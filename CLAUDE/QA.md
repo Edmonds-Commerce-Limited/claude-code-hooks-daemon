@@ -496,13 +496,42 @@ or `*.sh` to `shell_check`, says those checks ran. It says nothing about the
 behaviour of a test that reads the file, and that test is selected through the
 union.
 
-**A changed file that maps to nothing FAILS the run**, and is named in the
-summary with its reason. So does an empty change set. There are three reasons:
+**A Python source the mapping cannot cover selects test SHARDS, not the
+suite.** A file whose reach is `uncovered` (nothing refers to it) or `too-broad`
+(its reach passes the cap of 40 test files) used to fail the run for the whole
+suite to cover. It now runs the narrowest set of the declared shards
+(`scripts/qa/test_shards.yaml`) it can reach, so a work-in-progress change does
+not wait for shards it cannot touch. A file's shards are the UNION of:
 
-- `uncovered`: nothing refers to it.
-- `too-broad`: its reach passes the cap of 40 test files. A hub module, a
-  widely loaded config, and the root `tests/conftest.py` all hit this. Its own
-  tests still run when they fit.
+- its FLOOR, declared in `scripts/qa/changed_shard_reach.yaml`: any `src/` file
+  reaches `integration` and `acceptance-and-other` (those tests spawn the daemon
+  and load the package dynamically, so no import names the code they exercise),
+  a handler adds `unit-handlers`, the daemon package adds `unit-daemon`, and a
+  script adds `unit-tooling` and `integration`;
+- the shards that own EVERY test referring to it, or to a source that does,
+  counted without the 40-file cap (that cap decides what is worth naming, not
+  what could break). A big nested `conftest.py` selects the shards of its
+  subtree.
+
+The union is only ever wider than what can reach the file. A shard with no
+`ignore` runs as its directories; one that takes the remainder of a directory
+runs as explicit files, so nothing runs twice. **The summary names each chosen
+shard and why** (`shards chosen:` in `llm_qa.py changed`, `shards` in
+`untracked/qa/changed_tests.json`).
+
+**The whole suite is kept** where nothing sound can be said, and the file stays
+unmapped with reason `whole-suite` and its why. That is: a declared trigger in
+`changed_shard_reach.yaml` (`pyproject.toml`, `uv.lock`, the root
+`tests/conftest.py`, `tests/support/**`, `scripts/qa/**`), a file that is not
+Python source and has no declared rule, a reach through the root conftest, a
+file with no reference and no floor, and a reach that spans every shard.
+Skipping a shard the change could break is the failure to avoid, so these err
+wide.
+
+**A changed file that still maps to nothing FAILS the run**, and is named in the
+summary with its reason. So does an empty change set. There are two reasons:
+
+- `whole-suite`: see above; the coordinator's full gate must cover it.
 - `deleted-but-referenced`: it was deleted and a source still refers to it.
 
 The remedy is, in order:
@@ -512,7 +541,7 @@ The remedy is, in order:
 3. pass `--allow-unmapped`, which passes and records that a whole-suite run
    must cover it (see "The Unmapped and Too-Broad Fallback").
 
-A `too-broad` file is beyond what mapped tests can certify, so
+A `whole-suite` file is beyond what mapped tests or shards can certify, so
 `--allow-unmapped` is its honest answer. `--base REF` changes the base, which
 defaults to the branch `origin/HEAD` names. `changed` refuses to run on the base branch itself,
 because there the merge base is HEAD.

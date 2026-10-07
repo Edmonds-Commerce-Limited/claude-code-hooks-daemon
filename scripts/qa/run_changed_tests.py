@@ -34,6 +34,18 @@ unmapped file fails the run unless ``--allow-unmapped`` says the
 coordinator's full gate will cover it, and the report records why each one is
 unmapped. A run that tested nothing never reads as a pass.
 
+**A file the mapping cannot cover selects SHARDS, not the suite.** A Python
+source that is ``too-broad`` or ``uncovered`` runs the test shards it can reach
+(``test_shards.yaml``): its floor, declared in ``changed_shard_reach.yaml``
+(end-to-end shards for any ``src/`` file, the unit shard for its package), plus
+the shards that own every test referring to it or to a source that does,
+counted without the cap. The report names each chosen shard and why. The
+whole suite is kept, as an unmapped ``whole-suite`` file with its reason, for a
+declared trigger (``pyproject.toml``, the root conftest, ``tests/support/``,
+``scripts/qa/``), a file that is not Python source, a reach through the root
+conftest, an empty reach, or a reach that spans every shard. ``--shards`` and
+``--reach`` name those two files.
+
 "Changed" is everything that differs from the merge base with ``--base``:
 committed work on the branch, uncommitted edits, and new untracked files. On
 the base branch itself the merge base is HEAD and committed work vanishes, so
@@ -46,6 +58,7 @@ and never another copy of it, which moved documents tests read.
 Usage:
     python scripts/qa/run_changed_tests.py [--json] [--root DIR]
         [--base REF | --range A..B [--select-only]] [--rules FILE] [--allow-unmapped]
+        [--shards FILE] [--reach FILE]
 
 ``--base`` defaults to the local branch ``origin/HEAD`` names, then to
 ``origin/<it>``, then to a local ``main``.
@@ -77,6 +90,16 @@ from typing import Any, Final
 import yaml
 
 from claude_code_hooks_daemon.qa.pytest_text_report import parse_pytest_text_output
+from claude_code_hooks_daemon.qa.shard_reach import (
+    ShardReach,
+    floor_shards,
+    load_shard_reach,
+    path_glob_matches,
+    shard_names_of,
+    shard_targets,
+    whole_suite_reason,
+)
+from claude_code_hooks_daemon.qa.suite_shards import Shard, ShardError, load_shards
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 logger = logging.getLogger(__name__)
@@ -88,6 +111,9 @@ _TOOL_NAME: Final[str] = "changed_tests"
 
 #: This repository's declared rules for what a name cannot map.
 DEFAULT_RULES_PATH: Final[Path] = Path(__file__).resolve().parent / "changed_tests_map.yaml"
+#: The declared test shards, and which of them a file the mapping cannot cover reaches.
+DEFAULT_SHARDS_PATH: Final[Path] = Path(__file__).resolve().parent / "test_shards.yaml"
+DEFAULT_REACH_PATH: Final[Path] = Path(__file__).resolve().parent / "changed_shard_reach.yaml"
 
 EXIT_SUCCESS: Final[int] = 0
 EXIT_ISSUES: Final[int] = 1
@@ -126,8 +152,10 @@ RULE_SUBTREE: Final[str] = "conftest-subtree"
 RULE_DEPENDENT: Final[str] = "dependent"
 RULE_DELETED_TEST: Final[str] = "deleted-test"
 RULE_DELETED_UNREFERENCED: Final[str] = "deleted-unreferenced"
+RULE_SHARD_REACH: Final[str] = "shard-reach"
 
 # Why a file is unmapped, as recorded in the report.
+REASON_WHOLE_SUITE: Final[str] = "whole-suite"
 REASON_TOO_BROAD: Final[str] = "too-broad"
 REASON_UNCOVERED: Final[str] = "uncovered"
 REASON_STILL_REFERENCED: Final[str] = "deleted-but-referenced"
@@ -143,8 +171,6 @@ _KEY_WHY: Final[str] = "why"
 _RULE_KEYS: Final[frozenset[str]] = frozenset(
     {_KEY_GLOB, _KEY_PATH_GLOB, _KEY_PATH_EXCLUDE, _KEY_TESTS, _KEY_TOOLS, _KEY_WHY}
 )
-#: A ``path_glob`` segment matching any number of directories, as in ``Path.glob``.
-_ANY_DEPTH: Final[str] = "**"
 
 _OUTCOME_FAILED: Final[str] = "failed"
 
@@ -196,27 +222,13 @@ class DeclaredRule:
         return fnmatch.fnmatch(relative, self.glob)
 
 
-def path_glob_matches(relative: str, pattern: str) -> bool:
-    """Whether ``Path(root).glob(pattern)`` would yield ``relative``.
-
-    Each segment is matched on its own, so ``*`` never crosses ``/``, and a
-    ``**`` segment matches zero or more whole directories.
-    """
-    return _segments_match(relative.split("/"), pattern.split("/"))
-
-
-def _segments_match(parts: Sequence[str], patterns: Sequence[str]) -> bool:
-    if not patterns:
-        return not parts
-    head, rest = patterns[0], patterns[1:]
-    if head == _ANY_DEPTH:
-        return any(_segments_match(parts[skip:], rest) for skip in range(len(parts) + 1))
-    return bool(parts) and fnmatch.fnmatchcase(parts[0], head) and _segments_match(parts[1:], rest)
-
-
 @dataclass(slots=True)
 class Selection:
-    """What a change set maps to, and what it does not."""
+    """What a change set maps to, and what it does not.
+
+    ``shard_reasons`` maps each shard a change selected to why: one
+    ``<file>: <reason>`` line per file that reaches it.
+    """
 
     selected: list[str] = field(default_factory=list)
     mapping: list[dict[str, Any]] = field(default_factory=list)
@@ -224,6 +236,7 @@ class Selection:
     reasons: dict[str, dict[str, Any]] = field(default_factory=dict)
     deleted: list[str] = field(default_factory=list)
     non_python: list[str] = field(default_factory=list)
+    shard_reasons: dict[str, list[str]] = field(default_factory=dict)
 
 
 def run_git(args: list[str], root: Path) -> tuple[int, str, str]:
@@ -670,6 +683,7 @@ class _Cover:
     tests: set[str] = field(default_factory=set)
     tools: tuple[str, ...] = ()
     reason: tuple[str, str] | None = None
+    shards: list[str] = field(default_factory=list)
 
 
 class _Mapper:
@@ -818,6 +832,32 @@ class _Mapper:
                 return reach, self._too_broad(weight, f"its tests through {module}")
         return reach, None
 
+    def reach_tests(self, relative: str) -> set[str] | None:
+        """Every test file that statically reaches ``relative``, however many.
+
+        Its own tests plus one hop of dependents, with no cap: the cap decides
+        what is worth NAMING, and a shard fallback needs the whole reach. A
+        directory entry (a conftest's subtree) is expanded to its test files.
+        None when the reach runs through the root conftest, which is the suite.
+        """
+        own, broad = self.own_tests(relative)
+        if broad is not None:
+            return None
+        entries = set(own)
+        for module in self.referencing_modules(relative):
+            tests, broad = self.dependent_tests(module)
+            if broad is not None:
+                return None
+            entries.update(tests)
+        files: set[str] = set()
+        for entry in entries:
+            if entry.endswith(_PYTHON_SUFFIX):
+                files.add(entry)
+                continue
+            prefix = f"{entry}/"
+            files.update(test for test in self._corpus.tests if test.startswith(prefix))
+        return files
+
     def test_file_count(self, entries: set[str]) -> int:
         """How many test files ``entries`` runs: a directory counts every test under it."""
         count = 0
@@ -847,8 +887,64 @@ def _prune_covered(selected: set[str]) -> list[str]:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _ShardChoice:
+    """The shards a file the mapping cannot cover reaches, or why it needs the whole suite."""
+
+    names: frozenset[str] = frozenset()
+    why: dict[str, str] = field(default_factory=dict)
+    whole_suite: str | None = None
+
+
+def _shard_choice(
+    relative: str,
+    mapper: _Mapper,
+    shards: Sequence[Shard],
+    reach: ShardReach,
+) -> _ShardChoice:
+    """The narrowest shards that can exercise ``relative``, never fewer than it reaches.
+
+    The union of its declared floor and the shards owning every test that
+    refers to it or to a source that does. Only Python under ``src/``,
+    ``scripts/`` and ``tests/`` is reasoned about: nothing statically connects
+    anything else to a test. A declared whole-suite trigger, a reach through the
+    root conftest, an empty reach and a reach spanning every shard all keep the
+    whole suite.
+    """
+    declared = whole_suite_reason(reach, relative)
+    if declared is not None:
+        return _ShardChoice(whole_suite=declared)
+    path = PurePosixPath(relative)
+    if path.suffix != _PYTHON_SUFFIX or path.parts[0] not in _MODULE_ROOTS:
+        return _ShardChoice(
+            whole_suite="not Python source: no test names it and nothing declares what it reaches"
+        )
+    reached = mapper.reach_tests(relative)
+    if reached is None:
+        return _ShardChoice(whole_suite="reached through the root conftest, which loads everywhere")
+    floor, floor_whys = floor_shards(reach, relative)
+    names = floor | shard_names_of(shards, sorted(reached))
+    if not names:
+        return _ShardChoice(
+            whole_suite="nothing refers to it and no floor declares which shards it can reach"
+        )
+    if names >= {shard.name for shard in shards}:
+        return _ShardChoice(whole_suite="its reach spans every shard, which is the suite")
+    why = {
+        name: "; ".join(floor_whys) if name in floor else "owns tests that refer to it"
+        for name in sorted(names)
+    }
+    return _ShardChoice(names=frozenset(names), why=why)
+
+
 def select_tests(
-    changed: list[str], corpus: Corpus, root: Path, rules: list[DeclaredRule]
+    changed: list[str],
+    corpus: Corpus,
+    root: Path,
+    rules: list[DeclaredRule],
+    *,
+    shards: Sequence[Shard] | None = None,
+    reach: ShardReach | None = None,
 ) -> Selection:
     """Account for every changed file: every test it can break, or why it is unmapped.
 
@@ -856,10 +952,16 @@ def select_tests(
     the tests that name or import it, and the tests of every source that
     reaches it. Stopping at the first hit reported "0 unmapped" for a module
     whose dependents' tests never ran (delta review N3).
+
+    With ``shards`` and ``reach``, a file that is ``too-broad`` or ``uncovered``
+    selects the shards it can reach instead of being unmapped, unless it needs
+    the whole suite (see ``_shard_choice``), which stays unmapped as
+    ``whole-suite``.
     """
     selection = Selection()
     selected: set[str] = set()
     mapper = _Mapper(corpus)
+    shard_by_name = {shard.name: shard for shard in shards or []}
 
     for relative in changed:
         path = PurePosixPath(relative)
@@ -871,6 +973,24 @@ def select_tests(
 
         cover = mapper.cover(relative, exists, [rule for rule in rules if rule.matches(relative)])
         selected.update(cover.tests)
+        if (
+            cover.reason is not None
+            and shards is not None
+            and reach is not None
+            and cover.reason[0] in (REASON_TOO_BROAD, REASON_UNCOVERED)
+        ):
+            choice = _shard_choice(relative, mapper, shards, reach)
+            if choice.whole_suite is not None:
+                cover.reason = (REASON_WHOLE_SUITE, choice.whole_suite)
+            else:
+                cover.reason = None
+                cover.rules.append(RULE_SHARD_REACH)
+                for name in sorted(choice.names):
+                    selected.update(shard_targets(shard_by_name[name], root))
+                    selection.shard_reasons.setdefault(name, []).append(
+                        f"{relative}: {choice.why[name]}"
+                    )
+                cover.shards = sorted(choice.names)
         if cover.reason is not None:
             code, detail = cover.reason
             selection.unmapped.append(relative)
@@ -888,6 +1008,8 @@ def select_tests(
         }
         if cover.tools:
             entry["tools"] = list(cover.tools)
+        if cover.shards:
+            entry["shards"] = cover.shards
         selection.mapping.append(entry)
 
     selection.selected = _prune_covered(selected)
@@ -947,6 +1069,7 @@ def build_report(
         "unmapped": selection.unmapped,
         "unmapped_reasons": selection.reasons,
         "unmapped_allowed": allow_unmapped,
+        "shards": selection.shard_reasons,
         "deleted": selection.deleted,
         "non_python": selection.non_python,
         "tests": [
@@ -983,6 +1106,7 @@ def selection_payload(spec: str, changed: list[str], selection: Selection) -> di
         "mapping": selection.mapping,
         "unmapped": selection.unmapped,
         "unmapped_reasons": selection.reasons,
+        "shards": selection.shard_reasons,
     }
 
 
@@ -1000,6 +1124,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="print the --range selection as JSON and run nothing",
     )
     parser.add_argument("--rules", default=str(DEFAULT_RULES_PATH), help="declared rules file")
+    parser.add_argument(
+        "--shards", default=str(DEFAULT_SHARDS_PATH), help="the declared test shards file"
+    )
+    parser.add_argument(
+        "--reach", default=str(DEFAULT_REACH_PATH), help="the declared shard reach file"
+    )
     parser.add_argument(
         "--allow-unmapped",
         action="store_true",
@@ -1075,7 +1205,15 @@ def _selection(
             failure_report(error or "the tree could not be listed"),
             (EXIT_OPERATIONAL),
         )
-    return label, changed, select_tests(changed, build_corpus(root, tree), root, rules), None, 0
+    try:
+        shards = load_shards(Path(args.shards))
+        reach = load_shard_reach(Path(args.reach), shards)
+    except ShardError as exc:
+        return label, changed, None, failure_report(str(exc)), EXIT_OPERATIONAL
+    selection = select_tests(
+        changed, build_corpus(root, tree), root, rules, shards=shards, reach=reach
+    )
+    return label, changed, selection, None, 0
 
 
 def _verdict(
@@ -1113,6 +1251,13 @@ def _describe(report: dict[str, Any]) -> str:
         )
     else:
         line = f"no tests ran ({scope})"
+    shards = report.get("shards", {})
+    if shards:
+        line += "\nshards chosen (the narrowest the change can reach):"
+        for shard_name, whys in shards.items():
+            shown = "; ".join(whys[:_NAMED_DEPENDENTS])
+            more = len(whys) - _NAMED_DEPENDENTS
+            line += f"\n  {shard_name}: {shown}" + (f"; and {more} more" if more > 0 else "")
     if unmapped:
         verdict = "ALLOWED" if report["unmapped_allowed"] else "FAILS the run"
         reasons = report.get("unmapped_reasons", {})
@@ -1120,6 +1265,11 @@ def _describe(report: dict[str, Any]) -> str:
         for name in unmapped:
             why = reasons.get(name, {})
             line += f"\n  {name} [{why.get('reason', REASON_UNCOVERED)}] {why.get('detail', '')}"
+        if any(reasons.get(name, {}).get("reason") == REASON_WHOLE_SUITE for name in unmapped):
+            line += (
+                "\nthe whole suite is kept for the [whole-suite] files above: "
+                "the coordinator's full gate must cover them"
+            )
     return line
 
 

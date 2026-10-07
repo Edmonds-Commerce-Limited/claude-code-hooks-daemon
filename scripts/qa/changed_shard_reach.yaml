@@ -1,0 +1,47 @@
+# Which test shards a changed file can reach (Plan 00500), for `llm_qa.py changed`.
+#
+# `changed` maps a changed file to named tests first (changed_tests_map.yaml and
+# the import mapping in run_changed_tests.py). A file that mapping cannot cover,
+# because nothing refers to it or because its reach passes the cap, used to
+# fail the run for the whole suite to cover. It now selects the SHARDS it can
+# reach (scripts/qa/test_shards.yaml), and only the two lists below keep the
+# whole suite.
+#
+# A file's shards are the UNION of its floor (below) and the shards that own
+# every test that refers to it, or to a source that does. That is only ever
+# wider than what can reach it. When that union is every shard, or empty, the
+# whole suite is kept.
+#
+# `path_glob` is Path.glob style: `*` stays in one directory, `**` is any depth.
+# Applies only to a file the named-test mapping could not cover.
+# tests/unit/qa/test_shard_reach.py checks this file against the declared shards.
+
+# Files nothing sound can be said about: the whole suite must cover them.
+whole_suite:
+  - path_glob: "pyproject.toml"
+    why: build, pytest, coverage and tool settings apply to every test
+  - path_glob: "uv.lock"
+    why: the locked dependencies are imported by every shard
+  - path_glob: "tests/conftest.py"
+    why: loaded by every test, so its subtree is the suite
+  - path_glob: "tests/support/**"
+    why: shared test helpers, imported dynamically by fixtures in any shard
+  - path_glob: "scripts/qa/**"
+    why: the QA tooling decides what runs and how it is judged, so no shard is
+      narrower than the suite that tooling gates
+
+# Shards a matching source file can always reach, whatever statically names it.
+floors:
+  - path_glob: "src/**/*.py"
+    shards: [integration, acceptance-and-other]
+    why: end-to-end tests spawn the daemon and load the package dynamically, so
+      no import names the code they exercise
+  - path_glob: "src/claude_code_hooks_daemon/handlers/**/*.py"
+    shards: [unit-handlers]
+    why: handler unit tests load handlers through the registry, not by import
+  - path_glob: "src/claude_code_hooks_daemon/daemon/**/*.py"
+    shards: [unit-daemon]
+    why: the daemon's own unit tests drive it through the server, not by import
+  - path_glob: "scripts/**/*.py"
+    shards: [unit-tooling, integration]
+    why: scripts are run as processes by tests, which name them only as strings

@@ -23,6 +23,8 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.qa import shard_reach as reach_module
+from claude_code_hooks_daemon.qa import suite_shards as shard_module
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -900,12 +902,12 @@ class TestAnExplicitRange:
     def test_select_only_prints_the_selection_and_runs_nothing(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        _touch(tmp_path, "src/pkg/a.py", "tests/unit/test_a.py", "src/pkg/orphan.py")
+        _touch(tmp_path, "src/pkg/a.py", "tests/unit/test_a.py", "Makefile")
         calls: list[list[str]] = []
         code = self._main(
             tmp_path,
             ["--json", "--range", _RANGE, "--select-only"],
-            _range_git("src/pkg/a.py\nsrc/pkg/orphan.py\n"),
+            _range_git("src/pkg/a.py\nMakefile\n"),
             calls,
         )
         payload = json.loads(capsys.readouterr().out)
@@ -915,8 +917,8 @@ class TestAnExplicitRange:
         assert payload["range"] == _RANGE
         assert payload["selected"] == ["tests/unit/test_a.py"]
         assert [entry["file"] for entry in payload["mapping"]] == ["src/pkg/a.py"]
-        assert payload["unmapped"] == ["src/pkg/orphan.py"]
-        assert payload["unmapped_reasons"]["src/pkg/orphan.py"]["reason"] == "uncovered"
+        assert payload["unmapped"] == ["Makefile"]
+        assert payload["unmapped_reasons"]["Makefile"]["reason"] == "whole-suite"
 
     def test_select_only_needs_a_range(self, tmp_path: Path) -> None:
         with pytest.raises(SystemExit):
@@ -1026,8 +1028,190 @@ class TestSelectedButExecutedNothing:
         assert "collected nothing" in err
 
 
+_SHARDS = [
+    shard_module.Shard("unit-core", "unit", ("tests/unit/core",)),
+    shard_module.Shard("unit-handlers", "unit", ("tests/unit/handlers",)),
+    shard_module.Shard(
+        "unit-tooling", "unit", ("tests/unit",), ("tests/unit/core", "tests/unit/handlers")
+    ),
+    shard_module.Shard("integration", "rest", ("tests/integration",)),
+]
+_REACH = reach_module.ShardReach(
+    whole_suite=(
+        reach_module.WholeSuiteRule("pyproject.toml", "settings apply to every test"),
+        reach_module.WholeSuiteRule("tests/support/**", "shared helpers"),
+    ),
+    floors=(
+        reach_module.FloorRule("src/**/*.py", ("integration",), "end to end"),
+        reach_module.FloorRule(
+            "src/pkg/handlers/**/*.py", ("unit-handlers",), "loaded through the registry"
+        ),
+    ),
+)
+_OVER_CAP = changed_tests.MAX_IMPORT_SELECTION + 1
+
+
+def _select_sharded(root: Path, changed: list[str]) -> Any:
+    return changed_tests.select_tests(
+        changed,
+        changed_tests.build_corpus(root, _tree(root)),
+        root,
+        [],
+        shards=_SHARDS,
+        reach=_REACH,
+    )
+
+
+def _importers(root: Path, directory: str, module: str, count: int = _OVER_CAP) -> None:
+    for number in range(count):
+        _touch(root, f"{directory}/test_n{number}.py", text=f"import pkg.{module}\n")
+
+
+class TestShardFallback:
+    """An unmapped file selects the shards it can reach, not the whole suite."""
+
+    def test_a_source_file_nothing_refers_to_gets_its_floor(self, tmp_path: Path) -> None:
+        _touch(tmp_path, "src/pkg/orphan.py", "tests/unit/core/test_a.py")
+        selection = _select_sharded(tmp_path, ["src/pkg/orphan.py"])
+        assert selection.unmapped == []
+        assert selection.selected == ["tests/integration"]
+        entry = selection.mapping[0]
+        assert entry["rules"] == ["shard-reach"]
+        assert entry["shards"] == ["integration"]
+        assert selection.shard_reasons["integration"] == ["src/pkg/orphan.py: end to end"]
+
+    def test_the_shards_of_the_tests_that_refer_to_it_are_added(self, tmp_path: Path) -> None:
+        _touch(tmp_path, "src/pkg/hub.py")
+        _importers(tmp_path, "tests/unit/core", "hub")
+        selection = _select_sharded(tmp_path, ["src/pkg/hub.py"])
+        assert selection.unmapped == []
+        assert selection.mapping[0]["shards"] == ["integration", "unit-core"]
+        assert selection.selected == ["tests/integration", "tests/unit/core"]
+
+    def test_a_remainder_shard_runs_explicit_files_not_a_directory(self, tmp_path: Path) -> None:
+        _touch(tmp_path, "src/pkg/hub.py", "tests/unit/core/test_c.py", "tests/unit/test_l.py")
+        _importers(tmp_path, "tests/unit", "hub")
+        selection = _select_sharded(tmp_path, ["src/pkg/hub.py"])
+        assert selection.mapping[0]["shards"] == ["integration", "unit-tooling"]
+        assert "tests/unit" not in selection.selected
+        assert "tests/unit/test_l.py" in selection.selected
+        assert "tests/unit/test_n0.py" in selection.selected
+        assert "tests/unit/core/test_c.py" not in selection.selected
+
+    def test_a_handler_gets_its_unit_shard_too(self, tmp_path: Path) -> None:
+        _touch(tmp_path, "src/pkg/handlers/h.py", "tests/unit/handlers/test_other.py")
+        selection = _select_sharded(tmp_path, ["src/pkg/handlers/h.py"])
+        assert selection.mapping[0]["shards"] == ["integration", "unit-handlers"]
+
+    def test_a_reach_across_every_shard_is_the_whole_suite(self, tmp_path: Path) -> None:
+        _touch(tmp_path, "src/pkg/handlers/hub.py")
+        for directory in ("tests/unit/core", "tests/unit", "tests/integration"):
+            _importers(tmp_path, directory, "handlers.hub")
+        _touch(tmp_path, "tests/unit/handlers/test_h.py")
+        selection = _select_sharded(tmp_path, ["src/pkg/handlers/hub.py"])
+        assert selection.unmapped == ["src/pkg/handlers/hub.py"]
+        reason = selection.reasons["src/pkg/handlers/hub.py"]
+        assert reason["reason"] == "whole-suite"
+        assert "every shard" in reason["detail"]
+
+    def test_a_whole_suite_trigger_is_kept_and_says_why(self, tmp_path: Path) -> None:
+        _touch(tmp_path, "tests/support/helper.py", "tests/unit/core/test_a.py")
+        selection = _select_sharded(tmp_path, ["tests/support/helper.py"])
+        assert selection.unmapped == ["tests/support/helper.py"]
+        reason = selection.reasons["tests/support/helper.py"]
+        assert reason["reason"] == "whole-suite"
+        assert "shared helpers" in reason["detail"]
+
+    def test_a_file_that_is_not_python_source_is_the_whole_suite(self, tmp_path: Path) -> None:
+        _touch(tmp_path, "pyproject.toml", "Makefile")
+        selection = _select_sharded(tmp_path, ["pyproject.toml", "Makefile"])
+        assert selection.unmapped == ["pyproject.toml", "Makefile"]
+        assert selection.reasons["Makefile"]["reason"] == "whole-suite"
+        assert "settings apply" in selection.reasons["pyproject.toml"]["detail"]
+
+    def test_the_root_conftest_is_the_whole_suite(self, tmp_path: Path) -> None:
+        _touch(tmp_path, "tests/conftest.py", "tests/unit/core/test_a.py")
+        selection = _select_sharded(tmp_path, ["tests/conftest.py"])
+        assert selection.reasons["tests/conftest.py"]["reason"] == "whole-suite"
+
+    def test_a_big_nested_conftest_selects_the_shards_of_its_subtree(self, tmp_path: Path) -> None:
+        _touch(tmp_path, "tests/unit/core/conftest.py")
+        for number in range(_OVER_CAP):
+            _touch(tmp_path, f"tests/unit/core/test_n{number}.py")
+        selection = _select_sharded(tmp_path, ["tests/unit/core/conftest.py"])
+        assert selection.unmapped == []
+        assert selection.mapping[0]["shards"] == ["unit-core"]
+        assert selection.selected == ["tests/unit/core"]
+
+    def test_a_changed_test_file_is_never_widened(self, tmp_path: Path) -> None:
+        _touch(tmp_path, "tests/unit/core/test_a.py")
+        selection = _select_sharded(tmp_path, ["tests/unit/core/test_a.py"])
+        assert selection.selected == ["tests/unit/core/test_a.py"]
+
+    def test_a_deleted_file_a_source_still_imports_is_still_unmapped(self, tmp_path: Path) -> None:
+        _touch(tmp_path, "src/pkg/user.py", text="from pkg import gone\n")
+        selection = _select_sharded(tmp_path, ["src/pkg/gone.py"])
+        assert selection.unmapped == ["src/pkg/gone.py"]
+        assert selection.reasons["src/pkg/gone.py"]["reason"] == "deleted-but-referenced"
+
+    def test_without_shards_the_old_behaviour_holds(self, tmp_path: Path) -> None:
+        _touch(tmp_path, "src/pkg/orphan.py")
+        assert _select(tmp_path, ["src/pkg/orphan.py"]).unmapped == ["src/pkg/orphan.py"]
+
+    def test_the_report_names_the_shards_and_why(self) -> None:
+        selection = changed_tests.Selection(
+            selected=["tests/integration"],
+            shard_reasons={"integration": ["src/pkg/a.py: end to end"]},
+        )
+        report = changed_tests.build_report(
+            base="main",
+            changed=["src/pkg/a.py"],
+            selection=selection,
+            exit_code=0,
+            output="3 passed in 0.10s\n",
+            allow_unmapped=False,
+        )
+        assert report["shards"] == {"integration": ["src/pkg/a.py: end to end"]}
+        text = changed_tests._describe(report)
+        assert "shards chosen" in text
+        assert "integration: src/pkg/a.py: end to end" in text
+
+    def test_the_description_says_when_the_whole_suite_is_kept(self) -> None:
+        selection = changed_tests.Selection(
+            unmapped=["pyproject.toml"],
+            reasons={
+                "pyproject.toml": {
+                    "reason": "whole-suite",
+                    "detail": "settings apply to every test",
+                    "tests_run": [],
+                }
+            },
+        )
+        report = changed_tests.build_report(
+            base="main",
+            changed=["pyproject.toml"],
+            selection=selection,
+            exit_code=None,
+            output="",
+            allow_unmapped=True,
+        )
+        text = changed_tests._describe(report)
+        assert "whole suite" in text
+        assert "settings apply to every test" in text
+
+
 @pytest.mark.parametrize(
-    "flag", ["--base", "--root", "--allow-unmapped", "--rules", "--range", "--select-only"]
+    "flag",
+    [
+        "--base",
+        "--root",
+        "--allow-unmapped",
+        "--rules",
+        "--range",
+        "--select-only",
+        "--shards",
+        "--reach",
+    ],
 )
 def test_the_cli_documents_its_options(flag: str) -> None:
     assert flag in (changed_tests.__doc__ or "")
