@@ -36,6 +36,7 @@ import pytest
 
 from claude_code_hooks_daemon.constants.tags import HandlerTag
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.core import chain as chain_module
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult, HandlerChain
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
@@ -124,6 +125,50 @@ class MockHandler(Handler):
                 test_type=TestType.BLOCKING,
             )
         ]
+
+
+class _GatedHandler(MockHandler):
+    """A handler that blocks inside ``handle()`` until the test releases it.
+
+    "Slow" is an ordering the test controls, not a sleep racing a deadline:
+    the handler cannot return before ``release`` is set, however the host
+    schedules the threads.
+    """
+
+    def __init__(self, name: str, release: threading.Event, **kwargs: Any) -> None:
+        super().__init__(name, **kwargs)
+        self._release = release
+
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        self.handle_called += 1
+        self._release.wait(timeout=DispatchTestTimeout.GENEROUS)
+        return self._result
+
+
+class _ManualClock:
+    """Stands in for the ``time`` module the chain reads its deadline from.
+
+    Time passes only when the test says so, so a short deadline cannot be
+    consumed by scheduling delay between two statements of the test: that is
+    what sent a run to the already-expired path, where no handler ever runs.
+    """
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def perf_counter(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+@pytest.fixture
+def manual_clock(monkeypatch: pytest.MonkeyPatch) -> _ManualClock:
+    """The chain's deadline clock, frozen until the test advances it."""
+    clock = _ManualClock()
+    monkeypatch.setattr(chain_module, "time", clock)
+    return clock
 
 
 class TestChainExecutionResult:
@@ -965,7 +1010,9 @@ class TestHandlerChain:
         assert result.result.reason is not None
         assert "SYSTEM ERROR" in result.result.reason
 
-    def test_deadline_exceeded_denies_when_a_slow_handler_exhausts_the_whole_chain(self) -> None:
+    def test_deadline_exceeded_denies_when_a_slow_handler_exhausts_the_whole_chain(
+        self, manual_clock: _ManualClock
+    ) -> None:
         """Plan 00466 N25: a chain deadline denies rather than letting a slow
         handler exhaust the CLIENT's own timeout (which fails the whole
         chain open).
@@ -978,11 +1025,19 @@ class TestHandlerChain:
         was. The straggler keeps evaluating in the background and reaches
         the SAME correct "safety-guard: not judged in time" verdict
         internally, but that verdict is discarded -- the caller already
-        gave up. Polling for `slow` to finish rather than asserting it
-        immediately keeps this deterministic.
+        gave up.
+
+        Deterministic: the clock is manual and `slow` blocks until released,
+        so it is always the chain's own dispatch budget that runs out (never
+        the already-expired shortcut a scheduling stall could reach), and
+        the straggler is released only after the clock has passed the
+        deadline.
         """
+        from claude_code_hooks_daemon.core.bounded_dispatch import BoundedDispatcher
+
         chain = HandlerChain()
-        slow = MockHandler("slow", priority=10, sleep_in_handle=0.05)
+        release = threading.Event()
+        slow = _GatedHandler("slow", release, priority=10)
         guard = MockHandler(
             "safety-guard",
             priority=20,
@@ -991,13 +1046,21 @@ class TestHandlerChain:
         )
         chain.add(slow)
         chain.add(guard)
+        dispatcher = BoundedDispatcher(max_inflight=1)
 
-        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.01)
-
-        # An upper bound on waiting for the straggler, not a speed assertion.
-        deadline = time.perf_counter() + DispatchTestTimeout.GENEROUS
-        while slow.handle_called == 0 and time.perf_counter() < deadline:
+        try:
+            result = chain.execute(
+                {"tool_name": "Bash"}, deadline_seconds=0.01, dispatcher=dispatcher
+            )
+        finally:
+            manual_clock.advance(1.0)
+            release.set()
+        # The straggler leaves the dispatcher's set only once its whole call
+        # has returned, so this waits for it to finish, not for a guess.
+        while dispatcher.straggler_health().count:
             time.sleep(DispatchTestTimeout.INSTANT)
+        dispatcher.shutdown(wait=True)
+
         assert slow.handle_called == 1
         # The deadline is hit before the guard is even asked whether it
         # matches -- there is no time budget left to run it at all.
@@ -1051,19 +1114,32 @@ class TestHandlerChain:
         assert h1.handle_called == 1
         assert result.result.decision == Decision.ALLOW
 
-    def test_deadline_exceeded_skips_an_advisory_handler_with_a_note(self) -> None:
+    def test_deadline_exceeded_skips_an_advisory_handler_with_a_note(
+        self, manual_clock: _ManualClock
+    ) -> None:
         """A chain with no SAFETY+BLOCKING handler is skipped, not denied,
         on deadline. Plan 00466 N40 m1: `slow` alone exceeds the whole
         chain's dispatch budget, so the note names "chain", not `advisory`
         specifically -- see the module-level note on the redesign.
+
+        `slow` blocks until released and the clock is manual (see the
+        sibling test above), so the budget that runs out is always the
+        dispatched call's own.
         """
         chain = HandlerChain()
-        slow = MockHandler("slow", priority=10, sleep_in_handle=0.05)
+        release = threading.Event()
+        slow = _GatedHandler("slow", release, priority=10)
         advisory = MockHandler("advisory", priority=20, tags=[HandlerTag.ADVISORY])
         chain.add(slow)
         chain.add(advisory)
 
-        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.01)
+        try:
+            result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.01)
+        finally:
+            # Past the deadline before the straggler resumes, so it cannot
+            # go on to ask `advisory` whether it matches.
+            manual_clock.advance(1.0)
+            release.set()
 
         assert advisory.matches_called == 0
         assert result.result.decision == Decision.ALLOW
@@ -1100,6 +1176,7 @@ class TestHandlerChain:
         assert h2.handle_called == 1
         assert result.result.decision == Decision.ALLOW
 
+    @pytest.mark.usefixtures("manual_clock")
     def test_a_safety_blocking_handler_that_oversleeps_itself_is_denied_within_the_deadline(
         self,
     ) -> None:
@@ -1135,6 +1212,7 @@ class TestHandlerChain:
         assert result.result.reason.startswith(_CHAIN_TIMED_OUT)
         assert result.terminated_by is None
 
+    @pytest.mark.usefixtures("manual_clock")
     def test_a_slow_advisory_only_handler_that_oversleeps_itself_allows_with_an_advisory(
         self,
     ) -> None:
@@ -1924,6 +2002,7 @@ class TestDispatchCancellationReachesStragglingHandlerCode:
     call ALREADY in progress.
     """
 
+    @pytest.mark.usefixtures("manual_clock")
     def test_a_late_writes_after_the_deadline_is_skipped_not_written(self) -> None:
         chain = HandlerChain()
         outcome: dict[str, str] = {}
@@ -1998,6 +2077,7 @@ class TestStragglerCommitHonoursCancellation:
     never received.
     """
 
+    @pytest.mark.usefixtures("manual_clock")
     def test_commit_is_skipped_once_the_caller_has_abandoned_the_dispatch(self) -> None:
         from claude_code_hooks_daemon.core.bounded_dispatch import BoundedDispatcher
 
