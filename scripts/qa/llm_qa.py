@@ -385,7 +385,24 @@ _GIT_STATE_TIMEOUT_SECONDS: Final[int] = 60
 #: One tool's provenance entry, as JSON: the tree (str), the live verdict
 #: (bool), the exit code (int) and its report's hash (str, or None when the
 #: run wrote no report).
-ProvenanceRecord: TypeAlias = dict[str, str | bool | int | None]
+#: Timing adds the wall-clock start and end (str) and the duration (float).
+ProvenanceRecord: TypeAlias = dict[str, str | bool | int | float | None]
+
+_RECORD_STARTED: Final[str] = "started_at"
+_RECORD_ENDED: Final[str] = "ended_at"
+_RECORD_DURATION: Final[str] = "duration_seconds"
+_TIMING_LABEL: Final[str] = "TIMING"
+_TIMING_TOTAL: Final[str] = "total"
+_DURATION_DECIMALS: Final[int] = 1
+
+
+class StepTiming(NamedTuple):
+    """When one step ran: wall-clock start and end (ISO 8601, UTC) and seconds elapsed."""
+
+    started_at: str
+    ended_at: str
+    duration_seconds: float
+
 
 #: (exit code, stdout bytes) for one git call; injected in tests.
 GitBytesRunner = Callable[[list[str], Path], tuple[int, bytes]]
@@ -483,19 +500,53 @@ def output_digest(path: Path) -> str | None:
 
 
 def run_record(
-    state: dict[str, str], *, exit_code: int, passed: bool, output_sha256: str | None
+    state: dict[str, str],
+    *,
+    exit_code: int,
+    passed: bool,
+    output_sha256: str | None,
+    timing: StepTiming | None = None,
 ) -> ProvenanceRecord:
-    """One tool's entry: the tree it judged, its live verdict and its report's hash.
+    """One tool's entry: the tree it judged, its live verdict, its report's hash and its timing.
 
     ``output_sha256`` is taken when the tool returns, not at the end of the
     run, so a later tool that rewrites this report cannot be certified as it.
+    ``timing`` is absent from records an older run wrote; readers tolerate that.
     """
-    return {
+    record: ProvenanceRecord = {
         **state,
         _RECORD_PASSED: passed,
         _RECORD_EXIT_CODE: exit_code,
         _RECORD_OUTPUT_DIGEST: output_sha256,
     }
+    if timing is not None:
+        record[_RECORD_STARTED] = timing.started_at
+        record[_RECORD_ENDED] = timing.ended_at
+        record[_RECORD_DURATION] = round(timing.duration_seconds, _DURATION_DECIMALS)
+    return record
+
+
+def format_timing_summary(durations: Mapping[str, float]) -> str:
+    """Per-step durations, slowest first, with a total (seconds, one decimal)."""
+    width = max(len(name) for name in [*durations, _TIMING_TOTAL])
+    rows = sorted(durations.items(), key=lambda item: item[1], reverse=True)
+    lines = [f"{_TIMING_LABEL} (slowest first)"]
+    lines += [f"  {name:<{width}}  {seconds:.{_DURATION_DECIMALS}f}s" for name, seconds in rows]
+    total = sum(durations.values())
+    lines.append(f"  {_TIMING_TOTAL:<{width}}  {total:.{_DURATION_DECIMALS}f}s")
+    return "\n".join(lines) + "\n"
+
+
+def recorded_durations(
+    recorded: Mapping[str, ProvenanceRecord], tools: Sequence[str]
+) -> dict[str, float]:
+    """The duration each of ``tools`` recorded; a result with none (an older run) is left out."""
+    durations: dict[str, float] = {}
+    for name in tools:
+        seconds = recorded.get(name, {}).get(_RECORD_DURATION)
+        if isinstance(seconds, (int, float)) and not isinstance(seconds, bool):
+            durations[name] = float(seconds)
+    return durations
 
 
 def read_provenance(qa_dir: Path) -> dict[str, ProvenanceRecord]:
@@ -2565,7 +2616,7 @@ def main() -> int:
 
 
 #: Per tool: the exit code, the live verdict, and the report hash taken on return.
-RunOutcome: TypeAlias = tuple[int, bool, str | None]
+RunOutcome: TypeAlias = tuple[int, bool, str | None, StepTiming]
 
 
 def _record_run(run_records: Mapping[str, RunOutcome], before: dict[str, str] | None) -> None:
@@ -2585,8 +2636,10 @@ def _record_run(run_records: Mapping[str, RunOutcome], before: dict[str, str] | 
     record_provenance(
         QA_OUTPUT_DIR,
         {
-            name: run_record(state, exit_code=exit_code, passed=passed, output_sha256=digest)
-            for name, (exit_code, passed, digest) in run_records.items()
+            name: run_record(
+                state, exit_code=exit_code, passed=passed, output_sha256=digest, timing=timing
+            )
+            for name, (exit_code, passed, digest, timing) in run_records.items()
         },
     )
 
@@ -2625,8 +2678,14 @@ def _run_tools(
     read_only: bool,
     forwarded: Sequence[str] = (),
     lock_fd: int | None = None,
+    clock: Callable[[], float] = time.monotonic,
+    wall_clock: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> int:
     """Run (or merely summarize) each tool and print the overall verdict.
+
+    Each executed tool's wall-clock start, end and duration go in its
+    provenance record, and a timing summary (slowest first) follows the
+    verdict. ``clock`` measures the duration, ``wall_clock`` stamps it.
 
     A run records, per tool, the tree it judged (before and after must agree,
     or the record matches no tree), the live verdict, the exit code and the
@@ -2646,6 +2705,7 @@ def _run_tools(
         exit_code: int | None = None
         stale: str | None = None
         digest: str | None = None
+        timing: StepTiming | None = None
         record: ProvenanceRecord | None = None
         if read_only:
             record = recorded.get(name)
@@ -2663,7 +2723,10 @@ def _run_tools(
                 if daemon_note is not None:
                     print(daemon_note)
             extra = forwarded if name == _CHANGED_TESTS_TOOL else ()
+            started_wall, started = wall_clock(), clock()
             exit_code = run_tool(name, extra, lock_fd=lock_fd)
+            elapsed = clock() - started
+            timing = StepTiming(started_wall.isoformat(), wall_clock().isoformat(), elapsed)
             digest = output_digest(output)
 
         # Summarize from JSON, passing exit code for cross-check
@@ -2673,8 +2736,8 @@ def _run_tools(
             passed = False
             summary = summary.replace("✅", "❌", 1) + f"   {_STALE_LABEL} {failed_as_recorded}\n"
         tool_results[name] = (passed, summary)
-        if exit_code is not None and not read_only:
-            run_records[name] = (exit_code, passed, digest)
+        if exit_code is not None and timing is not None:
+            run_records[name] = (exit_code, passed, digest, timing)
         print(summary, end="")
         if not passed:
             all_passed = False
@@ -2694,6 +2757,18 @@ def _run_tools(
         print(f"QA: {passed_count}/{total} PASSED")
     else:
         print(f"QA: {passed_count}/{total} PASSED, {total - passed_count}/{total} FAILED")
+
+    durations = (
+        recorded_durations(recorded, tools)
+        if read_only
+        else {
+            name: round(outcome[3].duration_seconds, _DURATION_DECIMALS)
+            for name, outcome in run_records.items()
+        }
+    )
+    if durations:
+        print()
+        print(format_timing_summary(durations), end="")
 
     return EXIT_SUCCESS if all_passed else EXIT_FAILURE
 
