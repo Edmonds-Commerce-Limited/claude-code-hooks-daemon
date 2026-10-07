@@ -12,6 +12,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
+from tests.support.autonomy import CONTAINERS_ONLY, pin_autonomy
 
 from claude_code_hooks_daemon.handlers.status_line.environment_indicator import (
     _COLOR_BLUE,
@@ -20,7 +21,6 @@ from claude_code_hooks_daemon.handlers.status_line.environment_indicator import 
     _COLOR_RESET,
     EnvironmentIndicatorHandler,
 )
-from tests.support.autonomy import CONTAINERS_ONLY, pin_autonomy
 
 _PATCH_TARGET = (
     "claude_code_hooks_daemon.handlers.status_line.environment_indicator."
