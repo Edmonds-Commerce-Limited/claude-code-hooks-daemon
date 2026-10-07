@@ -10,17 +10,17 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-
-from claude_code_hooks_daemon.constants import HandlerID, Priority
-from claude_code_hooks_daemon.core import Decision
-from claude_code_hooks_daemon.core.chain import HandlerChain
-from claude_code_hooks_daemon.handlers.session_start.autonomy_notice import AutonomyNoticeHandler
 from tests.support.autonomy import (
     CONTAINERS_ONLY,
     pin_autonomy,
     pin_container_containers_only,
     pin_desktop_containers_only,
 )
+
+from claude_code_hooks_daemon.constants import HandlerID, Priority
+from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.chain import HandlerChain
+from claude_code_hooks_daemon.handlers.session_start.autonomy_notice import AutonomyNoticeHandler
 
 _EVENT: dict[str, Any] = {"hook_event_name": "SessionStart", "session_id": "s1"}
 
