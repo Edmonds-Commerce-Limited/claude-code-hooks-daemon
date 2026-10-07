@@ -121,8 +121,9 @@ The agent's rulings on ordering, plugin location and restart policy, made while 
   [HANDOVER.md](HANDOVER.md); the owner starts it.
   Live test run 2026-10-06: [LIVE-TEST-STATUS-261006.md](LIVE-TEST-STATUS-261006.md). Every step that ran passed
   except F1 (fixed on F44 in ccy 3.82.1, OWNER-DECISIONS D10). Owner ruling D11 (2026-10-07): the three steps not
-  run (key-file relaunch, passphrase key, deadline after a restart) test only the ccy launcher, so they pass to
-  fedora-desktop with the Task 3.2 comment. Every supervisor-side step passed, so this task is done for this
+  run (key-file relaunch, passphrase key, deadline after a restart) test the ccy launcher and, for the deadline, the
+  fedora-desktop plugin with a thin supervisor dependency (see D11), so they pass to fedora-desktop with the Task
+  3.2 comment. Every supervisor-side step passed, so this task is done for this
   repository, and the plugin API ships as beta.
 - [ ] ⬜ **Task 3.2**: Comment the outcome on #71 and fedora-desktop#61, using "Addresses" wording. Posted after
   the release, so it names the version: the plugin API is beta, the three launcher steps are fedora-desktop's to

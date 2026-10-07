@@ -76,9 +76,13 @@ The live test found that `--max-age`, `--run-for` and `--until` get through ever
 
 ## D11. The three live-test steps not yet run: whose are they? (raised by the owner, 2026-10-07)
 
-The steps not run on 2026-10-06 (key-file relaunch, passphrase key, deadline after a restart) exercise only the ccy
-launcher: key staging, the relaunch prompt path and `CCY_RELAUNCH_DEADLINE_EPOCH`. Every supervisor-side step
-(loading, status, notices, restart, broken-plugin isolation, the old-supervisor refusal) passed.
+Of the steps not run on 2026-10-06, the key-file relaunch and the passphrase key exercise only the ccy launcher (key
+staging, the relaunch prompt path). The deadline after a restart is mostly the launcher
+(`CCY_RELAUNCH_DEADLINE_EPOCH`) and the fedora-desktop `ccy_lifecycle` plugin (its per-session "announced" marker),
+with a thin supervisor dependency: rendering `Notify(DEADLINE_REACHED)` and the session id the plugin keys on. Both
+of those passed on their own (the section 3 deadline notice, the section 2 restarted notice); only their combination
+across a restart is untested. Every supervisor-side step (loading, status, notices, restart, broken-plugin
+isolation) passed, as did the old-supervisor refusal, which the launcher prints from the supervisor's `PLUGIN_API`.
 
 - **Answer (owner, 2026-10-07):** release the plugin API as beta, "unproven but ready for real world testing". Hand
   the launcher steps to fedora-desktop with a comment, and have any hooks-daemon problem filed as a GitHub issue on
