@@ -74,6 +74,16 @@ The live test found that `--max-age`, `--run-for` and `--until` get through ever
   later (`ccy --version`). Evidence:
   [261006-plan-fact-checker-fedora-desktop-sonnet.md](subagent-reports/261006-plan-fact-checker-fedora-desktop-sonnet.md).
 
+## D11. The three live-test steps not yet run: whose are they? (raised by the owner, 2026-10-07)
+
+The steps not run on 2026-10-06 (key-file relaunch, passphrase key, deadline after a restart) exercise only the ccy
+launcher: key staging, the relaunch prompt path and `CCY_RELAUNCH_DEADLINE_EPOCH`. Every supervisor-side step
+(loading, status, notices, restart, broken-plugin isolation, the old-supervisor refusal) passed.
+
+- **Answer (owner, 2026-10-07):** release the plugin API as beta, "unproven but ready for real world testing". Hand
+  the launcher steps to fedora-desktop with a comment, and have any hooks-daemon problem filed as a GitHub issue on
+  the hooks-daemon repository.
+
 ## D5. How the branch gets deployed for the live test (raised by the host agent)
 
 The claude-yolo play can only run from the owner's own fedora-desktop checkout. The inventory `host_vars` and the vault password file are gitignored and exist only there, so a clone or worktree of the branch cannot run it. That checkout is on `F44`, and another session was committing in it while the host agent worked, so the agent will not switch its branch on its own.

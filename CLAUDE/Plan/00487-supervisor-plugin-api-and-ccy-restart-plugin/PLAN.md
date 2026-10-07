@@ -116,18 +116,28 @@ The agent's rulings on ordering, plugin location and restart policy, made while 
 
 ### Phase 3: Close out
 
-- [ ] ⬜ **Task 3.1**: Run the live test ([OWNER-LIVE-TEST.md](OWNER-LIVE-TEST.md)) and fix what it finds. By owner ruling, a desktop (host) agent working on both repositories does this, starting from [HANDOVER.md](HANDOVER.md). Opening the fedora-desktop PR is the owner's call. This repository's side is already merged. Owner ruling D9
+- [x] ✅ **Task 3.1**: Run the live test ([OWNER-LIVE-TEST.md](OWNER-LIVE-TEST.md)) and fix what it finds. By owner ruling, a desktop (host) agent working on both repositories does this, starting from [HANDOVER.md](HANDOVER.md). Opening the fedora-desktop PR is the owner's call. This repository's side is already merged. Owner ruling D9
   (2026-10-06): the coordinator gave the owner copy-paste start text for the desktop agent, pointing it at
   [HANDOVER.md](HANDOVER.md); the owner starts it.
   Live test run 2026-10-06: [LIVE-TEST-STATUS-261006.md](LIVE-TEST-STATUS-261006.md). Every step that ran passed
-  except F1 (fixed on F44 in ccy 3.82.1, OWNER-DECISIONS D10); three steps were not run.
-- [ ] ⬜ **Task 3.2**: Comment the outcome on #71 and fedora-desktop#61, using "Addresses" wording.
+  except F1 (fixed on F44 in ccy 3.82.1, OWNER-DECISIONS D10). Owner ruling D11 (2026-10-07): the three steps not
+  run (key-file relaunch, passphrase key, deadline after a restart) test only the ccy launcher, so they pass to
+  fedora-desktop with the Task 3.2 comment. Every supervisor-side step passed, so this task is done for this
+  repository, and the plugin API ships as beta.
+- [ ] ⬜ **Task 3.2**: Comment the outcome on #71 and fedora-desktop#61, using "Addresses" wording. Posted after
+  the release, so it names the version: the plugin API is beta, the three launcher steps are fedora-desktop's to
+  run, and hooks-daemon problems are filed as issues on this repository (D11).
 
 ## Success Criteria
 
-- [ ] A crashing, hanging or unloadable plugin never stops the session from starting or running, and the agent gets exactly one notice for it.
-- [ ] A ccy session past its maximum age gets warned, restarts at an idle point, resumes the same conversation on the current Claude Code version, and is told so.
-- [ ] A `--run-for` / `--until` session gets its deadline message.
+- [x] A crashing, hanging or unloadable plugin never stops the session from starting or running, and the agent gets
+  exactly one notice for it. Live: LIVE-TEST-STATUS step 5 (raising and hanging plugins disabled with one notice
+  each; a printing plugin isolated).
+- [x] A ccy session past its maximum age gets warned, restarts at an idle point, resumes the same conversation on
+  the current Claude Code version, and is told so. Live: LIVE-TEST-STATUS section 2, session A.
+- [x] A `--run-for` / `--until` session gets its deadline message. Live: LIVE-TEST-STATUS section 3, session B.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/001-ccy-supervisor-plugin-api.md` (marked beta).
 
 ## Delivery & Milestones
 
