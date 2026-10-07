@@ -108,6 +108,43 @@ class TestAwaitingHumanStopNeedsAStandIn:
         assert result.decision is Decision.ALLOW
 
 
+_REAL_STOP_LINE = "STOPPING BECAUSE: background QA is still running."
+_PASTE_FOR_ANOTHER_SESSION = "STOPPING BECAUSE: [awaiting-human] pick A or B."
+
+
+class TestOnlyTheStopsOwnDeclarationCounts:
+    """N365: a token inside a fence or quoted copy-paste is not this stop's declaration."""
+
+    @pytest.mark.parametrize(
+        "quoted",
+        [
+            f"```\n{_PASTE_FOR_ANOTHER_SESSION}\n```",
+            f"```text\n{_PASTE_FOR_ANOTHER_SESSION}\n```",
+            f"~~~\n{_PASTE_FOR_ANOTHER_SESSION}\n~~~",
+            f"> {_PASTE_FOR_ANOTHER_SESSION}",
+            f"    {_PASTE_FOR_ANOTHER_SESSION}",
+            "```\nneed user input\n```",
+        ],
+        ids=["fence", "fence-lang", "tilde-fence", "blockquote", "indented", "older-phrasing"],
+    )
+    def test_a_quoted_declaration_demands_no_stand_in(self, tmp_path: Path, quoted: str) -> None:
+        text = f"Paste this into the other session:\n\n{quoted}\n\n{_REAL_STOP_LINE}"
+        result = _stop(tmp_path, text, session_crons=[])
+        assert result.decision is Decision.ALLOW
+        assert not (tmp_path / MARKER_FILENAME).exists()
+
+    def test_a_fence_before_the_real_declaration_does_not_hide_it(self, tmp_path: Path) -> None:
+        text = f"```\nexample\n```\n\n{_AWAITING}"
+        result = _stop(tmp_path, text, session_crons=[])
+        assert result.decision is Decision.DENY
+        assert "[tick:stand-in]" in result.reason
+
+    def test_an_older_phrasing_in_the_stop_line_still_declares(self, tmp_path: Path) -> None:
+        text = "```\nx\n```\nSTOPPING BECAUSE: need user input on A or B."
+        result = _stop(tmp_path, text, session_crons=[])
+        assert result.decision is Decision.DENY
+
+
 class TestMainThreadOnly:
     def test_a_sub_agent_stop_is_never_required_to_schedule_one(self, tmp_path: Path) -> None:
         result = _stop(tmp_path, session_crons=[], agent_id=_SUBAGENT_ID)

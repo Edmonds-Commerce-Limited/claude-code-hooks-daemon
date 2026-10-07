@@ -90,6 +90,56 @@ def _summary_section(plain: str) -> str:
     return "" if newline == -1 else plain[newline + 1 :]
 
 
+#: The pytest arguments every full-gate pytest leg passes so the slowest tests
+#: land in its console output. The floor keeps the section small: a test under
+#: a second is not what makes the gate slow. ``scripts/qa/run_tests.sh`` repeats
+#: these literally (a shell script cannot import them) and a test pins the two
+#: together.
+SLOWEST_DURATIONS_ARGS: tuple[str, ...] = ("--durations=50", "--durations-min=1.0")
+
+# "============ slowest 50 durations ============" (also "slowest durations"
+# when --durations=0).
+_DURATIONS_BANNER_PATTERN = re.compile(r"^=+ slowest (?:\d+ )?durations =+\s*$")
+# "12.50s call     tests/unit/test_x.py::TestA::test_b[param 1]"
+_DURATION_LINE_PATTERN = re.compile(r"^(\d+(?:\.\d+)?)s (setup|call|teardown)\s+(\S.*?)\s*$")
+
+
+def parse_slowest_durations(content: str) -> list[dict[str, Any]]:
+    """Read pytest's "slowest durations" section out of its console output.
+
+    Only the lines between pytest's own banner and the next ``=`` banner count:
+    the captured stream also carries subprocess output, and a stray line shaped
+    like a duration must not be recorded as a test.
+
+    Args:
+        content: Raw pytest stdout/stderr, with or without ANSI colouring.
+
+    Returns:
+        One ``{"nodeid", "phase", "seconds"}`` record per listed duration, in
+        pytest's order (slowest first). Empty when there is no such section.
+    """
+    records: list[dict[str, Any]] = []
+    in_section = False
+    for line in strip_ansi(content).splitlines():
+        if _DURATIONS_BANNER_PATTERN.match(line):
+            in_section = True
+            continue
+        if not in_section:
+            continue
+        if line.startswith("="):
+            break
+        match = _DURATION_LINE_PATTERN.match(line)
+        if match:
+            records.append(
+                {
+                    "nodeid": match.group(3),
+                    "phase": match.group(2),
+                    "seconds": float(match.group(1)),
+                }
+            )
+    return records
+
+
 def _count(pattern: re.Pattern[str], text: str) -> int:
     match = pattern.search(text)
     return int(match.group(1)) if match else 0

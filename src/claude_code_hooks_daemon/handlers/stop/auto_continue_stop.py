@@ -276,6 +276,35 @@ def _quoted_spans(text: str) -> tuple[tuple[int, int], ...]:
     return tuple(match.span() for match in _QUOTED_SPAN_RE.finditer(text))
 
 
+_FENCE_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
+_QUOTED_LINE_RE = re.compile(r"^(?:>|(?: {4}|\t))")
+
+
+def _declaring_lines(text: str) -> str:
+    """The text with fenced blocks, blockquotes and indented blocks removed.
+
+    A stop message can carry a copy-paste block for ANOTHER session whose
+    ``STOPPING BECAUSE: [awaiting-human]`` line is that session's declaration,
+    not this stop's (N365). Only unfenced, unindented, unquoted lines declare.
+    An unterminated fence runs to the end of the text, as in markdown.
+    """
+    kept: list[str] = []
+    fence: str | None = None
+    for line in text.splitlines():
+        marker = _FENCE_RE.match(line)
+        if fence is not None:
+            if marker and marker.group(1)[0] == fence[0] and len(marker.group(1)) >= len(fence):
+                fence = None
+            continue
+        if marker:
+            fence = marker.group(1)
+            continue
+        if _QUOTED_LINE_RE.match(line):
+            continue
+        kept.append(line)
+    return "\n".join(kept)
+
+
 def _declares_human_blocked(text: str) -> bool:
     """Whether a stop declares it is blocked ONLY on the human.
 
@@ -303,6 +332,7 @@ def _declares_human_blocked(text: str) -> bool:
     difference is semantic, and it is precisely why Plan 00337 added the
     explicit sentinel and closed these patterns to extension.
     """
+    text = _declaring_lines(text)
     if _AWAITING_HUMAN_DECLARATION.search(text):
         return True
     quoted = _quoted_spans(text)

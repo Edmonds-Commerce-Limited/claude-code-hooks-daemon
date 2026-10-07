@@ -66,6 +66,32 @@ class TestDaemonDocsGuardHandler:
         }
         assert handler.matches(hook_input) is True
 
+    # N372: only the .claude/hooks-daemon/CLAUDE/ segment is the daemon's copy
+    @pytest.mark.parametrize(
+        "file_path",
+        [
+            "/home/x/claude-code-hooks-daemon/CLAUDE/Plan/README.md",
+            "/home/x/hooks-daemon/CLAUDE/Plan/README.md",
+            "foo-hooks-daemon/CLAUDE/x.md",
+            "x-hooks-daemon/CLAUDE/x.md",
+            "/home/x/my.claude/hooks-daemon/CLAUDE/x.md",
+        ],
+    )
+    def test_not_matches_project_folder_ending_in_hooks_daemon(self, handler, file_path):
+        """A project folder whose name ends in hooks-daemon is not the daemon install."""
+        hook_input = {"tool_name": "Read", "tool_input": {"file_path": file_path}}
+        assert handler.matches(hook_input) is False
+
+    def test_matches_daemon_install_inside_project_named_hooks_daemon(self, handler):
+        """The .claude/hooks-daemon/CLAUDE/ install still warns inside such a project."""
+        hook_input = {
+            "tool_name": "Read",
+            "tool_input": {
+                "file_path": "/home/x/claude-code-hooks-daemon/.claude/hooks-daemon/CLAUDE/x.md"
+            },
+        }
+        assert handler.matches(hook_input) is True
+
     def test_matches_write_to_hooks_daemon_claude(self, handler):
         """Should also match Write to hooks-daemon/CLAUDE/ (wrong location)."""
         hook_input = {

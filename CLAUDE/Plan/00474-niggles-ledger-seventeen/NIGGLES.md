@@ -1426,6 +1426,46 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N372 — the daemon-docs guard warns on the project's own `CLAUDE/` when the repo folder ends in `hooks-daemon`
+
+**Found**: by the owner's desktop session, 2026-10-07. Reading `CLAUDE/Plan/README.md` in a clone named
+`claude-code-hooks-daemon/` drew the warning that it was "the hooks-daemon's internal docs copy".
+`daemon_docs_guard.py:20` matches any path containing `hooks-daemon/CLAUDE/`, so every project folder whose name ends
+in `hooks-daemon` trips it. It should match only the `.claude/hooks-daemon/CLAUDE/` segment. Same class as the loose
+path matching fixed in Plan 00458.
+
+**Status**: ✅ Fixed on this branch (merge pending). The guard now uses `matches_path_segment` from
+`utils/path_segments.py` with `.claude/hooks-daemon/CLAUDE/`. Tests in
+`tests/unit/handlers/pre_tool_use/test_daemon_docs_guard.py`:
+`test_not_matches_project_folder_ending_in_hooks_daemon` (five parametrised paths) and
+`test_matches_daemon_install_inside_project_named_hooks_daemon`.
+
+### N371 — the plan counter is per clone, so a second clone of this repository would reuse plan numbers
+
+**Found**: by the owner's desktop session, 2026-10-07 (Plan 00498 desktop check). In the desktop clone
+`git config --local hooksdaemon.latestPlanNumber` read 489, while plan folders up to 00499 exist on main and the
+container clone reads 499. The counter lives in each clone's local git config. `mkplan.bash` already scans the
+plan folders (including `Completed/`) and dies when they run ahead of the counter (lines 764-766), so with
+00490–00499 pulled it refuses rather than reusing a number. It reuses one only when the clone's folders are stale
+too. The daemon's `counter + 1` path (`plan_numbering.py:180`) does not look at the disk. The guidance says "the
+daemon keeps it correct across branches"; nothing says across clones. Remedy: `mkplan.bash` advances the counter to
+the highest plan number on disk instead of dying on that drift, and the daemon's path checks the disk the same way.
+
+**Status**: ⬜ Open.
+
+### N370 — the sed guard denies a `git -C <dir> commit -m` message that mentions an in-place sed edit
+
+**Found**: by the coordinator, 2026-10-06. `git -C /workspace add <dir> && git -C /workspace commit -q -m '… sed -i …'`
+was denied as `R-SED-FILE-MODIFICATION`. The guidance exempts "a `git commit` message mentioning sed (sed must follow
+`git commit` with no command separator between)". Here sed did follow the commit with no separator, but the commit
+was spelled `git -C <dir> commit`, so the exemption appears to match only the literal `git commit` adjacency. The
+same message without the sed word was allowed.
+
+**Fix**: recognise the commit subcommand after git's global options (`-C <dir>`, `-c k=v`, `--git-dir`,
+`--work-tree`), the way the other git-aware guards parse it. Test both spellings.
+
+**Status**: ⬜ Open.
+
 ### N369 — a forwarder integration test fails inside every worktree and passes on main
 
 **Found**: by the coordinator, 2026-10-06, in Plan 00495 Task 2.7's branch QA.
@@ -1451,7 +1491,9 @@ more: F1 was already fixed on F44 in ccy 3.82.1, so the checklist was telling th
 `reference_repos` config) and require a claim about an external repository to be checked there before it is
 called unverifiable. The coordinator should name the clone in the dispatch too.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed on this branch (merge pending). `.claude/agents/plan-fact-checker.md` now names the governed
+reference clones and requires a check there first. The coordinator naming the clone in the dispatch is still on the
+coordinator.
 
 ### N367 — the coordinator's branch-QA venv recipe installs off-lock tool versions, so three tests fail falsely
 
@@ -1534,7 +1576,11 @@ declare it, and background QA was still running. The Stop hook nevertheless trea
 denied it until a stand-in cron was created. The token should count only where the stop declares it (immediately
 after the `STOPPING BECAUSE:` prefix), never inside fenced or quoted text.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed on this branch (merge pending). `_declaring_lines` in `auto_continue_stop.py` drops fenced,
+blockquoted and indented lines before the sentinel and the older phrasings are matched. Tests:
+`TestOnlyTheStopsOwnDeclarationCounts::test_a_quoted_declaration_demands_no_stand_in` (six shapes),
+`test_a_fence_before_the_real_declaration_does_not_hide_it`, `test_an_older_phrasing_in_the_stop_line_still_declares`
+in `tests/unit/handlers/stop/test_auto_continue_stop_stand_in.py`.
 
 ### N363 — a pipe inside a `bash -c` string is blamed on `bash`, not on its real producer
 
@@ -1556,7 +1602,22 @@ branch whose tip is already contained in the default branch is lossless housekee
 **Fix**: allow the delete when every named branch's remote tip is an ancestor of the remote default branch (after a
 fetch); keep the deny, with the same message, otherwise. Tags are out of scope. Test both sides through the real chain.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed on branch `agent-a7777897724c1db4b-1ed0e9c0` (merge pending). `destructive_git` allows a
+`git push <remote> --delete|-d <branch>` / `:<branch>` when `refs/remotes/<remote>/<branch>` is an ancestor of the
+default branch (`git merge-base --is-ancestor`) and `git ls-remote <remote> refs/heads/<branch>` reports a tip equal
+to it (a stale tracking ref, an absent remote branch, a failure or a timeout is denied with "run `git fetch` and
+retry"; the handler never fetches); tags, the default branch, a missing ref,
+a tag-named branch, substitutions and any git failure stay denied, and every ref in the command must pass. Tests in
+`tests/unit/handlers/pre_tool_use/test_destructive_git_remote_delete_merged.py`:
+`test_deleting_a_merged_remote_branch_is_allowed` (five spellings),
+`test_deleting_an_unmerged_remote_branch_is_denied_and_says_so`, `test_a_missing_remote_tracking_ref_is_denied`,
+`test_deleting_a_tag_stays_denied`, `test_a_branch_sharing_its_name_with_a_tag_is_denied`,
+`test_the_default_branch_is_never_deletable`, `test_every_ref_must_be_merged`, `test_several_merged_refs_are_allowed`,
+`test_a_merged_delete_cannot_carry_a_force_push_along`, `test_a_merged_delete_chained_with_an_unmerged_one_is_denied`,
+`test_a_substitution_is_not_trusted`, `test_an_unknown_directory_is_denied`, `test_a_stale_tracking_ref_is_denied_and_says_to_fetch`,
+`test_a_fetched_tracking_ref_that_is_now_unmerged_is_denied`, `test_a_branch_already_gone_from_the_remote_is_denied`,
+`test_an_unreachable_remote_is_denied`,
+`test_the_rule_documentation_describes_the_merged_exception`.
 
 ### N361 — the fake-values registry is not pre-filled, and nothing says its entries must look fake
 

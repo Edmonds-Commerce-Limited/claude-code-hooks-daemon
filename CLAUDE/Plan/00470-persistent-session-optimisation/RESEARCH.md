@@ -186,3 +186,54 @@ deliberately. Decide from a measured A/B (Phase 4), not from this reasoning.
 4. **Answered by Task 3.4**: no. Only `auto_continue_stop` writes the marker, and it is scoped to
    the main thread.
 5. **Done by Task 1.1.**
+
+### Probe results (Task 6.3): a second thread in one session
+
+Run on the owner's desktop session of this repository, with daemon payload capture on for SessionStart,
+UserPromptSubmit and Stop. Thread 1 created a one-off cron (`probe`); thread 2, opened earlier with the left arrow,
+was then prompted; thread 1 then read the capture files.
+
+1. **A thread is a separate session to the hooks.** Thread 2's payloads carry their own `session_id` and their own
+   `transcript_path` (`<id>.jsonl` in the same project folder). Nothing in the captured fields links it to thread 1.
+2. **`session_crons` is per thread.** Thread 1's Stop after the CronCreate listed `probe`. Thread 2's Stop, which
+   came after it, carried an empty list. A thread does not see, and does not hold, the crons of the thread that
+   opened it.
+3. **Only Stop carries `session_crons`.** UserPromptSubmit payloads have no such key, before or after the cron
+   existed. Any cron check must keep reading it from Stop.
+4. **Opening a thread fires SessionStart, with `source: "startup"`.** A third thread opened with capture on produced
+   the only SessionStart record since the restart: a new `session_id`, its own transcript, and the same `source` a
+   brand-new session reports. No payload field marks it as a thread of an existing session.
+5. **Where it applies:** the owner's ccy stack has removed the new-thread action, so container sessions do not get
+   second threads. In this repository, host sessions have autonomy off (Plan 00498), so no crons are demanded there
+   either. Task 6.4 matters for client projects that allow autonomy where threads can be opened.
+
+Consequence for Task 6.4: the daemon sees a later thread as a fresh session with no crons. `cron_stop_enforcer`
+compares the declared jobs with the Stop's `session_crons` (`cron_stop_enforcer.py:145-179`), and a present but empty
+list counts as missing, so it would demand the declared crons at every thread's stop, and each thread would then
+run its own copy of every job. `persistent_cron_assertor` does not read `session_crons`; it states the declared jobs
+at SessionStart, which a new thread fires (item 4), so it would also tell every thread to create them.
+No hook payload tells "a thread opened later" from "a new session".
+
+**Process ancestry does** (Claude Code 2.1.292, owner's desktop, walking each thread's tool shell up to pid 1):
+
+```text
+thread 1 (bd14238f):  worker `<versions>/2.1.292 --session-id bd14238f… --fork-session --resume …`
+                      ← `claude bg-pty-host --bg-pty-host <tmp>/pty/bd14238f.sock …`
+                      ← `claude daemon run --origin transient --spawned-by {"pid":580792,…}`   (pid 589899)
+                      ← `claude` (pid 580792, the interactive front end) ← cc wrapper ← tmux
+thread 3:             worker `claude bg-spare --bg-spare <tmp>/spare/….claim.sock`
+                      ← `claude bg-pty-host …` ← the same `claude daemon run` (589899) ← the same 580792
+new session:          `claude` (2249863) ← cc wrapper ← tmux        (no `claude daemon run` above it)
+```
+
+- Threads are not one process: each runs in its own worker under its own `bg-pty-host`.
+- All threads of one session share one `claude daemon run --spawned-by {"pid": <front end>}` ancestor. A separate
+  session has a different front end, and has no such daemon at all until it opens a thread.
+- Once threads exist, the first thread also runs as a worker (`--fork-session --resume`), not inside the front end.
+  Later threads are claimed pre-started spares (`bg-spare`).
+
+So a grouping key exists: the pid of the nearest `claude daemon run` ancestor (or its `--spawned-by` pid), found by
+the hook client walking `/proc`. Sessions sharing a key are threads of one session; the first `session_id` seen
+under a key is the initial thread. A session with no such ancestor is a plain single-thread session and keeps
+today's behaviour. These are undocumented Claude Code internals, so the key must be optional: when the walk finds
+nothing it recognises, nothing changes.

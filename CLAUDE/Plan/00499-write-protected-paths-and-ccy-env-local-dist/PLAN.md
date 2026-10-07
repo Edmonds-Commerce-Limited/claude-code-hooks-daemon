@@ -1,0 +1,97 @@
+# Plan 00499: write-protected paths, and the ccy.env.local.dist template
+
+**Status**: In Progress
+**Created**: 2026-10-06
+**Owner**: dev
+**Priority**: Low
+**Recommended Executor**: Sonnet
+**Execution Strategy**: Sub-Agent Orchestration
+**GitHub Issue**: #88
+
+## Overview
+
+Owner rulings (2026-10-06):
+
+- `.claude/ccy/ccy.env.local` is written by IaC (or a human) only, never by an agent. Agents and ccy may read it.
+  The copy the coordinator had written was removed for that reason: "We need to know that the file is created by
+  IAC."
+- A generic guard for "agents may read this but never write it" is approved: "a generic handler would make sense".
+  It is not urgent.
+
+The daemon has no such guard today:
+
+- `secret_file_guard` blocks reading as well as writing.
+- `lock_file_edit_blocker` is hard-coded to package lock files and covers only the `Write`/`Edit` tools.
+- Claude Code's own `permissions.deny` with `Edit(...)` misses every Bash write (`>`, `tee`, `cp`, `mv`, `rm`).
+
+GitHub #88 asks the daemon to ship a tracked `ccy.env.local.dist` template beside the supervisor. Its scope is
+corrected by the rulings above. The daemon writes the template and never the local file. An advisory about an
+older local copy tells the agent to report it to a human, not to edit it.
+
+## Goals
+
+- A per-project list of path globs that agents may read but never create, change, move onto or delete.
+- This repository protects `.claude/ccy/ccy.env.local` with it.
+- #88 delivered with the corrected scope.
+
+## Non-Goals
+
+- Writing `ccy.env.local` from the daemon or from an agent, in any project.
+- Protecting against a human, or against IaC running outside Claude Code.
+- Changing what `secret_file_guard` protects.
+
+## Tasks
+
+### Phase 1: The guard
+
+- [ ] ⬜ **Task 1.1**: A PreToolUse handler `write_protected_paths`, off by default, with option `paths` (globs,
+  repository-relative). It denies:
+
+  - `Write`, `Edit` and `NotebookEdit` on a listed path;
+  - a Bash command that authors a listed path (redirect, `tee`, heredoc, `sed -i`, `dd of=`), relocates onto it
+    (`cp`, `mv`, `install`, `ln`), or deletes or truncates it (`rm`, `truncate`, `: >`).
+
+  Use `scan_bash_write_targets` (`core/utils.py`) with `authored_only=False`, not `get_written_file_paths`: that
+  wrapper sets `authored_only=True`, which drops `cp`/`mv`/`install`/`dd`. The scan already covers redirects
+  (including `: >`), `tee`, heredoc redirects, `cp`/`mv`/`install` and `dd of=`. `sed -i`, `ln`, `rm` and `truncate`
+  are new verbs to add. Fail closed on the scan's `unreadable` and `unresolved` results when the command names a
+  listed path. Reading is never denied. Tests first, through the real handler.
+
+- [ ] ⬜ **Task 1.2**: Guidance (`get_claude_md()`), a rule ID and acceptance tests. The deny message says that the
+  file is maintained outside the agent (IaC or a human), and to ask the human for any change.
+
+- [ ] ⬜ **Task 1.3**: Enable it in this repository with `paths: [".claude/ccy/ccy.env.local"]`, and add a
+  commented example to `.claude/hooks-daemon.yaml.example`.
+
+### Phase 2: #88, corrected
+
+- [x] ❌ **Task 2.1**: The daemon writes a tracked `ccy.env.local.dist`. CANCELLED: ccy writes it on every launch
+  (first seen 2026-10-06, "ccy.env.local.dist version 2"). Its header says commit it, never edit it, that IaC places
+  `ccy.env.local`, and how to record the "based on" version. Its first entry is the `HOOKS_DAEMON_HOSTNAME` role
+  override with the precedence ladder. The daemon writing a second copy would fight ccy's rewrite. This repository
+  tracks ccy's file.
+
+- [x] ❌ **Task 2.2**: A SessionStart advisory for an older "based on" version. CANCELLED: ccy reports that at
+  launch ("When this dist's version moves on, ccy says so at launch").
+
+- [x] ✅ **Task 2.3**: Comment on #88 with the corrected scope and link this plan ("Addresses #88"). Done: the
+  issue is claimed for this account and carries the correction.
+
+### Phase 3: IaC hand-off
+
+- [x] ✅ **Task 3.1**: Draft the fedora-desktop request for IaC to write this repository's `ccy.env.local` on the
+  sdlc runner VM (`HOOKS_DAEMON_HOSTNAME=cchd-sdlc-runner`, Plan 00479 owner ruling D8). The owner files or hands it
+  on. Done: [FEDORA-DESKTOP-REQUEST.md](FEDORA-DESKTOP-REQUEST.md). Its readability finding is resolved: from the
+  2026-10-07 restore, the IaC-written file reads normally inside the container and holds the expected line.
+
+## Success Criteria
+
+- [ ] An agent in this repository can read `.claude/ccy/ccy.env.local` but cannot create, edit, overwrite, move onto
+  or delete it by any tool route covered by the tests.
+- [ ] A project with no `write_protected_paths` config behaves exactly as before.
+- [x] `ccy.env.local.dist` is kept current, and nothing in the daemon touches `ccy.env.local`. Met by ccy, which
+  rewrites the dist at launch and reports an older "based on" version.
+
+## Delivery & Milestones
+
+- Plan filed.

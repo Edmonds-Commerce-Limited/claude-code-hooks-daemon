@@ -540,8 +540,58 @@ A run deletes each tool's old report before running it. A read-only summary
 - Its recorded exit code was non-zero.
 
 So neither an old green run nor a crashed tool's leftover report reads as a
-pass. A tree that changes during a run is said at the end of that run, because
-those results certify no tree.
+pass. Each step writes its record the moment it finishes and judges the tree
+just before and just after that step, so a tree that changes during one step
+is said at once and taints only that step's record.
+
+An interrupted run (for example a host reboot) is resumed with
+`llm_qa.py all --resume`. Each tool whose recorded result PASSED on the
+identical tree (and whose report is still the one that run wrote) is printed as
+reused and not run; a failed, stale or missing record is always re-run. Reused
+steps count in the verdict and show their recorded duration, marked reused.
+`--resume` takes the full-QA lock like any run, and cannot be combined with
+`--read-only`.
+
+The `tests` step is most of the gate, so `--resume` also reaches inside it.
+`run_test_matrix.py` writes a checkpoint per matrix leg
+(`untracked/qa/leg-py<version>-<scope>.checkpoint.json`, written by temp file and
+rename) the moment that leg finishes, keyed to the tree just before and just
+after it. On a resumed run a leg is reused only if it exited 0 and passed on the
+identical tree and the log (or, for the primary, the saved report copy) is still
+the one it wrote; a failed, stale or missing leg runs again, and a leg that
+starts drops its old checkpoint. The primary leg (3.11, full suite, the only one
+with coverage) is reused or re-run as one unit, so coverage and its 95%
+threshold are never split. Reused legs stay in `tests.json` `interpreters[]` with
+`"reused": true` and their recorded counts and `slowest_tests`. A normal `all`
+never reuses a leg: `llm_qa.py` passes `--resume` to the `tests` tool only when
+it was itself resumed.
+
+Each leg is itself a list of **shards**: named slices of `tests/` declared once
+in `scripts/qa/test_shards.yaml` (`paths`, or `remainder_of` a directory for
+everything no other shard claims). A shard is the unit that is checkpointed
+(`leg-py<version>-<scope>-<shard>.checkpoint.json`), so a reboot mid-primary
+loses one shard, not the hour-long leg, and `--resume` re-runs only the shards
+not green on the identical tree. Shards run one after another within a leg. The
+primary runs every shard; the extra interpreters' `unit` scope is the shards
+whose `scope` is `unit` (exactly `tests/unit`) and `rest` the others.
+`tests/unit/qa/test_suite_shards.py` fails if any test file under `tests/` is
+in no shard or in two, so sharding can never drop or double-run a test; a new
+test directory lands in a `remainder_of` shard without editing the file.
+
+Coverage is still judged on the whole suite, at the unchanged `fail_under`
+(95) in `pyproject.toml`. `run_tests.sh --shard` makes each primary shard write
+its own coverage data file (`untracked/qa/.coverage.<shard>`, via the
+`COVERAGE_FILE` environment variable, which coverage.py reads as the DATA file;
+the JSON report path is the separate `COVERAGE_JSON`) and judge no threshold.
+The data file is hashed into the shard's checkpoint with its report. Once every
+primary shard has run or been reused, `run_test_matrix.py` runs
+`coverage combine --keep` over them, writes `coverage.json` and takes the
+`coverage report` fail-under verdict from the combined data; a shard with no
+data file means coverage is not judged and the stage fails. `parallel = true`
+stays off in the coverage config. `tests.json` keeps its shape (counts summed
+over shards, the failed tests, `coverage`, merged `slowest_tests`); each
+`interpreters[]` entry for a sharded leg adds a `shards` list, one record per
+shard with its own counts, duration and `reused` flag.
 
 ### The Automated Checks
 
