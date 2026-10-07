@@ -173,8 +173,9 @@ waited on one bandit decision.
 - [ ] ⬜ **Task 6.4**: From the probe: by default only the initial thread of a
   session is required to hold the declared crons. Threads opened later hold none
   unless explicitly instructed. No hook payload tells a later thread from a new session (a new thread's SessionStart
-  reports `source: "startup"`). First prove the candidate in RESEARCH.md: threads share one Claude Code process, so
-  the first session seen per process pid is the initial thread.
+  reports `source: "startup"`), but process ancestry does: every thread of a session runs under one
+  `claude daemon run --spawned-by` process (RESEARCH.md, "Probe results (Task 6.3)"). Group sessions by that
+  ancestor; the first `session_id` per group holds the crons. With no such ancestor, behave as today.
 
 ## Success Criteria
 

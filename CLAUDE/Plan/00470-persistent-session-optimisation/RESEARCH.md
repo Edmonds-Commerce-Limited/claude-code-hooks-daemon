@@ -212,8 +212,28 @@ compares the declared jobs with the Stop's `session_crons` (`cron_stop_enforcer.
 list counts as missing, so it would demand the declared crons at every thread's stop, and each thread would then
 run its own copy of every job. `persistent_cron_assertor` does not read `session_crons`; it states the declared jobs
 at SessionStart, which a new thread fires (item 4), so it would also tell every thread to create them.
-No hook payload tells "a thread opened later" from "a new session". A candidate signal outside the payload: every
-thread runs inside the same Claude Code process, while a new session is a new process. The hook client could send
-the pid of the Claude Code process it runs under, and the daemon would treat the first session seen for that pid as
-the initial thread. Unverified: Task 6.4 must first show that two threads report the same process and two sessions
-do not.
+No hook payload tells "a thread opened later" from "a new session".
+
+**Process ancestry does** (Claude Code 2.1.292, owner's desktop, walking each thread's tool shell up to pid 1):
+
+```text
+thread 1 (bd14238f):  worker `<versions>/2.1.292 --session-id bd14238f… --fork-session --resume …`
+                      ← `claude bg-pty-host --bg-pty-host <tmp>/pty/bd14238f.sock …`
+                      ← `claude daemon run --origin transient --spawned-by {"pid":580792,…}`   (pid 589899)
+                      ← `claude` (pid 580792, the interactive front end) ← cc wrapper ← tmux
+thread 3:             worker `claude bg-spare --bg-spare <tmp>/spare/….claim.sock`
+                      ← `claude bg-pty-host …` ← the same `claude daemon run` (589899) ← the same 580792
+new session:          `claude` (2249863) ← cc wrapper ← tmux        (no `claude daemon run` above it)
+```
+
+- Threads are not one process: each runs in its own worker under its own `bg-pty-host`.
+- All threads of one session share one `claude daemon run --spawned-by {"pid": <front end>}` ancestor. A separate
+  session has a different front end, and has no such daemon at all until it opens a thread.
+- Once threads exist, the first thread also runs as a worker (`--fork-session --resume`), not inside the front end.
+  Later threads are claimed pre-started spares (`bg-spare`).
+
+So a grouping key exists: the pid of the nearest `claude daemon run` ancestor (or its `--spawned-by` pid), found by
+the hook client walking `/proc`. Sessions sharing a key are threads of one session; the first `session_id` seen
+under a key is the initial thread. A session with no such ancestor is a plain single-thread session and keeps
+today's behaviour. These are undocumented Claude Code internals, so the key must be optional: when the walk finds
+nothing it recognises, nothing changes.
