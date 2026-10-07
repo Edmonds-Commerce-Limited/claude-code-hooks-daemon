@@ -1,0 +1,57 @@
+# The test suite as named shards (Plan 00500 Task 2.4): the one declaration.
+#
+# Each shard is its own `--resume` checkpoint in the QA tests stage, so a host
+# reboot loses one shard rather than a whole matrix leg. Shards run one after
+# another within a leg. The primary interpreter runs every shard with coverage;
+# the extra interpreters run the `unit` shards, then the `rest` shards.
+#
+# A shard is either `paths` (pytest paths) or `remainder_of` (everything under a
+# directory that no other shard claims, so a new directory needs no edit here).
+# `scope: unit` is exactly `tests/unit`; `scope: rest` is the rest of `tests/`.
+# tests/unit/qa/test_suite_shards.py checks that every test file under `tests/`
+# is in exactly one shard.
+#
+# Sized by test-file count (unit ~1150 files, integration ~220, the rest ~40);
+# integration and acceptance files are the slow, process-spawning ones.
+shards:
+  - name: unit-handlers
+    scope: unit
+    paths: [tests/unit/handlers]
+
+  - name: unit-daemon
+    scope: unit
+    paths: [tests/unit/daemon, tests/unit/supervise]
+
+  - name: unit-core
+    scope: unit
+    paths:
+      - tests/unit/core
+      - tests/unit/utils
+      - tests/unit/config
+      - tests/unit/config_optimisation
+      - tests/unit/constants
+
+  - name: unit-features
+    scope: unit
+    paths:
+      - tests/unit/strategies
+      - tests/unit/install
+      - tests/unit/remote_docs
+      - tests/unit/issue_report
+      - tests/unit/reference_repos
+      - tests/unit/skill_scan
+      - tests/unit/routines
+      - tests/unit/rule_explain
+      - tests/unit/tool_report
+
+  - name: unit-tooling
+    scope: unit
+    remainder_of: tests/unit
+
+  - name: integration
+    scope: rest
+    paths: [tests/integration]
+
+  - name: acceptance-and-other
+    scope: rest
+    remainder_of: tests

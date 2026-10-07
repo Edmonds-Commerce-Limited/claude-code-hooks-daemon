@@ -26,12 +26,17 @@ An extra interpreter that cannot be provisioned FAILS the stage and says so;
 the stage never quietly runs fewer versions than CI. Its report is written
 over ``tests.json`` with a per-run ``interpreters`` list.
 
-Each leg also writes its own checkpoint (:class:`LegCheckpoints`) the moment it
-finishes. ``--resume`` (what ``llm_qa.py all --resume`` passes down) runs only
-the legs with no checkpoint that PASSED on the identical tree; the others run
-as normal. Coverage is judged on the whole: the primary leg is the only one
-with coverage and is reused or re-run as one unit. Without ``--resume`` no leg
-is ever reused.
+Each leg is a list of SHARDS (``scripts/qa/test_shards.yaml``: named slices of
+``tests/``) run one after another, and each shard writes its own checkpoint
+(:class:`LegCheckpoints`) the moment it finishes. ``--resume`` (what
+``llm_qa.py all --resume`` passes down) runs only the shards with no checkpoint
+that PASSED on the identical tree; the others run as normal. Without
+``--resume`` no shard is ever reused.
+
+Coverage is judged on the whole. Each primary shard writes its own coverage
+data file (no fail-under) that is kept with its checkpoint; once every primary
+shard has run or been reused they are combined (``coverage combine --keep``)
+and the report and the ``fail_under`` verdict come from the combined data.
 """
 
 from __future__ import annotations
@@ -64,12 +69,23 @@ from claude_code_hooks_daemon.qa.pytest_text_report import (
     parse_pytest_text_output,
     parse_slowest_durations,
 )
+from claude_code_hooks_daemon.qa.suite_shards import (
+    SCOPE_REST,
+    SCOPE_UNIT,
+    Shard,
+    ShardError,
+    load_shards,
+    shards_in_scope,
+)
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parent.parent.parent
 SCRIPTS_DIR: Final[Path] = PROJECT_ROOT / "scripts" / "qa"
+SHARDS_FILE: Final[Path] = SCRIPTS_DIR / "test_shards.yaml"
 QA_OUTPUT_DIR: Final[Path] = PROJECT_ROOT / "untracked" / "qa"
 TESTS_JSON: Final[Path] = QA_OUTPUT_DIR / "tests.json"
+COVERAGE_JSON_NAME: Final[str] = "coverage.json"
+COVERAGE_COMBINED_NAME: Final[str] = "coverage-combined.data"
 CI_WORKFLOW: Final[Path] = PROJECT_ROOT / ".github" / "workflows" / "qa.yml"
 CI_JOB: Final[str] = "qa"
 CI_MATRIX_KEY: Final[str] = "python-version"
@@ -78,8 +94,6 @@ DAEMON_CLI: Final[Path] = PROJECT_ROOT / "bin" / "hooks-daemon"
 DAEMON_CLI_TIMEOUT_SECONDS: Final[int] = 120
 
 SCOPE_FULL: Final[str] = "full"
-SCOPE_UNIT: Final[str] = "unit"
-SCOPE_REST: Final[str] = "rest"
 PHASE_PARALLEL: Final[int] = 1
 PHASE_SERIAL: Final[int] = 2
 
@@ -108,12 +122,19 @@ class ProvisionError(RuntimeError):
 
 
 class PlannedRun(NamedTuple):
-    """One pytest invocation the stage owes."""
+    """One matrix leg the stage owes: a pytest run of a scope, as a list of shards.
+
+    ``shards`` names the leg's shards (empty: the leg is one unsharded run).
+    The unit that actually launches and checkpoints is the leg with ``shards``
+    cleared and ``shard`` set to one of those names.
+    """
 
     version: str
     scope: str
     phase: int
     primary: bool
+    shards: tuple[str, ...] = ()
+    shard: str | None = None
 
 
 class RunOutcome(NamedTuple):
@@ -130,13 +151,26 @@ class RunOutcome(NamedTuple):
     first_error_lines: dict[str, str]
     #: ``{nodeid, phase, seconds}`` records for the run's slowest tests.
     slowest_tests: Sequence[dict[str, Any]] = ()
+    #: The coverage data file a primary shard wrote, kept with its checkpoint.
+    coverage_data: Path | None = None
+
+
+class ShardResult(NamedTuple):
+    """One shard of a leg: what it reported, how long it took, and whether it was reused."""
+
+    name: str
+    outcome: RunOutcome
+    duration_seconds: float
+    reused: bool
 
 
 class RunResult(NamedTuple):
     """A planned run and what became of it; ``outcome`` is None when it never ran.
 
     ``reused`` marks a result taken from a checkpoint (``--resume``); its
-    ``duration_seconds`` is then the run that produced it.
+    ``duration_seconds`` is then the run that produced it. A sharded leg's
+    ``outcome`` is the merge of its shards', listed in ``shards``; it is
+    ``reused`` only when every shard was.
     """
 
     run: PlannedRun
@@ -144,6 +178,7 @@ class RunResult(NamedTuple):
     duration_seconds: float
     error: str | None
     reused: bool = False
+    shards: tuple[ShardResult, ...] = ()
 
 
 class Job(Protocol):
@@ -167,6 +202,7 @@ _CK_DURATION: Final[str] = "duration_seconds"
 _CK_ARTEFACT: Final[str] = "artefact"
 _CK_ARTEFACT_SHA: Final[str] = "artefact_sha256"
 _CK_PAYLOAD: Final[str] = "payload"
+_CK_EXTRA_ARTEFACTS: Final[str] = "extra_artefacts"
 _DURATION_DECIMALS: Final[int] = 1
 
 
@@ -247,6 +283,7 @@ class LegCheckpoints:
         duration_seconds: float,
         artefact: Path | None,
         payload: Mapping[str, Any],
+        extra_artefacts: Sequence[Path] = (),
     ) -> None:
         """Record a finished leg, judged on the tree just before and just after it.
 
@@ -266,6 +303,10 @@ class LegCheckpoints:
         if artefact is not None:
             record[_CK_ARTEFACT] = str(artefact)
             record[_CK_ARTEFACT_SHA] = _GATE.output_digest(artefact)
+        if extra_artefacts:
+            record[_CK_EXTRA_ARTEFACTS] = {
+                str(path): _GATE.output_digest(path) for path in extra_artefacts
+            }
         self.write(key, record)
 
     def check(self, key: str) -> LegCheckpoint | str:
@@ -291,6 +332,12 @@ class LegCheckpoints:
             or _GATE.output_digest(Path(str(record[_CK_ARTEFACT]))) != record[_CK_ARTEFACT_SHA]
         ):
             return "the artefact on disk is not the one that leg wrote"
+        extras = record.get(_CK_EXTRA_ARTEFACTS, {})
+        if not isinstance(extras, dict) or any(
+            digest is None or _GATE.output_digest(Path(path)) != digest
+            for path, digest in extras.items()
+        ):
+            return "a data file kept with that leg is not the one it wrote"
         return LegCheckpoint(payload=payload, duration_seconds=float(duration))
 
 
@@ -357,12 +404,29 @@ def ci_python_versions(workflow: Path = CI_WORKFLOW) -> list[str]:
     return list(versions)
 
 
-def plan_runs(ci_versions: Sequence[str], primary_version: str) -> list[PlannedRun]:
-    """Every run the stage owes: the primary in full, each extra in two scopes."""
+def plan_runs(
+    ci_versions: Sequence[str], primary_version: str, shards: Sequence[Shard] = ()
+) -> list[PlannedRun]:
+    """Every leg the stage owes: the primary in full, each extra in two scopes.
+
+    With ``shards`` each leg lists the shards it runs (the primary all of them,
+    an extra those of its scope); without, each leg is one unsharded run.
+    """
     extras = [version for version in ci_versions if version != primary_version]
-    plan = [PlannedRun(primary_version, SCOPE_FULL, PHASE_PARALLEL, True)]
-    plan += [PlannedRun(version, SCOPE_UNIT, PHASE_PARALLEL, False) for version in extras]
-    plan += [PlannedRun(version, SCOPE_REST, PHASE_SERIAL, False) for version in extras]
+
+    def names(scope: str | None) -> tuple[str, ...]:
+        chosen = shards if scope is None else shards_in_scope(list(shards), scope)
+        return tuple(shard.name for shard in chosen)
+
+    plan = [PlannedRun(primary_version, SCOPE_FULL, PHASE_PARALLEL, True, names(None))]
+    plan += [
+        PlannedRun(version, SCOPE_UNIT, PHASE_PARALLEL, False, names(SCOPE_UNIT))
+        for version in extras
+    ]
+    plan += [
+        PlannedRun(version, SCOPE_REST, PHASE_SERIAL, False, names(SCOPE_REST))
+        for version in extras
+    ]
     return plan
 
 
@@ -393,14 +457,122 @@ def _provision_or_error(deps: MatrixDeps, version: str) -> Path | ProvisionError
         return exc
 
 
+class _Leg:
+    """One matrix leg executed unit by unit: each shard (or the whole leg, unsharded).
+
+    ``start`` does everything up to the first launch on the caller's thread, so
+    every phase-1 leg is running before the runner blocks on any; ``complete``
+    waits for the running unit, checkpoints it the moment it ends, and goes on
+    to the leg's remaining shards, one at a time.
+    """
+
+    def __init__(
+        self,
+        run: PlannedRun,
+        deps: MatrixDeps,
+        python_for: Callable[[PlannedRun], Path | None],
+    ) -> None:
+        self._run = run
+        self._deps = deps
+        self._python_for = python_for
+        self._pending = [run._replace(shards=(), shard=name) for name in run.shards] or [run]
+        self._done: list[RunResult] = []
+        self._running: tuple[PlannedRun, Job, dict[str, str] | None, float] | None = None
+        self.not_provisioned = False
+
+    def start(self) -> None:
+        """Reuse what ``--resume`` allows and launch the first unit that must run."""
+        deps = self._deps
+        checkpoints = deps.checkpoints
+        while self._pending and self._running is None:
+            unit = self._pending.pop(0)
+            cached = self._reuse(unit)
+            if cached is not None:
+                self._done.append(cached)
+                continue
+            python = self._python_for(self._run)
+            if python is None:
+                self.not_provisioned = True
+                self._pending.clear()
+                return
+            if self._run.phase == PHASE_SERIAL:
+                # Before EVERY serial unit, not once: the daemon exits after
+                # idle_timeout_seconds without traffic, and a run's later
+                # directories can go longer than that without touching it
+                # (00466 N196).
+                daemon_note = deps.ensure_daemon()
+                if daemon_note is not None:
+                    print(daemon_note)
+            before: dict[str, str] | None = None
+            if checkpoints is not None:
+                # Drop any old checkpoint as the unit starts: an interrupted
+                # unit must leave none behind.
+                checkpoints.invalidate(leg_key(unit))
+                before = checkpoints.tree()
+            self._running = (unit, deps.launch(unit, python), before, deps.clock())
+
+    def complete(self) -> RunResult:
+        """Wait for every remaining unit and return the leg's result."""
+        deps = self._deps
+        while self._running is not None:
+            unit, job, before, began = self._running
+            self._running = None
+            outcome = job.wait()
+            duration = deps.clock() - began
+            if deps.checkpoints is not None:
+                _checkpoint_leg(deps.checkpoints, unit, outcome, before, duration)
+            self._done.append(RunResult(unit, outcome, duration, None))
+            self.start()
+        if self.not_provisioned:
+            # Nothing ran; `run_matrix` replaces this with the provisioning error.
+            return RunResult(self._run, None, 0.0, None)
+        if len(self._done) == 1 and not self._run.shards:
+            return self._done[0]
+        return _merge_leg(self._run, self._done)
+
+    def _reuse(self, unit: PlannedRun) -> RunResult | None:
+        """The unit's checkpoint as a result, when ``--resume`` and the checkpoint allow it."""
+        checkpoints = self._deps.checkpoints
+        if checkpoints is None or not self._deps.resume:
+            return None
+        found = checkpoints.check(leg_key(unit))
+        if isinstance(found, str):
+            print(f"  {_label(unit)}: running ({found})")
+            return None
+        if unit.primary and unit.shard is None:
+            _restore_primary_report(checkpoints, unit)
+        print(f"  {_label(unit)}: reused, passed on this tree (took {found.duration_seconds}s)")
+        return RunResult(
+            unit, _outcome_from_payload(found.payload), found.duration_seconds, None, True
+        )
+
+
+def _merge_leg(run: PlannedRun, units: Sequence[RunResult]) -> RunResult:
+    """One leg result over its shard results (``units`` is never empty here)."""
+    shards = tuple(
+        ShardResult(str(unit.run.shard), unit.outcome, unit.duration_seconds, unit.reused)
+        for unit in units
+        if unit.outcome is not None
+    )
+    outcome = merge_outcomes([shard.outcome for shard in shards])
+    return RunResult(
+        run,
+        outcome,
+        sum(shard.duration_seconds for shard in shards),
+        None,
+        all(shard.reused for shard in shards),
+        shards,
+    )
+
+
 def run_matrix(
     plan: Sequence[PlannedRun], primary_python: Path, deps: MatrixDeps
 ) -> list[RunResult]:
-    """Execute ``plan`` and return one result per planned run, in plan order.
+    """Execute ``plan`` and return one result per planned leg, in plan order.
 
     The primary starts first and before any provisioning, since it is the
     longest run. An extra whose provisioning fails gets an error result for
-    each of its runs and nothing is launched for it.
+    each of its legs and nothing is launched for it.
     """
     provisioned: dict[str, Path | ProvisionError] = {}
     results: dict[PlannedRun, RunResult] = {}
@@ -417,86 +589,33 @@ def run_matrix(
         reason = provisioned.get(run.version, "not provisioned")
         return RunResult(run, None, 0.0, f"Python {run.version} was NOT tested: {reason}")
 
-    checkpoints = deps.checkpoints
-
-    def reuse(run: PlannedRun) -> RunResult | None:
-        """The leg's checkpoint as a result, when ``--resume`` and the checkpoint allow it."""
-        if checkpoints is None or not deps.resume:
-            return None
-        found = checkpoints.check(leg_key(run))
-        if isinstance(found, str):
-            print(f"  {_label(run)}: running ({found})")
-            return None
-        if run.primary:
-            _restore_primary_report(checkpoints, run)
-        print(f"  {_label(run)}: reused, passed on this tree (took {found.duration_seconds}s)")
-        return RunResult(
-            run, _outcome_from_payload(found.payload), found.duration_seconds, None, True
-        )
-
-    def begin(run: PlannedRun) -> dict[str, str] | None:
-        """Drop any old checkpoint as the leg starts; return the tree it starts on."""
-        if checkpoints is None:
-            return None
-        checkpoints.invalidate(leg_key(run))
-        return checkpoints.tree()
-
-    def finish(run: PlannedRun, job: Job, before: dict[str, str] | None, began: float) -> RunResult:
-        """Wait for the leg and checkpoint it at once, whatever else is still running."""
-        outcome = job.wait()
-        duration = deps.clock() - began
-        if checkpoints is not None:
-            _checkpoint_leg(checkpoints, run, outcome, before, duration)
-        return RunResult(run, outcome, duration, None)
-
-    started: list[tuple[PlannedRun, Job, dict[str, str] | None, float]] = []
+    started: list[tuple[PlannedRun, _Leg]] = []
     for run in (r for r in plan if r.phase == PHASE_PARALLEL):
-        cached = reuse(run)
-        if cached is not None:
-            results[run] = cached
-            continue
-        python = python_for(run)
-        if python is None:
-            results[run] = not_run(run)
-            continue
-        before = begin(run)
-        started.append((run, deps.launch(run, python), before, deps.clock()))
+        leg = _Leg(run, deps, python_for)
+        leg.start()
+        started.append((run, leg))
     if started:
-        # One waiter per leg, so each leg is checkpointed the moment IT ends
+        # One waiter per leg, so each shard is checkpointed the moment IT ends
         # rather than when the slowest leg before it in line does.
         with ThreadPoolExecutor(max_workers=len(started)) as pool:
-            pending = [
-                (run, pool.submit(finish, run, job, before, began))
-                for run, job, before, began in started
-            ]
-            for run, future in pending:
-                results[run] = future.result()
+            pending = [(run, pool.submit(leg.complete)) for run, leg in started]
+            for (run, leg), (_, future) in zip(started, pending, strict=True):
+                result = future.result()
+                results[run] = not_run(run) if leg.not_provisioned else result
 
     for run in (r for r in plan if r.phase == PHASE_SERIAL):
-        cached = reuse(run)
-        if cached is not None:
-            results[run] = cached
-            continue
-        python = python_for(run)
-        if python is None:
-            results[run] = not_run(run)
-            continue
-        # Before EVERY serial run, not once: the daemon exits after
-        # idle_timeout_seconds without traffic, and a run's later directories
-        # can go longer than that without touching it (00466 N196).
-        daemon_note = deps.ensure_daemon()
-        if daemon_note is not None:
-            print(daemon_note)
-        before = begin(run)
-        began = deps.clock()
-        results[run] = finish(run, deps.launch(run, python), before, began)
+        leg = _Leg(run, deps, python_for)
+        leg.start()
+        result = leg.complete()
+        results[run] = not_run(run) if leg.not_provisioned else result
 
     return [results[run] for run in plan]
 
 
 def leg_key(run: PlannedRun) -> str:
-    """The checkpoint key of one leg."""
-    return f"py{run.version}-{run.scope}"
+    """The checkpoint key of one leg, or of one shard of it."""
+    key = f"py{run.version}-{run.scope}"
+    return key if run.shard is None else f"{key}-{run.shard}"
 
 
 def _primary_report_copy(checkpoints: LegCheckpoints, run: PlannedRun) -> Path:
@@ -522,6 +641,7 @@ def _payload_from_outcome(outcome: RunOutcome) -> dict[str, Any]:
         "log": str(outcome.log),
         "first_error_lines": outcome.first_error_lines,
         "slowest_tests": list(outcome.slowest_tests),
+        "coverage_data": None if outcome.coverage_data is None else str(outcome.coverage_data),
     }
 
 
@@ -533,6 +653,7 @@ def _outcome_from_payload(payload: Mapping[str, Any]) -> RunOutcome:
         log=Path(payload["log"]),
         first_error_lines=dict(payload["first_error_lines"]),
         slowest_tests=list(payload["slowest_tests"]),
+        coverage_data=Path(payload["coverage_data"]) if payload.get("coverage_data") else None,
     )
 
 
@@ -545,7 +666,7 @@ def _checkpoint_leg(
 ) -> None:
     """Record a finished leg, judged on the tree just before and just after it."""
     artefact: Path | None = outcome.log if outcome.log.is_file() else None
-    if run.primary and artefact is not None:
+    if run.primary and run.shard is None and artefact is not None:
         # Atomic like the checkpoint itself, so a kill leaves no torn copy.
         copy = _primary_report_copy(checkpoints, run)
         temp = copy.with_name(f".{copy.name}.{os.getpid()}.tmp")
@@ -561,24 +682,31 @@ def _checkpoint_leg(
         duration_seconds=duration,
         artefact=artefact,
         payload=_payload_from_outcome(outcome),
+        extra_artefacts=[outcome.coverage_data] if outcome.coverage_data is not None else [],
     )
 
 
 def _label(run: PlannedRun) -> str:
-    return f"py{run.version} {run.scope}"
+    label = f"py{run.version} {run.scope}"
+    return label if run.shard is None else f"{label} [{run.shard}]"
 
 
 _COUNT_KEYS: Final[tuple[str, ...]] = ("total", "passed", "failed", "skipped", "errors")
 
 
 def build_report(
-    results: Sequence[RunResult], primary_report: dict[str, Any], wall_seconds: float
+    results: Sequence[RunResult],
+    primary_report: dict[str, Any],
+    wall_seconds: float,
+    coverage_failure: str | None = None,
 ) -> dict[str, Any]:
     """The stage's ``tests.json``: the primary's report, widened to every run.
 
     Counts are summed over every run, ``passed_all`` holds only when every
     planned run ran and passed, and each failure from an extra is named with
-    the interpreter and scope it failed under.
+    the interpreter and scope it failed under. A sharded leg's entry lists its
+    shards. ``coverage_failure`` (the combined coverage verdict, when it is not
+    a pass) fails the report and is named as its unexplained failure.
     """
     summary: dict[str, Any] = dict.fromkeys(_COUNT_KEYS, 0)
     tests: list[dict[str, Any]] = list(primary_report.get("tests", []))
@@ -616,6 +744,8 @@ def build_report(
                 "slowest_tests": list(result.outcome.slowest_tests),
             }
         )
+        if result.shards:
+            entry["shards"] = [_shard_entry(shard) for shard in result.shards]
         interpreters.append(entry)
 
         if run.primary:
@@ -637,6 +767,10 @@ def build_report(
             ]
         tests += named
 
+    if coverage_failure is not None:
+        passed_all = False
+        errors.append(coverage_failure)
+        summary["unnamed_failure_reason"] = coverage_failure
     summary["passed_all"] = passed_all
     report: dict[str, Any] = {
         "tool": "pytest",
@@ -651,7 +785,71 @@ def build_report(
     return report
 
 
+def _shard_entry(shard: ShardResult) -> dict[str, Any]:
+    """One shard of a leg, as listed in the leg's ``tests.json`` entry."""
+    outcome = shard.outcome
+    return {
+        "name": shard.name,
+        "reused": shard.reused,
+        "duration_seconds": round(shard.duration_seconds, 1),
+        "passed_all": bool(outcome.summary.get("passed_all", False)),
+        "exit_code": outcome.exit_code,
+        "log": str(outcome.log),
+        **{key: int(outcome.summary.get(key, 0)) for key in _COUNT_KEYS},
+    }
+
+
+def primary_report_from_shards(result: RunResult, coverage: dict[str, Any]) -> dict[str, Any]:
+    """The primary leg's report in the shape ``run_tests.sh`` writes for a whole run.
+
+    ``tests`` is every shard report's own list, joined in shard order;
+    ``coverage`` is the combined verdict's totals.
+    """
+    tests: list[dict[str, Any]] = []
+    for shard in result.shards:
+        if shard.outcome.log.is_file():
+            tests += json.loads(shard.outcome.log.read_text(encoding="utf-8")).get("tests", [])
+    return {"tool": "pytest", "tests": tests, "coverage": coverage}
+
+
 # ── Outcomes ───────────────────────────────────────────────────────
+
+_SLOWEST_KEPT: Final[int] = int(SLOWEST_DURATIONS_ARGS[0].partition("=")[2])
+
+
+def merge_outcomes(outcomes: Sequence[RunOutcome]) -> RunOutcome:
+    """One outcome over several shards' (never empty).
+
+    Counts are summed and ``passed_all`` needs every shard; the exit code is the
+    first non-zero one; failed tests and first error lines are joined; the
+    slowest tests are the slowest of all, capped as one run's would be. ``log``
+    is the first failing shard's, else the last's.
+    """
+    summary: dict[str, Any] = {
+        key: sum(int(o.summary.get(key, 0)) for o in outcomes) for key in _COUNT_KEYS
+    }
+    summary["passed_all"] = all(bool(o.summary.get("passed_all", False)) for o in outcomes)
+    reasons = [
+        str(o.summary["unnamed_failure_reason"])
+        for o in outcomes
+        if "unnamed_failure_reason" in o.summary
+    ]
+    if reasons:
+        summary["unnamed_failure_reason"] = "; ".join(reasons)
+    slowest = sorted(
+        (record for o in outcomes for record in o.slowest_tests),
+        key=lambda record: float(record.get("seconds", 0.0)),
+        reverse=True,
+    )
+    failing = [o for o in outcomes if not o.summary.get("passed_all", False)]
+    return RunOutcome(
+        exit_code=next((o.exit_code for o in outcomes if o.exit_code != 0), 0),
+        summary=summary,
+        failed_tests=[name for o in outcomes for name in o.failed_tests],
+        log=(failing[0] if failing else outcomes[-1]).log,
+        first_error_lines={k: v for o in outcomes for k, v in o.first_error_lines.items()},
+        slowest_tests=slowest[:_SLOWEST_KEPT],
+    )
 
 
 def _red_summary() -> dict[str, Any]:
@@ -680,7 +878,9 @@ def outcome_from_log(log: Path, exit_code: int, *, lines: Path) -> RunOutcome:
     )
 
 
-def outcome_from_primary_report(path: Path, exit_code: int) -> RunOutcome:
+def outcome_from_primary_report(
+    path: Path, exit_code: int, coverage_data: Path | None = None
+) -> RunOutcome:
     """The primary run's outcome, read from the ``tests.json`` run_tests.sh wrote.
 
     run_tests.sh has already put each failure's first error line on its
@@ -688,12 +888,14 @@ def outcome_from_primary_report(path: Path, exit_code: int) -> RunOutcome:
     they are, so none are collected here.
     """
     if not path.is_file():
-        return RunOutcome(exit_code, _red_summary(), [], path, {})
+        return RunOutcome(exit_code, _red_summary(), [], path, {}, (), coverage_data)
     report = json.loads(path.read_text(encoding="utf-8"))
     summary = dict(report.get("summary", {}))
     summary["passed_all"] = bool(summary.get("passed_all", False)) and exit_code == 0
     failed = [t.get("name", "") for t in report.get("tests", []) if t.get("outcome") == "failed"]
-    return RunOutcome(exit_code, summary, failed, path, {}, report.get("slowest_tests", []))
+    return RunOutcome(
+        exit_code, summary, failed, path, {}, report.get("slowest_tests", []), coverage_data
+    )
 
 
 # ── Real side effects ──────────────────────────────────────────────
@@ -780,29 +982,61 @@ def provision(version: str) -> Path:
     return python
 
 
-class _PrimaryJob:
-    """``run_tests.sh`` under the primary interpreter; its output goes to ours."""
+def shard_report_path(shard: str) -> Path:
+    """Where ``run_tests.sh`` writes one primary shard's ``tests.json``-shaped report."""
+    return QA_OUTPUT_DIR / f"tests-shard-{shard}.json"
 
-    def __init__(self, lock_fd: int) -> None:
+
+def shard_coverage_data_path(shard: str) -> Path:
+    """One primary shard's coverage DATA file (coverage.py's ``COVERAGE_FILE``)."""
+    return QA_OUTPUT_DIR / f".coverage.{shard}"
+
+
+class _PrimaryJob:
+    """``run_tests.sh`` under the primary interpreter; its output goes to ours.
+
+    With a ``shard`` it runs only that shard's pytest paths, writes the
+    shard's own report and coverage data file, and judges no coverage.
+    """
+
+    def __init__(self, lock_fd: int, shard: Shard | None = None) -> None:
+        self._report = TESTS_JSON if shard is None else shard_report_path(shard.name)
+        self._data = None if shard is None else shard_coverage_data_path(shard.name)
+        argv = [str(SCRIPTS_DIR / "run_tests.sh")]
+        if shard is not None and self._data is not None:
+            argv += [
+                "--shard",
+                shard.name,
+                "--output",
+                str(self._report),
+                "--coverage-data",
+                str(self._data),
+                "--",
+                *shard.pytest_args,
+            ]
+            self._data.unlink(missing_ok=True)
         # A previous run's report must not stand in for this run's if
         # run_tests.sh dies before writing one.
-        TESTS_JSON.unlink(missing_ok=True)
+        self._report.unlink(missing_ok=True)
         # run_tests.sh recognises the inherited descriptor as the held lock
         # instead of waiting on a second description of the same file.
         env = {**os.environ, "FULL_QA_LOCK_INHERITED_FD": str(lock_fd)}
         self._process = subprocess.Popen(
-            [str(SCRIPTS_DIR / "run_tests.sh")],
+            argv,
             cwd=str(PROJECT_ROOT),
             env=env,
             pass_fds=(lock_fd,),
         )
 
     def wait(self) -> RunOutcome:
-        return outcome_from_primary_report(TESTS_JSON, self._process.wait())
+        return outcome_from_primary_report(self._report, self._process.wait(), self._data)
 
 
-def extra_pytest_argv(python: Path, run: PlannedRun, lines: Path) -> list[str]:
+def extra_pytest_argv(
+    python: Path, run: PlannedRun, lines: Path, shard: Shard | None = None
+) -> list[str]:
     """The pytest command line for one extra run, recording first error lines to ``lines``."""
+    targets = SCOPE_PYTEST_ARGS[run.scope] if shard is None else shard.pytest_args
     return [
         str(python),
         "-m",
@@ -812,21 +1046,22 @@ def extra_pytest_argv(python: Path, run: PlannedRun, lines: Path) -> list[str]:
         f"{FIRST_ERROR_LINES_OPTION}={lines}",
         "--tb=short",
         *SLOWEST_DURATIONS_ARGS,
-        *SCOPE_PYTEST_ARGS[run.scope],
+        *targets,
     ]
 
 
 class _ExtraJob:
-    """pytest over one scope under an extra interpreter, logged to a file."""
+    """pytest over one scope (or one shard of it) under an extra interpreter, logged to a file."""
 
-    def __init__(self, run: PlannedRun, python: Path, lock_fd: int) -> None:
-        self._log = QA_OUTPUT_DIR / f"tests-py{run.version}-{run.scope}.log"
-        self._lines = QA_OUTPUT_DIR / f"first-error-lines-py{run.version}-{run.scope}.jsonl"
+    def __init__(self, run: PlannedRun, python: Path, lock_fd: int, shard: Shard | None) -> None:
+        stem = f"py{run.version}-{run.scope}" + ("" if shard is None else f"-{shard.name}")
+        self._log = QA_OUTPUT_DIR / f"tests-{stem}.log"
+        self._lines = QA_OUTPUT_DIR / f"first-error-lines-{stem}.jsonl"
         # The plugin appends, so a previous run's lines must not survive.
         self._lines.unlink(missing_ok=True)
         env = dict(os.environ)
         venv_bin = python.parent
-        # As CI does: the matrix venv's tools come first on PATH.
+        # As CI does: the matrix venv's tools come first on the search path.
         env["PATH"] = f"{venv_bin}{os.pathsep}{env.get('PATH', '')}"
         env["VIRTUAL_ENV"] = str(venv_bin.parent)
         # The acceptance tests' release-gate guard, as run_tests.sh sets it.
@@ -834,7 +1069,7 @@ class _ExtraJob:
         self._log.parent.mkdir(parents=True, exist_ok=True)
         self._handle: IO[bytes] = self._log.open("wb")
         self._process = subprocess.Popen(
-            extra_pytest_argv(python, run, self._lines),
+            extra_pytest_argv(python, run, self._lines, shard),
             cwd=str(PROJECT_ROOT),
             env=env,
             stdout=self._handle,
@@ -850,11 +1085,77 @@ class _ExtraJob:
         return outcome_from_log(self._log, exit_code, lines=self._lines)
 
 
-def launch(run: PlannedRun, python: Path, *, lock_fd: int) -> Job:
-    """Start ``run``; ``lock_fd`` is the held host-wide full-QA lock, handed to the child."""
+def launch(
+    run: PlannedRun, python: Path, *, lock_fd: int, shards: Mapping[str, Shard] | None = None
+) -> Job:
+    """Start ``run`` (a shard when ``run.shard`` names one); ``lock_fd`` is the held full-QA lock."""
+    shard = None if run.shard is None else (shards or {})[run.shard]
     if run.primary:
-        return _PrimaryJob(lock_fd)
-    return _ExtraJob(run, python, lock_fd)
+        return _PrimaryJob(lock_fd, shard)
+    return _ExtraJob(run, python, lock_fd, shard)
+
+
+class CoverageVerdict(NamedTuple):
+    """The combined coverage of every primary shard, judged against ``fail_under``."""
+
+    passed: bool
+    coverage: dict[str, Any]
+    message: str | None
+
+
+def _coverage(python: Path, *args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(python), "-m", "coverage", *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=str(cwd),
+    )
+
+
+def _last_output(completed: subprocess.CompletedProcess[str]) -> str:
+    lines = (completed.stderr or completed.stdout).strip().splitlines()
+    return lines[-1] if lines else ""
+
+
+def combine_coverage(
+    python: Path, data_files: Sequence[Path], qa_dir: Path, *, cwd: Path
+) -> CoverageVerdict:
+    """Combine the shards' coverage data (``--keep``) and judge the whole.
+
+    The shard files stay where they are, for the checkpoints that hashed them.
+    The report and its ``fail_under`` verdict come from coverage's own config
+    (``[tool.coverage.report]`` in pyproject.toml), run from ``cwd``, so the
+    threshold is the one a single whole-suite run has always been held to.
+    """
+    missing = [path for path in data_files if not path.is_file()]
+    if missing:
+        names = ", ".join(path.name for path in missing)
+        return CoverageVerdict(False, {}, f"coverage not judged: no data file {names}")
+    combined = qa_dir / COVERAGE_COMBINED_NAME
+    data_option = f"--data-file={combined}"
+    combine = _coverage(
+        python, "combine", "--keep", data_option, *(str(p) for p in data_files), cwd=cwd
+    )
+    if combine.returncode != 0:
+        return CoverageVerdict(False, {}, f"coverage combine failed: {_last_output(combine)}")
+    json_report = qa_dir / COVERAGE_JSON_NAME
+    # `coverage report` below is the verdict; the JSON export must not also judge.
+    exported = _coverage(
+        python, "json", data_option, "--fail-under=0", "-o", str(json_report), cwd=cwd
+    )
+    if exported.returncode != 0:
+        return CoverageVerdict(False, {}, f"coverage json failed: {_last_output(exported)}")
+    totals = json.loads(json_report.read_text(encoding="utf-8")).get("totals", {})
+    coverage = {
+        key: totals.get(key, 0) for key in ("percent_covered", "num_statements", "missing_lines")
+    }
+    report = _coverage(python, "report", data_option, cwd=cwd)
+    print(report.stdout)
+    if report.returncode == 0:
+        return CoverageVerdict(True, coverage, None)
+    # `coverage report` exits 2 when the total is below fail_under, saying so last.
+    return CoverageVerdict(False, coverage, _last_output(report) or "coverage report failed")
 
 
 def ensure_daemon() -> str | None:
@@ -898,6 +1199,47 @@ def _print_runs(report: dict[str, Any]) -> None:
             f"{entry['errors']} errors, {entry['skipped']} skipped "
             f"in {entry['duration_seconds']}s" + (" (reused)" if entry.get("reused") else "")
         )
+        for shard in entry.get("shards", []):
+            print(
+                f"    {shard['name']}: {'PASSED' if shard['passed_all'] else 'FAILED'} "
+                f"{shard['passed']} passed, {shard['failed']} failed in "
+                f"{shard['duration_seconds']}s" + (" (reused)" if shard["reused"] else "")
+            )
+
+
+def judge_primary(
+    results: Sequence[RunResult], python: Path, *, qa_dir: Path, cwd: Path
+) -> tuple[dict[str, Any], str | None]:
+    """The primary leg's report and the coverage failure to name, if any.
+
+    A sharded primary is judged here: its shards' coverage data (run or reused)
+    is combined and held to ``fail_under``. An unsharded primary wrote its own
+    ``tests.json``, coverage verdict included, so that is read as it stands.
+    """
+    sharded = next((r for r in results if r.run.primary and r.shards), None)
+    if sharded is None:
+        report: dict[str, Any] = {}
+        if TESTS_JSON.is_file():
+            report = json.loads(TESTS_JSON.read_text(encoding="utf-8"))
+        return report, None
+    data_files = [
+        shard.outcome.coverage_data or shard_coverage_data_path(shard.name)
+        for shard in sharded.shards
+    ]
+    verdict = combine_coverage(python, data_files, qa_dir, cwd=cwd)
+    return primary_report_from_shards(sharded, verdict.coverage), (
+        None if verdict.passed else verdict.message
+    )
+
+
+def _refuse(reason: str) -> int:
+    """Write a red report naming ``reason``, because no test run was attempted."""
+    report = build_report([], {}, wall_seconds=0.0)
+    report["summary"]["passed_all"] = False
+    report["error"] = reason
+    TESTS_JSON.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(reason, file=sys.stderr)
+    return 1
 
 
 def main() -> int:
@@ -910,14 +1252,13 @@ def main() -> int:
     except MatrixError as exc:
         # Refuse to run a narrower stage than CI: without the matrix there is
         # no way to know which versions are owed.
-        report = build_report([], {}, wall_seconds=0.0)
-        report["summary"]["passed_all"] = False
-        report["error"] = f"CI Python matrix unreadable, so no test run was attempted: {exc}"
-        TESTS_JSON.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-        print(report["error"], file=sys.stderr)
-        return 1
+        return _refuse(f"CI Python matrix unreadable, so no test run was attempted: {exc}")
+    try:
+        shards = load_shards(SHARDS_FILE)
+    except ShardError as exc:
+        return _refuse(f"test shards unreadable, so no test run was attempted: {exc}")
 
-    plan = plan_runs(ci_versions, primary_version)
+    plan = plan_runs(ci_versions, primary_version, shards)
     print(f"CI matrix {ci_versions}; primary interpreter {primary_version}")
     # Held for every child run: each is a whole-suite pytest the sink refuses
     # unless its ancestry holds this lock (Plan 00463).
@@ -926,7 +1267,9 @@ def main() -> int:
     with acquire_full_qa_lock(PROJECT_ROOT, reuse_inherited=True) as lock_fd:
         deps = MatrixDeps(
             provision=provision,
-            launch=functools.partial(launch, lock_fd=lock_fd),
+            launch=functools.partial(
+                launch, lock_fd=lock_fd, shards={shard.name: shard for shard in shards}
+            ),
             ensure_daemon=ensure_daemon,
             clock=time.monotonic,
             checkpoints=LegCheckpoints(QA_OUTPUT_DIR, tree=checkout_tree),
@@ -934,10 +1277,15 @@ def main() -> int:
         )
         results = run_matrix(plan, Path(sys.executable), deps)
 
-    primary_report: dict[str, Any] = {}
-    if TESTS_JSON.is_file():
-        primary_report = json.loads(TESTS_JSON.read_text(encoding="utf-8"))
-    report = build_report(results, primary_report, wall_seconds=time.monotonic() - began)
+    primary_report, coverage_failure = judge_primary(
+        results, Path(sys.executable), qa_dir=QA_OUTPUT_DIR, cwd=PROJECT_ROOT
+    )
+    report = build_report(
+        results,
+        primary_report,
+        wall_seconds=time.monotonic() - began,
+        coverage_failure=coverage_failure,
+    )
     TESTS_JSON.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     _print_runs(report)
     if "error" in report:

@@ -12,8 +12,55 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 OUTPUT_FILE="${PROJECT_ROOT}/untracked/qa/tests.json"
-COVERAGE_FILE="${PROJECT_ROOT}/untracked/qa/coverage.json"
+# The coverage JSON REPORT. Not named COVERAGE_FILE: coverage.py reads an
+# exported COVERAGE_FILE as the DATA file path, which is the one thing this
+# report must never be (shard mode exports that name for the data file below).
+COVERAGE_JSON="${PROJECT_ROOT}/untracked/qa/coverage.json"
 FIRST_ERROR_LINES_FILE="${PROJECT_ROOT}/untracked/qa/first-error-lines.jsonl"
+
+# Shard mode (Plan 00500 Task 2.4), driven by run_test_matrix.py:
+#   run_tests.sh --shard NAME --output FILE --coverage-data FILE -- PYTEST_ARG...
+# runs only PYTEST_ARG... (paths and --ignore=), writes this shard's report to
+# FILE and its coverage DATA to --coverage-data, and judges no coverage: the
+# data files of every shard are combined afterwards and the fail_under verdict
+# is taken once, on the whole. With no arguments the script runs all of tests/
+# with coverage and judges it, as it always has.
+SHARD=""
+COVERAGE_DATA=""
+COVERAGE_JSON_REPORT=""
+PYTEST_TARGETS=(tests/)
+if [ "${1:-}" = "--shard" ]; then
+    if [ "$#" -lt 8 ] || [ "$3" != "--output" ] || [ "$5" != "--coverage-data" ] || [ "$7" != "--" ]; then
+        echo "usage: run_tests.sh [--shard NAME --output FILE --coverage-data FILE -- PYTEST_ARG...]" >&2
+        exit 2
+    fi
+    SHARD="$2"
+    OUTPUT_FILE="$4"
+    COVERAGE_DATA="$6"
+    shift 7
+    PYTEST_TARGETS=("$@")
+    FIRST_ERROR_LINES_FILE="${OUTPUT_FILE%.json}.first-error-lines.jsonl"
+    # The data file and the JSON report must be different files, always.
+    if [ "${COVERAGE_DATA}" = "${COVERAGE_JSON}" ]; then
+        echo "run_tests.sh: --coverage-data must not be the coverage JSON report ${COVERAGE_JSON}" >&2
+        exit 2
+    fi
+elif [ "$#" -ne 0 ]; then
+    echo "usage: run_tests.sh [--shard NAME --output FILE --coverage-data FILE -- PYTEST_ARG...]" >&2
+    exit 2
+fi
+
+# Coverage options: a whole run reports to the terminal and the JSON file and
+# is held to pyproject's fail_under by pytest-cov; a shard writes only its data
+# file (COVERAGE_FILE, exported for coverage.py) and is held to nothing.
+COVERAGE_ARGS=(--cov=src/claude_code_hooks_daemon --cov=.claude/ccy --cov-branch)
+if [ -n "${SHARD}" ]; then
+    export COVERAGE_FILE="${COVERAGE_DATA}"
+    COVERAGE_ARGS+=(--cov-report= --cov-fail-under=0)
+else
+    COVERAGE_ARGS+=(--cov-report=term-missing:skip-covered --cov-report=json:"${COVERAGE_JSON}")
+    COVERAGE_JSON_REPORT="${COVERAGE_JSON}"
+fi
 
 # Each failed or errored test's first error line, put on its tests.json record
 # as "reason" so the gate's summary says why it failed, not only which (00466
@@ -79,12 +126,8 @@ if "${VENV_PYTHON}" -c "import pytest_json_report" 2>/dev/null; then
     if venv_tool pytest --json-report --json-report-file="${OUTPUT_FILE}.raw" \
               "${FIRST_ERROR_ARGS[@]}" \
               "${SLOWEST_DURATIONS_ARGS[@]}" \
-              --cov=src/claude_code_hooks_daemon \
-              --cov=.claude/ccy \
-              --cov-branch \
-              --cov-report=term-missing:skip-covered \
-              --cov-report=json:"${COVERAGE_FILE}" \
-              tests/; then
+              "${COVERAGE_ARGS[@]}" \
+              "${PYTEST_TARGETS[@]}"; then
         EXIT_CODE=0
     else
         EXIT_CODE=$?
@@ -99,7 +142,9 @@ if "${VENV_PYTHON}" -c "import pytest_json_report" 2>/dev/null; then
     # runner that exited non-zero over a clean-looking summary are both
     # caught the same way the text-fallback branch below catches them
     # (00466 N21 -- build_json_report_summary / finalize_passed_all).
-    PYTEST_RUN_EXIT_CODE="${EXIT_CODE}" "${VENV_PYTHON}" << 'EOF' > "${OUTPUT_FILE}"
+    PYTEST_RUN_EXIT_CODE="${EXIT_CODE}" RAW_FILE="${OUTPUT_FILE}.raw" \
+    FIRST_ERROR_LINES_FILE="${FIRST_ERROR_LINES_FILE}" \
+    COVERAGE_JSON_REPORT="${COVERAGE_JSON_REPORT}" "${VENV_PYTHON}" << 'EOF' > "${OUTPUT_FILE}"
 import json
 import os
 import sys
@@ -108,7 +153,7 @@ from pathlib import Path
 from claude_code_hooks_daemon.qa.first_error_lines import attach_first_error_lines
 from claude_code_hooks_daemon.qa.pytest_text_report import build_json_report_summary
 
-raw_file = Path("untracked/qa/tests.json.raw")
+raw_file = Path(os.environ["RAW_FILE"])
 # None (not {}) when the raw report never existed: a runner that crashed
 # before writing one produced no verdict at all, which must not be
 # conflated with a report that legitimately says "0 found".
@@ -126,12 +171,15 @@ if pytest_data is not None:
             "outcome": test.get("outcome", ""),
             "duration": test.get("call", {}).get("duration", 0),
         })
-attach_first_error_lines(tests, Path("untracked/qa/first-error-lines.jsonl"))
+attach_first_error_lines(tests, Path(os.environ["FIRST_ERROR_LINES_FILE"]))
 
 # Read coverage data
-coverage_file = Path("untracked/qa/coverage.json")
+# Empty in shard mode: a shard judges no coverage, and an old whole run's
+# coverage.json must not stand in for one.
+coverage_report = os.environ["COVERAGE_JSON_REPORT"]
+coverage_file = Path(coverage_report) if coverage_report else None
 coverage = {}
-if coverage_file.exists():
+if coverage_file is not None and coverage_file.exists():
     with open(coverage_file) as f:
         cov_data = json.load(f)
         coverage = {
@@ -154,13 +202,9 @@ else
     # Fallback: Parse standard pytest output
     if venv_tool pytest "${FIRST_ERROR_ARGS[@]}" \
               "${SLOWEST_DURATIONS_ARGS[@]}" \
-              --cov=src/claude_code_hooks_daemon \
-              --cov=.claude/ccy \
-              --cov-branch \
-              --cov-report=term-missing:skip-covered \
-              --cov-report=json:"${COVERAGE_FILE}" \
+              "${COVERAGE_ARGS[@]}" \
               --tb=short \
-              tests/ 2>&1 | tee "${OUTPUT_FILE}.raw"; then
+              "${PYTEST_TARGETS[@]}" 2>&1 | tee "${OUTPUT_FILE}.raw"; then
         EXIT_CODE=0
     else
         EXIT_CODE=$?
@@ -179,7 +223,9 @@ else
     # process exit code (00466 N21): the parser only ever sees console text,
     # so a runner that exits non-zero for a reason its summary line does not
     # capture would otherwise still read green.
-    PYTEST_RUN_EXIT_CODE="${EXIT_CODE}" "${VENV_PYTHON}" << 'EOF' > "${OUTPUT_FILE}"
+    PYTEST_RUN_EXIT_CODE="${EXIT_CODE}" RAW_FILE="${OUTPUT_FILE}.raw" \
+    FIRST_ERROR_LINES_FILE="${FIRST_ERROR_LINES_FILE}" \
+    COVERAGE_JSON_REPORT="${COVERAGE_JSON_REPORT}" "${VENV_PYTHON}" << 'EOF' > "${OUTPUT_FILE}"
 import json
 import os
 import sys
@@ -193,7 +239,7 @@ from claude_code_hooks_daemon.qa.pytest_text_report import (
     parse_slowest_durations,
 )
 
-raw_file = Path("untracked/qa/tests.json.raw")
+raw_file = Path(os.environ["RAW_FILE"])
 content = raw_file.read_text() if raw_file.exists() else ""
 report = parse_pytest_text_output(content)
 
@@ -203,7 +249,7 @@ exit_code = int(os.environ["PYTEST_RUN_EXIT_CODE"])
 # have to know which path produced the file. Only failures are listed: the text
 # output names those and is silent about every passing test.
 tests = [{"name": node_id, "outcome": "failed"} for node_id in report["failed_tests"]]
-attach_first_error_lines(tests, Path("untracked/qa/first-error-lines.jsonl"))
+attach_first_error_lines(tests, Path(os.environ["FIRST_ERROR_LINES_FILE"]))
 
 summary = {
     "total": report["total"],
@@ -231,9 +277,12 @@ if unnamed_failure_reason is not None:
     summary["unnamed_failure_reason"] = unnamed_failure_reason
 
 # Read coverage
-coverage_file = Path("untracked/qa/coverage.json")
+# Empty in shard mode: a shard judges no coverage, and an old whole run's
+# coverage.json must not stand in for one.
+coverage_report = os.environ["COVERAGE_JSON_REPORT"]
+coverage_file = Path(coverage_report) if coverage_report else None
 coverage = {}
-if coverage_file.exists():
+if coverage_file is not None and coverage_file.exists():
     with open(coverage_file) as f:
         cov_data = json.load(f)
         coverage = {
