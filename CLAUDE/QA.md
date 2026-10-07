@@ -566,6 +566,33 @@ threshold are never split. Reused legs stay in `tests.json` `interpreters[]` wit
 never reuses a leg: `llm_qa.py` passes `--resume` to the `tests` tool only when
 it was itself resumed.
 
+Each leg is itself a list of **shards**: named slices of `tests/` declared once
+in `scripts/qa/test_shards.yaml` (`paths`, or `remainder_of` a directory for
+everything no other shard claims). A shard is the unit that is checkpointed
+(`leg-py<version>-<scope>-<shard>.checkpoint.json`), so a reboot mid-primary
+loses one shard, not the hour-long leg, and `--resume` re-runs only the shards
+not green on the identical tree. Shards run one after another within a leg. The
+primary runs every shard; the extra interpreters' `unit` scope is the shards
+whose `scope` is `unit` (exactly `tests/unit`) and `rest` the others.
+`tests/unit/qa/test_suite_shards.py` fails if any test file under `tests/` is
+in no shard or in two, so sharding can never drop or double-run a test; a new
+test directory lands in a `remainder_of` shard without editing the file.
+
+Coverage is still judged on the whole suite, at the unchanged `fail_under`
+(95) in `pyproject.toml`. `run_tests.sh --shard` makes each primary shard write
+its own coverage data file (`untracked/qa/.coverage.<shard>`, via the
+`COVERAGE_FILE` environment variable, which coverage.py reads as the DATA file;
+the JSON report path is the separate `COVERAGE_JSON`) and judge no threshold.
+The data file is hashed into the shard's checkpoint with its report. Once every
+primary shard has run or been reused, `run_test_matrix.py` runs
+`coverage combine --keep` over them, writes `coverage.json` and takes the
+`coverage report` fail-under verdict from the combined data; a shard with no
+data file means coverage is not judged and the stage fails. `parallel = true`
+stays off in the coverage config. `tests.json` keeps its shape (counts summed
+over shards, the failed tests, `coverage`, merged `slowest_tests`); each
+`interpreters[]` entry for a sharded leg adds a `shards` list, one record per
+shard with its own counts, duration and `reused` flag.
+
 ### The Automated Checks
 
 `scripts/qa/run_all.sh` is the single source of truth for **which** checks exist
