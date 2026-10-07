@@ -17,6 +17,7 @@ from claude_code_hooks_daemon.utils.cron_tick import (
 from claude_code_hooks_daemon.utils.stand_in_cron import (
     DEFAULT_STAND_IN_DELAY_HOURS,
     STAND_IN_SENTINEL,
+    delay_hours_problem,
     has_stand_in_cron,
     one_off_schedule,
     stand_in_prompt,
@@ -96,6 +97,25 @@ class TestDelayValidation:
     def test_rejects_everything_else(self, value: object) -> None:
         with pytest.raises(ValueError, match="stand_in_delay_hours"):
             validate_delay_hours(value)
+
+
+class TestDelayHoursProblem:
+    @pytest.mark.parametrize("value", [1, 3.0, 0.5, 23.5])
+    def test_none_for_a_valid_value(self, value: float) -> None:
+        assert delay_hours_problem(value) is None
+
+    @pytest.mark.parametrize("value", [0, -1, 24, "3", True, float("nan"), float("inf"), None])
+    def test_message_for_everything_else(self, value: object) -> None:
+        problem = delay_hours_problem(value)
+        assert problem is not None
+        assert problem.startswith("stand_in_delay_hours must be a number above 0 and below 24")
+        assert repr(value) in problem
+
+    def test_validate_raises_the_same_message(self) -> None:
+        problem = delay_hours_problem(24)
+        with pytest.raises(ValueError) as excinfo:
+            validate_delay_hours(24)
+        assert str(excinfo.value) == problem
 
 
 class TestHasStandIn:
