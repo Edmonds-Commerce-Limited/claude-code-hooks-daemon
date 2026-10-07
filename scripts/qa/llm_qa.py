@@ -1597,6 +1597,7 @@ _BASE_OPTION: Final[str] = "--base"
 _RANGE_OPTION: Final[str] = "--range"
 _ALLOW_UNMAPPED_OPTION: Final[str] = "--allow-unmapped"
 _CHANGED_TESTS_TOOL: Final[str] = "changed_tests"
+_TESTS_TOOL: Final[str] = "tests"
 #: Forwarded options that take a value, spelt ``--opt VALUE`` or ``--opt=VALUE``.
 _CHANGED_VALUE_OPTIONS: Final[tuple[str, ...]] = (_BASE_OPTION, _RANGE_OPTION)
 
@@ -2709,6 +2710,20 @@ def _record_step(
     )
 
 
+def _tool_extra_args(name: str, forwarded: Sequence[str], resume: bool) -> Sequence[str]:
+    """The extra arguments ``name`` runs with.
+
+    ``changed_tests`` takes the forwarded range options. ``tests`` checkpoints
+    each matrix leg and, only on a resumed run, reuses the legs that passed on
+    this tree (Plan 00500 Task 2.3); a normal run never reuses a leg.
+    """
+    if name == _CHANGED_TESTS_TOOL:
+        return forwarded
+    if name == _TESTS_TOOL and resume:
+        return (_RESUME_OPTION,)
+    return ()
+
+
 def _reusable_reason(
     name: str,
     record: ProvenanceRecord | None,
@@ -2828,7 +2843,7 @@ def _run_tools(
                 daemon_note = ensure_live_daemon(name)
                 if daemon_note is not None:
                     print(daemon_note)
-            extra = forwarded if name == _CHANGED_TESTS_TOOL else ()
+            extra = _tool_extra_args(name, forwarded, resume)
             started_wall, started = wall_clock(), clock()
             exit_code = run_tool(name, extra, lock_fd=lock_fd)
             elapsed = clock() - started
