@@ -43,6 +43,15 @@ _RUN_IN_COPY: Final[str] = (
     "import sys, pytest; sys.path.insert(0, 'src'); sys.exit(pytest.main(sys.argv[1:]))"
 )
 
+#: What RELEASING.md Step 6 leaves between the task-index markers once the
+#: queued tasks have moved into the versioned guide.
+EMPTY_INDEX_PLACEHOLDER: Final[str] = "_No tasks are queued for the next release._"
+_TASK_INDEX_BLOCK: Final[re.Pattern[str]] = re.compile(
+    r"<!-- BEGIN TASK INDEX[^\n]*-->(?P<body>.*?)<!-- END TASK INDEX -->", re.DOTALL
+)
+#: An index row names its task file in a leading backticked cell.
+_TASK_ROW: Final[re.Pattern[str]] = re.compile(r"^\|\s*`[^`]+\.md`\s*\|", re.MULTILINE)
+
 #: Spellings by which a test reaches the holding area.
 _MENTIONS_HOLDING_AREA: Final[re.Pattern[str]] = re.compile(
     r"unreleased|PENDING_RELEASE_NOTES", re.IGNORECASE
@@ -63,6 +72,27 @@ def holding_area_readers(tests_dir: Path, *, exclude: Path) -> list[Path]:
 def is_staged_content(relative: str) -> bool:
     """True for a tracked file inside ``UNRELEASED/`` that is not README scaffolding."""
     return relative.startswith(f"{UNRELEASED_DIR}/") and Path(relative).name != SCAFFOLDING_NAME
+
+
+def empty_task_index(text: str) -> str:
+    """Replace a populated task index with the placeholder, as RELEASING.md Step 6 does.
+
+    An index with no task rows, or a file without the markers, is returned as is.
+    """
+    match = _TASK_INDEX_BLOCK.search(text)
+    if match is None or not _TASK_ROW.search(match.group("body")):
+        return text
+    head = text[: match.start("body")]
+    return f"{head}\n\n{EMPTY_INDEX_PLACEHOLDER}\n\n{text[match.end('body') :]}"
+
+
+def empty_task_indexes(root: Path) -> None:
+    """Empty the task index of every README scaffolding file under ``root``'s holding area."""
+    for readme in (root / UNRELEASED_DIR).rglob(SCAFFOLDING_NAME):
+        original = readme.read_text(encoding="utf-8")
+        emptied = empty_task_index(original)
+        if emptied != original:
+            readme.write_text(emptied, encoding="utf-8")
 
 
 def copy_released_tree(destination: Path, source: Path) -> None:
@@ -90,6 +120,7 @@ def copy_released_tree(destination: Path, source: Path) -> None:
     for staged in (destination / UNRELEASED_DIR).rglob("*"):
         if staged.is_file() and staged.name != SCAFFOLDING_NAME:
             staged.unlink()
+    empty_task_indexes(destination)
     _git(destination, "add", "-A")
     _git(
         destination,
@@ -133,6 +164,44 @@ class TestTheCopyIsTheReleasedState:
 
     def test_there_are_readers_to_run(self) -> None:
         assert holding_area_readers(TESTS_DIR, exclude=Path(__file__).resolve())
+
+
+_INDEXED = (
+    "intro\n\n"
+    "<!-- BEGIN TASK INDEX — regenerate when adding/removing tasks -->\n\n"
+    "| File | Type |\n| ---- | ---- |\n| `01-x.md` | config-migration |\n\n"
+    "<!-- END TASK INDEX -->\n\noutro\n"
+)
+
+
+class TestTheTaskIndexIsEmptiedAsReleasePrepDoes:
+    def test_rows_are_replaced_by_the_placeholder_between_the_markers(self) -> None:
+        emptied = empty_task_index(_INDEXED)
+        assert emptied == (
+            "intro\n\n"
+            "<!-- BEGIN TASK INDEX — regenerate when adding/removing tasks -->\n\n"
+            f"{EMPTY_INDEX_PLACEHOLDER}\n\n"
+            "<!-- END TASK INDEX -->\n\noutro\n"
+        )
+
+    def test_an_index_without_rows_is_untouched(self) -> None:
+        bare = _INDEXED.replace("| `01-x.md` | config-migration |\n", "")
+        assert empty_task_index(bare) == bare
+
+    def test_a_readme_without_markers_is_untouched(self) -> None:
+        text = "| `01-x.md` | a row outside any index |\n"
+        assert empty_task_index(text) == text
+
+    def test_only_readmes_under_the_holding_area_are_rewritten(self, tmp_path: Path) -> None:
+        inside = tmp_path / UNRELEASED_DIR / "post-upgrade-tasks" / SCAFFOLDING_NAME
+        inside.parent.mkdir(parents=True)
+        inside.write_text(_INDEXED, encoding="utf-8")
+        outside = tmp_path / "other" / SCAFFOLDING_NAME
+        outside.parent.mkdir()
+        outside.write_text(_INDEXED, encoding="utf-8")
+        empty_task_indexes(tmp_path)
+        assert EMPTY_INDEX_PLACEHOLDER in inside.read_text(encoding="utf-8")
+        assert outside.read_text(encoding="utf-8") == _INDEXED
 
 
 @pytest.fixture(scope="module")
