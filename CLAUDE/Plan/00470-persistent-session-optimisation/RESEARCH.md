@@ -206,8 +206,10 @@ was then prompted; thread 1 then read the capture files.
    second threads. In this repository, host sessions have autonomy off (Plan 00498), so no crons are demanded there
    either. Task 6.4 matters for client projects that allow autonomy where threads can be opened.
 
-Consequence for Task 6.4: the daemon sees a later thread as a fresh session with no crons, so
-`persistent_cron_assertor` and `cron_stop_enforcer` would demand the declared crons in every thread, and each thread
-would then run its own copy of every job. Telling "a thread opened later" apart from "a new session" needs a signal
+Consequence for Task 6.4: the daemon sees a later thread as a fresh session with no crons. `cron_stop_enforcer`
+compares the declared jobs with the Stop's `session_crons` (`cron_stop_enforcer.py:145-179`), and a present but empty
+list counts as missing, so it would demand the declared crons at every thread's stop, and each thread would then
+run its own copy of every job. `persistent_cron_assertor` does not read `session_crons`; it states the declared jobs
+at SessionStart, so it adds to this only if a new thread fires SessionStart (item 4, not observed). Telling "a thread opened later" apart from "a new session" needs a signal
 these payloads do not carry. The SessionStart payload of a new thread, its `source` field included, is the next thing
 to capture.
