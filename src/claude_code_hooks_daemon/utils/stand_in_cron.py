@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 import math
 import time
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from claude_code_hooks_daemon.core.result_types import BlockingResult
 from claude_code_hooks_daemon.utils.cron_enforcement import SessionCron, parse_session_crons
@@ -66,13 +66,11 @@ def stand_in_prompt() -> str:
     return with_tick_sentinel(_PROMPT_BODY, STAND_IN_SENTINEL)
 
 
-def validate_delay_hours(value: object) -> float:
-    """``value`` as the stand-in delay in hours.
+def delay_hours_problem(value: object) -> str | None:
+    """Why ``value`` is not a usable stand-in delay in hours, or ``None`` when it is.
 
-    Raises:
-        ValueError: not a real number above 0 and below ``MAX_STAND_IN_DELAY_HOURS``.
-            A bool or a numeric string is refused: it is a config typo, and this
-            runs at config load where a failure is reported rather than silent.
+    A bool or a numeric string is refused: it is a config typo, and this runs at
+    config load where a failure is reported rather than silent.
     """
     if (
         isinstance(value, bool)
@@ -80,11 +78,24 @@ def validate_delay_hours(value: object) -> float:
         or not math.isfinite(value)
         or not 0 < value < MAX_STAND_IN_DELAY_HOURS
     ):
-        raise ValueError(
+        return (
             f"stand_in_delay_hours must be a number above 0 and below "
             f"{MAX_STAND_IN_DELAY_HOURS:g} (the marker's expiry), got {value!r}"
         )
-    return float(value)
+    return None
+
+
+def validate_delay_hours(value: object) -> float:
+    """``value`` as the stand-in delay in hours.
+
+    Raises:
+        ValueError: with :func:`delay_hours_problem`'s message when ``value`` is
+            not a real number above 0 and below ``MAX_STAND_IN_DELAY_HOURS``.
+    """
+    problem = delay_hours_problem(value)
+    if problem is not None:
+        raise ValueError(problem)
+    return float(cast("float", value))
 
 
 def one_off_schedule(now: float, delay_hours: float) -> str:

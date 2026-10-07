@@ -70,6 +70,7 @@ from claude_code_hooks_daemon.utils.private_io import make_private_dir, open_pri
 from claude_code_hooks_daemon.utils.retention import cap_log_file
 from claude_code_hooks_daemon.utils.stand_in_cron import (
     DEFAULT_STAND_IN_DELAY_HOURS,
+    delay_hours_problem,
     stand_in_verdict,
     validate_delay_hours,
 )
@@ -679,10 +680,9 @@ class AutoContinueStopHandler(StopHandlerBase):
         """
         problems: dict[str, str] = {}
         if _STAND_IN_DELAY_OPTION in options:
-            try:
-                validate_delay_hours(options[_STAND_IN_DELAY_OPTION])
-            except ValueError as exc:
-                problems[_STAND_IN_DELAY_OPTION] = str(exc)
+            problem = delay_hours_problem(options[_STAND_IN_DELAY_OPTION])
+            if problem is not None:
+                problems[_STAND_IN_DELAY_OPTION] = problem
         return problems
 
     def _default_config_loader(self) -> Config:
