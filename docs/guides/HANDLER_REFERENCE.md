@@ -255,7 +255,7 @@ Safety handlers protect against destructive or dangerous operations. Most are bl
 - `git push --force` / `git push <remote> +<refspec>` -- overwrites remote history (a leading `+` on a refspec forces the update exactly like `--force`)
 - `git branch -D` / `git update-ref -d refs/heads/<name>` -- force-deletes a branch without checking it is merged (lowercase `-d` is allowed; `update-ref` is the plumbing equivalent, scoped to `refs/heads/` targets)
 - `git commit --amend` -- rewrites the previous commit; create a new commit instead
-- `git push --delete <name>` / `git push -d <remote> <name>` / `git push <remote> :<name>` -- deletes a branch or tag on the **remote** (`R-GIT-PUSH-DELETE-REMOTE`). **Human only**: the denial tells the agent to stop and ask the human to run it, and there is no escape hatch. Deleting a **local** ref (`git tag -d`, `git branch -d`) and `git reset --keep` are not blocked.
+- `git push --delete <name>` / `git push -d <remote> <name>` / `git push <remote> :<name>` -- deletes a branch or tag on the **remote** (`R-GIT-PUSH-DELETE-REMOTE`). **Allowed when every named branch is already merged into the default branch** (its `refs/remotes/<remote>/<name>` is an ancestor of the default branch, and `git ls-remote` shows the remote's live tip equal to it, so a stale tracking ref is denied until `git fetch`). Otherwise **human only**: an unmerged branch, a tag, the default branch, a missing remote-tracking ref or any check failure is denied, and the denial tells the agent to stop and ask the human to run it. Deleting a **local** ref (`git tag -d`, `git branch -d`) and `git reset --keep` are not blocked.
 
 **To delete a branch, always try `git branch -d` first (v3.52.0).** It is
 allowed, battle-tested, and refuses unless the branch is genuinely merged.
@@ -1318,7 +1318,7 @@ handlers:
 
 **`gh auth token` in a pipe or `$(...)`** (`gh auth token | docker login --password-stdin`, `TOKEN=$(gh auth token)`) hands the value to another command rather than the transcript, and is allowed. A consumer that prints its input (`echo`, `printf`, `cat`, `tee`, `head`, `tail`, `grep`, `sort`, `xargs echo`...) puts it in the transcript, and is denied. A receiver that cannot be identified (a variable) is allowed.
 
-**Always allowed (owner ruling A6):** `git tag -d`, `git reset --keep`, `truncate -s 0`, `rm -rf`. Remote ref deletion (`git push --delete`) is human-only under [`destructive_git`](#destructive_git).
+**Always allowed (owner ruling A6):** `git tag -d`, `git reset --keep`, `truncate -s 0`, `rm -rf`. Remote ref deletion (`git push --delete`) is human-only unless the branch is already merged, under [`destructive_git`](#destructive_git).
 
 **Options:** none beyond `enabled` and `priority`. No agent-side escape hatch: the human-only rows are lifted only by the human running the command, or by a config edit visible in review.
 
