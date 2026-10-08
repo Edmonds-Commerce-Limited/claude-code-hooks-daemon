@@ -756,7 +756,7 @@ _RULE_DEFINITIONS: tuple[tuple[str, str, str, str], ...] = (
     (
         RuleID.GIT_PUSH_DELETE_REMOTE,
         "`git push --delete <name>` / `git push <remote> :<name>` of a branch not merged "
-        "into the default branch, or of a tag",
+        "into the default branch, or of a tag; `git push --mirror` / `--prune` always",
         "Deletes a branch or tag in the shared remote repository, beyond any local recovery",
         "A branch already merged into the default branch is deleted freely; otherwise do not "
         "run it, stop and ask the human to run it themselves",
@@ -1009,7 +1009,9 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             "tracking ref is denied until `git fetch`; `git -C` and `cd` are honoured). "
             "Otherwise HUMAN ONLY — an "
             "unmerged branch, a tag, the default branch, a missing remote-tracking ref or "
-            "any check failure is denied: stop and ask the human to run it. Local "
+            "any check failure is denied: stop and ask the human to run it. "
+            "`git push --mirror` and `git push --prune` delete remote refs the command "
+            "never names, so they are always HUMAN ONLY. Local "
             "`git tag -d` and `git reset --keep` are allowed |\n\n"
             "The last four rows close spellings that reached an outcome this handler "
             "already guarded: `git checkout -- <file>` was blocked while "
