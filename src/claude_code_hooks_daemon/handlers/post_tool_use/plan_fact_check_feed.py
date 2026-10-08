@@ -13,10 +13,12 @@ to speak through, so it dispatches NOTHING: it logs at info level and stores the
 diff since the plan's last fact-checked content as a *pending fact-check*
 record, via
 :func:`~claude_code_hooks_daemon.utils.plan_fact_check.process_quiet_plan`.
-The next PostToolUse event, whatever the tool, delivers it as ``additionalContext``
-telling the session to dispatch the ``plan-fact-checker`` agent with the diff,
-and to treat REFUTED claims as work to fix. Each record is delivered once, which
-also marks that content as checked.
+The next PostToolUse event of the MAIN thread, whatever the tool, delivers it as
+``additionalContext`` telling the session to dispatch the ``plan-fact-checker``
+agent with the diff, and to treat REFUTED claims as work to fix. A subagent's
+event (one carrying ``agent_id``) feeds the debouncer but never takes the record.
+Each record is delivered once (claimed by an atomic rename, so two events at
+once cannot both deliver it), which also marks that content as checked.
 
 The supervisor turn channel (``session_actions_directive``) is deliberately not
 used: its signal carries a bare count and its text is a fixed template that
@@ -37,6 +39,7 @@ from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.debouncer import DebounceFire, get_debouncer
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
+from claude_code_hooks_daemon.core.handler_scope import in_subagent
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.utils import get_written_file_paths
 from claude_code_hooks_daemon.utils.plan_fact_check import (
@@ -101,11 +104,15 @@ class PlanFactCheckFeedHandler(PostToolUseHandlerBase):
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True when the event wrote a plan document, or a fact-check is owed.
 
-        An owed check is delivered on ANY next event: the debounce fire runs on
-        a timer thread with no hook to speak through, so the next event is the
-        earliest the session can be told.
+        An owed check is delivered on ANY next event of the main thread: the
+        debounce fire runs on a timer thread with no hook to speak through, so
+        the next event is the earliest the session can be told. A subagent's
+        event is never that: a worker told to dispatch the fact-checker would
+        consume the record, and the session that owns the plan would never hear.
         """
-        return bool(self._plan_matches(hook_input)) or bool(self._state().pending_folders())
+        if self._plan_matches(hook_input):
+            return True
+        return not in_subagent(hook_input) and bool(self._state().pending_folders())
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Feed the debouncer, and deliver any owed fact-check. Always ALLOW."""
@@ -118,7 +125,7 @@ class PlanFactCheckFeedHandler(PostToolUseHandlerBase):
                 callback=partial(_on_quiet, plan_root=match.plan_root, state_dir=state.state_dir),
                 payload=match.folder,
             )
-        instructions = deliver_pending(state)
+        instructions = [] if in_subagent(hook_input) else deliver_pending(state)
         if not instructions:
             return BlockingResult(decision=Decision.ALLOW)
         return BlockingResult(decision=Decision.ALLOW, context=instructions)

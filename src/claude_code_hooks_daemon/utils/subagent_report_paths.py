@@ -23,6 +23,7 @@ by agent type/id rather than trusting an exact filename match.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
@@ -63,6 +64,11 @@ _SAFE_COMPONENT_RE: Final[re.Pattern[str]] = re.compile(r"[^A-Za-z0-9._-]")
 
 _FILENAME_TIMESTAMP_FORMAT: Final[str] = "%y%m%d-%H%M%S"
 _MD_SUFFIX: Final[str] = ".md"
+#: Longest agent-type or agent-id component of a report filename. Two of them plus
+#: the 13-character stamp, the separators, ``.md`` and a collision suffix stay
+#: well inside the 255-byte filename limit.
+MAX_COMPONENT_LENGTH: Final[int] = 100
+_HASH_LENGTH: Final[int] = 8
 
 #: How many numeric-suffix attempts :func:`write_new_file_never_overwrite`
 #: makes before giving up. A real collision (two SubagentStops for the
@@ -96,8 +102,17 @@ def sanitise_component(value: str) -> str:
     Public because a report path this module does not write must still name
     an agent the same way: ``subagent_report_size_blocker`` prescribes a
     fallback path from the same agent type (Plan 00468 G12).
+
+    A component past ``MAX_COMPONENT_LENGTH`` is cut and ends in a short hash of
+    the full value: agent names can be 256 characters, and a filename holding
+    two of them would pass the 255-byte limit. The hash keeps two long names
+    that share a prefix distinct. The result is ASCII, so characters are bytes.
     """
-    return _SAFE_COMPONENT_RE.sub("_", value)
+    safe = _SAFE_COMPONENT_RE.sub("_", value)
+    if len(safe) <= MAX_COMPONENT_LENGTH:
+        return safe
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:_HASH_LENGTH]
+    return f"{safe[: MAX_COMPONENT_LENGTH - _HASH_LENGTH - 1]}-{digest}"
 
 
 def _ensure_self_ignoring(directory: Path) -> None:

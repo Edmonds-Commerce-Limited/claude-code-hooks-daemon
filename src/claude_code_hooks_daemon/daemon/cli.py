@@ -4268,9 +4268,14 @@ def cmd_check_effective_handlers(args: argparse.Namespace) -> int:
 
     Returns:
         0 if the effective handler set is unchanged, 1 if any handler starts
-        or stops, 2 on error.
+        or stops, 2 if the check cannot run (no config file, unusable version),
+        3 if the config file is not a valid YAML mapping. ``scripts/upgrade.sh``
+        reads these codes, and 1 must mean only "handlers change".
     """
-    from claude_code_hooks_daemon.install.config_cli import run_check_effective_handlers
+    from claude_code_hooks_daemon.install.config_cli import (
+        ConfigYamlError,
+        run_check_effective_handlers,
+    )
 
     if args.config:
         config_path = Path(args.config)
@@ -4286,6 +4291,9 @@ def cmd_check_effective_handlers(args: argparse.Namespace) -> int:
             config_path=config_path,
             output_format=args.format,
         )
+    except ConfigYamlError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 3
     except (FileNotFoundError, ValueError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 2

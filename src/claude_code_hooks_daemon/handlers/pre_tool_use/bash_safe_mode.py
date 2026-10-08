@@ -20,6 +20,7 @@ so the config surface is already stable for the follow-up that closes it.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import (
@@ -112,6 +113,47 @@ _STOPPING_FORMS: Final = (
 )
 
 
+_OPTION_MODE: Final = "mode"
+_OPTION_EXEMPT_PATTERNS: Final = "exempt_patterns"
+
+
+def _mode_problem(value: object) -> str | None:
+    """Why ``value`` is not a usable ``mode``, or None."""
+    if value == _MODE_INJECT:
+        return (
+            "bash_safe_mode mode 'inject' is reserved but NOT implemented: "
+            "this daemon's PreToolUse response schema does not model "
+            "hookSpecificOutput.updatedInput and the serialiser never emits "
+            "it, so the daemon cannot rewrite tool input yet. Use mode "
+            "'warn' or 'block' until the serialisation gap is closed."
+        )
+    if value not in (_MODE_WARN, _MODE_BLOCK):
+        return f"bash_safe_mode mode must be 'warn' or 'block', got {value!r}."
+    return None
+
+
+def _compile_exempt_patterns(value: object) -> tuple[list[re.Pattern[str]], str | None]:
+    """The compiled ``exempt_patterns`` and, when they are unusable, why not.
+
+    A bad value yields no patterns and a problem; it never raises, so a caller
+    can report the problem and carry on with the handler's default.
+    """
+    if not isinstance(value, list):
+        return [], f"bash_safe_mode exempt_patterns must be a list of regex strings, got {value!r}."
+    compiled: list[re.Pattern[str]] = []
+    for entry in value:
+        if not isinstance(entry, str):
+            return [], f"bash_safe_mode exempt_patterns entries must be strings, got {entry!r}."
+        try:
+            compiled.append(re.compile(entry))
+        except re.error as exc:
+            return (
+                [],
+                f"bash_safe_mode exempt_patterns entry {entry!r} is not a valid regex: {exc}.",
+            )
+    return compiled, None
+
+
 class BashSafeModeHandler(PreToolUseHandlerBase):
     """Require a bash safety prelude on multi-statement Bash invocations.
 
@@ -179,25 +221,13 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
 
         A pattern that cannot compile is a config typo the author wrote
         expecting an exemption; silently ignoring it would leave the
-        exemption inert with no signal. Raising here surfaces the message in
-        the registry's instantiation guard, exactly like ``mode: inject``.
+        exemption inert with no signal. ``register_all`` asks
+        :meth:`validate_options` first and withholds a bad value, so the
+        handler stays registered; a direct assignment still raises here.
         """
-        if not isinstance(value, list):
-            raise ValueError(
-                f"bash_safe_mode exempt_patterns must be a list of regex strings, got {value!r}."
-            )
-        compiled: list[re.Pattern[str]] = []
-        for entry in value:
-            if not isinstance(entry, str):
-                raise ValueError(
-                    f"bash_safe_mode exempt_patterns entries must be strings, got {entry!r}."
-                )
-            try:
-                compiled.append(re.compile(entry))
-            except re.error as exc:
-                raise ValueError(
-                    f"bash_safe_mode exempt_patterns entry {entry!r} is not a valid regex: {exc}."
-                ) from exc
+        compiled, problem = _compile_exempt_patterns(value)
+        if problem is not None:
+            raise ValueError(problem)
         self.__exempt_patterns = compiled
 
     @property
@@ -206,17 +236,30 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
 
     @_mode.setter
     def _mode(self, value: object) -> None:
-        if value == _MODE_INJECT:
-            raise ValueError(
-                "bash_safe_mode mode 'inject' is reserved but NOT implemented: "
-                "this daemon's PreToolUse response schema does not model "
-                "hookSpecificOutput.updatedInput and the serialiser never emits "
-                "it, so the daemon cannot rewrite tool input yet. Use mode "
-                "'warn' or 'block' until the serialisation gap is closed."
-            )
-        if value not in (_MODE_WARN, _MODE_BLOCK):
-            raise ValueError(f"bash_safe_mode mode must be 'warn' or 'block', got {value!r}.")
+        problem = _mode_problem(value)
+        if problem is not None:
+            raise ValueError(problem)
         self.__mode = str(value)
+
+    @staticmethod
+    def validate_options(options: Mapping[str, Any]) -> dict[str, str]:
+        """The configured options this handler refuses, keyed by option name.
+
+        Read by ``register_all`` before any value is applied, so a bad ``mode``
+        or ``exempt_patterns`` is reported at session start while this safety
+        handler stays registered on its default, instead of the setter's error
+        dropping the whole handler.
+        """
+        problems: dict[str, str] = {}
+        if _OPTION_MODE in options:
+            mode_problem = _mode_problem(options[_OPTION_MODE])
+            if mode_problem is not None:
+                problems[_OPTION_MODE] = mode_problem
+        if _OPTION_EXEMPT_PATTERNS in options:
+            _, patterns_problem = _compile_exempt_patterns(options[_OPTION_EXEMPT_PATTERNS])
+            if patterns_problem is not None:
+                problems[_OPTION_EXEMPT_PATTERNS] = patterns_problem
+        return problems
 
     def get_default_enabled(self) -> bool:
         """On by default, per the owner ruling cited in the module docstring.

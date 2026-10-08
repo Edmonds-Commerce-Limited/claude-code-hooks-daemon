@@ -67,6 +67,20 @@ _OPTIONS_TAKING_VALUE: Final[frozenset[str]] = frozenset(
         "--exclude-from", "--glob", "--iglob", "--type", "--type-not", "--color", "--label",
     }
 )  # fmt: skip
+# Value-taking options only ``rg`` has. They cannot join the shared set: ``-r``
+# is grep's recursion flag and ``-E`` its extended-regexp flag, neither takes a value.
+_RG_ONLY_OPTIONS_TAKING_VALUE: Final[frozenset[str]] = frozenset(
+    {
+        "-r", "-E",
+        "--replace", "--encoding", "--max-depth", "--max-filesize", "--max-columns",
+        "--threads", "--sort", "--sortr", "--pre", "--pre-glob", "--ignore-file",
+        "--type-add", "--type-clear", "--colors", "--context-separator",
+        "--field-context-separator", "--field-match-separator", "--path-separator",
+        "--regex-size-limit", "--dfa-size-limit", "--engine", "--hostname-bin",
+        "--hyperlink-format",
+    }
+)  # fmt: skip
+_RG_COMMAND: Final[str] = "rg"
 _RECURSIVE_LONG_OPTIONS: Final[frozenset[str]] = frozenset(
     {"--recursive", "--dereference-recursive"}
 )
@@ -163,8 +177,17 @@ def search_command(words: list[str]) -> tuple[str, int, bool] | None:
     return None
 
 
-def scan_options(arguments: list[str], *, tool: str) -> SearchArguments:
-    """Read options and operands of a grep-family invocation's arguments."""
+def scan_options(arguments: list[str], *, tool: str, command: str = "") -> SearchArguments:
+    """Read options and operands of a grep-family invocation's arguments.
+
+    ``command`` is the word that ran the search (``rg``, ``/usr/bin/rg``): ``rg``
+    alone takes a value after ``-r``/``--replace`` and its long options, so its
+    value is not read as the pattern or as a root.
+    """
+    rg_style = posixpath.basename(command) == _RG_COMMAND
+    value_options = (
+        _OPTIONS_TAKING_VALUE | _RG_ONLY_OPTIONS_TAKING_VALUE if rg_style else _OPTIONS_TAKING_VALUE
+    )
     scan = SearchArguments(recursive=tool != TOOL_GREP)
     pending: str | None = None
     options_ended = False
@@ -180,7 +203,7 @@ def scan_options(arguments: list[str], *, tool: str) -> SearchArguments:
             name, has_value, value = word.partition("=")
             scan.recursive = scan.recursive or name in _RECURSIVE_LONG_OPTIONS
             scan.pattern_given = scan.pattern_given or name in _PATTERN_OPTIONS
-            if name in _OPTIONS_TAKING_VALUE or name in _PATTERN_OPTIONS:
+            if name in value_options or name in _PATTERN_OPTIONS:
                 if has_value:
                     scan.take_value(name, value)
                 else:
@@ -189,9 +212,9 @@ def scan_options(arguments: list[str], *, tool: str) -> SearchArguments:
             cluster = word[1:]
             for offset, char in enumerate(cluster):
                 option = f"-{char}"
-                if char in "rR":
+                if char in "rR" and option not in value_options:
                     scan.recursive = True
-                elif option in _PATTERN_OPTIONS or option in _OPTIONS_TAKING_VALUE:
+                elif option in _PATTERN_OPTIONS or option in value_options:
                     scan.pattern_given = scan.pattern_given or option in _PATTERN_OPTIONS
                     attached = cluster[offset + 1 :]
                     if attached:
@@ -407,7 +430,7 @@ def _search_reads(words: list[str], cwd: str | None, *, piped_in: bool) -> Itera
     tool, start, relocated = found
     if relocated:
         return
-    scan = scan_options(words[start:], tool=tool)
+    scan = scan_options(words[start:], tool=tool, command=words[start - 1])
     if not scan.recursive:
         return
     if tool == TOOL_GIT:

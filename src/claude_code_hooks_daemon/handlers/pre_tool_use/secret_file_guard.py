@@ -52,6 +52,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.core.utils import grep_input_for, grep_targets
 from claude_code_hooks_daemon.utils import (
     encrypted_at_rest,
     protected_file_index,
@@ -127,8 +128,8 @@ _SEARCH_REMEDY: Final[str] = (
 _ADVISORY_ROUTE: Final[str] = "advisory"
 _NOT_JUDGED_PATTERN: Final[str] = "<not-judged>"
 _NO_INDEX_REASON: Final[str] = (
-    "a recursive search or directory read was not checked, because the index of "
-    "protected files is not available yet (the daemon has just started, or the "
+    "a recursive search, directory read or wildcard path was not checked, because the "
+    "index of protected files is not available yet (the daemon has just started, or the "
     "project is not a git repository)"
 )
 #: A command with none of these has no glob for the index to judge.
@@ -1249,6 +1250,8 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
         path_field = _PATH_FIELD_BY_TOOL.get(tool_name)
         path = str(tool_input.get(path_field, "")) if path_field else ""
+        if tool_name == ToolName.GREP:
+            path = "\0".join(grep_targets(tool_input))
         command = str(tool_input.get(_FIELD_COMMAND, ""))
         content = str(tool_input.get(_FIELD_CONTENT, "") or tool_input.get(_FIELD_NEW_STRING, ""))
         cwd = str(hook_input.get(HookInputField.CWD, ""))
@@ -1368,6 +1371,19 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         cwd = raw_cwd if isinstance(raw_cwd, str) else None
         patterns = self._patterns()
 
+        if tool_name == ToolName.GREP:
+            # A Grep names its target in `path` or `file_path`: judge each, as
+            # if it had been given in `path`.
+            targets = grep_targets(tool_input)
+            if len(targets) > 1:
+                for target in targets:
+                    found = self._evaluate(grep_input_for(hook_input, target))
+                    if found is not None:
+                        return found
+                return None
+            if targets:
+                tool_input = grep_input_for(hook_input, targets[0])[HookInputField.TOOL_INPUT]
+
         if tool_name == ToolName.BASH:
             # A quoted-delimiter heredoc body fed only to a TEXT reader (a
             # `git commit -F -` message, `cat > notes.md`) is data: bash
@@ -1392,6 +1408,9 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             # consumer decodes separately for correctness, same as before.
             shared_words = sfm.bash_route_word_stream(command, deadline=deadline)
             index = self._index(patterns) if _MAY_GLOB.search(command) else None
+            # A glob is expanded against the index of protected files; with none
+            # it goes unjudged, and the agent is told so (never a silent allow).
+            glob_unjudged = index is None and sfm.has_name_agnostic_glob(command)
             mention = sfm.find_protected_mention_detail(
                 command,
                 patterns,
@@ -1412,25 +1431,25 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                     command, patterns, deadline=deadline, cwd=cwd, words=shared_words
                 )
                 if one_liner_mention is None:
-                    return self._search_reach(command, patterns, cwd)
+                    return self._search_reach(command, patterns, cwd, glob_unjudged=glob_unjudged)
                 return (*one_liner_mention, "bash")
             # The EFFECTIVE patterns are passed through (review finding 1):
             # the flag-position check re-tests bare consumer arguments, and
             # testing the shipped defaults there would blind it to every
             # project-configured pattern — all of them under mode: replace.
             if sfm.is_exempt_invocation(command, self._consumers(), patterns, deadline=deadline):
-                return self._search_reach(command, patterns, cwd)
+                return self._search_reach(command, patterns, cwd, glob_unjudged=glob_unjudged)
             if sfm.is_encrypted_target_invocation(
                 command, patterns, cwd=cwd, is_encrypted=self._is_encrypted, deadline=deadline
             ):
-                return self._search_reach(command, patterns, cwd)
+                return self._search_reach(command, patterns, cwd, glob_unjudged=glob_unjudged)
             # Plan 00466 niggle (gd5_fp): a grep-family search PATTERN that
             # happens to spell a protected name is not a read of that file
             # -- only a FILE-TARGET argument is (see the function's own
             # docstring for the position-based distinction and every shape
             # this must NOT unlock).
             if sfm.is_grep_pattern_only_mention(command, patterns, deadline=deadline):
-                return self._search_reach(command, patterns, cwd)
+                return self._search_reach(command, patterns, cwd, glob_unjudged=glob_unjudged)
             return (mention[0], mention[1], "bash")
 
         path_field = _PATH_FIELD_BY_TOOL.get(str(tool_name or ""))
@@ -1459,7 +1478,12 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         return None
 
     def _search_reach(
-        self, command: str, patterns: tuple[str, ...], cwd: str | None
+        self,
+        command: str,
+        patterns: tuple[str, ...],
+        cwd: str | None,
+        *,
+        glob_unjudged: bool = False,
     ) -> tuple[str, str, str] | None:
         """A protected file a recursive search in ``command`` reads, or None (D1).
 
@@ -1469,11 +1493,15 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         Routed as ``search`` (the ``read`` rule plus the remedy) with the searched
         root as the detail, so the discovered filename is never echoed. With no
         index to look the roots up in, the search is not judged and the call is
-        allowed with an advisory.
+        allowed with an advisory. ``glob_unjudged`` is the same for a command
+        whose glob the missing index would have judged: it is the last thing
+        said, so a command with no search in it still gets the advisory.
         """
         reads = recursive_search.search_reads(command, cwd)
         if not reads:
-            return None
+            return (
+                (_NOT_JUDGED_PATTERN, _NO_INDEX_REASON, _ADVISORY_ROUTE) if glob_unjudged else None
+            )
         index = self._index(patterns)
         if index is None:
             return (_NOT_JUDGED_PATTERN, _NO_INDEX_REASON, _ADVISORY_ROUTE)

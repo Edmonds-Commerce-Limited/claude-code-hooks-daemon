@@ -66,6 +66,18 @@ def _registry_finding(error: FakeValuesError) -> Finding:
     )
 
 
+def _unreadable_finding(rel_path: str, error: Exception) -> Finding:
+    return Finding(
+        check_id=CHECK_ID,
+        severity=Severity.ADVISE,
+        message=f"`{rel_path}` could not be read, so its fake values were not judged: {error}",
+        remediation=(
+            f"Make `{rel_path}` readable UTF-8 text, or move it out of the documentation tree."
+        ),
+        path=rel_path,
+    )
+
+
 def _findings_for(rel_path: str, content: str, registry: FakeValuesRegistry) -> list[Finding]:
     vendored = parse_provenance(content).ok
     findings: list[Finding] = []
@@ -119,8 +131,10 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
         try:
             content = abs_path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
-            # One unreadable document must not abort the whole sweep.
-            logger.debug("unlisted-fake-value: skipping unreadable %s: %s", rel_path, exc)
+            # One unreadable document must not abort the whole sweep, and must
+            # not read as a clean one: it is reported as a finding of its own.
+            logger.warning("unlisted-fake-value: cannot read %s: %s", rel_path, exc)
+            findings.append(_unreadable_finding(rel_path, exc))
             continue
         findings.extend(_findings_for(rel_path, content, registry))
     return findings

@@ -328,9 +328,10 @@ def index_for(project_root: Path | str, patterns: tuple[str, ...]) -> ProtectedF
     """The index for these, or None when there is none yet; never waits for a build.
 
     A missing index starts a background build, and a stale one is served while a
-    fresh one is built. A build that fails is not retried until the refresh
-    interval has passed, so a project that is not a git repository costs nothing
-    after the first call.
+    fresh one is built. A build that fails is not retried until
+    :data:`RETRY_AFTER_FAILURE_SECONDS` has passed (a short wait, so a build that
+    only timed out is tried again soon, not after the refresh interval), so a
+    project that is not a git repository costs one attempt per that wait.
     """
     key = _key(project_root, patterns)
     now = time.monotonic()

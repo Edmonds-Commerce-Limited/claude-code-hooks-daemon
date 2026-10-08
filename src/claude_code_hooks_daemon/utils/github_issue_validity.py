@@ -72,7 +72,9 @@ SELF_ASSIGNEE: Final[str] = "@me"
 
 _VIEW_FIELDS: Final[str] = "assignees,state,author,labels"
 _LIST_FIELDS: Final[str] = "number,assignees,state,author,labels"
-_LIST_LIMIT: Final[str] = "100"
+#: The most open issues one listing asks ``gh`` for (``gh`` pages through them). A
+#: listing that comes back this full may have stopped short, so it is refused.
+LIST_LIMIT: Final[int] = 1000
 
 # GitHub logins: alphanumerics and single hyphens, never at the ends, at most 39
 # characters; apps carry a "[bot]" suffix.
@@ -481,7 +483,8 @@ class IssueValidityService:
         """Run ``checks`` over every open issue, from one ``gh issue list`` call.
 
         Raises:
-            GhError: The listing failed. There is no partial answer.
+            GhError: The listing failed, or filled ``LIST_LIMIT`` and so may have
+                left issues out. There is no partial answer.
         """
         self._asked = True
         data = _loads(
@@ -492,7 +495,7 @@ class IssueValidityService:
                     "--state",
                     "open",
                     "--limit",
-                    _LIST_LIMIT,
+                    str(LIST_LIMIT),
                     "--json",
                     _LIST_FIELDS,
                 ]
@@ -500,6 +503,11 @@ class IssueValidityService:
         )
         if not isinstance(data, list):
             raise GhError("gh returned an unexpected listing")
+        if len(data) >= LIST_LIMIT:
+            raise GhError(
+                f"the listing reached the limit of {LIST_LIMIT} open issues, so it may be "
+                "incomplete; check the issues you care about by number instead"
+            )
         reports: list[ValidityReport] = []
         for item in data:
             if not isinstance(item, dict) or not isinstance(item.get("number"), int):

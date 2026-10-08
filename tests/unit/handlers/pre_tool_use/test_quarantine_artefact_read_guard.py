@@ -126,6 +126,45 @@ class TestToolLevelPathChecks:
         payload = _hook_input("Grep", {"pattern": "x", "path": "/p/topic-opus-security-DETAIL.md"})
         assert handler.matches(payload) is True
 
+    def test_grep_file_path_of_detail_artefact_matches(
+        self, handler: QuarantineArtefactReadGuardHandler
+    ) -> None:
+        """N374 item 13: Grep may carry its target in file_path (Claude Code 2.1.292)."""
+        payload = _hook_input(
+            "Grep", {"pattern": "x", "file_path": "/p/topic-opus-security-DETAIL.md"}
+        )
+        assert handler.matches(payload) is True
+
+    def test_grep_naming_two_targets_is_judged_on_both(
+        self, handler: QuarantineArtefactReadGuardHandler
+    ) -> None:
+        payload = _hook_input(
+            "Grep",
+            {
+                "pattern": "x",
+                "path": "/p/src",
+                "file_path": "/p/topic-opus-security-DETAIL.md",
+            },
+        )
+        assert handler.matches(payload) is True
+
+    def test_grep_file_path_of_ordinary_file_does_not_match(
+        self, handler: QuarantineArtefactReadGuardHandler
+    ) -> None:
+        payload = _hook_input("Grep", {"pattern": "x", "file_path": "/p/src/app.py"})
+        assert handler.matches(payload) is False
+
+    def test_grep_file_path_rooted_at_directory_with_detail_artefact_matches(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        (tmp_path / "topic-opus-security-DETAIL.md").write_text("raw")
+        _indexed(handler, tmp_path, monkeypatch)
+        payload = _hook_input("Grep", {"pattern": "x", "file_path": str(tmp_path)})
+        assert handler.matches(payload) is True
+
     def test_write_of_detail_artefact_is_allowed(
         self, handler: QuarantineArtefactReadGuardHandler
     ) -> None:
@@ -827,6 +866,33 @@ class TestUnjudgedCallsAreAllowedWithAdvisory:
         assert result.decision == Decision.ALLOW
         assert result.context
         assert "index of quarantined artefacts is not available" in result.context[0]
+
+    @pytest.mark.parametrize("command", ["cat docs/*", "grep x d*/*", "head ./?", "cat docs/.*"])
+    def test_a_revealing_glob_with_no_index_is_allowed_with_an_advisory(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        tmp_path: Path,
+        no_index: None,
+        command: str,
+    ) -> None:
+        result = handler.handle(_hook_input("Bash", {"command": command}, cwd=tmp_path))
+        assert result.decision == Decision.ALLOW
+        assert result.context
+        assert "index of quarantined artefacts is not available" in result.context[0]
+
+    @pytest.mark.parametrize(
+        "command", ["cat plain.txt", "ls docs/*", "grep 'a*' plain.txt", "echo hi"]
+    )
+    def test_no_advisory_without_a_revealing_unquoted_glob(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        tmp_path: Path,
+        no_index: None,
+        command: str,
+    ) -> None:
+        result = handler.handle(_hook_input("Bash", {"command": command}, cwd=tmp_path))
+        assert result.decision == Decision.ALLOW
+        assert not result.context
 
     def test_a_finding_keeps_its_own_rule(
         self,

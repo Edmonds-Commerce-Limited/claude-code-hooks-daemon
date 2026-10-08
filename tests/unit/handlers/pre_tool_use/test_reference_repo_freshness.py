@@ -146,6 +146,33 @@ class TestWhichCallsItEngages:
 
         assert handler.matches(hook_input) is True
 
+    def test_a_grep_naming_a_governed_repo_in_file_path_engages(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """N374 item 13: Grep may carry its target in file_path (Claude Code 2.1.292)."""
+        repo = _repo(tmp_path)
+        hook_input = {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Grep",
+            "tool_input": {"pattern": "x", "file_path": str(repo)},
+            "session_id": _SESSION,
+        }
+
+        assert handler.matches(hook_input) is True
+
+    def test_a_grep_naming_two_targets_engages_on_either(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        repo = _repo(tmp_path)
+        hook_input = {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Grep",
+            "tool_input": {"pattern": "x", "path": str(tmp_path / "src"), "file_path": str(repo)},
+            "session_id": _SESSION,
+        }
+
+        assert handler.matches(hook_input) is True
+
     def test_a_glob_scoped_to_a_governed_repo_engages(
         self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
     ) -> None:

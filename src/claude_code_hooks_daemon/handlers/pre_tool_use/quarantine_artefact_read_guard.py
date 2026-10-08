@@ -46,6 +46,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.core.utils import grep_targets
 from claude_code_hooks_daemon.handlers.utils.quarantine import quarantine_agent_relevance
 from claude_code_hooks_daemon.utils import protected_file_index, recursive_search, shell_expansion
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
@@ -89,7 +90,7 @@ _RULE = Rule(
 # glob (those come from ``_effective_globs()``), so it cannot collide with one.
 _NOT_JUDGED_PATTERN: Final[str] = "<not-judged>"
 _NO_INDEX_REASON: Final[str] = (
-    "a recursive search or directory read was not checked, because the index of "
+    "a recursive search, directory read or wildcard path was not checked, because the index of "
     "quarantined artefacts is not available yet (the daemon has just started, or "
     "the project is not a git repository)"
 )
@@ -290,24 +291,35 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
         path_field = _PATH_FIELD_BY_TOOL.get(str(tool_name or ""))
         if path_field is None:
             return None
+        if tool_name == ToolName.GREP:
+            # A Grep names its target in `path` or `file_path`: judge each.
+            for target in grep_targets(tool_input):
+                found = self._grep_target_pattern(target, patterns)
+                if found is not None:
+                    return found
+            return None
         path = str(tool_input.get(path_field, "") or "")
         if not path:
             return None
         for pattern in patterns:
             if sfm.path_is_protected(path, (pattern,)):
                 return pattern
-
-        if tool_name == ToolName.GREP:
-            # Directory-rooted content search (mirrors secret_file_guard): a
-            # Grep rooted at a directory containing a DETAIL artefact reads it
-            # without naming it.
-            if not path_is_dir(path, unreadable_means=False):
-                return None
-            index = self._index(patterns)
-            if index is None:
-                return _NOT_JUDGED_PATTERN
-            return index.find_under(path, view=TreeView.ALL)
         return None
+
+    def _grep_target_pattern(self, path: str, patterns: tuple[str, ...]) -> str | None:
+        """The quarantine glob one Grep target reaches (by name, or as a directory), else None."""
+        for pattern in patterns:
+            if sfm.path_is_protected(path, (pattern,)):
+                return pattern
+        # Directory-rooted content search (mirrors secret_file_guard): a Grep
+        # rooted at a directory containing a DETAIL artefact reads it without
+        # naming it.
+        if not path_is_dir(path, unreadable_means=False):
+            return None
+        index = self._index(patterns)
+        if index is None:
+            return _NOT_JUDGED_PATTERN
+        return index.find_under(path, view=TreeView.ALL)
 
     def _bash_mention(
         self,
@@ -318,6 +330,7 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
         """First quarantine glob mentioned by a content-REVEALING segment, or None."""
         if not command:
             return None
+        glob_unjudged = False
         for segment in _segments(command):
             for verb, verb_pattern in _REVEALING_VERB_PATTERNS:
                 if not verb_pattern.search(segment):
@@ -333,16 +346,19 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
                 # `secret_file_guard` keeps the heuristic-only variant
                 # deliberately, since a false positive there is far cheaper
                 # than the false negative it guards against.
-                mention = sfm.find_protected_mention_strict(
-                    segment, patterns, cwd=cwd, index=self._index(patterns)
-                )
+                index = self._index(patterns)
+                mention = sfm.find_protected_mention_strict(segment, patterns, cwd=cwd, index=index)
                 if mention is not None:
                     return mention
+                # With no index the glob was never expanded: say so.
+                glob_unjudged = glob_unjudged or (
+                    index is None and sfm.has_name_agnostic_glob(segment)
+                )
         # A recursive search reads every artefact under its roots without
         # naming one (Plan 00483 D1, ledger 00474 N144).
         reads = recursive_search.search_reads(command, cwd)
         if not reads:
-            return None
+            return _NOT_JUDGED_PATTERN if glob_unjudged else None
         index = self._index(patterns)
         if index is None:
             return _NOT_JUDGED_PATTERN

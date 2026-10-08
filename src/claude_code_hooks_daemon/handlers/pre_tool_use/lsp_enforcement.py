@@ -44,7 +44,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
-from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.core.utils import GREP_TARGET_FIELDS, get_bash_command
 from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.claude_config import session_config_dir
 from claude_code_hooks_daemon.utils.claude_plugins import resolve_enabled_plugins
@@ -75,7 +75,6 @@ class NoLspMode:
 
 _GREP_GLOB_KEY: Final[str] = "glob"
 _GREP_TYPE_KEY: Final[str] = "type"
-_GREP_PATH_KEY: Final[str] = "path"
 
 #: ripgrep ``--type`` names (``rg --type-list``) for languages that code
 #: intelligence plugins serve. An unlisted type names no file type.
@@ -131,7 +130,7 @@ def _type_suffixes(type_name: str) -> frozenset[str]:
 
 def _grep_tool_suffixes(tool_input: Mapping[str, Any]) -> frozenset[str]:
     found: set[str] = set()
-    for key in (_GREP_GLOB_KEY, _GREP_PATH_KEY):
+    for key in (_GREP_GLOB_KEY, *GREP_TARGET_FIELDS):
         value = tool_input.get(key)
         if isinstance(value, str):
             found |= _suffixes(value)

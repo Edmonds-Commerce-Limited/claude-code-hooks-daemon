@@ -2395,6 +2395,32 @@ def _token_mention(
     return None
 
 
+def has_name_agnostic_glob(command: str) -> bool:
+    """Does ``command`` carry an unquoted glob whose file name says almost nothing?
+
+    ``*``, ``.*``, ``?`` and ``[a-z]*`` name no file family of their own: the
+    text checks have nothing to compare against a protected name (a residue
+    under ``_MIN_GLOB_OVERLAP_CHARS``), so only the index of protected files
+    can say whether one is reached. A caller with no index uses this to tell
+    the agent the glob went unjudged. A glob that asserts real name text
+    (``report-*.txt``) was judged by the text checks and is not reported.
+    Only a glob bash would expand counts: one quoted or escaped is a literal.
+    """
+    unquoted = mask_quoted(command, keep_double=False)
+    for token, start in _tokenise_with_offsets(command):
+        if not any(char in _GLOB_CHARACTERS for char in unquoted[start : start + len(token)]):
+            continue
+        for form in _normalised_token_forms(token):
+            for expansion in _expand_bracket_expressions(form):
+                basename = expansion.rsplit("/", maxsplit=1)[-1]
+                if (
+                    _is_glob_shaped(expansion)
+                    and len(_token_literal_residue(basename)) < _MIN_GLOB_OVERLAP_CHARS
+                ):
+                    return True
+    return False
+
+
 def find_protected_mention_strict(
     command: str,
     patterns: tuple[str, ...],

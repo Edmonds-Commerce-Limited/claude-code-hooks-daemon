@@ -13,6 +13,7 @@ import pytest
 
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.router import EventRouter
+from claude_code_hooks_daemon.handlers.pre_tool_use.bash_safe_mode import BashSafeModeHandler
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
 from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import AutoContinueStopHandler
 from claude_code_hooks_daemon.handlers.user_prompt_submit.idle_housekeeping_advisor import (
@@ -94,3 +95,49 @@ def test_a_valid_stand_in_delay_is_applied_with_no_failure() -> None:
 
     assert registry.option_failures == {}
     assert handler._stand_in_delay_hours == 5.0
+
+
+_SAFE_MODE_KEY = "PreToolUse.bash_safe_mode"
+
+
+def _register_safe_mode(**options: Any) -> tuple[HandlerRegistry, BashSafeModeHandler]:
+    registry = HandlerRegistry()
+    registry.discover()
+    router = EventRouter()
+    config = {"pre_tool_use": {"bash_safe_mode": {"enabled": True, "options": options}}}
+    registry.register_all(router, config=config)
+    for handler in router.get_chain(EventType.PRE_TOOL_USE).handlers:
+        if isinstance(handler, BashSafeModeHandler):
+            return registry, handler
+    raise AssertionError("bash_safe_mode was dropped by an invalid option")
+
+
+@pytest.mark.parametrize("bad", ["inject", "bogus", 5, None, ["warn"]])
+def test_a_bad_safe_mode_is_reported_and_the_guard_stays_registered_on_block(bad: object) -> None:
+    registry, handler = _register_safe_mode(mode=bad, min_statements=3)
+
+    assert "mode" in registry.option_failures[_SAFE_MODE_KEY]
+    assert handler._mode == "block"
+    assert handler._min_statements == 3  # its other options are untouched
+
+
+def test_the_reserved_inject_mode_is_reported_with_the_reason() -> None:
+    registry, _handler = _register_safe_mode(mode="inject")
+
+    assert "reserved" in registry.option_failures[_SAFE_MODE_KEY]
+
+
+@pytest.mark.parametrize("bad", ["^git", [1], ["["], ["^ok", "(unclosed"], {"a": "b"}, None])
+def test_bad_exempt_patterns_are_reported_and_the_guard_stays_registered(bad: object) -> None:
+    registry, handler = _register_safe_mode(exempt_patterns=bad)
+
+    assert "exempt_patterns" in registry.option_failures[_SAFE_MODE_KEY]
+    assert handler._exempt_patterns == []
+
+
+def test_good_safe_mode_options_are_applied_with_no_failure() -> None:
+    registry, handler = _register_safe_mode(mode="warn", exempt_patterns=["^git status"])
+
+    assert registry.option_failures == {}
+    assert handler._mode == "warn"
+    assert [p.pattern for p in handler._exempt_patterns] == ["^git status"]

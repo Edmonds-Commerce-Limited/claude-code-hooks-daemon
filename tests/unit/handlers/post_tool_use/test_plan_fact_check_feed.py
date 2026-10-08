@@ -302,6 +302,45 @@ class TestDelivery:
         assert result.context
         assert len(debouncer.pending()) == 1  # the new edit still feeds the debouncer
 
+    def test_a_subagent_event_neither_matches_nor_takes_the_owed_check(
+        self,
+        handler: PlanFactCheckFeedHandler,
+        debouncer: Debouncer,
+        clock: FakeClock,
+        state_dir: Path,
+        tmp_path: Path,
+    ) -> None:
+        """N374: the check is owed to the session that owns the plan, not to a worker."""
+        self._fire(handler, debouncer, clock, tmp_path)
+        subagent = {
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/x"},
+            "agent_id": "a1b2c3d4e5f6a7b8c",
+        }
+        assert handler.matches(subagent) is False
+        assert not handler.handle(subagent).context
+        state = PlanFactCheckState(state_dir / "plan-fact-check")
+        assert state.pending_folders() == ["00001-a"]
+        assert state.read_checked("00001-a") is None
+        main_thread = {"tool_name": "Read", "tool_input": {"file_path": "/x"}}
+        assert handler.handle(main_thread).context
+
+    def test_a_subagent_plan_edit_still_feeds_the_debouncer_but_delivers_nothing(
+        self,
+        handler: PlanFactCheckFeedHandler,
+        debouncer: Debouncer,
+        clock: FakeClock,
+        state_dir: Path,
+        tmp_path: Path,
+    ) -> None:
+        self._fire(handler, debouncer, clock, tmp_path)
+        edit = _write(_plan_file(tmp_path, "00002-b"))
+        edit["agent_id"] = "a1b2c3d4e5f6a7b8c"
+        assert handler.matches(edit) is True
+        assert not handler.handle(edit).context
+        assert len(debouncer.pending()) == 1
+        assert PlanFactCheckState(state_dir / "plan-fact-check").pending_folders() == ["00001-a"]
+
     def test_corrupt_pending_record_never_blocks(
         self, handler: PlanFactCheckFeedHandler, state_dir: Path
     ) -> None:

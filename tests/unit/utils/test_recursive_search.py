@@ -368,3 +368,50 @@ def test_git_grep_finds_a_tracked_protected_file_listed_after_position_six_thous
     _git(tmp_path, "add", "-A")
 
     assert _reach("git grep needle", tmp_path) == PROTECTED_GLOB
+
+
+class TestRgValueTakingOptions:
+    """N374: rg options that take a value must not shift the pattern onto the roots.
+
+    ``rg -r X needle`` searches ``.`` for ``needle`` (``-r`` is ``--replace``);
+    reading ``X`` as the pattern turned ``needle`` into the only search root and
+    left the real read of ``.`` unjudged.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "rg -r X needle",
+            "rg --replace X needle",
+            "rg --replace=X needle",
+            "rg -rX needle",
+            "rg -ir X needle",
+            "rg -E utf-8 needle",
+            "rg --encoding utf-8 needle",
+            "rg --max-depth 3 needle",
+            "rg --sort path needle",
+            "rg --max-columns 80 needle",
+            "rg --colors match:fg:red needle",
+            "rg --type-add 'web:*.html' needle",
+        ],
+    )
+    def test_the_value_is_not_the_pattern_so_dot_is_judged(self, tree: Path, command: str) -> None:
+        (read,) = rs.search_reads(command, str(tree))
+
+        assert read.root == str(tree)
+        assert _reach(command, tree) == PROTECTED_GLOB
+
+    def test_grep_r_is_still_the_recursion_flag(self, tree: Path) -> None:
+        (read,) = rs.search_reads("grep -r x sub", str(tree))
+
+        assert read.root == str(tree / "sub")
+
+    def test_ag_r_takes_no_value(self, tree: Path) -> None:
+        (read,) = rs.search_reads("ag -r x sub", str(tree))
+
+        assert read.root == str(tree / "sub")
+
+    def test_grep_capital_e_takes_no_value(self, tree: Path) -> None:
+        (read,) = rs.search_reads("grep -rE x sub", str(tree))
+
+        assert read.root == str(tree / "sub")

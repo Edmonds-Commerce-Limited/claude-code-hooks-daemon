@@ -6,6 +6,7 @@ each record into an instruction for the session, once.
 """
 
 import logging
+import threading
 from pathlib import Path
 
 import pytest
@@ -217,6 +218,65 @@ class TestDelivery:
             assert deliver_pending(state) == []
         assert state.pending_folders() == []
         assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+    def test_two_concurrent_deliveries_hand_out_exactly_one_instruction(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """N374: both events list the record before either takes it; only one may deliver."""
+        _, state = self._pending(tmp_path)
+        barrier = threading.Barrier(2)
+        listing = state.pending_folders
+
+        def listed_by_both() -> list[str]:
+            folders = listing()
+            barrier.wait(timeout=10)
+            return folders
+
+        monkeypatch.setattr(state, "pending_folders", listed_by_both)
+        results: list[list[str]] = []
+
+        def deliver() -> None:
+            results.append(deliver_pending(state))
+
+        threads = [threading.Thread(target=deliver) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=20)
+
+        assert sorted(len(messages) for messages in results) == [0, 1]
+        assert state.read_pending(FOLDER) is None
+        assert not list(tmp_path.glob("state/.*.tmp"))
+
+    def test_a_record_that_vanished_after_listing_is_skipped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        state = PlanFactCheckState(tmp_path)
+        monkeypatch.setattr(state, "pending_folders", lambda: [FOLDER])
+        assert deliver_pending(state) == []
+
+    def test_an_unreadable_record_that_vanished_after_listing_does_not_raise(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        state = PlanFactCheckState(tmp_path)
+        pending = tmp_path / f"{FOLDER}.pending.json"
+        pending.write_text("{nope", encoding="utf-8")
+        listing = state.pending_folders
+
+        def listed_then_taken() -> list[str]:
+            folders = listing()
+            pending.unlink()
+            return folders
+
+        monkeypatch.setattr(state, "pending_folders", listed_then_taken)
+        assert deliver_pending(state) == []
+
+    def test_a_claimed_unreadable_record_is_set_aside(self, tmp_path: Path) -> None:
+        state = PlanFactCheckState(tmp_path)
+        (tmp_path / f"{FOLDER}.pending.json").write_text("{nope", encoding="utf-8")
+        assert deliver_pending(state) == []
+        assert (tmp_path / f"{FOLDER}.pending.json.unreadable").is_file()
+        assert not list(tmp_path.glob(".*.tmp"))
 
     def test_valid_record_after_a_malformed_one_is_delivered(self, tmp_path: Path) -> None:
         state = PlanFactCheckState(tmp_path / "state")
