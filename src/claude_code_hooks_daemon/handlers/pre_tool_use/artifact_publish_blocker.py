@@ -34,6 +34,7 @@ from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, GatingResult, ProjectContext, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -194,10 +195,10 @@ class ArtifactPublishBlockerHandler(PreToolUseHandlerBase):
                 try:
                     tmp_path.unlink()
                 except OSError as cleanup_exc:
-                    logger.warning(
-                        "artifact source-disable: also failed to remove stale temp file %s: %s",
-                        tmp_path,
+                    log_and_continue(
+                        logger,
                         cleanup_exc,
+                        reason=f"a stale temp file {tmp_path} that cannot be removed leaks one file; the original settings failure is logged just below and the next attempt overwrites the temp file",
                     )
             logger.warning("artifact source-disable aborted for %s: %s", settings_path, exc)
             return

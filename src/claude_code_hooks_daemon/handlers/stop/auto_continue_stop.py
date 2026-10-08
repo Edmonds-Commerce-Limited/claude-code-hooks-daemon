@@ -61,6 +61,7 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import (
 from claude_code_hooks_daemon.utils.autonomy import autonomy_allowed
 from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, write_marker
 from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.goal_ledger import (
     LEDGER_FILENAME,
     GoalLedger,
@@ -484,11 +485,15 @@ def _parse_iso_timestamp(value: object) -> datetime | None:
     parsed: datetime | None = None
     try:
         parsed = datetime.fromisoformat(text)
-    except ValueError:
+    except ValueError as exc:
         # A malformed timestamp means "age unknown", a documented outcome that
         # also turns the staleness check off for this message -- so it is
         # said at WARNING, where a transcript format change would show.
-        logger.warning("Ignoring unparseable transcript timestamp: %r", value)
+        log_and_continue(
+            logger,
+            exc,
+            reason="a malformed transcript timestamp means 'age unknown', a documented outcome that turns the staleness check off for this message; the WARNING shows a transcript format change",
+        )
         parsed = None
     if parsed is None:
         return None
@@ -930,7 +935,11 @@ class AutoContinueStopHandler(StopHandlerBase):
             ledger_path = ProjectContext.daemon_untracked_dir() / LEDGER_FILENAME
             plan_dir = resolve_plan_dir(ProjectContext.project_root(), self._track_plans_in_project)
         except RuntimeError as e:
-            logger.warning("goal ledger consult skipped (no project context): %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="without a project context there is no goal ledger to consult (None), so the stop proceeds on its other signals",
+            )
             return None
         live = GoalLedger(ledger_path).live_plan_numbers(plan_dir)
         if not live:
@@ -972,7 +981,12 @@ class AutoContinueStopHandler(StopHandlerBase):
         try:
             marker_path = ProjectContext.daemon_untracked_dir() / MARKER_FILENAME
         except RuntimeError as e:
-            logger.debug("human-blocked marker: no project context, skipping: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="without a project context there is no human-blocked marker, so False (not blocked)",
+                level=logging.DEBUG,
+            )
             return False
         return write_marker(marker_path, session_id)
 
@@ -1283,7 +1297,12 @@ class AutoContinueStopHandler(StopHandlerBase):
                 retain_bytes=_STOP_EVENTS_MAX_BYTES // 2,
             )
         except (RuntimeError, OSError) as e:
-            logger.debug("_log_stop_event: non-critical write failure: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="the stop-events log is a diagnostic trail; a lost line must never change the stop decision already made",
+                level=logging.DEBUG,
+            )
 
     def _contains_confirmation_pattern(self, text: str) -> bool:
         """Check if text contains a confirmation pattern.

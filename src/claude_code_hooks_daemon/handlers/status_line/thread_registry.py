@@ -40,6 +40,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
@@ -145,7 +146,12 @@ def read_live_entries(
             # A concurrent writer's tmp file or a corrupt entry — skip it rather
             # than fail the whole render. Logged (not silently swallowed) so a
             # persistently unreadable heartbeat is visible at debug level.
-            logger.debug("Skipping unreadable heartbeat %s: %s", child, e)
+            log_and_continue(
+                logger,
+                e,
+                reason="a concurrent writer's tmp file or a corrupt heartbeat is skipped rather than failing the whole render; the other heartbeats still count",
+                level=logging.DEBUG,
+            )
             continue
         last_seen = entry.get("last_seen")
         if not isinstance(last_seen, (int, float)):

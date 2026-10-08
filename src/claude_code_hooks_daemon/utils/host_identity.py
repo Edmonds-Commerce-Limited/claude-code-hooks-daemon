@@ -49,6 +49,7 @@ from enum import Enum
 from pathlib import Path
 
 from claude_code_hooks_daemon.utils.container_detection import detect_container_runtime
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +187,12 @@ def _read_hosts_file(hosts_path: Path) -> str:
     try:
         return hosts_path.read_text(errors="replace")
     except OSError as exc:
-        logger.debug("Could not read %s for host-name inference: %s", hosts_path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"an unreadable {hosts_path} contributes no host names (empty text), so the host identity falls back to its other signals",
+            level=logging.DEBUG,
+        )
         return ""
 
 

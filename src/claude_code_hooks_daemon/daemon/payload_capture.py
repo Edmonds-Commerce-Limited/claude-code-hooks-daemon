@@ -25,6 +25,7 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants import HookInputField
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.private_io import make_private_dir, open_private_append
 from claude_code_hooks_daemon.utils.repo_relative_path import normalise_repo_relative_path
 from claude_code_hooks_daemon.utils.secret_redaction import redact_structure
@@ -93,7 +94,11 @@ def resolve_capture_dir(configured_dir: str | None, untracked_dir: Path) -> Path
         try:
             relative = normalise_repo_relative_path(configured_dir, "payload_capture.dir")
         except ValueError as exc:
-            logger.warning("Ignoring payload_capture.dir: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unusable payload_capture.dir is ignored and captures go to the default directory, so no payload is lost; the config value stays wrong until corrected",
+            )
         else:
             return untracked_dir / relative
     return untracked_dir / _DEFAULT_SUBDIR

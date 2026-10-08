@@ -12,6 +12,7 @@ from typing import Any
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
@@ -77,7 +78,12 @@ class SuggestStatusLineHandler(SessionStartHandlerBase):
         try:
             return ProjectContext.daemon_untracked_dir() / _STATE_FILE_NAME
         except (OSError, RuntimeError) as exc:
-            logger.debug("Statusline suggestion state file unresolvable: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="without a project context there is no daemon state directory, so there is nothing to read or write; None tells the caller the suggestion state is unavailable",
+                level=logging.DEBUG,
+            )
             return None
 
     def _shown_count(self) -> int:
@@ -95,7 +101,12 @@ class SuggestStatusLineHandler(SessionStartHandlerBase):
         try:
             data = json.loads(state_file.read_text())
         except (OSError, json.JSONDecodeError) as exc:
-            logger.debug("Statusline suggestion state unreadable (%s); suggesting anyway", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="unreadable suggestion state counts as zero prior suggestions, so the suggestion is simply shown again; nothing else depends on it",
+                level=logging.DEBUG,
+            )
             return 0
         count = data.get(_SHOWN_COUNT_KEY) if isinstance(data, dict) else None
         return count if isinstance(count, int) and count >= 0 else 0
@@ -109,7 +120,12 @@ class SuggestStatusLineHandler(SessionStartHandlerBase):
             state_file.parent.mkdir(parents=True, exist_ok=True)
             state_file.write_text(json.dumps({_SHOWN_COUNT_KEY: self._shown_count() + 1}))
         except OSError as exc:
-            logger.debug("Could not record statusline suggestion showing: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unrecorded showing only means the statusline suggestion may be shown again next session; it is a cosmetic hint",
+                level=logging.DEBUG,
+            )
 
     def _is_statusline_configured(self) -> bool:
         """Check if status line is already configured in .claude/settings.json.

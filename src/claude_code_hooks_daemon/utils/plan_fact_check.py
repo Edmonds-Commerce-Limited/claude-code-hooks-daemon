@@ -32,6 +32,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import Final
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
@@ -392,8 +393,13 @@ def deliver_pending(state: PlanFactCheckState) -> list[str]:
     for folder in state.pending_folders():
         try:
             claimed = state.claim_pending(folder)
-        except FileNotFoundError:
-            logger.debug("plan_fact_check: %s was taken by another event", folder)
+        except FileNotFoundError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"pending record for {folder} was claimed by another event, which delivers it",
+                level=logging.DEBUG,
+            )
             continue
         try:
             pending = state.read_claimed(claimed)

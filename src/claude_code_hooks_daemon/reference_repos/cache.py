@@ -31,6 +31,7 @@ from typing import Any, Final
 
 from claude_code_hooks_daemon.reference_repos.model import Checkability, RepoState
 from claude_code_hooks_daemon.utils.ccy_supervisor import daemon_untracked_dir
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +137,12 @@ def write_cache(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     except OSError as exc:
-        logger.debug("reference-repo cache not written (%s): %s", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"an unwritten reference-repo cache {path} only means the freshness reading is taken again at the next read; the reading just computed is still returned",
+            level=logging.DEBUG,
+        )
 
 
 def cached_states(

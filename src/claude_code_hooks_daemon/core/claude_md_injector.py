@@ -23,6 +23,7 @@ from claude_code_hooks_daemon.utils.conflict_markers import (
     describe_markers,
     find_conflict_markers_in_text,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import is_linked_worktree, run_git
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_document
 
@@ -324,19 +325,25 @@ class ClaudeMdInjector:
         try:
             self._run_inject()
         except OSError as exc:
-            logger.warning(
-                "ClaudeMdInjector: could not read/write %s — check file permissions (advisory skipped)",
-                self._workspace_root / "CLAUDE.md",
-                exc_info=exc,
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    f"ClaudeMdInjector: could not read/write {self._workspace_root / 'CLAUDE.md'} "
+                    "- check file permissions; the injection is an advisory feature, so the "
+                    "daemon continues without it"
+                ),
             )
-            return  # Advisory feature — daemon continues without CLAUDE.md injection
         except Exception as exc:
-            logger.warning(
-                "ClaudeMdInjector: unexpected error updating %s (advisory skipped)",
-                self._workspace_root / "CLAUDE.md",
-                exc_info=exc,
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    f"ClaudeMdInjector: unexpected error updating "
+                    f"{self._workspace_root / 'CLAUDE.md'}; the injection is an advisory "
+                    "feature that must never stop daemon startup"
+                ),
             )
-            return  # Advisory feature — daemon continues without CLAUDE.md injection
 
     def _run_inject(self) -> None:
         """Execute injection — raises on errors for caller to handle."""

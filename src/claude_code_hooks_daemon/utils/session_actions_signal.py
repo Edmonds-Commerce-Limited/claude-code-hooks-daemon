@@ -38,6 +38,7 @@ import re
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
@@ -137,4 +138,8 @@ def clear_session_actions_signal(daemon_untracked_dir: Path, *, session_id: str)
     try:
         signal_path(daemon_untracked_dir, session_id).unlink(missing_ok=True)
     except OSError as exc:
-        logger.warning("session_actions_signal: could not clear signal: %s", exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="a signal that cannot be cleared stays until the next session overwrites or clears it; clearing is housekeeping after the actions were delivered",
+        )

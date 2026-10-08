@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from claude_code_hooks_daemon.core import Handler
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.error_formatter import format_plugin_load_error
 from claude_code_hooks_daemon.utils.repo_relative_path import (
     REPO_ROOT_PLACEHOLDER,
@@ -181,10 +182,15 @@ class PluginLoader:
                     f"for examples."
                 )
         except Exception as e:
-            logger.warning(
-                f"Plugin handler '{handler.name}' (class {class_name}) failed to return "
-                f"acceptance tests: {e}. Handlers must implement get_acceptance_tests() and "
-                f"return at least one test."
+            log_and_continue(
+                logger,
+                e,
+                reason=(
+                    f"plugin handler '{handler.name}' (class {class_name}) failed to return "
+                    "acceptance tests; it still loads, because missing tests are a quality "
+                    "warning and must not drop a working handler (handlers must implement "
+                    "get_acceptance_tests() and return at least one test)"
+                ),
             )
 
         return handler

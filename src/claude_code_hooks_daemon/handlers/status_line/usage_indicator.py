@@ -52,6 +52,7 @@ from claude_code_hooks_daemon.core.data_layer import latest_usage
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.core.usage_snapshot import UsageSnapshot, UsageWindow
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.stop_failure_records import (
     default_records_path,
     latest_unresolved,
@@ -218,7 +219,11 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
         try:
             snapshot = latest_usage(now=now)
         except OSError as exc:
-            logger.warning("Skipping usage indicator: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="the usage snapshot cannot be read, so the indicator is omitted (None); the status line fails silent by contract",
+            )
             snapshot = None
         usage = self._render(snapshot, now, self._ceiling_text(hook_input)) if snapshot else None
         parts = [part for part in (failure_chip, pause_chip, usage) if part]
@@ -232,7 +237,12 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
         try:
             snapshot = latest_usage(now=now)
         except OSError as exc:
-            logger.debug("Failed to read usage snapshot for explain_segment: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="status-line segments fail silent by contract: an unexpected error omits the segment rather than showing a misleading one",
+                level=logging.DEBUG,
+            )
             snapshot = None
         if snapshot is None:
             current_value = (

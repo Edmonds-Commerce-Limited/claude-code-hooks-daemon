@@ -28,6 +28,7 @@ from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.handlers.registry import EVENT_TYPE_MAPPING
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command, daemon_path
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -286,11 +287,10 @@ class ProjectHandlerLoader:
                     file_path.name,
                 )
         except Exception as e:
-            logger.warning(
-                "Project handler '%s' from %s failed to return acceptance tests: %s",
-                handler.name,
-                file_path.name,
+            log_and_continue(
+                logger,
                 e,
+                reason=f"project handler '{handler.name}' from {file_path.name} failed to return acceptance tests but still loads; its missing tests are a quality warning, not a reason to drop a working handler",
             )
 
         logger.info(

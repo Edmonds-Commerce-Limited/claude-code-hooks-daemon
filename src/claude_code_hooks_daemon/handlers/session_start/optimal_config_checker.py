@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.handlers.status_line.settings_reader import get_settings_path
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
@@ -130,7 +131,12 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
                 return data
             return {}
         except (OSError, json.JSONDecodeError, ValueError) as e:
-            logger.debug("Failed to read global settings: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="unreadable global settings read as empty, so the checker advises as if nothing were set; the file is not modified",
+                level=logging.DEBUG,
+            )
             return {}
 
     def _write_global_settings(self, settings: dict[str, Any]) -> bool:
@@ -150,7 +156,12 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
                 f.write("\n")
             return True
         except (OSError, ValueError) as e:
-            logger.debug("Failed to write global settings: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="the global settings cannot be written, so the optimisation is not applied (False); the checker's advice is unchanged",
+                level=logging.DEBUG,
+            )
             return False
 
     def _check_agent_teams(self) -> dict[str, Any]:
@@ -325,7 +336,12 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
                 is False
             )
         except (RuntimeError, OSError, ValueError, AttributeError) as e:
-            logger.debug("Could not determine untracked-memory policy: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="the untracked-memory policy cannot be determined, so the answer is False and the checker raises no advice on it; the debug log names the cause",
+                level=logging.DEBUG,
+            )
             return False
 
     def _check_auto_memory(self) -> dict[str, Any]:
@@ -461,7 +477,12 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
                 settings = {}
         except (OSError, json.JSONDecodeError, ValueError) as e:
             # Read failed — do NOT write to avoid clobbering existing settings
-            logger.debug("Cannot read settings for sync, aborting: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="settings could not be read, so the sync aborts without writing (empty result) rather than clobbering a settings file it could not see",
+                level=logging.DEBUG,
+            )
             return []
 
         written: list[str] = []

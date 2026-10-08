@@ -115,19 +115,19 @@ def _extract_injected_block(claude_md_text: str) -> str:
 def _load_all_handler_instances() -> list[Any]:
     """Return instantiated Handler objects from the production handler package.
 
-    Skips handlers that cannot be imported or instantiated, logging the reason.
+    Skips single handlers that cannot be imported or instantiated, logging the
+    reason. A handler package that cannot be imported at all raises
+    ``ImportError``: an empty list would report a zero footprint as if it were
+    a measurement.
     """
     # Ensure the src directory is importable
     src_path = str(_PROJECT_ROOT / "src")
     if src_path not in sys.path:
         sys.path.insert(0, src_path)
 
-    try:
-        import claude_code_hooks_daemon.handlers as handlers_pkg
-        from claude_code_hooks_daemon.core.handler import Handler
-    except ImportError as exc:
-        logger.warning("Could not import handler package: %s", exc)
-        return []
+    import claude_code_hooks_daemon.handlers as handlers_pkg
+    from claude_code_hooks_daemon.core.handler import Handler
+    from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
     # Initialise ProjectContext so handlers that call project_root() during
     # __init__ do not raise RuntimeError.  When running from a worktree the
@@ -146,7 +146,12 @@ def _load_all_handler_instances() -> list[Any]:
                 config_path = _PROJECT_ROOT / "pyproject.toml"
             ProjectContext.initialize(config_path)
     except Exception as exc:
-        logger.debug("Could not initialize ProjectContext: %s", exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="an uninitialisable ProjectContext only means handlers that need the project root fail to instantiate and are skipped one by one below; the measurement covers the handlers that could be loaded",
+            level=logging.DEBUG,
+        )
 
     subclasses: list[type] = []
     for _finder, name, _ispkg in pkgutil.walk_packages(
@@ -155,7 +160,12 @@ def _load_all_handler_instances() -> list[Any]:
         try:
             mod = importlib.import_module(name)
         except ImportError as exc:
-            logger.debug("Skipping handler module %s: %s", name, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"a handler module {name} that cannot be imported is left out of the measurement; the other modules are still measured",
+                level=logging.DEBUG,
+            )
             continue
         for attr in dir(mod):
             obj = getattr(mod, attr)
@@ -168,7 +178,12 @@ def _load_all_handler_instances() -> list[Any]:
                 ):
                     subclasses.append(obj)
             except TypeError as exc:
-                logger.debug("Skipping attr %s.%s: %s", name, attr, exc)
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason=f"a module attribute {name}.{attr} that issubclass cannot classify is not a handler class, so it is skipped",
+                    level=logging.DEBUG,
+                )
 
     seen: set[type] = set()
     instances: list[Any] = []
@@ -178,7 +193,12 @@ def _load_all_handler_instances() -> list[Any]:
             try:
                 instances.append(cls())
             except (TypeError, ValueError, RuntimeError) as exc:
-                logger.debug("Could not instantiate %s: %s", cls.__name__, exc)
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason=f"a handler {cls.__name__} that cannot be instantiated is left out of the measurement; the other handlers are still measured",
+                    level=logging.DEBUG,
+                )
     return instances
 
 
@@ -219,11 +239,20 @@ def measure() -> dict[str, Any]:
 
     # 2. Per-handler get_claude_md() measurements
     handlers_map: dict[str, dict[str, int]] = {}
-    for instance in _load_all_handler_instances():
+    instances = _load_all_handler_instances()
+    # Imported only now: loading the instances is what puts ``src`` on sys.path.
+    from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+
+    for instance in instances:
         try:
             md = instance.get_claude_md()
         except (AttributeError, NotImplementedError) as exc:
-            logger.debug("Handler %s.get_claude_md() failed: %s", instance.name, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"a handler {instance.name} without a usable get_claude_md() contributes nothing to the per-handler figures; the other handlers are still measured",
+                level=logging.DEBUG,
+            )
             continue
         if md is not None:
             handlers_map[instance.name] = _measure_text(md)

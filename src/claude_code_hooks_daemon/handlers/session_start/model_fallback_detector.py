@@ -48,6 +48,7 @@ from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 from claude_code_hooks_daemon.utils import secret_redaction
 from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.model_fallback_records import (
     KEY_FALLBACK_MODEL,
     KEY_ORIGINAL_MODEL,
@@ -302,7 +303,12 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
                             assistant_models.append((line_index, model))
                     window.append(line)
         except OSError as exc:
-            logger.debug("model_fallback_detector: cannot read transcript %s: %s", path, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"an unreadable transcript {path} yields whatever records were scanned before the failure; a missed fallback is reported at a later session start",
+                level=logging.DEBUG,
+            )
         return found, assistant_models
 
     @staticmethod
@@ -400,7 +406,12 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
 
             return ProjectContext.daemon_untracked_dir() / _STATE_SUBDIR / _STATE_FILENAME
         except (RuntimeError, OSError) as exc:
-            logger.debug("model_fallback_detector: no project root for state file (%s)", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="no project root resolves, so there is nowhere to keep the dedupe state (None); the detector then dedupes in memory only",
+                level=logging.DEBUG,
+            )
             return None
 
     def _load_state(self) -> None:
@@ -416,12 +427,22 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
         try:
             text = path.read_text(encoding="utf-8")
         except OSError as exc:
-            logger.debug("model_fallback_detector: no persisted state yet (%s)", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="no persisted dedupe state is readable yet (first run or unreadable file), so the detector starts with empty state",
+                level=logging.DEBUG,
+            )
             return
         try:
             data: Any = json.loads(text)
         except ValueError as exc:
-            logger.debug("model_fallback_detector: corrupt state file, ignoring (%s)", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="a corrupt dedupe state file is ignored, so the detector starts with empty state and rewrites it on the next save",
+                level=logging.DEBUG,
+            )
             return
         if not isinstance(data, dict):
             return
@@ -463,7 +484,11 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
             tmp_path.write_text(json.dumps(payload), encoding="utf-8")
             tmp_path.replace(path)
         except OSError as exc:
-            logger.warning("model_fallback_detector: could not persist dedupe state: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unpersisted dedupe state means an already-reported fallback may be reported once more next session; a repeated notice is harmless and the current report is already produced",
+            )
 
     # ── Advisory rendering ──────────────────────────────────────────────────
 

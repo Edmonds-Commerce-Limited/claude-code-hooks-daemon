@@ -44,6 +44,7 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     git_subcommand_index,
     strip_transparent_reserved_words,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_exclusion import (
     first_matching_glob,
     literal_screen,
@@ -220,7 +221,12 @@ def resolve_configured_patterns() -> tuple[str, ...]:
         # schema-invalid config. yaml.YAMLError: malformed YAML -- Config.load
         # calls yaml.safe_load directly and does not catch this itself. All
         # four leave the SHIPPED DEFAULTS already set above in place.
-        logger.debug("Could not resolve secret_file_guard config, using defaults: %s", exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="an unresolvable secret_file_guard config keeps the already-set SHIPPED DEFAULT patterns, which still protect; config errors are reported by the config loader itself",
+            level=logging.DEBUG,
+        )
     return _CONFIGURED_PATTERNS
 
 
@@ -1632,7 +1638,12 @@ def _text_operand_spans(text: str, offset: int, depth: int) -> set[tuple[int, in
         inner_regions = substitution_inner_spans(text)
     except UnplaceableSubstitutionError as exc:
         # Nothing inside a substitution can be placed, so only the top level is relaxed.
-        logger.debug("text operands: substitution not placeable, top level only: %s", exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="a substitution whose inner spans cannot be placed leaves no inner regions, so only the top level is relaxed; everything inside the substitution stays judged as a mention",
+            level=logging.DEBUG,
+        )
         inner_regions = []
     operands: dict[tuple[int, int], str] = {}
     programs: list[tuple[int, int]] = []
@@ -3034,7 +3045,12 @@ def _shell_words(command: str) -> list[str] | None:
     except ValueError as exc:
         # Unbalanced quoting: the shell's own reading is unknown, so the
         # command is not confirmed. Registered in error_hiding_exclusions.json.
-        logger.debug("encrypted-target exemption: command not parseable: %s", exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="a command with unbalanced quoting is not confirmed (None), so the encrypted-target exemption does not apply and the ordinary deny-by-default mention rule decides",
+            level=logging.DEBUG,
+        )
         return None
 
 

@@ -24,7 +24,7 @@ from claude_code_hooks_daemon.constants import (
     ValidationLimit,
     wired_event_metas,
 )
-from claude_code_hooks_daemon.utils.strict_mode import handle_tier2_error
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -174,12 +174,18 @@ class ConfigValidator:
                             handler_config_name = ConfigValidator._to_snake_case(attr.__name__)
                             handlers.add(handler_config_name)
                 except (ImportError, SyntaxError, AttributeError) as e:
-                    # TIER 2: Crash in strict_mode, log debug in non-strict
-                    handle_tier2_error(
-                        error=e,
-                        strict_mode=strict_mode,
-                        error_message=f"Failed to import handler module {modname} in strict mode",
-                        graceful_message=f"Failed to import handler module {modname}",
+                    # TIER 2: Crash in strict_mode, log in non-strict
+                    if strict_mode:
+                        raise RuntimeError(
+                            f"Failed to import handler module {modname} in strict mode"
+                        ) from e
+                    log_and_continue(
+                        logger,
+                        e,
+                        reason=(
+                            f"Failed to import handler module {modname}; outside strict "
+                            "mode one broken optional module must not stop discovery"
+                        ),
                     )
                 except Exception as e:
                     # TIER 2: Crash in strict_mode, log error in non-strict

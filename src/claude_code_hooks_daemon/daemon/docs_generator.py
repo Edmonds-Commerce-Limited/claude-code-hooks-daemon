@@ -25,6 +25,7 @@ from claude_code_hooks_daemon.pseudo_events.registry import (
 # heading reads "Pseudo Nitpick" rather than colliding with a real event type.
 PSEUDO_EVENT_SECTION_PREFIX = "pseudo_"
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
@@ -294,9 +295,15 @@ class DocsGenerator:
                         True,
                     )
                     handlers_by_event.setdefault(section, []).append(handler_info)
-                except Exception:
-                    logger.exception(
-                        "Failed to inspect pseudo-event handler %s", handler_class.__name__
+                except Exception as exc:
+                    log_and_continue(
+                        logger,
+                        exc,
+                        reason=(
+                            f"Failed to inspect pseudo-event handler {handler_class.__name__}; "
+                            "doc generation lists every other handler instead of aborting"
+                        ),
+                        level=logging.ERROR,
                     )
 
     def _collect_handlers(
@@ -370,8 +377,16 @@ class DocsGenerator:
                         handlers_by_event[event_dir_name] = []
                     handlers_by_event[event_dir_name].append(handler_info)
 
-                except Exception:
-                    logger.exception("Failed to inspect handler %s", handler_class_name)
+                except Exception as exc:
+                    log_and_continue(
+                        logger,
+                        exc,
+                        reason=(
+                            f"Failed to inspect handler {handler_class_name}; doc generation "
+                            "lists every other handler instead of aborting"
+                        ),
+                        level=logging.ERROR,
+                    )
 
         self._collect_pseudo_event_handlers(handlers_by_event)
 
@@ -397,8 +412,16 @@ class DocsGenerator:
                 if event_dir not in handlers_by_event:
                     handlers_by_event[event_dir] = []
                 handlers_by_event[event_dir].append(handler_info)
-            except Exception:
-                logger.exception("Failed to inspect plugin handler")
+            except Exception as exc:
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason=(
+                        "Failed to inspect plugin handler; doc generation lists every other "
+                        "handler instead of aborting"
+                    ),
+                    level=logging.ERROR,
+                )
 
         # Collect from project handlers
         for project_handler in self._project_handlers:
@@ -435,8 +458,16 @@ class DocsGenerator:
                 if resolved_dir not in handlers_by_event:
                     handlers_by_event[resolved_dir] = []
                 handlers_by_event[resolved_dir].append(handler_info)
-            except Exception:
-                logger.exception("Failed to inspect project handler")
+            except Exception as exc:
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason=(
+                        "Failed to inspect project handler; doc generation lists every other "
+                        "handler instead of aborting"
+                    ),
+                    level=logging.ERROR,
+                )
 
     @staticmethod
     def _event_type_to_dir(event_type_value: str | None) -> str | None:

@@ -33,6 +33,7 @@ from typing import Any, Final
 
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.project_loader import ProjectHandlerLoadFailure
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,11 @@ def write_load_failures(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     except OSError as exc:
-        logger.warning("Failed to persist project-handler health state to %s: %s", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"the health file {path} is observability only; the daemon keeps the failures in memory and a handler's loading is unaffected",
+        )
 
 
 def clear_load_failures() -> None:
@@ -128,7 +133,11 @@ def clear_load_failures() -> None:
     try:
         path.unlink(missing_ok=True)
     except OSError as exc:
-        logger.warning("Failed to clear project-handler health state at %s: %s", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a health file {path} that cannot be cleared may show an old failure until the next load rewrites it; the load itself succeeded",
+        )
 
 
 def read_load_failures() -> ProjectHandlerHealthState:
@@ -187,11 +196,10 @@ def read_load_failures_at(untracked_dir: Path) -> ProjectHandlerHealthState:
         # Plan 00200 Task 5.5: match the visibility already given to the two
         # parse failures above (JSON decode / non-dict payload) rather than
         # silently defaulting the summary count to 0.
-        logger.warning(
-            "project-handler health state at %s has a malformed %s field: %s",
-            path,
-            _KEY_LOADED_COUNT,
+        log_and_continue(
+            logger,
             exc,
+            reason="a malformed loaded-count in the health state defaults to 0; the other fields still render and this warning names the field",
         )
         loaded_count = 0
 

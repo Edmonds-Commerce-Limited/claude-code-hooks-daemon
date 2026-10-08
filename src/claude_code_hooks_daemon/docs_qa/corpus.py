@@ -53,6 +53,7 @@ from claude_code_hooks_daemon.utils.authored_paths import (
     authored_path,
     contained_authored_path,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
     git_visible_ancestor_dirs,
     git_visible_paths,
@@ -796,7 +797,12 @@ def revalidate_corpus(corpus: DocCorpus, project_root: Path) -> DocCorpus:
             # otherwise silently stop a document being checked with no trace
             # anywhere. Affordable because a steady-state revalidation never
             # reaches this branch at all.
-            logger.info("docs-qa corpus: dropping unstattable %s: %s", rel_path, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="a file deleted or unreachable since the sweep is dropped from the corpus, which only caches what is on disk; logged at INFO so a persistent EACCES leaves a trace",
+                level=logging.INFO,
+            )
             continue
         if record.mtime_ns == stat.st_mtime_ns and record.size == stat.st_size:
             documents[rel_path] = record

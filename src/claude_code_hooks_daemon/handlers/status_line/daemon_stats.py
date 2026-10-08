@@ -17,6 +17,7 @@ from claude_code_hooks_daemon.core import (
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.daemon.controller import get_controller
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 psutil: ModuleType | None
 try:
@@ -80,9 +81,19 @@ class DaemonStatsHandler(StatusLineHandlerBase):
                     mem_mb = process.memory_info().rss / (1024 * 1024)
                     mem_str = f" : {mem_mb:.0f}MB"
                 except (OSError, AttributeError) as e:
-                    logger.debug("Failed to get process memory: %s", e)
+                    log_and_continue(
+                        logger,
+                        e,
+                        reason="an unreadable process memory figure is simply omitted from the segment; uptime and level still render",
+                        level=logging.DEBUG,
+                    )
                 except Exception as e:
-                    logger.error("Unexpected error getting memory stats: %s", e, exc_info=True)
+                    log_and_continue(
+                        logger,
+                        e,
+                        reason="an unexpected psutil failure must only drop the memory figure, never break the status line",
+                        level=logging.ERROR,
+                    )
 
             # Log level
             log_level = logging.getLogger().level
@@ -101,11 +112,20 @@ class DaemonStatsHandler(StatusLineHandlerBase):
                 if block_count > 0:
                     parts.append(f": 🛡️ {block_count} blocks")
             except Exception as e:
-                logger.debug("Failed to get block count: %s", e)
+                log_and_continue(
+                    logger,
+                    e,
+                    reason="an unavailable block count is omitted from the segment; the uptime and error figures still render",
+                    level=logging.DEBUG,
+                )
 
         except Exception as e:
-            logger.debug(f"Failed to get daemon stats: {e}")
-            # Fail silently - don't break status line
+            log_and_continue(
+                logger,
+                e,
+                reason="unreadable daemon stats leave the segment empty; this developer-facing diagnostic must never break the status line",
+                level=logging.DEBUG,
+            )
 
         return AdvisoryResult(context=parts)
 

@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.skill_scan.constants import (
     USER_RECORD_TYPE,
 )
 from claude_code_hooks_daemon.skill_scan.extraction import is_genuine_text
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,12 @@ def _read_tail_lines(path: Path) -> list[str]:
             handle.seek(start)
             raw = handle.read()
     except OSError as exc:
-        logger.debug("human_presence: cannot read transcript %s: %s", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"an unreadable transcript {path} yields no lines ([]), so no human prompt is found and the session is treated as unattended",
+            level=logging.DEBUG,
+        )
         return []
     lines = raw.decode("utf-8", errors="replace").splitlines()
     if start > 0 and lines:
@@ -131,7 +137,12 @@ def human_prompt_within(
         try:
             record = json.loads(line)
         except json.JSONDecodeError as exc:
-            logger.debug("human_presence: skipping unparseable transcript line: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="a transcript line that is not JSON (a half-written tail line, for one) is skipped; the scan goes on to the previous complete record",
+                level=logging.DEBUG,
+            )
             continue
         if not isinstance(record, dict) or not _is_human_prompt(record, session_id):
             continue
@@ -140,7 +151,12 @@ def human_prompt_within(
         except ValueError as exc:
             # The latest genuine prompt cannot be dated, so it proves nothing;
             # an older one would not speak for the present either.
-            logger.debug("human_presence: undatable human prompt: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="the latest human prompt cannot be dated, so it proves no presence (False); an older prompt would not speak for the present either",
+                level=logging.DEBUG,
+            )
             return False
         return 0 <= now - stamped <= window_seconds
     return False

@@ -69,6 +69,7 @@ from claude_code_hooks_daemon.core.utils import (
 from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.claude_config import claude_config_dir, session_config_dir
 from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.heredoc_operators import scan_heredocs
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
@@ -656,7 +657,12 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         try:
             return linear_shlex.split(segment)
         except ValueError as exc:
-            logger.debug("Could not tokenise segment for containment check: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="a segment that cannot be tokenised yields no tokens, so no path is extracted from it (fail-open by design); the containment check judges the other segments",
+                level=logging.DEBUG,
+            )
             return []
 
     @staticmethod

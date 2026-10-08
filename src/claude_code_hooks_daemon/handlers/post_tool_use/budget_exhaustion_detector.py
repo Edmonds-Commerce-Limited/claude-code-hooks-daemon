@@ -144,6 +144,7 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.private_io import make_private_dir, open_private_append
 from claude_code_hooks_daemon.utils.retention import cap_log_file
 
@@ -623,10 +624,10 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
                 try:
                     compiled.append(re.compile(raw, re.IGNORECASE | re.DOTALL))
                 except re.error as exc:
-                    logger.warning(
-                        "budget_exhaustion_detector: invalid extra_patterns regex %r: %s",
-                        raw,
+                    log_and_continue(
+                        logger,
                         exc,
+                        reason="an invalid extra_patterns regex is dropped and never matches; the built-in patterns and the other extras still apply, and the warning names the pattern",
                     )
                     continue
             self._compiled_extra_patterns = compiled
@@ -709,8 +710,10 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
             )
             return True
         except (RuntimeError, OSError) as exc:
-            logger.warning(
-                "budget_exhaustion_detector: ledger append failed (non-critical): %s", exc
+            log_and_continue(
+                logger,
+                exc,
+                reason="the budget-exhaustion ledger append is non-critical bookkeeping; False tells the caller nothing was recorded",
             )
             return False
 

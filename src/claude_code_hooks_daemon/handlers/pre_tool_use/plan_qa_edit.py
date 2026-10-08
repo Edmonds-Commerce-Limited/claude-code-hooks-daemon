@@ -41,6 +41,7 @@ from claude_code_hooks_daemon.plan_qa.report import format_advisory, format_bloc
 from claude_code_hooks_daemon.plan_qa.runner import run_stage
 from claude_code_hooks_daemon.plan_qa.types import JOURNAL_MODE_OFF, Finding, Level, Stage
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_exclusion import handler_excludes_path
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 
@@ -256,11 +257,11 @@ class PlanQaEditHandler(PreToolUseHandlerBase):
                 str(self._track_plans_in_project),
                 ProjectContext.project_root(),
             )
-        except Exception:
-            logger.warning(
-                "plan_qa_edit: failed to record plan allocation for %s",
-                file_path,
-                exc_info=True,
+        except Exception as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"a plan counter that cannot be advanced for {file_path} leaves the counter behind; the write being checked proceeds and the daemon's counter bootstrap corrects it later",
             )
         else:
             if recorded is not None:

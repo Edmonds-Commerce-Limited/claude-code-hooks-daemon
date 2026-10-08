@@ -57,6 +57,7 @@ from claude_code_hooks_daemon.plan_qa.types import (
     DEFAULT_PLAN_DOC_BLOCK_LINES,
 )
 from claude_code_hooks_daemon.utils.authored_paths import authored_path
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.vendor_paths import (
     VendorScope,
@@ -329,7 +330,12 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
             # An unreadable or undecodable file must not abort the whole
             # SessionStart sweep (Plan 00287 N5) -- skip it, matching the
             # corpus's own UnicodeDecodeError handling.
-            logger.debug("module-doc-budget: skipping unreadable %s: %s", rel_path, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unreadable or undecodable file is skipped so one bad file cannot abort the SessionStart sweep; the budget check omits only that file",
+                level=logging.DEBUG,
+            )
             continue
         registered = rel_path in context.policy.qa.registered_module_docs
         finding = _finding_for(rel_path, content, None, registered)

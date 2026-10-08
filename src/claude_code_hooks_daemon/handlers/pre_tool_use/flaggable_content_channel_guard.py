@@ -46,6 +46,7 @@ from claude_code_hooks_daemon.handlers.utils.quarantine import quarantine_agent_
 from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
 from claude_code_hooks_daemon.utils.recursive_search import (
     TOOL_GIT,
@@ -133,11 +134,13 @@ def _compiled_shape_pattern(pattern: str) -> re.Pattern[str] | None:
     try:
         compiled: re.Pattern[str] | None = re.compile(pattern, re.IGNORECASE)
     except re.error as exc:
-        logger.warning(
-            "flaggable_content_channel_guard: pattern %r does not compile (%s) "
-            "and will never match",
-            pattern,
+        log_and_continue(
+            logger,
             exc,
+            reason=(
+                f"configured pattern {pattern!r} does not compile and will never match; it is "
+                "dropped, the other patterns still guard, and this warning names it"
+            ),
         )
         compiled = None
     _COMPILED_SHAPE_CACHE[pattern] = compiled
