@@ -495,7 +495,7 @@ def _recursive_search_reaches(
     if found is None:
         return None
     tool, start, relocated = found
-    scan = scan_options(words[start:], tool=tool)
+    scan = scan_options(words[start:], tool=tool, command=words[start - 1])
     if not scan.recursive:
         return None
     if relocated:
