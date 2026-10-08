@@ -43,6 +43,7 @@ from claude_code_hooks_daemon.handlers.status_line.thread_registry import (
     read_live_entries,
     upsert_heartbeat,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -118,10 +119,18 @@ class MultithreadIndicatorHandler(StatusLineHandlerBase):
             live = read_live_entries(registry_dir, now)
             return compute_indicator(live, session_id)
         except RuntimeError as e:
-            logger.warning("Skipping multithread indicator (no project context): %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="without a project context there is no daemon state directory, so there is nothing to read or write; the indicator renders nothing",
+            )
             return ""
         except OSError as e:
-            logger.warning("Failed to update thread registry: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="the thread registry could not be updated, so the indicator renders nothing; the status line fails silent by contract",
+            )
             return ""
 
     def _now(self) -> float:

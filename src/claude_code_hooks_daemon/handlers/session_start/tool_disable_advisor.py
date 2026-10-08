@@ -34,6 +34,7 @@ from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.tool_report.costs import disable_route_for
 from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,12 @@ class ToolDisableAdvisorHandler(SessionStartHandlerBase):
         try:
             loaded = json.loads(settings_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-            logger.debug("tool_disable_advisor: cannot read %s: %s", settings_path, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="unreadable settings read as empty, so the advisor sees no declared tools and stays silent; it never blocks",
+                level=logging.DEBUG,
+            )
             return {}
         return loaded if isinstance(loaded, dict) else {}
 

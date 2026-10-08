@@ -35,6 +35,7 @@ from pathlib import Path
 
 from claude_code_hooks_daemon.block_report.fingerprints import attribute_deny
 from claude_code_hooks_daemon.tool_report.analyser import transcripts_root_for
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 logger = logging.getLogger(__name__)
@@ -168,7 +169,14 @@ def analyse_transcripts(transcripts_root: Path) -> BlockSummary:
         try:
             events, file_malformed = _iter_deny_events(transcript)
         except OSError as exc:
-            logger.warning("block-report: cannot read %s: %s", transcript, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    f"block-report: cannot read {transcript}; one unreadable transcript is "
+                    "skipped so the report still covers every other session"
+                ),
+            )
             continue
         malformed_lines += file_malformed
         for event in events:

@@ -31,6 +31,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 logger = logging.getLogger(__name__)
@@ -130,7 +131,11 @@ def _ensure_self_ignoring(directory: Path) -> None:
     try:
         gitignore_path.write_text(_GITIGNORE_CONTENT)
     except OSError as exc:
-        logger.warning("subagent_report_paths: cannot write %s: %s", gitignore_path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a self-ignoring {gitignore_path} that cannot be written leaves the reports directory visible to git; the report itself is still saved, so this is a hygiene loss only",
+        )
 
 
 def resolve_confined_report_dir(root: Path, report_dir: str) -> Path | None:
@@ -207,7 +212,11 @@ def write_new_file_never_overwrite(
     try:
         directory.mkdir(parents=True, exist_ok=True, mode=_DIR_MODE)
     except OSError as exc:
-        logger.warning("subagent_report_paths: cannot create %s: %s", directory, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a reports directory {directory} that cannot be created returns None (nothing persisted); the sub-agent's reply is still delivered, only its saved copy is lost",
+        )
         return None
     _ensure_self_ignoring(directory)
 
@@ -218,7 +227,11 @@ def write_new_file_never_overwrite(
         except FileExistsError:
             continue
         except OSError as exc:
-            logger.warning("subagent_report_paths: cannot create %s: %s", candidate, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"a report file {candidate} that cannot be created returns None (nothing persisted); the sub-agent's reply is still delivered, only its saved copy is lost",
+            )
             return None
         try:
             with os.fdopen(fd, "w") as handle:
@@ -232,10 +245,10 @@ def write_new_file_never_overwrite(
             try:
                 candidate.unlink(missing_ok=True)
             except OSError as unlink_exc:
-                logger.warning(
-                    "subagent_report_paths: cannot remove partial write %s: %s",
-                    candidate,
+                log_and_continue(
+                    logger,
                     unlink_exc,
+                    reason=f"a partial write {candidate} that cannot be removed stays on disk; the write error that caused it is logged just above and retention ages the file out",
                 )
             return None
         return candidate
@@ -280,12 +293,22 @@ def find_persisted_report(directory: Path, agent_type: str, agent_id: str) -> Pa
     try:
         matches = list(directory.glob(pattern))
     except OSError as exc:
-        logger.debug("subagent_report_paths: cannot glob %s: %s", directory, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a reports directory {directory} that cannot be searched reports no persisted report (None), which the verifier reads as the report not being found",
+            level=logging.DEBUG,
+        )
         return None
     if not matches:
         return None
     try:
         return max(matches, key=lambda path: (path.stat().st_mtime, path.name))
     except OSError as exc:
-        logger.debug("subagent_report_paths: cannot stat matches in %s: %s", directory, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"matches in {directory} that cannot be stat-ed leave no newest report to name (None), which the verifier reads as the report not being found",
+            level=logging.DEBUG,
+        )
         return None

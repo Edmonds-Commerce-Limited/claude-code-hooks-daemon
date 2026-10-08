@@ -14,6 +14,7 @@ from claude_code_hooks_daemon.core import AdvisoryResult, Decision, ProjectConte
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.handlers.status_line.mtime_cache import MtimeCachedFile
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +98,12 @@ class StartupCleanupHandler(StatusLineHandlerBase):
         except (OSError, RuntimeError) as e:
             # The read itself is fail-silent (see MtimeCachedFile); what can
             # still raise here is resolving the daemon's untracked dir.
-            logger.debug("Failed to read cleanup status: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="an unresolvable untracked dir shows no cleanup indicator (empty context); the status line must never break over a cosmetic segment",
+                level=logging.DEBUG,
+            )
 
         return AdvisoryResult(context=[])
 

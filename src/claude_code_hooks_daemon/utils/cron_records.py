@@ -55,6 +55,7 @@ from typing import Final
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils.blockage_marker import write_json_atomically
 from claude_code_hooks_daemon.utils.cron_enforcement import normalise_prompt
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +152,12 @@ def read_records(path: Path) -> list[CronRecord]:
     except FileNotFoundError:
         return []
     except (OSError, json.JSONDecodeError) as exc:
-        logger.debug("cron_records: unreadable %s: %s", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"an unreadable or corrupt records file {path} reads as no records ([]), so the declared crons are re-asserted instead of the session failing",
+            level=logging.DEBUG,
+        )
         return []
     entries = raw.get(_KEY_RECORDS) if isinstance(raw, dict) else None
     if not isinstance(entries, list):
@@ -181,7 +187,11 @@ def _write(path: Path, records: list[CronRecord]) -> bool:
     try:
         write_json_atomically(path, payload)
     except OSError as exc:
-        logger.warning("cron_records: failed to write %s: %s", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"an unwritable records file {path} is reported to the caller as False (not written); the crons are simply re-asserted at the next session",
+        )
         return False
     return True
 

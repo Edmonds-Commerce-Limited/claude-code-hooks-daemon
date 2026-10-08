@@ -25,6 +25,7 @@ from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 from claude_code_hooks_daemon.core.workspace import resolve_workspace
 from claude_code_hooks_daemon.strategies.tdd import TddStrategyRegistry
 from claude_code_hooks_daemon.strategies.tdd.protocol import TddStrategy
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
@@ -635,16 +636,14 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
                 continue
             try:
                 relative_parts = path_relative_to(Path(source_path), workspace.root).parts
-            except ValueError:
+            except ValueError as exc:
                 # A mirror is defined relative to the workspace; a source the
                 # glob matched from outside it has no such relation, so the
                 # mapping has nothing to place. Skip rather than guess.
-                logger.warning(
-                    "tdd_enforcement: test_path_map mirror for %r matched %r outside its "
-                    "workspace %s; skipped",
-                    mapping.source_glob,
-                    source_path,
-                    workspace.root,
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason="a mirror mapping is relative to the workspace, so a source matched from outside it has nothing to place; the mapping is skipped rather than guessed and the WARNING names it",
                 )
                 continue
             mirrored = _dirs_after_window(relative_parts, _glob_literal_root(mapping.source_glob))

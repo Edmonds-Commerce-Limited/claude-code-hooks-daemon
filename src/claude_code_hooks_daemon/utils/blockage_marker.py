@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.constants.permissions import FileMode
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,11 @@ def write_marker(path: Path, session_id: str, *, now: float | None = None) -> bo
         write_json_atomically(path, payload)
         return True
     except OSError as e:
-        logger.warning("blockage_marker: failed to write %s: %s", path, e)
+        log_and_continue(
+            logger,
+            e,
+            reason=f"an unwritable blockage marker {path} is reported to the caller as False (not written); the marker only silences cron ticks, so the session proceeds without that saving",
+        )
         return False
 
 
@@ -111,7 +116,12 @@ def read_marker(path: Path) -> BlockageMarker | None:
     except FileNotFoundError:
         return None
     except (OSError, json.JSONDecodeError) as e:
-        logger.debug("blockage_marker: unreadable %s: %s", path, e)
+        log_and_continue(
+            logger,
+            e,
+            reason=f"an unreadable or corrupt marker {path} reads as no marker (None), so the cron tick is delivered rather than wrongly suppressed",
+            level=logging.DEBUG,
+        )
         return None
     if not isinstance(raw, dict):
         return None
@@ -135,7 +145,12 @@ def clear_marker(path: Path) -> None:
     except FileNotFoundError:
         return
     except OSError as e:
-        logger.debug("blockage_marker: failed to clear %s: %s", path, e)
+        log_and_continue(
+            logger,
+            e,
+            reason=f"a marker {path} that cannot be cleared stays until it expires on its own, which only delays tick delivery; the caller has nothing else to do",
+            level=logging.DEBUG,
+        )
 
 
 def marker_is_valid(

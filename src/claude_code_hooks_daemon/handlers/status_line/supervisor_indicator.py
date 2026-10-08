@@ -79,6 +79,7 @@ from claude_code_hooks_daemon.core import AdvisoryResult, ProjectContext
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -243,7 +244,12 @@ class SupervisorIndicatorHandler(StatusLineHandlerBase):
         except Exception as e:
             # Fail silent: a false orange alarm would be more misleading than
             # simply omitting the segment on an unexpected error.
-            logger.debug("Failed to detect supervisor state: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="status-line segments fail silent by contract: an unexpected error omits the segment rather than showing a misleading one",
+                level=logging.DEBUG,
+            )
             state = None
 
         background = _STATE_BACKGROUND.get(state) if state is not None else None
@@ -270,7 +276,12 @@ class SupervisorIndicatorHandler(StatusLineHandlerBase):
         try:
             return self._active_message()
         except Exception as e:
-            logger.debug("Failed to read supervisor status message: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="status-line segments fail silent by contract: an unexpected error omits the segment rather than showing a misleading one",
+                level=logging.DEBUG,
+            )
             return None
 
     def _active_message(self) -> tuple[str, str] | None:
@@ -324,7 +335,12 @@ class SupervisorIndicatorHandler(StatusLineHandlerBase):
         try:
             data: Any = json.loads(path.read_text())
         except (OSError, ValueError) as e:
-            logger.debug("Failed to read status message file %s: %s", path, e)
+            log_and_continue(
+                logger,
+                e,
+                reason="an unreadable supervisor status message is treated as no message (None); status-line segments fail silent by contract: an unexpected error omits the segment rather than showing a misleading one",
+                level=logging.DEBUG,
+            )
             return None
         if not isinstance(data, dict):
             return None
@@ -446,7 +462,12 @@ class SupervisorIndicatorHandler(StatusLineHandlerBase):
         try:
             entries = list(proc_root.iterdir())
         except OSError as e:
-            logger.debug("Failed to scan /proc for supervisor: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="/proc cannot be scanned, so no supervisor is detected (None); status-line segments fail silent by contract: an unexpected error omits the segment rather than showing a misleading one",
+                level=logging.DEBUG,
+            )
             return None
 
         worker_match: tuple[int, bool] | None = None
@@ -475,7 +496,12 @@ class SupervisorIndicatorHandler(StatusLineHandlerBase):
         try:
             data: Any = json.loads(status_path.read_text())
         except (OSError, ValueError) as e:
-            logger.debug("Failed to read supervisor status file %s: %s", status_path, e)
+            log_and_continue(
+                logger,
+                e,
+                reason="an unreadable supervisor status file means no state (None); status-line segments fail silent by contract: an unexpected error omits the segment rather than showing a misleading one",
+                level=logging.DEBUG,
+            )
             return None
         if not isinstance(data, dict):
             return None
@@ -498,7 +524,12 @@ class SupervisorIndicatorHandler(StatusLineHandlerBase):
         try:
             raw = cmdline_path.read_bytes()
         except OSError as e:
-            logger.debug("Failed to read cmdline for pid %s: %s", pid, e)
+            log_and_continue(
+                logger,
+                e,
+                reason="a process cmdline that cannot be read is not matched as the supervisor (None)",
+                level=logging.DEBUG,
+            )
             return None
         return raw.decode(errors="replace").replace("\x00", " ")
 
@@ -514,7 +545,12 @@ class SupervisorIndicatorHandler(StatusLineHandlerBase):
         try:
             state: _SupervisorState | None = self._detect_state()
         except Exception as e:
-            logger.debug("Failed to detect supervisor state for explain_segment: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="status-line segments fail silent by contract: an unexpected error omits the segment rather than showing a misleading one",
+                level=logging.DEBUG,
+            )
             state = None
 
         if state is None:

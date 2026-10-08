@@ -60,6 +60,7 @@ from claude_code_hooks_daemon.utils import (
     shell_expansion,
 )
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     resolve_project_root,
@@ -657,10 +658,11 @@ def _parse_python_fragment(content: str) -> ast.Module | None:
         try:
             return ast.parse(attempt)
         except (SyntaxError, ValueError) as exc:
-            logger.debug(
-                "secret_file_guard: fragment parse attempt failed, trying next "
-                "recovery shape: %s",
+            log_and_continue(
+                logger,
                 exc,
+                reason="this recovery shape does not parse, so the next recovery shape is tried; only when all fail does the regex fallback apply",
+                level=logging.DEBUG,
             )
             continue
     wrapped = "def _f():\n" + textwrap.indent(content, "    ")
@@ -668,10 +670,10 @@ def _parse_python_fragment(content: str) -> ast.Module | None:
     try:
         tree = ast.parse(wrapped)
     except (SyntaxError, ValueError) as exc:
-        logger.warning(
-            "secret_file_guard: fragment is not parseable Python after all "
-            "recovery attempts; falling back to the regex heuristic: %s",
+        log_and_continue(
+            logger,
             exc,
+            reason="the fragment is not parseable Python even after every recovery shape, so the guard falls back to its regex heuristic; detection continues, less precisely",
         )
         tree = None
     return tree
@@ -1334,8 +1336,13 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                 literal = sfm.find_protected_mention_strict(
                     command, self._patterns(), raw_cwd if isinstance(raw_cwd, str) else None
                 )
-            except Exception:
-                logger.exception("secret_file_guard: the literal re-check raised")
+            except Exception as exc:
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason="the literal re-check is a second opinion on a scan that already gave up; if it raises too, the not-judged advisory is still returned, so the command is reported unjudged",
+                    level=logging.ERROR,
+                )
                 literal = None
             if literal is not None:
                 return (literal, literal, "bash")

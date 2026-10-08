@@ -31,6 +31,7 @@ from claude_code_hooks_daemon.docs_qa.types import (
 )
 from claude_code_hooks_daemon.remote_docs.provenance import parse_provenance
 from claude_code_hooks_daemon.utils.authored_paths import authored_path
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.fake_values import (
     REGISTRY_RELATIVE_PATH,
     FakeValuesError,
@@ -133,7 +134,15 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
         except (OSError, UnicodeDecodeError) as exc:
             # One unreadable document must not abort the whole sweep, and must
             # not read as a clean one: it is reported as a finding of its own.
-            logger.warning("unlisted-fake-value: cannot read %s: %s", rel_path, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    f"unreadable document {rel_path} is skipped so one bad file cannot abort "
+                    "the sweep; it is reported as a finding of its own, never read as clean"
+                ),
+                level=logging.WARNING,
+            )
             findings.append(_unreadable_finding(rel_path, exc))
             continue
         findings.extend(_findings_for(rel_path, content, registry))

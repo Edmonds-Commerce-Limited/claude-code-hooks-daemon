@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import ConfigKey, Timeout
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
 
 logger = logging.getLogger(__name__)
@@ -117,7 +118,12 @@ def project_root_is_daemon_repo(project_root: Path) -> bool:
         with pyproject.open("rb") as fh:
             data = tomllib.load(fh)
     except (OSError, tomllib.TOMLDecodeError) as e:
-        logger.debug("Failed to parse %s for daemon-repo detection: %s", pyproject, e)
+        log_and_continue(
+            logger,
+            e,
+            reason="an unparseable or unreadable pyproject.toml means 'not the daemon repository' (False); detection then takes the client-install layout",
+            level=logging.DEBUG,
+        )
         return False
     project_table = data.get("project")
     if not isinstance(project_table, dict):
@@ -145,10 +151,20 @@ def load_config_safe(project_root: Path) -> dict[str, Any] | None:
             result: dict[str, Any] | None = yaml.safe_load(f)
             return result
     except (OSError, PermissionError, yaml.YAMLError) as e:
-        logger.debug("Failed to load config from %s: %s", config_file, e)
+        log_and_continue(
+            logger,
+            e,
+            reason="an unreadable or invalid config file is treated as absent (None) and the caller falls back to defaults; the config validator reports config problems on its own path",
+            level=logging.DEBUG,
+        )
         return None
     except Exception as e:
-        logger.error("Unexpected error loading config %s: %s", config_file, e, exc_info=True)
+        log_and_continue(
+            logger,
+            e,
+            reason="an unexpected error loading the config is treated as absent (None) and the caller falls back to defaults; it is logged at ERROR so a persistent cause is visible",
+            level=logging.ERROR,
+        )
         return None
 
 

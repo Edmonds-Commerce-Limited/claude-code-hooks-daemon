@@ -30,6 +30,7 @@ from claude_code_hooks_daemon.pseudo_events.registry import (
     enabled_pseudo_event_handler_classes,
 )
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
 
 if TYPE_CHECKING:
@@ -329,7 +330,11 @@ class PlaybookGenerator:
                                 "Collected %d tests from %s", len(tests), handler_class_name
                             )
                 except Exception as e:
-                    logger.warning("Failed to get tests from %s: %s", handler_class_name, e)
+                    log_and_continue(
+                        logger,
+                        e,
+                        reason=f"a handler {handler_class_name} whose acceptance tests cannot be built is left out of the playbook; the other handlers' tests must still be generated",
+                    )
 
         # Collect from pseudo-event handlers. Read through the shared registry
         # so a new pseudo-event reaches this generator, the docs generator and
@@ -358,10 +363,10 @@ class PlaybookGenerator:
                             handler_class.__name__,
                         )
                 except Exception as e:
-                    logger.warning(
-                        "Failed to get tests from pseudo-event handler %s: %s",
-                        handler_class.__name__,
+                    log_and_continue(
+                        logger,
                         e,
+                        reason=f"a pseudo-event handler {handler_class.__name__} whose acceptance tests cannot be built is left out of the playbook; the other handlers' tests must still be generated",
                     )
 
         # Collect from plugin handlers
@@ -378,8 +383,10 @@ class PlaybookGenerator:
                         )
                         logger.debug("Collected %d tests from plugin %s", len(tests), handler_name)
             except Exception as e:
-                logger.warning(
-                    "Failed to get tests from plugin %s: %s", plugin_handler.__class__.__name__, e
+                log_and_continue(
+                    logger,
+                    e,
+                    reason=f"a plugin handler {plugin_handler.__class__.__name__} whose acceptance tests cannot be built is left out of the playbook; the other handlers' tests must still be generated",
                 )
 
         # Collect from project handlers
@@ -407,10 +414,10 @@ class PlaybookGenerator:
                             handler_name,
                         )
             except Exception as e:
-                logger.warning(
-                    "Failed to get tests from project handler %s: %s",
-                    project_handler.__class__.__name__,
+                log_and_continue(
+                    logger,
                     e,
+                    reason=f"a project handler {project_handler.__class__.__name__} whose acceptance tests cannot be built is left out of the playbook; the other handlers' tests must still be generated",
                 )
 
         # Sort by priority (lower = higher precedence)

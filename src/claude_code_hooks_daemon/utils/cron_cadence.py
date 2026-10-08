@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.constants.permissions import FileMode
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
@@ -90,7 +91,11 @@ def write_cadence(path: Path, state: CadenceState) -> bool:
         tmp_path.replace(path)
         return True
     except OSError as e:
-        logger.warning("cron_cadence: failed to write %s: %s", path, e)
+        log_and_continue(
+            logger,
+            e,
+            reason=f"an unwritable cadence record {path} is reported to the caller as False (not written); the record only tunes tick frequency, so the session proceeds at the default cadence",
+        )
         return False
 
 
@@ -108,7 +113,12 @@ def read_cadence(path: Path) -> CadenceState | None:
     except FileNotFoundError:
         return None
     except (OSError, json.JSONDecodeError) as e:
-        logger.debug("cron_cadence: unreadable %s: %s", path, e)
+        log_and_continue(
+            logger,
+            e,
+            reason=f"an unreadable or corrupt cadence record {path} reads as no record (None), so ticks run at the default cadence instead of failing",
+            level=logging.DEBUG,
+        )
         return None
     if not isinstance(raw, dict):
         return None
@@ -141,7 +151,12 @@ def reset_cadence(path: Path) -> None:
     except FileNotFoundError:
         return
     except OSError as e:
-        logger.debug("cron_cadence: failed to clear %s: %s", path, e)
+        log_and_continue(
+            logger,
+            e,
+            reason=f"a cadence record {path} that cannot be cleared keeps the backed-off cadence until the next reset or expiry; no caller has anything else to do",
+            level=logging.DEBUG,
+        )
 
 
 def next_tick_decision(state: CadenceState | None, *, session_id: str) -> tuple[bool, CadenceState]:

@@ -35,6 +35,7 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.commit_location import commit_runs_in_foreign_repo
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
     CommitReading,
     is_git_commit,
@@ -154,7 +155,12 @@ class RemoteDocsCommitGateHandler(PreToolUseHandlerBase):
             except (OSError, UnicodeDecodeError) as exc:
                 # Staged-but-absent (a race, or a path we cannot decode) is
                 # not evidence of a missing source; say nothing about it.
-                logger.debug("remote-docs commit gate skipped %s: %s", relpath, exc)
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason="a staged file that is absent or undecodable is not evidence of a missing source, so it is skipped without a finding",
+                    level=logging.DEBUG,
+                )
                 continue
             result = parse_provenance(content)
             if result.provenance is not None:

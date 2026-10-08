@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.daemon.source_fingerprint import (
 )
 from claude_code_hooks_daemon.daemon.verdict_log import append_verdicts
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.protected_file_index import IndexPrewarmer
 
 if TYPE_CHECKING:
@@ -483,7 +484,15 @@ class DaemonController:
         try:
             return compute_daemon_identity_fingerprint(*extra_roots)
         except OSError as exc:
-            logger.error("Could not compute source fingerprint (daemon continues): %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    "Could not compute source fingerprint; the fingerprint is only a "
+                    "staleness hint, so the daemon continues without one"
+                ),
+                level=logging.ERROR,
+            )
             return None
 
     def _sync_agent_assets(self, workspace_root: Path, config_path: Path) -> None:
@@ -499,9 +508,13 @@ class DaemonController:
             # invalid config the degraded-mode path already reports
             # (pydantic ValidationError is a ValueError), or a non-Path
             # workspace_root in a mocked unit-test initialise (TypeError) must
-            # not stop the daemon serving hooks. The failure is logged loudly
-            # at ERROR — never swallowed.
-            logger.error("Agent-asset sync failed (daemon continues): %s", exc)
+            # not stop the daemon serving hooks.
+            log_and_continue(
+                logger,
+                exc,
+                reason="a failed agent-asset sync leaves .claude/agents/ as it was; the daemon must keep serving hooks (fail-open startup contract) and the next restart retries",
+                level=logging.ERROR,
+            )
         for message in messages:
             logger.info("Agent assets: %s", message)
 
@@ -519,7 +532,12 @@ class DaemonController:
             # .claude/rules/ (OSError), an invalid config (ValueError), or a
             # non-Path workspace_root in a mocked unit-test initialise
             # (TypeError) must not stop the daemon serving hooks.
-            logger.error("Directory-role-rules sync failed (daemon continues): %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="a failed directory-role-rules sync leaves .claude/rules/ as it was; the daemon must keep serving hooks (fail-open startup contract) and the next restart retries",
+                level=logging.ERROR,
+            )
         for message in messages:
             logger.info("Directory-role rules: %s", message)
 
@@ -741,10 +759,10 @@ class DaemonController:
                 loaded_count=len(discovery.handlers),
             )
         except RuntimeError as exc:
-            logger.warning(
-                "Could not persist project-handler health state "
-                "(observability only, load unaffected): %s",
+            log_and_continue(
+                logger,
                 exc,
+                reason="the project-handler health file is observability only; the failures are already held in memory for the daemon's own health answer and the handlers' loading is unaffected",
             )
 
     def _register_pseudo_events(
@@ -773,8 +791,16 @@ class DaemonController:
         for name, pe_data in pseudo_events_config.items():
             try:
                 pe_config = PseudoEventConfig.from_dict(name, pe_data)
-            except ValueError:
-                logger.exception("Invalid pseudo-event config for %r, skipping", name)
+            except ValueError as exc:
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason=(
+                        f"Invalid pseudo-event config for {name!r}, skipping; one bad "
+                        "pseudo-event entry must not stop the others registering"
+                    ),
+                    level=logging.ERROR,
+                )
                 continue
 
             if not pe_config.enabled:
@@ -1196,9 +1222,17 @@ class DaemonController:
                 record_status_events=self._verdict_log_config.record_status_events,
             )
         except RuntimeError as e:
-            logger.warning("Skipping verdict log (no project context): %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="without a project context there is nowhere to write the verdict log, so this dispatch's verdicts are not recorded; the hook result itself is unaffected",
+            )
         except OSError as e:
-            logger.warning("Failed to write verdict log: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="an unwritable verdict log loses only this dispatch's audit record; the hook result is already decided and must still be returned",
+            )
 
     def process_request(
         self, request_data: dict[str, Any], *, arrival_time: float | None = None

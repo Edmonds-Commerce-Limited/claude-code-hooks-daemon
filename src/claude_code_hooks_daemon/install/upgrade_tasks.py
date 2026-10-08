@@ -43,6 +43,7 @@ from claude_code_hooks_daemon.install.upgrade_guides import (
     default_upgrades_dir,
 )
 from claude_code_hooks_daemon.install.version_parse import strip_tag_prefix
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 logger = logging.getLogger(__name__)
@@ -328,7 +329,12 @@ def _trusted_dirs(candidates: list[str] | None = None) -> list[str]:
             # not every one of them on this host. Logged so a genuinely
             # unexpected stat failure (permissions, not absence) is still
             # visible, rather than indistinguishable from "not on this OS".
-            logger.debug("_trusted_dirs: %s unavailable (%s)", candidate, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"a trusted-path candidate {candidate} that cannot be stat-ed is left out of the trusted set, which only narrows what the upgrade trusts; absence is expected on most hosts",
+                level=logging.DEBUG,
+            )
             continue
         if _dir_trust_from_stat(info):
             trusted.append(candidate)

@@ -57,6 +57,7 @@ from typing import Any, Final
 
 from claude_code_hooks_daemon.utils.claude_config import claude_config_dir
 from claude_code_hooks_daemon.utils.claude_plugins import resolve_enabled_plugins
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.markdown_format import parse_frontmatter_lenient
 
 # Review m5: resolve_lookup_root now lives in path_exclusion.py next to
@@ -202,7 +203,12 @@ def _find_agent_file(agents_dir: Path, agent_type: str) -> tuple[Path, dict[str,
         try:
             content = path.read_text()
         except OSError as exc:
-            _LOGGER.debug("subagent_tool_resolution: cannot read %s: %s", path, exc)
+            log_and_continue(
+                _LOGGER,
+                exc,
+                reason=f"an unreadable agent file {path} cannot be the match, so the search moves on to the next file; an agent whose file is never found resolves as unknown (None)",
+                level=logging.DEBUG,
+            )
             continue
         frontmatter = parse_frontmatter_lenient(content)
         if frontmatter is not None and frontmatter.get(_NAME_FIELD) == agent_type:

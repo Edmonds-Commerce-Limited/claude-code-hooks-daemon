@@ -49,6 +49,7 @@ from claude_code_hooks_daemon.utils.ccy_supervisor import (
     armed_supervisor_live,
     supervisor_relevance,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.session_action_items import collect_session_action_items
 from claude_code_hooks_daemon.utils.session_actions_signal import (
     clear_session_actions_signal,
@@ -94,7 +95,12 @@ class SessionActionsDirectiveHandler(SessionStartHandlerBase):
         try:
             return ProjectContext.project_root()
         except RuntimeError as exc:
-            logger.debug("session_actions_directive: no project root: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="no project root resolves, so there is nowhere to publish the directive (None)",
+                level=logging.DEBUG,
+            )
             return None
 
     @staticmethod
@@ -159,10 +165,15 @@ class SessionActionsDirectiveHandler(SessionStartHandlerBase):
                 )
             else:
                 clear_session_actions_signal(untracked, session_id=session_id)
-        except Exception:
+        except Exception as exc:
             # Best-effort: a sensor that raised here would take every other
             # SessionStart handler's output down with it.
-            logger.exception("session_actions_directive: could not publish directive signal")
+            log_and_continue(
+                logger,
+                exc,
+                reason="publishing the directive signal is best-effort; a sensor that raised here would take every other SessionStart handler's output down with it",
+                level=logging.ERROR,
+            )
 
         return silent
 

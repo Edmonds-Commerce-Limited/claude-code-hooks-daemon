@@ -36,6 +36,7 @@ from dataclasses import dataclass
 from itertools import chain
 from pathlib import Path
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 logger = logging.getLogger(__name__)
@@ -110,7 +111,11 @@ def audit_untracked_permissions(
             mode = stat.S_IMODE(path.stat().st_mode)
         except OSError as exc:
             # Explicit: a vanished or unreadable entry is reported, never hidden.
-            logger.warning("permission audit: cannot stat %s: %s", path, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="a vanished or unreadable entry cannot be assessed, so it is skipped; the audit still reports every other entry and the skipped one is visible in this log",
+            )
             continue
         if mode & _GROUP_OTHER_WRITE:
             findings.append(PermissionFinding(path=path, mode=mode))
@@ -139,7 +144,11 @@ def tighten_permissions(findings: Iterable[PermissionFinding]) -> list[Path]:
         try:
             finding.path.chmod(finding.mode & ~_GROUP_AND_OTHER)
         except OSError as exc:
-            logger.warning("permission audit: cannot chmod %s: %s", finding.path, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="chmod failed on this entry so its mode stays unchanged; the remaining findings are still fixed and the unfixed entry is reported again by the next audit",
+            )
             continue
         changed.append(finding.path)
     return changed

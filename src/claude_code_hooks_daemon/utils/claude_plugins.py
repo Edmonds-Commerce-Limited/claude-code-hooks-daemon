@@ -48,6 +48,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.utils.claude_config import claude_config_dir
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.markdown_format import parse_frontmatter_lenient
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 
@@ -755,10 +756,10 @@ def _read_text(path: Path) -> str | None:
     try:
         text = path.read_text(encoding="utf-8").strip()
     except (OSError, UnicodeDecodeError) as exc:
-        logger.warning(
-            "claude_plugins: cannot read %s (%s); treating this checkout as its own root",
-            path,
+        log_and_continue(
+            logger,
             exc,
+            reason=f"cannot read {path}, so the resolver treats this checkout as its own root (None), the safe default for a plugin lookup that must still answer",
         )
         text = None
     return text
@@ -774,6 +775,11 @@ def _read_json_object(path: Path) -> dict[str, Any] | None:
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         # A missing or broken Claude Code file is a normal state for a
         # resolver that must answer anyway: logged, then treated as absent.
-        logger.debug("claude_plugins: cannot read %s: %s", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a missing or broken Claude Code file {path} is a normal state for a resolver that must answer anyway, so it is treated as absent (None)",
+            level=logging.DEBUG,
+        )
         loaded = None
     return loaded if isinstance(loaded, dict) else None

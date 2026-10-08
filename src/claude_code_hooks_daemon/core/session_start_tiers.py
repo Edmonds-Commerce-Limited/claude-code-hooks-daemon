@@ -37,6 +37,8 @@ import logging
 from enum import StrEnum
 from typing import Final
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+
 logger = logging.getLogger(__name__)
 
 #: The method name a handler implements to opt into ACTION_REQUIRED. Named
@@ -167,10 +169,16 @@ def compute_tier(handler: object) -> SessionTier:
         verify = getattr(handler, _VERIFY_METHOD_NAME)
         try:
             still_needed = verify()
-        except Exception:
-            logger.exception(
-                "SessionStart verifier for %s raised; degrading to declared tier",
-                getattr(handler, "name", type(handler).__name__),
+        except Exception as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    f"SessionStart verifier for {getattr(handler, 'name', type(handler).__name__)}"
+                    " raised; the handler degrades to its declared tier rather than failing "
+                    "session start"
+                ),
+                level=logging.ERROR,
             )
         else:
             if still_needed:

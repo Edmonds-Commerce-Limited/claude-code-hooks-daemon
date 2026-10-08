@@ -23,6 +23,7 @@ from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils import git_sync
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
     HEADS_PREFIX,
     branch_ref,
@@ -125,7 +126,12 @@ class BranchCountAdvisorHandler(SessionStartHandlerBase):
                 try:
                     behind = self._behind(root, base, branch)
                 except ValueError as exc:
-                    logger.debug("branch_count_advisor: skipping %s: %s", branch, exc)
+                    log_and_continue(
+                        logger,
+                        exc,
+                        reason="a branch whose behind-count cannot be computed is left out of the advice; the advisory lists the other branches",
+                        level=logging.DEBUG,
+                    )
                     continue
                 if behind > self._behind_main_threshold:
                     stale.append((branch, behind))

@@ -32,6 +32,7 @@ from claude_code_hooks_daemon.utils.claude_plugins import (
     PluginInventory,
     PluginSkill,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.markdown_format import split_frontmatter
 
 logger = logging.getLogger(__name__)
@@ -124,7 +125,12 @@ def _first_body_line(skill: PluginSkill) -> str:
         content = skill.path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         # Unreadable here means Claude Code cannot list a description either.
-        logger.debug("plugin_costs: cannot read %s: %s", skill.path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a skill file {skill.path} that cannot be read contributes an empty description, matching what Claude Code itself can list for it",
+            level=logging.DEBUG,
+        )
         content = ""
     _frontmatter, body = split_frontmatter(content)
     return next((line.strip() for line in body.splitlines() if line.strip()), "")

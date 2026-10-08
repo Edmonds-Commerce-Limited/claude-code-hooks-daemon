@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 
 _LOGGER = logging.getLogger(__name__)
@@ -95,7 +96,12 @@ def read_message_files(command: str, cwd: str | None) -> list[MessageFile]:
             # unlinked between the check above and this line. Letting that
             # escape takes the calling guard down with it -- which is a guard
             # that silently stops applying, or one that denies legitimate work.
-            _LOGGER.debug("Skipping unreadable message file %s: %s", path, failure)
+            log_and_continue(
+                _LOGGER,
+                failure,
+                reason=f"an unreadable message file {path} is skipped so the calling guard still judges the files it can read, instead of failing outright",
+                level=logging.DEBUG,
+            )
             continue
         found.append(
             MessageFile(path=path, text=raw_bytes.decode(_ENCODING, errors=_DECODE_ERRORS))
