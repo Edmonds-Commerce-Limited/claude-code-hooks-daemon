@@ -1,6 +1,6 @@
 # Plan 00487: Supervisor plugin API and the ccy restart plugin
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-03
 **Owner**: dev
 **Priority**: High
@@ -82,14 +82,14 @@ The agent's rulings on ordering, plugin location and restart policy, made while 
   - each Notify kind has a per-process lifetime cap, logged once when reached (`test_session_notices.py`);
   - the RESTART_SOON and RESTARTED sentences no longer claim a newer Claude Code (a restart can be for session age); the unused `state_root` parameter of `PluginHost` is removed.
 
-- [x] ✅ **Task 1.4**: Moved to [Plan 00489](../00489-supervisor-in-container-restart-primitive/PLAN.md) by owner decision D2. Original scope, for reference: TDD the in-container `Restart` primitive, which the credential switch needs. It is not on this plan's critical path:
+- [x] ✅ **Task 1.4**: Moved to [Plan 00489](../../00489-supervisor-in-container-restart-primitive/PLAN.md) by owner decision D2. Original scope, for reference: TDD the in-container `Restart` primitive, which the credential switch needs. It is not on this plan's critical path:
 
   - refuse when the session id is ambiguous;
   - `/exit` through the injection path, with a deadline;
   - re-fork with `--resume <id>`, after stripping `--continue`, `-c`, `--resume`, `-r` and `--fork-session`;
   - abandon the restart if the child ignores `/exit`.
 
-- [x] ✅ **Task 1.5**: Moved to [Plan 00489](../00489-supervisor-in-container-restart-primitive/PLAN.md) by owner decision D2. Original scope: TDD the host half: `before_spawn` runs in the forked child, behind the `env_keys` allowlist and the denylist, with a close-on-exec result pipe and a `SIGKILL` deadline. If it fails, the supervisor falls back to a plain respawn.
+- [x] ✅ **Task 1.5**: Moved to [Plan 00489](../../00489-supervisor-in-container-restart-primitive/PLAN.md) by owner decision D2. Original scope: TDD the host half: `before_spawn` runs in the forked child, behind the `env_keys` allowlist and the denylist, with a close-on-exec result pipe and a `SIGKILL` deadline. If it fails, the supervisor falls back to a plain respawn.
 
 - [x] ✅ **Task 1.6**: TDD the uniform failure path and the plugin notice family. Built; [report](subagent-reports/261003-phase-1-tasks-1.2-1.3-1.3b-1.6-implementation-sonnet.md):
 
@@ -125,9 +125,10 @@ The agent's rulings on ordering, plugin location and restart policy, made while 
   fedora-desktop plugin with a thin supervisor dependency (see D11), so they pass to fedora-desktop with the Task
   3.2 comment. Every supervisor-side step passed, so this task is done for this
   repository, and the plugin API ships as beta.
-- [ ] ⬜ **Task 3.2**: Comment the outcome on #71 and fedora-desktop#61, using "Addresses" wording. Posted after
+- [x] ✅ **Task 3.2**: Comment the outcome on #71 and fedora-desktop#61, using "Addresses" wording. Posted after
   the release, so it names the version: the plugin API is beta, the three launcher steps are fedora-desktop's to
-  run, and hooks-daemon problems are filed as issues on this repository (D11).
+  run, and hooks-daemon problems are filed as issues on this repository (D11). Done: v3.69.0 comments on #71
+  (issuecomment-6070280790) and fedora-desktop#61 (issuecomment-6070281584).
 
 ## Success Criteria
 
