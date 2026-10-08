@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/mods/api
-fetched_at: '2026-10-06T09:55:18.768852+00:00'
+fetched_at: '2026-10-08T00:22:44.318337+00:00'
 fidelity: converted
-source_sha256: 46654ff407a87dcb886e19eef19070c751200f4b6d1c2a7fbfab9989d4620975
+source_sha256: 44a4fc9b383513b9a368e70c5c1b12f70a62852190c38b2c07a9a9288a23eb97
 licence: unreviewed
-stale_after: '2027-01-04'
+stale_after: '2027-01-06'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -74,6 +74,10 @@ on('tool.call', { tool: 'mcp__my-mod__ticket' }, async ($, e) => {
 ```
 
 When you ask about a ticket, Claude can call `mcp__my-mod__ticket` with its id. The second hook fetches the ticket and returns the response body, which Claude reads as the tool's result. When the server answers with an error status, Claude reads `Lookup failed with status` and the number.
+
+<Tip>
+  When [MCP tool search](/docs/en/mcp#scale-with-mcp-tool-search) defers a registered tool, Claude sees its name but not its description until it searches for it. If Claude should consider the tool on every turn, add [`isDeferred: false`](/docs/en/plugins/mods/reference#tools) to the registration to [load the full tool upfront](/docs/en/mcp#exempt-a-server-from-deferral). The field requires Claude Code v2.1.293 or later, and earlier versions ignore it.
+</Tip>
 
 ## Call a model
 

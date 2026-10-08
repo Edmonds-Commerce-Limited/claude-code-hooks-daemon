@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/mods/reference
-fetched_at: '2026-10-06T09:53:27.725972+00:00'
+fetched_at: '2026-10-08T00:22:46.574743+00:00'
 fidelity: converted
-source_sha256: da4f6d5fb2164519e2a9ca0dab3c4a6fa241acc18e184797cd238a6d90bfd295
+source_sha256: c56dbe30b19b907ae94f70dd5296c339b66ae79315331a6fb92afd582cb45eb8
 licence: unreviewed
-stale_after: '2027-01-04'
+stale_after: '2027-01-06'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -16,7 +16,7 @@ fetch_method: agent-browser-lite-headless (accept-markdown)
 
 > Complete reference for Claude Code mods: hooks module layout, events, mods API methods, render sites, elements by surface, limits, and settings.
 
-Look up any event a [mod](/docs/en/plugins/mods/overview) can handle, mods API method it can call, or render site it can draw in, for the Claude Code CLI and the Desktop app as of v2.1.289. Each entry gives the name and a one-line description, and links to the guide section that explains it where there is one.
+Look up any event a [mod](/docs/en/plugins/mods/overview) can handle, mods API method it can call, or render site it can draw in, for the Claude Code CLI and the Desktop app as of v2.1.290. Each entry gives the name and a one-line description, and links to the guide section that explains it where there is one.
 
 <Note>
   The complete reference is Claude Code's [TypeScript declarations for mods](https://github.com/anthropics/claude-code/blob/main/mods/types/claude-code.d.ts), which describe every event, method, and element, with examples. The copy on GitHub can be older than the Claude Code version you have installed. When the two disagree, trust [the copy Claude Code writes for your version](/docs/en/plugins/mods/create#get-the-types-for-your-build).
@@ -80,6 +80,7 @@ Prompt events cover the text the user types and the text Claude Code sends to Cl
 | [`prompt.section`](/docs/en/plugins/mods/events#rewrite-or-add-to-a-prompt) | Once for each named section of the system prompt. `e.name` is the section's `id` in `prompt.compose`. | `{ text }`, or `{ text: null }` to omit the section |
 | [`prompt.context`](/docs/en/plugins/mods/events#rewrite-or-add-to-a-prompt) | Once for each conversation, for the context sent with the first message | `{ blocks }` |
 | `prompt.attachment` | Claude Code adds a message of its own for Claude, such as a reminder. `e.type` names the kind, and for the kinds the types declare, `e.detail` holds the facts the text was written from. | `{ text }`, or `{ text: null }` to omit it |
+| `prompt.mention` | Claude Code is about to read a file that a prompt @-mentions. Requires Claude Code v2.1.290 or later. | `next({ ...e, path })` to read a different file, or `{ deny: reason }` |
 | [`skill.prompt`](/docs/en/plugins/mods/events#rewrite-or-add-to-a-prompt) | A skill's text is expanded for Claude | `{ text }` |
 | `attribution.text` | Claude Code composes commit or pull request attribution text | `{ text }` |
 
@@ -150,7 +151,7 @@ These events let a mod act on other mods as they load, to refuse one or change t
 | Event | Fires when | A hook can return |
 | :- | :- | :- |
 | [`plugin.register`](/docs/en/plugins/mods/admin#enforce-a-policy-with-a-mod-of-your-own) | A hooks module is about to load. `e.uses` lists its events, mods API calls, environment variables, and state, as `claude plugin validate` prints them. Each call is written without the `$.` prefix, such as `fs.read`. | `{ refuse: reason }` |
-| `engine.create` | The mods API is being built for this mod | A changed mods API, to add a namespace or withhold one |
+| `engine.create` | The mods API is being built for this mod | A changed mods API, to add a namespace. A mod outside the `user` [tier](#the-hook-function) can also withhold one. |
 
 ### Telemetry
 
@@ -221,8 +222,8 @@ A render site is an extension point in Claude Code's interface. Each row is a va
 To fit a tree to its site, read these props in the hook:
 
 * **Width of a `Pane` or the band**: draw to `e.props.bodyColumns`
-* **Height of a `Pane` beside the transcript**: where `e.props.placement` is `'dock'`, `e.props.scroll.bodyRows` is the number of rows the pane has
-* **Height of a `Pane` above the prompt**: where `e.props.placement` is `'inline'`, the pane grows with your tree up to a limit, and `bodyRows` counts only the rows showing now. The [`rows` field of `$.ui.open`](/docs/en/plugins/mods/interface#open-a-pane-at-the-right-time) asks for a different limit.
+* **Height of a `Pane` beside the transcript**: where `e.props.placement` is `'dock'`, `e.props.scroll.bodyRows` is the number of rows the pane has for your tree
+* **Height of a `Pane` above the prompt**: where `e.props.placement` is `'inline'`, the pane grows with your tree up to a limit, and `bodyRows` is that limit. The [`rows` field of `$.ui.open`](/docs/en/plugins/mods/interface#open-a-pane-at-the-right-time) asks for a different one.
 
 A tree taller than the pane scrolls as a whole.
 
@@ -232,12 +233,12 @@ Elements are the building blocks of a tree a `ui.render` hook returns, and you g
 
 | Element | Main props | Terminal | Desktop |
 | :- | :- | :-: | :-: |
-| [`Box`](/docs/en/plugins/mods/interface#build-a-tree-from-elements) | `key`, flex layout, `gap`, `padding`, `margin`, `width`, `height`, `borderStyle`, `backgroundColor`, `position`, `hover` | ✓ | ✓ |
+| [`Box`](/docs/en/plugins/mods/interface#build-a-tree-from-elements) | `key`, flex layout, `gap`, `padding`, `margin`, `width`, `height`, [`borderStyle`](#box-border-styles), `backgroundColor`, `position`, `hover` | ✓ | ✓ |
 | [`Text`](/docs/en/plugins/mods/interface#build-a-tree-from-elements) | `color`, `backgroundColor`, `bold`, `italic`, `underline`, `dimColor`, `inverse`, `wrap` | ✓ | ✓ |
 | [`Button`](/docs/en/plugins/mods/interface#respond-to-presses-and-typing) | `key`, `label`, `onPress`, `hotkey`, `plain`, `dimColor`, `autoFocus`, `action` | ✓ | ✓ |
 | `Link` | `href`, `label` | ✓ | ✓ |
-| `Code` | The code, up to 10,000 characters | ✓ | ✓ |
-| `Markdown` | `text`, up to 10,000 characters, `key`, `dimColor`, `onLinkPress`, `pressableLinks` | ✓ | ✓ |
+| `Code` | The code | ✓ | ✓ |
+| `Markdown` | `text`, `key`, `dimColor`, `onLinkPress`, `pressableLinks` | ✓ | ✓ |
 | [`Input`](/docs/en/plugins/mods/interface#take-typed-input-and-draw-a-row-for-each-item) | `key`, `label`, `placeholder`, `value`, `submitLabel`, `onSubmit`, `onInput`, `autoFocus` | ✓ | ✓ |
 | `Select` | `key`, `label`, `options`, `value`, `onSelect`, `autoFocus` | ✓ | ✓ |
 | `Svg` | An SVG document, up to 131,072 characters | | ✓ |
@@ -246,6 +247,27 @@ Elements are the building blocks of a tree a `ui.render` hook returns, and you g
 | `Image` | PNG or RGBA bytes up to 2 MiB, or a file path | ✓ | |
 
 More `Button` rules: `action` names one of Claude Code's own [keybinding actions](/docs/en/keybindings), and the user's binding for it presses the button when that binding is a chord or a modified key. A digit `hotkey` on a button in the band also fires when the user types that digit alone into an empty prompt and pauses. When two buttons in one drawing name the same `hotkey`, the later one gets it. `autoFocus` accepts only `true` on any control, so omit the prop to leave it off.
+
+<h3 id="box-border-styles">
+  `Box` border styles
+</h3>
+
+To draw a border around a `Box`, set its `borderStyle` to one of these names, as in `borderStyle: 'round'`. Each row says what the terminal draws for that name and shows the top edge of the border.
+
+| `borderStyle` | What the terminal draws | Top edge |
+| :- | :- | :- |
+| `'single'` | Thin lines with square corners | `┌──┐` |
+| `'double'` | Double lines | `╔══╗` |
+| `'round'` | Thin lines with rounded corners | `╭──╮` |
+| `'bold'` | Thick lines | `┏━━┓` |
+| `'singleDouble'` | Thin lines on the top and bottom, double lines on the sides | `╓──╖` |
+| `'doubleSingle'` | Double lines on the top and bottom, thin lines on the sides | `╒══╕` |
+| `'classic'` | The ASCII characters `+`, `-`, and `\|` | `+--+` |
+| `'arrow'` | Arrows that point into the `Box` | `↘↓↓↙` |
+| `'dashed'` | Dashed lines with blank corners | `╌╌` |
+| `'quote'` | A bar, `▎`, down the left side and blank cells on the other three sides | Blank |
+
+A `Box` whose `borderStyle` names anything else, such as `'rounded'`, draws with no border.
 
 ## Limits
 
@@ -259,7 +281,7 @@ Hooks and mods API calls run under time and size limits. Claude Code skips a hoo
 | `$.process.run` timeout | 30 seconds by default, 10 minutes at most |
 | `$.model.complete` `maxTokens` | 1024 by default, up to 64,000 or the model's output limit |
 | `$.fs.read` and `$.fs.write` | 4 MiB for one file |
-| One string child of a `Text` | 10,000 characters |
+| Text in one tree | The first 100,000 characters are drawn |
 | `$.store` | 4 MiB of JSON in total |
 | `$.session.messages()` | The newest 4,096 entries |
 | `$.ui.invalidate('ui.render')` redraws | Throttled to 10 a second, or 30 in the terminal for the visible pane, the expanded band, and the hint line under the prompt. Calls that come sooner are coalesced. |

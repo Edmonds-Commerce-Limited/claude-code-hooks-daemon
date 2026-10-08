@@ -1,11 +1,11 @@
 ---
 source_url: https://raw.githubusercontent.com/anthropics/claude-code/main/mods/types/claude-code.d.ts
-fetched_at: '2026-10-06T10:05:20.772482+00:00'
-fidelity: verbatim
+fetched_at: '2026-10-08T00:24:40.853087+00:00'
+fidelity: converted
 source_sha256: 8ae1244d19d4b393261605fe72d517b66be0d7e1c214c378cdec5107e8b0b46c
 licence: unreviewed
-stale_after: '2027-01-04'
-fetch_method: https-get
+stale_after: '2027-01-06'
+fetch_method: agent-browser-lite-headless (text)
 ---
 
 // Written by Claude Code 2.1.277.

@@ -1,10 +1,10 @@
 ---
 source_url: https://defence-before-fix.github.io/DETECTOR-SPEC.html
-fetched_at: 2026-09-15T11:37:07.792727+00:00
+fetched_at: '2026-10-08T00:24:26.739706+00:00'
 fidelity: converted
-source_sha256: 27de8f40380fa9448def102c05ae2d74d802ac3b0ec69aa6be25ba43556dffb9
+source_sha256: 10b35537c1d6b179e1fda75a9dee62e7b2cfdee1a7bbec98a0a245e353faa509
 licence: CC-BY-4.0
-stale_after: 2026-12-14
+stale_after: '2027-01-06'
 fetch_method: agent-browser-lite-headless (llms-link)
 ---
 
@@ -29,7 +29,7 @@ Edmonds Commerce. First published 22 February 2026.
 # Defence Before Fix: Detector Specification
 
 Version: 1.0.0, published 2026-09-08
-Companion to: the method specification, version 1.0.1, and the toolchain specification, version 0.2.0
+Companion to: the method specification, version 1.1.0, and the toolchain specification, version 0.2.0
 Author: Joseph Edmonds, Edmonds Commerce
 Coined: 22 February 2026, in the original article
 
@@ -461,8 +461,8 @@ Conform to the method specification on a Detector that Conforms to
 none of this, at the cost of building the missing mechanisms itself. This document exists so that it
 does not have to.
 
-Method specification 1.0.1, detector specification 1.0.0 and
-toolchain specification 0.2.0, published 8 September 2026. Source and history at
+Method specification 1.1.0, detector specification 1.0.0 and
+toolchain specification 0.2.0, published between 8 September and 2 October 2026. Source and history at
 github.com/Defence-Before-Fix.
 
 Defence Before Fix (DBF) was coined by Joseph Edmonds of

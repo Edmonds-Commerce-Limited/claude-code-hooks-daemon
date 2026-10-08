@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/mods/admin
-fetched_at: '2026-10-06T09:55:50.709261+00:00'
+fetched_at: '2026-10-08T00:23:45.323389+00:00'
 fidelity: converted
-source_sha256: 82cb03587626ab0e652bc66c47a0b8f403094212d292d9e7586f4106b65e0cff
+source_sha256: f4970cf8ab29ba67cf8c756b61f1c14ddfa9215f82307277b4f46e104ff4cd04
 licence: unreviewed
-stale_after: '2027-01-04'
+stale_after: '2027-01-06'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -117,7 +117,7 @@ You can see what a mod is able to do without running it. In your shell, run `cla
 claude plugin validate ./some-mod
 ```
 
-Two lines in the output describe the mod's code:
+The `hooks:` and `calls:` lines in the output describe the mod's code:
 
 ```text theme={null}
   ❯ ./register.js hooks: session.start, tool.call, ui.render{component=Pane}

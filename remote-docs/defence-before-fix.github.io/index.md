@@ -1,10 +1,10 @@
 ---
 source_url: https://defence-before-fix.github.io/
-fetched_at: 2026-09-15T11:37:10.154339+00:00
+fetched_at: '2026-10-08T00:22:54.447566+00:00'
 fidelity: converted
-source_sha256: 487f94c7996f15da009ac069e4db600e023497f69e241c6a634026b0582464bd
+source_sha256: 7b562047f977abe98b0dfa5ced06234c20e38ae3203c530e1b955faebf97ea2b
 licence: CC-BY-4.0
-stale_after: 2026-12-14
+stale_after: '2027-01-06'
 fetch_method: agent-browser-lite-headless (llms-link)
 ---
 
@@ -68,7 +68,7 @@ Version
 
 The method specification
 Normative. What a practitioner does when a defect is found.
-1.0.1
+1.1.0
 
 The detector specification
 What a tool that reads code must offer so that a rule can be written, proven, run and resolved in it.
@@ -137,8 +137,8 @@ Creative Commons Attribution 4.0 International.
 Coined by Joseph Edmonds of
 Edmonds Commerce. US spelling: Defense Before Fix.
 
-Method specification 1.0.1, detector specification 1.0.0 and
-toolchain specification 0.2.0, published 8 September 2026. Source and history at
+Method specification 1.1.0, detector specification 1.0.0 and
+toolchain specification 0.2.0, published between 8 September and 2 October 2026. Source and history at
 github.com/Defence-Before-Fix.
 
 Defence Before Fix (DBF) was coined by Joseph Edmonds of
