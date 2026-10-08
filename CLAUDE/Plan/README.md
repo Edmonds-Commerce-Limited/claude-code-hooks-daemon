@@ -311,11 +311,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 500 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 501 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 422 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 55 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 56 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
