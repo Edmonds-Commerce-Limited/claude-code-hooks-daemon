@@ -222,6 +222,10 @@ class PlanFactCheckState:
         path = self._path(folder, PENDING_SUFFIX)
         if not path.is_file():
             return None
+        return self._parse_pending(path)
+
+    def _parse_pending(self, path: Path) -> PendingFactCheck:
+        """Parse the pending record at ``path``; raises if it is corrupt."""
         data = self._read(path)
         files = data.get("files")
         if not isinstance(files, dict):
@@ -247,15 +251,38 @@ class PlanFactCheckState:
         """Drop the pending fact-check of ``folder`` (it has been delivered)."""
         self._path(folder, PENDING_SUFFIX).unlink(missing_ok=True)
 
-    def set_aside_pending(self, folder: str) -> Path:
+    def claim_pending(self, folder: str) -> Path:
+        """Take the owed record of ``folder`` for delivery and return where it now is.
+
+        The record is renamed to a name only the caller holds. A rename is atomic,
+        so of two events that both listed the record exactly one succeeds.
+
+        Raises:
+            FileNotFoundError: If the record is gone, because another event took it.
+        """
+        path = self._path(folder, PENDING_SUFFIX)
+        claimed = unique_temp_path(path)
+        path.replace(claimed)
+        return claimed
+
+    def read_claimed(self, claimed: Path) -> PendingFactCheck:
+        """The record held at ``claimed`` (from :meth:`claim_pending`).
+
+        Raises:
+            PlanFactCheckStateError: If the record is corrupt.
+        """
+        return self._parse_pending(claimed)
+
+    def set_aside_pending(self, folder: str, claimed: Path | None = None) -> Path:
         """Rename an unreadable pending record to ``<name>.unreadable`` and return its path.
 
         Renamed rather than deleted so the bytes stay inspectable; the new name
         no longer ends in the pending suffix, so it is never listed or re-read.
+        ``claimed`` is the record's current path when it was taken for delivery.
         """
         path = self._path(folder, PENDING_SUFFIX)
         aside = path.with_name(path.name + UNREADABLE_SUFFIX)
-        path.replace(aside)
+        (path if claimed is None else claimed).replace(aside)
         return aside
 
     def pending_folders(self) -> list[str]:
@@ -353,6 +380,10 @@ def deliver_pending(state: PlanFactCheckState) -> list[str]:
     content as checked (firing alone never does), drop the record, and return
     the rendered instruction.
 
+    Each record is first CLAIMED (:meth:`PlanFactCheckState.claim_pending`), so
+    two events that run at once cannot both deliver it: the one that loses the
+    claim finds the record gone and skips it.
+
     A record that cannot be read (corrupt, or written by an earlier build that
     stored no ``files``) is set aside by :meth:`PlanFactCheckState.set_aside_pending`
     with one WARNING, and delivery carries on with the next record.
@@ -360,17 +391,20 @@ def deliver_pending(state: PlanFactCheckState) -> list[str]:
     messages: list[str] = []
     for folder in state.pending_folders():
         try:
-            pending = state.read_pending(folder)
+            claimed = state.claim_pending(folder)
+        except FileNotFoundError:
+            logger.debug("plan_fact_check: %s was taken by another event", folder)
+            continue
+        try:
+            pending = state.read_claimed(claimed)
         except PlanFactCheckStateError as exc:
-            aside = state.set_aside_pending(folder)
+            aside = state.set_aside_pending(folder, claimed)
             logger.warning(
                 "plan_fact_check: set aside unreadable pending record as %s: %s", aside, exc
             )
             continue
-        if pending is None:
-            continue
         diff_path = state.write_diff(folder, pending.diff)
         state.record_checked(folder, pending.files)
-        state.clear_pending(folder)
+        claimed.unlink(missing_ok=True)
         messages.append(render_instruction(pending, diff_path))
     return messages
