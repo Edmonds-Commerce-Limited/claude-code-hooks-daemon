@@ -1414,6 +1414,37 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N378 — the `[awaiting-human]` marker is one project-wide file, cleared by any session's prompt
+
+**Source**: the Opus session-modes design review for Plan 00501 (2026-10-08,
+`untracked/agent-reports/261008-session-modes-design-opus.md`, findings F1–F3).
+
+**Evidence**: the marker is `untracked/human-input-blockage-marker.json` (`utils/blockage_marker.py:41`), one file
+for the project, so whichever session writes last wins. The suppressor clears it on any prompt that is not a
+`[tick:...]` cron tick (`classify_tick`), so the ccy supervisor's own typed `continue` or `/goal` lines (which start
+with `🤖 [ccy-supervisor`) count as the owner returning. The supervisor never reads the marker, and the existing
+`utils/human_presence.py` check is not used here. All three fail open: ticks are delivered when they need not be.
+
+**Status**: ⬜ Open, owner ruling 2026-10-08: fine to leave, because session modes (Plan 00501) may replace the
+marker with a per-session mode. Close it with 00501, or fix it alone if 00501 keeps the marker.
+
+### N377 — synthetic sessions still read the account's live usage in three more places
+
+**Source**: the v3.69.0 Step 8 gate. The account went over this host's usage ceiling mid-gate, and every synthetic
+session routed through the real chain was paused. Fixed for the playbook harness, `test_tool_use_error_recovery`,
+`test_full_qa_gate_is_never_deadlocked` and the dangerous-invocation corpus check by
+`utils/usage_pause.synthetic_session_exemption` (c2195729b).
+
+**Evidence**, still open:
+
+- `hooks-daemon probe` with a fresh session id is denied by `R-USAGE-PAUSE-TOOL` while the account is over the
+  ceiling (seen in the 3.69.0 manual test #353, which had to probe as the owner-overridden session).
+- Pause records for the synthetic ids `smoke-test-probe` and `socket-stdin-*` were left in
+  `untracked/context-sidecar/` during the gate. Their checks passed, but they read live usage and can fail the same
+  way.
+
+**Status**: ⬜ Open. Wrap each in `synthetic_session_exemption` (the probe CLI: for its own synthetic id only).
+
 ### N375 — the hook contract is audited at Claude Code 2.1.272 and the upstream hooks doc has changed since
 
 **Source**: v3.69.0 release Step 1c. `bin/hooks-daemon contract-status` returned CHANGED: recorded sha256 `0dc5622c…`
@@ -1488,6 +1519,12 @@ and `tests/unit/supervise/test_abandoned_input_flush.py::TestSuperviseEndToEndAb
 The scaling sweep now takes the minimum of CPU-time samples and the chain deadline tests use a manual clock (merge
 9a9d5e6f6, thresholds unchanged), but the sweep still failed once more under load (`host-command-guard`,
 `deep_bash_c_nesting`, 5/5 alone): CPU time per operation inflates on shared cores while three legs run at once.
+
+**More evidence** (the v3.69.0 Step 8 gate, host load about 20; each passed on `--resume` or alone):
+`tests/unit/core/test_router.py::TestEventRouter::test_route_passes_deadline_seconds_through_to_the_chain` (a
+2-second wall-clock poll for a straggler thread; it needs the manual clock `test_chain` now uses), the `[nesting]` sweep
+(`UpgradeApprovalGuardHandler` 25x for 8x input in-suite, 3 of 3 passes alone on py3.12), the `[.md]` deep-path
+sweep (`RemoteDocsProvenanceHandler` 73x for 8x) and `test_client_owned_asset_lint`'s 120-second shellcheck timeout.
 
 **Status**: Open. Run the performance sweeps outside the concurrent phase (their own serial shard or marker), and make
 the supervisor end-to-end test wait on its event rather than a fixed time. Never loosen a threshold.
