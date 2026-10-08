@@ -104,6 +104,24 @@ class TestSweep:
         (root / "guide.md").write_text(f"session {_UNLISTED}\n")
         assert _sweep(root) == []
 
+    def test_an_unreadable_document_is_a_finding_and_the_sweep_goes_on(
+        self, tmp_path: Path
+    ) -> None:
+        """N374: a document the sweep could not read must not look like a clean one."""
+        root = _project(tmp_path)
+        (root / "binary.md").write_bytes(b"\xff\xfe\x00 not utf-8 \xc3\x28")
+        (root / "guide.md").write_text(f"session {_UNLISTED}\n")
+
+        findings = _sweep(root)
+
+        unreadable = [f for f in findings if f.path == "binary.md"]
+        assert len(unreadable) == 1
+        assert unreadable[0].check_id == CHECK_ID
+        assert unreadable[0].severity is Severity.ADVISE
+        assert "could not be read" in unreadable[0].message
+        assert "binary.md" in unreadable[0].message
+        assert [f.path for f in findings if f.path != "binary.md"] == ["guide.md"]
+
     def test_a_malformed_registry_is_one_finding_about_the_registry(self, tmp_path: Path) -> None:
         root = _project(tmp_path, registry="kinds: [oops")
         (root / "guide.md").write_text(f"session {_UNLISTED}\n")
