@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00501: session focus mode](00501-session-focus-mode/PLAN.md) - Not Started, Medium (owner request: `hooks-daemon focus <task>` typed in a session switches off every work-driving distraction for that session only, via Plan 00498's autonomy gate; `hooks-daemon focus off` ends it; nothing persisted)
+
 - [00500: full qa timing and speed](00500-full-qa-timing-and-speed/PLAN.md) - In Progress, High (owner request: the full QA gate is too slow and restarts from the top after every reboot; record per-step and per-test timing, find the hot spots, add checkpoints so an interrupted gate resumes, then speed it up)
 
 - [00499: write-protected paths, and the ccy.env.local.dist template](00499-write-protected-paths-and-ccy-env-local-dist/PLAN.md) - In Progress, Low (owner rulings: `ccy.env.local` is written by IaC only, so agents may read it but never write it; a generic `write_protected_paths` guard for any project, and GitHub #88's tracked `ccy.env.local.dist` template with the corrected scope)
