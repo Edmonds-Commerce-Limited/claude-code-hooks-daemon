@@ -64,6 +64,14 @@ def _json_safe_value(value: Any) -> Any:
     return None if value is UNSET else value
 
 
+class ConfigYamlError(ValueError):
+    """A config file exists but is not a YAML mapping (malformed YAML, or another shape).
+
+    A :class:`ValueError` so existing callers keep working; a distinct type so the
+    CLI can give it an exit code of its own.
+    """
+
+
 def _load_yaml(path: Path) -> dict[str, Any]:
     """Load a YAML config file and return as dict.
 
@@ -81,10 +89,13 @@ def _load_yaml(path: Path) -> dict[str, Any]:
         raise FileNotFoundError(f"Config file not found: {path}")
 
     with path.open() as f:
-        data = yaml.safe_load(f)
+        try:
+            data = yaml.safe_load(f)
+        except yaml.YAMLError as exc:
+            raise ConfigYamlError(f"Config file is not valid YAML: {path}: {exc}") from exc
 
     if not isinstance(data, dict):
-        raise ValueError(f"Config file must contain a YAML dictionary: {path}")
+        raise ConfigYamlError(f"Config file must contain a YAML dictionary: {path}")
 
     return data
 
