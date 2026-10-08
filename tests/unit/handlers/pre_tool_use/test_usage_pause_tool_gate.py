@@ -141,6 +141,11 @@ class TestMetadata:
         assert text is not None
         assert "usage_pause_tool_gate" in text
 
+    def test_the_rule_gives_the_paste_ready_bang_form(self) -> None:
+        """The owner's override is typed in the session, so it carries Claude Code's ``!``."""
+        verbose = " ".join(UsagePauseToolGateHandler().get_rules()[0].verbose.split())
+        assert "! bin/hooks-daemon usage-pause clear" in verbose
+
 
 class TestToolSearchIsAllowed:
     """Plan 00479 C1: the cron tools are deferred, so ToolSearch must pass while paused."""

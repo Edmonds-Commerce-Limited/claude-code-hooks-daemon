@@ -80,14 +80,18 @@ logger = logging.getLogger(__name__)
 
 _RECOVERY_ADVISOR_EVENT: Final[str] = "post_tool_use"
 
-#: The command a human runs to lift a pause by hand (typed as `! <command>` in a session).
+#: The command a human runs to lift a pause by hand.
 CLEAR_COMMAND: Final[str] = "bin/hooks-daemon usage-pause clear"
+
+#: The same, paste-ready for the paused session's own prompt: Claude Code's `!`
+#: prefix runs it as a shell command there.
+CLEAR_IN_SESSION: Final[str] = f"! {CLEAR_COMMAND}"
 
 _RULE: Final[Rule] = Rule(
     rule_id=RuleID.USAGE_PAUSE_PROMPT,
     blocked="A prompt, cron tick or supervisor message while the session is paused on its usage ceiling",
     why="The session stopped taking on work to keep the account under its usage ceiling, and each prompt would cost a full model turn",
-    fix=f"Nothing to do -- the session resumes by itself at the window reset; a human can override it with `{CLEAR_COMMAND}` (run in a terminal)",
+    fix=f"Nothing to do -- the session resumes by itself at the window reset; a human can override it by typing `{CLEAR_IN_SESSION}` in the session",
     verbose=(
         "This session is PAUSED (Plan 00479): a usage window reached the ceiling\n"
         "configured for this host. The prompt was dropped before reaching the model,\n"
@@ -98,15 +102,15 @@ _RULE: Final[Rule] = Rule(
         "soon as this host has no ceiling (edit `hosts:` in .claude/hooks-daemon.yaml;\n"
         "the daemon reads it on its next config load) or every window is back under\n"
         "it or past its reset.\n\n"
-        "A human can also run:\n\n"
-        f"    {CLEAR_COMMAND}\n\n"
+        "A human can also type, in this session's prompt:\n\n"
+        f"    {CLEAR_IN_SESSION}\n\n"
         "It removes the pause record AND records an override that lasts until the\n"
         "latest reset among the windows over the ceiling (at most 8 days): while the\n"
         "override is valid no pause is started for this session, even though usage is\n"
         "still over the ceiling. It then ends by itself and the ceiling applies again.\n"
-        "Run it in a terminal; typing it in the session as `! <command>` may or may\n"
-        "not pass through the hooks (unverified). `usage-pause status` shows the\n"
-        "record. The record also expires on its own an hour after the resume time."
+        "The `!` makes Claude Code run it as a shell command; without it, run it in a\n"
+        "terminal at the project root. `usage-pause status` shows the record. The\n"
+        "record also expires on its own an hour after the resume time."
     ),
 )
 
@@ -273,8 +277,8 @@ class UsagePauseGateHandler(UserPromptSubmitHandlerBase):
             "still over, to stay paused and stop again (the resume cron stays in place). "
             "A tick before the resume time is dropped at no cost.\n\n"
             "The ceiling is re-checked on every held prompt, so the pause lifts by itself "
-            "when it no longer applies. A human can run "
-            f"`{CLEAR_COMMAND}` in a terminal: it removes the record and records an "
+            "when it no longer applies. A human can type "
+            f"`{CLEAR_IN_SESSION}` in the session: it removes the record and records an "
             "override until the latest reset among the windows over the ceiling (at most "
             "8 days), during which no pause is started for the session. "
             "No ceiling, no usage data or an unknown host never pauses anything."

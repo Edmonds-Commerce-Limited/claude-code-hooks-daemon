@@ -1,9 +1,9 @@
 """Tests for ``hooks-daemon usage-pause clear|status`` (Plan 00479 review C2b).
 
 The owner's escape from a usage pause: a held prompt can never lift it by itself
-when the ceiling is still reached, so a human runs ``bin/hooks-daemon usage-pause
-clear`` in a terminal. Whether a ``!``-prefixed command passes through the hooks is
-unverified, so the docs name the terminal.
+when the ceiling is still reached, so a human types ``! bin/hooks-daemon usage-pause
+clear`` in the paused session (Claude Code's ``!`` runs it as a shell command), or
+runs it without the ``!`` in a terminal.
 """
 
 from __future__ import annotations
