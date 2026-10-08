@@ -48,6 +48,11 @@ from claude_code_hooks_daemon.utils.deployed_version import (
     TRACKED_VERSION_DOC_REL_PATH,
     read_tracked_deployed_version,
 )
+from claude_code_hooks_daemon.utils.git_commit_parsing import git_invocations
+from claude_code_hooks_daemon.utils.git_invocation_directory import (
+    invocation_directory,
+    placement_problem,
+)
 from claude_code_hooks_daemon.utils.git_repo import GitRepo
 from claude_code_hooks_daemon.utils.merge_scope import (
     changed_path_is_or_is_under,
@@ -55,7 +60,23 @@ from claude_code_hooks_daemon.utils.merge_scope import (
     is_git_merge_pull_rebase_command,
 )
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
-from claude_code_hooks_daemon.utils.secret_file_matching import effective_cwds
+
+_MERGE_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"merge", "pull", "rebase"})
+
+
+def _merge_directory(command: str, cwd: str) -> Path:
+    """The directory the command's first merge/pull/rebase runs in.
+
+    That is ``cwd`` moved by the ``cd``/``pushd`` and ``git -C`` in effect AT
+    that invocation: a ``cd`` after it does not move it, and one before it that
+    returns to an earlier directory does (ledger 00483 N35). Where the directory
+    cannot be placed statically (``cd $DIR``) the session directory stands in.
+    """
+    start = Path(cwd)
+    run = next((r for r in git_invocations(command) if r.subcommand in _MERGE_SUBCOMMANDS), None)
+    if run is None or placement_problem(run) is not None:
+        return start
+    return invocation_directory(run, start)
 
 
 def _running_version() -> str:
@@ -192,10 +213,7 @@ class DaemonSyncAfterMergeHandler(PostToolUseHandlerBase):
         cwd_raw = hook_input.get(HookInputField.CWD)
         if not cwd_raw:
             return False
-        # The merge runs where the command's last literal `cd` leaves it, not
-        # where the session started (ledger 00483 N35).
-        cwds = effective_cwds(get_bash_command(hook_input) or "", cwd_raw)
-        repo = GitRepo.resolve_for(Path(cwds[-1] if cwds else cwd_raw))
+        repo = GitRepo.resolve_for(_merge_directory(get_bash_command(hook_input) or "", cwd_raw))
         return repo is not None and repo.root != project_root
 
     @staticmethod
