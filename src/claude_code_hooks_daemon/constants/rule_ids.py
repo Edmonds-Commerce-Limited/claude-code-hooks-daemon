@@ -532,6 +532,13 @@ class RuleID:
     LOCK_FILE_EDIT: str = "R-LOCK-FILE-EDIT"
 
     # ------------------------------------------------------------------
+    # write_protected_paths handler
+    # ------------------------------------------------------------------
+
+    #: A write, move onto, deletion or truncation of a path the project keeps read-only for agents.
+    WRITE_PROTECTED_PATH: str = "R-WRITE-PROTECTED-PATH"
+
+    # ------------------------------------------------------------------
     # write_clobber_guard handler
     # ------------------------------------------------------------------
 

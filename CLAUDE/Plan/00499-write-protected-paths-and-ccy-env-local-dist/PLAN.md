@@ -44,7 +44,7 @@ older local copy tells the agent to report it to a human, not to edit it.
 
 ### Phase 1: The guard
 
-- [ ] ⬜ **Task 1.1**: A PreToolUse handler `write_protected_paths`, off by default, with option `paths` (globs,
+- [x] ✅ **Task 1.1**: A PreToolUse handler `write_protected_paths`, off by default, with option `paths` (globs,
   repository-relative). It denies:
 
   - `Write`, `Edit` and `NotebookEdit` on a listed path;
@@ -55,13 +55,22 @@ older local copy tells the agent to report it to a human, not to edit it.
   wrapper sets `authored_only=True`, which drops `cp`/`mv`/`install`/`dd`. The scan already covers redirects
   (including `: >`), `tee`, heredoc redirects, `cp`/`mv`/`install` and `dd of=`. `sed -i`, `ln`, `rm` and `truncate`
   are new verbs to add. Fail closed on the scan's `unreadable` and `unresolved` results when the command names a
-  listed path. Reading is never denied. Tests first, through the real handler.
+  listed path. Reading is never denied. Tests first, through the real handler. Done: `write_protected_paths`
+  (`handlers/pre_tool_use/write_protected_paths.py`). The scan gained an opt-in `include_mutations` flag
+  (default off, so no existing caller's answer changes) reporting `sed -i`/`--in-place`, `ln`, `rm`, `truncate`
+  and the source of `mv`; a directory holding a listed file is protected too. An unresolved or unreadable result
+  is denied only when it visibly names a listed path. Tests: `tests/unit/core/test_bash_write_mutations.py`,
+  `tests/unit/handlers/pre_tool_use/test_write_protected_paths.py`.
 
-- [ ] ⬜ **Task 1.2**: Guidance (`get_claude_md()`), a rule ID and acceptance tests. The deny message says that the
-  file is maintained outside the agent (IaC or a human), and to ask the human for any change.
+- [x] ✅ **Task 1.2**: Guidance (`get_claude_md()`), a rule ID and acceptance tests. The deny message says that the
+  file is maintained outside the agent (IaC or a human), and to ask the human for any change. Done: rule
+  `R-WRITE-PROTECTED-PATH`, resident guidance, an allow acceptance probe, and the deny probe declared undrivable
+  (a live probe would write the real file were the handler not loaded); the deny is covered over temporary files.
 
-- [ ] ⬜ **Task 1.3**: Enable it in this repository with `paths: [".claude/ccy/ccy.env.local"]`, and add a
-  commented example to `.claude/hooks-daemon.yaml.example`.
+- [x] ✅ **Task 1.3**: Enable it in this repository with `paths: [".claude/ccy/ccy.env.local"]`, and add a
+  commented example to `.claude/hooks-daemon.yaml.example`. Done: enabled in `.claude/hooks-daemon.yaml`; the
+  example, `init_config`, HANDLER_REFERENCE entry, release-note callout 003 and the v3.70.0 config-changes
+  manifest are in. Takes effect after a daemon restart.
 
 ### Phase 2: #88, corrected
 

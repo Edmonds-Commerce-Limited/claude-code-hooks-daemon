@@ -140,6 +140,8 @@ class ConfigTemplate:
             "    host_command_guard: {enabled: true, priority: 10}  # Block docker host-root mounts, gh auth token; human only: non-PyPI pip index, crontab -r\n"
             "    curl_pipe_shell: {enabled: true, priority: 10}   # Block curl | bash patterns\n"
             "    lock_file_edit_blocker: {enabled: true, priority: 10}  # Block direct editing of package manager lock files\n"
+            # Plan 00499: opt-in; does nothing until `paths` lists repository-relative globs.
+            "    write_protected_paths: {enabled: false, priority: 10, options: {paths: []}}  # Paths agents may read but never write, move onto or delete\n"
             # On by default (Plan 00117): prefix-positive gate on AskUserQuestion
             # (Plan 00108) -- pausing the session is a privilege that must carry
             # a declared reason. Disable via enabled: false for fully unattended
