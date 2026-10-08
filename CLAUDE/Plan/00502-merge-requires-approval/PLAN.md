@@ -75,8 +75,10 @@ forge it?
 ### What exists to compare
 
 - Human `approve-merge <branch>`: writes a one-shot marker the merge command
-  consumes. It relies on the merging agent not running that CLI itself; the
-  human-only property is a convention plus the handler guard on the command.
+  consumes. Its human-only property is a convention only: no handler guards
+  the `approve-merge` command, the `merge-approvals` directory is unprotected,
+  and `cmd_approve_merge` makes no TTY check, so an agent can forge it today
+  (fact check, `subagent-reports/261008-plan-fact-check-sonnet.md`).
 - Upgrade approval (`approve-upgrade`): requires a TTY and a typed
   confirmation phrase, and an `upgrade_approval_guard`/agent-action rule denies
   an agent from running it or writing under `upgrade-approvals/`. That is a
@@ -90,8 +92,10 @@ forge it?
   Rejected: the merging agent can run it. Nothing proves a second, clean agent
   was involved.
 - **B. Marker written by the daemon at SubagentStop** (recommended). The daemon
-  already receives SubagentStart/SubagentStop with the sub-agent type, model and
-  final report. When a sub-agent whose type or model meets the configured
+  already receives SubagentStop with the sub-agent's `agent_id`, `agent_type`,
+  transcript path and final message, but NOT its model (neither Stop event
+  carries one; the model comes from the agent definition's declared `model`).
+  When a sub-agent whose type, or whose definition's declared model, meets the configured
   approver stops, the daemon (not the agent) inspects its final message for a
   machine-readable verdict line (for example `MERGE-APPROVAL: APPROVE <branch> <tip-sha>`), checks the branch and tip it names against git, and only
   then writes a marker under the daemon state directory. The merging agent
@@ -120,9 +124,11 @@ the configured reviewer on the branch, and re-merge. The handler never polls.
 Residual risk to state honestly in the docs: a merging agent that is also able
 to spawn the approver can ask it, but cannot make it say APPROVE; a hostile
 agent that instructs a sub-agent to lie is out of scope, exactly as for any
-agent-written verdict. The model check relies on the model reported in the
-SubagentStop event; if the event does not carry it, the task in Phase 2 falls
-back to the agent definition's declared model and records which source was used.
+agent-written verdict. The model check can only use the agent definition's
+declared `model` (resolved from `agent_type`), because SubagentStop carries no
+model: a dispatch that overrides the model at spawn time is not visible to the
+daemon. So `subagent: <name>` (a project agent whose definition pins its model)
+is the stronger form; `min_model` judges the declared model and the docs say so.
 
 ## Configuration shape
 
@@ -148,10 +154,10 @@ worktree:
 
 ### Migration from the old boolean key
 
-| Old config                                  | New effective config                    | Rationale                                                                                                                                                      |
-| ------------------------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| key absent or `false` (the shipped default) | agent approval, `min_model: opus`       | This is the new default. Previously no gate; the new default adds a review step. The upgrade names this change explicitly.                                     |
-| key `true`                                  | `approver: human` (unchanged behaviour) | A project that turned the human gate on chose it; it is neither weakened nor silently blocked. The upgrade offers `both` or `agent` as a suggested relaxation. |
+| Old config                                  | New effective config                        | Rationale                                                                                                                                                                                                                             |
+| ------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| key absent or `false` (the shipped default) | agent approval, `min_model: opus`           | This is the new default. Previously no gate; the new default adds a review step. The upgrade names this change explicitly.                                                                                                            |
+| key `true`                                  | `approver: human` (same gate, now enforced) | A project that turned the human gate on chose it; it is neither weakened nor silently blocked. Today an agent can forge that gate; after Tasks 2.3 and 4.1 it cannot. The upgrade offers `both` or `agent` as a suggested relaxation. |
 
 Notes the upgrade guide must carry: (1) the old key is deprecated and mapped as
 above; (2) projects that set `true` and find the human gate in the way are told
@@ -198,11 +204,12 @@ their plain meaning.
   time); rejects a verdict whose named tip is not the branch tip; rejects the
   merging agent's own id; under-qualified model or wrong sub-agent name.
 - [ ] ⬜ **Task 2.2**: Implement the SubagentStop recorder and the verdict-line
-  contract; resolve the model from the event, falling back to the agent
-  definition's declared model and recording the source.
-- [ ] ⬜ **Task 2.3**: Protect the marker path from agent writes (same family as
-  the `upgrade-approvals/` guard), with tests that a Write/Edit/Bash write to it
-  is denied.
+  contract; resolve the model from the agent definition named by `agent_type`
+  (SubagentStop has no model field) and record that source.
+- [ ] ⬜ **Task 2.3**: New guard (nothing protects these paths today): deny
+  agent writes to both the agent-approval and the `merge-approvals` marker
+  paths, and an agent running `approve-merge`, modelled on
+  `upgrade_approval_guard`, with tests that a Write/Edit/Bash write is denied.
 - [ ] ⬜ **Task 2.4**: Failing tests then implementation for invalidation: a new
   commit on the branch, a rebase or a different tip makes the record stale; the
   record is one-shot and consumed by the merge.
@@ -224,8 +231,9 @@ their plain meaning.
 ### Phase 4: CLI
 
 - [ ] ⬜ **Task 4.1**: `hooks-daemon approve-merge <branch>` becomes the human
-  step only (TTY-gated for `human` and `both`, consistent with the upgrade
-  gate's proof of a human); refuses with the reason when `both` has no valid
+  step only, with a new TTY gate and typed confirmation for `human` and `both`
+  (`cmd_approve_merge` has none today), consistent with the upgrade gate's
+  proof of a human; refuses with the reason when `both` has no valid
   agent record.
 - [ ] ⬜ **Task 4.2**: A read-only `hooks-daemon merge-approval-status <branch>`
   showing the record, whether it is valid for the current tip, and why not.
