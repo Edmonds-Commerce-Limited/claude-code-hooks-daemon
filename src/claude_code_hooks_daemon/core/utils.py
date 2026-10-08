@@ -228,6 +228,39 @@ def get_file_path(hook_input: dict[str, Any]) -> str | None:
     return cast("str", tool_input.get("file_path", ""))
 
 
+#: The tool-input fields a Grep call may name its target in (``file_path`` is
+#: accepted in place of ``path`` from Claude Code 2.1.292).
+GREP_TARGET_FIELDS: Final[tuple[str, ...]] = ("path", "file_path")
+
+
+def grep_targets(tool_input: Any) -> list[str]:
+    """Every distinct, non-empty target a Grep call names, ``path`` first.
+
+    The single reader of a Grep call's target: a handler that reads only
+    ``path`` misses a call that names its file in ``file_path``. When both are
+    present, both are returned so each can be judged.
+    """
+    if not isinstance(tool_input, dict):
+        return []
+    found: list[str] = []
+    for field in GREP_TARGET_FIELDS:
+        value = tool_input.get(field)
+        if isinstance(value, str) and value and value not in found:
+            found.append(value)
+    return found
+
+
+def grep_input_for(hook_input: dict[str, Any], target: str) -> dict[str, Any]:
+    """A copy of a Grep ``hook_input`` that names only ``target``, in ``path``."""
+    tool_input = hook_input.get(HookInputField.TOOL_INPUT)
+    kept = {
+        key: value
+        for key, value in (tool_input if isinstance(tool_input, dict) else {}).items()
+        if key not in GREP_TARGET_FIELDS
+    }
+    return {**hook_input, HookInputField.TOOL_INPUT: {**kept, "path": target}}
+
+
 def get_file_content(hook_input: dict[str, Any]) -> str | None:
     """Extract file content from hook input, or None if not Write/Edit.
 

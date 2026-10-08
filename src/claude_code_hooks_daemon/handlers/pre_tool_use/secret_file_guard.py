@@ -52,6 +52,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.core.utils import grep_input_for, grep_targets
 from claude_code_hooks_daemon.utils import (
     encrypted_at_rest,
     protected_file_index,
@@ -1249,6 +1250,8 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
         path_field = _PATH_FIELD_BY_TOOL.get(tool_name)
         path = str(tool_input.get(path_field, "")) if path_field else ""
+        if tool_name == ToolName.GREP:
+            path = "\0".join(grep_targets(tool_input))
         command = str(tool_input.get(_FIELD_COMMAND, ""))
         content = str(tool_input.get(_FIELD_CONTENT, "") or tool_input.get(_FIELD_NEW_STRING, ""))
         cwd = str(hook_input.get(HookInputField.CWD, ""))
@@ -1367,6 +1370,19 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         raw_cwd = hook_input.get(HookInputField.CWD)
         cwd = raw_cwd if isinstance(raw_cwd, str) else None
         patterns = self._patterns()
+
+        if tool_name == ToolName.GREP:
+            # A Grep names its target in `path` or `file_path`: judge each, as
+            # if it had been given in `path`.
+            targets = grep_targets(tool_input)
+            if len(targets) > 1:
+                for target in targets:
+                    found = self._evaluate(grep_input_for(hook_input, target))
+                    if found is not None:
+                        return found
+                return None
+            if targets:
+                tool_input = grep_input_for(hook_input, targets[0])[HookInputField.TOOL_INPUT]
 
         if tool_name == ToolName.BASH:
             # A quoted-delimiter heredoc body fed only to a TEXT reader (a

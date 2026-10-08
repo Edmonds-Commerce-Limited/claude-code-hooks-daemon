@@ -46,6 +46,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.core.utils import grep_targets
 from claude_code_hooks_daemon.handlers.utils.quarantine import quarantine_agent_relevance
 from claude_code_hooks_daemon.utils import protected_file_index, recursive_search, shell_expansion
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
@@ -290,24 +291,35 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
         path_field = _PATH_FIELD_BY_TOOL.get(str(tool_name or ""))
         if path_field is None:
             return None
+        if tool_name == ToolName.GREP:
+            # A Grep names its target in `path` or `file_path`: judge each.
+            for target in grep_targets(tool_input):
+                found = self._grep_target_pattern(target, patterns)
+                if found is not None:
+                    return found
+            return None
         path = str(tool_input.get(path_field, "") or "")
         if not path:
             return None
         for pattern in patterns:
             if sfm.path_is_protected(path, (pattern,)):
                 return pattern
-
-        if tool_name == ToolName.GREP:
-            # Directory-rooted content search (mirrors secret_file_guard): a
-            # Grep rooted at a directory containing a DETAIL artefact reads it
-            # without naming it.
-            if not path_is_dir(path, unreadable_means=False):
-                return None
-            index = self._index(patterns)
-            if index is None:
-                return _NOT_JUDGED_PATTERN
-            return index.find_under(path, view=TreeView.ALL)
         return None
+
+    def _grep_target_pattern(self, path: str, patterns: tuple[str, ...]) -> str | None:
+        """The quarantine glob one Grep target reaches (by name, or as a directory), else None."""
+        for pattern in patterns:
+            if sfm.path_is_protected(path, (pattern,)):
+                return pattern
+        # Directory-rooted content search (mirrors secret_file_guard): a Grep
+        # rooted at a directory containing a DETAIL artefact reads it without
+        # naming it.
+        if not path_is_dir(path, unreadable_means=False):
+            return None
+        index = self._index(patterns)
+        if index is None:
+            return _NOT_JUDGED_PATTERN
+        return index.find_under(path, view=TreeView.ALL)
 
     def _bash_mention(
         self,
