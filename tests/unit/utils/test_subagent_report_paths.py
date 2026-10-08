@@ -23,6 +23,7 @@ from claude_code_hooks_daemon.utils.subagent_report_paths import (
     find_persisted_report,
     report_filename,
     resolve_confined_report_dir,
+    sanitise_component,
     write_new_file_never_overwrite,
 )
 
@@ -51,6 +52,34 @@ class TestReportFilename:
         when = datetime(2026, 9, 24, 13, 45, 30, tzinfo=UTC)
         name = report_filename("", "agent-1", when=when)
         assert "unknown-agent-type" in name
+
+    def test_a_256_character_agent_name_fits_a_filename(self) -> None:
+        """N374 item 14: Claude Code 2.1.292 allows agent names of 256 characters."""
+        when = datetime(2026, 9, 24, 13, 45, 30, tzinfo=UTC)
+        name = report_filename("a" * 256, "agent-1", when=when)
+        assert len(name.encode("utf-8")) <= 255 - 8  # room left for the "-N" collision suffix
+        assert name.endswith("-agent-1.md")
+
+    def test_a_multibyte_agent_name_fits_a_filename(self) -> None:
+        when = datetime(2026, 9, 24, 13, 45, 30, tzinfo=UTC)
+        name = report_filename("é" * 256, "日本語" * 90, when=when)
+        assert len(name.encode("utf-8")) <= 255 - 8
+
+    def test_distinct_long_names_stay_distinct(self) -> None:
+        when = datetime(2026, 9, 24, 13, 45, 30, tzinfo=UTC)
+        first = report_filename("x" * 255 + "1", "agent-1", when=when)
+        second = report_filename("x" * 255 + "2", "agent-1", when=when)
+        assert first != second
+
+    def test_the_same_long_name_renders_the_same_filename(self) -> None:
+        when = datetime(2026, 9, 24, 13, 45, 30, tzinfo=UTC)
+        assert report_filename("x" * 300, "i", when=when) == report_filename(
+            "x" * 300, "i", when=when
+        )
+
+    def test_a_normal_name_is_unchanged(self) -> None:
+        assert sanitise_component("my-plugin:review:security") == "my-plugin_review_security"
+        assert sanitise_component("a" * 100) == "a" * 100
 
     def test_falls_back_to_placeholder_for_empty_agent_id(self) -> None:
         when = datetime(2026, 9, 24, 13, 45, 30, tzinfo=UTC)
