@@ -69,3 +69,19 @@ releases:
       The report is the Plan 00486 backfill review of Claude Code 2.1.272 to
       2.1.288, covering the changes since the last audited version. It does not
       establish the version v3.68.0 was tested against.
+  v3.69.0:
+    claude_code_version: unknown
+    evidence: ""
+    review_date: "2026-10-08"
+    reviewed_through: "2.1.293"
+    review_report: CLAUDE/Plan/00474-niggles-ledger-seventeen/subagent-reports/261008-claude-code-review-v3.69.0-sonnet.md
+    note: >-
+      The release host ran Claude Code 2.1.293, but the hook contract
+      (contracts/claude-code-hooks/META.json) is still audited at 2.1.272 and
+      the upstream hooks doc has changed since, so 2.1.293 is not recorded as
+      the tested version; the contract refresh is ledger 00474 N375. The review
+      ran FROM 2.1.288 (v3.68.0's reviewed_through) to 2.1.293: no adopt,
+      redundant or conflict rows. Two no-impact rows were acted on before the
+      tag as N374 items 13 (Grep accepts `file_path` for `path`, which the
+      path-keyed guards did not read) and 14 (256-character agent names in
+      report filenames).

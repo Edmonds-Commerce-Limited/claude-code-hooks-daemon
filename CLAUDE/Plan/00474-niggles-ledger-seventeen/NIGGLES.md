@@ -1414,6 +1414,19 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N375 — the hook contract is audited at Claude Code 2.1.272 and the upstream hooks doc has changed since
+
+**Source**: v3.69.0 release Step 1c. `bin/hooks-daemon contract-status` returned CHANGED: recorded sha256 `0dc5622c…`
+(322902 bytes, audited v2.1.272), upstream `403645d3…` (250548 bytes). The release host ran 2.1.293.
+
+**Evidence**: `tests/integration/test_claude_code_version_record.py::TestAgreesWithContractMeta` requires the newest
+recorded `claude_code_version` to equal `META.json`'s `last_audited_claude_code_version`, so v3.69.0 is recorded as
+`unknown` with `reviewed_through: 2.1.293`, as v3.68.0 was. The changelog reviews for 2.1.272 to 2.1.293 found nothing
+that changes hook payloads or output, but nobody has re-read the hooks doc itself against the vendored per-event JSON.
+
+**Status**: Open. Follow `docs/guides/HOOK-CONTRACT-REFRESH.md` from "Manual steps for a CHANGED verdict" (RAW text
+only), including the input side, then record the audited version in `claude-code-versions.yaml`.
+
 ### N374 — v3.69.0 release code review: non-blocking findings to work through
 
 **Source**: the v3.69.0 release code review gate (three reviewers over `git diff v3.68.0..HEAD -- src/`):
