@@ -53,6 +53,60 @@ def test_remote_ref_deletion_is_denied(handler: DestructiveGitHandler, command: 
     assert RuleID.GIT_PUSH_DELETE_REMOTE in result.reason
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git push --mirror origin",
+        "git push origin --mirror",
+        "git push --prune origin 'refs/heads/*:refs/heads/*'",
+        "git push origin --prune 'refs/heads/*:refs/heads/*'",
+        "git -C /srv/repo push --mirror origin",
+        "git fetch && git push --mirror backup",
+        "bash -c 'git push --prune origin refs/heads/*:refs/heads/*'",
+    ],
+)
+def test_mirror_and_prune_pushes_delete_remote_refs_so_they_are_human_only(
+    handler: DestructiveGitHandler, command: str
+) -> None:
+    hook_input = _bash(command)
+    assert handler.matches(hook_input) is True
+    result = handler.handle(hook_input)
+    assert result.decision == "deny"
+    assert RuleID.GIT_PUSH_DELETE_REMOTE in result.reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git push --delete --mirror origin merged",
+        "git push --prune --delete origin merged",
+    ],
+)
+def test_the_merged_branch_allowance_never_covers_mirror_or_prune(
+    handler: DestructiveGitHandler, command: str
+) -> None:
+    result = handler.handle(_bash(command))
+    assert result.decision == "deny"
+    assert "could not be verified" in result.reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git fetch --prune origin",
+        "git remote prune origin",
+        "git push origin --mirror-not-a-flag",
+        "git push origin prune-branch",
+        "git push origin main; echo --mirror",
+        "echo 'git push --mirror origin'",
+    ],
+)
+def test_prune_and_mirror_neighbours_stay_allowed(
+    handler: DestructiveGitHandler, command: str
+) -> None:
+    assert handler.matches(_bash(command)) is False
+
+
 def test_the_denial_says_a_human_runs_it_and_offers_no_hatch(
     handler: DestructiveGitHandler,
 ) -> None:
