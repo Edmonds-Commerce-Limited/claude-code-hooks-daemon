@@ -48,19 +48,31 @@ _ASSIGNMENT_WORD: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*="
 #: What a pip index must be to count as PyPI: HTTPS and one of these hosts exactly.
 #: ``test.pypi.org`` is a different index (a sandbox anyone can upload to), so it is
 #: not PyPI; ``pypi.org.example`` is a different host, so a prefix never counts.
-PYPI_HOSTS: Final[frozenset[str]] = frozenset({"pypi.org", "files.pythonhosted.org"})
+#: ``pypi.python.org`` is PyPI's legacy host, which redirects to ``pypi.org``.
+PYPI_HOSTS: Final[frozenset[str]] = frozenset(
+    {"pypi.org", "files.pythonhosted.org", "pypi.python.org"}
+)
 _PYPI_SCHEME: Final[str] = "https"
 
 #: Characters that mean the shell computes the value, so this reading cannot say what it is.
 _UNRESOLVED_VALUE: Final[tuple[str, ...]] = ("$", "`")
 
 _DOCKER: Final[str] = "docker"
-_DOCKER_CONTAINER: Final[str] = "container"
+_DOCKER_COMPOSE: Final[str] = "docker-compose"
+_DOCKER_PROGRAMS: Final[frozenset[str]] = frozenset({_DOCKER, _DOCKER_COMPOSE})
+#: Words between ``docker`` and the creating subcommand: ``docker container run``,
+#: ``docker compose run``.
+_DOCKER_SUBCOMMAND_PREFIXES: Final[frozenset[str]] = frozenset({"container", "compose"})
 _DOCKER_CREATES: Final[frozenset[str]] = frozenset({"run", "create"})
-#: `docker` global options that take a value word, so the value is not the subcommand.
+#: `docker` and `docker compose` global options that take a value word, so the value is
+#: not the subcommand.
 _DOCKER_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
-    {"--context", "-c", "-H", "--host", "--config", "-l", "--log-level"}
-)
+    {
+        "--context", "-c", "-H", "--host", "--config", "-l", "--log-level",
+        "-f", "--file", "-p", "--project-name", "--profile", "--project-directory",
+        "--env-file", "--ansi", "--parallel",
+    }
+)  # fmt: skip
 _VOLUME_OPTIONS: Final[frozenset[str]] = frozenset({"-v", "--volume"})
 _MOUNT_OPTION: Final[str] = "--mount"
 _MOUNT_SOURCE_KEYS: Final[frozenset[str]] = frozenset({"source", "src"})
@@ -75,6 +87,18 @@ _XARGS: Final[str] = "xargs"
 
 _GH: Final[str] = "gh"
 _GH_AUTH_TOKEN: Final[tuple[str, str]] = ("auth", "token")
+#: A ``gh auth token`` in the command text and the rest of ITS command (up to the next
+#: ``|``, ``;``, ``&&``, ``||``, newline or parenthesis). The lexer drops a redirect's
+#: file descriptor (``2>/dev/null`` reads like ``>/dev/null``), so the redirect is read
+#: from the text.
+_GH_AUTH_TOKEN_TEXT: Final[re.Pattern[str]] = re.compile(
+    r"\bgh\s+auth\s+token\b(?P<rest>(?:[^|;\n()&]|&(?!&))*)"
+)
+#: stdout sent to ``/dev/null`` (``>``, ``1>``, ``>>``, ``&>``): nothing reaches the transcript.
+#: ``2>/dev/null`` discards only stderr, so the token still prints.
+_STDOUT_TO_NULL: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|\s)(?:&>>?|1?>>?)\s*/dev/null(?![\w./-])"
+)
 
 _PIP_PROGRAMS: Final[frozenset[str]] = frozenset({"pip", "pip3"})
 _PYTHON_PREFIX: Final[str] = "python"
@@ -137,7 +161,8 @@ _RULES: Final[dict[str, Rule]] = {
             "build script executes at install time. `--index-url` and `-i` replace PyPI "
             "with another server and `--extra-index-url` adds one, so the host named there "
             "chooses what runs on this machine.\n\n"
-            "An index counts as PyPI only when it is `https://pypi.org/...` or "
+            "An index counts as PyPI only when it is `https://pypi.org/...`, "
+            "`https://pypi.python.org/...` or "
             "`https://files.pythonhosted.org/...`; `test.pypi.org`, plain `http://`, a "
             "`file://` path and every other host do not. A value held in a variable "
             "(`$INDEX`) is not judged.\n\n" + _ASK_THE_HUMAN
@@ -178,22 +203,24 @@ def _program(words: Sequence[str]) -> tuple[str, list[str]] | None:
 def _option_values(arguments: Sequence[str], names: frozenset[str]) -> list[str]:
     """Every value given to an option in ``names``, in any of its spellings.
 
-    ``--name value``, ``--name=value`` and, for a one-letter option, ``-Nvalue``.
+    ``--name value``, ``--name=value`` and, for a one-letter option, ``-Nvalue``. A
+    cluster of short flags ending in the option (``-itv value``) takes the next word.
     """
     values: list[str] = []
     for index, argument in enumerate(arguments):
+        following = arguments[index + 1 : index + 2]
         if argument in names:
-            if index + 1 < len(arguments):
-                values.append(arguments[index + 1])
+            values.extend(following)
             continue
         if argument.startswith(_LONG_PREFIX):
             name, equals, value = argument.partition("=")
             if equals and name in names:
                 values.append(value)
-        elif argument.startswith(_SHORT_PREFIX):
-            letter = argument[:2]
-            if len(argument) > 2 and letter in names:
+        elif argument.startswith(_SHORT_PREFIX) and len(argument) > 2:
+            if argument[:2] in names:
                 values.append(argument[2:])
+            elif argument[1:].isalpha() and f"{_SHORT_PREFIX}{argument[-1]}" in names:
+                values.extend(following)
     return values
 
 
@@ -205,7 +232,7 @@ def _docker_creation_arguments(arguments: Sequence[str]) -> list[str] | None:
         if argument.startswith(_SHORT_PREFIX):
             index += 2 if argument in _DOCKER_VALUE_OPTIONS else 1
             continue
-        if argument == _DOCKER_CONTAINER:
+        if argument in _DOCKER_SUBCOMMAND_PREFIXES:
             index += 1
             continue
         if argument in _DOCKER_CREATES:
@@ -312,9 +339,28 @@ def _token_is_consumed(steps: Sequence[SimpleCommand], index: int) -> bool:
     return owner is None or not _prints_its_input(*owner)
 
 
+def _is_gh_auth_token(program: str, arguments: Sequence[str]) -> bool:
+    return program == _GH and tuple(arguments[:2]) == _GH_AUTH_TOKEN
+
+
+def _every_token_output_discarded(command: str, token_steps: int) -> bool:
+    """Whether each of the ``token_steps`` ``gh auth token`` runs sends stdout to ``/dev/null``.
+
+    Judged on the text: every spelling of the call found there must discard its
+    output, and there must be at least as many as the reader found steps. A step the
+    text does not show (``"gh" auth token``) therefore leaves the command denied.
+    """
+    spellings = list(_GH_AUTH_TOKEN_TEXT.finditer(command))
+    return (
+        token_steps > 0
+        and len(spellings) >= token_steps
+        and all(_STDOUT_TO_NULL.search(match.group("rest")) for match in spellings)
+    )
+
+
 def _check_step(program: str, arguments: list[str]) -> str | None:
     """The rule one program with its arguments breaks, ignoring the gh pipeline context."""
-    if program == _DOCKER and _docker_root_mount(arguments):
+    if program in _DOCKER_PROGRAMS and _docker_root_mount(arguments):
         return RuleID.DOCKER_ROOT_MOUNT
     if _pip_non_pypi_index(program, arguments):
         return RuleID.PIP_NON_PYPI_INDEX
@@ -326,17 +372,19 @@ def _check_step(program: str, arguments: list[str]) -> str | None:
 def _findings(command: str) -> list[str]:
     """Every rule id ``command`` breaks, in command order."""
     steps = simple_commands(command)
+    readings = [_program(step.words) for step in steps]
+    token_steps = sum(1 for r in readings if r is not None and _is_gh_auth_token(*r))
+    discarded = _every_token_output_discarded(command, token_steps)
     found: list[str] = []
-    for index, step in enumerate(steps):
-        reading = _program(step.words)
+    for index, reading in enumerate(readings):
         if reading is None:
             continue
         program, arguments = reading
         rule_id = _check_step(program, arguments)
         if (
             rule_id is None
-            and program == _GH
-            and tuple(arguments[:2]) == _GH_AUTH_TOKEN
+            and _is_gh_auth_token(program, arguments)
+            and not discarded
             and not _token_is_consumed(steps, index)
         ):
             rule_id = RuleID.GH_AUTH_TOKEN
@@ -397,19 +445,21 @@ class HostCommandGuardHandler(PreToolUseHandlerBase):
             "| Rule | Command | What to do |\n"
             "|------|---------|------------|\n"
             f"| {RuleID.DOCKER_ROOT_MOUNT} | `docker run -v /:/host …` (also `--volume`, "
-            "`--mount type=bind,source=/,…`, `docker create`) | Mount only the directory "
+            "`--mount type=bind,source=/,…`, `docker create`, `docker compose run`, "
+            "`docker-compose run`, `-itv /:/host`) | Mount only the directory "
             'needed: `-v "$PWD":/app` |\n'
             f"| {RuleID.GH_AUTH_TOKEN} | `gh auth token` | Prints the token into the "
             "transcript. Use `gh auth status`; a pipe or `$(...)` that hands it to a command that "
             "does not print it (`| docker login --password-stdin`) is allowed; `| cat`, "
-            "`| tee`, `| head` and `echo $(...)` print it and are denied |\n"
+            "`| tee`, `| head` and `echo $(...)` print it and are denied; stdout sent to "
+            "`/dev/null` prints nothing and is allowed (`2>/dev/null` is not) |\n"
             f"| {RuleID.PIP_NON_PYPI_INDEX} | `pip install --index-url <url>` / `-i` / "
             "`--extra-index-url` naming a non-PyPI index | HUMAN ONLY: stop and ask the "
             "human to run it |\n"
             f"| {RuleID.CRONTAB_REMOVE} | `crontab -r` | HUMAN ONLY: stop and ask the "
             "human to run it. `crontab -l` and `-e` are allowed |\n\n"
-            "**What counts as PyPI**: `https://pypi.org/...` and "
-            "`https://files.pythonhosted.org/...` only. `test.pypi.org`, plain `http://`, "
+            "**What counts as PyPI**: `https://pypi.org/...`, `https://pypi.python.org/...` "
+            "and `https://files.pythonhosted.org/...` only. `test.pypi.org`, plain `http://`, "
             "`file://` and any other host are not, and a value held in a variable is not "
             "judged. `pip install -r requirements.txt` is unaffected.\n\n"
             "The human-only rows have no escape hatch: do not look for another spelling, "
