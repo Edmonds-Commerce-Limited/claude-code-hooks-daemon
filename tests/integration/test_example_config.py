@@ -102,6 +102,23 @@ def test_example_config_safety_handlers_enabled(example_config: dict) -> None:
         ), f"Safety handler {handler} should be enabled by default"
 
 
+@pytest.mark.parametrize("config_name", ["hooks-daemon.yaml.example", "hooks-daemon.yaml"])
+def test_root_recursion_guard_runs_before_secret_file_guard(config_name: str) -> None:
+    """A catastrophic-root scan is denied on its text before secret_file_guard walks a tree.
+
+    Fresh installs copy the example config, so an order set only in this
+    repository's own config never reaches them.
+    """
+    path = Path(__file__).parent.parent.parent / ".claude" / config_name
+    pre_tool_use = yaml.safe_load(path.read_text(encoding="utf-8"))["handlers"]["pre_tool_use"]
+    root_recursion = pre_tool_use[HandlerID.ROOT_RECURSION_GUARD.config_key]["priority"]
+    secret_file = pre_tool_use[HandlerID.SECRET_FILE_GUARD.config_key]["priority"]
+    assert root_recursion < secret_file, (
+        f"{config_name}: root_recursion_guard priority {root_recursion} must be lower than "
+        f"secret_file_guard priority {secret_file}"
+    )
+
+
 def test_example_config_plan_workflow_opt_in_by_default(example_config: dict) -> None:
     """F-PLANDEF: a stock install from the example must resolve plan_workflow as
     DISABLED, so it does not deploy CLAUDE/Plan/ + mkplan while the plan handlers

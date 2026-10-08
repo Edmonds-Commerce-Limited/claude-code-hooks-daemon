@@ -5,6 +5,77 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.69.0] - 2026-10-08
+
+_A guard-correctness, autonomy-control and supervisor-extension release. The secret, quarantine and containment guards now deny only on a positive finding, judged against a cached index of protected files (Plan 00483); a project can say where the work-driving machinery may run with a top-level `autonomy:` block (Plan 00498); the ccy supervisor gains a stdlib-only plugin API, shipped as BETA (Plan 00487); GitHub issue work can be validated and claimed in code (Plan 00490); and the full QA gate gains per-step timing, resume and shards (Plan 00500). `breaking: false` - no config key is renamed or removed and no handler is removed, so no upgrade guide beyond the per-release material is needed. One recommended post-upgrade task applies to `strict_mode` projects. Session usage limits need ccy 3.82.1 or later._
+
+### Added
+
+- **ccy supervisor plugin API (BETA).** A launcher names a stdlib-only plugin with `--plugin <name>=<worker.py>`; its `on_idle` hook runs at the end of the idle cascade, a plugin that fails is disabled and the session told once, and a plugin can ask for a restart (exit status 75) or a fixed-template notice. Unproven in long-running use; report problems as GitHub issues. Session limits (`--max-age`, `--run-for`, `--until`) need ccy 3.82.1 or later (Plan 00487; Addresses #71).
+- A top-level `autonomy:` block lists the environments (`host`, `docker`, `podman`, `lxc`, `generic`) and hosts where the work-driving machinery may run, and the new `autonomy_notice` SessionStart advisory says once when it is off. Default: every environment, so nothing changes without the block (Plan 00498).
+- `host_command_guard` denies `docker run -v /:/host` and `gh auth token`, and makes a non-PyPI `pip install --index-url` and `crontab -r` human-only. `destructive_git` makes deleting a remote ref human-only (`R-GIT-PUSH-DELETE-REMOTE`); an agent may delete a branch already merged into the default branch (Plan 00483, Plan 00474).
+- `hooks-daemon issue-validity N [--claim] [--list-eligible] [--json]` checks and claims a GitHub issue in code, and the opt-in `github_issue_assignment_guard` denies issue-tied work on an unclaimed, foreign or unapproved-author issue. It refuses (exit 4) when no `approved_issue_authors` list is configured; a claim switches the assignee, and two or more assignees are blocking (Plan 00490, Plan 00474).
+- `hooks-daemon defences [--json]` lists every active defence from your config (Plan 00484).
+- A durable `work-queue.json` and the `hooks-daemon work-queue` command record dispatched agents; the `work_queue_rebrief` SessionStart handler lists the running ones on `resume` or `compact`, and a usage-limit resume is recorded and a limit-killed agent named at the next prompt (Plan 00470).
+- An `[awaiting-human]` stop must schedule a one-off `[tick:stand-in]` cron (about three hours out, `stand_in_delay_hours`), whose firing has a sub-agent choose among engineering options and journal the choice as the stand-in's ruling (Plan 00470).
+- The ccy supervisor types one reconcile prompt when a long-quiet session holds only expired cron records (Plan 00470).
+- A registry of approved fake values (`.claude/fake-values.yaml`), the `unlisted-fake-value` docs QA check, and `value_swaps` provenance for vendored pages (Plan 00492).
+- `exclude_paths` and `extra_whitelist` entries accept `{pattern, reason}`; plain strings are reported as a config problem under `daemon.strict_mode` (Plan 00484).
+- The opt-in `plan_fact_check_feed` delivers a pending fact-check to the session on the next PostToolUse event as an instruction to dispatch `plan-fact-checker` (Plan 00480).
+- The upgrade names every handler it stops or starts running under the new default rules, with a restore snippet and the from-to version; `hooks-daemon check-effective-handlers --from --to` shows it for your config (Plan 00493).
+- `contract_staleness` advises once per Claude Code version newer than the last changelog review; the version record, the `claude-code-changelog-reviewer` agent and RELEASING Step 1c record what each release was tested against (Plan 00486).
+- `CLAUDE/Plan/mkplan.bash --resolve-conflict <day-file>` writes the union of a conflicted plan journal day-file (Plan 00474).
+- A QA check, `released_changelog`, fails when a released CHANGELOG section differs from its tag (Plan 00474).
+- The ccy supervisor starts through a shell launcher, `.claude/ccy/claude-supervise`, that picks Python 3.11 or later and otherwise starts `claude` unsupervised with a loud warning (Plan 00483).
+- The status line shows "hooks daemon loading" instead of waiting out the start deadline while the daemon starts (Plan 00495).
+- The full QA gate records each step's timing and provenance, prints a slowest-first summary, resumes with `all --resume`, and runs the tests as seven checkpointed shards with coverage combined (Plan 00500).
+- RELEASING gains a named Housekeeping phase that runs on every release, starting with a refetch of every vendored remote doc.
+- An ordinary-command regression gate (about 350 commands) fails if any blocking handler denies an everyday command (Plan 00483).
+
+### Changed
+
+- **The secret, quarantine and containment guards deny only on a finding.** A command they cannot read, a cap, a deadline or an internal error is allowed with an advisory saying what was not checked. Recursive searches and globs are judged against a cached index of protected files built from `git ls-files`, narrowed to the pathspecs a protected glob can select (Plan 00483, Plan 00474).
+- The secret guard judges the path a command reaches (a `..` collapse, a leading `cd`), a leading `@FILE`, an attached short-option value, and the files a recursive search would read (Plan 00483).
+- `bash_safe_mode` applies only to chains that contain a mutator again (`only_with_mutator: true`); it no longer reads compound-command syntax as ungated sequencing, and its message leads with `&&`, `|| exit 1` and a `bash -c` wrapper (Plan 00483, Plan 00474).
+- A top-level `set -e` no longer counts as gating a verifier in `verification_result_gate` (Plan 00474).
+- `root_recursion_guard` now defaults to priority 13, ahead of `secret_file_guard`. A fresh install from the 3.69.0 example gets 13. The upgrade moves a config that still carries the earlier example's 16 to 13, because it merges your customisations onto the new example. A config that set any other priority keeps it; set `priority: 13` (any value below 14) to get the new order (Plan 00483).
+- A `MUST_*_BECAUSE` escape hatch is honoured only with a specific reason (Plan 00484).
+- The short-path fallback socket, PID file, log and events directory names carry a per-host tag (Plan 00483).
+- The sed, plan-folder `mkdir`, `eval`, `$'...'` and auto-close-keyword guards judge more command shapes (Plan 00483).
+- A budget-exhausted commit gate has its own rule, `R-CONFLICT-MARKER-SCAN-TIMED-OUT` (Plan 00474).
+- `Grep` targets named in `file_path` are judged like `path` by the secret, quarantine, reference-repo and LSP guards (Plan 00474).
+- The ccy supervisor tells a compacted session that an Esc interruption is not a human rejection (Plan 00470).
+- The full-QA lock file names the live holder (Plan 00474).
+- A paused session's messages give the owner's override ready to paste into the session: `! bin/hooks-daemon usage-pause clear` (Plan 00479).
+
+### Fixed
+
+- A fresh install records itself for the pre-deploy gate, so a same-version re-run is not stopped for the owner (Plan 00474).
+- `init.sh` fail-open answers validate against every event's contract under Claude Code 2.1.289 (Plan 00483).
+- An unsupported system Python no longer stops Claude Code opening (Plan 00483).
+- A handler option that names a method is refused, and a broken config no longer switches redaction off (Plan 00483).
+- A repeated `git commit -F` is judged on the message file's current content (Plan 00483).
+- A grep regex inside `bash -c` and a `PYTHONPATH=... python -c` probe are no longer denied (Plan 00474).
+- `secret_file_guard` and `quarantine_artefact_read_guard` allow a name-agnostic glob read while the index is still building, and the index builds in the live daemon (Plan 00474).
+- Four ordinary conditions no longer let a scan pass without reading, and `remote-docs` refuses when the scanner cannot be built (Plan 00483).
+- Configured `protected_paths` reach payload capture and lint output before initialisation completes; an over-length socket path reads as not live (Plan 00483).
+- Several guard false positives are removed: `git config --get-regexp`, `git -C <dir> commit` with a message, a folder merely ending in `hooks-daemon` for `daemon_docs_guard`, and a quoted `[awaiting-human]` token (Plan 00474).
+- `check-effective-handlers` exits 3 on a malformed config, and the ccy wrapper migration leaves a custom-directory line alone (Plan 00474).
+- An invalid `stand_in_delay_hours` or `bash_safe_mode` option is reported without dropping the handler (Plan 00474).
+- The `daemon_sync_after_merge` advisory judges the directory in effect at the merge (Plan 00474).
+- `host_command_guard` reads `-itv` and `docker compose run` mounts, and `git push --mirror` / `--prune` fall under the human-only remote-delete rule (Plan 00474).
+- Plan fact-check delivery claims the pending record atomically and only the main thread receives it; an unreadable record is set aside (Plan 00474).
+- The open-issue listing fails closed when it comes back full (Plan 00474).
+- Report filenames bound the embedded agent name (Plan 00474).
+- Scaling sweeps take the minimum of CPU-time samples and the chain-deadline tests use a manual clock, reducing false failures under host load (Plan 00474).
+- A worktree creation failure names git's stderr (Plan 00483).
+- Acceptance probes and the dangerous-invocation corpus check no longer fail while the account is over the host's usage ceiling (Plan 00479).
+
+### Removed
+
+- The guard-incomplete rule IDs `R-SECRET-COMMAND-UNREADABLE`, `R-SECRET-EVALUATION-ERROR`, `R-SECRET-SCAN-INCOMPLETE`, `R-QUARANTINE-ARTEFACT-READ-EVALUATION-ERROR`, `R-QUARANTINE-SCAN-INCOMPLETE` and `R-PROJECT-CONTAINMENT-EVALUATION-ERROR`: those guards no longer deny when they cannot judge a call (Plan 00483).
+- The hard-coded author table in the issue-sdlc runbook, replaced by `approved_issue_authors` (Plan 00490).
+
 ## [3.68.0] - 2026-10-03
 
 _A daemon-robustness, guard-correctness and usage-control release. The headline themes: the daemon start/stop/recovery path is proven by owner, socket and answer rather than trusted (Plan 00466); upgrades stop before deploying until you have read what they list (Plan 00376); a session can pause itself at a host usage ceiling and resume at the window reset, with a subscription-usage status line (Plan 00479); `bash_safe_mode` is now ON by default and denies unguarded sequenced commands (Plan 00270); an opt-in handler with no config block no longer runs (Plan 00483); and a long run of secret-guard, glob and heredoc correctness fixes. `breaking: false` - no config key is renamed or removed and no handler is removed, so no upgrade guide is needed; review the two changed defaults in the release notes._

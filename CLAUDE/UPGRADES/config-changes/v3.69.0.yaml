@@ -1,7 +1,7 @@
 # Drafted by Plan 00490. The VERSION in the filename and the `version:` key are
 # a target, not a decision; the release agent confirms or renames this file.
 version: "3.69.0"
-date: "UNRELEASED"
+date: "2026-10-08"
 
 breaking: false
 
@@ -53,7 +53,7 @@ config_changes:
       recommended: true
       dormant: false
       description: >-
-        NEW (owner ruling A6, Plan 00483 Task 2.2). On by default. Denies
+        NEW (Plan 00483 Task 2.2). On by default. Denies
         `docker run -v /:/host` (a host-root mount, also `--volume`,
         `--mount type=bind,source=/` and `docker create`) and `gh auth token`
         (a token piped to or substituted into another command is allowed). Human
@@ -63,7 +63,7 @@ config_changes:
         `crontab -r`. `destructive_git` gains the same human-only denial for
         `git push --delete` and `git push <remote> :<name>` (R-GIT-PUSH-DELETE-REMOTE)
         with no config change, except that a branch already merged into the
-        default branch may be deleted (owner ruling D11). Only `enabled` and `priority` are options.
+        default branch may be deleted. Only `enabled` and `priority` are options.
       example_yaml: |
         handlers:
           pre_tool_use:
@@ -125,12 +125,118 @@ config_changes:
             github_issue_assignment_guard:
               options:
                 auto_claim: false
+    - key: handlers.session_start.work_queue_rebrief
+      recommended: false
+      dormant: false
+      description: >-
+        NEW (Plan 00470). On by default, advisory only. When a session starts
+        from `resume` or `compact`, lists the dispatched agents the durable
+        work queue (`work-queue.json`, written with `hooks-daemon work-queue`)
+        still records as running, with the facts needed to respawn them.
+        Silent when no queue exists or nothing is running.
+      example_yaml: |
+        handlers:
+          session_start:
+            work_queue_rebrief:
+              enabled: true
+              priority: 48
+      migration_note: >-
+        No action needed. Disable with
+        handlers.session_start.work_queue_rebrief.enabled: false.
+    - key: handlers.user_prompt_submit.limit_rebrief
+      recommended: false
+      dormant: false
+      description: >-
+        NEW (Plan 00470). On by default, never denies. One-shot re-brief at
+        the first prompt after a usage-limit resume; names a background or
+        teammate agent the limit killed and lists the work queue.
+      example_yaml: |
+        handlers:
+          user_prompt_submit:
+            limit_rebrief:
+              enabled: true
+              priority: 39
+      migration_note: >-
+        No action needed. Disable with
+        handlers.user_prompt_submit.limit_rebrief.enabled: false.
+    - key: handlers.notification.quota_resume_recorder
+      recommended: false
+      dormant: false
+      description: >-
+        NEW (Plan 00470). On by default, silent bookkeeping. Records a
+        `quota_auto_resume_*` notification so `limit_rebrief` can deliver the
+        re-brief at the next prompt.
+      example_yaml: |
+        handlers:
+          notification:
+            quota_resume_recorder:
+              enabled: true
+              priority: 50
+      migration_note: >-
+        No action needed. Disable with
+        handlers.notification.quota_resume_recorder.enabled: false.
+    - key: handlers.stop.auto_continue_stop.options.stand_in_delay_hours
+      recommended: false
+      dormant: false
+      description: >-
+        NEW (Plan 00470). How long, in hours, the one-off stand-in cron that
+        an `[awaiting-human]` stop must schedule waits before it fires.
+        Default 3; must be above 0 and below 24 (checked at config load). The
+        stand-in applies only where `persistent_crons.enabled` is true.
+      example_yaml: |
+        handlers:
+          stop:
+            auto_continue_stop:
+              options:
+                stand_in_delay_hours: 3
+      migration_note: >-
+        No action needed; the default is 3.
+    - key: daemon.exclude_paths
+      recommended: false
+      dormant: false
+      description: >-
+        NEW (Plan 00484). An entry of `exclude_paths` (project-wide
+        `daemon.exclude_paths` and any handler's `options.exclude_paths`) or of
+        `extra_whitelist` may be written as `{pattern, reason}` as well as a
+        plain string. Handlers receive the same plain pattern either way. With
+        `daemon.strict_mode: true`, a plain string is reported as a config
+        problem at session start (the config still loads).
+      example_yaml: |
+        daemon:
+          exclude_paths:
+            - pattern: "vendor/**"
+              reason: "third-party code we do not edit"
+      migration_note: >-
+        No action needed; plain strings keep working. Under strict_mode, see
+        the post-upgrade task 01-give-strict-mode-exclusions-a-reason.
   changed:
+    - key: handlers.pre_tool_use.root_recursion_guard.priority
+      recommended: true
+      dormant: false
+      recommended_value: 13
+      description: >-
+        DEFAULT CHANGED (Plan 00483). `root_recursion_guard` now runs at
+        priority 13, ahead of `secret_file_guard` (14), so a recursive search
+        rooted at `/`, `~` or `$HOME` is denied on the command text alone
+        rather than walked first. A fresh install from the 3.69.0 example gets
+        13. The upgrade moves a config that still carries the earlier
+        example's 16 to 13, because it merges your customisations onto the new
+        example. A config that set any other priority keeps it.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            root_recursion_guard:
+              priority: 13
+      migration_note: >-
+        Set handlers.pre_tool_use.root_recursion_guard.priority to 13 (any
+        value below 14) to get the new order. A config still carrying 16 is
+        moved to 13 by the upgrade; a config that set any other priority keeps
+        it until you change it.
     - key: handlers.pre_tool_use.bash_safe_mode.options.only_with_mutator
       recommended: true
       dormant: false
       description: >-
-        DEFAULT CHANGED (owner ruling A3, Plan 00483). `only_with_mutator` now
+        DEFAULT CHANGED (Plan 00483). `only_with_mutator` now
         defaults to `true`, reversing the block-everything default that
         3.68.0 shipped. A `;`- or newline-sequenced Bash command with no `set`
         safety prelude is denied only when it contains a mutator (`git add`,

@@ -1,4 +1,4 @@
-# Callout: bash_safe_mode no longer denies a fully gated group or loop
+# Callout: `bash_safe_mode` no longer denies a fully gated group or loop
 
 **Plan**: 00474
 **Audience**: everyone

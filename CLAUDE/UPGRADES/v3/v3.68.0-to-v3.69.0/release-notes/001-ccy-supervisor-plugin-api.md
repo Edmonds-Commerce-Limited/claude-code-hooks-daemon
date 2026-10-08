@@ -5,7 +5,7 @@
 
 **Beta.** The plugin API is ready for real-world testing but not yet proven in long-running use. Its supervisor
 side passed a live test (loading, status, notices, restart, and a raising, hanging or printing plugin never taking
-the session down); the remaining ccy launcher checks are handed to fedora-desktop. Session limits (`--max-age`,
+the session down); the remaining ccy launcher checks are handed to the launcher's own repository. Session limits (`--max-age`,
 `--run-for`, `--until`) need ccy 3.82.1 or later, or `ccy --supervise` on an older ccy. Report hooks-daemon problems
 as issues on this repository.
 
