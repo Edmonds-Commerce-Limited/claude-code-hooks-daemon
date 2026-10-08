@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00501: session focus mode](00501-session-focus-mode/PLAN.md) - Not Started, Medium (owner request: `hooks-daemon focus <task>` typed in a session switches off every work-driving distraction for that session only, via Plan 00498's autonomy gate; `hooks-daemon focus off` ends it; nothing persisted)
+- [00501: session modes](00501-session-modes/PLAN.md) - Not Started, Medium (#91; first-class per-session modes shown in the status line: focus (`hooks-daemon focus <task>`), BLOCKED (awaiting-human, goal-blocked loop breaker), usage-paused; per-session awaiting-human storage; guards never gated)
 
 - [00500: full qa timing and speed](00500-full-qa-timing-and-speed/PLAN.md) - In Progress, High (owner request: the full QA gate is too slow and restarts from the top after every reboot; record per-step and per-test timing, find the hot spots, add checkpoints so an interrupted gate resumes, then speed it up)
 
