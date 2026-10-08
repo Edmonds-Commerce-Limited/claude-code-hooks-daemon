@@ -1465,7 +1465,32 @@ evidence and a fix; several have probe scripts under `untracked/scratch/review-v
     (`docs_qa/checks/unlisted_fake_value.py:123`); repeated literals in `destructive_git.py:502-536`;
     `sensitive_content` re-reads `.claude/fake-values.yaml` on every matching write.
 
-**Status**: Open.
+**Status**: Defects ✅ fixed before the v3.69.0 tag (RELEASING.md: a release carries no known defect), merged at
+9028bc3a1, one commit each, test-first ([report](subagent-reports/261008-v369-review-defect-fixes-sonnet.md)): items 1
+to 8, the docstring and 100-issue halves of 9 and 10, the unreadable-doc logging in 11, the destructive_git named
+constants, `bash_safe_mode` gaining `validate_options` (the N373 class), and two items from the Step 1c Claude Code
+review: Grep targets named in `file_path` are now judged like `path` (a guard bypass since Claude Code 2.1.292), and
+report filenames stay under the filename limit with 256-character agent names. Still open, non-defects (cost and
+refactoring): the per-file `git check-ignore` calls in `find_under`, autonomy re-detecting the runtime per event, the
+hard-coded `"completed"` and duplicated pattern compilation in `cli.py`, the latent fallback-schema trap in
+`core/response_schemas.py:451`, and `sensitive_content` re-reading `.claude/fake-values.yaml`. Known residual of item 2:
+with a cold index, a glob carrying name text (`cat report-*.txt`) still gets no advisory, to keep
+`test_an_unrelated_star_bearing_token_stays_allowed` intact.
+
+### N376 — four tests fail under the full gate's concurrent load and pass alone
+
+**Source**: the v3.69.0 release gates.
+
+**Evidence**: each failed in one gate run and passed repeatedly alone:
+`test_safety_handlers_hostile_input_performance.py::TestCombinatorialSmallInputShapesStayLinear` (blaming a different
+handler each time, 2 of 5 alone-runs failing before the fix), `tests/unit/core/test_chain.py::...::test_deadline_exceeded_denies_when_a_slow_handler_exhausts_the_whole_chain`,
+and `tests/unit/supervise/test_abandoned_input_flush.py::TestSuperviseEndToEndAbandonedFlush::test_abandoned_message_is_submitted_then_compacted`.
+The scaling sweep now takes the minimum of CPU-time samples and the chain deadline tests use a manual clock (merge
+9a9d5e6f6, thresholds unchanged), but the sweep still failed once more under load (`host-command-guard`,
+`deep_bash_c_nesting`, 5/5 alone): CPU time per operation inflates on shared cores while three legs run at once.
+
+**Status**: Open. Run the performance sweeps outside the concurrent phase (their own serial shard or marker), and make
+the supervisor end-to-end test wait on its event rather than a fixed time. Never loosen a threshold.
 
 ### N373 — an invalid `stand_in_delay_hours` silently unregisters the whole Stop enforcement handler
 
