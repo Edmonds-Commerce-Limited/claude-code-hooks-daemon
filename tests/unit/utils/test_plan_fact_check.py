@@ -22,6 +22,8 @@ from claude_code_hooks_daemon.utils.plan_fact_check import (
 )
 
 FOLDER = "00480-demo"
+BARRIER_WAIT_SECONDS = 10
+THREAD_JOIN_SECONDS = 20
 
 
 def _plan(tmp_path: Path, files: dict[str, str]) -> Path:
@@ -229,7 +231,7 @@ class TestDelivery:
 
         def listed_by_both() -> list[str]:
             folders = listing()
-            barrier.wait(timeout=10)
+            barrier.wait(timeout=BARRIER_WAIT_SECONDS)
             return folders
 
         monkeypatch.setattr(state, "pending_folders", listed_by_both)
@@ -242,7 +244,7 @@ class TestDelivery:
         for thread in threads:
             thread.start()
         for thread in threads:
-            thread.join(timeout=20)
+            thread.join(timeout=THREAD_JOIN_SECONDS)
 
         assert sorted(len(messages) for messages in results) == [0, 1]
         assert state.read_pending(FOLDER) is None
