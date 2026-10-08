@@ -89,7 +89,7 @@ _RULE = Rule(
 # glob (those come from ``_effective_globs()``), so it cannot collide with one.
 _NOT_JUDGED_PATTERN: Final[str] = "<not-judged>"
 _NO_INDEX_REASON: Final[str] = (
-    "a recursive search or directory read was not checked, because the index of "
+    "a recursive search, directory read or wildcard path was not checked, because the index of "
     "quarantined artefacts is not available yet (the daemon has just started, or "
     "the project is not a git repository)"
 )
@@ -318,6 +318,7 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
         """First quarantine glob mentioned by a content-REVEALING segment, or None."""
         if not command:
             return None
+        glob_unjudged = False
         for segment in _segments(command):
             for verb, verb_pattern in _REVEALING_VERB_PATTERNS:
                 if not verb_pattern.search(segment):
@@ -333,16 +334,19 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
                 # `secret_file_guard` keeps the heuristic-only variant
                 # deliberately, since a false positive there is far cheaper
                 # than the false negative it guards against.
-                mention = sfm.find_protected_mention_strict(
-                    segment, patterns, cwd=cwd, index=self._index(patterns)
-                )
+                index = self._index(patterns)
+                mention = sfm.find_protected_mention_strict(segment, patterns, cwd=cwd, index=index)
                 if mention is not None:
                     return mention
+                # With no index the glob was never expanded: say so.
+                glob_unjudged = glob_unjudged or (
+                    index is None and sfm.has_name_agnostic_glob(segment)
+                )
         # A recursive search reads every artefact under its roots without
         # naming one (Plan 00483 D1, ledger 00474 N144).
         reads = recursive_search.search_reads(command, cwd)
         if not reads:
-            return None
+            return _NOT_JUDGED_PATTERN if glob_unjudged else None
         index = self._index(patterns)
         if index is None:
             return _NOT_JUDGED_PATTERN

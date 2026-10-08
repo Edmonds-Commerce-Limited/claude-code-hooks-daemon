@@ -828,6 +828,33 @@ class TestUnjudgedCallsAreAllowedWithAdvisory:
         assert result.context
         assert "index of quarantined artefacts is not available" in result.context[0]
 
+    @pytest.mark.parametrize("command", ["cat docs/*", "grep x d*/*", "head ./?", "cat docs/.*"])
+    def test_a_revealing_glob_with_no_index_is_allowed_with_an_advisory(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        tmp_path: Path,
+        no_index: None,
+        command: str,
+    ) -> None:
+        result = handler.handle(_hook_input("Bash", {"command": command}, cwd=tmp_path))
+        assert result.decision == Decision.ALLOW
+        assert result.context
+        assert "index of quarantined artefacts is not available" in result.context[0]
+
+    @pytest.mark.parametrize(
+        "command", ["cat plain.txt", "ls docs/*", "grep 'a*' plain.txt", "echo hi"]
+    )
+    def test_no_advisory_without_a_revealing_unquoted_glob(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        tmp_path: Path,
+        no_index: None,
+        command: str,
+    ) -> None:
+        result = handler.handle(_hook_input("Bash", {"command": command}, cwd=tmp_path))
+        assert result.decision == Decision.ALLOW
+        assert not result.context
+
     def test_a_finding_keeps_its_own_rule(
         self,
         handler: QuarantineArtefactReadGuardHandler,
