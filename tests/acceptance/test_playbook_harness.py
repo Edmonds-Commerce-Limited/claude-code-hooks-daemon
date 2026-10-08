@@ -46,6 +46,7 @@ from claude_code_hooks_daemon.daemon.playbook_harness import (
     wrapper_unreachable_reason,
 )
 from tests.acceptance.conftest import wrapper_subprocess_env
+from tests.usage_ceiling import exempt_from_usage_ceiling
 
 
 class _DaemonUnreachable(Exception):
@@ -133,16 +134,18 @@ def _dispatch(probe: ExecutableProbe, env: dict[str, str]) -> tuple[str, str, st
     the choice so this caller cannot make it wrongly.
     """
     wrapper = _WRAPPERS[probe.event_type]
-    result = subprocess.run(
-        ["bash", str(wrapper)],
-        input=json.dumps(build_event(probe, _RUN_ID)),
-        capture_output=True,
-        text=True,
-        cwd=str(REPO_ROOT),
-        timeout=PROBE_DISPATCH_TIMEOUT_SECONDS,
-        check=False,
-        env=env,
-    )
+    event = build_event(probe, _RUN_ID)
+    with exempt_from_usage_ceiling(str(event["session_id"])):
+        result = subprocess.run(
+            ["bash", str(wrapper)],
+            input=json.dumps(event),
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+            timeout=PROBE_DISPATCH_TIMEOUT_SECONDS,
+            check=False,
+            env=env,
+        )
     unreachable = wrapper_unreachable_reason(result.stderr or "")
     if unreachable is not None:
         raise _DaemonUnreachable(unreachable)

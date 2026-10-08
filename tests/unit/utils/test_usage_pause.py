@@ -281,5 +281,40 @@ class TestOwnerOverride:
         assert usage_pause.usage_override_active(tmp_path, _SESSION, now=_NOW) is False
 
 
+class TestSyntheticSessionExemption:
+    """A probe of the real chain must not answer with the account's usage state.
+
+    QA checks and acceptance probes route synthetic sessions through the real
+    chain, which on a host over its ceiling pauses every new session.
+    """
+
+    def test_the_session_is_overridden_inside_the_block(self, tmp_path: Path) -> None:
+        with usage_pause.synthetic_session_exemption(tmp_path, _SESSION, now=_NOW):
+            assert usage_pause.usage_override_active(tmp_path, _SESSION, now=_NOW + 1) is True
+
+    def test_a_pause_left_by_an_earlier_run_is_cleared_on_entry(self, tmp_path: Path) -> None:
+        usage_pause.write_usage_pause(tmp_path, _pause())
+        with usage_pause.synthetic_session_exemption(tmp_path, _SESSION, now=_NOW):
+            assert not usage_pause.pause_path(tmp_path, _SESSION).exists()
+
+    def test_nothing_is_left_behind_on_exit(self, tmp_path: Path) -> None:
+        with usage_pause.synthetic_session_exemption(tmp_path, _SESSION, now=_NOW):
+            usage_pause.write_usage_pause(tmp_path, _pause())
+        assert not usage_pause.override_path(tmp_path, _SESSION).exists()
+        assert not usage_pause.pause_path(tmp_path, _SESSION).exists()
+
+    def test_nothing_is_left_behind_when_the_block_raises(self, tmp_path: Path) -> None:
+        with (
+            pytest.raises(RuntimeError),
+            usage_pause.synthetic_session_exemption(tmp_path, _SESSION, now=_NOW),
+        ):
+            raise RuntimeError("probe failed")
+        assert not usage_pause.override_path(tmp_path, _SESSION).exists()
+
+    def test_another_session_is_not_exempted(self, tmp_path: Path) -> None:
+        with usage_pause.synthetic_session_exemption(tmp_path, _SESSION, now=_NOW):
+            assert usage_pause.usage_override_active(tmp_path, "other", now=_NOW + 1) is False
+
+
 def _raise_permission_error(*_args: Any, **_kwargs: Any) -> str:
     raise PermissionError("denied")

@@ -33,6 +33,8 @@ import json
 import logging
 import math
 import re
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -326,3 +328,35 @@ def clear_usage_pause(daemon_untracked_dir: Path, session_id: str) -> bool:
     except FileNotFoundError:
         return False
     return True
+
+
+#: Long enough for any one probe; the override is removed when the block ends.
+_SYNTHETIC_EXEMPTION_SECONDS: Final[float] = 3600.0
+
+
+@contextmanager
+def synthetic_session_exemption(
+    daemon_untracked_dir: Path, session_id: str, *, now: float
+) -> Generator[None]:
+    """Exempt a SYNTHETIC session from the usage ceiling for the block.
+
+    A QA check or acceptance probe that routes an invented session through the
+    real chain would otherwise be paused while the account is over the host's
+    ceiling, and report the account's usage instead of the handler under test.
+    The exemption is the owner's override, for this session only, after
+    clearing any pause an earlier run left; both records are removed on exit.
+    Never for a real session: it lifts the ceiling for whatever runs inside.
+
+    Raises:
+        ValueError: no session id.
+        OSError: a record could not be written or removed.
+    """
+    clear_usage_pause(daemon_untracked_dir, session_id)
+    write_usage_override(
+        daemon_untracked_dir, session_id, until=now + _SYNTHETIC_EXEMPTION_SECONDS, now=now
+    )
+    try:
+        yield
+    finally:
+        clear_usage_pause(daemon_untracked_dir, session_id)
+        override_path(daemon_untracked_dir, session_id).unlink(missing_ok=True)
