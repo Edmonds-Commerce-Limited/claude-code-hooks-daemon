@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.utils.github_issue_validity import (
+    LIST_LIMIT,
     UNRECOGNISED_LOGIN,
     AssigneeCheck,
     AuthorWhitelistCheck,
@@ -460,6 +461,29 @@ class TestListOpenIssues:
         assert len(gh.calls) == 1
         assert gh.calls[0][:3] == ("issue", "list", "--state")
         assert "open" in gh.calls[0]
+
+    def test_the_listing_asks_gh_for_the_documented_limit(
+        self, gh: FakeGh, service: IssueValidityService
+    ) -> None:
+        gh.issue_list = [_payload(number=1)]
+        service.check_open_issues([AuthorWhitelistCheck(["x"])])
+        call = gh.calls[0]
+        assert call[call.index("--limit") + 1] == str(LIST_LIMIT)
+
+    def test_a_listing_that_filled_the_limit_fails_closed(
+        self, gh: FakeGh, service: IssueValidityService
+    ) -> None:
+        """N374: a full page may hide issues past the limit, and there is no partial answer."""
+        gh.issue_list = [_payload(number=n) for n in range(1, LIST_LIMIT + 1)]
+        with pytest.raises(GhError, match=rf"{LIST_LIMIT} open issues.*incomplete"):
+            service.check_open_issues([AuthorWhitelistCheck(["x"])])
+
+    def test_a_listing_one_short_of_the_limit_is_complete(
+        self, gh: FakeGh, service: IssueValidityService
+    ) -> None:
+        gh.issue_list = [_payload(number=n) for n in range(1, LIST_LIMIT)]
+        reports = service.check_open_issues([AuthorWhitelistCheck(["x"])])
+        assert len(reports) == LIST_LIMIT - 1
 
     def test_a_listing_failure_raises(self, gh: FakeGh, service: IssueValidityService) -> None:
         gh.issue_list = GhError("offline")
