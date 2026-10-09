@@ -10,8 +10,11 @@ repository-relative globs. It covers the file tools (``Write``, ``Edit``,
 ``NotebookEdit``) and the Bash routes the shared write scan can name: a
 redirect, ``tee``, a heredoc redirect, ``sed -i``, ``dd of=``, a copy, move,
 install or link onto the path, and a deletion or truncation of it
-(``rm``, ``unlink``, ``touch``, ``truncate``, ``: >``). It is a guard against an agent's mistake, not
-against a human or a process running outside Claude Code.
+(``rm``, ``unlink``, ``touch``, ``truncate``, ``: >``). Past those precise routes, a command that
+names a listed path and is not known to only read it (:data:`READ_ONLY_VERBS`) is denied: wrappers
+(``flock``, ``chronic``), brace groups, ``for`` loops, ``bash -c`` / ``eval`` strings and absolute
+command paths are read through to the command they run. It is a guard against an agent's mistake,
+not against a human or a process running outside Claude Code.
 """
 
 from __future__ import annotations
@@ -33,6 +36,127 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import repository_root, scan_bash_write_targets
+from claude_code_hooks_daemon.utils.shell_expansion import TooManyToEnumerateError
+from claude_code_hooks_daemon.utils.simple_commands import (
+    SHELL_INTERPRETERS,
+    SimpleCommand,
+    brace_variants,
+    git_subcommand,
+    nested_command_strings,
+    simple_commands,
+    text_from,
+    unquote,
+    unroll_for_loops,
+)
+
+#: Commands known to only READ the files they are given. A command naming a listed
+#: path that is on none of these lists is denied (fail closed): what it does to
+#: the file is unknown. A write redirect onto the path is judged apart, by the
+#: shared write scan, whatever command carries it.
+READ_ONLY_VERBS: Final[frozenset[str]] = frozenset(
+    {
+        # print or search
+        "cat",
+        "tac",
+        "less",
+        "more",
+        "head",
+        "tail",
+        "grep",
+        "egrep",
+        "fgrep",
+        "rg",
+        "wc",
+        "nl",
+        "od",
+        "strings",
+        "cut",
+        "jq",
+        "cmp",
+        "diff",
+        # describe
+        "ls",
+        "stat",
+        "file",
+        "lsattr",
+        "du",
+        "readlink",
+        "realpath",
+        "basename",
+        "dirname",
+        "sha1sum",
+        "sha256sum",
+        "sha512sum",
+        "md5sum",
+        "cksum",
+        # test
+        "test",
+        "[",
+        "[[",
+        "true",
+        "false",
+        ":",
+        # print text
+        "echo",
+        "printf",
+        # read a file into the shell, or change only shell state
+        "source",
+        ".",
+        "export",
+        "unset",
+        "declare",
+        "readonly",
+        "local",
+        "set",
+        "cd",
+        "pushd",
+        "popd",
+        "type",
+        "which",
+    }
+)
+
+#: Commands whose effect on a file the shared write scan judges precisely
+#: (a redirect-free ``cp {p} /tmp/x`` is a read, ``rm {p}`` is not).
+SCAN_JUDGED_VERBS: Final[frozenset[str]] = frozenset(
+    {"cp", "mv", "install", "ln", "rm", "unlink", "touch", "truncate", "tee", "dd", "sed"}
+)
+
+#: ``git`` subcommands that never change a working-tree file's content.
+GIT_READ_ONLY_SUBCOMMANDS: Final[frozenset[str]] = frozenset(
+    {
+        "diff",
+        "log",
+        "show",
+        "status",
+        "blame",
+        "annotate",
+        "ls-files",
+        "ls-tree",
+        "grep",
+        "add",
+        "commit",
+        "rev-parse",
+        "check-ignore",
+        "cat-file",
+        "diff-tree",
+        "shortlog",
+    }
+)
+#: ``git`` subcommands the shared write scan judges (``git rm``, ``git mv``).
+GIT_SCAN_JUDGED_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"rm", "mv"})
+_GIT: Final[str] = "git"
+_EVAL: Final[str] = "eval"
+
+#: Every command this handler has a rule for; behind a wrapper it does not
+#: know, the first later word naming one of these is the command the wrapper runs.
+_KNOWN_VERBS: Final[frozenset[str]] = (
+    READ_ONLY_VERBS | SCAN_JUDGED_VERBS | SHELL_INTERPRETERS | {_GIT, _EVAL}
+)
+
+#: How many levels of ``bash -c '...'`` / ``eval`` are read as commands; past it
+#: the code is judged by whether it visibly names a listed path.
+MAX_SHELL_DEPTH: Final[int] = 3
 
 #: The tool-input field each file tool names its target in.
 _FILE_TOOL_TARGET_KEYS: Final[dict[str, str]] = {
@@ -66,6 +190,10 @@ _CD_COMMAND_RE: Final[re.Pattern[str]] = re.compile(
     r"^(cd|pushd|popd)(?:\s+(?:-[LP]\s+)?(?:--\s+)?(\"[^\"]*\"|'[^']*'|\S+))?\s*$"
 )
 
+#: A redirection on a `cd` (`2>/dev/null`, `>/dev/null 2>&1`, `&> log`): it does
+#: not stop the `cd` changing the directory.
+_CD_REDIRECT_RE: Final[re.Pattern[str]] = re.compile(r"\s+[0-9]*(?:&>>?|>>?|<)&?\s*[^\s;&|<>]+")
+
 _CD_WORD_RE: Final[re.Pattern[str]] = re.compile(r"\b(?:cd|pushd|popd)\b")
 _CD_ARGUMENT_RE: Final[re.Pattern[str]] = re.compile(
     r"\b(?:cd|pushd)\s+(?:-[LP]\s+)?(?:--\s+)?(\"[^\"]*\"|'[^']*'|[^\s;&|()]+)"
@@ -88,7 +216,9 @@ _RULE: Final[Rule] = Rule(
         "truncate or delete it, by any tool or any shell command.\n\n"
         "DO INSTEAD:\n"
         "  Leave the file alone and ask the human for the change you need.\n"
-        "  Reading it is always allowed."
+        "  Reading it is always allowed with a command known to only read (cat, grep,\n"
+        "  head, tail, ls, diff, stat, git diff); any other command that names it is\n"
+        "  refused because what it does to the file is unknown."
     ),
 )
 
@@ -303,13 +433,17 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
         # `validate_options` withholds a malformed value, so this is a list of strings.
         return [glob for glob in (self._paths or []) if glob.strip()]
 
-    def _protecting(self, path: str, roots: Sequence[str]) -> str | None:
-        """The glob keeping ``path`` (or a file inside it) read-only, else None."""
+    def _protecting(
+        self, path: str, roots: Sequence[str], *, directories: bool = True
+    ) -> str | None:
+        """The glob keeping ``path`` (or, with ``directories``, a file inside it) read-only."""
         globs = self._globs()
         for relative in self._relative(path, roots):
             for glob in globs:
                 parts = _segments(glob)
-                if _matches_in_full(relative, parts) or _is_ancestor(relative, parts):
+                if _matches_in_full(relative, parts) or (
+                    directories and _is_ancestor(relative, parts)
+                ):
                     return glob
         return None
 
@@ -380,7 +514,7 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
         directory = working
         assignments: list[str] = []
         for part in parts:
-            change = _CD_COMMAND_RE.match(part)
+            change = _CD_COMMAND_RE.match(_CD_REDIRECT_RE.sub("", part))
             if change is None:
                 untrusted = untrusted or _CD_WORD_RE.search(part) is not None
                 # Each part is read alone, so the variables set before it travel with it.
@@ -440,30 +574,84 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
         self, hook_input: dict[str, Any], roots: Sequence[str], working: str
     ) -> str | None:
         """The glob a shell command breaks, judged from every directory it may run in."""
-        tool_input = hook_input[HookInputField.TOOL_INPUT]
-        raw = tool_input.get("command", "")
+        raw = hook_input[HookInputField.TOOL_INPUT].get("command", "")
         command = raw if isinstance(raw, str) else ""
+        return self._spelled_violation(command, hook_input, roots, working, 0, set())
+
+    def _spelled_violation(
+        self,
+        command: str,
+        hook_input: dict[str, Any],
+        roots: Sequence[str],
+        working: str,
+        depth: int,
+        judged: set[tuple[str, str]],
+    ) -> str | None:
+        """The glob ``command`` breaks once its brace groups and ``for`` loops are spelled out.
+
+        ``judged`` holds the nested command strings already judged from a
+        directory, so a body repeated by each spelling of an outer group is
+        read once.
+        """
+        try:
+            variants = list(brace_variants(command))
+        except TooManyToEnumerateError:
+            # Too many spellings to list: the command is judged by whether it
+            # visibly names a listed path.
+            return self._text_naming(command)
+        for variant in variants:
+            glob = self._command_violation(
+                unroll_for_loops(variant), hook_input, roots, working, depth, judged
+            )
+            if glob is not None:
+                return glob
+        return None
+
+    def _scan_text(
+        self,
+        text: str,
+        base: str,
+        hook_input: dict[str, Any],
+        roots: Sequence[str],
+        untrusted: bool,
+    ) -> tuple[str | None, list[str], str | None]:
+        """What the shared write scan makes of ``text`` run in ``base``: the glob
+        it breaks, the destinations it could not place and the text it could not read."""
+        tool_input = hook_input[HookInputField.TOOL_INPUT]
+        part = {**hook_input, HookInputField.TOOL_INPUT: {**tool_input, "command": text}}
+        scan = scan_bash_write_targets({**part, HookInputField.CWD: base}, include_mutations=True)
+        for path in scan.paths:
+            glob = self._protecting(path, roots)
+            if glob is None and untrusted:
+                glob = self._protecting_by_name(path)
+            if glob is not None:
+                return glob, [], None
+        return None, list(scan.unresolved), scan.unreadable
+
+    def _command_violation(
+        self,
+        command: str,
+        hook_input: dict[str, Any],
+        roots: Sequence[str],
+        working: str,
+        depth: int,
+        judged: set[tuple[str, str]],
+    ) -> str | None:
+        """The glob a command, its braces already spelled out, breaks."""
         runs, untrusted = self._runs(command, working)
         bases = list(dict.fromkeys(directory for _, directory in runs))
         unresolved: list[str] = []
         unreadable: str | None = None
-        for text, base in runs:
-            part = (
-                hook_input
-                if text is None
-                else {**hook_input, HookInputField.TOOL_INPUT: {**tool_input, "command": text}}
-            )
-            scan = scan_bash_write_targets(
-                {**part, HookInputField.CWD: base}, include_mutations=True
-            )
-            for path in scan.paths:
-                glob = self._protecting(path, roots)
-                if glob is None and untrusted:
-                    glob = self._protecting_by_name(path)
-                if glob is not None:
-                    return glob
-            unresolved.extend(token for token in scan.unresolved if token not in unresolved)
-            unreadable = unreadable if unreadable is not None else scan.unreadable
+        for run, base in runs:
+            text = command if run is None else run
+            glob, tokens, unread = self._scan_text(text, base, hook_input, roots, untrusted)
+            if glob is not None:
+                return glob
+            unresolved.extend(token for token in tokens if token not in unresolved)
+            unreadable = unreadable if unreadable is not None else unread
+            glob = self._verbs_violation(text, (base, roots, untrusted, hook_input), depth, judged)
+            if glob is not None:
+                return glob
         # `xargs rm` takes its operands from the pipe, so none are visible to
         # the scan: the command text is what can name the file.
         for pipeline in _split_sequence(command) or [command]:
@@ -478,6 +666,119 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
             if glob is not None:
                 return glob
         return self._text_naming(unreadable) if unreadable is not None else None
+
+    # ------------------------------------------------------------------
+    # Judging the verb each simple command runs (Plan 00499 Phase 1b)
+    # ------------------------------------------------------------------
+
+    def _verbs_violation(
+        self,
+        text: str,
+        where: tuple[str, Sequence[str], bool, dict[str, Any]],
+        depth: int,
+        judged: set[tuple[str, str]],
+    ) -> str | None:
+        """The glob a simple command of ``text`` breaks, judged by its verb.
+
+        The shared scan names the routes it knows; this reads what the command
+        IS. A command that names a listed path and is not known to only read is
+        denied, whatever wraps it. Code handed to a shell is read as commands.
+        """
+        for command in simple_commands(text, known_verbs=_KNOWN_VERBS):
+            if command.reread:
+                glob = self._rescanned(command.text, where)
+                if glob is not None:
+                    return glob
+            bodies = nested_command_strings(command)
+            for body in bodies:
+                glob = self._nested_violation(body, where, depth, judged)
+                if glob is not None:
+                    return glob
+            if bodies or self._only_reads_or_is_scanned(command):
+                continue
+            glob = self._unknown_command_violation(command, where)
+            if glob is not None:
+                return glob
+        return None
+
+    @staticmethod
+    def _only_reads_or_is_scanned(command: SimpleCommand) -> bool:
+        """Is the command's effect on a file known: a read, or a verb the scan judges?"""
+        verb = command.verb
+        if verb in READ_ONLY_VERBS or verb in SCAN_JUDGED_VERBS or verb in SHELL_INTERPRETERS:
+            return True
+        if verb == _EVAL:
+            return True
+        if verb == _GIT:
+            subcommand = git_subcommand(command)
+            return subcommand in GIT_READ_ONLY_SUBCOMMANDS | GIT_SCAN_JUDGED_SUBCOMMANDS
+        return False
+
+    def _rescanned(
+        self, text: str, where: tuple[str, Sequence[str], bool, dict[str, Any]]
+    ) -> str | None:
+        """The glob the shared scan finds in a command it did not see as written:
+        its verb sat behind an absolute path or a wrapper."""
+        base, roots, untrusted, hook_input = where
+        glob, unresolved, unreadable = self._scan_text(text, base, hook_input, roots, untrusted)
+        if glob is not None:
+            return glob
+        for token in unresolved:
+            glob = self._token_naming(token, roots, [base])
+            if glob is not None:
+                return glob
+        return self._text_naming(unreadable) if unreadable is not None else None
+
+    def _nested_violation(
+        self,
+        body: str,
+        where: tuple[str, Sequence[str], bool, dict[str, Any]],
+        depth: int,
+        judged: set[tuple[str, str]],
+    ) -> str | None:
+        """The glob code handed to a shell (``bash -c BODY``) breaks."""
+        base, roots, _untrusted, hook_input = where
+        if (body, base) in judged:
+            return None
+        judged.add((body, base))
+        if depth >= MAX_SHELL_DEPTH:
+            return self._text_naming(body)
+        return self._spelled_violation(body, hook_input, roots, base, depth + 1, judged)
+
+    def _unknown_command_violation(
+        self, command: SimpleCommand, where: tuple[str, Sequence[str], bool, dict[str, Any]]
+    ) -> str | None:
+        """The glob an unrecognised command names: it may do anything to what it names."""
+        base, roots, untrusted, _hook_input = where
+        for operand in command.file_operands:
+            glob = self._operand_naming(operand, roots, base, untrusted)
+            if glob is not None:
+                return glob
+        # A verb the scan knows, run by a command this handler does not: the
+        # directories it would remove count as well.
+        for position, word in enumerate(command.words[1:], start=1):
+            if unquote(word) in SCAN_JUDGED_VERBS:
+                return self._rescanned(text_from(command.words, position), where)
+        return None
+
+    def _operand_naming(
+        self, operand: str, roots: Sequence[str], base: str, untrusted: bool
+    ) -> str | None:
+        """The glob an operand of an unrecognised command names: the file itself, a
+        wildcard that could expand to it, or ``--option=VALUE`` naming it."""
+        candidates = [operand, operand.partition("=")[2]] if "=" in operand else [operand]
+        for candidate in candidates:
+            if not candidate:
+                continue
+            if _WILDCARDS.search(candidate) or any(char in candidate for char in _EXPANSION_CHARS):
+                glob = self._token_naming(candidate, roots, [base])
+            else:
+                glob = self._protecting(str(Path(base) / candidate), roots, directories=False)
+                if glob is None and untrusted:
+                    glob = self._protecting_by_name(candidate)
+            if glob is not None:
+                return glob
+        return None
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True when the call would change a listed path."""
@@ -515,11 +816,17 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
             "installs or links (`ln`) onto it, or `touch`es, `truncate`s, `rm`s or `unlink`s it "
             "(or removes or moves a directory holding it, as `rm -rf` and `mv` do). A "
             "wildcard is denied when the shell could expand it to the file.\n\n"
-            "**Known gaps, still not for you to use**: `perl -i`, `rsync`, `find -delete`, "
-            "`python -c`/`open()` and any other interpreter, `bash -c '...'`, an absolute "
-            "`/bin/rm`, brace expansion (`{a,b}`) and wrappers the guard does not know "
-            "(`flock` and the like) reach the file without being seen. The rule is the "
-            "same whether or not the guard sees the route.\n\n"
+            "**Any other command that names the file is denied too**, unless it is known to "
+            "only read (`cat`, `grep`, `head`, `tail`, `ls`, `diff`, `stat`, `git diff`, ...): "
+            "`perl -i`, `rsync`, `find -delete`, `flock ... rm` and the like. Brace groups "
+            "(`{a,b}`), `for` loops, `bash -c '...'`, `eval`, a path to a command "
+            "(`/bin/rm`) and wrappers are read through to the command they run.\n\n"
+            "**Known gaps, still not for you to use**: code inside an interpreter "
+            "(`python -c`/`open()`, `perl -e`), a heredoc fed to one, and a directory "
+            "removed by a tool the guard does not know that names only the directory "
+            "(`find .claude -delete`) reach the file without being seen. The rule is the "
+            "same whether or not the guard sees the route. Quote a heredoc delimiter "
+            "(`<<'EOF'`) when its body only mentions the path.\n\n"
             "**When it is denied, do not look for another route to the same file.** Ask the "
             "human for the change you need; the file is theirs (or the IaC's) to place."
         )

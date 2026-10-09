@@ -77,18 +77,23 @@ older local copy tells the agent to report it to a human, not to edit it.
 Gaps the round 2 review found and the coordinator deferred at review round 2 rather than fix inside Phase 1. Each is also named in the handler's
 guidance as a known gap.
 
-- [ ] ⬜ **Task 1b.1**: Wrappers not on the handler's list (`flock`, `chronic` and the like) hide the verb they
+- [x] ✅ **Task 1b.1**: Wrappers not on the handler's list (`flock`, `chronic` and the like) hide the verb they
   run. Consider inverting the check to a read-only allowlist: any command not known to only read, naming a listed
-  path, is denied.
+  path, is denied. Done: a command that names a listed path and is on neither `READ_ONLY_VERBS` nor the scan-judged
+  verbs is denied; wrappers are read through to the command they run (`utils/simple_commands.py`).
 
-- [ ] ⬜ **Task 1b.2**: Brace expansion (`rm .claude/ccy/ccy.env.{local,bak}`) is not expanded before the path is
-  judged.
+- [x] ✅ **Task 1b.2**: Brace expansion (`rm .claude/ccy/ccy.env.{local,bak}`) is not expanded before the path is
+  judged. Done: groups are spelled out (joined and per-spelling variants) with the shared expansion caps; past a cap
+  the command is judged by whether it visibly names a listed path.
 
-- [ ] ⬜ **Task 1b.3**: `bash -c '...'` / `sh -c` strings and absolute command paths (`/bin/rm`) are not read as
-  commands.
+- [x] ✅ **Task 1b.3**: `bash -c '...'` / `sh -c` strings and absolute command paths (`/bin/rm`) are not read as
+  commands. Done: `bash -c`, `sh -c`, `eval`, `flock -c` and `su -c` bodies are judged as commands to
+  `MAX_SHELL_DEPTH` (3), and an absolute command path is reduced to its verb.
 
-- [ ] ⬜ **Task 1b.4**: A `cd` carrying a redirect (`cd .claude 2>/dev/null && rm -rf ccy`) is not followed as a
-  directory change, and a `for` loop over the path (`for f in <path>; do rm "$f"; done`) is not read.
+- [x] ✅ **Task 1b.4**: A `cd` carrying a redirect (`cd .claude 2>/dev/null && rm -rf ccy`) is not followed as a
+  directory change, and a `for` loop over the path (`for f in <path>; do rm "$f"; done`) is not read. Done: a
+  redirect is set aside before a `cd` is recognised, and a `for` loop body is written out once per word (32 at
+  most, then a wildcard).
 
 ### Phase 2: #88, corrected
 

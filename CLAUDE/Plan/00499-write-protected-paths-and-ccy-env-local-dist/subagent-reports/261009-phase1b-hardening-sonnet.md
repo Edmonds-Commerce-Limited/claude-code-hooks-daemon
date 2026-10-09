@@ -1,0 +1,44 @@
+# Plan 00499 Phase 1b: hardening report (sonnet)
+
+## What was built
+
+- `src/claude_code_hooks_daemon/utils/simple_commands.py` (new): reads a command line as simple commands (verb past
+  assignments, absolute command path and wrappers; quote-removed operands), the code a shell is handed
+  (`bash -c`, `eval`, `flock -c`, `su -c`), brace spellings and `for`-loop unrolling. It reuses the existing
+  `shell_segmentation`, `shell_expansion` (spelling caps) and `command_evasion` helpers.
+- `handlers/pre_tool_use/write_protected_paths.py`: the precise scan stays. On top of it, every simple command is
+  judged by its verb. A command naming a listed path (the file itself, a wildcard that could reach it, an
+  `--opt=VALUE`, a name behind an unresolved expansion) that is on neither `READ_ONLY_VERBS` nor the scan-judged verbs
+  is denied. `git` is judged by subcommand. Wrapper tails and absolute-path verbs are re-scanned. `bash -c`, `sh -c`,
+  `eval`, `flock -c` and `su -c` bodies are recursed into (`MAX_SHELL_DEPTH` 3; past it the body is judged by name).
+- `cd` with a redirect is followed (`_CD_REDIRECT_RE`). `for` bodies are written out per word (32 words, then `*`).
+
+## Decisions worth a reviewer's eye
+
+- Input redirects (`< file`) are not a naming of the file; output redirects are the shared scan's job, whatever
+  command carries them.
+- An unknown command naming only a directory ABOVE the file is allowed (`ruff check .claude`, `pytest .`); the
+  ancestor rule still applies to the scan-judged verbs and to a scan-judged verb behind an unknown command.
+- Brace variants: one joined variant plus one per spelling index, so a destination in last position
+  (`cp x f.{local,dist}`) is judged. Past the spelling cap the command is judged by `_text_naming`.
+- A quoted-delimiter heredoc body fed to a data sink is not read as commands; an UNQUOTED one is, so prose naming the
+  path in `cat > n.md <<EOF` can be denied. Guidance says to quote the delimiter.
+
+## Gaps not closed (named in the handler guidance)
+
+- Code inside an interpreter (`python -c "open(...)"`, `perl -e`) and a heredoc fed to one.
+- A tool that removes a directory above the file and names only the directory (`find .claude -delete`).
+- A group after an unreadable substitution (`rm $(date) x.{a,b}`) is judged by name only, so it is denied only when
+  the command text carries the literal file name.
+- Cross products of several brace groups for a destination in last position (only aligned spellings are tried).
+- Nested `for` loops: the inner loop is kept as written.
+
+## Tests
+
+- `tests/unit/handlers/pre_tool_use/test_write_protected_paths.py`: +about 230 cases (wrappers, read-only allowlist,
+  braces, shell strings and absolute paths, cd with redirect, loops, linear-time check, guidance).
+- `tests/unit/utils/test_simple_commands.py`: 66 cases for the new module.
+- Run: the two named test files, `test_blocking_handler_evasion.py`, `tests/unit/core/`, `test_simple_commands.py`
+  (3394 passed); `test_safety_handlers_hostile_input_performance.py` (43 passed); `test_claude_md_guidance_coverage.py`
+  (354 passed). ruff, black and mypy clean on the changed files. `llm_qa.py` was not run.
+- Tests were run with `-o pythonpath=src` because the shared venv's editable install points at the main checkout.
