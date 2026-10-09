@@ -40,6 +40,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
 )
 
 CHECK_ID: Final[str] = "index-retention-window"
+STATEMENT: Final[str] = (
+    "The main index keeps only the newest completed rows. Move older rows verbatim into Completed/README.md."
+)
 
 _REMEDIATION: Final[str] = (
     "Move every completed row beyond the newest "

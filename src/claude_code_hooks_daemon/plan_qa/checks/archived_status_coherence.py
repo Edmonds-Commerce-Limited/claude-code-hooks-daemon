@@ -21,6 +21,9 @@ from claude_code_hooks_daemon.plan_qa.model import PlanDoc
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, CheckSpec, Finding, Level, Stage
 
 CHECK_ID: Final[str] = "archived-status-coherence"
+STATEMENT: Final[str] = (
+    "A plan in the archive must carry a terminal status. Correct the status or move the folder out of the archive."
+)
 
 _PLAN_MD_SUFFIX: Final[str] = "/PLAN.md"
 _RELEVANT_STATUSES: Final[tuple[str, ...]] = ("A", "M")

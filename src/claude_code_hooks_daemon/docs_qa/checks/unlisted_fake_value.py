@@ -43,6 +43,9 @@ from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 logger = logging.getLogger(__name__)
 
 CHECK_ID: Final[str] = "unlisted-fake-value"
+STATEMENT: Final[str] = (
+    "Fake-looking values in docs must come from the fake-values registry. Use a listed fake or extend the registry."
+)
 
 _MARKDOWN_SUFFIX: Final[str] = ".md"
 

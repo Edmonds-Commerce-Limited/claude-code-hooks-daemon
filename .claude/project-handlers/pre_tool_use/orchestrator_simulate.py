@@ -51,7 +51,7 @@ from typing import Any, Final
 from claude_code_hooks_daemon.core import AcceptanceTest, Decision, GatingResult, TestType
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.handler_scope import acts_as_main_thread
-from claude_code_hooks_daemon.core.rule import Rule
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
 
 # Task/Agent (subagent dispatch), TodoWrite, Read and the search/web tools are
@@ -227,14 +227,31 @@ def _denial_reason(file_path: str | None) -> str:
     """The block message: terse, identified, and it names the way forward."""
     target = f" ({file_path})" if file_path else ""
     return (
-        f"[{ORCHESTRATOR_WRITE_RULE_ID}] ORCHESTRATOR-ONLY MODE: the main "
-        f"thread does not write files{target}.\n\n"
+        f"ORCHESTRATOR-ONLY MODE: the main thread does not write files{target}.\n\n"
         "Dispatch the work to a sub-agent with the `Task` tool and let it do "
         "the writing — that is the whole point of the mode: the lead's "
         "context stays coordination, not implementation.\n\n"
         "Exempt: this project's plan tree (CLAUDE/Plan/), which the "
         "coordinator owns. Sub-agents are never affected. Bash is never "
         "denied by this rule."
+    )
+
+
+def _write_rule() -> Rule:
+    """The one rule this handler enforces when armed (declared only then)."""
+    return Rule(
+        rule_id=ORCHESTRATOR_WRITE_RULE_ID,
+        blocked=(
+            "`Write`/`Edit`/`NotebookEdit` from the MAIN THREAD "
+            "(only when orchestrator blocking is armed; otherwise recorded, never denied)"
+        ),
+        why=(
+            "Implementation work belongs in a sub-agent; 73% of this "
+            "repository's main-thread edits were implementation, which "
+            "is context the lead should never have spent"
+        ),
+        fix="Dispatch the work with the `Task` tool and let the sub-agent write",
+        verbose=_denial_reason(None),
     )
 
 
@@ -371,7 +388,10 @@ class OrchestratorSimulateHandler(PreToolUseHandlerBase):
             return GatingResult(
                 decision=Decision.DENY,
                 rule=ORCHESTRATOR_WRITE_RULE_ID,
-                reason=_denial_reason(_target_path(hook_input)),
+                reason=(
+                    f"{RuleFormatter().headline(_write_rule())}\n\n"
+                    f"{_denial_reason(_target_path(hook_input))}"
+                ),
             )
 
         command = get_bash_command(hook_input)
@@ -391,27 +411,14 @@ class OrchestratorSimulateHandler(PreToolUseHandlerBase):
         )
 
     def get_rules(self) -> list[Rule]:
-        """The rule this handler can actually enforce — none, while simulating.
+        """The rule this handler enforces when armed, declared in every mode.
 
-        A rule row in the generated CLAUDE.md is a promise that the rule can
-        fire, and `explain-rule` resolving an ID is the same promise. Neither
-        is true in the default mode, so neither is made.
+        The ID is printed by the armed deny and by the guidance, so
+        `explain-rule` must resolve it however the handler was built (it
+        constructs handlers without config). The rule's own text says it
+        fires only when armed, so the row makes no false promise.
         """
-        if not self._blocking:
-            return []
-        return [
-            Rule(
-                rule_id=ORCHESTRATOR_WRITE_RULE_ID,
-                blocked="`Write`/`Edit`/`NotebookEdit` from the MAIN THREAD",
-                why=(
-                    "Implementation work belongs in a sub-agent; 73% of this "
-                    "repository's main-thread edits were implementation, which "
-                    "is context the lead should never have spent"
-                ),
-                fix="Dispatch the work with the `Task` tool and let the sub-agent write",
-                verbose=_denial_reason(None),
-            )
-        ]
+        return [_write_rule()]
 
     def get_claude_md(self) -> str | None:
         """Describe the mode that is actually ACTIVE, never both.

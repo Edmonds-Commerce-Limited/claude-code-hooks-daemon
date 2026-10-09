@@ -50,6 +50,9 @@ from claude_code_hooks_daemon.utils.authored_paths import (
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 CHECK_ID: Final[str] = "journal-entry-ordering"
+STATEMENT: Final[str] = (
+    "Journal entries must have times that increase down the day-file. Reorder the entries."
+)
 
 #: No backfill, mirroring Plan 00163 Decision 7's grandfathering: the SWEEP
 #: half ignores day-files NAMED before the date this rule shipped. A file

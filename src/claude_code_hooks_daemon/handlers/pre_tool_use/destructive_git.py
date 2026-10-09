@@ -761,6 +761,12 @@ _RULE_DEFINITIONS: tuple[tuple[str, str, str, str], ...] = (
         "A branch already merged into the default branch is deleted freely; otherwise do not "
         "run it, stop and ask the human to run it themselves",
     ),
+    (
+        RuleID.GIT_DESTRUCTIVE_UNREADABLE,
+        "a git command that may destroy changes and cannot be read in full",
+        "Fail closed: a command this handler cannot parse might be any of the rules above",
+        "Rewrite it as one plain git command per call, or ask the user to run it manually",
+    ),
 )
 
 
@@ -934,9 +940,10 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             # matches() returned True, so this path is unreachable via the
             # daemon's dispatch. Kept for callers that invoke handle() directly
             # with a command none of the patterns matches.
+            unreadable = self._rules_by_id[RuleID.GIT_DESTRUCTIVE_UNREADABLE]
             return GatingResult(
                 decision=Decision.DENY,
-                reason=f"BLOCKED: {_GENERIC_DESTRUCTIVE_REASON}",
+                reason=f"{self._formatter.headline(unreadable)}\n\n{_GENERIC_DESTRUCTIVE_REASON}",
             )
         rule = self._rules_by_id[rule_id]
 

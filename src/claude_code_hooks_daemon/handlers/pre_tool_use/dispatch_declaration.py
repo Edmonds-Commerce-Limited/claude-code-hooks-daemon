@@ -41,8 +41,10 @@ from claude_code_hooks_daemon.constants import (
     HookInputField,
     Priority,
 )
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.utils.option_coercion import coerce_bool_option
 from claude_code_hooks_daemon.utils.subagent_report_paths import (
     DEFAULT_REPORT_DIR,
@@ -109,6 +111,21 @@ _PATH_TOKEN_PATTERN = re.compile(r"\S*/\S+")
 # your findings there" in the next must NOT count as declaring a
 # destination: the keyword and the path are in different clauses.
 _CLAUSE_BOUNDARY_PATTERN = re.compile(r"[.!?\n]+")
+
+# The one rule behind the opt-in strict-mode deny. Advisory mode (the default)
+# never blocks, so it never prints this ID.
+_RULE: Final[Rule] = Rule(
+    rule_id=RuleID.DISPATCH_DECLARATION_MISSING,
+    blocked="a `Task` dispatch prompt that declares no plan folder and no non-plan destination (strict mode)",
+    why="A subagent's long-form reply travels over a bounded channel that silently elides an oversized inline report, so its output must go to a declared file",
+    fix="Name the plan folder the dispatch belongs to, or say 'not plan work' and declare where its files go",
+    verbose=(
+        "`dispatch_declaration` is running with `strict: true`, so a dispatch prompt\n"
+        "must declare where its reports go: the dispatching plan's folder (reports\n"
+        "land in its tracked `subagent-reports/`), or an explicit 'not plan work'\n"
+        "plus a declared file destination. The reason below names the exact forms."
+    ),
+)
 
 
 def _prompt_declares_destination(prompt: str) -> bool:
@@ -362,9 +379,16 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
             return GatingResult(decision=Decision.ALLOW, context=context)
 
         if self._is_strict():
-            return GatingResult(decision=Decision.DENY, reason=self._contract_text())
+            return GatingResult(
+                decision=Decision.DENY,
+                reason=f"{RuleFormatter().headline(_RULE)}\n\n{self._contract_text()}",
+            )
 
         return GatingResult(decision=Decision.ALLOW, context=[self._contract_text()])
+
+    def get_rules(self) -> list[Rule]:
+        """The rule behind the opt-in strict-mode deny (silent while ``strict`` is off)."""
+        return [_RULE]
 
     def get_claude_md(self) -> str | None:
         return (

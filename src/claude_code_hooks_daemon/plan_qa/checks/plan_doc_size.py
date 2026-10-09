@@ -48,6 +48,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
 from claude_code_hooks_daemon.utils.escape_hatch import is_acceptable_reason
 
 CHECK_ID: Final[str] = "plan-doc-size"
+STATEMENT: Final[str] = (
+    "A plan document is read in full every session, so it must stay within its size tiers. Extract durable detail into a supporting document, move dated narrative into JOURNAL/, or split the plan."
+)
 
 # An in-content escape hatch rather than an env var: a Write/Edit carries no
 # shell command to prefix, and keeping the justification IN the file means it

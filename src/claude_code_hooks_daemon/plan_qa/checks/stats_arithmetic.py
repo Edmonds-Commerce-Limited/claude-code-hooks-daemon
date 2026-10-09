@@ -41,6 +41,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
 )
 
 CHECK_ID: Final[str] = "plan-stats-arithmetic"
+STATEMENT: Final[str] = (
+    "The index's self-check sum must add up. Correct the figures so the arithmetic holds."
+)
 
 REMEDIATION: Final[str] = (
     "Recount from disk and correct the reconciliation bullet in the plan index "

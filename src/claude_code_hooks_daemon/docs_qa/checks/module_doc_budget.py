@@ -67,6 +67,9 @@ from claude_code_hooks_daemon.utils.vendor_paths import (
 logger = logging.getLogger(__name__)
 
 CHECK_ID: Final[str] = "module-doc-budget"
+STATEMENT: Final[str] = (
+    "A sub-folder CLAUDE.md is either a pure routing table or a registered module-local home within its budget. Trim it or register it."
+)
 
 _CLAUDE_MD_FILENAME: Final[str] = "CLAUDE.md"
 

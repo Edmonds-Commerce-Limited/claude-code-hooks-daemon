@@ -78,12 +78,29 @@ Terminal: True (blocks session ending when a release is in flight)
 import json
 import logging
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants.tags import HandlerTag
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 
 logger = logging.getLogger(__name__)
+
+# This project's rule ID (a project handler's IDs live with the handler, not in the
+# library's `RuleID`). `hooks-daemon explain-rule` resolves it (Plan 00484 G5).
+RULE_ID: Final[str] = "R-RELEASE-IN-PROGRESS"
+
+_RULE: Final[Rule] = Rule(
+    rule_id=RULE_ID,
+    blocked="ending the session while `untracked/release-state.json` records an unfinished release",
+    why="A part-done release (version bumped, UNRELEASED/ moved, nothing tagged) is its own broken state, and the state file is the human's authorisation to finish it",
+    fix="Resume from the recorded last_completed_step and finish the release (RELEASING.md); to abort a failed gate, delete the state file and report which gate failed",
+    verbose=(
+        "The state file is the authority on whether a release is in flight (RELEASING.md).\n"
+        "The guard holds at every recorded step until Step 15 verification deletes it.\n"
+        "The block message names the version, the last completed step and the abort route."
+    ),
+)
 
 
 class ReleaseBlockerHandler(Handler):
@@ -304,7 +321,13 @@ class ReleaseBlockerHandler(Handler):
             "for examples of AI acceptance test avoidance behaviour.\n\n"
             "To disable: handlers.stop.release_blocker (set enabled: false)"
         )
-        return HookResult(decision=Decision.DENY, reason=reason)
+        return HookResult(
+            decision=Decision.DENY, reason=f"{RuleFormatter().headline(_RULE)}\n\n{reason}"
+        )
+
+    def get_rules(self) -> list[Rule]:
+        """The rule behind this handler's one deny."""
+        return [_RULE]
 
     def get_claude_md(self) -> str | None:
         return None

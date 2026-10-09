@@ -5,6 +5,10 @@ anything. Nothing is listed here that another surface does not already own:
 which handlers are active comes from ``DocsGenerator`` (what ``generate-docs``
 renders), and each handler's rules from ``discover_handler_rules`` (what
 ``explain-rule`` reads). This module only joins the two.
+
+Membership follows owner ruling C1: the content and commit gates are the
+Defence set and the action guards are outside it. The deciding property is the
+handler's own ``defect_class`` declaration, not a list of names kept here.
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.daemon.docs_generator import CollectedHandler
 from claude_code_hooks_daemon.handlers.registry import EVENT_TYPE_MAPPING
 from claude_code_hooks_daemon.rule_explain.lookup import HandlerRules
@@ -25,7 +30,7 @@ _BEHAVIOR_BLOCKING = "BLOCKING"
 
 @dataclass(frozen=True, slots=True)
 class Defence:
-    """One active defence: a rule of an enabled handler, or a rule-less blocking handler.
+    """One active defence: a rule of an enabled Defence handler, or a rule-less blocking one.
 
     Attributes:
         rule_id: The rule's public ID, or ``None`` for a blocking handler that
@@ -36,9 +41,9 @@ class Defence:
         priority: Effective priority from the loaded config.
         behavior: ``DocsGenerator`` behaviour label (for example ``BLOCKING``).
         statement: The rule's terse ``blocked`` text, or ``None`` without a rule.
-        defect_class: Always ``None`` today: no source maps a rule to a
-            ``CLAUDE/Security/`` category (that register maps categories to
-            detector scripts, not to rules).
+        defect_class: The handler's declared ``Handler.defect_class``. Never
+            ``None`` in a listing: a handler without one is an action guard,
+            which is outside the Defence set and is not listed.
         docs: The command that prints the full documentation.
         detector_entry_point: The command that runs the defence by sending it a
             payload, or ``None`` when its event is not a wired hook event.
@@ -51,7 +56,7 @@ class Defence:
     priority: int
     behavior: str
     statement: str | None
-    defect_class: str | None
+    defect_class: DefectClass | None
     docs: str
     detector_entry_point: str | None
 
@@ -78,20 +83,37 @@ def collect_active_defences(
     records: list[Defence] = []
     for info in sorted(active_handlers, key=lambda info: (info[2], info[3], info[1])):
         entry = by_class.get(info[0])
-        rules = entry.rules if entry is not None else ()
-        for rule in rules:
+        if entry is None or entry.defect_class is None:
+            continue  # an action guard (owner ruling C1), or a handler that declares nothing
+        for rule in entry.rules:
             records.append(
                 _defence(
-                    info, rule.rule_id, rule.blocked, f"hooks-daemon explain-rule {rule.rule_id}"
+                    info,
+                    entry.defect_class,
+                    rule.rule_id,
+                    rule.blocked,
+                    f"hooks-daemon explain-rule {rule.rule_id}",
                 )
             )
-        if not rules and info[4] == _BEHAVIOR_BLOCKING:
-            records.append(_defence(info, None, None, f"hooks-daemon explain-handler {info[1]}"))
+        if not entry.rules and info[4] == _BEHAVIOR_BLOCKING:
+            records.append(
+                _defence(
+                    info,
+                    entry.defect_class,
+                    None,
+                    None,
+                    f"hooks-daemon explain-handler {info[1]}",
+                )
+            )
     return records
 
 
 def _defence(
-    info: CollectedHandler, rule_id: str | None, statement: str | None, docs: str
+    info: CollectedHandler,
+    defect_class: DefectClass,
+    rule_id: str | None,
+    statement: str | None,
+    docs: str,
 ) -> Defence:
     """Build one record from a ``CollectedHandler`` tuple and the rule fields."""
     class_name, config_key, event, priority, behavior, _description, _enabled = info
@@ -103,7 +125,7 @@ def _defence(
         priority=priority,
         behavior=behavior,
         statement=statement,
-        defect_class=None,
+        defect_class=defect_class,
         docs=docs,
         detector_entry_point=(
             f"hooks-daemon probe {event} --json <payload>" if event in EVENT_TYPE_MAPPING else None

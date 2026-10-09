@@ -26,6 +26,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
 )
 
 CHECK_ID: Final[str] = "task-grammar"
+STATEMENT: Final[str] = (
+    "Progress markers must use the template's checkbox and status-icon grammar, not ad-hoc ones like `[~]`. Rewrite the task lines in template form."
+)
 
 _REMEDIATION: Final[str] = (
     "Use the template task grammar instead of ad-hoc markers like [✓], [⏳], "

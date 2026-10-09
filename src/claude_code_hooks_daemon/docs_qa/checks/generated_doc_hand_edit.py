@@ -65,6 +65,9 @@ from claude_code_hooks_daemon.version import __version__ as _DAEMON_VERSION
 logger = logging.getLogger(__name__)
 
 CHECK_ID: Final[str] = "generated-doc-hand-edit"
+STATEMENT: Final[str] = (
+    "A generated document must not be edited by hand. Change its source or generator and regenerate it."
+)
 
 # The marker pattern now lives in utils/deployed_version.py, because the
 # post-merge daemon-sync advisory reads the same header to learn which version

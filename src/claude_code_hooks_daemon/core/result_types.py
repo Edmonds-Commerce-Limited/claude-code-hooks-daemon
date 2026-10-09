@@ -45,15 +45,34 @@ treat it as lax/advisory — ALLOW-equivalent. Excluding it would break nothing
 today but would be a gratuitous incompatibility for a client handler naming it.
 """
 
-from typing import Final, Literal, Self, get_args
+from typing import Any, Final, Literal, Self, TypeVar, get_args
 
 from claude_code_hooks_daemon.core.hook_result import REFUSAL_CAPABLE_EVENTS, Decision, HookResult
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 
 #: The decisions every event can carry, whatever else it can express.
 _UNIVERSAL: Final[frozenset[Decision]] = frozenset({Decision.ALLOW, Decision.CONTINUE})
 
 #: The model field the tiers narrow.
 _DECISION_FIELD: Final[str] = "decision"
+
+
+_ResultT = TypeVar("_ResultT", bound=HookResult[Any])  # any tier; only decision/reason are read
+
+
+def _filed_under_rule(result: _ResultT, rule: Rule, blocked: str | None) -> _ResultT:
+    """A denial with ``rule``'s ``BLOCKED [id]`` headline above its reason.
+
+    For a handler whose deny reasons are built in several places and each
+    carries its own specifics. Wrapping the verdict once puts on every deny
+    path the identifier ``explain-rule`` resolves (Plan 00484 G5). Anything but
+    a denial is returned unchanged.
+    """
+    if result.decision is not Decision.DENY:
+        return result
+    headline = RuleFormatter().headline(rule, blocked=blocked)
+    reason = f"{headline}\n\n{result.reason}" if result.reason else headline
+    return result.model_copy(update={"reason": reason})
 
 
 class AdvisoryResult(HookResult[Literal[Decision.ALLOW, Decision.CONTINUE]]):
@@ -92,6 +111,22 @@ class BlockingResult(HookResult[Literal[Decision.ALLOW, Decision.CONTINUE, Decis
             A result of the calling class, with the deny decision.
         """
         return cls(decision=Decision.DENY, reason=reason, context=context or [])
+
+    def under_rule(self, rule: Rule, *, blocked: str | None = None) -> Self:
+        """File a denial under ``rule``: its ``BLOCKED [id]`` headline above the reason.
+
+        See :func:`_filed_under_rule`.
+
+        Args:
+            rule: The rule the denial belongs to.
+            blocked: Headline wording for this one deny, when the rule's own
+                ``blocked`` text would misdescribe it (a fail-closed deny).
+
+        Returns:
+            A copy of this result with the headline prepended to its reason, or
+            this result when it is not a denial.
+        """
+        return _filed_under_rule(self, rule, blocked)
 
 
 class GatingResult(
@@ -175,6 +210,10 @@ class GatingResult(
             A result of the calling class, with the defer decision.
         """
         return cls(decision=Decision.DEFER)
+
+    def under_rule(self, rule: Rule, *, blocked: str | None = None) -> Self:
+        """File a denial under ``rule``. See :meth:`BlockingResult.under_rule`."""
+        return _filed_under_rule(self, rule, blocked)
 
 
 #: Narrowest first, so ``result_type_for_event`` never returns a wider tier

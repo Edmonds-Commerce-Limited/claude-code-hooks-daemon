@@ -26,6 +26,7 @@ from typing import Any
 import pytest
 from tests.claude_plugin_fixture import READ_ONLY_TOOLS, install_fake_plugin
 
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.dispatch_declaration import (
     DispatchDeclarationHandler,
@@ -302,6 +303,25 @@ class TestStrictMode:
         assert result.decision == Decision.DENY
         assert result.reason is not None
         assert "subagent-reports" in result.reason
+
+    def test_strict_deny_carries_the_rule_id_that_explain_rule_resolves(
+        self, strict_handler: DispatchDeclarationHandler
+    ) -> None:
+        """Plan 00484 G5: a deny path with no identifier resolves nowhere."""
+        (rule,) = strict_handler.get_rules()
+        result = strict_handler.handle(_task_input("refactor the config loader"))
+
+        assert rule.rule_id == RuleID.DISPATCH_DECLARATION_MISSING
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{rule.rule_id}]")
+
+    def test_advisory_mode_does_not_claim_a_block(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        result = handler.handle(_task_input("refactor the config loader"))
+
+        assert result.decision == Decision.ALLOW
+        assert all("BLOCKED [" not in text for text in result.context)
 
     def test_allows_declared_dispatch_in_strict_mode(
         self, strict_handler: DispatchDeclarationHandler

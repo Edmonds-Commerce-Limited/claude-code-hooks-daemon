@@ -31,6 +31,7 @@ from typing import Any
 import pytest
 from tests.claude_plugin_fixture import READ_ONLY_TOOLS, install_fake_plugin
 
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.subagent_stop.subagent_report_size_blocker import (
     SubagentReportSizeBlockerHandler,
@@ -100,6 +101,23 @@ class TestSizeThreshold:
         assert result.decision == Decision.DENY
         assert result.reason is not None
         assert "subagent-reports" in result.reason
+
+    def test_every_deny_path_carries_the_rule_id_that_explain_rule_resolves(
+        self, handler: SubagentReportSizeBlockerHandler, tmp_path: Path
+    ) -> None:
+        """Plan 00484 G5: the write-it-yourself, read-only and already-saved denies all
+        print the same identifier."""
+        (rule,) = handler.get_rules()
+        assert rule.rule_id == RuleID.SUBAGENT_REPORT_TOO_LARGE
+        oversized = "x" * (handler._threshold_chars + 1)
+
+        writable = handler.handle(_subagent_stop_input(oversized))
+        read_only = handler.handle(_subagent_stop_input(oversized, agent_type="Explore"))
+
+        for result in (writable, read_only):
+            assert result.decision == Decision.DENY
+            assert result.reason is not None
+            assert result.reason.startswith(f"BLOCKED [{rule.rule_id}]")
 
     def test_allows_message_exactly_at_threshold(
         self, handler: SubagentReportSizeBlockerHandler

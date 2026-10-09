@@ -5,7 +5,7 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
-from enforce_llm_qa import EnforceLlmQaHandler
+from enforce_llm_qa import RULE_ID, EnforceLlmQaHandler
 from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, scaling_ratio
 
 
@@ -125,6 +125,21 @@ class TestEnforceLlmQaHandler:
         assert result.reason is not None
         assert "llm_qa.py" in result.reason
         assert "run_all.sh" in result.reason
+
+    @pytest.mark.parametrize("agent_id", [None, "aplan484-impl-0123456789abcdef"])
+    def test_both_denials_carry_the_rule_id_that_explain_rule_resolves(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any, agent_id: str | None
+    ) -> None:
+        """Plan 00484 G5: neither the main-thread nor the sub-agent deny printed an ID."""
+        (rule,) = handler.get_rules()
+        hook_input = bash_hook_input("./scripts/qa/run_all.sh")
+        if agent_id:
+            hook_input["agent_id"] = agent_id
+
+        reason = handler.handle(hook_input).reason or ""
+
+        assert rule.rule_id == RULE_ID
+        assert reason.startswith(f"BLOCKED [{rule.rule_id}]")
 
     def test_the_main_thread_is_pointed_at_the_full_gate(
         self, handler: EnforceLlmQaHandler, bash_hook_input: Any

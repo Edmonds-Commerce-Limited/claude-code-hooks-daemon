@@ -37,6 +37,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
 )
 
 CHECK_ID: Final[str] = "index-no-log"
+STATEMENT: Final[str] = (
+    "The plan index states current truth only, not history. Move changelog-style text into git or the plan journal."
+)
 
 # How many offending phrases to name before summarising the rest, so a badly
 # degraded index produces a usable message instead of a wall of text.

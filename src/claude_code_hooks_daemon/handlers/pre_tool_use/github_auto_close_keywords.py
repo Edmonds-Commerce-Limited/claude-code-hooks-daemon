@@ -41,9 +41,10 @@ Message routes covered per segment:
 
 import logging
 import re
-from typing import Any, Final
+from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.dispatch_cancellation import is_dispatch_cancelled
@@ -153,6 +154,8 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
     project should disable the handler instead — a per-command hatch would
     just normalise bypassing it.
     """
+
+    defect_class: ClassVar[DefectClass | None] = DefectClass.ISSUE_CLOSING_KEYWORD
 
     def __init__(self) -> None:
         super().__init__(

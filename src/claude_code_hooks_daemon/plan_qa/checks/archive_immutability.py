@@ -18,6 +18,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
 )
 
 CHECK_ID: Final[str] = "archive-immutability"
+STATEMENT: Final[str] = (
+    "An archived plan is historical record; edits to it are only for deliberate corrections. Make the change in a live plan or journal instead."
+)
 
 _REMEDIATION: Final[str] = (
     "Confirm this is a deliberate correction (e.g. a status header fix); "

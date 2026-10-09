@@ -16,6 +16,9 @@ from claude_code_hooks_daemon.plan_qa.model import PlanLocation
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, CheckSpec, Finding, Level, Stage
 
 CHECK_ID: Final[str] = "structure-archive-dirs"
+STATEMENT: Final[str] = (
+    "The plan directory needs a README index and a completed-plans archive. Create the missing file or folder."
+)
 
 _OTHER_LOCATION_REMEDIATION: Final[str] = (
     "git mv this folder into the plan root or the matching archive directory."

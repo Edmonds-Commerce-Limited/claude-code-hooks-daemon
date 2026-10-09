@@ -23,6 +23,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
 )
 
 CHECK_ID: Final[str] = "status-line-present"
+STATEMENT: Final[str] = (
+    "A PLAN.md must carry a parseable `**Status**:` line. Add one, using a status token from the plan template."
+)
 
 _REMEDIATION: Final[str] = (
     "Add a status header line to the document, e.g. `**Status**: Not Started` "

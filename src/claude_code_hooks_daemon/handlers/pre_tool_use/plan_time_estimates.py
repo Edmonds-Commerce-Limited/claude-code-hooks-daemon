@@ -11,6 +11,7 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
+from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
@@ -82,6 +83,8 @@ class PlanTimeEstimatesHandler(PreToolUseHandlerBase):
         r"\bAPI\b",
         r"\brate\s+limit",
     ]
+
+    defect_class: ClassVar[DefectClass | None] = DefectClass.PLAN_TIME_ESTIMATE
 
     def __init__(self) -> None:
         super().__init__(

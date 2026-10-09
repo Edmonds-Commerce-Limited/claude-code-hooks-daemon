@@ -47,7 +47,10 @@ __all__ = ["fresh_relay_build", "pytest_collection_modifyitems", "pytest_runtest
 # unmeasured (00466 N110 round 3). It records only when --first-error-lines is
 # given. Named as a string, not imported, so pytest imports it and rewrites its
 # asserts; tests/unit/qa/test_run_test_matrix.py checks the name resolves.
-pytest_plugins = ["claude_code_hooks_daemon.qa.first_error_lines"]
+pytest_plugins = [
+    "claude_code_hooks_daemon.qa.first_error_lines",
+    "tests.plugins.deny_carries_rule_id",
+]
 
 
 @pytest.fixture(autouse=True, scope="session")

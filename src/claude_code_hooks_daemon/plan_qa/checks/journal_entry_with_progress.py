@@ -31,6 +31,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
 )
 
 CHECK_ID: Final[str] = "journal-entry-with-progress"
+STATEMENT: Final[str] = (
+    "A commit that changes a plan's tasks should stage a journal entry. Add one with `mkplan.bash --journal`."
+)
 
 _ADD_STATUS: Final[str] = "A"
 _MODIFY_STATUS: Final[str] = "M"

@@ -246,7 +246,7 @@ class RemoteDocsRoutingHandler(PreToolUseHandlerBase):
                 "If you genuinely need newer content, that is a refresh:\n"
                 f"  bin/hooks-daemon remote-docs refresh --path {document.path}"
             ),
-        )
+        ).under_rule(_RULE_VENDORED_COPY)
 
     def _read_advisory(self, path: Path) -> list[str] | None:
         """Advisory lines for a stale or unreviewed document, or None."""

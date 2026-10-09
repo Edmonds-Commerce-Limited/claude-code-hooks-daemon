@@ -17,6 +17,9 @@ from claude_code_hooks_daemon.plan_qa.model import PlanLocation
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, CheckSpec, Finding, Level, Stage
 
 CHECK_ID: Final[str] = "stats-recount"
+STATEMENT: Final[str] = (
+    "The README statistics must match the plan folders. Recount and update the figures."
+)
 
 _TOTAL_KEYWORD: Final[str] = "total"
 _CATEGORY_KEYWORDS: Final[tuple[str, ...]] = ("active", "completed", "cancelled")

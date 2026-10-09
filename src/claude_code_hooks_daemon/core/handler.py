@@ -17,6 +17,7 @@ from claude_code_hooks_daemon.core.relevance import Relevance
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from claude_code_hooks_daemon.constants.dbf import DefectClass
     from claude_code_hooks_daemon.constants.handlers import HandlerIDMeta
     from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
     from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
@@ -97,6 +98,15 @@ class Handler(ABC):
     #: environment. ``False`` for every guard, deliberately: a guard that never
     #: ran is a guard switched off.
     drives_autonomy: ClassVar[bool] = False
+
+    #: The defect class this handler defends, or ``None`` for an action guard
+    #: (Plan 00484, owner ruling C1). The content gates and commit gates are the
+    #: Defence Before Fix Defence set; the action guards are outside it. A
+    #: handler is a Defence exactly when it declares a class here (a
+    #: ``DefectClass`` value), and ``hooks-daemon defences`` lists exactly
+    #: those. ``None`` is the default, deliberately: a handler nobody has
+    #: classified makes no Defence claim.
+    defect_class: ClassVar[DefectClass | None] = None
 
     __slots__ = (
         "_project_exclude_paths",

@@ -27,6 +27,7 @@ import inspect
 import pkgutil
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -35,6 +36,9 @@ from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.docs_qa import checks as docs_checks_pkg
+from claude_code_hooks_daemon.plan_qa import checks as plan_checks_pkg
+from claude_code_hooks_daemon.rule_explain.checks import collect_check_entries, find_check
 from claude_code_hooks_daemon.rule_explain.lookup import HandlerRules, discover_handler_rules
 
 # ---------------------------------------------------------------------------
@@ -320,39 +324,6 @@ class TestConstantHygiene:
 #: Source marker meaning "this handler has a code path that denies a tool call".
 _DENY_MARKER = "Decision.DENY"
 
-#: Handlers whose module contains a Decision.DENY path but that legitimately
-#: declare no Rule objects. Every entry MUST record why. This allowlist is
-#: SEEDED from the state of the fan-out at Phase 7 authoring time (2026-08-31)
-#: — the coordinator is expected to PRUNE this list as sibling Phase 3
-#: migrations land, removing an entry the moment its handler gains get_rules().
-_DENY_WITHOUT_RULES_ALLOWLIST: dict[str, str] = {
-    "AutoApproveReadsHandler": (
-        "Its Decision.DENY branch is defensive-only: matches() gates handle() to "
-        "read-only tools already routed to Decision.ALLOW, so the DENY branch "
-        "guards against a non-read tool reaching handle() by a path matches() "
-        "does not permit today — not a live blocking rule with a table entry."
-    ),
-    "DispatchDeclarationHandler": (
-        "Plan 00307: a single opt-in strict-mode DENY branch (declaration "
-        "absent), disabled by default — not a disclosure-ladder table with "
-        "multiple concepts to distinguish."
-    ),
-    "SubagentReportSizeBlockerHandler": (
-        "Plan 00307: a single DENY branch (message over threshold) with no "
-        "other concept to distinguish — not a disclosure-ladder table."
-    ),
-    "SubagentReportPathVerifierHandler": (
-        "Plan 00446: a single DENY branch (the final message claims a project "
-        "file that is not on disk) with no other concept to distinguish — the "
-        "same shape as its sibling above, not a disclosure-ladder table."
-    ),
-    "CronStopEnforcerHandler": (
-        "Plan 00416: a single DENY branch (a declared persistent_crons job "
-        "verified missing from session_crons) with no other concept to "
-        "distinguish — not a disclosure-ladder table."
-    ),
-}
-
 
 def _discover_deny_handler_classes() -> dict[str, type[Handler]]:
     """Concrete handler classes whose own module source contains a deny path."""
@@ -379,8 +350,8 @@ def _discover_deny_handler_classes() -> dict[str, type[Handler]]:
     return found
 
 
-class TestDenyingHandlerDeclaresRulesOrIsAllowlisted:
-    """A handler with a Decision.DENY path must declare rules or explain why not."""
+class TestDenyingHandlerDeclaresRules:
+    """A handler with a Decision.DENY path must declare rules."""
 
     def test_discovery_is_not_vacuous(self) -> None:
         assert _discover_deny_handler_classes(), (
@@ -389,11 +360,9 @@ class TestDenyingHandlerDeclaresRulesOrIsAllowlisted:
             "without examining anything."
         )
 
-    def test_every_denying_handler_declares_rules_or_is_allowlisted(self) -> None:
+    def test_every_denying_handler_declares_rules(self) -> None:
         offenders = []
         for name, handler_class in sorted(_discover_deny_handler_classes().items()):
-            if name in _DENY_WITHOUT_RULES_ALLOWLIST:
-                continue
             try:
                 instance = handler_class()
             except Exception as exc:
@@ -402,37 +371,112 @@ class TestDenyingHandlerDeclaresRulesOrIsAllowlisted:
             if not instance.get_rules():
                 offenders.append(name)
         assert not offenders, (
-            "These handlers have a Decision.DENY code path but declare no Rule objects "
-            f"and are not in _DENY_WITHOUT_RULES_ALLOWLIST: {offenders}.\n\n"
-            "Either implement get_rules() (see MIGRATION-PATTERN.md), or add a "
-            "commented entry to _DENY_WITHOUT_RULES_ALLOWLIST explaining why the deny "
-            "path genuinely needs no rule (e.g. unreachable/defensive-only)."
+            "These handlers have a Decision.DENY code path but declare no Rule objects: "
+            f"{offenders}.\n\nImplement get_rules() (see MIGRATION-PATTERN.md) and build "
+            "the deny with BlockingResult.under_rule. No handler is exempt."
         )
 
-    def test_every_allowlist_entry_names_a_real_denying_handler(self) -> None:
-        stale = sorted(set(_DENY_WITHOUT_RULES_ALLOWLIST) - set(_discover_deny_handler_classes()))
-        assert not stale, (
-            "_DENY_WITHOUT_RULES_ALLOWLIST names handlers that no longer have a "
-            f"Decision.DENY path (or no longer exist): {stale}. Remove them."
+
+# ---------------------------------------------------------------------------
+# 5b. Every plan-QA / docs-QA CHECK_ID resolves (Plan 00484 G15)
+# ---------------------------------------------------------------------------
+
+
+def _module_check_ids(package: Any) -> dict[str, str]:
+    """Every module-level ``CHECK_ID`` constant in ``package``: check id -> module name."""
+    found: dict[str, str] = {}
+    for _finder, name, _ispkg in pkgutil.iter_modules(package.__path__, package.__name__ + "."):
+        value = getattr(importlib.import_module(name), "CHECK_ID", None)
+        if isinstance(value, str):
+            found[value] = name
+    return found
+
+
+class TestEveryCheckIdConstantResolves:
+    """A ``CHECK_ID`` is printed in a deny reason, so it must resolve like a rule ID does.
+
+    ``plan_qa_edit``, ``plan_qa_commit_gate``, ``docs_qa_edit`` and ``docs_qa_commit_gate``
+    name the failing check, not the umbrella rule. A check whose ID ``explain-rule`` cannot
+    resolve is a rule that blocks without explaining (TOOLING-SPEC 8.1).
+    """
+
+    @pytest.mark.parametrize("package", [plan_checks_pkg, docs_checks_pkg])
+    def test_every_module_check_id_resolves(self, package: Any) -> None:
+        constants = _module_check_ids(package)
+        assert constants, f"no CHECK_ID constants found in {package.__name__}"
+        entries = collect_check_entries()
+        unresolved = sorted(
+            f"{check_id} ({module})"
+            for check_id, module in constants.items()
+            if find_check(entries, check_id) is None
+        )
+        assert not unresolved, f"CHECK_ID constants that explain-rule cannot resolve: {unresolved}"
+
+    @pytest.mark.parametrize("package", [plan_checks_pkg, docs_checks_pkg])
+    def test_every_check_module_declares_a_plain_statement(self, package: Any) -> None:
+        """S3: ``explain-rule`` prints the module's ``STATEMENT``, so it must exist and be plain text."""
+        bad: list[str] = []
+        for check_id, module_name in _module_check_ids(package).items():
+            statement = getattr(importlib.import_module(module_name), "STATEMENT", None)
+            if not isinstance(statement, str) or len(statement.split()) < 5:
+                bad.append(f"{check_id}: missing or too short")
+            elif re.search(r"``|:[a-z]+:`", statement):
+                bad.append(f"{check_id}: raw RST markup")
+        assert not bad, bad
+
+    def test_every_registered_check_names_an_existing_umbrella_rule_or_is_sweep_only(
+        self, all_rules: list[tuple[HandlerRules, Rule]]
+    ) -> None:
+        known = {rule.rule_id for _handler, rule in all_rules}
+        for entry in collect_check_entries():
+            assert set(entry.umbrella_rule_ids) <= known, entry.check_id
+
+
+# ---------------------------------------------------------------------------
+# 6. The project's own handlers obey the same rule (Plan 00484 G5)
+# ---------------------------------------------------------------------------
+
+
+def _project_handler_instances() -> list[tuple[str, Handler]]:
+    """This repository's own handlers whose module source contains a deny path."""
+    from claude_code_hooks_daemon.handlers.project_loader import ProjectHandlerLoader
+
+    found: list[tuple[str, Handler]] = []
+    for _event, handler in ProjectHandlerLoader.discover_handlers(
+        _project_root() / ".claude" / "project-handlers"
+    ):
+        source = inspect.getsource(importlib.import_module(type(handler).__module__))
+        if _DENY_MARKER in source:
+            found.append((type(handler).__name__, handler))
+    return found
+
+
+class TestProjectHandlersDeclareRules:
+    """TOOLING-SPEC 5.3 / DETECTOR-SPEC 4.3: the project's own denials carry an ID too."""
+
+    def test_discovery_is_not_vacuous(self) -> None:
+        names = {name for name, _handler in _project_handler_instances()}
+        assert {
+            "RuffFormatBlockerHandler",
+            "EnforceLlmQaHandler",
+            "PlanDoneRequiresHoldingAreaHandler",
+            "ReleaseBlockerHandler",
+        } <= names
+
+    def test_every_denying_project_handler_declares_rules(self) -> None:
+        offenders = [
+            name for name, handler in _project_handler_instances() if not handler.get_rules()
+        ]
+        assert not offenders, (
+            f"Project handlers with a Decision.DENY path and no get_rules(): {offenders}. "
+            "Declare a Rule and print `BLOCKED [R-...]` in the deny."
         )
 
-    @pytest.mark.parametrize("class_name", sorted(_DENY_WITHOUT_RULES_ALLOWLIST))
-    def test_every_allowlist_entry_carries_a_reason(self, class_name: str) -> None:
-        reason = _DENY_WITHOUT_RULES_ALLOWLIST[class_name]
-        assert (
-            len(reason.split()) >= 10
-        ), f"{class_name}: the allowlist reason is too short to be an argument ({reason!r})."
-
-    @pytest.mark.parametrize("class_name", sorted(_DENY_WITHOUT_RULES_ALLOWLIST))
-    def test_an_allowlist_entry_is_dropped_once_it_declares_rules(self, class_name: str) -> None:
-        """If an allowlisted handler starts declaring rules, its entry is obsolete."""
-        handler_class = _discover_deny_handler_classes().get(class_name)
-        if handler_class is None:
-            pytest.skip(
-                "staleness is covered by test_every_allowlist_entry_names_a_real_denying_handler"
-            )
-        instance = handler_class()
-        assert not instance.get_rules(), (
-            f"{class_name} now declares rules via get_rules(), so its entry in "
-            "_DENY_WITHOUT_RULES_ALLOWLIST is obsolete. Delete the entry."
-        )
+    def test_project_rule_ids_are_well_formed_and_do_not_collide_with_the_library(
+        self, all_rules: list[tuple[HandlerRules, Rule]]
+    ) -> None:
+        library_ids = {rule.rule_id for _handler, rule in all_rules}
+        for name, handler in _project_handler_instances():
+            for rule in handler.get_rules():
+                assert _RULE_ID_PATTERN.match(rule.rule_id), f"{name}: {rule.rule_id}"
+                assert rule.rule_id not in library_ids, f"{name}: {rule.rule_id} is a library ID"
