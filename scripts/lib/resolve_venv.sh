@@ -156,14 +156,32 @@ _RV_PROBE_OUTPUT=""
 # exists to survive may not have one: a watchdog whose `sleep` fails at once
 # would kill a WORKING candidate straight away. So with no `sleep`, wait on
 # `read -t` against a process-substitution pipe opened read-write, which
-# never delivers data or EOF and needs no PATH lookup at all.
+# never delivers data or EOF and needs no PATH lookup at all. Some platforms
+# (macOS) duplicate the read end of that pipe, so the read can return at
+# once; the wait then repeats the read until the whole bound has elapsed by
+# the shell's own clock, rather than reporting a timeout that did not happen.
 _rv_wait_secs() {
     if command -v sleep > /dev/null; then
-        sleep "$1"
+        # The watchdog is killed when the candidate answers; an external
+        # `sleep` would outlive it, so it is started here and killed with it.
+        # The trap is set before the sleep starts, so a TERM cannot land in
+        # between and leave the sleep running.
+        local sleeper=""
+        trap '[ -z "$sleeper" ] || kill "$sleeper" 2> /dev/null; exit 143' TERM
+        sleep "$1" &
+        sleeper=$!
+        wait "$sleeper"
         return
     fi
-    read -r -t "$1" <> <(:)
-    [ "$?" -gt 128 ]
+    # One pipe is opened for the whole wait, so a read that returns at once
+    # costs a builtin call rather than a new process each time round.
+    local whole="${1%%.*}"
+    local deadline=$((SECONDS + ${whole:-0} + 1))
+    exec 9<> <(:)
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        read -r -t 1 -u 9 || continue
+    done
+    return 0
 }
 
 # Echoes $1's parent pid; fails when $1 is gone. Read with builtins from /proc
@@ -214,7 +232,7 @@ _rv_candidate_runs() {
             && [ "$(_rv_parent_of "$pid")" = "$_rv_parent" ]; then
             _rv_kill_out="$(kill -KILL "$pid" 2>&1)"
         fi
-    ) &
+    ) < /dev/null > /dev/null 2> /dev/null &
     watchdog=$!
     wait "$pid"
     rc=$?

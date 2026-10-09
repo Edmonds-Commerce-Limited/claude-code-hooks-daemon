@@ -149,11 +149,102 @@ def test_hanging_candidate_is_bounded_by_the_probe_timeout(tmp_path: Path) -> No
     assert elapsed < 10.0, f"probe must respect its bound; took {elapsed:.2f}s"
 
 
-def _run_in_library(script: str, *, path: str | None = None) -> subprocess.CompletedProcess[str]:
+def test_a_working_candidate_does_not_wait_out_the_probe_timeout(tmp_path: Path) -> None:
+    """The watchdog's pending ``sleep`` must not hold the caller's output pipe open.
+
+    The resolver runs inside ``$(...)`` on every cache miss. A watchdog whose
+    ``sleep`` inherited that pipe made the substitution wait for the full bound
+    after the candidate had already answered.
+    """
+    daemon_dir = tmp_path / "daemon"
+    _make_good_candidate(daemon_dir / "untracked" / "venv-py999-good")
+
+    started = time.monotonic()
+    result = _run_pick_python(daemon_dir, probe_timeout=20)
+    elapsed = time.monotonic() - started
+
+    assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert elapsed < 10.0, f"a working candidate answered after {elapsed:.2f}s of a 20s bound"
+
+
+def test_a_read_that_returns_at_once_does_not_end_the_wait_early() -> None:
+    """Without ``sleep`` the wait uses ``read -t``; on macOS that read can return instantly.
+
+    A watchdog trusting it would kill a working candidate straight away. The
+    wait must hold for the bound by the shell's own clock.
+    """
+    result = _run_in_library(
+        "read() { return 0; }\n"
+        "start=$SECONDS\n"
+        '_rv_wait_secs 2 && echo "waited $((SECONDS - start))"\n',
+        path="",
+    )
+
+    assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert int(result.stdout.split()[-1]) >= 2, result.stdout
+
+
+def test_the_watchdog_does_not_hold_the_callers_output_pipe(tmp_path: Path) -> None:
+    """The candidate answered; the watchdog's pending wait must not keep ``$(...)`` open."""
+    daemon_dir = tmp_path / "daemon"
+    _make_good_candidate(daemon_dir / "untracked" / "venv-py999-good")
+
+    started = time.monotonic()
+    result = _run_in_library(_good_probe_in_a_substitution(daemon_dir, "20"))
+    elapsed = time.monotonic() - started
+
+    assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert elapsed < 10.0, f"took {elapsed:.2f}s of a 20s bound"
+
+
+def _good_probe_in_a_substitution(daemon_dir: Path, bound: str) -> str:
+    """Probe a good candidate inside ``$(...)``, with the bound set AFTER sourcing.
+
+    The library reads the bound once, when it is sourced, so it is assigned to
+    the variable it was read into.
+    """
+    return (
+        f"_RV_PROBE_TIMEOUT_SECS={bound}\n"
+        f"out=\"$(_rv_candidate_runs '{daemon_dir}/untracked/venv-py999-good/bin/python')\"\n"
+    )
+
+
+def _sleepers(bound: str) -> list[int]:
+    """Pids of processes running ``sleep <bound>``."""
+    wanted = [b"sleep", bound.encode()]
+    found = []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            words = (entry / "cmdline").read_bytes().split(b"\0")[:2]
+        except OSError:
+            continue
+        if words == wanted:
+            found.append(int(entry.name))
+    return found
+
+
+def test_no_sleep_survives_a_good_candidates_answer(tmp_path: Path) -> None:
+    """Killing the watchdog must kill the ``sleep`` it started, not orphan it."""
+    daemon_dir = tmp_path / "daemon"
+    _make_good_candidate(daemon_dir / "untracked" / "venv-py999-good")
+    bound = f"{time.time_ns() % 100000 + 200}.5"
+
+    result = _run_in_library(_good_probe_in_a_substitution(daemon_dir, bound))
+    time.sleep(0.5)
+
+    assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert _sleepers(bound) == []
+
+
+def _run_in_library(
+    script: str, *, path: str | None = None, library: Path = RESOLVE_VENV_SH
+) -> subprocess.CompletedProcess[str]:
     """Source the library, then run ``script`` in the same shell."""
     prelude = f'export PATH="{path}"\n' if path is not None else ""
     return subprocess.run(
-        [BASH, "-c", f'{prelude}. "{RESOLVE_VENV_SH}"\n{script}'],
+        [BASH, "-c", f'{prelude}. "{library}"\n{script}'],
         capture_output=True,
         text=True,
         check=False,

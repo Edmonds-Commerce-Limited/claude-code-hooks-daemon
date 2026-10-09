@@ -47,7 +47,7 @@ _POST_FIX_WATCHDOG_LINE = (
     '            && [ "$(_rv_parent_of "$pid")" = "$_rv_parent" ]; then\n'
     '            _rv_kill_out="$(kill -KILL "$pid" 2>&1)"\n'
     "        fi\n"
-    "    ) &"
+    "    ) < /dev/null > /dev/null 2> /dev/null &"
 )
 _PRE_FIX_WATCHDOG_LINE = '    ( sleep "$_RV_PROBE_TIMEOUT_SECS"; kill -KILL "$pid" 2>/dev/null ) &'
 

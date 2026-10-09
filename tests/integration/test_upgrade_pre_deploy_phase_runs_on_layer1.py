@@ -288,6 +288,8 @@ def _env(extra: dict[str, str] | None = None) -> dict[str, str]:
         "HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP",
         "HOOKS_DAEMON_UNSAFE_TRACK_REF",
         "HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE",
+        # A runner's PYTHONPATH would shadow the code the upgrade installs.
+        "PYTHONPATH",
         "HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION",
         "HOOKS_DAEMON_UPGRADE_SECOND_PASS",
         "HOOKS_DAEMON_UPGRADE_HANDOFF",
@@ -324,15 +326,16 @@ def _confirm(output: str) -> str:
     return f"{SKIP_READING_FLAG}={_digest(output)}"
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def versions() -> tuple[str, str, str]:
     current = __version__
     return current, _next_minor(current), _next_major(current)
 
 
-@pytest.fixture
-def origin(tmp_path: Path, versions: tuple[str, str, str]) -> Path:
-    return _build_origin(tmp_path, *versions)
+@pytest.fixture(scope="module")
+def origin(tmp_path_factory: pytest.TempPathFactory, versions: tuple[str, str, str]) -> Path:
+    """The upstream repository, built once: tests only clone and fetch from it."""
+    return _build_origin(tmp_path_factory.mktemp("origin-root"), *versions)
 
 
 @pytest.fixture
