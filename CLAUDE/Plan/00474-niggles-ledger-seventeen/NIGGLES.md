@@ -1487,7 +1487,7 @@ the host name to the secret word list, and whether history matters for this name
 `<role>@<host>`. A role over 15 characters shows its first 10 followed by `...`; for example
 `github-softwaredev-lifecycle-unattended` on `build-box` shows `github-sof...@build-box`.
 
-**Evidence**: `handlers/status_line/host_hostname.py` renders only `@<host>` (with `@~` when the host name is
+**Evidence**: before the fix, `handlers/status_line/host_hostname.py` rendered only `@<host>` (with `@~` when the host name is
 inferred). The session's effective hostname reaches the daemon on the payload, under
 `HookInputField.SESSION_HOSTNAME`. `init.sh` (around lines 3326-3333) stamps the first non-empty of
 `HOOKS_DAEMON_HOSTNAME` and `CCY_HOST_HOSTNAME`, so the stamp alone cannot tell a role from the host's own name.
