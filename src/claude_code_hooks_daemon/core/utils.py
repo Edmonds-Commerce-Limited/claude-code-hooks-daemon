@@ -67,11 +67,12 @@ _LINK: Final[str] = "ln"
 
 _SED: Final[str] = "sed"
 _TRUNCATE: Final[str] = "truncate"
+_TOUCH: Final[str] = "touch"
 
 #: Verbs that change or remove a file they do not author, reported only to a
 #: caller that asks for them (``include_mutations``). Every operand of `rm` and
 #: `truncate` is a file; `sed` names its files only with `-i`/`--in-place`.
-_MUTATION_VERBS: Final[frozenset[str]] = frozenset({"rm", _TRUNCATE, _SED})
+_MUTATION_VERBS: Final[frozenset[str]] = frozenset({"rm", "unlink", "touch", _TRUNCATE, _SED})
 
 #: `dd`'s destination is an `of=` operand rather than a redirect.
 _DD_OUTPUT_PREFIX: Final[str] = "of="
@@ -939,6 +940,17 @@ def _write_target_tokens(
             index += 2
             continue
 
+        # A caller that asked for mutations judges COMMANDS, so a verb named as
+        # an argument (`grep rm f`) is no write. The default scan keeps reading
+        # every word, as its callers have always relied on.
+        if (
+            include_mutations
+            and token in _JUDGED_AS_COMMANDS
+            and not _is_command_word(tokens, index, token)
+        ):
+            index += 1
+            continue
+
         if token == _TEE:
             index = _collect_trailing_operands(tokens, index + 1, targets, keep_all=True)
             continue
@@ -967,6 +979,87 @@ def _write_target_tokens(
 
         index += 1
     return targets
+
+
+#: Tokens that end one simple command and start the next.
+_COMMAND_BOUNDARIES: Final[frozenset[str]] = _OPERAND_TERMINATORS | frozenset({"(", ")", "{", "}"})
+
+#: Shell keywords and modifiers that may stand before a command word.
+_COMMAND_PREFIXES: Final[frozenset[str]] = frozenset(
+    {"then", "do", "else", "elif", "if", "while", "until", "!", "time", "coproc"}
+)
+
+#: Commands that run the command named after their own options, so a verb
+#: following one is a command. `git` runs only `rm` and `mv` that way, and
+#: `find` only through `-exec`.
+_WRAPPER_COMMANDS: Final[frozenset[str]] = frozenset(
+    {
+        "sudo",
+        "doas",
+        "env",
+        "xargs",
+        "command",
+        "nice",
+        "ionice",
+        "nohup",
+        "timeout",
+        "exec",
+        "setsid",
+        "stdbuf",
+        "watch",
+        "busybox",
+        "git",
+        "find",
+    }
+)
+_GIT_RUNS: Final[frozenset[str]] = frozenset({"rm", "mv"})
+_GIT_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
+    {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
+)
+
+#: Words that are judged only where a command stands, under ``include_mutations``.
+_JUDGED_AS_COMMANDS: Final[frozenset[str]] = (
+    _COPY_VERBS | frozenset({_TEE, _LINK}) | _MUTATION_VERBS
+)
+
+#: `NAME=value` before a command.
+_ASSIGNMENT_RE: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _is_command_word(tokens: list[str], index: int, verb: str) -> bool:
+    """Is ``tokens[index]`` run as a command, rather than named as an argument?
+
+    True when it is the first word of its simple command (after any
+    assignments and shell keywords), or follows a command that runs another
+    one (:data:`_WRAPPER_COMMANDS`). After ``git`` only its own global options
+    may intervene, and only ``rm`` and ``mv`` are git subcommands that count.
+    """
+    start = index
+    while start > 0 and tokens[start - 1] not in _COMMAND_BOUNDARIES:
+        start -= 1
+    words = [
+        word
+        for word in tokens[start:index]
+        if word not in _COMMAND_PREFIXES and not _ASSIGNMENT_RE.match(word)
+    ]
+    if not words:
+        return True
+    first = words[0]
+    if first not in _WRAPPER_COMMANDS:
+        return False
+    if first != "git":
+        return True
+    if verb not in _GIT_RUNS:
+        return False
+    skip_value = False
+    for word in words[1:]:
+        if skip_value:
+            skip_value = False
+        elif word in _GIT_VALUE_OPTIONS:
+            skip_value = True
+        elif not word.startswith(_FLAG_PREFIX):
+            return False
+    return True
 
 
 class _ParsedWords(NamedTuple):
@@ -1002,7 +1095,7 @@ def _parse_command_words(
     index = start
     skip_next = False
     options_ended = False
-    while index < len(tokens) and tokens[index] not in _OPERAND_TERMINATORS:
+    while index < len(tokens) and tokens[index] not in _COMMAND_BOUNDARIES:
         token = tokens[index]
         if token in _REDIRECT_OPERATORS or token in _INPUT_REDIRECT_OPERATORS:
             if token in _REDIRECT_OPERATORS and index + 1 < len(tokens):
@@ -1065,6 +1158,14 @@ def _collect_mutated_operands(
             targets,
             short_value="sr",
             long_value=frozenset({"--size", "--reference"}),
+        )
+    elif verb == _TOUCH:
+        parsed = _parse_command_words(
+            tokens,
+            start,
+            targets,
+            short_value="drt",
+            long_value=frozenset({"--date", "--reference", "--time"}),
         )
     else:
         parsed = _parse_command_words(tokens, start, targets)

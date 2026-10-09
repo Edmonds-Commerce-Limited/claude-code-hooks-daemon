@@ -283,6 +283,155 @@ class TestFailClosed:
         assert handler.matches(_bash(root, command)) is True
 
 
+class TestWildcardsFollowTheShell:
+    """An unresolved wildcard names the file only if the shell could expand it to it."""
+
+    @pytest.mark.parametrize(
+        ("command", "where"),
+        [
+            ("rm -f *", "untracked/scratch"),
+            ("rm -rf *", ""),
+            ("rm -rf */*", ""),
+            ("rm -f *.local", "untracked/scratch"),
+            ("rm -- *.log *", "untracked/scratch"),
+            ("mv * ../dest/", "untracked/scratch"),
+            ("truncate -s0 *", "untracked/scratch"),
+        ],
+    )
+    def test_a_wildcard_that_cannot_reach_the_file_is_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path, command: str, where: str
+    ) -> None:
+        (root / where).mkdir(parents=True, exist_ok=True)
+        assert handler.matches(_bash(root, command, cwd=root / where)) is False
+
+    @pytest.mark.parametrize(
+        ("command", "where"),
+        [
+            ("rm -f *", ".claude/ccy"),
+            ("rm -f *.local", ".claude/ccy"),
+            ("rm -f ccy.env.*", ".claude/ccy"),
+            ("rm -rf .claude/*", ""),
+            ("rm -rf .claude/c*", ""),
+            ("rm .claude/ccy/*", ""),
+            ("rm -rf */*", ".claude"),
+            ("rm -rf *", ".claude"),
+            ("mv .claude/ccy/c* /tmp/", ""),
+        ],
+    )
+    def test_a_wildcard_that_can_reach_the_file_is_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path, command: str, where: str
+    ) -> None:
+        assert handler.matches(_bash(root, command, cwd=root / where)) is True
+
+    def test_a_wildcard_never_matches_a_leading_dot(
+        self, handler: WriteProtectedPathsHandler, root: Path
+    ) -> None:
+        assert handler.matches(_bash(root, "rm -rf *")) is False
+        assert handler.matches(_bash(root, "rm -rf .*")) is True
+
+
+class TestOnlyCommandsAreJudged:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep rm {p}",
+            "grep -n truncate {p}",
+            "grep touch {p}",
+            "echo unlink {p}",
+            "grep cp /tmp/a {p}",
+        ],
+    )
+    def test_a_verb_named_as_an_argument_is_a_read(
+        self, handler: WriteProtectedPathsHandler, root: Path, command: str
+    ) -> None:
+        assert handler.matches(_bash(root, command.format(p=f"{root}/{PROTECTED}"))) is False
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "sudo rm {p}",
+            "sudo -u root rm {p}",
+            "echo x | xargs rm {p}",
+            "FOO=1 rm {p}",
+            "env FOO=1 rm {p}",
+            "if true; then rm {p}; fi",
+            "(rm {p})",
+            "git rm {p}",
+            "git -C /somewhere rm {p}",
+            "timeout 5 rm {p}",
+            "find /tmp -exec rm {p} ;",
+        ],
+    )
+    def test_a_verb_behind_a_wrapper_or_at_a_command_head_is_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert handler.matches(_bash(root, template.format(p=f"{root}/{PROTECTED}"))) is True
+
+
+class TestXargs:
+    def test_names_fed_to_a_mutating_verb_by_xargs_are_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path
+    ) -> None:
+        assert handler.matches(_bash(root, f"echo {PROTECTED} | xargs rm")) is True
+        assert handler.matches(_bash(root, f"printf '%s\\n' {PROTECTED} | xargs -r unlink")) is True
+
+    def test_xargs_over_other_names_or_a_reading_verb_is_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path
+    ) -> None:
+        assert handler.matches(_bash(root, "echo other.txt | xargs rm")) is False
+        assert handler.matches(_bash(root, f"echo {PROTECTED} | xargs cat")) is False
+
+
+class TestCreationAndRemoval:
+    @pytest.mark.parametrize("template", ["touch {p}", "touch -c {p}", "unlink {p}"])
+    def test_creating_or_unlinking_is_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert handler.matches(_bash(root, template.format(p=f"{root}/{PROTECTED}"))) is True
+
+    @pytest.mark.parametrize(
+        "template",
+        ["touch -r {p} /tmp/other.txt", "touch /tmp/other.txt", "unlink /tmp/other.txt"],
+    )
+    def test_a_reference_read_or_another_file_is_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert handler.matches(_bash(root, template.format(p=f"{root}/{PROTECTED}"))) is False
+
+    def test_the_guidance_names_every_denied_verb(self) -> None:
+        guidance = WriteProtectedPathsHandler().get_claude_md() or ""
+        for word in ("touch", "unlink", "truncate", "rm", "tee", "ln", "dd", "perl", "rsync"):
+            assert word in guidance
+
+
+class TestDirectoryChanges:
+    def test_a_literal_cd_is_followed_to_the_directory_it_names(
+        self, handler: WriteProtectedPathsHandler, root: Path
+    ) -> None:
+        assert handler.matches(_bash(root, "cd .claude && rm -rf ccy")) is True
+        assert handler.matches(_bash(root, "cd .claude/ccy; echo x > ccy.env.local")) is True
+        assert handler.matches(_bash(root, "cd .claude && cd ccy && rm ccy.env.local")) is True
+        assert handler.matches(_bash(root, "cd /tmp && rm ccy.env.local")) is False
+
+    def test_a_cd_the_handler_cannot_follow_is_judged_by_name(
+        self, handler: WriteProtectedPathsHandler, root: Path
+    ) -> None:
+        assert handler.matches(_bash(root, 'cd "$D" && rm ccy.env.local')) is True
+        assert handler.matches(_bash(root, 'cd "$D" && rm -rf ccy')) is True
+        assert handler.matches(_bash(root, 'cd "$D" && rm other.txt')) is False
+
+    def test_a_wildcard_entry_is_not_a_project_wide_name_match(self, root: Path) -> None:
+        handler = _make(root, ["deploy/*.env"])
+        assert handler.matches(_bash(root, "cd frontend && echo A=1 > .env")) is False
+        assert handler.matches(_bash(root, "cd deploy && echo A=1 > .env")) is True
+        assert handler.matches(_bash(root, "echo A=1 > deploy/prod.env")) is True
+
+    def test_a_name_is_matched_as_a_whole_segment_not_a_substring(self, root: Path) -> None:
+        handler = _make(root, ["deploy/*.env"])
+        assert handler.matches(_bash(root, 'echo x > "$X/.envrc"')) is False
+        assert handler.matches(_bash(root, 'echo x > "$X/prod.env"')) is True
+
+
 class TestConfiguration:
     def test_a_recursive_glob_is_honoured(self, root: Path) -> None:
         handler = _make(root, ["**/*.env.local"])

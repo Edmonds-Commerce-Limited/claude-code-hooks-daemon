@@ -47,6 +47,13 @@ One allow probe (an `echo` naming the file) that runs live. The deny probe is de
 live probe of the real protected file would create or destroy it if the handler were not loaded, which the task
 forbids. All deny cases run through the real handler over temporary paths.
 
+## Review round 1 fixes
+
+Review: `261009-phase1-review-opus.md`. Wildcards now follow shell semantics from each directory the command may be
+in (a literal `cd` is followed); scan verbs count only at a command head or after a wrapper; `touch` and `unlink`
+added; expansion-built tokens are judged by whole final component; priority is 22 everywhere; the call is judged
+once. Still documented gaps: `perl -i`, `rsync`, `find -delete`, interpreters, `rm` of a symlink to the file.
+
 ## QA status
 
 - `./scripts/qa/llm_qa.py changed` did NOT run: the host-wide QA lock was held for over three hours by the

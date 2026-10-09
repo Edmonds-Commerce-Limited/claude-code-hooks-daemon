@@ -114,6 +114,65 @@ class TestTruncate:
         assert _mutated(command) == expected
 
 
+class TestTouchAndUnlink:
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ("touch f.txt", ["/repo/f.txt"]),
+            ("touch -c f.txt g.txt", ["/repo/f.txt", "/repo/g.txt"]),
+            ("touch -d yesterday f.txt", ["/repo/f.txt"]),
+            ("touch --date=yesterday f.txt", ["/repo/f.txt"]),
+            ("touch -r ref.txt f.txt", ["/repo/f.txt"]),
+            ("touch -t 202001010000 f.txt", ["/repo/f.txt"]),
+            ("unlink f.txt", ["/repo/f.txt"]),
+        ],
+    )
+    def test_names_the_files_not_the_option_values(self, command: str, expected: list[str]) -> None:
+        assert _mutated(command) == expected
+
+
+class TestCommandPosition:
+    """A verb is a command only where a command starts, or after a wrapper."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep rm f.txt",
+            "grep -n truncate f.txt",
+            "grep touch f.txt",
+            "echo unlink f.txt",
+            "grep cp a.txt b.txt",
+            "cat f.txt | grep rm",
+            "git log -- rm f.txt",
+        ],
+    )
+    def test_a_verb_that_is_only_an_argument_names_nothing(self, command: str) -> None:
+        assert _mutated(command) == []
+
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ("sudo rm f.txt", ["/repo/f.txt"]),
+            ("sudo -u root rm f.txt", ["/repo/f.txt"]),
+            ("echo x | xargs rm", []),
+            ("echo f.txt | xargs rm f.txt", ["/repo/f.txt"]),
+            ("FOO=1 rm f.txt", ["/repo/f.txt"]),
+            ("env FOO=1 rm f.txt", ["/repo/f.txt"]),
+            ("if true; then rm f.txt; fi", ["/repo/f.txt"]),
+            ("(rm f.txt)", ["/repo/f.txt"]),
+            ("git rm f.txt", ["/repo/f.txt"]),
+            ("git -C /x rm f.txt", ["/repo/f.txt"]),
+            ("find . -exec rm f.txt ;", ["/repo/f.txt"]),
+            ("true && rm f.txt", ["/repo/f.txt"]),
+            ("timeout 5 cp a.txt b.txt", ["/repo/b.txt"]),
+        ],
+    )
+    def test_a_verb_at_the_command_head_or_after_a_wrapper_counts(
+        self, command: str, expected: list[str]
+    ) -> None:
+        assert _mutated(command) == expected
+
+
 class TestMoveSource:
     def test_the_file_moved_away_is_mutated_and_so_is_the_destination(self) -> None:
         assert _mutated("mv a.txt b.txt") == ["/repo/b.txt", "/repo/a.txt"]
