@@ -161,7 +161,11 @@ other than defeating a parser. Everything else, every ordinary respelling includ
 - [ ] 🔄 **Task 3.2**: Narrow each guard that causes an in-scope false positive while catching
   an out-of-scope shape (TDD: the false positive is the red test). Open: 43 of the 50 INVENTORY
   probes still deny when re-run on 2026-10-09 (batches b and c of the status audit, which
-  file or fix them). Merged so far: X-1, branch
+  file or fix them). Batch (b), the git guards, is fixed on its branch: `destructive_git` and
+  `git_stash` judge each command segment on its own tokens and read a quoted `git`/`awk` pattern,
+  a `gh` body heredoc and a printing `while read` loop as data; gate rows `a8-*`. Report:
+  [subagent-reports/261009-batch-b-git-guards-sonnet.md](subagent-reports/261009-batch-b-git-guards-sonnet.md).
+  Merged so far: X-1, branch
   worktree-p483-x1-rebind-heredoc (merged 3644f831e): the shared rebinding check no longer withholds the heredoc
   exemption for `cd`/`pushd`/`popd`, `source`/`.` or a non-special `export X=$Y`; alias,
   function and PATH bindings still do. Report:

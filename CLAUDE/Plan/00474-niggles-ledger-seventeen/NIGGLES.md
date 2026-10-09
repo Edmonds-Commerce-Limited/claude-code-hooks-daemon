@@ -1461,6 +1461,20 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N383 — a quoted git global-option value with a space hides a destructive subcommand
+
+**Source**: the Plan 00483 batch (b) review round 2 (2026-10-09, merged at fe54af5e6).
+
+**Evidence**: the review probed these shapes on main and on the batch (b) tip, and every one was allowed:
+
+- `git -C 'my dir' reset --hard`, also with `"my dir"` and `my\ dir`;
+- the same with `stash`, `clean -fd` and `checkout -- f`;
+- `git -c 'user.name=A B' reset --hard`.
+
+The batch (b) round-1 tip denied them only by accident. A directory with a space is an ordinary careless spelling, so the shape is in scope under the 00483 threat model. The probe is `untracked/scratch/00483-review-batch-b-probe4.py` (its output is `00483-r2-probe4-main.txt`).
+
+**Status**: ⬜ Open. Remedy: the shared `_GIT_GLOBAL_OPTION` (`utils/command_evasion.py:62`, behind `GIT_INVOCATION`, which both destructive_git and git_stash use) accepts a quoted or escaped option value for `-C`/`-c`/`--git-dir`/`--work-tree`, and these shapes are added to the must-deny tests. Also from that review, as NITs: the handler guidance omits `-e` from the data-valued options, and `_git_grep_pattern_spans` duplicates the new reader.
+
 ### N382 — `changed --range` does not select tests that discover handlers by scanning the package
 
 **Source**: the coordinator, 2026-10-09. The Plan 00484 batch 3.1a agent reported a failing test that also failed on
