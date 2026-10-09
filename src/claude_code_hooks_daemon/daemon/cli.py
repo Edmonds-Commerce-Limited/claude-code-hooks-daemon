@@ -6797,6 +6797,66 @@ def cmd_issue_validity(args: argparse.Namespace) -> int:
     )
 
 
+def cmd_exceptions(args: argparse.Namespace) -> int:
+    """List every exception to a guard with the reason it carries (Plan 00484 G12).
+
+    Reads the project's raw ``.claude/hooks-daemon.yaml`` (a reason is dropped
+    when the config loads, so the loaded ``Config`` cannot show it), the
+    ``MUST_EXCEED_*_BECAUSE`` hatches in tracked files, and the QA exception
+    files. An entry with nowhere to write a reason shows ``(no reason)``.
+
+    Returns:
+        0 on success; 1 when the config is missing or unreadable, or the tracked
+        files cannot be listed.
+    """
+    import yaml
+
+    from claude_code_hooks_daemon.config.exceptions_listing import (
+        collect_config_exceptions,
+        collect_in_file_hatches,
+        collect_qa_exception_files,
+    )
+
+    # The raw file is read, so a config that fails validation can still be listed
+    # (the listing is how an unreasoned exception in it gets found).
+    override = getattr(args, "project_root", None)
+    project_path = Path(override).resolve() if override else Path(get_project_path(None))
+    config_path = project_path / ".claude" / "hooks-daemon.yaml"
+    if not config_path.exists():
+        print(f"No configuration file found at: {config_path}", file=sys.stderr)
+        return 1
+    try:
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        print(f"ERROR: cannot read {config_path}: {exc}", file=sys.stderr)
+        return 1
+    tracked = subprocess.run(  # nosec B603 B607 — fixed argv, no shell
+        ["git", "-C", str(project_path), "ls-files", "-z"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if tracked.returncode != 0:
+        print(
+            f"ERROR: cannot list tracked files in {project_path}: {tracked.stderr.strip()}",
+            file=sys.stderr,
+        )
+        return 1
+
+    records = [
+        *collect_config_exceptions(raw),
+        *collect_in_file_hatches(project_path, [Path(p) for p in tracked.stdout.split("\0") if p]),
+        *collect_qa_exception_files(project_path),
+    ]
+    if args.json:
+        print(json.dumps([record.as_dict() for record in records], indent=2))
+    else:
+        for record in records:
+            reason = record.reason if record.reason is not None else "(no reason)"
+            print(f"{record.source}\t{record.location}\t{record.value}\t{reason}")
+    return 0
+
+
 def cmd_probe(args: argparse.Namespace) -> int:
     """Send one hand-built payload through the project's hook entry point, marked.
 
@@ -10156,6 +10216,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output as JSON",
     )
     parser_config.set_defaults(func=cmd_config)
+
+    parser_exceptions = subparsers.add_parser(
+        "exceptions",
+        help="List every exception to a guard (config exclusions, disabled or downgraded "
+        "handlers, in-file hatches, QA exception files) with the reason it carries",
+    )
+    parser_exceptions.add_argument("--json", action="store_true", help="Output as JSON")
+    parser_exceptions.add_argument(
+        "--project-root", type=Path, help="Project root (auto-detected by default)"
+    )
+    parser_exceptions.set_defaults(func=cmd_exceptions)
 
     # repair command
     parser_repair = subparsers.add_parser("repair", help="Repair broken venv (runs uv sync)")

@@ -451,6 +451,13 @@ handlers:
 
 For the complete per-handler options reference (all handlers, all options, defaults, and examples), see **[Handler Reference](HANDLER_REFERENCE.md)**.
 
+### Listing every exception
+
+`hooks-daemon exceptions [--json]` lists what exempts something from a guard, with the reason each
+carries: `exclude_paths` and `extra_whitelist` entries, handlers set to `enabled: false` or
+`mode: warn`, in-file `MUST_EXCEED_*_BECAUSE` hatches, and the QA exception files. An exception
+written as `{pattern, reason}` shows its reason; a plain string shows `(no reason)`.
+
 ### Parent-Child Handler Relationships
 
 Some handlers share configuration through a parent-child relationship. The child handler inherits `options` from the parent, avoiding duplication:
