@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.daemon.controller import get_controller
+from claude_code_hooks_daemon.daemon.install_layout import is_self_install_mode
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 psutil: ModuleType | None
@@ -27,9 +28,6 @@ except ImportError:
     psutil = None
 
 logger = logging.getLogger(__name__)
-
-# Present only where the project root is the daemon's own source tree.
-_DAEMON_PACKAGE_MARKER: tuple[str, ...] = ("src", "claude_code_hooks_daemon", "__init__.py")
 
 
 class DaemonStatsHandler(StatusLineHandlerBase):
@@ -57,7 +55,7 @@ class DaemonStatsHandler(StatusLineHandlerBase):
         rather than recommend enabling it.
         """
         return Relevance.when(
-            context.has_file(*_DAEMON_PACKAGE_MARKER),
+            is_self_install_mode(context.project_root),
             present="this is the hooks daemon's own repository, where its health line is useful",
             absent="daemon health diagnostics are for daemon development, not a client project",
         )

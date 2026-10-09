@@ -1461,6 +1461,28 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N386 — the self-install rule is copied four times outside its one definition
+
+**Source**: the owner, 2026-10-09, on N384's first fix, which hand-rolled a fifth copy: "it should be a single source of
+truth that's simple and proven already". The canonical rule is `daemon/install_layout.is_self_install_mode(project_path)`
+(Plan 00457): standard-library only, so it can be loaded without the package. `ProjectContext` and `daemon/paths.py`
+already delegate to it, and N384 now does too.
+
+**Evidence**: four other places re-derive the same decision from `src/claude_code_hooks_daemon`, and they have
+drifted: two test `.exists()` and two `.is_dir()`.
+
+- `daemon/cli.py:2645` (`.exists()`) re-implements `install_layout.get_untracked_dir()` whole.
+- `install/client_validator.py:240` (`.exists()`) refuses a client install into the daemon repository.
+- `utils/ccy_supervisor.py:45,136` (`_SELF_INSTALL_MARKER_PARTS`, `.exists()`).
+- `scripts/debug_info.py:275` (`.is_dir()`) also re-implements `get_untracked_dir()`.
+
+**Status**: ⬜ Open. Remedy:
+
+- Each site calls `install_layout.is_self_install_mode` or `get_untracked_dir`. For a script that must run without the
+  package, load `install_layout.py` by path, the way `daemon/signal_standalone.py` does.
+- Add a QA detector so that no module except `install_layout.py` tests for that marker to decide the install mode.
+  Path construction for scanning the source tree is not a decision, and stays allowed.
+
 ### N385 — careless spellings the raw-text guards allow on main
 
 **Source**: the Plan 00483 batch (c) review, round 1 (2026-10-09). Every probe called `matches()` directly on main;
@@ -1502,8 +1524,8 @@ inherited `Relevance.always()`. The optimise review recommends enabling every re
 so it told every client project to turn on a daemon developer's diagnostic (uptime, memory, log level, error count).
 `default_enabled = False` kept it off at install, but the review then overrode that.
 
-**Status**: ✅ Fixed on main. `get_relevance()` is applicable only where the project root holds the daemon's own
-package (`src/claude_code_hooks_daemon/__init__.py`); elsewhere the review lists it as "not applicable here". The
+**Status**: ✅ Fixed on main. `get_relevance()` is applicable only in a self-install checkout, decided by the one
+rule `daemon/install_layout.is_self_install_mode` (the first fix hand-rolled its own marker, which is N386); elsewhere the review lists it as "not applicable here". The
 tests were written red first in `tests/unit/handlers/status_line/test_daemon_stats.py`. The optimise doc names it
 among the non-universal handlers, and release note 008 tells clients they can switch it off.
 
