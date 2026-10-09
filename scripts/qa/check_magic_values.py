@@ -27,6 +27,7 @@ magic" rule was rejected on that evidence - see
 Usage:
     python scripts/qa/check_magic_values.py
     python scripts/qa/check_magic_values.py --json  # JSON output
+    python scripts/qa/check_magic_values.py --path FILE [--json]  # one file, to stdout
 
 Exit codes:
     0 - No violations found
@@ -35,12 +36,13 @@ Exit codes:
 
 from __future__ import annotations
 
+import argparse
 import ast
 import json
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Final, Protocol
 
 from claude_code_hooks_daemon.utils.scan_scope import (
     relative_parts,
@@ -579,19 +581,123 @@ def check_file(filepath: Path, root: Path | None = None) -> list[Violation]:
     return check_source(source, str(filepath), root)
 
 
+#: Test files the tree run does not judge: they build mock handlers on purpose, or
+#: test the QA tools themselves rather than Claude Code tools.
+_SKIPPED_TEST_FILES: Final[frozenset[str]] = frozenset(
+    {
+        "test_qa_runner.py",
+        "test_server.py",
+        "test_log_level_override.py",
+        "test_handler.py",
+        "test_handler_config_blocking.py",
+        "test_daemon_smoke.py",
+        "test_init_config.py",
+    }
+)
+
+#: Directory names below the project root that the tree run does not judge.
+_SKIPPED_SOURCE_DIR: Final[str] = "constants"  # the constants module defines the constants
+_SKIPPED_TEST_DIR: Final[str] = "fixtures"  # fixtures are intentionally simplified
+_TESTS_DIR_NAME: Final[str] = "tests"
+
+
+def out_of_scope_reason(pyfile: Path, project_root: Path) -> str | None:
+    """Why the tree run would not judge ``pyfile``, or None when it would.
+
+    The single source of the tree run's skip rules, so ``--path FILE`` and the
+    whole-tree run can never disagree about a file.
+    """
+    parts = relative_parts(pyfile, project_root)
+    if parts[:1] == (_TESTS_DIR_NAME,):
+        if _SKIPPED_TEST_DIR in parts:
+            return f"test fixtures ('{_SKIPPED_TEST_DIR}') are intentionally simplified"
+        if pyfile.name in _SKIPPED_TEST_FILES:
+            return f"{pyfile.name} builds mock handlers or tests the QA tools themselves"
+        return None
+    if _SKIPPED_SOURCE_DIR in parts:
+        return f"the '{_SKIPPED_SOURCE_DIR}' module defines the constants"
+    return None
+
+
+def _report(violations: list[Violation], files_scanned: int, vacuous: str | None) -> dict[str, Any]:
+    """The JSON document, for the tree artefact and for a single-file run alike."""
+    return {
+        "summary": {
+            "passed": len(violations) == 0 and vacuous is None,
+            "total_violations": len(violations),
+            "by_rule": _count_by_rule(violations),
+            "files_scanned": files_scanned,
+            "vacuous_scan": vacuous,
+        },
+        "violations": [asdict(v) for v in violations],
+    }
+
+
+def _single_file_problem(path: Path) -> str | None:
+    """Why ``path`` cannot be judged as one Python file, or None."""
+    if not path.exists():
+        return f"{path}: no such file"
+    if not path.is_file():
+        return f"{path}: not a file (--path takes one file; the tree run takes none)"
+    if path.suffix != ".py":
+        return f"{path}: not a Python file, so nothing was examined"
+    return None
+
+
+def run_single_file(path: Path, project_root: Path, *, json_output: bool) -> int:
+    """Judge one file as the tree run would. Writes no repository artefact.
+
+    Findings go to stdout (JSON with ``--json``). A file the tree run does not
+    judge, or one that cannot be read, is a failure: examining nothing is not a
+    pass.
+    """
+    problem = _single_file_problem(path)
+    if problem is None:
+        reason = out_of_scope_reason(path.resolve(), project_root)
+        if reason is not None:
+            problem = f"{path}: not judged by the tree run ({reason}), so nothing was examined"
+    if problem is not None:
+        print(f"check_magic_values: {problem}", file=sys.stderr)
+        return 1
+    try:
+        source = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        print(f"check_magic_values: {path}: could not be read: {exc}", file=sys.stderr)
+        return 1
+    violations = sorted(
+        check_source(source, str(path), project_root), key=lambda v: (v.line, v.column)
+    )
+    if json_output:
+        print(json.dumps(_report(violations, 1, None), indent=2))
+    else:
+        for v in violations:
+            print(f"{v.file}:{v.line}:{v.column}: {v.rule}: {v.message}")
+        print(f"{len(violations)} violation(s) in {path}")
+    return 1 if violations else 0
+
+
 def main() -> int:
     """Check all Python files in src/ and tests/ directories for magic values.
+
+    ``--path FILE`` checks that one file instead (DETECTOR-SPEC 5.2).
 
     Returns:
         0 if no violations, 1 if violations found
     """
-    json_output = "--json" in sys.argv
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else "")
+    parser.add_argument("--json", action="store_true", dest="json_output")
+    parser.add_argument("--path", type=Path, default=None, help="check this one Python file")
+    args = parser.parse_args()
+    json_output: bool = args.json_output
 
     # Find project root (where src/ is)
     script_path = Path(__file__).resolve()
     project_root = script_path.parent.parent.parent
     src_dir = project_root / "src" / "claude_code_hooks_daemon"
     tests_dir = project_root / "tests"
+
+    if args.path is not None:
+        return run_single_file(args.path, project_root, json_output=json_output)
 
     if not src_dir.exists():
         print(f"ERROR: Source directory not found: {src_dir}", file=sys.stderr)
@@ -600,32 +706,11 @@ def main() -> int:
     violations: list[Violation] = []
     files_scanned = 0
 
-    # Check source files
-    for pyfile in walk_files(src_dir, "*.py"):
-        # Skip constants module itself (it defines the constants)
-        if "constants" in relative_parts(pyfile, project_root):
+    for tree_dir in (src_dir, tests_dir):
+        if not tree_dir.exists():
             continue
-        violations.extend(check_file(pyfile, project_root))
-        files_scanned += 1
-
-    # Check test files (but skip test fixtures which are intentionally simplified)
-    if tests_dir.exists():
-        for pyfile in walk_files(tests_dir, "*.py"):
-            # Skip test fixtures - they're intentionally simplified for testing
-            if "fixtures" in relative_parts(pyfile, project_root):
-                continue
-            # Skip test_qa_runner.py - it tests QA tools (ruff, mypy, etc), not Claude Code tools
-            if pyfile.name == "test_qa_runner.py":
-                continue
-            # Skip daemon/core tests that create mock handlers for testing daemon internals
-            if pyfile.name in (
-                "test_server.py",
-                "test_log_level_override.py",
-                "test_handler.py",
-                "test_handler_config_blocking.py",
-                "test_daemon_smoke.py",
-                "test_init_config.py",
-            ):
+        for pyfile in walk_files(tree_dir, "*.py"):
+            if out_of_scope_reason(pyfile, project_root) is not None:
                 continue
             violations.extend(check_file(pyfile, project_root))
             files_scanned += 1
@@ -639,16 +724,7 @@ def main() -> int:
     )
 
     if json_output:
-        output = {
-            "summary": {
-                "passed": len(violations) == 0 and vacuous is None,
-                "total_violations": len(violations),
-                "by_rule": _count_by_rule(violations),
-                "files_scanned": files_scanned,
-                "vacuous_scan": vacuous,
-            },
-            "violations": [asdict(v) for v in violations],
-        }
+        output = _report(violations, files_scanned, vacuous)
         # Write JSON to qa output dir
         qa_dir = project_root / "untracked" / "qa"
         qa_dir.mkdir(parents=True, exist_ok=True)

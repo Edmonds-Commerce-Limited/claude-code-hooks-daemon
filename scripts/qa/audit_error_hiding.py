@@ -21,13 +21,15 @@ see ``AUDITED_DIRECTORIES``, ``AUDITED_ROOT_FILES``,
 ``extract_heredoc_python_blocks``, and the ``silent-fallback`` rule below.
 
 Usage:
-    python scripts/qa/audit_error_hiding.py [--fix]
+    python scripts/qa/audit_error_hiding.py [--json]
+    python scripts/qa/audit_error_hiding.py --path FILE [--json]  # one file, to stdout
 
 Exit codes:
     0 - No violations found
     1 - Violations found (or other error)
 """
 
+import argparse
 import ast
 import json
 import re
@@ -1271,9 +1273,66 @@ def run_audit(workspace: Path, json_mode: bool) -> int:
     return 0
 
 
+def _single_file_problem(path: Path) -> str | None:
+    """Why ``path`` cannot be audited as one file, or None."""
+    if not path.exists():
+        return f"{path}: no such file"
+    if not path.is_file():
+        return f"{path}: not a file (--path takes one file)"
+    if path.suffix != ".py" and path.suffix not in _SHELL_EXTENSIONS:
+        return f"{path}: not a Python or shell file, so nothing was examined"
+    return None
+
+
+def audit_single_file(path: Path, workspace: Path) -> list[dict[str, Any]]:
+    """Audit ``path`` exactly as the tree run would, exclusions included.
+
+    A Python file gets the AST audit; a shell file gets its embedded Python
+    heredocs and the shell-language patterns. The exclusions are read from the
+    workspace, as in :func:`run_audit`, so a finding the tree run excuses is
+    excused here too and the two runs cannot disagree.
+    """
+    if path.suffix == ".py":
+        violations = audit_file(path)
+    else:
+        violations = audit_heredoc_python(path) + audit_shell_patterns(
+            path, ShellErrorHidingStrategy()
+        )
+    return apply_exclusions(violations, load_exclusions(workspace / "scripts" / "qa"))
+
+
+def run_single_file(path: Path, workspace: Path, json_mode: bool) -> int:
+    """Audit one file (DETECTOR-SPEC 5.2) and report on stdout. Writes no artefact."""
+    problem = _single_file_problem(path)
+    if problem is not None:
+        print(f"audit_error_hiding: {problem}", file=sys.stderr)
+        return 1
+    violations = audit_single_file(path, workspace)
+    if json_mode:
+        report = {
+            "summary": {
+                "passed": not violations,
+                "total_violations": len(violations),
+                "files_scanned": 1,
+            },
+            "violations": violations,
+        }
+        print(json.dumps(report, indent=2))
+    else:
+        print(format_violation_report(violations))
+    return 1 if violations else 0
+
+
 def main() -> int:
-    """Main entry point: audit this checkout."""
-    return run_audit(Path(__file__).parent.parent.parent, json_mode="--json" in sys.argv)
+    """Main entry point: audit this checkout, or one file with ``--path FILE``."""
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else "")
+    parser.add_argument("--json", action="store_true", dest="json_mode")
+    parser.add_argument("--path", type=Path, default=None, help="audit this one file")
+    args = parser.parse_args()
+    workspace = Path(__file__).parent.parent.parent
+    if args.path is not None:
+        return run_single_file(args.path, workspace, args.json_mode)
+    return run_audit(workspace, json_mode=args.json_mode)
 
 
 if __name__ == "__main__":

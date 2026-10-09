@@ -619,6 +619,13 @@ its first five findings as `<ID>  <file>:<line>  <text>`, says how many there ar
 path of the JSON. A finding with no identifier key (the row-key checkers) is
 listed only in the JSON.
 
+**One file.** `check_magic_values.py`, `audit_error_hiding.py` and
+`audit_shell.py` take `--path FILE` (DETECTOR-SPEC 5.2): the file is judged as
+the tree run would judge it, findings go to stdout (JSON with `--json`), and the
+repository artefact is never written. A missing file, a directory, a file of
+another kind, or one the tree run does not judge FAILS: examining nothing is
+not a pass. The other checkers still take directories only.
+
 - **Magic Values** (`check_magic_values.py`) — hardcoded strings/numbers that
   should be constants: handler names, priorities, tool names, event types, tags
 - **Format** (Black) / **Linter** (Ruff) — both auto-fix via

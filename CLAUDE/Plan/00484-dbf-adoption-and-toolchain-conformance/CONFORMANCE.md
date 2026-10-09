@@ -70,7 +70,7 @@ route.
 | 4.2d   | Docs state the correct construction                                    | PARTLY MET               | MET        | `test_rule_parity.py:180` requires a non-empty `fix`; B has no remediation text keyed by ID                                                                                                                                                                                                                                                                                                                    |
 | 4.3a   | Forbid (disable or block) every route that bypasses the record         | NOT MET                  | NOT MET    | 6 `MUST_*_BECAUSE` in-band hatches; inline suppressions are KEPT BY DESIGN (owner rulings B1, B2), not forbidden: 78 remain after 228 were deleted (`SUPPRESSIONS.md`), and since Task 3.1b each must carry a reason, enforced by `check_inline_suppressions.py:214` (`judge_comments`), registered at `llm_qa.py:711`. So this stays a declared known gap against 4.3, not conformance                        |
 | 4.3b   | Irreducible cases directed to the project record                       | NOT MET                  | NOT MET    | Hatches send the agent to the command line or a file comment, never to the config                                                                                                                                                                                                                                                                                                                              |
-| 4.4a   | Entry point meets D5.1–5.4 for every defence                           | NOT MET                  | PARTLY MET | The hook path meets it; `llm_qa.py` has no single-file subset (`llm_qa.py:2477-2492`)                                                                                                                                                                                                                                                                                                                          |
+| 4.4a   | Entry point meets D5.1–5.4 for every defence                           | NOT MET                  | PARTLY MET | The hook path meets it; `llm_qa.py` itself still has no single-file subset (only `--path FILE` on three checkers, see D5.2 under B), so this stays NOT MET at project level                                                                                                                                                                                                                                    |
 | 4.4b   | Entry point prints every identifier unaltered                          | PARTLY MET               | MET        | A deny prints `BLOCKED [R-…]`; since Task 3.1b `llm_qa.py` prints the first 5 findings of a failing tool with their IDs and the absolute report path (`:1455`), but not every ID, and the 3 row-key checkers have none                                                                                                                                                                                         |
 | 4.5a   | Detectors run before runners                                           | MET                      | N/A        | MET since Task 3.1b: every runner (`RUNNER_TOOLS`, `llm_qa.py:898`) is registered after every static detector (`:843`), and `resolve_tools` moves a named runner after the detectors (`:1623-1625`). Pinned by `tests/unit/qa/test_llm_qa_detectors_first.py`                                                                                                                                                  |
 | 4.5b   | A detector failure stops lower levels counting                         | MET                      | N/A        | MET since Task 3.1b, in the amended form (every tool still runs, so the other findings are not hidden): once a detector has failed, `_run_tools` marks each runner `NOT MEANINGFUL: detector failed` (`llm_qa.py:2934-2938`, `mark_not_meaningful` `:2782`) and leaves it out of the pass count (`format_verdict` `:2796`); the provenance record keeps the runner's real result so `--resume` still reuses it |
@@ -106,7 +106,7 @@ layer (B, D, `llm_qa.py`) and in the governance of exceptions. The handler layer
 | 4.3 stable ID     | MET               | PARTLY MET             | MET (wrapped)        | –                                          |
 | 4.4 SHOULD        | PARTLY MET        | NOT MET                | N/A                  | –                                          |
 | 5.1 local         | MET               | MET                    | MET                  | –                                          |
-| 5.2 single file   | PARTLY MET        | NOT MET                | MET                  | –                                          |
+| 5.2 single file   | PARTLY MET        | PARTLY MET             | MET                  | –                                          |
 | 5.3 output        | MET               | MET                    | PARTLY MET           | –                                          |
 | 5.4 not hosted    | MET               | MET                    | MET                  | –                                          |
 | 6.1 resolution    | MET               | PARTLY MET             | MET                  | –                                          |
@@ -171,8 +171,16 @@ MET: 4.1, 4.3a, 4.3b, 6.2a and 6.2b.
     defence such as `qa_suppression`, `error_hiding_blocker` or `security_antipattern`. The
     method's sweep step therefore cannot use them.
 - **B: scripts/qa checkers.**
-  - **D5.2 NOT MET.** No checker accepts a file. `--path` and `--root` take directories, and
-    `check_authored_path_stat.py:300-303` fails as vacuous when given a file.
+  - **D5.2 PARTLY MET since Task 3.1b (G8 phase 2).** `--path FILE` judges one file in
+    `check_magic_values.py` (`run_single_file`, `:647`; the tree run's skip rules are now one
+    function, `out_of_scope_reason`, `:604`, so the two cannot disagree), `audit_error_hiding.py`
+    (`:1304`, exclusions applied as in the tree run) and `audit_shell.py` (`:427`). Findings go
+    to stdout (JSON with `--json`), no repository artefact is written, and a missing file, a
+    directory, a file of another kind or a file the tree run does not judge FAILS rather than
+    passing vacuously. Pinned by `tests/unit/qa/test_qa_single_file_subset.py`. The other
+    checkers still take directories only; `check_authored_path_stat.py:300-303` still fails as
+    vacuous on a file. They are the known gap.
+  - Before: no checker accepted a file. `--path` and `--root` took directories.
   - **D4.3 PARTLY MET.** Most checkers print a rule ID (`check_magic_values.py:662`).
     `check_fail_open_inventory`, `check_dangerous_invocation_corpus` and
     `check_declared_invariant_pairs` print row keys, which are not rule identifiers.
@@ -428,6 +436,11 @@ generic-reason check is `utils/escape_hatch.is_acceptable_reason`, shared with t
 Not done, on purpose: `--disable-nosem` and bandit `--ignore-nosec` would make the tools IGNORE
 the kept directives, which contradicts B2 (they stay, with reasons); no `nosemgrep` exists today.
 The generic-reason check cannot tell whether a reason is true.
+
+**G8 closed in part (Task 3.1b).** Phase 1 (first findings with IDs, absolute report path in
+the summary) and phase 2 for three checkers (`check_magic_values.py`, `audit_error_hiding.py`,
+`audit_shell.py` take `--path FILE`) are done; see 4.4 and D5.2/D5.3 under B. Not done: `--path FILE` on the remaining checkers, and `llm_qa.py` itself has no file selection. Declared as a
+known gap (DETECTOR 5.2) in the declaration, Task 3.3.
 
 **G7 closed (Task 3.1b).** See the 4.5 section: runners are registered and resolved after every
 detector, and a runner's result after a failed detector is marked `NOT MEANINGFUL` and excluded
