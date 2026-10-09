@@ -36,7 +36,11 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import repository_root, scan_bash_write_targets
-from claude_code_hooks_daemon.utils.shell_expansion import TooManyToEnumerateError
+from claude_code_hooks_daemon.utils.shell_expansion import (
+    TooManyToEnumerateError,
+    iter_normalised_shell_words,
+    shell_word_spellings,
+)
 from claude_code_hooks_daemon.utils.simple_commands import (
     SHELL_INTERPRETERS,
     SimpleCommand,
@@ -237,9 +241,6 @@ _KNOWN_VERBS: Final[frozenset[str]] = (
 #: How many levels of ``bash -c '...'`` / ``eval`` are read as commands; past it
 #: the code is judged by whether it visibly names a listed path.
 MAX_SHELL_DEPTH: Final[int] = 3
-#: How many nested command strings past that depth are read before the rest is
-#: judged by name alone.
-MAX_DEEP_BODIES: Final[int] = 64
 #: How many variables set before a ``cd`` travel with each later part; past it the
 #: result is untrusted, so paths are judged by file name as well.
 MAX_CARRIED_ASSIGNMENTS: Final[int] = 32
@@ -623,7 +624,7 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
                     assignments[name] = assignment
                     if len(assignments) > MAX_CARRIED_ASSIGNMENTS:
                         # The oldest is dropped, so a later `$NAME` may be unresolved.
-                        del assignments[next(iter(assignments))]
+                        assignments = dict(list(assignments.items())[1:])
                         untrusted = True
                 continue
             argument = (change.group(2) or "").strip("\"'")
@@ -1077,26 +1078,17 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
         Linear: each nested string is read once, and at most ``MAX_DEEP_BODIES``
         are read before the rest is judged by whether it names the file.
         """
-        queue = [body]
-        seen = {body}
-        while queue:
-            if len(seen) > MAX_DEEP_BODIES:
-                return self._text_naming(queue[-1])
-            text = queue.pop()
-            try:
-                variants = list(brace_variants(text))
-            except TooManyToEnumerateError:
-                return self._text_naming(text)
-            for variant in variants:
-                for command in simple_commands(variant, known_verbs=_KNOWN_VERBS):
-                    for word in (command.verb, *command.operands):
-                        glob = self._wide_naming(word, roots, base)
-                        if glob is not None:
-                            return glob
-                    for nested in nested_command_strings(command):
-                        if nested not in seen:
-                            seen.add(nested)
-                            queue.append(nested)
+        try:
+            for word in iter_normalised_shell_words(body):
+                spellings = [word]
+                if "{" in word:
+                    spellings = list(dict.fromkeys(shell_word_spellings(word))) or [word]
+                for spelled in spellings:
+                    glob = self._wide_naming(spelled, roots, base)
+                    if glob is not None:
+                        return glob
+        except (TooManyToEnumerateError, TimeoutError):
+            return self._text_naming(body)
         return None
 
     def _unknown_command_violation(
