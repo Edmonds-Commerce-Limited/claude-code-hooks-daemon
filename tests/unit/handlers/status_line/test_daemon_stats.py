@@ -41,9 +41,8 @@ class TestDaemonStatsHandler:
     def test_the_review_recommends_it_in_the_daemons_own_repository(
         self, handler: DaemonStatsHandler, tmp_path: Path
     ) -> None:
-        package = tmp_path / "src" / "claude_code_hooks_daemon"
-        package.mkdir(parents=True)
-        (package / "__init__.py").write_text("")
+        """Relevance follows the one self-install rule, install_layout.is_self_install_mode."""
+        (tmp_path / "src" / "claude_code_hooks_daemon").mkdir(parents=True)
 
         assert handler.get_relevance(RelevanceContext.probe(tmp_path)).applicable
 
