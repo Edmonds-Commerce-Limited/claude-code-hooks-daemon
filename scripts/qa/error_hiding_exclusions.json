@@ -359,7 +359,7 @@
     {
       "file": "handlers/status_line/daemon_stats.py",
       "lines": [
-        23
+        25
       ],
       "rule": "silent-fallback",
       "reason": "Plan 00200 Task 5.4: module-level `try: import psutil except ImportError: psutil = None` -- the standard optional-dependency idiom. Matches this directory's documented CLAUDE.md rule #2 ('Reads are fail-silent and defensive... never raise -- see daemon_stats.py'). No function context at module scope, hence line-based match per the documented legacy-fallback convention. Realigned by Plan 00369's explain_segment() import shifting the try: block by one line."
