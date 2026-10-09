@@ -36,7 +36,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Final
@@ -502,31 +502,33 @@ def render_instruction(pending: PendingFactCheck, diff_path: Path) -> str:
 
 
 def _take(
-    state: PlanFactCheckState, folder: str, suffix: str
-) -> tuple[PendingFactCheck, Path] | None:
-    """Claim the ``suffix`` record of ``folder`` and read it; ``None`` if gone or unreadable.
+    state: PlanFactCheckState, folders: Iterable[str], suffix: str
+) -> Iterator[tuple[PendingFactCheck, Path]]:
+    """Claim and read the ``suffix`` record of each folder, skipping any gone or unreadable.
 
     Claiming (:meth:`PlanFactCheckState.claim_pending`) means two events that run
     at once cannot both take a record: the loser finds it gone. A record that
     cannot be read (corrupt, or written by an earlier build that stored no
     ``files``) is set aside with one WARNING.
     """
-    try:
-        claimed = state.claim_pending(folder, suffix)
-    except FileNotFoundError as exc:
-        log_and_continue(
-            logger,
-            exc,
-            reason=f"record for {folder} was claimed by another event, which delivers it",
-            level=logging.DEBUG,
-        )
-        return None
-    try:
-        return state.read_claimed(claimed), claimed
-    except PlanFactCheckStateError as exc:
-        aside = state.set_aside(folder, suffix, claimed)
-        logger.warning("plan_fact_check: set aside unreadable record as %s: %s", aside, exc)
-        return None
+    for folder in folders:
+        try:
+            claimed = state.claim_pending(folder, suffix)
+        except FileNotFoundError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"record for {folder} was claimed by another event, which delivers it",
+                level=logging.DEBUG,
+            )
+            continue
+        try:
+            pending = state.read_claimed(claimed)
+        except PlanFactCheckStateError as exc:
+            aside = state.set_aside(folder, suffix, claimed)
+            logger.warning("plan_fact_check: set aside unreadable record as %s: %s", aside, exc)
+            continue
+        yield pending, claimed
 
 
 def _hand_over(
@@ -576,9 +578,8 @@ def deliver_pending(state: PlanFactCheckState, now: float | None = None) -> list
         (state.offered_due(moment), OFFERED_SUFFIX),
     )
     for folders, suffix in batches:
-        for folder in folders:
-            taken = _take(state, folder, suffix)
-            message = None if taken is None else _hand_over(state, *taken, now=moment)
+        for pending, claimed in _take(state, folders, suffix):
+            message = _hand_over(state, pending, claimed, now=moment)
             if message is not None:
                 messages.append(message)
     return messages

@@ -1,6 +1,6 @@
 # Plan 00480: plan fact checker and debounce
 
-**Status**: In Progress
+**Status**: Complete (2026-10-09)
 **Created**: 2026-10-02
 **Owner**: dev
 **Priority**: High
@@ -131,7 +131,7 @@ as principle 1.
     template pointing at `hooks-daemon session-actions`, which lists SessionStart items only.
   - **Blocking**: none (open question 2 ruling and owner ruling A1); `plan_qa_commit_gate` is
     untouched.
-- [ ] 🔄 **Task 4.4**: Acceptance tests, plus a live run: edit a plan to add a false claim, see
+- [x] ✅ **Task 4.4**: Acceptance tests, plus a live run: edit a plan to add a false claim, see
   one debounced check fire, and see the refutation delivered.
   - **Done**: automated tests (`TestDelivery` in the feed handler and util tests) and the
     handler's acceptance tests.
@@ -142,8 +142,14 @@ as principle 1.
   - **Delivery seen (2026-10-06)**: filing Plan 00495 produced "PLAN FACT-CHECK OWED for
     00495-performance-improvement-programme" in the session on the next PostToolUse. The path was correct and the
     diff file existed. The coordinator dispatched `plan-fact-checker` on it.
-  - **Remains**: the rest of N359 (worktree and archived-plan paths, whole-folder first diffs, and the earlier delivery
-    that was consumed unseen, which this run did not repeat), then one more live run free of them.
+  - **Re-offer cap**: an unacted offer is re-offered up to `MAX_OFFERS` times, which `utils/plan_fact_check.py`
+    sets to 3.
+  - **Done (live run 2026-10-09, after the N359 merge 7aa463588 and a daemon restart)**: one false claim was added to
+    this plan (that `MAX_OFFERS` is 10). One debounced check fired for the one edit, and the next PostToolUse
+    delivered it unasked, with a diff holding only the two added lines. Dispatching `plan-fact-checker` with the
+    diff path advanced the checked content. The checker refuted the claim against `plan_fact_check.py:62`
+    ([report](subagent-reports/261009-fact-check-live-run-sonnet.md)), and the line above now carries the
+    corrected value.
 
 ## Open questions for the owner
 
@@ -168,10 +174,17 @@ as principle 1.
 
 ## Success Criteria
 
-- [ ] The fact checker, run on the artefact without hints, refutes the supervisor claim.
-  Met once, by the experiment; to be repeated by the final agent definition.
-- [ ] A burst of plan edits produces exactly one fact check, about 5 s after the last edit.
-- [ ] A false claim added to a plan is refuted and reaches the session without anyone asking.
+- [x] The fact checker, run on the artefact without hints, refutes the supervisor claim.
+  Met by the experiment, then by the final agent definition in Task 2.2's blind re-run.
+- [x] A burst of plan edits produces exactly one fact check, about 5 s after the last edit. Proven by the
+  `core/debouncer.py` tests (Task 3.1). Seen live on 2026-10-09: the three edits correcting the planted claim fired
+  once, and that one fire was absorbed as a correction of the confirmed check, as Task 4.2's correction window
+  intends.
+- [x] Every release-bound consequence is in the pending-release holding area or already released. The feed and
+  its delivery shipped in v3.69.0 (`RELEASES/v3.69.0.md`). The N359 delivery fixes are callout
+  `UNRELEASED/release-notes/002-plan-fact-check-feed-delivers-the-right-check-once.md`.
+- [x] A false claim added to a plan is refuted and reaches the session without anyone asking. Met by the
+  2026-10-09 live run (Task 4.4).
 
 ## Delivery & Milestones
 

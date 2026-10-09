@@ -56,6 +56,9 @@ from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor impor
     CANONICAL_CRON_PROMPT,
     declares_failsafe_cron,
 )
+from claude_code_hooks_daemon.handlers.utils.initial_thread_exemption import (
+    InitialThreadExemption,
+)
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.usage_pause import UsagePause
 from claude_code_hooks_daemon.utils.usage_pause_gate import (
@@ -115,7 +118,7 @@ _RULE: Final[Rule] = Rule(
 )
 
 
-class UsagePauseGateHandler(UserPromptSubmitHandlerBase):
+class UsagePauseGateHandler(InitialThreadExemption, UserPromptSubmitHandlerBase):
     """Record and enforce the usage pause on UserPromptSubmit."""
 
     def __init__(self) -> None:
@@ -237,7 +240,9 @@ class UsagePauseGateHandler(UserPromptSubmitHandlerBase):
         """The lift directive naming the crons this host declares."""
         config = self._config_loader()
         hostname = effective_hostname(hook_input)
-        jobs = config.persistent_crons.active_jobs(hostname)
+        crons = config.persistent_crons
+        # A thread opened later in the session holds none (Plan 00470 Task 6.4).
+        jobs = self._jobs_held_by_session(hook_input, crons, crons.active_jobs(hostname))
         recovery_on = config.get_handler_config(
             _RECOVERY_ADVISOR_EVENT, HandlerID.RECOVERY_CRON_ADVISOR.config_key
         ).enabled

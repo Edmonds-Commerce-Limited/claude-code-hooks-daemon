@@ -11,8 +11,8 @@ merge that had no recorded pass (Plan 00475 Task 4.2).
 checkout the run happened in, which for a work branch is its own worktree, not
 the checkout the coordinator merges from. Refs are shared by every worktree.
 
-On a Bash ``git merge`` of a work branch (``worktree-*``, local or
-``origin/worktree-*``) this resolves the ref to a commit and reads that record.
+On a Bash ``git merge`` of a work branch (``worktree-*`` or an agent dispatch's
+``agent-*``, local or under ``origin/``) this resolves the ref to a commit and reads that record.
 It is advisory only, and silent when the record names that commit, when the ref
 is not a work branch, and on anything it cannot read (fail open: it advises).
 """
@@ -36,15 +36,12 @@ from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.utils import get_bash_command
-from claude_code_hooks_daemon.handlers.session_start.branch_count_advisor import (
-    WORK_BRANCH_PREFIX,
-)
 from claude_code_hooks_daemon.utils.git_commit_parsing import GitInvocation, git_invocations
 from claude_code_hooks_daemon.utils.git_invocation_directory import (
     invocation_directory,
     placement_problem,
 )
-from claude_code_hooks_daemon.utils.git_repo import HEADS_PREFIX, run_git
+from claude_code_hooks_daemon.utils.git_repo import HEADS_PREFIX, WORK_BRANCH_PREFIXES, run_git
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 
 logger = logging.getLogger(__name__)
@@ -77,10 +74,10 @@ _OPTION_END: Final[str] = "--"
 _REMOTE: Final[str] = "origin"
 _REMOTES_PREFIX: Final[str] = f"refs/remotes/{_REMOTE}/"
 # A work branch as `git merge` can name it: bare, `refs/heads/`, `origin/` or
-# `refs/remotes/origin/`. The prefix is the one branch_count_advisor counts.
+# `refs/remotes/origin/`. The prefixes are the ones branch_count_advisor counts.
 _WORK_REF: Final[re.Pattern[str]] = re.compile(
     rf"^(?:(?P<heads>{re.escape(HEADS_PREFIX)})|(?P<remote>(?:refs/remotes/)?{_REMOTE}/))?"
-    rf"(?P<branch>{re.escape(WORK_BRANCH_PREFIX)}\S+)$"
+    rf"(?P<branch>(?:{'|'.join(re.escape(prefix) for prefix in WORK_BRANCH_PREFIXES)})\S+)$"
 )
 
 #: The advice names this repository's QA scripts, so it applies only where this
@@ -245,7 +242,8 @@ class MergeQaAdvisorHandler(PreToolUseHandlerBase):
     def get_claude_md(self) -> str | None:
         return (
             "## merge_qa_advisor — merge a work branch with its targeted QA recorded\n\n"
-            "A Bash `git merge` of a work branch (`worktree-*`, local or `origin/worktree-*`) "
+            "A Bash `git merge` of a work branch (`worktree-*` or an agent dispatch's "
+            "`agent-*`, local or under `origin/`) "
             "whose head has no recorded green `llm_qa.py changed` run is flagged "
             "(advisory, never blocked). The advisory names the head and the static "
             "checks to run first, from CLAUDE/QA.md, 'Before Merging: the Coordinator's "

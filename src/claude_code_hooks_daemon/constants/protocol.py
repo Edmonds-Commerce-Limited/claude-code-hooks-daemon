@@ -56,6 +56,11 @@ class HookInputField:
     # connected process's environment. Absent when the session set neither.
     # Consumed via utils.cron_hosts.effective_hostname (Plan 00470 Task 6.1).
     SESSION_HOSTNAME = "hooks_daemon_hostname"
+    # NOT sent by Claude Code: the pid of the hook process on the other end of the
+    # event socket, stamped by the daemon from SO_PEERCRED. Consumed by
+    # utils.session_thread_group to tell later threads of one Claude Code session
+    # from its initial thread (Plan 00470 Task 6.4). Absent when unknown.
+    PEER_PID = "hooks_daemon_peer_pid"
 
     # Tool-related fields (PreToolUse, PostToolUse)
     TOOL_NAME = "tool_name"
