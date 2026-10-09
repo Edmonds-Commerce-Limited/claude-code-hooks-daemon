@@ -61,7 +61,6 @@ VIOLATION_TYPES = {
         "use utils.deliberate_swallow.log_and_continue(..., reason=...) if deliberate"
     ),
     "bare-except": "Bare except clause without specific exception type",
-    "warning-instead-of-error": "Uses logger.warning() for critical failures",
     "silent-fallback": (
         "Exception handler assigns a fallback value with no logging or "
         "re-raise - failure becomes indistinguishable from success"
@@ -70,6 +69,25 @@ VIOLATION_TYPES = {
         "The file could not be opened or decoded, so it was never checked "
         "for error-hiding patterns - reported rather than silently skipped"
     ),
+}
+
+#: Stable rule IDs of the shell patterns the write-time strategy defines. The
+#: strategy's pattern NAME is the shell text itself (``|| true``), which is not an
+#: identifier a failing summary can be looked up by, so each gets a kebab-case ID.
+RULE_SHELL_OR_TRUE = "shell-or-true"
+RULE_SHELL_OR_COLON = "shell-or-colon"
+RULE_SHELL_SET_PLUS_E = "shell-set-plus-e"
+RULE_SHELL_REDIRECT_ALL_TO_NULL = "shell-redirect-all-to-null"
+RULE_SHELL_DISCARD_BOTH_STREAMS = "shell-discard-both-streams"
+RULE_SHELL_EMPTY_ERR_TRAP = "shell-empty-err-trap"
+
+SHELL_PATTERN_RULES: dict[str, str] = {
+    "|| true": RULE_SHELL_OR_TRUE,
+    "|| :": RULE_SHELL_OR_COLON,
+    "set +e": RULE_SHELL_SET_PLUS_E,
+    "&>/dev/null": RULE_SHELL_REDIRECT_ALL_TO_NULL,
+    ">/dev/null 2>&1": RULE_SHELL_DISCARD_BOTH_STREAMS,
+    "trap '' ERR": RULE_SHELL_EMPTY_ERR_TRAP,
 }
 
 # Directories audited recursively for BOTH Python (*.py) and shell (*.sh,
@@ -968,9 +986,14 @@ def audit_shell_patterns(filepath: Path, strategy: ErrorHidingStrategy) -> list[
     violations: list[dict[str, Any]] = []
     seen: set[tuple[int, str]] = set()
     for pattern in strategy.patterns:
+        if pattern.name not in SHELL_PATTERN_RULES:
+            raise ValueError(
+                f"shell pattern {pattern.name!r} has no rule ID: add it to SHELL_PATTERN_RULES "
+                "and scripts/qa/qa-rules.json"
+            )
         for match in re.finditer(pattern.regex, content, re.MULTILINE):
             line = content.count("\n", 0, match.start()) + 1
-            rule = f"shell-{pattern.name}"
+            rule = SHELL_PATTERN_RULES[pattern.name]
             key = (line, rule)
             if key in seen:
                 continue

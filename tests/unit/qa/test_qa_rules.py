@@ -48,9 +48,36 @@ def _load_llm_qa() -> Any:
 llm_qa = _load_llm_qa()
 
 
-def _module_constants(tree: ast.Module) -> dict[str, str]:
-    """Module-level `NAME = "literal"` assignments, for resolving `rule=NAME`."""
+_PACKAGE: Final[str] = "claude_code_hooks_daemon"
+
+
+def _imported_constants(tree: ast.Module) -> dict[str, str]:
+    """String constants a checker imports from this package, by the name it binds them to."""
     found: dict[str, str] = {}
+    for node in tree.body:
+        if not (
+            isinstance(node, ast.ImportFrom)
+            and node.module is not None
+            and node.module.split(".")[0] == _PACKAGE
+        ):
+            continue
+        source = PROJECT_ROOT / "src" / Path(*node.module.split(".")).with_suffix(".py")
+        if not source.is_file():
+            continue
+        theirs = _module_constants(ast.parse(source.read_text(encoding="utf-8")), {})
+        found.update(
+            {
+                alias.asname or alias.name: theirs[alias.name]
+                for alias in node.names
+                if alias.name in theirs
+            }
+        )
+    return found
+
+
+def _module_constants(tree: ast.Module, imported: dict[str, str]) -> dict[str, str]:
+    """Module-level `NAME = "literal"` (or an alias of a known constant), for `rule=NAME`."""
+    found: dict[str, str] = dict(imported)
     for node in tree.body:
         targets: list[ast.expr] = []
         value: ast.expr | None = None
@@ -58,27 +85,86 @@ def _module_constants(tree: ast.Module) -> dict[str, str]:
             targets, value = list(node.targets), node.value
         elif isinstance(node, ast.AnnAssign) and node.value is not None:
             targets, value = [node.target], node.value
+        text: str | None = None
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
-            found.update({t.id: value.value for t in targets if isinstance(t, ast.Name)})
+            text = value.value
+        elif isinstance(value, ast.Name) and value.id in found:
+            text = found[value.id]
+        if text is not None:
+            found.update({t.id: text for t in targets if isinstance(t, ast.Name)})
     return found
 
 
-def _literals_or_constants(node: ast.expr, constants: dict[str, str]) -> list[str]:
+class UnresolvedRuleError(AssertionError):
+    """A rule expression the discovery cannot turn into IDs: it fails, never skips."""
+
+
+def _module_lookups(tree: ast.Module) -> dict[str, ast.Dict]:
+    """Module-level ``NAME = {key: value, ...}``; resolved only where a rule indexes one."""
+    found: dict[str, ast.Dict] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names = [node.target.id]
+        else:
+            continue
+        if isinstance(node.value, ast.Dict):
+            found.update(dict.fromkeys(names, node.value))
+    return found
+
+
+def _literals_or_constants(
+    node: ast.expr, constants: dict[str, str], lookups: dict[str, ast.Dict]
+) -> list[str]:
     """Every string a rule expression can be: its literals, and the constants it names.
 
     A call is not descended into: ``rule=str(diagnostic.get("rule", ""))`` passes
-    a third-party tool's own ID through, which is not a rule of this checker.
+    a third-party tool's own ID through, which is not a rule of this checker. Any
+    other shape that builds an ID the source does not spell out fails closed: an
+    f-string, a concatenation, a constant-styled name that is not defined here.
+    A lower-case name is a parameter or local, assigned (and found) elsewhere.
     """
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return [node.value]
-    if isinstance(node, ast.Name) and node.id in constants:
-        return [constants[node.id]]
+    if isinstance(node, ast.Name):
+        if node.id in constants:
+            return [constants[node.id]]
+        if node.id.lstrip("_").isupper():
+            raise UnresolvedRuleError(f"line {node.lineno}: {node.id} is not a module constant")
+        return []
+    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
+        if node.value.id in lookups:
+            return [
+                leaf
+                for value in lookups[node.value.id].values
+                for leaf in _literals_or_constants(value, constants, {})
+            ]
+        raise UnresolvedRuleError(f"line {node.lineno}: {node.value.id}[...] is not a lookup here")
+    if isinstance(node, ast.JoinedStr):
+        first = node.values[0] if node.values else None
+        if (
+            isinstance(first, ast.FormattedValue)
+            and isinstance(first.value, ast.Name)
+            and first.value.id in constants
+            and _RULE_CONSTANT.match(first.value.id)
+        ):
+            return [constants[first.value.id]]
+        raise UnresolvedRuleError(
+            f"line {node.lineno}: an f-string rule ID; give each ID a RULE_* constant"
+        )
+    if isinstance(node, ast.BinOp):
+        raise UnresolvedRuleError(f"line {node.lineno}: a built rule ID; give each a constant")
     if isinstance(node, ast.IfExp):
-        return _literals_or_constants(node.body, constants) + _literals_or_constants(
-            node.orelse, constants
+        return _literals_or_constants(node.body, constants, lookups) + _literals_or_constants(
+            node.orelse, constants, lookups
         )
     if isinstance(node, ast.BoolOp):
-        return [leaf for value in node.values for leaf in _literals_or_constants(value, constants)]
+        return [
+            leaf
+            for value in node.values
+            for leaf in _literals_or_constants(value, constants, lookups)
+        ]
     return []
 
 
@@ -95,26 +181,27 @@ def discover_rule_ids(path: Path) -> set[str]:
     ``_add(node, "<id>", ...)`` call, and the keys of ``VIOLATION_TYPES``.
     """
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    constants = _module_constants(tree)
+    constants = _module_constants(tree, _imported_constants(tree))
+    lookups = _module_lookups(tree)
     found: set[str] = {value for name, value in constants.items() if _RULE_CONSTANT.match(name)}
     for node in ast.walk(tree):
         if isinstance(node, ast.keyword) and node.arg == "rule":
-            found.update(_literals_or_constants(node.value, constants))
+            found.update(_literals_or_constants(node.value, constants, lookups))
         elif isinstance(node, ast.Dict):
             for key, value in zip(node.keys, node.values, strict=True):
                 if isinstance(key, ast.Constant) and key.value == "rule":
-                    found.update(_literals_or_constants(value, constants))
+                    found.update(_literals_or_constants(value, constants, lookups))
         elif isinstance(node, ast.Assign) and any(_is_rule_target(t) for t in node.targets):
-            found.update(_literals_or_constants(node.value, constants))
+            found.update(_literals_or_constants(node.value, constants, lookups))
         elif isinstance(node, ast.AnnAssign) and _is_rule_target(node.target) and node.value:
-            found.update(_literals_or_constants(node.value, constants))
+            found.update(_literals_or_constants(node.value, constants, lookups))
         elif (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and node.func.attr == "_add"
             and len(node.args) >= 2
         ):
-            found.update(_literals_or_constants(node.args[1], constants))
+            found.update(_literals_or_constants(node.args[1], constants, lookups))
         elif isinstance(node, ast.Assign) and any(
             isinstance(t, ast.Name) and t.id == "VIOLATION_TYPES" for t in node.targets
         ):
@@ -124,7 +211,10 @@ def discover_rule_ids(path: Path) -> set[str]:
                     for key in node.value.keys
                     if isinstance(key, ast.Constant) and isinstance(key.value, str)
                 )
-    return {rule for rule in found if _RULE_ID.match(rule)}
+    malformed = sorted(rule for rule in found if not _RULE_ID.match(rule))
+    if malformed:
+        raise UnresolvedRuleError(f"{path.name}: rule IDs that are not kebab-case: {malformed}")
+    return found
 
 
 def discovered() -> dict[str, set[str]]:
@@ -195,6 +285,64 @@ class TestTheRegistryAndTheCheckersAgree:
             "inline-suppression-without-reason",  # RULE_* constant
         ):
             assert rule in found, rule
+
+
+class TestDiscoveryFailsClosed:
+    """A rule ID the source builds at run time must fail the guard, never slip past it."""
+
+    @staticmethod
+    def _discover(tmp_path: Path, source: str) -> set[str]:
+        path = tmp_path / "checker.py"
+        path.write_text(source, encoding="utf-8")
+        return discover_rule_ids(path)
+
+    def test_an_fstring_rule_id_fails(self, tmp_path: Path) -> None:
+        with pytest.raises(UnresolvedRuleError, match="f-string"):
+            self._discover(tmp_path, 'def f(name):\n    rule = f"shell-{name}"\n')
+
+    def test_a_concatenated_rule_id_fails(self, tmp_path: Path) -> None:
+        with pytest.raises(UnresolvedRuleError, match="built rule ID"):
+            self._discover(tmp_path, 'def f(name):\n    return dict(rule="shell-" + name)\n')
+
+    def test_an_undefined_constant_fails(self, tmp_path: Path) -> None:
+        with pytest.raises(UnresolvedRuleError, match="RULE_MISSING"):
+            self._discover(tmp_path, "def f():\n    return dict(rule=RULE_MISSING)\n")
+
+    def test_a_lookup_that_is_not_in_the_module_fails(self, tmp_path: Path) -> None:
+        with pytest.raises(UnresolvedRuleError, match="RULES"):
+            self._discover(tmp_path, "def f(k):\n    rule = RULES[k]\n")
+
+    def test_a_family_prefix_fstring_resolves_to_the_family(self, tmp_path: Path) -> None:
+        source = '_PUBLIC_RULE_PREFIX = "fam"\ndef f(n):\n    return dict(rule=f"{_PUBLIC_RULE_PREFIX}:{n}")\n'
+        assert self._discover(tmp_path, source) == {"fam"}
+
+    def test_a_dict_lookup_of_constants_resolves_to_every_value(self, tmp_path: Path) -> None:
+        source = (
+            'RULE_A = "rule-a"\nRULE_B = "rule-b"\nRULES = {"x": RULE_A, "y": RULE_B}\n'
+            "def f(k):\n    rule = RULES[k]\n"
+        )
+        assert self._discover(tmp_path, source) == {"rule-a", "rule-b"}
+
+    def test_a_parameter_passed_through_is_not_a_finding(self, tmp_path: Path) -> None:
+        assert self._discover(tmp_path, "def f(rule):\n    return dict(rule=rule)\n") == set()
+
+
+class TestEveryShellPatternRuleIsRegistered:
+    """B1: the shell error-hiding findings carry stable IDs that `--explain` resolves."""
+
+    SHELL_RULES: Final[tuple[str, ...]] = (
+        "shell-or-true",
+        "shell-or-colon",
+        "shell-set-plus-e",
+        "shell-redirect-all-to-null",
+        "shell-discard-both-streams",
+        "shell-empty-err-trap",
+    )
+
+    @pytest.mark.parametrize("rule", SHELL_RULES)
+    def test_the_rule_is_discovered_registered_and_explained(self, rule: str) -> None:
+        assert discovered()[rule] == {"audit_error_hiding.py"}
+        assert llm_qa.explain_rule(rule) is not None
 
 
 class TestExplain:

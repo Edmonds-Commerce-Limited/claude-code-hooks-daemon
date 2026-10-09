@@ -42,6 +42,7 @@ error-hiding.
 from __future__ import annotations
 
 import ast
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -890,7 +891,7 @@ class TestShellPatternAudit:
             extensions = (".sh",)
             patterns = (
                 ErrorHidingPattern(
-                    name="TOTALLY-MADE-UP-PATTERN",
+                    name="|| true",
                     regex=r"MAGIC_MARKER_XYZ",
                     example="MAGIC_MARKER_XYZ",
                     suggestion="remove the marker",
@@ -904,7 +905,38 @@ class TestShellPatternAudit:
         script.write_text("#!/bin/bash\necho MAGIC_MARKER_XYZ\n")
         violations = audit_shell_patterns(script, _StubStrategy())
         assert len(violations) == 1
-        assert violations[0]["rule"].endswith("TOTALLY-MADE-UP-PATTERN")
+        assert violations[0]["rule"] == "shell-or-true"
+
+    def test_a_pattern_with_no_declared_rule_id_fails_fast(self, tmp_path: Path) -> None:
+        """A strategy pattern gains a finding only with a stable, registered ID."""
+
+        class _StubStrategy:
+            language_name = "Stub"
+            extensions = (".sh",)
+            patterns = (
+                ErrorHidingPattern(
+                    name="TOTALLY-MADE-UP-PATTERN",
+                    regex=r"MAGIC_MARKER_XYZ",
+                    example="MAGIC_MARKER_XYZ",
+                    suggestion="remove the marker",
+                ),
+            )
+
+            def get_acceptance_tests(self) -> list[Any]:
+                return []
+
+        script = tmp_path / "stub.sh"
+        script.write_text("#!/bin/bash\necho MAGIC_MARKER_XYZ\n")
+        with pytest.raises(ValueError, match="TOTALLY-MADE-UP-PATTERN"):
+            audit_shell_patterns(script, _StubStrategy())
+
+    def test_every_shipped_shell_pattern_has_a_kebab_case_rule_id(self, tmp_path: Path) -> None:
+        for pattern in ShellErrorHidingStrategy().patterns:
+            script = tmp_path / "each.sh"
+            script.write_text(f"#!/bin/bash\n{pattern.example}\n")
+            rules = [v["rule"] for v in audit_shell_patterns(script, ShellErrorHidingStrategy())]
+            assert rules, pattern.name
+            assert all(re.fullmatch(r"shell-[a-z]+(?:-[a-z]+)*", rule) for rule in rules), rules
 
     def test_deduplicates_repeated_matches_on_same_line(self, tmp_path: Path) -> None:
         script = tmp_path / "dup.sh"
