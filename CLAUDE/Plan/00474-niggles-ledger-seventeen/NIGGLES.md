@@ -1461,18 +1461,40 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N389 — the development host's real name is in tracked plan files
+
+**Source**: the coordinator, 2026-10-09, while implementing N388. The N388 entry, as first committed in 3d1fa0ad6,
+used the development host's real name as its example. The project rule is that no real hostname goes in a public
+place.
+
+**Evidence**: `git grep` over the tree found five tracked occurrences in four files. Three are now replaced:
+
+- the N388 example, now `build-box`;
+- `Completed/00413-niggles-ledger-thirteen/NIGGLES.md`;
+- `00470-persistent-session-optimisation/subagent-reports/260930-p470-cron-hosts-sonnet-5-5.md`.
+
+Two remain, in `Completed/00413-niggles-ledger-thirteen/JOURNAL/00413-Journal-26-09-15.md`. Journal entries are not
+hand-edited (R-JOURNAL-HAND-WRITTEN-ENTRY). The name also stays in published history, which only a rewrite the owner
+runs could remove. Nothing stops it recurring: the secret word list is the mechanism for that, and only a human edits
+it.
+
+**Status**: ⬜ Open, for the owner. To decide: whether the two journal lines may be edited in place, whether to add
+the host name to the secret word list, and whether history matters for this name.
+
 ### N388 — the host segment does not show the session's role override
 
 **Source**: owner request, 2026-10-09. When a session exports `HOOKS_DAEMON_HOSTNAME`, the status bar should read
 `<role>@<host>`. A role over 15 characters shows its first 10 followed by `...`; for example
-`github-softwaredev-lifecycle-unattended` on `dc-lts-dev-vm` shows `github-sof...@dc-lts-dev-vm`.
+`github-softwaredev-lifecycle-unattended` on `build-box` shows `github-sof...@build-box`.
 
 **Evidence**: `handlers/status_line/host_hostname.py` renders only `@<host>` (with `@~` when the host name is
 inferred). The session's effective hostname reaches the daemon on the payload, under
 `HookInputField.SESSION_HOSTNAME`. `init.sh` (around lines 3326-3333) stamps the first non-empty of
 `HOOKS_DAEMON_HOSTNAME` and `CCY_HOST_HOSTNAME`, so the stamp alone cannot tell a role from the host's own name.
 
-**Status**: ⬜ Open; designed, not started (the session restarted). Design:
+**Status**: ✅ Fixed on main, as designed below. The tests were written red first (11 new cases, including a role of
+exactly 15 characters, the stamp winning over the environment, and the role being read on every render while the host
+stays cached). Release note 010. Design:
 
 - The role is the stamped value, falling back to `cron_hosts.hostname_override(os.environ)`, and is shown only when it
   differs from `resolve_host_name().name`. When nothing is overridden, the stamp is `CCY_HOST_HOSTNAME`, which equals

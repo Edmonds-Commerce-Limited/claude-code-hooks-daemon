@@ -27,13 +27,16 @@ values come from the environment.
 """
 
 import logging
+import os
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.core import AdvisoryResult
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
+from claude_code_hooks_daemon.utils.cron_hosts import ENV_HOSTNAME_OVERRIDE, hostname_override
 from claude_code_hooks_daemon.utils.host_identity import (
     ENV_HOST_HOSTNAME,
     HostName,
@@ -61,6 +64,32 @@ INFERRED_MARKER = "~"
 #: to be able to find it in this file, and an f-string would hide it. A unit
 #: test pins it equal to the composition so the two cannot drift apart.
 _ICON_INFERRED = "@~"
+
+#: A role longer than this is cut to :data:`_ROLE_KEEP` characters plus
+#: :data:`_ROLE_ELLIPSIS`, so a long alias cannot crowd out the host.
+_ROLE_MAX = 15
+_ROLE_KEEP = 10
+_ROLE_ELLIPSIS = "..."
+
+
+def _session_role(hook_input: dict[str, Any], host: str) -> str | None:
+    """The session's hostname override, shown before the ``@``; None when there is none.
+
+    The payload stamp wins because the daemon's own environment is whatever
+    started it, not the session's. No fallback to the system hostname: that is
+    no role. An override equal to the host (``CCY_HOST_HOSTNAME`` alone) is
+    not one either.
+    """
+    stamped = hook_input.get(HookInputField.SESSION_HOSTNAME)
+    if isinstance(stamped, str) and stamped.strip():
+        role: str | None = stamped.strip()
+    else:
+        role = hostname_override(os.environ)
+    if role is None or role == host:
+        return None
+    if len(role) > _ROLE_MAX:
+        return role[:_ROLE_KEEP] + _ROLE_ELLIPSIS
+    return role
 
 
 class HostHostnameHandler(StatusLineHandlerBase):
@@ -106,8 +135,9 @@ class HostHostnameHandler(StatusLineHandlerBase):
         if resolved is None:
             return AdvisoryResult(context=[])
         marker = INFERRED_MARKER if resolved.inferred else ""
+        role = _session_role(hook_input, resolved.name) or ""
         return AdvisoryResult(
-            context=[f"| {_COLOR_BRIGHT_CYAN}{_ICON}{marker}{resolved.name}{_COLOR_RESET}"]
+            context=[f"| {_COLOR_BRIGHT_CYAN}{role}{_ICON}{marker}{resolved.name}{_COLOR_RESET}"]
         )
 
     def explain_segment(self) -> SegmentExplanation:
@@ -130,7 +160,10 @@ class HostHostnameHandler(StatusLineHandlerBase):
             what_it_is="Which MACHINE this session is on, as opposed to which kind of environment.",
             how_to_read=(
                 f"{_ICON}name = read as fact; {_ICON_INFERRED}name = INFERRED from "
-                "/etc/hosts and possibly wrong. Resolved once per daemon start, in order: "
+                "/etc/hosts and possibly wrong. A session that took a role "
+                f"(${ENV_HOSTNAME_OVERRIDE}) shows it before the {_ICON}, cut to "
+                f"{_ROLE_KEEP} characters and {_ROLE_ELLIPSIS} when longer than {_ROLE_MAX}. "
+                "The host is resolved once per daemon start, in order: "
                 f"{HostNameSource.ENVIRONMENT.value} (${ENV_HOST_HOSTNAME}), "
                 f"{HostNameSource.LOCAL.value} (host or LXC only — a podman/docker hostname is "
                 f"the container ID), then {HostNameSource.ETC_HOSTS_HINT.value}. "

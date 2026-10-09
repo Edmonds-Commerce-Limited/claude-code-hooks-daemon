@@ -290,7 +290,7 @@ The tests pin a resolution LADDER whose bottom rung reads a name out of
 `/etc/hosts`. That file is real machine state. This container's carries a name
 that satisfies the resolver, so assertions of the form "a hostile value is
 REFUSED" get a successful resolution instead and fail:
-`assert HostName(name='dc-lts-dev-vm', ...)`.
+`assert HostName(name='<the host's real name>', ...)`.
 
 The failure mode is the expensive one: green on the author's machine, red on
 everyone else's, with the redness unrelated to the change under test.
@@ -335,4 +335,3 @@ had a violation before checking.
 
 Found by dogfooding, not by the suite — every check passed while the artefact
 said otherwise, because nothing compares a scoped verdict against its scope.
-

@@ -87,7 +87,7 @@ client process's environment while its own lacks the variable
 
 A finding worth knowing: after the change,
 `test_event_socket_hook_event_name_enrichment` failed because this sandbox
-exports `CCY_HOST_HOSTNAME=dc-lts-dev-vm`, and the in-process test client's
+exports `CCY_HOST_HOSTNAME` (set to the host's real name), and the in-process test client's
 `/proc/self/environ` carried it. That is the stamp working on a real peer. The test
 now stubs `hostname_override_of_process`, since `monkeypatch.delenv` cannot change
 `/proc/self/environ`. `test_forwarder_jq_free` likewise scrubs both variables, so a

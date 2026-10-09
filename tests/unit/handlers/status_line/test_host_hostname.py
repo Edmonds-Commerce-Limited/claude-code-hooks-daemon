@@ -12,8 +12,13 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.handlers.status_line import host_hostname
 from claude_code_hooks_daemon.handlers.status_line.host_hostname import HostHostnameHandler
+from claude_code_hooks_daemon.utils.cron_hosts import (
+    ENV_HOSTNAME_OVERRIDE,
+    HOSTNAME_OVERRIDE_ENV_VARS,
+)
 from claude_code_hooks_daemon.utils.host_identity import HostName, HostNameSource
 
 _ENV_VAR = "HOOKS_DAEMON_HOST_HOSTNAME"
@@ -22,10 +27,15 @@ _ENV_VAR = "HOOKS_DAEMON_HOST_HOSTNAME"
 @pytest.fixture(autouse=True)
 def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(_ENV_VAR, raising=False)
+    for name in HOSTNAME_OVERRIDE_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
 
 
-def _status_input() -> dict[str, Any]:
-    return {"session_id": "test-session"}
+def _status_input(role: str | None = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {"session_id": "test-session"}
+    if role is not None:
+        payload[HookInputField.SESSION_HOSTNAME] = role
+    return payload
 
 
 def _force_resolution(monkeypatch: pytest.MonkeyPatch, resolved: HostName | None) -> None:
@@ -168,6 +178,101 @@ class TestNoNameCanBeSuppliedFromConfig:
         assert seen == {}
 
 
+class TestARoleOverrideIsShownBeforeTheHost:
+    """A session that took a role shows ``<role>@<host>``.
+
+    The role is the session's hostname override (``HOOKS_DAEMON_HOSTNAME``),
+    which persistent crons' ``hosts:`` match against. Without it on the status
+    line, nothing visible says which role a session is playing.
+    """
+
+    def _render(self, monkeypatch: pytest.MonkeyPatch, role: str | None, **resolved: Any) -> str:
+        name = resolved.get("name", "dev-box")
+        source = resolved.get("source", HostNameSource.ENVIRONMENT)
+        _force_resolution(monkeypatch, HostName(name=name, source=source))
+        return HostHostnameHandler().handle(_status_input(role)).context[0]
+
+    def test_no_role_renders_the_host_alone(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        rendered = self._render(monkeypatch, None)
+
+        assert f"{host_hostname._COLOR_BRIGHT_CYAN}{host_hostname._ICON}dev-box" in rendered
+
+    def test_a_short_role_renders_in_full_before_the_at(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rendered = self._render(monkeypatch, "sdlc-runner")
+
+        assert "sdlc-runner@dev-box" in rendered
+
+    def test_a_role_of_exactly_fifteen_characters_is_not_truncated(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rendered = self._render(monkeypatch, "a" * 15)
+
+        assert f"{'a' * 15}@dev-box" in rendered
+
+    def test_a_long_role_shows_its_first_ten_characters_and_an_ellipsis(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rendered = self._render(monkeypatch, "github-softwaredev-lifecycle-unattended")
+
+        assert "github-sof...@dev-box" in rendered
+        assert "lifecycle" not in rendered
+
+    def test_a_role_equal_to_the_host_is_not_repeated(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``CCY_HOST_HOSTNAME`` alone stamps the host's own name, which is no role."""
+        rendered = self._render(monkeypatch, "dev-box")
+
+        assert f"{host_hostname._COLOR_BRIGHT_CYAN}{host_hostname._ICON}dev-box" in rendered
+
+    def test_an_inferred_host_keeps_its_marker_after_the_role(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rendered = self._render(
+            monkeypatch, "runner", name="guessed-box", source=HostNameSource.ETC_HOSTS_HINT
+        )
+
+        assert f"runner{host_hostname._ICON_INFERRED}guessed-box" in rendered
+
+    def test_without_a_stamp_the_role_comes_from_the_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(ENV_HOSTNAME_OVERRIDE, "runner")
+
+        rendered = self._render(monkeypatch, None)
+
+        assert "runner@dev-box" in rendered
+
+    def test_the_stamp_wins_over_the_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The daemon's environment is whatever started it, not the session's."""
+        monkeypatch.setenv(ENV_HOSTNAME_OVERRIDE, "stale-role")
+
+        rendered = self._render(monkeypatch, "session-role")
+
+        assert "session-role@dev-box" in rendered
+        assert "stale-role" not in rendered
+
+    def test_the_role_is_read_on_every_render(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Only the host is cached; the role travels on each payload."""
+        _force_resolution(monkeypatch, HostName(name="dev-box", source=HostNameSource.LOCAL))
+        handler = HostHostnameHandler()
+
+        first = handler.handle(_status_input("role-one")).context[0]
+        second = handler.handle(_status_input("role-two")).context[0]
+
+        assert "role-one@dev-box" in first
+        assert "role-two@dev-box" in second
+
+    def test_an_unresolvable_host_still_renders_nothing_with_a_role(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _force_resolution(monkeypatch, None)
+
+        assert HostHostnameHandler().handle(_status_input("runner")).context == []
+
+
 class TestTheSegmentExplainsItsOwnProvenance:
     def test_explain_names_the_rung_that_produced_the_value(
         self, monkeypatch: pytest.MonkeyPatch
@@ -180,6 +285,15 @@ class TestTheSegmentExplainsItsOwnProvenance:
 
         assert "dev-box" in explanation.current_value
         assert HostNameSource.ETC_HOSTS_HINT.value in explanation.current_value
+
+    def test_explain_describes_the_role_before_the_at(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _force_resolution(monkeypatch, HostName(name="dev-box", source=HostNameSource.LOCAL))
+
+        explanation = HostHostnameHandler().explain_segment()
+
+        assert ENV_HOSTNAME_OVERRIDE in explanation.how_to_read
 
     def test_explain_says_so_when_there_is_nothing_to_show(
         self, monkeypatch: pytest.MonkeyPatch
