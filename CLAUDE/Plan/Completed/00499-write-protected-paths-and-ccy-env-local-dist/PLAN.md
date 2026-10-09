@@ -1,6 +1,6 @@
 # Plan 00499: write-protected paths, and the ccy.env.local.dist template
 
-**Status**: In Progress
+**Status**: Complete (2026-10-09)
 **Created**: 2026-10-06
 **Owner**: dev
 **Priority**: Low
@@ -127,11 +127,17 @@ guidance as a known gap.
 
 ## Success Criteria
 
-- [ ] An agent in this repository can read `.claude/ccy/ccy.env.local` but cannot create, edit, overwrite, move onto
-  or delete it by any tool route covered by the tests.
-- [ ] A project with no `write_protected_paths` config behaves exactly as before.
+- [x] An agent in this repository can read `.claude/ccy/ccy.env.local` but cannot create, edit, overwrite, move onto
+  or delete it by any tool route covered by the tests. Probed on the live daemon after the Phase 1b merge (64823600a):
+  Edit, `rm`, `mv` onto, `cp` onto and `: >` deny under R-WRITE-PROTECTED-PATH, Write denies (an earlier guard answers
+  first), and `cat` and Read are allowed.
+- [x] A project with no `write_protected_paths` config behaves exactly as before. The handler ships disabled and
+  matches nothing with no `paths` (`test_the_handler_ships_disabled`, `test_with_no_paths_nothing_matches`).
 - [x] `ccy.env.local.dist` is kept current, and nothing in the daemon touches `ccy.env.local`. Met by ccy, which
   rewrites the dist at launch and reports an older "based on" version.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/003-write-protected-paths-handler.md` (the handler, and the Phase 1b read-only allowlist)
+  and `UNRELEASED/config-changes/v3.70.0.yaml`.
 
 ## Delivery & Milestones
 
