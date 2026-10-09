@@ -1440,15 +1440,21 @@ merge since the last green gate.
 Each test guards a property that every handler or every payload read must satisfy. None of them lives near the
 changed module, so a targeted run by name or import never selects them. Two more points:
 
-- `changed` with no `--range` on a clean main selects nothing (0 changed files). The advice "run `changed` on the
-  merged head" therefore checks nothing after a merge.
-- Agents cannot run `llm_qa.py` (R-SUBAGENT-FULL-QA), so the merge gate has to be the coordinator's
-  `changed --range <pre-merge>..HEAD`.
+- `changed` with no `--range` on main refuses to run, because HEAD is the base itself
+  (`scripts/qa/run_changed_tests.py:1031-1038`). The advice "run `changed` on the merged head" therefore checks
+  nothing on main.
+- Agents CAN run `llm_qa.py changed`. R-SUBAGENT-FULL-QA blocks only `all` and `tests`
+  (`.claude/hooks-daemon.yaml:524-528`). The coordinator had told every agent not to run `llm_qa.py` at all, to keep
+  them off the host-wide QA lock while the full gate ran. That is why no branch carried a green `changed` record, and
+  `changed` would have run these whole-repo checks.
 
-**Status**: 🔄 Fixing. The six regressions are on a worktree branch. Two process remedies follow:
+**Status**: 🔄 Fixing. The six regressions are on a worktree branch, after a fact-check refuted two of this entry's
+first-draft claims. The remedies:
 
-1. `merge_qa_advisor` should print the exact `--range <pre-merge head>..HEAD` command.
-2. The coordinator runs that range after every merge onto main.
+1. Done in 8c9ac4cf4: `merge_qa_advisor` prints the exact `--range <pre-merge head>..HEAD` command.
+2. Agents run `llm_qa.py changed` on their own branch before handing off, except while the coordinator's full gate
+   holds the lock.
+3. The coordinator runs `changed --range <pre-merge>..HEAD` after every merge onto main.
 
 ### N379 — a branch merged after a green gate that never saw it
 
