@@ -151,17 +151,16 @@ _rv_dir_mtime() {
 _RV_PROBE_TIMEOUT_SECS="${HOOKS_DAEMON_VENV_PROBE_TIMEOUT:-5}"
 _RV_PROBE_OUTPUT=""
 
-# Waits the given seconds; succeeds only if the full bound elapsed. `sleep`
-# is looked up on PATH, and the hostile or stripped PATH this resolver
-# exists to survive may not have one: a watchdog whose `sleep` fails at once
-# would kill a WORKING candidate straight away. So with no `sleep`, wait on
-# `read -t` against a process-substitution pipe opened read-write, which
-# never delivers data or EOF and needs no PATH lookup at all.
+# Waits the given seconds; succeeds only if the full bound elapsed. It waits
+# on the `read -t` builtin against a process-substitution pipe opened
+# read-write, which never delivers data or EOF. Two reasons it is not `sleep`:
+# `sleep` is looked up on PATH, and the hostile or stripped PATH this resolver
+# exists to survive may not have one (a watchdog whose `sleep` fails at once
+# would kill a WORKING candidate straight away); and the watchdog is killed
+# when the candidate answers, which orphans an external `sleep` that still
+# holds the caller's output pipe, so a `$(...)` around the resolver would wait
+# out the whole bound after the answer. A builtin dies with its subshell.
 _rv_wait_secs() {
-    if command -v sleep > /dev/null; then
-        sleep "$1"
-        return
-    fi
     read -r -t "$1" <> <(:)
     [ "$?" -gt 128 ]
 }

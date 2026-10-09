@@ -149,6 +149,24 @@ def test_hanging_candidate_is_bounded_by_the_probe_timeout(tmp_path: Path) -> No
     assert elapsed < 10.0, f"probe must respect its bound; took {elapsed:.2f}s"
 
 
+def test_a_working_candidate_does_not_wait_out_the_probe_timeout(tmp_path: Path) -> None:
+    """The watchdog's pending ``sleep`` must not hold the caller's output pipe open.
+
+    The resolver runs inside ``$(...)`` on every cache miss. A watchdog whose
+    ``sleep`` inherited that pipe made the substitution wait for the full bound
+    after the candidate had already answered.
+    """
+    daemon_dir = tmp_path / "daemon"
+    _make_good_candidate(daemon_dir / "untracked" / "venv-py999-good")
+
+    started = time.monotonic()
+    result = _run_pick_python(daemon_dir, probe_timeout=20)
+    elapsed = time.monotonic() - started
+
+    assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert elapsed < 10.0, f"a working candidate answered after {elapsed:.2f}s of a 20s bound"
+
+
 def _run_in_library(script: str, *, path: str | None = None) -> subprocess.CompletedProcess[str]:
     """Source the library, then run ``script`` in the same shell."""
     prelude = f'export PATH="{path}"\n' if path is not None else ""
