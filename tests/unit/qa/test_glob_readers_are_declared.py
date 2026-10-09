@@ -20,6 +20,7 @@ pattern or a directory is compared as the path it reads (review 6 m5).
 from __future__ import annotations
 
 import ast
+import functools
 import importlib.util
 import posixpath
 import shlex
@@ -327,7 +328,9 @@ def glob_readers(source: str) -> list[int]:
     return lines
 
 
+@functools.cache
 def _glob_reader_files() -> dict[str, list[int]]:
+    """The scan of every test file, made once: the tree does not change during a run."""
     found = {}
     for path in sorted(_TESTS.rglob("*.py")):
         if _FIXTURES in path.parents:
@@ -708,10 +711,16 @@ class TestEveryGlobReaderIsDeclared:
         )
 
 
-def _selected_for(path: str) -> list[str]:
+@functools.cache
+def _repository_corpus() -> Any:
+    """The mapper's corpus for this repository (immutable), built once."""
     tree, error = changed_tests.tree_files(PROJECT_ROOT)
     assert tree is not None, error
-    corpus = changed_tests.build_corpus(PROJECT_ROOT, tree)
+    return changed_tests.build_corpus(PROJECT_ROOT, tree)
+
+
+def _selected_for(path: str) -> list[str]:
+    corpus = _repository_corpus()
     rules, _ = changed_tests.load_declared_rules(changed_tests.DEFAULT_RULES_PATH)
     selection = changed_tests.select_tests([path], corpus, PROJECT_ROOT, rules)
     return [test for entry in selection.mapping for test in entry["tests"]]
