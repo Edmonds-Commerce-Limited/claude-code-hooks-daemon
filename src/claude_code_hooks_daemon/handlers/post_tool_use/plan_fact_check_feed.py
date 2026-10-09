@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.debouncer import DebounceFire, get_debouncer
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
@@ -89,9 +90,9 @@ def _in_main_checkout(path: str, project_root: Path) -> bool:
 
 def _checker_dispatch_prompt(hook_input: dict[str, Any]) -> str | None:
     """The prompt of a dispatch of the fact-checker agent, or ``None`` for any other event."""
-    if hook_input.get("tool_name") not in DISPATCH_TOOLS:
+    if hook_input.get(HookInputField.TOOL_NAME) not in DISPATCH_TOOLS:
         return None
-    tool_input = hook_input.get("tool_input")
+    tool_input = hook_input.get(HookInputField.TOOL_INPUT)
     if not isinstance(tool_input, dict) or tool_input.get("subagent_type") != FACT_CHECKER_AGENT:
         return None
     return str(tool_input.get("prompt", ""))

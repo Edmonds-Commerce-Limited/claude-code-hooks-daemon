@@ -61,6 +61,8 @@ _EXPECTED_OPT_IN_CONFIG_KEYS = {
     # Plan 00490: opt-in until it has run in the daemon's own repository for a
     # while; only plans that record `**GitHub Issue**: #N` are ever judged.
     "github_issue_assignment_guard",
+    # Plan 00499: does nothing until `paths` lists something, so it ships off.
+    "write_protected_paths",
 }
 
 
