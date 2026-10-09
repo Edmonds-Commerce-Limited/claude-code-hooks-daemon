@@ -288,6 +288,8 @@ def _env(extra: dict[str, str] | None = None) -> dict[str, str]:
         "HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP",
         "HOOKS_DAEMON_UNSAFE_TRACK_REF",
         "HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE",
+        # A runner's PYTHONPATH would shadow the code the upgrade installs.
+        "PYTHONPATH",
         "HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION",
         "HOOKS_DAEMON_UPGRADE_SECOND_PASS",
         "HOOKS_DAEMON_UPGRADE_HANDOFF",

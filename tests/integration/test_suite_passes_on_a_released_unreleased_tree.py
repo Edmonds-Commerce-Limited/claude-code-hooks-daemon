@@ -293,6 +293,8 @@ def _run_nested_pytest(
             *map(str, readers),
         ],
         cwd=released_tree,
+        # The runner's PYTHONPATH names THIS checkout's src; the copy puts its own first.
+        env={name: value for name, value in os.environ.items() if name != "PYTHONPATH"},
         capture_output=True,
         text=True,
         timeout=scaled_seconds(RUN_TIMEOUT_SECONDS),
