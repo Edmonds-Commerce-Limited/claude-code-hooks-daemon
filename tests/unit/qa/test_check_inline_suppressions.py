@@ -473,6 +473,13 @@ class TestOnlyTheProjectsOwnFilesAreJudged:
 
         assert [f["file"] for f in _findings(tmp_path)] == ["mod.py"]
 
+    def test_when_git_cannot_answer_nothing_is_dropped(self, tmp_path: Path) -> None:
+        """Fail closed: outside a repository the ignore rules are unknown, so all is judged."""
+        _write(tmp_path, ".gitignore", "cache/\n")
+        _write(tmp_path, "cache/vendored.py", f"import os  {NOQA}\n")
+
+        assert [f["file"] for f in _findings(tmp_path)] == ["cache/vendored.py"]
+
 
 class TestTheRepositoryItself:
     def test_this_repository_carries_a_reason_on_every_suppression(self) -> None:
