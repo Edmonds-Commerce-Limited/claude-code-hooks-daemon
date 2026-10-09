@@ -252,6 +252,7 @@ def _default_restart_fn(project_root: Path) -> Callable[[], int]:
         # the DAEMON's exit, not the CLI's (the daemon-smoke suite's own
         # hard-learned note). Only the exit code is consumed.
         try:
+            # Bandit B603 is raised by any subprocess call with a non-literal argv; see above.
             result = subprocess.run(  # nosec B603
                 [
                     sys.executable,

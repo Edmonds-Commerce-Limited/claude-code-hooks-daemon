@@ -91,10 +91,10 @@ once; that deletes five markers. Not done here because it changes five handlers'
 
 ## Kept: `.claude/ccy/claude-supervise.py` (6)
 
-`:214` B404, `:8270` B603, `:8804` B603, `:9277` B606 (`os.execvp` of the wrapped executable
-after fork; all carry a reason on the line, except `:9277` which has none) and `pragma: no cover`
-at `:3310` (unreachable raise, reason present) and `:9272` (runs in the forked child, reason
-present). The `:9277` B606 needs a reason added above it.
+`:214` B404, `:8282` B603, `:8816` B603, `:9289` B606 (`os.execvp` of the wrapped executable
+after fork; the B606 carries its reason in the comment block directly above) and `pragma: no cover`
+at `:3310` (unreachable raise, reason present) and `:9284` (runs in the forked child, reason
+present). The detector (below) confirms every one.
 
 ## Kept: formatter markers (7)
 
@@ -117,8 +117,23 @@ Test data for the `qa_suppression` handler and prose that names the directives:
 `tests/integration/test_path_mutated_execution_resolves_argv_by_name.py` (docstring quoting a
 historical `nosec` comment).
 
+## The detector (Task 3.1b, gap G1)
+
+`scripts/qa/check_inline_suppressions.py`, registered as `llm_qa.py inline_suppressions` and in
+`changed`, fails on any `nosec`, `noqa`, `type: ignore`, `nosemgrep`, `pragma: no cover` or
+`shellcheck disable` that carries no reason: after the directive and its codes, in a second `#`
+segment of the same comment, or in the own-line comment block directly above. It uses the same
+generic-reason check as the `MUST_*_BECAUSE` hatches (`utils/escape_hatch.py`). There is no
+baseline and no allowlist (owner ruling B2). Python comments come from `tokenize`, so a
+directive named in a string or docstring is not judged. Shell is read as own-line comments.
+
+The first run on the tree found six reasonless lines (four `shellcheck disable` in `init.sh` and
+`scripts/install/venv.sh`, two `nosec B603` whose reason sat above a `try:`); each now has a reason
+comment directly above. At the time of writing it examines 2497 files and 113 suppressions.
+
 ## Not covered
 
-No `nosemgrep`, `shellcheck disable` or `eslint-disable` directives exist in the scanned Python
-trees. Shell scripts, `.ts` files and YAML were not enumerated for `shellcheck disable`; G1's
-detector (still open) should cover them.
+`eslint-disable` and `.ts` files are not judged (none exist in the tree today; YAGNI). Formatter
+markers (`fmt: skip`, `fmt: off`) are not QA suppressions and are not judged. A shell directive
+trailing a command on the same line is not read (`shellcheck` honours a directive only on its own
+line). The generic-reason check cannot tell whether a reason is TRUE.

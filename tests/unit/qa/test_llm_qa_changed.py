@@ -88,6 +88,7 @@ class TestTheChangedSelection:
             "british_english",
             "git_history",
             "github_urls",
+            "inline_suppressions",
             "semgrep",
         ],
     )

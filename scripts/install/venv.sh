@@ -351,6 +351,7 @@ venv_lock_hash_matches() {
     local venv_python=""
     local _vlhm_lib="${_vlhm_install_dir%/install}/lib/resolve_venv.sh"
     if [ -f "$_vlhm_lib" ]; then
+        # The library path is computed at runtime from this script's own location.
         # shellcheck disable=SC1090
         source "$_vlhm_lib"
         venv_python="$(resolve_venv_python_in_venv "$venv_path")" || venv_python=""
@@ -525,6 +526,7 @@ _venv_detached_build_wait() {
         _vdbw_install_dir="$(dirname "${BASH_SOURCE[0]}")"
         _vdbw_lib="${_vdbw_install_dir%/install}/lib/portable_time.sh"
         [ -f "$_vdbw_lib" ] || return 1
+        # The library path is computed at runtime from this script's own location.
         # shellcheck disable=SC1090
         source "$_vdbw_lib"
     fi

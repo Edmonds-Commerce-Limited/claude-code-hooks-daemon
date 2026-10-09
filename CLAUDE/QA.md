@@ -469,7 +469,8 @@ project handlers' own tests), `declared_invariant_pairs`, `skill_refs`,
 `unreachable_handle_branch`, `fail_open_inventory`, `security`,
 `capture_corruption`, `dangerous_invocation_corpus`, `python_var_guidance`,
 `skip_list_substring`, `sensitive_content`, `british_english`, `git_history`,
-`github_urls` and `semgrep`. None needs a live daemon. Deliberately absent:
+`github_urls`, `inline_suppressions` (every inline suppression must carry a
+reason, owner ruling B2) and `semgrep`. None needs a live daemon. Deliberately absent:
 `security_downgrade_flags` (about 49 s), `smoke_test`, `tests`, and
 `dependencies` (it checks the local venv against `uv.lock` and runs
 `uv lock --check`, so it judges the host rather than the tree). It then

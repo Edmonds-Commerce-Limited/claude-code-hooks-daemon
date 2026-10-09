@@ -706,6 +706,13 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="github_urls.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
+    # Owner ruling B2 (Plan 00484 G1): suppressions stay inline and each carries
+    # its reasoning. There is no baseline file, so this is what enforces it.
+    "inline_suppressions": ToolConfig(
+        command=_python("check_inline_suppressions.py", "--json"),
+        json_file="inline_suppressions.json",
+        jq_hint="jq '.violations[] | {file, line, rule, message}'",
+    ),
     "released_changelog": ToolConfig(
         command=_python("check_released_changelog.py", "--json"),
         json_file="released_changelog.json",
@@ -926,6 +933,7 @@ CHANGED_TOOL_NAMES: Final[list[str]] = [
     "british_english",
     "git_history",
     "github_urls",
+    "inline_suppressions",
     "released_changelog",
     "semgrep",
     "changed_tests",
@@ -1265,6 +1273,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "shell_audit": _summarize_violations,
     "skill_refs": _summarize_violations,
     "github_urls": _summarize_violations,
+    "inline_suppressions": _summarize_violations,
     "released_changelog": _summarize_violations,
     "canonical_callers": _summarize_violations,
     "capture_corruption": _summarize_violations,
