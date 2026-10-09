@@ -123,8 +123,8 @@ Evidence, with verified facts marked apart from inferences, is in
     A RUNBOOK item for the owner or IaC (user settings are not the agent's to edit).
   - **`untracked/scratch/`** (329 MB, 34,669 files) holds live working notes, so it gets no silent age-based delete.
     Instead, `idle_housekeeping_advisor` reports old scratch files and suggests a cleanup command (report-first).
-  - **The supervisor's `decision.log`** is unbounded, though `cli.py:3170` says it is bounded on daemon start.
-    Either bound it there or correct the text.
+  - **The supervisor's `decision.log`** is bounded. `.claude/ccy/claude-supervise.py:246-254` caps it at 4 MiB at
+    write time (Plan 00181). Only the `cli.py:3170` wording ("bounded on daemon start") is wrong, and needs correcting.
   - **`refs/integration/changed-green/*`** (60 refs) has no sweep. Prune refs whose branch is gone.
   - `untracked/qa-interpreters/` (1.0 GB) is a reused cache that was filled once, so it needs no change.
 - [x] ✅ **Task 4.2**: Extend `idle_housekeeping_advisor` to report stale worktrees and daemons (report-first). Detection is `utils/stale_checkouts.py`; the advisory names each finding with its cleanup command and runs none. Options: `report_stale_checkouts`, `base_branch`, `stale_worktree_days`.
