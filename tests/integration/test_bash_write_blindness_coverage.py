@@ -126,6 +126,16 @@ _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
         "commit; the guard's premise is ownership of the work, not the bytes "
         "reaching disk, so the commit gate is where it matters",
     ),
+    "WriteProtectedPathsHandler": (
+        _PARTIAL,
+        "Plan 00499: the Bash surface is the point of this handler, since "
+        "Claude Code's own permissions.deny misses every Bash route. A command "
+        "naming a listed path is denied unless its verb is known only to read, "
+        "and wrappers, shell -c bodies, brace lists, for loops and find "
+        "-delete/-exec are read through. PARTIAL because a target computed at "
+        "run time, a script on disk that writes the file, and deliberately "
+        "hostile respellings are not followed; the guidance names them as gaps",
+    ),
     "AbsolutePathHandler": (
         _OUT_OF_FRAME,
         "premise is about a TOOL ARGUMENT being absolute, not a file on disk; "
