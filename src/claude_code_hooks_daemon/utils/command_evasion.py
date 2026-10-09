@@ -60,9 +60,18 @@ SUBCOMMAND_SEPARATOR_CHARS = ";&|\n\r"
 # One git global option: a token starting with `-`, optionally followed by a
 # separate value token which by definition does NOT start with `-` (that would
 # be the next option). Neither part may cross a sub-command separator.
+#
+# A word may carry a quoted or backslash-escaped part (N383: `-C 'my dir'`,
+# `-C my\ dir`, `-c user.name='A B'`), so a blank inside the quotes does not end
+# it. The quote classes exclude the quote character itself, so each piece has
+# exactly one reading and the run cannot backtrack exponentially.
+_SHELL_WORD_PIECE = (
+    r"""(?:'[^']*'|"(?:[^"\\]|\\.)*"|\\.|"""
+    rf"""[^\s{SUBCOMMAND_SEPARATOR_CHARS}'"\\])"""
+)
 _GIT_GLOBAL_OPTION = (
-    rf"-[^\s{SUBCOMMAND_SEPARATOR_CHARS}]+"
-    rf"(?:\s+[^-\s{SUBCOMMAND_SEPARATOR_CHARS}][^\s{SUBCOMMAND_SEPARATOR_CHARS}]*)?"
+    rf"-{_SHELL_WORD_PIECE}+"
+    rf"(?:\s+(?!-){_SHELL_WORD_PIECE}+)?"
 )
 
 # `git` followed by any run of global options, leaving the match positioned at
