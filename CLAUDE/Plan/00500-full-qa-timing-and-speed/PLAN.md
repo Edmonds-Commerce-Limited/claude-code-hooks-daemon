@@ -92,7 +92,8 @@ This plan adds timing first, measures the hot spots from it, then makes the gate
 ### Phase 3: Speed
 
 - [x] ✅ **Task 3.1** (merge `c02cf9838`): Act on the measured hot spots: the slowest tests, steps that can run
-  concurrently, any duplicated work such as repeated matrix legs. Done, measured per leg on a loaded host:
+  concurrently, any duplicated work such as repeated matrix legs. Done. Times are per leg: "after" was measured on a loaded host, and "before" also, except where only the last full
+  gate's figure existed:
 
   - The released-tree readers test went from 520 s to 172 s; its 25 readers now run as four concurrent nested runs,
     and every group's failure is reported.
