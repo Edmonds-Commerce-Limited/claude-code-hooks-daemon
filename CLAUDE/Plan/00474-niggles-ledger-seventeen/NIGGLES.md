@@ -1439,9 +1439,11 @@ module, so an import-based selector cannot reach it. This is the same shape as N
 lives far from the module that breaks it.
 
 **Status**: 🔄 The regression is fixed on main (a PARTIAL verdict row, with its reason). Still open: the selector
-should always run the tests that walk the handler package (blindness coverage, guidance coverage, priority bands,
-template consistency) whenever any file under `handlers/` changes. A pinned list in `scripts/qa/` is one way, with a
-test that each listed file really walks the package.
+should always run the tests that enumerate every handler whenever any file under `handlers/` changes. Two walk the
+package with `pkgutil.walk_packages` (blindness coverage, guidance coverage), and template consistency enumerates
+through `HandlerRegistry.discover()`. The selector's map sends `handlers/pre_tool_use/*.py` only to
+`test_ordinary_command_regression_gate.py`. A pinned list in `scripts/qa/` is one remedy, with a test that each listed
+file really enumerates the handlers. Fact-check: `subagent-reports/261009-fact-check-n382-sonnet.md`.
 
 ### N381 — `test_subagent_full_qa_blocker` fails under the pytest a fresh venv installs
 
