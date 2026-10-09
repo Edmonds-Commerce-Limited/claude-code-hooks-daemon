@@ -158,6 +158,18 @@ rules:
   - glob: "*.bash"
     tools: [shell_check]
     why: shell_check lints .bash scripts as well (run_shell_check.sh)
+  - glob: "scripts/lib/resolve_venv.sh"
+    tests:
+      - tests/integration/test_resolve_venv_runnability_probe.py
+      - tests/integration/test_venv_resolver_hot_path_latency.py
+      - tests/integration/test_venv_resolver_parity_matrix.py
+      - tests/integration/test_resolve_venv_override_cache.py
+      - tests/integration/test_resolve_venv_stat_portability.py
+      - tests/integration/test_init_sh_venv_resolution.py
+      - tests/integration/test_hostile_path_detector_proof.py
+    why: the venv resolver every hook fire sources; so many tests name it that
+      the inferred mapping is too broad to select, so the resolver's own
+      behaviour tests are named here
   - glob: "*/utils/protected_file_index.py"
     tests:
       - tests/unit/utils/test_protected_file_index.py
