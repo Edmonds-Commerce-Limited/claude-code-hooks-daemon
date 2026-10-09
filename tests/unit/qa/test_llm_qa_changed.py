@@ -176,34 +176,6 @@ class TestTheChangedTestsTool:
         )
         assert "src/pkg/hub.py [too-broad]" in line
 
-    def test_the_chosen_shards_and_why_are_named(self) -> None:
-        line = llm_qa.SUMMARIZERS["changed_tests"](
-            {
-                "summary": {"files_considered": 1, "test_files_selected": 3, "passed": 3},
-                "unmapped": [],
-                "shards": {"integration": ["src/pkg/a.py: end to end"]},
-                "tests": [],
-            }
-        )
-        assert "shards chosen" in line
-        assert "integration" in line
-        assert "src/pkg/a.py: end to end" in line
-
-    def test_a_kept_whole_suite_is_said_outright_with_its_reason(self) -> None:
-        line = llm_qa.SUMMARIZERS["changed_tests"](
-            {
-                "summary": {"files_considered": 1, "test_files_selected": 0},
-                "unmapped": ["pyproject.toml"],
-                "unmapped_reasons": {
-                    "pyproject.toml": {"reason": "whole-suite", "detail": "settings apply"}
-                },
-                "unmapped_allowed": False,
-                "tests": [],
-            }
-        )
-        assert "whole suite kept" in line
-        assert "pyproject.toml: settings apply" in line
-
     def test_a_failure_is_named_in_the_summary(self) -> None:
         line = llm_qa.SUMMARIZERS["changed_tests"](
             {

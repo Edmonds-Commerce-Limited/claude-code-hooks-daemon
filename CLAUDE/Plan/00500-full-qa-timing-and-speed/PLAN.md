@@ -75,10 +75,19 @@ This plan adds timing first, measures the hot spots from it, then makes the gate
   Task 3.2's question (the shared daemon, the full-QA lock and its sink plugin) and is not assumed here. For WIP QA,
   untouched tests are already skipped by `llm_qa.py changed` (`scripts/qa/run_changed_tests.py`); shards (`scripts/qa/test_shards.yaml`) now exist, and
   narrowing its unmapped and too-broad fallback, which today runs the whole suite, to the shards the change can
-  reach is a follow-up, not part of this task.
-- [x] ✅ **Task 2.5**: `llm_qa.py changed` narrows its unmapped and too-broad fallback to the shards a change can reach
-  (`scripts/qa/changed_shard_reach.yaml`, `qa/shard_reach.py`), the follow-up Task 2.4 named.
-  Done: `src/claude_code_hooks_daemon/qa/shard_reach.py`, `scripts/qa/changed_shard_reach.yaml`, `scripts/qa/run_changed_tests.py`, `scripts/qa/llm_qa.py`, `CLAUDE/QA.md` and `tests/unit/qa/test_{shard_reach,run_changed_tests,llm_qa_changed}.py`.
+  reach was the follow-up, Task 2.5, which measurement declined.
+- [x] ❌ **Task 2.5**: `llm_qa.py changed` narrows its unmapped and too-broad fallback to the shards a change can reach
+  (`scripts/qa/changed_shard_reach.yaml`, `qa/shard_reach.py`), the follow-up Task 2.4 named. **DECLINED WITH EVIDENCE:
+  the fallback stays the whole suite, as on main.** A first build reached one import hop, which review round 1 showed
+  under-selects (a hub's real tests sit several imports away). Sound reach follows the full import chain (the transitive
+  closure of reverse imports, package `__init__.py` included). Measured over every one of the 3,770 tracked non-test
+  files against the 1,423 test files: of the 2,833 that main sends to the whole suite, 2,816 still reach every shard
+  and only 17 (0.6%) narrow; of the 272 Python ones, 17 (6%), and those are near-empty package `__init__.py` files and
+  test-local conftests. The mean fraction of the suite selected is 0.996 for the files that fall back (0.956 for the
+  Python ones), so narrowing saves under 10% of the tests for nearly every file it could touch. The selector, the
+  declaration and their tests were removed rather than shipped for that margin. The earlier "only ever wider" claim
+  was true only after the closure, which is what removed the saving. The `whole_suite` trigger bug (B3) existed only in
+  that build: main has no such list.
 
 ### Phase 3: Speed
 

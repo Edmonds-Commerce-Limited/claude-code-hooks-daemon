@@ -968,10 +968,6 @@ def _summarize_pyright(data: QaReport) -> str:
 # every QA run, so a mass breakage must not flood it; the rest stay in
 # tests.json, which is the complete record.
 _MAX_NAMED_FAILURES = 15
-#: How many files' reasons a chosen shard names in the `changed` summary.
-_SHARD_REASONS_SHOWN = 3
-#: The reason `run_changed_tests.py` records for a file that needs the whole suite.
-_WHOLE_SUITE_REASON = "whole-suite"
 
 
 def _interpreter_lines(data: QaReport) -> str:
@@ -1112,18 +1108,6 @@ def _summarize_changed_tests(data: QaReport) -> str:
         line += f"\n   unmapped ({verdict}): " + ", ".join(shown)
         if more:
             line += f" ... and {more} more (see changed_tests.json)"
-        whole = [
-            f"{name}: {reasons[name].get('detail')}"
-            for name in unmapped_files
-            if reasons.get(name, {}).get("reason") == _WHOLE_SUITE_REASON
-        ]
-        if whole:
-            line += "\n   whole suite kept for: " + "; ".join(whole[:_MAX_NAMED_FAILURES])
-    shards: Mapping[str, list[str]] = data.get("shards", {})
-    if shards:
-        line += "\n   shards chosen:"
-        for shard, whys in shards.items():
-            line += f"\n     {shard}: " + "; ".join(whys[:_SHARD_REASONS_SHOWN])
     return line + _named_failures(data, "changed_tests.json")
 
 
