@@ -41,3 +41,24 @@ the last two), `~`, `$HOME` as a root, including via `-e`/`--regexp`/`rg --files
 ## Gate
 
 17 `a9-*` rows in `tests/fixtures/ordinary_command_corpus.yaml`; the gate is green.
+
+## Review round 1 fixes (review: `261009-batch-c-review-r1-opus.md`)
+
+Each deny case was written red first (24 failed before the change).
+
+- B1: the worktree verb pattern reads any option run before `-c` (`sh -e -c`, `bash -x -c`,
+  `bash -n -c`, `bash -o pipefail -c`). Fixed.
+- B2: a `-maxdepth` bound excuses a `find` only when it has no `-exec/-execdir/-ok/-okdir` and
+  its output is not piped to `xargs`. Fixed.
+- B3: a pipe that ends a line is joined to the next line before the curl check. Fixed.
+- S1: `/dev/stdin`, `/dev/fd/0`, `/proc/self/fd/0` are stdin for python/perl/ruby, from the
+  shared `STDIN_OPERANDS` in `command_evasion.py` (also used by `shell_expansion.py`). Fixed.
+- S2: both stale comments in `worktree_file_copy.py` rewritten. Fixed.
+- S3: acceptance probes are `bash -n -c '<cp|rsync ...>'` again. Fixed.
+- S4: the quote regex piece is one shared `QUOTED_SPAN_REGEX`, used by `GIT_INVOCATION` and
+  `_MESSAGE_BODY_PATTERN`. N383 stays Fixed in the ledger; the remaining
+  `_git_grep_pattern_spans` duplicate is an open line, and the `-e` guidance omission is fixed.
+- NITs: the Rule text and guidance now say "from a worktree into the main repo's code dirs"
+  and state that the reverse copy is not blocked.
+- Also: the `daemon_stats.py` silent-fallback exclusion line was realigned (23 to 25) after a
+  line shift that came in from main; it failed the changed tier through no change of ours.
