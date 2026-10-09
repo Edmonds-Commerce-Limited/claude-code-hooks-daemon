@@ -66,6 +66,7 @@ _CHECKERS: Final[tuple[ScopedChecker, ...]] = (
     ScopedChecker("check_security_downgrade_flags.py", "--root", "security_downgrade_flags.json"),
     ScopedChecker("check_eacces_safe_predicates.py", "--path", "eacces_safe.json"),
     ScopedChecker("check_authored_path_stat.py", "--path", "authored_path_stat.json"),
+    ScopedChecker("check_install_mode_marker.py", "--path", "install_mode_marker.json"),
 )
 
 

@@ -344,6 +344,16 @@ else
 fi
 echo ""
 
+echo "25b. Running Install-Mode-Marker Check..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_install_mode_marker.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Install-mode-marker check FAILED"
+else
+    echo "✅ Install-mode-marker check PASSED"
+fi
+echo ""
+
 echo "26. Running Declared-Invariant-Pairs Check..."
 echo "----------------------------------------"
 if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_declared_invariant_pairs.py" --json; then
@@ -468,6 +478,7 @@ results = {
     "Hook Contract": "untracked/qa/hook_contract.json",
     "Input Contract": "untracked/qa/input_contract.json",
     "Authored Path Stat": "untracked/qa/authored_path_stat.json",
+    "Install Mode Marker": "untracked/qa/install_mode_marker.json",
     "Skip List Substring": "untracked/qa/skip_list_substring.json",
     "Unreachable Handle Branch": "untracked/qa/unreachable_handle_branch.json",
     "Declared Invariant Pairs": "untracked/qa/declared_invariant_pairs.json",
