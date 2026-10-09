@@ -1820,7 +1820,15 @@ correction copied from the checker's own report, then a third check owed. The co
 recorded it here. A remedy to weigh: run one check per burst plus its corrections, for example by widening the
 quiet period, or by not re-offering a check whose diff only restates the last report's findings.
 
-**Status**: ⬜ Open. Plan 00480 Task 4.4 stays open on it.
+**Status**: Fixed on branch agent-a2c1639ebf327c0d2-c58056dc (merge pending). Tests:
+`TestWorktreePaths`, `TestFirstSight` and `TestDelivery::test_an_archived_plan_is_delivered_under_its_existing_path`,
+`test_delivery_alone_does_not_advance_the_checked_content`,
+`test_dispatching_the_fact_checker_with_the_diff_confirms_the_check` in
+`tests/unit/handlers/post_tool_use/test_plan_fact_check_feed.py`; and `TestProcessQuietPlan::test_first_sight_records_a_baseline_and_owes_nothing`,
+`TestDelivery::test_delivery_does_not_advance_checked_until_the_dispatch_is_seen`, `test_an_undelivered_check_is_re_offered_after_the_wait`,
+`test_re_offer_stops_after_the_cap_without_losing_the_content`, `test_archived_plan_is_delivered_under_its_resolved_path`,
+`test_a_vanished_plan_drops_the_record` and `TestCorrectionLoop` in `tests/unit/utils/test_plan_fact_check.py`.
+Plan 00480 Task 4.4 can be re-run once merged.
 
 ### N358 — one pending fact-check record from the pre-delivery build stops every delivery
 
