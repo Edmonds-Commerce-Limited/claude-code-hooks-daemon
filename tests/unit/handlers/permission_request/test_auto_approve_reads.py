@@ -142,6 +142,14 @@ class TestAutoApproveReadsHandler:
         assert result.reason is not None
         assert "BLOCKED" in result.reason
 
+    def test_non_read_deny_carries_its_declared_rule_id(self, handler):
+        """The defensive deny prints a rule ID the handler declares."""
+        result = handler.handle(_bypass_request("Write", {"file_path": "/workspace/test.py"}))
+        assert "BLOCKED [R-PERMISSION-REQUEST-NON-READ-TOOL]" in result.reason
+        assert [rule.rule_id for rule in handler.get_rules()] == [
+            "R-PERMISSION-REQUEST-NON-READ-TOOL"
+        ]
+
     def test_handle_returns_hook_result_instance(self, handler):
         """handle() should return HookResult instance."""
         result = handler.handle(_bypass_request("Read", {"file_path": "/workspace/README.md"}))

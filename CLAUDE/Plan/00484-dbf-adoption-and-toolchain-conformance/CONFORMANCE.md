@@ -146,7 +146,7 @@ MET: 4.1, 4.3a, 4.3b, 6.2a and 6.2b.
     MET once a structural test existed: `tests/plugins/deny_carries_rule_id.py` wraps `handle` on
     every library and project handler class and fails the test that provoked any deny whose
     reason lacks `BLOCKED [R-...]` or names an ID the handler's `get_rules()` does not declare
-    (only the allowlisted `AutoApproveReadsHandler` is exempt). It judges every deny a unit test provokes,
+    (no handler is exempt). It judges every deny a unit test provokes,
     wherever the reason was built, so the claim is as strong as the coverage gate. Running it
     caught further identifier-less deny paths in `destructive_git`, `sensitive_content`,
     `staged_lint_gate`, `remote_docs_commit_gate`, `remote_docs_provenance`,
@@ -157,9 +157,9 @@ MET: 4.1, 4.3a, 4.3b, 6.2a and 6.2b.
     `SubagentReportPathVerifierHandler`, `CronStopEnforcerHandler` and
     `CronSubagentStopEnforcerHandler`) and the four project handlers (`ruff_format_blocker`,
     `enforce_llm_qa`, `plan_done_requires_holding_area` and `release_blocker`) declare a rule and
-    print `BLOCKED [R-...]`. Only `AutoApproveReadsHandler` stays allowlisted, because its deny
-    branch is defensive and cannot fire. The set is found by a source marker, so the declaration
-    says "at least".
+    print `BLOCKED [R-...]`. `AutoApproveReadsHandler`, the one handler that had been
+    allowlisted, now declares `R-PERMISSION-REQUEST-NON-READ-TOOL` for its defensive deny, and
+    no allowlist remains.
   - **D4.2 PARTLY MET.** No route runs one rule alone against supplied input.
     - `hooks-daemon probe --file payload.json` sends one payload through the real entry point.
       It is local and needs no infrastructure, but it runs the whole chain, so other handlers
@@ -324,11 +324,9 @@ there.
 - **8.1 MET.**
   - `test_rule_parity.py` requires every declared rule to be complete, unique, a declared
     constant (`:105-150`) and rendered with its ID (`:198`).
-  - It also requires every handler with a `Decision.DENY` path to declare rules, or to carry a
-    reasoned allowlist entry of 10 or more words (`:392-424`).
+  - It also requires every handler with a `Decision.DENY` path to declare rules; there is no
+    allowlist.
   - It is on the full gate, which RELEASING.md:285 requires before a tag.
-  - Caveat: an allowlisted handler prints no ID. That passes 8.1 because there is nothing to
-    resolve; only `AutoApproveReadsHandler` remains, and its deny branch cannot fire.
   - The `Decision.DENY` source-marker discovery is a heuristic.
 - **8.2 MET.** `test_dogfooding_config.py:117` fails when a production handler is not enabled
   in this repository's config.
@@ -411,10 +409,12 @@ needing a reason comment: [SUPPRESSIONS.md](SUPPRESSIONS.md). The `scripts/qa` d
   `subagent_report_path_verifier`, `cron_stop_enforcer`, `cron_subagent_stop_enforcer`) and the
   four project handlers (`ruff_format_blocker`, `enforce_llm_qa`,
   `plan_done_requires_holding_area`, `release_blocker`) now declare a `Rule` and print
-  `BLOCKED [R-...]` on every deny path. `test_rule_parity.py` drops their allowlist entries,
-  keeps only `AutoApproveReadsHandler` (its deny branch is defensive and unreachable), and holds
-  the project handlers to the same rule. The count stays a lower bound: the parity test finds a
-  deny path by the `Decision.DENY` source marker, and a per-handler test pins the headline.
+  `BLOCKED [R-...]` on every deny path. `test_rule_parity.py` has no allowlist
+  (`AutoApproveReadsHandler` declares `R-PERMISSION-REQUEST-NON-READ-TOOL` too) and holds the
+  project handlers to the same rule. The parity test finds a denying handler by the
+  `Decision.DENY` source marker, but the structural plugin
+  (`tests/plugins/deny_carries_rule_id.py`) judges every deny any handler test provokes, so the
+  headline claim does not rest on that marker.
 - **G9 closed for the handler layer.** `hooks-daemon defences --json` fills `defect_class` on
   every row from the handler's own `defect_class` declaration, and lists only the handlers that
   declare one, which is owner ruling C1 (content and commit gates are the Defence set; action
@@ -447,7 +447,11 @@ needing a reason comment: [SUPPRESSIONS.md](SUPPRESSIONS.md). The `scripts/qa` d
 - **Orchestrator rule (N4).** `R-ORCHESTRATOR-MAIN-THREAD-WRITE` now resolves in
   `explain-rule` in every mode: `orchestrator_simulate` declares the rule always, and the
   rule's own text says it fires only when blocking is armed. The lookup builds handlers
-  without config, which is why the declaration cannot depend on the mode.
+  without config, which is why the declaration cannot depend on the mode. The consequence,
+  accepted knowingly like N3 (coordinator's ruling, not the owner's): in simulate mode
+  `orchestrator_simulate` moves from the Advisories one-liner list into the rule table, where its
+  row states the rule fires only when blocking is armed. The generator has no cheap way to keep
+  the "SIMULATE ONLY" one-liner for a dormant rule.
 - **DEFSET wording closed.** `DefenceBeforeFix.EXPLAIN_LINE` no longer calls every rule a
   defence, and README.md "Defence Before Fix" names the content and commit gates as the Defences.
 

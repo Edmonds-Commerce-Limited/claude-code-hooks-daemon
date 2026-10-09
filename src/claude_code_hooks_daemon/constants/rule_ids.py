@@ -729,3 +729,7 @@ class RuleID:
 
     #: The SubagentStop twin of CRON_STOP_DECLARED (`cron_subagent_stop_enforcer`).
     CRON_SUBAGENT_STOP_DECLARED: str = "R-CRON-SUBAGENT-STOP-DECLARED"
+
+    #: A permission request for a tool that is not read-only reaching
+    #: `auto_approve_reads`, which refuses it rather than approve it.
+    PERMISSION_REQUEST_NON_READ_TOOL: str = "R-PERMISSION-REQUEST-NON-READ-TOOL"

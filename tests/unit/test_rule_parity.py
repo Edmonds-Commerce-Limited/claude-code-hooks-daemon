@@ -40,10 +40,6 @@ from claude_code_hooks_daemon.docs_qa import checks as docs_checks_pkg
 from claude_code_hooks_daemon.plan_qa import checks as plan_checks_pkg
 from claude_code_hooks_daemon.rule_explain.checks import collect_check_entries, find_check
 from claude_code_hooks_daemon.rule_explain.lookup import HandlerRules, discover_handler_rules
-from tests.support.deny_allowlist import (
-    _DENY_WITHOUT_RULES_ALLOWLIST,
-    _PROJECT_DENY_WITHOUT_RULES_ALLOWLIST,
-)
 
 # ---------------------------------------------------------------------------
 # Shared fixtures / helpers
@@ -354,8 +350,8 @@ def _discover_deny_handler_classes() -> dict[str, type[Handler]]:
     return found
 
 
-class TestDenyingHandlerDeclaresRulesOrIsAllowlisted:
-    """A handler with a Decision.DENY path must declare rules or explain why not."""
+class TestDenyingHandlerDeclaresRules:
+    """A handler with a Decision.DENY path must declare rules."""
 
     def test_discovery_is_not_vacuous(self) -> None:
         assert _discover_deny_handler_classes(), (
@@ -364,11 +360,9 @@ class TestDenyingHandlerDeclaresRulesOrIsAllowlisted:
             "without examining anything."
         )
 
-    def test_every_denying_handler_declares_rules_or_is_allowlisted(self) -> None:
+    def test_every_denying_handler_declares_rules(self) -> None:
         offenders = []
         for name, handler_class in sorted(_discover_deny_handler_classes().items()):
-            if name in _DENY_WITHOUT_RULES_ALLOWLIST:
-                continue
             try:
                 instance = handler_class()
             except Exception as exc:
@@ -377,39 +371,9 @@ class TestDenyingHandlerDeclaresRulesOrIsAllowlisted:
             if not instance.get_rules():
                 offenders.append(name)
         assert not offenders, (
-            "These handlers have a Decision.DENY code path but declare no Rule objects "
-            f"and are not in _DENY_WITHOUT_RULES_ALLOWLIST: {offenders}.\n\n"
-            "Either implement get_rules() (see MIGRATION-PATTERN.md), or add a "
-            "commented entry to _DENY_WITHOUT_RULES_ALLOWLIST explaining why the deny "
-            "path genuinely needs no rule (e.g. unreachable/defensive-only)."
-        )
-
-    def test_every_allowlist_entry_names_a_real_denying_handler(self) -> None:
-        stale = sorted(set(_DENY_WITHOUT_RULES_ALLOWLIST) - set(_discover_deny_handler_classes()))
-        assert not stale, (
-            "_DENY_WITHOUT_RULES_ALLOWLIST names handlers that no longer have a "
-            f"Decision.DENY path (or no longer exist): {stale}. Remove them."
-        )
-
-    @pytest.mark.parametrize("class_name", sorted(_DENY_WITHOUT_RULES_ALLOWLIST))
-    def test_every_allowlist_entry_carries_a_reason(self, class_name: str) -> None:
-        reason = _DENY_WITHOUT_RULES_ALLOWLIST[class_name]
-        assert (
-            len(reason.split()) >= 10
-        ), f"{class_name}: the allowlist reason is too short to be an argument ({reason!r})."
-
-    @pytest.mark.parametrize("class_name", sorted(_DENY_WITHOUT_RULES_ALLOWLIST))
-    def test_an_allowlist_entry_is_dropped_once_it_declares_rules(self, class_name: str) -> None:
-        """If an allowlisted handler starts declaring rules, its entry is obsolete."""
-        handler_class = _discover_deny_handler_classes().get(class_name)
-        if handler_class is None:
-            pytest.skip(
-                "staleness is covered by test_every_allowlist_entry_names_a_real_denying_handler"
-            )
-        instance = handler_class()
-        assert not instance.get_rules(), (
-            f"{class_name} now declares rules via get_rules(), so its entry in "
-            "_DENY_WITHOUT_RULES_ALLOWLIST is obsolete. Delete the entry."
+            "These handlers have a Decision.DENY code path but declare no Rule objects: "
+            f"{offenders}.\n\nImplement get_rules() (see MIGRATION-PATTERN.md) and build "
+            "the deny with BlockingResult.under_rule. No handler is exempt."
         )
 
 
@@ -499,21 +463,14 @@ class TestProjectHandlersDeclareRules:
             "ReleaseBlockerHandler",
         } <= names
 
-    def test_every_denying_project_handler_declares_rules_or_is_allowlisted(self) -> None:
+    def test_every_denying_project_handler_declares_rules(self) -> None:
         offenders = [
-            name
-            for name, handler in _project_handler_instances()
-            if name not in _PROJECT_DENY_WITHOUT_RULES_ALLOWLIST and not handler.get_rules()
+            name for name, handler in _project_handler_instances() if not handler.get_rules()
         ]
         assert not offenders, (
             f"Project handlers with a Decision.DENY path and no get_rules(): {offenders}. "
-            "Declare a Rule (and print `BLOCKED [R-...]` in the deny), or add a reasoned "
-            "entry to _PROJECT_DENY_WITHOUT_RULES_ALLOWLIST."
+            "Declare a Rule and print `BLOCKED [R-...]` in the deny."
         )
-
-    @pytest.mark.parametrize("class_name", sorted(_PROJECT_DENY_WITHOUT_RULES_ALLOWLIST))
-    def test_every_project_allowlist_entry_carries_a_reason(self, class_name: str) -> None:
-        assert len(_PROJECT_DENY_WITHOUT_RULES_ALLOWLIST[class_name].split()) >= 10
 
     def test_project_rule_ids_are_well_formed_and_do_not_collide_with_the_library(
         self, all_rules: list[tuple[HandlerRules, Rule]]

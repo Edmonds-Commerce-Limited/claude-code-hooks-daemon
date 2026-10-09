@@ -798,8 +798,8 @@ class MyGate(PreToolUseHandlerBase):
 ```
 
 `defect_class` is the closed `DefectClass` vocabulary
-(`src/claude_code_hooks_daemon/constants/dbf.py`), a `StrEnum`; a free string is a type
-error. It is what `hooks-daemon defences --json` lists and reports in its `defect_class`
+(`src/claude_code_hooks_daemon/constants/dbf.py`), a `StrEnum`; a free string is a
+type error under mypy (a test also pins that every declared value is a member). It is what `hooks-daemon defences --json` lists and reports in its `defect_class`
 field, and what `explain-rule` and `explain-handler` print on the "Defence for the defect
 class" line. A handler that leaves it `None` is a guardrail and is not listed by
 `defences`. Adding a member to `DefectClass`, or declaring one on a library handler, also

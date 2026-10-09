@@ -11,8 +11,7 @@ This plugin wraps ``handle`` on every library and project handler class once
 collection has imported them, so every deny a test provokes is judged wherever
 its reason was built. A deny whose reason lacks the headline, or names an ID
 the handler's ``get_rules()`` does not declare, fails the test that provoked it
-at teardown. A handler in the shared allowlist
-(``tests/support/deny_allowlist.py``) is exempt only while it declares no rule.
+at teardown. No handler is exempt.
 
 Loaded from ``tests/conftest.py`` (``pytest_plugins``) and from the
 project-handler conftest (``register``).
@@ -35,10 +34,6 @@ import pytest
 from claude_code_hooks_daemon import handlers as handlers_package
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision
-from tests.support.deny_allowlist import (
-    _DENY_WITHOUT_RULES_ALLOWLIST,
-    _PROJECT_DENY_WITHOUT_RULES_ALLOWLIST,
-)
 
 __all__ = ["PLUGIN_NAME", "register"]
 
@@ -49,9 +44,6 @@ _PROJECT_HANDLERS_DIR: Final[Path] = (
     Path(__file__).resolve().parents[2] / ".claude" / "project-handlers"
 )
 _WRAPPED_MARK: Final[str] = "_deny_carries_rule_id_wrapped"
-_ALLOWLISTED: Final[frozenset[str]] = frozenset(
-    {*_DENY_WITHOUT_RULES_ALLOWLIST, *_PROJECT_DENY_WITHOUT_RULES_ALLOWLIST}
-)
 
 #: Violations recorded since the running test began; drained at its teardown.
 _violations: list[str] = []
@@ -76,8 +68,6 @@ def _judge(handler: Handler, result: Any) -> str | None:
         return None
     declared = {rule.rule_id for rule in handler.get_rules()}
     name = type(handler).__name__
-    if not declared and name in _ALLOWLISTED:
-        return None
     reason = getattr(result, "reason", None) or ""
     first_line = reason.strip().splitlines()[0] if reason.strip() else "(empty reason)"
     match = _HEADLINE.search(reason)
