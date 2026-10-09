@@ -1461,6 +1461,29 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N388 — the host segment does not show the session's role override
+
+**Source**: owner request, 2026-10-09. When a session exports `HOOKS_DAEMON_HOSTNAME`, the status bar should read
+`<role>@<host>`. A role over 15 characters shows its first 10 followed by `...`; for example
+`github-softwaredev-lifecycle-unattended` on `dc-lts-dev-vm` shows `github-sof...@dc-lts-dev-vm`.
+
+**Evidence**: `handlers/status_line/host_hostname.py` renders only `@<host>` (with `@~` when the host name is
+inferred). The session's effective hostname reaches the daemon on the payload, under
+`HookInputField.SESSION_HOSTNAME`. `init.sh` (around lines 3326-3333) stamps the first non-empty of
+`HOOKS_DAEMON_HOSTNAME` and `CCY_HOST_HOSTNAME`, so the stamp alone cannot tell a role from the host's own name.
+
+**Status**: ⬜ Open; designed, not started (the session restarted). Design:
+
+- The role is the stamped value, falling back to `cron_hosts.hostname_override(os.environ)`, and is shown only when it
+  differs from `resolve_host_name().name`. When nothing is overridden, the stamp is `CCY_HOST_HOSTNAME`, which equals
+  the host, so no role shows.
+- Never fall back to `socket.gethostname()`, so a container id is never rendered as a role.
+- Rendering: `f"| {cyan}{role}{_ICON}{marker}{host}{reset}"`, with the role truncated to 10 characters plus `...` when
+  it is over 15.
+- Update `explain_segment`.
+- Tests go in `tests/unit/handlers/status_line/test_host_hostname.py`, with these cases: no role, a short role, a
+  long role, a role equal to the host, and the inferred marker with a role.
+
 ### N387 — the inline-suppression detector judged gitignored third-party code
 
 **Source**: the coordinator, 2026-10-09. The range QA over the Plan 00484 batch 3.1b merge (1d0037601) reported 87
