@@ -74,7 +74,7 @@ older local copy tells the agent to report it to a human, not to edit it.
 
 ### Phase 1b: Hardening
 
-Gaps the round 2 review found and the owner chose not to fix inside Phase 1. Each is also named in the handler's
+Gaps the round 2 review found and the coordinator deferred at review round 2 rather than fix inside Phase 1. Each is also named in the handler's
 guidance as a known gap.
 
 - [ ] ⬜ **Task 1b.1**: Wrappers not on the handler's list (`flock`, `chronic` and the like) hide the verb they
