@@ -58,7 +58,15 @@ def state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     target = tmp_path / "untracked"
     target.mkdir()
     monkeypatch.setattr(ProjectContext, "daemon_untracked_dir", classmethod(lambda cls: target))
+    monkeypatch.setattr(ProjectContext, "project_root", classmethod(lambda cls: tmp_path))
     return target
+
+
+def _baseline(state_dir: Path, *folders: str) -> None:
+    """Record empty checked content, so the next fire is past first sight."""
+    state = PlanFactCheckState(state_dir / "plan-fact-check")
+    for folder in folders:
+        state.record_checked(folder, {})
 
 
 @pytest.fixture
@@ -119,6 +127,75 @@ class TestMatches:
         assert handler.matches({"tool_name": "Read", "tool_input": {"file_path": "/x"}}) is False
 
 
+class TestWorktreePaths:
+    """N359 item 1: a worktree's plan edit never feeds the main session's debouncer."""
+
+    def _worktree_plan(self, tmp_path: Path) -> Path:
+        path = tmp_path / ".claude" / "worktrees" / "agent-1" / "CLAUDE" / "Plan" / "00001-a"
+        path.mkdir(parents=True)
+        plan = path / "PLAN.md"
+        plan.write_text("x\n", encoding="utf-8")
+        return plan
+
+    def test_a_plan_edit_in_a_nested_worktree_is_ignored(
+        self, handler: PlanFactCheckFeedHandler, debouncer: Debouncer, tmp_path: Path
+    ) -> None:
+        hook = _write(self._worktree_plan(tmp_path))
+        assert handler.matches(hook) is False
+        handler.handle(hook)
+        assert debouncer.pending() == {}
+
+    def test_untracked_worktrees_are_ignored_too(
+        self, handler: PlanFactCheckFeedHandler, tmp_path: Path
+    ) -> None:
+        folder = tmp_path / "untracked" / "worktrees" / "w" / "CLAUDE" / "Plan" / "00001-a"
+        folder.mkdir(parents=True)
+        plan = folder / "PLAN.md"
+        plan.write_text("x\n", encoding="utf-8")
+        assert handler.matches(_write(plan)) is False
+
+    def test_a_session_rooted_in_the_worktree_still_feeds(
+        self,
+        handler: PlanFactCheckFeedHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        plan = self._worktree_plan(tmp_path)
+        worktree_root = tmp_path / ".claude" / "worktrees" / "agent-1"
+        monkeypatch.setattr(ProjectContext, "project_root", classmethod(lambda cls: worktree_root))
+        assert handler.matches(_write(plan)) is True
+
+    def test_a_path_outside_the_project_is_ignored(
+        self,
+        handler: PlanFactCheckFeedHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.setattr(ProjectContext, "project_root", classmethod(lambda cls: elsewhere))
+        assert handler.matches(_write(_plan_file(tmp_path, "00001-a"))) is False
+
+
+class TestFirstSight:
+    def test_a_first_edit_records_a_baseline_and_delivers_nothing(
+        self,
+        handler: PlanFactCheckFeedHandler,
+        debouncer: Debouncer,
+        clock: FakeClock,
+        state_dir: Path,
+        tmp_path: Path,
+    ) -> None:
+        handler.handle(_write(_plan_file(tmp_path, "00001-a", text="whole folder\n")))
+        clock.advance(6.0)
+        debouncer.run_due()
+        state = PlanFactCheckState(state_dir / "plan-fact-check")
+        assert state.pending_folders() == []
+        assert state.read_checked("00001-a") is not None
+        unrelated = {"tool_name": "Read", "tool_input": {"file_path": "/x"}}
+        assert not handler.handle(unrelated).context
+
+
 class TestDebouncedFeed:
     def test_burst_of_edits_to_one_plan_fires_exactly_once(
         self,
@@ -128,6 +205,7 @@ class TestDebouncedFeed:
         state_dir: Path,
         tmp_path: Path,
     ) -> None:
+        _baseline(state_dir, "00001-a")
         path = _plan_file(tmp_path, "00001-a", text="one\n")
         for _ in range(5):
             result = handler.handle(_write(path))
@@ -150,6 +228,7 @@ class TestDebouncedFeed:
         state_dir: Path,
         tmp_path: Path,
     ) -> None:
+        _baseline(state_dir, "00001-a", "00002-b")
         first = _plan_file(tmp_path, "00001-a")
         second = _plan_file(tmp_path, "00002-b")
         handler.handle(_write(first))
@@ -172,6 +251,7 @@ class TestDebouncedFeed:
         state_dir: Path,
         tmp_path: Path,
     ) -> None:
+        _baseline(state_dir, "00001-a")
         handler._quiet_seconds = 30.0
         handler.handle(_write(_plan_file(tmp_path, "00001-a")))
         clock.advance(29.0)
@@ -212,6 +292,7 @@ class TestDebouncedFeed:
         tmp_path: Path,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
+        _baseline(state_dir, "00001-a")
         handler.handle(_write(_plan_file(tmp_path, "00001-a")))
         clock.advance(6.0)
         with caplog.at_level(logging.INFO, logger="claude_code_hooks_daemon.utils.plan_fact_check"):
@@ -221,7 +302,7 @@ class TestDebouncedFeed:
         )
         # No delivery: the only artefact is the pending record in the state dir.
         files = sorted(p.name for p in (state_dir / "plan-fact-check").iterdir())
-        assert files == ["00001-a.pending.json"]
+        assert files == ["00001-a.checked.json", "00001-a.pending.json"]
 
 
 class TestDelivery:
@@ -235,6 +316,7 @@ class TestDelivery:
         tmp_path: Path,
         text: str = "x\n",
     ) -> None:
+        _baseline(tmp_path / "untracked", "00001-a")
         handler.handle(_write(_plan_file(tmp_path, "00001-a", text=text)))
         clock.advance(6.0)
         debouncer.run_due()
@@ -271,10 +353,54 @@ class TestDelivery:
         self._fire(handler, debouncer, clock, tmp_path)
         unrelated = {"tool_name": "Read", "tool_input": {"file_path": "/x"}}
         assert handler.handle(unrelated).context
-        assert handler.matches(unrelated) is False
         assert not handler.handle(unrelated).context
 
-    def test_delivery_advances_the_checked_content(
+    def test_delivery_alone_does_not_advance_the_checked_content(
+        self,
+        handler: PlanFactCheckFeedHandler,
+        debouncer: Debouncer,
+        clock: FakeClock,
+        state_dir: Path,
+        tmp_path: Path,
+    ) -> None:
+        """N359 item 4: only a seen dispatch of the agent marks the content checked."""
+        self._fire(handler, debouncer, clock, tmp_path)
+        state = PlanFactCheckState(state_dir / "plan-fact-check")
+        handler.handle({"tool_name": "Read", "tool_input": {"file_path": "/x"}})
+        checked = state.read_checked("00001-a")
+        assert checked is not None
+        assert checked.files == {}
+        assert state.offered_folders() == ["00001-a"]
+
+    @pytest.mark.parametrize("tool_name", ["Task", "Agent"])
+    def test_dispatching_the_fact_checker_with_the_diff_confirms_the_check(
+        self,
+        handler: PlanFactCheckFeedHandler,
+        debouncer: Debouncer,
+        clock: FakeClock,
+        state_dir: Path,
+        tmp_path: Path,
+        tool_name: str,
+    ) -> None:
+        self._fire(handler, debouncer, clock, tmp_path)
+        state = PlanFactCheckState(state_dir / "plan-fact-check")
+        handler.handle({"tool_name": "Read", "tool_input": {"file_path": "/x"}})
+        dispatch = {
+            "tool_name": tool_name,
+            "tool_input": {
+                "subagent_type": "plan-fact-checker",
+                "prompt": f"check {state.diff_path('00001-a')}",
+            },
+        }
+        assert handler.matches(dispatch) is True
+        assert not handler.handle(dispatch).context
+        checked = state.read_checked("00001-a")
+        assert checked is not None
+        assert checked.files == {"PLAN.md": "x\n"}
+        assert state.offered_folders() == []
+        assert handler.matches({"tool_name": "Read", "tool_input": {}}) is False
+
+    def test_dispatching_another_agent_confirms_nothing(
         self,
         handler: PlanFactCheckFeedHandler,
         debouncer: Debouncer,
@@ -284,9 +410,54 @@ class TestDelivery:
     ) -> None:
         self._fire(handler, debouncer, clock, tmp_path)
         state = PlanFactCheckState(state_dir / "plan-fact-check")
-        assert state.read_checked("00001-a") is None
         handler.handle({"tool_name": "Read", "tool_input": {"file_path": "/x"}})
-        assert state.read_checked("00001-a") is not None
+        other = {
+            "tool_name": "Task",
+            "tool_input": {"subagent_type": "other", "prompt": str(state.diff_path("00001-a"))},
+        }
+        handler.handle(other)
+        assert state.offered_folders() == ["00001-a"]
+
+    def test_a_subagent_dispatch_confirms_nothing(
+        self,
+        handler: PlanFactCheckFeedHandler,
+        debouncer: Debouncer,
+        clock: FakeClock,
+        state_dir: Path,
+        tmp_path: Path,
+    ) -> None:
+        self._fire(handler, debouncer, clock, tmp_path)
+        state = PlanFactCheckState(state_dir / "plan-fact-check")
+        handler.handle({"tool_name": "Read", "tool_input": {"file_path": "/x"}})
+        dispatch = {
+            "tool_name": "Task",
+            "agent_id": "a1b2c3d4e5f6a7b8c",
+            "tool_input": {
+                "subagent_type": "plan-fact-checker",
+                "prompt": str(state.diff_path("00001-a")),
+            },
+        }
+        handler.handle(dispatch)
+        assert state.offered_folders() == ["00001-a"]
+
+    def test_an_archived_plan_is_delivered_under_its_existing_path(
+        self,
+        handler: PlanFactCheckFeedHandler,
+        debouncer: Debouncer,
+        clock: FakeClock,
+        tmp_path: Path,
+    ) -> None:
+        """N359 item 2."""
+        self._fire(handler, debouncer, clock, tmp_path)
+        live = tmp_path / "CLAUDE" / "Plan" / "00001-a"
+        archived = live.parent / "Completed" / "00001-a"
+        archived.parent.mkdir()
+        live.rename(archived)
+        text = "\n".join(
+            handler.handle({"tool_name": "Read", "tool_input": {"file_path": "/x"}}).context
+        )
+        assert str(archived / "PLAN.md") in text
+        assert str(live / "PLAN.md") not in text
 
     def test_a_plan_edit_event_also_delivers_an_earlier_pending_check(
         self,
@@ -321,7 +492,7 @@ class TestDelivery:
         assert not handler.handle(subagent).context
         state = PlanFactCheckState(state_dir / "plan-fact-check")
         assert state.pending_folders() == ["00001-a"]
-        assert state.read_checked("00001-a") is None
+        assert state.read_checked("00001-a") is not None
         main_thread = {"tool_name": "Read", "tool_input": {"file_path": "/x"}}
         assert handler.handle(main_thread).context
 
@@ -334,6 +505,7 @@ class TestDelivery:
         tmp_path: Path,
     ) -> None:
         self._fire(handler, debouncer, clock, tmp_path)
+        _baseline(state_dir, "00002-b")
         edit = _write(_plan_file(tmp_path, "00002-b"))
         edit["agent_id"] = "a1b2c3d4e5f6a7b8c"
         assert handler.matches(edit) is True

@@ -566,8 +566,8 @@ handlers:
       enabled: true   # On by default; silent bookkeeping in cron-records.json in the daemon's untracked directory, never blocks. The refresh in cron_stop_enforcer relies on it.
       priority: 36
 
-    plan_fact_check_feed:  # Debounces plan edits into one pending fact-check record (Plan 00480)
-      enabled: false  # Opt-in: the check is recorded but its delivery is not built yet
+    plan_fact_check_feed:  # Debounces plan edits; on the next tool call tells the session to dispatch plan-fact-checker on the diff (Plan 00480)
+      enabled: false  # Opt-in: each quiet plan edit asks the session to spend one agent run; never blocks
       priority: 37
       # options:
       #   quiet_seconds: 5.0  # quiet period after the last edit to a plan before it fires
