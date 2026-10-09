@@ -18,6 +18,9 @@ from claude_code_hooks_daemon.plan_qa.readme_index import ReadmeIndex, ReadmeRow
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, CheckSpec, Finding, Level, Stage
 
 CHECK_ID: Final[str] = "row-folder-bijection"
+STATEMENT: Final[str] = (
+    "Every plan folder needs exactly one README index row and every row needs a folder. Add the missing row or folder."
+)
 
 _LOCATION_SECTIONS: Final[dict[PlanLocation, frozenset[ReadmeSection]]] = {
     PlanLocation.ROOT: frozenset({ReadmeSection.ACTIVE, ReadmeSection.BLOCKED}),

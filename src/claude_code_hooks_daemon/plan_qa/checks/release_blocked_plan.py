@@ -30,6 +30,9 @@ from claude_code_hooks_daemon.plan_qa.model import PlanStatus
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, Finding, Level
 
 CHECK_ID: Final[str] = "release-blocked-plan"
+STATEMENT: Final[str] = (
+    "A plan is done when merged into main; it must not list a release or publish step as a task or success criterion. Move release work out of the plan."
+)
 
 _NON_TERMINAL_STATUSES: Final[frozenset[PlanStatus]] = frozenset(
     {PlanStatus.NOT_STARTED, PlanStatus.IN_PROGRESS}

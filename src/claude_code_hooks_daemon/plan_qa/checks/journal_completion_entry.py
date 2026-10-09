@@ -35,6 +35,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
 )
 
 CHECK_ID: Final[str] = "journal-completion-entry"
+STATEMENT: Final[str] = (
+    "A commit that closes a plan should stage a closing journal entry. Add one before archiving."
+)
 
 _CLOSING_CATEGORY: Final[str] = "handoff"
 

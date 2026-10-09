@@ -22,7 +22,7 @@ from unittest.mock import patch
 
 from claude_code_hooks_daemon.core import Decision
 
-from .release_blocker import ReleaseBlockerHandler
+from .release_blocker import RULE_ID, ReleaseBlockerHandler
 
 #: Repo-relative folder the block message points the reader at. Relative on
 #: purpose: it is joined to a root derived from ``__file__``, so the assertion
@@ -461,6 +461,16 @@ class TestReleaseBlockerHandlerHandle:
         result = handler.handle({})
 
         assert result.decision == Decision.DENY
+
+    def test_handle_carries_the_rule_id_that_explain_rule_resolves(self) -> None:
+        """Plan 00484 G5: this project handler used to deny with no identifier."""
+        handler = ReleaseBlockerHandler()
+        (rule,) = handler.get_rules()
+
+        result = handler.handle({})
+
+        assert rule.rule_id == RULE_ID
+        assert (result.reason or "").startswith(f"BLOCKED [{rule.rule_id}]")
 
     def test_handle_returns_clear_reason_message(self) -> None:
         """Handler should return clear reason explaining why session is blocked."""

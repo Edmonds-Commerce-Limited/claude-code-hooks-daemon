@@ -56,6 +56,9 @@ from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 logger = logging.getLogger(__name__)
 
 CHECK_ID: Final[str] = "rules-file-shape"
+STATEMENT: Final[str] = (
+    "A `.claude/rules/*.md` file is pointers only: frontmatter, a trigger line, at most two imperative lines, and links to the agent tree. Move the depth to the agent tree."
+)
 
 # RULESET-sub-claude-md.md §3: "Body budget: <= ~15 lines / <=3 sentences of
 # orientation". Counted in non-blank, non-frontmatter LINES (the cheap,

@@ -76,6 +76,10 @@ _RULE: Final[Rule] = Rule(
 )
 
 
+#: Headline wording for the deny that announces the pause, which fires before any cron is judged.
+_ENTRY_BLOCKED: Final[str] = "a stop that crossed the usage ceiling: the session is now paused"
+
+
 def _is_resume_cron(cron: SessionCron) -> bool:
     tick = classify_tick(cron.prompt)
     return tick is not None and tick.kind is TickKind.USAGE_RESUME
@@ -137,7 +141,9 @@ class UsagePauseStopGateHandler(StopHandlerBase):
         if fresh:
             # Entered on this very Stop: the model has not seen the directive, so it is
             # delivered whatever ``stop_hook_active`` says; the next Stop reads a live record.
-            return BlockingResult.deny(render_pause_directive(pause))
+            return BlockingResult.deny(render_pause_directive(pause)).under_rule(
+                _RULE, blocked=_ENTRY_BLOCKED
+            )
         crons = parse_session_crons(hook_input)
         if crons is None:
             return BlockingResult(decision=Decision.ALLOW)
@@ -153,7 +159,7 @@ class UsagePauseStopGateHandler(StopHandlerBase):
             return BlockingResult(decision=Decision.ALLOW)
         return BlockingResult.deny(
             render_stop_directive(pause, found=len(crons), problem=problem or None)
-        )
+        ).under_rule(_RULE)
 
     @staticmethod
     def _problem(crons: list[SessionCron]) -> str | None:

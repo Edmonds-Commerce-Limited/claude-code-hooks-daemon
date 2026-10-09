@@ -22,6 +22,9 @@ from claude_code_hooks_daemon.plan_qa.model import (
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, CheckSpec, Finding, Level, Stage
 
 CHECK_ID: Final[str] = "location-status-coherence"
+STATEMENT: Final[str] = (
+    "A plan's folder location must match its status. Move the folder or correct the status."
+)
 
 _MISSING_PLAN_MD_REMEDIATION: Final[str] = "Add a PLAN.md with at least a status header."
 _MISSING_STATUS_LINE_MESSAGE: Final[str] = "PLAN.md has no parseable `**Status**:` line"

@@ -280,6 +280,28 @@ class TestRuleFormatterVerbose:
         assert len(formatter.verbose(sample_rule)) > len(formatter.terse(sample_rule))
 
 
+class TestRuleFormatterHeadline:
+    """RuleFormatter.headline() is the identifier line a handler puts above its own reason."""
+
+    def test_headline_is_the_first_line_of_verbose(
+        self, formatter: RuleFormatter, sample_rule: Rule
+    ) -> None:
+        assert formatter.verbose(sample_rule).startswith(formatter.headline(sample_rule))
+
+    def test_headline_names_the_rule_id_and_blocked_literal_on_one_line(
+        self, formatter: RuleFormatter, sample_rule: Rule
+    ) -> None:
+        headline = formatter.headline(sample_rule)
+        assert headline == f"BLOCKED [{sample_rule.rule_id}]: {sample_rule.blocked}"
+        assert "\n" not in headline
+
+    def test_a_blocked_override_replaces_the_wording_but_not_the_id(
+        self, formatter: RuleFormatter, sample_rule: Rule
+    ) -> None:
+        headline = formatter.headline(sample_rule, blocked="a fail-closed verdict")
+        assert headline == f"BLOCKED [{sample_rule.rule_id}]: a fail-closed verdict"
+
+
 class TestRuleFormatterAdvisory:
     """RuleFormatter.advisory() renders an ALLOW-path report for a rule.
 

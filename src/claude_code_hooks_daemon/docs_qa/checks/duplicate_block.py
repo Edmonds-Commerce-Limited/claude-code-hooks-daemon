@@ -54,6 +54,9 @@ from claude_code_hooks_daemon.docs_qa.types import (
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 CHECK_ID: Final[str] = "duplicate-block"
+STATEMENT: Final[str] = (
+    "A structured block (code, table or list) must not be repeated across documents. Keep one canonical copy and link to it."
+)
 
 # One (path, start_line, end_line) entry per document that carries a given
 # shared block hash -- its OWN first occurrence of that block.

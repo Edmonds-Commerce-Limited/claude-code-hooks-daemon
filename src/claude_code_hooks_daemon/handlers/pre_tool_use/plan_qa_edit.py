@@ -23,9 +23,10 @@ document, not on edits, so the hot path is unchanged.
 import logging
 from datetime import date
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
@@ -74,6 +75,8 @@ _MARKDOWN_SUFFIX: Final[str] = ".md"
 
 class PlanQaEditHandler(PreToolUseHandlerBase):
     """Blocking/advisory edit-time lint for plan documents."""
+
+    defect_class: ClassVar[DefectClass | None] = DefectClass.PLAN_DRIFT
 
     def __init__(self) -> None:
         super().__init__(

@@ -33,6 +33,7 @@ from __future__ import annotations
 import re
 from itertools import pairwise
 
+from claude_code_hooks_daemon.utils.command_evasion import git_subcommand_index
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     is_inert_pipeline_stage,
     resolve_shell_word,
@@ -249,6 +250,125 @@ def command_position_segments(command: str) -> list[str]:
     """
     view = command_position_view(command)
     return [view[start:end] for start, end in _segment_spans(view)]
+
+
+#: Commands whose quoted multi-word arguments are search patterns, programs or
+#: format strings handed to THAT command, never a second command line:
+#: `git log --grep='git reset --hard'`, `awk '/git stash/ {print}'`.
+_TEXT_ARGUMENT_HEADS: frozenset[str] = frozenset({"git", "awk", "gawk", "mawk"})
+
+_QUOTES = ("'", '"')
+
+
+#: Read-only git subcommands: they print, never run, what they are given.
+#: `submodule foreach`, `rebase --exec` and `bisect run` take a command line
+#: and are NOT here, so their quoted argument stays a command.
+_READ_ONLY_GIT_SUBCOMMANDS: frozenset[str] = frozenset(
+    {"log", "show", "diff", "grep", "shortlog", "blame", "rev-list", "whatchanged"}
+)
+
+#: Options of those subcommands whose value is a search or format string.
+_GIT_TEXT_OPTIONS: frozenset[str] = frozenset({"--grep", "-S", "-G", "-e"})
+_GIT_TEXT_OPTION_PREFIXES: tuple[str, ...] = ("--grep=", "--format=", "--pretty=", "-S", "-G", "-e")
+_GIT_GREP = "grep"
+#: Text a git command or awk may RUN: a `!` alias body, an awk `system` call or pipe.
+_GIT_RUNNABLE_MARKERS: tuple[str, ...] = ("!",)
+_AWK_RUNNABLE_MARKERS: tuple[str, ...] = ("system", "|")
+
+
+def _blank_literal(word: str, runnable: tuple[str, ...], at_start: bool) -> str:
+    """``word`` with its one quoted literal replaced by a placeholder.
+
+    Kept as written when the literal holds no blank (`"stash"` is a token the
+    guards read), has an expansion or escape, is not a single quoted span, or
+    holds text in ``runnable``. ``at_start`` says the literal opens the word;
+    otherwise it follows an attached option such as `--grep=`.
+    """
+    quote_at = 0 if at_start else min((word.find(q) for q in _QUOTES if q in word), default=-1)
+    if quote_at < 0 or resolve_shell_word(word[quote_at:]) is None:
+        return word
+    literal = word[quote_at:]
+    quote = literal[0]
+    body = literal[1:-1]
+    if (
+        quote not in _QUOTES
+        or literal[-1] != quote
+        or literal.count(quote) != 2
+        or not any(blank in body for blank in " \t")
+        or any(marker in body for marker in _EXPANSION_MARKERS)
+        or (quote == '"' and any(active in body for active in _DOUBLE_QUOTE_ACTIVE))
+        or any(marker in body for marker in runnable)
+    ):
+        return word
+    return word[:quote_at] + quote + _DATA_PLACEHOLDER + quote
+
+
+def _blank_git_text(segment: str, words: list[tuple[int, int]]) -> list[str]:
+    """Each word of a read-only git segment, with search/format literals blanked."""
+    raw = [segment[start:end] for start, end in words]
+    git_at = next((i for i, word in enumerate(raw) if word.rsplit("/", 1)[-1] == "git"), None)
+    subcommand = None if git_at is None else git_subcommand_index(raw, git_at)
+    if subcommand is None or raw[subcommand] not in _READ_ONLY_GIT_SUBCOMMANDS:
+        return raw
+    grep = raw[subcommand] == _GIT_GREP
+    out = list(raw)
+    for index in range(subcommand + 1, len(raw)):
+        word = raw[index]
+        after_option = raw[index - 1] in _GIT_TEXT_OPTIONS and index - 1 > subcommand
+        if after_option or (grep and not word.startswith("-")):
+            out[index] = _blank_literal(word, _GIT_RUNNABLE_MARKERS, True)
+        elif word.startswith(_GIT_TEXT_OPTION_PREFIXES):
+            out[index] = _blank_literal(word, _GIT_RUNNABLE_MARKERS, False)
+    return out
+
+
+def blank_quoted_text_arguments(segment: str) -> str:
+    """``segment`` with the quoted text arguments of `git`/`awk` blanked.
+
+    A guard asks "is this a destructive git command?". The value of `--grep`,
+    `-S`, `-G`, `-e`, `--format` or `--pretty` on a read-only git subcommand,
+    a `git grep` pattern, and an `awk` program are data for that command. A
+    quoted argument of any other git command stays: `submodule foreach`,
+    `rebase --exec` and `bisect run` run it. Everything the reader cannot
+    place, and everything that could run, is left as written.
+    """
+    head = _head(segment)
+    if head not in _TEXT_ARGUMENT_HEADS:
+        return segment
+    words = shell_word_spans(segment)
+    if head == "git":
+        replaced = _blank_git_text(segment, words)
+    else:
+        replaced = [
+            _blank_literal(segment[start:end], _AWK_RUNNABLE_MARKERS, True) for start, end in words
+        ]
+    pieces: list[str] = []
+    previous_end = 0
+    for (start, end), word in zip(words, replaced, strict=True):
+        pieces.append(segment[previous_end:start])
+        pieces.append(word)
+        previous_end = end
+    pieces.append(segment[previous_end:])
+    return "".join(pieces)
+
+
+def command_position_argument_segments(command: str) -> list[str]:
+    """:func:`command_position_segments` with quoted text arguments blanked.
+
+    A segment whose output a pipeline hands to anything but a known inert sink
+    is left as written: `git log --format='git reset --hard' | sh` runs it.
+    """
+    view = command_position_view(command)
+    spans = _segment_spans(view)
+    segments = [view[start:end] for start, end in spans]
+    return [
+        (
+            segment
+            if _pipeline_may_run_output(view, spans, segments, index)
+            else blank_quoted_text_arguments(segment)
+        )
+        for index, segment in enumerate(segments)
+    ]
 
 
 def _head(segment: str) -> str | None:

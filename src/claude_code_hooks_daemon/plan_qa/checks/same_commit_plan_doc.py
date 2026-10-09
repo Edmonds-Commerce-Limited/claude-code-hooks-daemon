@@ -45,6 +45,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
 from claude_code_hooks_daemon.utils.authored_paths import contained_authored_path
 
 CHECK_ID: Final[str] = "same-commit-plan-doc"
+STATEMENT: Final[str] = (
+    "A commit that claims work on a plan must also touch that plan's PLAN.md. Stage the plan update with the work."
+)
 
 _PLAN_REF_RE: Final[re.Pattern[str]] = re.compile(r"[Pp]lan\s+0*(\d{1,5})")
 

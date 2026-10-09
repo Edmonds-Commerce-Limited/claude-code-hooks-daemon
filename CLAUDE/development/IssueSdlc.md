@@ -474,7 +474,8 @@ waits on the human. The option defaults to false for any job that omits it.
 
 ## Where the hourly cron runs
 
-The `issue-sdlc` job carries `hosts: [cchd-sdlc-runner]` in `persistent_crons`,
+The `issue-sdlc` job carries `hosts: [github-softwaredev-lifecycle-unattended]`
+in `persistent_crons`,
 so a session is asked for it (at SessionStart and at Stop) only when its
 hostname matches. `failsafe-recovery` has no `hosts:` and stays global. A
 `hosts:` entry is an exact hostname or an fnmatch glob (`*`, `?`, `[...]`),
@@ -483,7 +484,8 @@ matched case-sensitively; an empty list is a config error.
 The hostname is the first non-empty of the `HOOKS_DAEMON_HOSTNAME` and
 `CCY_HOST_HOSTNAME` environment variables (ccy sets the second to the host
 machine's name), then the system hostname. To start an SDLC runner anywhere,
-export `HOOKS_DAEMON_HOSTNAME=cchd-sdlc-runner` before launching the session.
+export `HOOKS_DAEMON_HOSTNAME=github-softwaredev-lifecycle-unattended` before
+launching the session.
 
 Only the INITIAL thread of a Claude Code session holds the declared jobs
 (`persistent_crons.initial_thread_only`, default true). A thread opened later in

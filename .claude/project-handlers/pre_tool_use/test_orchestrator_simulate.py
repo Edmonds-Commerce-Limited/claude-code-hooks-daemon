@@ -384,9 +384,15 @@ class TestBlockingIsOptInAndOffByDefault:
         assert "blocking" not in handler.tags
         assert "advisory" in handler.tags
 
-    def test_a_default_handler_declares_no_rule(self) -> None:
-        """A rule row in CLAUDE.md is a promise that the rule can fire."""
-        assert OrchestratorSimulateHandler().get_rules() == []
+    def test_a_default_handler_still_declares_its_rule_and_says_it_is_dormant(self) -> None:
+        """The printed ID must resolve in explain-rule, so it is declared in every mode.
+
+        The row does not promise the rule fires: it says so is conditional on arming.
+        """
+        (rule,) = OrchestratorSimulateHandler().get_rules()
+        assert rule.rule_id == ORCHESTRATOR_WRITE_RULE_ID
+        assert "only when" in rule.blocked
+        assert "armed" in rule.blocked
 
     def test_a_blocking_handler_is_tagged_blocking_and_declares_its_rule(self) -> None:
         handler = OrchestratorSimulateHandler(blocking=True)

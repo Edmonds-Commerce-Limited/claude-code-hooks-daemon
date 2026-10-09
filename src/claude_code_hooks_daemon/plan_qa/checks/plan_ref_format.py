@@ -17,6 +17,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
 )
 
 CHECK_ID: Final[str] = "plan-ref-format"
+STATEMENT: Final[str] = (
+    "Reference a plan as `Plan NNNNN` (capitalised, zero-padded). Reword the commit message."
+)
 
 _CANONICAL_REF_RE: Final[re.Pattern[str]] = re.compile(r"Plan \d{5}")
 

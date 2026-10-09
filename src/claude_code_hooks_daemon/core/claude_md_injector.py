@@ -110,6 +110,9 @@ _FALLBACK_TIER_HEADING = (
 
 _RULE_TABLE_HEADER = "| ID | Blocked | Why | Fix |\n| --- | --- | --- | --- |"
 
+# Leads the line that closes a promoted section with its handler's rule IDs.
+_RULE_IDS_PREFIX = "IDs: "
+
 # Provenance marker emitted before each handler's guidance (DBF, Core
 # Standard 15). The injector holds `handler.name` while assembling the block;
 # writing it out is what lets a checker ask "does the handler that produced
@@ -231,6 +234,19 @@ class CanBeDormant(Protocol):
     def is_dormant(self) -> bool:
         """Whether config has made this handler unable to fire."""
         ...
+
+
+def _with_rule_ids(prose: str, rules: list[Rule]) -> str:
+    """``prose`` followed by one ``IDs:`` line naming every rule the handler declares.
+
+    A promoted section is emitted INSTEAD of the handler's table rows, so
+    without this line the IDs its denials print appear nowhere in CLAUDE.md
+    (TOOLING-SPEC 7.1, Plan 00484 G13). A handler with no rules is unchanged.
+    """
+    if not rules:
+        return prose
+    ids = ", ".join(rule.rule_id for rule in rules)
+    return f"{prose.rstrip()}\n\n{_RULE_IDS_PREFIX}{ids}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -699,7 +715,7 @@ class ClaudeMdInjector:
             config_key = type(handler).__module__.rsplit(".", maxsplit=1)[-1]
             if config_key in self._promoted_handlers or handler.name in self._promoted_handlers:
                 if content is not None:
-                    promoted.append((handler.name, content, config_key))
+                    promoted.append((handler.name, _with_rule_ids(content, rules), config_key))
                     continue
                 # Named in promoted_handlers but has no get_claude_md() prose
                 # (only rules, or nothing at all) — fall through to the

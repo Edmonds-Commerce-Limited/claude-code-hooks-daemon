@@ -290,6 +290,16 @@ above) with a decision and optional context/reason. Widening this back to
 **`get_acceptance_tests(self) -> list[AcceptanceTest]`**
 Return at least one acceptance test definition. Used for playbook generation and validation.
 
+#### Optional: declare a Defence (`defect_class`)
+
+A project handler that is a content gate or a commit gate can declare
+`defect_class: ClassVar[DefectClass | None] = DefectClass.<MEMBER>` and then appears in
+`hooks-daemon defences`. One that declares none is not listed, however blocking it is; the
+value must be a member of the closed `DefectClass` vocabulary, not a string of your own.
+Declaring `get_rules()` and printing `BLOCKED [R-...]` in every deny is separate and
+expected of any denying handler. The full rule is in
+[HANDLER_DEVELOPMENT.md](HANDLER_DEVELOPMENT.md#rules-deny-identifiers-and-defences).
+
 #### Priority Ranges (Convention)
 
 The priority bands are documented once, in the

@@ -20,7 +20,7 @@ reading the prose.
 from typing import Any
 
 import pytest
-from ruff_format_blocker import RuffFormatBlockerHandler
+from ruff_format_blocker import RULE_ID, RuffFormatBlockerHandler
 
 from claude_code_hooks_daemon.core.hook_result import Decision
 
@@ -162,6 +162,17 @@ class TestTheDenial:
         result = handler.handle(bash_hook_input("ruff format src"))
 
         assert result.decision is Decision.DENY
+
+    def test_it_carries_the_rule_id_that_explain_rule_resolves(
+        self, handler: RuffFormatBlockerHandler, bash_hook_input: Any
+    ) -> None:
+        """Plan 00484 G5: this project handler used to deny with no identifier."""
+        (rule,) = handler.get_rules()
+        result = handler.handle(bash_hook_input("ruff format src"))
+
+        assert rule.rule_id == RULE_ID
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{rule.rule_id}]")
 
     def test_it_names_the_formatter_of_record(
         self, handler: RuffFormatBlockerHandler, bash_hook_input: Any

@@ -11,7 +11,42 @@ entry rows, 65 of them not in a terminal state. They stay open, are not copied
 here, and are tracked from this ledger by reference to that
 [index](../Completed/00466-niggles-ledger-sixteen/PLAN.md). Its branches are all
 resolved: landed (n101, n211, lifecycle, d-00376) or dropped, their branch-only
-entries carried in the sections below. Nothing is dismissed or deferred.
+entries carried in the sections below. Plan 00483's dismissals and no-change
+rulings for these entries are recorded in the next section.
+
+### Plan 00483 write-back for the 00466 entries (Task 2.3)
+
+Plan 00483 triaged the 67 entries open in archived ledger 00466
+([TRIAGE-ledger-466.md](../00483-threat-model-conformance-audit/TRIAGE-ledger-466.md)).
+Ledger 00466 is archived, so its dispositions are recorded here. The dismissals are
+verdicts of that triage (classified under the two-part test, checked by the
+coordinator); none is an owner ruling. The command-shaped ones have a
+`UNCOVERED-accepted` row in `scripts/qa/dangerous-invocation-corpus.yaml`.
+
+**Dismissed (threat model):**
+
+- **N45** — limb 2: a NUL byte in `secret_word_list_path`; no working purpose, and no careless edit produces it. No command, so no corpus row. The `except (OSError, ValueError)` hardening noted in the triage needs no plan.
+- **N57** — limb 1: `V=...; bash -c "$V"`, `eval "$V"`, an alias, or a file written then run; the operative text is not visible at the call. Corpus row `dismissed-n57-variable-body-in-bash-c`. Same ground as dismissed N135 and N189.
+- **N68** — limb 2: a moved-away daemon checkout reads NOT_INSTALLED and fails open; the ruling's "anything that stops or routes around the daemon". No command, so no corpus row.
+- **N71** — limb 1: a script rewritten between judgement and run; its text comes from a file. The Plan 00464 script walker it concerned is absent from main. No corpus row (a script file is not a command string).
+- **N72** — limb 1: `python3 s.py` building a git argv at run time; same absent walker. No corpus row.
+- **N77** — limb 1: `x=...; bash -c "$x"`, `eval "$x"`, an in-command alias, a script written then run. Corpus row `dismissed-n77-variable-body-in-eval`.
+- **N78** — limb 2: a trailing `#c` after a key name and backslash-octal in an unquoted word. No corpus row: main denies the representative command (`cat $'\151d_rsa'` is denied by `secret_file_guard`), so no allowed command exists to pin. The one prose false positive the entry mentioned was never identified.
+- **N89** — limb 2: `cat() { bash; }; cat <<'E'` and `alias cat=bash`; no ordinary work redefines `cat` as `bash`. Corpus row `dismissed-n89-redefined-data-sink`.
+
+**No change:**
+
+- **N62** — subagent context and concurrency budgets stay with the harness knob `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` and the Plan 00479 usage ceiling. Source: a ruling the owner delegated to a Fable subagent, extended to N62 by the coordinator ([RULINGS-owner-delegated-fable.md](../00483-threat-model-conformance-audit/RULINGS-owner-delegated-fable.md)), confirmed by a coordinator call on 2026-10-05, which is not an owner ruling. Re-open trigger: if the 00479 pause fires routinely because of subagent context, build the concurrency cap first.
+- **N74** — `grep -r` over an ancestor of a protected path. Source: the same Fable ruling, "no change, accepted residual". The owner ruling A2 of 2026-10-05 ([OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md)) settled N74 through the cached protected-file index, merged as dc5c9263b. Corpus row `recursive-search-grep-r-whole-checkout` is `COVERED`, so there is no `UNCOVERED-accepted` row.
+- **N240** (carried list) — the two `script` log shapes now have their corpus rows, `no-change-n240-script-typescript-log` and `no-change-n240-script-log-option`; they were promised by the Fable ruling but missing from the corpus.
+
+**Still open, residuals stated precisely (not dismissed):**
+
+- **N124** — the grep/rg pattern shapes are fixed; the `find -regex`/`-iregex` operand is still read as a path (see its entry in [CARRIED-REFIX-BRANCHES.md](CARRIED-REFIX-BRANCHES.md)).
+- **N222** — the guard half is changed, not removed: `SCAN_DEADLINE_SECONDS` is still used at `secret_file_guard.py` lines 1403 and 1616, but A1 (merge dc5c9263b) made the timeout outcome allow with an advisory instead of deny. What remains is the test half: about 15 tests that assert wall-clock bounds and fail on a loaded host. Remedy: switch them to the load-scaled helper N95 already uses.
+- **N260** — the `sys.path` half is fixed (257847b51). Still open, direction corrected: `.github/workflows/qa.yml` (line 498) passes only `--import-mode=importlib`, while the local runner (`daemon/cli.py`, lines 6384-6396) passes that plus `-p no:claude_code_hooks_daemon.qa.full_qa_gate`. CI therefore loads the full-QA gate plugin and the local run does not, so a run can be green locally and red on CI.
+
+**Fixed, not yet marked in the 00466 index:** N170, N130 and N136 (statuses corrected in CARRIED-REFIX-BRANCHES.md, merges 9b2e15be1 and 012915bd9/dc5c9263b); N79 (the ordinary-command corpus is 391 rows now, above the 200 asked).
 
 ### 55 entries carried from the six dropped re-fix branches
 
@@ -1425,6 +1460,39 @@ also judges `sub/f.txt` when `cd x` succeeds. N299 round 2 did NOT close it. The
 The uncertain-move union judges the hook directory and the LAST recorded move (`x`), but not
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
+
+### N383 — a quoted git global-option value with a space hides a destructive subcommand
+
+**Source**: the Plan 00483 batch (b) review round 2 (2026-10-09, merged at fe54af5e6).
+
+**Evidence**: the review probed these shapes on main and on the batch (b) tip, and every one was allowed:
+
+- `git -C 'my dir' reset --hard`, also with `"my dir"` and `my\ dir`;
+- the same with `stash`, `clean -fd` and `checkout -- f`;
+- `git -c 'user.name=A B' reset --hard`.
+
+The batch (b) round-1 tip denied them only by accident. A directory with a space is an ordinary careless spelling, so the shape is in scope under the 00483 threat model. The probe is `untracked/scratch/00483-review-batch-b-probe4.py` (its output is `00483-r2-probe4-main.txt`).
+
+**Status**: ⬜ Open. Remedy: the shared `_GIT_GLOBAL_OPTION` (`utils/command_evasion.py:62`, behind `GIT_INVOCATION`, which both destructive_git and git_stash use) accepts a quoted or escaped option value for `-C`/`-c`/`--git-dir`/`--work-tree`, and these shapes are added to the must-deny tests. Also from that review, as NITs: the handler guidance omits `-e` from the data-valued options, and `_git_grep_pattern_spans` duplicates the new reader.
+
+### N382 — `changed --range` does not select tests that discover handlers by scanning the package
+
+**Source**: the coordinator, 2026-10-09. The Plan 00484 batch 3.1a agent reported a failing test that also failed on
+main.
+
+**Evidence**: `tests/integration/test_bash_write_blindness_coverage.py::TestEveryKeyedHandlerHasAVerdict` failed on
+main after the 00499 Phase 1b merge (64823600a): `WriteProtectedPathsHandler` keys on Write/Edit and had no recorded
+verdict. `llm_qa.py changed --range 0ef4ce3942a9..HEAD --allow-unmapped` reported 38/38 green over that merge, so it
+never selected the test. The test finds its handlers with `pkgutil` and a source scan, not by importing the changed
+module, so an import-based selector cannot reach it. This is the same shape as N380: a whole-repo property test that
+lives far from the module that breaks it.
+
+**Status**: 🔄 The regression is fixed on main (a PARTIAL verdict row, with its reason). Still open: the selector
+should always run the tests that enumerate every handler whenever any file under `handlers/` changes. Two walk the
+package with `pkgutil.walk_packages` (blindness coverage, guidance coverage), and template consistency enumerates
+through `HandlerRegistry.discover()`. The selector's map sends `handlers/pre_tool_use/*.py` only to
+`test_ordinary_command_regression_gate.py`. A pinned list in `scripts/qa/` is one remedy, with a test that each listed
+file really enumerates the handlers. Fact-check: `subagent-reports/261009-fact-check-n382-sonnet.md`.
 
 ### N381 — `test_subagent_full_qa_blocker` fails under the pytest a fresh venv installs
 

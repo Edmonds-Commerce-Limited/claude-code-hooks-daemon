@@ -13,6 +13,9 @@ from claude_code_hooks_daemon.plan_qa.readme_index import ReadmeSection
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, CheckSpec, Finding, Level, Stage
 
 CHECK_ID: Final[str] = "claim-spotcheck-queue"
+STATEMENT: Final[str] = (
+    "Index status text such as 'PR open' is only true when written. Re-check the claim and update the row."
+)
 
 _PR_NUMBER_RE: Final[re.Pattern[str]] = re.compile(r"PR\s*#\d+", re.IGNORECASE)
 _PR_STATE_WORD_RE: Final[re.Pattern[str]] = re.compile(

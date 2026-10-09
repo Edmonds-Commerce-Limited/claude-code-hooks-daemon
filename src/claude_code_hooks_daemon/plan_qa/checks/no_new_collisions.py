@@ -16,6 +16,9 @@ from claude_code_hooks_daemon.plan_qa.checks.common import (
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, CheckSpec, Finding, Level, Stage
 
 CHECK_ID: Final[str] = "no-new-collisions"
+STATEMENT: Final[str] = (
+    "Two plan folders must not share a plan number. Renumber the new folder using `mkplan.bash`."
+)
 
 _REMEDIATION: Final[str] = (
     "Renumber the newest folder via the git counter / mkplan.bash and update its README row."

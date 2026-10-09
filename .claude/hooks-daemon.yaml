@@ -1454,7 +1454,7 @@ persistent_crons:
       description: "One open GitHub issue through the full delivery lifecycle"
       enabled: true
       runs_while_awaiting_human: true  # Independent of a pending human question (Plan 00470); the failsafe below stays suppressed
-      hosts: [cchd-sdlc-runner]  # Only a session that exported HOOKS_DAEMON_HOSTNAME=cchd-sdlc-runner before launch is asked for this job (Plan 00470 Task 6.2); failsafe-recovery below stays global
+      hosts: [github-softwaredev-lifecycle-unattended]  # Only a session that exported HOOKS_DAEMON_HOSTNAME=github-softwaredev-lifecycle-unattended before launch is asked for this job (Plan 00470 Task 6.2); failsafe-recovery below stays global
       prompt: |
         **ISSUE SDLC TICK (automated hourly — NOT a heartbeat, NOT human authorisation).**
         Invoke the `issue-sdlc` skill (Skill tool, skill: issue-sdlc) and follow it exactly.
@@ -1749,9 +1749,10 @@ pseudo_events:
 
 # Per-host settings (Plan 00479). Owner ruling D8 (2026-10-06): this repository's always-on
 # datacentre session dogfoods the usage ceiling at 80%. The key is a role alias, not a real
-# hostname: it matches only a session launched with HOOKS_DAEMON_HOSTNAME=cchd-sdlc-runner,
-# the same alias persistent_crons uses for the issue-sdlc job. Inert until that is exported.
+# hostname: it matches only a session launched with
+# HOOKS_DAEMON_HOSTNAME=github-softwaredev-lifecycle-unattended, the same alias persistent_crons
+# uses for the issue-sdlc job. Inert until that is exported.
 hosts:
-  cchd-sdlc-runner:
+  github-softwaredev-lifecycle-unattended:
     usage_ceiling:
       max_used_percent: 80

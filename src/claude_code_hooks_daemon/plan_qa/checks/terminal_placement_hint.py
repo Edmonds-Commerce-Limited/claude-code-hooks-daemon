@@ -18,6 +18,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
 )
 
 CHECK_ID: Final[str] = "terminal-placement-hint"
+STATEMENT: Final[str] = (
+    "A plan whose status is terminal belongs in the archive folder. Move it there in the same commit as the status flip."
+)
 
 
 def _run(context: CheckContext) -> list[Finding]:

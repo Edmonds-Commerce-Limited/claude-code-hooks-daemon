@@ -46,6 +46,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
 )
 
 CHECK_ID: Final[str] = "index-row-length"
+STATEMENT: Final[str] = (
+    "A plan index row is a pointer, not a summary. Shorten the row and move the detail into the plan."
+)
 
 # How many offending lines to name before summarising the rest, so a badly
 # degraded index produces a usable message instead of a wall of text.

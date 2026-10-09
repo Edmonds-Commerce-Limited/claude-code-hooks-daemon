@@ -22,6 +22,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
 )
 
 CHECK_ID: Final[str] = "terminal-state-atomic"
+STATEMENT: Final[str] = (
+    "A terminal status flip must move the folder to the archive and update the index in the same commit. Stage all three together."
+)
 
 _NEW_OR_MODIFIED_STATUSES: Final[tuple[str, ...]] = ("A", "M")
 _RENAME_STATUS_PREFIX: Final[str] = "R"

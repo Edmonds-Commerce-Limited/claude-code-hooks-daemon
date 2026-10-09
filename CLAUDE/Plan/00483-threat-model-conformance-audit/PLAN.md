@@ -113,49 +113,64 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   `crontab -r` (R-CRONTAB-REMOVE) human-only. `git tag -d`, `git reset --keep`, `truncate -s 0`
   and `rm -rf` are `UNCOVERED-accepted`; the other five rows are `COVERED`. Ordinary-command
   gate rows are the `a6-` ids.
-- [ ] 🔄 **Task 2.3**: Done for the carried entries (merge 56677e3c6). That added 9
+- [x] ✅ **Task 2.3**: Done for the carried entries (merge 56677e3c6). That added 9
   `UNCOVERED-accepted` corpus rows. N201, N228 and N257 have no row, because main denies the
   representative command anyway. Record every dismissal: in the ledger, mark it
   `Dismissed (threat model)`; for a command, add a corpus row. The coordinator checks each
-  batch's classifications against the two-part test before they land.
+  batch's classifications against the two-part test before they land. The 00466 entries are
+  written back in ledger 00474 (NIGGLES.md, "Plan 00483 write-back for the 00466 entries", and
+  index rows in its PLAN.md): N45, N57, N68, N71, N72, N77, N78 and N89 as
+  `Dismissed (threat model)`, N62 and N74 as no change with their sources (Fable-delegated
+  rulings; N74 also settled by owner ruling A2). New corpus rows: N57, N77, N89 and the two
+  N240 `script` shapes. N78 has none because main denies its representative command, and
+  N45, N68, N71 and N72 are not command strings.
 
 ### Phase 3: Act
 
-- [ ] ⬜ **Task 3.1**: Fix the in-scope defects through the ledger, at most 3 branches open at
-  once (Plan 00475). N154 and N230 (Fable FIX rulings) were verified already fixed on main at
-  c7271043f, so branch worktree-p483-inscope changes no code for them. Report:
+- [x] ✅ **Task 3.1**: Fix the in-scope defects through the ledger, at most 3 branches open at
+  once (Plan 00475). Done: every branch below is merged into main and its ref deleted
+  ([261009-phase3-status-sonnet.md](subagent-reports/261009-phase3-status-sonnet.md) section 1);
+  each is named with its merge commit. The in-scope defects that remain are ordinary ledger work
+  and Task 3.2 false positives. N154 and N230 (Fable FIX rulings) were verified already fixed on
+  main at c7271043f, so worktree-p483-inscope (merged a248be4c2) changes no code for them. Report:
   [subagent-reports/261003-task-3.1-n154-n230-sonnet.md](subagent-reports/261003-task-3.1-n154-n230-sonnet.md).
-  Batch A on branch worktree-p483-leak: N61 no longer reproduces (fixed by 530ffc83d, now pinned
+  Batch A, branch worktree-p483-leak (merged 3495e36b9): N61 no longer reproduces (fixed by 530ffc83d, now pinned
   with a public-pattern test); N94 fixed (the auto-close verdict memo is keyed by the hook_input
   object, not the command text). Report:
   [subagent-reports/261003-task-3.1-batch-a-n61-n94-sonnet.md](subagent-reports/261003-task-3.1-batch-a-n61-n94-sonnet.md).
-  Segmentation batch on branch worktree-p483-segment: N48 (sed_blocker splits on newline), N87 (`$'...'` bodies decoded), N93 (`eval` body judged like `bash -c`) fixed; N85 no longer reproduces. Report:
+  Segmentation batch, branch worktree-p483-segment (merged 6f9cd976b): N48 (sed_blocker splits on newline), N87 (`$'...'` bodies decoded), N93 (`eval` body judged like `bash -c`) fixed; N85 no longer reproduces. Report:
   [subagent-reports/261003-task-3.1-batch-b-segmentation-sonnet.md](subagent-reports/261003-task-3.1-batch-b-segmentation-sonnet.md).
-  N50, N54 and N43 fixed on branch worktree-p483-config: an option naming a method, read-only
+  N50, N54 and N43 fixed, branch worktree-p483-config (merged fec3aa703): an option naming a method, read-only
   property or `_` name is refused and reported, one cached default `Config` replaces the
   per-Stop rebuild, and redaction falls back to the default word list when the config fails.
   Report: [subagent-reports/261003-task-3.1-batch-c-config-sonnet.md](subagent-reports/261003-task-3.1-batch-c-config-sonnet.md).
-  N170, N242 and N136 fixed on branch worktree-p483-secret: the `secret-meta`/`git rm --cached`
+  N170, N242 and N136 fixed, branch worktree-p483-secret (merged 9b2e15be1): the `secret-meta`/`git rm --cached`
   exemption refuses `&`, `$( )` and backticks, and a `python -m` module or a later `-c` import is not a path.
   Report: [subagent-reports/261004-task-3.1-batch-e-secret-sonnet.md](subagent-reports/261004-task-3.1-batch-e-secret-sonnet.md).
-  N141 (SH1, `cd` form), N179 and N186 (brace form) fixed on branch worktree-p483-mkdir: the plan-folder `mkdir` guard runs before the discovery exemptions, reads redirections, `cd` and brace lists, and judges every operand. Report:
+  N141 (SH1, `cd` form), N179 and N186 (brace form) fixed, branch worktree-p483-mkdir (merged 76bf848aa): the plan-folder `mkdir` guard runs before the discovery exemptions, reads redirections, `cd` and brace lists, and judges every operand. Report:
   [subagent-reports/261004-task-3.1-batch-d-mkdir-sonnet.md](subagent-reports/261004-task-3.1-batch-d-mkdir-sonnet.md).
-  N184 and N221 fixed on branch worktree-p483-paths: a directory or absolute-path pattern is matched
+  N184 and N221 fixed, branch worktree-p483-paths (merged c953b0c62): a directory or absolute-path pattern is matched
   after `..` is collapsed and from the hook's cwd and each literal `cd` target.
   Report: [subagent-reports/261004-task-3.1-batch-f-paths-sonnet.md](subagent-reports/261004-task-3.1-batch-f-paths-sonnet.md).
-  N220 and N124 (grep/rg pattern) fixed and N249 pinned on branch worktree-p483-glob; report:
+  N220 and N124 (grep/rg pattern) fixed and N249 pinned, branch worktree-p483-glob (merged 2ba5b72a2); report:
   [subagent-reports/261004-task-3.1-batch-g-glob-sonnet.md](subagent-reports/261004-task-3.1-batch-g-glob-sonnet.md).
-  N143, N144, N152 (literal wrappers) and N153 fixed on branch worktree-p483-recur: a recursive search is judged by the files it would read; report:
+  N143, N144, N152 (literal wrappers) and N153 fixed, branch worktree-p483-recur (merged f152ea9d9): a recursive search is judged by the files it would read; report:
   [subagent-reports/261004-task-3.1-batch-h-recursive-sonnet.md](subagent-reports/261004-task-3.1-batch-h-recursive-sonnet.md).
-  N171, N172, N248 and N250 fixed on branch worktree-p483-ordin: an unlistable directory, a missing daemon package, an unresolved word list and an unbuildable capture scanner each fail loudly instead of passing; report: [subagent-reports/261004-task-3.1-batch-i-ordinary-sonnet.md](subagent-reports/261004-task-3.1-batch-i-ordinary-sonnet.md).
-  N130 (and N348's cap half) fixed on branch worktree-n130-walk: a recursive search is examined by a capped scan that raises past 250000 entries or the deadline and is denied as incomplete, never answered as clean, and `rg`, `ag` and `git grep` read git's file lists; report: [subagent-reports/261004-n130-n348-implementation-sonnet.md](subagent-reports/261004-n130-n348-implementation-sonnet.md).
+  N171, N172, N248 and N250 fixed, branch worktree-p483-ordin (merged cd7638c73): an unlistable directory, a missing daemon package, an unresolved word list and an unbuildable capture scanner each fail loudly instead of passing; report: [subagent-reports/261004-task-3.1-batch-i-ordinary-sonnet.md](subagent-reports/261004-task-3.1-batch-i-ordinary-sonnet.md).
+  N130 (and N348's cap half) fixed, branch worktree-n130-walk (merged 012915bd9; its capped walk was then removed by the A1/A2 merge dc5c9263b, and N130 is now answered by the cached protected-file index): a recursive search is examined by a capped scan that raises past 250000 entries or the deadline and is denied as incomplete, never answered as clean, and `rg`, `ag` and `git grep` read git's file lists; report: [subagent-reports/261004-n130-n348-implementation-sonnet.md](subagent-reports/261004-n130-n348-implementation-sonnet.md).
 - [ ] 🔄 **Task 3.2**: Narrow each guard that causes an in-scope false positive while catching
-  an out-of-scope shape (TDD: the false positive is the red test). X-1 fixed on branch
-  worktree-p483-x1-rebind-heredoc: the shared rebinding check no longer withholds the heredoc
+  an out-of-scope shape (TDD: the false positive is the red test). Open: 43 of the 50 INVENTORY
+  probes still deny when re-run on 2026-10-09 (batches b and c of the status audit, which
+  file or fix them). Batch (b), the git guards, is fixed on its branch: `destructive_git` and
+  `git_stash` judge each command segment on its own tokens and read a quoted `git`/`awk` pattern,
+  a `gh` body heredoc and a printing `while read` loop as data; gate rows `a8-*`. Report:
+  [subagent-reports/261009-batch-b-git-guards-sonnet.md](subagent-reports/261009-batch-b-git-guards-sonnet.md).
+  Merged so far: X-1, branch
+  worktree-p483-x1-rebind-heredoc (merged 3644f831e): the shared rebinding check no longer withholds the heredoc
   exemption for `cd`/`pushd`/`popd`, `source`/`.` or a non-special `export X=$Y`; alias,
   function and PATH bindings still do. Report:
   [subagent-reports/261002-x1-sonnet.md](subagent-reports/261002-x1-sonnet.md).
-  FP batch 2 fixed on branch worktree-p483-fp-batch2: the brace reader reads a quoted
+  FP batch 2 fixed, branch worktree-p483-fp-batch2 (merged 9d182f299): the brace reader reads a quoted
   `${name:-word}` default (and `=`, `+`, `?`) instead of failing closed; `curl -o /dev/null`
   and `wget -O /dev/null` are no longer outside writes; `$PWD`, `${PWD}`, `$(pwd)` and
   `$(git rev-parse --show-toplevel)` resolve to the hook cwd and its repository root, judged
@@ -245,9 +260,15 @@ Owner questions sent 2026-10-05 as chunks A–D; see the backlog report
 
 ## Success Criteria
 
-- [ ] No open ledger entry or `UNCOVERED-open` corpus row is left unclassified.
-- [ ] Each dismissal is recorded both in the ledger and, for a command, in the corpus.
-- [ ] Every blocking guard has a verdict in `INVENTORY.md`.
+- [ ] No open ledger entry or `UNCOVERED-open` corpus row is left unclassified. Corpus half
+  met (0 open rows). Open: 00474's own later entries (N353 to N381) have not been triaged
+  under the two-part test.
+- [x] Each dismissal is recorded both in the ledger and, for a command, in the corpus.
+  Evidence: Task 2.3 above; `check_dangerous_invocation_corpus.py` holds 37 rows, 0 open.
+- [x] Every blocking guard has a verdict in `INVENTORY.md`. Evidence: every file under
+  `handlers/pre_tool_use/` is named in the inventory; Part H adds the three that were
+  missing. The 24 handlers of Part G are provisional file-level verdicts, and Parts A to F
+  pre-date the A1/A2 removals.
 - [ ] Every in-scope false positive found has a narrowing fix merged or a ledger entry.
 
 ## Delivery & Milestones

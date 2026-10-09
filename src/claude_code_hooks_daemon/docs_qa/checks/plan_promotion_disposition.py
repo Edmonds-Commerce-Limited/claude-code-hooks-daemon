@@ -35,6 +35,9 @@ from claude_code_hooks_daemon.docs_qa.types import (
 )
 
 CHECK_ID: Final[str] = "plan-promotion-disposition"
+STATEMENT: Final[str] = (
+    "At terminal status, every supporting document in the plan folder needs a recorded disposition. Record promote, keep or delete for each."
+)
 
 _PLAN_DOC_FILENAME: Final[str] = "PLAN.md"
 _JOURNAL_DIR_NAME: Final[str] = "JOURNAL"
