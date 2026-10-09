@@ -91,8 +91,22 @@ This plan adds timing first, measures the hot spots from it, then makes the gate
 
 ### Phase 3: Speed
 
-- [ ] ⬜ **Task 3.1**: Act on the measured hot spots: the slowest tests, steps that can run concurrently, any
-  duplicated work such as repeated matrix legs.
+- [x] ✅ **Task 3.1** (merge `c02cf9838`): Act on the measured hot spots: the slowest tests, steps that can run
+  concurrently, any duplicated work such as repeated matrix legs. Done, measured per leg on a loaded host:
+
+  - The released-tree readers test went from 520 s to 172 s; its 25 readers now run as four concurrent nested runs,
+    and every group's failure is reported.
+  - The layer-1 upgrade file went from about 380 s to 166 s; its origin repository is built once per module.
+  - `test_gate_fires_when_the_cache_cannot_hit` went from 129 s to 11 s. The resolver's probe watchdog held the
+    caller's pipe for its whole bound. That is a fix in client-run `scripts/lib/resolve_venv.sh`: stdio is detached and
+    the watchdog kills its own `sleep`.
+  - The glob-reader guard went from several hundred seconds to 29 s, by building its scans once.
+  - Three hot spots were declined with reasons: the signal checker scan, the main-moved fixture, and the hostile-input
+    timing that is itself the measurement.
+
+  Reports: [subagent-reports/261009-task-3.1-hot-spots-sonnet.md](subagent-reports/261009-task-3.1-hot-spots-sonnet.md)
+  and the two reviews beside it.
+
 - [ ] ⬜ **Task 3.2**: Evaluate pytest-xdist (running tests across cores): whether the suite is safe in parallel
   (sockets, ports, working directory, the full-QA lock and its sink plugin), and adopt it if it is.
 
