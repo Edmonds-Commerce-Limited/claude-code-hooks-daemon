@@ -1682,7 +1682,9 @@ def _gh_reads_body_as_data(stage: str, fds_may_run: bool) -> bool:
     words = _segment_words(stage)
     arguments = None if not words else _arguments_after_command(words, _GH_COMMAND)
     remaining = None if arguments is None else _inert_redirects(arguments, fds_may_run)
-    return bool(remaining) and remaining[0].value in _GH_DATA_SUBCOMMANDS
+    if not remaining:
+        return False
+    return remaining[0].value in _GH_DATA_SUBCOMMANDS
 
 
 def _stage_writes_a_file(command: str, words: list[_Word], remaining: list[_Word]) -> bool:

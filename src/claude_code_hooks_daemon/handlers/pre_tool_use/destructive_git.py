@@ -1057,7 +1057,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             "definition and an awk program calling `system` are still judged). A quoted "
             "heredoc fed to `gh pr|issue|release|gist|api` or to a `while read` loop "
             "that only prints, counts or filters its input is prose too; a loop that "
-            "runs its input (`eval \"$l\"`, `$l`, `bash -c`) is not.\n\n"
+            'runs its input (`eval "$l"`, `$l`, `bash -c`) is not.\n\n'
             "**PROSE describing one of these is not one of these.** What bash hands "
             "over as DATA is blanked before the command is judged, so a commit "
             "message that documents `--force`, or a `cat <<'EOF'` heredoc body naming "

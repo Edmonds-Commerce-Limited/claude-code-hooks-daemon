@@ -35,7 +35,7 @@ class TestBlankQuotedTextArguments:
             "awk 'BEGIN {system(\"git stash\")}'",
             "awk '{print | \"sh\"}' f",
             'git log --grep="$(git stash)"',
-            "git log --grep=\"a `b` c\"",
+            'git log --grep="a `b` c"',
             "bash -c 'git stash'",
             "eval 'git stash'",
             "ls 'a b'",
