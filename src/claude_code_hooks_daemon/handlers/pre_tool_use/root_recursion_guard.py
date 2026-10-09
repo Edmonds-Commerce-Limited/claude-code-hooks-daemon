@@ -23,7 +23,6 @@ Escape hatch (mirrors git_stash's ``MUST_STASH_BECAUSE=``):
 
 import re
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
@@ -34,6 +33,7 @@ from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.escape_hatch import command_declares_hatch
+from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 
 # Full first-fire teaching content (Plan 00116), preserving the pre-migration
 # handler's rich prose verbatim.
@@ -106,7 +106,8 @@ def _is_dangerous_root(token: str) -> bool:
     if root in _HOME_EXACT or root in _DEFAULT_EXACT_ROOTS:
         return True
     if any(root.startswith(prefix + "/") for prefix in _DEFAULT_PREFIX_ROOTS):
-        return not Path(root).is_file()
+        # An unreadable path counts as not-a-file, so it is judged as a tree.
+        return not path_is_file(root, unreadable_means=False)
     return root in _DEFAULT_PREFIX_ROOTS
 
 

@@ -66,13 +66,9 @@ SUBCOMMAND_SEPARATOR_CHARS = ";&|\n\r"
 # it. The quote classes exclude the quote character itself, so each piece has
 # exactly one reading and the run cannot backtrack exponentially.
 _SHELL_WORD_PIECE = (
-    r"""(?:'[^']*'|"(?:[^"\\]|\\.)*"|\\.|"""
-    rf"""[^\s{SUBCOMMAND_SEPARATOR_CHARS}'"\\])"""
+    r"""(?:'[^']*'|"(?:[^"\\]|\\.)*"|\\.|""" rf"""[^\s{SUBCOMMAND_SEPARATOR_CHARS}'"\\])"""
 )
-_GIT_GLOBAL_OPTION = (
-    rf"-{_SHELL_WORD_PIECE}+"
-    rf"(?:\s+(?!-){_SHELL_WORD_PIECE}+)?"
-)
+_GIT_GLOBAL_OPTION = rf"-{_SHELL_WORD_PIECE}+" rf"(?:\s+(?!-){_SHELL_WORD_PIECE}+)?"
 
 # `git` followed by any run of global options, leaving the match positioned at
 # the subcommand. Prefix a subcommand pattern with this instead of `\bgit\s+`.
