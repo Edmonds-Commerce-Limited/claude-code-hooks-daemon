@@ -1,0 +1,31 @@
+# Fact check round 2: N380 correction diff
+
+Diff: `untracked/plan-fact-check/00474-niggles-ledger-seventeen.diff`, checked against /workspace main. The entry is at `CLAUDE/Plan/00474-niggles-ledger-seventeen/NIGGLES.md:1429-1457`.
+
+## REFUTED
+
+None.
+
+## UNVERIFIABLE-HERE (weak)
+
+- C6 "The coordinator had told every agent not to run `llm_qa.py` at all, to keep them off the host-wide QA lock": a coordinator instruction is not on disk. The grep for `llm_qa` in the plan JOURNAL day-files for 26-10-08 and 26-10-09 found nothing. It would be settled by the coordinator's dispatch prompts.
+- C7 "That is why no branch carried a green `changed` record": a causal claim about agent runs. No per-branch record is on disk. It would be settled by the branches' `untracked/qa` records.
+- C8 "`changed` would have run these whole-repo checks": the previous report found `changed --range` selected 253 test files from 90 files and reached the failing tests, so a per-branch run plausibly would too. Whether the per-branch mapper selects them is untested without running it.
+
+## Table
+
+| #   | Claim                                                                                            | Verdict           | Evidence                                                                                                                                                                                                                                                                |
+| --- | ------------------------------------------------------------------------------------------------ | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `changed` with no `--range` on main refuses to run, because HEAD is the base itself              | VERIFIED          | `scripts/qa/run_changed_tests.py:1031-1038`: `current_branch == base` returns files None and the error "HEAD is on `{base}`, the base itself". `resolve_base` (270-292) resolves the base to the origin/HEAD branch, else local `main`, so on main this branch applies. |
+| 2   | Citation `run_changed_tests.py:1031-1038`                                                        | VERIFIED          | Lines 1031-1038 are exactly that `if` block.                                                                                                                                                                                                                            |
+| 3   | The advice "run `changed` on the merged head" therefore checks nothing on main                   | VERIFIED          | Follows from C1. A refused run checks nothing.                                                                                                                                                                                                                          |
+| 4   | Agents CAN run `llm_qa.py changed`; R-SUBAGENT-FULL-QA blocks only `all` and `tests`             | VERIFIED          | `.claude/hooks-daemon.yaml:524-528`: `command: llm_qa.py`, `full_words: [all, tests]`. `changed` is listed under `targeted_qa_commands` (line 560). The handler treats a word as full only when it is in `full_words` (`subagent_full_qa_blocker.py:4106`).             |
+| 5   | Citation `hooks-daemon.yaml:524-528`                                                             | VERIFIED          | Those lines are the `llm-qa-whole-suite` entry.                                                                                                                                                                                                                         |
+| 6   | The coordinator had told every agent not to run `llm_qa.py` at all, to keep them off the QA lock | UNVERIFIABLE-HERE | See above.                                                                                                                                                                                                                                                              |
+| 7   | That is why no branch carried a green `changed` record                                           | UNVERIFIABLE-HERE | See above.                                                                                                                                                                                                                                                              |
+| 8   | `changed` would have run these whole-repo checks                                                 | UNVERIFIABLE-HERE | See above.                                                                                                                                                                                                                                                              |
+| 9   | Done in 8c9ac4cf4: `merge_qa_advisor` prints the exact `--range <pre-merge head>..HEAD` command  | VERIFIED          | `git show 8c9ac4cf4` changes `merge_qa_advisor.py` so `_advice` builds `./scripts/qa/llm_qa.py changed --range {start}..HEAD` from the pre-merge HEAD (12-char short SHA, or the placeholder `<the pre-merge head>`). `git branch --contains` lists `main`.             |
+| 10  | A fact-check refuted two of this entry's first-draft claims                                      | VERIFIED          | `subagent-reports/261009-fact-check-n380-sonnet.md` REFUTED items 1 and 2: agents can run `changed`, and a bare `changed` on main is refused.                                                                                                                           |
+| 11  | "The six regressions are on a worktree branch" (unchanged claim, still in the Status line)       | UNVERIFIABLE-HERE | The earlier report could not locate the fixing branch. The diff keeps the wording.                                                                                                                                                                                      |
+
+Remedies 2 and 3 are intentions and were skipped.
