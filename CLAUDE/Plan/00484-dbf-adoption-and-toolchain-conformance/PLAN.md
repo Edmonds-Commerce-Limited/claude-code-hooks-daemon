@@ -136,7 +136,8 @@ agent.
       `EXPLAIN_LINE` and the README still call every handler a defence, but ruling C1 puts the action guards outside
       the Defence set.
     - **3.1b, QA layer**: the G1 detector (reasons inline, no baseline file, per B2), G6, G7 and G8.
-    - **3.1c, config and CLI**: the G4 footer, G11 `probe --only`, and G12.
+    - **3.1c, config and CLI**: the G4 footer, G11 `probe --only`, and G12. Also fix the `exception_entries.py:16`
+      docstring, which calls a plain string under `strict_mode` an error. The code makes it a warning.
   - **Coordinator call (under the owner's "go with the clear winners" instruction):** G5–G9, G12, G13 and G15 were
     never put to the owner. Closing them is the default, so they are closed through the batches above. Resolved; not
     an owner ruling. Success criterion 3 ("the owner has ruled on every gap") therefore waits on the owner to confirm
