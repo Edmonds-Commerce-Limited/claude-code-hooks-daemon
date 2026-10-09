@@ -39,6 +39,8 @@ Default mode (`block_once`): the first symbol-lookup grep in a session is denied
 
 It enforces only where an enabled Claude Code plugin provides a language server for the searched file type (from the glob, type or path). Elsewhere the default `no_lsp_mode: advisory` only suggests installing a code intelligence plugin.
 
+IDs: R-LSP-SYMBOL-LOOKUP
+
 <!-- handler: pipe-blocker -->
 
 ### Pipe Blocker
@@ -82,6 +84,8 @@ pytest tests/ 2>&1 | bin/echd-capture 20
 
 **Length is NOT part of that judgement.** A long command is still a command: a 100-character invocation with a worktree branch name and absolute paths gets the normal block reason, naming what matched and how to whitelist it. If you ever see the short prose reason for text that really was a command, that is a bug worth reporting — retrying it unchanged will block again.
 
+IDs: R-PIPE-TO-TAIL, R-PIPE-TO-HEAD
+
 <!-- handler: block-sed-command -->
 
 ## sed_blocker — sed is forbidden for file modification
@@ -112,6 +116,8 @@ pytest tests/ 2>&1 | bin/echd-capture 20
   2. Dispatch one Haiku agent per file
   3. Each agent uses the `Edit` tool (never `sed`)
 
+IDs: R-SED-FILE-MODIFICATION
+
 <!-- handler: qa-suppression-blocker -->
 
 ## qa_suppression — QA suppression annotations are blocked
@@ -131,6 +137,8 @@ A `Write`/`Edit` that puts QA suppression directives into a source file is block
 **Required action**: Fix the code so QA passes without suppression. If a suppression is genuinely necessary, ask the user to add it manually — this signals a conscious decision rather than a shortcut.
 
 **Excluded paths**: per-language vendor/build/node_modules dirs are skipped by default. Exempt more paths with glob patterns via `handlers.pre_tool_use.qa_suppression.options.exclude_paths` or the project-wide `daemon.exclude_paths` — use these for fixtures that must contain suppression annotations.
+
+IDs: R-QA-SUPPRESSION
 
 <!-- handler: plan-number-helper -->
 
@@ -169,6 +177,8 @@ bin/hooks-daemon find-plan "jobs"
 
 It searches the WHOLE tree including `Completed/`, which is precisely what a folder scan misses, and prints each plan's number, status and path.
 
+IDs: R-PLAN-NUMBER-DISCOVERY, R-PLAN-FOLDER-MKDIR
+
 <!-- handler: block-sensitive-content -->
 
 ## sensitive_content — blocked patterns and secret terms are never written
@@ -191,6 +201,8 @@ If a compound command is denied because an unrelated part of it carries a term (
 
 Missing/empty/comments-only secret file = this source is inert. A list the config names but which is missing is reported once at SessionStart by `secret_file_hygiene_checker`.
 
+IDs: R-SENSITIVE-PUBLIC-PATTERN, R-SENSITIVE-SECRET-TERM
+
 <!-- handler: block-security-antipatterns -->
 
 ## security_antipattern — OWASP security antipatterns are blocked
@@ -210,6 +222,8 @@ A `Write`/`Edit` of code containing security antipatterns is blocked, across all
 **Supported languages**: Python, JavaScript/TypeScript, Go, PHP, Ruby, Java, Kotlin, C#, Rust, Swift, Dart. Coverage varies by language — a construct blocked in one is not necessarily blocked in another.
 
 **Excluded paths**: vendor/, node_modules/, and test fixtures are skipped by default. Exempt more paths with glob patterns via `handlers.pre_tool_use.security_antipattern.options.exclude_paths` or the project-wide `daemon.exclude_paths`.
+
+IDs: R-SEC-CODE-INJECTION, R-SEC-CMD-INJECTION, R-SEC-DESERIALISATION, R-SEC-XSS, R-SEC-HARDCODED-CREDS, R-SEC-UNSAFE-MEMORY
 
 <!-- handler: enforce-tdd -->
 
@@ -253,6 +267,8 @@ test_path_map:
 
 **Allowed through without blocking**: vendor dirs, node_modules, build outputs, generated files, and file extensions not in the supported language list.
 
+IDs: R-TDD-TEST-FIRST
+
 <!-- handler: error-hiding-blocker -->
 
 ## error_hiding_blocker — error-suppression patterns are blocked
@@ -269,6 +285,8 @@ A `Write`/`Edit` of code that silently swallows errors is blocked. All errors mu
 **Required action**: Handle errors explicitly — log them, return them to the caller, or propagate them. Silent error suppression masks bugs and makes debugging impossible.
 
 **Excluded paths**: vendor/, node_modules/, and test-fixture dirs (tests/fixtures/, tests/assets/, __fixtures__/) are skipped by default. Exempt more paths with glob patterns via `handlers.pre_tool_use.error_hiding_blocker.options.exclude_paths` or the project-wide `daemon.exclude_paths` — use these for fixtures of deliberately-broken code instead of disabling the handler.
+
+IDs: R-ERROR-HIDING
 
 <!-- handler: block-comment-changelog -->
 
@@ -292,6 +310,8 @@ Both were measured with ZERO false positives across this project's own ~1,080 so
 **Scope**: only comment spans are scanned (not code), via the same Strategy Pattern language registry as `qa_suppression`. `.md` files are skipped entirely — markdown prose is not a comment. Only the ADDED text is checked on `Edit` (`new_string`) — removing changelog content is never blocked.
 
 **Excluded paths**: vendor/build/fixture dirs are skipped by default. Exempt more paths via `handlers.pre_tool_use.comment_changelog.options.exclude_paths` or the project-wide `daemon.exclude_paths`.
+
+IDs: R-COMMENT-CHANGELOG
 
 <!-- handler: auto-continue-stop -->
 
@@ -354,6 +374,8 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 
 **An `[awaiting-human]` stop must also schedule a one-off stand-in.** With `persistent_crons.enabled`, a main-thread stop that declares it is blocked on the human is denied until `session_crons` holds a cron led by `[tick:stand-in]`; the deny gives the exact `CronCreate` (`recurring: false`, about `options.stand_in_delay_hours` = 3 hours out, valid above 0 and below 24). If the marker is still live when it fires, a `model: fable` sub-agent picks among the options you laid out and the choice is journalled as the stand-in's ruling, never the owner's. It may choose only engineering options: releases, force and remote-branch deletes, QA suppressions, history rewrites, upgrade approvals and anything a guard says to ask the user stay blocked. The stand-in tick is not dropped by the live marker, and a sub-agent or teammate stop is never asked for one.
 
+IDs: R-STOP-QA-FAILURE, R-STOP-TAUTOLOGICAL-QUESTION, R-STOP-AFTER-TOOL-ERROR, R-STOP-CONFIRMATION-QUESTION, R-STOP-NO-REASON, R-STOP-GOAL-LEDGER
+
 ## All other enforced rules
 
 <!-- handler: bash-safe-mode -->
@@ -388,11 +410,19 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 
 <!-- handler: conflict-marker-commit-gate -->
 
+<!-- handler: cron-stop-enforcer -->
+
+<!-- handler: cron-subagent-stop-enforcer -->
+
 <!-- handler: daemon-location-guard -->
+
+<!-- handler: dispatch-declaration -->
 
 <!-- handler: docs-qa-commit-gate -->
 
 <!-- handler: docs-qa-edit -->
+
+<!-- handler: enforce-llm-qa -->
 
 <!-- handler: enforce-markdown-organization -->
 
@@ -418,6 +448,8 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 
 <!-- handler: lsp-noise-checker -->
 
+<!-- handler: plan-done-requires-holding-area -->
+
 <!-- handler: plan-journal-guard -->
 
 <!-- handler: plan-qa-commit-gate -->
@@ -431,6 +463,8 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 <!-- handler: quarantine-artefact-read-guard -->
 
 <!-- handler: reference-repo-freshness -->
+
+<!-- handler: release-blocker -->
 
 <!-- handler: remote-docs-commit-gate -->
 
@@ -446,11 +480,17 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 
 <!-- handler: root-recursion-guard -->
 
+<!-- handler: ruff-format-blocker -->
+
 <!-- handler: staged-lint-gate -->
 
 <!-- handler: subagent-cron-delete-blocker -->
 
 <!-- handler: subagent-full-qa-blocker -->
+
+<!-- handler: subagent-report-path-verifier -->
+
+<!-- handler: subagent-report-size-blocker -->
 
 <!-- handler: subagent-worktree-write-guard -->
 
@@ -496,9 +536,13 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 | R-WRITE-CLOBBER                    | `Write` to an existing file you have not read this session                                                                                                                                                                                                      | You cannot know what you are destroying, so you could not report the loss even afterwards                                                                                                         | `Read` the file then retry, or use `Edit` for a targeted change                                                                                                                                                       |
 | R-CONFLICT-MARKER-COMMIT           | a commit whose added lines carry a merge-conflict marker                                                                                                                                                                                                        | A leftover marker becomes history, and one disguised by the markdown formatter reads as prose to every later check                                                                                | Resolve the conflict at each line listed below, re-stage, and commit again                                                                                                                                            |
 | R-CONFLICT-MARKER-SCAN-TIMED-OUT   | a commit git could not finish reading for conflict markers within its time limit                                                                                                                                                                                | An unchecked commit is not a clean one, so it is denied; but no conflict marker was found, and the content is not at fault                                                                        | Retry the same commit; the limit is hit when the host is loaded                                                                                                                                                       |
+| R-CRON-STOP-DECLARED               | a Stop while a declared `persistent_crons` job is missing from `session_crons` or due a refresh                                                                                                                                                                 | A declared cron that does not exist (or that expires within the day) fires no more ticks, so nothing would bring the session back                                                                 | CronCreate (recurring) the named job with the schedule and prompt given, deleting the old copy first when refreshing; or `hooks-daemon cron-pause <job>`                                                              |
+| R-CRON-SUBAGENT-STOP-DECLARED      | a SubagentStop while a declared `persistent_crons` job is missing from `session_crons` or due a refresh                                                                                                                                                         | A declared cron that does not exist (or that expires within the day) fires no more ticks, so nothing would bring the session back                                                                 | CronCreate (recurring) the named job with the schedule and prompt given, deleting the old copy first when refreshing; or `hooks-daemon cron-pause <job>`                                                              |
 | R-DAEMON-DIR-CD                    | `cd`/`pushd` into `.claude/hooks-daemon/`                                                                                                                                                                                                                       | Daemon CLI commands must be run from PROJECT ROOT, causing path confusion otherwise                                                                                                               | Run daemon commands from project root, e.g. `bin/hooks-daemon status`                                                                                                                                                 |
+| R-DISPATCH-DECLARATION-MISSING     | a `Task` dispatch prompt that declares no plan folder and no non-plan destination (strict mode)                                                                                                                                                                 | A subagent's long-form reply travels over a bounded channel that silently elides an oversized inline report, so its output must go to a declared file                                             | Name the plan folder the dispatch belongs to, or say 'not plan work' and declare where its files go                                                                                                                   |
 | R-DOCS-QA-COMMIT                   | a git commit violates a block-level docs QA staged-tree check                                                                                                                                                                                                   | Most doc rot that matters at commit time is cross-file drift a single-file edit hook cannot see                                                                                                   | Fix the content per each finding's remediation below and amend the commit                                                                                                                                             |
 | R-DOCS-QA-EDIT                     | a documentation Write/Edit violates a block-level docs QA check                                                                                                                                                                                                 | A finding only denies the write when it is BLOCK severity AND the resolved mode for that check is block                                                                                           | Fix the content per each finding's remediation below and retry                                                                                                                                                        |
+| R-ENFORCE-LLM-QA                   | running `run_all.sh` directly                                                                                                                                                                                                                                   | It prints 200+ lines of verbose output; this project's QA output is the LLM-optimised wrapper's ~16 lines                                                                                         | Use the project's LLM-optimised QA wrapper (a sub-agent runs its targeted mode and hands the commit to the coordinator)                                                                                               |
 | R-MARKDOWN-WRONG-LOCATION          | MARKDOWN FILE IN WRONG LOCATION — a new `.md` file written to an unrecognised location                                                                                                                                                                          | Markdown files must follow project organization rules                                                                                                                                             | Move it into an allowed location, declare its sub-project under `projects:`, or configure `extra_allowed_markdown_paths`                                                                                              |
 | R-MARKDOWN-UNTRACKED-MEMORY        | UNTRACKED CLAUDE MEMORY IS DISABLED FOR THIS PROJECT — a write to `~/.claude/projects/*/memory/*.md`                                                                                                                                                            | That knowledge is per-checkout, un-reviewed, and invisible to teammates — it drifts from the repo and bypasses code review                                                                        | Document it in tracked project docs instead (CLAUDE.md, .claude/rules/\*.md, docs/)                                                                                                                                   |
 | R-MARKDOWN-PLAN-SYNC               | a `.claude/settings.json` `plansDirectory` out of sync with the daemon's plan_workflow config                                                                                                                                                                   | Plan workflow requires plansDirectory to match daemon config to redirect writes correctly                                                                                                         | Fix `.claude/settings.json`'s `plansDirectory` key, then restart your session                                                                                                                                         |
@@ -522,6 +566,7 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 | R-LOCK-FILE-EDIT                   | Direct `Write`/`Edit` of a package manager lock file                                                                                                                                                                                                            | Lock files are generated artifacts; manual edits create checksum mismatches and broken dependency graphs                                                                                          | Use the package manager commands instead (e.g. `npm install`, `cargo update`)                                                                                                                                         |
 | R-LSP-CONFIG-EXCLUDE               | a language server config with no exclude for a tree that is not project code                                                                                                                                                                                    | The language server reports other checkouts' and fixtures' defects against this one, and a noisy stream is skimmed                                                                                | Add the listed exclude entries (the advisory prints them ready to use); a finding that instead names an entry as harmful means REMOVE it - follow the exact instruction printed, never assume every finding means add |
 | R-LSP-SERVER-STALE                 | a running language server older than the config file its check is anchored to                                                                                                                                                                                   | It is still analysing the scope the OLD config declared                                                                                                                                           | End the named process (the harness respawns it on the next LSP use)                                                                                                                                                   |
+| R-PLAN-DONE-HOLDING-AREA           | flipping a plan to Complete when its Success Criteria never mention the pending-release holding area                                                                                                                                                            | A plan is done when it is merged AND its release-bound consequences are recorded in the holding area; otherwise they are lost at the next release                                                 | Add a Success Criteria line citing the holding-area artefact, or stating that the plan has no release-bound consequences and why                                                                                      |
 | R-JOURNAL-HAND-WRITTEN-ENTRY       | a plan journal entry written by hand (Edit/Write/Bash into a JOURNAL/ day-file)                                                                                                                                                                                 | Only `mkplan.bash --journal` stamps the real UTC time; hand-typed stamps have landed 40 minutes in the future                                                                                     | Write the entry body to a fresh file under untracked/scratch/, then run `mkplan.bash --journal <plan> <category> <body-file>`                                                                                         |
 | R-PLAN-QA-COMMIT                   | a git commit violates a block-level plan QA cross-file invariant                                                                                                                                                                                                | Most plan rot is cross-file and a single-file edit hook cannot see it                                                                                                                             | Amend the commit to also stage what each finding's remediation names below                                                                                                                                            |
 | R-PLAN-QA-EDIT                     | a PLAN.md/README.md Write/Edit violates a block-level plan QA check                                                                                                                                                                                             | Plan QA linting catches issues you can fix immediately, before they reach commit                                                                                                                  | Fix the content per each finding's remediation below and retry                                                                                                                                                        |
@@ -544,6 +589,7 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 | R-QUARANTINE-ARTEFACT-READ         | reading a quarantined `*-opus-security-DETAIL*` artefact into the coordinator                                                                                                                                                                                   | A DETAIL artefact holds raw flaggable substance meant for a human or another quarantine agent only                                                                                                | Read the paired `*-opus-security-SUMMARY*` artefact instead                                                                                                                                                           |
 | R-REFERENCE-REPO-STALE             | a read of a governed reference clone that is behind or off its default branch                                                                                                                                                                                   | reasoning from a stale clone produces conclusions indistinguishable from correct ones -- no error, no failing test, just a wrong answer                                                           | Run the `fix:` command printed beside the repo, then retry the read                                                                                                                                                   |
 | R-REFERENCE-REPO-NOT-VERIFIED      | a read of a governed reference clone with no in-date freshness reading                                                                                                                                                                                          | nobody has checked this clone, which is a different fact from it being stale -- and treating the two the same either cries wolf or gives false comfort                                            | Run `hooks-daemon reference-repos` to fetch every governed repo and refresh                                                                                                                                           |
+| R-RELEASE-IN-PROGRESS              | ending the session while `untracked/release-state.json` records an unfinished release                                                                                                                                                                           | A part-done release (version bumped, UNRELEASED/ moved, nothing tagged) is its own broken state, and the state file is the human's authorisation to finish it                                     | Resume from the recorded last_completed_step and finish the release (RELEASING.md); to abort a failed gate, delete the state file and report which gate failed                                                        |
 | R-REMOTE-DOCS-STAGED-PROVENANCE    | a commit staging a remote-docs file without valid provenance frontmatter                                                                                                                                                                                        | An unattributed vendored document that reaches history needs a rewrite to remove, and cannot be refreshed, dated or trusted meanwhile                                                             | Capture with `hooks-daemon remote-docs add <url>` and re-stage                                                                                                                                                        |
 | R-REMOTE-DOCS-PROVENANCE           | a write into the remote-docs tree without valid provenance frontmatter                                                                                                                                                                                          | A vendored document with no recorded source is indistinguishable from something we wrote ourselves, and cannot be refreshed, dated or trusted                                                     | Capture with `hooks-daemon remote-docs add <url>` instead of hand-authoring                                                                                                                                           |
 | R-REMOTE-DOCS-VENDORED-COPY        | a WebFetch of a URL this project already holds a fresh vendored copy of                                                                                                                                                                                         | The local copy is faster, costs no network round trip, and is the corpus the remote-docs tree exists to build                                                                                     | Read the local path named in the message, or refresh it if you need newer content                                                                                                                                     |
@@ -551,9 +597,12 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 | R-GH-ISSUE-VIEW-NO-COMMENTS        | `gh issue view` without `--comments`                                                                                                                                                                                                                            | Issue comments contain critical context, clarifications and updates not in the issue body                                                                                                         | Add --comments, or include comments in --json fields                                                                                                                                                                  |
 | R-GH-PR-VIEW-NO-COMMENTS           | `gh pr view` without `--comments`                                                                                                                                                                                                                               | PR comments contain review feedback and discussion context not in the PR body                                                                                                                     | Add --comments, or include comments in --json fields                                                                                                                                                                  |
 | R-ROOT-RECURSION-CATASTROPHIC      | `grep -r`/`find`/`rg`/... rooted at `/`, `/proc`, `/sys`, `/home`, `/root`, `~`, `$HOME`                                                                                                                                                                        | Walks the entire filesystem and can pin every CPU core for hours                                                                                                                                  | Scope the search to the project (e.g. `rg -l "pattern" .`)                                                                                                                                                            |
+| R-RUFF-FORMAT-WRONG-FORMATTER      | `ruff format` (and `ruff format --check`)                                                                                                                                                                                                                       | Black is this project's formatter; running Ruff's restyles every file it touches and the next QA run rewrites them back, burying the churn in an unrelated commit                                 | Use `./scripts/qa/run_autofix.sh`; `ruff check` and `ruff check --fix` are fine                                                                                                                                       |
 | R-STAGED-LINT-FAILURE              | a staged file fails the cheap syntax check at commit time                                                                                                                                                                                                       | lint_on_edit only ever runs at Write/Edit time, so a git add of pre-existing content skips it entirely                                                                                            | Fix the failing file(s) above and re-stage before committing                                                                                                                                                          |
 | R-SUBAGENT-CRON-DELETE             | `CronDelete` called from inside a subagent                                                                                                                                                                                                                      | A session cron belongs to the coordinator's session, which is the session that loses coverage when it goes                                                                                        | Report the cron id and your reasoning to the coordinator and let it decide                                                                                                                                            |
 | R-SUBAGENT-FULL-QA                 | a full-suite QA run inside a sub-agent (a declared `full_qa_patterns` command)                                                                                                                                                                                  | Concurrent full runs across agents exhaust the host, and the coordinator runs the full gate over every ready branch anyway                                                                        | Run targeted QA on what you changed, commit, and hand the commit to the coordinator                                                                                                                                   |
+| R-SUBAGENT-REPORT-PATH-MISSING     | a final message that claims to have written a project file that is not on disk                                                                                                                                                                                  | A false report path looks right, gets recorded as evidence, and resolves to nothing                                                                                                               | Write the file at that exact path, or stop without claiming a path (do not invent an empty report)                                                                                                                    |
+| R-SUBAGENT-REPORT-TOO-LARGE        | a subagent's final message over the character threshold                                                                                                                                                                                                         | A subagent's reply travels over a bounded channel that silently elides an oversized inline report in the middle, so the coordinator can receive a report that looks complete and is not           | Put the full report in a file and reply with its path and a short summary under the threshold                                                                                                                         |
 | R-SUBAGENT-CROSS-WORKTREE-WRITE    | a subagent's Write/Edit/NotebookEdit into another checkout of its repository                                                                                                                                                                                    | Edits land uncommitted in a branch nobody on this task owns, and a later commit there carries them under the wrong branch's name                                                                  | Write only inside your own worktree; report any cross-branch need to the coordinator                                                                                                                                  |
 | R-UPGRADE-APPROVAL-AGENT           | an agent action that grants or forges the owner's upgrade approval (running `approve-upgrade`, writing/touching a marker under `upgrade-approvals/`, forging a venv `.daemon-version` stamp, or moving the `.claude/hooks-daemon` clone to another ref by hand) | Approving a breaking upgrade is the project OWNER's step, not the agent's — the gate exists so a human reads what changed before it happens                                                       | Report the gate's reasons to the user and stop; the owner runs `hooks-daemon approve-upgrade <version> --from <previous>` in their own terminal (it requires a TTY and a typed confirmation phrase)                   |
 | R-UPGRADE-APPROVAL-ENV-BYPASS      | a Bash command that sets `HOOKS_DAEMON_UPGRADE_HANDOFF`, or runs an upgrade with a variable that picks its interpreter, venv, flags or code, or passes `--uv <path>`                                                                                            | The upgrade and its pre-deploy gate run as shipped, not as an agent steers them                                                                                                                   | Run the upgrade with no such variable set; if it cannot run, tell the user                                                                                                                                            |
@@ -614,14 +663,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - command_hints — advisory reminders after specific commands
 
-<!-- handler: cron-stop-enforcer -->
-
-- cron_stop_enforcer — declared crons are verified, not just asked for
-
-<!-- handler: cron-subagent-stop-enforcer -->
-
-- cron_subagent_stop_enforcer — SubagentStop twin of `cron_stop_enforcer`
-
 <!-- handler: daemon-restart-verifier -->
 
 - daemon_restart_verifier — restart the daemon before committing
@@ -633,10 +674,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: deployed-artefact-drift -->
 
 - deployed_artefact_drift — a deployed file has moved away from its template
-
-<!-- handler: dispatch-declaration -->
-
-- dispatch_declaration — declare where a subagent's reports go
 
 <!-- handler: docs-qa-sweep -->
 
@@ -750,17 +787,9 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - standing_authorisations — a project can record a standing request
 
-<!-- handler: subagent-report-path-verifier -->
-
-- subagent_report_path_verifier — a claimed report path must exist
-
 <!-- handler: subagent-report-persistence -->
 
 - subagent_report_persistence — every sub-agent reply is saved to a file
-
-<!-- handler: subagent-report-size-blocker -->
-
-- subagent_report_size_blocker — write large reports to a file
 
 <!-- handler: tool-disable-advisor -->
 
