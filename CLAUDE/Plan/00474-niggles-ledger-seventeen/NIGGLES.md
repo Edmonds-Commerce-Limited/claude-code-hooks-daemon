@@ -1426,6 +1426,23 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N382 — `changed --range` does not select tests that discover handlers by scanning the package
+
+**Source**: the coordinator, 2026-10-09. The Plan 00484 batch 3.1a agent reported a failing test that also failed on
+main.
+
+**Evidence**: `tests/integration/test_bash_write_blindness_coverage.py::TestEveryKeyedHandlerHasAVerdict` failed on
+main after the 00499 Phase 1b merge (64823600a): `WriteProtectedPathsHandler` keys on Write/Edit and had no recorded
+verdict. `llm_qa.py changed --range 0ef4ce3942a9..HEAD --allow-unmapped` reported 38/38 green over that merge, so it
+never selected the test. The test finds its handlers with `pkgutil` and a source scan, not by importing the changed
+module, so an import-based selector cannot reach it. This is the same shape as N380: a whole-repo property test that
+lives far from the module that breaks it.
+
+**Status**: 🔄 The regression is fixed on main (a PARTIAL verdict row, with its reason). Still open: the selector
+should always run the tests that walk the handler package (blindness coverage, guidance coverage, priority bands,
+template consistency) whenever any file under `handlers/` changes. A pinned list in `scripts/qa/` is one way, with a
+test that each listed file really walks the package.
+
 ### N381 — `test_subagent_full_qa_blocker` fails under the pytest a fresh venv installs
 
 **Source**: the Plan 00484 batch 3.1a review (2026-10-09,
