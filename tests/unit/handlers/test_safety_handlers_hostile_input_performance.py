@@ -59,6 +59,7 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
 )
 from claude_code_hooks_daemon.handlers.registry import (
     HandlerRegistry,
+    apply_handler_options,
     iter_builtin_handler_classes,
 )
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
@@ -189,6 +190,22 @@ def _safety_pre_tool_use_handlers() -> list[type[Handler]]:
     return classes
 
 
+#: Handlers that do nothing until configured, and the options that make them judge.
+#: A bare instance would be swept vacuously (Plan 00499 review S11).
+_SWEEP_OPTIONS: dict[str, dict[str, object]] = {
+    "WriteProtectedPathsHandler": {"paths": [".claude/ccy/ccy.env.local", "secrets/*.txt"]},
+}
+
+
+def _configured(handler_cls: type[Handler]) -> Handler:
+    """``handler_cls()`` with the options that make it do real work in the sweep."""
+    handler = handler_cls()
+    options = _SWEEP_OPTIONS.get(handler_cls.__name__)
+    if options is not None:
+        apply_handler_options(handler, options)
+    return handler
+
+
 def _dispatch(handler: Handler, hook_input: dict) -> None:
     """Run ``matches()``, and ``handle()`` when it matches."""
     if handler.matches(hook_input):
@@ -314,7 +331,7 @@ class TestBashCommandShapesStayLinear:
             def input_at(size: int, s: str = shape) -> dict:
                 return _bash_input(_hostile_bash_command_at(s, size))
 
-            finding = _growth_finding(handler_cls(), input_at, small_n, large_text)
+            finding = _growth_finding(_configured(handler_cls), input_at, small_n, large_text)
             if finding is not None:
                 superlinear.append(f"{handler_cls.__name__} {finding} on shape={shape!r}")
         assert not superlinear, "superlinear SAFETY handler(s) found:\n" + "\n".join(superlinear)
@@ -343,7 +360,7 @@ class TestWriteContentShapesStayLinear:
                     },
                 }
 
-            finding = _growth_finding(handler_cls(), input_at, small_n, large_text)
+            finding = _growth_finding(_configured(handler_cls), input_at, small_n, large_text)
             if finding is not None:
                 superlinear.append(f"{handler_cls.__name__} {finding} on shape={shape!r}")
         assert not superlinear, "superlinear SAFETY handler(s) found:\n" + "\n".join(superlinear)
@@ -491,7 +508,7 @@ def _project_pre_tool_use_handlers() -> list[Handler]:
 
 def _all_swept_handlers() -> list[Handler]:
     """Fresh built-in SAFETY instances plus best-effort project-level handlers."""
-    instances: list[Handler] = [cls() for cls in _safety_pre_tool_use_handlers()]
+    instances: list[Handler] = [_configured(cls) for cls in _safety_pre_tool_use_handlers()]
     instances.extend(_project_pre_tool_use_handlers())
     return instances
 
