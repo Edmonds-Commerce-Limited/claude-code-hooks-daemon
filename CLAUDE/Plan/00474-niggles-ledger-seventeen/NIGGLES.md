@@ -1426,6 +1426,19 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N381 — `test_subagent_full_qa_blocker` fails under the pytest a fresh venv installs
+
+**Source**: the Plan 00484 batch 3.1a review (2026-10-09,
+`subagent-reports/261009-00484-3.1a-review-r1-opus.md` in Plan 00484 once committed).
+
+**Evidence**: the file passes on main with the shared venv. In a worktree whose venv was built fresh, it fails
+because the full-QA blocker does not recognise a newer pytest's options. So the blocker's table of pytest options
+is pinned to one pytest version, while the venv resolves whatever version is current.
+
+**Status**: ⬜ Open. Remedy: find the options the newer pytest added, and either pin pytest in `uv.lock` /
+`pyproject.toml` or make the blocker treat an unknown option conservatively. Add a test run against the lock's pytest
+version.
+
 ### N380 — agent branches pass their targeted tests and break the cross-cutting ones
 
 **Source**: the coordinator, 2026-10-09. After N379, `llm_qa.py changed --range 85c4c73b1..HEAD` was run over every
