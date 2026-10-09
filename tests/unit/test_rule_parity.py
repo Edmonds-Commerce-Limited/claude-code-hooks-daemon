@@ -318,7 +318,7 @@ class TestConstantHygiene:
 
 
 # ---------------------------------------------------------------------------
-# 5. Every Decision.DENY handler declares rules (or is explicitly allowlisted)
+# 5. Every Decision.DENY handler declares rules
 # ---------------------------------------------------------------------------
 
 #: Source marker meaning "this handler has a code path that denies a tool call".
