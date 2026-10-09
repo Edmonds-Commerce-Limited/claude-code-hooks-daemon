@@ -773,6 +773,45 @@ return GatingResult(
 )
 ```
 
+## Rules, deny identifiers and Defences
+
+**Every deny names a rule.** A handler that can deny declares its `Rule` objects in
+`get_rules()`, and every deny reason starts with the `BLOCKED [R-...]` headline of one of
+them (`RuleFormatter().headline(rule)`, or `BlockingResult.under_rule(rule)` when the
+reason is built in several places). The ID is what `hooks-daemon explain-rule <ID>`
+resolves. The test suite fails a test whose handler denies without a declared ID
+(`tests/plugins/deny_carries_rule_id.py`).
+
+**A Defence is a content gate or commit gate.** Under the Defence Before Fix method a
+Defence finds a class of defect in what is written or committed: a `Write`/`Edit` content
+gate or a commit gate. An action guard (it stops a careless action, not a defect in content)
+and a post-write linter that only warns are not Defences. A handler is a Defence exactly
+when it declares `defect_class`:
+
+```python
+from typing import ClassVar
+
+from claude_code_hooks_daemon.constants.dbf import DefectClass
+
+class MyGate(PreToolUseHandlerBase):
+    defect_class: ClassVar[DefectClass | None] = DefectClass.ERROR_HIDING
+```
+
+`defect_class` is the closed `DefectClass` vocabulary
+(`src/claude_code_hooks_daemon/constants/dbf.py`), a `StrEnum`; a free string is a
+type error under mypy (a test also pins that every declared value is a member). It is what `hooks-daemon defences --json` lists and reports in its `defect_class`
+field, and what `explain-rule` and `explain-handler` print on the "Defence for the defect
+class" line. A handler that leaves it `None` is a guardrail and is not listed by
+`defences`. Adding a member to `DefectClass`, or declaring one on a library handler, also
+means editing the pinned set in `tests/unit/test_defence_membership.py`, which is a
+deliberate membership ruling rather than a side effect.
+
+**A project handler declares it the same way**, with a member of `DefectClass`; it cannot
+use its own string, because the vocabulary is closed. A project handler that declares none
+does not appear in `defences`, however blocking it is. If none of the members describes the
+defect class a project handler defends, that is a library change (a new member), not a
+local string.
+
 ## Testing Handlers
 
 ### Test Structure

@@ -42,6 +42,9 @@ from claude_code_hooks_daemon.utils.link_resolution import link_resolves_literal
 from claude_code_hooks_daemon.utils.markdown_links import extract_link_targets
 
 CHECK_ID: Final[str] = "plan-link-resolves"
+STATEMENT: Final[str] = (
+    "A live plan should not link to a sibling that has since been archived. Update the link to the archived location."
+)
 
 _EXTERNAL_SCHEME_PREFIXES: Final[tuple[str, ...]] = ("#", "mailto:")
 _PLACEHOLDER_TOKENS: Final[tuple[str, ...]] = ("NNNNN", "X.Y.Z", "{", "*", "<")

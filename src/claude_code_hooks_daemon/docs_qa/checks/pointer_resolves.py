@@ -49,6 +49,9 @@ from claude_code_hooks_daemon.utils.markdown_links import extract_link_targets
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 CHECK_ID: Final[str] = "pointer-resolves"
+STATEMENT: Final[str] = (
+    "A markdown link must point at a file that exists. Fix the target or remove the link."
+)
 
 
 _EXTERNAL_SCHEME_RE: Final[re.Pattern[str]] = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://")

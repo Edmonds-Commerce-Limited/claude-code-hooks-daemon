@@ -33,7 +33,7 @@ import shutil
 import subprocess  # nosec B404 - subprocess used for lint validation only (trusted tools)
 import sys
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -43,6 +43,7 @@ from claude_code_hooks_daemon.constants import (
     Timeout,
     ToolName,
 )
+from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import AcceptanceTest, Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
@@ -65,6 +66,7 @@ from claude_code_hooks_daemon.utils.git_facts import commit_facts
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 from claude_code_hooks_daemon.utils.staging_simulation import (
+    INCOMPLETE_SIMULATION_BLOCKED,
     SimulationIncompleteError,
     simulated_staging,
 )
@@ -123,6 +125,8 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         mode: "warn" (default) or "block".
         max_files: int - stand-down threshold (default 20).
     """
+
+    defect_class: ClassVar[DefectClass | None] = DefectClass.LINT_FAILURE
 
     def __init__(self) -> None:
         super().__init__(
@@ -201,7 +205,9 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
                 ]
         except SimulationIncompleteError as incomplete:
             if self._mode == _MODE_BLOCK:
-                return GatingResult(decision=Decision.DENY, reason=str(incomplete))
+                return GatingResult(decision=Decision.DENY, reason=str(incomplete)).under_rule(
+                    self._rule, blocked=INCOMPLETE_SIMULATION_BLOCKED
+                )
             return GatingResult(
                 decision=Decision.ALLOW, context=[f"⚠️ staged-lint-gate: {incomplete}"]
             )

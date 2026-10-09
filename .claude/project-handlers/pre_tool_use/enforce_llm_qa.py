@@ -12,6 +12,7 @@ from typing import Any, Final
 
 from claude_code_hooks_daemon.core import AcceptanceTest, Handler, HookResult, TestType
 from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.utils import shell_expansion
 from claude_code_hooks_daemon.utils.linear_shlex import LinearShlex
 from claude_code_hooks_daemon.utils.shell_segmentation import (
@@ -22,6 +23,23 @@ from claude_code_hooks_daemon.utils.shell_segmentation import (
 _BLOCKED_SCRIPT = "run_all.sh"
 _LLM_SCRIPT = "./scripts/qa/llm_qa.py all"
 _TARGETED_SCRIPT = "./scripts/qa/llm_qa.py changed"
+
+# This project's rule ID (a project handler's IDs live with the handler, not in the
+# library's `RuleID`). `hooks-daemon explain-rule` resolves it (Plan 00484 G5).
+RULE_ID: Final[str] = "R-ENFORCE-LLM-QA"
+
+_RULE: Final[Rule] = Rule(
+    rule_id=RULE_ID,
+    blocked="running `run_all.sh` directly",
+    why="It prints 200+ lines of verbose output; this project's QA output is the LLM-optimised wrapper's ~16 lines",
+    fix="Use the project's LLM-optimised QA wrapper (a sub-agent runs its targeted mode and hands the commit to the coordinator)",
+    verbose=(
+        "`run_all.sh` is the verbose full suite. The block message names the wrapper to\n"
+        "run instead for the role that asked: the main thread runs the full gate, a\n"
+        "sub-agent runs the targeted mode (the full suite is the coordinator's gate).\n"
+        "Individual scripts (`run_lint.sh`, `run_type_check.sh`, ...) are still allowed."
+    ),
+)
 
 # Characters that end one command and begin the next AT THE TOP LEVEL of a
 # shell line. A newline is one of them: `a\nb` runs two commands exactly as
@@ -491,10 +509,12 @@ class EnforceLlmQaHandler(Handler):
         gate (Plan 00463), and `subagent_full_qa_blocker` denies it there, so
         advice to run it would lead straight into the next deny.
         """
+        headline = RuleFormatter().headline(_RULE)
         if hook_input.get("agent_id"):
             return HookResult(
                 decision=Decision.DENY,
                 reason=(
+                    f"{headline}\n\n"
                     "USE LLM-OPTIMISED, TARGETED QA\n\n"
                     "run_all.sh is the full suite with 200+ lines of verbose output.\n"
                     "The full suite is the coordinator's gate, so as a sub-agent run:\n\n"
@@ -505,6 +525,7 @@ class EnforceLlmQaHandler(Handler):
         return HookResult(
             decision=Decision.DENY,
             reason=(
+                f"{headline}\n\n"
                 "USE LLM-OPTIMISED QA SCRIPT\n\n"
                 "run_all.sh produces 200+ lines of verbose output.\n"
                 "Use the LLM-optimised wrapper instead:\n\n"
@@ -513,6 +534,10 @@ class EnforceLlmQaHandler(Handler):
                 "Individual scripts (run_lint.sh, run_type_check.sh, etc.) are still allowed."
             ),
         )
+
+    def get_rules(self) -> list[Rule]:
+        """The rule behind both of this handler's denies (main thread and sub-agent)."""
+        return [_RULE]
 
     def get_claude_md(self) -> str | None:
         return None

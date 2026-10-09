@@ -199,7 +199,7 @@ class UsagePauseGateHandler(InitialThreadExemption, UserPromptSubmitHandlerBase)
             return BlockingResult(
                 decision=Decision.DENY,
                 reason=f"Usage pause: the resume cron fired before {until}; the pause holds.",
-            )
+            ).under_rule(_RULE, blocked="a resume cron tick that fired before the pause is due")
         breaches = current_breaches(hook_input, env)
         if not breaches:
             return self._lift(hook_input, session_id, record, env, verified_under_ceiling=True)

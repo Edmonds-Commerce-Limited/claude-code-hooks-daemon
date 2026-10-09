@@ -28,6 +28,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
 )
 
 CHECK_ID: Final[str] = "status-enum-and-date"
+STATEMENT: Final[str] = (
+    "The `**Status**:` line must be one of the allowed status tokens (and carry a terminal date where the project requires one). Use a token from the plan template."
+)
 
 _ALLOWED_TOKENS: Final[str] = (
     "Not Started, In Progress, Complete, Blocked, Cancelled, Superseded, Dormant"

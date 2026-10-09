@@ -31,16 +31,33 @@ project's linter, which is exactly right. The deny message says so, because the
 wrong lesson to take from this block is "Ruff is banned".
 """
 
-from typing import Any
+from typing import Any, Final
 
 from claude_code_hooks_daemon.core import AcceptanceTest, Handler, HookResult, TestType
 from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     split_unquoted,
     strip_quoted_heredoc_bodies,
 )
 
 _AUTOFIX_SCRIPT = "./scripts/qa/run_autofix.sh"
+
+# This project's rule ID (a project handler's IDs live with the handler, not in the
+# library's `RuleID`). `hooks-daemon explain-rule` resolves it (Plan 00484 G5).
+RULE_ID: Final[str] = "R-RUFF-FORMAT-WRONG-FORMATTER"
+
+_RULE: Final[Rule] = Rule(
+    rule_id=RULE_ID,
+    blocked="`ruff format` (and `ruff format --check`)",
+    why="Black is this project's formatter; running Ruff's restyles every file it touches and the next QA run rewrites them back, burying the churn in an unrelated commit",
+    fix=f"Use `{_AUTOFIX_SCRIPT}`; `ruff check` and `ruff check --fix` are fine",
+    verbose=(
+        "Ruff is the LINTER here and Black is the FORMATTER (CLAUDE/QA.md). Both are\n"
+        "installed and `ruff format` succeeds, which is the trap: it leaves a tree that\n"
+        f"passes its own check while Black disagrees. Run `{_AUTOFIX_SCRIPT}`."
+    ),
+)
 
 # Commands that READ a path or record it as data rather than executing it. A
 # `ruff format` inside a grep pattern, a commit message or a file being cat-ed
@@ -141,11 +158,16 @@ class RuffFormatBlockerHandler(Handler):
                 return True
         return False
 
+    def get_rules(self) -> list[Rule]:
+        """The rule behind this handler's one deny."""
+        return [_RULE]
+
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Deny, naming the formatter of record and the entry point to use."""
         return HookResult(
             decision=Decision.DENY,
             reason=(
+                f"{RuleFormatter().headline(_RULE)}\n\n"
                 "WRONG FORMATTER — Black is this project's formatter of record\n\n"
                 "Ruff is the LINTER here; Black is the FORMATTER (CLAUDE/QA.md).\n"
                 "Running `ruff format` restyles every file it touches, and the\n"

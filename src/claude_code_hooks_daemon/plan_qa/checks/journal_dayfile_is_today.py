@@ -42,6 +42,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
 )
 
 CHECK_ID: Final[str] = "journal-dayfile-is-today"
+STATEMENT: Final[str] = (
+    "A journal day-file edit must be for exactly today's date. Append to today's day-file with `mkplan.bash --journal`."
+)
 
 _GENERIC_DAYFILE_NAME: Final[str] = "NNNNN-Journal-YY-MM-DD.md"
 

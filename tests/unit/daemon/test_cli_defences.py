@@ -41,10 +41,38 @@ class TestCmdDefences:
         assert cmd_defences(_args()) == 0
         records = json.loads(capsys.readouterr().out)
         by_id = {record["rule_id"]: record for record in records if record["rule_id"]}
-        record = by_id["R-GIT-RESET-HARD"]
-        assert record["handler"] == "destructive_git"
-        assert record["docs"] == "hooks-daemon explain-rule R-GIT-RESET-HARD"
+        record = by_id["R-QA-SUPPRESSION"]
+        assert record["handler"] == "qa_suppression"
+        assert record["docs"] == "hooks-daemon explain-rule R-QA-SUPPRESSION"
         assert record["event"] == "pre_tool_use"
+
+    def test_every_record_names_a_defect_class(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert cmd_defences(_args()) == 0
+        records = json.loads(capsys.readouterr().out)
+        assert all(record["defect_class"] for record in records)
+        by_id = {record["rule_id"]: record for record in records if record["rule_id"]}
+        assert by_id["R-QA-SUPPRESSION"]["defect_class"] == "qa-suppression"
+
+    def test_action_guards_are_not_listed(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Owner ruling C1: the action guards are outside the Defence set."""
+        assert cmd_defences(_args()) == 0
+        listed = {record["handler"] for record in json.loads(capsys.readouterr().out)}
+        assert not listed & {"destructive_git", "sed_blocker", "pipe_blocker", "git_stash"}
+
+    def test_listing_is_exactly_the_handlers_that_declare_a_defect_class(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from claude_code_hooks_daemon.rule_explain.lookup import discover_handler_rules
+
+        assert cmd_defences(_args()) == 0
+        listed = {record["handler_class"] for record in json.loads(capsys.readouterr().out)}
+        declared = {
+            entry.class_name
+            for entry in discover_handler_rules(include_project_handlers=True)
+            if entry.defect_class is not None
+        }
+        assert listed <= declared
+        assert len(listed) > 10
 
     def test_every_listed_rule_id_resolves_with_explain_rule(
         self, capsys: pytest.CaptureFixture[str]
@@ -69,7 +97,7 @@ class TestCmdDefences:
     ) -> None:
         assert cmd_defences(_args(as_json=False)) == 0
         lines = capsys.readouterr().out.splitlines()
-        assert any(line.startswith("R-GIT-RESET-HARD\tdestructive_git\t") for line in lines)
+        assert any(line.startswith("R-QA-SUPPRESSION\tqa_suppression\t") for line in lines)
 
     def test_uninstalled_project_fails_fast(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]

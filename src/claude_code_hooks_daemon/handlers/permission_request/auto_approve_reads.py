@@ -11,12 +11,14 @@ Plan 00106: it converted a default session into YOLO behaviour without
 user consent.
 """
 
-from typing import Any
+from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import PermissionRequestHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.utils.permission_mode import is_bypass_mode
 
 # Read-only tools that are safe to auto-approve
@@ -24,6 +26,17 @@ _READ_ONLY_TOOLS: tuple[str, ...] = (
     ToolName.READ,
     ToolName.GLOB,
     ToolName.GREP,
+)
+
+_RULE: Final[Rule] = Rule(
+    rule_id=RuleID.PERMISSION_REQUEST_NON_READ_TOOL,
+    blocked="a permission request for a tool that is not Read, Glob or Grep",
+    why="Only read-only tools are auto-approved; a write or execute request is not this handler's to grant",
+    fix="Control write/execute operations with PreToolUse hooks",
+    verbose=(
+        "Defensive: matches() only admits read-only tools in bypass mode, so this\n"
+        "refusal fires only if another tool reaches handle()."
+    ),
 )
 
 
@@ -85,11 +98,15 @@ class AutoApproveReadsHandler(PermissionRequestHandlerBase):
         return BlockingResult(
             decision=Decision.DENY,
             reason=(
-                f"BLOCKED: Permission request for non-read tool '{tool_name}'\n\n"
+                f"Permission request for non-read tool '{tool_name}'\n\n"
                 "Only read-only tools (Read, Glob, Grep) are auto-approved.\n"
                 "Write/execute operations should be controlled by PreToolUse hooks."
             ),
-        )
+        ).under_rule(_RULE)
+
+    def get_rules(self) -> list[Rule]:
+        """Declare the one rule this handler's deny prints."""
+        return [_RULE]
 
     def get_claude_md(self) -> str | None:
         return (

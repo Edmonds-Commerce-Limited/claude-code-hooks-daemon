@@ -422,6 +422,14 @@ _RULE_DEFINITIONS: tuple[tuple[str, str, str, str, str], ...] = (
         _GOAL_LEDGER_MECHANISM_NOTE
         + " The challenge always names the live plan numbers at fire time.",
     ),
+    (
+        RuleID.STOP_STAND_IN_MISSING,
+        "An [awaiting-human] stop with no one-off stand-in cron scheduled",
+        "One open question would halt all work until the owner returns",
+        "CronCreate the one-off stand-in with the schedule and prompt in the block message, then stop again",
+        "The block message carries the exact schedule and prompt. The stand-in only acts if the "
+        "awaiting-human marker is still live when it fires, and it may choose only engineering options.",
+    ),
 )
 
 # Plan 00276: goal-ledger Stop defence (mechanism explanation shared with
@@ -712,7 +720,10 @@ class AutoContinueStopHandler(StopHandlerBase):
             return None
         if not self._config_loader().persistent_crons.enabled:
             return None
-        return stand_in_verdict(hook_input, delay_hours=self._stand_in_delay_hours)
+        verdict = stand_in_verdict(hook_input, delay_hours=self._stand_in_delay_hours)
+        if verdict is None:
+            return None
+        return verdict.under_rule(self._rules_by_id[RuleID.STOP_STAND_IN_MISSING])
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Return True for all Stop events unless re-entry or AskUserQuestion.

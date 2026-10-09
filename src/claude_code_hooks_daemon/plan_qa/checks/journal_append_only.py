@@ -32,6 +32,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
 )
 
 CHECK_ID: Final[str] = "journal-append-only"
+STATEMENT: Final[str] = (
+    "A journal day-file is an append-only log. Add new entries at the end and do not edit earlier ones."
+)
 
 
 def _remediation(plan_dir: str, plan_number: int | None) -> str:

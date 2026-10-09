@@ -1335,6 +1335,40 @@ class TestTwoTierPromotedBlock:
         content = claude_md.read_text()
         assert "Verbatim prose that must stay resident." in content
 
+    def test_promoted_section_lists_every_rule_id_its_handler_declares(
+        self, tmp_path: Path
+    ) -> None:
+        """Plan 00484 G13: a promoted prose section replaces the table rows, so
+        without an IDs line the rule IDs the handler denies with reach no one."""
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Project\n")
+        promoted = _StubHandler(
+            "pipe_blocker",
+            "## pipe_blocker\n\nProse that stays resident.",
+            rules=[self._rule("R-PIPE-ONE"), self._rule("R-PIPE-TWO")],
+        )
+        ClaudeMdInjector(
+            workspace_root=tmp_path, handlers=[promoted], promoted_handlers=["pipe_blocker"]
+        ).inject()
+
+        content = claude_md.read_text()
+        assert "IDs: R-PIPE-ONE, R-PIPE-TWO" in content.splitlines()
+        assert content.index("Prose that stays resident.") < content.index("IDs: R-PIPE-ONE")
+
+    def test_promoted_section_without_rules_has_no_ids_line(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Project\n")
+        promoted = _StubHandler("plain", "## plain\n\nProse only.")
+        ClaudeMdInjector(
+            workspace_root=tmp_path, handlers=[promoted], promoted_handlers=["plain"]
+        ).inject()
+
+        assert "IDs:" not in claude_md.read_text()
+
     def test_promotion_matches_config_key_not_display_name(self, tmp_path: Path) -> None:
         """The promoted_handlers config lists CONFIG KEYS (module basenames,
         e.g. ``lsp_enforcement``), but a handler's ``.name`` is its display

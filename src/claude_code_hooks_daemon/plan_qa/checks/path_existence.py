@@ -31,6 +31,9 @@ from claude_code_hooks_daemon.utils.authored_paths import contained_authored_pat
 from claude_code_hooks_daemon.utils.markdown_fences import lines_outside_fences
 
 CHECK_ID: Final[str] = "path-existence"
+STATEMENT: Final[str] = (
+    "Repository paths a plan names should exist. Update or remove a path that was renamed or deleted."
+)
 
 # A plan whose work has not begun names the files it INTENDS to create, so
 # "does not exist" is the expected state rather than drift. Every finding on

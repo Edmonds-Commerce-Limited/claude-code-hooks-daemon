@@ -40,6 +40,9 @@ from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 logger = logging.getLogger(__name__)
 
 CHECK_ID: Final[str] = "at-import-census"
+STATEMENT: Final[str] = (
+    "`@`-imports outside the root CLAUDE.md's deliberate set defeat progressive disclosure. Replace the import with a link."
+)
 
 _BACKTICK_SPAN_RE: Final[re.Pattern[str]] = re.compile(r"`[^`]*`")
 _AT_IMPORT_RE: Final[re.Pattern[str]] = re.compile(r"@(\S+\.md)")

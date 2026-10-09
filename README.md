@@ -85,11 +85,14 @@ statement is in
 
 The method behind the handlers is [Defence Before Fix](https://defence-before-fix.github.io):
 a defect is evidence of a class, and the class gets an automated defence before
-the instance gets a fix. Each handler here is such a defence, running at
-tool-call time against the ordinary mistakes described above, and
-`hooks-daemon explain-rule <ID>` names the method for any rule. It is a method
-for catching careless mistakes, not a claim to stop a hostile agent or prompt
-injection.
+the instance gets a fix. The Defences here are the handlers that judge what a
+file contains or what a commit would record (the content and commit gates),
+each running at tool-call time against a named defect class. The action guards
+(destructive git, `sed`, pipes and the like) are guardrails: they stop a careless
+action and are not Defences in that sense. `hooks-daemon defences` lists the
+Defences with their defect classes, and `hooks-daemon explain-rule <ID>` names
+the method and says which of the two a rule is. It is a method for catching
+careless mistakes, not a claim to stop a hostile agent or prompt injection.
 
 ---
 

@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from plan_done_requires_holding_area import PlanDoneRequiresHoldingAreaHandler
+from plan_done_requires_holding_area import RULE_ID, PlanDoneRequiresHoldingAreaHandler
 
+from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.core.hook_result import Decision
 
 _ACTIVE = "CLAUDE/Plan/00999-example/PLAN.md"
@@ -73,6 +74,21 @@ class TestAWriteThatCompletesAPlan:
         assert result.reason is not None
         assert "holding area" in result.reason
         assert "UNRELEASED" in result.reason
+
+    def test_denial_carries_the_rule_id_that_explain_rule_resolves(
+        self, handler: PlanDoneRequiresHoldingAreaHandler, write_hook_input: Any
+    ) -> None:
+        """Plan 00484 G5: this project handler used to deny with no identifier."""
+        (rule,) = handler.get_rules()
+        result = handler.handle(write_hook_input(_ACTIVE, _plan("Complete", _CRITERIA_WITHOUT)))
+        assert rule.rule_id == RULE_ID
+        assert (result.reason or "").startswith(f"BLOCKED [{rule.rule_id}]")
+
+    def test_it_judges_plan_content_so_it_is_a_defence_not_an_action_guard(
+        self, handler: PlanDoneRequiresHoldingAreaHandler
+    ) -> None:
+        """Owner ruling C1: a content gate is in the Defence set."""
+        assert handler.defect_class == DefectClass.UNRECORDED_RELEASE_CONSEQUENCE
 
     def test_allowed_when_the_criterion_names_an_artefact(
         self, handler: PlanDoneRequiresHoldingAreaHandler, write_hook_input: Any

@@ -42,6 +42,9 @@ from claude_code_hooks_daemon.plan_qa.model import (
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, CheckSpec, Finding, Level, Stage
 
 CHECK_ID: Final[str] = "journal-entry-future-dated"
+STATEMENT: Final[str] = (
+    "A journal entry must not be timestamped ahead of the clock. Use `mkplan.bash --journal`, which stamps the real time."
+)
 
 #: How far ahead of the clock an entry may sit before it is reported. Generous
 #: on purpose: a write takes time, clocks skew, and an agent that rounds up to

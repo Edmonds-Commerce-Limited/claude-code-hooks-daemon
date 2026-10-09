@@ -33,8 +33,10 @@ from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import SubagentStopHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 
 # Fenced spans are stripped before matching: a fence is something the agent is
@@ -74,6 +76,20 @@ _SENTENCE_BOUNDARY_CHARS: Final[str] = ".\n!?"
 #: naming more than a handful is already unambiguous; the rest add length
 #: without adding information.
 _MAX_CLAIMS_REPORTED: Final[int] = 5
+
+_RULE: Final[Rule] = Rule(
+    rule_id=RuleID.SUBAGENT_REPORT_PATH_MISSING,
+    blocked="a final message that claims to have written a project file that is not on disk",
+    why="A false report path looks right, gets recorded as evidence, and resolves to nothing",
+    fix="Write the file at that exact path, or stop without claiming a path (do not invent an empty report)",
+    verbose=(
+        "A subagent's final message said it wrote a file and the file is absent.\n"
+        "Either write the file now at the exact path named in the reason below,\n"
+        "or restate the report without the path claim. Never create an empty or\n"
+        "padded file only to satisfy the check: an invented report looks like\n"
+        "evidence, which is worse than the claim it replaces."
+    ),
+)
 
 
 def _is_negated(prose: str, verb_start: int) -> bool:
@@ -231,7 +247,11 @@ class SubagentReportPathVerifierHandler(SubagentStopHandlerBase):
                 "worse than the claim it replaces, because it looks like "
                 "evidence."
             ),
-        )
+        ).under_rule(_RULE)
+
+    def get_rules(self) -> list[Rule]:
+        """The single rule behind this handler's deny."""
+        return [_RULE]
 
     def get_claude_md(self) -> str | None:
         return (

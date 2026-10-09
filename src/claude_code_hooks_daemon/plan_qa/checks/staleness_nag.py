@@ -18,6 +18,9 @@ from claude_code_hooks_daemon.plan_qa.model import PlanFolder, PlanLocation, Pla
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, CheckSpec, Finding, Level, Stage
 
 CHECK_ID: Final[str] = "staleness-nag"
+STATEMENT: Final[str] = (
+    "A plan marked In Progress with no recent commits is rotting. Update its status or resume the work."
+)
 
 _REMEDIATION: Final[str] = (
     "For each listed plan: confirm it is still active, mark it "

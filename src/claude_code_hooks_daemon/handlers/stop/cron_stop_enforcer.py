@@ -46,9 +46,11 @@ from claude_code_hooks_daemon.config.models import Config, PersistentCronConfig
 from claude_code_hooks_daemon.constants import HandlerTag
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import StopHandlerBase
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.utils.initial_thread_exemption import (
     InitialThreadExemption,
 )
@@ -72,6 +74,20 @@ logger = logging.getLogger(__name__)
 
 # Bound the per-session pause-advice map on the daemon-lifetime singleton.
 _MAX_TRACKED_PAUSE_KEYS: Final[int] = 256
+
+_RULE: Final[Rule] = Rule(
+    rule_id=RuleID.CRON_STOP_DECLARED,
+    blocked="a Stop while a declared `persistent_crons` job is missing from `session_crons` or due a refresh",
+    why="A declared cron that does not exist (or that expires within the day) fires no more ticks, so nothing would bring the session back",
+    fix="CronCreate (recurring) the named job with the schedule and prompt given, deleting the old copy first when refreshing; or `hooks-daemon cron-pause <job>`",
+    verbose=(
+        "`persistent_cron_assertor` can only ask at SessionStart; `Stop` is where\n"
+        "`session_crons` is delivered, so this handler verifies it. The block message\n"
+        "names each job, the exact `CronCreate` to run, and the `cron-pause` escape\n"
+        "for a session that must not create it. One deny per stop chain: a re-entered\n"
+        "stop is allowed, so a session that cannot create the job is never trapped."
+    ),
+)
 
 
 class CronStopEnforcerHandler(InitialThreadExemption, StopHandlerBase):
@@ -183,7 +199,11 @@ class CronStopEnforcerHandler(InitialThreadExemption, StopHandlerBase):
             records_path=self._records_path(),
             should_advise=self._pause_advice.should_advise,
             refresh_after_seconds=refresh_days_to_seconds(self._refresh_after_days),
-        )
+        ).under_rule(_RULE)
+
+    def get_rules(self) -> list[Rule]:
+        """The single rule behind both of this handler's denies (missing job, job due a refresh)."""
+        return [_RULE]
 
     def _pauses_path(self) -> Path | None:
         """Where ``hooks-daemon cron-pause`` records this project's pauses."""

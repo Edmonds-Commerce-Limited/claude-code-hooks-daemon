@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any, ClassVar, Final, NamedTuple
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
@@ -79,6 +80,7 @@ from claude_code_hooks_daemon.utils.path_predicates import read_text_or_reason
 from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 from claude_code_hooks_daemon.utils.staging_simulation import (
+    INCOMPLETE_SIMULATION_BLOCKED,
     SimulationIncompleteError,
     simulated_staging,
 )
@@ -119,6 +121,13 @@ _RULE_SECRET_TERM = Rule(
 )
 
 _FIELD_FILE_PATH: Final[str] = "file_path"
+
+# Headline wording for the fail-closed denies, which cannot say "matched a
+# pattern" because nothing was matched: the write could not be checked.
+_NUL_BYTE_BLOCKED: Final[str] = "a write whose file_path embeds a NUL byte"
+_SECRET_LIST_UNREADABLE_BLOCKED: Final[str] = (
+    "a write that cannot be checked because the secret word list cannot be read"
+)
 _FIELD_CONTENT: Final[str] = "content"
 _FIELD_NEW_STRING: Final[str] = "new_string"
 _FIELD_COMMAND: Final[str] = "command"
@@ -633,6 +642,8 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
     # contract forbids a repo-singular handler consuming per-project
     # resolution.
     workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.PROJECT
+
+    defect_class: ClassVar[DefectClass | None] = DefectClass.SENSITIVE_CONTENT
 
     def __init__(self) -> None:
         super().__init__(
@@ -1442,12 +1453,16 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         nul_byte_reason = self._nul_byte_file_path_reason(hook_input)
         if nul_byte_reason is not None:
-            return GatingResult(decision=Decision.DENY, reason=f"BLOCKED: {nul_byte_reason}")
+            return GatingResult(decision=Decision.DENY, reason=nul_byte_reason).under_rule(
+                _RULE_PUBLIC_PATTERN, blocked=_NUL_BYTE_BLOCKED
+            )
 
         try:
             haystacks = self._take_cached_haystacks(hook_input)
         except SimulationIncompleteError as incomplete:
-            return GatingResult(decision=Decision.DENY, reason=f"BLOCKED: {incomplete}")
+            return GatingResult(decision=Decision.DENY, reason=str(incomplete)).under_rule(
+                _RULE_PUBLIC_PATTERN, blocked=INCOMPLETE_SIMULATION_BLOCKED
+            )
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
 
         for hay in haystacks:
@@ -1464,11 +1479,11 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             return GatingResult(
                 decision=Decision.DENY,
                 reason=(
-                    "BLOCKED: the secret word list exists but cannot be read, so this "
+                    "The secret word list exists but cannot be read, so this "
                     f"write cannot be checked against it. {exc}. Restore read access "
                     "to the list (or remove it to opt out) and retry."
                 ),
-            )
+            ).under_rule(_RULE_SECRET_TERM, blocked=_SECRET_LIST_UNREADABLE_BLOCKED)
         for hay in haystacks:
             index = sr.find_first_match_index(hay.text, terms)
             if index is not None:

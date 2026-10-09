@@ -17,6 +17,9 @@ from claude_code_hooks_daemon.plan_qa.model import PlanFolder, PlanLocation, Pla
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, CheckSpec, Finding, Level, Stage
 
 CHECK_ID: Final[str] = "journal-folder-present"
+STATEMENT: Final[str] = (
+    "An In Progress plan should have a JOURNAL/ folder. Start journalling with `mkplan.bash --journal`."
+)
 
 _REMEDIATION: Final[str] = (
     "Start a journal for each listed plan: create "

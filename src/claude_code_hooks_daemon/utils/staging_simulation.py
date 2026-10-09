@@ -53,6 +53,10 @@ _NO_SPLIT_INDEX: Final[tuple[str, ...]] = ("-c", "core.splitIndex=false")
 #: it did not run to the end.
 _PARTIAL_ADD_EXIT: Final[int] = 1
 
+#: The headline wording for a deny filed under the gate's rule when the commit
+#: could not be read, so the rule's own text (about content) is not claimed.
+INCOMPLETE_SIMULATION_BLOCKED: Final[str] = "a commit whose staging this gate could not simulate"
+
 INCOMPLETE_SIMULATION_REASON: Final[str] = (
     "The `git add` in this command could not be simulated completely ({why}), so "
     "the commit gate cannot tell what the commit would record. Run `git add` as "
