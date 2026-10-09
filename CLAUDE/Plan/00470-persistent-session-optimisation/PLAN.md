@@ -175,7 +175,10 @@ waited on one bandit decision.
   unless explicitly instructed. No hook payload tells a later thread from a new session (a new thread's SessionStart
   reports `source: "startup"`), but process ancestry does: every thread of a session runs under one
   `claude daemon run --spawned-by` process (RESEARCH.md, "Probe results (Task 6.3)"). Group sessions by that
-  ancestor; the first `session_id` per group holds the crons. With no such ancestor, behave as today.
+  ancestor. The holder is the thread on the initial worker, not the first `session_id` seen, because a new
+  thread's first hook can arrive before the initial thread's. With no such ancestor, behave as today.
+  - Residual risk (review round 2): if a new thread's first hook arrives before the initial thread has moved into its
+    worker, the new thread holds as well. The result is duplicate crons, never lost ones.
   - Done: both sockets stamp the hook's pid (`SO_PEERCRED`, caller value replaced); `utils/session_thread_group.py` walks `/proc` (bounded, deadline) to the `claude daemon run --origin transient --spawned-by` ancestor, picks the holder by worker shape (`--fork-session --resume` initial, `bg-spare` later) and persists group (pid + start time) to the holder's live worker; `persistent_cron_assertor`, `cron_stop_enforcer`, `cron_subagent_stop_enforcer` and the `usage_pause_gate` lift directive exempt a non-holder; option `persistent_crons.initial_thread_only` (default true).
 
 ## Success Criteria

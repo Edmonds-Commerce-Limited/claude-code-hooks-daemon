@@ -77,7 +77,7 @@ MAX_WALK_DEPTH: Final[int] = 32
 WALK_TIME_BUDGET_SECONDS: Final[float] = 0.25
 
 #: Most ``/proc`` entries the initial-worker scan will look at; more is "unsure".
-MAX_SCAN_ENTRIES: int = 4096
+MAX_SCAN_ENTRIES: Final[int] = 4096
 
 #: Groups remembered; the oldest are forgotten first.
 MAX_TRACKED_GROUPS: Final[int] = 256
