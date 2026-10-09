@@ -76,6 +76,9 @@ This plan adds timing first, measures the hot spots from it, then makes the gate
   untouched tests are already skipped by `llm_qa.py changed` (`scripts/qa/run_changed_tests.py`); shards (`scripts/qa/test_shards.yaml`) now exist, and
   narrowing its unmapped and too-broad fallback, which today runs the whole suite, to the shards the change can
   reach is a follow-up, not part of this task.
+- [x] ✅ **Task 2.5**: `llm_qa.py changed` narrows its unmapped and too-broad fallback to the shards a change can reach
+  (`scripts/qa/changed_shard_reach.yaml`, `qa/shard_reach.py`), the follow-up Task 2.4 named.
+  Done: `src/claude_code_hooks_daemon/qa/shard_reach.py`, `scripts/qa/changed_shard_reach.yaml`, `scripts/qa/run_changed_tests.py`, `scripts/qa/llm_qa.py`, `CLAUDE/QA.md` and `tests/unit/qa/test_{shard_reach,run_changed_tests,llm_qa_changed}.py`.
 
 ### Phase 3: Speed
 
