@@ -10,7 +10,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION, remove_word_quoting
-from claude_code_hooks_daemon.utils.command_position import command_position_segments
+from claude_code_hooks_daemon.utils.command_position import command_position_argument_segments
 from claude_code_hooks_daemon.utils.escape_hatch import command_declares_hatch
 
 # Shared teaching content for the (only) deny path — preserves the deny-mode
@@ -41,7 +41,10 @@ _ESCAPE_HATCH = "MUST_STASH_BECAUSE"
 
 # Recovery/query operations are allowed unconditionally: pop, apply, list, show
 # retrieve stashed work. drop/clear are blocked by DestructiveGitHandler.
-_RECOVERY_PATTERN = re.compile(GIT_INVOCATION + r"stash\s+(?:pop|apply|list|show)", re.IGNORECASE)
+# `--help` and `-h` print the usage and stash nothing.
+_RECOVERY_PATTERN = re.compile(
+    GIT_INVOCATION + r"stash\s+(?:pop|apply|list|show|--help|-h)(?!\S)", re.IGNORECASE
+)
 _CREATION_PATTERN = re.compile(
     GIT_INVOCATION + r"stash(?:\s+(?:push|save))?(?=\W|$)", re.IGNORECASE
 )
@@ -109,7 +112,12 @@ class GitStashHandler(PreToolUseHandlerBase):
         # "stash"` stashes, and `git stash 'pop'` recovers (Plan 00408 Task
         # 3.0's sibling sweep). The escape hatch reads the raw command, since
         # its quotes are what delimit the reason.
-        if not any(_creates_a_stash(segment) for segment in command_position_segments(command)):
+        #
+        # The quoted pattern of another git command (`git log -S'git stash'`)
+        # or of `awk` is data for that command and is blanked first.
+        if not any(
+            _creates_a_stash(segment) for segment in command_position_argument_segments(command)
+        ):
             return False
 
         # Escape hatch: MUST_STASH_BECAUSE="non-empty reason" bypasses block
@@ -161,7 +169,10 @@ class GitStashHandler(PreToolUseHandlerBase):
             "## git_stash — git stash is blocked by default\n\n"
             "`git stash`, `git stash push`, and `git stash save` are blocked. "
             "`git stash pop`, `git stash apply`, `git stash list`, and `git stash show` "
-            "are always allowed.\n\n"
+            "are always allowed, as is `git stash --help`. Text that only names the "
+            "command is not the command: `git log -S'git stash'` and "
+            "`awk '/git stash/ {print}' f` are allowed, while `x && git stash` is "
+            "blocked like `git stash`.\n\n"
             "**Why**: stashes get forgotten, lost, and block `git pull`. "
             "Use `git commit -m 'WIP: ...'` instead — WIP commits are acceptable.\n\n"
             "**Escape hatch** (when commit truly won't work):\n"

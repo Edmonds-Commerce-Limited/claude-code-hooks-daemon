@@ -1537,7 +1537,97 @@ def _receiver_is_data_sink(
         # be told apart from a read, so the body keeps being judged.
         return False
     receiving_stage = segment + " " + split_unquoted(opener_tail, ("|", *_PIPELINE_TERMINATORS))[0]
+    if not text_readers_only and _segment_command_word(receiving_stage) == _LOOP_END_WORD:
+        return _loop_only_prints_its_input(command[:opener_start], receiving_stage, fds_may_run)
     return _stage_is_inert_sink(receiving_stage, fds_may_run, text_readers_only)
+
+
+#: The word that closes a loop; a heredoc after it is the loop's standard input.
+_LOOP_END_WORD = "done"
+
+#: Words that open a loop, whose word list is data and runs nothing itself.
+_LOOP_LIST_HEADS: frozenset[str] = frozenset({"for", "select"})
+
+#: What a loop may run for its standard input to stay data: reserved words that
+#: only structure it, and commands that read, print, count or compare their
+#: input and cannot run it. `eval`, an interpreter, `xargs` and a command word
+#: that is itself an expansion (`$line`) are the ways a loop RUNS the lines it
+#: reads, and none of them is listed.
+_LOOP_DATA_COMMANDS: frozenset[str] = frozenset(
+    {
+        "read",
+        "echo",
+        "printf",
+        "cat",
+        "grep",
+        "wc",
+        "sort",
+        "uniq",
+        "cut",
+        "tr",
+        "basename",
+        "dirname",
+        "test",
+        "[",
+        "true",
+        "false",
+        ":",
+        "let",
+        "expr",
+        "do",
+        "done",
+        "then",
+        "else",
+        "fi",
+        "esac",
+    }
+)
+
+
+def _without_plain_assignments(statement: str) -> str:
+    """``statement`` without leading `NAME=value` words that expand nothing
+    (`IFS= read -r line` is the command `read`)."""
+    while True:
+        spans = shell_word_spans(statement)
+        if not spans:
+            return statement
+        word = statement[spans[0][0] : spans[0][1]]
+        if not _ASSIGNMENT_WORD.match(word) or "$" in word or "`" in word:
+            return statement
+        statement = statement[spans[0][1] :]
+
+
+def _loop_only_prints_its_input(prefix: str, receiving_stage: str, fds_may_run: bool) -> bool:
+    """Whether the loop ending at ``receiving_stage`` only READS its heredoc.
+
+    ``while read l; do echo "$l"; done <<'EOF'`` hands the body to `read`, which
+    stores it. The lines are data unless a command of the loop runs them, so
+    every statement before the opener must be a loop word or a command that
+    cannot (:data:`_LOOP_DATA_COMMANDS`); anything else, or anything this reader
+    cannot place, keeps the body scanned. The wording is deliberately
+    conservative: an unrelated command earlier in the same command withholds
+    the exemption, which costs a false positive and never a guard.
+    """
+    words = _segment_words(receiving_stage)
+    if not words or any(opener in receiving_stage for opener in _PROCESS_SUBSTITUTIONS):
+        return False
+    arguments = _arguments_after_command(words, _LOOP_END_WORD)
+    if arguments is None or _inert_redirects(arguments, fds_may_run) != []:
+        return False
+    for start, end in split_unquoted_spans(prefix, (*_RECEIVER_SEPARATORS, _NEWLINE)):
+        statement = prefix[start:end]
+        if not statement.strip():
+            continue
+        if "$(" in statement or "`" in statement:
+            # `echo "$($l)"` runs the line it read.
+            return False
+        first = next(iter(iter_shell_words(statement)), None)
+        if first in _LOOP_LIST_HEADS:
+            continue
+        statement = _without_plain_assignments(strip_reserved_word_prefix(statement))
+        if _segment_command_word(statement) not in _LOOP_DATA_COMMANDS:
+            return False
+    return True
 
 
 def _stage_is_inert_sink(stage: str, fds_may_run: bool, text_readers_only: bool = False) -> bool:
@@ -1565,6 +1655,8 @@ def _stage_is_inert_sink(stage: str, fds_may_run: bool, text_readers_only: bool 
     pathspec; and the stage carries no substitution at all.
     """
     word = _segment_command_word(stage)
+    if word == _GH_COMMAND and not text_readers_only:
+        return _gh_reads_body_as_data(stage, fds_may_run)
     if word is None or word not in DATA_SINKS:
         return False
     if text_readers_only and (
@@ -1590,6 +1682,26 @@ def _stage_is_inert_sink(stage: str, fds_may_run: bool, text_readers_only: bool 
             return _git_reads_stdin_as_message(remaining)
         return _git_reads_body_as_data(remaining)
     return _sink_arguments_are_inert(word, remaining, fds_may_run)
+
+
+_GH_COMMAND = "gh"
+
+#: The `gh` command groups that read a heredoc as a body, comment, notes or
+#: JSON input (`--body-file -`, `-F -`, `--input -`). Built-in names, which a
+#: user alias cannot shadow, so none of them can be a `!` alias running a shell.
+_GH_DATA_SUBCOMMANDS: frozenset[str] = frozenset({"pr", "issue", "release", "gist", "api"})
+
+
+def _gh_reads_body_as_data(stage: str, fds_may_run: bool) -> bool:
+    """Whether ``stage`` is a `gh` command group that only reads its stdin."""
+    if any(opener in stage for opener in _PROCESS_SUBSTITUTIONS):
+        return False
+    words = _segment_words(stage)
+    arguments = None if not words else _arguments_after_command(words, _GH_COMMAND)
+    remaining = None if arguments is None else _inert_redirects(arguments, fds_may_run)
+    if not remaining:
+        return False
+    return remaining[0].value in _GH_DATA_SUBCOMMANDS
 
 
 def _stage_writes_a_file(command: str, words: list[_Word], remaining: list[_Word]) -> bool:
