@@ -87,6 +87,9 @@ guidance as a known gap.
 - [ ] ⬜ **Task 1b.3**: `bash -c '...'` / `sh -c` strings and absolute command paths (`/bin/rm`) are not read as
   commands.
 
+- [ ] ⬜ **Task 1b.4**: A `cd` carrying a redirect (`cd .claude 2>/dev/null && rm -rf ccy`) is not followed as a
+  directory change, and a `for` loop over the path (`for f in <path>; do rm "$f"; done`) is not read.
+
 ### Phase 2: #88, corrected
 
 - [x] ❌ **Task 2.1**: The daemon writes a tracked `ccy.env.local.dist`. CANCELLED: ccy writes it on every launch

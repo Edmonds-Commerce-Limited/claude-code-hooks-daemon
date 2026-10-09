@@ -425,7 +425,35 @@ class TestEachCommandRunsWhereItRuns:
         assert handler.matches(_bash(root, command.format(r=root))) is True
 
 
+class TestVariablesSurviveACd:
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "F={p}; cd /tmp; rm $F",
+            'F={p} && cd /tmp && rm "$F"',
+            'F={p}; cd /tmp && echo x > "$F"',
+            "export F={p}; cd /tmp; rm $F",
+        ],
+    )
+    def test_an_assignment_before_a_cd_still_resolves_after_it(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert handler.matches(_bash(root, template.format(p=f"{root}/{PROTECTED}"))) is True
+
+    def test_an_assignment_naming_another_file_stays_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path
+    ) -> None:
+        assert handler.matches(_bash(root, "F=/tmp/other.txt; cd /tmp; rm $F")) is False
+
+
 class TestCachedVerdictIsNotReused:
+    def test_an_allow_is_not_reused_after_the_configuration_changes(self, root: Path) -> None:
+        handler = _make(root, [])
+        hook_input = _bash(root, f"rm {root}/{PROTECTED}")
+        assert handler.matches(hook_input) is False
+        apply_handler_options(handler, {"paths": [PROTECTED]})
+        assert handler.matches(hook_input) is True
+
     def test_a_later_identical_call_is_judged_again(self, root: Path) -> None:
         handler = _make(root)
         hook_input = _bash(root, f"rm {root}/{PROTECTED}")

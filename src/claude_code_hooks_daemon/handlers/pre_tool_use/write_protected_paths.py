@@ -58,6 +58,9 @@ _XARGS_MUTATION_RE: Final[re.Pattern[str]] = re.compile(
 
 #: Shell syntax whose scope a plain cut at the separators would get wrong.
 _NOT_SEQUENTIAL_RE: Final[re.Pattern[str]] = re.compile(r"[(){}`]|<<")
+#: A part that sets a variable (`F=value`, `export F=value`).
+_ASSIGNMENT_RE: Final[re.Pattern[str]] = re.compile(r"^(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*=")
+_EXPORT_PREFIX_RE: Final[re.Pattern[str]] = re.compile(r"^export\s+")
 #: A part that is nothing but a directory change.
 _CD_COMMAND_RE: Final[re.Pattern[str]] = re.compile(
     r"^(cd|pushd|popd)(?:\s+(?:-[LP]\s+)?(?:--\s+)?(\"[^\"]*\"|'[^']*'|\S+))?\s*$"
@@ -375,11 +378,15 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
             return [(None, base) for base in bases], untrusted or unfollowed
         runs: list[tuple[str | None, str]] = []
         directory = working
+        assignments: list[str] = []
         for part in parts:
             change = _CD_COMMAND_RE.match(part)
             if change is None:
                 untrusted = untrusted or _CD_WORD_RE.search(part) is not None
-                runs.append((part, directory))
+                # Each part is read alone, so the variables set before it travel with it.
+                runs.append(("; ".join([*assignments, part]), directory))
+                if _ASSIGNMENT_RE.match(part):
+                    assignments.append(_EXPORT_PREFIX_RE.sub("", part))
                 continue
             argument = (change.group(2) or "").strip("\"'")
             if change.group(1) == "popd" or not argument or _UNFOLLOWABLE_CD.search(argument):
@@ -474,6 +481,9 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True when the call would change a listed path."""
+        # A verdict is kept only between `matches` and the `handle` that follows
+        # it, so an earlier answer is never reused for a later call.
+        self._last = None
         if hook_input.get(HookInputField.TOOL_NAME) not in self._TOOLS:
             return False
         return self._violation(hook_input) is not None
