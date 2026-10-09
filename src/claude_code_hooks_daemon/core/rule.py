@@ -148,7 +148,7 @@ class RuleFormatter:
         """
         return f"{self.headline(rule)}\n\n{rule.verbose}"
 
-    def headline(self, rule: Rule) -> str:
+    def headline(self, rule: Rule, *, blocked: str | None = None) -> str:
         """Render the one-line ``BLOCKED [rule_id]: blocked`` identifier line.
 
         A handler whose deny reason is dynamic (it names the offending path,
@@ -157,8 +157,11 @@ class RuleFormatter:
 
         Args:
             rule: The rule to render.
+            blocked: Wording for this one deny when the rule's own ``blocked``
+                text would misdescribe it (a fail-closed deny filed under the
+                rule that would have judged the content). The ID is unchanged.
 
         Returns:
             The headline, without a trailing newline.
         """
-        return f"BLOCKED [{rule.rule_id}]: {rule.blocked}"
+        return f"BLOCKED [{rule.rule_id}]: {blocked or rule.blocked}"

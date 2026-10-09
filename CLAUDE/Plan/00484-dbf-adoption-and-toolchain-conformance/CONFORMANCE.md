@@ -103,7 +103,7 @@ layer (B, D, `llm_qa.py`) and in the governance of exceptions. The handler layer
 | ----------------- | ----------------- | ---------------------- | -------------------- | ------------------------------------------ |
 | 4.1 bespoke rules | MET               | MET                    | MET                  | NOT MET (see gap G10)                      |
 | 4.2 harness       | PARTLY MET        | PARTLY MET             | MET                  | –                                          |
-| 4.3 stable ID     | PARTLY MET        | PARTLY MET             | MET (wrapped)        | –                                          |
+| 4.3 stable ID     | MET               | PARTLY MET             | MET (wrapped)        | –                                          |
 | 4.4 SHOULD        | PARTLY MET        | NOT MET                | N/A                  | –                                          |
 | 5.1 local         | MET               | MET                    | MET                  | –                                          |
 | 5.2 single file   | PARTLY MET        | NOT MET                | MET                  | –                                          |
@@ -142,9 +142,18 @@ MET: 4.1, 4.3a, 4.3b, 6.2a and 6.2b.
 - **A: the handler engine.** It is the closest of the four.
   - **D4.1 MET.** `.claude/project-handlers/` handlers register in the same chain, with the
     same standing (`CLAUDE/PROJECT_HANDLERS.md`).
-  - **D4.3 PARTLY MET, with G5 closed in Task 3.1a.** The grade stays PARTLY MET because no
-    test proves that every `Decision.DENY` carries an ID (REVIEW-fable.md). The nine deny paths
-    that printed no identifier now do. The five library handlers
+  - **D4.3 MET, with G5 closed in Task 3.1a (review round 1 S4).** The grade moved from PARTLY
+    MET once a structural test existed: `tests/plugins/deny_carries_rule_id.py` wraps `handle` on
+    every library and project handler class and fails the test that provoked any deny whose
+    reason lacks `BLOCKED [R-...]` or names an ID the handler's `get_rules()` does not declare
+    (only the allowlisted `AutoApproveReadsHandler` and, while simulating,
+    `OrchestratorSimulateHandler` are exempt). It judges every deny a unit test provokes,
+    wherever the reason was built, so the claim is as strong as the coverage gate. Running it
+    caught further identifier-less deny paths in `destructive_git`, `sensitive_content`,
+    `staged_lint_gate`, `remote_docs_commit_gate`, `remote_docs_provenance`,
+    `remote_docs_routing` and `conflict_marker_commit_gate`, all now filed under a declared
+    rule (`R-GIT-DESTRUCTIVE-UNREADABLE` is new). The nine deny paths found first
+    printed no identifier and now do. The five library handlers
     (`DispatchDeclarationHandler`, `SubagentReportSizeBlockerHandler`,
     `SubagentReportPathVerifierHandler`, `CronStopEnforcerHandler` and
     `CronSubagentStopEnforcerHandler`) and the four project handlers (`ruff_format_blocker`,
@@ -388,7 +397,7 @@ recommendation.
 | G10 | ruff, pyright and shellcheck cannot host bespoke rules, yet their findings block                                                                        | T4.1 point 3               | **Accept by declaration.** State that they run as checks and that no DBF Defence is routed through them. A Defence goes in A, B or C. Mark it out of scope for conformance                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | G11 | No single-rule harness for handlers, and no way to sweep the tree with a bundled content defence                                                        | D4.2, D5.2                 | **Close `probe --only <handler>`** (cheap). **Consider** a `scan <handler> <paths>` batch mode: it is what lets a DBF tool use the daemon's content defences for the sweep step                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | G12 | B's exception files are named by no record, and the record cannot be listed with its justifications                                                     | T6.1, T6.3                 | **Close** together with G4: a record listing command that names the files it reads                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| G13 | 25 promoted-handler IDs are missing from CLAUDE.md                                                                                                      | T7.1 (SHOULD)              | **Close.** Add one IDs line per promoted section, at a small token cost                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| G13 | 24 promoted-handler IDs are missing from CLAUDE.md                                                                                                      | T7.1 (SHOULD)              | **Close.** Add one IDs line per promoted section, at a small token cost                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | G14 | Hook-time defences fail open, and a stopped daemon blocks nothing                                                                                       | Threat model, not a clause | **Out of scope.** State it in the declaration                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 **G1 status (owner ruling B2 applied: inline only, no central file or baseline).** Deleted 228
@@ -411,14 +420,37 @@ needing a reason comment: [SUPPRESSIONS.md](SUPPRESSIONS.md). The `scripts/qa` d
 - **G9 closed for the handler layer.** `hooks-daemon defences --json` fills `defect_class` on
   every row from the handler's own `defect_class` declaration, and lists only the handlers that
   declare one, which is owner ruling C1 (content and commit gates are the Defence set; action
-  guards are guardrails). `explain-rule` and `explain-handler` print the class, or a guardrail
+  guards are guardrails). `defect_class` is the closed `DefectClass` enum, and
+  `tests/unit/test_defence_membership.py` pins the set and checks each member blocks. `explain-rule` and `explain-handler` print the class, or a guardrail
   line, and `explain-rule --list` ends with a footer naming `explain-rule <ID>`. B's rows still
   arrive with G6.
-- **G13 closed.** A promoted section ends with an `IDs:` line (24 IDs plus those added since).
+- **G13 closed.** A promoted section ends with an `IDs:` line: 11 promoted sections, 24 IDs.
 - **G15 closed.** `explain-rule plan-doc-size` prints the check's purpose and the umbrella
   rule(s) its denies are filed under; `test_rule_parity.py` walks every `CHECK_ID` constant in
-  `plan_qa/checks/` and `docs_qa/checks/`. The statement printed is the check module's own
-  rationale paragraph, so no second registry exists.
+  `plan_qa/checks/` and `docs_qa/checks/` and requires a `STATEMENT` constant beside each. The
+  statement printed is that constant, so no second registry exists and no raw docstring markup
+  reaches the output.
+- **Defence membership rulings (coordinator, review round 1 S5; NOT the owner's).** These apply
+  the DBF definition (a Defence finds a class of defect in content, and blocks) to the handlers
+  C1 left open; the owner has not ruled on them and may overrule. `lint_on_edit` and
+  `validate_eslint_on_write` are NOT Defences (they run after the write and only warn);
+  `staged_lint_gate` is the Defence for the `lint-failure` class; `github_auto_close_keywords` IS
+  a Defence (a content gate on commit messages, class `issue-closing-keyword`); `tdd_enforcement`
+  is NOT (it guards an action, not content). The project handler
+  `plan_done_requires_holding_area` is a Defence of its own class,
+  `unrecorded-release-consequence`. `R-CONFLICT-MARKER-SCAN-TIMED-OUT` and
+  `R-CONFLICT-MARKER-COMMIT` are two rows of one Defence (`conflict_marker_commit_gate`): the
+  timed-out row is a fail-closed verdict of the same gate, not a second Defence.
+- **`dispatch_declaration` row (N3), accepted.** `R-DISPATCH-DECLARATION-MISSING` is listed in
+  the generated "All other enforced rules" table although the handler's default is advisory
+  (`strict: false`). The row is an honest statement of what the rule does when a project turns
+  strict on, the advisory pointer stays in the handler's own guidance, and the table cannot
+  read per-project options.
+- **Orchestrator rule (N4).** `R-ORCHESTRATOR-MAIN-THREAD-WRITE` still does not resolve in
+  `explain-rule` while `orchestrator_simulate` only simulates: its `get_rules()` is empty by
+  design, because a rule row promises the rule can fire. Armed, it resolves and its denial
+  prints the headline. The lookup builds handlers without config, so it reports the default
+  (simulating) mode.
 - **DEFSET wording closed.** `DefenceBeforeFix.EXPLAIN_LINE` no longer calls every rule a
   defence, and README.md "Defence Before Fix" names the content and commit gates as the Defences.
 

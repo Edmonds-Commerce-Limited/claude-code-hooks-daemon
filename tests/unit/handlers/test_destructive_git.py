@@ -32,6 +32,7 @@ _DECLARED_RULE_IDS = {
     RuleID.GIT_GC_PRUNE_NOW,
     RuleID.GIT_FILTER_HISTORY,
     RuleID.GIT_PUSH_DELETE_REMOTE,
+    RuleID.GIT_DESTRUCTIVE_UNREADABLE,
 }
 
 
@@ -617,6 +618,12 @@ class TestDestructiveGitGetRules:
         """Every declared rule_id is a destructive_git RuleID constant, and vice versa."""
         actual = {rule.rule_id for rule in handler.get_rules()}
         assert actual == _DECLARED_RULE_IDS
+
+    def test_a_deny_no_pattern_could_name_is_filed_under_the_unreadable_rule(self, handler):
+        """The fail-closed fallback still prints a declared identifier (Plan 00484 G5)."""
+        result = handler.handle({"tool_name": "Bash", "tool_input": {"command": "echo hello"}})
+        assert result.decision.value == "deny"
+        assert result.reason.startswith(f"BLOCKED [{RuleID.GIT_DESTRUCTIVE_UNREADABLE}]")
 
     def test_no_duplicate_rule_ids(self, handler):
         """No two declared rules share a rule_id."""

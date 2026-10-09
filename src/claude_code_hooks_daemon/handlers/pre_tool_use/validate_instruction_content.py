@@ -164,7 +164,7 @@ class ValidateInstructionContentHandler(PreToolUseHandlerBase):
         r"(?:all\s+done|task\s+complete|finished\s+task)!?",
     ]
 
-    defect_class: ClassVar[str | None] = DefectClass.INSTRUCTION_FILE_LOG
+    defect_class: ClassVar[DefectClass | None] = DefectClass.INSTRUCTION_FILE_LOG
 
     def __init__(self) -> None:
         """Initialize handler."""

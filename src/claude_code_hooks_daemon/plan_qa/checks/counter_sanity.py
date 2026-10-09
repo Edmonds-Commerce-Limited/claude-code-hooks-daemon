@@ -19,6 +19,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
 )
 
 CHECK_ID: Final[str] = "counter-sanity"
+STATEMENT: Final[str] = (
+    "A new plan number must come from the git-anchored counter. Create the folder with `mkplan.bash`."
+)
 
 _NEW_STATUS: Final[str] = "A"
 _PLAN_FOLDER_NUMBER_RE: Final[re.Pattern[str]] = re.compile(r"^(\d{1,5})-[A-Za-z]")

@@ -40,6 +40,10 @@ from claude_code_hooks_daemon.docs_qa import checks as docs_checks_pkg
 from claude_code_hooks_daemon.plan_qa import checks as plan_checks_pkg
 from claude_code_hooks_daemon.rule_explain.checks import collect_check_entries, find_check
 from claude_code_hooks_daemon.rule_explain.lookup import HandlerRules, discover_handler_rules
+from tests.support.deny_allowlist import (
+    _DENY_WITHOUT_RULES_ALLOWLIST,
+    _PROJECT_DENY_WITHOUT_RULES_ALLOWLIST,
+)
 
 # ---------------------------------------------------------------------------
 # Shared fixtures / helpers
@@ -324,20 +328,6 @@ class TestConstantHygiene:
 #: Source marker meaning "this handler has a code path that denies a tool call".
 _DENY_MARKER = "Decision.DENY"
 
-#: Handlers whose module contains a Decision.DENY path but that legitimately
-#: declare no Rule objects. Every entry MUST record why. This allowlist is
-#: SEEDED from the state of the fan-out at Phase 7 authoring time (2026-08-31)
-#: — the coordinator is expected to PRUNE this list as sibling Phase 3
-#: migrations land, removing an entry the moment its handler gains get_rules().
-_DENY_WITHOUT_RULES_ALLOWLIST: dict[str, str] = {
-    "AutoApproveReadsHandler": (
-        "Its Decision.DENY branch is defensive-only: matches() gates handle() to "
-        "read-only tools already routed to Decision.ALLOW, so the DENY branch "
-        "guards against a non-read tool reaching handle() by a path matches() "
-        "does not permit today — not a live blocking rule with a table entry."
-    ),
-}
-
 
 def _discover_deny_handler_classes() -> dict[str, type[Handler]]:
     """Concrete handler classes whose own module source contains a deny path."""
@@ -458,6 +448,18 @@ class TestEveryCheckIdConstantResolves:
         )
         assert not unresolved, f"CHECK_ID constants that explain-rule cannot resolve: {unresolved}"
 
+    @pytest.mark.parametrize("package", [plan_checks_pkg, docs_checks_pkg])
+    def test_every_check_module_declares_a_plain_statement(self, package: Any) -> None:
+        """S3: ``explain-rule`` prints the module's ``STATEMENT``, so it must exist and be plain text."""
+        bad: list[str] = []
+        for check_id, module_name in _module_check_ids(package).items():
+            statement = getattr(importlib.import_module(module_name), "STATEMENT", None)
+            if not isinstance(statement, str) or len(statement.split()) < 5:
+                bad.append(f"{check_id}: missing or too short")
+            elif re.search(r"``|:[a-z]+:`", statement):
+                bad.append(f"{check_id}: raw RST markup")
+        assert not bad, bad
+
     def test_every_registered_check_names_an_existing_umbrella_rule_or_is_sweep_only(
         self, all_rules: list[tuple[HandlerRules, Rule]]
     ) -> None:
@@ -469,16 +471,6 @@ class TestEveryCheckIdConstantResolves:
 # ---------------------------------------------------------------------------
 # 6. The project's own handlers obey the same rule (Plan 00484 G5)
 # ---------------------------------------------------------------------------
-
-#: Project handlers whose module contains a deny path but that declare no rule
-#: in the mode this repository runs them in. Every entry MUST record why.
-_PROJECT_DENY_WITHOUT_RULES_ALLOWLIST: dict[str, str] = {
-    "OrchestratorSimulateHandler": (
-        "Plan 00418: it only RECORDS what orchestrator-only mode would deny while "
-        "simulating, so it declares no rule (a rule row promises the rule can "
-        "fire); armed, it declares R-ORCHESTRATOR-MAIN-THREAD-WRITE and denies with it."
-    ),
-}
 
 
 def _project_handler_instances() -> list[tuple[str, Handler]]:

@@ -45,6 +45,7 @@ from claude_code_hooks_daemon.utils.git_commit_parsing import (
 )
 from claude_code_hooks_daemon.utils.git_facts import commit_facts
 from claude_code_hooks_daemon.utils.staging_simulation import (
+    INCOMPLETE_SIMULATION_BLOCKED,
     SimulationIncompleteError,
     simulated_staging,
 )
@@ -83,7 +84,7 @@ _RULE_STAGED_PROVENANCE: Final[Rule] = Rule(
 class RemoteDocsCommitGateHandler(PreToolUseHandlerBase):
     """Deny a commit that would enter an unattributed vendored document."""
 
-    defect_class: ClassVar[str | None] = DefectClass.UNATTRIBUTED_VENDORED_DOC
+    defect_class: ClassVar[DefectClass | None] = DefectClass.UNATTRIBUTED_VENDORED_DOC
 
     def __init__(self) -> None:
         super().__init__(
@@ -140,7 +141,9 @@ class RemoteDocsCommitGateHandler(PreToolUseHandlerBase):
                 return GatingResult(decision=Decision.ALLOW)
             staged = self.staged_reader(reading, cwd if isinstance(cwd, str) else None)
         except SimulationIncompleteError as incomplete:
-            return GatingResult(decision=Decision.DENY, reason=str(incomplete))
+            return GatingResult(decision=Decision.DENY, reason=str(incomplete)).under_rule(
+                _RULE_STAGED_PROVENANCE, blocked=INCOMPLETE_SIMULATION_BLOCKED
+            )
         except OSError as exc:
             # A gate that cannot read the index must not block every commit.
             logger.debug("remote-docs commit gate could not read the index: %s", exc)
@@ -188,7 +191,7 @@ class RemoteDocsCommitGateHandler(PreToolUseHandlerBase):
                 "  bin/hooks-daemon remote-docs add <url>\n\n"
                 "Then re-stage. Deleting a vendored document is never blocked."
             ),
-        )
+        ).under_rule(_RULE_STAGED_PROVENANCE)
 
     def get_rules(self) -> list[Rule]:
         """The Rule backing this handler's denial."""

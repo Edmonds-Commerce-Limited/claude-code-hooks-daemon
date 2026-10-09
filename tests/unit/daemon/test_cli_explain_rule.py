@@ -102,6 +102,24 @@ class TestCmdExplainRule:
         assert "R-GIT-RESET-HARD" in err
         assert "--list" in err
 
+    def test_near_matches_of_a_rule_and_a_check_are_ranked_by_similarity(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A check typo ranks the check first, not after the rules that merely share letters."""
+        assert cmd_explain_rule(_rule_args(rule_id="plan-doc-siez")) == 1
+        err_lines = capsys.readouterr().err.splitlines()
+        suggestions = next(line for line in err_lines if line.startswith("Did you mean"))
+        first = suggestions.removeprefix("Did you mean: ").split(", ")[0]
+        assert first == "plan-doc-size"
+
+    def test_the_classification_line_is_set_off_by_a_blank_line(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert cmd_explain_rule(_rule_args(rule_id="R-QA-SUPPRESSION")) == 0
+        lines = capsys.readouterr().out.splitlines()
+        classification = lines.index(DefenceBeforeFix.defence_line(DefectClass.QA_SUPPRESSION))
+        assert lines[classification - 1] == ""
+
     def test_completely_unknown_id_still_hints_list(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -147,7 +165,8 @@ class TestCmdExplainHandler:
     ) -> None:
         assert cmd_explain_handler(_handler_args(name="qa_suppression")) == 0
         lines = capsys.readouterr().out.splitlines()
-        assert DefenceBeforeFix.defence_line(DefectClass.QA_SUPPRESSION) in lines
+        classification = lines.index(DefenceBeforeFix.defence_line(DefectClass.QA_SUPPRESSION))
+        assert lines[classification - 1] == ""
 
     def test_action_guard_handler_is_called_a_guardrail(
         self, capsys: pytest.CaptureFixture[str]

@@ -17,6 +17,7 @@ from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.daemon.docs_generator import CollectedHandler
 from claude_code_hooks_daemon.handlers.registry import EVENT_TYPE_MAPPING
 from claude_code_hooks_daemon.rule_explain.lookup import HandlerRules
@@ -55,7 +56,7 @@ class Defence:
     priority: int
     behavior: str
     statement: str | None
-    defect_class: str | None
+    defect_class: DefectClass | None
     docs: str
     detector_entry_point: str | None
 
@@ -109,7 +110,7 @@ def collect_active_defences(
 
 def _defence(
     info: CollectedHandler,
-    defect_class: str,
+    defect_class: DefectClass,
     rule_id: str | None,
     statement: str | None,
     docs: str,

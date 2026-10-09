@@ -39,6 +39,9 @@ from claude_code_hooks_daemon.utils.authored_paths import authored_path
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 CHECK_ID: Final[str] = "unenforced-approval-gate"
+STATEMENT: Final[str] = (
+    "A daemon-owned core document must not state an approval gate nothing enforces. Remove the claim or add the enforcement."
+)
 
 # The daemon-owned core documents live at ``<agent tree>/core/*.core.md``:
 # the deployed, byte-identical copies of ``install/templates/core/`` (the

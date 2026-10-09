@@ -51,6 +51,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
 )
 
 CHECK_ID: Final[str] = "header-body-coherence"
+STATEMENT: Final[str] = (
+    "A plan whose header says Not Started or In Progress must not already claim completion in its body. Make the header status and the body agree."
+)
 _SINS: Final[tuple[str, ...]] = ("A3", "A1")
 
 _NON_TERMINAL_STATUSES: Final[frozenset[PlanStatus]] = frozenset(

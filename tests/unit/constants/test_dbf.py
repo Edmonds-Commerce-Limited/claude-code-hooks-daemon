@@ -3,16 +3,9 @@
 from __future__ import annotations
 
 import re
+from enum import StrEnum
 
 from claude_code_hooks_daemon.constants.dbf import DefectClass, DefenceBeforeFix
-
-
-def _defect_class_values() -> dict[str, str]:
-    return {
-        name: value
-        for name, value in vars(DefectClass).items()
-        if not name.startswith("_") and isinstance(value, str)
-    }
 
 
 class TestDefenceBeforeFix:
@@ -34,14 +27,18 @@ class TestDefenceBeforeFix:
         assert "not a defence" in DefenceBeforeFix.GUARDRAIL_LINE.lower()
 
     def test_defence_line_names_the_defect_class(self) -> None:
-        line = DefenceBeforeFix.defence_line("error-hiding")
+        line = DefenceBeforeFix.defence_line(DefectClass.ERROR_HIDING)
         assert "error-hiding" in line
         assert "\n" not in line
 
 
 class TestDefectClass:
+    def test_is_a_closed_string_enum(self) -> None:
+        assert issubclass(DefectClass, StrEnum)
+        assert DefectClass("error-hiding") is DefectClass.ERROR_HIDING
+
     def test_values_are_unique_kebab_case(self) -> None:
-        values = list(_defect_class_values().values())
+        values = [member.value for member in DefectClass]
         assert values
         assert len(values) == len(set(values))
         assert all(re.fullmatch(r"[a-z]+(-[a-z]+)*", value) for value in values)

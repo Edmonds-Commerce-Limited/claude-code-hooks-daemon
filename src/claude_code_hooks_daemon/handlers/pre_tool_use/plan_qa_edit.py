@@ -76,7 +76,7 @@ _MARKDOWN_SUFFIX: Final[str] = ".md"
 class PlanQaEditHandler(PreToolUseHandlerBase):
     """Blocking/advisory edit-time lint for plan documents."""
 
-    defect_class: ClassVar[str | None] = DefectClass.PLAN_DRIFT
+    defect_class: ClassVar[DefectClass | None] = DefectClass.PLAN_DRIFT
 
     def __init__(self) -> None:
         super().__init__(

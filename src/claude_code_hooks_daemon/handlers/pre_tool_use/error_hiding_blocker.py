@@ -108,7 +108,7 @@ class ErrorHidingBlockerHandler(PreToolUseHandlerBase):
     # resolution.
     workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.PROJECT
 
-    defect_class: ClassVar[str | None] = DefectClass.ERROR_HIDING
+    defect_class: ClassVar[DefectClass | None] = DefectClass.ERROR_HIDING
 
     def __init__(self) -> None:
         super().__init__(

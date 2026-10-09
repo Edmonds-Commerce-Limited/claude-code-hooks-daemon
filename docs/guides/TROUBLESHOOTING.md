@@ -807,15 +807,19 @@ came from it.
 | `init-config`       | Generate a configuration template                                                             |
 | `repair`            | Repair broken virtual environment                                                             |
 | `generate-playbook` | Generate acceptance test playbook                                                             |
-| `defences`          | List every active defence, one record each (see below)                                        |
+| `defences`          | List the active Defences (content and commit gates), one record each (see below)              |
 
-`defences --json` is the machine-readable listing of active defences for a Defence Before Fix
-tool. It reads the loaded config through the same generator as `generate-docs`, and each
-handler's rules from the index `explain-rule` uses, so it adds no list of its own. One record
-per rule of each enabled handler, plus one rule-less record per enabled blocking handler that
-declares none (`rule_id` and `statement` are `null`). Fields: `rule_id`, `handler`,
-`handler_class`, `event`, `priority`, `behavior`, `statement`, `defect_class`, `docs` (the
-command that prints the full text) and `detector_entry_point` (`hooks-daemon probe <event>`).
-`defect_class` is always `null`: no source maps a rule to a `CLAUDE/Security/` category.
-`detector_entry_point` is `null` for a handler whose event is not a wired hook event. Without
-`--json` it prints one tab-separated line per record.
+`defences --json` is the machine-readable listing of the active Defences for a Defence Before Fix
+tool. A Defence is a content gate or a commit gate: a blocking handler that finds a class of
+defect in what is written or committed. Action guards (destructive git, pipes and the like)
+are not Defences and are not listed; `explain-rule --list` covers every rule, Defence or not.
+It reads the loaded config through the same generator as `generate-docs`, and each handler's
+rules from the index `explain-rule` uses, so it adds no list of its own. A handler is listed
+when it declares a `defect_class`. One record per rule of each enabled Defence, plus one
+rule-less record per enabled blocking Defence that declares no rule (`rule_id` and `statement`
+are `null`). Fields: `rule_id`, `handler`, `handler_class`, `event`, `priority`, `behavior`,
+`statement`, `defect_class` (the handler's declared class, such as `qa-suppression`; never
+`null` in this listing), `docs` (the command that prints the full text) and
+`detector_entry_point` (`hooks-daemon probe <event>`). `detector_entry_point` is `null` for a
+handler whose event is not a wired hook event. A project handler appears only if it declares a
+`defect_class`. Without `--json` it prints one tab-separated line per record.

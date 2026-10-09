@@ -23,6 +23,9 @@ from claude_code_hooks_daemon.plan_qa.model import (
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, CheckSpec, Finding, Level, Stage
 
 CHECK_ID: Final[str] = "journal-freshness"
+STATEMENT: Final[str] = (
+    "An In Progress plan's newest journal day-file is stale. Journal the recent activity."
+)
 
 
 def _remediation(plan_dir: str) -> str:

@@ -8,7 +8,7 @@ identifier ``explain-rule`` resolves.
 from __future__ import annotations
 
 from claude_code_hooks_daemon.core.hook_result import Decision
-from claude_code_hooks_daemon.core.result_types import BlockingResult
+from claude_code_hooks_daemon.core.result_types import BlockingResult, GatingResult
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 
 _RULE = Rule(
@@ -42,3 +42,21 @@ class TestUnderRule:
         original.under_rule(_RULE)
 
         assert original.reason == "r"
+
+
+class TestGatingResultUnderRule:
+    def test_a_gating_denial_gets_the_headline_and_stays_gating(self) -> None:
+        result = GatingResult.deny("the specific reason").under_rule(_RULE)
+
+        assert isinstance(result, GatingResult)
+        assert result.reason == f"{RuleFormatter().headline(_RULE)}\n\nthe specific reason"
+
+    def test_a_gating_ask_is_returned_unchanged(self) -> None:
+        asked = GatingResult.ask("really?")
+
+        assert asked.under_rule(_RULE) == asked
+
+    def test_a_blocked_override_words_the_headline_for_a_fail_closed_deny(self) -> None:
+        result = GatingResult.deny("r").under_rule(_RULE, blocked="could not be checked")
+
+        assert result.reason == f"BLOCKED [{_RULE.rule_id}]: could not be checked\n\nr"

@@ -12,6 +12,9 @@ from claude_code_hooks_daemon.plan_qa.model import PlanLocation, PlanStatus
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, CheckSpec, Finding, Level, Stage
 
 CHECK_ID: Final[str] = "dormant-honesty"
+STATEMENT: Final[str] = (
+    "A plan still marked In Progress long after its last commit misstates its activity. Mark it Not Started, Blocked or Cancelled."
+)
 
 _DORMANT_THRESHOLD_MULTIPLIER: Final[int] = 2
 

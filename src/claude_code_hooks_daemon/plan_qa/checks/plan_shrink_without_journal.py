@@ -42,6 +42,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
 )
 
 CHECK_ID: Final[str] = "plan-shrink-without-journal"
+STATEMENT: Final[str] = (
+    "Shrinking a plan should relocate dated narrative into the journal rather than delete it. Stage the journal entry that receives it."
+)
 
 _MODIFY_STATUS: Final[str] = "M"
 

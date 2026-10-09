@@ -18,6 +18,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
 )
 
 CHECK_ID: Final[str] = "template-metadata"
+STATEMENT: Final[str] = (
+    "A new plan should carry the full template header (Created, Owner, Priority). Add the missing header fields."
+)
 
 _REMEDIATION: Final[str] = (
     "Add the missing template header line(s), e.g. `**Created**: YYYY-MM-DD`, "

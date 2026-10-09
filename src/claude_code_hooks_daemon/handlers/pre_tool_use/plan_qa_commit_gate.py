@@ -75,7 +75,7 @@ _FIELD_COMMAND: Final[str] = "command"
 class PlanQaCommitGateHandler(PreToolUseHandlerBase):
     """Warn-first cross-file plan QA gate on git commit."""
 
-    defect_class: ClassVar[str | None] = DefectClass.PLAN_DRIFT
+    defect_class: ClassVar[DefectClass | None] = DefectClass.PLAN_DRIFT
 
     def __init__(self) -> None:
         super().__init__(

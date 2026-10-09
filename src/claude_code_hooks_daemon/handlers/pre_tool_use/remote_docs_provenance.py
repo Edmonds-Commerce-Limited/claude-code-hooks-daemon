@@ -68,7 +68,7 @@ _RULE_REMOTE_DOCS_PROVENANCE: Final[Rule] = Rule(
 class RemoteDocsProvenanceHandler(PreToolUseHandlerBase):
     """Deny a remote-tree write whose content lacks valid provenance."""
 
-    defect_class: ClassVar[str | None] = DefectClass.UNATTRIBUTED_VENDORED_DOC
+    defect_class: ClassVar[DefectClass | None] = DefectClass.UNATTRIBUTED_VENDORED_DOC
 
     def __init__(self) -> None:
         super().__init__(
@@ -165,7 +165,7 @@ class RemoteDocsProvenanceHandler(PreToolUseHandlerBase):
                     "If you need to record something ABOUT this document, "
                     "write it in your own docs and link to the vendored copy."
                 ),
-            )
+            ).under_rule(_RULE_REMOTE_DOCS_PROVENANCE)
         result = parse_provenance(self._added_text(hook_input))
         problems = "\n".join(f"  - {error.field}: {error.message}" for error in result.errors)
         return GatingResult(
@@ -181,7 +181,7 @@ class RemoteDocsProvenanceHandler(PreToolUseHandlerBase):
                 "`fidelity` — if upstream changed, refresh it instead:\n"
                 "  bin/hooks-daemon remote-docs refresh --path <file>"
             ),
-        )
+        ).under_rule(_RULE_REMOTE_DOCS_PROVENANCE)
 
     def get_rules(self) -> list[Rule]:
         """The Rule backing this handler's blocking behaviour."""

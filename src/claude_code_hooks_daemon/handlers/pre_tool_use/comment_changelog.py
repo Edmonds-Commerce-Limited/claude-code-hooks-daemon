@@ -228,7 +228,7 @@ class CommentChangelogHandler(PreToolUseHandlerBase):
     # resolution.
     workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.PROJECT
 
-    defect_class: ClassVar[str | None] = DefectClass.CHANGELOG_IN_COMMENT
+    defect_class: ClassVar[DefectClass | None] = DefectClass.CHANGELOG_IN_COMMENT
 
     def __init__(self) -> None:
         super().__init__(

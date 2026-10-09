@@ -15,6 +15,7 @@ import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
@@ -58,7 +59,7 @@ class HandlerRules:
     class_name: str
     rules: tuple[Rule, ...]
     claude_md: str | None
-    defect_class: str | None = None
+    defect_class: DefectClass | None = None
 
 
 def _normalise_id(value: str) -> str:

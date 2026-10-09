@@ -74,7 +74,7 @@ _FIELD_COMMAND: Final[str] = "command"
 class DocsQaCommitGateHandler(PreToolUseHandlerBase):
     """Warn-first STAGED docs QA gate on git commit."""
 
-    defect_class: ClassVar[str | None] = DefectClass.DOC_DRIFT
+    defect_class: ClassVar[DefectClass | None] = DefectClass.DOC_DRIFT
 
     def __init__(self) -> None:
         super().__init__(

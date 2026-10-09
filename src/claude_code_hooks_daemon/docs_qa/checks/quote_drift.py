@@ -55,6 +55,9 @@ from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 logger = logging.getLogger(__name__)
 
 CHECK_ID: Final[str] = "quote-drift"
+STATEMENT: Final[str] = (
+    "A quoted block must match its declared source. Re-copy the quote from the source or fix the anchor."
+)
 
 _REMEDY_TAIL: Final[str] = (
     "A quote must come from a SINGLE section — verbatim text spanning two "

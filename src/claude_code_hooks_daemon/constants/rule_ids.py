@@ -80,6 +80,10 @@ class RuleID:
     #: git push --delete / git push <remote> :<name> — deletes a ref on the remote; human only.
     GIT_PUSH_DELETE_REMOTE: str = "R-GIT-PUSH-DELETE-REMOTE"
 
+    #: A git command that may destroy changes and that no specific rule could name
+    #: (fail closed: the command could not be read in full).
+    GIT_DESTRUCTIVE_UNREADABLE: str = "R-GIT-DESTRUCTIVE-UNREADABLE"
+
     # ------------------------------------------------------------------
     # sed_blocker handler
     # ------------------------------------------------------------------
@@ -240,6 +244,9 @@ class RuleID:
 
     #: Stop attempted right after a QA tool's own output indicated failure.
     STOP_QA_FAILURE: str = "R-STOP-QA-FAILURE"
+
+    #: An [awaiting-human] stop with no one-off stand-in cron scheduled.
+    STOP_STAND_IN_MISSING: str = "R-STOP-STAND-IN-MISSING"
 
     #: Stop attempted after asking a non-rhetorical confirmation question.
     STOP_CONFIRMATION_QUESTION: str = "R-STOP-CONFIRMATION-QUESTION"

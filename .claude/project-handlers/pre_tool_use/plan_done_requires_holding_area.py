@@ -113,7 +113,7 @@ class PlanDoneRequiresHoldingAreaHandler(Handler):
 
     #: It judges the CONTENT a plan file would have, so it is a content gate and
     #: therefore in the Defence set (owner ruling C1), unlike the action guards.
-    defect_class: ClassVar[str | None] = DefectClass.PLAN_DRIFT
+    defect_class: ClassVar[DefectClass | None] = DefectClass.UNRECORDED_RELEASE_CONSEQUENCE
 
     def __init__(self) -> None:
         super().__init__(

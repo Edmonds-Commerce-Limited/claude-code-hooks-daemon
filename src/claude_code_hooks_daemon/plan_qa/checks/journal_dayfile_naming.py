@@ -37,6 +37,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
 )
 
 CHECK_ID: Final[str] = "journal-dayfile-naming"
+STATEMENT: Final[str] = (
+    "A journal day-file must be named NNNNN-Journal-YY-MM-DD.md for its plan. Rename the file."
+)
 
 _REMEDIATION: Final[str] = (
     "Name journal day-files `NNNNN-Journal-YY-MM-DD.md` where NNNNN is the "

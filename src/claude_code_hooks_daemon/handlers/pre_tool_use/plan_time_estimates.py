@@ -84,7 +84,7 @@ class PlanTimeEstimatesHandler(PreToolUseHandlerBase):
         r"\brate\s+limit",
     ]
 
-    defect_class: ClassVar[str | None] = DefectClass.PLAN_TIME_ESTIMATE
+    defect_class: ClassVar[DefectClass | None] = DefectClass.PLAN_TIME_ESTIMATE
 
     def __init__(self) -> None:
         super().__init__(

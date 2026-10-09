@@ -16,7 +16,6 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
@@ -266,8 +265,6 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
     # PROJECT-scoped: resolves per-file layout/workspace via resolve_layout()
     # (see CLAUDE/Code/WorkspaceResolution.md).
     workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.PROJECT
-
-    defect_class: ClassVar[str | None] = DefectClass.SOURCE_WITHOUT_TEST
 
     def __init__(self) -> None:
         super().__init__(

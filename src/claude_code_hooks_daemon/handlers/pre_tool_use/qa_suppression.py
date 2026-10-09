@@ -89,7 +89,7 @@ class QaSuppressionHandler(PreToolUseHandlerBase):
     # resolution.
     workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.PROJECT
 
-    defect_class: ClassVar[str | None] = DefectClass.QA_SUPPRESSION
+    defect_class: ClassVar[DefectClass | None] = DefectClass.QA_SUPPRESSION
 
     def __init__(self) -> None:
         super().__init__(

@@ -7,7 +7,8 @@ resolves nowhere: ``explain-rule plan-doc-size`` answered "unknown rule ID".
 
 Nothing is registered twice. The checks come from the same ``all_checks()``
 registries the runners execute, the umbrella rule is the one the stage maps to,
-and the statement is the rationale paragraph of the check module's own docstring.
+and the statement is the ``STATEMENT`` constant each check module declares beside its
+``CHECK_ID``.
 """
 
 from __future__ import annotations
@@ -40,7 +41,7 @@ _DOCS_UMBRELLA: Final[dict[str, str]] = {
 
 _NEAR_MATCH_CUTOFF: Final[float] = 0.6
 _NEAR_MATCH_LIMIT: Final[int] = 5
-_PARAGRAPH_BREAK: Final[str] = "\n\n"
+_STATEMENT_ATTR: Final[str] = "STATEMENT"
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +53,7 @@ class CheckEntry:
         umbrella_rule_ids: The ``R-`` rules whose denies can name this check
             (empty for a check that only runs in the advisory sweep).
         stages: The stages the check is registered at, in registry order.
-        statement: What the check enforces, from its module docstring.
+        statement: What the check refuses and what to do, from its module's ``STATEMENT``.
     """
 
     check_id: str
@@ -62,10 +63,15 @@ class CheckEntry:
 
 
 def _statement(run_module: str) -> str:
-    """The rationale paragraph (the one after the headline) of a check module's docstring."""
-    doc = importlib.import_module(run_module).__doc__ or ""
-    paragraphs = [" ".join(part.split()) for part in doc.strip().split(_PARAGRAPH_BREAK)]
-    return paragraphs[1] if len(paragraphs) > 1 else paragraphs[0]
+    """The check module's own ``STATEMENT`` constant (what is refused, and what to do).
+
+    Raises:
+        ValueError: If the module declares none; ``test_rule_parity.py`` requires one.
+    """
+    statement = getattr(importlib.import_module(run_module), _STATEMENT_ATTR, None)
+    if not isinstance(statement, str) or not statement.strip():
+        raise ValueError(f"{run_module} declares no {_STATEMENT_ATTR} constant")
+    return statement
 
 
 def _entries(

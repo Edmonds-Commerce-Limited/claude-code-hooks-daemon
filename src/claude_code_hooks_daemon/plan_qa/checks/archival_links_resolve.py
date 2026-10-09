@@ -37,6 +37,9 @@ from claude_code_hooks_daemon.utils.link_resolution import link_resolves_literal
 from claude_code_hooks_daemon.utils.markdown_links import extract_link_targets
 
 CHECK_ID: Final[str] = "archival-links-resolve"
+STATEMENT: Final[str] = (
+    "Archiving moves a plan one directory deeper, so its relative links must be updated. Fix the links that no longer resolve."
+)
 
 _RENAME_STATUS_PREFIX: Final[str] = "R"
 _MARKDOWN_SUFFIX: Final[str] = ".md"

@@ -88,7 +88,7 @@ class TestAWriteThatCompletesAPlan:
         self, handler: PlanDoneRequiresHoldingAreaHandler
     ) -> None:
         """Owner ruling C1: a content gate is in the Defence set."""
-        assert handler.defect_class == DefectClass.PLAN_DRIFT
+        assert handler.defect_class == DefectClass.UNRECORDED_RELEASE_CONSEQUENCE
 
     def test_allowed_when_the_criterion_names_an_artefact(
         self, handler: PlanDoneRequiresHoldingAreaHandler, write_hook_input: Any

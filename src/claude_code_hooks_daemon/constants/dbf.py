@@ -12,6 +12,7 @@ it. A handler is in the set exactly when it declares a ``defect_class``
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import ClassVar
 
 
@@ -28,7 +29,7 @@ class DefenceBeforeFix:
     )
 
     @staticmethod
-    def defence_line(defect_class: str) -> str:
+    def defence_line(defect_class: DefectClass) -> str:
         """The line printed for a rule whose handler is a Defence.
 
         Args:
@@ -40,24 +41,27 @@ class DefenceBeforeFix:
         return f"Defence for the defect class: {defect_class}"
 
 
-class DefectClass:
-    """The defect classes the content and commit gates defend (public contract, like ``RuleID``).
+class DefectClass(StrEnum):
+    """The closed vocabulary of defect classes the content and commit gates defend.
 
     A handler declares one as ``defect_class``; ``hooks-daemon defences --json``
-    reports it as ``defect_class``. Renames are a breaking change.
+    reports its value as ``defect_class``. The set is closed: a handler (project
+    handlers included) declares a member of this enum, never a free string, so a
+    typo cannot mint a new class. Renames are a breaking change.
     """
 
-    QA_SUPPRESSION: ClassVar[str] = "qa-suppression"
-    ERROR_HIDING: ClassVar[str] = "error-hiding"
-    SECURITY_ANTIPATTERN: ClassVar[str] = "security-antipattern"
-    SENSITIVE_CONTENT: ClassVar[str] = "sensitive-content"
-    CHANGELOG_IN_COMMENT: ClassVar[str] = "changelog-in-comment"
-    OVERSIZED_COMMENT: ClassVar[str] = "oversized-comment"
-    SOURCE_WITHOUT_TEST: ClassVar[str] = "source-without-test"
-    LINT_FAILURE: ClassVar[str] = "lint-failure"
-    INSTRUCTION_FILE_LOG: ClassVar[str] = "instruction-file-log"
-    PLAN_TIME_ESTIMATE: ClassVar[str] = "plan-time-estimate"
-    PLAN_DRIFT: ClassVar[str] = "plan-drift"
-    DOC_DRIFT: ClassVar[str] = "doc-drift"
-    UNATTRIBUTED_VENDORED_DOC: ClassVar[str] = "unattributed-vendored-doc"
-    CONFLICT_MARKER: ClassVar[str] = "conflict-marker"
+    QA_SUPPRESSION = "qa-suppression"
+    ERROR_HIDING = "error-hiding"
+    SECURITY_ANTIPATTERN = "security-antipattern"
+    SENSITIVE_CONTENT = "sensitive-content"
+    CHANGELOG_IN_COMMENT = "changelog-in-comment"
+    OVERSIZED_COMMENT = "oversized-comment"
+    LINT_FAILURE = "lint-failure"
+    INSTRUCTION_FILE_LOG = "instruction-file-log"
+    PLAN_TIME_ESTIMATE = "plan-time-estimate"
+    PLAN_DRIFT = "plan-drift"
+    UNRECORDED_RELEASE_CONSEQUENCE = "unrecorded-release-consequence"
+    DOC_DRIFT = "doc-drift"
+    UNATTRIBUTED_VENDORED_DOC = "unattributed-vendored-doc"
+    CONFLICT_MARKER = "conflict-marker"
+    ISSUE_CLOSING_KEYWORD = "issue-closing-keyword"

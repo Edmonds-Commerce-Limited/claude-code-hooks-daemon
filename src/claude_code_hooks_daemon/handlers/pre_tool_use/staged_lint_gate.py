@@ -66,6 +66,7 @@ from claude_code_hooks_daemon.utils.git_facts import commit_facts
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 from claude_code_hooks_daemon.utils.staging_simulation import (
+    INCOMPLETE_SIMULATION_BLOCKED,
     SimulationIncompleteError,
     simulated_staging,
 )
@@ -125,7 +126,7 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         max_files: int - stand-down threshold (default 20).
     """
 
-    defect_class: ClassVar[str | None] = DefectClass.LINT_FAILURE
+    defect_class: ClassVar[DefectClass | None] = DefectClass.LINT_FAILURE
 
     def __init__(self) -> None:
         super().__init__(
@@ -204,7 +205,9 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
                 ]
         except SimulationIncompleteError as incomplete:
             if self._mode == _MODE_BLOCK:
-                return GatingResult(decision=Decision.DENY, reason=str(incomplete))
+                return GatingResult(decision=Decision.DENY, reason=str(incomplete)).under_rule(
+                    self._rule, blocked=INCOMPLETE_SIMULATION_BLOCKED
+                )
             return GatingResult(
                 decision=Decision.ALLOW, context=[f"⚠️ staged-lint-gate: {incomplete}"]
             )

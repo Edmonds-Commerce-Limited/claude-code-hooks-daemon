@@ -96,7 +96,7 @@ _SINGLE_REPLACEMENT: Final[int] = 1
 class DocsQaEditHandler(PreToolUseHandlerBase):
     """Blocking/advisory EDIT-time lint for documentation-scoped files."""
 
-    defect_class: ClassVar[str | None] = DefectClass.DOC_DRIFT
+    defect_class: ClassVar[DefectClass | None] = DefectClass.DOC_DRIFT
 
     def __init__(self) -> None:
         super().__init__(

@@ -83,6 +83,9 @@ from claude_code_hooks_daemon.docs_qa.types import (
 from claude_code_hooks_daemon.utils.vendor_paths import VendorScope
 
 CHECK_ID: Final[str] = "source-tree-markdown"
+STATEMENT: Final[str] = (
+    "Markdown in a source or test directory must follow the documentation-SSoT pattern. Move it or make it a collocated CLAUDE.md."
+)
 
 _MARKDOWN_SUFFIX: Final[str] = ".md"
 _CLAUDE_MD_FILENAME: Final[str] = "CLAUDE.md"

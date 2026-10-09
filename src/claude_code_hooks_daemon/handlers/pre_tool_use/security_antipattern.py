@@ -159,7 +159,7 @@ class SecurityAntipatternHandler(PreToolUseHandlerBase):
     # resolution.
     workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.PROJECT
 
-    defect_class: ClassVar[str | None] = DefectClass.SECURITY_ANTIPATTERN
+    defect_class: ClassVar[DefectClass | None] = DefectClass.SECURITY_ANTIPATTERN
 
     def __init__(self) -> None:
         super().__init__(

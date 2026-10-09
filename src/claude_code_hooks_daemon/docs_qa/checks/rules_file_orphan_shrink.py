@@ -28,6 +28,9 @@ from claude_code_hooks_daemon.docs_qa.types import (
 )
 
 CHECK_ID: Final[str] = "rules-file-orphan-shrink"
+STATEMENT: Final[str] = (
+    "A rules file must not be thinned by deleting content. Promote the content to the agent tree first, or verify it is already there."
+)
 
 _RULES_DIR_PARTS: Final[tuple[str, str]] = (".claude", "rules")
 

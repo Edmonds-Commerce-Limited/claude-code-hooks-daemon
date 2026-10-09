@@ -154,6 +154,9 @@ _TIMED_OUT_RULE: Final[Rule] = Rule(
 )
 
 
+_FORMATTER: Final[RuleFormatter] = RuleFormatter()
+
+
 @dataclass(frozen=True)
 class _Source:
     """One thing a commit records: the index, or the working tree (some paths)."""
@@ -473,27 +476,24 @@ _REPHRASE: Final[str] = (
 
 def _unchecked(reason: str) -> GatingResult:
     """Deny a commit this gate could not check: an unchecked commit is not a clean one."""
-    return GatingResult(
-        decision=Decision.DENY,
-        reason=(
-            f"{RuleID.CONFLICT_MARKER_COMMIT}: this commit was NOT checked for "
-            f"merge-conflict markers, because {reason}.\n\n{_REPHRASE}"
-        ),
+    headline = _FORMATTER.headline(
+        _RULE, blocked=f"this commit was NOT checked for merge-conflict markers, because {reason}"
     )
+    return GatingResult(decision=Decision.DENY, reason=f"{headline}\n\n{_REPHRASE}")
 
 
 def _timed_out() -> GatingResult:
     """Deny a commit git ran out of time reading, saying plainly that nothing was found."""
     return GatingResult(
         decision=Decision.DENY,
-        reason=f"{RuleID.CONFLICT_MARKER_SCAN_TIMED_OUT}: {_TIMED_OUT_RULE.verbose}",
+        reason=_FORMATTER.verbose(_TIMED_OUT_RULE),
     )
 
 
 class ConflictMarkerCommitGateHandler(PreToolUseHandlerBase):
     """Deny a commit that would record a merge-conflict marker."""
 
-    defect_class: ClassVar[str | None] = DefectClass.CONFLICT_MARKER
+    defect_class: ClassVar[DefectClass | None] = DefectClass.CONFLICT_MARKER
 
     def __init__(self) -> None:
         super().__init__(
@@ -506,7 +506,7 @@ class ConflictMarkerCommitGateHandler(PreToolUseHandlerBase):
                 HandlerTag.TERMINAL,
             ],
         )
-        self._formatter = RuleFormatter()
+        self._formatter = _FORMATTER
         # Config option, set via setattr after __init__ like every content handler's.
         self._exclude_paths: list[str] | None = None
 

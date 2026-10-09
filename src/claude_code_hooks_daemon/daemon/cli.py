@@ -27,6 +27,7 @@ Provides:
 import argparse
 import asyncio
 import datetime
+import difflib
 import fcntl
 import importlib.util
 import json
@@ -51,7 +52,7 @@ from pydantic import ValidationError as PydanticValidationError
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config, handler_options
 from claude_code_hooks_daemon.constants import DaemonPath, HandlerID, Timeout
-from claude_code_hooks_daemon.constants.dbf import DefenceBeforeFix
+from claude_code_hooks_daemon.constants.dbf import DefectClass, DefenceBeforeFix
 from claude_code_hooks_daemon.constants.modes import DaemonMode
 from claude_code_hooks_daemon.constants.permissions import FileMode
 from claude_code_hooks_daemon.core.event import EventType
@@ -8824,7 +8825,7 @@ def _init_project_context_for_cli(args: argparse.Namespace) -> None:
         )
 
 
-def _dbf_classification_line(defect_class: str | None) -> str:
+def _dbf_classification_line(defect_class: DefectClass | None) -> str:
     """The line saying whether a handler is a Defence (owner ruling C1) or a guardrail."""
     if defect_class is None:
         return DefenceBeforeFix.GUARDRAIL_LINE
@@ -8898,10 +8899,14 @@ def cmd_explain_rule(args: argparse.Namespace) -> int:
         if check is not None:
             _print_check_entry(check)
             return 0
-        suggestions = [
-            *near_rule_matches(handlers, rule_id),
-            *near_check_matches(check_entries, rule_id),
-        ]
+        typed = rule_id.strip().lower().removeprefix("r-")
+        suggestions = sorted(
+            {*near_rule_matches(handlers, rule_id), *near_check_matches(check_entries, rule_id)},
+            key=lambda name: (
+                -difflib.SequenceMatcher(None, typed, name.lower().removeprefix("r-")).ratio(),
+                name,
+            ),
+        )
         print(f"ERROR: unknown rule ID: {rule_id}", file=sys.stderr)
         if suggestions:
             print(f"Did you mean: {', '.join(suggestions)}?", file=sys.stderr)
@@ -8914,6 +8919,7 @@ def cmd_explain_rule(args: argparse.Namespace) -> int:
     print(f"Handler: {handler.config_key} ({handler.class_name})")
     print()
     print(formatter.verbose(rule))
+    print()
     print(_dbf_classification_line(handler.defect_class))
     print(DefenceBeforeFix.EXPLAIN_LINE)
     return 0
@@ -8994,6 +9000,7 @@ def cmd_explain_handler(args: argparse.Namespace) -> int:
     else:
         print("CLAUDE.md guidance: (none)")
 
+    print()
     print(_dbf_classification_line(handler.defect_class))
     print(DefenceBeforeFix.EXPLAIN_LINE)
     return 0

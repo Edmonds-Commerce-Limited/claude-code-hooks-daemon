@@ -32,6 +32,9 @@ from claude_code_hooks_daemon.docs_qa.types import (
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 CHECK_ID: Final[str] = "quote-source-stale"
+STATEMENT: Final[str] = (
+    "Editing a file that other documents quote means those quotes need re-checking. Review the quoting files."
+)
 
 
 def _finding(rel_path: str, anchor: str, quoters: tuple[str, ...]) -> Finding:

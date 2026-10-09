@@ -20,7 +20,6 @@ from claude_code_hooks_daemon.constants import (
     Timeout,
     ToolName,
 )
-from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import BlockingResult, Decision, get_data_layer
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
@@ -95,8 +94,6 @@ class LintOnEditHandler(PostToolUseHandlerBase):
     # PROJECT-scoped: resolves the file's toolchain via resolve_workspace()
     # (see CLAUDE/Code/WorkspaceResolution.md).
     workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.PROJECT
-
-    defect_class: ClassVar[str | None] = DefectClass.LINT_FAILURE
 
     def __init__(self) -> None:
         super().__init__(
