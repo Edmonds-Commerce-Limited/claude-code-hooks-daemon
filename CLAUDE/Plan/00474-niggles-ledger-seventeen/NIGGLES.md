@@ -1426,6 +1426,30 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N380 — agent branches pass their targeted tests and break the cross-cutting ones
+
+**Source**: the coordinator, 2026-10-09. After N379, `llm_qa.py changed --range 85c4c73b1..HEAD` was run over every
+merge since the last green gate.
+
+**Evidence**: 6 tests fail on main that no agent ran:
+
+- **00499 Phase 1:** the priority-band check, the default-enabled template consistency check (x2), and registry
+  option injection for `write_protected_paths`.
+- **00470 Task 6.4:** the `HookInputField` single-source check, and the event-socket enrichment "left untouched" test.
+
+Each test guards a property that every handler or every payload read must satisfy. None of them lives near the
+changed module, so a targeted run by name or import never selects them. Two more points:
+
+- `changed` with no `--range` on a clean main selects nothing (0 changed files). The advice "run `changed` on the
+  merged head" therefore checks nothing after a merge.
+- Agents cannot run `llm_qa.py` (R-SUBAGENT-FULL-QA), so the merge gate has to be the coordinator's
+  `changed --range <pre-merge>..HEAD`.
+
+**Status**: 🔄 Fixing. The six regressions are on a worktree branch. Two process remedies follow:
+
+1. `merge_qa_advisor` should print the exact `--range <pre-merge head>..HEAD` command.
+2. The coordinator runs that range after every merge onto main.
+
 ### N379 — a branch merged after a green gate that never saw it
 
 **Source**: the coordinator, 2026-10-09. The B4 full gate ran on main at 85c4c73b1. The N359 and 00499 branches

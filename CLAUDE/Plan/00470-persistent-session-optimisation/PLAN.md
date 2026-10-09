@@ -115,7 +115,18 @@ Evidence, with verified facts marked apart from inferences, is in
 
 ### Phase 4: Housekeeping and cost (owner: orchestrator; code by sub-agents)
 
-- [ ] ⬜ **Task 4.1**: Measure disk/log growth on the server; add rotation where it is unbounded.
+- [ ] 🔄 **Task 4.1**: Measure disk/log growth on the server; add rotation where it is unbounded.
+  - Measured ([report](subagent-reports/261009-task-4.1-growth-sonnet.md)). Every daemon-written store is bounded
+    except those below.
+  - **Claude Code transcripts** (`~/.claude/projects/<project>/`, 2.9 GB, sub-agent transcripts 2.3 GB) are Claude
+    Code's own files, so the daemon must not delete them. Claude Code's `cleanupPeriodDays` user setting bounds them.
+    A RUNBOOK item for the owner or IaC (user settings are not the agent's to edit).
+  - **`untracked/scratch/`** (329 MB, 34,669 files) holds live working notes, so it gets no silent age-based delete.
+    Instead, `idle_housekeeping_advisor` reports old scratch files and suggests a cleanup command (report-first).
+  - **The supervisor's `decision.log`** is unbounded, though `cli.py:3170` says it is bounded on daemon start.
+    Either bound it there or correct the text.
+  - **`refs/integration/changed-green/*`** (60 refs) has no sweep. Prune refs whose branch is gone.
+  - `untracked/qa-interpreters/` (1.0 GB) is a reused cache that was filled once, so it needs no change.
 - [x] ✅ **Task 4.2**: Extend `idle_housekeeping_advisor` to report stale worktrees and daemons (report-first). Detection is `utils/stale_checkouts.py`; the advisory names each finding with its cleanup command and runs none. Options: `report_stale_checkouts`, `base_branch`, `stale_worktree_days`.
   - Remedies are real and never signal: `rm` of a proven-dead pid file, only this host's pid file, and a daemon with a vanished root gets a read-only `ps` and a human look. Merged 057116873.
 - [x] ✅ **Task 4.5**: Stale-scan follow-ups from the Task 4.2 review (`untracked/scratch/merge-review/housekeeping.md` is lost on restart, so the list is here).
