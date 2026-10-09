@@ -105,6 +105,18 @@ def _probe_stands_for(hook_input: Mapping[str, Any], *, subagent: bool) -> bool:
     return probe_thread(hook_input) is wanted
 
 
+def probe_only_handler(hook_input: Mapping[str, Any]) -> str | None:
+    """The one handler a probe restricts the chain to, or None for the whole chain.
+
+    Lazy for the same import-cycle reason as :func:`_is_synthetic`.
+    """
+    from claude_code_hooks_daemon.daemon.synthetic_traffic import (
+        probe_only_handler as _probe_only_handler,
+    )
+
+    return _probe_only_handler(hook_input)
+
+
 def acts_as_main_thread(hook_input: Mapping[str, Any]) -> bool:
     """Whether this event is judged as the main thread's.
 

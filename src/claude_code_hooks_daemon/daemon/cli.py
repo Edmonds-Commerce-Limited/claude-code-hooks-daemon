@@ -6840,6 +6840,7 @@ def cmd_probe(args: argparse.Namespace) -> int:
             project_root=project_root,
             session_id=probe_session_id(),
             probe_as=ProbeThread(asked) if asked else None,
+            only=getattr(args, "only", None),
         )
         entry_point = entry_point_for(project_root, event)
     except (ProbeInputError, OSError) as exc:
@@ -11842,6 +11843,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Thread the probe stands for, so MAIN/SUB-scoped handlers judge it "
         "(default: main; sub also sends agent_id=manual-probe-agent)",
+    )
+    parser_probe.add_argument(
+        "--only",
+        metavar="HANDLER",
+        default=None,
+        help="Run only this handler (config key, e.g. destructive_git) instead of the whole "
+        "chain, so a detector can be exercised alone",
     )
     parser_probe.add_argument(
         "--project-root",

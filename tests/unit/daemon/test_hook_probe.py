@@ -48,6 +48,7 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     MANUAL_PROBE,
     PROBE_AGENT_ID,
     PROBE_AS_FIELD,
+    PROBE_ONLY_FIELD,
     SYNTHETIC_SOURCE_FIELD,
     ProbeThread,
     record_synthetic_source,
@@ -407,6 +408,89 @@ class TestCmdProbe:
     ) -> None:
         assert cmd_probe(self._args(tmp_path)) == 2
         assert "pre-tool-use" in capsys.readouterr().err
+
+
+class TestProbeOnly:
+    """``--only HANDLER`` restricts the chain to one handler (Plan 00484 G11)."""
+
+    def _build(self, payload: object, tmp_path: Path, only: str | None) -> dict[str, Any]:
+        return build_probe_event(
+            payload,
+            event=EventID.PRE_TOOL_USE,
+            project_root=tmp_path,
+            session_id="manual-probe-fixed",
+            only=only,
+        )
+
+    def test_the_named_handler_is_sent_as_the_restriction(self, tmp_path: Path) -> None:
+        event = self._build(dict(_BASH_PAYLOAD), tmp_path, "destructive_git")
+        assert event[PROBE_ONLY_FIELD] == "destructive_git"
+
+    def test_the_dashed_spelling_names_the_same_handler(self, tmp_path: Path) -> None:
+        event = self._build(dict(_BASH_PAYLOAD), tmp_path, "destructive-git")
+        assert event[PROBE_ONLY_FIELD] == "destructive_git"
+
+    def test_no_restriction_is_sent_by_default(self, tmp_path: Path) -> None:
+        assert PROBE_ONLY_FIELD not in self._build(dict(_BASH_PAYLOAD), tmp_path, None)
+
+    def test_a_handler_the_event_does_not_have_is_refused(self, tmp_path: Path) -> None:
+        """A typo answered with an allow would read as a handler that passed."""
+        with pytest.raises(ProbeInputError, match="no_such_handler"):
+            self._build(dict(_BASH_PAYLOAD), tmp_path, "no_such_handler")
+
+    def test_a_non_probe_source_is_refused_because_it_would_be_ignored(
+        self, tmp_path: Path
+    ) -> None:
+        payload = {**_BASH_PAYLOAD, SYNTHETIC_SOURCE_FIELD: "plugin-audit"}
+        with pytest.raises(ProbeInputError, match=PROBE_ONLY_FIELD):
+            self._build(payload, tmp_path, "destructive_git")
+
+    def test_a_payload_restriction_contradicting_the_asked_one_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        payload = {**_BASH_PAYLOAD, PROBE_ONLY_FIELD: "sed_blocker"}
+        with pytest.raises(ProbeInputError, match=PROBE_ONLY_FIELD):
+            self._build(payload, tmp_path, "destructive_git")
+
+    def test_the_cli_sends_the_restriction(self, tmp_path: Path) -> None:
+        entry = _project_with_entry_point(tmp_path, "pre-tool-use", _CAPTURING_ENTRY_POINT)
+        args = argparse.Namespace(
+            project_root=tmp_path,
+            event="PreToolUse",
+            json=json.dumps(_BASH_PAYLOAD),
+            file=None,
+            probe_as=None,
+            only="destructive_git",
+        )
+        assert cmd_probe(args) == 0
+        sent = json.loads((entry.parent / "captured.json").read_text(encoding="utf-8"))
+        assert sent[PROBE_ONLY_FIELD] == "destructive_git"
+
+    def test_the_cli_refuses_an_unknown_handler_and_sends_nothing(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        entry = _project_with_entry_point(tmp_path, "pre-tool-use", _CAPTURING_ENTRY_POINT)
+        args = argparse.Namespace(
+            project_root=tmp_path,
+            event="PreToolUse",
+            json=json.dumps(_BASH_PAYLOAD),
+            file=None,
+            probe_as=None,
+            only="no_such_handler",
+        )
+        assert cmd_probe(args) == 2
+        assert not (entry.parent / "captured.json").exists()
+        assert "no_such_handler" in capsys.readouterr().err
+
+    def test_the_verdict_names_the_restriction(self) -> None:
+        event = {**_RENDERED_EVENT, PROBE_ONLY_FIELD: "destructive_git"}
+        _, text = render_verdict(
+            event=EventID.PRE_TOOL_USE,
+            entry_point=Path("/p/.claude/hooks/pre-tool-use"),
+            hook_event=event,
+            outcome=ProbeOutcome(0, "{}", ""),
+        )
+        assert f"{PROBE_ONLY_FIELD}: destructive_git" in text
 
 
 class TestTheVerdictLogRecordsTheProbe:

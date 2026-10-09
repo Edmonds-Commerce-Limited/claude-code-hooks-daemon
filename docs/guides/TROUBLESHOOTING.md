@@ -156,8 +156,9 @@ To see it running, check immediately after a hook fires:
 
 The `probe` command sends one test payload through your hook and prints the
 decision. It marks the payload `"synthetic_source": "manual-probe"`, so the
-daemon's verdict log does not count it as a real tool call. To pipe the
-payload yourself, set the field by hand:
+daemon's verdict log does not count it as a real tool call. `--only <handler>`
+runs that one handler instead of the whole chain. To pipe the payload
+yourself, set the field by hand:
 
 ```bash
 echo '{"tool_name":"Bash","tool_input":{"command":"echo test"},"synthetic_source":"manual-probe"}' | bash .claude/hooks/pre-tool-use
@@ -820,6 +821,7 @@ rule-less record per enabled blocking Defence that declares no rule (`rule_id` a
 are `null`). Fields: `rule_id`, `handler`, `handler_class`, `event`, `priority`, `behavior`,
 `statement`, `defect_class` (the handler's declared class, such as `qa-suppression`; never
 `null` in this listing), `docs` (the command that prints the full text) and
-`detector_entry_point` (`hooks-daemon probe <event>`). `detector_entry_point` is `null` for a
+`detector_entry_point` (`hooks-daemon probe <event> --only <handler>`, which runs that one
+handler alone). `detector_entry_point` is `null` for a
 handler whose event is not a wired hook event. A project handler appears only if it declares a
 `defect_class`. Without `--json` it prints one tab-separated line per record.

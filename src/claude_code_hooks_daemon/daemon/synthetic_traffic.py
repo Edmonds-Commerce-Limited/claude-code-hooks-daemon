@@ -80,6 +80,11 @@ TEST_PROBE: Final[str] = "test-probe"
 #: SUB-scoped handler (``core/handler_scope.py``).
 PROBE_AS_FIELD: Final[str] = "probe_as"
 
+#: Field a PROBE sets to restrict the chain to one handler (config key), so a
+#: detector can be exercised alone (Plan 00484 G11). Honoured only for a
+#: probe-class source, by :func:`probe_only_handler`.
+PROBE_ONLY_FIELD: Final[str] = "probe_only"
+
 #: The only sources allowed to name a thread, each declared here by name. A
 #: probe is sent to exercise handlers, so it may stand for a thread; a harness
 #: run, a cron tick or a supervisor-generated event must never pass for one,
@@ -175,6 +180,19 @@ def probe_thread(hook_input: Mapping[str, Any]) -> ProbeThread | None:
     if thread is ProbeThread.MAIN:
         return thread if not agent_id else None
     return thread if agent_id == PROBE_AGENT_ID else None
+
+
+def probe_only_handler(hook_input: Mapping[str, Any]) -> str | None:
+    """The one handler a probe restricts the chain to, or None for the whole chain.
+
+    Only an event whose MARKER is a probe-class source counts, for the reason
+    :func:`probe_thread` gives: a field that switches the other guards off
+    must not be reachable from real traffic.
+    """
+    if hook_input.get(SYNTHETIC_SOURCE_FIELD) not in PROBE_CLASS_SOURCES:
+        return None
+    raw = hook_input.get(PROBE_ONLY_FIELD)
+    return raw if isinstance(raw, str) and raw else None
 
 
 def record_synthetic_source(record: Mapping[str, Any]) -> str | None:

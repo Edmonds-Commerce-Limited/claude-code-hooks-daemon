@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+from claude_code_hooks_daemon.config.validator import ConfigValidator
 from claude_code_hooks_daemon.constants.events import EventIDMeta, wired_event_metas
 from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.constants.timeout import Timeout
@@ -41,6 +42,7 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     PROBE_AGENT_ID,
     PROBE_AS_FIELD,
     PROBE_CLASS_SOURCES,
+    PROBE_ONLY_FIELD,
     SYNTHETIC_SOURCE_FIELD,
     ProbeThread,
     classify_synthetic,
@@ -124,6 +126,44 @@ def _resolve_thread(
     return asked or in_payload or ProbeThread.MAIN
 
 
+def _resolve_only(
+    payload: Mapping[str, Any], event: EventIDMeta, asked: str | None
+) -> str | None:
+    """The handler this probe is restricted to: asked, else the payload's, else none.
+
+    Raises:
+        ProbeInputError: The restriction contradicts the payload's own, the
+            payload's source is not probe-class (so the daemon would ignore
+            the restriction and run the whole chain), or the event has no
+            such handler (an allow from a typo would read as a handler that
+            passed).
+    """
+    in_payload = payload.get(PROBE_ONLY_FIELD)
+    requested = asked if asked is not None else in_payload
+    if requested is None:
+        return None
+    if not isinstance(requested, str) or not requested:
+        raise ProbeInputError(f"{PROBE_ONLY_FIELD} must name a handler, got {requested!r}")
+    handler = requested.replace("-", "_")
+    if asked is not None and in_payload is not None and in_payload != handler:
+        raise ProbeInputError(
+            f"the payload says {PROBE_ONLY_FIELD}: {in_payload}, but the probe was "
+            f"asked to run only {handler}"
+        )
+    source = payload.get(SYNTHETIC_SOURCE_FIELD, MANUAL_PROBE)
+    if source not in PROBE_CLASS_SOURCES:
+        raise ProbeInputError(
+            f"{PROBE_ONLY_FIELD} is honoured only for a probe source, and "
+            f"{SYNTHETIC_SOURCE_FIELD} {source!r} is not one, so the whole chain would run"
+        )
+    available = ConfigValidator.get_available_handlers(event.config_key)
+    if handler not in available:
+        raise ProbeInputError(
+            f"{event.json_key} has no handler {handler!r}. Handlers: {', '.join(sorted(available))}"
+        )
+    return handler
+
+
 def build_probe_event(
     payload: object,
     *,
@@ -131,6 +171,7 @@ def build_probe_event(
     project_root: Path,
     session_id: str,
     probe_as: ProbeThread | None = None,
+    only: str | None = None,
 ) -> dict[str, Any]:
     """The event to send: the caller's payload, marked and framed like Claude Code's.
 
@@ -170,6 +211,7 @@ def build_probe_event(
                 f"{SYNTHETIC_SOURCE_FIELD} must be a non-empty string naming the producer, "
                 f"got {marker!r}; omit it and the probe is marked {MANUAL_PROBE!r}"
             )
+    only_handler = _resolve_only(payload, event, only)
     thread = _resolve_thread(payload, event, probe_as)
     agent_id = payload.get(HookInputField.AGENT_ID)
     if thread is ProbeThread.MAIN and agent_id:
@@ -188,6 +230,8 @@ def build_probe_event(
     hook_event.setdefault("session_id", session_id)
     hook_event.setdefault("cwd", str(project_root))
     hook_event.setdefault(SYNTHETIC_SOURCE_FIELD, MANUAL_PROBE)
+    if only_handler is not None:
+        hook_event[PROBE_ONLY_FIELD] = only_handler
     if thread is not None:
         hook_event[PROBE_AS_FIELD] = thread.value
     if thread is ProbeThread.SUB:
@@ -281,6 +325,11 @@ def render_verdict(
     ]
     if PROBE_AS_FIELD in hook_event:
         header.append(f"{PROBE_AS_FIELD}: {hook_event[PROBE_AS_FIELD]}")
+    if PROBE_ONLY_FIELD in hook_event:
+        header.append(
+            f"{PROBE_ONLY_FIELD}: {hook_event[PROBE_ONLY_FIELD]} "
+            "(an allow also means the handler is not enabled in this project)"
+        )
     if event_supports_scope(event.json_key) and source not in PROBE_CLASS_SOURCES:
         # Only a probe-class source may name a thread, so an allow here says
         # nothing about scoped handlers. Measured on Stop: `{}` where the

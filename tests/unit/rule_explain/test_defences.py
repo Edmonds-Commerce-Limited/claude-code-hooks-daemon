@@ -62,7 +62,9 @@ class TestCollectActiveDefences:
         assert record.priority == 7
         assert record.statement == "`git x`"
         assert record.docs == "hooks-daemon explain-rule R-A-ONE"
-        assert record.detector_entry_point == "hooks-daemon probe pre_tool_use --json <payload>"
+        assert record.detector_entry_point == (
+            "hooks-daemon probe pre_tool_use --only a --json <payload>"
+        )
 
     def test_defect_class_is_the_handlers_declared_class(self) -> None:
         handlers = [
