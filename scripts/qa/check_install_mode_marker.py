@@ -296,7 +296,9 @@ def _constant_parts(node: ast.expr) -> list[str | None] | None:
     if isinstance(node, ast.Tuple | ast.List) and all(
         isinstance(e, ast.Constant) and isinstance(e.value, str) for e in node.elts
     ):
-        return [e.value for e in node.elts if isinstance(e, ast.Constant)]
+        return [
+            e.value for e in node.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)
+        ]
     return None
 
 

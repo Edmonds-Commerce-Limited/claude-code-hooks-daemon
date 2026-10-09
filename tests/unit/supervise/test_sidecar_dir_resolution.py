@@ -111,7 +111,7 @@ class TestTheRuleIsTheCanonicalOne:
         (clone_daemon_dir / "daemon").mkdir(parents=True)
         (clone_daemon_dir / "daemon" / "install_layout.py").write_text(
             (
-                Path(_mod.__file__).resolve().parents[2]
+                Path(str(_mod.__file__)).resolve().parents[2]
                 / "src"
                 / "claude_code_hooks_daemon"
                 / "daemon"
