@@ -1439,11 +1439,15 @@ whole-repo checkers never saw their code before the merges.
 - `generated_doc_drift`: 416 lines in `.claude/HOOKS-DAEMON.md`, a stale copy committed on the 00499 branch.
 
 `merge_qa_advisor` did not fire on either merge. The gate's result was green, but it described a different tree.
+The advisor was silent because it matched only `worktree-*` branches (`WORK_BRANCH_PREFIX` in
+`branch_count_advisor`). An `isolation: worktree` agent dispatch names its branch `agent-<hex>-<hex>`, so every
+agent branch was merged unadvised, and `branch_count_advisor` left agent branches out of the WIP count too.
 
-**Status**: ✅ Fixed forward in 06ab3658e. The process remedy is the coordinator's: run the full gate on a tree
-that holds the branches to be merged (merge them into a candidate first), or follow every merge onto main with
-`llm_qa.py changed` before calling it done. Open for the tooling: `merge_qa_advisor` could name the whole-repo
-checkers a branch's recorded QA never ran.
+**Status**: ✅ Fixed. The failures were fixed forward in 06ab3658e. Both handlers now take their branch shapes from
+`git_repo.WORK_BRANCH_PREFIXES` (`worktree-`, `agent-`), with tests through each handler and release-note callout
+004\. The process remedy is the coordinator's: run the full gate on a tree that holds the branches to be merged
+(merge them into a candidate first), or follow every merge onto main with `llm_qa.py changed` before calling it
+done.
 
 ### N378 — the `[awaiting-human]` marker is one project-wide file, cleared by any session's prompt
 

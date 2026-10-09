@@ -54,8 +54,9 @@ rounds, and nine that were superseded copies of newer branches. Each rule below
 answers one of those failures.
 
 - **At most 3 open work branches at once.** Starting a fourth waits until one
-  merges or is dropped. Count the `worktree-*` branches that exist; a branch
-  whose worktree is gone still counts until it is deleted.
+  merges or is dropped. Count the `worktree-*` branches and the `agent-*`
+  branches agent dispatch creates that exist; a branch whose worktree is gone
+  still counts until it is deleted.
 - **Finish before starting.** A branch merges or is dropped within its batch.
   An unmerged branch falls behind `main`, and its merge cost grows with every
   commit it misses.

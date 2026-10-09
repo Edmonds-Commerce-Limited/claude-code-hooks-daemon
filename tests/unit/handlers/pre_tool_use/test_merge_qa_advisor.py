@@ -26,6 +26,8 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.merge_qa_advisor import (
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _BRANCH = "worktree-feature"
+#: The branch an `isolation: worktree` agent dispatch is given.
+_AGENT_BRANCH = "agent-a2c1639ebf327c0d2-c58056dc"
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -137,6 +139,21 @@ class TestAdvises:
         assert "llm_qa.py changed" in text
         for command in ("ruff check", "black --check", "mypy", "audit_error_hiding.py"):
             assert command in text
+
+    def test_an_agent_dispatch_branch_is_a_work_branch(
+        self, handler: MergeQaAdvisorHandler, repo: Path, head: str
+    ) -> None:
+        """Ledger 00474 N379: two agent branches were merged with no advice at all."""
+        _git(repo, "branch", _AGENT_BRANCH, _BRANCH)
+        text = _advice(handler, f"git merge --no-ff {_AGENT_BRANCH}", repo)
+        assert head[:12] in text
+        assert _AGENT_BRANCH in text
+
+    def test_a_remote_tracking_agent_branch_is_judged(
+        self, handler: MergeQaAdvisorHandler, repo: Path, head: str
+    ) -> None:
+        _git(repo, "update-ref", f"refs/remotes/origin/{_AGENT_BRANCH}", head)
+        assert head[:12] in _advice(handler, f"git merge origin/{_AGENT_BRANCH}", repo)
 
     def test_a_record_for_an_older_head_is_stale(
         self, handler: MergeQaAdvisorHandler, repo: Path, head: str
