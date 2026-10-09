@@ -651,21 +651,6 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="pyright.json",
         jq_hint="jq '.errors[] | {file, line, rule, message}'",
     ),
-    # The hint MUST name the array holding the detail, not the summary. It
-    # pointed at `.summary` until Plan 00229 — sending a reader who wanted to
-    # know WHAT failed back to the count they had already been shown. That is
-    # why Plan 00226's missing failure names had no surface on which they could
-    # look wrong. Asserted by test_llm_qa_count_implies_detail.py.
-    # A live consumer through tests/acceptance: its daemon fixtures skip with
-    # no socket, and a skip in a RELEASING.md Step 12.0 gate is a failure.
-    # run_test_matrix.py runs run_tests.sh AND the suite under every other
-    # Python in CI's matrix (00466 N110), so the gate is not narrower than CI.
-    "tests": ToolConfig(
-        command=_python("run_test_matrix.py"),
-        json_file="tests.json",
-        jq_hint="jq '.tests[] | select(.outcome == \"failed\") | .name'",
-        live_daemon=True,
-    ),
     "security": ToolConfig(
         command=_bash("run_security_check.sh"),
         json_file="security.json",
@@ -839,16 +824,6 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="british_english.json",
         jq_hint="jq '.violations[] | {file, line, american, british}'",
     ),
-    # Runs the project handlers' own tests, which `run_tests.sh` cannot reach:
-    # `testpaths` is ["tests"], so the 61 tests co-located with
-    # `.claude/project-handlers/` went unexecuted by every gate while
-    # gate-scope.bash cited them as the reason those handlers need no type
-    # checking. Both are terminal and both DENY.
-    "project_handlers": ToolConfig(
-        command=_python("check_project_handler_tests.py", "--json"),
-        json_file="project_handlers.json",
-        jq_hint="jq '.tests[] | {name, outcome}'",
-    ),
     # Diffs the daemon's schemas/claim tables against the vendored Claude Code
     # hooks contract (Plan 00271). Network-free; staleness is the
     # contract_staleness SessionStart advisory's job.
@@ -863,6 +838,37 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         command=_python("check_input_contract.py", "--json"),
         json_file="input_contract.json",
         jq_hint="jq '.violations[] | {rule, event, subject, message}'",
+    ),
+    # ── Runners ─────────────────────────────────────────────────────
+    # Everything from here on EXECUTES code (RUNNER_TOOLS). Every static
+    # detector is registered above, so a detector's verdict is in before a
+    # runner's means anything (TOOLING-SPEC 4.5, Plan 00484 G7). Pinned by
+    # test_llm_qa_detectors_first.py.
+    #
+    # Runs the project handlers' own tests, which `run_tests.sh` cannot reach:
+    # `testpaths` is ["tests"], so the 61 tests co-located with
+    # `.claude/project-handlers/` went unexecuted by every gate while
+    # gate-scope.bash cited them as the reason those handlers need no type
+    # checking. Both are terminal and both DENY.
+    "project_handlers": ToolConfig(
+        command=_python("check_project_handler_tests.py", "--json"),
+        json_file="project_handlers.json",
+        jq_hint="jq '.tests[] | {name, outcome}'",
+    ),
+    # The hint MUST name the array holding the detail, not the summary. It
+    # pointed at `.summary` until Plan 00229 — sending a reader who wanted to
+    # know WHAT failed back to the count they had already been shown. That is
+    # why Plan 00226's missing failure names had no surface on which they could
+    # look wrong. Asserted by test_llm_qa_count_implies_detail.py.
+    # A live consumer through tests/acceptance: its daemon fixtures skip with
+    # no socket, and a skip in a RELEASING.md Step 12.0 gate is a failure.
+    # run_test_matrix.py runs run_tests.sh AND the suite under every other
+    # Python in CI's matrix (00466 N110), so the gate is not narrower than CI.
+    "tests": ToolConfig(
+        command=_python("run_test_matrix.py"),
+        json_file="tests.json",
+        jq_hint="jq '.tests[] | select(.outcome == \"failed\") | .name'",
+        live_daemon=True,
     ),
     # Targeted only (Plan 00463): pytest on the tests mapped from what changed
     # since the merge base. Excluded from `all`, which runs the whole suite
@@ -883,6 +889,15 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         live_daemon=True,
     ),
 }
+
+#: The tools that EXECUTE code (the test suite, the project handlers' tests, the
+#: live smoke test) rather than judge the tree statically. Every other tool is a
+#: detector. A runner's result means something only while every detector agrees
+#: the tree is sound, so runners are ordered after detectors and are marked
+#: "not meaningful" once a detector has failed (Plan 00484 G7, TOOLING-SPEC 4.5).
+RUNNER_TOOLS: Final[frozenset[str]] = frozenset(
+    {"tests", "project_handlers", "changed_tests", "smoke_test"}
+)
 
 #: Tools that exist for the targeted path only, and never run as part of `all`.
 _TARGETED_ONLY_TOOLS: Final[frozenset[str]] = frozenset({"changed_tests"})
@@ -905,7 +920,6 @@ CHANGED_TOOL_NAMES: Final[list[str]] = [
     "pyright",
     "error_hiding",
     "eacces_safe",
-    "project_handlers",
     "docs_qa",
     "plan_qa",
     "shell_check",
@@ -936,6 +950,7 @@ CHANGED_TOOL_NAMES: Final[list[str]] = [
     "inline_suppressions",
     "released_changelog",
     "semgrep",
+    "project_handlers",
     "changed_tests",
 ]
 
@@ -1323,6 +1338,11 @@ _REPORT_ERROR_LABEL: Final[str] = "⚠️  TOOL ERROR:"
 # Prefix for a `--read-only` result recorded for a different tree (Plan 00463).
 _STALE_LABEL: Final[str] = "⚠️  STALE:"
 
+#: Marks a runner's result once a detector has failed (Plan 00484 G7).
+_NOT_MEANINGFUL_LABEL: Final[str] = "NOT MEANINGFUL"
+_NOT_MEANINGFUL_ICON: Final[str] = "⚪"  # white circle: neither a pass nor a failure
+_RESULT_ICONS: Final[tuple[str, ...]] = ("✅", "❌", _REUSED_ICON)
+
 #: Said by a run whose results cannot be tied to one tree.
 _TREE_WARNING_LABEL: Final[str] = "⚠️  NOT RECORDED FOR THIS TREE:"
 
@@ -1581,7 +1601,9 @@ def resolve_tools(names: list[str]) -> tuple[list[str], list[str]]:
 
     ``all`` anywhere means the full suite and nothing else: every other name is
     already in it. ``changed`` expands to its targeted list, and a named tool
-    beside it is added once.
+    beside it is added once. Detectors always run before runners (see
+    :data:`RUNNER_TOOLS`), whatever order they were named in; the order inside
+    each group is kept.
 
     Returns:
         ``(tools, unknown)``: the tools to run, and each name that is neither a
@@ -1598,7 +1620,9 @@ def resolve_tools(names: list[str]) -> tuple[list[str], list[str]]:
                 unknown.append(tool)
             elif tool not in tools:
                 tools.append(tool)
-    return tools, unknown
+    detectors = [tool for tool in tools if tool not in RUNNER_TOOLS]
+    runners = [tool for tool in tools if tool in RUNNER_TOOLS]
+    return detectors + runners, unknown
 
 
 #: Options `changed` forwards to `run_changed_tests.py` (Plan 00463).
@@ -2755,6 +2779,36 @@ def _reusable_reason(
     return output_reason(record, QA_OUTPUT_DIR / TOOL_REGISTRY[name].json_file)
 
 
+def mark_not_meaningful(summary: str, failed_detectors: Sequence[str]) -> str:
+    """``summary`` with its result icon replaced and the failed detectors named.
+
+    A runner's result after a failed detector says nothing about the tree the
+    detector rejected, so the line must not read as a pass (or as a separate
+    failure to weigh): the icon goes and the reason is on the first line.
+    """
+    first, newline, rest = summary.partition("\n")
+    for icon in _RESULT_ICONS:
+        first = first.replace(icon, _NOT_MEANINGFUL_ICON, 1)
+    reason = f"[{_NOT_MEANINGFUL_LABEL}: detector failed: {', '.join(failed_detectors)}]"
+    return f"{first}   {reason}{newline}{rest}"
+
+
+def format_verdict(
+    *, passed: int, total: int, not_meaningful: Sequence[str], failed_detectors: Sequence[str]
+) -> str:
+    """The ``QA:`` line. Runners marked not meaningful are neither passed nor failed."""
+    if not not_meaningful and passed == total:
+        return f"QA: {passed}/{total} PASSED"
+    failed = total - passed - len(not_meaningful)
+    line = f"QA: {passed}/{total} PASSED, {failed}/{total} FAILED"
+    if not_meaningful:
+        line += (
+            f", {len(not_meaningful)}/{total} {_NOT_MEANINGFUL_LABEL} "
+            f"(detector failed: {', '.join(failed_detectors)})"
+        )
+    return line
+
+
 def _certify_gate(judged: dict[str, str] | None) -> None:
     """After a passing full run, record HEAD as the batch's certified head, and say so."""
     try:
@@ -2811,6 +2865,8 @@ def _run_tools(
     runs. Reused steps count in the verdict and show their recorded duration.
     """
     all_passed = True
+    failed_detectors: list[str] = []
+    not_meaningful: list[str] = []
     tool_results: dict[str, tuple[bool, str]] = {}
     run_records: dict[str, RunOutcome] = {}
     reused: dict[str, float] = {}
@@ -2832,6 +2888,9 @@ def _run_tools(
             seconds = recorded_durations(recorded, [name]).get(name)
             note = "" if seconds is None else f" (took {seconds:.{_DURATION_DECIMALS}f}s)"
             summary = f"{_REUSED_ICON} {name}: reused, passed on this tree{note}\n"
+            if name in RUNNER_TOOLS and failed_detectors:
+                summary = mark_not_meaningful(summary, failed_detectors)
+                not_meaningful.append(name)
             tool_results[name] = (True, summary)
             if seconds is not None:
                 reused[name] = seconds
@@ -2866,11 +2925,18 @@ def _run_tools(
         if failed_as_recorded is not None:
             passed = False
             summary = summary.replace("✅", "❌", 1) + f"   {_STALE_LABEL} {failed_as_recorded}\n"
-        tool_results[name] = (passed, summary)
         if exit_code is not None and timing is not None:
+            # The record keeps the runner's own result, whatever a detector said:
+            # `--resume` must reuse a runner that really passed.
             run_records[name] = (exit_code, passed, digest, timing)
             _record_step(name, run_records[name], current, step_after)
             current = step_after
+        if not passed and name not in RUNNER_TOOLS:
+            failed_detectors.append(name)
+        if name in RUNNER_TOOLS and failed_detectors:
+            summary = mark_not_meaningful(summary, failed_detectors)
+            not_meaningful.append(name)
+        tool_results[name] = (passed, summary)
         print(summary, end="")
         if not passed:
             all_passed = False
@@ -2883,12 +2949,18 @@ def _run_tools(
 
     # Overall summary
     total = len(tools)
-    passed_count = sum(1 for passed, _ in tool_results.values() if passed)
+    passed_count = sum(
+        1 for name, (passed, _) in tool_results.items() if passed and name not in not_meaningful
+    )
     print()
-    if all_passed:
-        print(f"QA: {passed_count}/{total} PASSED")
-    else:
-        print(f"QA: {passed_count}/{total} PASSED, {total - passed_count}/{total} FAILED")
+    print(
+        format_verdict(
+            passed=passed_count,
+            total=total,
+            not_meaningful=not_meaningful,
+            failed_detectors=failed_detectors,
+        )
+    )
 
     durations = (
         recorded_durations(recorded, tools)

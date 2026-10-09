@@ -604,6 +604,15 @@ requirements a reader needs to know in advance; they are not the full list, and
 this section deliberately carries no count — an earlier version claimed seven
 while the runner ran considerably more.
 
+**Order and verdicts.** `llm_qa.py` runs every static detector before every
+runner (`RUNNER_TOOLS`: `tests`, `project_handlers`, `changed_tests`,
+`smoke_test`), whatever order the tools were named in. It still runs every
+tool, so one red detector does not hide the others. Once a detector has failed,
+each runner's line is marked `NOT MEANINGFUL: detector failed: <names>` and is
+left out of the pass count (`QA: 1/3 PASSED, 1/3 FAILED, 1/3 NOT MEANINGFUL (detector failed: lint)`). A green `tests` line beside a red detector is
+therefore never a pass. The provenance record keeps the runner's real result,
+so `--resume` still reuses a runner that passed.
+
 - **Magic Values** (`check_magic_values.py`) — hardcoded strings/numbers that
   should be constants: handler names, priorities, tool names, event types, tags
 - **Format** (Black) / **Linter** (Ruff) — both auto-fix via
