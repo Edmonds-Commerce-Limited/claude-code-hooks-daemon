@@ -319,9 +319,7 @@ class TestDelivery:
         assert state.pending_folders() == []
         assert state.offered_folders() == []
 
-    def test_an_offer_for_a_plan_that_vanished_is_dropped_on_re_offer(
-        self, tmp_path: Path
-    ) -> None:
+    def test_an_offer_for_a_plan_that_vanished_is_dropped_on_re_offer(self, tmp_path: Path) -> None:
         root, state = self._pending(tmp_path)
         deliver_pending(state, now=2.0)
         (root / "PLAN.md").unlink()
@@ -477,9 +475,7 @@ class TestCorrectionLoop:
         self, tmp_path: Path
     ) -> None:
         root, state = self._checked_at(tmp_path, 100.0)
-        state.store_pending(
-            PendingFactCheck(FOLDER, "h", "d", 1, 1.0, str(root), {"PLAN.md": "x"})
-        )
+        state.store_pending(PendingFactCheck(FOLDER, "h", "d", 1, 1.0, str(root), {"PLAN.md": "x"}))
         _edit(root, "base corrected\n")
         assert process_quiet_plan(root, FOLDER, state, trigger_count=1, now=160.0) is not None
 

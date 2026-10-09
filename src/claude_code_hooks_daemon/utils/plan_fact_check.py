@@ -550,9 +550,7 @@ def _hand_over(
             pending.offers,
         )
     else:
-        offered = replace(
-            pending, plan_root=str(root), offers=pending.offers + 1, offered_at=now
-        )
+        offered = replace(pending, plan_root=str(root), offers=pending.offers + 1, offered_at=now)
         diff_path = state.write_diff(folder, offered.diff)
         state.offer(offered)
         claimed.unlink(missing_ok=True)
