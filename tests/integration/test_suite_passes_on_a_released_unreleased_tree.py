@@ -197,6 +197,10 @@ class TestTheReadersAreSplitAcrossRuns:
         readers = self._files(tmp_path, {"a.py": 5, "b.py": 5})
         assert [len(group) for group in partition_readers(readers, 4, root=tmp_path)] == [1, 1]
 
+    def test_no_readers_is_refused_with_a_message_that_says_so(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="no test file mentions the holding area"):
+            partition_readers([], 4, root=tmp_path)
+
     def test_fewer_than_one_group_is_refused(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="at least 1"):
             partition_readers([], 0, root=tmp_path)

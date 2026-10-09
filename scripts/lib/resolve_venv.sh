@@ -162,13 +162,21 @@ _RV_PROBE_OUTPUT=""
 # the shell's own clock, rather than reporting a timeout that did not happen.
 _rv_wait_secs() {
     if command -v sleep > /dev/null; then
-        sleep "$1"
+        # The watchdog is killed when the candidate answers; an external
+        # `sleep` would outlive it, so it is started here and killed with it.
+        # The trap is set first so a TERM at any later point finds the sleep.
+        trap 'kill $(jobs -p) 2> /dev/null; exit 143' TERM
+        sleep "$1" &
+        wait $!
         return
     fi
+    # One pipe is opened for the whole wait, so a read that returns at once
+    # costs a builtin call rather than a new process each time round.
     local whole="${1%%.*}"
     local deadline=$((SECONDS + ${whole:-0} + 1))
+    exec 9<> <(:)
     while [ "$SECONDS" -lt "$deadline" ]; do
-        read -r -t 1 <> <(:) || continue
+        read -r -t 1 -u 9 || continue
     done
     return 0
 }
