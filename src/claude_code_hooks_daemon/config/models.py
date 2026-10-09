@@ -2292,12 +2292,21 @@ class PersistentCronsConfig(BaseModel):
 
     Attributes:
         enabled: Master switch for the whole mechanism.
+        initial_thread_only: Whether only the INITIAL thread of a Claude Code
+            session must hold the declared jobs (Plan 00470 Task 6.4). Threads
+            opened later in the same session are told they hold none and are not
+            asked for them. False makes every thread hold them, as before.
         jobs: The declared jobs.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = Field(default=False, description="Master switch for cron assertion")
+    initial_thread_only: bool = Field(
+        default=True,
+        strict=True,
+        description="Only the initial thread of a session holds the declared crons",
+    )
     jobs: list[PersistentCronConfig] = Field(
         default_factory=list, description="Declared crons to assert each session"
     )

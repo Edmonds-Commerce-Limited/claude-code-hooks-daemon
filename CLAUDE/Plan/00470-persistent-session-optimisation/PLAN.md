@@ -170,12 +170,13 @@ waited on one bandit decision.
   their `session_id`, transcript and `session_crons`. Done on the owner's desktop session: a thread has its own
   `session_id` and transcript, and its own (empty) `session_crons`; only Stop carries that key. Results in
   [RESEARCH.md](RESEARCH.md) "Probe results (Task 6.3)".
-- [ ] ⬜ **Task 6.4**: From the probe: by default only the initial thread of a
+- [x] ✅ **Task 6.4**: From the probe: by default only the initial thread of a
   session is required to hold the declared crons. Threads opened later hold none
   unless explicitly instructed. No hook payload tells a later thread from a new session (a new thread's SessionStart
   reports `source: "startup"`), but process ancestry does: every thread of a session runs under one
   `claude daemon run --spawned-by` process (RESEARCH.md, "Probe results (Task 6.3)"). Group sessions by that
   ancestor; the first `session_id` per group holds the crons. With no such ancestor, behave as today.
+  - Done: the event socket stamps the hook's pid (`SO_PEERCRED`); `utils/session_thread_group.py` walks `/proc` (bounded, deadline) to the `claude daemon run --spawned-by` ancestor and persists group (pid + start time) to holder; `persistent_cron_assertor`, `cron_stop_enforcer` and `cron_subagent_stop_enforcer` exempt a non-holder; option `persistent_crons.initial_thread_only` (default true).
 
 ## Success Criteria
 

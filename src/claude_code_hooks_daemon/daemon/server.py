@@ -210,24 +210,55 @@ def _pre_tool_use_transport_deny_response() -> dict[str, Any]:
     }
 
 
-def _peer_hostname(writer: asyncio.StreamWriter) -> PeerHostname:
-    """The hostname override of the process on the other end of a Unix socket.
+def _peer_pid(writer: asyncio.StreamWriter) -> tuple[int | None, str | None]:
+    """The pid of the process on the other end of a Unix socket, or why it is unknown.
 
-    The peer's pid comes from ``SO_PEERCRED`` (Linux), then its environment is
-    read. Where the OS has no ``SO_PEERCRED``, the query fails, or the kernel
-    reports pid 0 (a peer in another PID namespace), the result is unreadable
-    and says why.
+    The pid comes from ``SO_PEERCRED`` (Linux). Where the OS has no
+    ``SO_PEERCRED`` or the query fails, the pid is None and the reason says why.
+    The kernel reports pid 0 for a peer in another PID namespace; that is
+    returned as is, and the callers treat a non-positive pid as unusable.
     """
     peercred = getattr(socket, "SO_PEERCRED", None)
     sock = writer.get_extra_info("socket")
     if peercred is None or sock is None:
-        return PeerHostname(unreadable_because="no SO_PEERCRED on this connection")
+        return None, "no SO_PEERCRED on this connection"
     try:
         raw = sock.getsockopt(socket.SOL_SOCKET, peercred, struct.calcsize("3i"))
     except OSError as exc:
-        return PeerHostname(unreadable_because=f"SO_PEERCRED query failed: {exc}")
+        return None, f"SO_PEERCRED query failed: {exc}"
     pid: int = struct.unpack("3i", raw)[0]
+    return pid, None
+
+
+def _peer_hostname(writer: asyncio.StreamWriter) -> PeerHostname:
+    """The hostname override of the process on the other end of a Unix socket.
+
+    The peer's pid comes from :func:`_peer_pid`, then its environment is read.
+    Where the pid is unknown, or the kernel reports pid 0 (a peer in another PID
+    namespace), the result is unreadable and says why.
+    """
+    pid, reason = _peer_pid(writer)
+    if pid is None:
+        return PeerHostname(unreadable_because=reason)
     return hostname_override_of_process(pid)
+
+
+def _stamp_peer_pid(hook_input: Any, writer: asyncio.StreamWriter) -> None:
+    """Stamp the connected hook process's pid on an event-socket payload (Plan 00470 Task 6.4).
+
+    Only the pid is recorded here; the ``/proc`` walk that groups threads of one
+    Claude Code session happens lazily, in the cron handlers, and only when a
+    project declares ``persistent_crons``. An unknown or non-positive pid stamps
+    nothing, which leaves the session holding the crons as before. A value
+    already on the payload is never overwritten.
+    """
+    if not isinstance(hook_input, dict) or HookInputField.PEER_PID in hook_input:
+        return
+    pid, reason = _peer_pid(writer)
+    if pid is None:
+        logger.debug("No peer pid stamped: %s", reason)
+    elif pid > 0:
+        hook_input[HookInputField.PEER_PID] = pid
 
 
 def _stamp_session_hostname(hook_input: Any, writer: asyncio.StreamWriter) -> None:
@@ -1927,6 +1958,7 @@ class HooksDaemon:
                 await writer.drain()
             else:
                 _stamp_session_hostname(hook_input, writer)
+                _stamp_peer_pid(hook_input, writer)
                 await self._answer_event(
                     event_json_key, hook_input, writer, arrival_time=arrival_time
                 )

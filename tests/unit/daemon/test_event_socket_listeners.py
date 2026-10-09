@@ -242,6 +242,9 @@ class TestEofFraming:
         # (Plan 00470 Task 6.1). That stamp has its own coverage in
         # test_event_socket_session_hostname.py; here the peer exported none.
         monkeypatch.setattr(server, "_peer_hostname", lambda writer: PeerHostname())
+        # Likewise the peer pid (Plan 00470 Task 6.4); covered in
+        # test_event_socket_session_hostname.py.
+        monkeypatch.setattr(server, "_peer_pid", lambda writer: (None, "stubbed"))
         config = _make_config(isolated_untracked_dir, relay_enabled=True)
         daemon = HooksDaemon(config=config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())

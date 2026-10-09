@@ -1108,6 +1108,21 @@ pseudo_events:
 #   workflow_docs: "CLAUDE/PlanWorkflow.md"
 #   enforce_claude_code_sync: false
 
+# Crons the daemon re-asserts each session (Plan 00384). Off by default. Claude
+# Code crons live in session memory only, so declared jobs are stated at session
+# start and checked at Stop. `initial_thread_only` (default true, Plan 00470 Task
+# 6.4): only the INITIAL thread of a Claude Code session must hold the jobs; a
+# thread opened later in the same session (found by the shared `claude daemon
+# run --spawned-by` ancestor process) is told it holds none and is not asked for
+# them. With no such ancestor every session holds them. false: every thread does.
+# persistent_crons:
+#   enabled: true
+#   initial_thread_only: true
+#   jobs:
+#     - id: nightly-check
+#       schedule: "23 * * * *"
+#       prompt: "Run the nightly check."
+
 # Per-host settings (Plan 00479). A key is a label; `pattern` is an optional
 # case-sensitive fnmatch glob against the effective session hostname
 # (HOOKS_DAEMON_HOSTNAME, then CCY_HOST_HOSTNAME, then the system hostname);

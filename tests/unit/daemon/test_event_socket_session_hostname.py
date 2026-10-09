@@ -154,6 +154,71 @@ class TestAnUnreadablePeerStampsNothing:
         assert payload == {"hook_event_name": "Stop"}
 
 
+class TestPeerPidStamp:
+    """Plan 00470 Task 6.4: the connected hook's pid is stamped for thread grouping."""
+
+    _writer = cast("asyncio.StreamWriter", object())
+
+    def test_a_known_pid_is_stamped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(server, "_peer_pid", lambda writer: (4242, None))
+        payload: dict[str, Any] = {"hook_event_name": "Stop"}
+
+        server._stamp_peer_pid(payload, self._writer)
+
+        assert payload[HookInputField.PEER_PID] == 4242
+
+    @pytest.mark.parametrize("pid", [0, -1])
+    def test_a_non_positive_pid_stamps_nothing(
+        self, monkeypatch: pytest.MonkeyPatch, pid: int
+    ) -> None:
+        monkeypatch.setattr(server, "_peer_pid", lambda writer: (pid, None))
+        payload: dict[str, Any] = {"hook_event_name": "Stop"}
+
+        server._stamp_peer_pid(payload, self._writer)
+
+        assert HookInputField.PEER_PID not in payload
+
+    def test_an_unknown_pid_stamps_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(server, "_peer_pid", lambda writer: (None, "no SO_PEERCRED"))
+        payload: dict[str, Any] = {"hook_event_name": "Stop"}
+
+        server._stamp_peer_pid(payload, self._writer)
+
+        assert HookInputField.PEER_PID not in payload
+
+    def test_an_existing_value_is_kept(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(server, "_peer_pid", lambda writer: (4242, None))
+        payload: dict[str, Any] = {HookInputField.PEER_PID: 7}
+
+        server._stamp_peer_pid(payload, self._writer)
+
+        assert payload[HookInputField.PEER_PID] == 7
+
+    def test_a_non_dict_payload_is_ignored(self) -> None:
+        server._stamp_peer_pid(["not", "a", "dict"], self._writer)
+
+    def test_the_peer_pid_query_reports_a_connection_without_a_socket(self) -> None:
+        class _NoSocketWriter:
+            def get_extra_info(self, name: str) -> None:
+                return None
+
+        pid, reason = server._peer_pid(cast("asyncio.StreamWriter", _NoSocketWriter()))
+
+        assert pid is None
+        assert reason is not None
+
+    @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="needs SO_PEERCRED")
+    @pytest.mark.anyio
+    async def test_the_clients_pid_reaches_the_handler(self, untracked_dir: Path) -> None:
+        seen = await _run(untracked_dir, {"hook_event_name": "Stop"}, _client_env())
+
+        assert seen is not None
+        stamped = seen[HookInputField.PEER_PID]
+        assert isinstance(stamped, int)
+        assert stamped > 1
+        assert stamped != os.getpid()
+
+
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc/<pid>/environ")
 class TestPeerEnvironmentIsStamped:
     @pytest.mark.anyio

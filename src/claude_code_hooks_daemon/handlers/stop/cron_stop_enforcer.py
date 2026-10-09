@@ -49,6 +49,9 @@ from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import StopHandlerBase
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
+from claude_code_hooks_daemon.handlers.utils.initial_thread_exemption import (
+    InitialThreadExemption,
+)
 from claude_code_hooks_daemon.handlers.utils.session_advice_counter import (
     SessionAdviceCounter,
 )
@@ -71,7 +74,7 @@ logger = logging.getLogger(__name__)
 _MAX_TRACKED_PAUSE_KEYS: Final[int] = 256
 
 
-class CronStopEnforcerHandler(StopHandlerBase):
+class CronStopEnforcerHandler(InitialThreadExemption, StopHandlerBase):
     """Block a Stop while a declared persistent cron was never created."""
 
     # Demands crons: gated on the project's `autonomy:` config (Plan 00498).
@@ -139,8 +142,14 @@ class CronStopEnforcerHandler(StopHandlerBase):
             return default_config()
 
     def _active_jobs(self, hook_input: dict[str, Any]) -> list[PersistentCronConfig]:
-        """The jobs declared for the session's hostname (``hosts:``, Plan 00470)."""
-        return self._load_config().persistent_crons.active_jobs(effective_hostname(hook_input))
+        """The jobs this session must hold: declared for its hostname (``hosts:``),
+        and none for a thread opened later in a session (``initial_thread_only``).
+        """
+        crons = self._load_config().persistent_crons
+        jobs = crons.active_jobs(effective_hostname(hook_input))
+        if jobs and self._exempt_holder(hook_input, crons) is not None:
+            return []
+        return jobs
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Fire only when the project has at least one active job declared for this host.
@@ -264,6 +273,13 @@ class CronStopEnforcerHandler(StopHandlerBase):
             "then `CCY_HOST_HOSTNAME`, then the system hostname) matches an entry, "
             "so a session elsewhere is never told to create it. A job without "
             "`hosts:` is global.\n\n"
+            "**Only the initial thread of a Claude Code session is checked.** A "
+            "thread opened later in the same session (left arrow, new thread) is a "
+            "separate session to the hooks and holds no crons of its own, so it is "
+            "never asked for the declared ones; the session's first thread, found by "
+            "the shared `claude daemon run` ancestor process, is. With no such "
+            "ancestor every session is checked as before. "
+            "`persistent_crons.initial_thread_only: false` checks every thread.\n\n"
             "**An absent `session_crons` field always ALLOWs.** It means no "
             "information was delivered, never that no crons exist — only a "
             "PRESENT list (even an empty one) is treated as a real report of "

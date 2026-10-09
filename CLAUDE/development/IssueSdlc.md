@@ -485,6 +485,14 @@ The hostname is the first non-empty of the `HOOKS_DAEMON_HOSTNAME` and
 machine's name), then the system hostname. To start an SDLC runner anywhere,
 export `HOOKS_DAEMON_HOSTNAME=cchd-sdlc-runner` before launching the session.
 
+Only the INITIAL thread of a Claude Code session holds the declared jobs
+(`persistent_crons.initial_thread_only`, default true). A thread opened later in
+the same session is a separate session to the hooks, so it is recognised by the
+`claude daemon run --spawned-by` process all threads share: the first
+`session_id` seen under it holds the crons, and a later one is told it holds
+none and is not asked for them at Stop. Where no such process is found, every
+session holds them; `false` makes every thread hold them.
+
 The value that counts is the one exported in the SESSION, not in the daemon's
 own environment, which is whatever started the daemon. The `init.sh` transport
 stamps it on the payload as `hooks_daemon_hostname`. The relay and `nc` copy
