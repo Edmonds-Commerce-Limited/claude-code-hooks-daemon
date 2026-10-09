@@ -2,7 +2,7 @@
 
 ``exclude_paths`` and ``extra_whitelist`` entries are either a plain string or a
 ``{pattern, reason}`` mapping. Handlers only ever see plain patterns. Under
-``daemon.strict_mode`` a plain string is a config error.
+``daemon.strict_mode`` a plain string loads and is reported as a warning.
 """
 
 from __future__ import annotations

@@ -314,7 +314,7 @@ class TestEventRouter:
         assert "Also denied by: second" in (merged.result.reason or "")
         # The footer still names the FIRST restrictive handler, after the merge.
         assert (merged.result.reason or "").endswith(
-            "To disable: handlers.pre_tool_use.first  (set enabled: false)"
+            "To disable: handlers.pre_tool_use.first  (set enabled: false and record why beside it)"
         )
 
     def test_route_passes_deadline_seconds_through_to_the_chain(self, router: EventRouter) -> None:

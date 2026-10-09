@@ -5,7 +5,7 @@ to the correct handler chain based on event type.
 """
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult, HandlerChain
 from claude_code_hooks_daemon.core.event import EventType
@@ -31,8 +31,15 @@ _ALLOW_IS_FINAL_EVENTS: frozenset[EventType] = frozenset({EventType.PERMISSION_R
 _SESSION_TIER_EVENTS: frozenset[EventType] = frozenset({EventType.SESSION_START})
 
 # Format string for the config key disable footer appended to DENY/ASK reasons
+#: The parenthesis after the config path. A disabled guard is an exception, so the
+#: footer asks for the reason to be recorded beside it (Plan 00484 G4, owner ruling
+#: B3: accepted now, warned for under ``strict_mode``). One text for every deny that
+#: advertises how to switch its handler off.
+DISABLE_FOOTER_SUFFIX: Final[str] = "(set enabled: false and record why beside it)"
+
 _DISABLE_FOOTER_TEMPLATE = (
-    "\n\nTo disable: handlers.{event_config_key}.{handler_config_key}  (set enabled: false)"
+    "\n\nTo disable: handlers.{event_config_key}.{handler_config_key}  "
+    + DISABLE_FOOTER_SUFFIX
 )
 
 
