@@ -1473,7 +1473,7 @@ land in.
 
 The batch (b) round-1 tip denied them only by accident. A directory with a space is an ordinary careless spelling, so the shape is in scope under the 00483 threat model. The probe is `untracked/scratch/00483-review-batch-b-probe4.py` (its output is `00483-r2-probe4-main.txt`).
 
-**Status**: ⬜ Open. Remedy: `_GIT_INVOCATION` in destructive_git (and git_stash's equivalent) accepts a quoted or escaped option value for `-C`/`-c`/`--git-dir`/`--work-tree`, and these shapes are added to the must-deny tests. Also from that review, as NITs: the handler guidance omits `-e` from the data-valued options, and `_git_grep_pattern_spans` duplicates the new reader.
+**Status**: ⬜ Open. Remedy: the shared `_GIT_GLOBAL_OPTION` (`utils/command_evasion.py:62`, behind `GIT_INVOCATION`, which both destructive_git and git_stash use) accepts a quoted or escaped option value for `-C`/`-c`/`--git-dir`/`--work-tree`, and these shapes are added to the must-deny tests. Also from that review, as NITs: the handler guidance omits `-e` from the data-valued options, and `_git_grep_pattern_spans` duplicates the new reader.
 
 ### N382 — `changed --range` does not select tests that discover handlers by scanning the package
 
