@@ -1455,7 +1455,16 @@ session routed through the real chain was paused. Fixed for the playbook harness
   `untracked/context-sidecar/` during the gate. Their checks passed, but they read live usage and can fail the same
   way.
 
-**Status**: ⬜ Open. Wrap each in `synthetic_session_exemption` (the probe CLI: for its own synthetic id only).
+**More evidence**: the B4 merge gate (b3ee935aa) failed on exactly these sites:
+`test_stop_hook_hard_block::test_stop_hook_exits_2_on_block` and
+`test_forwarder_socket_stdin::test_stop_forwarder_exits_2_on_block_with_socket_stdin`, on both interpreters (the daemon
+answered `{}` instead of the Stop block, because the probe session was paused).
+
+**Status**: ✅ Fixed at the source rather than per site. `usage_pause_gate.try_start_pause` now never pauses synthetic
+traffic (`synthetic_traffic.is_synthetic_event`: the `synthetic_source` marker, or a known synthetic session shape).
+That covers `hooks-daemon probe` (`manual-probe`), the smoke test and every marked test probe in one place. A real
+Claude Code payload carries no marker and a UUID session id, so it is still paused. The per-site
+`synthetic_session_exemption` wrappers stay: they also clear a pause record left from before this fix.
 
 ### N375 — the hook contract is audited at Claude Code 2.1.272 and the upstream hooks doc has changed since
 

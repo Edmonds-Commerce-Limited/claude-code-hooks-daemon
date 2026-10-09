@@ -523,6 +523,24 @@ class TestStartPause:
             assert gate.try_start_pause(self._input(""), self._env(_snapshot(five=95.0))) is None
             assert list(tmp_path.rglob("*.usage-paused")) == []
 
+    @pytest.mark.parametrize(
+        "synthetic",
+        [
+            {"synthetic_source": "test-probe"},
+            {"synthetic_source": "manual-probe"},
+            {"session_id": "socket-stdin-test"},
+            {"session_id": "playbook-probe-123"},
+        ],
+    )
+    def test_synthetic_traffic_never_pauses(
+        self, tmp_path: Path, synthetic: dict[str, Any]
+    ) -> None:
+        """A probe is not a session spending the account's usage (ledger N377)."""
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            hook_input = {**self._input(), **synthetic}
+            assert gate.try_start_pause(hook_input, self._env(_snapshot(five=95.0))) is None
+            assert list(tmp_path.rglob("*.usage-paused")) == []
+
     def test_below_the_ceiling_never_pauses(self, tmp_path: Path) -> None:
         with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
             assert gate.try_start_pause(self._input(), self._env(_snapshot(five=10.0))) is None

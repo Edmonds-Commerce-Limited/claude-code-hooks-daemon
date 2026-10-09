@@ -54,6 +54,7 @@ from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core.data_layer import latest_usage
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.usage_snapshot import UsageSnapshot, UsageWindow
+from claude_code_hooks_daemon.daemon.synthetic_traffic import is_synthetic_event
 from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
 from claude_code_hooks_daemon.utils.cron_enforcement import (
     FAILSAFE_CRON_SCHEDULE_HINT,
@@ -544,9 +545,17 @@ def start_pause(
 
 
 def try_start_pause(hook_input: Mapping[str, Any], env: PauseEnvironment) -> UsagePause | None:
-    """Enter the pause if this session's host ceiling is reached; total, fails open."""
+    """Enter the pause if this session's host ceiling is reached; total, fails open.
+
+    Synthetic traffic (a probe, a harness, a test) is never paused: it is not a
+    session spending the account's usage, and a pause would replace the verdict
+    of the handler it exists to exercise with the pause directive.
+    """
     session_id = str(hook_input.get(HookInputField.SESSION_ID) or "")
     if not session_id:
+        return None
+    if is_synthetic_event(hook_input):
+        logger.debug("usage_pause_gate: synthetic traffic is never paused (%s)", session_id)
         return None
     try:
         return start_pause(session_id, current_breaches(hook_input, env), env)
