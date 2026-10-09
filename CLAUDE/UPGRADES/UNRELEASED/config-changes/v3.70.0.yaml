@@ -40,3 +40,24 @@ config_changes:
               options:
                 paths:
                   - .claude/ccy/ccy.env.local
+    - key: persistent_crons.initial_thread_only
+      recommended: false
+      dormant: false
+      description: >-
+        NEW (Plan 00470 Task 6.4). Default `true`: only the initial thread of a
+        Claude Code session must hold the declared `persistent_crons`. A thread
+        opened later in the same session (a `bg-spare` worker under the shared
+        `claude daemon run --origin transient --spawned-by` process; the initial
+        thread's worker carries `--fork-session --resume`) is told by
+        `persistent_cron_assertor` that it holds none, and
+        `cron_stop_enforcer` and `cron_subagent_stop_enforcer` do not demand
+        them from it. With no such ancestor, or an unreadable `/proc`, every
+        session holds them as before. `false` makes every thread hold them.
+      example_yaml: |
+        persistent_crons:
+          enabled: true
+          initial_thread_only: true
+      migration_note: >-
+        On by default and inert unless `persistent_crons` is enabled and a
+        session opens a second thread. Set `false` to keep the previous
+        behaviour of asking every thread for the declared crons.

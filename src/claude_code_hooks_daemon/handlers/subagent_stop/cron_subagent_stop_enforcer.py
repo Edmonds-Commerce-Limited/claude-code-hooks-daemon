@@ -39,6 +39,9 @@ from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import SubagentStopHandlerBase
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
+from claude_code_hooks_daemon.handlers.utils.initial_thread_exemption import (
+    InitialThreadExemption,
+)
 from claude_code_hooks_daemon.handlers.utils.session_advice_counter import (
     SessionAdviceCounter,
 )
@@ -61,7 +64,7 @@ logger = logging.getLogger(__name__)
 _MAX_TRACKED_PAUSE_KEYS: Final[int] = 256
 
 
-class CronSubagentStopEnforcerHandler(SubagentStopHandlerBase):
+class CronSubagentStopEnforcerHandler(InitialThreadExemption, SubagentStopHandlerBase):
     """Block a SubagentStop while a declared persistent cron is missing."""
 
     # Demands crons: gated on the project's `autonomy:` config (Plan 00498).
@@ -118,8 +121,12 @@ class CronSubagentStopEnforcerHandler(SubagentStopHandlerBase):
             return default_config()
 
     def _active_jobs(self, hook_input: dict[str, Any]) -> list[PersistentCronConfig]:
-        """The jobs declared for the session's hostname (``hosts:``, Plan 00470)."""
-        return self._load_config().persistent_crons.active_jobs(effective_hostname(hook_input))
+        """The jobs this session must hold: declared for its hostname (``hosts:``),
+        and none for a thread opened later in a session (``initial_thread_only``).
+        """
+        crons = self._load_config().persistent_crons
+        jobs = crons.active_jobs(effective_hostname(hook_input))
+        return self._jobs_held_by_session(hook_input, crons, jobs)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Fire only when the project has at least one active job declared for this host.

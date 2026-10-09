@@ -35,3 +35,11 @@ entries:
       read by utils/cron_hosts.effective_hostname to match persistent_crons
       hosts:. No vendored input_example can document a field the daemon adds.
     link: "CLAUDE/Plan/00470-persistent-session-optimisation/PLAN.md"
+  - id: "unknown-input-field:(shared):hooks_daemon_peer_pid"
+    reason: >-
+      Not sent by Claude Code: the daemon stamps the pid of the connected hook
+      process (SO_PEERCRED, daemon/server.py _stamp_peer_pid) so that
+      utils/session_thread_group can walk its process ancestry and tell later
+      threads of one Claude Code session from the initial thread. No vendored
+      input_example can document a field the daemon adds.
+    link: "CLAUDE/Plan/00470-persistent-session-optimisation/PLAN.md"

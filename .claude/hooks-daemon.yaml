@@ -1447,6 +1447,7 @@ autonomy:
 # as missing and name it, and the next session is asked for it again.
 persistent_crons:
   enabled: true
+  initial_thread_only: true  # Only a session's initial thread holds the jobs; a thread opened later is told it holds none (Plan 00470 Task 6.4)
   jobs:
     - id: issue-sdlc
       schedule: "23 * * * *"   # Off the :00 mark deliberately — see CronCreate guidance

@@ -38,6 +38,10 @@ from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
+from claude_code_hooks_daemon.handlers.utils.initial_thread_exemption import (
+    InitialThreadExemption,
+    render_non_holder_note,
+)
 from claude_code_hooks_daemon.utils.cron_enforcement import declared_tick_prompt
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.cron_pause import (
@@ -50,7 +54,7 @@ from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
 logger = logging.getLogger(__name__)
 
 
-class PersistentCronAssertorHandler(SessionStartHandlerBase):
+class PersistentCronAssertorHandler(InitialThreadExemption, SessionStartHandlerBase):
     """State the project's declared crons and instruct a CronList reconcile."""
 
     # Schedules work: gated on the project's `autonomy:` config (Plan 00498).
@@ -145,6 +149,14 @@ class PersistentCronAssertorHandler(SessionStartHandlerBase):
         if not jobs:
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
+        # A thread opened later in a Claude Code session is a fresh session to
+        # the hooks (source "startup") but not the one that holds the crons.
+        other = self._exempt_holder(hook_input, self._load_config().persistent_crons)
+        if other is not None:
+            return AdvisoryResult(
+                decision=Decision.ALLOW, context=render_non_holder_note(other.session_id)
+            )
+
         now = time.time()
         session_id = str(hook_input.get(HookInputField.SESSION_ID) or "")
         live = load_live_pauses(self._pauses_path(), session_id=session_id, now=now)
@@ -231,6 +243,20 @@ class PersistentCronAssertorHandler(SessionStartHandlerBase):
             "session's hostname matches, so it is absent from the list elsewhere: "
             "`HOOKS_DAEMON_HOSTNAME`, then `CCY_HOST_HOSTNAME`, then the system "
             "hostname, as exported in the session. A job without `hosts:` is global.\n\n"
+            "Only the INITIAL thread of a Claude Code session holds the declared jobs. "
+            "A thread opened later in the same session (it reports `source: startup` "
+            "like a new session) is recognised by its worker process (a `bg-spare` "
+            "worker under the session's shared `claude daemon run` process, while "
+            "the initial thread's worker carries `--fork-session --resume`) and is "
+            "told it holds none; create none there unless the user says so. The "
+            "holder is a live worker, so if the initial thread exits the next thread "
+            "takes over, and a `/clear` in the initial thread keeps holding. Whenever "
+            "the placement is unsure (no such ancestor, an unreadable `/proc`, an "
+            "unrecognised worker) every session holds them as before. This needs "
+            "the hook's pid, which the daemon reads from the connection on both the "
+            "event sockets and the legacy `init.sh` socket. "
+            "`persistent_crons.initial_thread_only: false` makes every thread hold "
+            "them.\n\n"
             "A job paused for this session with `hooks-daemon cron-pause` is left out "
             "of the list and stated as paused instead — do not re-create it. The pause "
             "belongs to one session, so a new session is asked for the job again."
