@@ -196,6 +196,12 @@ handlers:
       enabled: true         # No agent-side escape hatch: only a human sets this to false.
       priority: 21
 
+    write_protected_paths: # Paths agents may READ but never create, change, move onto or delete (IaC- or human-maintained files)
+      enabled: false        # Opt-in: does nothing until `paths` lists something.
+      priority: 22
+      options:
+        paths: []           # Repository-relative globs, e.g. [".claude/ccy/ccy.env.local", "deploy/*.env"]
+
     ask_user_question_blocker: # Blocks AskUserQuestion so Claude works autonomously (for unattended workflows)
       enabled: false           # Enable for fully unattended operation
       priority: 23

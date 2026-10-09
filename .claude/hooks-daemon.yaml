@@ -448,6 +448,16 @@ handlers:
       enabled: true
       priority: 22
 
+    # Plan 00499 (GitHub #88): paths agents may read but never create, change,
+    # move onto or delete, by a file tool or a Bash command. `ccy.env.local` is
+    # placed by IaC (or a human) and never by an agent. Only a human edits this.
+    write_protected_paths:
+      enabled: true
+      priority: 22
+      options:
+        paths:
+          - .claude/ccy/ccy.env.local
+
     ask_user_question_blocker: # UNATTENDED: blocks EVERY AskUserQuestion, justified or not
       enabled: true
       priority: 23

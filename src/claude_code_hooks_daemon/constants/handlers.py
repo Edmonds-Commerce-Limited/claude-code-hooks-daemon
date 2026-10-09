@@ -94,6 +94,12 @@ class HandlerID:
         config_key="lock_file_edit_blocker",
         display_name="lock-file-edit-blocker",
     )
+    # Plan 00499: paths agents may read but never create, change, move onto or delete.
+    WRITE_PROTECTED_PATHS = HandlerIDMeta(
+        class_name="WriteProtectedPathsHandler",
+        config_key="write_protected_paths",
+        display_name="write-protected-paths",
+    )
     CURL_PIPE_SHELL = HandlerIDMeta(
         class_name="CurlPipeShellHandler",
         config_key="curl_pipe_shell",

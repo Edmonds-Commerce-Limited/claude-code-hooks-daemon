@@ -1238,6 +1238,38 @@ handlers:
 
 ---
 
+#### write_protected_paths
+
+| Property       | Value                   |
+| -------------- | ----------------------- |
+| **Config key** | `write_protected_paths` |
+| **Priority**   | 22                      |
+| **Type**       | Blocking (terminal)     |
+| **Event**      | PreToolUse              |
+
+**Description:** Keeps listed paths read-only for agents. Some files are maintained outside the agent (an infrastructure-as-code run places them, or a human edits them): agents may read them and must never create, change, move onto or delete them. The handler denies `Write`, `Edit` and `NotebookEdit` on a listed path, and a Bash command that authors it (a redirect, `tee`, a heredoc, `sed -i`, `dd of=`), relocates onto it (`cp`, `mv`, `install`, `ln`), or creates, deletes or truncates it (`touch`, `rm`, `unlink`, `truncate`, `: >`). Verbs count only where a command starts or after a wrapper (`sudo`, `xargs`, `git rm`), so `grep rm file` is a read. Moving or deleting a directory that holds a listed file is denied too. A wildcard is denied only when the shell could expand it to a listed file (`*` stays inside one component and skips dotfiles), and a literal `cd` is followed. A destination built from an expansion is judged by its final component, whole. Not covered: `perl -i`, `rsync`, `find -delete`, interpreters. Reading is never denied. The denial says the file is maintained outside the agent and to ask the human for any change. Ships **disabled** and does nothing without `paths`. It guards against an agent's mistake, not against a human or a process running outside Claude Code.
+
+**Options:**
+
+| Option  | Default | Meaning                                                                                                                      |
+| ------- | ------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `paths` | `[]`    | Repository-relative globs (`*`, `?`, `**`). Absolute paths and `..` are refused. Matched in a worktree of the repository too |
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    write_protected_paths:
+      enabled: true
+      priority: 22
+      options:
+        paths:
+          - .claude/ccy/ccy.env.local
+```
+
+---
+
 #### pip_break_system
 
 | Property       | Value              |
@@ -4601,6 +4633,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `sed_blocker`                   | PreToolUse        | 10       | the word sed in a Bash command, bar four narrow exemptions               |
 | `curl_pipe_shell`               | PreToolUse        | 10       | curl/wget piped to bash/sh                                               |
 | `lock_file_edit_blocker`        | PreToolUse        | 10       | Direct editing of lock files                                             |
+| `write_protected_paths`         | PreToolUse        | 22       | Agent writes to a configured read-only path                              |
 | `pip_break_system`              | PreToolUse        | 10       | pip --break-system-packages                                              |
 | `sudo_pip`                      | PreToolUse        | 10       | sudo pip install                                                         |
 | `host_command_guard`            | PreToolUse        | 10       | docker host-root mount, gh auth token, non-PyPI pip index, crontab -r    |
