@@ -164,10 +164,13 @@ _rv_wait_secs() {
     if command -v sleep > /dev/null; then
         # The watchdog is killed when the candidate answers; an external
         # `sleep` would outlive it, so it is started here and killed with it.
-        # The trap is set first so a TERM at any later point finds the sleep.
-        trap 'kill $(jobs -p) 2> /dev/null; exit 143' TERM
+        # The trap is set before the sleep starts, so a TERM cannot land in
+        # between and leave the sleep running.
+        local sleeper=""
+        trap '[ -z "$sleeper" ] || kill "$sleeper" 2> /dev/null; exit 143' TERM
         sleep "$1" &
-        wait $!
+        sleeper=$!
+        wait "$sleeper"
         return
     fi
     # One pipe is opened for the whole wait, so a read that returns at once
