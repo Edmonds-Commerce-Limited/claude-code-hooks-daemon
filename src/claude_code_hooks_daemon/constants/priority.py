@@ -52,7 +52,7 @@ class Priority:
     CURL_PIPE_SHELL = 10
     ASK_USER_QUESTION_BLOCKER = 10
     LOCK_FILE_EDIT_BLOCKER = 10
-    WRITE_PROTECTED_PATHS = 22
+    WRITE_PROTECTED_PATHS = 18  # Safety band: a PreToolUse write blocker
     AUTO_APPROVE_READS = 10
     VALIDATE_ESLINT_ON_WRITE = 10
     COMPACTION_SIGNAL = 20  # PreCompact: drop compaction signal for the PTY supervisor

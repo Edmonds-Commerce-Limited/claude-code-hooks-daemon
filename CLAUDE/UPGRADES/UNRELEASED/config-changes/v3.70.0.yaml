@@ -22,7 +22,7 @@ config_changes:
           pre_tool_use:
             write_protected_paths:
               enabled: true
-              priority: 22
+              priority: 18
       migration_note: >-
         Opt in for files that infrastructure-as-code or a human maintains and
         an agent must only read.

@@ -453,7 +453,7 @@ handlers:
     # placed by IaC (or a human) and never by an agent. Only a human edits this.
     write_protected_paths:
       enabled: true
-      priority: 22
+      priority: 18
       options:
         paths:
           - .claude/ccy/ccy.env.local

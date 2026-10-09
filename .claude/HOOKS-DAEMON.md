@@ -32,6 +32,7 @@
 | 17 | self_matching_process_probe | BLOCKING | Block a liveness probe whose pattern matches the shell running it |
 | 18 | dangerous_permissions | BLOCKING | Block chmod 777 and dangerous permission commands |
 | 18 | github_auto_close_keywords | BLOCKING | Deny git messages carrying GitHub auto-closing keyword references |
+| 18 | write_protected_paths | BLOCKING | Deny any agent write to a configured path; reading is never denied |
 | 19 | ancestry_preserving_merge | BLOCKING | Block (or, in warn mode, advise against) ancestry-severing merges |
 | 19 | git_stash | BLOCKING | Block or warn about git stash based on mode configuration |
 | 20 | git_message_backtick | BLOCKING | Block a double-quoted git message whose backticks would be executed |
@@ -41,7 +42,6 @@
 | 21 | pip_break_system | BLOCKING | Block pip install --break-system-packages commands |
 | 22 | host_command_guard | BLOCKING | Deny the four commands of owner ruling A6 that reach past the project |
 | 22 | sudo_pip | BLOCKING | Block sudo pip install commands |
-| 22 | write_protected_paths | BLOCKING | Deny any agent write to a configured path; reading is never denied |
 | 23 | ask_user_question_blocker | BLOCKING | Allow AskUserQuestion only when every question is prefix-justified |
 | 30 | plan_status_snapshot | ADVISORY | Record a PLAN.md's pre-write status for `goal_injection` to consume |
 | 30 | qa_suppression | BLOCKING | Block QA suppression comments across all supported languages |

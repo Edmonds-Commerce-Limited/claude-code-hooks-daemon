@@ -579,7 +579,898 @@ class TestConfiguration:
         assert set(WriteProtectedPathsHandler.validate_options(options)) == expected_keys
 
 
+ABS = "{r}/" + PROTECTED
+
+
+def _denied(handler: WriteProtectedPathsHandler, root: Path, template: str) -> bool:
+    command = template.format(p=PROTECTED, a=ABS.format(r=root), r=root)
+    return handler.matches(_bash(root, command))
+
+
+class TestUnlistedWrappersHideNothing:
+    """Plan 00499 Task 1b.1: a command that names the file and is not known to
+    only read is denied, however it is wrapped."""
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "flock /tmp/l rm {p}",
+            "flock -x /tmp/l rm -f {a}",
+            "chronic rm {p}",
+            "chronic mv {p} /tmp/gone",
+            "nice -n 5 rm {p}",
+            "stdbuf -o0 tee {p}",
+            "echo x | stdbuf -o0 tee {p}",
+            "ionice -c3 truncate -s0 {p}",
+            "doas rm {p}",
+            "setsid rm {p}",
+            "flock /tmp/l rm -rf .claude/ccy",
+            "chronic rm -rf {r}/.claude",
+            "python3 tool.py --out {p}",
+            "perl -i -pe s/a/b/ {p}",
+            "rsync /tmp/new.env {p}",
+            "shred -u {p}",
+            "find {p} -delete",
+            "gawk -i inplace 1 {a}",
+            "make {p}",
+        ],
+    )
+    def test_a_command_that_names_the_file_and_is_not_known_to_read_is_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is True
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "cat {p}",
+            "less {p}",
+            "head -n 3 {a}",
+            "tail -n 3 {p}",
+            "grep -n X {p}",
+            "rg X {p}",
+            "wc -l {p}",
+            "stat {p}",
+            "ls -l {p}",
+            "file {p}",
+            "diff {p} /tmp/other",
+            "cmp {p} /tmp/other",
+            "sha256sum {p}",
+            "md5sum {a}",
+            "test -f {p}",
+            "[ -f {p} ]",
+            "[[ -f {p} ]]",
+            "git diff -- {p}",
+            "git log --oneline -- {p}",
+            "git show HEAD:{p}",
+            "git status {p}",
+            "git blame {p}",
+            "git -C {r} diff {p}",
+            "git add {p}",
+            "source {p}",
+            ". {p}",
+            "export F={p}",
+            "F={p}; echo $F",
+            "flock /tmp/l cat {p}",
+            "nice -n 5 grep X {p}",
+            "ionice -c3 cat {p}",
+            "chronic cat {p}",
+            "sudo cat {p}",
+            "env FOO=1 cat {p}",
+            "timeout 5 grep X {p}",
+            "/bin/cat {p}",
+            "/usr/bin/grep -n X {a}",
+            "cat {p} | wc -l",
+            "echo ok && cat {p}",
+            "if true; then cat {p}; fi",
+            "python3 tool.py --out /tmp/elsewhere",
+            "flock /tmp/l rm /tmp/elsewhere",
+            "git commit -m 'document .claude/ccy/ccy.env.local'",
+            "echo 'docs: ccy.env.local is placed by IaC' > /tmp/note.txt",
+            "cat > /tmp/notes.md <<'EOF'\nThe file .claude/ccy/ccy.env.local is placed by IaC.\nEOF",
+        ],
+    )
+    def test_a_command_known_to_only_read_is_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is False
+
+    def test_a_read_only_command_with_a_write_redirect_is_still_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path
+    ) -> None:
+        assert _denied(handler, root, "cat /tmp/x > {p}") is True
+        assert _denied(handler, root, "flock /tmp/l cat /tmp/x >> {p}") is True
+
+    def test_a_known_variable_naming_the_file_is_followed_into_an_unknown_command(
+        self, handler: WriteProtectedPathsHandler, root: Path
+    ) -> None:
+        assert _denied(handler, root, "F={p}; flock /tmp/l rm $F") is True
+        assert _denied(handler, root, "F={p}; python3 tool.py $F") is True
+        assert _denied(handler, root, "F=/tmp/other; python3 tool.py $F") is False
+
+    def test_an_unresolved_operand_is_judged_by_name_for_an_unknown_command(
+        self, handler: WriteProtectedPathsHandler, root: Path
+    ) -> None:
+        assert _denied(handler, root, 'python3 tool.py "$D/ccy.env.local"') is True
+        assert _denied(handler, root, 'python3 tool.py "$D/other.txt"') is False
+
+    def test_a_wildcard_that_could_reach_the_file_is_denied_for_an_unknown_command(
+        self, handler: WriteProtectedPathsHandler, root: Path
+    ) -> None:
+        assert _denied(handler, root, "python3 tool.py .claude/ccy/ccy.env.*") is True
+        assert _denied(handler, root, "python3 tool.py /tmp/*.txt") is False
+
+    def test_an_option_value_naming_the_file_is_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path
+    ) -> None:
+        assert _denied(handler, root, "python3 tool.py --out={p}") is True
+
+    def test_an_input_redirect_from_the_file_is_not_a_write(
+        self, handler: WriteProtectedPathsHandler, root: Path
+    ) -> None:
+        assert _denied(handler, root, "python3 tool.py < {p}") is False
+
+    def test_an_unknown_command_naming_only_a_directory_above_it_is_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path
+    ) -> None:
+        assert _denied(handler, root, "ruff check .claude") is False
+        assert _denied(handler, root, "pytest .") is False
+
+    def test_the_deny_reason_names_the_read_only_commands(
+        self, handler: WriteProtectedPathsHandler, root: Path
+    ) -> None:
+        hook_input = _bash(root, f"python3 tool.py {PROTECTED}")
+        assert handler.matches(hook_input) is True
+        reason = handler.handle(hook_input).reason or ""
+        assert "cat" in reason
+        assert "grep" in reason
+
+
+class TestBraceExpansion:
+    """Plan 00499 Task 1b.2: brace groups are spelled out before the path is judged."""
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "rm .claude/ccy/ccy.env.{{local,bak}}",
+            "rm .claude/ccy/ccy.env.{{bak,local}}",
+            "rm -f {r}/.claude/ccy/ccy.env.{{local,bak}}",
+            "echo x | tee .claude/ccy/ccy.env.{{local,bak}}",
+            "cp /tmp/x .claude/ccy/ccy.env.{{local,dist}}",
+            "cp /tmp/x .claude/ccy/ccy.env.{{dist,local}}",
+            "mv /tmp/x .claude/ccy/ccy.env.{{bak,local}}",
+            "rm .claude/{{ccy,other}}/ccy.env.local",
+            "rm .claude/ccy/ccy.env.{{lo{{c,x}}al,bak}}",
+            "rm .claude/ccy/ccy.env.l{{o..p}}cal",
+            "touch .claude/ccy/ccy.env.{{local,}}",
+            "rm -rf .claude/{{ccy,x}}",
+            "truncate -s0 .claude/ccy/{{ccy.env.local,x}}",
+            "flock /tmp/l rm .claude/ccy/ccy.env.{{local,bak}}",
+            "bash -c 'rm .claude/ccy/ccy.env.{{local,bak}}'",
+            "echo x > .claude/ccy/ccy.env.{{local,bak}}",
+            "cd .claude && rm ccy/ccy.env.{{local,bak}}",
+        ],
+    )
+    def test_a_group_that_spells_the_file_is_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "rm .claude/ccy/ccy.env.{dist,bak}",
+            "rm .claude/ccy/other.{local,bak}",
+            "cp /tmp/x .claude/ccy/ccy.env.{dist,bak}",
+            "cat .claude/ccy/ccy.env.{local,bak}",
+            "ls .claude/ccy/ccy.env.{local,dist}",
+            "grep X .claude/ccy/ccy.env.{local,bak}",
+            "echo {a,b} {1..3}",
+            "rm /tmp/x.{a,b}",
+            "echo ${HOME}/x {}",
+            "echo '.claude/ccy/ccy.env.{local,bak}'",
+            "git commit -m 'drop ccy.env.{local,bak}'",
+        ],
+    )
+    def test_a_group_that_does_not_spell_the_file_or_only_reads_it_is_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path, command: str
+    ) -> None:
+        assert handler.matches(_bash(root, command)) is False
+
+    def test_a_group_with_too_many_spellings_is_denied_only_when_it_names_the_file(
+        self, handler: WriteProtectedPathsHandler, root: Path
+    ) -> None:
+        many = "{a,b}" * 20
+        assert handler.matches(_bash(root, f"echo {many}")) is False
+        assert handler.matches(_bash(root, f"rm {many} ccy.env.local")) is True
+
+    def test_a_group_after_an_unreadable_substitution_is_judged_by_name(
+        self, handler: WriteProtectedPathsHandler, root: Path
+    ) -> None:
+        assert handler.matches(_bash(root, "rm $(date) .claude/ccy/ccy.env.local{,.bak}")) is True
+        assert handler.matches(_bash(root, "rm $(date) /tmp/x.{a,b}")) is False
+
+
+class TestShellStringsAndAbsoluteCommands:
+    """Plan 00499 Task 1b.3: code handed to a shell is a command; so is a path to one."""
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "bash -c 'rm {p}'",
+            'sh -c "rm {p}"',
+            "bash -c 'echo x > {p}'",
+            "bash -lc 'rm {p}'",
+            "bash -x -c 'rm {p}'",
+            "/bin/bash -c 'rm {p}'",
+            "sudo bash -c 'rm {p}'",
+            "chronic sh -c 'rm {p}'",
+            "dash -c 'truncate -s0 {p}'",
+            "eval 'rm {p}'",
+            "eval rm {p}",
+            'eval "rm {p}"',
+            "flock /tmp/l -c 'rm {p}'",
+            "su -c 'rm {p}' root",
+            "bash -c \"bash -c 'rm {p}'\"",
+            "bash -c 'cd .claude && rm -rf ccy'",
+            "cd .claude && bash -c 'rm ccy/ccy.env.local'",
+            'F={p}; bash -c "rm $F"',
+            "/bin/rm {p}",
+            "/usr/bin/rm -f {a}",
+            "echo x | /usr/bin/tee {p}",
+            "/usr/bin/tee {p} < /tmp/x",
+            "/bin/mv /tmp/x {p}",
+            "/bin/cp /tmp/x {p}",
+            "/usr/bin/env rm {p}",
+            "FOO=1 /bin/rm {p}",
+            "'/bin/rm' {p}",
+            "bash -c 'true; rm {p}'",
+        ],
+    )
+    def test_a_write_through_a_shell_string_or_an_absolute_command_is_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is True
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "bash -c 'cat {p}'",
+            'sh -c "grep X {p}"',
+            "bash -lc 'cat {p}'",
+            "eval 'cat {p}'",
+            "eval cat {p}",
+            "flock /tmp/l -c 'cat {p}'",
+            "bash -c 'rm /tmp/elsewhere'",
+            "bash -c 'echo x > /tmp/elsewhere'",
+            "bash -c 'cat {p} | wc -l'",
+            "bash script.sh {p}",
+            "/bin/rm /tmp/elsewhere",
+            "/usr/bin/tee /tmp/elsewhere",
+            "/bin/cat {p}",
+            "/bin/cp {p} /tmp/copy",
+            "sudo bash -c 'cat {p}'",
+        ],
+    )
+    def test_a_read_through_a_shell_string_or_an_absolute_command_is_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is False
+
+    def test_nesting_deeper_than_the_bound_is_judged_by_name(
+        self, handler: WriteProtectedPathsHandler, root: Path
+    ) -> None:
+        deep = "rm ccy.env.local"
+        for _ in range(8):
+            deep = "bash -c " + "'" + deep.replace("'", "'\"'\"'") + "'"
+        assert handler.matches(_bash(root, deep, cwd=root / ".claude" / "ccy")) is True
+        harmless = "bash -c 'true'"
+        for _ in range(8):
+            harmless = "bash -c " + "'" + harmless.replace("'", "'\"'\"'") + "'"
+        assert handler.matches(_bash(root, harmless)) is False
+
+
+class TestDirectoryChangeWithRedirectAndLoops:
+    """Plan 00499 Task 1b.4."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd .claude 2>/dev/null && rm -rf ccy",
+            "cd .claude >/dev/null 2>&1 && rm ccy/ccy.env.local",
+            "cd .claude &>/dev/null; rm -rf ccy",
+            "cd .claude 2>/dev/null; cd ccy && rm ccy.env.local",
+            "cd .claude > /dev/null && rm -rf ccy",
+            "cd .claude/ccy 2>/dev/null && echo x > ccy.env.local",
+        ],
+    )
+    def test_a_cd_carrying_a_redirect_still_changes_the_directory(
+        self, handler: WriteProtectedPathsHandler, root: Path, command: str
+    ) -> None:
+        assert handler.matches(_bash(root, command)) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd /tmp 2>/dev/null && rm -rf ccy",
+            "cd /tmp >/dev/null 2>&1 && rm ccy.env.local",
+            "cd .claude 2>/dev/null && cat ccy/ccy.env.local",
+            "cd .claude 2>/dev/null && rm other.txt",
+        ],
+    )
+    def test_a_cd_carrying_a_redirect_elsewhere_or_a_read_is_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path, command: str
+    ) -> None:
+        assert handler.matches(_bash(root, command)) is False
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            'for f in {p}; do rm "$f"; done',
+            "for f in {a}; do rm -f $f; done",
+            'for f in /tmp/a {p}; do rm "$f"; done',
+            'for f in {p}\ndo\n  rm "$f"\ndone',
+            'for f in {p}; do echo x > "$f"; done',
+            "for f in {p}; do truncate -s0 ${{f}}; done",
+            'for f in .claude/ccy/*; do rm "$f"; done',
+            'for f in {p}; do chronic rm "$f"; done',
+            'for f in {p}; do bash -c "rm $f"; done',
+            'for f in .claude/ccy/ccy.env.{{local,bak}}; do rm "$f"; done',
+            "for f in a b; do echo $f; done; rm {p}",
+        ],
+    )
+    def test_a_loop_over_the_file_that_writes_it_is_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is True
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            'for f in {p}; do cat "$f"; done',
+            'for f in {p}; do grep X "$f"; done',
+            'for f in /tmp/a /tmp/b; do rm "$f"; done',
+            "for f in a b; do echo $f; done",
+            'for f in {p}; do echo "$f"; done',
+            'for f in a b; do rm "/tmp/$f"; done',
+        ],
+    )
+    def test_a_loop_that_only_reads_or_leaves_it_alone_is_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is False
+
+
+_LINEAR_SHAPES: dict[str, Any] = {
+    "wrapped_reads": lambda n: "; ".join(["flock /tmp/l cat /tmp/x"] * n),
+    "assignments_then_cd": lambda n: "; ".join(["F=a"] * n) + "; cd a; echo x",
+    "cd_parts": lambda n: "; ".join(["cd a"] * n) + "; echo x",
+    "brace_groups": lambda n: "echo " + " ".join(["x{a,b}"] * n),
+    "loops": lambda n: "; ".join(["for f in a b c; do echo /tmp/$f; done"] * n),
+    "newline_run": lambda n: "true" + "\n" * (n * 20),
+    "export_run": lambda n: "export A=1;" * n + "echo x",
+    "nested_shells": lambda n: "; ".join(["bash -c 'echo a; echo b'"] * n),
+}
+
+
+class TestHostileInputStaysLinear:
+    """Cost may not grow faster than the command, with `paths` SET (review B1, S11)."""
+
+    @pytest.mark.parametrize("shape", sorted(_LINEAR_SHAPES))
+    def test_a_long_command_is_judged_in_proportion_to_its_length(
+        self, handler: WriteProtectedPathsHandler, root: Path, shape: str
+    ) -> None:
+        import time
+
+        def cost(count: int) -> float:
+            command = _LINEAR_SHAPES[shape](count)
+            started = time.perf_counter()
+            assert handler.matches(_bash(root, command)) is False
+            return time.perf_counter() - started
+
+        cost(20)
+        small, large = min(cost(40) for _ in range(2)), min(cost(320) for _ in range(2))
+        assert large < small * 8 * 3
+
+    def test_ten_kilobytes_of_assignments_before_a_cd_is_judged_quickly(
+        self, handler: WriteProtectedPathsHandler, root: Path
+    ) -> None:
+        import time
+
+        command = "; ".join(["F=a"] * 2000) + "; cd a; rm ccy.env.local"
+        started = time.perf_counter()
+        handler.matches(_bash(root, command))
+        assert time.perf_counter() - started < 5
+
+    def test_assignments_before_a_cd_still_resolve_after_it(
+        self, handler: WriteProtectedPathsHandler, root: Path
+    ) -> None:
+        many = "; ".join(f"V{i}=x" for i in range(100))
+        command = f"{many}; F={root}/{PROTECTED}; cd /tmp; rm $F"
+        assert handler.matches(_bash(root, command)) is True
+
+
+def _nest(inner: str, depth: int) -> str:
+    import shlex
+
+    for _ in range(depth):
+        inner = "bash -c " + shlex.quote(inner)
+    return inner
+
+
+class TestPastTheNestingLimitFailsClosed:
+    """Review B2: text the reader stops at is denied when it names, or could name, a listed path."""
+
+    @pytest.mark.parametrize(
+        "inner",
+        [
+            "rm {r}/.claude/ccy/*",
+            "rm {r}/.claude/ccy/ccy.env.{{local,x}}",
+            "rm {r}/.claude/ccy/ccy.env.loc''al",
+            "cd {r}/.claude && rm -rf ccy",
+            "rm -rf {r}/.claude",
+            "rm {a}",
+        ],
+    )
+    @pytest.mark.parametrize("depth", [4, 6])
+    def test_a_deep_body_naming_the_file_is_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path, inner: str, depth: int
+    ) -> None:
+        command = _nest(inner.format(r=root, a=f"{root}/{PROTECTED}"), depth)
+        assert handler.matches(_bash(root, command)) is True
+
+    def test_a_deep_eval_chain_naming_the_file_is_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path
+    ) -> None:
+        import shlex
+
+        command = "eval " + shlex.quote(_nest(f"rm {root}/.claude/ccy/*", 4))
+        assert handler.matches(_bash(root, command)) is True
+
+    def test_a_deep_body_naming_nothing_listed_is_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path
+    ) -> None:
+        assert handler.matches(_bash(root, _nest("rm /tmp/elsewhere", 6))) is False
+        assert handler.matches(_bash(root, _nest("true", 8))) is False
+
+
+class TestPlainWrappersAndDeclarations:
+    """Review B3, careless parts: a plain wrapper or declaration hides nothing."""
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "time -p rm {p}",
+            "time rm {p}",
+            "command rm {p}",
+            "builtin cd /tmp && command rm {p}",
+            "exec rm {p}",
+            "nohup rm {p}",
+            "export F={a}; rm $F",
+            'export F={a}; rm "$F"',
+            "declare F={a}; rm $F",
+            "declare -x F={a}; rm $F",
+            "local F={a}; rm $F",
+            "readonly F={a}; rm $F",
+            "typeset F={a}; truncate -s0 $F",
+            "export F={a}; cd /tmp; rm $F",
+            "export F=/tmp/x; rm {p}",
+        ],
+    )
+    def test_the_command_behind_it_is_judged(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is True
+
+    @pytest.mark.parametrize(
+        "template",
+        ["time -p cat {p}", "command cat {p}", "export F={a}; cat $F", "export F=/tmp/x; rm $F"],
+    )
+    def test_a_read_behind_it_is_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is False
+
+
+class TestXargsIsJudgedLikeAnyOtherCommand:
+    """Review S2."""
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "echo {a} | xargs shred -u",
+            "echo {a} | xargs -n1 cp /dev/null",
+            "ls .claude/ccy/* | xargs rm",
+            "ls {r}/.claude/ccy/* | xargs -r unlink",
+            "echo {p} | xargs -I{{}} mv {{}} /tmp/gone",
+            "echo {p} | xargs -I{{}} cp /dev/null {{}}",
+            "echo {p} | xargs python3 tool.py",
+            "printf '%s\\n' {p} | xargs -P4 -n1 truncate -s0",
+        ],
+    )
+    def test_a_producer_naming_the_file_feeding_a_non_reading_command_is_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is True
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "echo {p} | xargs cat",
+            "echo {p} | xargs -n1 grep X",
+            "ls {p} | xargs -I{{}} cp {{}} /tmp/backup",
+            "echo other.txt | xargs rm",
+            "ls /opt/* | xargs rm",
+            "xargs -a /tmp/list rm",
+        ],
+    )
+    def test_a_read_or_a_copy_out_or_another_producer_is_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is False
+
+
+class TestReadLoops:
+    """Review S3."""
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            'ls .claude/ccy/* | while read f; do rm "$f"; done',
+            "while read f; do rm $f; done <<< {p}",
+            'echo {p} | while read -r f; do truncate -s0 "$f"; done',
+            'while read f; do echo x > "$f"; done <<< {a}',
+        ],
+    )
+    def test_a_loop_whose_input_names_the_file_and_that_writes_is_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is True
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            'ls .claude/ccy/* | while read f; do cat "$f"; done',
+            "while read f; do rm $f; done <<< /tmp/x",
+            'ls /opt/* | while read f; do rm "$f"; done',
+        ],
+    )
+    def test_a_loop_that_reads_or_whose_input_names_nothing_listed_is_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is False
+
+
+class TestFindWithAnAction:
+    """Review S5."""
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "find .claude/ccy -name '*.local' -delete",
+            "find .claude -name ccy.env.local -delete",
+            "find .claude -name 'ccy.env.*' -exec rm {{}} +",
+            "find {r}/.claude/ccy -delete",
+            "find .claude/ccy -type f -exec rm {{}} \\;",
+            "find . -path '*ccy*' -delete",
+            "find {r} -delete",
+            "find .claude -fprint {p}",
+        ],
+    )
+    def test_a_find_that_acts_on_a_tree_holding_the_file_is_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is True
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "find .claude -name ccy.env.local -print",
+            "find .claude/ccy -type f",
+            "find . -name '*.pyc' -delete",
+            "find /tmp -delete",
+            "find .claude -name '*.pyc' -exec rm {{}} +",
+            "find .claude/ccy -name ccy.env.local -exec cat {{}} \\;",
+            "find .claude/ccy -name ccy.env.local -exec grep X {{}} +",
+        ],
+    )
+    def test_a_find_that_only_looks_or_cannot_reach_the_file_is_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is False
+
+
+class TestTheFilesOwnDirectoryAsADestination:
+    """Review S6."""
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "rsync /tmp/ccy.env.local {r}/.claude/ccy/",
+            "rsync -a --delete /tmp/empty/ .claude/ccy/",
+            "tar -xf a.tar -C .claude/ccy",
+            "tar -xf a.tar --directory=.claude/ccy",
+            "unzip -o a.zip -d .claude/ccy",
+            "cp -r /tmp/dir/. .claude/ccy",
+            "cp -a /tmp/dir/ {r}/.claude/ccy/",
+            "mv -T /tmp/dir .claude/ccy",
+            "cd .claude/ccy && tar -xf /tmp/a.tar -C .",
+        ],
+    )
+    def test_writing_into_the_directory_is_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is True
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "ruff check .claude",
+            "pytest .",
+            "tar -xf a.tar -C /tmp/x",
+            "rsync -a /tmp/a/ /tmp/b/",
+            "cp /tmp/other.txt .claude/ccy/",
+            "ls .claude/ccy",
+        ],
+    )
+    def test_naming_a_directory_above_or_elsewhere_stays_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is False
+
+
+class TestReadersThatWrite:
+    """Review S9."""
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "git diff --output={p}",
+            "git diff --output {p}",
+            "git log --output={a}",
+            "git -C {r} show --output={p} HEAD",
+            "less -o {p} /tmp/x",
+            "less -O {p} /tmp/x",
+            "less --log-file={p} /tmp/x",
+            "sort -o {p} /tmp/x",
+            "sort --output={p} /tmp/x",
+            "xxd -r /tmp/hex {p}",
+            "uniq /tmp/in {p}",
+        ],
+    )
+    def test_a_write_option_naming_the_file_is_a_write(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is True
+
+    @pytest.mark.parametrize(
+        "template",
+        ["git diff --output=/tmp/out -- {p}", "sort -o /tmp/out {p}", "less -o /tmp/log {p}"],
+    )
+    def test_the_same_options_writing_elsewhere_are_reads_of_the_file(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is False
+
+
+class TestOrdinaryReadsAreNotDenied:
+    """Review S10: the allowlist must cover what an agent reads a file with."""
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "sort {p}",
+            "sort -u {a}",
+            "awk 1 {p}",
+            "awk -F= '{{print $1}}' {p}",
+            "gawk '/X/' {p}",
+            "xxd {p}",
+            "hexdump -C {p}",
+            "column -t {p}",
+            "bat {p}",
+            "shellcheck {p}",
+            "od -c {p}",
+            "strings {p}",
+            "file {p}",
+            "md5sum {p}",
+            "comm -12 {p} /tmp/other",
+            "paste {p} /tmp/other",
+            "fold -w 80 {p}",
+            "base64 {p}",
+            "uniq {p}",
+            "nl {p}",
+            "diff <(sort {p}) <(sort /tmp/other)",
+            "view {p}",
+            "docker run --env-file {p} img",
+            "docker compose --env-file {p} up",
+            "docker compose -f {p} up",
+            "docker-compose -f {a} config",
+            "ansible-playbook site.yml --vault-password-file {p}",
+            "ansible-playbook --vault-password-file={p} site.yml",
+            "dotenv -f {p} list",
+            "cat {p} | tool --stdin",
+            "set -a; . {p}; set +a",
+        ],
+    )
+    def test_a_known_reader_or_an_input_file_option_is_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is False
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "awk -i inplace '{{print}}' {p}",
+            "awk '{{print > \"{p}\"}}' /tmp/x",
+            "docker run --env-file /tmp/x -v {p}:/x img",
+            "docker run -v {p}:/etc/x img",
+            "python3 tool.py --config {p}",
+        ],
+    )
+    def test_a_write_or_an_unknown_use_of_the_file_is_still_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is True
+
+    def test_the_documentation_says_exactly_what_is_denied(self) -> None:
+        guidance = WriteProtectedPathsHandler().get_claude_md() or ""
+        assert "Reading it is always allowed" not in guidance
+        assert "cat P | tool" in guidance
+        assert "careless-agent" in guidance or "careless agent" in guidance
+        docs = (
+            Path(__file__).resolve().parents[4] / "docs" / "guides" / "HANDLER_REFERENCE.md"
+        ).read_text()
+        section = docs.split("#### write_protected_paths", 1)[1].split("\n---\n", 1)[0]
+        assert "Reading is never denied" not in section
+        assert "cat P | tool" in section
+
+
+class TestReviewRound2:
+    """Plan 00499 Phase 1b review round 2 (S1 to S4 and the read-only nits)."""
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "xargs rm <<< {p}",
+            "xargs -I{{}} rm {{}} <<< {p}",
+            "xargs -0 bash -c 'rm \"$0\"' <<< {p}",
+            "xargs rm -f -a {p}",
+            "xargs --arg-file={p} rm",
+            "xargs --arg-file {p} shred -u",
+            "xargs rm < {p}",
+        ],
+    )
+    def test_s1_xargs_input_given_on_the_command_itself_is_judged(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is True
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "xargs cat <<< {p}",
+            "xargs rm <<< /tmp/other",
+            "xargs -a /tmp/list rm",
+            "xargs cat < {p}",
+        ],
+    )
+    def test_s1_same_input_for_a_reader_or_another_file_is_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is False
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            'while read -r l; do echo "$l" >> /tmp/out; done < {p}',
+            "while IFS='=' read -r k v; do printf '%s\\n' \"$k\" > /tmp/keys; done < {p}",
+            'grep -v "^#" {p} | while read -r l; do echo "$l" >> /tmp/out; done',
+            'cat {p} | while read -r l; do printf "%s\\n" "$l"; done',
+        ],
+    )
+    def test_s2_a_loop_that_reads_the_file_and_writes_elsewhere_is_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is False
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            'ls .claude/ccy/* | while read f; do rm "$f"; done',
+            'ls {p} | while read f; do echo x > "$f"; done',
+            "while read f; do truncate -s0 $f; done <<< {p}",
+        ],
+    )
+    def test_s2_a_loop_whose_variable_is_a_file_operand_is_still_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is True
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "cp -r .claude/ccy /tmp/copy",
+            "cp -a .claude/ccy/. /tmp/x",
+            "cp -r {r}/.claude/ccy /tmp/copy",
+            "cp -rt /tmp/x .claude/ccy",
+        ],
+    )
+    def test_s3_copying_the_directory_out_is_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is False
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "cp -r /tmp/dir/. .claude/ccy",
+            "cp -rt .claude/ccy /tmp/dir",
+            "cp -r --target-directory={r}/.claude/ccy /tmp/dir",
+        ],
+    )
+    def test_s3_copying_onto_the_directory_is_still_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is True
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "find . -name '*.pyc' | xargs rm -f",
+            "find . -name __pycache__ | xargs rm -rf",
+            "find {r} -iname '*.log' -print0 | xargs -0 rm -f",
+        ],
+    )
+    def test_s4_a_find_whose_name_filter_cannot_match_feeds_xargs_freely(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is False
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "find . -name 'ccy.env.*' | xargs rm -f",
+            "find .claude | xargs rm -f",
+            "find . -path '*ccy*' | xargs rm",
+            "ls .claude/ccy/* | xargs rm",
+        ],
+    )
+    def test_s4_an_unfiltered_or_matching_find_feeding_xargs_is_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is True
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "tree .claude/ccy",
+            "tree {p}",
+            "ruff check {p}",
+            "ruff format --check {p}",
+            "docker build {r}/.claude/ccy",
+            "docker build -f {p} .",
+            "shellcheck {p}",
+        ],
+    )
+    def test_nit_these_readers_are_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is False
+
+    @pytest.mark.parametrize("template", ["ruff format {p}", "ruff check --fix {p}"])
+    def test_nit_ruff_that_rewrites_the_file_is_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is True
+
+
 class TestGuidanceAndAcceptance:
+    def test_the_guidance_no_longer_lists_closed_gaps(self) -> None:
+        guidance = WriteProtectedPathsHandler().get_claude_md() or ""
+        assert "Known gaps" in guidance
+        for closed in ("brace expansion", "`bash -c", "`/bin/rm`", "`flock`"):
+            assert closed not in guidance.split("Known gaps", 1)[1]
+
     def test_it_is_a_terminal_pre_tool_use_blocker(self) -> None:
         handler = WriteProtectedPathsHandler()
         assert handler.terminal is True

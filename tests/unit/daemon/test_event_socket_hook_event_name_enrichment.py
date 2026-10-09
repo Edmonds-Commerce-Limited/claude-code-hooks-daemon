@@ -33,6 +33,7 @@ from claude_code_hooks_daemon.config.models import (
     TransportConfig,
 )
 from claude_code_hooks_daemon.constants import HandlerID, Priority, Timeout
+from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.core.front_controller import FrontController
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
@@ -186,7 +187,12 @@ class TestHookEventNameEnrichment:
         response = await _connect_and_send_eof(socket_path, payload)
 
         assert response.get("error") != "input_validation_failed", response
-        assert echo_handler.last_hook_input == payload
+        # The daemon owns the peer-pid field (Plan 00470 Task 6.4): it strips any
+        # caller value and stamps the connection's own, so it is the one key that
+        # is not "untouched". Everything the caller sent must arrive unchanged.
+        received = dict(echo_handler.last_hook_input or {})
+        received.pop(HookInputField.PEER_PID, None)
+        assert received == payload
 
         await daemon.shutdown()
         await server_task
