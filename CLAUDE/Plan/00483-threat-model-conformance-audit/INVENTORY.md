@@ -34,6 +34,7 @@ Parts (each a per-guard table set):
 | E    | plan_number_helper, project_containment, upgrade_approval_guard, subagent_worktree_write_guard, subagent_cron_delete_blocker, artifact_publish_blocker, usage_pause_tool_gate                                   |
 | F    | subagent_full_qa_blocker, self_matching_process_probe, bash_safe_mode, pip_break_system, sudo_pip, dangerous_permissions, npm_command, gh_issue_comments, gh_pr_comments, lock_file_edit_blocker, absolute_path |
 | G    | remaining Write/Edit content and tool-input guards (below)                                                                                                                                                      |
+| H    | guards added after the Phase 1 pass: write_protected_paths, host_command_guard, github_issue_assignment_guard (end of file)                                                                                     |
 
 ## Part G: remaining blocking handlers (not shell-parsing guards)
 
@@ -1299,3 +1300,63 @@ threat model): `MUST_SQUASH_BECAUSE` (ancestry_preserving_merge), `MUST_STASH_BE
 `MUST_SCAN_ROOT_BECAUSE` (root_recursion_guard), `MUST_SKIP_SAFE_MODE_BECAUSE` (bash_safe_mode).
 
 **Owner ruling (2026-10-05):** keep the four hatches, with the review's hygiene fixes; resolved — see [OWNER-RULINGS-261005.md](OWNER-RULINGS-261005.md) (B1).
+
+---
+
+# Part H: guards added after the Phase 1 pass (written 2026-10-09 from the code, UNVERIFIED by probe)
+
+Judged by the two-part test in PLAN.md and ARCHITECTURE.md. Handler code was read per guard (file:line cited); no
+`hooks-daemon probe` was run, so every false positive or gap below is a reading of the code, marked UNVERIFIED, and not a
+reproduction. `write_protected_paths` and `host_command_guard` post-date the A1/A2 removals, so they were written under the "deny
+only on a positive finding" rule; `github_issue_assignment_guard` (Plan 00490) pre-dates the dc5c9263b merge and is
+judged as it stands now.
+
+## 1. write_protected_paths (`handlers/pre_tool_use/write_protected_paths.py`, 570 lines; Plan 00499; opt-in, priority 18)
+
+Summary: terminal DENY (R-WRITE-PROTECTED-PATH) of an agent write to a path the project lists under `options.paths`. Covers `Write`/`Edit`/`NotebookEdit` and the Bash routes `scan_bash_write_targets` names (redirect, `tee`, heredoc redirect, in-place `sed`, `dd of=`, copy/move/install/link onto, `rm`, `unlink`, `touch`, `truncate`, `: >`). Reading is never denied. Does nothing without `paths`.
+
+| branch                                             | file:line        | shapes handled                                                                            | scope verdict + limb                                                                                 | FP?        | notes                                                                                              |
+| -------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ---------- | -------------------------------------------------------------------------------------------------- |
+| file-tool target match                             | WPP:429-434      | `file_path` / `notebook_path` against the globs, `**` and ancestor directories            | IN                                                                                                   | no         | path layout only; visible at call time                                                             |
+| Bash redirect/tee/dd/in-place edit/cp/mv/rm/touch  | WPP:446-466      | the shared write scan, each part judged from the directory a literal `cd` left it in      | IN (literal commands, ordinary respellings)                                                          | UNVERIFIED | judges what the scan names; reads are never matched                                                |
+| `cd` and sequence placement                        | WPP:352-396      | literal `cd`/`pushd`, `;` `&&` `\|\|` newline cuts; variables carried across a `cd`       | IN (a `cd` into a directory then a relative write is ordinary)                                       | no         | falls back to "judge from every directory the command names", which over-claims rather than misses |
+| unresolved destination judged by the name it shows | WPP:321-341      | `$DIR/name`, a wildcard that could expand to a listed file                                | IN: a positive finding only (a visible final component); a path wholly built by expansion is allowed | UNVERIFIED | consistent with ruling A1: unknown is allowed, a visible name is denied                            |
+| `xargs rm/mv/touch` and unreadable command text    | WPP:467-473, 480 | the pipeline text is searched for the listed file name as a whole name                    | IN, positive finding only                                                                            | UNVERIFIED | a whole-name match in text can deny prose inside an `xargs` line; low                              |
+| option validation                                  | WPP:230-242      | a malformed `paths` value, an absolute path or `..` entry is refused and protects nothing | n/a (configuration)                                                                                  | no         |                                                                                                    |
+
+In-scope false positives: none reproduced. One candidate (UNVERIFIED): the whole-name text search on an `xargs` line (WPP:467-473) could deny an `xargs rm` line that only quotes the file name.
+In-scope gaps: the handler's own guidance (WPP:518-522) lists routes it does not see: `perl -i`, `rsync`, `find -delete`, `python -c`/`open()` and other interpreters, `bash -c '...'`, an absolute `/bin/rm`, brace expansion, and wrappers it does not know (`flock`). Under the two-part test most of these are IN scope, because the text is visible at the call and each has an ordinary use: `perl -i`, `rsync`, `find -delete`, `/bin/rm`, a literal `bash -c '...'` body (the same class as N93, fixed for other guards) and brace lists. Only a variable-built path or a program held in a variable is out of scope (limb 1). The handler describes them as "known gaps, still not for you to use", which is a documented residual and not a ledger entry; none is filed yet.
+Out-of-scope-only code: none. The unresolved-path branches deny only on a visible name, so they serve in-scope text, not a parser.
+Verdict: CONFORMS in design (positive finding only, reading never denied); HAS IN-SCOPE GAPS on ordinary literal routes (`perl -i`, `rsync`, `find -delete`, `/bin/rm`, literal `bash -c` body, brace lists), documented by the handler but not yet filed as ledger entries. Opt-in and project-configured, so the owner decides whether to widen it.
+
+## 2. host_command_guard (`handlers/pre_tool_use/host_command_guard.py`, 553 lines; Plan 00483 Task 2.2, owner ruling A6; default on)
+
+Summary: terminal DENY of four commands whose reach goes past the project: `docker run -v /:/host` (R-DOCKER-ROOT-MOUNT), `gh auth token` (R-GH-AUTH-TOKEN), `pip install` from a non-PyPI index (R-PIP-NON-PYPI-INDEX, human only) and `crontab -r` (R-CRONTAB-REMOVE, human only). Judges each simple command through the shared `simple_commands` reader, so only a program that IS the command is judged.
+
+| branch             | file:line   | shapes handled                                                                                                        | scope verdict + limb      | FP? | notes                                                           |
+| ------------------ | ----------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------- | --- | --------------------------------------------------------------- |
+| program resolution | HCG:187-200 | assignments and wrappers peeled (`FOO=1 sudo -H pip ...`)                                                             | IN (ordinary prefixes)    | no  | data heads (`echo`, `grep`, a commit message) are not commands  |
+| docker root mount  | HCG:227-272 | `docker`/`docker container`/`docker compose` `run`/`create`; `-v`, `--volume`, `--mount source=/`, `-Nvalue` forms    | IN                        | no  | a mount of any other directory stays allowed                    |
+| `gh auth token`    | HCG:312-340 | denied unless stdout goes to `/dev/null` or the token is piped/substituted into a consumer that does not print        | IN: positive finding only | no  | an unidentifiable receiver (a variable) is allowed, per A1      |
+| non-PyPI pip index | HCG:275-299 | `pip`, `pip3`, `python -m pip`; `--index-url`, `--extra-index-url`, `-i`, `--opt=value`; HTTPS and an exact host list | IN                        | no  | a value with `$` or a backtick is allowed (limb 1: not visible) |
+| `crontab -r`       | HCG:302-309 | `-r` alone or in a cluster (`-ri`)                                                                                    | IN                        | no  | `-l` and `-e` stay allowed                                      |
+
+In-scope false positives: none found in the code; the design allows data uses (`echo 'crontab -r'`, a commit message, a `grep` pattern).
+In-scope gaps (UNVERIFIED; candidate respellings with ordinary uses, each owner-gated per the corpus header): `podman run -v /:/host` (a different container engine), `uv pip install --index-url <url>`, a pip index set through `PIP_INDEX_URL` in the environment. None is a limb-1 or limb-2 shape. Not filed.
+Out-of-scope-only code: none. Variable-valued operands are allowed rather than parsed, which is the intended A1 behaviour.
+Verdict: CONFORMS. The candidate gaps above are optional widenings of an owner-ruled four-row list, not defects against the ruling.
+
+## 3. github_issue_assignment_guard (`handlers/pre_tool_use/github_issue_assignment_guard.py`, 410 lines; Plan 00490; opt-in, enabled in this repository)
+
+Summary: terminal DENY (R-GH-ISSUE-UNASSIGNED, R-GH-ISSUE-ASSIGNED-ELSEWHERE, R-GH-ISSUE-AUTHOR-NOT-APPROVED) of issue-tied work on an issue that is unclaimed, assigned to someone else or opened by an unapproved author. Work is issue-tied when a `Write`/`Edit` targets a tracked document in a plan folder whose `PLAN.md` header carries `**GitHub Issue**: #N`, or a `git commit` cites `#N` together with a `Plan NNNNN` whose header carries that `#N`. A workflow gate, not a parser of evasion: neither limb of the test applies to it.
+
+| branch                       | file:line   | shapes handled                                                                                           | scope verdict + limb             | FP?        | notes                                                                               |
+| ---------------------------- | ----------- | -------------------------------------------------------------------------------------------------------- | -------------------------------- | ---------- | ----------------------------------------------------------------------------------- |
+| plan-document edit           | GIA:230-240 | path inside a plan folder, header read once per mtime                                                    | IN (path layout, visible)        | no         | archived plans and `JOURNAL/` are never tied                                        |
+| commit citing issue and plan | GIA:242-256 | raw-text match of `git commit`, `#N` and `Plan NNNNN` in the command; `#N` must be in that plan's header | IN                               | UNVERIFIED | the commit is found by a regex over the whole command text, not by command position |
+| verdict                      | GIA:317-339 | a settled problem denies; a failed lookup (no `gh`, offline) allows with an advisory                     | IN; fail-open on a failed lookup | no         | deliberate: never a denial on a failed lookup                                       |
+
+In-scope false positives: one candidate (UNVERIFIED, low): the commit is recognised by regex over the raw command text (GIA:243, `GIT_INVOCATION + commit`), so an `echo` or `grep` argument naming `git commit`, `Plan NNNNN` and a tied `#N` would be judged as issue work and cost a `gh` lookup. It needs a plan whose header names an issue, so it is rare. The fix pattern is `command_position`, already used by the git guards.
+In-scope gaps: none under the test; the guard is workflow hygiene, and a commit assembled from variables is limb 1 and not claimed.
+Out-of-scope-only code: none.
+Verdict: CONFORMS, with one low in-scope false-positive candidate on the raw-text commit match, not filed.
