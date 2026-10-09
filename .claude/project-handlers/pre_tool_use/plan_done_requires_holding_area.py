@@ -14,12 +14,31 @@ not a status flip.
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar, Final
 
+from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import AcceptanceTest, Handler, HookResult, TestType
 from claude_code_hooks_daemon.core.acceptance_test import ToolPayload
 from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+
+# This project's rule ID (a project handler's IDs live with the handler, not in the
+# library's `RuleID`). `hooks-daemon explain-rule` resolves it (Plan 00484 G5).
+RULE_ID: Final[str] = "R-PLAN-DONE-HOLDING-AREA"
+
+_RULE: Final[Rule] = Rule(
+    rule_id=RULE_ID,
+    blocked="flipping a plan to Complete when its Success Criteria never mention the pending-release holding area",
+    why="A plan is done when it is merged AND its release-bound consequences are recorded in the holding area; otherwise they are lost at the next release",
+    fix="Add a Success Criteria line citing the holding-area artefact, or stating that the plan has no release-bound consequences and why",
+    verbose=(
+        "Step 0 of the Plan Completion Checklist (CLAUDE/core/PlanWorkflow.core.md).\n"
+        "Shapes: release-notes/ (a callout), post-upgrade-tasks/ (an action),\n"
+        "config-changes/, truth-changes/ under CLAUDE/UPGRADES/UNRELEASED/. Write the\n"
+        "artefact first, then cite it in Success Criteria."
+    ),
+)
 
 _PLAN_FILENAME = "PLAN.md"
 _STATUS_RE = re.compile(r"^\*\*Status\*\*:\s*(?P<status>[^\n(]+)", re.MULTILINE)
@@ -92,6 +111,10 @@ class PlanDoneRequiresHoldingAreaHandler(Handler):
     #: advisories are already attached when this terminal DENY lands.
     _PRIORITY = 51
 
+    #: It judges the CONTENT a plan file would have, so it is a content gate and
+    #: therefore in the Defence set (owner ruling C1), unlike the action guards.
+    defect_class: ClassVar[str | None] = DefectClass.PLAN_DRIFT
+
     def __init__(self) -> None:
         super().__init__(
             handler_id="plan-done-requires-holding-area",
@@ -115,10 +138,15 @@ class PlanDoneRequiresHoldingAreaHandler(Handler):
             return False
         return _CRITERION_RE.search(_criteria_section(content)) is None
 
+    def get_rules(self) -> list[Rule]:
+        """The rule behind this handler's one deny."""
+        return [_RULE]
+
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         return HookResult(
             decision=Decision.DENY,
             reason=(
+                f"{RuleFormatter().headline(_RULE)}\n\n"
                 "PLAN NOT DONE: the holding area criterion is missing\n\n"
                 "A plan is done when its work is merged into main AND its\n"
                 "release-bound consequences are in the pending-release holding\n"

@@ -17,6 +17,7 @@ from claude_code_hooks_daemon.constants import (
     Timeout,
     ToolName,
 )
+from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -139,6 +140,8 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
     # PROJECT-scoped: resolves the file's workspace via resolve_workspace()
     # (see CLAUDE/Code/WorkspaceResolution.md).
     workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.PROJECT
+
+    defect_class: ClassVar[str | None] = DefectClass.LINT_FAILURE
 
     VALIDATE_EXTENSIONS: ClassVar[list[str]] = [".ts", ".tsx"]
     # Plan 00288 Task 3.2: core (11 names) plus this handler's own extra,

@@ -1,4 +1,9 @@
-"""Tests for the machine-readable defence enumeration (Plan 00484 Task 3.2)."""
+"""Tests for the machine-readable defence enumeration (Plan 00484 Task 3.2, 3.1a).
+
+Owner ruling C1: the action guards are outside the Defence set; the content and
+commit gates are the set. A handler is in the set exactly when it declares a
+``defect_class``, so that property is also the ``defect_class`` column.
+"""
 
 from __future__ import annotations
 
@@ -10,14 +15,22 @@ from claude_code_hooks_daemon.rule_explain.defences import (
 )
 from claude_code_hooks_daemon.rule_explain.lookup import HandlerRules
 
+_CLASS = "some-defect-class"
+
 
 def _rule(rule_id: str, blocked: str = "`thing`") -> Rule:
     return Rule(rule_id=rule_id, blocked=blocked, why="why", fix="fix", verbose="verbose")
 
 
-def _handler_rules(class_name: str, config_key: str, *rules: Rule) -> HandlerRules:
+def _handler_rules(
+    class_name: str, config_key: str, *rules: Rule, defect_class: str | None = _CLASS
+) -> HandlerRules:
     return HandlerRules(
-        config_key=config_key, class_name=class_name, rules=tuple(rules), claude_md=None
+        config_key=config_key,
+        class_name=class_name,
+        rules=tuple(rules),
+        claude_md=None,
+        defect_class=defect_class,
     )
 
 
@@ -50,11 +63,15 @@ class TestCollectActiveDefences:
         assert record.docs == "hooks-daemon explain-rule R-A-ONE"
         assert record.detector_entry_point == "hooks-daemon probe pre_tool_use --json <payload>"
 
-    def test_defect_class_is_null_because_no_source_maps_a_rule_to_one(self) -> None:
-        handlers = [_handler_rules("AHandler", "a", _rule("R-A-ONE"))]
+    def test_defect_class_is_the_handlers_declared_class(self) -> None:
+        handlers = [_handler_rules("AHandler", "a", _rule("R-A-ONE"), defect_class="error-hiding")]
         (record,) = collect_active_defences([_collected("AHandler", "a")], handlers)
-        assert record.defect_class is None
-        assert record.to_dict()["defect_class"] is None
+        assert record.defect_class == "error-hiding"
+        assert record.to_dict()["defect_class"] == "error-hiding"
+
+    def test_action_guard_is_not_a_defence(self) -> None:
+        handlers = [_handler_rules("GuardHandler", "guard", _rule("R-G-ONE"), defect_class=None)]
+        assert collect_active_defences([_collected("GuardHandler", "guard")], handlers) == []
 
     def test_inactive_handler_is_not_listed(self) -> None:
         handlers = [
@@ -64,11 +81,12 @@ class TestCollectActiveDefences:
         records = collect_active_defences([_collected("BHandler", "b")], handlers)
         assert [record.rule_id for record in records] == ["R-B-ONE"]
 
-    def test_blocking_handler_without_rules_is_listed_with_null_rule_id(self) -> None:
+    def test_blocking_defence_without_rules_is_listed_with_null_rule_id(self) -> None:
         handlers = [_handler_rules("ProjHandler", "proj_handler")]
         (record,) = collect_active_defences([_collected("ProjHandler", "proj_handler")], handlers)
         assert record.rule_id is None
         assert record.statement is None
+        assert record.defect_class == _CLASS
         assert record.docs == "hooks-daemon explain-handler proj_handler"
 
     def test_advisory_handler_without_rules_is_not_a_defence(self) -> None:
@@ -78,9 +96,10 @@ class TestCollectActiveDefences:
         )
         assert records == []
 
-    def test_active_handler_unknown_to_the_rule_index_is_listed_as_rule_less(self) -> None:
-        records = collect_active_defences([_collected("PluginHandler", "PluginHandler")], [])
-        assert [(r.rule_id, r.handler) for r in records] == [(None, "PluginHandler")]
+    def test_active_handler_unknown_to_the_rule_index_declares_no_class_so_is_not_listed(
+        self,
+    ) -> None:
+        assert collect_active_defences([_collected("PluginHandler", "PluginHandler")], []) == []
 
     def test_output_is_ordered_by_event_priority_then_handler(self) -> None:
         handlers = [
@@ -105,7 +124,7 @@ class TestCollectActiveDefences:
             priority=1,
             behavior="BLOCKING",
             statement="s",
-            defect_class=None,
+            defect_class="c",
             docs="d",
             detector_entry_point="e",
         )

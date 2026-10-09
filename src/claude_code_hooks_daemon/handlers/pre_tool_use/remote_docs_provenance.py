@@ -15,7 +15,7 @@ dispatch on it in the first place.
 """
 
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -24,6 +24,7 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
+from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
@@ -66,6 +67,8 @@ _RULE_REMOTE_DOCS_PROVENANCE: Final[Rule] = Rule(
 
 class RemoteDocsProvenanceHandler(PreToolUseHandlerBase):
     """Deny a remote-tree write whose content lacks valid provenance."""
+
+    defect_class: ClassVar[str | None] = DefectClass.UNATTRIBUTED_VENDORED_DOC
 
     def __init__(self) -> None:
         super().__init__(

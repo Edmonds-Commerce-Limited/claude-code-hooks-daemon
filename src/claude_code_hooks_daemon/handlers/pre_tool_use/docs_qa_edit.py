@@ -40,9 +40,10 @@ primary surface for this slice.
 """
 
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
@@ -94,6 +95,8 @@ _SINGLE_REPLACEMENT: Final[int] = 1
 
 class DocsQaEditHandler(PreToolUseHandlerBase):
     """Blocking/advisory EDIT-time lint for documentation-scoped files."""
+
+    defect_class: ClassVar[str | None] = DefectClass.DOC_DRIFT
 
     def __init__(self) -> None:
         super().__init__(

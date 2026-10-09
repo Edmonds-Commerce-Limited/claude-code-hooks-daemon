@@ -63,8 +63,8 @@ route.
 
 | Clause | Obligation (short)                                                     | Grade (project)          | Artefact   | One-line evidence                                                                                                                                                                                                                                                       |
 | ------ | ---------------------------------------------------------------------- | ------------------------ | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 4.1    | No defence routed through a non-conforming detector                    | NOT MET                  | NOT MET    | A fails D4.3 for 9 deny paths; B fails D5.2; D cannot host bespoke rules (see matrix)                                                                                                                                                                                   |
-| 4.2a   | Every printed identifier resolves offline                              | PARTLY MET               | MET        | `explain-rule` resolves all 121 handler IDs offline, including a client's project-handler rules; at project level B's IDs resolve nowhere                                                                                                                               |
+| 4.1    | No defence routed through a non-conforming detector                    | NOT MET                  | NOT MET    | A's 9 identifier-less deny paths now print one (G5, Task 3.1a); B fails D5.2; D cannot host bespoke rules (see matrix)                                                                                                                                                  |
+| 4.2a   | Every printed identifier resolves offline                              | PARTLY MET               | MET        | `explain-rule` resolves every handler rule ID offline, including a client's project-handler rules, and since Task 3.1a the plan-QA and docs-QA check IDs too (G15, `rule_explain/checks.py`); at project level B's IDs resolve nowhere                                  |
 | 4.2b   | Remediation docs ship with the code, version tracked together          | MET                      | MET        | `Rule` objects live in handler source (`core/rule.py`, `get_rules()`)                                                                                                                                                                                                   |
 | 4.2c   | A defined place for a new rule's docs                                  | PARTLY MET               | MET        | Handlers: `Rule(blocked, why, fix, verbose)`. B: docstrings and `VIOLATION_TYPES` only, with no defined place                                                                                                                                                           |
 | 4.2d   | Docs state the correct construction                                    | PARTLY MET               | MET        | `test_rule_parity.py:180` requires a non-empty `fix`; B has no remediation text keyed by ID                                                                                                                                                                             |
@@ -76,17 +76,17 @@ route.
 | 4.5b   | A detector failure stops lower levels counting                         | NOT MET                  | N/A        | `_run_tools` runs every tool regardless (`llm_qa.py:2622-2658`)                                                                                                                                                                                                         |
 | 5.1a   | List every active defence without running it                           | PARTLY MET               | PARTLY MET | `explain-rule --list` lists all installed rules, disabled ones included; HOOKS-DAEMON.md is active-only but has no IDs. Task 3.2 adds `hooks-daemon defences --json`, active-only with IDs ([reference](../../../docs/guides/TROUBLESHOOTING.md#cli-command-reference)) |
 | 5.1b   | Listing carries ID and a terse statement                               | PARTLY MET               | PARTLY MET | `explain-rule --list` does (`cli.py:8553-8557`); HOOKS-DAEMON.md does not; B is absent                                                                                                                                                                                  |
-| 5.1c   | Listing gives the route to full docs                                   | PARTLY MET               | MET        | `explain-rule <ID>`, stated once in the CLAUDE.md header; nothing for B                                                                                                                                                                                                 |
+| 5.1c   | Listing gives the route to full docs                                   | PARTLY MET               | MET        | `explain-rule <ID>`, stated once in the CLAUDE.md header and, since Task 3.1a, as the last line of `explain-rule --list`; nothing for B                                                                                                                                 |
 | 5.2    | Listing derived from the active config                                 | PARTLY MET               | PARTLY MET | `--list` instantiates classes with no config (`lookup.py:84-88`); `docs_generator.py:324-329` skips the tag gates that `registry.py:244-262` applies                                                                                                                    |
-| 5.3    | The project's own defences appear alongside bundled ones               | NOT MET                  | PARTLY MET | B's rules appear in no listing; 4 of 6 project handlers declare no rule                                                                                                                                                                                                 |
+| 5.3    | The project's own defences appear alongside bundled ones               | NOT MET                  | PARTLY MET | B's rules appear in no listing; the 4 project handlers that denied with no rule now declare one (G5), and `hooks-daemon defences` lists the Defences only (owner ruling C1)                                                                                             |
 | 6.1    | A defined record location the toolchain loads                          | PARTLY MET               | MET        | `.claude/hooks-daemon.yaml` is loaded (`config/models.py:2717`); B's 6+ exception files are named by no record                                                                                                                                                          |
 | 6.2a   | Every exception carries a justification; none defaulted, none omitted  | NOT MET                  | NOT MET    | `options: dict[str, Any]` (`models.py:58-78`); `enabled: bool` has no reason (`:72`); `never_want.reason` defaults to `""` (`:2111`)                                                                                                                                    |
 | 6.2b   | Names hazard and scope; generic reasons rejected by a documented check | NOT MET                  | NOT MET    | No generic-reason check anywhere in `src/` or `scripts/`                                                                                                                                                                                                                |
 | 6.3    | Record enumerable by the same means as the defences                    | PARTLY MET               | PARTLY MET | `config --json` and `config-diff` exist, but no record listing; in-file hatches and B's exception files are not enumerated                                                                                                                                              |
 | 6.4    | SHOULD: documented defaults                                            | MET                      | MET        | `hooks-daemon.yaml.example`, `init_config.py`, `Handler.get_default_enabled`                                                                                                                                                                                            |
-| 7.1    | SHOULD: terse per-defence summary with ID and docs route               | PARTLY MET               | PARTLY MET | 96 of 121 IDs reach CLAUDE.md; promoted prose sections drop their 25 IDs                                                                                                                                                                                                |
+| 7.1    | SHOULD: terse per-defence summary with ID and docs route               | PARTLY MET               | MET        | Promoted prose sections now end with an `IDs:` line (G13, `claude_md_injector._with_rule_ids`); B's rules are still absent at project level                                                                                                                             |
 | 7.2    | SHOULD: delivered automatically into a delimited generated region      | MET                      | MET        | The `<hooksdaemon>` block, regenerated on restart (`core/claude_md_injector.py`)                                                                                                                                                                                        |
-| 8.1    | Release fails if a bundled defence lacks resolvable docs               | n/a (artefact)           | MET        | `test_rule_parity.py:162-227` on the full gate, which RELEASING.md:285 requires                                                                                                                                                                                         |
+| 8.1    | Release fails if a bundled defence lacks resolvable docs               | n/a (artefact)           | MET        | `test_rule_parity.py:162-227` on the full gate, which RELEASING.md:285 requires; since Task 3.1a it also walks every plan-QA and docs-QA `CHECK_ID` (G15) and the project's own deny handlers (G5)                                                                      |
 | 8.1f   | Family-page pattern audit                                              | n/a                      | N/A        | One ID per rule; there are no family pages                                                                                                                                                                                                                              |
 | 8.2    | Bundled defences active on own source; release fails otherwise         | n/a (artefact)           | MET        | `test_dogfooding_config.py:117` asserts every production handler is enabled here                                                                                                                                                                                        |
 | 9      | Partial conformance not described as conformance                       | MET                      | MET        | README and `pyproject.toml` make no DBF claim at all (checked by grep)                                                                                                                                                                                                  |
@@ -122,7 +122,7 @@ layer (B, D, `llm_qa.py`) and in the governance of exceptions. The handler layer
 | Scope                                 | MET | PARTLY MET | NOT MET | N/A |
 | ------------------------------------- | --- | ---------- | ------- | --- |
 | TOOLING, project level (29 rows)      | 4   | 11         | 9       | 5   |
-| TOOLING, artefact level (29 rows)     | 12  | 7          | 5       | 5   |
+| TOOLING, artefact level (29 rows)     | 13  | 6          | 5       | 5   |
 | DETECTOR matrix, A + B + C (45 cells) | 20  | 12         | 3       | 10  |
 | D (one row, a classification)         | –   | –          | 1       | –   |
 
@@ -142,14 +142,16 @@ MET: 4.1, 4.3a, 4.3b, 6.2a and 6.2b.
 - **A: the handler engine.** It is the closest of the four.
   - **D4.1 MET.** `.claude/project-handlers/` handlers register in the same chain, with the
     same standing (`CLAUDE/PROJECT_HANDLERS.md`).
-  - **D4.3 PARTLY MET.** Nine deny paths print no identifier.
-    - Five library handlers: `AutoApproveReadsHandler`, `DispatchDeclarationHandler`,
-      `SubagentReportSizeBlockerHandler`, `SubagentReportPathVerifierHandler` and
-      `CronStopEnforcerHandler`. These are allowlisted in `test_rule_parity.py:328-354`.
-    - Four project handlers: `ruff_format_blocker`, `enforce_llm_qa`,
-      `plan_done_requires_holding_area` and `release_blocker`. Their deny reasons carry no ID
-      (for example `ruff_format_blocker.py:147-160`), and `explain-handler --list` reports
-      `0 rule(s)` for each.
+  - **D4.3 PARTLY MET, with G5 closed in Task 3.1a.** The grade stays PARTLY MET because no
+    test proves that every `Decision.DENY` carries an ID (REVIEW-fable.md). The nine deny paths
+    that printed no identifier now do. The five library handlers
+    (`DispatchDeclarationHandler`, `SubagentReportSizeBlockerHandler`,
+    `SubagentReportPathVerifierHandler`, `CronStopEnforcerHandler` and
+    `CronSubagentStopEnforcerHandler`) and the four project handlers (`ruff_format_blocker`,
+    `enforce_llm_qa`, `plan_done_requires_holding_area` and `release_blocker`) declare a rule and
+    print `BLOCKED [R-...]`. Only `AutoApproveReadsHandler` stays allowlisted, because its deny
+    branch is defensive and cannot fire. The set is found by a source marker, so the declaration
+    says "at least".
   - **D4.2 PARTLY MET.** No route runs one rule alone against supplied input.
     - `hooks-daemon probe --file payload.json` sends one payload through the real entry point.
       It is local and needs no infrastructure, but it runs the whole chain, so other handlers
@@ -302,12 +304,13 @@ there.
 
 - **7.2 MET.** The `<hooksdaemon>` region is delimited, marked as generated and refreshed on
   restart.
-- **7.1 PARTLY MET.**
+- **7.1 MET at artefact level, PARTLY MET at project level.**
   - The progressive table gives one row per rule, with ID, blocked, why and fix.
-  - The 25 IDs owned by promoted handlers appear nowhere in CLAUDE.md, because their prose
-    sections are emitted instead of rows. Examples: `R-PIPE-TO-TAIL`, `R-QA-SUPPRESSION`,
-    `R-SEC-*`, `R-STOP-*` and `R-TDD-TEST-FIRST`.
-  - B's rules are absent.
+  - A promoted handler's prose section is emitted instead of rows, so its IDs used to appear
+    nowhere in CLAUDE.md (examples: `R-PIPE-TO-TAIL`, `R-QA-SUPPRESSION`, `R-SEC-*`, `R-STOP-*`
+    and `R-TDD-TEST-FIRST`). G13 (Task 3.1a) closes that: every promoted section now ends with an
+    `IDs:` line.
+  - B's rules are absent, which is the project-level gap.
 
 ### 8.1–8.2: self-audit (artefact)
 
@@ -318,7 +321,7 @@ there.
     reasoned allowlist entry of 10 or more words (`:392-424`).
   - It is on the full gate, which RELEASING.md:285 requires before a tag.
   - Caveat: an allowlisted handler prints no ID. That passes 8.1 because there is nothing to
-    resolve, but it fails D4.3.
+    resolve; only `AutoApproveReadsHandler` remains, and its deny branch cannot fire.
   - The `Decision.DENY` source-marker discovery is a heuristic.
 - **8.2 MET.** `test_dogfooding_config.py:117` fails when a production handler is not enabled
   in this repository's config.
@@ -394,6 +397,30 @@ scripts, 7 `nosec` in `src/` with no finding, 22 `type: ignore` and 6 `pragma: n
 replaced or dropped); 78 kept. Inventory, per-entry reasons and the reasonless lines still
 needing a reason comment: [SUPPRESSIONS.md](SUPPRESSIONS.md). The `scripts/qa` detector and
 `--disable-nosem` parts of G1 remain open.
+
+**G5, G9, G13, G15 status (Task 3.1a).** All four are closed except where noted.
+
+- **G5 closed.** The five library handlers (`dispatch_declaration`, `subagent_report_size_blocker`,
+  `subagent_report_path_verifier`, `cron_stop_enforcer`, `cron_subagent_stop_enforcer`) and the
+  four project handlers (`ruff_format_blocker`, `enforce_llm_qa`,
+  `plan_done_requires_holding_area`, `release_blocker`) now declare a `Rule` and print
+  `BLOCKED [R-...]` on every deny path. `test_rule_parity.py` drops their allowlist entries,
+  keeps only `AutoApproveReadsHandler` (its deny branch is defensive and unreachable), and holds
+  the project handlers to the same rule. The count stays a lower bound: the parity test finds a
+  deny path by the `Decision.DENY` source marker, and a per-handler test pins the headline.
+- **G9 closed for the handler layer.** `hooks-daemon defences --json` fills `defect_class` on
+  every row from the handler's own `defect_class` declaration, and lists only the handlers that
+  declare one, which is owner ruling C1 (content and commit gates are the Defence set; action
+  guards are guardrails). `explain-rule` and `explain-handler` print the class, or a guardrail
+  line, and `explain-rule --list` ends with a footer naming `explain-rule <ID>`. B's rows still
+  arrive with G6.
+- **G13 closed.** A promoted section ends with an `IDs:` line (24 IDs plus those added since).
+- **G15 closed.** `explain-rule plan-doc-size` prints the check's purpose and the umbrella
+  rule(s) its denies are filed under; `test_rule_parity.py` walks every `CHECK_ID` constant in
+  `plan_qa/checks/` and `docs_qa/checks/`. The statement printed is the check module's own
+  rationale paragraph, so no second registry exists.
+- **DEFSET wording closed.** `DefenceBeforeFix.EXPLAIN_LINE` no longer calls every rule a
+  defence, and README.md "Defence Before Fix" names the content and commit gates as the Defences.
 
 ### What a DBF tool needs in order to hook in (TOOLING §5, and Task 3.2)
 

@@ -29,6 +29,7 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
+from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
@@ -226,6 +227,8 @@ class CommentChangelogHandler(PreToolUseHandlerBase):
     # contract forbids a repo-singular handler consuming per-project
     # resolution.
     workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.PROJECT
+
+    defect_class: ClassVar[str | None] = DefectClass.CHANGELOG_IN_COMMENT
 
     def __init__(self) -> None:
         super().__init__(

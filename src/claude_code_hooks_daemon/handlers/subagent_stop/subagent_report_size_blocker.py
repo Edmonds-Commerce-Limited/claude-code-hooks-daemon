@@ -19,11 +19,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SubagentStopHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.utils.option_coercion import coerce_int_option
 from claude_code_hooks_daemon.utils.subagent_report_paths import (
     DEFAULT_PERSISTED_REPORT_DIR,
@@ -57,6 +59,22 @@ _DEFAULT_FALLBACK_REPORT_DIR = "untracked/agent-reports/"
 # path literally sees they are placeholders, not real values.
 _AGENT_NAME_PLACEHOLDER = "{agent-name}"
 _MODEL_PLACEHOLDER = "{model}"
+
+# The one rule every deny path below is filed under (Plan 00484 G5): the
+# write-it-yourself, read-only and already-saved denies differ only in the
+# prescribed remedy, not in what was refused.
+_RULE: Final[Rule] = Rule(
+    rule_id=RuleID.SUBAGENT_REPORT_TOO_LARGE,
+    blocked="a subagent's final message over the character threshold",
+    why="A subagent's reply travels over a bounded channel that silently elides an oversized inline report in the middle, so the coordinator can receive a report that looks complete and is not",
+    fix="Put the full report in a file and reply with its path and a short summary under the threshold",
+    verbose=(
+        "A subagent's final message must be a short completion summary. The reason\n"
+        "below gives the exact path to write the report to (or, for an agent with no\n"
+        "`Write` tool, how to condense), and the threshold is\n"
+        "`handlers.subagent_stop.subagent_report_size_blocker.options.threshold_chars`."
+    ),
+)
 
 
 class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
@@ -262,8 +280,19 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
         """
         return coerce_int_option(self._threshold_chars, default=_DEFAULT_THRESHOLD_CHARS)
 
+    def get_rules(self) -> list[Rule]:
+        """The single rule every deny path is filed under."""
+        return [_RULE]
+
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
-        """DENY when ``last_assistant_message`` exceeds the threshold, else ALLOW."""
+        """DENY when ``last_assistant_message`` exceeds the threshold, else ALLOW.
+
+        Every denial is filed under ``_RULE``, whichever remedy it prescribes.
+        """
+        return self._judge(hook_input).under_rule(_RULE)
+
+    def _judge(self, hook_input: dict[str, Any]) -> BlockingResult:
+        """The verdict, before its denial (if any) is given the rule's headline."""
         message = hook_input.get("last_assistant_message")
         if not isinstance(message, str):
             # Fail open: no verdict without a readable report string.

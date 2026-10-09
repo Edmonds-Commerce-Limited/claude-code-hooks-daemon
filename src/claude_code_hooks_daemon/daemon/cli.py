@@ -176,6 +176,7 @@ if TYPE_CHECKING:
     from claude_code_hooks_daemon.daemon.project_handler_health import (
         ProjectHandlerHealthState,
     )
+    from claude_code_hooks_daemon.rule_explain.checks import CheckEntry
 
 # Test-runner module ``test-project-handlers`` shells out to. It is a dev-only
 # extra (see pyproject ``[project.optional-dependencies].dev``), so it is
@@ -8746,6 +8747,8 @@ def cmd_block_report(args: argparse.Namespace) -> int:
 
 
 _EXPLAIN_UNKNOWN_RULE_HINT = "Run 'hooks-daemon explain-rule --list' to see every known rule ID."
+# Last line of `explain-rule --list` (TOOLING-SPEC 5.1c: a listing gives the route to full docs).
+_EXPLAIN_RULE_LIST_FOOTER = "Full detail for any rule: hooks-daemon explain-rule <ID>"
 _EXPLAIN_UNKNOWN_HANDLER_HINT = (
     "Run 'hooks-daemon explain-handler --list' to see every known handler name "
     "(including advisory handlers with no declared rules, which "
@@ -8821,6 +8824,27 @@ def _init_project_context_for_cli(args: argparse.Namespace) -> None:
         )
 
 
+def _dbf_classification_line(defect_class: str | None) -> str:
+    """The line saying whether a handler is a Defence (owner ruling C1) or a guardrail."""
+    if defect_class is None:
+        return DefenceBeforeFix.GUARDRAIL_LINE
+    return DefenceBeforeFix.defence_line(defect_class)
+
+
+def _print_check_entry(check: "CheckEntry") -> None:
+    """Print a plan-QA / docs-QA check: its statement and the umbrella rule(s) to read next."""
+    print(f"Check: {check.check_id}")
+    print(f"Stages: {', '.join(check.stages)}")
+    print()
+    print(check.statement)
+    print()
+    if check.umbrella_rule_ids:
+        for rule_id in check.umbrella_rule_ids:
+            print(f"Reported under {rule_id}: hooks-daemon explain-rule {rule_id}")
+    else:
+        print("Reported only by the advisory session-start sweep; no deny names it.")
+
+
 def cmd_explain_rule(args: argparse.Namespace) -> int:
     """Print the full verbatim detail for a rule, or list every known rule ID.
 
@@ -8838,6 +8862,11 @@ def cmd_explain_rule(args: argparse.Namespace) -> int:
         rule ID is unknown or missing with no ``--list``.
     """
     from claude_code_hooks_daemon.core.rule import RuleFormatter
+    from claude_code_hooks_daemon.rule_explain.checks import (
+        collect_check_entries,
+        find_check,
+        near_check_matches,
+    )
     from claude_code_hooks_daemon.rule_explain.lookup import (
         discover_handler_rules,
         find_rule,
@@ -8851,6 +8880,7 @@ def cmd_explain_rule(args: argparse.Namespace) -> int:
         for handler in handlers:
             for rule in handler.rules:
                 print(f"{rule.rule_id}\t{handler.config_key}\t{rule.blocked}")
+        print(_EXPLAIN_RULE_LIST_FOOTER)
         return 0
 
     rule_id = getattr(args, "rule_id", None)
@@ -8863,7 +8893,15 @@ def cmd_explain_rule(args: argparse.Namespace) -> int:
 
     found = find_rule(handlers, rule_id)
     if found is None:
-        suggestions = near_rule_matches(handlers, rule_id)
+        check_entries = collect_check_entries()
+        check = find_check(check_entries, rule_id)
+        if check is not None:
+            _print_check_entry(check)
+            return 0
+        suggestions = [
+            *near_rule_matches(handlers, rule_id),
+            *near_check_matches(check_entries, rule_id),
+        ]
         print(f"ERROR: unknown rule ID: {rule_id}", file=sys.stderr)
         if suggestions:
             print(f"Did you mean: {', '.join(suggestions)}?", file=sys.stderr)
@@ -8876,6 +8914,7 @@ def cmd_explain_rule(args: argparse.Namespace) -> int:
     print(f"Handler: {handler.config_key} ({handler.class_name})")
     print()
     print(formatter.verbose(rule))
+    print(_dbf_classification_line(handler.defect_class))
     print(DefenceBeforeFix.EXPLAIN_LINE)
     return 0
 
@@ -8955,6 +8994,7 @@ def cmd_explain_handler(args: argparse.Namespace) -> int:
     else:
         print("CLAUDE.md guidance: (none)")
 
+    print(_dbf_classification_line(handler.defect_class))
     print(DefenceBeforeFix.EXPLAIN_LINE)
     return 0
 

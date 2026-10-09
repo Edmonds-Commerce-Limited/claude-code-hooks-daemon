@@ -27,7 +27,7 @@ import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final, NoReturn
+from typing import Any, ClassVar, Final, NoReturn
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -37,6 +37,7 @@ from claude_code_hooks_daemon.constants import (
     Timeout,
     ToolName,
 )
+from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
@@ -491,6 +492,8 @@ def _timed_out() -> GatingResult:
 
 class ConflictMarkerCommitGateHandler(PreToolUseHandlerBase):
     """Deny a commit that would record a merge-conflict marker."""
+
+    defect_class: ClassVar[str | None] = DefectClass.CONFLICT_MARKER
 
     def __init__(self) -> None:
         super().__init__(

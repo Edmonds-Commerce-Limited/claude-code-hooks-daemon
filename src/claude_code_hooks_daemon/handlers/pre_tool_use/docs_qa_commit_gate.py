@@ -15,9 +15,10 @@ denies with a diffable list. Never fires for a commit inside a repo other
 than the project's own (nested repos, foreign worktrees).
 """
 
-from typing import Any, Final
+from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
@@ -72,6 +73,8 @@ _FIELD_COMMAND: Final[str] = "command"
 
 class DocsQaCommitGateHandler(PreToolUseHandlerBase):
     """Warn-first STAGED docs QA gate on git commit."""
+
+    defect_class: ClassVar[str | None] = DefectClass.DOC_DRIFT
 
     def __init__(self) -> None:
         super().__init__(

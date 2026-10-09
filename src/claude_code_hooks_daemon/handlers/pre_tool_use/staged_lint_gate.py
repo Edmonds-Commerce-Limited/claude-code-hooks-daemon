@@ -33,7 +33,7 @@ import shutil
 import subprocess  # nosec B404 - subprocess used for lint validation only (trusted tools)
 import sys
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -43,6 +43,7 @@ from claude_code_hooks_daemon.constants import (
     Timeout,
     ToolName,
 )
+from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import AcceptanceTest, Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
@@ -123,6 +124,8 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         mode: "warn" (default) or "block".
         max_files: int - stand-down threshold (default 20).
     """
+
+    defect_class: ClassVar[str | None] = DefectClass.LINT_FAILURE
 
     def __init__(self) -> None:
         super().__init__(

@@ -697,3 +697,28 @@ class RuleID:
     #: A Bash command that sets `HOOKS_DAEMON_UPGRADE_HANDOFF`, impersonating
     #: the upgrade's Layer 1.
     UPGRADE_APPROVAL_ENV_BYPASS: str = "R-UPGRADE-APPROVAL-ENV-BYPASS"
+
+    # ------------------------------------------------------------------
+    # Deny paths that printed no identifier (Plan 00484 G5)
+    # ------------------------------------------------------------------
+
+    #: A `Task` dispatch prompt that declares neither a plan folder nor a
+    #: "not plan work" destination, refused under `dispatch_declaration`'s
+    #: opt-in `strict` option.
+    DISPATCH_DECLARATION_MISSING: str = "R-DISPATCH-DECLARATION-MISSING"
+
+    #: A subagent's final message over the size threshold, refused by
+    #: `subagent_report_size_blocker` so the oversized inline report is not
+    #: silently elided in transit.
+    SUBAGENT_REPORT_TOO_LARGE: str = "R-SUBAGENT-REPORT-TOO-LARGE"
+
+    #: A subagent's final message that claims a project file which is not on
+    #: disk, refused by `subagent_report_path_verifier`.
+    SUBAGENT_REPORT_PATH_MISSING: str = "R-SUBAGENT-REPORT-PATH-MISSING"
+
+    #: A Stop refused while a declared `persistent_crons` job is missing from
+    #: `session_crons` or due a refresh (`cron_stop_enforcer`).
+    CRON_STOP_DECLARED: str = "R-CRON-STOP-DECLARED"
+
+    #: The SubagentStop twin of CRON_STOP_DECLARED (`cron_subagent_stop_enforcer`).
+    CRON_SUBAGENT_STOP_DECLARED: str = "R-CRON-SUBAGENT-STOP-DECLARED"

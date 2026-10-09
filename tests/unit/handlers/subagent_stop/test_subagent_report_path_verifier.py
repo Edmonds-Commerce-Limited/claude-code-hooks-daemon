@@ -21,6 +21,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.subagent_stop.subagent_report_path_verifier import (
     SubagentReportPathVerifierHandler,
@@ -128,6 +129,15 @@ class TestTheHandlerBlocksOnlyAMissingClaim:
         result = handler.handle(_hook_input("Report written to `missing-report.md`"))
         assert result.decision == Decision.DENY
         assert "missing-report.md" in (result.reason or "")
+
+    def test_the_deny_carries_the_rule_id_that_explain_rule_resolves(self, tmp_path: Path) -> None:
+        """Plan 00484 G5: this deny used to print no identifier."""
+        handler = SubagentReportPathVerifierHandler()
+        handler._project_root = tmp_path
+        (rule,) = handler.get_rules()
+        result = handler.handle(_hook_input("Report written to `missing-report.md`"))
+        assert rule.rule_id == RuleID.SUBAGENT_REPORT_PATH_MISSING
+        assert (result.reason or "").startswith(f"BLOCKED [{rule.rule_id}]")
 
     def test_the_deny_offers_dropping_the_claim_as_well_as_writing_it(self, tmp_path: Path) -> None:
         """An agent that genuinely reported inline is not at fault.

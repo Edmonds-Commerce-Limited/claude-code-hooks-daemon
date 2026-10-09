@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from claude_code_hooks_daemon.constants.dbf import DefenceBeforeFix
+from claude_code_hooks_daemon.constants.dbf import DefectClass, DefenceBeforeFix
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.cli import cmd_explain_handler, cmd_explain_rule
 
@@ -58,6 +58,33 @@ class TestCmdExplainRule:
         assert lines.count(DefenceBeforeFix.EXPLAIN_LINE) == 1
         assert lines[-1] == DefenceBeforeFix.EXPLAIN_LINE
         assert "https://defence-before-fix.github.io" in DefenceBeforeFix.EXPLAIN_LINE
+
+    def test_defence_rule_names_its_defect_class_not_the_guardrail_line(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert cmd_explain_rule(_rule_args(rule_id="R-QA-SUPPRESSION")) == 0
+        lines = capsys.readouterr().out.splitlines()
+        assert DefenceBeforeFix.defence_line(DefectClass.QA_SUPPRESSION) in lines
+        assert DefenceBeforeFix.GUARDRAIL_LINE not in lines
+        assert lines[-1] == DefenceBeforeFix.EXPLAIN_LINE
+
+    def test_action_guard_rule_is_called_a_guardrail_not_a_defence(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Owner ruling C1: an action guard is outside the Defence set."""
+        assert cmd_explain_rule(_rule_args(rule_id="R-GIT-RESET-HARD")) == 0
+        lines = capsys.readouterr().out.splitlines()
+        assert DefenceBeforeFix.GUARDRAIL_LINE in lines
+        assert not any(line.startswith("Defence for the defect class") for line in lines)
+        assert lines[-1] == DefenceBeforeFix.EXPLAIN_LINE
+
+    def test_list_ends_with_a_footer_naming_the_lookup_verb(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert cmd_explain_rule(_rule_args(list_rules=True)) == 0
+        last = capsys.readouterr().out.rstrip("\n").splitlines()[-1]
+        assert "explain-rule <ID>" in last
+        assert "\t" not in last
 
     def test_unknown_id_does_not_print_defence_before_fix_line(
         self, capsys: pytest.CaptureFixture[str]
@@ -114,6 +141,19 @@ class TestCmdExplainHandler:
         assert cmd_explain_handler(_handler_args(name="destructive_git")) == 0
         lines = capsys.readouterr().out.splitlines()
         assert lines.count(DefenceBeforeFix.EXPLAIN_LINE) == 1
+
+    def test_defence_handler_names_its_defect_class(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert cmd_explain_handler(_handler_args(name="qa_suppression")) == 0
+        lines = capsys.readouterr().out.splitlines()
+        assert DefenceBeforeFix.defence_line(DefectClass.QA_SUPPRESSION) in lines
+
+    def test_action_guard_handler_is_called_a_guardrail(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert cmd_explain_handler(_handler_args(name="destructive_git")) == 0
+        assert DefenceBeforeFix.GUARDRAIL_LINE in capsys.readouterr().out.splitlines()
 
     def test_case_insensitive_class_name_match(self) -> None:
         assert cmd_explain_handler(_handler_args(name="DestructiveGitHandler")) == 0

@@ -8,6 +8,7 @@ import re
 from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import HandlerTag, HookInputField
+from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -162,6 +163,8 @@ class ValidateInstructionContentHandler(PreToolUseHandlerBase):
     COMPLETION_INDICATORS: ClassVar[list[str]] = [
         r"(?:all\s+done|task\s+complete|finished\s+task)!?",
     ]
+
+    defect_class: ClassVar[str | None] = DefectClass.INSTRUCTION_FILE_LOG
 
     def __init__(self) -> None:
         """Initialize handler."""

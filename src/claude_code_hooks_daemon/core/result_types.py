@@ -48,6 +48,7 @@ today but would be a gratuitous incompatibility for a client handler naming it.
 from typing import Final, Literal, Self, get_args
 
 from claude_code_hooks_daemon.core.hook_result import REFUSAL_CAPABLE_EVENTS, Decision, HookResult
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 
 #: The decisions every event can carry, whatever else it can express.
 _UNIVERSAL: Final[frozenset[Decision]] = frozenset({Decision.ALLOW, Decision.CONTINUE})
@@ -92,6 +93,27 @@ class BlockingResult(HookResult[Literal[Decision.ALLOW, Decision.CONTINUE, Decis
             A result of the calling class, with the deny decision.
         """
         return cls(decision=Decision.DENY, reason=reason, context=context or [])
+
+    def under_rule(self, rule: Rule) -> Self:
+        """File a denial under ``rule``: its ``BLOCKED [id]`` headline above the reason.
+
+        For a handler whose deny reasons are built in several places and each
+        carries its own specifics. Wrapping the verdict once puts on every deny
+        path the identifier ``explain-rule`` resolves (Plan 00484 G5). Anything
+        but a denial is returned unchanged.
+
+        Args:
+            rule: The rule the denial belongs to.
+
+        Returns:
+            A copy of this result with the headline prepended to its reason, or
+            this result when it is not a denial.
+        """
+        if self.decision is not Decision.DENY:
+            return self
+        headline = RuleFormatter().headline(rule)
+        reason = f"{headline}\n\n{self.reason}" if self.reason else headline
+        return self.model_copy(update={"reason": reason})
 
 
 class GatingResult(

@@ -98,6 +98,15 @@ class Handler(ABC):
     #: ran is a guard switched off.
     drives_autonomy: ClassVar[bool] = False
 
+    #: The defect class this handler defends, or ``None`` for an action guard
+    #: (Plan 00484, owner ruling C1). The content gates and commit gates are the
+    #: Defence Before Fix Defence set; the action guards are outside it. A
+    #: handler is a Defence exactly when it declares a class here (a
+    #: ``DefectClass`` value), and ``hooks-daemon defences`` lists exactly
+    #: those. ``None`` is the default, deliberately: a handler nobody has
+    #: classified makes no Defence claim.
+    defect_class: ClassVar[str | None] = None
+
     __slots__ = (
         "_project_exclude_paths",
         "_project_languages",

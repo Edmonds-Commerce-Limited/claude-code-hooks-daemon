@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.config.models import (
     PersistentCronsConfig,
 )
 from claude_code_hooks_daemon.constants.priority import Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope, scope_admits
 from claude_code_hooks_daemon.handlers.stop.cron_stop_enforcer import CronStopEnforcerHandler
@@ -127,6 +128,21 @@ class TestADeclaredCronAbsentFromSessionCronsBlocks:
         result = handler.handle(payload)
 
         assert result.decision is Decision.DENY
+
+    def test_the_deny_carries_the_rule_id_that_explain_rule_resolves(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Plan 00484 G5: this deny used to print no identifier, and it must not
+        borrow its Stop twin's (rule IDs are globally unique)."""
+        handler = _handler(monkeypatch, _config(_JOB))
+        (rule,) = handler.get_rules()
+
+        result = handler.handle({"session_crons": []})
+
+        assert rule.rule_id == RuleID.CRON_SUBAGENT_STOP_DECLARED
+        assert rule.rule_id != RuleID.CRON_STOP_DECLARED
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{rule.rule_id}]")
 
     def test_the_deny_reason_names_the_schedule_and_the_prompt(
         self, monkeypatch: pytest.MonkeyPatch

@@ -50,12 +50,15 @@ class HandlerRules:
         rules: This handler's declared ``Rule`` objects (empty for handlers
             that have not migrated onto ``get_rules()``).
         claude_md: This handler's ``get_claude_md()`` text, or ``None``.
+        defect_class: The handler's declared ``Handler.defect_class``; ``None``
+            for an action guard, which is outside the Defence set.
     """
 
     config_key: str
     class_name: str
     rules: tuple[Rule, ...]
     claude_md: str | None
+    defect_class: str | None = None
 
 
 def _normalise_id(value: str) -> str:
@@ -101,6 +104,7 @@ def collect_handler_rules(handler_classes: Iterable[type[Handler]]) -> list[Hand
                 class_name=handler_class.__name__,
                 rules=rules,
                 claude_md=claude_md,
+                defect_class=handler_class.defect_class,
             )
         )
 

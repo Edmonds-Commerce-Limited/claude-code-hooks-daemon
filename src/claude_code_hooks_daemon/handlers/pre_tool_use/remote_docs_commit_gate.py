@@ -19,7 +19,7 @@ than adding one.
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -28,6 +28,7 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
+from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
@@ -81,6 +82,8 @@ _RULE_STAGED_PROVENANCE: Final[Rule] = Rule(
 
 class RemoteDocsCommitGateHandler(PreToolUseHandlerBase):
     """Deny a commit that would enter an unattributed vendored document."""
+
+    defect_class: ClassVar[str | None] = DefectClass.UNATTRIBUTED_VENDORED_DOC
 
     def __init__(self) -> None:
         super().__init__(
