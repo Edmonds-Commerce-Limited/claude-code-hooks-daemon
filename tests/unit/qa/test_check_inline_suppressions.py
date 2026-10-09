@@ -52,6 +52,22 @@ PROJECT_FORM_SAMPLES: Final[tuple[str, ...]] = (
     "# ru" + "ff: no" + "qa",
     "# ru" + "ff: no" + "qa: E501",
     "# fla" + "ke8: no" + "qa",
+    "# my" + "py: disable-error-code=attr-defined",
+)
+
+#: The ten suppressions in the tree whose reason is the comment block above them, not
+#: their own line. Each names a code of the directive, or a tool, or opens with SECURITY:.
+GENUINE_REASON_ABOVE: Final[tuple[tuple[str, int], ...]] = (
+    (".claude/ccy/claude-supervise.py", 9289),
+    ("init.sh", 1215),
+    ("init.sh", 2566),
+    ("init.sh", 2676),
+    ("scripts/install/venv.sh", 356),
+    ("scripts/install/venv.sh", 532),
+    ("src/claude_code_hooks_daemon/constants/paths.py", 91),
+    ("src/claude_code_hooks_daemon/install/transport_toggle.py", 31),
+    ("src/claude_code_hooks_daemon/install/transport_verify.py", 37),
+    ("src/claude_code_hooks_daemon/install/transport_verify.py", 158),
 )
 
 
@@ -158,7 +174,7 @@ class TestAPythonSuppressionWithNoReasonFails:
         _write(
             tmp_path,
             "mod.py",
-            "# Re-exported on purpose so callers import them from here.\n"
+            "# F401 is expected: re-exported so callers import them from here.\n"
             f"from a import b  {NOQA}: F401\n"
             f"from a import c  {NOQA}: F401\n",
         )
@@ -256,6 +272,54 @@ class TestTheBlockAboveMustBeAboutTheSuppression:
         )
         assert _findings(tmp_path) == []
 
+    @pytest.mark.parametrize(
+        ("above", "directive"),
+        [
+            ("# There is no config file here.", NO_COVER),
+            ("# Return type of the handler.", TYPE_IGNORE),
+            ("# Ignore empty lines.", TYPE_IGNORE),
+            ("# Disable the cache when pragma is set.", NO_COVER),
+            ("# Nonsecurity data only.", NOSEC + " B404"),
+            ("# A SECURITY-minded reader skips this.", NOSEC + " B404"),
+            ("# The b4040 constant.", NOSEC + " B404"),
+        ],
+    )
+    def test_the_directives_own_words_and_substrings_are_not_a_reason(
+        self, tmp_path: Path, above: str, directive: str
+    ) -> None:
+        """SHOULD 1: `no`, `cover`, `type`, `ignore` prove nothing, and neither do substrings."""
+        _write(tmp_path, "mod.py", f"{above}\nx = 1  {directive}\n")
+        assert [f["line"] for f in _findings(tmp_path)] == [2]
+
+    @pytest.mark.parametrize(
+        ("above", "directive"),
+        [
+            ("# B404 is raised by the bare import.", NOSEC + " B404"),
+            ("# bandit flags the import only.", NOSEC + " B404"),
+            ("# mypy cannot see the stub.", TYPE_IGNORE),
+            ("# The stub lacks it: attr-defined.", TYPE_IGNORE + "[attr-defined]"),
+            ("# SECURITY: fixed argv, no shell.", NOSEC + " B603"),
+        ],
+    )
+    def test_a_code_a_tool_or_the_security_marker_is_a_reason(
+        self, tmp_path: Path, above: str, directive: str
+    ) -> None:
+        _write(tmp_path, "mod.py", f"{above}\nx = 1  {directive}\n")
+        assert _findings(tmp_path) == []
+
+    @pytest.mark.parametrize(("relative", "line"), GENUINE_REASON_ABOVE)
+    def test_the_genuine_reason_above_in_this_tree_still_passes(
+        self, relative: str, line: int
+    ) -> None:
+        path = _REPO_ROOT / relative
+        text = path.read_text(encoding="utf-8")
+        shell = checker._is_shell(path, text.split("\n", 1)[0])
+        comments = checker._shell_comments(text) if shell else checker._python_comments(text)
+        parsed = checker.parse_comment(comments[line].text)
+        assert parsed.directives, f"{relative}:{line} is not a suppression"
+        assert not checker.is_acceptable_reason(parsed.reason_text), "reason is on the line itself"
+        assert checker.judge_comments(comments)[1] == []
+
     def test_an_unrelated_comment_above_a_python_directive_is_a_finding(
         self, tmp_path: Path
     ) -> None:
@@ -304,7 +368,7 @@ class TestShellSuppressions:
         _write(
             tmp_path,
             "run.sh",
-            "#!/usr/bin/env bash\n# Invoked only by the EXIT trap, so the body looks unreachable.\n"
+            "#!/usr/bin/env bash\n# Invoked only by the EXIT trap, so shellcheck sees the body as dead.\n"
             f"{SHELLCHECK}=SC2317\n",
         )
         assert _findings(tmp_path) == []

@@ -157,5 +157,7 @@ reproduced. No `noqa` or `type: ignore` remains.
 markers (`fmt: skip`, `fmt: off`) are not QA suppressions and are not judged. A shell directive
 trailing a command on the same line is not read (`shellcheck` honours a directive only on its own
 line). The generic-reason check cannot tell whether a reason is TRUE, and the "block above must be
-about the suppression" test is a word list: an unrelated comment that happens to contain one of the
-words (`security`, `suppress`, `unreachable`, ...) still passes.
+about the suppression" test is a word match: the block must name, on word boundaries, a rule code
+of the directive or a tool name, or open a line with `SECURITY:`. A comment that names the tool
+but gives no real reason still passes. `audit_error_hiding.py --path FILE` decides scope by
+collecting the whole audited set (one source of truth for scope, at the cost of a walk).

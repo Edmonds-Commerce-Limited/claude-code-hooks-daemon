@@ -1314,6 +1314,11 @@ def out_of_scope_reason(path: Path, workspace: Path) -> str | None:
     that is decided by the tree run's own collectors, so the two cannot
     disagree. A file outside the workspace has no tree-run verdict to match, so
     it is judged as given.
+
+    Cost, on purpose: the answer comes from collecting the whole audited set, which
+    walks ``src/`` and ``scripts/`` to decide one file. A narrower test would be a
+    second copy of the collectors' rules that could disagree with them; the single
+    source of truth is worth the walk.
     """
     resolved = path.resolve()
     if not path_is_relative_to(resolved, workspace.resolve()):

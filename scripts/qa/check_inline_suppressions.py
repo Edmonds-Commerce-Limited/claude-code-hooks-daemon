@@ -142,20 +142,26 @@ _PREFILTER: Final[re.Pattern[str]] = re.compile(
     re.IGNORECASE,
 )
 
-#: Words that make a comment block above a directive ABOUT the suppression. A block
-#: that names neither the directive's own words and codes nor one of these is about
-#: something else, and an unrelated neighbour is not a reason.
-_RELEVANT_WORDS: Final[tuple[str, ...]] = (
-    "suppress",
-    "silence",
-    "false positive",
-    "false-positive",
-    "unreachable",
-    "security",
-    "deliberate",
-    "intentional",
-    "on purpose",
+#: What makes a comment block above a directive ABOUT the suppression: it names a
+#: rule code the directive carries (``B603``, ``SC2317``, ``attr-defined``), or one of
+#: these tools, or it opens a line with the project's ``SECURITY:`` marker. The
+#: directive's own words (``no``, ``cover``, ``type``, ``ignore``) never count, and
+#: every match is on word boundaries, so ``type`` in "Return type" proves nothing.
+_TOOL_NAMES: Final[tuple[str, ...]] = (
+    "bandit",
+    "coverage",
+    "flake8",
+    "mypy",
+    "pylint",
+    "pyright",
+    "ruff",
+    "semgrep",
+    "shellcheck",
 )
+_SECURITY_MARKER: Final[re.Pattern[str]] = re.compile(r"(?m)^\s*SECURITY:")
+_CODE_BRACKET: Final[re.Pattern[str]] = re.compile(r"\[([^\]]*)\]")
+_CODE_WITH_DIGIT: Final[re.Pattern[str]] = re.compile(r"[A-Za-z]+\d+")
+_PYRIGHT_RULE: Final[re.Pattern[str]] = re.compile(r"report[A-Za-z]+")
 
 _EN_DASH: Final[str] = chr(0x2013)
 _EM_DASH: Final[str] = chr(0x2014)
@@ -204,18 +210,33 @@ def parse_comment(comment: str) -> ParsedComment:
             continue
         name, end = found
         directives.append(name)
-        subjects.update(word.lower() for word in re.findall(r"[\w.-]+", segment[:end]))
+        subjects.update(_codes_in(segment[:end]))
         free.append(segment[end:].lstrip(_LEADING_FILLER))
     return ParsedComment(
         directives, " ".join(part for part in free if part.strip()), frozenset(subjects)
     )
 
 
+def _codes_in(directive_text: str) -> set[str]:
+    """The rule codes a matched directive carries: bracketed, digit-bearing or ``reportX``."""
+    codes: set[str] = set()
+    for bracket in _CODE_BRACKET.findall(directive_text):
+        codes.update(part.strip().lower() for part in bracket.split(",") if part.strip())
+    codes.update(code.lower() for code in _CODE_WITH_DIGIT.findall(directive_text))
+    codes.update(code.lower() for code in _PYRIGHT_RULE.findall(directive_text))
+    return codes
+
+
+def _names(block: str, word: str) -> bool:
+    """Whether ``word`` appears in ``block`` as a whole word (a hyphen joins words)."""
+    return re.search(rf"(?<![\w-]){re.escape(word)}(?![\w-])", block, re.IGNORECASE) is not None
+
+
 def _is_about(block: str, subjects: frozenset[str]) -> bool:
-    """Whether ``block`` names the suppression's own words or codes, or says it is one."""
-    lowered = block.lower()
-    words = set(re.findall(r"[\w.-]+", lowered))
-    return bool(words & subjects) or any(word in lowered for word in _RELEVANT_WORDS)
+    """Whether ``block`` names a code of the suppression, a tool, or carries ``SECURITY:``."""
+    if _SECURITY_MARKER.search(block):
+        return True
+    return any(_names(block, word) for word in (*subjects, *_TOOL_NAMES))
 
 
 class CommentLine(NamedTuple):

@@ -478,18 +478,20 @@ needing a reason comment: [SUPPRESSIONS.md](SUPPRESSIONS.md).
 
 **G1 closed in the form owner ruling B2 sets (Task 3.1b; review round 1 B2, S2, S6).**
 `scripts/qa/check_inline_suppressions.py` fails on any `nosec`, `noqa`, `type: ignore`,
-`nosemgrep`, `pragma: no cover`, `shellcheck disable`, `pyright: ignore`, `mypy: ignore-errors`
-or `pylint: disable` with no reason, and on the file-wide `ruff: noqa` and `flake8: noqa` forms
+`nosemgrep`, `pragma: no cover`, `shellcheck disable`, `pyright: ignore`, `mypy: ignore-errors`,
+`mypy: disable-error-code` or `pylint: disable` with no reason, and on the file-wide `ruff: noqa` and `flake8: noqa` forms
 and `pyright: report...=` config comments. The pyright, mypy and pylint forms are read from the
 `qa_suppression` handler's own list (`PythonQaSuppressionStrategy.forbidden_patterns`), so the
 write-time and batch lists cannot drift. A reason is in the same comment after the directive and
 its codes, in a second `#` segment, or in the own-line comment block directly above. Round 1 made
 three things stricter: a bare Bandit code or test name after `nosec` (also `nosec: B603`) is not a
-reason, a block above counts only when it names the suppression's own words or codes, or says
-it is a suppression (`suppress`, `unreachable`, `security`, ...), and `init.sh`, `venv.sh` and
-the two `nosec B603` lines now carry their own reasons. The block-above test is a vocabulary
-heuristic: a comment about something else that happens to use one of those words still passes,
-and the generic-reason check cannot tell whether a reason is true. It is registered as
+reason, a block above counts only when it names, on word boundaries, a rule code the directive
+carries (`B603`, `SC2317`, `attr-defined`) or a tool (`bandit`, `shellcheck`, `mypy`, ...), or
+opens a line with the project's `SECURITY:` marker (round 2 tightened this: the directive's own
+words `no`, `cover`, `type`, `ignore` and substrings no longer count), and `init.sh`,
+`venv.sh` and the two `nosec B603` lines now carry their own reasons. The test is still a word
+match: a comment that names the tool but says nothing useful passes, and the generic-reason check
+cannot tell whether a reason is true. It is registered as
 `llm_qa.py inline_suppressions` and runs in `changed`. Reasons are inline and there is no
 baseline file (owner ruling B2). The generic-reason check is `utils/escape_hatch.is_acceptable_reason`,
 shared with the six `MUST_*_BECAUSE` hatches. Pinned by
