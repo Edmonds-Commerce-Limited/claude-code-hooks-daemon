@@ -1243,7 +1243,7 @@ handlers:
 | Property       | Value                   |
 | -------------- | ----------------------- |
 | **Config key** | `write_protected_paths` |
-| **Priority**   | 22                      |
+| **Priority**   | 18                      |
 | **Type**       | Blocking (terminal)     |
 | **Event**      | PreToolUse              |
 
@@ -1262,7 +1262,7 @@ handlers:
   pre_tool_use:
     write_protected_paths:
       enabled: true
-      priority: 22
+      priority: 18
       options:
         paths:
           - .claude/ccy/ccy.env.local
@@ -4633,7 +4633,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `sed_blocker`                   | PreToolUse        | 10       | the word sed in a Bash command, bar four narrow exemptions               |
 | `curl_pipe_shell`               | PreToolUse        | 10       | curl/wget piped to bash/sh                                               |
 | `lock_file_edit_blocker`        | PreToolUse        | 10       | Direct editing of lock files                                             |
-| `write_protected_paths`         | PreToolUse        | 22       | Agent writes to a configured read-only path                              |
+| `write_protected_paths`         | PreToolUse        | 18       | Agent writes to a configured read-only path                              |
 | `pip_break_system`              | PreToolUse        | 10       | pip --break-system-packages                                              |
 | `sudo_pip`                      | PreToolUse        | 10       | sudo pip install                                                         |
 | `host_command_guard`            | PreToolUse        | 10       | docker host-root mount, gh auth token, non-PyPI pip index, crontab -r    |
