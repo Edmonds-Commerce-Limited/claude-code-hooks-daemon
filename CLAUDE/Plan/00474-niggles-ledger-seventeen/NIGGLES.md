@@ -1461,6 +1461,21 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N384 — `/hooks-daemon optimise` recommends the `daemon_stats` health line to every project
+
+**Source**: the owner, 2026-10-09: "daemon stats is only useful in this repo, normal projects should not have it
+enabled".
+
+**Evidence**: `DaemonStatsHandler` (`handlers/status_line/daemon_stats.py`) did not override `get_relevance()`, so it
+inherited `Relevance.always()`. The optimise review recommends enabling every relevant handler whatever its default,
+so it told every client project to turn on a daemon developer's diagnostic (uptime, memory, log level, error count).
+`default_enabled = False` kept it off at install, but the review then overrode that.
+
+**Status**: ✅ Fixed on main. `get_relevance()` is applicable only where the project root holds the daemon's own
+package (`src/claude_code_hooks_daemon/__init__.py`); elsewhere the review lists it as "not applicable here". The
+tests were written red first in `tests/unit/handlers/status_line/test_daemon_stats.py`. The optimise doc names it
+among the non-universal handlers, and release note 008 tells clients they can switch it off.
+
 ### N383 — a quoted git global-option value with a space hides a destructive subcommand
 
 **Source**: the Plan 00483 batch (b) review round 2 (2026-10-09, merged at fe54af5e6).
