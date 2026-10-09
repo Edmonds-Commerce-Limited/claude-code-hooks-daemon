@@ -1461,6 +1461,86 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N386 — the self-install rule is copied four times outside its one definition
+
+**Source**: the owner, 2026-10-09, on N384's first fix, which hand-rolled a fifth copy: "it should be a single source of
+truth that's simple and proven already". The canonical rule is `daemon/install_layout.is_self_install_mode(project_path)`
+(Plan 00457): standard-library only, so it can be loaded without the package. `ProjectContext` and `daemon/paths.py`
+already delegate to it, and N384 now does too.
+
+**Evidence**: seven other places re-derive the same decision from `src/claude_code_hooks_daemon`, and they have
+drifted. The four Python sites split three `.exists()` to one `.is_dir()`:
+
+- `daemon/cli.py:2645` (`.exists()`) re-implements `install_layout.get_untracked_dir()` whole.
+- `install/client_validator.py:240` (`.exists()`) refuses a client install into the daemon repository.
+- `utils/ccy_supervisor.py:45,136` (`_SELF_INSTALL_MARKER_PARTS`, `.exists()`).
+- `scripts/debug_info.py:275` (`.is_dir()`) also re-implements `get_untracked_dir()`.
+
+Three shell scripts test `[ -d src/claude_code_hooks_daemon ]` themselves:
+
+- `scripts/setup_worktree.sh:184`.
+- `scripts/install/mode_guard.sh:66`, a stricter variant.
+- `scripts/health_check.sh:169`, which also re-checks the config-driven flag.
+
+`daemon/validation.py:105-125` decides "is this the daemon repository" from `pyproject.toml`, a different marker. It is
+a related question, and the remedy should say whether it merges into the one rule.
+
+**Status**: ⬜ Open. Remedy:
+
+- Each site calls `install_layout.is_self_install_mode` or `get_untracked_dir`. For a script that must run without the
+  package, load `install_layout.py` by path, the way `daemon/signal_standalone.py` does.
+- The shell scripts share one shell function for the test (the shell has no access to the Python one), kept in step with
+  `install_layout.py` by a parity test.
+- Add a QA detector, covering Python AND shell, so that no file except those two definitions tests for that marker to
+  decide the install mode. Building a path in order to scan the source tree is not a decision, and stays allowed.
+  Fact-check: `subagent-reports/261009-fact-check-n386-sonnet.md`.
+
+### N385 — careless spellings the raw-text guards allow on main
+
+**Source**: the Plan 00483 batch (c) review, round 1 (2026-10-09). Every probe called `matches()` directly on main;
+the evidence is in `untracked/scratch/batchc-review/`. None of these came from batch (c), and each is allowed on main.
+
+**Evidence**, by guard:
+
+- **curl_pipe_shell**:
+  - `sh -c "$(curl …)"`, which is Homebrew's documented install form and the most important item here;
+  - `bash <(curl …)`;
+  - `curl url -o x.sh && bash x.sh`;
+  - `| env python3`;
+  - `| sudo -u bob python3`;
+  - `| node`.
+- **worktree_file_copy**:
+  - `cp -r <wt>/src .` and `rsync -a <wt>/ ./`, a whole-tree copy into the main checkout;
+  - `cd /workspace; cp -r <wt>/src .` and `(cp …)`;
+  - copies behind a wrapper: `command cp`, `nice cp` and `xargs cp`;
+  - `cp -t src/ <wt>/…`;
+  - `find -exec cp`.
+- **root_recursion_guard**:
+  - `bash -c 'grep -r x /'` and `time grep -r x /`;
+  - `sudo find / …`;
+  - `grep -rm1 x /`, where the clustered option hides the root;
+  - `du -sh /` and `ls -R /`;
+  - `rg x /home/user`.
+
+Each is a spelling a careless agent writes, so all are in scope under the 00483 threat model. Out of scope (hostile, by the reviewer's call, which the coordinator accepts): a local program whose only job is to run stdin, such as `python3 -c 'exec(sys.stdin.read())'`.
+
+**Status**: ⬜ Open. Remedy: one branch per guard, each shape a red test first and a must-deny gate row. The shared wrapper and `-c`-body readers that batch (b) and (c) reuse should cover most of the wrapper cases.
+
+### N384 — `/hooks-daemon optimise` recommends the `daemon_stats` health line to every project
+
+**Source**: the owner, 2026-10-09: "daemon stats is only useful in this repo, normal projects should not have it
+enabled".
+
+**Evidence**: `DaemonStatsHandler` (`handlers/status_line/daemon_stats.py`) did not override `get_relevance()`, so it
+inherited `Relevance.always()`. The optimise review recommends enabling every relevant handler whatever its default,
+so it told every client project to turn on a daemon developer's diagnostic (uptime, memory, log level, error count).
+`default_enabled = False` kept it off at install, but the review then overrode that.
+
+**Status**: ✅ Fixed on main. `get_relevance()` is applicable only in a self-install checkout, decided by the one
+rule `daemon/install_layout.is_self_install_mode` (the first fix hand-rolled its own marker, which is N386); elsewhere the review lists it as "not applicable here". The
+tests were written red first in `tests/unit/handlers/status_line/test_daemon_stats.py`. The optimise doc names it
+among the non-universal handlers, and release note 008 tells clients they can switch it off.
+
 ### N383 — a quoted git global-option value with a space hides a destructive subcommand
 
 **Source**: the Plan 00483 batch (b) review round 2 (2026-10-09, merged at fe54af5e6).

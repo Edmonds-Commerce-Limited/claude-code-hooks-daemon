@@ -15,8 +15,10 @@ from claude_code_hooks_daemon.core import (
     get_data_layer,
 )
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
+from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.daemon.controller import get_controller
+from claude_code_hooks_daemon.daemon.install_layout import is_self_install_mode
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 psutil: ModuleType | None
@@ -42,6 +44,20 @@ class DaemonStatsHandler(StatusLineHandlerBase):
             priority=Priority.DAEMON_STATS,
             terminal=False,
             tags=[HandlerTag.STATUS, HandlerTag.DAEMON, HandlerTag.HEALTH, HandlerTag.NON_TERMINAL],
+        )
+
+    def get_relevance(self, context: RelevanceContext) -> Relevance:
+        """Relevant only in the daemon's own repository.
+
+        Uptime, memory and log level are diagnostics for whoever develops the
+        daemon. In a client project they are noise on every render, so the
+        optimise review must report the handler as not applicable there
+        rather than recommend enabling it.
+        """
+        return Relevance.when(
+            is_self_install_mode(context.project_root),
+            present="this is the hooks daemon's own repository, where its health line is useful",
+            absent="daemon health diagnostics are for daemon development, not a client project",
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:

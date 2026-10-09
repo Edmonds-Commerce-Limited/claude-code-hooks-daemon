@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.relevance import RelevanceContext
 from claude_code_hooks_daemon.handlers.status_line import DaemonStatsHandler
 
 
@@ -26,6 +28,23 @@ class TestDaemonStatsHandler:
         assert "status" in handler.tags
         assert "daemon" in handler.tags
         assert "health" in handler.tags
+
+    def test_the_review_does_not_recommend_it_to_a_client_project(
+        self, handler: DaemonStatsHandler, tmp_path: Path
+    ) -> None:
+        """Daemon health diagnostics are for daemon developers, not client projects."""
+        relevance = handler.get_relevance(RelevanceContext.probe(tmp_path))
+
+        assert not relevance.applicable
+        assert "daemon" in relevance.reason
+
+    def test_the_review_recommends_it_in_the_daemons_own_repository(
+        self, handler: DaemonStatsHandler, tmp_path: Path
+    ) -> None:
+        """Relevance follows the one self-install rule, install_layout.is_self_install_mode."""
+        (tmp_path / "src" / "claude_code_hooks_daemon").mkdir(parents=True)
+
+        assert handler.get_relevance(RelevanceContext.probe(tmp_path)).applicable
 
     def test_matches_always_returns_true(self, handler: DaemonStatsHandler) -> None:
         """Handler should always match for status events."""
