@@ -166,3 +166,14 @@ rules:
       - tests/unit/handlers/pre_tool_use/test_quarantine_artefact_read_guard.py
     why: the index build and its cache are read by both guards; the isolation
       test pins that a build never outlives the test that started it
+  - glob: "init.sh"
+    tests:
+      - tests/integration/test_init_sh_pretooluse_fail_closed.py
+      - tests/integration/test_init_sh_needs_provision.py
+      - tests/integration/test_init_sh_expected_version.py
+      - tests/integration/test_init_sh_hook_event_names.py
+    why: the import-based reach of init.sh is too broad to run, so its own
+      integration suites are declared
+  - glob: "*/install/transport_toggle.py"
+    tests: [tests/unit/install/test_transport_toggle.py]
+    why: the import-based reach is too broad to run; its own unit suite is declared
