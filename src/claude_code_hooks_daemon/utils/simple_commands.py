@@ -43,8 +43,9 @@ from claude_code_hooks_daemon.utils.shell_segmentation import (
     substitute_known_variables,
 )
 
-#: Where one simple command ends and the next begins. Longest first.
-_SEGMENT_SEPARATORS: tuple[str, ...] = ("&&", "||", "|", "&", ";", "\n", "(", ")", "`")
+#: Where, inside one part run after another, one simple command ends and the next
+#: begins: the commands of a part form a pipeline or a group.
+_PIPELINE_SEPARATORS: tuple[str, ...] = ("|", "&", "(", ")", "`")
 #: The separators that run one part after another (a loop's ``do`` and ``done``
 #: are parts of their own).
 _SEQUENCE_SEPARATORS: tuple[str, ...] = ("&&", "||", ";", "\n")
@@ -162,6 +163,7 @@ class SimpleCommand:
     words: tuple[str, ...]
     operands: tuple[str, ...]
     reread: bool
+    group: int = 0
 
     @property
     def text(self) -> str:
@@ -236,7 +238,12 @@ def simple_commands(command: str, *, known_verbs: frozenset[str]) -> list[Simple
     text = strip_quoted_heredoc_bodies(command)
     known = known_variables(command)
     found: list[SimpleCommand] = []
-    for segment in split_unquoted(text, _SEGMENT_SEPARATORS):
+    segments = [
+        (group, segment)
+        for group, part in enumerate(split_unquoted(text, _SEQUENCE_SEPARATORS))
+        for segment in split_unquoted(part, _PIPELINE_SEPARATORS)
+    ]
+    for group, segment in segments:
         words = _words_of(strip_reserved_word_prefix(segment))
         start = next((i for i, w in enumerate(words) if not _ASSIGNMENT_WORD.match(w)), len(words))
         if start == len(words):
@@ -251,6 +258,7 @@ def simple_commands(command: str, *, known_verbs: frozenset[str]) -> list[Simple
                 words=tuple(words),
                 operands=tuple(unquote(word) for word in words[1:]),
                 reread=index > 0 or unquote(words[0]) != verb,
+                group=group,
             )
         )
     return found

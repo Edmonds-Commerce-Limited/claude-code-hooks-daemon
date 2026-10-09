@@ -33,6 +33,18 @@
 - Cross products of several brace groups for a destination in last position (only aligned spellings are tried).
 - Nested `for` loops: the inner loop is kept as written.
 
+## Review round 1 (fixes)
+
+Review: `261009-00499-phase1b-review-r1-opus.md`. Fixed: B1 (assignments carried across a `cd` are a bounded map;
+`F=a` repeated 500 times before a `cd` took 22.5 s and takes 0.17 s, 10 KB takes 0.77 s), B2 (nested past the bound: any word
+naming the file, its directory or a wildcard/brace group that could reach it is denied, 64 bodies at most), B3 careless
+parts (scan-judged verbs are always re-read from their own text; `export/declare/local/readonly/typeset F=P` read as
+plain assignments), S2 (`xargs` read as a wrapper), S3 (`read` loops), S5 (`find` with an action), S6 (the file's own
+directory as a destination; `cp -r`/`mv -T`), S9 (`--output`, `-o`, `-O`, `--log-file`), S10 (wider read-only
+allowlist, `--env-file`/`-f` input options, wording), S11 (the perf sweep configures this handler with `paths`).
+Out of scope, listed in the guidance: B4, S1, S4, S7, S8 (hostile respellings). Tests were written before the code, but
+I did not capture a red run for this round.
+
 ## Tests
 
 - `tests/unit/handlers/pre_tool_use/test_write_protected_paths.py`: +about 230 cases (wrappers, read-only allowlist,

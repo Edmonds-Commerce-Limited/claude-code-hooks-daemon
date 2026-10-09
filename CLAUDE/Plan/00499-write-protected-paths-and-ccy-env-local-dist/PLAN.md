@@ -95,6 +95,15 @@ guidance as a known gap.
   redirect is set aside before a `cd` is recognised, and a `for` loop body is written out once per word (32 at
   most, then a wildcard).
 
+- [x] ✅ **Review round 1**: Done: the quadratic carry of assignments before a `cd` is bounded (32 names) and the
+  shared perf sweep now configures this handler with `paths`; past the nesting limit any word naming the file, its
+  directory or a wildcard that could reach it is denied; plain wrappers, `export`/`declare`/`local`/`readonly`
+  assignments, `xargs`, `read` loops, `find -delete`/`-exec`, a listed file's own directory as a destination and
+  readers used to write (`--output`, `-o`) are judged; the read-only allowlist now covers `sort`, `awk`, `xxd`,
+  `hexdump`, `column`, `shellcheck` and the like, with input-file options (`--env-file P`) read as reads. Hostile
+  respellings are named out of scope in the guidance. Report:
+  `subagent-reports/261009-00499-phase1b-review-r1-opus.md`.
+
 ### Phase 2: #88, corrected
 
 - [x] ❌ **Task 2.1**: The daemon writes a tracked `ccy.env.local.dist`. CANCELLED: ccy writes it on every launch
