@@ -1329,3 +1329,31 @@ rows:
       git reset --hard
       git stash
       EOF
+  # --- Plan 00483 Task 3.2 batch (c): raw-text guards ----------------------------
+  - id: a9-curl-json-tool
+    command: |-
+      curl -s https://api.example.com/v1/items | python3 -m json.tool
+  - id: a9-wget-json-tool
+    command: |-
+      wget -qO- https://api.example.com/v1/items | python3 -m json.tool
+  - id: a9-curl-download-then-json-tool
+    command: |-
+      set -euo pipefail; curl -o out.json https://api.example.com/v1/items && cat out.json | python3 -m json.tool
+  - id: a9-curl-python-dash-c
+    command: |-
+      curl -s https://api.example.com/v1/items | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))'
+  - id: a9-curl-perl-pe
+    command: |-
+      curl -s https://api.example.com/v1/items | perl -pe 's/a/b/'
+  - id: a9-grep-mentions-worktree-mv
+    command: |-
+      grep -rn 'mv untracked/worktrees/foo/src/x.py src/' CLAUDE/
+  - id: a9-echo-mentions-worktree-cp
+    command: |-
+      echo "cp untracked/worktrees/foo/src/x.py src/"
+  - id: a9-ls-worktree-then-cp-readme
+    command: |-
+      set -euo pipefail; ls untracked/worktrees/foo/src/ && cp README.md src/
+  - id: a9-mv-worktree-note-then-ls
+    command: |-
+      set -euo pipefail; mv untracked/worktrees/foo/notes.txt tmp.txt; ls src/x

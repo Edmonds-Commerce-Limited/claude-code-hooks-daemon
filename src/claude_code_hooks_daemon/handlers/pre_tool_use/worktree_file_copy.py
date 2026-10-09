@@ -13,7 +13,7 @@ from claude_code_hooks_daemon.core.project_layout import main_repo_code_dirs
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import RESERVED_WORD_PREFIX
-from claude_code_hooks_daemon.utils.shell_segmentation import strip_inert_spans
+from claude_code_hooks_daemon.utils.command_position import command_position_segments
 
 # Both worktree root prefixes — untracked/ is manually managed, .claude/ is Claude Code managed
 _WORKTREE_PREFIXES = (ProjectPath.WORKTREES_DIR, ProjectPath.CLAUDE_WORKTREES_DIR)
@@ -58,10 +58,12 @@ _RELOCATION_VERBS: tuple[str, ...] = ("cp", "mv", "rsync", "install", "dd")
 #
 # Shell reserved words between the separator and the verb (`do cp`, `then mv`)
 # leave the verb in command position, so they are skipped (Plan 00422 N25).
+# So do leading `NAME=value` assignments and a `bash -c ` whose body the
+# command-position view splices in without its quotes.
 _RELOCATION_VERB_RE = re.compile(
     r"""(?:^|[;&|\n"']|\$\()\s*"""
     + RESERVED_WORD_PREFIX
-    + r"(?:sudo\s+)?(?:\S*/)?("
+    + r"(?:[A-Za-z_]\w*=\S*\s+)*(?:(?:ba|z|da|k)?sh\s+-\w*c\s+)?(?:sudo\s+)?(?:\S*/)?("
     + "|".join(_RELOCATION_VERBS)
     + r")\b",
     re.IGNORECASE,
@@ -156,8 +158,16 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
         command = get_bash_command(hook_input)
         if not command:
             return False
-        command = strip_inert_spans(command)
+        # Each command segment is judged on its own tokens. The path patterns
+        # run `.*` and would otherwise cross `&&`/`;` into the NEXT command,
+        # and a segment that only prints a path (`grep`, `echo`) is blanked by
+        # the command-position view unless its output feeds an executor.
+        return any(
+            self._segment_relocates(segment) for segment in command_position_segments(command)
+        )
 
+    def _segment_relocates(self, command: str) -> bool:
+        """Whether one command segment relocates a file from a worktree into main-repo code."""
         if not any(prefix in command for prefix in _WORKTREE_PREFIXES):
             return False
 
@@ -219,6 +229,10 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
             "(`src/`, `tests/`, `config/`) — or vice versa — are blocked.\n\n"
             "Worktrees are isolated branches. Cross-copying corrupts that isolation "
             "and can silently overwrite in-progress work.\n\n"
+            "Each command is judged on its own: a `grep` or `echo` that only MENTIONS a "
+            "worktree path, and a `ls <worktree>/src/ && cp README.md src/` whose copy "
+            "does not read the worktree, are allowed. The target must be a main-repo "
+            "code dir, so `mv <worktree>/notes.txt tmp.txt` is not blocked.\n\n"
             "**Allowed**: operations within the same worktree branch. "
             "**To merge changes**: use `git merge` or `git cherry-pick` instead."
         )
@@ -230,7 +244,10 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
         return [
             AcceptanceTest(
                 title="cp from worktree to main repo",
-                command='echo "cp untracked/worktrees/feature-branch/src/file.py src/"',
+                command=(
+                    "cp untracked/worktrees/acceptance-probe-absent/src/file.py "
+                    "src/acceptance-probe-absent.py"
+                ),
                 dispatch_as_bash=True,
                 description="Blocks copying files from worktree to main repo (breaks isolation)",
                 expected_decision=Decision.DENY,
@@ -239,14 +256,14 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
                     r"worktree.*isolation",
                     r"git merge",
                 ],
-                safety_notes="Uses echo - safe to test",
+                safety_notes="The source worktree does not exist, so a failed block copies nothing",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="rsync from worktree to main repo",
-                command='echo "rsync -av untracked/worktrees/feature/src/ src/"',
+                command="rsync -a --dry-run untracked/worktrees/acceptance-probe-absent/src/ src/",
                 dispatch_as_bash=True,
                 description="Blocks rsync from worktree to main repo",
                 expected_decision=Decision.DENY,
@@ -254,7 +271,7 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
                     r"between a worktree and the main repo",
                     r"git history",
                 ],
-                safety_notes="Uses echo - safe to test",
+                safety_notes="--dry-run and a nonexistent source worktree - nothing is copied",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,

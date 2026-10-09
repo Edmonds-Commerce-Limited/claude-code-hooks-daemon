@@ -17,10 +17,16 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, OPTIONAL_SUDO
-from claude_code_hooks_daemon.utils.command_position import command_position_view
+from claude_code_hooks_daemon.utils.command_position import (
+    SEGMENT_SEPARATORS,
+    command_position_view,
+)
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     DATA_SINKS,
     quoted_heredoc_command_words,
+    resolve_shell_word,
+    shell_word_spans,
+    split_unquoted_spans,
     strip_quoted_heredoc_bodies,
 )
 
@@ -111,6 +117,82 @@ _PIPE_INTO_INTERPRETER_PATTERN = (
     + r"\b"
 )
 
+_DOWNLOADER = re.compile(r"\b(?:curl|wget)\b", re.IGNORECASE)
+_SHELL_NAMES = frozenset({"bash", "sh", "zsh", "ksh", "dash"})
+# A redirect word: `2>&1`, `>out`, `<in`, `&>f`.
+_REDIRECT_WORD = re.compile(r"[0-9]*[<>]|&>")
+# Options that take their value as the NEXT word, per interpreter.
+_VALUE_OPTIONS = {
+    "python": frozenset({"-W", "-X"}),
+    "perl": frozenset({"-I"}),
+    "ruby": frozenset({"-I", "-r"}),
+}
+# A short-option cluster that carries the program: python `-c`/`-m`, perl and
+# ruby `-e`/`-E` (`-pe`, `-lane`).
+_PROGRAM_OPTION = {
+    "python": re.compile(r"-[bBdEiIOqsSuUvx]*[cm]"),
+    "perl": re.compile(r"-[0-9acCdDFilnpsStTuUvwWxX]*[eE]"),
+    "ruby": re.compile(r"-[acdlnpsSvwWxy]*e"),
+}
+
+
+def _interpreter_family(word: str) -> str:
+    """`python3.12` -> `python`; the bare name of the interpreter a word names."""
+    return word.rsplit("/", 1)[-1].lower().rstrip("0123456789.")
+
+
+def _stage_reads_stdin_as_code(words: list[str | None]) -> bool:
+    """Whether a pipe stage running ``words`` executes the bytes piped into it.
+
+    A shell always does. python, perl and ruby do when no program is named: no
+    `-c`/`-m`/`-e`, no script file, or an explicit `-` (stdin). A word the
+    reader cannot resolve is treated as the worst case.
+    """
+    family = _interpreter_family(words[0] or "")
+    if family in _SHELL_NAMES or family not in _PROGRAM_OPTION:
+        return True
+    skip_next = False
+    for word in words[1:]:
+        if word is None:
+            return True
+        if skip_next:
+            skip_next = False
+        elif word == "-":
+            return True
+        elif _PROGRAM_OPTION[family].match(word):
+            return False
+        elif word in _VALUE_OPTIONS[family]:
+            skip_next = True
+        elif _REDIRECT_WORD.match(word):
+            skip_next = _REDIRECT_WORD.fullmatch(word) is not None
+        elif not word.startswith("-"):
+            return False
+    return True
+
+
+def _some_download_becomes_code(view: str) -> bool:
+    """Whether any `curl|wget ... | <interpreter>` pipe in ``view`` runs the download.
+
+    The pattern search found a candidate; each pipe into an interpreter that
+    follows a downloader on the same line is judged by the stage's own words.
+    """
+    spans = split_unquoted_spans(view, SEGMENT_SEPARATORS)
+    line_start = 0
+    for line in view.split("\n"):
+        downloader = _DOWNLOADER.search(line)
+        if downloader is not None:
+            for pipe in re.finditer(_PIPE_INTO_INTERPRETER_PATTERN, line, re.IGNORECASE):
+                if pipe.start() < downloader.start():
+                    continue
+                at = line_start + pipe.start(1)
+                end = next((e for s, e in spans if s <= at <= e), len(view))
+                stage = view[at:end]
+                words = [resolve_shell_word(stage[a:b]) for a, b in shell_word_spans(stage)]
+                if not words or _stage_reads_stdin_as_code(words):
+                    return True
+        line_start += len(line) + 1
+    return False
+
 
 class CurlPipeShellHandler(PreToolUseHandlerBase):
     """Block curl/wget piped to shell commands.
@@ -179,7 +261,10 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
         if not command:
             return False
 
-        return bool(re.search(_CURL_PIPE_SHELL_PATTERN, self._scannable(command), re.IGNORECASE))
+        view = self._scannable(command)
+        if not re.search(_CURL_PIPE_SHELL_PATTERN, view, re.IGNORECASE):
+            return False
+        return _some_download_becomes_code(view)
 
     @staticmethod
     def _scannable(command: str) -> str:
@@ -289,6 +374,13 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
             "It executes untrusted remote code without any inspection.\n\n"
             "**Blocked**: `curl URL | bash`, `curl URL | sh`, `wget URL | bash`, "
             "`curl URL | sudo bash`\n\n"
+            "**Allowed**: a pipe into python, perl or ruby that names its program "
+            "on the command line, because the download is then data and the "
+            "program is local: `curl URL | python3 -m json.tool`, "
+            "`curl URL | python3 -c '...'`, `curl URL | perl -pe '...'`. "
+            "`curl URL | python3`, `curl URL | python3 -` and every shell "
+            "(`bash`, `sh -c`, `bash -s`) stay blocked, because there the "
+            "downloaded bytes are the program.\n\n"
             "**Safe alternative**: download first, inspect, then execute:\n"
             "```\n"
             "curl -o untracked/scratch/script.sh URL\n"
