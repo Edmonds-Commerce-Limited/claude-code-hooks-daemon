@@ -1468,20 +1468,32 @@ truth that's simple and proven already". The canonical rule is `daemon/install_l
 (Plan 00457): standard-library only, so it can be loaded without the package. `ProjectContext` and `daemon/paths.py`
 already delegate to it, and N384 now does too.
 
-**Evidence**: four other places re-derive the same decision from `src/claude_code_hooks_daemon`, and they have
-drifted: two test `.exists()` and two `.is_dir()`.
+**Evidence**: seven other places re-derive the same decision from `src/claude_code_hooks_daemon`, and they have
+drifted. The four Python sites split three `.exists()` to one `.is_dir()`:
 
 - `daemon/cli.py:2645` (`.exists()`) re-implements `install_layout.get_untracked_dir()` whole.
 - `install/client_validator.py:240` (`.exists()`) refuses a client install into the daemon repository.
 - `utils/ccy_supervisor.py:45,136` (`_SELF_INSTALL_MARKER_PARTS`, `.exists()`).
 - `scripts/debug_info.py:275` (`.is_dir()`) also re-implements `get_untracked_dir()`.
 
+Three shell scripts test `[ -d src/claude_code_hooks_daemon ]` themselves:
+
+- `scripts/setup_worktree.sh:184`.
+- `scripts/install/mode_guard.sh:66`, a stricter variant.
+- `scripts/health_check.sh:169`, which also re-checks the config-driven flag.
+
+`daemon/validation.py:105-125` decides "is this the daemon repository" from `pyproject.toml`, a different marker. It is
+a related question, and the remedy should say whether it merges into the one rule.
+
 **Status**: ⬜ Open. Remedy:
 
 - Each site calls `install_layout.is_self_install_mode` or `get_untracked_dir`. For a script that must run without the
   package, load `install_layout.py` by path, the way `daemon/signal_standalone.py` does.
-- Add a QA detector so that no module except `install_layout.py` tests for that marker to decide the install mode.
-  Path construction for scanning the source tree is not a decision, and stays allowed.
+- The shell scripts share one shell function for the test (the shell has no access to the Python one), kept in step with
+  `install_layout.py` by a parity test.
+- Add a QA detector, covering Python AND shell, so that no file except those two definitions tests for that marker to
+  decide the install mode. Building a path in order to scan the source tree is not a decision, and stays allowed.
+  Fact-check: `subagent-reports/261009-fact-check-n386-sonnet.md`.
 
 ### N385 — careless spellings the raw-text guards allow on main
 
