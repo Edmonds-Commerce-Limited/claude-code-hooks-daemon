@@ -241,7 +241,10 @@ def _write_rule() -> Rule:
     """The one rule this handler enforces when armed (declared only then)."""
     return Rule(
         rule_id=ORCHESTRATOR_WRITE_RULE_ID,
-        blocked="`Write`/`Edit`/`NotebookEdit` from the MAIN THREAD",
+        blocked=(
+            "`Write`/`Edit`/`NotebookEdit` from the MAIN THREAD "
+            "(only when orchestrator blocking is armed; otherwise recorded, never denied)"
+        ),
         why=(
             "Implementation work belongs in a sub-agent; 73% of this "
             "repository's main-thread edits were implementation, which "
@@ -408,14 +411,13 @@ class OrchestratorSimulateHandler(PreToolUseHandlerBase):
         )
 
     def get_rules(self) -> list[Rule]:
-        """The rule this handler can actually enforce — none, while simulating.
+        """The rule this handler enforces when armed, declared in every mode.
 
-        A rule row in the generated CLAUDE.md is a promise that the rule can
-        fire, and `explain-rule` resolving an ID is the same promise. Neither
-        is true in the default mode, so neither is made.
+        The ID is printed by the armed deny and by the guidance, so
+        `explain-rule` must resolve it however the handler was built (it
+        constructs handlers without config). The rule's own text says it
+        fires only when armed, so the row makes no false promise.
         """
-        if not self._blocking:
-            return []
         return [_write_rule()]
 
     def get_claude_md(self) -> str | None:

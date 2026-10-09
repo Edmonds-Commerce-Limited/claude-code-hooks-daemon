@@ -146,8 +146,7 @@ MET: 4.1, 4.3a, 4.3b, 6.2a and 6.2b.
     MET once a structural test existed: `tests/plugins/deny_carries_rule_id.py` wraps `handle` on
     every library and project handler class and fails the test that provoked any deny whose
     reason lacks `BLOCKED [R-...]` or names an ID the handler's `get_rules()` does not declare
-    (only the allowlisted `AutoApproveReadsHandler` and, while simulating,
-    `OrchestratorSimulateHandler` are exempt). It judges every deny a unit test provokes,
+    (only the allowlisted `AutoApproveReadsHandler` is exempt). It judges every deny a unit test provokes,
     wherever the reason was built, so the claim is as strong as the coverage gate. Running it
     caught further identifier-less deny paths in `destructive_git`, `sensitive_content`,
     `staged_lint_gate`, `remote_docs_commit_gate`, `remote_docs_provenance`,
@@ -191,10 +190,9 @@ MET: 4.1, 4.3a, 4.3b, 6.2a and 6.2b.
 - **Verified.** `bin/hooks-daemon explain-rule R-PIPE-TO-TAIL` prints the full rule offline
   with no daemon running. It walks the installed package (`rule_explain/lookup.py:105-143`,
   `cli.py:8527-8582`), and it is case-tolerant and suggests near matches.
-- **Every literal ID resolves except one.** Every literal `"R-…"` string in `src/` and
-  `.claude/project-handlers/` resolves, except `R-ORCHESTRATOR-MAIN-THREAD-WRITE`. That rule
-  is deliberately withheld while its handler only simulates
-  (`orchestrator_simulate.py:393-409`), so no denial prints it.
+- **Every literal ID resolves.** Every literal `"R-…"` string in `src/` and
+  `.claude/project-handlers/` resolves, including `R-ORCHESTRATOR-MAIN-THREAD-WRITE`, which
+  `orchestrator_simulate` now declares in every mode.
 - **Correct construction is enforced for handler rules.** `test_rule_parity.py:162-196`
   requires non-empty `blocked`, `why`, `fix` and `verbose`, and checks that every rendering
   carries the ID.
@@ -446,11 +444,10 @@ needing a reason comment: [SUPPRESSIONS.md](SUPPRESSIONS.md). The `scripts/qa` d
   (`strict: false`). The row is an honest statement of what the rule does when a project turns
   strict on, the advisory pointer stays in the handler's own guidance, and the table cannot
   read per-project options.
-- **Orchestrator rule (N4).** `R-ORCHESTRATOR-MAIN-THREAD-WRITE` still does not resolve in
-  `explain-rule` while `orchestrator_simulate` only simulates: its `get_rules()` is empty by
-  design, because a rule row promises the rule can fire. Armed, it resolves and its denial
-  prints the headline. The lookup builds handlers without config, so it reports the default
-  (simulating) mode.
+- **Orchestrator rule (N4).** `R-ORCHESTRATOR-MAIN-THREAD-WRITE` now resolves in
+  `explain-rule` in every mode: `orchestrator_simulate` declares the rule always, and the
+  rule's own text says it fires only when blocking is armed. The lookup builds handlers
+  without config, which is why the declaration cannot depend on the mode.
 - **DEFSET wording closed.** `DefenceBeforeFix.EXPLAIN_LINE` no longer calls every rule a
   defence, and README.md "Defence Before Fix" names the content and commit gates as the Defences.
 

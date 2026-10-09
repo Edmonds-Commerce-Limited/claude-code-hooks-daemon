@@ -23,10 +23,4 @@ _DENY_WITHOUT_RULES_ALLOWLIST: dict[str, str] = {
 
 #: Project handlers whose module contains a deny path but that declare no rule
 #: in the mode this repository runs them in. Every entry MUST record why.
-_PROJECT_DENY_WITHOUT_RULES_ALLOWLIST: dict[str, str] = {
-    "OrchestratorSimulateHandler": (
-        "Plan 00418: it only RECORDS what orchestrator-only mode would deny while "
-        "simulating, so it declares no rule (a rule row promises the rule can "
-        "fire); armed, it declares R-ORCHESTRATOR-MAIN-THREAD-WRITE and denies with it."
-    ),
-}
+_PROJECT_DENY_WITHOUT_RULES_ALLOWLIST: dict[str, str] = {}
