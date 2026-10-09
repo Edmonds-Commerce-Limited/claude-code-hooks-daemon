@@ -984,6 +984,17 @@ def _write_target_tokens(
 #: Tokens that end one simple command and start the next.
 _COMMAND_BOUNDARIES: Final[frozenset[str]] = _OPERAND_TERMINATORS | frozenset({"(", ")", "{", "}"})
 
+#: The lexer fuses adjacent punctuation (`);`, `)&&`) into one token.
+_BOUNDARY_CHARACTERS: Final[frozenset[str]] = frozenset("();&|{}")
+
+
+def _is_command_boundary(token: str) -> bool:
+    """Does ``token`` end one simple command and start the next?"""
+    return token in _COMMAND_BOUNDARIES or (
+        bool(token) and all(char in _BOUNDARY_CHARACTERS for char in token)
+    )
+
+
 #: Shell keywords and modifiers that may stand before a command word.
 _COMMAND_PREFIXES: Final[frozenset[str]] = frozenset(
     {"then", "do", "else", "elif", "if", "while", "until", "!", "time", "coproc"}
@@ -1035,7 +1046,7 @@ def _is_command_word(tokens: list[str], index: int, verb: str) -> bool:
     may intervene, and only ``rm`` and ``mv`` are git subcommands that count.
     """
     start = index
-    while start > 0 and tokens[start - 1] not in _COMMAND_BOUNDARIES:
+    while start > 0 and not _is_command_boundary(tokens[start - 1]):
         start -= 1
     words = [
         word
@@ -1095,7 +1106,7 @@ def _parse_command_words(
     index = start
     skip_next = False
     options_ended = False
-    while index < len(tokens) and tokens[index] not in _COMMAND_BOUNDARIES:
+    while index < len(tokens) and not _is_command_boundary(tokens[index]):
         token = tokens[index]
         if token in _REDIRECT_OPERATORS or token in _INPUT_REDIRECT_OPERATORS:
             if token in _REDIRECT_OPERATORS and index + 1 < len(tokens):

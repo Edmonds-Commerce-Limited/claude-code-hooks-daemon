@@ -72,6 +72,21 @@ older local copy tells the agent to report it to a human, not to edit it.
   example, `init_config`, HANDLER_REFERENCE entry, release-note callout 003 and the v3.70.0 config-changes
   manifest are in. Takes effect after a daemon restart.
 
+### Phase 1b: Hardening
+
+Gaps the round 2 review found and the owner chose not to fix inside Phase 1. Each is also named in the handler's
+guidance as a known gap.
+
+- [ ] ⬜ **Task 1b.1**: Wrappers not on the handler's list (`flock`, `chronic` and the like) hide the verb they
+  run. Consider inverting the check to a read-only allowlist: any command not known to only read, naming a listed
+  path, is denied.
+
+- [ ] ⬜ **Task 1b.2**: Brace expansion (`rm .claude/ccy/ccy.env.{local,bak}`) is not expanded before the path is
+  judged.
+
+- [ ] ⬜ **Task 1b.3**: `bash -c '...'` / `sh -c` strings and absolute command paths (`/bin/rm`) are not read as
+  commands.
+
 ### Phase 2: #88, corrected
 
 - [x] ❌ **Task 2.1**: The daemon writes a tracked `ccy.env.local.dist`. CANCELLED: ccy writes it on every launch

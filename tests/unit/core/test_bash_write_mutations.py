@@ -160,6 +160,8 @@ class TestCommandPosition:
             ("env FOO=1 rm f.txt", ["/repo/f.txt"]),
             ("if true; then rm f.txt; fi", ["/repo/f.txt"]),
             ("(rm f.txt)", ["/repo/f.txt"]),
+            ("(cd /x); rm f.txt", ["/repo/f.txt"]),
+            ("(true)&&rm f.txt", ["/repo/f.txt"]),
             ("git rm f.txt", ["/repo/f.txt"]),
             ("git -C /x rm f.txt", ["/repo/f.txt"]),
             ("find . -exec rm f.txt ;", ["/repo/f.txt"]),

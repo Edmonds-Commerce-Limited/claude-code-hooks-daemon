@@ -368,6 +368,73 @@ class TestOnlyCommandsAreJudged:
         assert handler.matches(_bash(root, template.format(p=f"{root}/{PROTECTED}"))) is True
 
 
+class TestNameOnlyMatchingNeedsTheParentChain:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'rm -rf "$TMPDIR/.claude"',
+            'cp -r "$SRC/.claude" "$DEST/.claude"',
+            'rm -rf "$WORK/ccy"',
+            'cd "$D" && rm -rf ccy',
+        ],
+    )
+    def test_a_bare_directory_name_is_not_the_protected_path(
+        self, handler: WriteProtectedPathsHandler, root: Path, command: str
+    ) -> None:
+        assert handler.matches(_bash(root, command)) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'rm -rf "$W/.claude/ccy"',
+            'cd "$D" && rm -rf .claude/ccy',
+            'rm "$W/ccy.env.local"',
+        ],
+    )
+    def test_the_chain_toward_the_file_or_the_file_name_is(
+        self, handler: WriteProtectedPathsHandler, root: Path, command: str
+    ) -> None:
+        assert handler.matches(_bash(root, command)) is True
+
+
+class TestEachCommandRunsWhereItRuns:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd /tmp/otherclone && rm -rf .claude",
+            "cd .claude; cd /tmp/x; rm -rf ccy",
+            "cd /tmp/x && cd ../y && rm -rf .claude/ccy",
+        ],
+    )
+    def test_a_command_after_a_cd_elsewhere_is_judged_there(
+        self, handler: WriteProtectedPathsHandler, root: Path, command: str
+    ) -> None:
+        assert handler.matches(_bash(root, command)) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "rm -rf .claude/ccy && cd /tmp",
+            "cd /tmp/x; cd {r}/.claude && rm -rf ccy",
+            "(cd /tmp/x); rm -rf .claude/ccy",
+        ],
+    )
+    def test_a_command_that_runs_in_the_project_is_still_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path, command: str
+    ) -> None:
+        assert handler.matches(_bash(root, command.format(r=root))) is True
+
+
+class TestCachedVerdictIsNotReused:
+    def test_a_later_identical_call_is_judged_again(self, root: Path) -> None:
+        handler = _make(root)
+        hook_input = _bash(root, f"rm {root}/{PROTECTED}")
+        assert handler.matches(hook_input) is True
+        assert handler.handle(hook_input).decision == Decision.DENY
+        apply_handler_options(handler, {"paths": []})
+        assert handler.matches(hook_input) is False
+
+
 class TestXargs:
     def test_names_fed_to_a_mutating_verb_by_xargs_are_denied(
         self, handler: WriteProtectedPathsHandler, root: Path
@@ -380,6 +447,20 @@ class TestXargs:
     ) -> None:
         assert handler.matches(_bash(root, "echo other.txt | xargs rm")) is False
         assert handler.matches(_bash(root, f"echo {PROTECTED} | xargs cat")) is False
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "ls {p} | xargs -I{{}} cp {{}} /tmp/backup",
+            "ls {p} | xargs -I{{}} install {{}} /tmp/backup",
+            "echo {p}; echo other.txt | xargs rm",
+            "echo {p} && echo other.txt | xargs rm",
+        ],
+    )
+    def test_a_copy_out_or_another_pipeline_is_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert handler.matches(_bash(root, template.format(p=PROTECTED))) is False
 
 
 class TestCreationAndRemoval:
@@ -417,7 +498,7 @@ class TestDirectoryChanges:
         self, handler: WriteProtectedPathsHandler, root: Path
     ) -> None:
         assert handler.matches(_bash(root, 'cd "$D" && rm ccy.env.local')) is True
-        assert handler.matches(_bash(root, 'cd "$D" && rm -rf ccy')) is True
+        assert handler.matches(_bash(root, 'cd "$D" && rm -rf .claude/ccy')) is True
         assert handler.matches(_bash(root, 'cd "$D" && rm other.txt')) is False
 
     def test_a_wildcard_entry_is_not_a_project_wide_name_match(self, root: Path) -> None:

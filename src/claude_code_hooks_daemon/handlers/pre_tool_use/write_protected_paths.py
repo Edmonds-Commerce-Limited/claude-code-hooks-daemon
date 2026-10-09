@@ -53,7 +53,14 @@ _SUBSTITUTION_RE: Final[re.Pattern[str]] = re.compile(r"\$\(|`")
 
 #: `xargs` running a verb that changes the files it is handed.
 _XARGS_MUTATION_RE: Final[re.Pattern[str]] = re.compile(
-    r"\bxargs\b[^|;&]*?\b(?:rm|unlink|touch|truncate|mv|cp|ln|install|tee)\b"
+    r"\bxargs\b[^|;&]*?\b(?:rm|unlink|touch|truncate|mv)\b"
+)
+
+#: Shell syntax whose scope a plain cut at the separators would get wrong.
+_NOT_SEQUENTIAL_RE: Final[re.Pattern[str]] = re.compile(r"[(){}`]|<<")
+#: A part that is nothing but a directory change.
+_CD_COMMAND_RE: Final[re.Pattern[str]] = re.compile(
+    r"^(cd|pushd|popd)(?:\s+(?:-[LP]\s+)?(?:--\s+)?(\"[^\"]*\"|'[^']*'|\S+))?\s*$"
 )
 
 _CD_WORD_RE: Final[re.Pattern[str]] = re.compile(r"\b(?:cd|pushd|popd)\b")
@@ -142,14 +149,25 @@ def _could_match(token: Sequence[str], listed: Sequence[str]) -> bool:
     return _segment_could_match(token[0], listed[0]) and _could_match(token[1:], listed[1:])
 
 
-def _names_segment(name: str, glob: str) -> bool:
-    """Is ``name`` a whole component of ``glob``: its file name, or a directory above it?"""
+def _names_chain(written: Sequence[str], glob: str) -> bool:
+    """Do the last components of ``written`` name ``glob``'s file, or a directory above
+    it together with the whole chain of directories that leads to it?
+
+    A bare directory name (`.claude`, `ccy`) is not enough: it is the name of
+    unrelated directories everywhere.
+    """
     parts = [part for part in _segments(glob) if part != _RECURSIVE]
-    return any(
-        fnmatch.fnmatchcase(name, part)
-        for position, part in enumerate(parts)
-        if position == len(parts) - 1 or not _is_all_wildcard(part)
-    )
+    if not written or not parts:
+        return False
+    if fnmatch.fnmatchcase(written[-1], parts[-1]):
+        return True
+    for last in range(1, len(parts) - 1):
+        if _is_all_wildcard(parts[last]) or len(written) < last + 1:
+            continue
+        tail = written[len(written) - last - 1 :]
+        if all(fnmatch.fnmatchcase(name, part) for name, part in zip(tail, parts, strict=False)):
+            return True
+    return False
 
 
 def _is_all_wildcard(part: str) -> bool:
@@ -169,6 +187,41 @@ def _name_pattern(glob: str) -> re.Pattern[str] | None:
     before = f"(?<!{_NAME_CHARACTER})" if start == 0 else ""
     after = f"(?!{_NAME_CHARACTER})" if start + len(fragment) == len(last) else ""
     return re.compile(f"{before}{re.escape(fragment)}{after}")
+
+
+def _split_sequence(command: str) -> list[str] | None:
+    """``command`` cut at the separators that run its parts one after another
+    (`;`, `&&`, `||`, a newline), outside quotes; ``None`` if a quote never closes."""
+    parts: list[str] = []
+    current: list[str] = []
+    quote = ""
+    index = 0
+    while index < len(command):
+        char = command[index]
+        pair = command[index : index + 2]
+        if quote:
+            if char == "\\" and quote == '"':
+                current.append(command[index : index + 2])
+                index += 2
+                continue
+            quote = "" if char == quote else quote
+        elif char == "\\":
+            current.append(command[index : index + 2])
+            index += 2
+            continue
+        elif char in "'\"":
+            quote = char
+        elif char in ";\n" or pair in ("&&", "||"):
+            parts.append("".join(current))
+            current = []
+            index += 1 if char in ";\n" else 2
+            continue
+        current.append(char)
+        index += 1
+    if quote:
+        return None
+    parts.append("".join(current))
+    return [part.strip() for part in parts if part.strip()]
 
 
 def _option_problem(options: Mapping[str, Any]) -> str | None:
@@ -258,9 +311,9 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
         return None
 
     def _protecting_by_name(self, path: str) -> str | None:
-        """The glob whose file name ``path`` carries, in whatever directory."""
-        name = Path(path).name
-        return next((glob for glob in self._globs() if _names_segment(name, glob)), None)
+        """The glob whose file name, or directory chain, ``path`` ends with."""
+        written = _segments(path)
+        return next((glob for glob in self._globs() if _names_chain(written, glob)), None)
 
     def _token_naming(self, token: str, roots: Sequence[str], bases: Sequence[str]) -> str | None:
         """The glob an unresolved destination ``token`` visibly names, else None.
@@ -272,10 +325,10 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
         `*` stays inside one component and never matches a leading dot.
         """
         if any(char in token for char in _EXPANSION_CHARS):
-            final = token.rstrip("/").rsplit("/", 1)[-1]
-            if not final or any(char in final for char in _EXPANSION_CHARS):
+            written = _segments(token)
+            if not written or any(char in written[-1] for char in _EXPANSION_CHARS):
                 return None
-            return next((glob for glob in self._globs() if _names_segment(final, glob)), None)
+            return next((glob for glob in self._globs() if _names_chain(written, glob)), None)
         for base in bases:
             written = _segments(os.path.normpath(str(Path(base) / token)))
             for root in roots:
@@ -293,28 +346,47 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
         return None
 
     @staticmethod
-    def _bases(command: str, working: str) -> tuple[list[str], bool]:
-        """The directories a command may run in, and whether it may run in others.
+    def _runs(command: str, working: str) -> tuple[list[tuple[str | None, str]], bool]:
+        """Where each part of a command runs, and whether that is only a guess.
 
-        Starts from the hook's working directory and follows each literal
-        `cd`/`pushd` the command names. A directory change it cannot follow
-        (`cd "$D"`, `cd -`, `popd`, a bare `cd`) or a path built by a
-        substitution leaves relative paths untrustworthy, so those are also
-        judged by file name.
+        Returns ``(text, directory)`` pairs, ``text`` being ``None`` for the whole
+        command. Without a ``cd`` that is the whole command in the hook's
+        directory. A plain sequence of commands is cut at its separators and
+        each part is placed in the directory a literal ``cd`` left it in. Anything
+        the cut cannot be trusted with (subshells, groups, substitutions,
+        heredocs) is judged whole from every directory the command names, which
+        over-claims rather than misses. A ``cd`` it cannot follow (`cd "$D"`,
+        `cd -`, `popd`) or a path built by a substitution makes the result
+        untrusted, so paths are also judged by file name.
         """
-        bases = [working]
-        followed = 0
         untrusted = _SUBSTITUTION_RE.search(command) is not None
-        for raw in _CD_ARGUMENT_RE.findall(command):
-            argument = raw.strip("\"'")
-            if _UNFOLLOWABLE_CD.search(argument):
-                untrusted = True
+        if _CD_WORD_RE.search(command) is None:
+            return [(None, working)], untrusted
+        parts = None if _NOT_SEQUENTIAL_RE.search(command) else _split_sequence(command)
+        if parts is None:
+            bases = [working]
+            for raw in _CD_ARGUMENT_RE.findall(command):
+                argument = raw.strip("\"'")
+                if _UNFOLLOWABLE_CD.search(argument):
+                    untrusted = True
+                else:
+                    bases.append(os.path.normpath(str(Path(bases[-1]) / argument)))
+            unfollowed = len(_CD_WORD_RE.findall(command)) != len(bases) - 1
+            return [(None, base) for base in bases], untrusted or unfollowed
+        runs: list[tuple[str | None, str]] = []
+        directory = working
+        for part in parts:
+            change = _CD_COMMAND_RE.match(part)
+            if change is None:
+                untrusted = untrusted or _CD_WORD_RE.search(part) is not None
+                runs.append((part, directory))
                 continue
-            followed += 1
-            bases.append(os.path.normpath(str(Path(bases[-1]) / argument)))
-        if len(_CD_WORD_RE.findall(command)) != followed:
-            untrusted = True
-        return bases, untrusted
+            argument = (change.group(2) or "").strip("\"'")
+            if change.group(1) == "popd" or not argument or _UNFOLLOWABLE_CD.search(argument):
+                untrusted = True
+            else:
+                directory = os.path.normpath(str(Path(directory) / argument))
+        return runs, untrusted
 
     # ------------------------------------------------------------------
     # Detection
@@ -361,13 +433,21 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
         self, hook_input: dict[str, Any], roots: Sequence[str], working: str
     ) -> str | None:
         """The glob a shell command breaks, judged from every directory it may run in."""
-        command = hook_input[HookInputField.TOOL_INPUT].get("command", "")
-        bases, untrusted = self._bases(command if isinstance(command, str) else "", working)
+        tool_input = hook_input[HookInputField.TOOL_INPUT]
+        raw = tool_input.get("command", "")
+        command = raw if isinstance(raw, str) else ""
+        runs, untrusted = self._runs(command, working)
+        bases = list(dict.fromkeys(directory for _, directory in runs))
         unresolved: list[str] = []
         unreadable: str | None = None
-        for base in bases:
+        for text, base in runs:
+            part = (
+                hook_input
+                if text is None
+                else {**hook_input, HookInputField.TOOL_INPUT: {**tool_input, "command": text}}
+            )
             scan = scan_bash_write_targets(
-                {**hook_input, HookInputField.CWD: base}, include_mutations=True
+                {**part, HookInputField.CWD: base}, include_mutations=True
             )
             for path in scan.paths:
                 glob = self._protecting(path, roots)
@@ -379,10 +459,11 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
             unreadable = unreadable if unreadable is not None else scan.unreadable
         # `xargs rm` takes its operands from the pipe, so none are visible to
         # the scan: the command text is what can name the file.
-        if _XARGS_MUTATION_RE.search(command if isinstance(command, str) else ""):
-            glob = self._text_naming(command)
-            if glob is not None:
-                return glob
+        for pipeline in _split_sequence(command) or [command]:
+            if _XARGS_MUTATION_RE.search(pipeline):
+                glob = self._text_naming(pipeline)
+                if glob is not None:
+                    return glob
         # What the scan could not place is unknown, not nothing: it is denied
         # only when it visibly names a listed path.
         for token in unresolved:
@@ -404,6 +485,7 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Deny, saying the file is maintained outside the agent."""
         glob = self._violation(hook_input)
+        self._last = None
         if glob is None:
             return GatingResult(decision=Decision.ALLOW)
         return GatingResult.deny(f"{RuleFormatter().verbose(_RULE)}\n\nPROTECTED PATH: {glob}")
@@ -424,8 +506,10 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
             "(or removes or moves a directory holding it, as `rm -rf` and `mv` do). A "
             "wildcard is denied when the shell could expand it to the file.\n\n"
             "**Known gaps, still not for you to use**: `perl -i`, `rsync`, `find -delete`, "
-            "`python -c`/`open()` and any other interpreter reach the file without being "
-            "seen. The rule is the same whether or not the guard sees the route.\n\n"
+            "`python -c`/`open()` and any other interpreter, `bash -c '...'`, an absolute "
+            "`/bin/rm`, brace expansion (`{a,b}`) and wrappers the guard does not know "
+            "(`flock` and the like) reach the file without being seen. The rule is the "
+            "same whether or not the guard sees the route.\n\n"
             "**When it is denied, do not look for another route to the same file.** Ask the "
             "human for the change you need; the file is theirs (or the IaC's) to place."
         )
