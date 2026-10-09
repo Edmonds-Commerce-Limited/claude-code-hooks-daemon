@@ -252,7 +252,7 @@ def _default_restart_fn(project_root: Path) -> Callable[[], int]:
         # the DAEMON's exit, not the CLI's (the daemon-smoke suite's own
         # hard-learned note). Only the exit code is consumed.
         try:
-            result = subprocess.run(  # nosec B603
+            result = subprocess.run(  # nosec B603 - fixed argv (this interpreter, this package's CLI, project root), no shell
                 [
                     sys.executable,
                     "-m",

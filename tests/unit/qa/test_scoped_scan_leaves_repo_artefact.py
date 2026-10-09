@@ -62,6 +62,7 @@ _CHECKERS: Final[tuple[ScopedChecker, ...]] = (
     ScopedChecker("check_skill_references.py", "--path", "skill_references.json"),
     ScopedChecker("check_python_var_guidance.py", "--path", "python_var_guidance.json"),
     ScopedChecker("check_github_urls.py", "--path", "github_urls.json"),
+    ScopedChecker("check_inline_suppressions.py", "--path", "inline_suppressions.json"),
     ScopedChecker("check_security_downgrade_flags.py", "--root", "security_downgrade_flags.json"),
     ScopedChecker("check_eacces_safe_predicates.py", "--path", "eacces_safe.json"),
     ScopedChecker("check_authored_path_stat.py", "--path", "authored_path_stat.json"),

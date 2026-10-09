@@ -469,7 +469,8 @@ project handlers' own tests), `declared_invariant_pairs`, `skill_refs`,
 `unreachable_handle_branch`, `fail_open_inventory`, `security`,
 `capture_corruption`, `dangerous_invocation_corpus`, `python_var_guidance`,
 `skip_list_substring`, `sensitive_content`, `british_english`, `git_history`,
-`github_urls` and `semgrep`. None needs a live daemon. Deliberately absent:
+`github_urls`, `inline_suppressions` (every inline suppression must carry a
+reason, owner ruling B2) and `semgrep`. None needs a live daemon. Deliberately absent:
 `security_downgrade_flags` (about 49 s), `smoke_test`, `tests`, and
 `dependencies` (it checks the local venv against `uv.lock` and runs
 `uv lock --check`, so it judges the host rather than the tree). It then
@@ -602,6 +603,44 @@ thread only. The Targeted tier runs the `CHANGED_TOOL_NAMES` subset of it. The n
 requirements a reader needs to know in advance; they are not the full list, and
 this section deliberately carries no count — an earlier version claimed seven
 while the runner ran considerably more.
+
+**Order and verdicts.** `llm_qa.py` runs every static detector before every
+runner (`RUNNER_TOOLS`: `tests`, `project_handlers`, `changed_tests`,
+`smoke_test`), whatever order the tools were named in. It still runs every
+tool, so one red detector does not hide the others. Once a detector has failed,
+each runner that PASSED is marked `NOT MEANINGFUL: detector failed: <names>` and
+is left out of the pass count (`QA: 1/3 PASSED, 1/3 FAILED, 1/3 NOT MEANINGFUL (detector failed: lint)`). A green `tests` line beside a red detector is
+therefore never a pass. A runner that failed itself stays a failure, shown and
+counted as one, and the exit code is non-zero whenever anything failed. The
+provenance record keeps the runner's real result, so `--resume` still reuses a
+runner that passed (and marks it the same way) and re-runs one that failed.
+
+**What a failing tool prints.** Under a failing tool's line, `llm_qa.py` names
+its first five findings as `<ID>  <file>:<line>  <text>`, says how many there are
+(`FINDINGS (first 5 of 12; ...)`), and prints `full report:` with the absolute
+path of the JSON. A finding with no identifier key (the row-key checkers) is
+listed only in the JSON. The `--explain <ID>` hint appears only when a shown ID
+resolves; a wrapped tool's own ID (a ruff code, a bandit test id) is in no
+registry and gets none.
+
+**Rule IDs.** Every rule ID a `scripts/qa` checker prints is explained in
+`scripts/qa/qa-rules.json` (a statement, a fix and the scripts that print it).
+`./scripts/qa/llm_qa.py --explain <ID>` prints one; `--explain` alone lists them
+all. `public-pattern:<name>` resolves to its `public-pattern` entry. A new rule
+needs an entry, and `tests/unit/qa/test_qa_rules.py` fails without one (it finds
+the IDs in the checkers' source, and also fails on an entry no checker prints).
+Handler rules (`R-...`) and the plan-QA and docs-QA check IDs resolve through
+`bin/hooks-daemon explain-rule <ID>` instead.
+
+**One file.** `check_magic_values.py`, `audit_error_hiding.py` and
+`audit_shell.py` take `--path FILE` (DETECTOR-SPEC 5.2): the file is judged as
+the tree run would judge it, findings go to stdout (JSON with `--json`), and the
+repository artefact is never written. A missing file, a directory, a file of
+another kind, or a file inside the repository that the tree run does not judge
+(for example a test module under `audit_error_hiding.py`, or the root `init.sh`
+under `audit_shell.py`) FAILS: examining nothing is not a pass. A file outside
+the repository has no tree-run verdict to match and is judged as given. The
+other checkers still take directories only.
 
 - **Magic Values** (`check_magic_values.py`) — hardcoded strings/numbers that
   should be constants: handler names, priorities, tool names, event types, tags

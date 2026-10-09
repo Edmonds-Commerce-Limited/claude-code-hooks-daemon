@@ -21,13 +21,15 @@ see ``AUDITED_DIRECTORIES``, ``AUDITED_ROOT_FILES``,
 ``extract_heredoc_python_blocks``, and the ``silent-fallback`` rule below.
 
 Usage:
-    python scripts/qa/audit_error_hiding.py [--fix]
+    python scripts/qa/audit_error_hiding.py [--json]
+    python scripts/qa/audit_error_hiding.py --path FILE [--json]  # one file, to stdout
 
 Exit codes:
     0 - No violations found
     1 - Violations found (or other error)
 """
 
+import argparse
 import ast
 import json
 import re
@@ -59,7 +61,6 @@ VIOLATION_TYPES = {
         "use utils.deliberate_swallow.log_and_continue(..., reason=...) if deliberate"
     ),
     "bare-except": "Bare except clause without specific exception type",
-    "warning-instead-of-error": "Uses logger.warning() for critical failures",
     "silent-fallback": (
         "Exception handler assigns a fallback value with no logging or "
         "re-raise - failure becomes indistinguishable from success"
@@ -68,6 +69,25 @@ VIOLATION_TYPES = {
         "The file could not be opened or decoded, so it was never checked "
         "for error-hiding patterns - reported rather than silently skipped"
     ),
+}
+
+#: Stable rule IDs of the shell patterns the write-time strategy defines. The
+#: strategy's pattern NAME is the shell text itself (``|| true``), which is not an
+#: identifier a failing summary can be looked up by, so each gets a kebab-case ID.
+RULE_SHELL_OR_TRUE = "shell-or-true"
+RULE_SHELL_OR_COLON = "shell-or-colon"
+RULE_SHELL_SET_PLUS_E = "shell-set-plus-e"
+RULE_SHELL_REDIRECT_ALL_TO_NULL = "shell-redirect-all-to-null"
+RULE_SHELL_DISCARD_BOTH_STREAMS = "shell-discard-both-streams"
+RULE_SHELL_EMPTY_ERR_TRAP = "shell-empty-err-trap"
+
+SHELL_PATTERN_RULES: dict[str, str] = {
+    "|| true": RULE_SHELL_OR_TRUE,
+    "|| :": RULE_SHELL_OR_COLON,
+    "set +e": RULE_SHELL_SET_PLUS_E,
+    "&>/dev/null": RULE_SHELL_REDIRECT_ALL_TO_NULL,
+    ">/dev/null 2>&1": RULE_SHELL_DISCARD_BOTH_STREAMS,
+    "trap '' ERR": RULE_SHELL_EMPTY_ERR_TRAP,
 }
 
 # Directories audited recursively for BOTH Python (*.py) and shell (*.sh,
@@ -966,9 +986,14 @@ def audit_shell_patterns(filepath: Path, strategy: ErrorHidingStrategy) -> list[
     violations: list[dict[str, Any]] = []
     seen: set[tuple[int, str]] = set()
     for pattern in strategy.patterns:
+        if pattern.name not in SHELL_PATTERN_RULES:
+            raise ValueError(
+                f"shell pattern {pattern.name!r} has no rule ID: add it to SHELL_PATTERN_RULES "
+                "and scripts/qa/qa-rules.json"
+            )
         for match in re.finditer(pattern.regex, content, re.MULTILINE):
             line = content.count("\n", 0, match.start()) + 1
-            rule = f"shell-{pattern.name}"
+            rule = SHELL_PATTERN_RULES[pattern.name]
             key = (line, rule)
             if key in seen:
                 continue
@@ -1271,9 +1296,98 @@ def run_audit(workspace: Path, json_mode: bool) -> int:
     return 0
 
 
+def _single_file_problem(path: Path) -> str | None:
+    """Why ``path`` cannot be audited as one file, or None."""
+    if not path.exists():
+        return f"{path}: no such file"
+    if not path.is_file():
+        return f"{path}: not a file (--path takes one file)"
+    if path.suffix != ".py" and path.suffix not in _SHELL_EXTENSIONS:
+        return f"{path}: not a Python or shell file, so nothing was examined"
+    return None
+
+
+def out_of_scope_reason(path: Path, workspace: Path) -> str | None:
+    """Why the tree run would not judge ``path``, or None when it would.
+
+    A file inside the workspace is judged only if the tree run collects it, and
+    that is decided by the tree run's own collectors, so the two cannot
+    disagree. A file outside the workspace has no tree-run verdict to match, so
+    it is judged as given.
+
+    Cost, on purpose: the answer comes from collecting the whole audited set, which
+    walks ``src/`` and ``scripts/`` to decide one file. A narrower test would be a
+    second copy of the collectors' rules that could disagree with them; the single
+    source of truth is worth the walk.
+    """
+    resolved = path.resolve()
+    if not path_is_relative_to(resolved, workspace.resolve()):
+        return None
+    collected = {
+        file.resolve()
+        for file in (*collect_workspace_python_files(workspace), *collect_shell_files(workspace))
+    }
+    if resolved in collected:
+        return None
+    return (
+        "it is outside the audited directories "
+        f"({', '.join(AUDITED_DIRECTORIES)}) and root files, or in an excluded directory"
+    )
+
+
+def audit_single_file(path: Path, workspace: Path) -> list[dict[str, Any]]:
+    """Audit ``path`` exactly as the tree run would, exclusions included.
+
+    A Python file gets the AST audit; a shell file gets its embedded Python
+    heredocs and the shell-language patterns. The exclusions are read from the
+    workspace, as in :func:`run_audit`, so a finding the tree run excuses is
+    excused here too and the two runs cannot disagree.
+    """
+    if path.suffix == ".py":
+        violations = audit_file(path)
+    else:
+        violations = audit_heredoc_python(path) + audit_shell_patterns(
+            path, ShellErrorHidingStrategy()
+        )
+    return apply_exclusions(violations, load_exclusions(workspace / "scripts" / "qa"))
+
+
+def run_single_file(path: Path, workspace: Path, json_mode: bool) -> int:
+    """Audit one file (DETECTOR-SPEC 5.2) and report on stdout. Writes no artefact."""
+    problem = _single_file_problem(path)
+    if problem is None:
+        reason = out_of_scope_reason(path, workspace)
+        if reason is not None:
+            problem = f"{path}: not judged by the tree run ({reason}), so nothing was examined"
+    if problem is not None:
+        print(f"audit_error_hiding: {problem}", file=sys.stderr)
+        return 1
+    violations = audit_single_file(path, workspace)
+    if json_mode:
+        report = {
+            "summary": {
+                "passed": not violations,
+                "total_violations": len(violations),
+                "files_scanned": 1,
+            },
+            "violations": violations,
+        }
+        print(json.dumps(report, indent=2))
+    else:
+        print(format_violation_report(violations))
+    return 1 if violations else 0
+
+
 def main() -> int:
-    """Main entry point: audit this checkout."""
-    return run_audit(Path(__file__).parent.parent.parent, json_mode="--json" in sys.argv)
+    """Main entry point: audit this checkout, or one file with ``--path FILE``."""
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else "")
+    parser.add_argument("--json", action="store_true", dest="json_mode")
+    parser.add_argument("--path", type=Path, default=None, help="audit this one file")
+    args = parser.parse_args()
+    workspace = Path(__file__).parent.parent.parent
+    if args.path is not None:
+        return run_single_file(args.path, workspace, args.json_mode)
+    return run_audit(workspace, json_mode=args.json_mode)
 
 
 if __name__ == "__main__":

@@ -544,7 +544,7 @@ class TestTheRepository:
         new_file = tmp_path / "test_a_new_hazard.py"
         new_file.write_text("import os\nimport signal\n\nos.kill(pid, signal.SIGKILL)\n")
         violations = checker.scan_file(new_file)
-        assert [v.rule for v in violations] == [checker.RAW_SIGNAL]
+        assert [v.rule for v in violations] == [checker.RULE_RAW_SIGNAL]
 
     def test_the_message_points_at_documentation_naming_every_rule(
         self, checker: ModuleType
@@ -553,10 +553,10 @@ class TestTheRepository:
         assert docs in checker._REMEDIATION
         text = (_REPO_ROOT / docs).read_text(encoding="utf-8")
         for rule in (
-            checker.RAW_SIGNAL,
-            checker.UNPROVEN_HANDLE,
-            checker.KILL_COMMAND,
-            checker.SHELL_UNPROVEN_KILL,
+            checker.RULE_RAW_SIGNAL,
+            checker.RULE_UNPROVEN_HANDLE,
+            checker.RULE_KILL_COMMAND,
+            checker.RULE_SHELL_UNPROVEN_KILL,
         ):
             assert f"`{rule}`" in text
 

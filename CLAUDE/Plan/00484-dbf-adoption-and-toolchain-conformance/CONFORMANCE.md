@@ -61,40 +61,41 @@ route.
 
 ## Summary: TOOLING-SPEC (project level; artefact level where it differs)
 
-| Clause | Obligation (short)                                                     | Grade (project)          | Artefact   | One-line evidence                                                                                                                                                                                                                                                       |
-| ------ | ---------------------------------------------------------------------- | ------------------------ | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 4.1    | No defence routed through a non-conforming detector                    | NOT MET                  | NOT MET    | A's 9 identifier-less deny paths now print one (G5, Task 3.1a); B fails D5.2; D cannot host bespoke rules (see matrix)                                                                                                                                                  |
-| 4.2a   | Every printed identifier resolves offline                              | PARTLY MET               | MET        | `explain-rule` resolves every handler rule ID offline, including a client's project-handler rules, and since Task 3.1a the plan-QA and docs-QA check IDs too (G15, `rule_explain/checks.py`); at project level B's IDs resolve nowhere                                  |
-| 4.2b   | Remediation docs ship with the code, version tracked together          | MET                      | MET        | `Rule` objects live in handler source (`core/rule.py`, `get_rules()`)                                                                                                                                                                                                   |
-| 4.2c   | A defined place for a new rule's docs                                  | PARTLY MET               | MET        | Handlers: `Rule(blocked, why, fix, verbose)`. B: docstrings and `VIOLATION_TYPES` only, with no defined place                                                                                                                                                           |
-| 4.2d   | Docs state the correct construction                                    | PARTLY MET               | MET        | `test_rule_parity.py:180` requires a non-empty `fix`; B has no remediation text keyed by ID                                                                                                                                                                             |
-| 4.3a   | Forbid (disable or block) every route that bypasses the record         | NOT MET                  | NOT MET    | 6 `MUST_*_BECAUSE` in-band hatches; 232 `# nosec`, honoured and unforbidden; `nosemgrep` honoured; `shellcheck disable` ×19                                                                                                                                             |
-| 4.3b   | Irreducible cases directed to the project record                       | NOT MET                  | NOT MET    | Hatches send the agent to the command line or a file comment, never to the config                                                                                                                                                                                       |
-| 4.4a   | Entry point meets D5.1–5.4 for every defence                           | NOT MET                  | PARTLY MET | The hook path meets it; `llm_qa.py` has no single-file subset (`llm_qa.py:2477-2492`)                                                                                                                                                                                   |
-| 4.4b   | Entry point prints every identifier unaltered                          | PARTLY MET               | MET        | A deny prints `BLOCKED [R-…]`; `llm_qa.py` prints a metric line and a JSON filename, with no IDs (`:1424-1425`)                                                                                                                                                         |
-| 4.5a   | Detectors run before runners                                           | NOT MET                  | N/A        | `tests` is 6th of 15 in `TOOL_REGISTRY` (`llm_qa.py:543-791`)                                                                                                                                                                                                           |
-| 4.5b   | A detector failure stops lower levels counting                         | NOT MET                  | N/A        | `_run_tools` runs every tool regardless (`llm_qa.py:2622-2658`)                                                                                                                                                                                                         |
-| 5.1a   | List every active defence without running it                           | PARTLY MET               | PARTLY MET | `explain-rule --list` lists all installed rules, disabled ones included; HOOKS-DAEMON.md is active-only but has no IDs. Task 3.2 adds `hooks-daemon defences --json`, active-only with IDs ([reference](../../../docs/guides/TROUBLESHOOTING.md#cli-command-reference)) |
-| 5.1b   | Listing carries ID and a terse statement                               | PARTLY MET               | PARTLY MET | `explain-rule --list` does (`cli.py:8553-8557`); HOOKS-DAEMON.md does not; B is absent                                                                                                                                                                                  |
-| 5.1c   | Listing gives the route to full docs                                   | PARTLY MET               | MET        | `explain-rule <ID>`, stated once in the CLAUDE.md header and, since Task 3.1a, as the last line of `explain-rule --list`; nothing for B                                                                                                                                 |
-| 5.2    | Listing derived from the active config                                 | PARTLY MET               | PARTLY MET | `--list` instantiates classes with no config (`lookup.py:84-88`); `docs_generator.py:324-329` skips the tag gates that `registry.py:244-262` applies                                                                                                                    |
-| 5.3    | The project's own defences appear alongside bundled ones               | NOT MET                  | PARTLY MET | B's rules appear in no listing; the 4 project handlers that denied with no rule now declare one (G5), and `hooks-daemon defences` lists the Defences only (owner ruling C1)                                                                                             |
-| 6.1    | A defined record location the toolchain loads                          | PARTLY MET               | MET        | `.claude/hooks-daemon.yaml` is loaded (`config/models.py:2717`); B's 6+ exception files are named by no record                                                                                                                                                          |
-| 6.2a   | Every exception carries a justification; none defaulted, none omitted  | NOT MET                  | NOT MET    | `options: dict[str, Any]` (`models.py:58-78`); `enabled: bool` has no reason (`:72`); `never_want.reason` defaults to `""` (`:2111`)                                                                                                                                    |
-| 6.2b   | Names hazard and scope; generic reasons rejected by a documented check | NOT MET                  | NOT MET    | No generic-reason check anywhere in `src/` or `scripts/`                                                                                                                                                                                                                |
-| 6.3    | Record enumerable by the same means as the defences                    | PARTLY MET               | PARTLY MET | `config --json` and `config-diff` exist, but no record listing; in-file hatches and B's exception files are not enumerated                                                                                                                                              |
-| 6.4    | SHOULD: documented defaults                                            | MET                      | MET        | `hooks-daemon.yaml.example`, `init_config.py`, `Handler.get_default_enabled`                                                                                                                                                                                            |
-| 7.1    | SHOULD: terse per-defence summary with ID and docs route               | PARTLY MET               | MET        | Promoted prose sections now end with an `IDs:` line (G13, `claude_md_injector._with_rule_ids`); B's rules are still absent at project level                                                                                                                             |
-| 7.2    | SHOULD: delivered automatically into a delimited generated region      | MET                      | MET        | The `<hooksdaemon>` block, regenerated on restart (`core/claude_md_injector.py`)                                                                                                                                                                                        |
-| 8.1    | Release fails if a bundled defence lacks resolvable docs               | n/a (artefact)           | MET        | `test_rule_parity.py:162-227` on the full gate, which RELEASING.md:285 requires; since Task 3.1a it also walks every plan-QA and docs-QA `CHECK_ID` (G15) and the project's own deny handlers (G5)                                                                      |
-| 8.1f   | Family-page pattern audit                                              | n/a                      | N/A        | One ID per rule; there are no family pages                                                                                                                                                                                                                              |
-| 8.2    | Bundled defences active on own source; release fails otherwise         | n/a (artefact)           | MET        | `test_dogfooding_config.py:117` asserts every production handler is enabled here                                                                                                                                                                                        |
-| 9      | Partial conformance not described as conformance                       | MET                      | MET        | README and `pyproject.toml` make no DBF claim at all (checked by grep)                                                                                                                                                                                                  |
-| 9.1    | The two levels graded and declared separately                          | N/A (no declaration yet) | N/A        | Becomes binding at Task 3.3; this document grades both                                                                                                                                                                                                                  |
-| 9.2    | Known gaps recorded with the declared version                          | N/A (no declaration yet) | N/A        | Becomes binding at Task 3.3; the text is drafted below                                                                                                                                                                                                                  |
+| Clause | Obligation (short)                                                     | Grade (project)          | Artefact   | One-line evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ------ | ---------------------------------------------------------------------- | ------------------------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 4.1    | No defence routed through a non-conforming detector                    | NOT MET                  | NOT MET    | A's 9 identifier-less deny paths now print one (G5, Task 3.1a); B fails D5.2; D cannot host bespoke rules (see matrix)                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 4.2a   | Every printed identifier resolves offline                              | PARTLY MET               | MET        | `explain-rule` resolves every handler rule ID offline, including a client's project-handler rules, and since Task 3.1a the plan-QA and docs-QA check IDs too (G15, `rule_explain/checks.py`); since Task 3.1b (G6) B's IDs resolve too, through `llm_qa.py --explain <ID>` (`:2688`), so the rest of the gap is the wrapped third-party tools' own identifiers                                                                                                                                                                                       |
+| 4.2b   | Remediation docs ship with the code, version tracked together          | MET                      | MET        | `Rule` objects live in handler source (`core/rule.py`, `get_rules()`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 4.2c   | A defined place for a new rule's docs                                  | MET                      | MET        | Handlers: `Rule(blocked, why, fix, verbose)`. B (since Task 3.1b): an entry in `scripts/qa/qa-rules.json`, which `test_qa_rules.py` requires for every rule a checker prints                                                                                                                                                                                                                                                                                                                                                                         |
+| 4.2d   | Docs state the correct construction                                    | PARTLY MET               | MET        | Handlers: `test_rule_parity.py:180` requires a non-empty `fix`. B (since Task 3.1b): a `fix` per ID in `qa-rules.json`, and in review round 1 every entry was checked by hand against its checker's own message and remediation (about forty were wrong or loose and are corrected). Nothing mechanical ties a fix to what the checker does, so the text can drift again: PARTLY MET, not MET                                                                                                                                                        |
+| 4.3a   | Forbid (disable or block) every route that bypasses the record         | NOT MET                  | NOT MET    | 6 `MUST_*_BECAUSE` in-band hatches; inline suppressions are KEPT BY DESIGN (owner rulings B1, B2), not forbidden: 113 directive lines remain (65 `nosec`, 12 `pragma: no cover`, 36 `shellcheck disable`; the 78 of the deletion pass counted the Python directives only, see `SUPPRESSIONS.md`) after 228 were deleted, and since Task 3.1b each must carry a reason, enforced by `check_inline_suppressions.py` (`judge_comments`), registered as `llm_qa.py inline_suppressions`. So this stays a declared known gap against 4.3, not conformance |
+| 4.3b   | Irreducible cases directed to the project record                       | NOT MET                  | NOT MET    | Hatches send the agent to the command line or a file comment, never to the config                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 4.4a   | Entry point meets D5.1–5.4 for every defence                           | NOT MET                  | PARTLY MET | The hook path meets it; `llm_qa.py` itself still has no single-file subset (only `--path FILE` on three checkers, see D5.2 under B), so this stays NOT MET at project level                                                                                                                                                                                                                                                                                                                                                                          |
+| 4.4b   | Entry point prints every identifier unaltered                          | PARTLY MET               | MET        | A deny prints `BLOCKED [R-…]`; since Task 3.1b `llm_qa.py` prints the first 5 findings of a failing tool with their IDs and the absolute report path (`:1455`), but not every ID, and the 3 row-key checkers have none                                                                                                                                                                                                                                                                                                                               |
+| 4.5a   | Detectors run before runners                                           | MET                      | N/A        | MET since Task 3.1b: every runner (`RUNNER_TOOLS`, `llm_qa.py:898`) is registered after every static detector (`:843`), and `resolve_tools` moves a named runner after the detectors (`:1623-1625`). Pinned by `tests/unit/qa/test_llm_qa_detectors_first.py`                                                                                                                                                                                                                                                                                        |
+| 4.5b   | A detector failure stops lower levels counting                         | MET                      | N/A        | MET since Task 3.1b, in the amended form (every tool still runs, so the other findings are not hidden): once a detector has failed, `_run_tools` marks each runner that passed `NOT MEANINGFUL: detector failed` (`mark_not_meaningful`) and leaves it out of the pass count (`format_verdict`); a runner that failed itself stays a failure; the provenance record keeps the runner's real result so `--resume` still reuses it                                                                                                                     |
+| 5.1a   | List every active defence without running it                           | PARTLY MET               | PARTLY MET | `explain-rule --list` lists all installed rules, disabled ones included; HOOKS-DAEMON.md is active-only but has no IDs. Task 3.2 adds `hooks-daemon defences --json`, active-only with IDs ([reference](../../../docs/guides/TROUBLESHOOTING.md#cli-command-reference))                                                                                                                                                                                                                                                                              |
+| 5.1b   | Listing carries ID and a terse statement                               | PARTLY MET               | PARTLY MET | `explain-rule --list` does (`cli.py:8553-8557`); HOOKS-DAEMON.md does not; B is absent                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 5.1c   | Listing gives the route to full docs                                   | PARTLY MET               | MET        | `explain-rule <ID>`, stated once in the CLAUDE.md header and, since Task 3.1a, as the last line of `explain-rule --list`; nothing for B                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 5.2    | Listing derived from the active config                                 | PARTLY MET               | PARTLY MET | `--list` instantiates classes with no config (`lookup.py:84-88`); `docs_generator.py:324-329` skips the tag gates that `registry.py:244-262` applies                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 5.3    | The project's own defences appear alongside bundled ones               | NOT MET                  | PARTLY MET | B's rules appear in no listing; the 4 project handlers that denied with no rule now declare one (G5), and `hooks-daemon defences` lists the Defences only (owner ruling C1)                                                                                                                                                                                                                                                                                                                                                                          |
+| 6.1    | A defined record location the toolchain loads                          | PARTLY MET               | MET        | `.claude/hooks-daemon.yaml` is loaded (`config/models.py:2717`); B's 6+ exception files are named by no record                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 6.2a   | Every exception carries a justification; none defaulted, none omitted  | NOT MET                  | NOT MET    | `options: dict[str, Any]` (`models.py:58-78`); `enabled: bool` has no reason (`:72`); `never_want.reason` defaults to `""` (`:2111`)                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 6.2b   | Names hazard and scope; generic reasons rejected by a documented check | NOT MET                  | NOT MET    | No generic-reason check anywhere in `src/` or `scripts/`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 6.3    | Record enumerable by the same means as the defences                    | PARTLY MET               | PARTLY MET | `config --json` and `config-diff` exist, but no record listing; in-file hatches and B's exception files are not enumerated                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 6.4    | SHOULD: documented defaults                                            | MET                      | MET        | `hooks-daemon.yaml.example`, `init_config.py`, `Handler.get_default_enabled`                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| 7.1    | SHOULD: terse per-defence summary with ID and docs route               | PARTLY MET               | MET        | Promoted prose sections now end with an `IDs:` line (G13, `claude_md_injector._with_rule_ids`); B's rules are still absent at project level                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 7.2    | SHOULD: delivered automatically into a delimited generated region      | MET                      | MET        | The `<hooksdaemon>` block, regenerated on restart (`core/claude_md_injector.py`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 8.1    | Release fails if a bundled defence lacks resolvable docs               | n/a (artefact)           | MET        | `test_rule_parity.py:162-227` on the full gate, which RELEASING.md:285 requires; since Task 3.1a it also walks every plan-QA and docs-QA `CHECK_ID` (G15) and the project's own deny handlers (G5)                                                                                                                                                                                                                                                                                                                                                   |
+| 8.1f   | Family-page pattern audit                                              | n/a                      | N/A        | One ID per rule; there are no family pages                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 8.2    | Bundled defences active on own source; release fails otherwise         | n/a (artefact)           | MET        | `test_dogfooding_config.py:117` asserts every production handler is enabled here                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 9      | Partial conformance not described as conformance                       | MET                      | MET        | README and `pyproject.toml` make no DBF claim at all (checked by grep)                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 9.1    | The two levels graded and declared separately                          | N/A (no declaration yet) | N/A        | Becomes binding at Task 3.3; this document grades both                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 9.2    | Known gaps recorded with the declared version                          | N/A (no declaration yet) | N/A        | Becomes binding at Task 3.3; the text is drafted below                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
-**Project-level verdict: not conforming.** Nine MUSTs are NOT MET, so the toolchain is not
-conforming, and it is not conforming with agent support either. Most of the gap is in the QA
+**Project-level verdict: not conforming.** Seven clauses are NOT MET (4.1, 4.3a, 4.3b, 4.4a,
+5.3, 6.2a and 6.2b in the table), so the toolchain is not conforming, and it is not conforming
+with agent support either. Most of the gap is in the QA
 layer (B, D, `llm_qa.py`) and in the governance of exceptions. The handler layer is close.
 
 ## Summary: DETECTOR-SPEC matrix (the clauses TOOLING §4.1 pulls in)
@@ -103,11 +104,11 @@ layer (B, D, `llm_qa.py`) and in the governance of exceptions. The handler layer
 | ----------------- | ----------------- | ---------------------- | -------------------- | ------------------------------------------ |
 | 4.1 bespoke rules | MET               | MET                    | MET                  | NOT MET (see gap G10)                      |
 | 4.2 harness       | PARTLY MET        | PARTLY MET             | MET                  | –                                          |
-| 4.3 stable ID     | MET               | PARTLY MET             | MET (wrapped)        | –                                          |
+| 4.3 stable ID     | MET               | MET                    | MET (wrapped)        | –                                          |
 | 4.4 SHOULD        | PARTLY MET        | NOT MET                | N/A                  | –                                          |
 | 5.1 local         | MET               | MET                    | MET                  | –                                          |
-| 5.2 single file   | PARTLY MET        | NOT MET                | MET                  | –                                          |
-| 5.3 output        | MET               | PARTLY MET             | PARTLY MET           | –                                          |
+| 5.2 single file   | PARTLY MET        | PARTLY MET             | MET                  | –                                          |
+| 5.3 output        | MET               | MET                    | PARTLY MET           | –                                          |
 | 5.4 not hosted    | MET               | MET                    | MET                  | –                                          |
 | 6.1 resolution    | MET               | PARTLY MET             | MET                  | –                                          |
 | 6.2 offline       | MET               | N/A                    | N/A                  | –                                          |
@@ -121,9 +122,9 @@ layer (B, D, `llm_qa.py`) and in the governance of exceptions. The handler layer
 
 | Scope                                 | MET | PARTLY MET | NOT MET | N/A |
 | ------------------------------------- | --- | ---------- | ------- | --- |
-| TOOLING, project level (29 rows)      | 4   | 11         | 9       | 5   |
+| TOOLING, project level (29 rows)      | 7   | 10         | 7       | 5   |
 | TOOLING, artefact level (29 rows)     | 13  | 6          | 5       | 5   |
-| DETECTOR matrix, A + B + C (45 cells) | 20  | 12         | 3       | 10  |
+| DETECTOR matrix, A + B + C (45 cells) | 22  | 11         | 2       | 10  |
 | D (one row, a classification)         | –   | –          | 1       | –   |
 
 Section 8 counts as N/A at the project level, because TOOLING §9.1 says it bears on the
@@ -171,11 +172,29 @@ MET: 4.1, 4.3a, 4.3b, 6.2a and 6.2b.
     defence such as `qa_suppression`, `error_hiding_blocker` or `security_antipattern`. The
     method's sweep step therefore cannot use them.
 - **B: scripts/qa checkers.**
-  - **D5.2 NOT MET.** No checker accepts a file. `--path` and `--root` take directories, and
-    `check_authored_path_stat.py:300-303` fails as vacuous when given a file.
-  - **D4.3 PARTLY MET.** Most checkers print a rule ID (`check_magic_values.py:662`).
-    `check_fail_open_inventory`, `check_dangerous_invocation_corpus` and
-    `check_declared_invariant_pairs` print row keys, which are not rule identifiers.
+  - **D5.2 PARTLY MET since Task 3.1b (G8 phase 2).** `--path FILE` judges one file in
+    `check_magic_values.py` (`run_single_file`, `:647`; the tree run's skip rules are now one
+    function, `out_of_scope_reason`, so the two cannot disagree), `audit_error_hiding.py`
+    (`audit_single_file`, exclusions applied as in the tree run) and `audit_shell.py`
+    (`run_single_file`). Findings go to stdout (JSON with `--json`), no repository artefact is
+    written, and a missing file, a directory, a file of another kind or a file inside the
+    repository that the tree run does not judge FAILS rather than passing vacuously. In review
+    round 1 (S4) the two audit scripts gained their own `out_of_scope_reason`, which reuses the
+    tree run's collectors (`collect_workspace_python_files` plus `collect_shell_files`; the
+    default scan directories and `_is_excluded`), so a test module under `audit_error_hiding.py`
+    or the root `init.sh` under `audit_shell.py` is now refused. A file outside the repository has
+    no tree-run verdict to match and is judged as given. Pinned by
+    `tests/unit/qa/test_qa_single_file_subset.py`. The other
+    checkers still take directories only; `check_authored_path_stat.py:300-303` still fails as
+    vacuous on a file. They are the known gap.
+  - Before: no checker accepted a file. `--path` and `--root` took directories.
+  - **D4.3 MET since Task 3.1b (G6), with one note.** Every checker prints a stable rule ID,
+    and each resolves through `qa-rules.json` (see 4.2). `check_fail_open_inventory`,
+    `check_dangerous_invocation_corpus` and `check_declared_invariant_pairs` print one rule
+    ID of their own per violation; their ROW keys remain data, not identifiers. The `rule`
+    strings are not namespaced (`silent-pass`, not `R-...`), and a few IDs are shared by two
+    checkers (`unreadable-file`, `marker-missing-reason`, `handler-ref-unknown`), so an ID
+    names a class of finding rather than one script.
 - **C: Semgrep.** Natively, Semgrep's `check_id` is prefixed with the path of the rule file,
   which D4.3 names as unstable. The wrapper strips the prefix back to the author's `id:`
   (`run_semgrep_check.sh:101`), so the wrapped pair holds (TOOLING 4.1 point 1).
@@ -196,10 +215,43 @@ MET: 4.1, 4.3a, 4.3b, 6.2a and 6.2b.
 - **Correct construction is enforced for handler rules.** `test_rule_parity.py:162-196`
   requires non-empty `blocked`, `why`, `fix` and `verbose`, and checks that every rendering
   carries the ID.
-- **Gaps:**
-  - B's identifiers (`magic-timeout`, `silent-pass`, `bounded-intent-unbounded-read`, …)
-    appear in no document and have no lookup.
-  - The four project handlers listed under 4.1 print nothing to look up.
+- **B's identifiers resolve since Task 3.1b (G6).** `scripts/qa/qa-rules.json` holds one entry
+  per rule ID the `scripts/qa` checkers print (a statement, a fix and the scripts that print
+  it), and `llm_qa.py --explain <ID>` prints it (`explain_rule`, `llm_qa.py:2688`;
+  `explain_command`, `:2709`); `--explain` with no ID lists them all. A `family:name` ID such
+  as `public-pattern:aws-access-key` resolves to its family. `tests/unit/qa/test_qa_rules.py`
+  DISCOVERS the IDs from the checkers' source (a `RULE` constant, `rule=`, a `"rule":` key, an
+  assignment to `rule`, `_add(node, "<id>", ...)`, the keys of `VIOLATION_TYPES`) and fails if
+  a checker prints an ID with no entry, an entry names a rule no checker prints, or an entry's
+  `checks` list differs from the scripts that print it. **Review round 1 (B1) found that the
+  first version missed IDs it could not read:** `audit_error_hiding.py` built six of them as
+  `f"shell-{pattern.name}"` (`shell-|| true` and five more), none was in the registry, and
+  `--explain` said no checker printed them. They are now `shell-or-true`, `shell-or-colon`,
+  `shell-set-plus-e`, `shell-redirect-all-to-null`, `shell-discard-both-streams` and
+  `shell-empty-err-trap`, a pattern with no declared ID raises, and the discovery now FAILS on an
+  f-string, a concatenated or undefined constant, a lookup it cannot resolve, or an ID that is not
+  kebab-case instead of skipping it. It follows imported constants and module dict lookups, which
+  found a seventh missing entry (`plan-stats-arithmetic`) and one entry for a rule no checker ever
+  emitted (`warning-instead-of-error`, deleted). The three row-key checkers
+  (`check_fail_open_inventory`, `check_dangerous_invocation_corpus`,
+  `check_declared_invariant_pairs`) print a single `rule` of their own
+  (`fail-open-inventory`, ...) in each violation, and those resolve; their ROW keys are data
+  and are not identifiers. Not covered: the identifiers of the wrapped third-party tools
+  (ruff, mypy, pyright, bandit, shellcheck, Semgrep rule IDs), which are theirs to document,
+  and the plan-QA and docs-QA check IDs, which `bin/hooks-daemon explain-rule` resolves
+  (G15). `check_signal_targets.py` renamed four constants to `RULE_*` so the discovery sees
+  them.
+- **4.2d is PARTLY MET (review round 1, B3).** Of 13 entries the reviewer sampled, 4 were
+  wrong (`silent-pass`, `raw-signal`, `unproven-process-handle`, `kill-command`). All entries were
+  then compared with the message and remediation each checker prints, and about forty were
+  corrected, among them `malformed-allowlist-entry` (the fields are `id`, `reason` and `link`),
+  `config-key-mismatch`, `missing-identifier`, `handler-claim-mismatch`,
+  `undocumented-blocking-handler` and `unbounded-skip-list-membership`. The review was by
+  hand, once. No test can tell that a fix describes the checker's real behaviour, so the grade
+  is not MET.
+- **Remaining gap:** B's rules are not rows of `hooks-daemon defences`. Which `scripts/qa`
+  checkers are Defences (and so listed there) is a Defence-membership call: the coordinator's
+  call, not made in this batch and not the owner's. 5.1 and 5.3 stay as graded until it is.
 
 ### 4.3: suppression routes that bypass the project record
 
@@ -251,8 +303,18 @@ appearing in `.claude/hooks-daemon.yaml`.
 - **`llm_qa.py` does not.**
   - There is no file subset; only tool names or `changed` (`:806-844`).
   - Each tool's own output is discarded (`:1366-1367`).
-  - The summary line carries a metric and a bare JSON filename, never the absolute directory,
-    and no identifier (`:1424-1425`). Identifiers reach the practitioner only if they open the
+  - **Task 3.1b (G8 phase 1).** A failing tool's summary now names its first
+    `MAX_FINDINGS_SHOWN` (5) findings with their identifier, location and text, says how many
+    there are, and prints the ABSOLUTE path of the full report (`failure_extras`,
+    `llm_qa.py:1455`, called at `:1625`). Pinned by
+    `tests/unit/qa/test_llm_qa_findings_in_summary.py`. A finding with no identifier key (the
+    row-key checkers `check_fail_open_inventory`, `check_dangerous_invocation_corpus` and
+    `check_declared_invariant_pairs`) is listed in the JSON only, not given an invented ID, and
+    only the first five findings of a failing tool are named, so 4.4b stays PARTLY MET. The
+    `--explain <ID>` hint is printed only when a shown ID resolves (review round 1, N2): a wrapped
+    tool's own ID has no registry entry and gets no hint.
+  - Before: the summary line carried a metric and a bare JSON filename, never the absolute
+    directory, and no identifier. Identifiers reached the practitioner only if they opened the
     JSON.
 - **The Semgrep wrapper rewrites `check_id`.** It does so towards the stable form, but strictly
   "unaltered" fails. This is noted rather than graded, because it is what makes C hold
@@ -260,11 +322,20 @@ appearing in `.claude/hooks-daemon.yaml`.
 
 ### 4.5: ordering
 
-`TOOL_REGISTRY` order is `magic_values`, `format`, `lint`, `type_check`, `pyright`, then
-**`tests`**, then 20+ more static checkers, then `project_handlers` (a runner), the contract
-checks, and the smoke test (`llm_qa.py:543-791`). Nothing short-circuits. Both halves are NOT
-MET. At the artefact level the daemon ships no accept-changes invocation, so the clause is N/A
-there.
+**Both halves MET since Task 3.1b (G7).** Before: `TOOL_REGISTRY` ran `tests` sixth of the
+static checkers and nothing marked a runner's result after a detector failure. Now
+`RUNNER_TOOLS` (`llm_qa.py:898`: `tests`, `project_handlers`, `changed_tests`, `smoke_test`)
+are registered after every detector (`:843`), `resolve_tools` stably puts runners last
+whatever order they were named (`:1623-1625`), and `_run_tools` keeps running every tool but
+marks each runner that PASSED `NOT MEANINGFUL: detector failed` and leaves it out of the pass
+count (`mark_not_meaningful`, `format_verdict`). Review round 1 (S5) changed one case: a runner
+that really failed after a failed detector used to be shown as `NOT MEANINGFUL` and left out of
+the FAILED count; it now stays a failure, shown and counted as one. The exit code is non-zero
+whenever anything failed, and the `--resume` and `--read-only` paths are pinned by tests (a
+reused pass is marked, a recorded failure is re-run and stays failed). The recorded provenance
+keeps the runner's real result. The tests are
+`tests/unit/qa/test_llm_qa_detectors_first.py`. At the artefact
+level the daemon ships no accept-changes invocation, so the clause is N/A there.
 
 ### 5.1–5.3: enumeration
 
@@ -345,7 +416,10 @@ there.
 - **B D4.2 PARTLY MET.** Function-level harnesses exist (`check_source(source, path, root)` in
   `check_magic_values.py:579`, with tests in `tests/unit/qa/`). There is no CLI to run one rule
   alone, and running a harness means running the project's test suite.
-- **B D5.3 PARTLY MET.** A summary and a filename are printed; the directory is not.
+- **B D5.3 MET since Task 3.1b.** A failing checker's summary carries the first findings with
+  their identifiers and the absolute path of the remainder (`llm_qa.py:1455`). The checker run
+  alone prints its own report or writes its artefact; the clause is judged on the command the
+  practitioner ran, `llm_qa.py`.
 - **C D4.2 MET.** `semgrep --config <one-rule.yaml> <file>` runs one rule natively. Two of the
   six rule files (`bounded-reads.yaml` and `short-refname.yaml`) have no fixture test. That is
   a missing red proof by the project, not a detector gap.
@@ -400,8 +474,53 @@ recommendation.
 inline suppressions in commits `b2089aed8` and `ef8192afd` (193 inert `nosec` in tests and
 scripts, 7 `nosec` in `src/` with no finding, 22 `type: ignore` and 6 `pragma: no cover`
 replaced or dropped); 78 kept. Inventory, per-entry reasons and the reasonless lines still
-needing a reason comment: [SUPPRESSIONS.md](SUPPRESSIONS.md). The `scripts/qa` detector and
-`--disable-nosem` parts of G1 remain open.
+needing a reason comment: [SUPPRESSIONS.md](SUPPRESSIONS.md).
+
+**G1 closed in the form owner ruling B2 sets (Task 3.1b; review round 1 B2, S2, S6).**
+`scripts/qa/check_inline_suppressions.py` fails on any `nosec`, `noqa`, `type: ignore`,
+`nosemgrep`, `pragma: no cover`, `shellcheck disable`, `pyright: ignore`, `mypy: ignore-errors`,
+`mypy: disable-error-code` or `pylint: disable` with no reason, and on the file-wide `ruff: noqa` and `flake8: noqa` forms
+and `pyright: report...=` config comments. The pyright, mypy and pylint forms are read from the
+`qa_suppression` handler's own list (`PythonQaSuppressionStrategy.forbidden_patterns`), so the
+write-time and batch lists cannot drift. A reason is in the same comment after the directive and
+its codes, in a second `#` segment, or in the own-line comment block directly above. Round 1 made
+three things stricter: a bare Bandit code or test name after `nosec` (also `nosec: B603`) is not a
+reason, a block above counts only when it names, on word boundaries, a rule code the directive
+carries (`B603`, `SC2317`, `attr-defined`) or a tool (`bandit`, `shellcheck`, `mypy`, ...), or
+opens a line with the project's `SECURITY:` marker (round 2 tightened this: the directive's own
+words `no`, `cover`, `type`, `ignore` and substrings no longer count), and `init.sh`,
+`venv.sh` and the two `nosec B603` lines now carry their own reasons. The test is still a word
+match: a comment that names the tool but says nothing useful passes, and the generic-reason check
+cannot tell whether a reason is true. It is registered as
+`llm_qa.py inline_suppressions` and runs in `changed`. Reasons are inline and there is no
+baseline file (owner ruling B2). The generic-reason check is `utils/escape_hatch.is_acceptable_reason`,
+shared with the six `MUST_*_BECAUSE` hatches. Pinned by
+`tests/unit/qa/test_check_inline_suppressions.py`, whose last test judges this repository.
+Not done, on purpose: `--disable-nosem` and bandit `--ignore-nosec` would make the tools IGNORE
+the kept directives, which contradicts B2 (they stay, with reasons); no `nosemgrep` exists today.
+Not covered: `eslint-disable` (no `.ts` source), formatter markers.
+
+**G6 closed for the identifiers; the fix text is reviewed, not enforced (Task 3.1b; review round
+1 B1, B3).** `scripts/qa/qa-rules.json` (an entry per rule ID: statement, fix, printing scripts)
+and `llm_qa.py --explain [ID]`, guarded in both directions by `tests/unit/qa/test_qa_rules.py`,
+whose discovery now fails closed on an ID it cannot read; see 4.2. The six `shell-*` IDs that the
+first version missed are registered and resolve. The accuracy of the `fix` and `statement` text
+was checked entry by entry against each checker and corrected, once; 4.2d is graded PARTLY MET for
+that reason. Open inside G6: B's rules are not rows of `hooks-daemon defences` (a Defence-membership
+call, the coordinator's, not made here); the wrapped tools' own identifiers are theirs.
+
+**G8 closed in part (Task 3.1b).** Phase 1 (first findings with IDs, absolute report path in
+the summary) and phase 2 for three checkers (`check_magic_values.py`, `audit_error_hiding.py`,
+`audit_shell.py` take `--path FILE`) are done; see 4.4 and D5.2/D5.3 under B. Review round 1
+(S4) fixed the claim that the file is judged "as the tree run would": the two audit scripts now
+refuse a file inside the repository that the tree run does not collect, as `check_magic_values.py`
+already did. Not done: `--path FILE` on the remaining checkers, and `llm_qa.py` itself has no file
+selection. Declared as a known gap (DETECTOR 5.2) in the declaration, Task 3.3.
+
+**G7 closed (Task 3.1b; review round 1 S5).** See the 4.5 section: runners are registered and
+resolved after every detector, and a runner that PASSED after a failed detector is marked
+`NOT MEANINGFUL` and excluded from the pass count, while every tool still runs (Fable's
+amendment). A runner that failed stays a failure and the exit code is non-zero.
 
 **G5, G9, G13, G15 status (Task 3.1a).** All four are closed except where noted.
 

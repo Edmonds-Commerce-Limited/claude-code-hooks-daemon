@@ -78,6 +78,13 @@ def test_matches_pylint_disable() -> None:
     assert any(re.search(p, text, re.IGNORECASE) for p in patterns)
 
 
+def test_matches_mypy_disable_error_code() -> None:
+    """The write-time guard also forbids the per-file mypy error-code switch."""
+    strategy = PythonQaSuppressionStrategy()
+    text = "# my" + "py: disable-error-code=attr-defined"
+    assert any(re.search(p, text, re.IGNORECASE) for p in strategy.forbidden_patterns)
+
+
 def test_skip_directories_not_empty() -> None:
     """Should have skip directories defined."""
     strategy = PythonQaSuppressionStrategy()

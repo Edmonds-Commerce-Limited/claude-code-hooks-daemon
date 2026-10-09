@@ -15,6 +15,7 @@ _FORBIDDEN_PATTERNS: tuple[str, ...] = (
     r"#\s*pylint:\s*" + "disable",
     r"#\s*pyright:\s*" + "ignore",
     r"#\s*mypy:\s*" + "ignore-errors",
+    r"#\s*mypy:\s*" + "disable-error-code",
 )
 _SKIP_DIRECTORIES: tuple[str, ...] = (
     "tests/fixtures/",

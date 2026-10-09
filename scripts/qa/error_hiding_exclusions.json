@@ -451,7 +451,7 @@
     {
       "file": "init.sh",
       "function": "emit_hook_error",
-      "rule": "shell-&>/dev/null",
+      "rule": "shell-redirect-all-to-null",
       "reason": "Plan 00200 Task 5.4: `if command -v jq &>/dev/null; then` -- exit code is explicitly checked by the if; output is suppressed only because a tool-presence probe's own output is noise, not diagnostic content."
     },
     {
@@ -461,7 +461,7 @@
         100,
         103
       ],
-      "rule": "shell-&>/dev/null",
+      "rule": "shell-redirect-all-to-null",
       "reason": "Plan 00200 Task 5.4: `command -v uv &>/dev/null` probes inside an `if`/compound-`if` condition (legacy install flow) -- exit code explicitly checked, output suppressed because a presence probe's own output is noise. Module-level (no enclosing function in this script), hence line-based match."
     },
     {
@@ -470,7 +470,7 @@
         83,
         101
       ],
-      "rule": "shell->/dev/null 2>&1",
+      "rule": "shell-discard-both-streams",
       "reason": "Plan 00200 Task 5.4: line 83 is `if ! git clone ... >/dev/null 2>&1; then _fail ...` (explicit failure handling). Line 101 is the curl-based uv installer inside a compound `if` condition, whose success is verified afterward via a fresh `command -v uv` check rather than trusting curl's own exit code -- a deliberate self-verifying fallback, not error hiding. Module-level, hence line-based match."
     },
     {
@@ -478,55 +478,55 @@
       "lines": [
         117
       ],
-      "rule": "shell-&>/dev/null",
+      "rule": "shell-redirect-all-to-null",
       "reason": "Plan 00200 Task 5.4: `if command -v python3 &>/dev/null; then` -- exit code explicitly checked. Module-level (no enclosing function at this call site), hence line-based match."
     },
     {
       "file": "scripts/install/hooks_deploy.sh",
       "function": "git_force_executable",
-      "rule": "shell->/dev/null 2>&1",
+      "rule": "shell-discard-both-streams",
       "reason": "Plan 00200 Task 5.4: `if ! git ... rev-parse --is-inside-work-tree >/dev/null 2>&1; then print_verbose \"Not a git repository, skipping...\"`. Exit code explicitly checked; comment at the site already documents why output is suppressed ('expected to fail outside git repos')."
     },
     {
       "file": "scripts/install/prerequisites.sh",
       "function": "check_git",
-      "rule": "shell-&>/dev/null",
+      "rule": "shell-redirect-all-to-null",
       "reason": "Plan 00200 Task 5.4: `command -v git &>/dev/null`-style presence probe inside an explicit if/exit-code check."
     },
     {
       "file": "scripts/install/prerequisites.sh",
       "function": "check_uv",
-      "rule": "shell-&>/dev/null",
+      "rule": "shell-redirect-all-to-null",
       "reason": "Plan 00200 Task 5.4: `command -v uv &>/dev/null`-style presence probes inside explicit if/exit-code checks (two sites in this function)."
     },
     {
       "file": "scripts/install/prerequisites.sh",
       "function": "check_uv",
-      "rule": "shell->/dev/null 2>&1",
+      "rule": "shell-discard-both-streams",
       "reason": "Plan 00200 Task 5.4: version-probe command inside an explicit if/exit-code check within the same function as the &>/dev/null presence probes above."
     },
     {
       "file": "scripts/install/prerequisites.sh",
       "function": "get_python_version",
-      "rule": "shell-&>/dev/null",
+      "rule": "shell-redirect-all-to-null",
       "reason": "Plan 00200 Task 5.4: interpreter presence/version probe inside an explicit if/exit-code check."
     },
     {
       "file": "scripts/install/prerequisites.sh",
       "function": "get_python_major_minor",
-      "rule": "shell-&>/dev/null",
+      "rule": "shell-redirect-all-to-null",
       "reason": "Plan 00200 Task 5.4: interpreter presence probe inside an explicit if/exit-code check."
     },
     {
       "file": "scripts/install/project_detection.sh",
       "function": "detect_install_mode",
-      "rule": "shell-&>/dev/null",
+      "rule": "shell-redirect-all-to-null",
       "reason": "Plan 00200 Task 5.4: `if ! command -v python3 &>/dev/null; then echo \"normal\"` -- exit code explicitly checked, falls back to a safe default detection result."
     },
     {
       "file": "scripts/install/venv.sh",
       "function": "verify_venv",
-      "rule": "shell->/dev/null 2>&1",
+      "rule": "shell-discard-both-streams",
       "reason": "Plan 00200 Task 5.4: `if ! \"$venv_python\" --version > /dev/null 2>&1; then print_error \"Virtual environment Python failed to run...\"` -- exit code explicitly checked and a specific error printed on failure."
     },
     {
@@ -534,7 +534,7 @@
       "lines": [
         21
       ],
-      "rule": "shell-&>/dev/null",
+      "rule": "shell-redirect-all-to-null",
       "reason": "Plan 00200 Task 5.4: `if ! command -v shellcheck &>/dev/null; then echo \"shellcheck not installed\"` -- exit code explicitly checked, specific error printed on failure. Module-level, hence line-based match."
     },
     {
@@ -543,7 +543,7 @@
         126,
         139
       ],
-      "rule": "shell-|| true",
+      "rule": "shell-or-true",
       "reason": "Plan 00200 Task 5.4: `validate_worktree \"$wt\" || true` inside a loop -- deliberately continues validating remaining worktrees after one fails. validate_worktree() records the failure in FAILED_WTS BEFORE returning 1, and the script's own final summary exits 1 if FAILED_WTS is non-empty -- the opposite of hiding: every failure is aggregated and the overall exit code reflects it. The `|| true` exists only to stop `set -e` short-circuiting the loop on the first failure."
     },
     {

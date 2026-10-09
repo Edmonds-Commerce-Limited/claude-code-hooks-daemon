@@ -651,21 +651,6 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="pyright.json",
         jq_hint="jq '.errors[] | {file, line, rule, message}'",
     ),
-    # The hint MUST name the array holding the detail, not the summary. It
-    # pointed at `.summary` until Plan 00229 — sending a reader who wanted to
-    # know WHAT failed back to the count they had already been shown. That is
-    # why Plan 00226's missing failure names had no surface on which they could
-    # look wrong. Asserted by test_llm_qa_count_implies_detail.py.
-    # A live consumer through tests/acceptance: its daemon fixtures skip with
-    # no socket, and a skip in a RELEASING.md Step 12.0 gate is a failure.
-    # run_test_matrix.py runs run_tests.sh AND the suite under every other
-    # Python in CI's matrix (00466 N110), so the gate is not narrower than CI.
-    "tests": ToolConfig(
-        command=_python("run_test_matrix.py"),
-        json_file="tests.json",
-        jq_hint="jq '.tests[] | select(.outcome == \"failed\") | .name'",
-        live_daemon=True,
-    ),
     "security": ToolConfig(
         command=_bash("run_security_check.sh"),
         json_file="security.json",
@@ -704,6 +689,13 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
     "github_urls": ToolConfig(
         command=_python("check_github_urls.py", "--json"),
         json_file="github_urls.json",
+        jq_hint="jq '.violations[] | {file, line, rule, message}'",
+    ),
+    # Owner ruling B2 (Plan 00484 G1): suppressions stay inline and each carries
+    # its reasoning. There is no baseline file, so this is what enforces it.
+    "inline_suppressions": ToolConfig(
+        command=_python("check_inline_suppressions.py", "--json"),
+        json_file="inline_suppressions.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
     "released_changelog": ToolConfig(
@@ -832,16 +824,6 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="british_english.json",
         jq_hint="jq '.violations[] | {file, line, american, british}'",
     ),
-    # Runs the project handlers' own tests, which `run_tests.sh` cannot reach:
-    # `testpaths` is ["tests"], so the 61 tests co-located with
-    # `.claude/project-handlers/` went unexecuted by every gate while
-    # gate-scope.bash cited them as the reason those handlers need no type
-    # checking. Both are terminal and both DENY.
-    "project_handlers": ToolConfig(
-        command=_python("check_project_handler_tests.py", "--json"),
-        json_file="project_handlers.json",
-        jq_hint="jq '.tests[] | {name, outcome}'",
-    ),
     # Diffs the daemon's schemas/claim tables against the vendored Claude Code
     # hooks contract (Plan 00271). Network-free; staleness is the
     # contract_staleness SessionStart advisory's job.
@@ -856,6 +838,37 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         command=_python("check_input_contract.py", "--json"),
         json_file="input_contract.json",
         jq_hint="jq '.violations[] | {rule, event, subject, message}'",
+    ),
+    # ── Runners ─────────────────────────────────────────────────────
+    # Everything from here on EXECUTES code (RUNNER_TOOLS). Every static
+    # detector is registered above, so a detector's verdict is in before a
+    # runner's means anything (TOOLING-SPEC 4.5, Plan 00484 G7). Pinned by
+    # test_llm_qa_detectors_first.py.
+    #
+    # Runs the project handlers' own tests, which `run_tests.sh` cannot reach:
+    # `testpaths` is ["tests"], so the 61 tests co-located with
+    # `.claude/project-handlers/` went unexecuted by every gate while
+    # gate-scope.bash cited them as the reason those handlers need no type
+    # checking. Both are terminal and both DENY.
+    "project_handlers": ToolConfig(
+        command=_python("check_project_handler_tests.py", "--json"),
+        json_file="project_handlers.json",
+        jq_hint="jq '.tests[] | {name, outcome}'",
+    ),
+    # The hint MUST name the array holding the detail, not the summary. It
+    # pointed at `.summary` until Plan 00229 — sending a reader who wanted to
+    # know WHAT failed back to the count they had already been shown. That is
+    # why Plan 00226's missing failure names had no surface on which they could
+    # look wrong. Asserted by test_llm_qa_count_implies_detail.py.
+    # A live consumer through tests/acceptance: its daemon fixtures skip with
+    # no socket, and a skip in a RELEASING.md Step 12.0 gate is a failure.
+    # run_test_matrix.py runs run_tests.sh AND the suite under every other
+    # Python in CI's matrix (00466 N110), so the gate is not narrower than CI.
+    "tests": ToolConfig(
+        command=_python("run_test_matrix.py"),
+        json_file="tests.json",
+        jq_hint="jq '.tests[] | select(.outcome == \"failed\") | .name'",
+        live_daemon=True,
     ),
     # Targeted only (Plan 00463): pytest on the tests mapped from what changed
     # since the merge base. Excluded from `all`, which runs the whole suite
@@ -876,6 +889,16 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         live_daemon=True,
     ),
 }
+
+#: The tools that EXECUTE code (the test suite, the project handlers' tests, the
+#: live smoke test) rather than judge the tree statically. Every other tool is a
+#: detector. A runner's result means something only while every detector agrees
+#: the tree is sound, so runners are ordered after detectors and are marked
+#: "not meaningful" when they pass after a detector has failed; a runner that
+#: failed itself stays a failure (Plan 00484 G7, TOOLING-SPEC 4.5).
+RUNNER_TOOLS: Final[frozenset[str]] = frozenset(
+    {"tests", "project_handlers", "changed_tests", "smoke_test"}
+)
 
 #: Tools that exist for the targeted path only, and never run as part of `all`.
 _TARGETED_ONLY_TOOLS: Final[frozenset[str]] = frozenset({"changed_tests"})
@@ -898,7 +921,6 @@ CHANGED_TOOL_NAMES: Final[list[str]] = [
     "pyright",
     "error_hiding",
     "eacces_safe",
-    "project_handlers",
     "docs_qa",
     "plan_qa",
     "shell_check",
@@ -926,8 +948,10 @@ CHANGED_TOOL_NAMES: Final[list[str]] = [
     "british_english",
     "git_history",
     "github_urls",
+    "inline_suppressions",
     "released_changelog",
     "semgrep",
+    "project_handlers",
     "changed_tests",
 ]
 
@@ -1265,6 +1289,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "shell_audit": _summarize_violations,
     "skill_refs": _summarize_violations,
     "github_urls": _summarize_violations,
+    "inline_suppressions": _summarize_violations,
     "released_changelog": _summarize_violations,
     "canonical_callers": _summarize_violations,
     "capture_corruption": _summarize_violations,
@@ -1313,6 +1338,11 @@ _REPORT_ERROR_LABEL: Final[str] = "⚠️  TOOL ERROR:"
 
 # Prefix for a `--read-only` result recorded for a different tree (Plan 00463).
 _STALE_LABEL: Final[str] = "⚠️  STALE:"
+
+#: Marks a runner's result once a detector has failed (Plan 00484 G7).
+_NOT_MEANINGFUL_LABEL: Final[str] = "NOT MEANINGFUL"
+_NOT_MEANINGFUL_ICON: Final[str] = "⚪"  # white circle: neither a pass nor a failure
+_RESULT_ICONS: Final[tuple[str, ...]] = ("✅", "❌", _REUSED_ICON)
 
 #: Said by a run whose results cannot be tied to one tree.
 _TREE_WARNING_LABEL: Final[str] = "⚠️  NOT RECORDED FOR THIS TREE:"
@@ -1387,6 +1417,70 @@ def _report_error(data: QaReport) -> str | None:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
+
+
+#: How many findings a failing tool's summary names, and the keys a finding may
+#: carry its identifier, location and text under (the shipped checkers differ).
+MAX_FINDINGS_SHOWN: Final[int] = 5
+_FINDING_ID_KEYS: Final[tuple[str, ...]] = ("rule", "check_id", "test_id", "rule_id")
+_FINDING_FILE_KEYS: Final[tuple[str, ...]] = ("file", "path")
+_FINDING_TEXT_KEYS: Final[tuple[str, ...]] = ("message", "detail", "description")
+_FINDING_TEXT_LIMIT: Final[int] = 110
+_FINDINGS_LABEL: Final[str] = "FINDINGS"
+
+
+def _first_value(item: dict[str, Any], keys: tuple[str, ...]) -> str:
+    """The first non-empty value of ``item`` under ``keys``, as text, or ''."""
+    for key in keys:
+        value = item.get(key)
+        if value not in (None, ""):
+            return str(value)
+    return ""
+
+
+def _finding_line(item: dict[str, Any]) -> str | None:
+    """One finding as ``id  file:line  message``, or None when it carries no identifier."""
+    identifier = _first_value(item, _FINDING_ID_KEYS)
+    if not identifier:
+        return None
+    location = _first_value(item, _FINDING_FILE_KEYS)
+    line = item.get("line")
+    if location and line not in (None, "", 0):
+        location = f"{location}:{line}"
+    text = " ".join(_first_value(item, _FINDING_TEXT_KEYS).split())
+    if len(text) > _FINDING_TEXT_LIMIT:
+        text = text[: _FINDING_TEXT_LIMIT - 3] + "..."
+    return "     " + "  ".join(part for part in (identifier, location, text) if part)
+
+
+def failure_extras(data: QaReport, config: ToolConfig, output: Path) -> str:
+    """The first findings with their identifiers, and the absolute path of the full report.
+
+    TOOLING-SPEC 4.4: the entry point prints each finding's identifier unaltered
+    and says where the rest is. A finding with no identifier key (the row-key
+    checkers) is not listed rather than given a made-up one. Empty text is never
+    returned for a failure: the path line is always there.
+    """
+    key = detail_array_key(config.jq_hint)
+    items = [entry for entry in data.get(key, []) if isinstance(entry, dict)] if key else []
+    named = [item for item in items if _first_value(item, _FINDING_ID_KEYS)]
+    lines = [line for line in map(_finding_line, named) if line is not None]
+    out = ""
+    if lines:
+        shown = lines[:MAX_FINDINGS_SHOWN]
+        # A wrapped tool's own ID (a ruff code, a bandit test id) is in no registry,
+        # so the hint is offered only when a shown ID is one `--explain` resolves.
+        explainable = any(
+            explain_rule(_first_value(item, _FINDING_ID_KEYS)) is not None
+            for item in named[:MAX_FINDINGS_SHOWN]
+        )
+        hint = "; `llm_qa.py --explain <ID>` for a checker's fix" if explainable else ""
+        out += (
+            f"   {_FINDINGS_LABEL} (first {len(shown)} of {len(lines)}{hint}):\n"
+            + "\n".join(shown)
+            + "\n"
+        )
+    return out + f"   full report: {output.resolve()}\n"
 
 
 def _is_passed(data: QaReport) -> bool:
@@ -1538,6 +1632,7 @@ def _summarize_recorded(name: str, exit_code: int | None) -> tuple[bool, str]:
 
     line1 = f"{icon} {name}: {metrics}{mismatch_note}"
     line2 = f"   {config.json_file} | {config.jq_hint}"
+    extras = "" if passed else failure_extras(data, config, json_path)
 
     # A recorded reason beats any inference we could make, and it is the ONLY
     # copy left once run_tool discards the tool's stdout. It also takes
@@ -1547,7 +1642,7 @@ def _summarize_recorded(name: str, exit_code: int | None) -> tuple[bool, str]:
     recorded_error = _report_error(data)
     if recorded_error is not None:
         line3 = f"   {_REPORT_ERROR_LABEL} {recorded_error}"
-        return passed, f"{line1}\n{line2}\n{line3}\n"
+        return passed, f"{line1}\n{line2}\n{line3}\n{extras}"
 
     # A report that counts failures it cannot show is worse than one that
     # counts none: the hint above becomes a promise it does not keep, and an
@@ -1559,9 +1654,9 @@ def _summarize_recorded(name: str, exit_code: int | None) -> tuple[bool, str]:
             f"so the command on the previous line will print nothing. Do NOT read "
             f"that as 'nothing to fix' — the detail was dropped, not absent."
         )
-        return passed, f"{line1}\n{line2}\n{line3}\n"
+        return passed, f"{line1}\n{line2}\n{line3}\n{extras}"
 
-    return passed, f"{line1}\n{line2}\n"
+    return passed, f"{line1}\n{line2}\n{extras}"
 
 
 # ── CLI ────────────────────────────────────────────────────────────
@@ -1572,7 +1667,9 @@ def resolve_tools(names: list[str]) -> tuple[list[str], list[str]]:
 
     ``all`` anywhere means the full suite and nothing else: every other name is
     already in it. ``changed`` expands to its targeted list, and a named tool
-    beside it is added once.
+    beside it is added once. Detectors always run before runners (see
+    :data:`RUNNER_TOOLS`), whatever order they were named in; the order inside
+    each group is kept.
 
     Returns:
         ``(tools, unknown)``: the tools to run, and each name that is neither a
@@ -1589,7 +1686,9 @@ def resolve_tools(names: list[str]) -> tuple[list[str], list[str]]:
                 unknown.append(tool)
             elif tool not in tools:
                 tools.append(tool)
-    return tools, unknown
+    detectors = [tool for tool in tools if tool not in RUNNER_TOOLS]
+    runners = [tool for tool in tools if tool in RUNNER_TOOLS]
+    return detectors + runners, unknown
 
 
 #: Options `changed` forwards to `run_changed_tests.py` (Plan 00463).
@@ -2573,9 +2672,80 @@ def main_moved_command(args: Sequence[str], *, root: Path = PROJECT_ROOT) -> int
     return _VERDICT_EXIT[outcome.verdict]
 
 
+#: Where each rule ID a checker prints is explained (Plan 00484 G6).
+QA_RULES_FILE: Final[Path] = SCRIPTS_DIR / "qa-rules.json"
+_EXPLAIN_OPTION: Final[str] = "--explain"
+_FAMILY_SEPARATOR: Final[str] = ":"
+_EXPLAIN_USAGE: Final[str] = (
+    f"Usage: llm_qa.py {_EXPLAIN_OPTION} [RULE_ID]  (no ID lists every rule). "
+    "Daemon handler rules (R-...), plan-QA and docs-QA checks: "
+    "`bin/hooks-daemon explain-rule <ID>`."
+)
+
+
+def _qa_rules_document() -> dict[str, Any]:
+    """``qa-rules.json`` as parsed: ``{version, docs, description, rules}``."""
+    document: dict[str, Any] = json.loads(QA_RULES_FILE.read_text(encoding="utf-8"))
+    return document
+
+
+def _qa_rules() -> dict[str, dict[str, Any]]:
+    """The rule registry: ``{id: {statement, fix, checks}}`` from ``qa-rules.json``."""
+    rules: dict[str, dict[str, Any]] = _qa_rules_document()["rules"]
+    return rules
+
+
+def explain_rule(rule_id: str) -> str | None:
+    """What ``rule_id`` means and how to fix it, or None when no checker prints it.
+
+    An ID of the form ``family:name`` (``public-pattern:aws-access-key``) is
+    explained by its family entry, because the part after the colon is data
+    the checker computed, not a separate rule.
+    """
+    document = _qa_rules_document()
+    rules: dict[str, dict[str, Any]] = document["rules"]
+    entry = rules.get(rule_id) or rules.get(rule_id.partition(_FAMILY_SEPARATOR)[0])
+    if entry is None:
+        return None
+    return (
+        f"{rule_id}\n"
+        f"  What:       {entry['statement']}\n"
+        f"  Fix:        {entry['fix']}\n"
+        f"  Printed by: {', '.join(entry['checks'])}\n"
+        f"  Docs:       {document['docs']}\n"
+    )
+
+
+def explain_command(args: Sequence[str]) -> int:
+    """``llm_qa.py --explain [RULE_ID]``: explain one rule, or list every rule."""
+    if len(args) > 1:
+        print(f"llm_qa: {_EXPLAIN_OPTION} takes one rule ID. {_EXPLAIN_USAGE}", file=sys.stderr)
+        return EXIT_FAILURE
+    if not args:
+        for rule_id, entry in _qa_rules().items():
+            print(f"{rule_id}  {entry['statement']}")
+        print(f"\n{_EXPLAIN_USAGE}")
+        return EXIT_SUCCESS
+    text = explain_rule(args[0])
+    if text is None:
+        print(
+            f"llm_qa: no scripts/qa checker prints rule '{args[0]}'. {_EXPLAIN_USAGE}",
+            file=sys.stderr,
+        )
+        return EXIT_FAILURE
+    print(text, end="")
+    return EXIT_SUCCESS
+
+
 def main() -> int:
     """Entry point."""
     args = sys.argv[1:]
+
+    if args[:1] == [_EXPLAIN_OPTION]:
+        return explain_command(args[1:])
+    if _EXPLAIN_OPTION in args:
+        print(f"llm_qa: {_EXPLAIN_OPTION} runs on its own. {_EXPLAIN_USAGE}", file=sys.stderr)
+        return EXIT_FAILURE
 
     command_args = [arg for arg in args if arg != "--read-only"]
     if command_args[:1] == [MAIN_MOVED_COMMAND]:
@@ -2611,6 +2781,9 @@ def main() -> int:
             f"  {MAIN_MOVED_COMMAND} [{_START_OPTION} [{_RESTART_OPTION}] | {_ADVANCE_OPTION} | "
             f"{_FINISH_OPTION}] [MAIN_REF]: the batched gate's check on what would land "
             "(runs no tools)"
+        )
+        print(
+            f"  {_EXPLAIN_OPTION} [RULE_ID]: what a rule ID printed by a checker means, and its fix"
         )
         print(f"Tools: {', '.join(TOOL_REGISTRY)}")
         return EXIT_SUCCESS
@@ -2746,6 +2919,36 @@ def _reusable_reason(
     return output_reason(record, QA_OUTPUT_DIR / TOOL_REGISTRY[name].json_file)
 
 
+def mark_not_meaningful(summary: str, failed_detectors: Sequence[str]) -> str:
+    """``summary`` with its result icon replaced and the failed detectors named.
+
+    A runner's result after a failed detector says nothing about the tree the
+    detector rejected, so the line must not read as a pass (or as a separate
+    failure to weigh): the icon goes and the reason is on the first line.
+    """
+    first, newline, rest = summary.partition("\n")
+    for icon in _RESULT_ICONS:
+        first = first.replace(icon, _NOT_MEANINGFUL_ICON, 1)
+    reason = f"[{_NOT_MEANINGFUL_LABEL}: detector failed: {', '.join(failed_detectors)}]"
+    return f"{first}   {reason}{newline}{rest}"
+
+
+def format_verdict(
+    *, passed: int, total: int, not_meaningful: Sequence[str], failed_detectors: Sequence[str]
+) -> str:
+    """The ``QA:`` line. Runners marked not meaningful are neither passed nor failed."""
+    if not not_meaningful and passed == total:
+        return f"QA: {passed}/{total} PASSED"
+    failed = total - passed - len(not_meaningful)
+    line = f"QA: {passed}/{total} PASSED, {failed}/{total} FAILED"
+    if not_meaningful:
+        line += (
+            f", {len(not_meaningful)}/{total} {_NOT_MEANINGFUL_LABEL} "
+            f"(detector failed: {', '.join(failed_detectors)})"
+        )
+    return line
+
+
 def _certify_gate(judged: dict[str, str] | None) -> None:
     """After a passing full run, record HEAD as the batch's certified head, and say so."""
     try:
@@ -2802,6 +3005,8 @@ def _run_tools(
     runs. Reused steps count in the verdict and show their recorded duration.
     """
     all_passed = True
+    failed_detectors: list[str] = []
+    not_meaningful: list[str] = []
     tool_results: dict[str, tuple[bool, str]] = {}
     run_records: dict[str, RunOutcome] = {}
     reused: dict[str, float] = {}
@@ -2823,6 +3028,9 @@ def _run_tools(
             seconds = recorded_durations(recorded, [name]).get(name)
             note = "" if seconds is None else f" (took {seconds:.{_DURATION_DECIMALS}f}s)"
             summary = f"{_REUSED_ICON} {name}: reused, passed on this tree{note}\n"
+            if name in RUNNER_TOOLS and failed_detectors:
+                summary = mark_not_meaningful(summary, failed_detectors)
+                not_meaningful.append(name)
             tool_results[name] = (True, summary)
             if seconds is not None:
                 reused[name] = seconds
@@ -2857,11 +3065,20 @@ def _run_tools(
         if failed_as_recorded is not None:
             passed = False
             summary = summary.replace("✅", "❌", 1) + f"   {_STALE_LABEL} {failed_as_recorded}\n"
-        tool_results[name] = (passed, summary)
         if exit_code is not None and timing is not None:
+            # The record keeps the runner's own result, whatever a detector said:
+            # `--resume` must reuse a runner that really passed.
             run_records[name] = (exit_code, passed, digest, timing)
             _record_step(name, run_records[name], current, step_after)
             current = step_after
+        if not passed and name not in RUNNER_TOOLS:
+            failed_detectors.append(name)
+        if name in RUNNER_TOOLS and failed_detectors and passed:
+            # Only a PASS is unjudgeable after a failed detector. A runner that
+            # really failed stays a failure, shown and counted as one.
+            summary = mark_not_meaningful(summary, failed_detectors)
+            not_meaningful.append(name)
+        tool_results[name] = (passed, summary)
         print(summary, end="")
         if not passed:
             all_passed = False
@@ -2874,12 +3091,18 @@ def _run_tools(
 
     # Overall summary
     total = len(tools)
-    passed_count = sum(1 for passed, _ in tool_results.values() if passed)
+    passed_count = sum(
+        1 for name, (passed, _) in tool_results.items() if passed and name not in not_meaningful
+    )
     print()
-    if all_passed:
-        print(f"QA: {passed_count}/{total} PASSED")
-    else:
-        print(f"QA: {passed_count}/{total} PASSED, {total - passed_count}/{total} FAILED")
+    print(
+        format_verdict(
+            passed=passed_count,
+            total=total,
+            not_meaningful=not_meaningful,
+            failed_detectors=failed_detectors,
+        )
+    )
 
     durations = (
         recorded_durations(recorded, tools)

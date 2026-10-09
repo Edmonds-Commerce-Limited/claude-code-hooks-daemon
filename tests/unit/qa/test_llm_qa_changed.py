@@ -88,6 +88,7 @@ class TestTheChangedSelection:
             "british_english",
             "git_history",
             "github_urls",
+            "inline_suppressions",
             "semgrep",
         ],
     )
@@ -115,7 +116,9 @@ class TestTheChangedSelection:
     def test_a_named_tool_beside_changed_is_added_once(self) -> None:
         tools, _ = llm_qa.resolve_tools(["changed", "lint", "dependencies"])
         assert tools.count("lint") == 1
-        assert tools[-1] == "dependencies"
+        # Added after the `changed` detectors, and still before the runners.
+        detectors = [tool for tool in tools if tool not in llm_qa.RUNNER_TOOLS]
+        assert detectors[-1] == "dependencies"
 
     def test_an_unknown_name_is_reported(self) -> None:
         tools, unknown = llm_qa.resolve_tools(["lint", "bogus"])

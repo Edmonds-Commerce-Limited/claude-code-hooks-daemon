@@ -1,0 +1,552 @@
+{
+  "version": 1,
+  "docs": "CLAUDE/QA.md",
+  "description": "One entry per rule ID a scripts/qa checker prints (Plan 00484 G6). `llm_qa.py --explain <ID>` prints an entry. `checks` names the scripts that print the ID; tests/unit/qa/test_qa_rules.py fails when this file and the scripts disagree, in either direction.",
+  "rules": {
+    "american-spelling": {
+      "statement": "A British-English project wrote an American spelling.",
+      "fix": "Use the British spelling. If the word is a quotation or an identifier, wrap it in backticks: inline code is not checked.",
+      "checks": ["check_british_english.py"]
+    },
+    "authored-path-stat": {
+      "statement": "A path built by joining an author-written value is stat-ed or read as joined, so a `..` in it is walked through the filesystem and the answer depends on every directory along the way existing.",
+      "fix": "Normalise the path lexically first, with `utils.authored_paths.authored_path_exists`; for a read, normalise and then establish containment before opening. There is no exemption marker.",
+      "checks": ["check_authored_path_stat.py"]
+    },
+    "bare-except": {
+      "statement": "A bare `except:` catches everything, including KeyboardInterrupt, and hides the error.",
+      "fix": "Catch the specific exception types the call can raise, and handle or re-raise them.",
+      "checks": ["audit_error_hiding.py"]
+    },
+    "bare-python-module": {
+      "statement": "An agent-facing string contains `python -m claude_code_hooks_daemon`.",
+      "fix": "Point the agent at the skill instead: `Skill tool: skill=hooks-daemon, args=<subcommand>`.",
+      "checks": ["check_skill_references.py"]
+    },
+    "bootstrap-reexec-dollar0-source": {
+      "statement": "`$0`-relative path resolution (`dirname \"$0\"`, `${0%/*}`) appears after a self-bootstrap re-exec stanza, which relocates `$0` to a mktemp path, so a sibling lookup built on it breaks.",
+      "fix": "Anchor to a value derived from PROJECT_ROOT or DAEMON_DIR, or add `# shell-audit: allow -- <reason>` inline or on the line above if the reference genuinely predates the re-exec.",
+      "checks": ["audit_shell.py"]
+    },
+    "capability-table-drift": {
+      "statement": "`constants/events.py` says an event can or cannot block, and the vendored Claude Code contract says otherwise.",
+      "fix": "Correct `can_block` for the event in `constants/events.py`, or refresh the vendored contract if it is stale.",
+      "checks": ["check_hook_contract.py"]
+    },
+    "capture-corruption": {
+      "statement": "A function whose stdout is captured (`var=$(func)`) or redirected to a file elsewhere writes to stdout somewhere other than its return position, so the caller's variable or file holds extra text.",
+      "fix": "Redirect diagnostics with `>&2`, write the value only at the function's terminal return, or add `# capture-audit: allow -- <reason>`.",
+      "checks": ["audit_capture_corruption.py"]
+    },
+    "cli-subcommand-unknown": {
+      "statement": "A shell-tagged fence runs `bin/hooks-daemon <subcommand>` with a subcommand the CLI does not have.",
+      "fix": "Use a subcommand the CLI has, or use the skill (Skill tool: skill=hooks-daemon, args=<subcommand>); the wrapper exits 2 on an unknown one.",
+      "checks": ["check_doc_truth.py"]
+    },
+    "config": {
+      "statement": "The sensitive-content checker's own configuration is invalid, so the scan could not be trusted.",
+      "fix": "Correct the `sensitive_content` options in `.claude/hooks-daemon.yaml` named in the finding.",
+      "checks": ["check_sensitive_content.py"]
+    },
+    "config-key-mismatch": {
+      "statement": "In `docs/guides/HANDLER_REFERENCE.md` a handler section's `**Config key**` row names a different key from the section's own heading.",
+      "fix": "Make the heading and the `**Config key**` row name the same key: readers copy the row, not the heading.",
+      "checks": ["check_handler_reference.py"]
+    },
+    "config-unparseable": {
+      "statement": "The history sweep could not parse the configuration it reads, so the sweep did not complete.",
+      "fix": "Fix the YAML syntax of the config file the finding names.",
+      "checks": ["check_git_history.py"]
+    },
+    "conftest-subtree": {
+      "statement": "Test-selection rule: a test was selected because it lives under a conftest.py that the change touched.",
+      "fix": "Not a defect. It explains why a test ran; see `scripts/qa/run_changed_tests.py` for the mapping.",
+      "checks": ["run_changed_tests.py"]
+    },
+    "daemon-dir-cd-in-docs": {
+      "statement": "A document tells the reader to `cd` into `.claude/hooks-daemon/`, which the daemon's CLI commands must not be run from.",
+      "fix": "Show the command run from the project root, for example `bin/hooks-daemon status`.",
+      "checks": ["check_daemon_dir_cd_in_docs.py"]
+    },
+    "dangerous-invocation-corpus": {
+      "statement": "A recorded corpus verdict no longer describes what the daemon does: a dangerous outcome is reachable by a spelling no guard names.",
+      "fix": "Restore the handler behaviour, or correct the row in `scripts/qa/dangerous-invocation-corpus.yaml` with the reason the verdict changed.",
+      "checks": ["check_dangerous_invocation_corpus.py"]
+    },
+    "dead-letter-field": {
+      "statement": "A schema accepts a field that the vendored docs say Claude Code discards for that event.",
+      "fix": "Remove the field from that event's schema, or refresh the contract if Claude Code now honours it.",
+      "checks": ["check_hook_contract.py"]
+    },
+    "declared": {
+      "statement": "Test-selection rule: a test was selected because `changed_tests_map.yaml` declares it for a changed file.",
+      "fix": "Not a defect. It explains why a test ran; see `scripts/qa/changed_tests_map.yaml`.",
+      "checks": ["run_changed_tests.py"]
+    },
+    "declared-invariant-pairs": {
+      "statement": "Two sites a human declared as a pair no longer satisfy the declared relation (asymmetric sibling protection).",
+      "fix": "Change both sides together, or update the pair's row in `scripts/qa/declared-invariant-pairs.yaml`.",
+      "checks": ["check_declared_invariant_pairs.py"]
+    },
+    "deleted-test": {
+      "statement": "Test-selection rule: a deleted test file is recorded so its removal is not mistaken for an unmapped change.",
+      "fix": "Not a defect. It explains how a deletion was classified.",
+      "checks": ["run_changed_tests.py"]
+    },
+    "deleted-unreferenced": {
+      "statement": "Test-selection rule: a deleted source file has no remaining referrer, so no test needs to run for it.",
+      "fix": "Not a defect. It explains how a deletion was classified.",
+      "checks": ["run_changed_tests.py"]
+    },
+    "dependent": {
+      "statement": "Test-selection rule: a test was selected because it covers a source file that refers to the changed file (one hop of dependents).",
+      "fix": "Not a defect. It explains why a test ran; reach beyond one hop is the coordinator's full gate.",
+      "checks": ["run_changed_tests.py"]
+    },
+    "double-suppression": {
+      "statement": "A shell command drops both stderr and the exit code (`2>/dev/null || true`, `>/dev/null 2>&1 || true` or `&>/dev/null || true`), leaving no way to notice a failure.",
+      "fix": "Fix the code so the failure is handled, or add `# shell-audit: allow -- <reason>` inline or on the line above.",
+      "checks": ["audit_shell.py"]
+    },
+    "event-missing-from-catalogue": {
+      "statement": "The vendored contract documents an event that has no entry in `constants/events.py`.",
+      "fix": "Add the event (wired, or `wired=False` plus `EXPECTED_UNWIRED` per the file's tracked-gap rule).",
+      "checks": ["check_hook_contract.py"]
+    },
+    "example-config-phantom-handler": {
+      "statement": "`.claude/hooks-daemon.yaml.example` configures a handler that does not exist or was retired.",
+      "fix": "Delete the key from the example config: retired names are exempt from the unknown-handler error, so a copied block would give no error, no handler and a false belief that a protection runs.",
+      "checks": ["check_handler_reference.py"]
+    },
+    "fail-open-inventory": {
+      "statement": "The enforcement path has a fail-open candidate (the guarded action proceeds because the guard could not reach a verdict) that no inventory row judges, or a row is incomplete or names a candidate that is gone.",
+      "fix": "Make it fail closed, or add a judged row to `scripts/qa/fail-open-boundaries.yaml` stating what induces it, whether the input is caller-controlled and what trace it leaves; delete a row whose candidate is gone.",
+      "checks": ["check_fail_open_inventory.py"]
+    },
+    "fetch-piped-to-shell": {
+      "statement": "A `curl` or `wget` pipes its output straight into an interpreter, so whatever the server sends is run.",
+      "fix": "Download to a file, verify the bytes against a digest carried independently of them, then run it; or record the case in `scripts/qa/security-downgrade-inventory.yaml` with its note.",
+      "checks": ["check_security_downgrade_flags.py"]
+    },
+    "frozen-session-summary": {
+      "statement": "A tracked document carries a session-summary marker: a snapshot of one conversation whose counts freeze and whose next steps nothing updates.",
+      "fix": "Delete it, or fold the durable part into the document that owns the topic. Narrative belongs in the plan's JOURNAL/.",
+      "checks": ["check_repo_hygiene.py"]
+    },
+    "generated-doc-drift": {
+      "statement": "The committed `.claude/HOOKS-DAEMON.md` differs from what `generate-docs` produces now (the marker line is excluded).",
+      "fix": "Regenerate it (`bin/hooks-daemon generate-docs`) and commit it in the same change that altered the handler set; a daemon restart does not refresh it.",
+      "checks": ["check_generated_doc_drift.py"]
+    },
+    "generated-doc-marker-missing": {
+      "statement": "The committed `.claude/HOOKS-DAEMON.md` carries no `> Generated on ... (vX.Y.Z)` marker, the durable record of the version the tracked assets were deployed from.",
+      "fix": "Run `bin/hooks-daemon generate-docs` to restore the marker; `scripts/upgrade.sh` reads it.",
+      "checks": ["check_generated_doc_drift.py"]
+    },
+    "git-scan-failed": {
+      "statement": "The history sweep could not run git, the target is not a git repository, or git reported zero commits, so no history was vouched for.",
+      "fix": "Make `git` work in the target repository (path, permissions), then re-run; a sweep that scanned no commits is not a pass.",
+      "checks": ["check_git_history.py"]
+    },
+    "handler-claim-mismatch": {
+      "statement": "A document bullet's verb asserts blocking for an advisory or context handler, or advisory-only behaviour for a blocking or terminal one.",
+      "fix": "Correct the bullet to say what the handler does, as `.claude/HOOKS-DAEMON.md` records it.",
+      "checks": ["check_doc_truth.py"]
+    },
+    "handler-count-unverifiable": {
+      "statement": "A document gives a prose \"N production handlers\" count, which no artefact substantiates (the generated doc counts only what is enabled in this project).",
+      "fix": "Drop the number; say \"a large library of production handlers\" and point at the generated doc.",
+      "checks": ["check_doc_truth.py"]
+    },
+    "handler-ref-unknown": {
+      "statement": "A document names a handler that is not in the generated registry (`.claude/HOOKS-DAEMON.md`) or the handler code.",
+      "fix": "Correct the key, delete the section if the handler does not exist, or regenerate the doc (`hooks-daemon generate-docs`) if the handler is new.",
+      "checks": ["check_doc_truth.py", "check_handler_reference.py"]
+    },
+    "hostile-path-unguarded-command": {
+      "statement": "`date` or `pgrep` is looked up on PATH in a declared hostile-PATH file (the venv bootstrap and install scripts), with no `command -v` guard anywhere in the file.",
+      "fix": "Guard it with `command -v <cmd>` and a fallback (see `scripts/lib/portable_time.sh`), or add `# shell-audit: allow -- <reason>` inline or on the line above if the call cannot be reached with a hostile PATH.",
+      "checks": ["audit_shell.py"]
+    },
+    "ignored-plan-document": {
+      "statement": "A plan document is silently ignored by .gitignore, so it is missing for everyone except its author.",
+      "fix": "Narrow the .gitignore pattern (anchor a root-level name with a leading slash), then `git add` the document. Do not rename the document to dodge the pattern.",
+      "checks": ["check_repo_hygiene.py"]
+    },
+    "inline-suppression-without-reason": {
+      "statement": "An inline QA suppression (nosec, noqa including the file-wide ruff/flake8 forms, type: ignore, pyright, mypy, pylint, nosemgrep, pragma: no cover, shellcheck disable) names no reason; owner ruling B2 requires one. A bare Bandit code or test name after nosec is not a reason.",
+      "fix": "Add the reason after the directive (`nosec B404 - fixed argv, no shell`), in a second `#` segment of the same comment, or in the comment block directly above that names the suppression, its code or the tool. A comment about something else does not count. Better: fix the code so the suppression can go.",
+      "checks": ["check_inline_suppressions.py"]
+    },
+    "kill-command": {
+      "statement": "Python runs a `kill`, `pkill` or `killall` argv through `subprocess` (other than `kill -0`). `pkill` and `killall` pick their targets by pattern, so no pid is proven. The shell form is `shell-unproven-kill`.",
+      "fix": "Signal through `claude_code_hooks_daemon.utils.safe_signal` (`signal_verified_daemon`, `stop_verified_daemon`, `signal_own_session_child`), or signal the Popen object itself. There is no exemption marker.",
+      "checks": ["check_signal_targets.py"]
+    },
+    "log-and-continue": {
+      "statement": "An exception handler only logs and carries on, so the failure is indistinguishable from success.",
+      "fix": "Re-raise, return an error, or use `utils.deliberate_swallow.log_and_continue(..., reason=...)` if the swallow is deliberate.",
+      "checks": ["audit_error_hiding.py"]
+    },
+    "log-helper-stdout": {
+      "statement": "A shell logging helper (`print_*`, `log_*`, `warn_*`, `err_*`) writes to stdout, which corrupts any value its caller captures.",
+      "fix": "Redirect every echo or printf in the helper with `>&2`.",
+      "checks": ["audit_capture_corruption.py"]
+    },
+    "magic-config-key": {
+      "statement": "A config key is written as a string literal when subscripting a config-like mapping instead of a constant.",
+      "fix": "Use the `ConfigKey.<NAME>` constant.",
+      "checks": ["check_magic_values.py"]
+    },
+    "magic-decision": {
+      "statement": "A decision value (\"allow\", \"deny\") is passed as a string literal to `decision=` instead of an enum member.",
+      "fix": "Use the `Decision.<NAME>` enum member (for example `Decision.DENY`).",
+      "checks": ["check_magic_values.py"]
+    },
+    "magic-event-type": {
+      "statement": "An event type is compared as a string literal instead of a constant.",
+      "fix": "Use the `EventID.<NAME>` constant.",
+      "checks": ["check_magic_values.py"]
+    },
+    "magic-handler-display-name": {
+      "statement": "A handler display name is written as a string literal in a test instead of being read from the handler constant.",
+      "fix": "Use `HandlerID.<NAME>.display_name`.",
+      "checks": ["check_magic_values.py"]
+    },
+    "magic-handler-name": {
+      "statement": "A handler name is written as a string literal in `Handler.__init__`.",
+      "fix": "Pass `handler_id=HandlerID.<NAME>` instead of `name=\"...\"`.",
+      "checks": ["check_magic_values.py"]
+    },
+    "magic-priority": {
+      "statement": "A handler priority is written as a number instead of a constant.",
+      "fix": "Use the priority constant from `constants/priority.py`.",
+      "checks": ["check_magic_values.py"]
+    },
+    "magic-tag": {
+      "statement": "A handler tag is written as a string literal instead of a constant.",
+      "fix": "Use the `HandlerTag` constant.",
+      "checks": ["check_magic_values.py"]
+    },
+    "magic-timeout": {
+      "statement": "A timeout is written as a number, or a `settimeout()` literal guards a dispatch round trip.",
+      "fix": "Use the `Timeout.<NAME>` constant; a `settimeout()` literal guarding a connect-only liveness probe is correct by design and not flagged.",
+      "checks": ["check_magic_values.py"]
+    },
+    "magic-tool-name": {
+      "statement": "A Claude Code tool name is written as a string literal instead of a constant.",
+      "fix": "Use the `ToolName.<NAME>` constant.",
+      "checks": ["check_magic_values.py"]
+    },
+    "malformed-allowlist-entry": {
+      "statement": "An entry in a contract allowlist (`ALLOWLIST.yaml`, `INPUT-ALLOWLIST.yaml`) lacks its `id`, its `reason` or its `link` to a plan or task.",
+      "fix": "Give the entry an `id`, a `reason` and a `link` to the plan or task that tracks it, or delete it.",
+      "checks": ["contract_allowlist.py"]
+    },
+    "marker-missing-reason": {
+      "statement": "An `allow` marker (`shell-audit: allow`, `capture-audit: allow`) has no `-- <reason>` suffix.",
+      "fix": "Write `-- <why this is safe>` after the marker, or fix the line and remove the marker.",
+      "checks": ["audit_capture_corruption.py", "audit_shell.py"]
+    },
+    "missing-identifier": {
+      "statement": "A documented `Handler` subclass calls `super().__init__()` with neither `handler_id` nor `name`, which raises ValueError.",
+      "fix": "Pass `handler_id=HandlerID.<NAME>` to `super().__init__()` in the snippet.",
+      "checks": ["check_doc_snippets.py"]
+    },
+    "missing-refusal-claim": {
+      "statement": "The docs document blocking for an event, but `REFUSAL_CAPABLE_EVENTS` omits it, so a DENY there is silently dropped.",
+      "fix": "Add the event to `REFUSAL_CAPABLE_EVENTS`, or record why the daemon cannot express a refusal there in the contract allowlist.",
+      "checks": ["check_hook_contract.py"]
+    },
+    "module-too-long": {
+      "statement": "A module under `src/` is longer than 1000 lines. The check is report-only and does not gate.",
+      "fix": "Split the module along its existing seams.",
+      "checks": ["check_module_length.py"]
+    },
+    "orphaned-handler-guidance": {
+      "statement": "The resident CLAUDE.md guidance block describes a handler that has no module in the tree.",
+      "fix": "Restart the daemon so the injector regenerates the block, then commit the regenerated CLAUDE.md. Do not hand-edit the block.",
+      "checks": ["check_repo_hygiene.py"]
+    },
+    "plan-stats-arithmetic": {
+      "statement": "The plan index's reconciliation bullet carries figures (folder counts, distinct plan numbers, folderless numbers) that do not add up.",
+      "fix": "Recount from disk and correct the bullet so every figure agrees with the others; do not just adjust whichever number the message names, and do not leave the verified tick above numbers that disagree.",
+      "checks": ["check_repo_hygiene.py"]
+    },
+    "positional-arg": {
+      "statement": "A documented snippet passes a positional argument to a symbol whose parameters are keyword-only.",
+      "fix": "Pass the argument by keyword.",
+      "checks": ["check_doc_snippets.py"]
+    },
+    "post-upgrade-index-drift": {
+      "statement": "The post-upgrade task index names a task file that is gone, or omits one that exists.",
+      "fix": "Add a row for each task with none and delete the row for each task that is gone.",
+      "checks": ["check_repo_hygiene.py"]
+    },
+    "priority-mismatch": {
+      "statement": "A documented handler priority differs from the priority in the code.",
+      "fix": "Correct the document to the value in `constants/priority.py`.",
+      "checks": ["check_handler_reference.py"]
+    },
+    "priority-unresolvable": {
+      "statement": "A document gives a priority for a handler whose priority is not declared in `constants/priority.py`, so the number cannot be verified.",
+      "fix": "Add a Priority constant for the handler and use it in its `__init__` (preferred), or drop the Priority row rather than assert an unverifiable number.",
+      "checks": ["check_handler_reference.py"]
+    },
+    "public-pattern": {
+      "statement": "Content matches a named public sensitive-content pattern, or a configured pattern is not a valid regex and so checked nothing. The ID is `public-pattern:<name>`; the name says which pattern.",
+      "fix": "Remove or rewrite the matched text, or fix the pattern's regex. The pattern is declared in `.claude/hooks-daemon.yaml` under `sensitive_content`.",
+      "checks": ["check_git_history.py", "check_sensitive_content.py"]
+    },
+    "qa-check-count-hardcoded": {
+      "statement": "A document hard-codes how many QA checks exist, and the number goes stale.",
+      "fix": "Remove the number and say \"all checks in the QA suite\" instead: no generated artefact holds the count, so it drifts silently.",
+      "checks": ["check_doc_truth.py"]
+    },
+    "raw-signal": {
+      "statement": "`os.kill`, `os.killpg`, `signal.pthread_kill` or `signal.pidfd_send_signal` sends a nonzero signal to a target nothing proved is the intended process.",
+      "fix": "Route the signal through `claude_code_hooks_daemon.utils.safe_signal` (`signal_verified_daemon`, `stop_verified_daemon`, `signal_own_session_child`), or signal the Popen object itself. Signal 0 is exempt. There is no exemption marker: fix the site.",
+      "checks": ["check_signal_targets.py"]
+    },
+    "raw-stat-predicate": {
+      "statement": "A handler that can receive a caller-supplied path judges it with a raw `Path.exists()`, `is_file()` or `is_dir()`, which raises PermissionError when an ancestor directory is not traversable.",
+      "fix": "Use `utils.path_predicates` (for example `path_is_file(path, unreadable_means=...)`), stating what this site means by \"I could not look\". For a daemon-controlled path, record `# eacces-safe-exempt: <why this path is not caller-supplied>` in place.",
+      "checks": ["check_eacces_safe_predicates.py"]
+    },
+    "reference": {
+      "statement": "Test-selection rule: a test was selected because it is the changed file's mirrored test, or refers to it by path, by basename or by import.",
+      "fix": "Not a defect. It explains why a test ran.",
+      "checks": ["run_changed_tests.py"]
+    },
+    "released-changelog-section-edited": {
+      "statement": "CHANGELOG.md edits a section already released at the latest tag; released history is frozen.",
+      "fix": "Revert the edit. New notes go in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`; the release process writes the CHANGELOG section.",
+      "checks": ["check_released_changelog.py"]
+    },
+    "return-none-on-error": {
+      "statement": "A handler returns None on error instead of raising, so the caller cannot tell failure from absence.",
+      "fix": "Raise a specific exception, or return a result type that carries the error.",
+      "checks": ["audit_error_hiding.py"]
+    },
+    "return-none-via-local": {
+      "statement": "A handler binds None or an empty default to a local that is returned after the try: return-none-on-error in a different spelling.",
+      "fix": "Re-raise, log at warning or above, or record the problem on a list the function returns or reports; or return a result type that carries the error.",
+      "checks": ["audit_error_hiding.py"]
+    },
+    "root-test-script": {
+      "statement": "A `test_*.sh` script sits at the repository root, where nothing owns or runs it.",
+      "fix": "Move it into `tests/` (or beside the code it exercises) if it still earns its keep, otherwise delete it.",
+      "checks": ["check_repo_hygiene.py"]
+    },
+    "secret-word-list": {
+      "statement": "Content matches an entry of the gitignored secret word list. Only the entry index is reported, never the term.",
+      "fix": "Remove the matched text. Ask the owner what the entry covers; do not open the secret word list.",
+      "checks": ["check_git_history.py", "check_sensitive_content.py"]
+    },
+    "security-downgrade-flag": {
+      "statement": "A script sets a flag whose only effect is to turn a protection off (`--no-verify`, `verify=False`, `PYTHONHTTPSVERIFY=0`, `-k` or `--insecure` on a fetching line, ...).",
+      "fix": "Remove the flag, or record the case in `scripts/qa/security-downgrade-inventory.yaml` with its reason.",
+      "checks": ["check_security_downgrade_flags.py"]
+    },
+    "self": {
+      "statement": "Test-selection rule: a changed test file selects itself.",
+      "fix": "Not a defect. It explains why a test ran.",
+      "checks": ["run_changed_tests.py"]
+    },
+    "shell-discard-both-streams": {
+      "statement": "A shell command redirects stdout to /dev/null and then stderr to the same place (`>/dev/null 2>&1`), so its failures leave no trace.",
+      "fix": "Redirect only what you intend; log errors to a file or stderr.",
+      "checks": ["audit_error_hiding.py"]
+    },
+    "shell-empty-err-trap": {
+      "statement": "A shell file installs an empty ERR trap (`trap '' ERR`), which silences every command failure the trap would have reported.",
+      "fix": "Remove the trap or handle errors explicitly.",
+      "checks": ["audit_error_hiding.py"]
+    },
+    "shell-or-colon": {
+      "statement": "A shell command ends in `|| :`, which turns its failure into success.",
+      "fix": "Handle failure explicitly with if/else or exit 1.",
+      "checks": ["audit_error_hiding.py"]
+    },
+    "shell-or-true": {
+      "statement": "A shell command ends in `|| true`, which turns its failure into success.",
+      "fix": "Handle failure explicitly with if/else or exit 1.",
+      "checks": ["audit_error_hiding.py"]
+    },
+    "shell-redirect-all-to-null": {
+      "statement": "A shell command sends both stdout and stderr to /dev/null with `&>/dev/null`, so its failures leave no trace.",
+      "fix": "Redirect only what you intend; log errors to a file or stderr.",
+      "checks": ["audit_error_hiding.py"]
+    },
+    "shell-set-plus-e": {
+      "statement": "A shell file turns errexit off with `set +e`, so a failing command no longer stops the script.",
+      "fix": "Remove `set +e`; handle individual command failures with if/else.",
+      "checks": ["audit_error_hiding.py"]
+    },
+    "shell-unproven-kill": {
+      "statement": "A shell `kill`, `pkill` or `killall` in command position sends a nonzero signal to a target nothing proved. `pkill` and `killall` pick targets by pattern and are always reported; a `kill` target is proven only when it is `$$`, `$!`, a `%job`, a variable always bound to `$!`, or a variable an identity check ran on earlier in the same function.",
+      "fix": "Run an identity check on the pid earlier in the same function (`_is_project_daemon_pid`, a start-time or parent check), or signal `$$` or `$!`. A group target (`-PGID`) needs an identity check. There is no exemption marker.",
+      "checks": ["check_signal_targets.py"]
+    },
+    "silent-continue": {
+      "statement": "An exception handler whose whole body is `continue` skips the error with no trace.",
+      "fix": "Record the skipped item where the caller reads it (append it to a list the function returns or reports, or tell the user on the console), call `utils.deliberate_swallow.log_and_continue(..., reason=...)` if the skip is deliberate, or let the error propagate. A bare log call plus `continue` is `log-and-continue`.",
+      "checks": ["audit_error_hiding.py"]
+    },
+    "silent-fallback": {
+      "statement": "An exception handler whose whole body is one assignment replaces the error with a fallback value, with no logging or re-raise, so failure looks like success.",
+      "fix": "Re-raise, surface the failure (log at warning or above, or `utils.deliberate_swallow.log_and_continue(..., reason=...)`) alongside the fallback, or let the error propagate. A logged None or empty default is `log-and-continue`.",
+      "checks": ["audit_error_hiding.py"]
+    },
+    "silent-pass": {
+      "statement": "An exception handler whose whole body is `pass` swallows the error completely. Narrowing the exception type does not change the finding.",
+      "fix": "Handle the error or let it propagate. If the swallow is deliberate, call `utils.deliberate_swallow.log_and_continue(..., reason=...)` with a specific reason.",
+      "checks": ["audit_error_hiding.py"]
+    },
+    "slash-command-in-shell-fence": {
+      "statement": "A Claude Code slash command is shown inside a shell-tagged code fence.",
+      "fix": "Tag the fence `claude-code` (see `CLAUDE/development/DOC-CONVENTIONS.md`).",
+      "checks": ["check_doc_truth.py"]
+    },
+    "slash-command-syntax": {
+      "statement": "An agent-facing string uses `/hooks-daemon` slash-command syntax, which Claude interprets as a bash command.",
+      "fix": "Point the agent at the skill instead: `Skill tool: skill=hooks-daemon, args=<subcommand>`.",
+      "checks": ["check_skill_references.py"]
+    },
+    "src-test-stub": {
+      "statement": "A test file sits under `src/`, where pytest never collects it, so it runs nowhere.",
+      "fix": "Delete it and write the real test under `tests/`. Never commit a bypass of the TDD gate.",
+      "checks": ["check_repo_hygiene.py"]
+    },
+    "stale-allowlist-entry": {
+      "statement": "An allowlist entry excuses a finding that no longer exists.",
+      "fix": "Delete the entry; the allowlist must only hold live exceptions.",
+      "checks": ["contract_allowlist.py"]
+    },
+    "stale-exclusion": {
+      "statement": "An entry of `error_hiding_exclusions.json` matches no finding, so it drifted off its target or the code was fixed.",
+      "fix": "Realign the entry to its target, or delete it.",
+      "checks": ["audit_error_hiding.py"]
+    },
+    "stale-grandfather": {
+      "statement": "A grandfathered ref in the history sweep's configuration no longer exists.",
+      "fix": "Remove the entry from `history_grandfathered_refs`.",
+      "checks": ["check_git_history.py"]
+    },
+    "suppressed-fetch": {
+      "statement": "A `curl`, `wget` or `git clone` discards its failure to /dev/null, so a fetch that went wrong cannot be seen.",
+      "fix": "Let the fetch report failure and check its exit status.",
+      "checks": ["check_security_downgrade_flags.py"]
+    },
+    "tracked-build-artifact": {
+      "statement": "A build artefact is tracked in the repository.",
+      "fix": "Untrack it (`git rm --cached`) and ignore the path.",
+      "checks": ["check_repo_hygiene.py"]
+    },
+    "unauditable-file": {
+      "statement": "A file could not be opened or decoded, so it was never audited for error hiding.",
+      "fix": "Make the file readable UTF-8, or remove it; an unaudited file is not a pass.",
+      "checks": ["audit_error_hiding.py"]
+    },
+    "unbounded-skip-list-membership": {
+      "statement": "A skip or exclude list entry is tested against a path with bare `in`, which is substring containment, so the guard stands down for any path that merely ends in the entry.",
+      "fix": "Use `utils.path_segments.matches_path_segment(file_path, patterns, project_root=resolve_project_root())`, which matches whole path segments relative to the project.",
+      "checks": ["check_skip_list_substring.py"]
+    },
+    "undocumented-blocking-handler": {
+      "statement": "A PreToolUse blocking handler listed in the generated `.claude/HOOKS-DAEMON.md` has no section in the canonical `docs/guides/HANDLER_REFERENCE.md`.",
+      "fix": "Add a `#### <key>` section for the handler to `docs/guides/HANDLER_REFERENCE.md`.",
+      "checks": ["check_handler_reference.py"]
+    },
+    "undocumented-claim": {
+      "statement": "`REFUSAL_CAPABLE_EVENTS` claims DENY or ASK on an event for which the docs document no such mechanism.",
+      "fix": "Remove the claim, or refresh the contract if Claude Code now documents it.",
+      "checks": ["check_hook_contract.py"]
+    },
+    "undocumented-emitted-token": {
+      "statement": "Serialising a DENY on an event emits a top-level `decision` token the docs never define.",
+      "fix": "Emit a documented decision value, or refresh the contract.",
+      "checks": ["check_hook_contract.py"]
+    },
+    "undocumented-enum-value": {
+      "statement": "A schema enum allows a value the docs do not define for that event.",
+      "fix": "Remove the value, or refresh the contract.",
+      "checks": ["check_hook_contract.py"]
+    },
+    "undocumented-schema-field": {
+      "statement": "A schema accepts a field (top-level, `hookSpecificOutput.*` or nested) the docs do not define for that event.",
+      "fix": "Remove the field, or refresh the contract.",
+      "checks": ["check_hook_contract.py"]
+    },
+    "unexpressed-capability": {
+      "statement": "The docs define a field the daemon's schema for that event cannot express.",
+      "fix": "Add the field to the schema, or record why the daemon omits it in the contract allowlist.",
+      "checks": ["check_hook_contract.py"]
+    },
+    "unexpressed-enum-value": {
+      "statement": "The docs define an enum value of a `hookSpecificOutput` field that the daemon's schema cannot express.",
+      "fix": "Add the value, or record why the daemon omits it in the contract allowlist.",
+      "checks": ["check_hook_contract.py"]
+    },
+    "unexpressed-universal-fields": {
+      "statement": "An event's schema cannot express the documented universal output fields (`continue`, `stopReason`, `suppressOutput`, `systemMessage`, `terminalSequence`).",
+      "fix": "Add the missing universal fields to the event's output schema.",
+      "checks": ["check_hook_contract.py"]
+    },
+    "unknown-import": {
+      "statement": "A documented snippet imports a name the package does not export.",
+      "fix": "Correct the import to a real name, or remove the snippet.",
+      "checks": ["check_doc_snippets.py"]
+    },
+    "unknown-input-field": {
+      "statement": "The daemon reads a hook-input field the vendored per-event examples do not contain.",
+      "fix": "Stop reading the field; or, if it arrives only under some condition, declare it with that condition in the event's `conditional_input_fields`; or refresh the vendored examples if Claude Code now sends it.",
+      "checks": ["check_input_contract.py"]
+    },
+    "unknown-keyword": {
+      "statement": "A documented snippet passes a keyword the callee does not accept (a Pydantic model may silently discard it).",
+      "fix": "Use a keyword the callee has.",
+      "checks": ["check_doc_snippets.py"]
+    },
+    "unparseable-shell": {
+      "statement": "A quote, `$(...)`, backtick or heredoc opened in a shell file never closes, so the lines after it cannot be audited as logical commands.",
+      "fix": "Fix the unterminated quote, backtick, `$(...)` or heredoc.",
+      "checks": ["audit_capture_corruption.py"]
+    },
+    "unproven-process-handle": {
+      "statement": "`.terminate()`, `.kill()` or `.send_signal()` is called on a `psutil.Process` built from a raw pid or taken from `psutil.process_iter()`, or `.send_signal()` on a receiver not proven to be a `subprocess.Popen` this scope spawned.",
+      "fix": "Signal through `claude_code_hooks_daemon.utils.safe_signal`, or through a handle it returned (`verified_daemon_process`), or signal the Popen itself. An inline check of the handle's command line or start time is not proof. There is no exemption marker.",
+      "checks": ["check_signal_targets.py"]
+    },
+    "unreachable-handle-branch": {
+      "statement": "A handler's `handle()` does work under `if not self.matches(...)`, which the chain never executes.",
+      "fix": "Make `matches()` return True for every input `handle()` must see and let `handle()` choose the decision; keep the `if not self.matches(...)` branch, if at all, as a bare `return` of an ALLOW.",
+      "checks": ["check_unreachable_handle_branch.py"]
+    },
+    "unreadable-file": {
+      "statement": "A file could not be read, decoded or tokenised, so it was never checked.",
+      "fix": "Make the file readable UTF-8, or fix the parse error the finding names; an unread file is not a pass.",
+      "checks": ["check_github_urls.py", "check_inline_suppressions.py", "check_sensitive_content.py"]
+    },
+    "unreleased-manifest-date": {
+      "statement": "A released config-changes manifest still carries the UNRELEASED placeholder, or any other non-ISO `date:`, instead of its release date.",
+      "fix": "Set `date:` to the date the version was tagged (`git log -1 --format=%cs vX.Y.Z`) when the manifest moves out of UNRELEASED.",
+      "checks": ["check_repo_hygiene.py"]
+    },
+    "unset-shell-variable-in-guidance": {
+      "statement": "Agent-facing guidance names a shell variable (such as `$PYTHON`) that is never set in an agent's shell.",
+      "fix": "Use `utils.cli_command.daemon_cli_command(...)` so the emitted command is an absolute path to the deployed `bin/hooks-daemon` wrapper; in static markdown, write the wrapper path directly.",
+      "checks": ["check_python_var_guidance.py"]
+    },
+    "unvalidated-url-expansion": {
+      "statement": "A URL is built from an environment expansion that nothing scheme-checks, in a file that fetches.",
+      "fix": "Validate the scheme (https only) before fetching.",
+      "checks": ["check_security_downgrade_flags.py"]
+    },
+    "wrong-github-owner": {
+      "statement": "A GitHub URL names this project under an owner that is not the canonical repository.",
+      "fix": "Use the canonical `Edmonds-Commerce-Limited/claude-code-hooks-daemon` URL.",
+      "checks": ["check_github_urls.py"]
+    }
+  }
+}

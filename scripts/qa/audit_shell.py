@@ -58,6 +58,7 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 from claude_code_hooks_daemon.utils.scan_scope import (
     relative_parts,
     vacuous_scan_failure,
@@ -65,6 +66,9 @@ from claude_code_hooks_daemon.utils.scan_scope import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+#: The suffixes of the scripts this auditor judges.
+_SHELL_SUFFIXES = frozenset({".sh", ".bash"})
+
 DEFAULT_SCAN_DIR = REPO_ROOT / "scripts"
 # Plan 00285: the self-bootstrap stanza (and therefore the
 # bootstrap-reexec-dollar0-source rule) only ever appears in the deployed
@@ -368,7 +372,7 @@ class DirectoryAudit:
 def audit_directory(root: Path) -> DirectoryAudit:
     """Audit every .sh / .bash file under root (recursively)."""
     candidates = sorted(
-        script for pattern in ("*.sh", "*.bash") for script in walk_files(root, pattern)
+        script for suffix in sorted(_SHELL_SUFFIXES) for script in walk_files(root, f"*{suffix}")
     )
     kept = [script for script in candidates if not _is_excluded(script, root)]
     violations = [violation for script in kept for violation in audit_file(script)]
@@ -384,11 +388,11 @@ def _format_text_report(violations: list[Violation]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _write_json(
-    violations: list[Violation], output_path: Path, *, examined: int, vacuous: str | None
-) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    data = {
+def _report_data(
+    violations: list[Violation], *, examined: int, vacuous: str | None
+) -> dict[str, object]:
+    """The JSON document, for the artefact and for a single-file run alike."""
+    return {
         "summary": {
             "passed": not violations and vacuous is None,
             "total_violations": len(violations),
@@ -397,7 +401,62 @@ def _write_json(
         },
         "violations": [asdict(v) for v in violations],
     }
-    output_path.write_text(json.dumps(data, indent=2))
+
+
+def _write_json(
+    violations: list[Violation], output_path: Path, *, examined: int, vacuous: str | None
+) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(_report_data(violations, examined=examined, vacuous=vacuous), indent=2)
+    )
+
+
+def _single_file_problem(path: Path) -> str | None:
+    """Why ``path`` cannot be audited as one shell script, or None."""
+    if not path.exists():
+        return f"{path}: no such file"
+    if not path.is_file():
+        return f"{path}: not a file (--path takes one file; --scan-dir takes a directory)"
+    if path.suffix not in _SHELL_SUFFIXES:
+        return f"{path}: not a shell script (.sh or .bash), so nothing was examined"
+    return None
+
+
+def out_of_scope_reason(path: Path) -> str | None:
+    """Why the default tree run would not judge ``path``, or None when it would.
+
+    A file inside the repository is judged only if the default run reaches it:
+    below ``scripts/`` or the skill scripts directory, outside an excluded
+    directory. A file outside the repository has no tree-run verdict to match,
+    so it is judged as given.
+    """
+    resolved = path.resolve()
+    if not path_is_relative_to(resolved, REPO_ROOT.resolve()):
+        return None
+    for scan_dir in (DEFAULT_SCAN_DIR, DEFAULT_SKILL_SCAN_DIR):
+        root = scan_dir.resolve()
+        if path_is_relative_to(resolved, root) and not _is_excluded(resolved, root):
+            return None
+    return "it is outside scripts/ and the skill scripts directory, or in an excluded directory"
+
+
+def run_single_file(path: Path, *, json_output: bool) -> int:
+    """Audit one script (DETECTOR-SPEC 5.2) and report on stdout. Writes no artefact."""
+    problem = _single_file_problem(path)
+    if problem is None:
+        reason = out_of_scope_reason(path)
+        if reason is not None:
+            problem = f"{path}: not judged by the tree run ({reason}), so nothing was examined"
+    if problem is not None:
+        print(f"shell-audit: {problem}", file=sys.stderr)
+        return 1
+    violations = audit_file(path)
+    if json_output:
+        print(json.dumps(_report_data(violations, examined=1, vacuous=None), indent=2))
+    else:
+        sys.stdout.write(_format_text_report(violations))
+    return 1 if violations else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -419,7 +478,16 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_OUTPUT,
         help="Where to write JSON (only when --json is given)",
     )
+    parser.add_argument(
+        "--path",
+        type=Path,
+        default=None,
+        help="Audit this one script; findings (JSON with --json) go to stdout, no artefact",
+    )
     args = parser.parse_args(argv)
+
+    if args.path is not None:
+        return run_single_file(args.path, json_output=args.json)
 
     scan_dirs = (
         [args.scan_dir]
