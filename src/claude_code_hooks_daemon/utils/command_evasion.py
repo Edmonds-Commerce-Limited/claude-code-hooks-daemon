@@ -65,9 +65,15 @@ SUBCOMMAND_SEPARATOR_CHARS = ";&|\n\r"
 # `-C my\ dir`, `-c user.name='A B'`), so a blank inside the quotes does not end
 # it. The quote classes exclude the quote character itself, so each piece has
 # exactly one reading and the run cannot backtrack exponentially.
-_SHELL_WORD_PIECE = (
-    r"""(?:'[^']*'|"(?:[^"\\]|\\.)*"|\\.|""" rf"""[^\s{SUBCOMMAND_SEPARATOR_CHARS}'"\\])"""
-)
+#
+# The two quote alternatives are the SHARED regex spelling of a quoted span
+# (also used by `shell_segmentation._MESSAGE_BODY_PATTERN`).
+QUOTED_SPAN_REGEX = r"""'[^']*'|"(?:[^"\\]|\\.)*\""""
+_SHELL_WORD_PIECE = rf"""(?:{QUOTED_SPAN_REGEX}|\\.|[^\s{SUBCOMMAND_SEPARATOR_CHARS}'"\\])"""
+
+# Operands that name the process's own standard input, for an interpreter that
+# reads its program from a file argument (`python3 /dev/stdin`).
+STDIN_OPERANDS: Final = ("-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0")
 _GIT_GLOBAL_OPTION = rf"-{_SHELL_WORD_PIECE}+" rf"(?:\s+(?!-){_SHELL_WORD_PIECE}+)?"
 
 # `git` followed by any run of global options, leaving the match positioned at

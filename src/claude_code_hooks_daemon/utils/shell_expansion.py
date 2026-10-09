@@ -29,6 +29,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Final, NamedTuple
 
+from claude_code_hooks_daemon.utils.command_evasion import STDIN_OPERANDS
 from claude_code_hooks_daemon.utils.heredoc_operators import (
     Heredoc,
     scan_heredocs,
@@ -2705,7 +2706,7 @@ def _classify_interpreter_option_word(word: str) -> str:
     - ``"dash_c_glued_command"`` -- ``--command=CODE``, the code glued into
       THIS token with no further word to wait for.
     """
-    if word in ("-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0"):
+    if word in STDIN_OPERANDS:
         return "plain"
     if word == "--command":
         return "dash_c"

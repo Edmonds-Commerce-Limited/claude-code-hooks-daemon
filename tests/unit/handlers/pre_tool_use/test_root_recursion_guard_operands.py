@@ -86,6 +86,17 @@ DANGEROUS = [
     "FOO=1 grep -r x /",
     "grep -r x . /",
     "grep -r x / --include=*.py",
+    # Review r1 B2: a depth bound does not excuse what find hands on.
+    "find / -maxdepth 1 -exec grep -r x {} +",
+    "find / -maxdepth 1 -exec grep -r x {} \\;",
+    "find / -maxdepth 1 -type d -exec rg x {} +",
+    "find / -maxdepth 1 -execdir du -sh {} +",
+    "find / -maxdepth 1 -ok du -sh {} \\;",
+    "find / -maxdepth 1 -okdir du -sh {} \\;",
+    "find / -maxdepth 1 -type d | xargs grep -r x",
+    "find / -maxdepth 1 -exec find {} -name x \\;",
+    "find /home -maxdepth 1 -exec grep -rl x {} +",
+    "find /sys/class/net -maxdepth 1 | xargs rg x",
 ]
 
 

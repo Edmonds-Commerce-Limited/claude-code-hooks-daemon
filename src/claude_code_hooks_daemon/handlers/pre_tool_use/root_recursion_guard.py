@@ -174,6 +174,9 @@ def _depth_within_bound(value: str | None) -> bool:
     return value is not None and value.isdigit() and int(value) <= _BOUNDED_DEPTH
 
 
+_FIND_ACTIONS: Final = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
+
+
 def _find_roots(args: list[str]) -> tuple[list[str], bool]:
     """The start paths of a ``find`` and whether ``-maxdepth`` bounds it."""
     index = 0
@@ -188,7 +191,9 @@ def _find_roots(args: list[str]) -> tuple[list[str], bool]:
     while index < len(args) and not args[index].startswith(("-", "(", "!", ",")):
         roots.append(args[index])
         index += 1
-    bounded = any(
+    # `-exec`/`-ok` hand every entry to another command, which may recurse.
+    runs_a_command = any(arg in _FIND_ACTIONS for arg in args)
+    bounded = not runs_a_command and any(
         arg == "-maxdepth" and _depth_within_bound(following)
         for arg, following in zip(args, [*args[1:], ""], strict=True)
     )
@@ -250,8 +255,18 @@ def _tokenize(segment: str) -> list[str]:
         return segment.split()
 
 
-def _segment_is_dangerous(segment: str) -> bool:
-    """Return True if a single command segment is a root-rooted recursive scan."""
+def _is_xargs(segment: str) -> bool:
+    """Whether a pipeline stage is ``xargs`` (after any ``VAR=value`` prefix)."""
+    tokens = [token for token in _tokenize(segment) if not re.match(r"^\w+=", token)]
+    return bool(tokens) and _command_token_basename(tokens[0]) == "xargs"
+
+
+def _segment_is_dangerous(segment: str, feeds_xargs: bool = False) -> bool:
+    """Return True if a single command segment is a root-rooted recursive scan.
+
+    ``feeds_xargs``: its output is piped to ``xargs``, which runs a command on
+    every entry, so a depth bound no longer limits the work.
+    """
     tokens = _tokenize(segment)
     # Skip leading ``VAR=value`` environment assignments to find the real command.
     index = 0
@@ -281,7 +296,7 @@ def _segment_is_dangerous(segment: str) -> bool:
         roots, bounded = _find_roots(args)
     else:
         roots, bounded = _search_roots(_SYNTAX_BY_COMMAND[command], args)
-    return not bounded and any(_is_dangerous_root(root) for root in roots)
+    return not (bounded and not feeds_xargs) and any(_is_dangerous_root(root) for root in roots)
 
 
 class RootRecursionGuardHandler(PreToolUseHandlerBase):
@@ -309,7 +324,17 @@ class RootRecursionGuardHandler(PreToolUseHandlerBase):
         # Escape hatch: explicit justification bypasses the block.
         if command_declares_hatch(command, _ESCAPE_HATCH):
             return False
-        return any(_segment_is_dangerous(seg) for seg in _SEGMENT_SPLIT_RE.split(command))
+        parts = _SEGMENT_SPLIT_RE.split(command)
+        separators = _SEGMENT_SPLIT_RE.findall(command)
+        return any(
+            _segment_is_dangerous(
+                segment,
+                feeds_xargs=index < len(separators)
+                and separators[index] == "|"
+                and _is_xargs(parts[index + 1]),
+            )
+            for index, segment in enumerate(parts)
+        )
 
     def get_rules(self) -> list[Rule]:
         """Return the single Rule backing this handler's blocking behaviour."""

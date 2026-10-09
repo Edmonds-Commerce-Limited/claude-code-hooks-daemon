@@ -56,6 +56,14 @@ DANGEROUS = [
     "for f in a; do cp untracked/worktrees/foo/src/x.py src/; done",
     "cp untracked/worktrees/foo/src/x.py src/ && ls",
     "cp .claude/worktrees/foo/src/x.py src/",
+    # Review r1 B1: a shell wrapper with options before `-c`.
+    "sh -e -c 'cp untracked/worktrees/foo/src/x.py src/x.py'",
+    "bash -x -c 'cp untracked/worktrees/foo/src/x.py src/x.py'",
+    "bash -n -c 'cp untracked/worktrees/foo/src/x.py src/x.py'",
+    "bash -n -c 'rsync -a untracked/worktrees/foo/src/ src/'",
+    "bash -o pipefail -c 'cp untracked/worktrees/foo/src/x.py src/x.py'",
+    "bash -nc 'cp untracked/worktrees/foo/src/x.py src/x.py'",
+    'bash -n -c "cp untracked/worktrees/foo/src/x.py src/x.py"',
 ]
 
 

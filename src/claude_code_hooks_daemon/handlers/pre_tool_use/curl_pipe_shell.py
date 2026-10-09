@@ -16,7 +16,11 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
-from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, OPTIONAL_SUDO
+from claude_code_hooks_daemon.utils.command_evasion import (
+    OPTIONAL_PATH,
+    OPTIONAL_SUDO,
+    STDIN_OPERANDS,
+)
 from claude_code_hooks_daemon.utils.command_position import (
     SEGMENT_SEPARATORS,
     command_position_view,
@@ -117,6 +121,7 @@ _PIPE_INTO_INTERPRETER_PATTERN = (
     + r"\b"
 )
 
+_PIPE_AT_LINE_END = re.compile(r"\|[ \t]*\n\s*")
 _DOWNLOADER = re.compile(r"\b(?:curl|wget)\b", re.IGNORECASE)
 _SHELL_NAMES = frozenset({"bash", "sh", "zsh", "ksh", "dash"})
 # A redirect word: `2>&1`, `>out`, `<in`, `&>f`.
@@ -157,7 +162,7 @@ def _stage_reads_stdin_as_code(words: list[str | None]) -> bool:
             return True
         if skip_next:
             skip_next = False
-        elif word == "-":
+        elif word in STDIN_OPERANDS:
             return True
         elif _PROGRAM_OPTION[family].match(word):
             return False
@@ -261,7 +266,8 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
         if not command:
             return False
 
-        view = self._scannable(command)
+        # A pipe that ends a line continues the pipeline onto the next one.
+        view = _PIPE_AT_LINE_END.sub("| ", self._scannable(command))
         if not re.search(_CURL_PIPE_SHELL_PATTERN, view, re.IGNORECASE):
             return False
         return _some_download_becomes_code(view)

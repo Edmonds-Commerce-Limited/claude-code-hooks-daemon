@@ -39,6 +39,7 @@ from typing import Final, NamedTuple
 
 from claude_code_hooks_daemon.utils.ansi_c import ansi_c_string
 from claude_code_hooks_daemon.utils.command_evasion import (
+    QUOTED_SPAN_REGEX,
     git_subcommand_index,
     strip_reserved_word_prefix,
 )
@@ -724,8 +725,7 @@ _MESSAGE_BODY_PATTERN = re.compile(
     r"(?P<value>"
     r"\"\$\(cat\s+<<-?\s*(?P<dq>['\"]?)(?P<delim>[^\s'\"\\;&|<>()]+)(?P=dq)"
     r"\s*\n.*?\n[ \t]*(?P=delim)[ \t]*\n?\s*\)\""
-    r"|'[^']*'"
-    r'|"(?:[^"\\]|\\.)*"'
+    rf"|{QUOTED_SPAN_REGEX}"
     r"|[^\s;&|<>()`]+"
     r")",
     re.DOTALL,
