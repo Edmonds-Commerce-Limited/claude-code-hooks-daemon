@@ -58,6 +58,7 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 from claude_code_hooks_daemon.utils.scan_scope import (
     relative_parts,
     vacuous_scan_failure,
@@ -422,9 +423,31 @@ def _single_file_problem(path: Path) -> str | None:
     return None
 
 
+def out_of_scope_reason(path: Path) -> str | None:
+    """Why the default tree run would not judge ``path``, or None when it would.
+
+    A file inside the repository is judged only if the default run reaches it:
+    below ``scripts/`` or the skill scripts directory, outside an excluded
+    directory. A file outside the repository has no tree-run verdict to match,
+    so it is judged as given.
+    """
+    resolved = path.resolve()
+    if not path_is_relative_to(resolved, REPO_ROOT.resolve()):
+        return None
+    for scan_dir in (DEFAULT_SCAN_DIR, DEFAULT_SKILL_SCAN_DIR):
+        root = scan_dir.resolve()
+        if path_is_relative_to(resolved, root) and not _is_excluded(resolved, root):
+            return None
+    return "it is outside scripts/ and the skill scripts directory, or in an excluded directory"
+
+
 def run_single_file(path: Path, *, json_output: bool) -> int:
     """Audit one script (DETECTOR-SPEC 5.2) and report on stdout. Writes no artefact."""
     problem = _single_file_problem(path)
+    if problem is None:
+        reason = out_of_scope_reason(path)
+        if reason is not None:
+            problem = f"{path}: not judged by the tree run ({reason}), so nothing was examined"
     if problem is not None:
         print(f"shell-audit: {problem}", file=sys.stderr)
         return 1

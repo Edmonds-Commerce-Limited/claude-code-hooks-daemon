@@ -1307,6 +1307,29 @@ def _single_file_problem(path: Path) -> str | None:
     return None
 
 
+def out_of_scope_reason(path: Path, workspace: Path) -> str | None:
+    """Why the tree run would not judge ``path``, or None when it would.
+
+    A file inside the workspace is judged only if the tree run collects it, and
+    that is decided by the tree run's own collectors, so the two cannot
+    disagree. A file outside the workspace has no tree-run verdict to match, so
+    it is judged as given.
+    """
+    resolved = path.resolve()
+    if not path_is_relative_to(resolved, workspace.resolve()):
+        return None
+    collected = {
+        file.resolve()
+        for file in (*collect_workspace_python_files(workspace), *collect_shell_files(workspace))
+    }
+    if resolved in collected:
+        return None
+    return (
+        "it is outside the audited directories "
+        f"({', '.join(AUDITED_DIRECTORIES)}) and root files, or in an excluded directory"
+    )
+
+
 def audit_single_file(path: Path, workspace: Path) -> list[dict[str, Any]]:
     """Audit ``path`` exactly as the tree run would, exclusions included.
 
@@ -1327,6 +1350,10 @@ def audit_single_file(path: Path, workspace: Path) -> list[dict[str, Any]]:
 def run_single_file(path: Path, workspace: Path, json_mode: bool) -> int:
     """Audit one file (DETECTOR-SPEC 5.2) and report on stdout. Writes no artefact."""
     problem = _single_file_problem(path)
+    if problem is None:
+        reason = out_of_scope_reason(path, workspace)
+        if reason is not None:
+            problem = f"{path}: not judged by the tree run ({reason}), so nothing was examined"
     if problem is not None:
         print(f"audit_error_hiding: {problem}", file=sys.stderr)
         return 1

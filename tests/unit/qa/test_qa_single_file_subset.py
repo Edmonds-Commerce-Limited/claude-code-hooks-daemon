@@ -145,6 +145,51 @@ class TestAFileIsJudgedOnItsOwn:
         assert "notes.txt" in result.stderr
 
 
+@dataclass(frozen=True)
+class ScopeCase:
+    """A tracked file inside the repository, and whether the tree run judges it."""
+
+    script: str
+    relative: str
+    judged: bool
+
+
+#: `audit_error_hiding` audits src/, scripts/ and four root files; `audit_shell` audits
+#: scripts/ and the skill scripts only. So the root `init.sh` is judged by the first and
+#: not by the second, and a test module is judged by neither.
+_SCOPE_CASES: Final[tuple[ScopeCase, ...]] = (
+    ScopeCase("audit_error_hiding.py", "scripts/qa/check_module_length.py", True),
+    ScopeCase("audit_error_hiding.py", "init.sh", True),
+    ScopeCase("audit_error_hiding.py", "tests/unit/qa/test_qa_single_file_subset.py", False),
+    ScopeCase("audit_shell.py", "scripts/lib/portable_time.sh", True),
+    ScopeCase("audit_shell.py", "init.sh", False),
+)
+
+
+class TestAFileInsideTheRepositoryIsJudgedOnlyIfTheTreeRunJudgesIt:
+    """S4: `--path FILE` cannot pass a file the tree run would never look at."""
+
+    @pytest.mark.parametrize("case", _SCOPE_CASES, ids=lambda c: f"{c.script}:{c.relative}")
+    def test_scope_matches_the_tree_run(self, case: ScopeCase) -> None:
+        checker = next(c for c in _CHECKERS if c.script == case.script)
+        result = _run(checker, REPO_ROOT / case.relative)
+        if case.judged:
+            assert "not judged by the tree run" not in result.stderr
+        else:
+            assert result.returncode == 1
+            assert "not judged by the tree run" in result.stderr
+            assert case.relative in result.stderr
+
+    @pytest.mark.parametrize("case", _SCOPE_CASES, ids=lambda c: f"{c.script}:{c.relative}")
+    def test_an_out_of_scope_file_reports_nothing_on_stdout(self, case: ScopeCase) -> None:
+        if case.judged:
+            pytest.skip("only the refused files have a refusal to pin")
+        checker = next(c for c in _CHECKERS if c.script == case.script)
+        result = _run(checker, REPO_ROOT / case.relative, "--json")
+        assert result.returncode == 1
+        assert result.stdout.strip() == ""
+
+
 class TestTheTreeRunIsUnchanged:
     def test_the_tree_run_still_takes_no_path(self) -> None:
         """No `--path`: the whole-repository behaviour and its artefact are as before."""

@@ -894,7 +894,8 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
 #: live smoke test) rather than judge the tree statically. Every other tool is a
 #: detector. A runner's result means something only while every detector agrees
 #: the tree is sound, so runners are ordered after detectors and are marked
-#: "not meaningful" once a detector has failed (Plan 00484 G7, TOOLING-SPEC 4.5).
+#: "not meaningful" when they pass after a detector has failed; a runner that
+#: failed itself stays a failure (Plan 00484 G7, TOOLING-SPEC 4.5).
 RUNNER_TOOLS: Final[frozenset[str]] = frozenset(
     {"tests", "project_handlers", "changed_tests", "smoke_test"}
 )
@@ -1462,13 +1463,22 @@ def failure_extras(data: QaReport, config: ToolConfig, output: Path) -> str:
     """
     key = detail_array_key(config.jq_hint)
     items = [entry for entry in data.get(key, []) if isinstance(entry, dict)] if key else []
-    lines = [line for line in map(_finding_line, items) if line is not None]
+    named = [item for item in items if _first_value(item, _FINDING_ID_KEYS)]
+    lines = [line for line in map(_finding_line, named) if line is not None]
     out = ""
     if lines:
         shown = lines[:MAX_FINDINGS_SHOWN]
+        # A wrapped tool's own ID (a ruff code, a bandit test id) is in no registry,
+        # so the hint is offered only when a shown ID is one `--explain` resolves.
+        explainable = any(
+            explain_rule(_first_value(item, _FINDING_ID_KEYS)) is not None
+            for item in named[:MAX_FINDINGS_SHOWN]
+        )
+        hint = "; `llm_qa.py --explain <ID>` for a checker's fix" if explainable else ""
         out += (
-            f"   {_FINDINGS_LABEL} (first {len(shown)} of {len(lines)}; "
-            f"`llm_qa.py --explain <ID>` for the fix):\n" + "\n".join(shown) + "\n"
+            f"   {_FINDINGS_LABEL} (first {len(shown)} of {len(lines)}{hint}):\n"
+            + "\n".join(shown)
+            + "\n"
         )
     return out + f"   full report: {output.resolve()}\n"
 
@@ -3063,7 +3073,9 @@ def _run_tools(
             current = step_after
         if not passed and name not in RUNNER_TOOLS:
             failed_detectors.append(name)
-        if name in RUNNER_TOOLS and failed_detectors:
+        if name in RUNNER_TOOLS and failed_detectors and passed:
+            # Only a PASS is unjudgeable after a failed detector. A runner that
+            # really failed stays a failure, shown and counted as one.
             summary = mark_not_meaningful(summary, failed_detectors)
             not_meaningful.append(name)
         tool_results[name] = (passed, summary)

@@ -8,8 +8,10 @@ sat beside a green test line and the reader weighed the two.
 
 Every tool still runs (Fable's amendment): stopping at the first red detector
 would hide the rest of the findings. But once a detector has failed, a runner's
-result is marked "not meaningful: detector failed" and is left out of the pass
+PASS is marked "not meaningful: detector failed" and is left out of the pass
 count, so a green `tests` line next to a red detector cannot be read as a pass.
+A runner that really failed stays a failure, and the exit code is non-zero
+whenever anything failed.
 """
 
 from __future__ import annotations
@@ -138,14 +140,30 @@ class TestARunnerAfterAFailedDetector:
         assert verdict.startswith("QA: 1/3 PASSED, 1/3 FAILED, 1/3 NOT MEANINGFUL")
         assert "lint" in verdict
 
-    def test_a_failed_runner_after_a_failed_detector_is_also_not_meaningful(
+    def test_a_failed_runner_after_a_failed_detector_stays_a_failure(
         self, qa_dir: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any
     ) -> None:
-        self._run(qa_dir, monkeypatch, {"lint": _RED, "tests": _RED}, ["lint", "tests"])
-        verdict = next(
-            line for line in capsys.readouterr().out.splitlines() if line.startswith("QA:")
-        )
-        assert verdict.startswith("QA: 0/2 PASSED, 1/2 FAILED, 1/2 NOT MEANINGFUL")
+        """A runner that really failed is a failure, not an unjudgeable result."""
+        code, _ = self._run(qa_dir, monkeypatch, {"lint": _RED, "tests": _RED}, ["lint", "tests"])
+        out = capsys.readouterr().out
+        verdict = next(line for line in out.splitlines() if line.startswith("QA:"))
+        assert code == 1
+        assert verdict == "QA: 0/2 PASSED, 2/2 FAILED"
+        assert "NOT MEANINGFUL" not in out
+        failed_line = next(line for line in out.splitlines() if "tests:" in line)
+        assert "❌" in failed_line
+
+    def test_the_exit_code_is_non_zero_when_only_a_runner_failed_after_a_detector_passed(
+        self, qa_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        code, _ = self._run(qa_dir, monkeypatch, {"lint": _GREEN, "tests": _RED}, ["lint", "tests"])
+        assert code == 1
+
+    def test_the_exit_code_is_non_zero_when_a_detector_failed_and_the_runner_passed(
+        self, qa_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        code, _ = self._run(qa_dir, monkeypatch, {"lint": _RED, "tests": _GREEN}, ["lint", "tests"])
+        assert code == 1
 
     def test_the_provenance_record_keeps_the_real_result(
         self, qa_dir: Path, monkeypatch: pytest.MonkeyPatch
@@ -155,6 +173,74 @@ class TestARunnerAfterAFailedDetector:
         recorded = llm_qa.read_provenance(qa_dir)
         assert recorded["tests"]["passed"] is True
         assert recorded["lint"]["passed"] is False
+
+    def _later(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        outcomes: dict[str, dict[str, Any]],
+        tools: list[str],
+        *,
+        read_only: bool = False,
+        resume: bool = False,
+    ) -> tuple[int, list[str]]:
+        """A second run over the records the first one left, naming what it executed."""
+        ran: list[str] = []
+
+        def run_tool(name: str, extra_args: Any = (), lock_fd: int | None = None) -> int:
+            ran.append(name)
+            return 0 if outcomes[name]["summary"]["passed"] else 1
+
+        monkeypatch.setattr(llm_qa, "run_tool", run_tool)
+        return llm_qa._run_tools(tools, read_only=read_only, resume=resume), ran
+
+    def test_resume_reuses_a_passed_runner_and_still_marks_it_not_meaningful(
+        self, qa_dir: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any
+    ) -> None:
+        outcomes = {"lint": _RED, "tests": _GREEN}
+        self._run(qa_dir, monkeypatch, outcomes, ["lint", "tests"])
+        capsys.readouterr()
+        code, ran = self._later(monkeypatch, outcomes, ["lint", "tests"], resume=True)
+        out = capsys.readouterr().out
+        assert ran == ["lint"]
+        assert code == 1
+        assert "tests: reused" in out
+        assert "NOT MEANINGFUL" in out
+        assert "QA: 0/2 PASSED, 1/2 FAILED, 1/2 NOT MEANINGFUL" in out
+
+    def test_resume_reruns_a_failed_runner_and_keeps_it_failed(
+        self, qa_dir: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any
+    ) -> None:
+        outcomes = {"lint": _GREEN, "tests": _RED}
+        self._run(qa_dir, monkeypatch, outcomes, ["lint", "tests"])
+        capsys.readouterr()
+        code, ran = self._later(monkeypatch, outcomes, ["lint", "tests"], resume=True)
+        out = capsys.readouterr().out
+        assert ran == ["tests"]
+        assert code == 1
+        assert "QA: 1/2 PASSED, 1/2 FAILED" in out
+        assert "NOT MEANINGFUL" not in out
+
+    def test_resume_never_turns_a_failed_runner_into_a_pass_when_the_detector_is_fixed(
+        self, qa_dir: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any
+    ) -> None:
+        self._run(qa_dir, monkeypatch, {"lint": _RED, "tests": _RED}, ["lint", "tests"])
+        capsys.readouterr()
+        fixed = {"lint": _GREEN, "tests": _RED}
+        code, ran = self._later(monkeypatch, fixed, ["lint", "tests"], resume=True)
+        assert ran == ["lint", "tests"]
+        assert code == 1
+
+    def test_a_read_only_summary_marks_the_recorded_runner_and_keeps_the_exit_code(
+        self, qa_dir: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any
+    ) -> None:
+        outcomes = {"lint": _RED, "tests": _GREEN}
+        self._run(qa_dir, monkeypatch, outcomes, ["lint", "tests"])
+        capsys.readouterr()
+        code, ran = self._later(monkeypatch, outcomes, ["lint", "tests"], read_only=True)
+        out = capsys.readouterr().out
+        assert ran == []
+        assert code == 1
+        assert "NOT MEANINGFUL" in out
 
     def test_a_green_detector_leaves_the_runner_meaningful(
         self, qa_dir: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any

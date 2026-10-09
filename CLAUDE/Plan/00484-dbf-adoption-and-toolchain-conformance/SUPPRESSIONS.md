@@ -129,11 +129,33 @@ directive named in a string or docstring is not judged. Shell is read as own-lin
 
 The first run on the tree found six reasonless lines (four `shellcheck disable` in `init.sh` and
 `scripts/install/venv.sh`, two `nosec B603` whose reason sat above a `try:`); each now has a reason
-comment directly above. At the time of writing it examines 2497 files and 113 suppressions.
+comment directly above. Review round 1 widened the detector and tightened it:
+
+- It also judges `pyright: ignore`, `mypy: ignore-errors` and `pylint: disable` (read from the
+  `qa_suppression` handler's own pattern list, not a second copy), the file-wide `ruff: noqa` and
+  `flake8: noqa`, and `pyright: report...=` config comments. None exists in the tree today.
+- A bare Bandit code or test name after `nosec` (`nosec: B603`, `nosec subprocess_without_shell_equals_true`)
+  is not a reason.
+- A comment block above counts only when it names the suppression's own words or codes, or says
+  it is a suppression. That caught `init.sh` (the `SC2317` before `send_request_stdin`, whose
+  neighbouring comment was about the advisory text) and the two `source` lines in `venv.sh`, whose
+  reasons never named the tool; each now says why. The two `nosec B603` lines with a "see above"
+  comment (`contract_staleness.py`, `transport_toggle.py`) now state the reason on the line.
+
+At the time of writing it examines about 2500 files and 113 suppressions.
+
+**Reconciling 113 and 78.** The detector counts 113 directive lines: 65 `nosec`, 12
+`pragma: no cover` and 36 `shellcheck disable`. The 78 above is the deletion pass's count of the
+Python directives it kept (`nosec`, `noqa`, `type: ignore`, `pragma: no cover`) and never included
+`shellcheck disable`, which that pass did not touch. The detector finds 77 Python directives (65 +
+12), one fewer than the hand count; the detector's figure is the reproducible one and the 78 is not
+reproduced. No `noqa` or `type: ignore` remains.
 
 ## Not covered
 
 `eslint-disable` and `.ts` files are not judged (none exist in the tree today; YAGNI). Formatter
 markers (`fmt: skip`, `fmt: off`) are not QA suppressions and are not judged. A shell directive
 trailing a command on the same line is not read (`shellcheck` honours a directive only on its own
-line). The generic-reason check cannot tell whether a reason is TRUE.
+line). The generic-reason check cannot tell whether a reason is TRUE, and the "block above must be
+about the suppression" test is a word list: an unrelated comment that happens to contain one of the
+words (`security`, `suppress`, `unreachable`, ...) still passes.

@@ -103,6 +103,30 @@ class TestAFailingToolNamesItsFindings:
         assert str(qa_dir / "error_hiding.json") in text
 
 
+class TestTheExplainHintIsOnlyForIdsThatResolve:
+    """N2: `--explain <ID>` fails for a wrapped tool's own ID, so it is not offered for one."""
+
+    def test_a_registry_id_gets_the_hint(self, qa_dir: Path) -> None:
+        item = {**_violation(1), "rule": "silent-pass"}
+        assert "--explain" in _summary(qa_dir, _report([item]))
+
+    def test_an_id_no_checker_registers_gets_no_hint(self, qa_dir: Path) -> None:
+        item = {**_violation(1), "rule": "F401"}
+        text = _summary(qa_dir, _report([item]))
+        assert "F401" in text
+        assert "--explain" not in text
+
+    def test_a_family_id_gets_the_hint(self, qa_dir: Path) -> None:
+        item = {**_violation(1), "rule": "public-pattern:aws-key"}
+        assert "--explain" in _summary(qa_dir, _report([item]))
+
+    def test_a_mixed_list_gets_it_with_the_limit_stated(self, qa_dir: Path) -> None:
+        items = [{**_violation(1), "rule": "silent-pass"}, {**_violation(2), "rule": "F401"}]
+        text = _summary(qa_dir, _report(items))
+        assert "--explain" in text
+        assert "checker" in text.split("--explain", 1)[1].splitlines()[0]
+
+
 class TestAPassingToolStaysQuiet:
     def test_no_findings_block_and_no_extra_path_line(self, qa_dir: Path) -> None:
         text = _summary(qa_dir, _report([], passed=True))

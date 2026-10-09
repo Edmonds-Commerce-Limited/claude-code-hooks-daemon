@@ -608,16 +608,20 @@ while the runner ran considerably more.
 runner (`RUNNER_TOOLS`: `tests`, `project_handlers`, `changed_tests`,
 `smoke_test`), whatever order the tools were named in. It still runs every
 tool, so one red detector does not hide the others. Once a detector has failed,
-each runner's line is marked `NOT MEANINGFUL: detector failed: <names>` and is
-left out of the pass count (`QA: 1/3 PASSED, 1/3 FAILED, 1/3 NOT MEANINGFUL (detector failed: lint)`). A green `tests` line beside a red detector is
-therefore never a pass. The provenance record keeps the runner's real result,
-so `--resume` still reuses a runner that passed.
+each runner that PASSED is marked `NOT MEANINGFUL: detector failed: <names>` and
+is left out of the pass count (`QA: 1/3 PASSED, 1/3 FAILED, 1/3 NOT MEANINGFUL (detector failed: lint)`). A green `tests` line beside a red detector is
+therefore never a pass. A runner that failed itself stays a failure, shown and
+counted as one, and the exit code is non-zero whenever anything failed. The
+provenance record keeps the runner's real result, so `--resume` still reuses a
+runner that passed (and marks it the same way) and re-runs one that failed.
 
 **What a failing tool prints.** Under a failing tool's line, `llm_qa.py` names
 its first five findings as `<ID>  <file>:<line>  <text>`, says how many there are
 (`FINDINGS (first 5 of 12; ...)`), and prints `full report:` with the absolute
 path of the JSON. A finding with no identifier key (the row-key checkers) is
-listed only in the JSON.
+listed only in the JSON. The `--explain <ID>` hint appears only when a shown ID
+resolves; a wrapped tool's own ID (a ruff code, a bandit test id) is in no
+registry and gets none.
 
 **Rule IDs.** Every rule ID a `scripts/qa` checker prints is explained in
 `scripts/qa/qa-rules.json` (a statement, a fix and the scripts that print it).
@@ -632,8 +636,11 @@ Handler rules (`R-...`) and the plan-QA and docs-QA check IDs resolve through
 `audit_shell.py` take `--path FILE` (DETECTOR-SPEC 5.2): the file is judged as
 the tree run would judge it, findings go to stdout (JSON with `--json`), and the
 repository artefact is never written. A missing file, a directory, a file of
-another kind, or one the tree run does not judge FAILS: examining nothing is
-not a pass. The other checkers still take directories only.
+another kind, or a file inside the repository that the tree run does not judge
+(for example a test module under `audit_error_hiding.py`, or the root `init.sh`
+under `audit_shell.py`) FAILS: examining nothing is not a pass. A file outside
+the repository has no tree-run verdict to match and is judged as given. The
+other checkers still take directories only.
 
 - **Magic Values** (`check_magic_values.py`) — hardcoded strings/numbers that
   should be constants: handler names, priorities, tool names, event types, tags
