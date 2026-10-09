@@ -251,6 +251,78 @@ def command_position_segments(command: str) -> list[str]:
     return [view[start:end] for start, end in _segment_spans(view)]
 
 
+#: Commands whose quoted multi-word arguments are search patterns, programs or
+#: format strings handed to THAT command, never a second command line:
+#: `git log --grep='git reset --hard'`, `awk '/git stash/ {print}'`.
+_TEXT_ARGUMENT_HEADS: frozenset[str] = frozenset({"git", "awk", "gawk", "mawk"})
+
+#: Quoted text that is run, not read: a git alias definition (`alias.x='!cmd'`)
+#: and an awk program that calls `system` or pipes to a command.
+_RUNNABLE_TEXT_MARKERS: tuple[str, ...] = ("system", "|")
+
+_QUOTES = ("'", '"')
+
+
+def _runnable_text(head: str, text: str) -> bool:
+    """Whether quoted ``text`` given to ``head`` may be run as a command."""
+    if head == "git":
+        return text.startswith("!")
+    return any(marker in text for marker in _RUNNABLE_TEXT_MARKERS)
+
+
+def _blank_spaced_quotes(head: str, word: str) -> str:
+    """``word`` with each quoted span that holds a blank replaced by a placeholder.
+
+    A span with an expansion, an escape, or runnable text is kept, and so is a
+    span with no blank (`git "stash"`), which is a single token the guards read.
+    """
+    pieces: list[str] = []
+    index = 0
+    while index < len(word):
+        char = word[index]
+        end = word.find(char, index + 1) if char in _QUOTES else -1
+        if end == -1:
+            pieces.append(char)
+            index += 1
+            continue
+        body = word[index + 1 : end]
+        keep = (
+            not any(blank in body for blank in " \t")
+            or (char == '"' and any(active in body for active in _DOUBLE_QUOTE_ACTIVE))
+            or any(marker in body for marker in _EXPANSION_MARKERS)
+            or _runnable_text(head, body)
+        )
+        pieces.append(word[index : end + 1] if keep else char + _DATA_PLACEHOLDER + char)
+        index = end + 1
+    return "".join(pieces)
+
+
+def blank_quoted_text_arguments(segment: str) -> str:
+    """``segment`` with the quoted text arguments of `git`/`awk` blanked.
+
+    The question a guard asks is "is this command a destructive git command?".
+    A quoted pattern given to another git command or to `awk` is data for that
+    command, so the words inside it are not a command. Everything the reader
+    cannot place, and everything that could run, is left as written.
+    """
+    head = _head(segment)
+    if head not in _TEXT_ARGUMENT_HEADS:
+        return segment
+    pieces: list[str] = []
+    previous_end = 0
+    for start, end in shell_word_spans(segment):
+        pieces.append(segment[previous_end:start])
+        pieces.append(_blank_spaced_quotes(head, segment[start:end]))
+        previous_end = end
+    pieces.append(segment[previous_end:])
+    return "".join(pieces)
+
+
+def command_position_argument_segments(command: str) -> list[str]:
+    """:func:`command_position_segments` with quoted text arguments blanked."""
+    return [blank_quoted_text_arguments(segment) for segment in command_position_segments(command)]
+
+
 def _head(segment: str) -> str | None:
     chain = segment_command_chain(segment)
     return None if chain is None else chain[-1].rstrip(")").rsplit("/", 1)[-1]

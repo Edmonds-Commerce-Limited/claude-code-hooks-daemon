@@ -18,7 +18,7 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     SUBCOMMAND_SEPARATOR_CHARS,
     remove_word_quoting,
 )
-from claude_code_hooks_daemon.utils.command_position import command_position_view
+from claude_code_hooks_daemon.utils.command_position import command_position_argument_segments
 from claude_code_hooks_daemon.utils.git_commit_parsing import GitInvocation, git_invocations
 from claude_code_hooks_daemon.utils.git_invocation_directory import (
     invocation_directory,
@@ -138,7 +138,9 @@ _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
         "git reset --hard destroys all uncommitted changes permanently",
     ),
     (
-        rf"{_GIT_INVOCATION}clean\s+.*-[a-z]*f",
+        # The force flag must START a whitespace-delimited token: `-f` inside the
+        # operand `build-final/` is a directory name, not the flag.
+        rf"{_GIT_INVOCATION}clean\s+(?:.*\s)?(?:--force\b|-(?!-)[a-z]*f)",
         "git clean -f permanently deletes untracked files",
     ),
     # Bare `git checkout .` discards working-tree changes; generic reason suffices.
@@ -149,15 +151,21 @@ _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
     # Match all variants of checkout with -- and a file:
     # git checkout -- file / git checkout HEAD -- file / git checkout main -- file
     (
-        rf"{_GIT_INVOCATION}checkout\s+.*--\s+\S",
+        rf"{_GIT_INVOCATION}checkout\s+(?:.*\s)?--\s+\S",
         "git checkout [REF] -- file discards all local changes to that file permanently",
     ),
     # git restore with file paths discards working-tree changes.
-    # Does NOT match the staged-only forms (safe - they only unstage):
+    # Does NOT match the staged-only forms (safe - they only unstage), wherever
+    # the flag sits and whatever else rides along (`--source=<tree>`):
     #   git restore --staged file.txt   (long flag)
     #   git restore -S file.txt          (short flag, equivalent to --staged)
+    # `--staged --worktree` (`-SW`) restores the working tree too, so it matches.
+    # The short letters are case-SENSITIVE: `-s` is `--source`, not `-S`.
     (
-        rf"{_GIT_INVOCATION}restore\s+(?!--staged\b)(?!-S\b).*\S",
+        rf"{_GIT_INVOCATION}restore\s+"
+        r"(?!(?=.*(?<!\S)(?:--staged|-(?!-)(?-i:[A-Za-z]*S[A-Za-z]*))(?!\S))"
+        r"(?!.*(?<!\S)(?:--worktree|-(?!-)(?-i:[A-Za-z]*W[A-Za-z]*))(?!\S)))"
+        r".*\S",
         "git restore discards all local changes to files permanently",
     ),
     (
@@ -806,8 +814,8 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         return tuple(pattern for pattern, _reason in self._pattern_reasons)
 
     @staticmethod
-    def _scan_target(command: str) -> str:
-        """The command with every span bash hands over as DATA blanked out.
+    def _scan_target(command: str) -> list[str]:
+        """The command's segments with every span bash hands over as DATA blanked out.
 
         A quoted-delimiter heredoc body and an inert `-m`/`-F` message value
         are prose; the shell never parses them as syntax, so neither can be the
@@ -845,14 +853,27 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         anchored on a leading token missed the quoted spelling (Plan 00408 Task
         3.0). Blanking runs FIRST so a message value is gone before unquoting
         could expose anything inside it.
+
+        The result is one string PER COMMAND SEGMENT, and each pattern is
+        searched in each segment on its own. A pattern's `.*` therefore cannot
+        run across `&&`, `;` or a pipe into the next command (Plan 00483 Task
+        3.2): `git checkout main && git log -- src/x.py` has git log's `--`,
+        and `git reset HEAD f && ls --hard` has ls's `--hard`. The quoted
+        pattern of `git log --grep='...'` is data for that command and is
+        blanked before the quotes are removed.
         """
-        return remove_word_quoting(command_position_view(command))
+        return [
+            remove_word_quoting(segment) for segment in command_position_argument_segments(command)
+        ]
+
+    def _segment_matches(self, pattern: re.Pattern[str], command: str) -> bool:
+        """Whether ``pattern`` matches inside any one command segment."""
+        return any(pattern.search(target) for target in self._scan_target(command))
 
     def _match_reason(self, command: str) -> str | None:
         """Return the reason for the first matching destructive pattern, or None."""
-        target = self._scan_target(command)
         for pattern, reason in self._pattern_reasons:
-            if pattern.search(target):
+            if self._segment_matches(pattern, command):
                 return reason
         return None
 
@@ -863,16 +884,18 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         same blanked scan target — so the two can never disagree about which
         pattern matched first, nor about what counted as a command.
         """
-        target = self._scan_target(command)
         for pattern, rule_id in self._pattern_rule_ids:
-            if pattern.search(target):
+            if self._segment_matches(pattern, command):
                 return rule_id
         return None
 
     def _match_rule_ids(self, command: str) -> list[str]:
         """Every distinct RuleID whose pattern matches, in pattern order."""
-        target = self._scan_target(command)
-        matched = (rule_id for pattern, rule_id in self._pattern_rule_ids if pattern.search(target))
+        matched = (
+            rule_id
+            for pattern, rule_id in self._pattern_rule_ids
+            if self._segment_matches(pattern, command)
+        )
         return list(dict.fromkeys(matched))
 
     @staticmethod
@@ -982,9 +1005,10 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             "| Command | Reason |\n"
             "|---------|--------|\n"
             "| `git reset --hard` | Permanently destroys all uncommitted changes |\n"
-            "| `git clean -f` | Permanently deletes untracked files |\n"
+            "| `git clean -f` | Permanently deletes untracked files (a dry run `git clean -nd` is allowed) |\n"
             "| `git checkout -- <file>` | Discards all local changes to that file |\n"
-            "| `git restore <file>` | Discards local changes (`--staged` is allowed) |\n"
+            "| `git restore <file>` | Discards local changes (`--staged` alone, with or without "
+            "`--source`, is allowed; `--staged --worktree` is not) |\n"
             "| `git stash drop` | Permanently destroys stashed changes |\n"
             "| `git stash clear` | Permanently destroys all stashes |\n"
             "| `git push --force` / `git push <remote> +<refspec>` "
@@ -1021,6 +1045,19 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             "`git checkout -b feature` and `git gc --auto` all pass.\n\n"
             "If the user needs to run one of these, ask them to do it manually. "
             "Do not attempt to work around the block.\n\n"
+            "**Each command is judged on its own, and on its own TOKENS.** A chained "
+            "command is split at `&&`, `||`, `;`, `|` and newlines, so another command's "
+            "flag is not this command's: `git checkout main && git log -- src/x.py` "
+            "(the `--` is `git log`'s) and `git reset HEAD f && ls --hard` are allowed, "
+            "while `x && git reset --hard` is denied exactly as `git reset --hard` is. "
+            "A flag must start a word, so `git clean -nd build-final/` is a dry run on "
+            "a directory whose NAME contains `-f`. The quoted pattern of another git "
+            "command or of `awk` is data for that command: `git log --grep='git reset "
+            "--hard'` and `awk '/git stash/ {print}'` are allowed (a `!` alias "
+            "definition and an awk program calling `system` are still judged). A quoted "
+            "heredoc fed to `gh pr|issue|release|gist|api` or to a `while read` loop "
+            "that only prints, counts or filters its input is prose too; a loop that "
+            "runs its input (`eval \"$l\"`, `$l`, `bash -c`) is not.\n\n"
             "**PROSE describing one of these is not one of these.** What bash hands "
             "over as DATA is blanked before the command is judged, so a commit "
             "message that documents `--force`, or a `cat <<'EOF'` heredoc body naming "
