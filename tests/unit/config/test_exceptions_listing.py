@@ -46,7 +46,9 @@ class TestConfigExceptions:
                 "pre_tool_use": {
                     "sensitive_content": {
                         "options": {
-                            "exclude_paths": [{"pattern": "vendor/**", "reason": "third-party code"}]
+                            "exclude_paths": [
+                                {"pattern": "vendor/**", "reason": "third-party code"}
+                            ]
                         }
                     }
                 }

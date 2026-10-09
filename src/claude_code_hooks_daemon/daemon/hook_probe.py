@@ -126,9 +126,7 @@ def _resolve_thread(
     return asked or in_payload or ProbeThread.MAIN
 
 
-def _resolve_only(
-    payload: Mapping[str, Any], event: EventIDMeta, asked: str | None
-) -> str | None:
+def _resolve_only(payload: Mapping[str, Any], event: EventIDMeta, asked: str | None) -> str | None:
     """The handler this probe is restricted to: asked, else the payload's, else none.
 
     Raises:

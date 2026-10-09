@@ -38,8 +38,7 @@ _SESSION_TIER_EVENTS: frozenset[EventType] = frozenset({EventType.SESSION_START}
 DISABLE_FOOTER_SUFFIX: Final[str] = "(set enabled: false and record why beside it)"
 
 _DISABLE_FOOTER_TEMPLATE = (
-    "\n\nTo disable: handlers.{event_config_key}.{handler_config_key}  "
-    + DISABLE_FOOTER_SUFFIX
+    "\n\nTo disable: handlers.{event_config_key}.{handler_config_key}  " + DISABLE_FOOTER_SUFFIX
 )
 
 

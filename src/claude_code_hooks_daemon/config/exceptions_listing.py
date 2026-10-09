@@ -105,7 +105,9 @@ def collect_config_exceptions(config: Mapping[str, Any]) -> list[ExceptionRecord
                 continue
             where = f"handlers.{event}.{name}"
             if spec.get("enabled") is False:
-                records.append(ExceptionRecord(SOURCE_DISABLED_HANDLER, where, "enabled: false", None))
+                records.append(
+                    ExceptionRecord(SOURCE_DISABLED_HANDLER, where, "enabled: false", None)
+                )
             options = handler_options(spec)
             if options.get("mode") == _MODE_WARN:
                 records.append(
@@ -129,17 +131,17 @@ def collect_in_file_hatches(root: Path, files: Iterable[Path]) -> list[Exception
     """The ``MUST_EXCEED_*_BECAUSE`` declarations in ``files`` (relative to ``root``).
 
     A line whose reason is the ``<reason>`` placeholder is documentation naming
-    the hatch, not a declaration. A file that is not UTF-8 text is skipped.
+    the hatch, not a declaration. A file that is not UTF-8 text is read with
+undecodable bytes replaced.
     """
     records: list[ExceptionRecord] = []
     for relative in files:
         path = root / relative
         if not path.is_file() or path.stat().st_size > _MAX_SCAN_BYTES:
             continue
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except UnicodeDecodeError:
-            continue
+        # Undecodable bytes become U+FFFD, which is never a comment opener, so a
+        # binary file cannot yield a declaration and no skip branch is needed.
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         for number, line in enumerate(lines, start=1):
             match = _HATCH_RE.search(line)
             if match is None or not _COMMENT_LEAD_RE.fullmatch(line[: match.start()]):
