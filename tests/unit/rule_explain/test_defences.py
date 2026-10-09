@@ -7,6 +7,7 @@ commit gates are the set. A handler is in the set exactly when it declares a
 
 from __future__ import annotations
 
+from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.daemon.docs_generator import CollectedHandler
 from claude_code_hooks_daemon.rule_explain.defences import (
@@ -15,7 +16,7 @@ from claude_code_hooks_daemon.rule_explain.defences import (
 )
 from claude_code_hooks_daemon.rule_explain.lookup import HandlerRules
 
-_CLASS = "some-defect-class"
+_CLASS = DefectClass.PLAN_DRIFT
 
 
 def _rule(rule_id: str, blocked: str = "`thing`") -> Rule:
@@ -23,7 +24,7 @@ def _rule(rule_id: str, blocked: str = "`thing`") -> Rule:
 
 
 def _handler_rules(
-    class_name: str, config_key: str, *rules: Rule, defect_class: str | None = _CLASS
+    class_name: str, config_key: str, *rules: Rule, defect_class: DefectClass | None = _CLASS
 ) -> HandlerRules:
     return HandlerRules(
         config_key=config_key,
@@ -64,9 +65,11 @@ class TestCollectActiveDefences:
         assert record.detector_entry_point == "hooks-daemon probe pre_tool_use --json <payload>"
 
     def test_defect_class_is_the_handlers_declared_class(self) -> None:
-        handlers = [_handler_rules("AHandler", "a", _rule("R-A-ONE"), defect_class="error-hiding")]
+        handlers = [
+            _handler_rules("AHandler", "a", _rule("R-A-ONE"), defect_class=DefectClass.ERROR_HIDING)
+        ]
         (record,) = collect_active_defences([_collected("AHandler", "a")], handlers)
-        assert record.defect_class == "error-hiding"
+        assert record.defect_class == DefectClass.ERROR_HIDING
         assert record.to_dict()["defect_class"] == "error-hiding"
 
     def test_action_guard_is_not_a_defence(self) -> None:
@@ -124,7 +127,7 @@ class TestCollectActiveDefences:
             priority=1,
             behavior="BLOCKING",
             statement="s",
-            defect_class="c",
+            defect_class=DefectClass.PLAN_DRIFT,
             docs="d",
             detector_entry_point="e",
         )
