@@ -135,8 +135,8 @@ agent.
       `defences --json` row, and `explain-rule --list` has no footer), and the C1 wording fix. `constants/dbf.py`
       `EXPLAIN_LINE` and the README still call every handler a defence, but ruling C1 puts the action guards outside
       the Defence set.
-      **Done (3.1a):** G5 (all nine identifier-less deny paths declare a rule and print `BLOCKED [R-...]`; only
-      `AutoApproveReadsHandler` stays allowlisted), G15 (`explain-rule` resolves check IDs; `test_rule_parity.py`
+      **Done (3.1a):** G5 (all nine identifier-less deny paths declare a rule and print `BLOCKED [R-...]`; review round 3
+      gave `AutoApproveReadsHandler` its own rule and removed the allowlist, so no deny path is exempt), G15 (`explain-rule` resolves check IDs; `test_rule_parity.py`
       walks every `CHECK_ID`), G13 (`IDs:` line per promoted section), G9 (`defect_class` from a declared
       `Handler.defect_class`; `explain-rule --list` footer) and the C1 wording (`EXPLAIN_LINE`, README; `defences`
       lists only the handlers that declare a defect class). Evidence in [CONFORMANCE.md](CONFORMANCE.md); report in
@@ -144,7 +144,8 @@ agent.
       ([review](subagent-reports/261009-00484-3.1a-review-r1-opus.md)) addressed: `DefectClass` is a closed
       `StrEnum` with a pinned Defence set, `STATEMENT` constants for the QA checks, a deny-carries-an-ID pytest
       plugin (D4.3 now MET for the handler engine), and the Defence membership rulings (coordinator's, not the
-      owner's: the post-write linters and `tdd_enforcement` out, `github_auto_close_keywords` in).
+      owner's: the post-write linters and `tdd_enforcement` out, `github_auto_close_keywords` in). Merged at
+      `758b76a41` after three review rounds, the third verified by the coordinator.
     - **3.1b, QA layer**: the G1 detector (reasons inline, no baseline file, per B2), G6, G7 and G8.
     - **3.1c, config and CLI**: the G4 footer, G11 `probe --only`, and G12. Also fix the `exception_entries.py:16`
       docstring, which calls a plain string under `strict_mode` an error. The code makes it a warning.
