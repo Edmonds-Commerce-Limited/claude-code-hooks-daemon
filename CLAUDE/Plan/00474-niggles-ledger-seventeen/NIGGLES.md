@@ -1485,7 +1485,7 @@ Three shell scripts test `[ -d src/claude_code_hooks_daemon ]` themselves:
 `daemon/validation.py:105-125` decides "is this the daemon repository" from `pyproject.toml`, a different marker. It is
 a related question, and the remedy should say whether it merges into the one rule.
 
-**Status**: ⬜ Open. Remedy:
+**Status**: ✅ Fixed on branch `agent-aad776239ba17caaa-f439650b`. Remedy:
 
 - Each site calls `install_layout.is_self_install_mode` or `get_untracked_dir`. For a script that must run without the
   package, load `install_layout.py` by path, the way `daemon/signal_standalone.py` does.
@@ -1494,6 +1494,20 @@ a related question, and the remedy should say whether it merges into the one rul
 - Add a QA detector, covering Python AND shell, so that no file except those two definitions tests for that marker to
   decide the install mode. Building a path in order to scan the source tree is not a decision, and stays allowed.
   Fact-check: `subagent-reports/261009-fact-check-n386-sonnet.md`.
+
+Outcome: `cli.py` imports `get_untracked_dir`; `client_validator.py` and `utils/ccy_supervisor.py` call the rule;
+`scripts/debug_info.py` loads `install_layout.py` by path (it runs on a bare interpreter). The shell function is
+`is_self_install_checkout` in `scripts/install/mode_guard.sh`, called by `setup_worktree.sh`, `health_check.sh`,
+`bootstrap-self-install.sh` and `detect_self_install_mode` (which keeps its extra `pyproject.toml` and real-clone terms),
+with `tests/unit/install/test_self_install_shell_python_parity.py` running both on the same layouts. The detector is
+`scripts/qa/check_install_mode_marker.py` (`llm_qa.py install_mode_marker`, rule `install-mode-marker`). Copies the ledger
+and the fact-check both missed, found by the detector or the search behind it: `.claude/ccy/claude-supervise.py`
+(`.exists()`, now loads the rule by path from its own checkout), `scripts/bootstrap-self-install.sh`, and the
+`CLAUDE/UPGRADES/v2/v2.11-to-v2.12/verification.sh` self-install branch. `daemon/validation.py:105-125` asks a different
+question (does `pyproject.toml` name this package, which also holds for the daemon's own clone under a client's
+`.claude/hooks-daemon/`), so it is left alone. Residual, outside the detector by design: `init.sh:2394`,
+`provision.sh:68` and the top of `verification.sh` decide "is this the daemon repository" from
+`src/claude_code_hooks_daemon/version.py`, a file marker one level deeper than the directory the detector matches.
 
 ### N385 — careless spellings the raw-text guards allow on main
 
