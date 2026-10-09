@@ -1418,6 +1418,61 @@ def _report_error(data: QaReport) -> str | None:
     return None
 
 
+#: How many findings a failing tool's summary names, and the keys a finding may
+#: carry its identifier, location and text under (the shipped checkers differ).
+MAX_FINDINGS_SHOWN: Final[int] = 5
+_FINDING_ID_KEYS: Final[tuple[str, ...]] = ("rule", "check_id", "test_id", "rule_id")
+_FINDING_FILE_KEYS: Final[tuple[str, ...]] = ("file", "path")
+_FINDING_TEXT_KEYS: Final[tuple[str, ...]] = ("message", "detail", "description")
+_FINDING_TEXT_LIMIT: Final[int] = 110
+_FINDINGS_LABEL: Final[str] = "FINDINGS"
+
+
+def _first_value(item: dict[str, Any], keys: tuple[str, ...]) -> str:
+    """The first non-empty value of ``item`` under ``keys``, as text, or ''."""
+    for key in keys:
+        value = item.get(key)
+        if value not in (None, ""):
+            return str(value)
+    return ""
+
+
+def _finding_line(item: dict[str, Any]) -> str | None:
+    """One finding as ``id  file:line  message``, or None when it carries no identifier."""
+    identifier = _first_value(item, _FINDING_ID_KEYS)
+    if not identifier:
+        return None
+    location = _first_value(item, _FINDING_FILE_KEYS)
+    line = item.get("line")
+    if location and line not in (None, "", 0):
+        location = f"{location}:{line}"
+    text = " ".join(_first_value(item, _FINDING_TEXT_KEYS).split())
+    if len(text) > _FINDING_TEXT_LIMIT:
+        text = text[: _FINDING_TEXT_LIMIT - 3] + "..."
+    return "     " + "  ".join(part for part in (identifier, location, text) if part)
+
+
+def failure_extras(data: QaReport, config: ToolConfig, output: Path) -> str:
+    """The first findings with their identifiers, and the absolute path of the full report.
+
+    TOOLING-SPEC 4.4: the entry point prints each finding's identifier unaltered
+    and says where the rest is. A finding with no identifier key (the row-key
+    checkers) is not listed rather than given a made-up one. Empty text is never
+    returned for a failure: the path line is always there.
+    """
+    key = detail_array_key(config.jq_hint)
+    items = [entry for entry in data.get(key, []) if isinstance(entry, dict)] if key else []
+    lines = [line for line in map(_finding_line, items) if line is not None]
+    out = ""
+    if lines:
+        shown = lines[:MAX_FINDINGS_SHOWN]
+        out += (
+            f"   {_FINDINGS_LABEL} (first {len(shown)} of {len(lines)}; "
+            f"`llm_qa.py --explain <ID>` for the fix):\n" + "\n".join(shown) + "\n"
+        )
+    return out + f"   full report: {output.resolve()}\n"
+
+
 def _is_passed(data: QaReport) -> bool:
     """Determine pass/fail from JSON data (handles both schemas)."""
     summary = data.get("summary", {})
@@ -1567,6 +1622,7 @@ def _summarize_recorded(name: str, exit_code: int | None) -> tuple[bool, str]:
 
     line1 = f"{icon} {name}: {metrics}{mismatch_note}"
     line2 = f"   {config.json_file} | {config.jq_hint}"
+    extras = "" if passed else failure_extras(data, config, json_path)
 
     # A recorded reason beats any inference we could make, and it is the ONLY
     # copy left once run_tool discards the tool's stdout. It also takes
@@ -1576,7 +1632,7 @@ def _summarize_recorded(name: str, exit_code: int | None) -> tuple[bool, str]:
     recorded_error = _report_error(data)
     if recorded_error is not None:
         line3 = f"   {_REPORT_ERROR_LABEL} {recorded_error}"
-        return passed, f"{line1}\n{line2}\n{line3}\n"
+        return passed, f"{line1}\n{line2}\n{line3}\n{extras}"
 
     # A report that counts failures it cannot show is worse than one that
     # counts none: the hint above becomes a promise it does not keep, and an
@@ -1588,9 +1644,9 @@ def _summarize_recorded(name: str, exit_code: int | None) -> tuple[bool, str]:
             f"so the command on the previous line will print nothing. Do NOT read "
             f"that as 'nothing to fix' — the detail was dropped, not absent."
         )
-        return passed, f"{line1}\n{line2}\n{line3}\n"
+        return passed, f"{line1}\n{line2}\n{line3}\n{extras}"
 
-    return passed, f"{line1}\n{line2}\n"
+    return passed, f"{line1}\n{line2}\n{extras}"
 
 
 # ── CLI ────────────────────────────────────────────────────────────

@@ -71,7 +71,7 @@ route.
 | 4.3a   | Forbid (disable or block) every route that bypasses the record         | NOT MET                  | NOT MET    | 6 `MUST_*_BECAUSE` in-band hatches; inline suppressions are KEPT BY DESIGN (owner rulings B1, B2), not forbidden: 78 remain after 228 were deleted (`SUPPRESSIONS.md`), and since Task 3.1b each must carry a reason, enforced by `check_inline_suppressions.py:214` (`judge_comments`), registered at `llm_qa.py:711`. So this stays a declared known gap against 4.3, not conformance                        |
 | 4.3b   | Irreducible cases directed to the project record                       | NOT MET                  | NOT MET    | Hatches send the agent to the command line or a file comment, never to the config                                                                                                                                                                                                                                                                                                                              |
 | 4.4a   | Entry point meets D5.1–5.4 for every defence                           | NOT MET                  | PARTLY MET | The hook path meets it; `llm_qa.py` has no single-file subset (`llm_qa.py:2477-2492`)                                                                                                                                                                                                                                                                                                                          |
-| 4.4b   | Entry point prints every identifier unaltered                          | PARTLY MET               | MET        | A deny prints `BLOCKED [R-…]`; `llm_qa.py` prints a metric line and a JSON filename, with no IDs (`:1424-1425`)                                                                                                                                                                                                                                                                                                |
+| 4.4b   | Entry point prints every identifier unaltered                          | PARTLY MET               | MET        | A deny prints `BLOCKED [R-…]`; since Task 3.1b `llm_qa.py` prints the first 5 findings of a failing tool with their IDs and the absolute report path (`:1455`), but not every ID, and the 3 row-key checkers have none                                                                                                                                                                                         |
 | 4.5a   | Detectors run before runners                                           | MET                      | N/A        | MET since Task 3.1b: every runner (`RUNNER_TOOLS`, `llm_qa.py:898`) is registered after every static detector (`:843`), and `resolve_tools` moves a named runner after the detectors (`:1623-1625`). Pinned by `tests/unit/qa/test_llm_qa_detectors_first.py`                                                                                                                                                  |
 | 4.5b   | A detector failure stops lower levels counting                         | MET                      | N/A        | MET since Task 3.1b, in the amended form (every tool still runs, so the other findings are not hidden): once a detector has failed, `_run_tools` marks each runner `NOT MEANINGFUL: detector failed` (`llm_qa.py:2934-2938`, `mark_not_meaningful` `:2782`) and leaves it out of the pass count (`format_verdict` `:2796`); the provenance record keeps the runner's real result so `--resume` still reuses it |
 | 5.1a   | List every active defence without running it                           | PARTLY MET               | PARTLY MET | `explain-rule --list` lists all installed rules, disabled ones included; HOOKS-DAEMON.md is active-only but has no IDs. Task 3.2 adds `hooks-daemon defences --json`, active-only with IDs ([reference](../../../docs/guides/TROUBLESHOOTING.md#cli-command-reference))                                                                                                                                        |
@@ -107,7 +107,7 @@ layer (B, D, `llm_qa.py`) and in the governance of exceptions. The handler layer
 | 4.4 SHOULD        | PARTLY MET        | NOT MET                | N/A                  | –                                          |
 | 5.1 local         | MET               | MET                    | MET                  | –                                          |
 | 5.2 single file   | PARTLY MET        | NOT MET                | MET                  | –                                          |
-| 5.3 output        | MET               | PARTLY MET             | PARTLY MET           | –                                          |
+| 5.3 output        | MET               | MET                    | PARTLY MET           | –                                          |
 | 5.4 not hosted    | MET               | MET                    | MET                  | –                                          |
 | 6.1 resolution    | MET               | PARTLY MET             | MET                  | –                                          |
 | 6.2 offline       | MET               | N/A                    | N/A                  | –                                          |
@@ -251,8 +251,16 @@ appearing in `.claude/hooks-daemon.yaml`.
 - **`llm_qa.py` does not.**
   - There is no file subset; only tool names or `changed` (`:806-844`).
   - Each tool's own output is discarded (`:1366-1367`).
-  - The summary line carries a metric and a bare JSON filename, never the absolute directory,
-    and no identifier (`:1424-1425`). Identifiers reach the practitioner only if they open the
+  - **Task 3.1b (G8 phase 1).** A failing tool's summary now names its first
+    `MAX_FINDINGS_SHOWN` (5) findings with their identifier, location and text, says how many
+    there are, and prints the ABSOLUTE path of the full report (`failure_extras`,
+    `llm_qa.py:1455`, called at `:1625`). Pinned by
+    `tests/unit/qa/test_llm_qa_findings_in_summary.py`. A finding with no identifier key (the
+    row-key checkers `check_fail_open_inventory`, `check_dangerous_invocation_corpus` and
+    `check_declared_invariant_pairs`) is listed in the JSON only, not given an invented ID, and
+    only the first five findings of a failing tool are named, so 4.4b stays PARTLY MET.
+  - Before: the summary line carried a metric and a bare JSON filename, never the absolute
+    directory, and no identifier. Identifiers reached the practitioner only if they opened the
     JSON.
 - **The Semgrep wrapper rewrites `check_id`.** It does so towards the stable form, but strictly
   "unaltered" fails. This is noted rather than graded, because it is what makes C hold
@@ -349,7 +357,10 @@ level the daemon ships no accept-changes invocation, so the clause is N/A there.
 - **B D4.2 PARTLY MET.** Function-level harnesses exist (`check_source(source, path, root)` in
   `check_magic_values.py:579`, with tests in `tests/unit/qa/`). There is no CLI to run one rule
   alone, and running a harness means running the project's test suite.
-- **B D5.3 PARTLY MET.** A summary and a filename are printed; the directory is not.
+- **B D5.3 MET since Task 3.1b.** A failing checker's summary carries the first findings with
+  their identifiers and the absolute path of the remainder (`llm_qa.py:1455`). The checker run
+  alone prints its own report or writes its artefact; the clause is judged on the command the
+  practitioner ran, `llm_qa.py`.
 - **C D4.2 MET.** `semgrep --config <one-rule.yaml> <file>` runs one rule natively. Two of the
   six rule files (`bounded-reads.yaml` and `short-refname.yaml`) have no fixture test. That is
   a missing red proof by the project, not a detector gap.

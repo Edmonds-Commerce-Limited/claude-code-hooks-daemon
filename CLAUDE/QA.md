@@ -613,6 +613,12 @@ left out of the pass count (`QA: 1/3 PASSED, 1/3 FAILED, 1/3 NOT MEANINGFUL (det
 therefore never a pass. The provenance record keeps the runner's real result,
 so `--resume` still reuses a runner that passed.
 
+**What a failing tool prints.** Under a failing tool's line, `llm_qa.py` names
+its first five findings as `<ID>  <file>:<line>  <text>`, says how many there are
+(`FINDINGS (first 5 of 12; ...)`), and prints `full report:` with the absolute
+path of the JSON. A finding with no identifier key (the row-key checkers) is
+listed only in the JSON.
+
 - **Magic Values** (`check_magic_values.py`) — hardcoded strings/numbers that
   should be constants: handler names, priorities, tool names, event types, tags
 - **Format** (Black) / **Linter** (Ruff) — both auto-fix via
