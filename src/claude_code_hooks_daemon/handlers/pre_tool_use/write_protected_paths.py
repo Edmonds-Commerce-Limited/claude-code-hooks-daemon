@@ -80,9 +80,7 @@ def _matches_in_full(path: Sequence[str], glob: Sequence[str]) -> bool:
     head, rest = glob[0], glob[1:]
     if head == _RECURSIVE:
         return any(_matches_in_full(path[skip:], rest) for skip in range(len(path) + 1))
-    return (
-        bool(path) and fnmatch.fnmatchcase(path[0], head) and _matches_in_full(path[1:], rest)
-    )
+    return bool(path) and fnmatch.fnmatchcase(path[0], head) and _matches_in_full(path[1:], rest)
 
 
 def _is_ancestor(path: Sequence[str], glob: Sequence[str]) -> bool:
@@ -187,7 +185,8 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
                     yield _segments(form[len(root) :])
 
     def _globs(self) -> list[str]:
-        return [glob for glob in (self._paths or []) if isinstance(glob, str) and glob.strip()]
+        # `validate_options` withholds a malformed value, so this is a list of strings.
+        return [glob for glob in (self._paths or []) if glob.strip()]
 
     def _protecting(self, path: str, roots: Sequence[str]) -> str | None:
         """The glob keeping ``path`` (or a file inside it) read-only, else None."""

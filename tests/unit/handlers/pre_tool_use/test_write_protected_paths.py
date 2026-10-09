@@ -76,9 +76,10 @@ class TestFileTools:
         assert handler.matches(hook_input) is True
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
-        assert "IaC" in result.reason
-        assert "human" in result.reason
-        assert PROTECTED in result.reason
+        reason = result.reason or ""
+        assert "IaC" in reason
+        assert "human" in reason
+        assert PROTECTED in reason
 
     def test_a_path_through_dot_dot_is_still_the_listed_path(
         self, handler: WriteProtectedPathsHandler, root: Path
@@ -95,7 +96,10 @@ class TestFileTools:
     def test_an_unlisted_path_is_allowed(
         self, handler: WriteProtectedPathsHandler, root: Path
     ) -> None:
-        assert handler.matches(_tool("Write", file_path=f"{root}/.claude/ccy/ccy.env.local.dist")) is False
+        assert (
+            handler.matches(_tool("Write", file_path=f"{root}/.claude/ccy/ccy.env.local.dist"))
+            is False
+        )
         assert handler.matches(_tool("Edit", file_path=f"{root}/README.md")) is False
 
     def test_reading_is_never_denied(self, handler: WriteProtectedPathsHandler, root: Path) -> None:
@@ -158,7 +162,9 @@ class TestBashWrites:
         assert handler.matches(_bash(root, template.format(p=PROTECTED))) is True
         inside = root / ".claude" / "ccy"
         assert handler.matches(_bash(root, template.format(p="ccy.env.local"), cwd=inside)) is True
-        assert handler.matches(_bash(root, template.format(p="./ccy.env.local"), cwd=inside)) is True
+        assert (
+            handler.matches(_bash(root, template.format(p="./ccy.env.local"), cwd=inside)) is True
+        )
 
     def test_copying_into_the_directory_under_the_listed_name_is_denied(
         self, handler: WriteProtectedPathsHandler, root: Path
