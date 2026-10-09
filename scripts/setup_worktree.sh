@@ -34,6 +34,8 @@ WORKTREES_DIR="${PROJECT_ROOT}/untracked/worktrees"
 # Load SSOT venv helpers (v3.7.0+ fingerprint-keyed layout).
 # shellcheck source=install/output.sh
 source "${SCRIPT_DIR}/install/output.sh"
+# shellcheck source=install/mode_guard.sh
+source "${SCRIPT_DIR}/install/mode_guard.sh"
 # shellcheck source=install/python_fingerprint.sh
 source "${SCRIPT_DIR}/install/python_fingerprint.sh"
 # shellcheck source=install/venv.sh
@@ -181,7 +183,7 @@ fi
 preflight_socket_path() {
     local worktree_dir="$1"
     local self_install="false"
-    if [[ -d "${PROJECT_ROOT}/src/claude_code_hooks_daemon" ]]; then
+    if is_self_install_checkout "${PROJECT_ROOT}"; then
         self_install="true"
     fi
 

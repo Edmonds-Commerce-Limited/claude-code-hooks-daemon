@@ -18,11 +18,11 @@
 
 set -euo pipefail
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+# Colours (RED, GREEN, YELLOW, NC) come from output.sh, which mode_guard.sh
+# loads; mode_guard.sh also carries the one self-install test.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=install/mode_guard.sh
+source "${SCRIPT_DIR}/install/mode_guard.sh"
 
 # Parse arguments
 PROJECT_ROOT=""
@@ -166,7 +166,7 @@ fi
 
 if [[ "$SELF_INSTALL" == "true" ]]; then
     # Self-install mode - daemon code should be at project root
-    if [[ -d "$PROJECT_ROOT/src/claude_code_hooks_daemon" ]]; then
+    if is_self_install_checkout "$PROJECT_ROOT"; then
         echo -e "${GREEN}✓ Self-install mode${NC}"
     else
         echo -e "${RED}✗ Self-install mode but daemon source not found${NC}"
