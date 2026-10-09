@@ -173,8 +173,12 @@ class DebugInfoGenerator:
             return None
 
     @staticmethod
-    def _load_daemon_util(name: str) -> ModuleType | None:
-        """Load one daemon util BY PATH, without importing the package.
+    def _load_daemon_util(name: str, subpackage: str = "utils") -> ModuleType | None:
+        """Load one daemon module BY PATH, without importing the package.
+
+        ``subpackage`` is the directory under ``claude_code_hooks_daemon/`` the
+        module sits in: ``utils`` for the redaction helpers, ``daemon`` for
+        ``install_layout`` (the one install-mode rule).
 
         `claude_code_hooks_daemon/__init__.py` pulls in the front controller and
         therefore pydantic, so `import claude_code_hooks_daemon.utils.x` fails on
@@ -192,7 +196,7 @@ class DebugInfoGenerator:
             Path(__file__).resolve().parent.parent
             / "src"
             / "claude_code_hooks_daemon"
-            / "utils"
+            / subpackage
             / f"{name}.py"
         )
         if not path.is_file():
@@ -269,12 +273,19 @@ class DebugInfoGenerator:
     def _untracked_dir(self) -> Path:
         """Daemon runtime dir for ``self.project_root``.
 
-        Mirrors ``daemon.paths._get_untracked_dir``: ``{root}/untracked`` in
-        self-install mode, else ``{root}/.claude/hooks-daemon/untracked``.
+        The rule is ``daemon/install_layout.py`` -- the one definition -- loaded
+        by file path because this script runs on a bare interpreter. It sits
+        beside this script in the same checkout, so failing to load it is a
+        broken install, reported rather than guessed around.
         """
-        if (self.project_root / "src" / "claude_code_hooks_daemon").is_dir():
-            return self.project_root / "untracked"
-        return self.project_root / ".claude" / "hooks-daemon" / "untracked"
+        layout = self._load_daemon_util("install_layout", subpackage="daemon")
+        if layout is None:
+            raise RuntimeError(
+                "daemon/install_layout.py could not be loaded; cannot locate untracked/"
+            )
+        untracked = layout.get_untracked_dir(self.project_root)
+        assert isinstance(untracked, Path)
+        return untracked
 
     def _emit_degraded_diagnostics(self) -> None:
         """Dump init.sh-independent state when path detection fails.

@@ -16,6 +16,7 @@ from pathlib import Path
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.paths import DaemonPath
+from claude_code_hooks_daemon.daemon.install_layout import is_self_install_mode
 from claude_code_hooks_daemon.daemon.paths import (
     read_pid_file_text,
     resolve_existing_venv_python,
@@ -237,12 +238,11 @@ class ClientInstallValidator:
         warnings: list[str] = []
 
         # Check for daemon source at project root (sign of daemon repo)
-        daemon_src = project_root / "src" / "claude_code_hooks_daemon"
-        if daemon_src.exists():
+        if is_self_install_mode(project_root):
             # This looks like the daemon repo - should use --self-install
             errors.append(
                 f"Installation target appears to be the daemon repository itself.\n"
-                f"Found daemon source at: {daemon_src}\n"
+                f"Found daemon source at the project root: {project_root}\n"
                 f"To install on the daemon repo for development, use: python3 install.py --self-install"
             )
 

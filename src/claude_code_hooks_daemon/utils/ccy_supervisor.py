@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
+from claude_code_hooks_daemon.daemon.install_layout import get_untracked_dir
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
@@ -37,14 +38,6 @@ _SUPERVISOR_SCRIPT_NAME: Final[str] = "claude-supervise.py"
 _SUPERVISOR_LAUNCHER_NAME: Final[str] = "claude-supervise"
 _WRAPPER_EXPORT_KEY: Final[str] = "CCY_CLAUDE_WRAPPER"
 _COMMENT_PREFIX: Final[str] = "#"
-
-# Untracked runtime dir relative to the project root, per install mode. Mirrors
-# ProjectContext.daemon_untracked_dir() and the supervisor's own resolver so all
-# three agree on where the status file lives, without importing ProjectContext
-# (callers may pass a fallback cwd root).
-_SELF_INSTALL_MARKER_PARTS: Final[tuple[str, str]] = ("src", "claude_code_hooks_daemon")
-_SELF_INSTALL_UNTRACKED_PARTS: Final[tuple[str, ...]] = ("untracked",)
-_NORMAL_UNTRACKED_PARTS: Final[tuple[str, ...]] = (".claude", "hooks-daemon", "untracked")
 
 _SUPERVISE_SUBDIR: Final[str] = "supervise"
 _SUPERVISOR_STATUS_FILENAME: Final[str] = "supervisor-status.json"
@@ -132,10 +125,12 @@ def supervisor_relevance(context: RelevanceContext) -> Relevance:
 
 
 def daemon_untracked_dir(project_root: Path) -> Path:
-    """Resolve the daemon untracked dir (install-mode-aware) from the root."""
-    if project_root.joinpath(*_SELF_INSTALL_MARKER_PARTS).exists():
-        return project_root.joinpath(*_SELF_INSTALL_UNTRACKED_PARTS)
-    return project_root.joinpath(*_NORMAL_UNTRACKED_PARTS)
+    """Resolve the daemon untracked dir (install-mode-aware) from the root.
+
+    The mode rule is ``install_layout`` -- the one definition -- not a copy of
+    it, and no ``ProjectContext`` is needed (callers may pass a fallback cwd).
+    """
+    return get_untracked_dir(project_root)
 
 
 def hash_supervisor_source(path: Path) -> str:
