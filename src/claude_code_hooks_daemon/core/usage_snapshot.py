@@ -40,6 +40,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
@@ -168,7 +169,14 @@ def _write_state_file(state_file: Path, payload: dict[str, dict[str, float | int
         tmp_path.write_text(json.dumps(payload), encoding="utf-8")
         tmp_path.replace(state_file)
     except OSError as exc:
-        logger.warning("Could not persist usage snapshot to %s: %s", state_file, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=(
+                f"Could not persist usage snapshot to {state_file}; the caller is told through "
+                "the False return and a lost snapshot only delays the next usage reading"
+            ),
+        )
         _discard_temp_file(tmp_path)
         return False
     return True
@@ -183,7 +191,15 @@ def _discard_temp_file(tmp_path: Path) -> bool:
     try:
         tmp_path.unlink(missing_ok=True)
     except OSError as exc:
-        logger.debug("Could not remove usage snapshot temp file %s: %s", tmp_path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=(
+                f"Could not remove usage snapshot temp file {tmp_path}; the write failure that "
+                "left it is already reported and the file usually never existed"
+            ),
+            level=logging.DEBUG,
+        )
         return False
     return True
 

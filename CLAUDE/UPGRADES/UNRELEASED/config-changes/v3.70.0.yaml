@@ -1,0 +1,42 @@
+# Drafted by Plan 00499. The VERSION in the filename and the `version:` key are
+# a target, not a decision; the release agent confirms or renames this file.
+version: "3.70.0"
+date: "UNRELEASED"
+
+breaking: false
+
+config_changes:
+  added:
+    - key: handlers.pre_tool_use.write_protected_paths
+      recommended: false
+      dormant: true
+      description: >-
+        NEW (Plan 00499, GitHub #88). Keeps listed paths read-only for agents:
+        `Write`, `Edit` and `NotebookEdit` on a listed path, and a Bash command
+        that writes it (redirect, `tee`, heredoc, `sed -i`, `dd of=`), copies,
+        moves, installs or links onto it, or deletes or truncates it (`rm`,
+        `truncate`, `: >`), are denied. Reading is never denied. Off by default
+        and inert without `options.paths`.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            write_protected_paths:
+              enabled: true
+              priority: 22
+      migration_note: >-
+        Opt in for files that infrastructure-as-code or a human maintains and
+        an agent must only read.
+    - key: handlers.pre_tool_use.write_protected_paths.options.paths
+      recommended: false
+      dormant: true
+      description: >-
+        NEW (Plan 00499). Repository-relative globs (`*`, `?`, `**`) the
+        handler protects. Absolute paths and `..` are refused. The default is
+        an empty list, which protects nothing.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            write_protected_paths:
+              options:
+                paths:
+                  - .claude/ccy/ccy.env.local

@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.handlers.status_line.mtime_cache import MtimeCachedFile
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +125,12 @@ class UpgradeNotifierHandler(StatusLineHandlerBase):
             segment = self._detect_upgrade_segment()
         except Exception as e:
             segment = None
-            logger.debug("Failed to read version cache for explain_segment: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="status-line segments fail silent by contract: an unexpected error omits the segment rather than showing a misleading one",
+                level=logging.DEBUG,
+            )
         current_value = (
             f"Currently shows: {segment}"
             if segment

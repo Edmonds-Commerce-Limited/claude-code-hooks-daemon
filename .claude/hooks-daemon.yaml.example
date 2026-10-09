@@ -129,7 +129,7 @@ handlers:
 
     root_recursion_guard:  # Blocks recursive scans (grep -r, find, rg) rooted at / /proc /sys ~ $HOME
       enabled: true
-      priority: 16
+      priority: 13  # Before secret_file_guard (14): judges text only, so no tree walk for a catastrophic root
 
     # Blocks a pgrep -f / pkill -f / ps|grep probe whose literal pattern is in
     # the calling shell's own argv, so the probe always finds itself and a
@@ -195,6 +195,12 @@ handlers:
     host_command_guard:    # docker run -v /:/host, gh auth token; HUMAN ONLY: non-PyPI pip index, crontab -r
       enabled: true         # No agent-side escape hatch: only a human sets this to false.
       priority: 21
+
+    write_protected_paths: # Paths agents may READ but never create, change, move onto or delete (IaC- or human-maintained files)
+      enabled: false        # Opt-in: does nothing until `paths` lists something.
+      priority: 22
+      options:
+        paths: []           # Repository-relative globs, e.g. [".claude/ccy/ccy.env.local", "deploy/*.env"]
 
     ask_user_question_blocker: # Blocks AskUserQuestion so Claude works autonomously (for unattended workflows)
       enabled: false           # Enable for fully unattended operation
@@ -566,8 +572,8 @@ handlers:
       enabled: true   # On by default; silent bookkeeping in cron-records.json in the daemon's untracked directory, never blocks. The refresh in cron_stop_enforcer relies on it.
       priority: 36
 
-    plan_fact_check_feed:  # Debounces plan edits into one pending fact-check record (Plan 00480)
-      enabled: false  # Opt-in: the check is recorded but its delivery is not built yet
+    plan_fact_check_feed:  # Debounces plan edits; on the next tool call tells the session to dispatch plan-fact-checker on the diff (Plan 00480)
+      enabled: false  # Opt-in: each quiet plan edit asks the session to spend one agent run; never blocks
       priority: 37
       # options:
       #   quiet_seconds: 5.0  # quiet period after the last edit to a plan before it fires

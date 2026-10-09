@@ -132,6 +132,18 @@ class TestOverLimit:
         for n in range(4):
             assert f"worktree-b{n}" in text
 
+    def test_agent_dispatch_branches_count(self, repo: Path) -> None:
+        """Ledger 00474 N379: `isolation: worktree` names its branch `agent-<hex>-<hex>`."""
+        agents = [f"agent-a{n:016x}-{n:08x}" for n in range(2)]
+        for n in range(2):
+            _git(repo, "branch", f"worktree-b{n}")
+        for name in agents:
+            _git(repo, "branch", name)
+        text = "\n".join(_run(repo, _make()))
+        assert "4 open work branches" in text
+        for name in agents:
+            assert name in text
+
     def test_custom_limit(self, repo: Path) -> None:
         for n in range(2):
             _git(repo, "branch", f"worktree-b{n}")

@@ -108,12 +108,23 @@ _GIT_PUSH_FORCE_PATTERN = (
 #     from the `+<name>` force refspec. `main:feature` and `HEAD:refs/heads/x`
 #     have a source and are ordinary pushes.
 #
+# `--mirror` and `--prune` delete remote refs too (the remote is made to match
+# the local refs, dropping the rest), so they are the same human-only act. They
+# are never in `_PUSH_LONG_FLAGS`: the merged-branch allowance cannot read what
+# they delete, so they stay denied.
+#
 # Deleting a LOCAL ref (`git tag -d`, `git branch -d`) is a different command and a
 # different pattern; the owner ruled `git tag -d` allowed.
+_DELETE_LONG: Final[str] = "--delete"
+_DELETE_LETTER: Final[str] = "d"
+_REF_DROPPING_LONG_FLAGS: Final[tuple[str, ...]] = ("--mirror", "--prune")
+_PUSH_DELETE_LONG_ALTERNATIVES = "|".join(
+    re.escape(flag) for flag in (_DELETE_LONG, *_REF_DROPPING_LONG_FLAGS)
+)
 _GIT_PUSH_DELETE_PATTERN = (
     rf"{_GIT_INVOCATION}push\b[^{_SUBCOMMAND_SEPARATOR_CHARS}]*?"
-    r"(?:(?<!\S)--delete(?!\S)"
-    r"|(?<!\S)-(?!-)[A-Za-z0-9]*d[A-Za-z0-9]*(?!\S)"
+    rf"(?:(?<!\S)(?:{_PUSH_DELETE_LONG_ALTERNATIVES})(?!\S)"
+    rf"|(?<!\S)-(?!-)[A-Za-z0-9]*{_DELETE_LETTER}[A-Za-z0-9]*(?!\S)"
     r"|(?<!\S):[^\s:]\S*)"
 )
 
@@ -352,7 +363,7 @@ _OPTIONS_END: Final[str] = "--"
 # `git branch` flags a forced delete may carry. Anything else (`-r` deletes a
 # remote-tracking ref, for one) changes what is deleted, so it is unverifiable.
 _BRANCH_FLAG_LETTERS: Final[frozenset[str]] = frozenset("dDfq")
-_BRANCH_LONG_FLAGS: Final[frozenset[str]] = frozenset({"--delete", "--force", "--quiet"})
+_BRANCH_LONG_FLAGS: Final[frozenset[str]] = frozenset({_DELETE_LONG, "--force", "--quiet"})
 # A branch name that is safe to hand to git as one argument: no expansion,
 # quoting or option-looking characters survive it.
 _LITERAL_BRANCH_NAME: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9._/+@-]+")
@@ -375,13 +386,13 @@ def _forced_branch_names(run: GitInvocation) -> list[str] | None:
         elif argument == _OPTIONS_END:
             options_ended = True
         elif argument.startswith("--"):
-            delete = delete or argument == "--delete"
+            delete = delete or argument == _DELETE_LONG
             force = force or argument == "--force"
             if argument not in _BRANCH_LONG_FLAGS:
                 unknown.append(argument)
         else:
             letters = set(argument[1:])
-            delete = delete or bool(letters & {"d", "D"})
+            delete = delete or bool(letters & {_DELETE_LETTER, "D"})
             force = force or bool(letters & {"f", "D"})
             if not letters <= _BRANCH_FLAG_LETTERS:
                 unknown.append(argument)
@@ -492,9 +503,9 @@ _TAGS_PREFIX: Final[str] = "refs/tags/"
 # `git push` flags a remote delete may carry without changing WHAT it deletes. Anything
 # else (`--repo`, `-o`, `--receive-pack`, ...) can redirect or reshape the push, so a
 # command using one is unverifiable.
-_PUSH_FLAG_LETTERS: Final[frozenset[str]] = frozenset("dqvnu")
+_PUSH_FLAG_LETTERS: Final[frozenset[str]] = frozenset({_DELETE_LETTER, *"qvnu"})
 _PUSH_LONG_FLAGS: Final[frozenset[str]] = frozenset(
-    {"--delete", "--quiet", "--verbose", "--dry-run", "--no-verify", "--set-upstream"}
+    {_DELETE_LONG, "--quiet", "--verbose", "--dry-run", "--no-verify", "--set-upstream"}
 )
 _REFSPEC_SEPARATOR: Final[str] = ":"
 
@@ -517,12 +528,12 @@ def _remote_delete_targets(run: GitInvocation) -> tuple[str, list[str]] | None:
         elif argument == _OPTIONS_END:
             options_ended = True
         elif argument.startswith("--"):
-            delete = delete or argument == "--delete"
+            delete = delete or argument == _DELETE_LONG
             if argument not in _PUSH_LONG_FLAGS:
                 raise _Unverifiable(f"`{argument}` changes what `git push` does")
         else:
             letters = set(argument[1:])
-            delete = delete or "d" in letters
+            delete = delete or _DELETE_LETTER in letters
             if not letters <= _PUSH_FLAG_LETTERS:
                 raise _Unverifiable(f"`{argument}` changes what `git push` does")
     refspecs = positional[1:]
@@ -745,7 +756,7 @@ _RULE_DEFINITIONS: tuple[tuple[str, str, str, str], ...] = (
     (
         RuleID.GIT_PUSH_DELETE_REMOTE,
         "`git push --delete <name>` / `git push <remote> :<name>` of a branch not merged "
-        "into the default branch, or of a tag",
+        "into the default branch, or of a tag; `git push --mirror` / `--prune` always",
         "Deletes a branch or tag in the shared remote repository, beyond any local recovery",
         "A branch already merged into the default branch is deleted freely; otherwise do not "
         "run it, stop and ask the human to run it themselves",
@@ -934,9 +945,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         check = (
             _branch_delete_note
             if not others
-            else _remote_delete_note
-            if rule_ids == [RuleID.GIT_PUSH_DELETE_REMOTE]
-            else None
+            else _remote_delete_note if rule_ids == [RuleID.GIT_PUSH_DELETE_REMOTE] else None
         )
         if check is not None:
             try:
@@ -1000,7 +1009,9 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             "tracking ref is denied until `git fetch`; `git -C` and `cd` are honoured). "
             "Otherwise HUMAN ONLY — an "
             "unmerged branch, a tag, the default branch, a missing remote-tracking ref or "
-            "any check failure is denied: stop and ask the human to run it. Local "
+            "any check failure is denied: stop and ask the human to run it. "
+            "`git push --mirror` and `git push --prune` delete remote refs the command "
+            "never names, so they are always HUMAN ONLY. Local "
             "`git tag -d` and `git reset --keep` are allowed |\n\n"
             "The last four rows close spellings that reached an outcome this handler "
             "already guarded: `git checkout -- <file>` was blocked while "

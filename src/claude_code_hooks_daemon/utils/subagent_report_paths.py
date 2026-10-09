@@ -23,6 +23,7 @@ by agent type/id rather than trusting an exact filename match.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
@@ -30,6 +31,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 logger = logging.getLogger(__name__)
@@ -63,6 +65,11 @@ _SAFE_COMPONENT_RE: Final[re.Pattern[str]] = re.compile(r"[^A-Za-z0-9._-]")
 
 _FILENAME_TIMESTAMP_FORMAT: Final[str] = "%y%m%d-%H%M%S"
 _MD_SUFFIX: Final[str] = ".md"
+#: Longest agent-type or agent-id component of a report filename. Two of them plus
+#: the 13-character stamp, the separators, ``.md`` and a collision suffix stay
+#: well inside the 255-byte filename limit.
+MAX_COMPONENT_LENGTH: Final[int] = 100
+_HASH_LENGTH: Final[int] = 8
 
 #: How many numeric-suffix attempts :func:`write_new_file_never_overwrite`
 #: makes before giving up. A real collision (two SubagentStops for the
@@ -96,8 +103,17 @@ def sanitise_component(value: str) -> str:
     Public because a report path this module does not write must still name
     an agent the same way: ``subagent_report_size_blocker`` prescribes a
     fallback path from the same agent type (Plan 00468 G12).
+
+    A component past ``MAX_COMPONENT_LENGTH`` is cut and ends in a short hash of
+    the full value: agent names can be 256 characters, and a filename holding
+    two of them would pass the 255-byte limit. The hash keeps two long names
+    that share a prefix distinct. The result is ASCII, so characters are bytes.
     """
-    return _SAFE_COMPONENT_RE.sub("_", value)
+    safe = _SAFE_COMPONENT_RE.sub("_", value)
+    if len(safe) <= MAX_COMPONENT_LENGTH:
+        return safe
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:_HASH_LENGTH]
+    return f"{safe[: MAX_COMPONENT_LENGTH - _HASH_LENGTH - 1]}-{digest}"
 
 
 def _ensure_self_ignoring(directory: Path) -> None:
@@ -115,7 +131,11 @@ def _ensure_self_ignoring(directory: Path) -> None:
     try:
         gitignore_path.write_text(_GITIGNORE_CONTENT)
     except OSError as exc:
-        logger.warning("subagent_report_paths: cannot write %s: %s", gitignore_path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a self-ignoring {gitignore_path} that cannot be written leaves the reports directory visible to git; the report itself is still saved, so this is a hygiene loss only",
+        )
 
 
 def resolve_confined_report_dir(root: Path, report_dir: str) -> Path | None:
@@ -192,7 +212,11 @@ def write_new_file_never_overwrite(
     try:
         directory.mkdir(parents=True, exist_ok=True, mode=_DIR_MODE)
     except OSError as exc:
-        logger.warning("subagent_report_paths: cannot create %s: %s", directory, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a reports directory {directory} that cannot be created returns None (nothing persisted); the sub-agent's reply is still delivered, only its saved copy is lost",
+        )
         return None
     _ensure_self_ignoring(directory)
 
@@ -203,7 +227,11 @@ def write_new_file_never_overwrite(
         except FileExistsError:
             continue
         except OSError as exc:
-            logger.warning("subagent_report_paths: cannot create %s: %s", candidate, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"a report file {candidate} that cannot be created returns None (nothing persisted); the sub-agent's reply is still delivered, only its saved copy is lost",
+            )
             return None
         try:
             with os.fdopen(fd, "w") as handle:
@@ -217,10 +245,10 @@ def write_new_file_never_overwrite(
             try:
                 candidate.unlink(missing_ok=True)
             except OSError as unlink_exc:
-                logger.warning(
-                    "subagent_report_paths: cannot remove partial write %s: %s",
-                    candidate,
+                log_and_continue(
+                    logger,
                     unlink_exc,
+                    reason=f"a partial write {candidate} that cannot be removed stays on disk; the write error that caused it is logged just above and retention ages the file out",
                 )
             return None
         return candidate
@@ -265,12 +293,22 @@ def find_persisted_report(directory: Path, agent_type: str, agent_id: str) -> Pa
     try:
         matches = list(directory.glob(pattern))
     except OSError as exc:
-        logger.debug("subagent_report_paths: cannot glob %s: %s", directory, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a reports directory {directory} that cannot be searched reports no persisted report (None), which the verifier reads as the report not being found",
+            level=logging.DEBUG,
+        )
         return None
     if not matches:
         return None
     try:
         return max(matches, key=lambda path: (path.stat().st_mtime, path.name))
     except OSError as exc:
-        logger.debug("subagent_report_paths: cannot stat matches in %s: %s", directory, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"matches in {directory} that cannot be stat-ed leave no newest report to name (None), which the verifier reads as the report not being found",
+            level=logging.DEBUG,
+        )
         return None

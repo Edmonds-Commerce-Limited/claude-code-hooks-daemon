@@ -1507,6 +1507,57 @@ def socket_path_diagnosis(project_path: Path, *, self_install: bool) -> str | No
     )
 
 
+_PACKAGE_DOTTED_ROOT = "claude_code_hooks_daemon"
+_PACKAGE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _load_package_module_by_path(relative_path: str) -> ModuleType:
+    """Load ``<package>/<relative_path>`` by file path, without importing the package.
+
+    The dotted name is derived from the path. Returns the module already in
+    ``sys.modules`` under that name when there is one (so a package that IS
+    importable shares one module object), otherwise executes the file and
+    registers it under its real dotted name so a later normal import of the
+    same module gets this object instead of a second copy. A module loaded
+    this way must itself import only the standard library or modules already
+    loaded the same way.
+    """
+    dotted_name = ".".join((_PACKAGE_DOTTED_ROOT, *relative_path.removesuffix(".py").split("/")))
+    cached = sys.modules.get(dotted_name)
+    if cached is not None:
+        return cached
+    spec = importlib.util.spec_from_file_location(dotted_name, _PACKAGE_DIR / relative_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {dotted_name!r} from {_PACKAGE_DIR / relative_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    sys.modules.setdefault(dotted_name, module)
+    return module
+
+
+def log_and_continue(
+    log: logging.Logger,
+    exc: BaseException,
+    *,
+    reason: str,
+    level: int = logging.WARNING,
+) -> None:
+    """Sanctioned log-and-continue (``utils/deliberate_swallow.py``), loaded lazily.
+
+    Deliberately NOT ``from claude_code_hooks_daemon.utils.deliberate_swallow
+    import log_and_continue``: THIS file is run standalone by file path
+    (``resolve_venv.sh`` / ``venv_bootstrap.sh`` run ``python3 paths.py ...``
+    during fresh-clone bootstrap) with no venv and no package on ``sys.path``,
+    so a dotted import at module level would crash it at load. The helper's
+    only dependency, ``escape_hatch``, is stdlib-only and is loaded first so
+    its own dotted import resolves from ``sys.modules``. The error-hiding
+    audit recognises the sanctioned form by this name.
+    """
+    _load_package_module_by_path("utils/escape_hatch.py")
+    swallow = _load_package_module_by_path("utils/deliberate_swallow.py")
+    swallow.log_and_continue(log, exc, reason=reason, level=level)
+
+
 _install_layout_module: ModuleType | None = None
 
 
@@ -1529,21 +1580,8 @@ def _install_layout() -> ModuleType:
     global _install_layout_module
     if _install_layout_module is not None:
         return _install_layout_module
-    dotted_name = "claude_code_hooks_daemon.daemon.install_layout"
-    cached = sys.modules.get(dotted_name)
-    if cached is not None:
-        _install_layout_module = cached
-        return cached
-    spec = importlib.util.spec_from_file_location(
-        dotted_name, Path(__file__).resolve().parent / "install_layout.py"
-    )
-    if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load {dotted_name!r} beside {__file__}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    sys.modules.setdefault(dotted_name, module)
-    _install_layout_module = module
-    return module
+    _install_layout_module = _load_package_module_by_path("daemon/install_layout.py")
+    return _install_layout_module
 
 
 def is_self_install_mode(project_path: Path) -> bool:
@@ -1927,7 +1965,11 @@ def write_socket_discovery_file(project_dir: Path | str, socket_path: Path | str
         discovery_file.write_text(str(socket_path))
         logger.debug("Wrote socket discovery file: %s -> %s", discovery_file, socket_path)
     except OSError as e:
-        logger.warning("Failed to write socket discovery file: %s", e)
+        log_and_continue(
+            logger,
+            e,
+            reason=f"without the socket discovery file {discovery_file} clients fall back to the computed socket path; the daemon itself is unaffected",
+        )
 
 
 def read_socket_discovery_file(project_dir: Path | str) -> Path | None:
@@ -1960,7 +2002,11 @@ def read_socket_discovery_file(project_dir: Path | str) -> Path | None:
     try:
         content = discovery_file.read_text().strip()
     except OSError as e:
-        logger.warning("Failed to read socket discovery file %s: %s", discovery_file, e)
+        log_and_continue(
+            logger,
+            e,
+            reason="an unreadable socket discovery file means no discovered socket (None); the caller falls back to the computed default socket path",
+        )
         return None
     return Path(content) if content else None
 
@@ -1981,7 +2027,11 @@ def cleanup_socket_discovery_file(project_dir: Path | str) -> None:
             discovery_file.unlink()
             logger.debug("Removed socket discovery file: %s", discovery_file)
     except OSError as e:
-        logger.warning("Failed to cleanup socket discovery file: %s", e)
+        log_and_continue(
+            logger,
+            e,
+            reason=f"a socket discovery file {discovery_file} left behind is stale but harmless; the next daemon start overwrites it and shutdown must finish",
+        )
 
 
 def is_pid_alive(pid: int) -> bool:
@@ -2004,10 +2054,20 @@ def is_pid_alive(pid: int) -> bool:
         # Process exists but we can't access it
         return True
     except (OSError, TypeError, ValueError) as e:
-        logger.debug("PID check failed for %d: %s", pid, e)
+        log_and_continue(
+            logger,
+            e,
+            reason="a PID liveness probe that cannot complete answers 'not alive', and the caller falls back to its stale-PID handling; nothing is lost beyond this one liveness answer",
+            level=logging.DEBUG,
+        )
         return False
     except Exception as e:
-        logger.error("Unexpected error checking PID %d: %s", pid, e, exc_info=True)
+        log_and_continue(
+            logger,
+            e,
+            reason="an unexpected error probing a PID answers 'not alive' so the caller takes its stale-PID path; it is logged at ERROR so a persistent cause is visible",
+            level=logging.ERROR,
+        )
         return False
 
 
@@ -2040,7 +2100,12 @@ def is_daemon_pid(pid: int) -> bool:
     try:
         cmdline = psutil.Process(pid).cmdline()
     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
-        logger.debug("Cannot inspect PID %d cmdline: %s", pid, e)
+        log_and_continue(
+            logger,
+            e,
+            reason="a process whose cmdline cannot be inspected (gone or access denied) cannot be shown to be the daemon, so it is reported as not a match, the conservative answer for an identity check",
+            level=logging.DEBUG,
+        )
         return False
     return _is_daemon_server_process(cmdline)
 
@@ -2164,10 +2229,20 @@ def read_pid_record(pid_path: Path | str, verify_daemon: bool = False) -> PidRec
     except FileNotFoundError:
         return None
     except UnicodeDecodeError as e:
-        logger.debug("Corrupt PID file %s: %s", pid_path, e)
+        log_and_continue(
+            logger,
+            e,
+            reason="a corrupt PID file is treated as no PID (None), the same answer as an absent file",
+            level=logging.DEBUG,
+        )
         return None
     except (OSError, PermissionError) as e:
-        logger.debug("Failed to read PID file %s: %s", pid_path, e)
+        log_and_continue(
+            logger,
+            e,
+            reason="an unreadable PID file is treated as no PID (None), the same answer as an absent file",
+            level=logging.DEBUG,
+        )
         return None
 
 
@@ -2196,9 +2271,18 @@ def cleanup_socket(socket_path: Path | str) -> None:
         if socket_path.exists():
             socket_path.unlink()
     except (OSError, PermissionError) as e:
-        logger.warning("Failed to cleanup socket %s: %s", socket_path, e)
+        log_and_continue(
+            logger,
+            e,
+            reason=f"a socket {socket_path} that cannot be removed is rebound or replaced by the next daemon start, and shutdown must finish",
+        )
     except Exception as e:
-        logger.error("Unexpected error cleaning socket %s: %s", socket_path, e, exc_info=True)
+        log_and_continue(
+            logger,
+            e,
+            reason=f"an unexpected error removing socket {socket_path} must not abort shutdown; the next start replaces a stale socket",
+            level=logging.ERROR,
+        )
 
 
 def cleanup_pid_file(pid_path: Path | str, pid: int) -> None:
@@ -2223,9 +2307,18 @@ def cleanup_pid_file(pid_path: Path | str, pid: int) -> None:
             return
         pid_path.unlink()
     except (OSError, PermissionError) as e:
-        logger.warning("Failed to cleanup PID file %s: %s", pid_path, e)
+        log_and_continue(
+            logger,
+            e,
+            reason=f"a PID file {pid_path} that cannot be removed is detected as stale by the next start (dead PID), and shutdown must finish",
+        )
     except Exception as e:
-        logger.error("Unexpected error cleaning PID file %s: %s", pid_path, e, exc_info=True)
+        log_and_continue(
+            logger,
+            e,
+            reason=f"an unexpected error removing PID file {pid_path} must not abort shutdown; the next start treats a dead PID as stale",
+            level=logging.ERROR,
+        )
 
 
 # Prefix for all daemon runtime files
@@ -2270,9 +2363,18 @@ def cleanup_stale_daemon_files(project_dir: Path | str, max_age_days: int = 7) -
                 removed += 1
                 logger.info("Removed stale daemon file: %s", filepath)
         except OSError as e:
-            logger.warning("Failed to remove stale daemon file %s: %s", filepath, e)
+            log_and_continue(
+                logger,
+                e,
+                reason=f"a stale daemon file {filepath} that cannot be removed is retried by the next sweep, and the sweep carries on with the remaining files",
+            )
         except Exception as e:
-            logger.error("Unexpected error removing %s: %s", filepath, e, exc_info=True)
+            log_and_continue(
+                logger,
+                e,
+                reason=f"an unexpected error on {filepath} must not stop the sweep of the remaining files; the next sweep retries it",
+                level=logging.ERROR,
+            )
 
     if removed:
         logger.info(
@@ -2397,7 +2499,12 @@ def touch_daemon_files_in_dir(untracked_dir: Path) -> None:
             filepath.touch()
             logger.debug("Touched daemon file: %s", filepath)
         except OSError as e:
-            logger.debug("Failed to touch daemon file %s: %s", filepath, e)
+            log_and_continue(
+                logger,
+                e,
+                reason=f"an untouched {filepath} only ages toward the stale-file sweep sooner; the other files are still touched and a live daemon recreates what it needs",
+                level=logging.DEBUG,
+            )
 
 
 def touch_daemon_files(project_dir: Path | str) -> None:
@@ -2435,7 +2542,11 @@ def write_cleanup_status(project_dir: Path | str, total_removed: int) -> None:
         status_file.write_text(json.dumps({"count": total_removed, "timestamp": time.time()}))
         logger.debug("Wrote cleanup status: %d files removed", total_removed)
     except OSError as e:
-        logger.warning("Failed to write cleanup status: %s", e)
+        log_and_continue(
+            logger,
+            e,
+            reason="the cleanup status file only feeds the status line's removed-files count; the cleanup itself has already happened",
+        )
 
 
 def _collect_hostname_suffixed_venvs(untracked_dir: Path) -> list[tuple[Path, str]]:

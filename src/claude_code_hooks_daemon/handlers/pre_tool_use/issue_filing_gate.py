@@ -75,6 +75,7 @@ from claude_code_hooks_daemon.issue_report.upstream import (
     UPSTREAM_REPO_SLUG,
 )
 from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import GitRepo
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
@@ -205,7 +206,12 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
         try:
             return self.self_install_reader()
         except (RuntimeError, OSError) as exc:
-            logger.debug("install mode unresolvable, assuming client install: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unresolvable install mode is taken to be a client install (False), the default mode",
+                level=logging.DEBUG,
+            )
             return False
 
     @staticmethod
@@ -264,7 +270,12 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
             if repo is not None:
                 urls = repo.remote_urls()
         except (OSError, ValueError) as exc:  # pragma: no cover - defensive
-            logger.debug("Could not resolve the repository for %s: %s", cwd, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="the repository of this cwd cannot be resolved, so no repository URLs are offered (empty) and the gate judges without them",
+                level=logging.DEBUG,
+            )
             urls = ()
         return frozenset(cls._repo_slug(url) for url in urls)
 

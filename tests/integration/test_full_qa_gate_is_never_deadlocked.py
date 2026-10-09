@@ -39,6 +39,7 @@ from claude_code_hooks_daemon.core.router import EventRouter
 from claude_code_hooks_daemon.daemon.cli import _build_handler_config_mapping
 from claude_code_hooks_daemon.handlers.project_loader import ProjectHandlerLoader
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
+from tests.usage_ceiling import exempt_from_usage_ceiling
 
 _ORCHESTRATOR = "orchestrator-simulate"
 _ORCHESTRATOR_RULE = "R-ORCHESTRATOR-MAIN-THREAD-WRITE"
@@ -107,7 +108,9 @@ def _event(tool_name: str, tool_input: dict[str, Any], **extra: Any) -> dict[str
 
 
 def _route(router: EventRouter, hook_input: dict[str, Any]) -> ChainExecutionResult:
-    return router.route(EventType.PRE_TOOL_USE, hook_input, collect_all=True)
+    # The real chain reads this checkout's live usage, which can be over the ceiling.
+    with exempt_from_usage_ceiling(str(hook_input["session_id"])):
+        return router.route(EventType.PRE_TOOL_USE, hook_input, collect_all=True)
 
 
 def _verdict(result: ChainExecutionResult, handler_name: str) -> Decision | None:

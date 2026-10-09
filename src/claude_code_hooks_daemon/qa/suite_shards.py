@@ -20,6 +20,8 @@ from typing import Any, Final
 
 import yaml
 
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
+
 SCOPE_UNIT: Final[str] = "unit"
 SCOPE_REST: Final[str] = "rest"
 SCOPES: Final[frozenset[str]] = frozenset({SCOPE_UNIT, SCOPE_REST})
@@ -161,7 +163,7 @@ def collected_test_files(root: Path, tests_dir: str) -> list[str]:
     """
     found: list[str] = []
     for file in (root / tests_dir).rglob(TEST_FILE_GLOB):
-        relative = file.relative_to(root)
+        relative = path_relative_to(file, root)
         parts = relative.parts
         if any(part.startswith(".") or part in _SKIPPED_DIRS for part in parts[:-1]):
             continue

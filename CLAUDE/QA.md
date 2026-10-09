@@ -115,7 +115,7 @@ checkout the run happened in (the branch's worktree) and the merge happens in
 another; refs are shared by every worktree. A failing run of the whole
 selection drops the record, and a dirty tree or a detached HEAD records
 nothing (the run says so). `merge_qa_advisor` (Plan 00475 Task 4.2) reads it:
-on a Bash `git merge` of a `worktree-*` branch, local or `origin/`, whose head
+on a Bash `git merge` of a `worktree-*` or agent `agent-*` branch, local or `origin/`, whose head
 the record does not name, it adds an advisory naming the head and the checks
 above. It never blocks, and it is silent when the record matches, for any other
 branch, for `--abort`/`--continue`/`--quit`, and when git cannot answer. Commit

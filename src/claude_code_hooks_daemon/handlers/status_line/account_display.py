@@ -14,6 +14,7 @@ from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.handlers.status_line.mtime_cache import MtimeCachedFile
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,12 @@ class AccountDisplayHandler(StatusLineHandlerBase):
         try:
             username = _username_reader.read(Path.home().joinpath(*_CONF_RELATIVE_PATH))
         except Exception as e:
-            logger.debug("Failed to read account conf for explain_segment: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="status-line segments fail silent by contract: an unexpected error omits the segment rather than showing a misleading one",
+                level=logging.DEBUG,
+            )
             username = None
         current_value = (
             f"Currently shows: 👤 {username} |"

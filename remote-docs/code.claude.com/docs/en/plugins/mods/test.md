@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/mods/test
-fetched_at: '2026-10-06T09:55:31.985292+00:00'
+fetched_at: '2026-10-08T00:23:59.751164+00:00'
 fidelity: converted
-source_sha256: bd9e7709bff0dc2eee9d04114dfa3cc398fb58d20ad5f7d329ed25ad6a1aa01a
+source_sha256: 5e78b0dc3a989f336afad2876ed8653370e8beb68c2cd37c3a9562011395a42e
 licence: unreviewed
-stale_after: '2027-01-04'
+stale_after: '2027-01-06'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -113,7 +113,7 @@ The test passes because the hook's `reply` is the object under `value`, whose `t
 
 A stub for a mods API call returns an object with a `value` field, which holds what the call resolves to in your mod: `{ value: 7 }` makes `$.store.get` resolve to `7`. A stub for one of Claude Code's events, such as [`turn.step`](/docs/en/plugins/mods/reference#turns) or `tool.call`, returns that event's own result, such as `{ result: 'ok' }`. `$.session.send` and `$.prompt.fill` take their event's result too, as the table shows. [Look up what a stub returns](#look-up-what-a-stub-returns) shows which form each common name takes. These errors mean a stub is wrong or missing. A failed test's output includes a block headed `the engine reported:`, and each error appears there:
 
-* `returned neither { value } nor { deny }`: a stub for a mods API call returned a bare value
+* `returned neither { value } nor { deny }`: a stub for a mods API call returned a bare value, which fails the test
 * `no implementation for` followed by a name: your mod made that call and no stub answers it
 
 The kit also exports in-memory mocks that answer a whole namespace for you. `mock.clock(on)` answers [`$.clock`](/docs/en/plugins/mods/api#run-work-in-the-background), `mock.store(on, { count: 7 })` answers `$.store` from a store that starts with those entries, and `mock.env(on, { CI: 'true' })` answers `$.env.get` from those variables. `mock.clock` returns a mock clock that your test advances, so a test of a timer doesn't wait. `mock.store` returns nothing, so to check what your mod saved, write the two `store` stubs yourself as the [drawing test](#test-a-drawing) does.
@@ -199,6 +199,8 @@ This table lists the ones mods use most. The first column is the call your mod m
 | `ui.render` | `() => ({ type: 'Text', props: {}, children: ['...'] })` |
 
 `expect` has the assertions `toBe`, `toEqual`, `toMatch`, `toMatchObject`, `toContain`, `toBeDefined`, `toBeUndefined`, and `toThrow`, and `.not` before any of them.
+
+When an `expect` fails inside a stub or hook that you passed to `on` as a plain function rather than an async generator, the test fails. The engine skips that hook, and the failure output names it, such as `in the test's store.set hook`.
 
 ## Test a timer
 

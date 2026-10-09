@@ -1,5 +1,6 @@
 """Unit tests for PlaybookGenerator."""
 
+import logging
 from typing import Any, Protocol
 from unittest.mock import patch
 
@@ -422,11 +423,12 @@ def test_generate_markdown_handles_handler_instantiation_error() -> None:
     with patch("claude_code_hooks_daemon.daemon.playbook_generator.logger") as mock_logger:
         markdown = generator.generate_markdown()
 
-        # Should log warning with handler name
-        mock_logger.warning.assert_called()
-        call_args = mock_logger.warning.call_args[0]
-        assert "Failed to get tests from %s" in call_args[0]
-        assert "BrokenHandler" in call_args[1]
+        # Should log at warning level, naming the handler and why it is left out
+        mock_logger.log.assert_called()
+        call_args = mock_logger.log.call_args[0]
+        assert call_args[0] == logging.WARNING
+        assert "BrokenHandler" in call_args[2]
+        assert "left out of the playbook" in call_args[2]
 
     # Should still generate valid markdown
     assert "# Acceptance Testing Playbook" in markdown

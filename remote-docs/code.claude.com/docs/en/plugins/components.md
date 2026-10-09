@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/components
-fetched_at: '2026-10-06T09:58:45.343429+00:00'
+fetched_at: '2026-10-08T00:22:42.065827+00:00'
 fidelity: converted
-source_sha256: 7639f74ce85a2d1ce05c3ee5116831d46ee059f9b9d9a740f61224a8fc4d10f6
+source_sha256: 4f1eb7aebd7604eaaea6b02c35151de6323f958258586005f0eeb561364d7850
 licence: unreviewed
-stale_after: '2027-01-04'
+stale_after: '2027-01-06'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -731,7 +731,7 @@ model: sonnet
 You are a security reviewer. Read the changed files and report injection, authentication, and secrets-handling risks.
 ```
 
-This agent is named `my-plugin:security-reviewer`, and the user can [invoke it explicitly](/docs/en/sub-agents#invoke-subagents-explicitly) with `@agent-my-plugin:security-reviewer`. The name form is `<plugin>:<name>`, where `<name>` comes from the frontmatter, or from the file name when there is none.
+This agent is named `my-plugin:security-reviewer`, and the user can [invoke it explicitly](/docs/en/sub-agents#invoke-subagents-explicitly) with `@agent-my-plugin:security-reviewer`. The name form is `<plugin>:<name>`, where `<name>` comes from the frontmatter `name` field, or from the file name when that field is missing.
 
 The `agents` manifest key replaces the `agents/` scan.
 

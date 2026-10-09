@@ -10,6 +10,8 @@ import stat
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from claude_code_hooks_daemon.install.ccy_supervisor import (
     CCY_ENV_NAME,
     SUPERVISOR_LAUNCHER_NAME,
@@ -339,7 +341,7 @@ class TestArmCcySupervisor:
         env_file.write_text(
             "export FOO=bar\n"
             "# was: claude-supervise.py --arm --\n"
-            'export CCY_CLAUDE_WRAPPER="${CCY_CLAUDE_WRAPPER:-/w/claude-supervise.py --arm --}"\n'
+            f'export CCY_CLAUDE_WRAPPER="${{CCY_CLAUDE_WRAPPER:-{ccy}/claude-supervise.py --arm --}}"\n'
         )
         config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
 
@@ -349,10 +351,88 @@ class TestArmCcySupervisor:
         assert env_file.read_text() == (
             "export FOO=bar\n"
             "# was: claude-supervise.py --arm --\n"
-            'export CCY_CLAUDE_WRAPPER="${CCY_CLAUDE_WRAPPER:-/w/claude-supervise --arm --}"\n'
+            f'export CCY_CLAUDE_WRAPPER="${{CCY_CLAUDE_WRAPPER:-{ccy}/claude-supervise --arm --}}"\n'
         )
         again = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
         assert again.wrapper_migrated is False
+
+    @pytest.mark.parametrize(
+        "location",
+        [
+            '$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/',
+            ".claude/ccy/",
+            "./.claude/ccy/",
+        ],
+    )
+    def test_the_deployed_directory_spellings_are_migrated(
+        self, tmp_path: Path, location: str
+    ) -> None:
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        env_file = ccy / CCY_ENV_NAME
+        env_file.write_text(f'export CCY_CLAUDE_WRAPPER="{location}claude-supervise.py --arm --"\n')
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        assert result.wrapper_migrated is True
+        assert env_file.read_text() == (
+            f'export CCY_CLAUDE_WRAPPER="{location}claude-supervise --arm --"\n'
+        )
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            'export CCY_CLAUDE_WRAPPER="/opt/tools/claude-supervise.py --arm --"',
+            'export CCY_CLAUDE_WRAPPER="${CCY_CLAUDE_WRAPPER:-/w/claude-supervise.py --arm --}"',
+            'export CCY_CLAUDE_WRAPPER="claude-supervise.py --arm --"',
+            'export CCY_CLAUDE_WRAPPER="$HOME/bin/claude-supervise.py --arm --"',
+        ],
+    )
+    def test_a_wrapper_in_another_directory_is_left_alone_and_reported(
+        self, tmp_path: Path, line: str
+    ) -> None:
+        """The launcher is deployed only to .claude/ccy, so a custom path must not be repointed."""
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        env_file = ccy / CCY_ENV_NAME
+        env_file.write_text(f"{line}\n")
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        assert result.wrapper_migrated is False
+        assert env_file.read_text() == f"{line}\n"
+        assert any(
+            "left unchanged" in message and "claude-supervise" in message
+            for message in result.messages
+        )
+
+    def test_only_the_deployed_line_is_migrated_when_both_kinds_are_present(
+        self, tmp_path: Path
+    ) -> None:
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        env_file = ccy / CCY_ENV_NAME
+        env_file.write_text(
+            'export CCY_CLAUDE_WRAPPER="/opt/x/claude-supervise.py --"\n'
+            'export CCY_CLAUDE_WRAPPER=".claude/ccy/claude-supervise.py --arm --"\n'
+        )
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        assert result.wrapper_migrated is True
+        assert env_file.read_text() == (
+            'export CCY_CLAUDE_WRAPPER="/opt/x/claude-supervise.py --"\n'
+            'export CCY_CLAUDE_WRAPPER=".claude/ccy/claude-supervise --arm --"\n'
+        )
 
     def test_a_commented_out_wrapper_is_not_migrated(self, tmp_path: Path) -> None:
         daemon_root = tmp_path / "daemon"

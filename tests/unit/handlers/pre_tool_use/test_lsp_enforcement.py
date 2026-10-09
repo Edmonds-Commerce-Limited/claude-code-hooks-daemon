@@ -16,6 +16,7 @@ Every test sees the LSP servers in ``lsp_servers`` (a Python server unless a
 test changes it), never the real Claude config dir.
 """
 
+import logging
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -643,7 +644,8 @@ class TestLspEnforcementBlockCount:
         ):
             mock_dl.side_effect = RuntimeError("no data layer")
             assert handler._get_block_count() == 0
-            mock_logger.warning.assert_called_once()
+            mock_logger.log.assert_called_once()
+            assert mock_logger.log.call_args.args[0] == logging.WARNING
 
     def test_block_count_does_not_swallow_unexpected_errors(self) -> None:
         """Unexpected (non data-layer) errors must propagate, not be hidden.

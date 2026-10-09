@@ -17,6 +17,7 @@ from claude_code_hooks_daemon.daemon.process_verification import (
 )
 from claude_code_hooks_daemon.daemon.server import _socket_is_live, remove_stale_pid_file
 from claude_code_hooks_daemon.utils.container_detection import is_container_environment
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.safe_signal import (
     DaemonStop,
     RefusedSignalTarget,
@@ -56,7 +57,15 @@ def _serves_a_socket(pid: int) -> bool:
     try:
         return bool(bound_socket_paths(pid))
     except OSError as exc:
-        logger.info("Cannot read the sockets of PID %d (%s); it is not proven to serve", pid, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=(
+                f"Cannot read the sockets of PID {pid}; a process whose sockets cannot be "
+                "read is not proven to serve, which is the safe answer for enforcement"
+            ),
+            level=logging.INFO,
+        )
         return False
 
 

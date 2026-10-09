@@ -21,18 +21,6 @@
       "reason": "Plan 00389: same tolerant-read contract as utils/blockage_marker.py::read_marker directly analogous to it. A project that has never run generate-docs, one whose generated doc predates the version header, and one whose doc is unreadable are all NORMAL states, and all mean the same single thing to every caller: there is nothing to compare the running version against, so say nothing. The consumer is daemon_sync_after_merge, a PostToolUse advisory -- raising would propagate out of a hook and risk failing the user's tool call over a missing optional marker, which is a strictly worse outcome than the silence. The file-absent case is tested for before the read (is_file), so the caught OSError/UnicodeDecodeError band is genuinely the unreadable-or-undecodable one, logged at debug and covered by test_undecodable_bytes_are_none_not_an_error."
     },
     {
-      "file": "daemon/controller.py",
-      "function": "_sync_agent_assets",
-      "rule": "log-and-continue",
-      "reason": "Plan 00279: agent-asset sync at daemon start is deliberately best-effort, mirroring the fail-open startup contract (_validate_config, ClaudeMdInjector): an unwritable .claude/agents/, an invalid config (already reported by the degraded-mode path), or a mocked non-Path workspace_root must not stop the daemon serving hooks. The failure is logged at ERROR, so nothing is concealed; the deploy is re-attempted on every restart and available on demand via `hooks-daemon agents install`."
-    },
-    {
-      "file": "daemon/controller.py",
-      "function": "_sync_directory_role_rules",
-      "rule": "log-and-continue",
-      "reason": "Plan 00288 D5: directory-role-rules sync at daemon start is deliberately best-effort, the EXACT sibling contract to _sync_agent_assets directly above it in the same file (and in this file's first entry): an unwritable .claude/rules/ (OSError), an invalid config already reported by the degraded-mode path (ValueError), or a mocked non-Path workspace_root (TypeError) must not stop the daemon serving hooks. The failure is logged at ERROR, so nothing is concealed; the deploy re-attempts on every restart."
-    },
-    {
       "file": "handlers/post_tool_use/model_downgrade_recorder.py",
       "function": "publish",
       "rule": "return-none-on-error",
@@ -58,12 +46,6 @@
     },
     {
       "file": "handlers/session_start/model_fallback_detector.py",
-      "function": "_scan_transcript",
-      "rule": "log-and-continue",
-      "reason": "Plan 00278: advisory SessionStart transcript scan. A missing or unreadable transcript is a documented no-detection outcome, not an error to raise — the handler must never fail a session start, and the OSError is logged before returning the (correct) empty result. Nothing is concealed: an empty result simply means no fallback record could be observed."
-    },
-    {
-      "file": "handlers/session_start/model_fallback_detector.py",
       "function": "_resolve_state_file",
       "rule": "return-none-on-error",
       "reason": "Plan 00278 dogfooding fix: persisted dedupe state is best-effort, mirroring _resolve_snapshot_dir's contract. Without a live ProjectContext (unit tests, CLI probes) a RuntimeError/OSError is logged at debug and None is returned, which callers treat as 'persistence unavailable, fall back to in-memory-only dedupe for this process' -- never a reason to fail a session start."
@@ -73,12 +55,6 @@
       "function": "_load_state",
       "rule": "return-none-on-error",
       "reason": "Plan 00278 dogfooding fix: loading persisted dedupe state is fail-silent by design, matching this handler's advisory contract. A missing state file (first run), an unreadable one (OSError), or a corrupt one (ValueError from json.loads) are all logged at debug and treated as 'no prior state' -- exactly the same fallback as _parse_high_water in downgrade_state.py. Nothing is concealed: dedupe simply starts from empty, which only means a record MIGHT re-advise once, never that a real fallback goes unreported."
-    },
-    {
-      "file": "handlers/session_start/model_fallback_detector.py",
-      "function": "_save_state",
-      "rule": "log-and-continue",
-      "reason": "Plan 00278 dogfooding fix: persisting dedupe state is best-effort. An OSError (unwritable directory, disk full) is logged at warning and swallowed -- losing persistence for this call degrades to in-memory-only dedupe for the remainder of THIS process, it must never fail or block a session start. The write itself is atomic (tmp + os.replace, mirroring downgrade_state.write_high_water) so a failure here can never corrupt an existing state file."
     },
     {
       "file": "handlers/session_start/model_fallback_detector.py",
@@ -105,28 +81,10 @@
       "reason": "FileNotFoundError is expected when config file disappears between exists() check and read (TOCTOU). Falls through to return cls() which creates a safe default. This is not hiding an error — it IS the intended fallback."
     },
     {
-      "file": "core/claude_md_injector.py",
-      "function": "inject",
-      "rule": "return-none-on-error",
-      "reason": "ClaudeMdInjector.inject() is a strictly advisory feature — it must never crash daemon startup. Both OSError and broad Exception are caught, logged with full traceback (exc_info=exc), and swallowed so daemon continues. The return is just the early-exit path, not hiding a real error."
-    },
-    {
       "file": "core/front_controller.py",
       "function": "_inject_config_key_footer",
       "rule": "return-none-on-error",
       "reason": "Returns early on ValueError for unknown event types. The caller continues normally — the footer injection is optional context enrichment, not a critical operation."
-    },
-    {
-      "file": "core/project_context.py",
-      "function": "_ensure_self_install_cli_symlink",
-      "rule": "log-and-continue",
-      "reason": "Plan 00455: creating the conventional .claude/hooks-daemon/bin/hooks-daemon symlink for a self-install checkout is a best-effort convenience, not a precondition for the daemon to serve hooks -- ProjectContext.initialize() must still complete (and the daemon must still start) if the filesystem refuses the symlink (permissions, an unsupported filesystem). The OSError is caught narrowly (not a bare except) and logged at WARNING with the path and the underlying error, so the degraded state is visible rather than concealed."
-    },
-    {
-      "file": "core/project_context.py",
-      "function": "_ensure_self_install_lsp_venv_symlink",
-      "rule": "log-and-continue",
-      "reason": "Ledger 00422 N18: maintaining the untracked/lsp-venv symlink that gives pyrightconfig.json a stable path to the current venv is a best-effort convenience for LSP diagnostics, not a precondition for the daemon to serve hooks -- ProjectContext.initialize() must still complete if the filesystem refuses the symlink (permissions, an unsupported filesystem, a concurrent repoint). The OSError is caught narrowly (not a bare except) and logged at WARNING with the path and the underlying error, so the degraded state is visible rather than concealed."
     },
     {
       "file": "core/pseudo_event.py",
@@ -142,33 +100,15 @@
     },
     {
       "file": "core/transcript_reader.py",
-      "function": "_parse",
-      "rule": "log-and-continue",
-      "reason": "Logs file read errors and continues with empty state. Transcript parsing is advisory — one unreadable transcript must not crash handler execution. Already logged at debug/error level."
-    },
-    {
-      "file": "core/transcript_reader.py",
       "function": "load_tail",
       "rule": "return-none-on-error",
       "reason": "Bounded tail load (Plan 00177). Returns early when the path is invalid/missing — exact parity with load(). Transcript reading is advisory; the Stop dispatch must not crash if the transcript path is malformed or absent. Callers check _loaded state."
     },
     {
       "file": "core/transcript_reader.py",
-      "function": "_parse_tail",
-      "rule": "log-and-continue",
-      "reason": "Bounded tail parse (Plan 00177). Logs a read error and continues with empty state — exact parity with _parse(). One unreadable transcript must not crash the Stop handler. Already logged at debug/error level."
-    },
-    {
-      "file": "core/transcript_reader.py",
       "function": "_ingest_record",
       "rule": "return-none-on-error",
       "reason": "Shared JSONL record ingest for _parse and _parse_tail (Plan 00177): except json.JSONDecodeError skips a malformed line — the standard JSONL pattern (same as read_incremental's silent-continue). A single bad line must not abort parsing the rest of the transcript."
-    },
-    {
-      "file": "core/transcript_reader.py",
-      "function": "read_incremental",
-      "rule": "log-and-continue",
-      "reason": "Logs OSError/UnicodeDecodeError at debug level and returns partial results. Incremental transcript reading is advisory — same pattern as _parse(). Already logged."
     },
     {
       "file": "core/transcript_reader.py",
@@ -183,28 +123,10 @@
       "reason": "JSONL transcript tail scan for Stop-hook block markers: except json.JSONDecodeError: continue is the standard JSONL pattern. The discriminator must skip malformed lines to evaluate the rest of the lookback window — a single bad line cannot mask a genuine block marker further along. Same pattern already excluded in transcript_reader.read_incremental."
     },
     {
-      "file": "daemon/cli.py",
-      "function": "get_project_path",
-      "rule": "log-and-continue",
-      "reason": "Directory search loop: log-and-continue when searching upward for .claude directory. SystemExit during path validation means invalid installation at this path — continue searching upward is the correct behaviour. Already logged at debug level."
-    },
-    {
-      "file": "daemon/cli.py",
-      "function": "_collect_status_line_segment_entries",
-      "rule": "log-and-continue",
-      "reason": "Plan 00369 status-line-explained: an unreadable/invalid hooks-daemon.yaml degrades to event_config={} (every handler resolves 'enabled' via its own default), matching explain-rule/explain-handler's own _init_project_context_for_explain degrade-gracefully contract for a command that must work without a fully validated installation. Already logged at debug level."
-    },
-    {
       "file": "handlers/session_start/session_actions_directive.py",
       "function": "_project_root",
       "rule": "return-none-on-error",
       "reason": "Plan 00416 Task 2.3: identical contract to hook_registration_checker._get_project_root -- ProjectContext.project_root() raises RuntimeError when the root cannot be resolved, which for a SessionStart advisory means 'nothing to check', not an error. Logged at debug; the sole caller treats None as 'stand down' and writes no signal."
-    },
-    {
-      "file": "utils/session_actions_signal.py",
-      "function": "clear_session_actions_signal",
-      "rule": "log-and-continue",
-      "reason": "Plan 00416 Task 2.3: retracting a directive is best-effort hygiene on a session-start path. The common case is that the file is absent (most sessions are healthy), and an unreadable untracked directory is not worth failing a session start over -- that would cost the agent every other SessionStart handler's output to avoid one stale nudge. Logged at warning. The WRITE half deliberately does NOT have this contract: it propagates OSError so a caller that cares can report it."
     },
     {
       "file": "handlers/post_tool_use/goal_injection.py",
@@ -223,18 +145,6 @@
       "function": "send_daemon_request",
       "rule": "return-none-on-error",
       "reason": "Returns None on socket connection failure. Callers check for None and display appropriate error messages to user. Socket unavailability is a normal operational state (daemon not running). Already logged via logger.exception."
-    },
-    {
-      "file": "daemon/paths.py",
-      "function": "write_socket_discovery_file",
-      "rule": "log-and-continue",
-      "reason": "Stale socket/PID file cleanup routine: log-and-continue is correct. Cleanup failing for one stale file should not prevent cleanup of others or block daemon startup. Already logged at warning level."
-    },
-    {
-      "file": "daemon/paths.py",
-      "function": "cleanup_socket_discovery_file",
-      "rule": "log-and-continue",
-      "reason": "Stale socket/PID file cleanup routine: log-and-continue is correct. Cleanup failing for one stale file should not prevent cleanup of others or block daemon startup. Already logged at warning level."
     },
     {
       "file": "daemon/paths.py",
@@ -273,42 +183,6 @@
       "reason": "Plan 00110 Phase 3 best-effort pyproject.toml floor reader. Returns None when the file is unreadable (OSError) — pyproject may legitimately be absent (bootstrap from fresh clone, downstream install without project pyproject). Callers fall back to the hard-coded _MIN_COMPATIBLE_PYTHON floor when None is returned. Uses regex instead of tomllib so the helper works under any host interpreter during bootstrap."
     },
     {
-      "file": "daemon/paths.py",
-      "function": "cleanup_socket",
-      "rule": "log-and-continue",
-      "reason": "Stale socket/PID file cleanup routine: log-and-continue is correct. Cleanup failing for one stale file should not prevent cleanup of others or block daemon startup. Already logged at warning level."
-    },
-    {
-      "file": "daemon/paths.py",
-      "function": "cleanup_pid_file",
-      "rule": "log-and-continue",
-      "reason": "Stale socket/PID file cleanup routine: log-and-continue is correct. Cleanup failing for one stale file should not prevent cleanup of others or block daemon startup. Already logged at warning level."
-    },
-    {
-      "file": "daemon/paths.py",
-      "function": "cleanup_stale_daemon_files",
-      "rule": "log-and-continue",
-      "reason": "Stale file batch cleanup routine: log-and-continue is correct. One unremovable/unreadable file must not abort cleanup of others or block daemon startup. Already logged at warning/debug level."
-    },
-    {
-      "file": "daemon/paths.py",
-      "function": "touch_daemon_files_in_dir",
-      "rule": "log-and-continue",
-      "reason": "Stale file batch cleanup routine: log-and-continue is correct. One unremovable/unreadable file must not abort cleanup of others or block daemon startup. Already logged at warning/debug level."
-    },
-    {
-      "file": "daemon/paths.py",
-      "function": "write_cleanup_status",
-      "rule": "log-and-continue",
-      "reason": "Stale file batch cleanup routine: log-and-continue is correct. One unremovable/unreadable file must not abort cleanup of others or block daemon startup. Already logged at warning/debug level."
-    },
-    {
-      "file": "daemon/playbook_generator.py",
-      "function": "_collect_tests",
-      "rule": "log-and-continue",
-      "reason": "Acceptance test collection from handlers: log-and-continue when a handler fails to provide tests. One handler failing should not prevent playbook generation from other handlers. Already logged."
-    },
-    {
       "file": "daemon/process_verification.py",
       "function": "find_all_daemon_processes",
       "rule": "silent-continue",
@@ -321,52 +195,10 @@
       "reason": "Schema validator loading: returns None when schema not available. Callers check for None and skip validation or use strict mode. Schema validation is optional safety layer, not blocking."
     },
     {
-      "file": "daemon/server.py",
-      "function": "_write_pid_file",
-      "rule": "log-and-continue",
-      "reason": "Stale PID file check: log-and-continue when reading/parsing stale PID file. Already logged. Daemon startup should continue even if stale PID file is unreadable."
-    },
-    {
-      "file": "daemon/server.py",
-      "function": "_capture_payload_best_effort",
-      "rule": "log-and-continue",
-      "reason": "Plan 00158 dogfooding payload capture: log-and-continue on OSError (untracked dir unwritable) / RuntimeError (ProjectContext not initialised in non-daemon callers). Capture is an opt-in debug aid and must NEVER break hook dispatch, which carries safety-critical handlers. Logged at warning level, never silently swallowed. Same sanctioned fail-open contract as context_sidecar._write_sidecar and compaction_signal._write_signal."
-    },
-    {
-      "file": "daemon/server.py",
-      "function": "_ensure_scratch_dir_best_effort",
-      "rule": "log-and-continue",
-      "reason": "Plan 00333 scratch bootstrap: log-and-continue on OSError (project root unwritable) / RuntimeError (ProjectContext not initialised), the exact sibling contract to _capture_payload_best_effort three entries above. project_containment denies out-of-root writes and points at untracked/scratch/, so the daemon creates it at start; but refusing to START over a missing scratch directory would trade a small inconvenience for the loss of every safety-critical handler, which is strictly the worse failure. Logged at warning level, never silently swallowed, and re-attempted on every restart."
-    },
-    {
       "file": "daemon/validation.py",
       "function": "load_config_safe",
       "rule": "return-none-on-error",
       "reason": "Returns None on config load failure. Callers receive None and handle it by using defaults or raising with better context. This is the documented contract of the function."
-    },
-    {
-      "file": "handlers/pre_compact/compaction_signal.py",
-      "function": "_write_signal",
-      "rule": "log-and-continue",
-      "reason": "Plan 00135 compaction signal: logs RuntimeError (ProjectContext not initialised in unit tests / non-daemon callers) and OSError (untracked dir unwritable) at warning level and continues. Dropping the <session>.compacting marker is a best-effort observability signal for the PTY supervisor; a failed write must never block or fail a compaction. Same fail-open contract as context_sidecar._write_sidecar."
-    },
-    {
-      "file": "handlers/project_loader.py",
-      "function": "load_handler_from_file",
-      "rule": "log-and-continue",
-      "reason": "Project handler acceptance test validation: log-and-continue. Acceptance test retrieval failure is non-fatal for handler loading. Already logged at warning level."
-    },
-    {
-      "file": "handlers/registry.py",
-      "function": "discover",
-      "rule": "log-and-continue",
-      "reason": "Handler module discovery: log-and-continue when a module fails to import. One broken module should not prevent other handlers from loading. Already logged at warning level."
-    },
-    {
-      "file": "handlers/registry.py",
-      "function": "register_all",
-      "rule": "log-and-continue",
-      "reason": "Handler module discovery: log-and-continue when a module fails to import. One broken module should not prevent other handlers from loading. Already logged at warning level."
     },
     {
       "file": "handlers/session_start/hook_registration_checker.py",
@@ -388,27 +220,9 @@
     },
     {
       "file": "handlers/session_start/gitignore_safety_checker.py",
-      "function": "_compute_gitignore_hash",
-      "rule": "log-and-continue",
-      "reason": "Gitignore safety checker: log-and-continue on OSError reading optional gitignore files. Advisory handler — if a gitignore file is temporarily unreadable, the check skips that file and continues. Already logged at debug level."
-    },
-    {
-      "file": "handlers/session_start/gitignore_safety_checker.py",
-      "function": "_read_gitignore_lines",
-      "rule": "log-and-continue",
-      "reason": "Gitignore safety checker: log-and-continue on OSError reading optional gitignore files. Advisory handler — if a gitignore file is temporarily unreadable, the check skips that file and continues. Already logged at debug level."
-    },
-    {
-      "file": "handlers/session_start/gitignore_safety_checker.py",
       "function": "_get_cached_missing_entries",
       "rule": "return-none-on-error",
       "reason": "Cache reader: returns None when cache file is missing or unparseable. Caller checks for None and falls through to a fresh filesystem scan. Cache reading is advisory — failure means re-scan, not crash."
-    },
-    {
-      "file": "handlers/session_start/gitignore_safety_checker.py",
-      "function": "_write_cache",
-      "rule": "log-and-continue",
-      "reason": "Cache writer: log-and-continue on OSError writing cache file. Cache writing is best-effort — failure means the next session re-scans instead of using cache. Advisory handler must not crash session start. Already logged at debug level."
     },
     {
       "file": "handlers/session_start/suggest_statusline.py",
@@ -417,40 +231,10 @@
       "reason": "Plan 00236: returns None when ProjectContext is not initialised (unit tests, or any non-daemon caller), so the suggestion-counter read/write is skipped. Identical explicitly-non-fatal contract to background_process_tracker._resolve_state_file — the advisory is the primary function and must never crash session start. Note the failure direction is deliberately fail-OPEN: an unresolvable state file makes the handler SUGGEST, never fall silent, because a permanently silent advisory is indistinguishable from a working one."
     },
     {
-      "file": "handlers/session_start/suggest_statusline.py",
-      "function": "_record_shown",
-      "rule": "log-and-continue",
-      "reason": "Plan 00236: log-and-continue on OSError persisting the showing counter. Same best-effort contract as gitignore_safety_checker._write_cache — a failed write means the suggestion may be shown once more than intended, which is strictly the safe direction for a noise-reduction counter, and must not crash session start. Already logged at debug level."
-    },
-    {
       "file": "handlers/session_start/version_check.py",
       "function": "_get_cached_result",
       "rule": "return-none-on-error",
       "reason": "Version check helper: returns None when cache file missing or unparseable. Caller handles None gracefully by falling through to a fresh version check. Version checking is advisory — failure should not break session start."
-    },
-    {
-      "file": "handlers/session_start/version_check.py",
-      "function": "_write_cache",
-      "rule": "log-and-continue",
-      "reason": "Version check: log-and-continue on cache write failure. Already logged. Version checking is advisory."
-    },
-    {
-      "file": "skill_scan/state.py",
-      "function": "_write_state",
-      "rule": "log-and-continue",
-      "reason": "Skill-scan TTL state (Plan 00274): log-and-continue on state write failure, the version_check cache pattern. The scan is advisory; a failed state write means the advisory refires next session, which fails toward a suggestion rather than silence."
-    },
-    {
-      "file": "config_optimisation/state.py",
-      "function": "record_run",
-      "rule": "log-and-continue",
-      "reason": "Config-optimisation last-run state (Plan 00308): same log-and-continue pattern as skill_scan/state.py's _write_state. A failed state write means the config_optimisation_reminder advisory refires next session (fails toward reminding, never toward silence)."
-    },
-    {
-      "file": "skill_scan/extraction.py",
-      "function": "extract_prompts",
-      "rule": "log-and-continue",
-      "reason": "Skill-scan transcript reader (Plan 00274): an unreadable/unstatable transcript file is skipped and logged. Transcripts are Claude Code's private files being read best-effort; one bad file must not abort the whole scan."
     },
     {
       "file": "skill_scan/extraction.py",
@@ -469,36 +253,6 @@
       "function": "_read_installed_version",
       "rule": "return-none-on-error",
       "reason": "Contract-staleness advisory (Plan 00271): returns None when `claude --version` cannot be run or parsed (missing binary, timeout, non-zero exit), logged at debug. The advisory then stays silent — a broken probe must not fail session start."
-    },
-    {
-      "file": "handlers/session_start/contract_staleness.py",
-      "function": "_read_installed_version",
-      "rule": "log-and-continue",
-      "reason": "Contract-staleness advisory (Plan 00271): cache read/write failures are logged at debug and the probe falls through to a fresh `claude --version` run. The cache is purely an optimisation; advisory handlers are fail-open."
-    },
-    {
-      "file": "handlers/status_line/daemon_stats.py",
-      "function": "handle",
-      "rule": "log-and-continue",
-      "reason": "Daemon stats handler: log-and-continue on individual stat collection failures. Status line handlers are fail-open — one stat failing must not crash the entire status line. Already logged."
-    },
-    {
-      "file": "handlers/status_line/git_branch.py",
-      "function": "_render_git_context",
-      "rule": "log-and-continue",
-      "reason": "Git branch handler: log-and-continue on subprocess failure. Status line handlers are fail-open by design — one failing element must not crash the entire status line. Already logged at debug level. (Plan 00155 T4 moved this fail-open render body out of handle() into _render_git_context() so handle() can wrap it with the render TTL cache.)"
-    },
-    {
-      "file": "handlers/status_line/startup_cleanup.py",
-      "function": "handle",
-      "rule": "log-and-continue",
-      "reason": "Startup cleanup status handler: log-and-continue on OSError reading cleanup_status.json. Status line handlers are fail-open by design — one failing element must not crash the entire status line. Returns empty context on error. Already logged at debug level."
-    },
-    {
-      "file": "handlers/status_line/context_sidecar.py",
-      "function": "_write_sidecar",
-      "rule": "log-and-continue",
-      "reason": "Plan 00135 observe-only context sidecar: log-and-continue on RuntimeError (ProjectContext not initialised in unit tests / non-daemon callers) and OSError (untracked dir unwritable). Status line handlers are fail-open by design — a failed best-effort sidecar write must never crash the render or the dispatch. The sidecar is an advisory sensor for the PTY supervisor, not a critical path. Both errors are logged at warning level, never silently swallowed. Same fail-open contract as startup_cleanup.handle."
     },
     {
       "file": "handlers/status_line/supervisor_indicator.py",
@@ -531,12 +285,6 @@
       "reason": "Supervisor indicator transient-message fail-silent wrapper: returns None on ANY error resolving the current message (broad catch) so a bad message file can never break the status-line render — the top hat then renders without an attached notice. Identical fail-open contract to the handler's handle() body and the other supervisor_indicator readers (_read_status, _scan_for_supervisor). Already logged at debug level."
     },
     {
-      "file": "handlers/stop/auto_continue_stop.py",
-      "function": "_log_stop_event",
-      "rule": "log-and-continue",
-      "reason": "_log_stop_event(): Non-critical JSONL append — logs at debug level and continues when ProjectContext is not initialised (unit tests) or the log file is unwritable. Stop event logging is purely diagnostic and must not affect the handler decision or raise to callers."
-    },
-    {
       "file": "install/transport_probe.py",
       "function": "_verify_digest",
       "rule": "return-none-on-error",
@@ -553,12 +301,6 @@
       "function": "load_handler",
       "rule": "return-none-on-error",
       "reason": "Plugin loader: returns None when plugin import or instantiation fails. Logged at error level before returning. The plugin system is resilient — one broken plugin does not prevent others from loading."
-    },
-    {
-      "file": "plugins/loader.py",
-      "function": "load_handler",
-      "rule": "log-and-continue",
-      "reason": "Plugin acceptance test validation: log-and-continue. Acceptance test retrieval failure is non-fatal for plugin loading. Already logged at warning level."
     },
     {
       "file": "qa/runner.py",
@@ -579,12 +321,6 @@
       "reason": "Returns None when the per-repo plan counter is unset or non-integer (corrupt). None is the documented 'no counter yet' signal that triggers bootstrap-from-scan in next_plan_number_for_target — it is the intended control-flow path, not a swallowed error."
     },
     {
-      "file": "handlers/pre_tool_use/plan_qa_edit.py",
-      "function": "_record_allocation",
-      "rule": "log-and-continue",
-      "reason": "A git-config counter-write failure must not block plan creation. Logs the failure with a full traceback (exc_info=True) and continues — the next read re-bootstraps the counter from a filesystem scan, so the counter self-heals rather than going silently stale. Same sanctioned pattern as transcript_reader._parse. Relocated from validate_plan_number in Plan 00237 along with the writer itself."
-    },
-    {
       "file": "daemon/background_harvester.py",
       "function": "read_tracked_commands",
       "rule": "silent-continue",
@@ -601,30 +337,6 @@
       "function": "_strip_ledger_records",
       "rule": "silent-continue",
       "reason": "Plan 00319 F2/Task 4.5: scans every brace-balanced span of a tool response for this handler's own ledger record shape, trying json.loads on each candidate span. Most candidate spans in ordinary prose (any '{...}' a tool response happens to contain) are not valid JSON at all — the standard JSONL/candidate-parsing pattern already excluded for transcript_reader.read_incremental and background_harvester.read_tracked_commands, just applied to brace-delimited spans instead of newline-delimited lines. A span that fails to parse is simply not a ledger record and is left untouched; a span that IS valid JSON but lacks the ledger's key set is also left untouched by the surrounding key-set check, so nothing here can conceal a genuine budget-exhaustion match."
-    },
-    {
-      "file": "daemon/controller.py",
-      "function": "_persist_project_handler_health",
-      "rule": "log-and-continue",
-      "reason": "Plan 00143: persisting project-handler load failures is observability ONLY — it must never crash handler loading / daemon startup. Catches RuntimeError (e.g. ProjectContext not initialised in non-daemon callers / unit tests), logs a visible warning, and continues. The degraded-protection signal is a safety net, not a critical path; same explicitly-non-fatal contract as background_process_tracker._resolve_state_file."
-    },
-    {
-      "file": "daemon/project_handler_health.py",
-      "function": "write_load_failures",
-      "rule": "log-and-continue",
-      "reason": "Plan 00143: best-effort write of the project-handler load-failure state file under the daemon untracked dir. A filesystem error (OSError) must not crash daemon startup — logged at warning level and skipped. Same fail-open contract as the daemon/paths.py cleanup writers and gitignore_safety_checker._write_cache."
-    },
-    {
-      "file": "daemon/project_handler_health.py",
-      "function": "clear_load_failures",
-      "rule": "log-and-continue",
-      "reason": "Plan 00143: best-effort removal of the project-handler load-failure state file (clears stale degraded state when the daemon now loads cleanly). An OSError unlinking the file must not crash daemon startup — logged at warning level and skipped. Same fail-open cleanup contract as daemon/paths.py cleanup_socket / cleanup_pid_file."
-    },
-    {
-      "file": "handlers/pre_tool_use/pipe_blocker.py",
-      "function": "_resolve_echd_capture_path",
-      "rule": "log-and-continue",
-      "reason": "Best-effort self-heal of the echd-capture helper's executable bit (e.g. a client checkout with git core.fileMode=false). A chmod OSError is logged at warning level, never swallowed, and the resolver degrades to returning None so the caller falls back to the temp-file guidance rather than crashing a pipe-block message. Same fail-open contract as handlers/status_line/context_sidecar.py — recommending a capture helper is advisory, never a critical path."
     },
     {
       "file": "handlers/pre_tool_use/pipe_blocker.py",
@@ -647,7 +359,7 @@
     {
       "file": "handlers/status_line/daemon_stats.py",
       "lines": [
-        22
+        23
       ],
       "rule": "silent-fallback",
       "reason": "Plan 00200 Task 5.4: module-level `try: import psutil except ImportError: psutil = None` -- the standard optional-dependency idiom. Matches this directory's documented CLAUDE.md rule #2 ('Reads are fail-silent and defensive... never raise -- see daemon_stats.py'). No function context at module scope, hence line-based match per the documented legacy-fallback convention. Realigned by Plan 00369's explain_segment() import shifting the try: block by one line."
@@ -695,12 +407,6 @@
       "reason": "Plan 00200 Task 5.4: path.stat() raising OSError for a missing secret-word-list file is cached via a documented sentinel (see docstring: 'A missing file is cached too... so repeated lookups for an absent file are a dict lookup, not a repeated stat()'). The feature is opt-in and inert until a project creates the file."
     },
     {
-      "file": "utils/secret_file_matching.py",
-      "function": "resolve_configured_patterns",
-      "rule": "log-and-continue",
-      "reason": "Plan 00272 Task 4-5: mirrors secret_redaction._resolve_active_path's sanctioned fail-open contract. A config-load failure here must still protect the SHIPPED DEFAULTS (the module-level fallback already set), never disable protection -- logged at debug, matching the sibling resolver."
-    },
-    {
       "file": "daemon/cli.py",
       "function": "cmd_start",
       "rule": "silent-fallback",
@@ -717,12 +423,6 @@
       "function": "update_git_index_executable",
       "rule": "silent-continue",
       "reason": "Plan 00200 Task 5.4: ValueError from Path.relative_to() only fires when a hook_file isn't under project_root -- an expected input-filtering case (a hook file from a different tree), not a failure. The inline comment already documents why ('File not under project_root, skip'); no information is lost, the file is simply excluded from the relative_paths list being built."
-    },
-    {
-      "file": "daemon/server.py",
-      "function": "_discard_unsecured_socket",
-      "rule": "log-and-continue",
-      "reason": "Plan 00403 niggle N1: cleanup for a per-event socket the caller has ALREADY decided to abandon, because its chmod to 0o660 failed and it must not be served with umask-derived permissions. Raising here would defeat the entire purpose of the function -- it exists so that one unsecurable socket costs one event (which falls back to the legacy socket, as every other per-socket failure in _bind_event_sockets does) instead of aborting daemon startup, which is exactly the defect it was written to fix. The commonest cause is a concurrently starting daemon having already rmtree'd the events dir, and `missing_ok=True` treats that as success because it IS the outcome wanted; the residual OSError band is a directory permission problem, logged at ERROR so nothing is concealed. Covered by test_a_chmod_failure_skips_one_socket_rather_than_aborting_startup."
     },
     {
       "file": "scripts/debug_info.py",
@@ -747,12 +447,6 @@
       "function": "_is_exempt_path",
       "rule": "silent-fallback",
       "reason": "Plan 00200 Task 5.4: Path.relative_to() raising ValueError when a path is outside the repo root falls back to using the path as-is for prefix matching -- the same relative-path-fallback shape as plan_qa/paths.py::_outside above."
-    },
-    {
-      "file": "scripts/qa/measure_instruction_footprint.py",
-      "function": "_load_all_handler_instances",
-      "rule": "log-and-continue",
-      "reason": "Plan 00200 Task 5.4: best-effort handler discovery for a metrics/reporting script (docstring: 'Skips handlers that cannot be imported or instantiated, logging the reason'). Covers all three sites in this function (module import, attribute introspection, instantiation) -- each is logged at debug level and the scan continues with the handlers that DID load."
     },
     {
       "file": "init.sh",
@@ -853,34 +547,10 @@
       "reason": "Plan 00200 Task 5.4: `validate_worktree \"$wt\" || true` inside a loop -- deliberately continues validating remaining worktrees after one fails. validate_worktree() records the failure in FAILED_WTS BEFORE returning 1, and the script's own final summary exits 1 if FAILED_WTS is non-empty -- the opposite of hiding: every failure is aggregated and the overall exit code reflects it. The `|| true` exists only to stop `set -e` short-circuiting the loop on the first failure."
     },
     {
-      "file": "daemon/controller.py",
-      "function": "_record_verdicts",
-      "rule": "log-and-continue",
-      "reason": "Plan 00209 verdict log: log-and-continue on RuntimeError (ProjectContext not initialised -- the default-config/standalone entry-point branch exercised by many unit tests) and OSError (untracked dir unwritable). The verdict log is a metadata-only audit trail; a failed write must never break hook dispatch, which carries safety-critical handlers. Both errors are logged at warning level, never silently swallowed. Same sanctioned fail-open contract as daemon/server.py::_capture_payload_best_effort."
-    },
-    {
       "file": "daemon/verdict_report.py",
       "function": "read_verdict_records",
       "rule": "silent-continue",
       "reason": "Plan 00209 verdict log reporting: except json.JSONDecodeError: continue is the standard JSONL pattern -- identical shape to transcript_reader.read_incremental, background_harvester.read_tracked_commands, and hedging_language_detector._parse_transcript. One corrupted append (e.g. a crash mid-write) must not hide every other decision recorded around it."
-    },
-    {
-      "file": "daemon/cli.py",
-      "function": "cmd_inject_goal",
-      "rule": "log-and-continue",
-      "reason": "Plan 00269 review fix: ProjectContext.initialize() is called unconditionally (no private-state peeking), so a repeat call raises RuntimeError meaning 'already initialised earlier in this process' -- a benign, expected state where the existing context is exactly what the command needs. Logged at debug and execution continues; raising would break every inject-goal run performed after any other context-initialising step."
-    },
-    {
-      "file": "daemon/cli.py",
-      "function": "cmd_clear_goal",
-      "rule": "log-and-continue",
-      "reason": "Plan 00321: identical shape and identical justification to the cmd_inject_goal entry above -- ProjectContext.initialize() is called unconditionally, so RuntimeError means 'already initialised earlier in this process', a benign expected state. Logged at debug and execution continues. The sibling ValueError branch is deliberately NOT excluded: it is remembered in context_init_error and consumed by the failure message, so a genuinely unreadable config names the real cause rather than being swallowed."
-    },
-    {
-      "file": "daemon/cli.py",
-      "function": "cmd_signal",
-      "rule": "log-and-continue",
-      "reason": "Plan 00417: identical shape and identical justification to the cmd_inject_goal/cmd_clear_goal entries above -- ProjectContext.initialize() is called unconditionally, so RuntimeError means 'already initialised earlier in this process', a benign expected state. Logged at debug and execution continues. The sibling ValueError branch is deliberately NOT excluded: it is remembered in context_init_error and consumed by the failure message, so a genuinely unreadable config names the real cause rather than being swallowed."
     },
     {
       "file": "handlers/stop/auto_continue_stop.py",
@@ -899,18 +569,6 @@
       "function": "_optional_float",
       "rule": "return-none-on-error",
       "reason": "Plan 00276 review fix (coerce optional ledger fields): a non-numeric displaced_at/retired_at in a hand-edited or corrupted ledger entry maps to None (field absent), consistent with the ledger's documented fail-open tolerant-record contract. Raising would let one malformed field hide every other recorded goal."
-    },
-    {
-      "file": "utils/goal_ledger.py",
-      "function": "_locked",
-      "rule": "log-and-continue",
-      "reason": "Plan 00276 review fix (flock around read-modify-write): the lock is a concurrency optimisation, not a correctness gate for the caller's tool call. If the lock file cannot be created/locked (read-only untracked dir), the ledger proceeds unlocked with a warning — failing the PostToolUse/Stop event over an advisory ledger would violate the documented fail-open contract. Unlock failure on the finally path is likewise logged; the fd close still runs."
-    },
-    {
-      "file": "utils/goal_ledger.py",
-      "function": "_save",
-      "rule": "log-and-continue",
-      "reason": "Plan 00276: ledger persistence is best-effort by contract -- it runs inside PostToolUse and Stop handling, and an unwritable untracked dir must never break the tool call or the Stop event. The OSError is logged at warning; behaviour degrades to an empty ledger, which the Stop consult treats as 'nothing to defend' (fail-open)."
     },
     {
       "file": "docs_qa/corpus.py",
@@ -961,12 +619,6 @@
       "reason": "Plan 00298: clearing a marker that is already absent (FileNotFoundError) is not an error -- it is the exact state the caller wanted. An OSError removing an existing marker is logged at debug and swallowed: clear_marker is a best-effort cleanup helper, and a stale marker left behind only means suppression stays live until its own expiry, never an incorrect suppression."
     },
     {
-      "file": "utils/blockage_marker.py",
-      "function": "clear_marker",
-      "rule": "log-and-continue",
-      "reason": "Plan 00298: same site as the return-none-on-error entry immediately above -- clear_marker's OSError branch is both 'returns without raising' and 'logs and continues' under this audit's classification. An unwritable marker file degrades to 'the marker stays present until its own expiry', which is the documented fail-open outcome, not a concealed failure."
-    },
-    {
       "file": "plan_qa/checks/same_commit_plan_doc.py",
       "function": "_plan_status",
       "rule": "return-none-on-error",
@@ -991,22 +643,10 @@
       "reason": "Plan 00337 Phase 4: resetting a cadence that is already absent (FileNotFoundError) is not an error -- it is the exact state the caller wanted. An OSError removing an existing file is logged at debug and swallowed: a stale cadence file left behind only means ticks stay thinned until the next real prompt or the next reset, and they are capped at every 4 hours, never silence."
     },
     {
-      "file": "utils/cron_cadence.py",
-      "function": "reset_cadence",
-      "rule": "log-and-continue",
-      "reason": "Plan 00337 Phase 4: same site as the return-none-on-error entry immediately above -- reset_cadence's OSError branch is both 'returns without raising' and 'logs and continues' under this audit's classification. It rides along with a genuine user prompt, and failing that prompt because a cleanup unlink failed would turn a cosmetic problem into a blocked conversation."
-    },
-    {
       "file": "handlers/user_prompt_submit/failsafe_cron_blockage_suppressor.py",
       "function": "_work_is_owed",
       "rule": "return-none-on-error",
       "reason": "Plan 00337 Phase 4: None is a DELIBERATE THIRD VALUE here, not a swallowed failure -- it means 'could not determine whether work is owed', and it is distinct from False ('nothing owed'). The caller treats it as owed on the undeclared path, so an unresolvable project context or an unreadable ledger produces a DELIVERED tick. Raising would abort a UserPromptSubmit handler; returning False would silently withdraw the session's recovery net, which is the failure this three-valued return exists to prevent."
-    },
-    {
-      "file": "daemon/payload_capture.py",
-      "function": "resolve_capture_dir",
-      "rule": "log-and-continue",
-      "reason": "Plan 00302: an absolute/escaping configured capture dir is logged and the resolver falls back to the default repo-relative dir. Payload capture is a diagnostic aid; refusing to run the daemon over a bad capture path would be a worse failure than capturing to the default location, and the fallback is announced in the log."
     },
     {
       "file": "utils/goal_ledger.py",
@@ -1057,30 +697,6 @@
       "reason": "Plan 00326 Task 5.2: identical cosmetic fallback to remote_docs_staleness._describe. relative_to raises ValueError for a document not under the tree root, and the index then lists its absolute path -- more information, never less, and the document is still listed. Omitting it would be the real defect, because an index that quietly disagrees with the tree it describes becomes a second source of truth."
     },
     {
-      "file": "remote_docs/fetchers.py",
-      "function": "_close_session",
-      "rule": "log-and-continue",
-      "reason": "Plan 00335 I4: this is cleanup running in a `finally`, so the ONLY alternative to logging is masking. Raising here replaces whatever the fetch raised, and the triggering shape makes both fail together -- a missing or renamed agent-browser binary fails the read AND the close, so the operator would be shown the reap failure instead of the cause. Suppressing the primary error to report a cleanup error is strictly worse than the pattern this rule exists to catch, and it is why the same principle is built into contextlib's own cleanup contract. Nothing is concealed: the binary name and the underlying exception are both logged at WARNING, and the exception is caught by type (TimeoutExpired, FileNotFoundError, OSError) rather than bare. The leaked session self-reaps on the browser's idle timeout, so continuing is safe. Reversal: if a close failure ever needs to be fatal, it must be raised OUTSIDE the finally, after the primary error has been allowed to propagate -- not by deleting this entry."
-    },
-    {
-      "file": "daemon/server.py",
-      "function": "_bind_event_sockets",
-      "rule": "log-and-continue",
-      "reason": "Plan 00295 Task 2.6: a stale per-event socket dir that fails to remove (disk-full, a momentary permission hiccup) is not a reason to abort the whole rung -- the per-socket bind loop immediately below already reports (and gracefully skips) an individual bind OSError, including the 'address already in use' a leftover socket file would raise, so a partially-cleared directory degrades exactly the same way a stale one does today. The failure is logged at ERROR, so nothing is concealed, and continuing lets binding proceed best-effort rather than silently disabling the relay/nc rungs for the rest of the daemon process over a cleanup hiccup."
-    },
-    {
-      "file": "daemon/server.py",
-      "function": "shutdown",
-      "rule": "log-and-continue",
-      "reason": "Plan 00295 Task 2.6: shutdown must never abort partway through cleanup over one directory removal failing -- the legacy socket unlink and PID file removal immediately below still need to run. The failure is logged at ERROR (previously silently discarded via `ignore_errors=True`), so nothing is concealed; a directory that fails to remove here is harmless leftover state cleared on the next daemon start's own removal attempt in _bind_event_sockets."
-    },
-    {
-      "file": "handlers/pre_tool_use/artifact_publish_blocker.py",
-      "function": "_ensure_source_disable",
-      "rule": "log-and-continue",
-      "reason": "Plan 00295 Task 2.9: this is best-effort cleanup of a staged temp file after the atomic write it belongs to has already failed and is itself about to be logged and abandoned (the outer except's own log+return follows immediately after). Raising here would replace the outer failure's own error with a secondary cleanup error, hiding the actual cause -- the same principle documented for remote_docs/fetchers.py._close_session above. Nothing is concealed: the cleanup failure is logged at WARNING alongside the file it could not remove, and a leaked temp file (the only consequence) is silently overwritten by write_text on the next retry attempt, never accumulating unboundedly."
-    },
-    {
       "file": "daemon/controller.py",
       "function": "_compute_startup_source_fingerprint",
       "rule": "return-none-on-error",
@@ -1109,12 +725,6 @@
       "function": "_decode",
       "rule": "return-none-on-error",
       "reason": "Plan 00401: None is this function's DOCUMENTED return value for 'this payload is not exactly right', not a swallowed failure -- a malformed entry is an ordinary state (a cache written by a newer schema, or a write torn by a crash), never an exceptional one. The caller acts on it decisively: one undecodable entry condemns the WHOLE file, so cached_states returns None and every downstream reader gets NOT VERIFIED. That is the strictly SAFE direction -- a corrupt cache makes the enforcing surface more conservative, never less -- whereas raising would let a single bad byte in an untracked cache file abort SessionStart for the whole project. Covered by test_one_bad_entry_condemns_the_whole_file."
-    },
-    {
-      "file": "reference_repos/cache.py",
-      "function": "write_cache",
-      "rule": "log-and-continue",
-      "reason": "Plan 00401: the cache is an OPTIMISATION -- it exists so the PreToolUse backstop never has to touch the network -- so a cache that cannot be written must degrade, not detonate. A full disk or an unwritable untracked/ would otherwise break SessionStart for every project at once. The failure conceals nothing: the next reader finds no in-date reading and emits the loud NOT_VERIFIED_HEADLINE advisory, so the user-visible consequence is louder than any log line would be, which is why the log sits at debug rather than the ERROR level used by the best-effort controller syncs above. Covered by test_an_unwritable_location_does_not_raise."
     },
     {
       "file": "reference_repos/cache.py",
@@ -1153,12 +763,6 @@
       "reason": "Plan 00452: resolving WHICH transcript to analyse is a discovery step, and 'no transcript found' is a legitimate outcome rather than a fault -- a project that has never run a session simply has no file. The catch is genuinely racy-narrow: Path.glob over a missing directory yields nothing without raising, so the only reachable OSError is a stat() on a file that vanished between the glob and the sort, which is a transient the next invocation resolves. None is not swallowed: the sole caller (cmd_cache_gaps) turns it into an explicit stderr message naming --transcript and exit code 2, so the user is told clearly rather than left with a silent empty report. The chosen path is also printed on success, because analysing the wrong session produces a perfectly plausible report about somebody else's work."
     },
     {
-      "file": "handlers/subagent_stop/subagent_cache_aggregator.py",
-      "function": "record",
-      "rule": "log-and-continue",
-      "reason": "Plan 00452: this is a SENSOR on a blocking event. The sidecar write is the last thing that happens before a sub-agent stops, and the only two failures reachable here are a daemon with no ProjectContext (RuntimeError, a standalone entry point or a unit test) and an unwritable untracked directory (OSError) -- neither of which is a reason to strand a stopping agent, which is what propagating would risk. The figure is advisory, purely cosmetic (a `sub NN%` fragment on the status line), and the next agent's stop records again, so nothing is lost permanently. Both branches log at WARNING, so the failure is visible rather than concealed. The write itself is atomic (tmp + Path.replace), so a failure can never leave a half-written document for the status-line reader. Covered by test_a_missing_project_context_does_not_raise and test_an_unwritable_root_does_not_raise."
-    },
-    {
       "file": "utils/markdown_format.py",
       "function": "parse_frontmatter_yaml",
       "rule": "return-none-on-error",
@@ -1184,21 +788,9 @@
     },
     {
       "file": "utils/subagent_report_paths.py",
-      "function": "_ensure_self_ignoring",
-      "rule": "log-and-continue",
-      "reason": "Plan 00460 review finding B1: writing the self-ignoring `.gitignore` (the runtime enforcement that a client repo's own ignore rules cannot be trusted to cover this directory) is a best-effort defence in depth layered on top of the write it accompanies -- the write itself already has its own logged, never-raised fail-open contract (the return-none-on-error entry for write_new_file_never_overwrite above), and a failure writing the marker must not additionally fail that already-decided-fail-open write. Logged at warning, not silently swallowed."
-    },
-    {
-      "file": "utils/subagent_report_paths.py",
       "function": "resolve_confined_report_dir",
       "rule": "return-none-on-error",
       "reason": "Plan 00460 review finding M1: this function's OWN documented contract (docstring: 'Returns None for all of those -- callers must skip persistence entirely rather than guess a safer target') is a validation gate, not a read that can fail -- a report_dir that resolves outside the project root (ValueError from Path.relative_to) is exactly as invalid as an empty string or an absolute path, both handled by the same None return a few lines earlier in this same function's normal control flow. Raising here would turn a misconfigured YAML option into a crashed SubagentStop dispatch instead of the documented 'skip persistence, log a warning' outcome the sole caller (subagent_report_persistence.handle) already implements. Covered by TestResolveConfinedReportDir's full negative-case suite in tests/unit/utils/test_subagent_report_paths.py."
-    },
-    {
-      "file": "utils/subagent_report_paths.py",
-      "function": "write_new_file_never_overwrite",
-      "rule": "log-and-continue",
-      "reason": "Plan 00460 review finding m3: after O_CREAT|O_EXCL already created the file on disk, an OSError from the content write must not leave a truncated/empty file behind for find_persisted_report to later cite as though it were a complete reply -- so the write-failure branch (already covered by the return-none-on-error entry above) additionally attempts candidate.unlink(missing_ok=True). If even THAT fails (a second, independent filesystem error), logging and continuing to the same None return is correct: the outer branch is already returning None and logging the original write failure, and a cleanup failure on top of an already-fail-open path must not escalate to raising. Covered by test_removes_a_partial_file_when_the_content_write_fails."
     },
     {
       "file": "utils/usage_pause_gate.py",
@@ -1217,12 +809,6 @@
       "function": "start_pause",
       "rule": "return-none-on-error",
       "reason": "Plan 00479: a record that cannot be written means no pause is entered (warned), because the other gates read that record and a directive without one could not be enforced. Fail open by design; covered by TestStartPause."
-    },
-    {
-      "file": "utils/usage_pause_gate.py",
-      "function": "start_pause",
-      "rule": "log-and-continue",
-      "reason": "Plan 00479 round 2 N3: after a record is written but cannot be read back, start_pause removes it best-effort so no unreadable record lingers. If that removal also fails (a second, independent filesystem error) logging and continuing to the same None return is correct: the pause is already refused and the original failure is already logged, so raising would turn a fault into a chain DENY of the call. Covered by test_a_record_that_cannot_be_read_back_is_no_pause."
     },
     {
       "file": "utils/usage_pause_gate.py",

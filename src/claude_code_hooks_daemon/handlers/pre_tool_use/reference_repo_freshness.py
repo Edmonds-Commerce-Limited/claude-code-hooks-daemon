@@ -40,6 +40,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.core.utils import grep_targets
 from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 from claude_code_hooks_daemon.reference_repos.cache import cached_states
 from claude_code_hooks_daemon.reference_repos.discovery import GIT_ENTRY as _GIT_ENTRY
@@ -273,12 +274,14 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
 
         field = _PATH_FIELD_BY_TOOL.get(tool_name)
         if field is not None:
-            raw = tool_input.get(field)
-            if not raw:
+            raws = (
+                grep_targets(tool_input) if tool_name == ToolName.GREP else [tool_input.get(field)]
+            )
+            candidates = [self._absolute(str(raw), project_root) for raw in raws if raw]
+            if not candidates:
                 return []
-            candidate = self._absolute(str(raw), project_root)
             roots = self._roots(project_root)
-            return [candidate] if any(self._within(candidate, root) for root in roots) else []
+            return [c for c in candidates if any(self._within(c, root) for root in roots)]
 
         if tool_name != ToolName.BASH:
             return []

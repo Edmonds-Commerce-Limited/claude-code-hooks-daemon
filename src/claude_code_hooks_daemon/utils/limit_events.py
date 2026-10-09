@@ -35,6 +35,7 @@ from typing import Final
 
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils.blockage_marker import write_json_atomically
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.stop_failure_records import epoch_seconds
 
 logger = logging.getLogger(__name__)
@@ -120,7 +121,12 @@ def read_events(path: Path) -> list[LimitEvent]:
     except FileNotFoundError:
         return []
     except (OSError, json.JSONDecodeError) as exc:
-        logger.debug("limit_events: unreadable %s: %s", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"an unreadable or corrupt events file {path} reads as no events ([]), so the usage gate sees no recorded limit hits and does not pause",
+            level=logging.DEBUG,
+        )
         return []
     entries = raw.get(_KEY_EVENTS) if isinstance(raw, dict) else None
     if not isinstance(entries, list):
@@ -145,7 +151,11 @@ def _write(path: Path, events: list[LimitEvent]) -> bool:
     try:
         write_json_atomically(path, payload)
     except OSError as exc:
-        logger.warning("limit_events: failed to write %s: %s", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"an unwritable events file {path} is reported to the caller as False (not written); the limit hit is lost from the history but the session proceeds",
+        )
         return False
     return True
 

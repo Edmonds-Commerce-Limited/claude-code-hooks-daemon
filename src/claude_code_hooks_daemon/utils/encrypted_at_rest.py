@@ -40,6 +40,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 
 logger = logging.getLogger(__name__)
@@ -148,7 +149,14 @@ def _read_bounded(
     except OSError as exc:
         # Unreadable, vanished, or raced: all mean "not confirmed", which keeps
         # the file protected. The class name only -- never the path's content.
-        logger.debug("encrypted-at-rest check failed closed: %s", type(exc).__name__)
+        # A fresh, argument-less instance of the same class is what gets
+        # logged: an OSError's own text carries the file name.
+        log_and_continue(
+            logger,
+            type(exc)(),
+            reason=f"the encrypted-at-rest check fails closed ({type(exc).__name__}): None means 'not confirmed encrypted', which keeps the file protected; the path is deliberately not logged",
+            level=logging.DEBUG,
+        )
         return None
 
 

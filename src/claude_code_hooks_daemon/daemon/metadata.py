@@ -19,6 +19,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+
 logger = logging.getLogger(__name__)
 
 
@@ -116,14 +118,24 @@ def read_daemon_metadata(venv_dir: Path | str) -> DaemonVenvMetadata | None:
         # conditions") and matches the byte-for-byte stdlib mirror
         # ``_read_venv_metadata_stdlib`` in paths.py, which also guards
         # ``read_text`` with ``except OSError: return None``.
-        logger.debug("metadata at %s could not be read: %s", candidate, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="an unreadable venv metadata file is 'unusable metadata', which the documented never-raises contract returns as None; callers fall back to discovering the venv another way, so only the cached hint is lost",
+            level=logging.DEBUG,
+        )
         return None
     if not raw.strip():
         return None
     try:
         return DaemonVenvMetadata.model_validate_json(raw)
     except (ValidationError, ValueError) as exc:
-        logger.debug("metadata at %s failed schema validation: %s", candidate, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="metadata that fails schema validation is treated as absent (None); callers fall back to discovering the venv another way, so only the cached hint is lost",
+            level=logging.DEBUG,
+        )
         return None
 
 

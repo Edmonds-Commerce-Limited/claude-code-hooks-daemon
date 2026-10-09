@@ -1250,7 +1250,19 @@ entries, needs the owner.
 
 **Owner ruling (2026-10-05):** resolved: one named helper with a required reason argument, and the audit widened to catch log-then-continue bodies — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (B4).
 
-**Status**: ⬜ Open (ruling given; implementation not started).
+**Status**: ✅ Fixed (d7ec3ff9b through e90cbd63c). The named helper
+`utils/deliberate_swallow.log_and_continue(logger, exc, *, reason, level=WARNING)` exists, and the
+audit's `log-and-continue` rule flags any non-raising handler body that logs (inline or by passing
+the exception to a helper) and then continues, passes, breaks or returns a fallback. The sanctioned
+form is the helper called with a specific `reason`. Console reports (`print`, `sys.stderr.write`), a
+report's own `self.output(...)` line, failures recorded on a list or future, stderr/stdout stream
+writes and logging `handleError` count as surfacing, and the exception counts as handed to a logger
+only when it is passed as a value. Every site is converted: 166 remained at 22c33d242, and
+009a7c9b4 and e90cbd63c finish them. No `log-and-continue` entry is left in
+`error_hiding_exclusions.json`, and the audit and `TestRealRepoSelfScan` are green. Two sites
+could not take the helper as it stood: `measure_instruction_footprint.py` now raises when the
+handler package cannot be imported instead of reporting an empty footprint, and the venv-free
+upgrade gate loads `escape_hatch` and `deliberate_swallow` by path.
 
 ### N297 — the coordinator merged the merge advisor itself without a targeted QA run, and main broke twice
 
@@ -1413,6 +1425,171 @@ also judges `sub/f.txt` when `cd x` succeeds. N299 round 2 did NOT close it. The
 The uncertain-move union judges the hook directory and the LAST recorded move (`x`), but not
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
+
+### N379 — a branch merged after a green gate that never saw it
+
+**Source**: the coordinator, 2026-10-09. The B4 full gate ran on main at 85c4c73b1. The N359 and 00499 branches
+were merged after it went green (7aa463588, 8887b2435). Their agents had run only targeted tests, so the
+whole-repo checkers never saw their code before the merges.
+
+**Evidence**: `llm_qa.py changed` after the merges reported three new failures:
+
+- `error_hiding`: two `return-none-on-error` findings in `utils/plan_fact_check.py` `_take`, from N359.
+- `security`: bandit B105, from 00499 (`core/utils.py`, `token == "--"`).
+- `generated_doc_drift`: 416 lines in `.claude/HOOKS-DAEMON.md`, a stale copy committed on the 00499 branch.
+
+`merge_qa_advisor` did not fire on either merge. The gate's result was green, but it described a different tree.
+The advisor was silent because it matched only `worktree-*` branches (`WORK_BRANCH_PREFIX` in
+`branch_count_advisor`). An `isolation: worktree` agent dispatch names its branch `agent-<hex>-<hex>`, so every
+agent branch was merged unadvised, and `branch_count_advisor` left agent branches out of the WIP count too.
+
+**Status**: ✅ Fixed. The failures were fixed forward in 06ab3658e. Both handlers now take their branch shapes from
+`git_repo.WORK_BRANCH_PREFIXES` (`worktree-`, `agent-`), with tests through each handler and release-note callout
+004\. The process remedy is the coordinator's: run the full gate on a tree that holds the branches to be merged
+(merge them into a candidate first), or follow every merge onto main with `llm_qa.py changed` before calling it
+done.
+
+### N378 — the `[awaiting-human]` marker is one project-wide file, cleared by any session's prompt
+
+**Source**: the Opus session-modes design review for Plan 00501 (2026-10-08,
+`untracked/agent-reports/261008-session-modes-design-opus.md`, findings F1–F3).
+
+**Evidence**: the marker is `untracked/human-input-blockage-marker.json` (`utils/blockage_marker.py:41`), one file
+for the project, so whichever session writes last wins. The suppressor clears it on any prompt that is not a
+`[tick:...]` cron tick (`classify_tick`), so the ccy supervisor's own typed `continue` or `/goal` lines (which start
+with `🤖 [ccy-supervisor`) count as the owner returning. The supervisor never reads the marker, and the existing
+`utils/human_presence.py` check is not used here. All three fail open: ticks are delivered when they need not be.
+
+**Status**: ⬜ Open, owner ruling 2026-10-08: fine to leave, because session modes (Plan 00501) may replace the
+marker with a per-session mode. Close it with 00501, or fix it alone if 00501 keeps the marker.
+
+### N377 — synthetic sessions still read the account's live usage in three more places
+
+**Source**: the v3.69.0 Step 8 gate. The account went over this host's usage ceiling mid-gate, and every synthetic
+session routed through the real chain was paused. Fixed for the playbook harness, `test_tool_use_error_recovery`,
+`test_full_qa_gate_is_never_deadlocked` and the dangerous-invocation corpus check by
+`utils/usage_pause.synthetic_session_exemption` (c2195729b).
+
+**Evidence**, still open:
+
+- `hooks-daemon probe` with a fresh session id is denied by `R-USAGE-PAUSE-TOOL` while the account is over the
+  ceiling (seen in the 3.69.0 manual test #353, which had to probe as the owner-overridden session).
+- Pause records for the synthetic ids `smoke-test-probe` and `socket-stdin-*` were left in
+  `untracked/context-sidecar/` during the gate. Their checks passed, but they read live usage and can fail the same
+  way.
+
+**More evidence**: the B4 merge gate (b3ee935aa) failed on exactly these sites:
+`test_stop_hook_hard_block::test_stop_hook_exits_2_on_block` and
+`test_forwarder_socket_stdin::test_stop_forwarder_exits_2_on_block_with_socket_stdin`, on both interpreters (the daemon
+answered `{}` instead of the Stop block, because the probe session was paused).
+
+**Status**: ✅ Fixed at the source rather than per site. `usage_pause_gate.try_start_pause` now never pauses synthetic
+traffic (`synthetic_traffic.is_synthetic_event`: the `synthetic_source` marker, or a known synthetic session shape).
+That covers `hooks-daemon probe` (`manual-probe`), the smoke test and every marked test probe in one place. A real
+Claude Code payload carries no marker and a UUID session id, so it is still paused. The per-site
+`synthetic_session_exemption` wrappers stay: they also clear a pause record left from before this fix.
+
+### N375 — the hook contract is audited at Claude Code 2.1.272 and the upstream hooks doc has changed since
+
+**Source**: v3.69.0 release Step 1c. `bin/hooks-daemon contract-status` returned CHANGED: recorded sha256 `0dc5622c…`
+(322902 bytes, audited v2.1.272), upstream `403645d3…` (250548 bytes). The release host ran 2.1.293.
+
+**Evidence**: `tests/integration/test_claude_code_version_record.py::TestAgreesWithContractMeta` requires the newest
+recorded `claude_code_version` to equal `META.json`'s `last_audited_claude_code_version`, so v3.69.0 is recorded as
+`unknown` with `reviewed_through: 2.1.293`, as v3.68.0 was. The changelog reviews for 2.1.272 to 2.1.293 found nothing
+that changes hook payloads or output, but nobody has re-read the hooks doc itself against the vendored per-event JSON.
+
+**Status**: Open. Follow `docs/guides/HOOK-CONTRACT-REFRESH.md` from "Manual steps for a CHANGED verdict" (RAW text
+only), including the input side, then record the audited version in `claude-code-versions.yaml`.
+
+### N374 — v3.69.0 release code review: non-blocking findings to work through
+
+**Source**: the v3.69.0 release code review gate (three reviewers over `git diff v3.68.0..HEAD -- src/`):
+[pre-tool-use](subagent-reports/261007-v369-review-pre-tool-use-opus.md),
+[core/daemon/handlers](subagent-reports/261007-v369-review-core-daemon-handlers-opus.md),
+[utils/install/rest](subagent-reports/261007-v369-review-utils-install-rest-opus.md). Each report gives file:line,
+evidence and a fix; several have probe scripts under `untracked/scratch/review-v369/`, `untracked/scratch/rev/` and
+`untracked/scratch/review-rest/`, which are not kept across a container reset.
+
+**Evidence** (all judged non-blocking for the release; the most security-relevant first):
+
+01. `rg -r X needle` is parsed as searching root `needle`, not `.`: `-r`/`--replace` takes a value the recursive
+    search parser does not consume, so protected files under `.` are missed (`utils/recursive_search.py:62-69, 189-201`).
+02. A glob that reaches a protected file is allowed silently while the protected-file index is still building after a
+    restart; the docs promise an advisory (`secret_file_guard.py:1394`, `quarantine_artefact_read_guard.py:337`).
+03. `git push --mirror` and `git push --prune` delete remote refs but miss the human-only remote-delete rule
+    (`destructive_git.py:113`).
+04. `host_command_guard` misses `docker run -itv /:/host` and `docker compose run -v /:/h`
+    (`host_command_guard.py:178-245`); it denies `gh auth token > /dev/null` and treats `pypi.python.org` as non-PyPI
+    (`:294-312`, `:51`).
+05. Plan fact-check delivery has no lock: two concurrent events can deliver one check twice, and an unreadable record
+    can raise `FileNotFoundError`; it goes to whichever session or sub-agent calls next
+    (`utils/plan_fact_check.py:250-259, 349-376`, `plan_fact_check_feed.py:97-124`).
+06. `daemon_sync_after_merge.py:197-198` takes the LAST effective cwd as the merge directory.
+07. `check-effective-handlers` exits 1 on malformed YAML, which `scripts/upgrade.sh` reads as "handlers change
+    state"; its exit codes are untested (`cli.py:4263-4297`).
+08. The upgrade rewrites a `CCY_CLAUDE_WRAPPER` line pointing at a custom directory, possibly to a missing file
+    (`install/ccy_supervisor.py:244-258`).
+09. `find_under` runs `git check-ignore` once per ignored protected file in one PreToolUse call
+    (`utils/protected_file_index.py:136-142, 187-200`); its `index_for` docstring says 600 s where the code retries
+    at 30 s (`:331-333`).
+10. The open-issue listing stops at 100 without saying so (`utils/github_issue_validity.py:75, 486-509`).
+11. Smaller: autonomy re-detects the container runtime per event (`utils/autonomy.py:57-59`); a hard-coded
+    `"completed"` and duplicated pattern compilation in `cli.py:3925, 7751-7756`; the fallback response schema would
+    reject a top-level `decision` (`core/response_schemas.py:451`); an unreadable doc is logged only at DEBUG
+    (`docs_qa/checks/unlisted_fake_value.py:123`); repeated literals in `destructive_git.py:502-536`;
+    `sensitive_content` re-reads `.claude/fake-values.yaml` on every matching write.
+
+**Status**: Defects ✅ fixed before the v3.69.0 tag (RELEASING.md: a release carries no known defect), merged at
+9028bc3a1, one commit each, test-first ([report](subagent-reports/261008-v369-review-defect-fixes-sonnet.md)): items 1
+to 8, the docstring and 100-issue halves of 9 and 10, the unreadable-doc logging in 11, the destructive_git named
+constants, `bash_safe_mode` gaining `validate_options` (the N373 class), and two items from the Step 1c Claude Code
+review: Grep targets named in `file_path` are now judged like `path` (a guard bypass since Claude Code 2.1.292), and
+report filenames stay under the filename limit with 256-character agent names. Still open, non-defects (cost and
+refactoring): the per-file `git check-ignore` calls in `find_under`, autonomy re-detecting the runtime per event, the
+hard-coded `"completed"` and duplicated pattern compilation in `cli.py`, the latent fallback-schema trap in
+`core/response_schemas.py:451`, and `sensitive_content` re-reading `.claude/fake-values.yaml`. Known residual of item 2:
+with a cold index, a glob carrying name text (`cat report-*.txt`) still gets no advisory, to keep
+`test_an_unrelated_star_bearing_token_stays_allowed` intact.
+
+### N376 — four tests fail under the full gate's concurrent load and pass alone
+
+**Source**: the v3.69.0 release gates.
+
+**Evidence**: each failed in one gate run and passed repeatedly alone:
+`test_safety_handlers_hostile_input_performance.py::TestCombinatorialSmallInputShapesStayLinear` (blaming a different
+handler each time, 2 of 5 alone-runs failing before the fix), `tests/unit/core/test_chain.py::...::test_deadline_exceeded_denies_when_a_slow_handler_exhausts_the_whole_chain`,
+and `tests/unit/supervise/test_abandoned_input_flush.py::TestSuperviseEndToEndAbandonedFlush::test_abandoned_message_is_submitted_then_compacted`.
+The scaling sweep now takes the minimum of CPU-time samples and the chain deadline tests use a manual clock (merge
+9a9d5e6f6, thresholds unchanged), but the sweep still failed once more under load (`host-command-guard`,
+`deep_bash_c_nesting`, 5/5 alone): CPU time per operation inflates on shared cores while three legs run at once.
+
+**More evidence** (the v3.69.0 Step 8 gate, host load about 20; each passed on `--resume` or alone):
+`tests/unit/core/test_router.py::TestEventRouter::test_route_passes_deadline_seconds_through_to_the_chain` (a
+2-second wall-clock poll for a straggler thread; it needs the manual clock `test_chain` now uses), the `[nesting]` sweep
+(`UpgradeApprovalGuardHandler` 25x for 8x input in-suite, 3 of 3 passes alone on py3.12), the `[.md]` deep-path
+sweep (`RemoteDocsProvenanceHandler` 73x for 8x) and `test_client_owned_asset_lint`'s 120-second shellcheck timeout.
+
+**Status**: Open. Run the performance sweeps outside the concurrent phase (their own serial shard or marker), and make
+the supervisor end-to-end test wait on its event rather than a fixed time. Never loosen a threshold.
+
+### N373 — an invalid `stand_in_delay_hours` silently unregisters the whole Stop enforcement handler
+
+**Source**: the v3.69.0 release code review gate
+([report](subagent-reports/261007-v369-review-core-daemon-handlers-opus.md)), graded BLOCKER.
+
+**Evidence**: the option setter in `handlers/stop/auto_continue_stop.py:653-667` raises on 24, 0 or `"3"`, and
+`handlers/registry.py:350-366, 948-949` catches that around the whole handler, so `AutoContinueStopHandler` (the
+`STOPPING BECAUSE:` enforcement and the awaiting-human marker) is dropped with only a WARNING log. Nothing reaches
+`option_failures`, so the session-start alert stays silent.
+
+**Status**: ✅ Fixed before the v3.69.0 release (commit f4d3c34a6, merged to main). `AutoContinueStopHandler` gained
+a `validate_options` like `IdleHousekeepingAdvisoryHandler`'s, so the registry withholds a bad value, reports it on
+`option_failures` and keeps the handler on its 3-hour default. Tests in
+`tests/unit/handlers/test_registry_option_validation.py` register through `register_all` with 24, 0, -1, `"3"`,
+`True` and NaN. Same class, not fixed: `bash_safe_mode`'s `mode` and `exempt_patterns` setters raise and drop the
+handler. Those setters are unchanged since v3.68.0, and the docstrings describe the rejection at load as intended; whether it should
+report through `option_failures` instead is open.
 
 ### N372 — the daemon-docs guard warns on the project's own `CLAUDE/` when the repo folder ends in `hooks-daemon`
 
@@ -1666,7 +1843,15 @@ correction copied from the checker's own report, then a third check owed. The co
 recorded it here. A remedy to weigh: run one check per burst plus its corrections, for example by widening the
 quiet period, or by not re-offering a check whose diff only restates the last report's findings.
 
-**Status**: ⬜ Open. Plan 00480 Task 4.4 stays open on it.
+**Status**: Fixed on branch agent-a2c1639ebf327c0d2-c58056dc (merge pending). Tests:
+`TestWorktreePaths`, `TestFirstSight` and `TestDelivery::test_an_archived_plan_is_delivered_under_its_existing_path`,
+`test_delivery_alone_does_not_advance_the_checked_content`,
+`test_dispatching_the_fact_checker_with_the_diff_confirms_the_check` in
+`tests/unit/handlers/post_tool_use/test_plan_fact_check_feed.py`; and `TestProcessQuietPlan::test_first_sight_records_a_baseline_and_owes_nothing`,
+`TestDelivery::test_delivery_does_not_advance_checked_until_the_dispatch_is_seen`, `test_an_undelivered_check_is_re_offered_after_the_wait`,
+`test_re_offer_stops_after_the_cap_without_losing_the_content`, `test_archived_plan_is_delivered_under_its_resolved_path`,
+`test_a_vanished_plan_drops_the_record` and `TestCorrectionLoop` in `tests/unit/utils/test_plan_fact_check.py`.
+Plan 00480 Task 4.4 can be re-run once merged.
 
 ### N358 — one pending fact-check record from the pre-delivery build stops every delivery
 

@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/mods/interface
-fetched_at: '2026-10-06T09:53:43.418138+00:00'
+fetched_at: '2026-10-08T00:22:45.825102+00:00'
 fidelity: converted
-source_sha256: 3b3578bbb642222889b5fad04174b90b27ab43069c64f65c0e3f36924d8dfcf6
+source_sha256: da8f1b7e0704154d4d28c164d8eadc1f87753e2de500e74e94b1114d5b76ecbe
 licence: unreviewed
-stale_after: '2027-01-04'
+stale_after: '2027-01-06'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -426,7 +426,7 @@ The [interface gallery](/docs/en/plugins/mods/gallery) has samples and screensho
 
 | Element | What it draws | Where |
 | :- | :- | :- |
-| `Box` | A flex container. Takes layout props such as `flexDirection`, `columnGap`, `padding`, `borderStyle`, and `width`. | Everywhere |
+| `Box` | A flex container. Takes layout props such as `flexDirection`, `columnGap`, `padding`, [`borderStyle`](/docs/en/plugins/mods/reference#box-border-styles), and `width`. | Everywhere |
 | `Text` | Styled text. Takes `color`, `bold`, `dimColor`, `italic`, and `wrap`. A `color` is a theme key or a color such as `'red'`. A `wrap` is `'wrap'`, `'truncate'`, `'truncate-start'`, `'truncate-middle'`, or `'truncate-end'`. | Everywhere |
 | `Button` | A control that calls `onPress` | Everywhere |
 | `Link`, `Code`, `Markdown` | A link with `href` and an optional `label`, a code block, and text formatted the way Claude's replies are. `Markdown` takes its content in a `text` prop, not in `children`, and needs a `key` when you pass `onLinkPress`. | Everywhere |
@@ -549,12 +549,14 @@ In the terminal, name the key in a bracketed button's label, or use `plain: true
 Many panes are a text field with a list under it. The example in this section is a notes pane: you type a note and press Enter to add it, and each note has an `x` button that deletes it. With two notes added, the terminal draws the pane this way:
 
 ```text theme={null}
-╭──────────────────────────────────────────────────────────╮
-│ Note: Type a note and press Enter ⏎ add                ✕ │
+╭────────────────────────────────────────────────────────✕─╮
+│ Note: Type a note and press Enter ⏎ add                  │
 │ x buy milk                                               │
 │ x call bob                                               │
 ╰──────────────────────────────────────────────────────────╯
 ```
+
+The `✕` on the top border is Claude Code's own mark for closing the pane.
 
 The example uses these techniques:
 
@@ -772,6 +774,7 @@ Because the `ui.render` hook read `count`, Claude Code runs the hook again each 
 These rules apply to the code:
 
 * **Write `plugin` and `key` as string literals**: `claude plugin validate` reads them from your source
+* **Hold the result of each `atom` call in a `const`**: if you declare `count` with `let`, validation fails with `takes a source the scan can read`
 * **Declare every value in the type declaration file**: otherwise validation fails with `hello-tabs.count is not declared`
 * **Write from a callback or another event's hook**: a `ui.render` hook can read state and can't write it, so write from `onPress`, `onSubmit`, or a hook for another event
 

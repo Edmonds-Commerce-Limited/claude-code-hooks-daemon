@@ -564,10 +564,18 @@ class TestOwnerEscapeIsDocumented:
         assert "no pause is started" in verbose
         assert "at once" not in verbose  # clear is not instant relief while usage is over
 
-    def test_the_rule_says_bang_commands_are_unverified(self) -> None:
+    def test_the_rule_gives_the_paste_ready_bang_form(self) -> None:
+        """The owner typed ``! <command>`` in a paused session and the pause lifted."""
         verbose = " ".join(UsagePauseGateHandler().get_rules()[0].verbose.split())
-        assert "may or may not" in verbose
-        assert "terminal" in verbose
+        assert "! bin/hooks-daemon usage-pause clear" in verbose
+        assert "may or may not" not in verbose
+
+    def test_the_hold_reason_gives_the_paste_ready_bang_form(self, tmp_path: Path) -> None:
+        _record(tmp_path)
+        handler = _handler(tmp_path, snapshot=_snapshot(five=91.0))
+        result = _run(handler, tmp_path, _input("an owner prompt"))
+        assert result.reason is not None
+        assert "! bin/hooks-daemon usage-pause clear" in result.reason
 
     def test_the_hold_reason_names_the_cli(self, tmp_path: Path) -> None:
         _record(tmp_path)

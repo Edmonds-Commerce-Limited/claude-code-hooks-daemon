@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.plan_qa.model import TERMINAL_STATUSES, PlanDoc, PlanStatus
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 
 logger = logging.getLogger(__name__)
@@ -214,7 +215,11 @@ def _candidate_folders(plan_dir: Path, plan_number: str) -> list[Path] | None:
     try:
         return sorted(plan_dir.glob(f"{plan_number}-*"))
     except OSError as e:
-        logger.warning("goal_ledger: cannot scan plan dir %s: %s", plan_dir, e)
+        log_and_continue(
+            logger,
+            e,
+            reason=f"a plan dir {plan_dir} that cannot be scanned yields None, which callers read as plan folders unknown; the goal injection proceeds without plan text",
+        )
         return None
 
 
@@ -251,7 +256,11 @@ def _find_plan_md_text(plan_dir: Path, plan_number: str) -> tuple[str, str] | No
             # (a non-UTF-8 PLAN.md), the same tolerance review RV-m5 gave
             # the ledger file itself -- a binary/corrupt sibling plan must
             # not crash a live plan's own refresh.
-            logger.warning("goal_ledger: cannot read %s: %s", plan_md, e)
+            log_and_continue(
+                logger,
+                e,
+                reason=f"an unreadable {plan_md} is skipped so the search moves on to the next candidate; a corrupt sibling plan must not crash a live plan's own refresh",
+            )
             continue
         return folder.name, text
     return None
@@ -323,7 +332,11 @@ class GoalLedger:
             fcntl.flock(lock_fd, fcntl.LOCK_EX)
             locked = True
         except OSError as e:
-            logger.warning("goal_ledger: proceeding without lock on %s: %s", lock_path, e)
+            log_and_continue(
+                logger,
+                e,
+                reason=f"a lock {lock_path} that cannot be taken lets the ledger operation proceed unlocked (fail-open); a goal-state race is a smaller harm than blocking the hook",
+            )
         try:
             yield
         finally:
@@ -332,7 +345,11 @@ class GoalLedger:
                     try:
                         fcntl.flock(lock_fd, fcntl.LOCK_UN)
                     except OSError as e:
-                        logger.warning("goal_ledger: unlock failed on %s: %s", lock_path, e)
+                        log_and_continue(
+                            logger,
+                            e,
+                            reason=f"a failed unlock of {lock_path} is cleared when the lock descriptor is closed just after, so nothing stays held",
+                        )
                 os.close(lock_fd)
 
     # ── persistence ────────────────────────────────────────────────────────
@@ -381,7 +398,11 @@ class GoalLedger:
         try:
             raw = self._load_raw()
         except LedgerUnreadable as e:
-            logger.warning("goal_ledger: %s; entries() reads as empty (fail-open)", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="an unreadable or corrupt ledger reads as no entries ([]), the documented fail-open contract: a broken ledger must not block the hooks that consult it",
+            )
             return []
         return self._parse_entries(raw)
 
@@ -455,7 +476,11 @@ class GoalLedger:
                 primary_owner=primary_owner,
             )
         except (KeyError, TypeError, ValueError) as e:
-            logger.warning("goal_ledger: skipping malformed entry: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="a malformed ledger entry is skipped (None) so the other entries still load; one bad record must not discard the whole ledger",
+            )
             return None
 
     def _save(self, entries: list[GoalLedgerEntry], ever_recorded: list[str]) -> None:
@@ -481,7 +506,11 @@ class GoalLedger:
                 handle.write(json.dumps(payload))
             tmp_path.replace(self._path)
         except OSError as e:
-            logger.warning("goal_ledger: failed to write %s: %s", self._path, e)
+            log_and_continue(
+                logger,
+                e,
+                reason=f"an unwritable ledger {self._path} loses this update only; the ledger is fail-open state and a goal that is not recorded is re-declared by the next injection",
+            )
 
     @staticmethod
     def _prune(entries: list[GoalLedgerEntry]) -> list[GoalLedgerEntry]:
@@ -711,7 +740,11 @@ class GoalLedger:
         try:
             raw = self._load_raw()
         except LedgerUnreadable as e:
-            logger.warning("goal_ledger: %s; session_has_entries reads as False (fail-open)", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="an unreadable ledger reads as the session having no entries (False), the documented fail-open contract",
+            )
             return False
         return session_id in self._parse_ever_recorded(raw)
 
@@ -743,8 +776,10 @@ class GoalLedger:
             try:
                 raw = self._load_raw()
             except LedgerUnreadable as e:
-                logger.warning(
-                    "goal_ledger: %s; reassert_session finds nothing to reassert onto", e
+                log_and_continue(
+                    logger,
+                    e,
+                    reason="an unreadable ledger leaves nothing to reassert the session onto (False); the next write recreates the ledger",
                 )
                 return False
             entries = self._parse_entries(raw)
@@ -799,7 +834,11 @@ class GoalLedger:
             try:
                 raw = self._load_raw()
             except LedgerUnreadable as e:
-                logger.warning("goal_ledger: %s; add_owners finds nothing to add onto", e)
+                log_and_continue(
+                    logger,
+                    e,
+                    reason="an unreadable ledger leaves nothing to add owners onto (False); the owners are not recorded and the next declaration records them",
+                )
                 return False
             entries = self._parse_entries(raw)
             changed = False
@@ -833,7 +872,11 @@ class GoalLedger:
             try:
                 raw = self._load_raw()
             except LedgerUnreadable as e:
-                logger.warning("goal_ledger: %s; live_plan_numbers reads as empty", e)
+                log_and_continue(
+                    logger,
+                    e,
+                    reason="an unreadable ledger reads as no live plans ([]), the documented fail-open contract",
+                )
                 return []
             entries = self._parse_entries(raw)
             changed, states = self._reconcile(entries, plan_dir)

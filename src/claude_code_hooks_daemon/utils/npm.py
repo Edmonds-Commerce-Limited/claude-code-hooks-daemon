@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,11 @@ def has_llm_commands_in_package_json(project_root: Path | None = None) -> bool:
         content = package_json_path.read_text(encoding="utf-8")
         data = json.loads(content)
     except (json.JSONDecodeError, OSError) as e:
-        logger.warning("Failed to parse package.json at %s: %s", package_json_path, e)
+        log_and_continue(
+            logger,
+            e,
+            reason=f"an unreadable or invalid package.json at {package_json_path} reports no llm: commands (False), so the playbook simply omits the llm-commands section",
+        )
         return False
 
     scripts = data.get("scripts")

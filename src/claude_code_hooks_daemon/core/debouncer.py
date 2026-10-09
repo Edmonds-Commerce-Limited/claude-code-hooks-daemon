@@ -63,6 +63,8 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_PENDING = 256
@@ -263,8 +265,16 @@ class Debouncer:
         def job() -> None:
             try:
                 callback(fire)
-            except Exception:
-                logger.exception("Debounce callback for key %r raised", key)
+            except Exception as exc:
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason=(
+                        f"Debounce callback for key {key!r} raised; one failing callback "
+                        "must not kill the scheduler thread other keys depend on"
+                    ),
+                    level=logging.ERROR,
+                )
 
         return job
 

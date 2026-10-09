@@ -111,6 +111,7 @@ from claude_code_hooks_daemon.utils.cron_cadence import (
 )
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.cron_tick import DaemonTick, TickKind, classify_tick
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.goal_ledger import (
     LEDGER_FILENAME,
     GoalLedger,
@@ -266,7 +267,12 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             untracked_dir = ProjectContext.daemon_untracked_dir()
             plan_dir = resolve_plan_dir(ProjectContext.project_root(), self._track_plans_in_project)
         except RuntimeError as e:
-            logger.debug("failsafe_cron cadence: plan context unavailable: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="without a plan context the cadence cannot consult the goal ledger (None), so the default hourly cadence applies",
+                level=logging.DEBUG,
+            )
             return None
         if not plan_dir.is_dir():
             # Defence in depth against the fallback above: a directory that is
@@ -277,7 +283,11 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
         try:
             return bool(GoalLedger(untracked_dir / LEDGER_FILENAME).live_plan_numbers(plan_dir))
         except OSError as e:
-            logger.warning("failsafe_cron cadence: ledger consult failed: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="the goal ledger cannot be consulted (None), so the default hourly cadence applies; the WARNING names the failure",
+            )
             return None
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
@@ -339,7 +349,11 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             # _work_is_owed handles its own known failures; this is the outer
             # guarantee that a NEW one cannot turn into a silently withdrawn
             # safety net.
-            logger.warning("failsafe_cron cadence: owed-work consult raised: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="a new failure in the owed-work consult leaves owed unknown (None); the WARNING names it so a withdrawn safety net is visible",
+            )
             owed = None
 
         if not declared:

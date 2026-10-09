@@ -22,6 +22,7 @@ from claude_code_hooks_daemon.core.session_start_tiers import (
     SessionTier,
 )
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.hook_command_migration import (
     MigrationResult,
     migrate_settings_to_bash_invocation,
@@ -101,7 +102,12 @@ class HookRegistrationCheckerHandler(SessionStartVerifiable, SessionStartHandler
         try:
             return ProjectContext.project_root()
         except RuntimeError as exc:
-            logger.debug("Cannot determine project root: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="without a project root the check cannot locate the settings, so it is skipped (None); the daemon has no project to advise on",
+                level=logging.DEBUG,
+            )
             return None
 
     def _read_json_file(self, path: Path) -> dict[str, Any]:
@@ -122,7 +128,12 @@ class HookRegistrationCheckerHandler(SessionStartVerifiable, SessionStartHandler
                 return data
             return {}
         except (OSError, json.JSONDecodeError, ValueError) as exc:
-            logger.debug("Failed to read %s: %s", path, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unreadable or invalid settings file reads as empty, so the registration check sees nothing registered rather than aborting session start",
+                level=logging.DEBUG,
+            )
             return {}
 
     def verify_still_needed(self) -> bool:
@@ -198,7 +209,11 @@ class HookRegistrationCheckerHandler(SessionStartVerifiable, SessionStartHandler
             try:
                 migration_result = migrate_settings_to_bash_invocation(claude_dir / _SETTINGS_FILE)
             except OSError as exc:
-                logger.warning("Hook command migration aborted: %s", exc)
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason="the hook command migration could not complete (OSError), so no migration result is reported (None); the settings file is left as it was and the next session retries",
+                )
                 migration_result = None
 
         # Plan 00185 Phase 2: self-heal — add any MISSING wired hook
@@ -211,7 +226,11 @@ class HookRegistrationCheckerHandler(SessionStartVerifiable, SessionStartHandler
             try:
                 repair_result = repair_settings_registrations(claude_dir / _SETTINGS_FILE)
             except OSError as exc:
-                logger.warning("Hook registration repair aborted: %s", exc)
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason="the hook registration repair could not complete (OSError), so no repair result is reported (None); the settings file is left as it was and the next session retries",
+                )
                 repair_result = None
 
         # Read settings files

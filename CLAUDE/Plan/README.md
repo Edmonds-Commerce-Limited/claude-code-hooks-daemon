@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00501: session modes](00501-session-modes/PLAN.md) - Not Started, Medium (#91; first-class per-session modes shown in the status line: focus (`hooks-daemon focus <task>`), BLOCKED (awaiting-human, goal-blocked loop breaker), usage-paused; per-session awaiting-human storage; guards never gated)
+
 - [00500: full qa timing and speed](00500-full-qa-timing-and-speed/PLAN.md) - In Progress, High (owner request: the full QA gate is too slow and restarts from the top after every reboot; record per-step and per-test timing, find the hot spots, add checkpoints so an interrupted gate resumes, then speed it up)
 
 - [00499: write-protected paths, and the ccy.env.local.dist template](00499-write-protected-paths-and-ccy-env-local-dist/PLAN.md) - In Progress, Low (owner rulings: `ccy.env.local` is written by IaC only, so agents may read it but never write it; a generic `write_protected_paths` guard for any project, and GitHub #88's tracked `ccy.env.local.dist` template with the corrected scope)
@@ -20,8 +22,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00488: status line visible during daemon outage](00488-status-line-visible-during-daemon-outage/PLAN.md) - Not Started (owner request, #72: the status-line forwarder exits 1 when the daemon is down so Claude Code hides the bar entirely, and a venv-building state reads as DAEMON FAILED)
 
-- [00487: Supervisor plugin API and the ccy restart plugin](00487-supervisor-plugin-api-and-ccy-restart-plugin/PLAN.md) - In Progress (owner request, #71: plugin API for the ccy supervisor per the fedora-desktop 00146 draft; first consumer is a ccy max-age restart and deadline plugin on a fedora-desktop branch, tracked here)
-
 - [00485: split subagent full qa blocker](00485-split-subagent-full-qa-blocker/PLAN.md) - Not Started (owner-delegated Fable ruling on 00466 N96: pure-refactor split of the 5,300-line handler along its class seams; starts only once no open branch touches the file)
 
 - [00484: DBF adoption and toolchain conformance](00484-dbf-adoption-and-toolchain-conformance/PLAN.md) - In Progress (owner ruling: fully adopt Defence Before Fix and link it, #65 and #67; assess the daemon as a DBF toolchain against TOOLING-SPEC and let DBF tools enumerate its defences)
@@ -31,8 +31,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00482: handler crash containment](00482-handler-crash-containment/PLAN.md) - Not Started (owner ruling after #68: handlers must never crash; a crash gets a crash record and a bug-report request, non-safety handlers are disabled after N crashes, safety guards stay fail-closed pending the owner's decision)
 
 - [00481: release 3.67 retrospective - how #68 shipped, and the QA gaps](00481-release-3-67-retrospective-qa-gaps/PLAN.md) - Not Started (owner request: a causal account, gate by gate, of how #68 reached a release, then a realistic-command corpus gate and an evaluation-error release signal, each proven against the pre-fix tree)
-
-- [00480: plan fact checker and debounce](00480-plan-fact-checker-and-debounce/PLAN.md) - In Progress (owner ruling after ledger 00474 N290: a Sonnet fact itemiser/verifier wired into plan QA through a first-class debounce; the experiment caught the planted false claim)
 
 - [00479: subscription usage monitor and ceiling](00479-subscription-usage-monitor-and-ceiling/PLAN.md) - In Progress (owner request: a status-line 5-hour/weekly usage segment, plus a per-host usage ceiling in a host-first `hosts:` block so unattended sessions stop before exhausting the subscription)
 
@@ -164,6 +162,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Handler UX Adjustments
 
+- [00502: merge requires approval](00502-merge-requires-approval/PLAN.md) - Not Started (owner rulings: the merge gate becomes "merge requires APPROVAL" with a configurable human or agent approver, default a clean sub-agent at minimum model `opus` or a named project review sub-agent; the core design is a daemon-written, tip-bound approval record the merging agent cannot forge, plus migration from the old human-approval boolean)
+
 - Dogfooding alert: agent stalled twice asking tautological questions ("Should I push?"); the prefix-positive `ask_user_question_blocker` (Plan 00108 / v3.14.0) was shipped `enabled: false` so it never fired
 
 - Phase 1 DONE: enabled in this project's config, daemon restarted, live probe confirms unprefixed AskUserQuestion is denied with `ASKING BECAUSE:` guidance
@@ -198,6 +198,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00480: plan fact checker and debounce](Completed/00480-plan-fact-checker-and-debounce/PLAN.md) - Complete, the feed shipped in v3.69.0, with the N359 delivery fixes at merge `7aa463588` + the archiving commit (owner ruling after ledger 00474 N290: a Sonnet fact itemiser/verifier wired into plan QA through a first-class debounce; the final live run refuted a planted false claim delivered unasked)
+
+- [00487: Supervisor plugin API and the ccy restart plugin](Completed/00487-supervisor-plugin-api-and-ccy-restart-plugin/PLAN.md) - Complete, shipped as beta in v3.69.0 + the archiving commit (owner request, #71: a crash-isolated plugin API for the ccy supervisor and a ccy max-age restart and deadline plugin on fedora-desktop; every supervisor-side live-test step passed, and the three launcher-only steps were handed to fedora-desktop#61 by owner ruling D11)
 
 - [00498: autonomy only where allowed](Completed/00498-autonomy-only-where-allowed/PLAN.md) - Complete at merge `68dd20179` + the archiving commit (owner request after a desktop agent drifted off its one task: a top-level `autonomy:` block, keyed on the detected environment and role alias, decides whether crons, goal pressure and resume advice run; this repo allows them in containers only, and the owner's desktop session showed `no autonomy` with an empty CronList)
 
@@ -255,9 +259,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00439: fence splitter moves out of plan qa](Completed/00439-fence-splitter-moves-out-of-plan-qa/PLAN.md) - Complete at `712cbf2e` + the archiving commit (from 00422 N5 row (h): `utils/markdown_links.py` said "it imports neither of them" six lines above an import of `plan_qa.model`; the splitter moved to `utils/markdown_fences.py`, and the guard written to prove it found six such edges where the ledger named one — the other four are now a declared ratchet, filed as N14)
 
-- [00438: kill suggestion can name the protected group](Completed/00438-kill-suggestion-can-name-the-protected-group/PLAN.md) - Complete at `d9990531` + the archiving commit (from 00422 N5 row (i): `exclude_pgids` was honoured when deciding what breaches and ignored when building the `kill --` the report prints, so the harvester could recommend killing its own group)
-
-- [00437: session advice counter is shared and locked](Completed/00437-session-advice-counter-is-shared-and-locked/PLAN.md) - Complete at `2fbe655e` + the archiving commit (from 00422 N5 row (c): two handlers carried the same unlocked eviction on a daemon-lifetime singleton, and dispatch really is threaded — the test had to drive CPython's switch interval to its floor before the KeyError would appear at all)
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -309,9 +310,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 500 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 502 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 422 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 424 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
 - **Active**: 55 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 

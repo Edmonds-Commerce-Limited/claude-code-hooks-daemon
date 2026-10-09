@@ -1,17 +1,17 @@
 ---
 source_url: https://defence-before-fix.github.io/raw/TOOLING-SPEC.md
-fetched_at: 2026-09-15T11:36:54.202186+00:00
+fetched_at: '2026-10-08T00:24:33.721615+00:00'
 fidelity: converted
-source_sha256: 64d5dc76473f5f50bb2522ab61924181473fbf5c7f469dd502945e424bb98bd3
+source_sha256: e88f22b57336cb341c062e9f9dc306576d6faa20c6efcc8934a5a77e7588a27a
 licence: CC-BY-4.0
-stale_after: 2026-12-14
+stale_after: '2027-01-06'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
 # Defence Before Fix: Toolchain Specification
 
 **Version**: 0.2.0, published 2026-09-08
-**Companion to**: [the method specification](SPEC.md), version 1.0.1, and [the detector specification](DETECTOR-SPEC.md), version 1.0.0
+**Companion to**: [the method specification](SPEC.md), version 1.1.0, and [the detector specification](DETECTOR-SPEC.md), version 1.0.0
 **Author**: [Joseph Edmonds](https://ltscommerce.dev), [Edmonds Commerce](https://edmondscommerce.co.uk)
 **Coined**: 22 February 2026, in [the original article](https://ltscommerce.dev/articles/defence-before-fix-static-analysis)
 

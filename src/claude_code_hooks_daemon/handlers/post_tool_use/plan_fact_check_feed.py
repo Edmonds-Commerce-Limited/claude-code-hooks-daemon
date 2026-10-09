@@ -13,10 +13,20 @@ to speak through, so it dispatches NOTHING: it logs at info level and stores the
 diff since the plan's last fact-checked content as a *pending fact-check*
 record, via
 :func:`~claude_code_hooks_daemon.utils.plan_fact_check.process_quiet_plan`.
-The next PostToolUse event, whatever the tool, delivers it as ``additionalContext``
-telling the session to dispatch the ``plan-fact-checker`` agent with the diff,
-and to treat REFUTED claims as work to fix. Each record is delivered once, which
-also marks that content as checked.
+The next PostToolUse event of the MAIN thread, whatever the tool, delivers it as
+``additionalContext`` telling the session to dispatch the ``plan-fact-checker``
+agent with the diff, and to treat REFUTED claims as work to fix. A subagent's
+event (one carrying ``agent_id``) feeds the debouncer but never takes the record.
+Each record is handed over once per offer (claimed by an atomic rename, so two
+events at once cannot both deliver it). The daemon cannot see whether the text
+arrived, so the content counts as checked only when the session is then seen
+dispatching ``plan-fact-checker`` with the diff path in its prompt; an offer
+nobody acts on is re-offered after a wait, a few times.
+
+A plan's first sighting records a baseline and owes nothing; a small edit soon
+after a confirmed check is taken for a correction and absorbed; and edits under
+a worktree nested in the project root are ignored (they reach this tree by a
+merge, not as edits).
 
 The supervisor turn channel (``session_actions_directive``) is deliberately not
 used: its signal carries a bare count and its text is a fixed template that
@@ -37,12 +47,16 @@ from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.debouncer import DebounceFire, get_debouncer
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
+from claude_code_hooks_daemon.core.handler_scope import in_subagent
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.utils import get_written_file_paths
+from claude_code_hooks_daemon.core.worktree_paths import enclosing_checkout
 from claude_code_hooks_daemon.utils.plan_fact_check import (
+    FACT_CHECKER_AGENT,
     STATE_SUBDIR,
     PlanFactCheckState,
     PlanFolderMatch,
+    confirm_dispatch,
     deliver_pending,
     plan_folder_match,
     process_quiet_plan,
@@ -52,6 +66,8 @@ from claude_code_hooks_daemon.utils.plan_trigger import plan_dir_for
 logger = logging.getLogger(__name__)
 
 DEFAULT_QUIET_SECONDS: Final[float] = 5.0
+#: Tools that dispatch a sub-agent (the tool's name differs between Claude Code versions).
+DISPATCH_TOOLS: Final[frozenset[str]] = frozenset({"Task", "Agent"})
 
 
 def _on_quiet(fire: DebounceFire, *, plan_root: Path, state_dir: Path) -> None:
@@ -63,6 +79,22 @@ def _on_quiet(fire: DebounceFire, *, plan_root: Path, state_dir: Path) -> None:
         trigger_count=fire.trigger_count,
         now=time.time(),
     )
+
+
+def _in_main_checkout(path: str, project_root: Path) -> bool:
+    """True when ``path`` is in the project's own checkout, not a worktree nested under it."""
+    located = enclosing_checkout(path, project_root)
+    return located is not None and located[0] == project_root
+
+
+def _checker_dispatch_prompt(hook_input: dict[str, Any]) -> str | None:
+    """The prompt of a dispatch of the fact-checker agent, or ``None`` for any other event."""
+    if hook_input.get("tool_name") not in DISPATCH_TOOLS:
+        return None
+    tool_input = hook_input.get("tool_input")
+    if not isinstance(tool_input, dict) or tool_input.get("subagent_type") != FACT_CHECKER_AGENT:
+        return None
+    return str(tool_input.get("prompt", ""))
 
 
 class PlanFactCheckFeedHandler(PostToolUseHandlerBase):
@@ -85,12 +117,18 @@ class PlanFactCheckFeedHandler(PostToolUseHandlerBase):
         self._quiet_seconds: float = DEFAULT_QUIET_SECONDS
 
     def _plan_matches(self, hook_input: dict[str, Any]) -> list[PlanFolderMatch]:
-        """One match per distinct plan folder the event wrote a tracked document in."""
+        """One match per distinct plan folder the event wrote a tracked document in.
+
+        A write inside a worktree nested under the project root (a sub-agent's
+        own checkout) is not this session's plan: it reaches the main tree only
+        by a merge, so it must not feed the debouncer under the worktree path.
+        """
         plan_dir = plan_dir_for(self._project_layout)
+        project_root = ProjectContext.project_root().resolve()
         found: dict[str, PlanFolderMatch] = {}
         for path in get_written_file_paths(hook_input):
             match = plan_folder_match(path, plan_dir)
-            if match is not None:
+            if match is not None and _in_main_checkout(path, project_root):
                 found[str(match.plan_root)] = match
         return list(found.values())
 
@@ -101,14 +139,21 @@ class PlanFactCheckFeedHandler(PostToolUseHandlerBase):
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True when the event wrote a plan document, or a fact-check is owed.
 
-        An owed check is delivered on ANY next event: the debounce fire runs on
-        a timer thread with no hook to speak through, so the next event is the
-        earliest the session can be told.
+        An owed check is delivered on ANY next event of the main thread: the
+        debounce fire runs on a timer thread with no hook to speak through, so
+        the next event is the earliest the session can be told. A subagent's
+        event is never that: a worker told to dispatch the fact-checker would
+        consume the record, and the session that owns the plan would never hear.
         """
-        return bool(self._plan_matches(hook_input)) or bool(self._state().pending_folders())
+        if self._plan_matches(hook_input):
+            return True
+        if in_subagent(hook_input):
+            return False
+        state = self._state()
+        return bool(state.pending_folders() or state.offered_folders())
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
-        """Feed the debouncer, and deliver any owed fact-check. Always ALLOW."""
+        """Feed the debouncer, confirm a dispatch, and deliver what is owed. Always ALLOW."""
         state = self._state()
         debouncer = get_debouncer()
         for match in self._plan_matches(hook_input):
@@ -118,6 +163,11 @@ class PlanFactCheckFeedHandler(PostToolUseHandlerBase):
                 callback=partial(_on_quiet, plan_root=match.plan_root, state_dir=state.state_dir),
                 payload=match.folder,
             )
+        if in_subagent(hook_input):
+            return BlockingResult(decision=Decision.ALLOW)
+        prompt = _checker_dispatch_prompt(hook_input)
+        if prompt is not None:
+            confirm_dispatch(state, prompt, now=time.time())
         instructions = deliver_pending(state)
         if not instructions:
             return BlockingResult(decision=Decision.ALLOW)

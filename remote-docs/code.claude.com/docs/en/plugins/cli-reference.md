@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/cli-reference
-fetched_at: '2026-10-06T10:47:30.416416+00:00'
+fetched_at: '2026-10-08T00:23:34.696566+00:00'
 fidelity: converted
-source_sha256: d96e2e4ef14af7fa0376ced181d08189c9984a9497d79826601a2fd6ab37e877
+source_sha256: 71adefd1331bdc7fce3581614e5e68ab55f369611da974151f4831b83156b0ac
 licence: unreviewed
-stale_after: '2027-01-04'
+stale_after: '2027-01-06'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -14,11 +14,11 @@ fetch_method: agent-browser-lite-headless (accept-markdown)
 
 # Plugin commands reference
 
-> Complete reference for the claude plugin shell commands, /plugin and /reload-plugins in a session, and the flags that load a plugin for one session.
+> Reference for the claude plugin shell commands, /plugin and /reload-plugins in a session, and the flags that load a plugin for one session.
 
 You run plugin commands either as `claude plugin` from your shell or a script, or as `/plugin` and `/reload-plugins` inside a Claude Code session. This reference gives each command's flags, defaults, output, and exit codes, along with the two flags that load a plugin for one session.
 
-Run `claude plugin --help` on your build to confirm which subcommands your version has.
+The tables below list each subcommand's commonly used options, not every option. Run `claude plugin --help` in your shell to see which subcommands your version has, and `claude plugin <subcommand> --help` for a subcommand's full option list.
 
 <Note>
   These cases are covered on other pages:
@@ -634,6 +634,7 @@ With `--json`, Claude Code writes the report to stdout as one JSON object with t
 * `target`: the resolved path Claude Code validated
 * `manifest`: the manifest's own result, or `null` for a run without a manifest
 * `contents`: per-file results, each naming its `file` and carrying `errors`, `warnings`, and `notes` arrays
+  * `gatingHooks`: whether each [mod](/docs/en/plugins/mods/overview) hook that can refuse an action, such as a `tool.call` hook, has a [`.catch` handler](/docs/en/plugins/mods/events#handle-a-hook-that-fails). Each item gives `module`, `pattern`, `hook`, and `hasCatch`. Requires Claude Code v2.1.290 or later
 
 On exit `2`, the command writes nothing to stdout. The error message goes to stderr.
 

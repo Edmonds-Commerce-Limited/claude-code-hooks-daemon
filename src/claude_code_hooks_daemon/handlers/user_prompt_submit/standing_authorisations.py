@@ -66,6 +66,7 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 from claude_code_hooks_daemon.utils import ccy_supervisor
 from claude_code_hooks_daemon.utils.cron_tick import classify_tick
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
@@ -278,10 +279,18 @@ def write_standing_auth_signal(
         tmp_path.replace(final_path)
         return final_path
     except RuntimeError as exc:
-        logger.warning("standing_authorisations: skipping signal (no project context): %s", exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="without a project context there is no daemon state directory, so there is nothing to read or write; no signal is written and None tells the caller so",
+        )
         return None
     except OSError as exc:
-        logger.warning("standing_authorisations: failed to write signal: %s", exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="the standing-authorisations signal could not be written (None); the signal is a notification, not the authorisation itself",
+        )
         return None
 
 

@@ -36,6 +36,7 @@ from typing import Final
 
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils.blockage_marker import write_json_atomically
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +124,12 @@ def read_records(path: Path) -> list[StopFailureRecord]:
     except FileNotFoundError:
         return []
     except (OSError, json.JSONDecodeError) as exc:
-        logger.debug("stop_failure_records: unreadable %s: %s", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"an unreadable or corrupt records file {path} reads as no records ([]), so the stop-failure history starts afresh instead of failing the hook",
+            level=logging.DEBUG,
+        )
         return []
     entries = raw.get(_KEY_RECORDS) if isinstance(raw, dict) else None
     if not isinstance(entries, list):
@@ -147,7 +153,11 @@ def _write(path: Path, records: list[StopFailureRecord]) -> bool:
     try:
         write_json_atomically(path, payload)
     except OSError as exc:
-        logger.warning("stop_failure_records: failed to write %s: %s", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"an unwritable records file {path} is reported to the caller as False (not written); this stop failure is missing from the history but the hook proceeds",
+        )
         return False
     return True
 

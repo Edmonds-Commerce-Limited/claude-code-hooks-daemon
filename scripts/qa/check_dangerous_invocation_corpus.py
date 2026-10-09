@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -57,6 +58,7 @@ _OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / _ARTEFACT_NAME
 _DEFAULT_CORPUS: Final[Path] = _REPO_ROOT / "scripts" / "qa" / "dangerous-invocation-corpus.yaml"
 
 _RULE: Final[str] = "dangerous-invocation-corpus"
+_SESSION_ID: Final[str] = "dangerous-invocation-corpus"
 
 _COVERED: Final[str] = "COVERED"
 _UNCOVERED_ACCEPTED: Final[str] = "UNCOVERED-accepted"
@@ -130,6 +132,7 @@ def real_chain_verdict() -> VerdictFn:
     from claude_code_hooks_daemon.core.router import EventRouter
     from claude_code_hooks_daemon.daemon.cli import _build_handler_config_mapping
     from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
+    from claude_code_hooks_daemon.utils.usage_pause import synthetic_session_exemption
 
     config_path = _REPO_ROOT / ".claude" / "hooks-daemon.yaml"
     if not ProjectContext.is_initialized():
@@ -148,17 +151,22 @@ def real_chain_verdict() -> VerdictFn:
         documentation=config.documentation,
     )
 
+    untracked_dir = ProjectContext.daemon_untracked_dir()
+
     def verdict(command: str) -> tuple[bool, str]:
-        outcome = router.route(
-            EventType.PRE_TOOL_USE,
-            {
-                "hook_event_name": "PreToolUse",
-                "tool_name": "Bash",
-                "tool_input": {"command": command},
-                "session_id": "dangerous-invocation-corpus",
-                "cwd": str(_REPO_ROOT),
-            },
-        )
+        # The corpus is about guards, not the account: over the host's usage
+        # ceiling the pause gate would otherwise deny every row.
+        with synthetic_session_exemption(untracked_dir, _SESSION_ID, now=time.time()):
+            outcome = router.route(
+                EventType.PRE_TOOL_USE,
+                {
+                    "hook_event_name": "PreToolUse",
+                    "tool_name": "Bash",
+                    "tool_input": {"command": command},
+                    "session_id": _SESSION_ID,
+                    "cwd": str(_REPO_ROOT),
+                },
+            )
         return outcome.result.decision is not Decision.ALLOW, outcome.decided_by or ""
 
     return verdict

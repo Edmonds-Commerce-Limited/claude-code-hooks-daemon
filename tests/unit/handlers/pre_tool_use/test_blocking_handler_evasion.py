@@ -529,6 +529,11 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
 # assumption that let the git bypasses survive.
 _NOT_COMMAND_ANCHORED: dict[str, str] = {
     "AbsolutePathHandler": "matches on the file_path parameter, not a command",
+    "WriteProtectedPathsHandler": (
+        "matches on the PATH a file tool or a shell write names, read by the shared write "
+        "scan (redirects, tee, cp/mv/install/ln, sed -i, rm, truncate), not on a command name; "
+        "its respellings are covered in test_write_protected_paths.py"
+    ),
     "GithubIssueAssignmentGuardHandler": (
         "matches on a Write/Edit path inside a plan folder whose PLAN.md header names an "
         "issue, or on a `git commit` message citing that issue while naming the plan; the "

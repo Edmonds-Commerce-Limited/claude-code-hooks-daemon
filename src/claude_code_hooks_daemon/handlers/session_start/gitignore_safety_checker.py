@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.encrypted_at_rest import is_encrypted_at_rest
 from claude_code_hooks_daemon.utils.git_file_states import (
     gitignore_negation,
@@ -188,7 +189,12 @@ class GitignoreSafetyCheckerHandler(SessionStartHandlerBase):
                 try:
                     content += path.read_text(errors="replace")
                 except OSError as exc:
-                    logger.debug("Could not read %s for hash: %s", path, exc)
+                    log_and_continue(
+                        logger,
+                        exc,
+                        reason=f"an unreadable {path} drops out of the cache hash, so the hash differs from a readable run and the check simply recomputes",
+                        level=logging.DEBUG,
+                    )
         return hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()
 
     # ------------------------------------------------------------------
@@ -208,7 +214,12 @@ class GitignoreSafetyCheckerHandler(SessionStartHandlerBase):
                     if stripped and not stripped.startswith("#"):
                         lines.add(stripped)
             except OSError as exc:
-                logger.debug("Could not read %s for gitignore check: %s", path, exc)
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason=f"an unreadable {path} contributes no ignore entries, so entries it holds may be reported missing; the check still covers the other gitignore files",
+                    level=logging.DEBUG,
+                )
         return lines
 
     @staticmethod
@@ -276,7 +287,12 @@ class GitignoreSafetyCheckerHandler(SessionStartHandlerBase):
                 json.dumps({"gitignore_hash": gitignore_hash, "missing_entries": missing})
             )
         except (OSError, TypeError) as exc:
-            logger.debug("Failed to write gitignore safety cache: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unwritable gitignore safety cache only means the check is recomputed next session; the advice for this session is already computed",
+                level=logging.DEBUG,
+            )
 
     # ------------------------------------------------------------------
     # Handler protocol

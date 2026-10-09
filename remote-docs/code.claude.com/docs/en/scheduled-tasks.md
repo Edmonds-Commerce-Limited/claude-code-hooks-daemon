@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/scheduled-tasks.md
-fetched_at: '2026-10-02T17:27:03.133456+00:00'
+fetched_at: '2026-10-08T00:24:19.344722+00:00'
 fidelity: converted
 source_sha256: bd61138121e36e5e0b888c7e2ad15df0d65d735cfcdcc46e35b950b0ce80846e
 licence: unreviewed
-stale_after: '2026-12-31'
+stale_after: '2027-01-06'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 

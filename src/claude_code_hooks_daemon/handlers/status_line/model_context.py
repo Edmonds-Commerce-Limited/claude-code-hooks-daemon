@@ -96,6 +96,7 @@ from claude_code_hooks_daemon.handlers.status_line.settings_reader import (
     get_settings_path,
     read_claude_settings,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -385,7 +386,12 @@ class ModelContextHandler(StatusLineHandlerBase):
             settings = read_claude_settings(self._get_settings_path())
             settings_effort = settings.get("effortLevel")
         except Exception as e:
-            logger.debug("Failed to read settings.json for explain_segment: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="status-line segments fail silent by contract: an unexpected error omits the segment rather than showing a misleading one",
+                level=logging.DEBUG,
+            )
             settings_effort = None
         effort_note = (
             f"~{settings_effort} (from settings.json; a session-only /effort override "

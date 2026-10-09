@@ -1,16 +1,16 @@
 ---
 source_url: https://defence-before-fix.github.io/defence-before-fix-project-prompt.md
-fetched_at: 2026-09-15T11:37:09.011824+00:00
+fetched_at: '2026-10-08T00:24:30.288117+00:00'
 fidelity: converted
-source_sha256: 7a0f97d40eea12a518cf77d6cfff143683ca2d5c3843854a2c7a32cc43938441
+source_sha256: f05d0a56779c08ced383f83d85b18825ff2bce924e0d7dfcc9655ec26c71fb53
 licence: CC-BY-4.0
-stale_after: 2026-12-14
+stale_after: '2027-01-06'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
 # Defence Before Fix (DBF): project prompt for agents
 
-You are working in a project that follows Defence Before Fix (DBF), method specification 1.0.1.
+You are working in a project that follows Defence Before Fix (DBF), method specification 1.1.0.
 This file is generated from that specification and is the short form; the specification governs
 where they differ. Read it once at the start of a task that involves fixing a defect.
 
@@ -56,6 +56,9 @@ the standing answer is no unless a human has already agreed and documented an Ex
 project. If you hit one, finish everything else, then report the count and what fixing it would
 take, and leave the Rule unmerged rather than merging it weakened.
 
+A Defect you find and do not fix now is recorded where the project keeps its other decisions,
+naming the Class if you can already see it. Mentioning it in your output is not a record.
+
 If you are unsure whether code you want to exclude carries the Hazard, you are suppressing it, so
 refer it upwards rather than deciding. Narrow only where you are confident.
 
@@ -72,7 +75,7 @@ Only then fix the original Defect in the normal way, with a test that reproduces
 
 ## Where the full documents are, as raw markdown
 
-- Method specification 1.0.1: https://defence-before-fix.github.io/raw/SPEC.md
+- Method specification 1.1.0: https://defence-before-fix.github.io/raw/SPEC.md
 - Detector specification 1.0.0: https://defence-before-fix.github.io/raw/DETECTOR-SPEC.md
 - Toolchain specification 0.2.0: https://defence-before-fix.github.io/raw/TOOLING-SPEC.md
 - Primer: https://defence-before-fix.github.io/raw/PRIMER.md
@@ -109,5 +112,5 @@ declaration yourself; report what you found.
 
 ## Citation
 
-Edmonds, Joseph. *Defence Before Fix*, version 1.0.1. First published 22 February 2026.
+Edmonds, Joseph. *Defence Before Fix*, version 1.1.0. First published 22 February 2026.
 https://defence-before-fix.github.io/

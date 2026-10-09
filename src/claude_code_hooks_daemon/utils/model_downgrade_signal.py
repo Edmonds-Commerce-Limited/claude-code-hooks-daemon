@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
@@ -175,8 +176,13 @@ def read_downgrade_signal(daemon_untracked_dir: Path, session_id: str) -> Downgr
         return None
     try:
         payload = json.loads(text)
-    except ValueError:
-        logger.debug("model_downgrade_signal: malformed signal at %s", path)
+    except ValueError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a malformed signal at {path} reads as no signal (None), so no downgrade is announced from a half-written file",
+            level=logging.DEBUG,
+        )
         return None
     found = _parse(payload)
     if found is None or found.session_id != session_id:
@@ -222,6 +228,10 @@ def write_downgrade_signal(
         tmp_path.write_text(json.dumps(payload), encoding="utf-8")
         tmp_path.replace(path)
     except OSError as exc:
-        logger.warning("model_downgrade_signal: could not write %s: %s", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"an unwritable signal {path} returns None (nothing published); the downgrade stays in the transcript and the next PostToolUse scans again",
+        )
         return None
     return path

@@ -1,10 +1,10 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-10-06 (v3.68.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-10-09 (v3.69.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (74 handlers)
+### PreToolUse (75 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -41,6 +41,7 @@
 | 21 | pip_break_system | BLOCKING | Block pip install --break-system-packages commands |
 | 22 | host_command_guard | BLOCKING | Deny the four commands of owner ruling A6 that reach past the project |
 | 22 | sudo_pip | BLOCKING | Block sudo pip install commands |
+| 22 | write_protected_paths | BLOCKING | Deny any agent write to a configured path; reading is never denied |
 | 23 | ask_user_question_blocker | BLOCKING | Allow AskUserQuestion only when every question is prefix-justified |
 | 30 | plan_status_snapshot | ADVISORY | Record a PLAN.md's pre-write status for `goal_injection` to consume |
 | 30 | qa_suppression | BLOCKING | Block QA suppression comments across all supported languages |

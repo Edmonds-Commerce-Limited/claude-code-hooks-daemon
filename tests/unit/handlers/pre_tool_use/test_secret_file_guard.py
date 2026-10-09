@@ -120,6 +120,37 @@ class TestReadTools:
         handler = _handler()
         assert handler.matches(_hook_input("Grep", {"pattern": "x", "path": str(tmp_path)}))
 
+    def test_grep_naming_a_protected_file_in_file_path_matches(self) -> None:
+        """N374 item 13: Claude Code 2.1.292 lets Grep carry its target in file_path."""
+        handler = _handler()
+        hook_input = _hook_input("Grep", {"pattern": "^a", "file_path": "/proj/.vault-pass"})
+        assert handler.matches(hook_input)
+        assert handler.handle(hook_input).decision == "deny"
+
+    def test_grep_of_ordinary_file_path_does_not_match(self) -> None:
+        handler = _handler()
+        assert not handler.matches(_hook_input("Grep", {"pattern": "x", "file_path": "/proj/src"}))
+
+    @pytest.mark.parametrize(
+        "tool_input",
+        [
+            {"pattern": "x", "path": "/proj/src", "file_path": "/proj/.vault-pass"},
+            {"pattern": "x", "path": "/proj/.vault-pass", "file_path": "/proj/src"},
+        ],
+    )
+    def test_grep_naming_two_targets_is_judged_on_both(self, tool_input: dict[str, str]) -> None:
+        assert _handler().matches(_hook_input("Grep", tool_input))
+
+    def test_grep_rooted_at_dir_via_file_path_is_judged_by_the_index(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / ".vault-pass").write_text("x\n")
+        _index_project(tmp_path, monkeypatch)
+        handler = _handler()
+        hook_input = _hook_input("Grep", {"pattern": "x", "file_path": str(tmp_path)})
+        assert handler.matches(hook_input)
+        assert handler.handle(hook_input).decision == "deny"
+
     def test_glob_tool_is_never_matched(self) -> None:
         """Names-only: presence is the feature, deliberately allowed."""
         handler = _handler()

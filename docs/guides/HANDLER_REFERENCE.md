@@ -1238,6 +1238,38 @@ handlers:
 
 ---
 
+#### write_protected_paths
+
+| Property       | Value                   |
+| -------------- | ----------------------- |
+| **Config key** | `write_protected_paths` |
+| **Priority**   | 22                      |
+| **Type**       | Blocking (terminal)     |
+| **Event**      | PreToolUse              |
+
+**Description:** Keeps listed paths read-only for agents. Some files are maintained outside the agent (an infrastructure-as-code run places them, or a human edits them): agents may read them and must never create, change, move onto or delete them. The handler denies `Write`, `Edit` and `NotebookEdit` on a listed path, and a Bash command that authors it (a redirect, `tee`, a heredoc, `sed -i`, `dd of=`), relocates onto it (`cp`, `mv`, `install`, `ln`), or creates, deletes or truncates it (`touch`, `rm`, `unlink`, `truncate`, `: >`). Verbs count only where a command starts or after a wrapper (`sudo`, `xargs`, `git rm`), so `grep rm file` is a read. Moving or deleting a directory that holds a listed file is denied too. A wildcard is denied only when the shell could expand it to a listed file (`*` stays inside one component and skips dotfiles), and a literal `cd` is followed. A destination built from an expansion is judged by its final component, whole. Not covered: `perl -i`, `rsync`, `find -delete`, interpreters. Reading is never denied. The denial says the file is maintained outside the agent and to ask the human for any change. Ships **disabled** and does nothing without `paths`. It guards against an agent's mistake, not against a human or a process running outside Claude Code.
+
+**Options:**
+
+| Option  | Default | Meaning                                                                                                                      |
+| ------- | ------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `paths` | `[]`    | Repository-relative globs (`*`, `?`, `**`). Absolute paths and `..` are refused. Matched in a worktree of the repository too |
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    write_protected_paths:
+      enabled: true
+      priority: 22
+      options:
+        paths:
+          - .claude/ccy/ccy.env.local
+```
+
+---
+
 #### pip_break_system
 
 | Property       | Value              |
@@ -4256,7 +4288,7 @@ These handlers run when the user submits a prompt.
 | **Type**       | Blocking           |
 | **Event**      | UserPromptSubmit   |
 
-**Description:** Pauses a session at its host usage ceiling (Plan 00479). When `hosts:` gives the host a `usage_ceiling` and a live usage window reaches it, the pause is recorded (`<session>.usage-paused`, also read by the ccy supervisor) and the model is told to `CronList`, `CronDelete` every cron, `CronCreate` ONE recurring resume cron on the schedule `*/10 * * * *` (no clock time, so no host time zone can misplace it), and to wind up its subagents (start none, let running ones finish), then stop. The directive travels as context on the prompt that trips the ceiling, because a UserPromptSubmit `block` reason reaches the user and never the model. While the record is live every other prompt (cron tick, supervisor message, human) is blocked before the model (`R-USAGE-PAUSE-PROMPT`), but each held prompt first re-checks the ceiling and lifts a pause that no longer applies. The owner can run `bin/hooks-daemon usage-pause clear` in a terminal (whether a `!`-prefixed command passes through the hooks is unverified): it removes the pause and records an override until the latest reset among the windows over the ceiling (at most 8 days), during which no pause is started for that session; `usage-pause status` shows it. No session id, an unreadable record, or one that cannot be read back never pauses; a reset only seconds away still pauses, resuming two minutes after the reset. The resume cron's prompt starts `[tick:usage-resume]`: a tick before the resume time is dropped at zero cost; the first one at or after it re-reads usage, and under the ceiling the record is cleared and the model is told to delete the resume cron, re-create the failsafe and declared crons and continue; still over it, the record is refreshed and the same resume cron stays in place.
+**Description:** Pauses a session at its host usage ceiling (Plan 00479). When `hosts:` gives the host a `usage_ceiling` and a live usage window reaches it, the pause is recorded (`<session>.usage-paused`, also read by the ccy supervisor) and the model is told to `CronList`, `CronDelete` every cron, `CronCreate` ONE recurring resume cron on the schedule `*/10 * * * *` (no clock time, so no host time zone can misplace it), and to wind up its subagents (start none, let running ones finish), then stop. The directive travels as context on the prompt that trips the ceiling, because a UserPromptSubmit `block` reason reaches the user and never the model. While the record is live every other prompt (cron tick, supervisor message, human) is blocked before the model (`R-USAGE-PAUSE-PROMPT`), but each held prompt first re-checks the ceiling and lifts a pause that no longer applies. The owner can type `! bin/hooks-daemon usage-pause clear` in the paused session (or run it without the `!` in a terminal): it removes the pause and records an override until the latest reset among the windows over the ceiling (at most 8 days), during which no pause is started for that session; `usage-pause status` shows it. No session id, an unreadable record, or one that cannot be read back never pauses; a reset only seconds away still pauses, resuming two minutes after the reset. The resume cron's prompt starts `[tick:usage-resume]`: a tick before the resume time is dropped at zero cost; the first one at or after it re-reads usage, and under the ceiling the record is cleared and the model is told to delete the resume cron, re-create the failsafe and declared crons and continue; still over it, the record is refreshed and the same resume cron stays in place.
 
 **Fails open:** no ceiling for the host, an unknown hostname, no usage snapshot, no project context, or a record that cannot be written never pauses a session (a debug line says which). Never terminal.
 
@@ -4601,6 +4633,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `sed_blocker`                   | PreToolUse        | 10       | the word sed in a Bash command, bar four narrow exemptions               |
 | `curl_pipe_shell`               | PreToolUse        | 10       | curl/wget piped to bash/sh                                               |
 | `lock_file_edit_blocker`        | PreToolUse        | 10       | Direct editing of lock files                                             |
+| `write_protected_paths`         | PreToolUse        | 22       | Agent writes to a configured read-only path                              |
 | `pip_break_system`              | PreToolUse        | 10       | pip --break-system-packages                                              |
 | `sudo_pip`                      | PreToolUse        | 10       | sudo pip install                                                         |
 | `host_command_guard`            | PreToolUse        | 10       | docker host-root mount, gh auth token, non-PyPI pip index, crontab -r    |

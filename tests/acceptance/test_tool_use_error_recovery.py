@@ -34,6 +34,7 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     TEST_PROBE,
     ProbeThread,
 )
+from tests.usage_ceiling import exempt_from_usage_ceiling
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -83,7 +84,10 @@ def _send_stop_event(sock_path: Path, transcript_path: Path, session_id: str, cw
     }
     request = json.dumps(payload).encode("utf-8") + b"\n"
 
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+    with (
+        exempt_from_usage_ceiling(session_id),
+        socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock,
+    ):
         sock.settimeout(Timeout.SOCKET_DISPATCH_ROUNDTRIP)
         sock.connect(str(sock_path))
         sock.sendall(request)

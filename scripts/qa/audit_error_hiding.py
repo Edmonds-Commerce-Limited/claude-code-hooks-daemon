@@ -40,6 +40,8 @@ from claude_code_hooks_daemon.strategies.error_hiding.protocol import ErrorHidin
 from claude_code_hooks_daemon.strategies.error_hiding.shell_strategy import (
     ShellErrorHidingStrategy,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import SANCTIONED_HELPER_NAME
+from claude_code_hooks_daemon.utils.escape_hatch import is_acceptable_reason
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 from claude_code_hooks_daemon.utils.scan_scope import walk_files
 
@@ -52,7 +54,10 @@ VIOLATION_TYPES = {
         "Handler binds None or an empty default to a local that is returned "
         "after the try - return-none-on-error spelt so the token is not seen"
     ),
-    "log-and-continue": "Logs error but continues execution",
+    "log-and-continue": (
+        "Handler only logs (inline or through a helper) and carries on - "
+        "use utils.deliberate_swallow.log_and_continue(..., reason=...) if deliberate"
+    ),
     "bare-except": "Bare except clause without specific exception type",
     "warning-instead-of-error": "Uses logger.warning() for critical failures",
     "silent-fallback": (
@@ -285,11 +290,25 @@ def _walk_own_scope(node: ast.AST) -> Iterator[ast.AST]:
             yield from _walk_own_scope(child)
 
 
+#: ``level=`` spellings of the named helper that stay below warning.
+_QUIET_LEVELS: frozenset[str] = frozenset({"logging.DEBUG", "logging.INFO", "DEBUG", "INFO"})
+
+
+def _is_surfacing_sanctioned_call(call: ast.Call) -> bool:
+    """The named helper with a reason, logging at warning or above (its default)."""
+    if not _is_sanctioned_helper_call(call):
+        return False
+    level = next((kw.value for kw in call.keywords if kw.arg == "level"), None)
+    return level is None or ast.unparse(level) not in _QUIET_LEVELS
+
+
 def _handler_surfaces_the_error(handler: ast.ExceptHandler, surfaced_lists: set[str]) -> bool:
     """Does the handler re-raise, log at warning or above, or record a
     problem on a list that its function returns, raises, logs or reports?"""
     for child in _walk_own_scope(handler):
         if isinstance(child, ast.Raise):
+            return True
+        if isinstance(child, ast.Call) and _is_surfacing_sanctioned_call(child):
             return True
         if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute):
             if child.func.attr in _SURFACING_LOG_LEVELS:
@@ -457,6 +476,134 @@ def _is_rebound_between(scope: list[ast.AST], name: str, after: int, before: int
     )
 
 
+#: Logger methods whose call makes a handler body "log-like" at any level.
+_ALL_LOG_LEVELS: frozenset[str] = _SURFACING_LOG_LEVELS | {"info", "debug"}
+
+
+def _is_trivial_continuation(stmt: ast.stmt) -> bool:
+    """A statement that lets execution carry on without doing anything real."""
+    if isinstance(stmt, ast.Pass | ast.Continue | ast.Break):
+        return True
+    if isinstance(stmt, ast.Return):
+        value = stmt.value
+        # A truthy constant (``return 1``) is a failure exit code or a flag the
+        # caller reads, not an empty answer standing in for a result.
+        if isinstance(value, ast.Constant):
+            return not value.value
+        return _is_none(value) or _is_fallback_value(value)
+    if isinstance(stmt, ast.Assign):
+        falsy_constant = isinstance(stmt.value, ast.Constant) and not stmt.value.value
+        return falsy_constant or any(True for _ in _fallback_bindings(stmt))
+    return False
+
+
+def _hands_the_failure_to_a_reader(call: ast.Call) -> bool:
+    """A call that records the failure where the caller reads it back.
+
+    Appending to a collection or setting the exception on a future is
+    surfacing, not swallowing, so a handler containing one is not flagged.
+    """
+    return (
+        _is_console_report(call)
+        or _is_report_buffer_write(call)
+        or (
+            isinstance(call.func, ast.Attribute)
+            and (call.func.attr in _LIST_RECORDING_METHODS or call.func.attr == "set_exception")
+        )
+    )
+
+
+def _is_report_buffer_write(call: ast.Call) -> bool:
+    """``self.output(...)``: a diagnostic report writing a line into its own body.
+
+    The report is what the reader is handed, so a failure written into it is
+    surfaced, not logged and forgotten.
+    """
+    func = call.func
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr == "output"
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "self"
+    )
+
+
+def _is_console_report(call: ast.Call) -> bool:
+    """``print(...)`` or ``sys.stderr.write(...)``: the user is told on the console."""
+    if _call_name(call.func) in ("print", "handleError"):
+        # ``logging.Handler.handleError`` is the logging machinery's own report
+        # of a failed emit: it prints the traceback to stderr.
+        return True
+    func = call.func
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr == "write"
+        and any(stream in ast.unparse(func.value).lower() for stream in ("stderr", "stdout"))
+    )
+
+
+def _is_sanctioned_helper_call(call: ast.Call) -> bool:
+    """The named helper, called with a ``reason`` that is specific.
+
+    A reason built at run time (an f-string or a name) cannot be judged here
+    and is accepted; a missing, empty or placeholder literal is not.
+    """
+    if _call_name(call.func) != SANCTIONED_HELPER_NAME:
+        return False
+    reason = next((kw.value for kw in call.keywords if kw.arg == "reason"), None)
+    if reason is None:
+        return False
+    if isinstance(reason, ast.Constant):
+        return isinstance(reason.value, str) and is_acceptable_reason(reason.value)
+    return True
+
+
+def _is_log_like_call(call: ast.Call, exc_name: str | None) -> bool:
+    """A logger-level call, or a call that is handed the caught exception."""
+    func = call.func
+    # Telling the user on stdout/stderr is surfacing the failure, not logging it.
+    if _is_console_report(call):
+        return False
+    if isinstance(func, ast.Attribute):
+        if func.attr in _ALL_LOG_LEVELS:
+            return True
+    if any(kw.arg == "exc_info" for kw in call.keywords):
+        return True
+    if exc_name is None:
+        return False
+    operands = [*call.args, *(kw.value for kw in call.keywords)]
+    return any(_carries_the_exception(operand, exc_name) for operand in operands)
+
+
+def _carries_the_exception(expr: ast.expr, exc_name: str) -> bool:
+    """Whether ``expr`` hands the caught exception itself over as a value.
+
+    The exception counts when it is the operand, sits in an f-string, a
+    ``%``-format, a container, or is an argument of a nested call
+    (``str(exc)``). An attribute read off it or off ``type(exc)`` does not:
+    ``digest.update(type(exc).__name__.encode())`` folds the failure into a
+    computed value, it does not log anything.
+    """
+    if isinstance(expr, ast.Name):
+        return expr.id == exc_name
+    if isinstance(expr, ast.FormattedValue):
+        return _carries_the_exception(expr.value, exc_name)
+    if isinstance(expr, ast.JoinedStr):
+        return any(_carries_the_exception(part, exc_name) for part in expr.values)
+    if isinstance(expr, ast.BinOp):
+        return _carries_the_exception(expr.left, exc_name) or _carries_the_exception(
+            expr.right, exc_name
+        )
+    if isinstance(expr, ast.List | ast.Tuple | ast.Set):
+        return any(_carries_the_exception(elt, exc_name) for elt in expr.elts)
+    if isinstance(expr, ast.Call):
+        return any(
+            _carries_the_exception(operand, exc_name)
+            for operand in (*expr.args, *(kw.value for kw in expr.keywords))
+        )
+    return False
+
+
 class ErrorHidingVisitor(ast.NodeVisitor):
     """AST visitor to detect error hiding patterns."""
 
@@ -594,17 +741,27 @@ class ErrorHidingVisitor(ast.NodeVisitor):
                         )
 
     def _is_log_and_continue(self, handler: ast.ExceptHandler) -> bool:
-        """Check if handler just logs and continues."""
-        # Pattern: except: logger.error(...) with no raise
-        if len(handler.body) == 1:
-            stmt = handler.body[0]
+        """Does the handler only log (however spelt) and then carry on?
+
+        Owner ruling B4 (N296). A body is flagged when it never raises, every
+        statement is a call, a pass/continue/break, or a return/assignment of a
+        trivial fallback, and at least one call is log-like. The sanctioned
+        form, the named helper called with a real reason, is never flagged.
+        """
+        if any(isinstance(node, ast.Raise) for node in _walk_own_scope(handler)):
+            return False
+        calls: list[ast.Call] = []
+        for stmt in handler.body:
             if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
-                func = stmt.value.func
-                if isinstance(func, ast.Attribute):
-                    # Check for logger.error(), logger.warning()
-                    if func.attr in ("error", "warning", "info", "debug"):
-                        return True
-        return False
+                calls.append(stmt.value)
+            elif not _is_trivial_continuation(stmt):
+                return False
+        if any(
+            _is_sanctioned_helper_call(call) or _hands_the_failure_to_a_reader(call)
+            for call in calls
+        ):
+            return False
+        return any(_is_log_like_call(call, handler.name) for call in calls)
 
     def _add_violation(self, node: ast.AST, rule: str, message: str) -> None:
         """Add a violation to the list, deduplicating by (file, line, rule)."""

@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.secret_file_matching import (
     path_is_protected,
     resolve_configured_patterns,
@@ -71,6 +72,14 @@ GIT_TIMED_OUT: Final[int] = 124
 #: :func:`branch_ref` and :func:`strip_branch_ref` for why a bare name is unsafe.
 #: Shared here rather than per-module so the two callers cannot drift apart.
 HEADS_PREFIX: Final[str] = "refs/heads/"
+
+#: A work branch made by hand or by the coordinator (CLAUDE/Worktree.md).
+WORKTREE_BRANCH_PREFIX: Final[str] = "worktree-"
+#: A work branch made by an `isolation: worktree` agent dispatch (`agent-<hex>-<hex>`).
+AGENT_BRANCH_PREFIX: Final[str] = "agent-"
+#: Every work branch shape. The WIP limit counts them all and a merge of any is
+#: judged for recorded QA (ledger 00474 N379: agent branches were missed by both).
+WORK_BRANCH_PREFIXES: Final[tuple[str, ...]] = (WORKTREE_BRANCH_PREFIX, AGENT_BRANCH_PREFIX)
 
 #: ``git config --get-regexp`` key pattern for every remote's URL.
 _REMOTE_URL_KEY_PATTERN: Final[str] = r"^remote\..*\.url$"
@@ -392,7 +401,12 @@ def is_linked_worktree(checkout: Path) -> bool:
             return False
         content = git_path.read_text(encoding="utf-8", errors="replace")
     except (OSError, ValueError, TypeError) as exc:
-        logger.debug("Worktree detection failed for %r: %s", checkout, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a checkout {checkout!r} whose .git entry cannot be read is reported as not a linked worktree (False); callers then treat it as an ordinary checkout",
+            level=logging.DEBUG,
+        )
         return False
     for line in content.splitlines():
         stripped = line.strip()

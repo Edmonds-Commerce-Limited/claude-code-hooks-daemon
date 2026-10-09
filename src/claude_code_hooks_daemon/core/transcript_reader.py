@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants.tools import ToolName
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +135,15 @@ class TranscriptReader:
                 logger.warning("Transcript file not found: %s", transcript_path)
                 return
         except Exception as e:
-            logger.debug("TranscriptReader: Error checking path %s: %s", transcript_path, e)
+            log_and_continue(
+                logger,
+                e,
+                reason=(
+                    f"TranscriptReader: error checking path {transcript_path}; the reader "
+                    "stays unloaded and callers treat an unloaded reader as 'no transcript'"
+                ),
+                level=logging.DEBUG,
+            )
             return
 
         self._parse(path)
@@ -182,9 +191,16 @@ class TranscriptReader:
                 return
             size = path.stat().st_size
         except Exception as e:
-            # Parity with load(): a path-resolution/stat glitch degrades to an
-            # unloaded reader (fail-safe for the Stop dispatch), logged at debug.
-            logger.debug("TranscriptReader: Error checking path %s: %s", transcript_path, e)
+            log_and_continue(
+                logger,
+                e,
+                reason=(
+                    f"TranscriptReader: error checking path {transcript_path}; parity with "
+                    "load(): a path-resolution/stat glitch degrades to an unloaded reader, "
+                    "which is fail-safe for the Stop dispatch"
+                ),
+                level=logging.DEBUG,
+            )
             return
 
         if size > _FILE_START_OFFSET:
@@ -216,9 +232,19 @@ class TranscriptReader:
                 for line in f:
                     self._ingest_record(line)
         except (OSError, UnicodeDecodeError) as e:
-            logger.debug("TranscriptReader: Failed to read %s: %s", path, e)
+            log_and_continue(
+                logger,
+                e,
+                reason=f"an unreadable transcript {path} leaves the reader empty, so handlers see no history rather than failing the hook",
+                level=logging.DEBUG,
+            )
         except Exception as e:
-            logger.error("TranscriptReader: Unexpected error reading %s: %s", path, e)
+            log_and_continue(
+                logger,
+                e,
+                reason=f"an unexpected error reading {path} must degrade to an empty reader (fail-safe for the Stop dispatch), never crash the handler",
+                level=logging.ERROR,
+            )
 
     def _parse_tail(self, path: Path, size: int, max_bytes: int) -> None:
         """Parse only the trailing ``max_bytes`` of the file.
@@ -247,12 +273,19 @@ class TranscriptReader:
             for line in lines:
                 self._ingest_record(line)
         except (OSError, UnicodeDecodeError, ValueError) as e:
-            logger.debug("TranscriptReader: Failed tail read %s: %s", path, e)
+            log_and_continue(
+                logger,
+                e,
+                reason=f"an unreadable tail of {path} leaves the reader with whatever it ingested before the failure; history is a best-effort aid",
+                level=logging.DEBUG,
+            )
         except Exception as e:
-            # Mirror _parse's broad, LOGGED catch: an unexpected read error must
-            # degrade to an empty reader (fail-safe for the Stop dispatch), never
-            # crash the handler. Logged at error level — not silently hidden.
-            logger.error("TranscriptReader: Unexpected error tail-reading %s: %s", path, e)
+            log_and_continue(
+                logger,
+                e,
+                reason=f"an unexpected error tail-reading {path} must degrade to an empty reader (fail-safe for the Stop dispatch), never crash the handler",
+                level=logging.ERROR,
+            )
 
     def _ingest_record(self, line: str) -> None:
         """Parse a single JSONL line and append any message/tool-use it yields.
@@ -270,8 +303,16 @@ class TranscriptReader:
 
         try:
             data = json.loads(line)
-        except json.JSONDecodeError:
-            logger.debug("TranscriptReader: Skipping malformed JSON line")
+        except json.JSONDecodeError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    "TranscriptReader: skipping a malformed JSON line; a transcript being "
+                    "appended to can end mid-record and the other lines are still valid"
+                ),
+                level=logging.DEBUG,
+            )
             return
 
         if not isinstance(data, dict):
@@ -459,7 +500,12 @@ class TranscriptReader:
 
                 new_offset = f.tell()
         except (OSError, UnicodeDecodeError) as e:
-            logger.debug("TranscriptReader: Failed incremental read %s: %s", path, e)
+            log_and_continue(
+                logger,
+                e,
+                reason=f"an unreadable {path} ends the incremental read with the messages and offset gathered so far, so the next call resumes from there",
+                level=logging.DEBUG,
+            )
 
         return messages, new_offset
 

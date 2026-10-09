@@ -42,6 +42,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+
 logger = logging.getLogger(__name__)
 
 # ── Transcript record shapes (see the Plan 00278 field report) ──────────────
@@ -125,7 +127,11 @@ def event_epoch(timestamp: str) -> float | None:
     try:
         parsed = datetime.fromisoformat(timestamp)
     except ValueError as exc:
-        logger.warning("model_fallback_records: unparseable timestamp %r: %s", timestamp, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"an unparseable timestamp {timestamp!r} leaves the event undated (None), so the pairing check treats the record as not pairable (fail-closed) rather than guessing a time",
+        )
         parsed = None
     if parsed is None:
         return None
@@ -211,7 +217,12 @@ def _parse_payload_line(line: str) -> dict[str, Any] | None:
     try:
         payload = json.loads(stripped)
     except ValueError as exc:
-        logger.debug("model_fallback_records: unparseable transcript line: %s", exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="an unparseable transcript line (a half-written tail line, for one) is not a candidate record; the scan goes on with the other lines",
+            level=logging.DEBUG,
+        )
         payload = None
     return payload if isinstance(payload, dict) else None
 
@@ -290,7 +301,12 @@ def scan_transcript_tail(
     try:
         lines = _read_tail_lines(path, max_bytes)
     except OSError as exc:
-        logger.debug("model_fallback_records: cannot read transcript %s: %s", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"an unreadable transcript {path} yields no scan result (None), so no fallback is reported this time; a later scan retries",
+            level=logging.DEBUG,
+        )
         return None
 
     latest: FallbackFacts | None = None

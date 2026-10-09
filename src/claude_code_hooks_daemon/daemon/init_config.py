@@ -140,6 +140,8 @@ class ConfigTemplate:
             "    host_command_guard: {enabled: true, priority: 10}  # Block docker host-root mounts, gh auth token; human only: non-PyPI pip index, crontab -r\n"
             "    curl_pipe_shell: {enabled: true, priority: 10}   # Block curl | bash patterns\n"
             "    lock_file_edit_blocker: {enabled: true, priority: 10}  # Block direct editing of package manager lock files\n"
+            # Plan 00499: opt-in; does nothing until `paths` lists repository-relative globs.
+            "    write_protected_paths: {enabled: false, priority: 22, options: {paths: []}}  # Paths agents may read but never write, move onto or delete\n"
             # On by default (Plan 00117): prefix-positive gate on AskUserQuestion
             # (Plan 00108) -- pausing the session is a privilege that must carry
             # a declared reason. Disable via enabled: false for fully unattended
@@ -322,7 +324,7 @@ class ConfigTemplate:
             "    merge_qa_report: {enabled: true, priority: 34}  # Post-hoc plan/docs QA report on what a git merge/pull/rebase introduced (fires only when plan/docs QA sweeps are active)\n"
             "    daemon_sync_after_merge: {enabled: true, priority: 35}  # A merge/pull/rebase that changed daemon config or handler code leaves the running daemon stale -- advises a restart, naming the paths\n"
             "    cron_record_keeper: {enabled: true, priority: 36}  # Record each CronCreate/CronDelete so cron_stop_enforcer can refresh a job before the 7-day cron expiry (silent bookkeeping, opt-out)\n"
-            "    plan_fact_check_feed: {enabled: false, priority: 37}  # Debounce plan edits into one pending fact-check record (opt-in; delivery not built yet, Plan 00480)\n"
+            "    plan_fact_check_feed: {enabled: false, priority: 37}  # Debounce plan edits; the next tool call asks the session to dispatch plan-fact-checker on the diff (opt-in, never blocks, Plan 00480)\n"
             "\n"
             "  # PostToolUseFailure - After a tool call fails\n"
             "  post_tool_use_failure:\n"

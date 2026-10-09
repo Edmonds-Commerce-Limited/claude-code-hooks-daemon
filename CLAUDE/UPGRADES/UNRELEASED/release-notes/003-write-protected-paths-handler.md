@@ -1,0 +1,6 @@
+# Callout: `write_protected_paths` keeps listed files read-only for agents, by any tool or Bash route
+
+**Plan**: 00499
+**Audience**: operators
+
+A new opt-in PreToolUse handler, `write_protected_paths`, takes a list of repository-relative path globs (`options.paths`) that agents may read but never create, change, move onto or delete. It denies `Write`, `Edit` and `NotebookEdit` on a listed path, and a Bash command that writes it (redirect, `tee`, heredoc, `sed -i`, `dd of=`), copies, moves, installs or links onto it, or deletes or truncates it (`rm`, `truncate`, `: >`), including a directory that holds it. The denial says the file is maintained outside the agent (infrastructure-as-code or a human) and to ask the human for any change. It ships disabled and does nothing without `paths`, so existing projects behave exactly as before. Claude Code's own `permissions.deny` with `Edit(...)` misses every Bash route; this handler covers them. For handler authors: `scan_bash_write_targets` takes `include_mutations=True` to also report the files a command changes without authoring (`sed -i`, `ln`, `rm`, `truncate`, and the source of `mv`); callers that do not pass it see no change.

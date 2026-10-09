@@ -65,6 +65,7 @@ from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.strategies.lsp_noise.protocol import LspNoiseStrategy
 from claude_code_hooks_daemon.strategies.lsp_noise.registry import LspNoiseStrategyRegistry
 from claude_code_hooks_daemon.utils.claude_config import config_dir_within
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
@@ -98,7 +99,12 @@ def running_language_servers(known_names: frozenset[str]) -> list[RunningServer]
         try:
             info: dict[str, Any] = proc.info
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as exc:
-            logger.debug("process vanished during langserver scan: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="a process that vanished or denies access during the scan cannot be assessed and is skipped",
+                level=logging.DEBUG,
+            )
             continue
         cmdline = " ".join(str(part) for part in (info.get("cmdline") or []))
         matched = frozenset(name for name in known_names if name in cmdline)
@@ -250,7 +256,12 @@ class LspNoiseCheckerHandler(SessionStartHandlerBase):
         try:
             return ProjectContext.project_root()
         except RuntimeError as exc:
-            logger.debug("ProjectContext not initialised; skipping LSP noise check: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="the project context is not initialised, so there is no project to check; the advisory is skipped (None)",
+                level=logging.DEBUG,
+            )
             return None
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
@@ -294,7 +305,12 @@ class LspNoiseCheckerHandler(SessionStartHandlerBase):
         try:
             config_mtime = config_path.stat().st_mtime
         except OSError as exc:
-            logger.debug("could not stat %s for staleness: %s", config_path, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="the config file cannot be stat'ed, so no staleness can be shown; no servers are reported (empty list) rather than guessing",
+                level=logging.DEBUG,
+            )
             return []
         own_names = set(strategy.process_names)
         stale = [s for s in servers if s.matched_names & own_names and s.started_at < config_mtime]

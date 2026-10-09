@@ -145,6 +145,38 @@ class TestCdIntoAnotherCheckout:
         result = self._handle_in(project, f"cd {other} && git merge main")
         assert not result.context
 
+    def test_returning_to_the_project_before_the_merge_still_advises(self, tmp_path: Path) -> None:
+        """N374: the merge's directory is the one in effect AT the merge, not the last cd seen."""
+        project = self._init_repo(tmp_path / "project")
+        other = self._init_repo(tmp_path / "other")
+        result = self._handle_in(project, f"cd {other} && cd {project} && git merge main")
+        assert result.context
+
+    def test_a_cd_after_the_merge_does_not_move_it(self, tmp_path: Path) -> None:
+        project = self._init_repo(tmp_path / "project")
+        other = self._init_repo(tmp_path / "other")
+        result = self._handle_in(project, f"git pull && cd {other}")
+        assert result.context
+
+    def test_a_merge_in_the_other_repo_followed_by_a_cd_back_is_silent(
+        self, tmp_path: Path
+    ) -> None:
+        project = self._init_repo(tmp_path / "project")
+        other = self._init_repo(tmp_path / "other")
+        result = self._handle_in(project, f"cd {other} && git merge main && cd {project}")
+        assert not result.context
+
+    def test_git_dash_c_names_the_merge_directory(self, tmp_path: Path) -> None:
+        project = self._init_repo(tmp_path / "project")
+        other = self._init_repo(tmp_path / "other")
+        result = self._handle_in(project, f"git -C {other} merge main")
+        assert not result.context
+
+    def test_a_computed_cd_target_falls_back_to_the_session_directory(self, tmp_path: Path) -> None:
+        project = self._init_repo(tmp_path / "project")
+        result = self._handle_in(project, "cd $SOMEWHERE && git merge main")
+        assert result.context
+
     def test_merge_in_the_session_repo_still_advises(self, tmp_path: Path) -> None:
         project = self._init_repo(tmp_path / "project")
         result = self._handle_in(project, "git merge main")

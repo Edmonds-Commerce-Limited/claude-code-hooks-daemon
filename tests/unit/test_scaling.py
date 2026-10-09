@@ -26,6 +26,10 @@ def _install_clock(
         SimpleNamespace(thread_time=thread_time, perf_counter=time.perf_counter),
     )
     monkeypatch.setattr(scaling, "clock_resolution_seconds", lambda: resolution)
+    # These tests script exactly ``REPEATS`` readings per measurement.
+    monkeypatch.setattr(scaling, "SAMPLE_BUDGET_SECONDS", 0.0)
+    # These tests script exactly ``REPEATS`` readings per measurement.
+    monkeypatch.setattr(scaling, "SAMPLE_BUDGET_SECONDS", 0.0)
 
 
 def _noop(_size: int) -> None:
@@ -84,6 +88,46 @@ class TestScalingRatioOnZeroReadings:
         ratio = scaling.scaling_ratio(_noop, 10, "x" * 80)
 
         assert ratio == pytest.approx(8.0)
+
+
+class _CountedWork:
+    """Work that counts its runs, on a clock whose successive runs cost ``costs``."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, costs: list[float], budget: float) -> None:
+        ticks = iter([t for cost in costs for t in (0.0, cost)])
+        monkeypatch.setattr(scaling, "time", SimpleNamespace(thread_time=lambda: next(ticks, 0.0)))
+        monkeypatch.setattr(scaling, "SAMPLE_BUDGET_SECONDS", budget)
+        self.runs = 0
+
+    def __call__(self) -> None:
+        self.runs += 1
+
+
+class TestMinCpuSecondsSampling:
+    """Cheap work is sampled past ``REPEATS`` so one hiccup cannot set its cost."""
+
+    def test_a_late_fast_run_is_found_beyond_the_first_repeats(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Three slow runs (a hiccup) then a fast one: the minimum is the fast one."""
+        costs = [0.005] * scaling.REPEATS + [0.0001] + [0.005] * 40
+        work = _CountedWork(monkeypatch, costs, budget=0.05)
+
+        assert scaling.min_cpu_seconds(work) == pytest.approx(0.0001)
+
+    def test_expensive_work_stops_at_the_repeats(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        work = _CountedWork(monkeypatch, [1.0] * 40, budget=0.02)
+
+        scaling.min_cpu_seconds(work)
+
+        assert work.runs == scaling.REPEATS
+
+    def test_sampling_is_capped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        work = _CountedWork(monkeypatch, [0.0] * 100, budget=1.0)
+
+        scaling.min_cpu_seconds(work)
+
+        assert work.runs == scaling.MAX_REPEATS
 
 
 class TestClockResolutionSeconds:

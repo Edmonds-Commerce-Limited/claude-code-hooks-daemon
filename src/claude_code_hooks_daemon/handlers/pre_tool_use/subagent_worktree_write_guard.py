@@ -82,6 +82,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_checkouts import (
     Checkout,
     CheckoutUndecidableError,
@@ -244,7 +245,15 @@ class SubagentWorktreeWriteGuardHandler(PreToolUseHandlerBase):
         try:
             return self._crossing(hook_input) is not None
         except CheckoutUndecidableError as exc:
-            logger.debug("subagent_worktree_write_guard: undecidable, allowing: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    "subagent_worktree_write_guard: checkout undecidable, allowing; the guard "
+                    "only denies cross-checkout writes it can prove (fail-open by design)"
+                ),
+                level=logging.DEBUG,
+            )
             return False
 
     def get_rules(self) -> list[Rule]:

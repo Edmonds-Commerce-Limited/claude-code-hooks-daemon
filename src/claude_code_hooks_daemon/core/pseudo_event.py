@@ -25,6 +25,7 @@ from claude_code_hooks_daemon.core.chain import ChainExecutionResult, HandlerCha
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.core.result_types import decisions_of, result_type_for_event
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.handler import Handler
@@ -319,10 +320,16 @@ class PseudoEventDispatcher:
             chain_result = registered.chain.execute(enriched)
             return chain_result.result
 
-        except Exception:
-            logger.exception(
-                "Pseudo-event %s failed during setup/dispatch",
-                registered.config.name,
+        except Exception as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    f"Pseudo-event {registered.config.name} failed during setup/dispatch; "
+                    "a pseudo-event is a side channel whose failure must not fail the real "
+                    "hook that triggered it"
+                ),
+                level=logging.ERROR,
             )
             return None
 

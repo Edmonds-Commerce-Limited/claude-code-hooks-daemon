@@ -29,6 +29,7 @@ import os
 from pathlib import Path
 
 from claude_code_hooks_daemon.core import ProjectContext
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +133,12 @@ def _marker_exists(path: str) -> bool:
     try:
         return Path(path).exists()
     except OSError as exc:
-        logger.debug("container marker probe failed for %s: %s", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a marker {path} that cannot be probed counts as absent (False), so no container is claimed from an unreadable signal",
+            level=logging.DEBUG,
+        )
         return False
 
 
@@ -149,7 +155,12 @@ def _runtime_from_cgroup() -> str | None:
         # A missing/unreadable cgroup file (e.g. on macOS) is a legitimate
         # "no signal" outcome: log it and treat content as empty so the loop
         # below finds no token and the function reports None via its normal path.
-        logger.debug("cgroup probe failed for %s: %s", cgroup_path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a cgroup file {cgroup_path} that is missing or unreadable (e.g. on macOS) is a legitimate no-signal outcome, so it reads as empty and the runtime stays undetected",
+            level=logging.DEBUG,
+        )
         content = ""
     for token, runtime in _CGROUP_TOKENS:
         if token in content:
@@ -178,7 +189,12 @@ def _runtime_from_systemd_container() -> str | None:
         # inside a container) is a legitimate "no signal" outcome: log it and
         # treat content as empty so the check below finds no LXC value and the
         # function reports None via its normal return path.
-        logger.debug("systemd-container probe failed for %s: %s", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a systemd container file {path} that is missing (the host case) is a legitimate no-signal outcome, so it reads as empty and no LXC runtime is reported",
+            level=logging.DEBUG,
+        )
         content = ""
     if content in _SYSTEMD_CONTAINER_LXC_VALUES:
         return _RUNTIME_LXC
@@ -261,6 +277,11 @@ def is_yolo_sandbox() -> bool:
         if in_workspace and ProjectContext.config_dir().exists():
             return True
     except (OSError, RuntimeError) as exc:
-        logger.debug("is_yolo_sandbox ProjectContext probe failed: %s", exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="a project context that cannot be probed gives no evidence of the yolo workspace, so the sandbox is not claimed (False)",
+            level=logging.DEBUG,
+        )
         return False
     return False

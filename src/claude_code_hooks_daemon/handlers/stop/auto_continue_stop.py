@@ -28,7 +28,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar
@@ -61,6 +61,7 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import (
 from claude_code_hooks_daemon.utils.autonomy import autonomy_allowed
 from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, write_marker
 from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.goal_ledger import (
     LEDGER_FILENAME,
     GoalLedger,
@@ -70,6 +71,7 @@ from claude_code_hooks_daemon.utils.private_io import make_private_dir, open_pri
 from claude_code_hooks_daemon.utils.retention import cap_log_file
 from claude_code_hooks_daemon.utils.stand_in_cron import (
     DEFAULT_STAND_IN_DELAY_HOURS,
+    delay_hours_problem,
     stand_in_verdict,
     validate_delay_hours,
 )
@@ -81,6 +83,9 @@ from claude_code_hooks_daemon.utils.stop_hook_helpers import (
 from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
 
 logger = logging.getLogger(__name__)
+
+# The handler option whose setter validates the stand-in delay.
+_STAND_IN_DELAY_OPTION = "stand_in_delay_hours"
 
 # Plan 00181: stop-events.jsonl is append-only and was never bounded (644 KB
 # observed). Cap it after each write; on breach keep the newest half so a busy
@@ -480,11 +485,15 @@ def _parse_iso_timestamp(value: object) -> datetime | None:
     parsed: datetime | None = None
     try:
         parsed = datetime.fromisoformat(text)
-    except ValueError:
+    except ValueError as exc:
         # A malformed timestamp means "age unknown", a documented outcome that
         # also turns the staleness check off for this message -- so it is
         # said at WARNING, where a transcript format change would show.
-        logger.warning("Ignoring unparseable transcript timestamp: %r", value)
+        log_and_continue(
+            logger,
+            exc,
+            reason="a malformed transcript timestamp means 'age unknown', a documented outcome that turns the staleness check off for this message; the WARNING shows a transcript format change",
+        )
         parsed = None
     if parsed is None:
         return None
@@ -664,6 +673,22 @@ class AutoContinueStopHandler(StopHandlerBase):
     def _stand_in_delay_hours(self, value: object) -> None:
         """Validate at config load: a delay that cannot work must not be silent."""
         self.__stand_in_delay_hours = validate_delay_hours(value)
+
+    @staticmethod
+    def validate_options(options: Mapping[str, Any]) -> dict[str, str]:
+        """The configured options this handler refuses, keyed by option name.
+
+        Read by ``register_all`` before any value is applied, so a bad
+        ``stand_in_delay_hours`` is reported at session start while the handler
+        stays registered on its default, instead of the setter's error dropping
+        the whole handler.
+        """
+        problems: dict[str, str] = {}
+        if _STAND_IN_DELAY_OPTION in options:
+            problem = delay_hours_problem(options[_STAND_IN_DELAY_OPTION])
+            if problem is not None:
+                problems[_STAND_IN_DELAY_OPTION] = problem
+        return problems
 
     def _default_config_loader(self) -> Config:
         """The project's daemon config; defaults (stand-in off) when unloadable."""
@@ -910,7 +935,11 @@ class AutoContinueStopHandler(StopHandlerBase):
             ledger_path = ProjectContext.daemon_untracked_dir() / LEDGER_FILENAME
             plan_dir = resolve_plan_dir(ProjectContext.project_root(), self._track_plans_in_project)
         except RuntimeError as e:
-            logger.warning("goal ledger consult skipped (no project context): %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="without a project context there is no goal ledger to consult (None), so the stop proceeds on its other signals",
+            )
             return None
         live = GoalLedger(ledger_path).live_plan_numbers(plan_dir)
         if not live:
@@ -952,7 +981,12 @@ class AutoContinueStopHandler(StopHandlerBase):
         try:
             marker_path = ProjectContext.daemon_untracked_dir() / MARKER_FILENAME
         except RuntimeError as e:
-            logger.debug("human-blocked marker: no project context, skipping: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="without a project context there is no human-blocked marker, so False (not blocked)",
+                level=logging.DEBUG,
+            )
             return False
         return write_marker(marker_path, session_id)
 
@@ -1263,7 +1297,12 @@ class AutoContinueStopHandler(StopHandlerBase):
                 retain_bytes=_STOP_EVENTS_MAX_BYTES // 2,
             )
         except (RuntimeError, OSError) as e:
-            logger.debug("_log_stop_event: non-critical write failure: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="the stop-events log is a diagnostic trail; a lost line must never change the stop decision already made",
+                level=logging.DEBUG,
+            )
 
     def _contains_confirmation_pattern(self, text: str) -> bool:
         """Check if text contains a confirmation pattern.

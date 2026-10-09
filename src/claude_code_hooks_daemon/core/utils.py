@@ -11,6 +11,7 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.ansi_c import ansi_c_string
 from claude_code_hooks_daemon.utils.command_evasion import normalise_line_continuations
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.heredoc_operators import (
     COMMENT_PRECEDERS,
     HeredocScan,
@@ -57,6 +58,22 @@ _TEE: Final[str] = "tee"
 #: written is `dest/<basename of each source>`; see `resolve_bash_write_destination`.
 _COPY_VERBS: Final[frozenset[str]] = frozenset({"cp", "mv", "install"})
 
+#: `mv` is a copy verb that ALSO removes its sources.
+_MOVE: Final[str] = "mv"
+
+#: `ln` writes its LAST operand (or `-t DEST`) like a copy verb, but only when a
+#: caller asks for mutations: it puts a link there, not content.
+_LINK: Final[str] = "ln"
+
+_SED: Final[str] = "sed"
+_TRUNCATE: Final[str] = "truncate"
+_TOUCH: Final[str] = "touch"
+
+#: Verbs that change or remove a file they do not author, reported only to a
+#: caller that asks for them (``include_mutations``). Every operand of `rm` and
+#: `truncate` is a file; `sed` names its files only with `-i`/`--in-place`.
+_MUTATION_VERBS: Final[frozenset[str]] = frozenset({"rm", "unlink", "touch", _TRUNCATE, _SED})
+
 #: `dd`'s destination is an `of=` operand rather than a redirect.
 _DD_OUTPUT_PREFIX: Final[str] = "of="
 
@@ -68,6 +85,9 @@ _OPERAND_TERMINATORS: Final[frozenset[str]] = frozenset({"|", "&&", "||", ";", "
 _INPUT_REDIRECT_OPERATORS: Final[frozenset[str]] = frozenset({"<", "<<", "<<-", "<<<"})
 
 _FLAG_PREFIX: Final[str] = "-"
+
+#: `--` ends a command's options; it also prefixes every long option.
+_END_OF_OPTIONS: Final[str] = "--"
 
 #: `cp a b` needs a source AND a destination before the last operand is a write.
 _MIN_COPY_OPERANDS: Final[int] = 2
@@ -156,6 +176,9 @@ class BashWriteDestination(NamedTuple):
     sources: tuple[str, ...] = ()
     directory_only: bool = False
     authored: bool = True
+    #: The command changes or removes this path (``rm``, ``sed -i``, the source
+    #: of ``mv``). A directory is then a real target, not a place files land.
+    mutation: bool = False
 
 
 class BashWriteScan(NamedTuple):
@@ -226,6 +249,39 @@ def get_file_path(hook_input: dict[str, Any]) -> str | None:
         return None
     tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
     return cast("str", tool_input.get("file_path", ""))
+
+
+#: The tool-input fields a Grep call may name its target in (``file_path`` is
+#: accepted in place of ``path`` from Claude Code 2.1.292).
+GREP_TARGET_FIELDS: Final[tuple[str, ...]] = ("path", "file_path")
+
+
+def grep_targets(tool_input: Any) -> list[str]:
+    """Every distinct, non-empty target a Grep call names, ``path`` first.
+
+    The single reader of a Grep call's target: a handler that reads only
+    ``path`` misses a call that names its file in ``file_path``. When both are
+    present, both are returned so each can be judged.
+    """
+    if not isinstance(tool_input, dict):
+        return []
+    found: list[str] = []
+    for field in GREP_TARGET_FIELDS:
+        value = tool_input.get(field)
+        if isinstance(value, str) and value and value not in found:
+            found.append(value)
+    return found
+
+
+def grep_input_for(hook_input: dict[str, Any], target: str) -> dict[str, Any]:
+    """A copy of a Grep ``hook_input`` that names only ``target``, in ``path``."""
+    tool_input = hook_input.get(HookInputField.TOOL_INPUT)
+    kept = {
+        key: value
+        for key, value in (tool_input if isinstance(tool_input, dict) else {}).items()
+        if key not in GREP_TARGET_FIELDS
+    }
+    return {**hook_input, HookInputField.TOOL_INPUT: {**kept, "path": target}}
 
 
 def get_file_content(hook_input: dict[str, Any]) -> str | None:
@@ -356,18 +412,29 @@ def scan_bash_write_targets(
     *,
     include_heredoc_bodies: bool = False,
     authored_only: bool = False,
+    include_mutations: bool = False,
 ) -> BashWriteTargets:
     """:func:`get_bash_write_targets`, plus the command text it could not read.
 
     The accessor for a guard that DENIES on a write location. The options mean
     what they mean on :func:`get_bash_write_targets`.
+
+    ``include_mutations`` also reports the files a command changes or removes
+    without authoring them: ``sed -i``, ``ln``, ``rm``, ``truncate`` and the
+    source of ``mv``. A guard that keeps a path read-only wants them; a caller
+    judging what a command writes does not, which is why they are off by
+    default (Plan 00499).
     """
     command = get_bash_command(hook_input)
     if not command:
         return BashWriteTargets([], None)
 
     cwd = hook_input.get(HookInputField.CWD)
-    scan = scan_bash_write_destinations(command, include_heredoc_bodies=include_heredoc_bodies)
+    scan = scan_bash_write_destinations(
+        command,
+        include_heredoc_bodies=include_heredoc_bodies,
+        include_mutations=include_mutations,
+    )
     known = known_variables(command)
     found: list[str] = []
     unresolved: list[str] = []
@@ -404,7 +471,7 @@ _TOPLEVEL_EXPANSION_RE: Final[re.Pattern[str]] = re.compile(
 _CHANGES_DIRECTORY_RE: Final[re.Pattern[str]] = re.compile(r"\b(?:cd|pushd|popd)\b|\bPWD=")
 
 
-def _repository_root(cwd: str) -> str | None:
+def repository_root(cwd: str) -> str | None:
     """The nearest directory at or above ``cwd`` holding a ``.git`` entry (a
     directory, or the file a worktree has), which is where
     ``git rev-parse --show-toplevel`` answers; ``None`` when there is none."""
@@ -430,7 +497,7 @@ def substitute_cwd_expansions(token: str, command: str, cwd: Any) -> str:
         return token
     token = _PWD_EXPANSION_RE.sub(lambda _match: cwd, token)
     if _TOPLEVEL_EXPANSION_RE.search(token):
-        root = _repository_root(cwd)
+        root = repository_root(cwd)
         if root is not None:
             token = _TOPLEVEL_EXPANSION_RE.sub(lambda _match: root, token)
     return token
@@ -466,7 +533,7 @@ def bash_write_destinations(
 
 
 def scan_bash_write_destinations(
-    command: str, *, include_heredoc_bodies: bool = False
+    command: str, *, include_heredoc_bodies: bool = False, include_mutations: bool = False
 ) -> BashWriteScan:
     """Every destination ``command`` names as written, UNRESOLVED.
 
@@ -502,10 +569,12 @@ def scan_bash_write_destinations(
     ``include_heredoc_bodies``, so is an unreadable body fed to anything but
     a data sink.
     """
-    return _scan_destinations(command, include_heredoc_bodies, depth=0)
+    return _scan_destinations(command, include_heredoc_bodies, depth=0, mutations=include_mutations)
 
 
-def _scan_destinations(command: str, include_heredoc_bodies: bool, depth: int) -> BashWriteScan:
+def _scan_destinations(
+    command: str, include_heredoc_bodies: bool, depth: int, mutations: bool = False
+) -> BashWriteScan:
     """:func:`scan_bash_write_destinations`, ``depth`` shell bodies deep."""
     if depth > _MAX_SHELL_BODY_DEPTH:
         return BashWriteScan([], command)
@@ -522,7 +591,7 @@ def _scan_destinations(command: str, include_heredoc_bodies: bool, depth: int) -
         if tokens is None:
             unreadable = "\n".join([*commands[position:], *unscanned])
             break
-        destinations.extend(_write_target_tokens(tokens))
+        destinations.extend(_write_target_tokens(tokens, mutations))
     if unreadable is None and unscanned:
         unreadable = unscanned[0]
     if unreadable is None:
@@ -535,7 +604,7 @@ def _scan_destinations(command: str, include_heredoc_bodies: bool, depth: int) -
             # The shell reads each body line with its newline, and joins its
             # continuations as it reads.
             script = remove_line_continuations(body + "\n")
-            nested = _scan_destinations(script, include_heredoc_bodies, depth + 1)
+            nested = _scan_destinations(script, include_heredoc_bodies, depth + 1, mutations)
             destinations.extend(nested.destinations)
             unreadable = unreadable if unreadable is not None else nested.unreadable
         # A body with no redirect and no write verb cannot name a target, so
@@ -546,7 +615,7 @@ def _scan_destinations(command: str, include_heredoc_bodies: bool, depth: int) -
             tokens = _tokenise(body)
             if tokens is None and not all(word in DATA_SINKS for word in words):
                 unreadable = unreadable if unreadable is not None else body
-            destinations.extend(_write_target_tokens(tokens or []))
+            destinations.extend(_write_target_tokens(tokens or [], mutations))
     return BashWriteScan(destinations, unreadable)
 
 
@@ -654,6 +723,8 @@ def resolve_bash_write_destination(candidate: BashWriteDestination, cwd: Any) ->
     destination = _resolve_write_target(candidate.destination, cwd)
     if destination is None:
         return []
+    if candidate.mutation:
+        return [destination]
     directory_only = candidate.directory_only or candidate.destination.endswith("/")
     try:
         destination_is_dir = Path(destination).is_dir()
@@ -663,12 +734,10 @@ def resolve_bash_write_destination(candidate: BashWriteDestination, cwd: Any) ->
         # error-hiding auditor exists to catch: without a record, "the guard
         # decided this is not a directory" and "the guard could not look" are
         # indistinguishable to whoever is asking why a policy did not fire.
-        logger.warning(
-            "Could not stat write destination %r (%s) -- treating it as a "
-            "non-directory. A path-keyed guard may see a different target "
-            "than the shell will write.",
-            destination,
+        log_and_continue(
+            logger,
             exc,
+            reason="an unstattable write destination is treated as a non-directory (the answer pathlib gives for expected stat failures); the copy-verb expansion stays suppressed, so a path-keyed guard loses only the directory-target inference and nothing is fabricated",
         )
         # An unstattable destination is not KNOWN to be a directory, so it is
         # treated as not one -- the same answer pathlib already gives for every
@@ -850,12 +919,19 @@ def split_heredocs(command: str) -> tuple[str, list[HeredocBody]]:
     return _without_spans(command, 0, len(command), _body_spans(command, scan)), heredocs
 
 
-def _write_target_tokens(tokens: list[str]) -> list[BashWriteDestination]:
+def _write_target_tokens(
+    tokens: list[str], include_mutations: bool = False
+) -> list[BashWriteDestination]:
     """Candidate targets, in command order, before quoting or path resolution.
 
     Each candidate carries the SOURCE operands that would supply a basename if
     the destination turns out to be a directory. Only copy verbs have any --
     ``cp a.py somedir`` writes ``somedir/a.py``, a path nothing else can name.
+
+    ``include_mutations`` adds the verbs that change or remove a file without
+    authoring its content (:data:`_MUTATION_VERBS`, ``sed -i``, ``ln`` and the
+    source of ``mv``). Off by default, so every caller that did not ask for
+    them keeps the answers it had.
     """
     targets: list[BashWriteDestination] = []
     index = 0
@@ -867,14 +943,36 @@ def _write_target_tokens(tokens: list[str]) -> list[BashWriteDestination]:
             index += 2
             continue
 
+        # A caller that asked for mutations judges COMMANDS, so a verb named as
+        # an argument (`grep rm f`) is no write. The default scan keeps reading
+        # every word, as its callers have always relied on.
+        if (
+            include_mutations
+            and token in _JUDGED_AS_COMMANDS
+            and not _is_command_word(tokens, index, token)
+        ):
+            index += 1
+            continue
+
         if token == _TEE:
             index = _collect_trailing_operands(tokens, index + 1, targets, keep_all=True)
             continue
 
-        if token in _COPY_VERBS:
+        if token in _COPY_VERBS or (include_mutations and token == _LINK):
+            before = len(targets)
             index = _collect_trailing_operands(
                 tokens, index + 1, targets, keep_all=False, authored=False
             )
+            if include_mutations and token == _MOVE and len(targets) > before:
+                # The file moved AWAY is gone from where it was.
+                targets.extend(
+                    BashWriteDestination(source, authored=False, mutation=True)
+                    for source in targets[-1].sources
+                )
+            continue
+
+        if include_mutations and token in _MUTATION_VERBS:
+            index = _collect_mutated_operands(tokens, index + 1, targets, token)
             continue
 
         if token.startswith(_DD_OUTPUT_PREFIX):
@@ -884,6 +982,211 @@ def _write_target_tokens(tokens: list[str]) -> list[BashWriteDestination]:
 
         index += 1
     return targets
+
+
+#: Tokens that end one simple command and start the next.
+_COMMAND_BOUNDARIES: Final[frozenset[str]] = _OPERAND_TERMINATORS | frozenset({"(", ")", "{", "}"})
+
+#: The lexer fuses adjacent punctuation (`);`, `)&&`) into one token.
+_BOUNDARY_CHARACTERS: Final[frozenset[str]] = frozenset("();&|{}")
+
+
+def _is_command_boundary(token: str) -> bool:
+    """Does ``token`` end one simple command and start the next?"""
+    return token in _COMMAND_BOUNDARIES or (
+        bool(token) and all(char in _BOUNDARY_CHARACTERS for char in token)
+    )
+
+
+#: Shell keywords and modifiers that may stand before a command word.
+_COMMAND_PREFIXES: Final[frozenset[str]] = frozenset(
+    {"then", "do", "else", "elif", "if", "while", "until", "!", "time", "coproc"}
+)
+
+#: Commands that run the command named after their own options, so a verb
+#: following one is a command. `git` runs only `rm` and `mv` that way, and
+#: `find` only through `-exec`.
+_WRAPPER_COMMANDS: Final[frozenset[str]] = frozenset(
+    {
+        "sudo",
+        "doas",
+        "env",
+        "xargs",
+        "command",
+        "nice",
+        "ionice",
+        "nohup",
+        "timeout",
+        "exec",
+        "setsid",
+        "stdbuf",
+        "watch",
+        "busybox",
+        "git",
+        "find",
+    }
+)
+_GIT_RUNS: Final[frozenset[str]] = frozenset({"rm", "mv"})
+_GIT_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
+    {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
+)
+
+#: Words that are judged only where a command stands, under ``include_mutations``.
+_JUDGED_AS_COMMANDS: Final[frozenset[str]] = (
+    _COPY_VERBS | frozenset({_TEE, _LINK}) | _MUTATION_VERBS
+)
+
+#: `NAME=value` before a command.
+_ASSIGNMENT_RE: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _is_command_word(tokens: list[str], index: int, verb: str) -> bool:
+    """Is ``tokens[index]`` run as a command, rather than named as an argument?
+
+    True when it is the first word of its simple command (after any
+    assignments and shell keywords), or follows a command that runs another
+    one (:data:`_WRAPPER_COMMANDS`). After ``git`` only its own global options
+    may intervene, and only ``rm`` and ``mv`` are git subcommands that count.
+    """
+    start = index
+    while start > 0 and not _is_command_boundary(tokens[start - 1]):
+        start -= 1
+    words = [
+        word
+        for word in tokens[start:index]
+        if word not in _COMMAND_PREFIXES and not _ASSIGNMENT_RE.match(word)
+    ]
+    if not words:
+        return True
+    first = words[0]
+    if first not in _WRAPPER_COMMANDS:
+        return False
+    if first != "git":
+        return True
+    if verb not in _GIT_RUNS:
+        return False
+    skip_value = False
+    for word in words[1:]:
+        if skip_value:
+            skip_value = False
+        elif word in _GIT_VALUE_OPTIONS:
+            skip_value = True
+        elif not word.startswith(_FLAG_PREFIX):
+            return False
+    return True
+
+
+class _ParsedWords(NamedTuple):
+    """One command's words, split into operands and the options it was given."""
+
+    operands: list[str]
+    short: set[str]
+    long: set[str]
+    end: int
+
+
+def _parse_command_words(
+    tokens: list[str],
+    start: int,
+    targets: list[BashWriteDestination],
+    *,
+    short_value: str = "",
+    short_optional: str = "",
+    long_value: frozenset[str] = frozenset(),
+) -> _ParsedWords:
+    """Split one command's words into operands and options.
+
+    Stops at a shell separator. A redirect's word is no operand, and a
+    redirect that writes is appended to ``targets`` as it is anywhere else.
+    ``short_value`` letters take a value (attached, or the next word);
+    ``short_optional`` letters take the rest of their cluster as an optional
+    suffix and never the next word (``sed -i.bak``); ``long_value`` names take
+    ``=value`` or the next word. ``--`` ends the options.
+    """
+    operands: list[str] = []
+    short: set[str] = set()
+    long: set[str] = set()
+    index = start
+    skip_next = False
+    options_ended = False
+    while index < len(tokens) and not _is_command_boundary(tokens[index]):
+        token = tokens[index]
+        if token in _REDIRECT_OPERATORS or token in _INPUT_REDIRECT_OPERATORS:
+            if token in _REDIRECT_OPERATORS and index + 1 < len(tokens):
+                targets.append(BashWriteDestination(tokens[index + 1]))
+            index += 2
+            continue
+        index += 1
+        if skip_next:
+            skip_next = False
+        elif options_ended or not token.startswith(_FLAG_PREFIX) or token == _FLAG_PREFIX:
+            operands.append(token)
+        elif token == _END_OF_OPTIONS:
+            options_ended = True
+        elif token.startswith(_END_OF_OPTIONS):
+            name, equals, _value = token.partition("=")
+            long.add(name)
+            skip_next = name in long_value and not equals
+        else:
+            for position, letter in enumerate(token[1:], start=1):
+                short.add(letter)
+                if letter in short_optional:
+                    break
+                if letter in short_value:
+                    skip_next = position == len(token) - 1
+                    break
+    return _ParsedWords(operands, short, long, index)
+
+
+def _collect_mutated_operands(
+    tokens: list[str], start: int, targets: list[BashWriteDestination], verb: str
+) -> int:
+    """Append the files ``verb`` changes or removes; return the next token index.
+
+    These put no new content on disk, so every candidate is not ``authored``.
+    ``sed`` counts only with ``-i``/``--in-place``; without it the file is read.
+    """
+    if verb == _SED:
+        parsed = _parse_command_words(
+            tokens,
+            start,
+            targets,
+            short_value="efl",
+            short_optional="i",
+            long_value=frozenset({"--expression", "--file", "--line-length"}),
+        )
+        in_place = "i" in parsed.short or "--in-place" in parsed.long
+        script_given = bool({"e", "f"} & parsed.short) or bool(
+            {"--expression", "--file"} & parsed.long
+        )
+        files = parsed.operands if script_given else parsed.operands[1:]
+        if in_place:
+            targets.extend(
+                BashWriteDestination(file, authored=False, mutation=True) for file in files
+            )
+        return parsed.end
+    if verb == _TRUNCATE:
+        parsed = _parse_command_words(
+            tokens,
+            start,
+            targets,
+            short_value="sr",
+            long_value=frozenset({"--size", "--reference"}),
+        )
+    elif verb == _TOUCH:
+        parsed = _parse_command_words(
+            tokens,
+            start,
+            targets,
+            short_value="drt",
+            long_value=frozenset({"--date", "--reference", "--time"}),
+        )
+    else:
+        parsed = _parse_command_words(tokens, start, targets)
+    targets.extend(
+        BashWriteDestination(file, authored=False, mutation=True) for file in parsed.operands
+    )
+    return parsed.end
 
 
 def _collect_trailing_operands(

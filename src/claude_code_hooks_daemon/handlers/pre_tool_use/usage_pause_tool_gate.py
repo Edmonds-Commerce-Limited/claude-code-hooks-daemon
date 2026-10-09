@@ -82,9 +82,9 @@ _RULE: Final[Rule] = Rule(
         "     gave it (its prompt starts [tick:usage-resume]).\n"
         "  3. Do not start new subagents; let running ones finish.\n"
         "  4. Stop. The session resumes by itself after the window reset.\n\n"
-        "A human can run `bin/hooks-daemon usage-pause clear` (in a terminal): it removes the\n"
-        "pause and no pause is started for this session again until the latest reset among\n"
-        "the windows over the ceiling (at most 8 days)."
+        "A human can type `! bin/hooks-daemon usage-pause clear` in the session: it removes\n"
+        "the pause and no pause is started for this session again until the latest reset\n"
+        "among the windows over the ceiling (at most 8 days)."
     ),
 )
 

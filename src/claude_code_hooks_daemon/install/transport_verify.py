@@ -57,6 +57,7 @@ from claude_code_hooks_daemon.install.forwarder_generator import (
     strip_relay_guard_block,
 )
 from claude_code_hooks_daemon.install.relay_deploy import resolve_relay_binary_path
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -242,9 +243,11 @@ def probe_status_line(hooks_dir: Path) -> ProbeResult:
             # The PASSING outcome, made explicit: brace-leading bytes that do
             # not decode as JSON are still raw text, which is exactly what
             # the raw_stdout contract wants on stdout.
-            logger.debug(
-                "status-line output starts with '{' but is not JSON (%s) — raw text, as required",
+            log_and_continue(
+                logger,
                 exc,
+                reason="brace-leading status-line bytes that are not JSON are raw text, which is exactly what the raw_stdout contract wants, so the probe records no envelope and passes",
+                level=logging.DEBUG,
             )
             envelope = None
         if isinstance(envelope, dict):
@@ -399,10 +402,11 @@ def probe_no_event_listeners(project_root: Path) -> ProbeResult:
         except OSError as exc:
             # The PASSING outcome, made explicit: a socket file nothing
             # accepts on is a stale leftover, not a live relay listener.
-            logger.debug(
-                "no listener accepting on %s (%s) — expected for the off state",
-                socket_path,
+            log_and_continue(
+                logger,
                 exc,
+                reason=f"a socket file {socket_path} that nothing accepts on is a stale leftover, which is the passing outcome for the off state, so the probe records not-connected",
+                level=logging.DEBUG,
             )
             connected = False
         else:

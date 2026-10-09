@@ -4,6 +4,10 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00438: kill suggestion can name the protected group](00438-kill-suggestion-can-name-the-protected-group/PLAN.md) - Complete at `d9990531` + the archiving commit (from 00422 N5 row (i): `exclude_pgids` was honoured when deciding what breaches and ignored when building the `kill --` the report prints, so the harvester could recommend killing its own group)
+
+- [00437: session advice counter is shared and locked](00437-session-advice-counter-is-shared-and-locked/PLAN.md) - Complete at `2fbe655e` + the archiving commit (from 00422 N5 row (c): two handlers carried the same unlocked eviction on a daemon-lifetime singleton, and dispatch really is threaded — the test had to drive CPython's switch interval to its floor before the KeyError would appear at all)
+
 - [00436: empty truncated cron prompt matches anything](00436-empty-truncated-cron-prompt-matches-anything/PLAN.md) - Complete at `0e4c2d11` + the archiving commit (from 00422 N5 row (g): a delivered cron prompt that is nothing but a truncation marker strips to an empty prefix, which every declaration starts with, so a cron that was never created was reported as live)
 
 - [00435: priority band table contradicts shipped handlers](00435-priority-band-table-contradicts-shipped-handlers/PLAN.md) - Complete at `96577149` + the archiving commit (from 00422 N5 rows (a) and (d): the documented 0-9 band said no built-in ships there while three Stop-family handlers must sit there to be reachable at all, and the Advisory row read 56-69 against an ADVISORY_MAX of 73 — a test now compares the table with the constants it cites)

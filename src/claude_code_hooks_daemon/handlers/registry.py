@@ -19,6 +19,7 @@ from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.handler_scope import resolve_scope
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.vendor_paths import VendorScope
 
 if TYPE_CHECKING:
@@ -499,8 +500,12 @@ class HandlerRegistry:
         """
         try:
             package = importlib.import_module(package_path)
-        except ImportError:
-            logger.warning("Could not import handlers package: %s", package_path)
+        except ImportError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"an unimportable handlers package {package_path} discovers no handlers (0 is returned), so the registry stays empty for that package instead of failing the daemon start",
+            )
             return 0
 
         if not hasattr(package, "__path__"):
@@ -528,7 +533,11 @@ class HandlerRegistry:
                         count += 1
                         logger.debug("Discovered handler: %s", attr.__name__)
             except Exception as e:
-                logger.warning("Failed to load module %s: %s", modname, e)
+                log_and_continue(
+                    logger,
+                    e,
+                    reason=f"a handler module {modname} that fails to import is skipped; one broken module must not stop discovery of the others",
+                )
 
         logger.info("Discovered %d handlers", count)
         return count
@@ -947,7 +956,11 @@ class HandlerRegistry:
                                 instance.tags,
                             )
                         except Exception as e:
-                            logger.warning("Failed to instantiate %s: %s", attr.__name__, e)
+                            log_and_continue(
+                                logger,
+                                e,
+                                reason=f"a handler {attr.__name__} that fails to instantiate is not registered; one broken handler must not stop registration of the rest",
+                            )
 
         logger.info("Registered %d handlers with router", count)
         return count

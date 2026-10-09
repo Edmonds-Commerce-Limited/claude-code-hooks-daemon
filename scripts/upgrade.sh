@@ -1150,7 +1150,8 @@ fi
 # identical, so neither the file diff above nor a manifest entry can say so.
 # check-effective-handlers resolves THIS project's config under the old and the
 # new version's rules and names every handler that stops or starts running.
-# Exit 1 = changes (normal!), 0 none, 2 error or an older target.
+# Exit 1 = changes (normal!), 0 none, 2 error or an older target, 3 the config
+# is not valid YAML (reported as a config error, never as a handler change).
 echo ""
 _info "${_BOLD}Daemon version: ${FROM_VERSION:-unknown} -> ${TARGET_DISPLAY}${_NC}"
 _metadata_handler_changes=""
@@ -1182,6 +1183,10 @@ if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
         fi
     elif [ "$_eff_rc" -eq 0 ]; then
         _ok "Effective handler set: unchanged by this upgrade."
+    elif [ "$_eff_rc" -eq 3 ]; then
+        _warn "${_BOLD}CONFIG ERROR${_NC}: ${_metadata_config_file} is not a valid YAML mapping, so the effective handler set could not be compared."
+        echo "$_eff_out"
+        _info "Fix the YAML (the daemon cannot load this config either), then re-run the upgrade or 'check-effective-handlers'."
     else
         _warn "Effective handler summary unavailable (check-effective-handlers exit $_eff_rc; older target?)."
     fi

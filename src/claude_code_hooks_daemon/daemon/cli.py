@@ -125,6 +125,7 @@ from claude_code_hooks_daemon.qa.full_qa_lock import host_lock_path as qa_host_l
 from claude_code_hooks_daemon.utils.claude_config import claude_config_dir, is_in_claude_config_dir
 from claude_code_hooks_daemon.utils.claude_plugins import resolve_enabled_plugins
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
     git_visible_ancestor_dirs,
     git_visible_paths,
@@ -247,9 +248,13 @@ def get_project_path(override_path: Path | None = None) -> Path:
             # Validate installation based on config
             try:
                 return _validate_installation(current)
-            except SystemExit:
-                # Invalid installation - keep searching upward
-                logger.debug("Invalid installation at %s, searching upward", current)
+            except SystemExit as exit_signal:
+                log_and_continue(
+                    logger,
+                    exit_signal,
+                    reason=f"an invalid installation at {current} is not the project, so the search moves to the parent directory; the final could-not-find error is raised if none validates",
+                    level=logging.DEBUG,
+                )
         current = current.parent
 
     print(
@@ -436,8 +441,17 @@ def send_daemon_request(
         sock.close()
         return cast("dict[str, Any]", json.loads(response.decode("utf-8")))
 
-    except Exception:
-        logger.exception("Failed to communicate with daemon")
+    except Exception as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason=(
+                "Failed to communicate with daemon; the documented contract of "
+                "send_daemon_request is None on any transport failure, and every caller "
+                "reports a missing response itself"
+            ),
+            level=logging.ERROR,
+        )
         return None
 
 
@@ -1115,7 +1129,15 @@ class _StartProgress:
             self.exited = True
             return False
         except psutil.AccessDenied as exc:
-            logger.debug("Cannot read the starting daemon's CPU time: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    "Cannot read the starting daemon's CPU time; no CPU progress is "
+                    "reported, which the start wait treats as 'not yet spending CPU'"
+                ),
+                level=logging.DEBUG,
+            )
             return False
         spent = times.user + times.system + times.children_user + times.children_system
         if spent <= self._cpu_seconds:
@@ -1480,11 +1502,16 @@ def cmd_status(args: argparse.Namespace) -> int:
     try:
         transport_config = Config.find_and_load(project_path).daemon.transport
     except (FileNotFoundError, PydanticValidationError) as exc:
-        # Config is legitimately absent/invalid for a bare `status` probe (no
-        # project config yet, or a config mid-edit) -- fall back to "transport
-        # section unknown" rather than crashing status reporting, but log so
-        # the failure is never indistinguishable from "no config file at all".
-        logger.debug("cmd_status: could not resolve daemon.transport config: %s", exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=(
+                "cmd_status: could not resolve daemon.transport config; config is "
+                "legitimately absent/invalid for a bare `status` probe (no project config "
+                "yet, or a config mid-edit), so the transport section is shown as unknown"
+            ),
+            level=logging.DEBUG,
+        )
         transport_config = None
     if transport_config is not None and (
         transport_config.relay_enabled or transport_config.nc_enabled
@@ -1676,7 +1703,14 @@ def _acknowledged_plugins(project_path: Path) -> list[str]:
     try:
         config = Config.load_or_default(config_path)
     except (ValueError, OSError) as exc:
-        logger.warning("health: cannot read %s, no plugin acknowledged: %s", config_path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=(
+                f"health: cannot read {config_path}; an unreadable config acknowledges "
+                "nothing, so every plugin is shown without the mark"
+            ),
+        )
         return []
     options = config.get_handler_config(
         "session_start", HandlerID.PLUGIN_HOOKS_ADVISOR.config_key
@@ -2284,7 +2318,11 @@ def _qa_run_lock_holder(project_root: Path) -> str | None:
     try:
         lock_path = qa_host_lock_path(project_root)
     except OSError as exc:
-        logger.warning(_QA_LOCK_CANNOT_TELL, f"its lock location is unknown ({exc})")
+        log_and_continue(
+            logger,
+            exc,
+            reason=_QA_LOCK_CANNOT_TELL % "its lock location is unknown",
+        )
         lock_path = None
     if lock_path is None or not lock_path.is_file():
         return None
@@ -2302,7 +2340,11 @@ def _qa_run_lock_holder(project_root: Path) -> str | None:
     try:
         fd = os.open(lock_path, os.O_RDWR)
     except OSError as exc:
-        logger.warning(_QA_LOCK_CANNOT_TELL, f"its lock could not be opened ({exc})")
+        log_and_continue(
+            logger,
+            exc,
+            reason=_QA_LOCK_CANNOT_TELL % "its lock could not be opened",
+        )
         fd = None
 
     if fd is None:
@@ -2311,7 +2353,11 @@ def _qa_run_lock_holder(project_root: Path) -> str | None:
     try:
         held = _qa_lock_is_held(fd)
     except OSError as exc:
-        logger.warning(_QA_LOCK_CANNOT_TELL, f"its lock could not be tested ({exc})")
+        log_and_continue(
+            logger,
+            exc,
+            reason=_QA_LOCK_CANNOT_TELL % "its lock could not be tested",
+        )
         held = False
     finally:
         # Closing the descriptor releases an flock we acquired, so there is no
@@ -4268,9 +4314,14 @@ def cmd_check_effective_handlers(args: argparse.Namespace) -> int:
 
     Returns:
         0 if the effective handler set is unchanged, 1 if any handler starts
-        or stops, 2 on error.
+        or stops, 2 if the check cannot run (no config file, unusable version),
+        3 if the config file is not a valid YAML mapping. ``scripts/upgrade.sh``
+        reads these codes, and 1 must mean only "handlers change".
     """
-    from claude_code_hooks_daemon.install.config_cli import run_check_effective_handlers
+    from claude_code_hooks_daemon.install.config_cli import (
+        ConfigYamlError,
+        run_check_effective_handlers,
+    )
 
     if args.config:
         config_path = Path(args.config)
@@ -4286,6 +4337,9 @@ def cmd_check_effective_handlers(args: argparse.Namespace) -> int:
             config_path=config_path,
             output_format=args.format,
         )
+    except ConfigYamlError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 3
     except (FileNotFoundError, ValueError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 2
@@ -4781,8 +4835,13 @@ def cmd_clear_goal(args: argparse.Namespace) -> int:
     context_init_error: str | None = None
     try:
         ProjectContext.initialize(project_path / ".claude" / "hooks-daemon.yaml")
-    except RuntimeError:
-        logger.debug("clear-goal: project context already initialised; reusing it")
+    except RuntimeError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="the project context was already initialised in this process, so clear-goal reuses it; nothing is lost",
+            level=logging.DEBUG,
+        )
     except ValueError as e:
         context_init_error = str(e)
         print(f"WARNING: could not initialise project context: {e}", file=sys.stderr)
@@ -4861,8 +4920,13 @@ def cmd_signal(args: argparse.Namespace) -> int:
     context_init_error: str | None = None
     try:
         ProjectContext.initialize(project_path / ".claude" / "hooks-daemon.yaml")
-    except RuntimeError:
-        logger.debug("signal: project context already initialised; reusing it")
+    except RuntimeError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="the project context was already initialised in this process, so signal reuses it; nothing is lost",
+            level=logging.DEBUG,
+        )
     except ValueError as e:
         context_init_error = str(e)
         print(f"WARNING: could not initialise project context: {e}", file=sys.stderr)
@@ -5431,8 +5495,13 @@ def cmd_inject_goal(args: argparse.Namespace) -> int:
     context_init_error: str | None = None
     try:
         ProjectContext.initialize(config_file)
-    except RuntimeError:
-        logger.debug("inject-goal: project context already initialised; reusing it")
+    except RuntimeError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="the project context was already initialised in this process, so inject-goal reuses it; nothing is lost",
+            level=logging.DEBUG,
+        )
     except ValueError as e:
         context_init_error = str(e)
         print(f"WARNING: could not initialise project context: {e}", file=sys.stderr)
@@ -8953,7 +9022,12 @@ def _collect_status_line_segment_entries(
                 config = Config.load(config_path)
                 event_config = config.handlers.model_dump().get(_STATUS_LINE_EVENT_DIR) or {}
             except (PydanticValidationError, OSError, ValueError) as exc:
-                logger.debug("Could not load config for status-line-explained: %s", exc)
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason="an unloadable config leaves every status-line segment listed with its default enablement and priority; the explanation is still useful and config errors are reported by their own commands",
+                    level=logging.DEBUG,
+                )
 
     registry = HandlerRegistry()
     registry.discover()

@@ -241,21 +241,44 @@ def deploy_ccy_supervisor_if_enabled(
     return result
 
 
-def _migrate_wrapper_to_launcher(content: str) -> str:
-    """Repoint every ACTIVE wrapper export from the bare script to the launcher.
+#: Spellings that put the wrapper in the deployed ``.claude/ccy/`` directory: this
+#: module's own self-locating armed line, and a path through ``.claude/ccy``.
+_DEPLOYED_LOCATIONS: Final[tuple[str, ...]] = (
+    '$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/',
+    ".claude/ccy/",
+)
 
-    Only non-comment lines that export ``CCY_CLAUDE_WRAPPER`` and name
-    ``claude-supervise.py`` change; every other byte is preserved. The launcher
-    passes all arguments through, so the rewritten line means the same thing on
-    a supported Python and degrades safely on an unsupported one.
+
+def _names_deployed_script(line: str, target_ccy_dir: Path) -> bool:
+    """Does ``line`` name ``claude-supervise.py`` in the directory the launcher is deployed to?"""
+    locations = (*_DEPLOYED_LOCATIONS, f"{target_ccy_dir}/")
+    return any(f"{location}{SUPERVISOR_SCRIPT_NAME}" in line for location in locations)
+
+
+def _migrate_wrapper_to_launcher(content: str, target_ccy_dir: Path) -> tuple[str, list[str]]:
+    """Repoint ACTIVE wrapper exports from the bare script to the launcher.
+
+    Only non-comment lines that export ``CCY_CLAUDE_WRAPPER`` and name the
+    DEPLOYED ``claude-supervise.py`` change; every other byte is preserved. The
+    launcher passes all arguments through, so the rewritten line means the same
+    thing on a supported Python and degrades safely on an unsupported one.
+
+    The launcher exists only in ``target_ccy_dir``, so a line naming the script in
+    any other directory is left as written (rewriting it would name a file that
+    is not there) and returned as the second item, for the caller to report.
     """
     lines = content.split("\n")
+    left_alone: list[str] = []
     for index, line in enumerate(lines):
         if line.lstrip().startswith("#"):
             continue
-        if _WRAPPER_EXPORT_KEY in line and SUPERVISOR_SCRIPT_NAME in line:
+        if _WRAPPER_EXPORT_KEY not in line or SUPERVISOR_SCRIPT_NAME not in line:
+            continue
+        if _names_deployed_script(line, target_ccy_dir):
             lines[index] = line.replace(SUPERVISOR_SCRIPT_NAME, SUPERVISOR_LAUNCHER_NAME)
-    return "\n".join(lines)
+        else:
+            left_alone.append(line.strip())
+    return "\n".join(lines), left_alone
 
 
 def _arm_ccy_supervisor(target_ccy_dir: Path) -> tuple[bool, bool, str]:
@@ -283,7 +306,16 @@ def _arm_ccy_supervisor(target_ccy_dir: Path) -> tuple[bool, bool, str]:
     if env_path.is_file():
         content = env_path.read_text(encoding="utf-8")
         if _WRAPPER_EXPORT_KEY in content:
-            migrated_content = _migrate_wrapper_to_launcher(content)
+            migrated_content, left_alone = _migrate_wrapper_to_launcher(content, target_ccy_dir)
+            note = ""
+            if left_alone:
+                note = (
+                    f"; left unchanged (it names {SUPERVISOR_SCRIPT_NAME} outside "
+                    f"{target_ccy_dir}, where the {SUPERVISOR_LAUNCHER_NAME} launcher is not "
+                    f"deployed - point it at {target_ccy_dir}/{SUPERVISOR_LAUNCHER_NAME} to use "
+                    "the launcher): " + " | ".join(left_alone)
+                )
+                logger.warning("ccy.env wrapper left on a custom path in %s: %s", env_path, note)
             if migrated_content != content:
                 env_path.write_text(migrated_content, encoding="utf-8")
                 logger.info("Migrated %s in %s to the launcher", _WRAPPER_EXPORT_KEY, env_path)
@@ -291,7 +323,7 @@ def _arm_ccy_supervisor(target_ccy_dir: Path) -> tuple[bool, bool, str]:
                     False,
                     True,
                     f"Migrated {_WRAPPER_EXPORT_KEY} in {env_path} to the "
-                    f"{SUPERVISOR_LAUNCHER_NAME} launcher",
+                    f"{SUPERVISOR_LAUNCHER_NAME} launcher{note}",
                 )
             logger.info(
                 "ccy.env already references %s at %s; left untouched", _WRAPPER_EXPORT_KEY, env_path
@@ -299,7 +331,7 @@ def _arm_ccy_supervisor(target_ccy_dir: Path) -> tuple[bool, bool, str]:
             return (
                 False,
                 False,
-                f"ccy.env already configures {_WRAPPER_EXPORT_KEY}; left untouched",
+                f"ccy.env already configures {_WRAPPER_EXPORT_KEY}; left untouched{note}",
             )
         new_content = f"{content.rstrip(chr(10))}\n\n{armed_block}"
         env_path.write_text(new_content, encoding="utf-8")

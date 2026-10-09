@@ -53,6 +53,7 @@ from claude_code_hooks_daemon.handlers.status_line.context_tiers import (
     is_critical,
     is_red,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
@@ -200,9 +201,17 @@ class ContextSidecarHandler(StatusLineHandlerBase):
         except RuntimeError as e:
             # ProjectContext not initialised (default-config / standalone
             # entry-point branch). Skip rather than fail the dispatch.
-            logger.warning("Skipping context sidecar (no project context): %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="without a project context there is nowhere to write the context sidecar, so the supervisor reads none; the status line render itself proceeds",
+            )
         except OSError as e:
-            logger.warning("Failed to write context sidecar: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="an unwritable context sidecar loses only this render's context figure for the supervisor; the next render writes a fresh one and the status line proceeds",
+            )
 
     def _safe_session_stem(self, session_id: str) -> str:
         """Return a filesystem-safe filename stem for the session id."""

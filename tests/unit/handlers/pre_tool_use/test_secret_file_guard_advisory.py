@@ -213,6 +213,66 @@ class TestNoIndexIsAnAdvisory:
         assert "index of protected files is not available" in _advisory(handler.handle(hook_input))
 
 
+class TestAGlobWithNoIndexIsAnAdvisory:
+    """N374: a glob is expanded against the index too; with none it was allowed in silence."""
+
+    @pytest.fixture
+    def no_index(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(SecretFileGuardHandler, "_index", lambda self, patterns: None)
+
+    @pytest.mark.parametrize(
+        "command",
+        ["head keys/*", "cat keys/.*", "cat keys/?", "cat keys/[a-z]*", "cat a b ./*"],
+    )
+    def test_a_name_agnostic_glob_is_allowed_with_an_advisory(
+        self, tmp_path: Path, no_index: None, command: str
+    ) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "cwd": str(tmp_path),
+        }
+        assert "index of protected files is not available" in _advisory(
+            SecretFileGuardHandler().handle(hook_input)
+        )
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cat plain.txt",
+            "grep 'a*' plain.txt",
+            'grep "a*" plain.txt',
+            "echo hi",
+            "cat report-[0-9]*.txt",
+        ],
+    )
+    def test_a_command_with_no_glob_to_expand_stays_silent(
+        self, tmp_path: Path, no_index: None, command: str
+    ) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "cwd": str(tmp_path),
+        }
+        result = SecretFileGuardHandler().handle(hook_input)
+        assert result.decision == Decision.ALLOW
+        assert not result.context
+
+    def test_a_glob_that_reaches_a_protected_file_still_denies_with_an_index(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "keys").mkdir()
+        (tmp_path / "keys" / PROTECTED).write_text("x\n")
+        monkeypatch.setattr(guard_module, "resolve_project_root", lambda: tmp_path)
+        index_project(tmp_path, SecretFileGuardHandler()._patterns())
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "head keys/.*"},
+            "cwd": str(tmp_path),
+        }
+        assert SecretFileGuardHandler().handle(hook_input).decision == Decision.DENY
+
+
 class TestPrewarmIndex:
     def test_starts_the_build_for_its_own_patterns(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

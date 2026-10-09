@@ -54,6 +54,7 @@ from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core.data_layer import latest_usage
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.usage_snapshot import UsageSnapshot, UsageWindow
+from claude_code_hooks_daemon.daemon.synthetic_traffic import is_synthetic_event
 from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
 from claude_code_hooks_daemon.utils.cron_enforcement import (
     FAILSAFE_CRON_SCHEDULE_HINT,
@@ -61,6 +62,7 @@ from claude_code_hooks_daemon.utils.cron_enforcement import (
 )
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.cron_tick import TickKind, classify_tick, tick_sentinel
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.host_usage_ceiling import (
     HostUsageCeiling,
     resolve_host_usage_ceiling,
@@ -220,7 +222,12 @@ def untracked_dir() -> Path | None:
     try:
         return ProjectContext.daemon_untracked_dir()
     except RuntimeError as exc:
-        logger.debug("usage_pause_gate: no project context, so no usage pause: %s", exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="without a project context there is nowhere to read or write a pause record (None), so no usage pause applies",
+            level=logging.DEBUG,
+        )
         return None
 
 
@@ -240,8 +247,10 @@ def active_usage_pause(session_id: str, *, now: float | None = None) -> UsagePau
             return None
         return read_usage_pause(directory, session_id, now=time.time() if now is None else now)
     except (OSError, ValueError, RuntimeError) as exc:
-        logger.warning(
-            "usage_pause_gate: cannot read the pause record, treating as no pause: %s", exc
+        log_and_continue(
+            logger,
+            exc,
+            reason="an unreadable pause record is treated as no pause (None): this runs inside safety handlers on every call, and a record that cannot be read must not deny or stop the session",
         )
         return None
 
@@ -473,7 +482,11 @@ def current_breaches(hook_input: Mapping[str, Any], env: PauseEnvironment) -> li
     try:
         snapshot = env.usage_loader(now)
     except OSError as exc:
-        logger.warning("usage_pause_gate: cannot read the usage snapshot, not pausing: %s", exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="an unreadable usage snapshot is no data, so no breach is found ([]) and the session is not paused on a reading nobody could take",
+        )
         return []
     if snapshot is None:
         logger.debug("usage_pause_gate: no usage snapshot (no rate_limits seen), not pausing")
@@ -508,7 +521,11 @@ def start_pause(
     try:
         write_usage_pause(directory, pause)
     except (OSError, ValueError) as exc:
-        logger.warning("usage_pause_gate: pause record not written, not pausing: %s", exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="a pause record that cannot be written means no pause is entered (None): every other gate reads that record, so a directive without one could not be enforced",
+        )
         return None
     if read_usage_pause(directory, session_id, now=now) != pause:
         logger.warning(
@@ -517,23 +534,39 @@ def start_pause(
         try:
             clear_usage_pause(directory, session_id)
         except OSError as exc:
-            logger.warning("usage_pause_gate: could not remove the unreadable record: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unreadable record that cannot be removed is still not enforced as a pause (None is returned below), so the session is not held by it",
+            )
         return None
     logger.warning("usage_pause_gate: pausing session %s: %s", session_id, pause.reason)
     return pause
 
 
 def try_start_pause(hook_input: Mapping[str, Any], env: PauseEnvironment) -> UsagePause | None:
-    """Enter the pause if this session's host ceiling is reached; total, fails open."""
+    """Enter the pause if this session's host ceiling is reached; total, fails open.
+
+    Synthetic traffic (a probe, a harness, a test) is never paused: it is not a
+    session spending the account's usage, and a pause would replace the verdict
+    of the handler it exists to exercise with the pause directive.
+    """
     session_id = str(hook_input.get(HookInputField.SESSION_ID) or "")
     if not session_id:
+        return None
+    if is_synthetic_event(hook_input):
+        logger.debug("usage_pause_gate: synthetic traffic is never paused (%s)", session_id)
         return None
     try:
         return start_pause(session_id, current_breaches(hook_input, env), env)
     except Exception as exc:
         # Deliberately broad: this runs inside a SAFETY handler on every tool call, and
         # the chain turns any exception from one into a DENY of the call.
-        logger.warning("usage_pause_gate: cannot evaluate the ceiling, not pausing: %s", exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="an evaluation that raises means no pause is entered (None): this runs inside a SAFETY handler on every tool call, and the chain would turn any exception from one into a DENY of the call",
+        )
         return None
 
 
@@ -545,6 +578,10 @@ def clear_pause(session_id: str) -> bool:
     try:
         clear_usage_pause(directory, session_id)
     except OSError as exc:
-        logger.warning("usage_pause_gate: could not clear the pause record: %s", exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="a pause record that cannot be removed is reported to the caller as False (not cleared), so the owner is told the clear did not happen",
+        )
         return False
     return True

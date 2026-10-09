@@ -39,6 +39,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 logger = logging.getLogger(__name__)
@@ -111,7 +112,12 @@ class RemoteDocsRoutingHandler(PreToolUseHandlerBase):
                 ProjectContext.project_root() / ".claude" / "hooks-daemon.yaml"
             )
         except (OSError, ValueError) as exc:
-            logger.debug("remote-docs routing could not read config: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unreadable remote-docs config means no routing (None), so the handler stays silent",
+                level=logging.DEBUG,
+            )
             return None
 
     def _is_declared(self, url: str) -> bool:
