@@ -1461,6 +1461,52 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N385 — careless spellings the raw-text guards allow on main
+
+**Source**: the Plan 00483 batch (c) review, round 1 (2026-10-09). Every probe called `matches()` directly on main;
+the evidence is in `untracked/scratch/batchc-review/`. None of these came from batch (c), and each is allowed on main.
+
+**Evidence**, by guard:
+
+- **curl_pipe_shell**:
+  - `sh -c "$(curl …)"`, which is Homebrew's documented install form and the most important item here;
+  - `bash <(curl …)`;
+  - `curl url -o x.sh && bash x.sh`;
+  - `| env python3`;
+  - `| sudo -u bob python3`;
+  - `| node`.
+- **worktree_file_copy**:
+  - `cp -r <wt>/src .` and `rsync -a <wt>/ ./`, a whole-tree copy into the main checkout;
+  - `cd /workspace; cp -r <wt>/src .` and `(cp …)`;
+  - copies behind a wrapper: `command cp`, `nice cp` and `xargs cp`;
+  - `cp -t src/ <wt>/…`;
+  - `find -exec cp`.
+- **root_recursion_guard**:
+  - `bash -c 'grep -r x /'` and `time grep -r x /`;
+  - `sudo find / …`;
+  - `grep -rm1 x /`, where the clustered option hides the root;
+  - `du -sh /` and `ls -R /`;
+  - `rg x /home/user`.
+
+Each is a spelling a careless agent writes, so all are in scope under the 00483 threat model. Out of scope (hostile, by the reviewer's call, which the coordinator accepts): a local program whose only job is to run stdin, such as `python3 -c 'exec(sys.stdin.read())'`.
+
+**Status**: ⬜ Open. Remedy: one branch per guard, each shape a red test first and a must-deny gate row. The shared wrapper and `-c`-body readers that batch (b) and (c) reuse should cover most of the wrapper cases.
+
+### N384 — `/hooks-daemon optimise` recommends the `daemon_stats` health line to every project
+
+**Source**: the owner, 2026-10-09: "daemon stats is only useful in this repo, normal projects should not have it
+enabled".
+
+**Evidence**: `DaemonStatsHandler` (`handlers/status_line/daemon_stats.py`) did not override `get_relevance()`, so it
+inherited `Relevance.always()`. The optimise review recommends enabling every relevant handler whatever its default,
+so it told every client project to turn on a daemon developer's diagnostic (uptime, memory, log level, error count).
+`default_enabled = False` kept it off at install, but the review then overrode that.
+
+**Status**: ✅ Fixed on main. `get_relevance()` is applicable only where the project root holds the daemon's own
+package (`src/claude_code_hooks_daemon/__init__.py`); elsewhere the review lists it as "not applicable here". The
+tests were written red first in `tests/unit/handlers/status_line/test_daemon_stats.py`. The optimise doc names it
+among the non-universal handlers, and release note 008 tells clients they can switch it off.
+
 ### N383 — a quoted git global-option value with a space hides a destructive subcommand
 
 **Source**: the Plan 00483 batch (b) review round 2 (2026-10-09, merged at fe54af5e6).
