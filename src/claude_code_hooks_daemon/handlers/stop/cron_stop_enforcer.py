@@ -147,9 +147,7 @@ class CronStopEnforcerHandler(InitialThreadExemption, StopHandlerBase):
         """
         crons = self._load_config().persistent_crons
         jobs = crons.active_jobs(effective_hostname(hook_input))
-        if jobs and self._exempt_holder(hook_input, crons) is not None:
-            return []
-        return jobs
+        return self._jobs_held_by_session(hook_input, crons, jobs)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Fire only when the project has at least one active job declared for this host.
@@ -276,9 +274,12 @@ class CronStopEnforcerHandler(InitialThreadExemption, StopHandlerBase):
             "**Only the initial thread of a Claude Code session is checked.** A "
             "thread opened later in the same session (left arrow, new thread) is a "
             "separate session to the hooks and holds no crons of its own, so it is "
-            "never asked for the declared ones; the session's first thread, found by "
-            "the shared `claude daemon run` ancestor process, is. With no such "
-            "ancestor every session is checked as before. "
+            "never asked for the declared ones; the session's initial thread (its "
+            "worker carries `--fork-session --resume`, a later thread's is a "
+            "`bg-spare`, both under one shared `claude daemon run` process) is. The "
+            "holder is a live worker: if it exits the next thread takes over, and a "
+            "`/clear` in it keeps holding. Whenever the placement is unsure every "
+            "session is checked as before. "
             "`persistent_crons.initial_thread_only: false` checks every thread.\n\n"
             "**An absent `session_crons` field always ALLOWs.** It means no "
             "information was delivered, never that no crons exist — only a "

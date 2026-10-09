@@ -143,7 +143,9 @@ class TestAnUnreadablePeerStampsNothing:
 
     def test_the_payload_is_left_without_a_stamp(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            server, "_peer_hostname", lambda writer: PeerHostname(unreadable_because="gone")
+            server,
+            "_peer_hostname",
+            lambda writer, peer=None: PeerHostname(unreadable_because="gone"),
         )
         payload: dict[str, Any] = {"hook_event_name": "Stop"}
         # _peer_hostname is replaced above, so the writer is never touched.
@@ -186,16 +188,86 @@ class TestPeerPidStamp:
 
         assert HookInputField.PEER_PID not in payload
 
-    def test_an_existing_value_is_kept(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_a_caller_supplied_value_is_replaced(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(server, "_peer_pid", lambda writer: (4242, None))
         payload: dict[str, Any] = {HookInputField.PEER_PID: 7}
 
         server._stamp_peer_pid(payload, self._writer)
 
-        assert payload[HookInputField.PEER_PID] == 7
+        assert payload[HookInputField.PEER_PID] == 4242
 
-    def test_a_non_dict_payload_is_ignored(self) -> None:
-        server._stamp_peer_pid(["not", "a", "dict"], self._writer)
+    @pytest.mark.parametrize("known", [(None, "no SO_PEERCRED"), (0, None)])
+    def test_a_caller_supplied_value_is_removed_when_the_pid_is_unknown(
+        self, monkeypatch: pytest.MonkeyPatch, known: tuple[int | None, str | None]
+    ) -> None:
+        monkeypatch.setattr(server, "_peer_pid", lambda writer: known)
+        payload: dict[str, Any] = {HookInputField.PEER_PID: 7}
+
+        server._stamp_peer_pid(payload, self._writer)
+
+        assert HookInputField.PEER_PID not in payload
+
+    def test_an_already_queried_peer_is_not_queried_again(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _fail(writer: object) -> tuple[int | None, str | None]:
+            raise AssertionError("SO_PEERCRED queried twice")
+
+        monkeypatch.setattr(server, "_peer_pid", _fail)
+        payload: dict[str, Any] = {}
+
+        server._stamp_peer_pid(payload, self._writer, (99, None))
+        server._stamp_session_hostname(payload, self._writer, (None, "unreadable"))
+
+        assert payload == {HookInputField.PEER_PID: 99}
+
+    def test_a_non_dict_payload_is_left_unchanged(self) -> None:
+        payload = ["not", "a", "dict"]
+
+        server._stamp_peer_pid(payload, self._writer, (4242, None))
+
+        assert payload == ["not", "a", "dict"]
+
+    @pytest.mark.anyio
+    async def test_the_legacy_socket_replaces_a_forged_pid_with_the_connections(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``_handle_client`` hands the connection's own peer pid to ``_process_request``."""
+        seen: dict[str, Any] = {}
+        controller = FrontController(event_name="Stop")
+        daemon = HooksDaemon(config=_config(Path(tempfile.mkdtemp())), controller=controller)
+        monkeypatch.setattr(
+            HooksDaemon,
+            "_capture_payload_best_effort",
+            lambda self, event, hook_input: seen.update(hook_input),
+        )
+        request = json.dumps(
+            {"event": "Stop", "hook_input": {"hook_event_name": "Stop", HookInputField.PEER_PID: 7}}
+        )
+
+        await daemon._process_request(request, peer=(31337, None))
+
+        assert seen[HookInputField.PEER_PID] == 31337
+
+    @pytest.mark.anyio
+    async def test_the_event_path_does_not_strip_what_it_already_stamped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: dict[str, Any] = {}
+        controller = FrontController(event_name="Stop")
+        daemon = HooksDaemon(config=_config(Path(tempfile.mkdtemp())), controller=controller)
+        monkeypatch.setattr(
+            HooksDaemon,
+            "_capture_payload_best_effort",
+            lambda self, event, hook_input: seen.update(hook_input),
+        )
+        request = json.dumps(
+            {"event": "Stop", "hook_input": {"hook_event_name": "Stop", HookInputField.PEER_PID: 8}}
+        )
+
+        await daemon._process_request(request)
+
+        assert seen[HookInputField.PEER_PID] == 8
 
     def test_the_peer_pid_query_reports_a_connection_without_a_socket(self) -> None:
         class _NoSocketWriter:

@@ -1112,9 +1112,12 @@ pseudo_events:
 # Code crons live in session memory only, so declared jobs are stated at session
 # start and checked at Stop. `initial_thread_only` (default true, Plan 00470 Task
 # 6.4): only the INITIAL thread of a Claude Code session must hold the jobs; a
-# thread opened later in the same session (found by the shared `claude daemon
-# run --spawned-by` ancestor process) is told it holds none and is not asked for
-# them. With no such ancestor every session holds them. false: every thread does.
+# thread opened later in the same session is told it holds none and is not asked
+# for them. Threads are told apart by their worker process under the shared
+# `claude daemon run --origin transient --spawned-by` ancestor (initial thread:
+# `--fork-session --resume`; later thread: `bg-spare`), not by arrival order; the
+# holder is a live process, so if it exits the next thread takes over. Whenever
+# the placement is unsure every session holds them. false: every thread does.
 # persistent_crons:
 #   enabled: true
 #   initial_thread_only: true

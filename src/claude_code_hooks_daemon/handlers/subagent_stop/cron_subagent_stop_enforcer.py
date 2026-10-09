@@ -126,9 +126,7 @@ class CronSubagentStopEnforcerHandler(InitialThreadExemption, SubagentStopHandle
         """
         crons = self._load_config().persistent_crons
         jobs = crons.active_jobs(effective_hostname(hook_input))
-        if jobs and self._exempt_holder(hook_input, crons) is not None:
-            return []
-        return jobs
+        return self._jobs_held_by_session(hook_input, crons, jobs)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Fire only when the project has at least one active job declared for this host.

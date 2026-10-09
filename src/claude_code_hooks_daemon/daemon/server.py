@@ -224,44 +224,65 @@ def _peer_pid(writer: asyncio.StreamWriter) -> tuple[int | None, str | None]:
         return None, "no SO_PEERCRED on this connection"
     try:
         raw = sock.getsockopt(socket.SOL_SOCKET, peercred, struct.calcsize("3i"))
-    except OSError as exc:
+        pid: int = struct.unpack("3i", raw)[0]
+    except (OSError, struct.error, TypeError) as exc:
         return None, f"SO_PEERCRED query failed: {exc}"
-    pid: int = struct.unpack("3i", raw)[0]
     return pid, None
 
 
-def _peer_hostname(writer: asyncio.StreamWriter) -> PeerHostname:
+def _peer_hostname(
+    writer: asyncio.StreamWriter, peer: tuple[int | None, str | None] | None = None
+) -> PeerHostname:
     """The hostname override of the process on the other end of a Unix socket.
 
-    The peer's pid comes from :func:`_peer_pid`, then its environment is read.
-    Where the pid is unknown, or the kernel reports pid 0 (a peer in another PID
-    namespace), the result is unreadable and says why.
+    The peer's pid comes from :func:`_peer_pid` (or the already-queried ``peer``),
+    then its environment is read. Where the pid is unknown, or the kernel reports
+    pid 0 (a peer in another PID namespace), the result is unreadable and says why.
     """
-    pid, reason = _peer_pid(writer)
+    pid, reason = peer if peer is not None else _peer_pid(writer)
     if pid is None:
         return PeerHostname(unreadable_because=reason)
     return hostname_override_of_process(pid)
 
 
-def _stamp_peer_pid(hook_input: Any, writer: asyncio.StreamWriter) -> None:
-    """Stamp the connected hook process's pid on an event-socket payload (Plan 00470 Task 6.4).
+def _set_peer_pid(hook_input: Any, pid: int | None, reason: str | None = None) -> None:
+    """Replace the payload's ``hooks_daemon_peer_pid`` with the connection's own (Plan 00470 Task 6.4).
 
-    Only the pid is recorded here; the ``/proc`` walk that groups threads of one
-    Claude Code session happens lazily, in the cron handlers, and only when a
-    project declares ``persistent_crons``. An unknown or non-positive pid stamps
-    nothing, which leaves the session holding the crons as before. A value
-    already on the payload is never overwritten.
+    Claude Code never sends this field and the only thing a forged value could do
+    is exempt a session from its crons, so whatever the caller supplied is
+    removed first and only the pid the kernel reports for the connection is
+    stamped. An unknown or non-positive pid stamps nothing, which leaves the
+    session holding the crons as before.
     """
-    if not isinstance(hook_input, dict) or HookInputField.PEER_PID in hook_input:
+    if not isinstance(hook_input, dict):
         return
-    pid, reason = _peer_pid(writer)
+    hook_input.pop(HookInputField.PEER_PID, None)
     if pid is None:
         logger.debug("No peer pid stamped: %s", reason)
     elif pid > 0:
         hook_input[HookInputField.PEER_PID] = pid
 
 
-def _stamp_session_hostname(hook_input: Any, writer: asyncio.StreamWriter) -> None:
+def _stamp_peer_pid(
+    hook_input: Any,
+    writer: asyncio.StreamWriter,
+    peer: tuple[int | None, str | None] | None = None,
+) -> None:
+    """Stamp the connected hook process's pid on a payload (Plan 00470 Task 6.4).
+
+    Only the pid is recorded here; the ``/proc`` walk that groups threads of one
+    Claude Code session happens lazily, in the cron handlers, and only when a
+    project declares ``persistent_crons``.
+    """
+    pid, reason = peer if peer is not None else _peer_pid(writer)
+    _set_peer_pid(hook_input, pid, reason)
+
+
+def _stamp_session_hostname(
+    hook_input: Any,
+    writer: asyncio.StreamWriter,
+    peer: tuple[int | None, str | None] | None = None,
+) -> None:
     """Stamp the session's hostname override on an event-socket payload (Plan 00470 Task 6.1).
 
     ``persistent_crons`` jobs can carry ``hosts:``, matched against the hostname
@@ -279,11 +300,11 @@ def _stamp_session_hostname(hook_input: Any, writer: asyncio.StreamWriter) -> No
     """
     if not isinstance(hook_input, dict) or HookInputField.SESSION_HOSTNAME in hook_input:
         return
-    peer = _peer_hostname(writer)
-    if peer.unreadable_because is not None:
-        logger.debug("No session hostname stamped: %s", peer.unreadable_because)
-    if peer.override is not None:
-        hook_input[HookInputField.SESSION_HOSTNAME] = peer.override
+    hostname = _peer_hostname(writer, peer)
+    if hostname.unreadable_because is not None:
+        logger.debug("No session hostname stamped: %s", hostname.unreadable_because)
+    if hostname.override is not None:
+        hook_input[HookInputField.SESSION_HOSTNAME] = hostname.override
 
 
 def redacted_blocking_response(response_json: str) -> str:
@@ -1957,8 +1978,9 @@ class HooksDaemon:
                 writer.write(json.dumps(fail_response).encode())
                 await writer.drain()
             else:
-                _stamp_session_hostname(hook_input, writer)
-                _stamp_peer_pid(hook_input, writer)
+                peer = _peer_pid(writer)  # one SO_PEERCRED query for both stamps
+                _stamp_session_hostname(hook_input, writer, peer)
+                _stamp_peer_pid(hook_input, writer, peer)
                 await self._answer_event(
                     event_json_key, hook_input, writer, arrival_time=arrival_time
                 )
@@ -2240,7 +2262,9 @@ class HooksDaemon:
                     # Parse and process request
                     start_time = time.time()
                     response = await self._process_request(
-                        request_data.decode(), arrival_time=arrival_time
+                        request_data.decode(),
+                        arrival_time=arrival_time,
+                        peer=_peer_pid(writer),
                     )
                     elapsed_ms = (time.time() - start_time) * 1000
 
@@ -2376,12 +2400,20 @@ class HooksDaemon:
             )
 
     async def _process_request(
-        self, request_data: str, *, arrival_time: float | None = None
+        self,
+        request_data: str,
+        *,
+        arrival_time: float | None = None,
+        peer: tuple[int | None, str | None] | None = None,
     ) -> dict[str, Any]:
         """Process incoming hook request.
 
         Args:
             request_data: JSON-encoded request string
+            peer: ``_peer_pid`` result of the legacy socket connection. When given,
+                the payload's ``hooks_daemon_peer_pid`` is replaced by it (any
+                caller-supplied value is dropped); the event-socket path stamps
+                before it gets here and passes None.
             arrival_time: ``time.perf_counter()`` reading taken at request
                 arrival (Plan 00466 N40 M1), from BEFORE this coroutine was
                 even scheduled -- see the callers' own notes. None (the
@@ -2422,6 +2454,9 @@ class HooksDaemon:
         # Handle system events (logs, status, health, handlers)
         if event == "_system":
             return self._handle_system_request(hook_input, request_id)
+
+        if peer is not None:
+            _set_peer_pid(hook_input, *peer)
 
         # Plan 00158: opt-in daemon-side payload capture for dogfooding.
         self._capture_payload_best_effort(event, hook_input)

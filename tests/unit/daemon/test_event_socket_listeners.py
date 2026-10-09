@@ -241,7 +241,7 @@ class TestEofFraming:
         # whatever hostname override the process running pytest exported
         # (Plan 00470 Task 6.1). That stamp has its own coverage in
         # test_event_socket_session_hostname.py; here the peer exported none.
-        monkeypatch.setattr(server, "_peer_hostname", lambda writer: PeerHostname())
+        monkeypatch.setattr(server, "_peer_hostname", lambda writer, peer=None: PeerHostname())
         # Likewise the peer pid (Plan 00470 Task 6.4); covered in
         # test_event_socket_session_hostname.py.
         monkeypatch.setattr(server, "_peer_pid", lambda writer: (None, "stubbed"))

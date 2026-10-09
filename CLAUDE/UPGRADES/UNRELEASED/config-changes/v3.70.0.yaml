@@ -46,8 +46,9 @@ config_changes:
       description: >-
         NEW (Plan 00470 Task 6.4). Default `true`: only the initial thread of a
         Claude Code session must hold the declared `persistent_crons`. A thread
-        opened later in the same session (found by the shared
-        `claude daemon run --spawned-by` ancestor process) is told by
+        opened later in the same session (a `bg-spare` worker under the shared
+        `claude daemon run --origin transient --spawned-by` process; the initial
+        thread's worker carries `--fork-session --resume`) is told by
         `persistent_cron_assertor` that it holds none, and
         `cron_stop_enforcer` and `cron_subagent_stop_enforcer` do not demand
         them from it. With no such ancestor, or an unreadable `/proc`, every

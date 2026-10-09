@@ -151,9 +151,11 @@ class PersistentCronAssertorHandler(InitialThreadExemption, SessionStartHandlerB
 
         # A thread opened later in a Claude Code session is a fresh session to
         # the hooks (source "startup") but not the one that holds the crons.
-        holder = self._exempt_holder(hook_input, self._load_config().persistent_crons)
-        if holder is not None:
-            return AdvisoryResult(decision=Decision.ALLOW, context=render_non_holder_note(holder))
+        other = self._exempt_holder(hook_input, self._load_config().persistent_crons)
+        if other is not None:
+            return AdvisoryResult(
+                decision=Decision.ALLOW, context=render_non_holder_note(other.session_id)
+            )
 
         now = time.time()
         session_id = str(hook_input.get(HookInputField.SESSION_ID) or "")
@@ -243,11 +245,18 @@ class PersistentCronAssertorHandler(InitialThreadExemption, SessionStartHandlerB
             "hostname, as exported in the session. A job without `hosts:` is global.\n\n"
             "Only the INITIAL thread of a Claude Code session holds the declared jobs. "
             "A thread opened later in the same session (it reports `source: startup` "
-            "like a new session) is recognised by its shared `claude daemon run` "
-            "ancestor process and is told it holds none, naming the initial thread; "
-            "create none there unless the user says so. With no such ancestor every "
-            "session holds them as before, and `persistent_crons.initial_thread_only: "
-            "false` makes every thread hold them.\n\n"
+            "like a new session) is recognised by its worker process (a `bg-spare` "
+            "worker under the session's shared `claude daemon run` process, while "
+            "the initial thread's worker carries `--fork-session --resume`) and is "
+            "told it holds none; create none there unless the user says so. The "
+            "holder is a live worker, so if the initial thread exits the next thread "
+            "takes over, and a `/clear` in the initial thread keeps holding. Whenever "
+            "the placement is unsure (no such ancestor, an unreadable `/proc`, an "
+            "unrecognised worker) every session holds them as before. This needs "
+            "the hook's pid, which the daemon reads from the connection on both the "
+            "event sockets and the legacy `init.sh` socket. "
+            "`persistent_crons.initial_thread_only: false` makes every thread hold "
+            "them.\n\n"
             "A job paused for this session with `hooks-daemon cron-pause` is left out "
             "of the list and stated as paused instead — do not re-create it. The pause "
             "belongs to one session, so a new session is asked for the job again."

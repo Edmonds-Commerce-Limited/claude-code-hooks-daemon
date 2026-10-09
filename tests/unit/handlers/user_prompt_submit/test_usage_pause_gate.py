@@ -19,6 +19,13 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from tests.fake_proc import (
+    DAEMON_ARGV,
+    INITIAL_WORKER_ARGV,
+    SPARE_WORKER_ARGV,
+    add_proc,
+    add_thread,
+)
 
 from claude_code_hooks_daemon.config.models import (
     Config,
@@ -380,6 +387,32 @@ class TestResume:
         assert "issue-sdlc" in text
         assert "*/20 * * * *" in text
         assert "[tick:job:issue-sdlc]" in text
+
+    def test_a_later_thread_is_not_told_to_recreate_the_declared_jobs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Plan 00470 Task 6.4: only the initial thread holds the declared crons."""
+        proc = tmp_path / "proc"
+        proc.mkdir()
+        add_proc(proc, 1, 0, ["init"])
+        add_proc(proc, 589, 1, DAEMON_ARGV, start=777)
+        add_thread(proc, 589, 591, 700, INITIAL_WORKER_ARGV)
+        add_thread(proc, 589, 592, 701, SPARE_WORKER_ARGV)
+        job = PersistentCronConfig(
+            id="issue-sdlc", schedule="*/20 * * * *", prompt="Run the issue loop."
+        )
+
+        def lifted_text(session: str, pid: int) -> str:
+            handler = _handler(tmp_path, config=_config(jobs=[job]), snapshot=_snapshot(five=10.0))
+            monkeypatch.setattr(handler, "_proc_root", lambda: proc)
+            monkeypatch.setattr(handler, "_thread_groups_path", lambda: tmp_path / "groups.json")
+            hook_input = {**_input(gate.USAGE_RESUME_PROMPT, session), "hooks_daemon_peer_pid": pid}
+            return "\n".join(_run(handler, tmp_path, hook_input).context)
+
+        assert "issue-sdlc" in lifted_text("initial", 700)
+        later = lifted_text("later", 701)
+        assert "PAUSE LIFTED" in later
+        assert "issue-sdlc" not in later
 
     def test_the_lift_directive_carries_the_failsafe_cron_when_none_is_declared(
         self, tmp_path: Path
