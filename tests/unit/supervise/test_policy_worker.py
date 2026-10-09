@@ -549,7 +549,30 @@ def test_worker_restart_alone_picks_up_changed_recognition_behaviour(
     original_source = SCRIPT_PATH.read_text(encoding="utf-8")
     assert '_COMPACT_COMMAND_PREFIX = "/compact"' in original_source
 
-    edited_copy = tmp_path / "claude-supervise-edited.py"
+    # A real deploy sits in `<client>/.claude/ccy/` beside the client's daemon
+    # clone, and finds the daemon's install-mode rule there (N386).
+    edited_copy = tmp_path / ".claude" / "ccy" / "claude-supervise-edited.py"
+    edited_copy.parent.mkdir(parents=True)
+    clone_layout = (
+        tmp_path
+        / ".claude"
+        / "hooks-daemon"
+        / "src"
+        / "claude_code_hooks_daemon"
+        / "daemon"
+        / "install_layout.py"
+    )
+    clone_layout.parent.mkdir(parents=True)
+    clone_layout.write_text(
+        (
+            SCRIPT_PATH.parents[2]
+            / "src"
+            / "claude_code_hooks_daemon"
+            / "daemon"
+            / "install_layout.py"
+        ).read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
     edited_copy.write_text(
         original_source.replace(
             '_COMPACT_COMMAND_PREFIX = "/compact"', '_COMPACT_COMMAND_PREFIX = "/thinkharder"'

@@ -69,3 +69,61 @@ class TestDefaultSidecarDir:
 
         # cwd has no src/claude_code_hooks_daemon → normal-mode layout under cwd.
         assert result == tmp_path / ".claude" / "hooks-daemon" / "untracked" / _SUBDIR
+
+
+class TestTheRuleIsTheCanonicalOne:
+    """The supervisor asks `daemon/install_layout.py` rather than keeping its own test (N386).
+
+    It loads that file by path -- it stays stdlib-only and imports no package --
+    from the checkout the script itself sits in, so a project root that
+    carries no daemon source at all (a test directory, a stray cwd) still gets
+    an answer.
+    """
+
+    def test_a_file_at_the_marker_path_is_a_client_install(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        marker = tmp_path / "src" / "claude_code_hooks_daemon"
+        marker.parent.mkdir(parents=True)
+        marker.write_text("a file, not the source tree", encoding="utf-8")
+        monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+
+        result = _mod._daemon_untracked_dir()
+
+        assert result == tmp_path / ".claude" / "hooks-daemon" / "untracked"
+
+    @pytest.mark.parametrize("self_install", [True, False])
+    def test_agrees_with_install_layout(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, self_install: bool
+    ) -> None:
+        from claude_code_hooks_daemon.daemon.install_layout import get_untracked_dir
+
+        if self_install:
+            _make_self_install_marker(tmp_path)
+        monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+
+        assert _mod._daemon_untracked_dir() == get_untracked_dir(tmp_path)
+
+    def test_the_rule_is_found_in_a_client_clone_too(self, tmp_path: Path) -> None:
+        """A deployed script sits in a client whose daemon clone is under `.claude/hooks-daemon`."""
+        client = tmp_path / "client"
+        clone_daemon_dir = client / ".claude" / "hooks-daemon" / "src" / "claude_code_hooks_daemon"
+        (clone_daemon_dir / "daemon").mkdir(parents=True)
+        (clone_daemon_dir / "daemon" / "install_layout.py").write_text(
+            (
+                Path(_mod.__file__).resolve().parents[2]
+                / "src"
+                / "claude_code_hooks_daemon"
+                / "daemon"
+                / "install_layout.py"
+            ).read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+
+        located = _mod._install_layout_path(client)
+
+        assert located == clone_daemon_dir / "daemon" / "install_layout.py"
+
+    def test_a_checkout_with_no_rule_file_fails_loudly(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError):
+            _mod._install_layout_path(tmp_path)

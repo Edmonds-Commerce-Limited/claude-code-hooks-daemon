@@ -30,13 +30,17 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# The one shell self-install test lives in mode_guard.sh.
+# shellcheck source=install/mode_guard.sh
+source "$REPO_ROOT/scripts/install/mode_guard.sh"
+
 echo "Bootstrapping self-install at: $REPO_ROOT"
 
 # Refuse to run anywhere but the daemon's own repository. Everywhere else this
 # script is wrong in a way that is hard to see afterwards: it would write an
 # env file pointing a CLIENT project's daemon at the client's own root, which
 # is precisely the half-configured state init.sh's repo guard exists to catch.
-if [[ ! -f "$REPO_ROOT/install.py" ]] || [[ ! -d "$REPO_ROOT/src/claude_code_hooks_daemon" ]]; then
+if [[ ! -f "$REPO_ROOT/install.py" ]] || ! is_self_install_checkout "$REPO_ROOT"; then
     echo "ERROR: this is not the hooks-daemon repository (no install.py + src/claude_code_hooks_daemon)." >&2
     echo "       A client project installs the daemon with install.py instead." >&2
     exit 1
