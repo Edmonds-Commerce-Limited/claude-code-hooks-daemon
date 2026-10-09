@@ -1461,6 +1461,20 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N387 — the inline-suppression detector judged gitignored third-party code
+
+**Source**: the coordinator, 2026-10-09. The range QA over the Plan 00484 batch 3.1b merge (1d0037601) reported 87
+violations on main that the branch's own run never saw.
+
+**Evidence**: every one was in `.claude/ccy/plugins/marketplaces/`, a gitignored plugin cache that git does not
+track. `scripts/qa/check_inline_suppressions.py` skipped a hand-written list of directories rather than asking git
+what it ignores. A fresh worktree has no such cache, so the branch scored 0. Same shape as N380 and N382: a whole-tree
+check that a branch run cannot fail.
+
+**Status**: ✅ Fixed on main. The detector drops any file `utils/git_file_states.scan_git_file_states` reports as
+ignored, and it fails closed: when git cannot answer, nothing is dropped. Tests with a temporary repository were
+written red first. On main: 0 violations in 113 suppressions.
+
 ### N386 — the self-install rule is copied four times outside its one definition
 
 **Source**: the owner, 2026-10-09, on N384's first fix, which hand-rolled a fifth copy: "it should be a single source of

@@ -453,6 +453,27 @@ class TestTheCommandLine:
         assert "mod.py:1" in result.stdout
 
 
+class TestOnlyTheProjectsOwnFilesAreJudged:
+    """Gitignored files are someone else's code (a plugin cache, a vendored tree)."""
+
+    @staticmethod
+    def _repo(root: Path) -> None:
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        _write(root, ".gitignore", "cache/\n")
+
+    def test_a_gitignored_file_is_not_judged(self, tmp_path: Path) -> None:
+        self._repo(tmp_path)
+        _write(tmp_path, "cache/vendored.py", f"import os  {NOQA}\n")
+
+        assert _findings(tmp_path) == []
+
+    def test_an_untracked_file_that_is_not_ignored_is_still_judged(self, tmp_path: Path) -> None:
+        self._repo(tmp_path)
+        _write(tmp_path, "mod.py", f"import os  {NOQA}\n")
+
+        assert [f["file"] for f in _findings(tmp_path)] == ["mod.py"]
+
+
 class TestTheRepositoryItself:
     def test_this_repository_carries_a_reason_on_every_suppression(self) -> None:
         """The detector's verdict on the tracked tree, so a reasonless one fails the suite."""
