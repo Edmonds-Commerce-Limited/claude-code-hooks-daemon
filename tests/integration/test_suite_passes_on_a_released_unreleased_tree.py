@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Final
 
@@ -35,6 +36,8 @@ FIXTURE_DIRNAME: Final[str] = "cyber-flag"
 #: at a load average of 17.
 RUN_TIMEOUT_SECONDS: Final[int] = 900
 FAILURE_TAIL_CHARS: Final[int] = 40000
+#: The readers run as this many concurrent nested pytest runs over the one copy.
+READER_RUN_GROUPS: Final[int] = 4
 
 #: Puts the copy's ``src`` first on the runner's own import path only. A
 #: PYTHONPATH would leak into every upgrade the tests launch and shadow the
@@ -166,6 +169,37 @@ class TestTheCopyIsTheReleasedState:
         assert holding_area_readers(TESTS_DIR, exclude=Path(__file__).resolve())
 
 
+class TestTheReadersAreSplitAcrossRuns:
+    @staticmethod
+    def _files(root: Path, sizes: dict[str, int]) -> list[Path]:
+        for name, size in sizes.items():
+            (root / name).write_text("x" * size)
+        return [Path(name) for name in sizes]
+
+    def test_every_reader_lands_in_exactly_one_group(self, tmp_path: Path) -> None:
+        readers = self._files(
+            tmp_path, {"a.py": 50, "b.py": 40, "c.py": 30, "d.py": 20, "e.py": 10}
+        )
+        groups = partition_readers(readers, 3, root=tmp_path)
+        assert sorted(path for group in groups for path in group) == sorted(readers)
+
+    def test_the_largest_file_does_not_share_a_group_with_the_next_largest(
+        self, tmp_path: Path
+    ) -> None:
+        readers = self._files(tmp_path, {"a.py": 100, "b.py": 90, "c.py": 10, "d.py": 10})
+        groups = partition_readers(readers, 2, root=tmp_path)
+        assert not {Path("a.py"), Path("b.py")} <= set(groups[0])
+        assert not {Path("a.py"), Path("b.py")} <= set(groups[1])
+
+    def test_there_are_no_empty_groups_when_readers_are_few(self, tmp_path: Path) -> None:
+        readers = self._files(tmp_path, {"a.py": 5, "b.py": 5})
+        assert [len(group) for group in partition_readers(readers, 4, root=tmp_path)] == [1, 1]
+
+    def test_fewer_than_one_group_is_refused(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="at least 1"):
+            partition_readers([], 0, root=tmp_path)
+
+
 _INDEXED = (
     "intro\n\n"
     "<!-- BEGIN TASK INDEX — regenerate when adding/removing tasks -->\n\n"
@@ -204,22 +238,30 @@ class TestTheTaskIndexIsEmptiedAsReleasePrepDoes:
         assert outside.read_text(encoding="utf-8") == _INDEXED
 
 
-@pytest.fixture(scope="module")
-def released_tree(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """The tracked tree with ``UNRELEASED/`` in its just-released state."""
-    root = tmp_path_factory.mktemp("released")
-    copy_released_tree(root, REPO_ROOT)
-    return root
+def partition_readers(readers: list[Path], groups: int, *, root: Path) -> list[list[Path]]:
+    """Split ``readers`` into at most ``groups`` lists of near-equal total size.
+
+    Every reader lands in exactly one list. Largest files are placed first,
+    each in the list with the least size so far, because a file's size tracks
+    its run time well enough to keep the slowest list close to the average.
+    """
+    if groups < 1:
+        raise ValueError(f"groups must be at least 1, got {groups}")
+    sized = sorted(
+        readers, key=lambda path: ((root / path).stat().st_size, str(path)), reverse=True
+    )
+    buckets: list[list[Path]] = [[] for _ in range(min(groups, len(sized)))]
+    totals = [0] * len(buckets)
+    for path in sized:
+        lightest = totals.index(min(totals))
+        buckets[lightest].append(path)
+        totals[lightest] += (root / path).stat().st_size
+    return buckets
 
 
-@pytest.mark.slow
-def test_the_holding_area_readers_pass_with_nothing_staged(released_tree: Path) -> None:
-    readers = holding_area_readers(TESTS_DIR, exclude=Path(__file__).resolve())
-    staged = [p for p in (released_tree / UNRELEASED_DIR).rglob("*") if p.is_file()]
-    assert staged
-    assert all(p.name == SCAFFOLDING_NAME for p in staged), staged
-
-    result = subprocess.run(
+def _run_readers(released_tree: Path, readers: list[Path]) -> subprocess.CompletedProcess[str]:
+    """One nested pytest run over ``readers``, inside the released-state copy."""
+    return subprocess.run(
         [
             sys.executable,
             "-c",
@@ -236,8 +278,32 @@ def test_the_holding_area_readers_pass_with_nothing_staged(released_tree: Path) 
         timeout=scaled_seconds(RUN_TIMEOUT_SECONDS),
         check=False,
     )
-    assert result.returncode == 0, (
+
+
+@pytest.fixture(scope="module")
+def released_tree(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The tracked tree with ``UNRELEASED/`` in its just-released state."""
+    root = tmp_path_factory.mktemp("released")
+    copy_released_tree(root, REPO_ROOT)
+    return root
+
+
+@pytest.mark.slow
+def test_the_holding_area_readers_pass_with_nothing_staged(released_tree: Path) -> None:
+    readers = holding_area_readers(TESTS_DIR, exclude=Path(__file__).resolve())
+    staged = [p for p in (released_tree / UNRELEASED_DIR).rglob("*") if p.is_file()]
+    assert staged
+    assert all(p.name == SCAFFOLDING_NAME for p in staged), staged
+
+    groups = partition_readers(readers, READER_RUN_GROUPS, root=REPO_ROOT)
+    with ThreadPoolExecutor(max_workers=len(groups)) as pool:
+        results = list(pool.map(lambda group: _run_readers(released_tree, group), groups))
+    failures = [result for result in results if result.returncode != 0]
+    assert not failures, (
         "A test needs content staged in CLAUDE/UPGRADES/UNRELEASED/ and would fail at "
         "release prep, when that directory is emptied. Give it its own fixture.\n"
-        f"{result.stdout[-FAILURE_TAIL_CHARS:]}\n{result.stderr[-FAILURE_TAIL_CHARS:]}"
+        + "\n".join(
+            f"{result.stdout[-FAILURE_TAIL_CHARS:]}\n{result.stderr[-FAILURE_TAIL_CHARS:]}"
+            for result in failures
+        )
     )
