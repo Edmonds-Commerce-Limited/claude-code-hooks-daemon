@@ -50,6 +50,9 @@ import tokenize
 from pathlib import Path
 from typing import Any, Final, NamedTuple
 
+from claude_code_hooks_daemon.strategies.qa_suppression.python_strategy import (
+    PythonQaSuppressionStrategy,
+)
 from claude_code_hooks_daemon.utils.escape_hatch import is_acceptable_reason
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.scan_scope import (
@@ -65,23 +68,6 @@ _OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / _ARTEFACT_NAME
 
 RULE_NO_REASON: Final[str] = "inline-suppression-without-reason"
 RULE_UNREADABLE: Final[str] = "unreadable-file"
-
-#: One sentence per rule this checker can print, for ``llm_qa.py --explain``.
-STATEMENT_NO_REASON: Final[str] = (
-    "An inline QA suppression names no reason: owner ruling B2 requires every kept "
-    "suppression to say why it is needed."
-)
-FIX_NO_REASON: Final[str] = (
-    "Add the reason after the directive (`nosec B404 - fixed argv, no shell`), in a second "
-    "`#` segment of the same comment, or in the comment block directly above. Better: fix "
-    "the code so the suppression can be deleted."
-)
-STATEMENT_UNREADABLE: Final[str] = (
-    "A file could not be read or tokenised, so its suppressions were never judged."
-)
-FIX_UNREADABLE: Final[str] = (
-    "Fix the file so it parses (or is readable), then re-run; an unread file is not a pass."
-)
 
 #: Gitignored runtime state, never project source. Matched on the path BELOW the
 #: scan root (00466 N26), never on the absolute path.
@@ -108,11 +94,17 @@ _MAX_BYTES: Final[int] = 2_000_000
 
 #: Where each directive's own codes end. What follows is the free text.
 #: Each pattern is anchored at the START of a comment segment.
+#: A Bandit code (``B603``) or test name (``subprocess_without_shell_equals_true``)
+#: names the check that is silenced, never why, so both belong to the directive.
+_BANDIT_CODE: Final[str] = r"(?:B\d{3}|[a-z][a-z0-9]*(?:_[a-z0-9]+)+)"
 _DIRECTIVES: Final[tuple[tuple[str, re.Pattern[str]], ...]] = (
-    ("nosec", re.compile(r"nosec\b(?:[\s,]+B\d{3})*", re.IGNORECASE)),
+    ("nosec", re.compile(rf"nosec\b(?:\s*:)?(?:[\s,]*{_BANDIT_CODE})*", re.IGNORECASE)),
     (
         "noqa",
-        re.compile(r"noqa\b(?:\s*:\s*[A-Za-z]+\d+(?:[\s,]+[A-Za-z]+\d+)*)?", re.IGNORECASE),
+        re.compile(
+            r"(?:(?:ruff|flake8)\s*:\s*)?noqa\b" r"(?:\s*:\s*[A-Za-z]+\d+(?:[\s,]+[A-Za-z]+\d+)*)?",
+            re.IGNORECASE,
+        ),
     ),
     ("type: ignore", re.compile(r"type:\s*ignore\b(?:\[[^\]]*\])?", re.IGNORECASE)),
     ("nosemgrep", re.compile(r"nosemgrep\b(?:\s*:\s*[\w./-]+)?", re.IGNORECASE)),
@@ -121,12 +113,48 @@ _DIRECTIVES: Final[tuple[tuple[str, re.Pattern[str]], ...]] = (
         "shellcheck disable",
         re.compile(r"shellcheck\s+disable\s*=\s*[A-Za-z0-9,]+", re.IGNORECASE),
     ),
+    (
+        "pyright config",
+        re.compile(r"pyright:\s*report\w+\s*=\s*\w+(?:\s*,\s*report\w+\s*=\s*\w+)*", re.IGNORECASE),
+    ),
 )
+
+#: The directives the ``qa_suppression`` write-time handler already forbids, read from
+#: its Python strategy so the two lists cannot drift. Each starts ``#\s*``.
+PROJECT_FORBIDDEN_PATTERNS: Final[tuple[str, ...]] = (
+    PythonQaSuppressionStrategy().forbidden_patterns
+)
+_PROJECT_DIRECTIVES: Final[tuple[re.Pattern[str], ...]] = tuple(
+    re.compile(pattern, re.IGNORECASE) for pattern in PROJECT_FORBIDDEN_PATTERNS
+)
+#: What may follow a project directive before its free text: ``[codes]`` or ``=codes``.
+_PROJECT_CODES: Final[re.Pattern[str]] = re.compile(r"(?:\[[^\]]*\]|=[\w,.-]+)?")
 
 #: A cheap test over a whole file, so only files that could hold a directive are tokenised.
 _PREFILTER: Final[re.Pattern[str]] = re.compile(
-    r"nosec|noqa|nosemgrep|type:\s*ignore|pragma:\s*no\s+cover|shellcheck\s+disable",
+    "|".join(
+        (
+            r"nosec|noqa|nosemgrep|type:\s*ignore|pragma:\s*no\s+cover|shellcheck\s+disable",
+            r"pyright:\s*report",
+            *PROJECT_FORBIDDEN_PATTERNS,
+        )
+    ),
     re.IGNORECASE,
+)
+
+#: Words that make a comment block above a directive ABOUT the suppression. A block
+#: that names neither the directive's own words and codes nor one of these is about
+#: something else, and an unrelated neighbour is not a reason.
+_RELEVANT_WORDS: Final[tuple[str, ...]] = (
+    "suppress",
+    "silence",
+    "false positive",
+    "false-positive",
+    "unreachable",
+    "security",
+    "deliberate",
+    "intentional",
+    "on purpose",
 )
 
 _EN_DASH: Final[str] = chr(0x2013)
@@ -135,10 +163,28 @@ _LEADING_FILLER: Final[str] = f" \t:-{_EN_DASH}{_EM_DASH},;"
 
 
 class ParsedComment(NamedTuple):
-    """A comment's directives, and the free text that could be their reason."""
+    """A comment's directives, the free text that could be their reason, and their own words."""
 
     directives: list[str]
     reason_text: str
+    subjects: frozenset[str]
+
+
+def _match_directive(segment: str) -> tuple[str, int] | None:
+    """``(name, end)`` of the directive STARTING ``segment``, ``end`` past its codes."""
+    text = segment.lstrip(_LEADING_FILLER)
+    for name, pattern in _DIRECTIVES:
+        match = pattern.match(text)
+        if match:
+            return name, len(segment) - len(text) + match.end()
+    hashed = "#" + segment
+    for pattern in _PROJECT_DIRECTIVES:
+        match = pattern.match(hashed)
+        if match:
+            codes = _PROJECT_CODES.match(hashed, match.end())
+            end = codes.end() if codes else match.end()
+            return " ".join(hashed[1 : match.end()].split()), end - 1
+    return None
 
 
 def parse_comment(comment: str) -> ParsedComment:
@@ -150,17 +196,26 @@ def parse_comment(comment: str) -> ParsedComment:
     """
     directives: list[str] = []
     free: list[str] = []
+    subjects: set[str] = set()
     for segment in comment.split("#"):
-        text = segment.lstrip(_LEADING_FILLER)
-        for name, pattern in _DIRECTIVES:
-            match = pattern.match(text)
-            if match:
-                directives.append(name)
-                free.append(text[match.end() :].lstrip(_LEADING_FILLER))
-                break
-        else:
-            free.append(text)
-    return ParsedComment(directives, " ".join(part for part in free if part.strip()))
+        found = _match_directive(segment)
+        if found is None:
+            free.append(segment.lstrip(_LEADING_FILLER))
+            continue
+        name, end = found
+        directives.append(name)
+        subjects.update(word.lower() for word in re.findall(r"[\w.-]+", segment[:end]))
+        free.append(segment[end:].lstrip(_LEADING_FILLER))
+    return ParsedComment(
+        directives, " ".join(part for part in free if part.strip()), frozenset(subjects)
+    )
+
+
+def _is_about(block: str, subjects: frozenset[str]) -> bool:
+    """Whether ``block`` names the suppression's own words or codes, or says it is one."""
+    lowered = block.lower()
+    words = set(re.findall(r"[\w.-]+", lowered))
+    return bool(words & subjects) or any(word in lowered for word in _RELEVANT_WORDS)
 
 
 class CommentLine(NamedTuple):
@@ -222,7 +277,8 @@ def judge_comments(comments: dict[int, CommentLine]) -> tuple[int, list[tuple[in
             continue
         if is_acceptable_reason(parsed.reason_text):
             continue
-        if is_acceptable_reason(_block_above(comments, line)):
+        above = _block_above(comments, line)
+        if is_acceptable_reason(above) and _is_about(above, parsed.subjects):
             continue
         reasonless.extend((line, name) for name in parsed.directives)
     return total, reasonless

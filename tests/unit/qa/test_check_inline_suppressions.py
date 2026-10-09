@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -25,6 +26,10 @@ from types import ModuleType
 from typing import Final
 
 import pytest
+
+from claude_code_hooks_daemon.strategies.qa_suppression.python_strategy import (
+    PythonQaSuppressionStrategy,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _CHECKER = _REPO_ROOT / "scripts" / "qa" / "check_inline_suppressions.py"
@@ -35,6 +40,19 @@ NOSEMGREP: Final[str] = "# no" + "semgrep"
 TYPE_IGNORE: Final[str] = "# type: " + "ignore"
 NO_COVER: Final[str] = "# pragma: " + "no cover"
 SHELLCHECK: Final[str] = "# shellcheck " + "disable"
+
+#: Directives the qa_suppression write-time list names, plus the file-wide forms of
+#: tools the project gates on. Assembled from parts for the same reason as above.
+PROJECT_FORM_SAMPLES: Final[tuple[str, ...]] = (
+    "# py" + "right: ignore",
+    "# py" + "right: ignore[reportAssignmentType]",
+    "# py" + "right: reportMissingImports=false",
+    "# my" + "py: ignore-errors",
+    "# pyl" + "int: disable=C0114",
+    "# ru" + "ff: no" + "qa",
+    "# ru" + "ff: no" + "qa: E501",
+    "# fla" + "ke8: no" + "qa",
+)
 
 
 def _load_checker() -> ModuleType:
@@ -147,6 +165,104 @@ class TestAPythonSuppressionWithNoReasonFails:
         assert [f["line"] for f in _findings(tmp_path)] == [3]
 
 
+class TestTheProjectsOwnDirectiveListIsJudged:
+    """B2: pyright, mypy, pylint and the file-wide ruff/flake8 forms are suppressions too."""
+
+    @pytest.mark.parametrize("line", PROJECT_FORM_SAMPLES)
+    def test_a_bare_directive_is_a_finding(self, tmp_path: Path, line: str) -> None:
+        _write(tmp_path, "mod.py", f"x = 1\n{line}\n")
+        found = _findings(tmp_path)
+        assert [f["line"] for f in found] == [2]
+
+    @pytest.mark.parametrize("line", PROJECT_FORM_SAMPLES)
+    def test_a_reason_on_the_line_passes(self, tmp_path: Path, line: str) -> None:
+        _write(tmp_path, "mod.py", f"x = 1\n{line} - the stub is wrong upstream\n")
+        assert _findings(tmp_path) == []
+
+    @pytest.mark.parametrize("line", PROJECT_FORM_SAMPLES)
+    def test_a_directive_counts_towards_the_denominator(self, tmp_path: Path, line: str) -> None:
+        _write(tmp_path, "mod.py", f"x = 1\n{line} - the stub is wrong upstream\n")
+        assert checker.scan(tmp_path).suppressions_found == 1
+
+    def test_every_pattern_of_the_write_time_list_has_a_sample(self) -> None:
+        """The detector reads the strategy's list, so a pattern added there needs a sample here."""
+        samples = (NOQA, TYPE_IGNORE, *PROJECT_FORM_SAMPLES)
+        for pattern in PythonQaSuppressionStrategy().forbidden_patterns:
+            assert any(re.search(pattern, sample) for sample in samples), pattern
+
+    def test_the_detector_reads_the_strategy_list_not_a_copy(self) -> None:
+        assert (
+            checker.PROJECT_FORBIDDEN_PATTERNS == PythonQaSuppressionStrategy().forbidden_patterns
+        )
+
+
+class TestNosecReasonsAreReasons:
+    """S6: an ID with a colon, or Bandit's test name, names the check and not the reason."""
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            f"import subprocess  {NOSEC}: B603\n",
+            f"import subprocess  {NOSEC}:B603\n",
+            f"import subprocess  {NOSEC} subprocess_without_shell_equals_true\n",
+            f"import subprocess  {NOSEC}: B404, B603\n",
+            f"import subprocess  {NOSEC} B404 import_subprocess\n",
+        ],
+    )
+    def test_codes_and_test_names_alone_are_findings(self, tmp_path: Path, line: str) -> None:
+        _write(tmp_path, "mod.py", f"x = 1\n{line}")
+        assert [f["line"] for f in _findings(tmp_path)] == [2]
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            f"import subprocess  {NOSEC}: B603 - fixed argv, no shell\n",
+            f"import subprocess  {NOSEC} subprocess_without_shell_equals_true - fixed argv\n",
+        ],
+    )
+    def test_a_reason_after_them_passes(self, tmp_path: Path, line: str) -> None:
+        _write(tmp_path, "mod.py", f"x = 1\n{line}")
+        assert _findings(tmp_path) == []
+
+
+class TestTheBlockAboveMustBeAboutTheSuppression:
+    """S2: an adjacent comment about something else is not the reason."""
+
+    def test_an_unrelated_comment_above_is_a_finding(self, tmp_path: Path) -> None:
+        _write(
+            tmp_path,
+            "run.sh",
+            "#!/usr/bin/env bash\n"
+            "# First call: return one-time advisory context so the agent sees it once.\n"
+            f"{SHELLCHECK}=SC2317\n",
+        )
+        assert [f["line"] for f in _findings(tmp_path)] == [3]
+
+    def test_a_comment_naming_the_code_is_a_reason(self, tmp_path: Path) -> None:
+        _write(
+            tmp_path,
+            "run.sh",
+            "#!/usr/bin/env bash\n# SC2317 fires here: the body is only reached via export -f.\n"
+            f"{SHELLCHECK}=SC2317\n",
+        )
+        assert _findings(tmp_path) == []
+
+    def test_a_comment_naming_the_tool_is_a_reason(self, tmp_path: Path) -> None:
+        _write(
+            tmp_path,
+            "run.sh",
+            "#!/usr/bin/env bash\n# Called by the forwarder, so shellcheck sees dead code.\n"
+            f"{SHELLCHECK}=SC2317\n",
+        )
+        assert _findings(tmp_path) == []
+
+    def test_an_unrelated_comment_above_a_python_directive_is_a_finding(
+        self, tmp_path: Path
+    ) -> None:
+        _write(tmp_path, "mod.py", f"# Parse the config file.\nimport os  {NOQA}: F401\n")
+        assert [f["line"] for f in _findings(tmp_path)] == [2]
+
+
 class TestOnlyRealCommentsAreJudged:
     def test_a_directive_in_a_string_is_not_a_comment(self, tmp_path: Path) -> None:
         _write(tmp_path, "mod.py", f'SAMPLE = "x = 1  {NOQA}"\n')
@@ -188,7 +304,8 @@ class TestShellSuppressions:
         _write(
             tmp_path,
             "run.sh",
-            f"#!/usr/bin/env bash\n# Invoked indirectly by the EXIT trap.\n{SHELLCHECK}=SC2317\n",
+            "#!/usr/bin/env bash\n# Invoked only by the EXIT trap, so the body looks unreachable.\n"
+            f"{SHELLCHECK}=SC2317\n",
         )
         assert _findings(tmp_path) == []
 

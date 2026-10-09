@@ -2672,6 +2672,7 @@ ensure_daemon() {
         # Plan 00156: jq-free. The event name arrives as $1 (the wrapper passes
         # it); the hook_input payload on stdin is drained (this advisory is a
         # fixed template with no user-derived content).
+        # Exported with `export -f` and called by the forwarder, so shellcheck sees the body as unreachable.
         # shellcheck disable=SC2317
         send_request_stdin() {
             local event_name="${1:-Unknown}"

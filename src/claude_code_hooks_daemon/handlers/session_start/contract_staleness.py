@@ -374,8 +374,7 @@ class ContractStalenessHandler(SessionStartHandlerBase):
             return None
         # SECURITY: fixed argv, no shell, binary resolved via PATH lookup.
         try:
-            # Bandit B603 is raised by any subprocess call with a non-literal argv; see above.
-            result = subprocess.run(  # nosec B603
+            result = subprocess.run(  # nosec B603 - fixed argv (PATH-resolved claude, literal flag), no shell
                 [binary, _CLAUDE_VERSION_FLAG],
                 capture_output=True,
                 text=True,
