@@ -1357,3 +1357,27 @@ rows:
   - id: a9-mv-worktree-note-then-ls
     command: |-
       set -euo pipefail; mv untracked/worktrees/foo/notes.txt tmp.txt; ls src/x
+  - id: a9-rg-pattern-mentions-home
+    command: |-
+      rg "/home" src/
+  - id: a9-grep-slash-pattern-include
+    command: |-
+      grep -rn "/" src/ --include=*.py
+  - id: a9-rg-single-file-in-home
+    command: |-
+      rg foo ~/.bashrc
+  - id: a9-grep-proc-self-status
+    command: |-
+      grep -r foo /proc/self/status
+  - id: a9-find-root-maxdepth-one
+    command: |-
+      find / -maxdepth 1 -name tmp
+  - id: a9-find-sys-class-net-maxdepth-one
+    command: |-
+      find /sys/class/net -maxdepth 1
+  - id: a9-find-home-subdirectory
+    command: |-
+      find $HOME/proj -name x
+  - id: a9-grep-home-projects
+    command: |-
+      grep -rl x --include=*.py ~/projects

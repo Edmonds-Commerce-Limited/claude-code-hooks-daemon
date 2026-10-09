@@ -22,6 +22,8 @@ Escape hatch (mirrors git_stash's ``MUST_STASH_BECAUSE=``):
 """
 
 import re
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
@@ -76,9 +78,8 @@ _SHORT_FLAG_CLUSTER_RE: Final[re.Pattern[str]] = re.compile(r"-[A-Za-z]+$")
 # NOT split on (it appears inside redirections like ``2>&1``).
 _SEGMENT_SPLIT_RE: Final[re.Pattern[str]] = re.compile(r"\|\||&&|;|\||\n")
 
-# Home-relative tokens (and prefixes) that denote the user's entire home tree.
+# Home-relative tokens that denote the user's entire home tree.
 _HOME_EXACT: Final[frozenset[str]] = frozenset({"~", "$HOME", "${HOME}"})
-_HOME_PREFIXES: Final[tuple[str, ...]] = ("~/", "$HOME/", "${HOME}/")
 
 # Default catastrophic roots. ``/`` is matched EXACTLY (never as a prefix, or it
 # would block every absolute path). ``/home`` and ``/root`` are matched exactly
@@ -94,14 +95,148 @@ def _command_token_basename(token: str) -> str:
 
 
 def _is_dangerous_root(token: str) -> bool:
-    """Return True if ``token`` is a path argument rooted at a catastrophic location."""
-    if token in _HOME_EXACT:
+    """Return True if ``token`` is a scan root that walks a whole catastrophic tree.
+
+    ``/``, ``/home``, ``/root``, ``/proc``, ``/sys``, ``~`` and ``$HOME`` are
+    the trees themselves (a trailing slash is the same root). A subdirectory of
+    the home tree (``~/projects``) is a project root, and an existing FILE under
+    ``/proc`` or ``/sys`` is a single read: neither walks the tree.
+    """
+    root = token.rstrip("/") or token
+    if root in _HOME_EXACT or root in _DEFAULT_EXACT_ROOTS:
         return True
-    if any(token.startswith(prefix) for prefix in _HOME_PREFIXES):
-        return True
-    if token in _DEFAULT_EXACT_ROOTS:
-        return True
-    return any(token == root or token.startswith(root + "/") for root in _DEFAULT_PREFIX_ROOTS)
+    if any(root.startswith(prefix + "/") for prefix in _DEFAULT_PREFIX_ROOTS):
+        return not Path(root).is_file()
+    return root in _DEFAULT_PREFIX_ROOTS
+
+
+@dataclass(frozen=True)
+class _ScanSyntax:
+    """The option syntax that tells a scanner's operands apart."""
+
+    short_values: str  # short options whose value is the next word (or attached)
+    long_values: frozenset[str]  # long options whose value is the next word
+    pattern_options: str = ""  # short options that SUPPLY the pattern
+    pattern_long: frozenset[str] = frozenset()  # long options that supply the pattern
+    depth_short: str = ""  # short option bounding the depth
+    depth_long: frozenset[str] = frozenset()  # long options bounding the depth
+    path_long: frozenset[str] = frozenset()  # long options whose value IS a scan root
+    pattern_operand: bool = True  # the first operand is a pattern, not a path
+
+
+_GREP_SYNTAX: Final = _ScanSyntax(
+    short_values="efmABCdD",
+    long_values=frozenset(
+        {"regexp", "file", "max-count", "after-context", "before-context", "context"}
+        | {"include", "exclude", "exclude-from", "exclude-dir", "include-dir", "directories"}
+        | {"devices", "label", "binary-files"}
+    ),
+    pattern_options="ef",
+    pattern_long=frozenset({"regexp", "file"}),
+)
+_RG_SYNTAX: Final = _ScanSyntax(
+    short_values="efmABCgtTjMrEd",
+    long_values=frozenset(
+        {"regexp", "file", "max-count", "after-context", "before-context", "context", "glob"}
+        | {"iglob", "type", "type-not", "type-add", "max-depth", "threads", "max-filesize"}
+        | {"replace", "engine", "encoding", "pre", "pre-glob", "sort", "sortr", "colors"}
+        | {"ignore-file", "max-columns", "path-separator"}
+    ),
+    pattern_options="ef",
+    pattern_long=frozenset({"regexp", "file", "files"}),
+    depth_short="d",
+    depth_long=frozenset({"max-depth"}),
+)
+_FD_SYNTAX: Final = _ScanSyntax(
+    short_values="deEtSjc",
+    long_values=frozenset(
+        {"max-depth", "extension", "exclude", "type", "size", "threads", "color", "min-depth"}
+        | {"exact-depth", "changed-within", "changed-before", "owner", "format", "ignore-file"}
+        | {"max-results", "search-path", "base-directory"}
+    ),
+    depth_short="d",
+    depth_long=frozenset({"max-depth"}),
+    path_long=frozenset({"search-path", "base-directory"}),
+)
+_SYNTAX_BY_COMMAND: Final[dict[str, _ScanSyntax]] = {
+    **dict.fromkeys(_GREP_FAMILY_SCANNERS | {"rgrep"}, _GREP_SYNTAX),
+    "rg": _RG_SYNTAX,
+    "fd": _FD_SYNTAX,
+    "fdfind": _FD_SYNTAX,
+}
+
+# A scan bounded to this many levels below its root does not walk the tree.
+_BOUNDED_DEPTH: Final = 1
+
+
+def _depth_within_bound(value: str | None) -> bool:
+    return value is not None and value.isdigit() and int(value) <= _BOUNDED_DEPTH
+
+
+def _find_roots(args: list[str]) -> tuple[list[str], bool]:
+    """The start paths of a ``find`` and whether ``-maxdepth`` bounds it."""
+    index = 0
+    while index < len(args):
+        if args[index] in ("-H", "-L", "-P") or args[index].startswith("-O"):
+            index += 1
+        elif args[index] == "-D":
+            index += 2
+        else:
+            break
+    roots: list[str] = []
+    while index < len(args) and not args[index].startswith(("-", "(", "!", ",")):
+        roots.append(args[index])
+        index += 1
+    bounded = any(
+        arg == "-maxdepth" and _depth_within_bound(following)
+        for arg, following in zip(args, [*args[1:], ""], strict=True)
+    )
+    return roots, bounded
+
+
+def _search_roots(syntax: _ScanSyntax, args: list[str]) -> tuple[list[str], bool]:
+    """The paths a grep/rg/fd-style scan walks and whether a depth option bounds it.
+
+    The first operand is the PATTERN (unless an option supplies it), so
+    ``rg "/home" src/`` scans ``src/`` only. An option's value is not an operand.
+    """
+    operands: list[str] = []
+    roots: list[str] = []
+    pattern_given = False
+    bounded = False
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        if arg == "--":
+            operands.extend(args[index:])
+            break
+        value: str | None = None
+        if arg.startswith("--"):
+            name, equals, attached = arg[2:].partition("=")
+            pattern_given = pattern_given or name in syntax.pattern_long
+            takes_next = not equals and name in syntax.long_values
+            value = attached if equals else (args[index] if takes_next else None)
+            index += takes_next
+            if name in syntax.path_long and value is not None:
+                roots.append(value)
+            if name in syntax.depth_long:
+                bounded = bounded or _depth_within_bound(value)
+        elif arg.startswith("-") and len(arg) > 1:
+            for position, letter in enumerate(arg[1:], 1):
+                if letter in syntax.short_values:
+                    pattern_given = pattern_given or letter in syntax.pattern_options
+                    attached = arg[position + 1 :]
+                    takes_next = not attached
+                    value = attached or (args[index] if index < len(args) else None)
+                    index += takes_next
+                    if letter in syntax.depth_short:
+                        bounded = bounded or _depth_within_bound(value)
+                    break
+        else:
+            operands.append(arg)
+    skipped = 0 if pattern_given or not syntax.pattern_operand else 1
+    return roots + operands[skipped:], bounded
 
 
 def _tokenize(segment: str) -> list[str]:
@@ -141,7 +276,11 @@ def _segment_is_dangerous(segment: str) -> bool:
     if not recursive:
         return False
 
-    return any(_is_dangerous_root(arg) for arg in args)
+    if command == "find":
+        roots, bounded = _find_roots(args)
+    else:
+        roots, bounded = _search_roots(_SYNTAX_BY_COMMAND[command], args)
+    return not bounded and any(_is_dangerous_root(root) for root in roots)
 
 
 class RootRecursionGuardHandler(PreToolUseHandlerBase):
@@ -211,7 +350,11 @@ class RootRecursionGuardHandler(PreToolUseHandlerBase):
             "**Allowed**: the same scanners scoped to the project — "
             '`rg -l "x" .`, `grep -rl "x" "$CLAUDE_PROJECT_DIR"`, '
             "`grep -rl x src/`, `find . -name y`. Non-recursive `grep x /etc/hosts` "
-            "is not affected.\n\n"
+            "is not affected. The guard judges the scan ROOT: a pattern operand "
+            '(`rg "/home" src/`), a single file (`grep -r foo /proc/self/status`), '
+            "a subdirectory of home (`~/projects`, `$HOME/proj`) and a scan bounded to "
+            "one level (`find / -maxdepth 1`, `rg --max-depth 1 x /`) are allowed. "
+            "`grep -r x /`, `find / -name x` and `rg x ~` stay blocked.\n\n"
             "**Note**: `... | head` does NOT bound a `-l`/`-rl` scan — a producer that "
             "matches nothing never writes, so it never receives SIGPIPE and runs to "
             "completion across the whole disk.\n\n"
