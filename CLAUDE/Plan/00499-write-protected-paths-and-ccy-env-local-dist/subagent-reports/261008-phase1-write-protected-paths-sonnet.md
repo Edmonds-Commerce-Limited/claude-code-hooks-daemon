@@ -47,6 +47,19 @@ One allow probe (an `echo` naming the file) that runs live. The deny probe is de
 live probe of the real protected file would create or destroy it if the handler were not loaded, which the task
 forbids. All deny cases run through the real handler over temporary paths.
 
+## QA status
+
+- `./scripts/qa/llm_qa.py changed` did NOT run: the host-wide QA lock was held for over three hours by the
+  coordinator's `llm_qa.py all` (pid 3903498), and two waits (600 s, 3000 s, 7000 s) all expired. Rerun it once the
+  lock is free.
+- Run directly instead, all green: the two new test files (139 tests), `tests/unit/core` (2715), the evasion triage,
+  `tests/integration/test_example_config.py`, `tests/unit/config`; mypy on the new files; `ruff check`; Black.
+- One known red until the daemon restarts: `tests/integration/test_claude_md_guidance_coverage.py:: TestGuidanceActuallyReachesClaudeMd::test_every_earning_handler_has_a_section_in_claude_md` wants a
+  `write-protected-paths` section in the generated `CLAUDE.md` block, which the daemon writes (and auto-commits) on
+  restart. It was not hand-edited.
+- The config-changes manifest is `v3.70.0.yaml`; rename it if the release agent targets another version, and expect
+  a trivial merge if another branch also adds one.
+
 ## Constraint kept
 
 `.claude/ccy/ccy.env.local` was not created, edited, moved or deleted in any checkout; tests use `tmp_path`.
