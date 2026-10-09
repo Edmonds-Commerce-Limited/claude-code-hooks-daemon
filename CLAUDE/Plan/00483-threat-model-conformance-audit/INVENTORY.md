@@ -1307,8 +1307,9 @@ threat model): `MUST_SQUASH_BECAUSE` (ancestry_preserving_merge), `MUST_STASH_BE
 
 Judged by the two-part test in PLAN.md and ARCHITECTURE.md. Handler code was read per guard (file:line cited); no
 `hooks-daemon probe` was run, so every false positive or gap below is a reading of the code, marked UNVERIFIED, and not a
-reproduction. All three guards post-date the A1/A2 removals, so they were written under the "deny only on a positive
-finding" rule.
+reproduction. `write_protected_paths` and `host_command_guard` post-date the A1/A2 removals, so they were written under the "deny
+only on a positive finding" rule; `github_issue_assignment_guard` (Plan 00490) pre-dates the dc5c9263b merge and is
+judged as it stands now.
 
 ## 1. write_protected_paths (`handlers/pre_tool_use/write_protected_paths.py`, 570 lines; Plan 00499; opt-in, priority 18)
 

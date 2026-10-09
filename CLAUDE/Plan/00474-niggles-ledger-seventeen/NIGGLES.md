@@ -43,10 +43,10 @@ coordinator); none is an owner ruling. The command-shaped ones have a
 **Still open, residuals stated precisely (not dismissed):**
 
 - **N124** — the grep/rg pattern shapes are fixed; the `find -regex`/`-iregex` operand is still read as a path (see its entry in [CARRIED-REFIX-BRANCHES.md](CARRIED-REFIX-BRANCHES.md)).
-- **N222** — the guard half no longer exists: the wall-clock scan deadline was removed by A1 (merge dc5c9263b; a cap or deadline now allows with an advisory). What remains is the test half: about 15 tests that assert wall-clock bounds and fail on a loaded host. Remedy: switch them to the load-scaled helper N95 already uses.
-- **N260** — the `sys.path` half is fixed (257847b51). Still open: the local gate (`scripts/qa/check_project_handler_tests.py`) does not pass the pytest plugin flag and daemon state that `.github/workflows/qa.yml` (line 498) uses, so a run can be green locally and red on CI.
+- **N222** — the guard half is changed, not removed: `SCAN_DEADLINE_SECONDS` is still used at `secret_file_guard.py` lines 1403 and 1616, but A1 (merge dc5c9263b) made the timeout outcome allow with an advisory instead of deny. What remains is the test half: about 15 tests that assert wall-clock bounds and fail on a loaded host. Remedy: switch them to the load-scaled helper N95 already uses.
+- **N260** — the `sys.path` half is fixed (257847b51). Still open, direction corrected: `.github/workflows/qa.yml` (line 498) passes only `--import-mode=importlib`, while the local runner (`daemon/cli.py`, lines 6384-6396) passes that plus `-p no:claude_code_hooks_daemon.qa.full_qa_gate`. CI therefore loads the full-QA gate plugin and the local run does not, so a run can be green locally and red on CI.
 
-**Fixed, not yet marked in the 00466 index:** N170, N130 and N136 (statuses corrected in CARRIED-REFIX-BRANCHES.md, merges 9b2e15be1 and 012915bd9/dc5c9263b); N79 (the ordinary-command corpus is about 357 rows after R2, above the 200 asked).
+**Fixed, not yet marked in the 00466 index:** N170, N130 and N136 (statuses corrected in CARRIED-REFIX-BRANCHES.md, merges 9b2e15be1 and 012915bd9/dc5c9263b); N79 (the ordinary-command corpus is 391 rows now, above the 200 asked).
 
 ### 55 entries carried from the six dropped re-fix branches
 
