@@ -123,7 +123,7 @@ test, alongside N101's.
 
 ### N170 — `secret_file_guard`'s secret-meta and `git rm --cached` exemptions let a second command read a protected file
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-a.md)
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed, merge 9b2e15be1 (worktree-p483-secret, Plan 00483 Task 3.1): the `secret-meta`/`git rm --cached` exemption refuses `&`, `$( )` and backticks
 
 **Found:** Plan 00421 review 4, D-RULE check (finding SH1, graded BLOCKER),
 reproduced in memory against main's source. All of these were ALLOWED while
@@ -601,7 +601,7 @@ matches it exactly. Tests: `test_git_command_target_eval_walks.py`
 
 ### N124 — `secret_file_guard` reads a grep/rg regex argument as a path and denies it
 
-**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on main (Plan 00483 triage) for the three shapes in the entry; ✅ Fixed on worktree-p483-glob (Plan 00483 Task 3.1) for the residual escaped-dot or alternation grep/rg pattern: the positional pattern is text; ⬜ Open: other regex-text tools such as `find -regex` and a `python3 -c` regex (see TRIAGE-carried-b.md)
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on main (Plan 00483 triage) for the three shapes in the entry; ✅ Fixed on worktree-p483-glob (Plan 00483 Task 3.1) for the residual escaped-dot or alternation grep/rg pattern: the positional pattern is text; ⬜ Open, residual stated precisely (Plan 00483, 2026-10-09): the grep/rg positional pattern and `-e`/`--regexp` value are fixed (worktree-p483-glob merge 2ba5b72a2; Issue #70 regex-operand merge 0bfca745d). Still open: the regex operand of `find -regex`/`-iregex`, which the guard still reads as a path. Re-confirmed live on 2026-10-09: a Bash command carrying `find . -regex '.*decision:.*'` was denied R-SECRET-BASH-MENTION (matched glob `.vault-pass*`, on the token `.*decision:.*`). A `python3 -c` regex string was not re-probed and stays unverified (see TRIAGE-carried-b.md)
 
 **Found by the small-a fixer.** `grep -n "def .*repair\|uv" f`,
 `grep -v '^tests/.*:.*#'` and `grep "^tests/.*test_.*\.py$"` were each denied
@@ -687,7 +687,7 @@ handler cases and 7 module cases. Release note 142.
 
 ### N130 — Glob and directory walks answered "nothing here" when they could not finish
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-b.md, D2: Grep directory scan fails open past 5000 files); the other three halves are fixed on main
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed, merge 012915bd9 (worktree-n130-walk, Plan 00483 Task 3.1), then superseded by merge dc5c9263b (Plan 00483 A1/A2): that merge removed the capped walk, and the cached protected-file index answers the question without walking the tree; the other three halves were already fixed on main
 
 **Found by the small-a D-PATH (BLOCKER 2, MAJOR 3) and D-RULE (F4) reviews,
 shared with main.** Four defects, each of which made the walk fail open:
@@ -797,7 +797,7 @@ and is not fixed here.
 
 ### N136 — A dotted Python module name is read as a protected path
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-b.md)
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed, merge 9b2e15be1 (worktree-p483-secret, Plan 00483 Task 3.1): a `python -m` module or a later `-c` import is not a path
 
 **Found by n23-land-1.** `secret_file_guard` denied
 `.venv/bin/python -c "import sys; sys.path.insert(0,'src'); import claude_code_hooks_daemon.utils.secret_file_matching as s; ..."`:

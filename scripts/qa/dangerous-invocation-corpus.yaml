@@ -292,6 +292,60 @@ rows:
       fix on the dropped branch would deny `.venv/bin/ansible-playbook`, an
       ordinary spelling, so it would add an in-scope false positive.
 
+  # ----------------------- carried from ledger 00466 (Plan 00483 Task 2.3 write-back)
+  #
+  # Command-shaped entries of archived ledger 00466 that the Plan 00483 Task 2.1
+  # triage (TRIAGE-ledger-466.md) dismissed under the same threat model, and the
+  # `script` shapes of ledger N240 (Fable ruling, no change). These are triage
+  # verdicts, not owner rulings.
+  - id: dismissed-n57-variable-body-in-bash-c
+    command: "bash -c \"$V\""
+    axis: working-tree-destruction
+    verdict: UNCOVERED-accepted
+    note: >-
+      ACCEPTED, threat-model limb 1 (ledger 00466 N57). The text run by
+      `bash -c` is held in a variable, so the operative text is not visible at
+      the call. The literal `bash -c 'git reset --hard'` is denied, and so is
+      `V='git reset --hard' && bash -c "$V"`, because the assignment itself
+      shows the text; the row holds the variable with no visible assignment.
+
+  - id: dismissed-n77-variable-body-in-eval
+    command: "eval \"$x\""
+    axis: working-tree-destruction
+    verdict: UNCOVERED-accepted
+    note: >-
+      ACCEPTED, threat-model limb 1 (ledger 00466 N77, the `eval "$x"` shape;
+      N57 holds the `bash -c "$V"` shape). The alias and written-then-run-script
+      shapes of N77 are limb 1 as well.
+
+  - id: dismissed-n89-redefined-data-sink
+    command: "cat() { bash; } && cat <<'E'\ngit reset --hard\nE"
+    axis: working-tree-destruction
+    verdict: UNCOVERED-accepted
+    note: >-
+      ACCEPTED, threat-model limb 2 (ledger 00466 N89). Redefining `cat` as a
+      function that runs `bash` has no working purpose except defeating the
+      heredoc reader; no ordinary work does it. A plain `git reset --hard` is
+      denied.
+
+  - id: no-change-n240-script-typescript-log
+    command: "script -q /tmp/typescript.log -c ls"
+    axis: project-containment
+    verdict: UNCOVERED-accepted
+    note: >-
+      ACCEPTED, no change (ledger N240, ruling delegated by the owner to a Fable
+      subagent, RULINGS-owner-delegated-fable.md). A `script` typescript
+      duplicates what the terminal already showed, and a path passed as a plain
+      argument is containment's documented boundary.
+
+  - id: no-change-n240-script-log-option
+    command: "script -O /tmp/out.log"
+    axis: project-containment
+    verdict: UNCOVERED-accepted
+    note: >-
+      ACCEPTED, no change (ledger N240, same Fable ruling): the `-I`/`-O`/`-B`/`-T`
+      log-file spelling of the shape above.
+
   # ------------------------------------------- recursive searches (ledger N130)
   #
   # A row runs against this checkout, so a tree past the scan's entry cap, an

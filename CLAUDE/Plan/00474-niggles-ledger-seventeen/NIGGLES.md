@@ -11,7 +11,42 @@ entry rows, 65 of them not in a terminal state. They stay open, are not copied
 here, and are tracked from this ledger by reference to that
 [index](../Completed/00466-niggles-ledger-sixteen/PLAN.md). Its branches are all
 resolved: landed (n101, n211, lifecycle, d-00376) or dropped, their branch-only
-entries carried in the sections below. Nothing is dismissed or deferred.
+entries carried in the sections below. Plan 00483's dismissals and no-change
+rulings for these entries are recorded in the next section.
+
+### Plan 00483 write-back for the 00466 entries (Task 2.3)
+
+Plan 00483 triaged the 67 entries open in archived ledger 00466
+([TRIAGE-ledger-466.md](../00483-threat-model-conformance-audit/TRIAGE-ledger-466.md)).
+Ledger 00466 is archived, so its dispositions are recorded here. The dismissals are
+verdicts of that triage (classified under the two-part test, checked by the
+coordinator); none is an owner ruling. The command-shaped ones have a
+`UNCOVERED-accepted` row in `scripts/qa/dangerous-invocation-corpus.yaml`.
+
+**Dismissed (threat model):**
+
+- **N45** — limb 2: a NUL byte in `secret_word_list_path`; no working purpose, and no careless edit produces it. No command, so no corpus row. The `except (OSError, ValueError)` hardening noted in the triage needs no plan.
+- **N57** — limb 1: `V=...; bash -c "$V"`, `eval "$V"`, an alias, or a file written then run; the operative text is not visible at the call. Corpus row `dismissed-n57-variable-body-in-bash-c`. Same ground as dismissed N135 and N189.
+- **N68** — limb 2: a moved-away daemon checkout reads NOT_INSTALLED and fails open; the ruling's "anything that stops or routes around the daemon". No command, so no corpus row.
+- **N71** — limb 1: a script rewritten between judgement and run; its text comes from a file. The Plan 00464 script walker it concerned is absent from main. No corpus row (a script file is not a command string).
+- **N72** — limb 1: `python3 s.py` building a git argv at run time; same absent walker. No corpus row.
+- **N77** — limb 1: `x=...; bash -c "$x"`, `eval "$x"`, an in-command alias, a script written then run. Corpus row `dismissed-n77-variable-body-in-eval`.
+- **N78** — limb 2: a trailing `#c` after a key name and backslash-octal in an unquoted word. No corpus row: main denies the representative command (`cat $'\151d_rsa'` is denied by `secret_file_guard`), so no allowed command exists to pin. The one prose false positive the entry mentioned was never identified.
+- **N89** — limb 2: `cat() { bash; }; cat <<'E'` and `alias cat=bash`; no ordinary work redefines `cat` as `bash`. Corpus row `dismissed-n89-redefined-data-sink`.
+
+**No change:**
+
+- **N62** — subagent context and concurrency budgets stay with the harness knob `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` and the Plan 00479 usage ceiling. Source: a ruling the owner delegated to a Fable subagent, extended to N62 by the coordinator ([RULINGS-owner-delegated-fable.md](../00483-threat-model-conformance-audit/RULINGS-owner-delegated-fable.md)), confirmed by a coordinator call on 2026-10-05, which is not an owner ruling. Re-open trigger: if the 00479 pause fires routinely because of subagent context, build the concurrency cap first.
+- **N74** — `grep -r` over an ancestor of a protected path. Source: the same Fable ruling, "no change, accepted residual". The owner ruling A2 of 2026-10-05 ([OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md)) settled N74 through the cached protected-file index, merged as dc5c9263b. Corpus row `recursive-search-grep-r-whole-checkout` is `COVERED`, so there is no `UNCOVERED-accepted` row.
+- **N240** (carried list) — the two `script` log shapes now have their corpus rows, `no-change-n240-script-typescript-log` and `no-change-n240-script-log-option`; they were promised by the Fable ruling but missing from the corpus.
+
+**Still open, residuals stated precisely (not dismissed):**
+
+- **N124** — the grep/rg pattern shapes are fixed; the `find -regex`/`-iregex` operand is still read as a path (see its entry in [CARRIED-REFIX-BRANCHES.md](CARRIED-REFIX-BRANCHES.md)).
+- **N222** — the guard half no longer exists: the wall-clock scan deadline was removed by A1 (merge dc5c9263b; a cap or deadline now allows with an advisory). What remains is the test half: about 15 tests that assert wall-clock bounds and fail on a loaded host. Remedy: switch them to the load-scaled helper N95 already uses.
+- **N260** — the `sys.path` half is fixed (257847b51). Still open: the local gate (`scripts/qa/check_project_handler_tests.py`) does not pass the pytest plugin flag and daemon state that `.github/workflows/qa.yml` (line 498) uses, so a run can be green locally and red on CI.
+
+**Fixed, not yet marked in the 00466 index:** N170, N130 and N136 (statuses corrected in CARRIED-REFIX-BRANCHES.md, merges 9b2e15be1 and 012915bd9/dc5c9263b); N79 (the ordinary-command corpus is about 357 rows after R2, above the 200 asked).
 
 ### 55 entries carried from the six dropped re-fix branches
 
