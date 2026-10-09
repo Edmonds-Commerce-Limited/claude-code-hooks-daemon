@@ -1,12 +1,12 @@
 """BranchCountAdvisorHandler - open work branches and how far they lag (Plan 00475 Task 4.1).
 
 CLAUDE/Worktree.md, "Small Batches", defines the rule this reports against:
-at most 3 open work branches at once, counted as the ``worktree-*`` branches
-that exist, a branch whose worktree is gone counting until it is deleted. An
-unmerged branch also falls behind the default branch, and its merge cost grows
-with every commit it misses.
+at most 3 open work branches at once, counted as the ``worktree-*`` and agent
+dispatch ``agent-*`` branches that exist, a branch whose worktree is gone
+counting until it is deleted. An unmerged branch also falls behind the default
+branch, and its merge cost grows with every commit it misses.
 
-On a new session this counts the local ``worktree-*`` branches. When there are
+On a new session this counts those local branches. When there are
 more than ``max_open_branches`` it names them all; it also names any branch more
 than ``behind_main_threshold`` commits behind the default branch. It is
 advisory only and silent when within both limits, outside a git repository, or
@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.utils import git_sync
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
     HEADS_PREFIX,
+    WORK_BRANCH_PREFIXES,
     branch_ref,
     run_git,
     strip_branch_ref,
@@ -34,9 +35,9 @@ from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
 
-# CLAUDE/Worktree.md, "Small Batches": the limit and the branch naming it counts.
+# CLAUDE/Worktree.md, "Small Batches": the limit. The branches it counts are
+# git_repo.WORK_BRANCH_PREFIXES.
 DEFAULT_MAX_OPEN_BRANCHES = 3
-WORK_BRANCH_PREFIX = "worktree-"
 # A branch this far behind is costly to merge (ledger 00466's stale branches were
 # 139 to 650 commits behind); half of the smallest of those is the warning line.
 DEFAULT_BEHIND_MAIN_THRESHOLD = 50
@@ -75,12 +76,12 @@ class BranchCountAdvisorHandler(SessionStartHandlerBase):
             return Path.cwd()
 
     def _work_branches(self, root: Path) -> list[str]:
-        """Local ``worktree-*`` branch names; empty when git fails."""
+        """Local work branch names (``worktree-*``, ``agent-*``); empty when git fails."""
         result = run_git(
             root,
             "for-each-ref",
             "--format=%(refname)",
-            f"{HEADS_PREFIX}{WORK_BRANCH_PREFIX}*",
+            *(f"{HEADS_PREFIX}{prefix}*" for prefix in WORK_BRANCH_PREFIXES),
             timeout=Timeout.GIT_CONTEXT,
         )
         if result.returncode != 0:
@@ -175,8 +176,9 @@ class BranchCountAdvisorHandler(SessionStartHandlerBase):
         """The branch limit is a standing policy, not a one-shot correction."""
         return (
             "## branch_count_advisor — keep open work branches few\n\n"
-            "At most `options.max_open_branches` (default 3) `worktree-*` branches may be "
-            "open at once. Finish (merge or drop) one before starting another. A branch "
+            "At most `options.max_open_branches` (default 3) work branches may be open at "
+            "once: `worktree-*`, and the `agent-*` branch each `isolation: worktree` agent "
+            "dispatch is given. Finish (merge or drop) one before starting another. A branch "
             "whose worktree is gone still counts until it is deleted. A branch more than "
             "`options.behind_main_threshold` (default 50) commits behind the default "
             "branch should be merged or dropped. Advisory only."
@@ -195,7 +197,8 @@ class BranchCountAdvisorHandler(SessionStartHandlerBase):
                 title="branch count advisor - names work branches beyond the limit",
                 command='echo "test"',
                 description=(
-                    "On a new session the handler counts worktree-* branches and, above the "
+                    "On a new session the handler counts worktree-* and agent-* branches and, "
+                    "above the "
                     "limit or far behind the default branch, names them. It never blocks."
                 ),
                 expected_decision=Decision.ALLOW,

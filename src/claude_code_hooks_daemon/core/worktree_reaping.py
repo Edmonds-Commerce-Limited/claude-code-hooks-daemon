@@ -46,6 +46,7 @@ from typing import Protocol
 
 from claude_code_hooks_daemon.core.worktree_paths import WORKTREE_DIR_PATTERNS
 from claude_code_hooks_daemon.utils.git_repo import (
+    AGENT_BRANCH_PREFIX,
     parse_worktree_porcelain,
     run_git,
     strip_branch_ref,
@@ -530,7 +531,7 @@ def reap_worktree(
 #: The naming shape agent dispatch uses (`agent-<hex>-<hex>`). Scoped to it on
 #: purpose: Plan 00349 and Plan 00048 both declined a general branch-pruning
 #: policy, and Plan 00352 inherits that boundary rather than widening it.
-AGENT_BRANCH_GLOB = "agent-*"
+AGENT_BRANCH_GLOB = f"{AGENT_BRANCH_PREFIX}*"
 
 #: List with the FULL refname and strip it. `%(refname:short)` yields the
 #: shortest UNAMBIGUOUS name, so a branch sharing its name with a tag comes back

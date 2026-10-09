@@ -73,6 +73,14 @@ GIT_TIMED_OUT: Final[int] = 124
 #: Shared here rather than per-module so the two callers cannot drift apart.
 HEADS_PREFIX: Final[str] = "refs/heads/"
 
+#: A work branch made by hand or by the coordinator (CLAUDE/Worktree.md).
+WORKTREE_BRANCH_PREFIX: Final[str] = "worktree-"
+#: A work branch made by an `isolation: worktree` agent dispatch (`agent-<hex>-<hex>`).
+AGENT_BRANCH_PREFIX: Final[str] = "agent-"
+#: Every work branch shape. The WIP limit counts them all and a merge of any is
+#: judged for recorded QA (ledger 00474 N379: agent branches were missed by both).
+WORK_BRANCH_PREFIXES: Final[tuple[str, ...]] = (WORKTREE_BRANCH_PREFIX, AGENT_BRANCH_PREFIX)
+
 #: ``git config --get-regexp`` key pattern for every remote's URL.
 _REMOTE_URL_KEY_PATTERN: Final[str] = r"^remote\..*\.url$"
 

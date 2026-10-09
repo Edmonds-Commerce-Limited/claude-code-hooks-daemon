@@ -86,6 +86,9 @@ _INPUT_REDIRECT_OPERATORS: Final[frozenset[str]] = frozenset({"<", "<<", "<<-", 
 
 _FLAG_PREFIX: Final[str] = "-"
 
+#: `--` ends a command's options; it also prefixes every long option.
+_END_OF_OPTIONS: Final[str] = "--"
+
 #: `cp a b` needs a source AND a destination before the last operand is a write.
 _MIN_COPY_OPERANDS: Final[int] = 2
 
@@ -1118,9 +1121,9 @@ def _parse_command_words(
             skip_next = False
         elif options_ended or not token.startswith(_FLAG_PREFIX) or token == _FLAG_PREFIX:
             operands.append(token)
-        elif token == "--":
+        elif token == _END_OF_OPTIONS:
             options_ended = True
-        elif token.startswith("--"):
+        elif token.startswith(_END_OF_OPTIONS):
             name, equals, _value = token.partition("=")
             long.add(name)
             skip_next = name in long_value and not equals
