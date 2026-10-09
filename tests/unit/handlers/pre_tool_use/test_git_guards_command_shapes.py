@@ -46,6 +46,11 @@ ORDINARY = [
     "gh pr comment 1 --body-file - <<'EOF'\nrun git reset --hard first\nEOF",
     "gh issue create --title t --body-file - <<'EOF'\ngit stash is blocked\nEOF",
     "while read line; do echo \"$line\"; done <<'EOF'\ngit reset --hard\ngit stash\nEOF",
+    "while IFS= read -r c; do echo \"$c\"; done <<'EOF'\ngit reset --hard\nEOF",
+    "git log --format='git reset --hard %H' --oneline",
+    "git log --pretty='git stash %H'",
+    "git grep -n 'git stash' src",
+    "git log -G'git stash'",
 ]
 
 
@@ -109,6 +114,21 @@ def test_real_invocation_stays_denied_after_another_command(lead: str, command: 
         "while read c; do eval \"$c\"; done <<'EOF'\ngit reset --hard\nEOF",
         "while read c; do bash -c \"$c\"; done <<'EOF'\ngit stash\nEOF",
         "while read c; do $c; done <<'EOF'\ngit stash\nEOF",
+        # Review r1 B1: a quoted argument of a git command that RUNS it.
+        "git submodule foreach --recursive 'git reset --hard && git clean -fdx'",
+        "git submodule foreach 'git stash'",
+        'git submodule foreach "git reset --hard"',
+        "git rebase -i --exec 'git clean -fd'",
+        "git rebase -x 'git stash'",
+        "git bisect run bash -c 'git stash && make'",
+        # Review r1 S1: a `=!` alias body is runnable.
+        "git -c 'alias.n=!git reset --hard' n",
+        # Review r1 S2: the loop runs the line it read.
+        "while read l; do echo \"$($l)\"; done <<'EOF'\ngit stash\nEOF",
+        "while read l; do echo `$l`; done <<'EOF'\ngit stash\nEOF",
+        # Review r1 NIT: piping the format string into a shell runs it.
+        "git log --format='git reset --hard %H' | sh",
+        "git log --grep='git stash' | bash",
     ],
 )
 def test_a_second_real_command_or_an_executing_receiver_stays_denied(command: str) -> None:

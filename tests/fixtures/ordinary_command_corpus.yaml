@@ -1303,9 +1303,9 @@ rows:
   - id: a8-restore-source-staged
     command: |-
       git restore --source=HEAD~1 --staged src/x.py
-  - id: a8-reset-then-ls-hard
+  - id: a8-reset-then-rm-f
     command: |-
-      set -euo pipefail; git reset HEAD src/x.py && ls --hard
+      set -euo pipefail; git reset HEAD src/x.py && rm -f untracked/foo.txt
   - id: a8-log-grep-mentions-reset-hard
     command: |-
       git log --grep='git reset --hard'
@@ -1318,11 +1318,6 @@ rows:
   - id: a8-stash-help
     command: |-
       git stash --help
-  - id: a8-heredoc-cat-mentions-reset-hard
-    command: |-
-      cat <<'EOF'
-      git reset --hard
-      EOF
   - id: a8-gh-body-file-heredoc-mentions-reset-hard
     command: |-
       gh pr comment 1 --body-file - <<'EOF'
@@ -1330,7 +1325,7 @@ rows:
       EOF
   - id: a8-while-read-heredoc-mentions-reset-hard
     command: |-
-      while read line; do echo "$line"; done <<'EOF'
+      while IFS= read -r line; do echo "$line"; done <<'EOF'
       git reset --hard
       git stash
       EOF

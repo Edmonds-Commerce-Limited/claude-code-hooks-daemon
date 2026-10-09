@@ -1584,6 +1584,19 @@ _LOOP_DATA_COMMANDS: frozenset[str] = frozenset(
 )
 
 
+def _without_plain_assignments(statement: str) -> str:
+    """``statement`` without leading `NAME=value` words that expand nothing
+    (`IFS= read -r line` is the command `read`)."""
+    while True:
+        spans = shell_word_spans(statement)
+        if not spans:
+            return statement
+        word = statement[spans[0][0] : spans[0][1]]
+        if not _ASSIGNMENT_WORD.match(word) or "$" in word or "`" in word:
+            return statement
+        statement = statement[spans[0][1] :]
+
+
 def _loop_only_prints_its_input(prefix: str, receiving_stage: str, fds_may_run: bool) -> bool:
     """Whether the loop ending at ``receiving_stage`` only READS its heredoc.
 
@@ -1605,9 +1618,13 @@ def _loop_only_prints_its_input(prefix: str, receiving_stage: str, fds_may_run: 
         statement = prefix[start:end]
         if not statement.strip():
             continue
+        if "$(" in statement or "`" in statement:
+            # `echo "$($l)"` runs the line it read.
+            return False
         first = next(iter(iter_shell_words(statement)), None)
         if first in _LOOP_LIST_HEADS:
             continue
+        statement = _without_plain_assignments(strip_reserved_word_prefix(statement))
         if _segment_command_word(statement) not in _LOOP_DATA_COMMANDS:
             return False
     return True

@@ -39,6 +39,10 @@ class TestBlankQuotedTextArguments:
             "bash -c 'git stash'",
             "eval 'git stash'",
             "ls 'a b'",
+            "git submodule foreach 'git stash'",
+            "git rebase -x 'git clean -fd'",
+            "git -c 'alias.n=!git reset --hard' n",
+            "git commit -m 'a b'",
         ],
     )
     def test_anything_runnable_or_unplaced_is_kept(self, segment: str) -> None:
