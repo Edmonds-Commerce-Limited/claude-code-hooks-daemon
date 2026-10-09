@@ -128,6 +128,19 @@ agent.
   G4 (B3) is partly closed: reasons accepted, and asked for under `strict_mode` (warning, not error). Planned for the
   next major (breaking config change): a reason required for every project on `exclude_paths`
   and `extra_whitelist`. `CLAUDE/UPGRADES/` keeps no upcoming-major notes, so it is tracked here.
+  - **Worklist** ([report](subagent-reports/261009-task-3.1-gap-worklist-sonnet.md), verified against main): G2 and
+    G10 are closed, and G3 and G9 mostly. Still open are G1 (detector), G4 (footer), G5, G6, G7, G8, G11, G12, G13
+    and G15. Three batches:
+    - **3.1a, identifiers and agent context**: G5, G15, G13, the G9 leftovers (`defect_class` is null in every
+      `defences --json` row, and `explain-rule --list` has no footer), and the C1 wording fix. `constants/dbf.py`
+      `EXPLAIN_LINE` and the README still call every handler a defence, but ruling C1 puts the action guards outside
+      the Defence set.
+    - **3.1b, QA layer**: the G1 detector (reasons inline, no baseline file, per B2), G6, G7 and G8.
+    - **3.1c, config and CLI**: the G4 footer, G11 `probe --only`, and G12.
+  - **Coordinator call (under the owner's "go with the clear winners" instruction):** G5–G9, G12, G13 and G15 were
+    never put to the owner. Closing them is the default, so they are closed through the batches above. Resolved; not
+    an owner ruling. Success criterion 3 ("the owner has ruled on every gap") therefore waits on the owner to confirm
+    these calls and the earlier ones for G3, G10, G11, G14 and G16.
 - [x] ✅ **Task 3.2**: A machine-readable enumeration of active defences (§5): rule ID,
   handler, defect class, docs link, and the detector entry point, so a DBF tool can read
   them. Reuse the generate-docs data rather than a second source. Done: `hooks-daemon defences --json`, see [the report](subagent-reports/261004-task-3.2-defence-enumeration-sonnet.md).
