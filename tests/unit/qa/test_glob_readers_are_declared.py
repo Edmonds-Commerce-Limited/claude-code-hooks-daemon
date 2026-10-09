@@ -712,7 +712,7 @@ class TestEveryGlobReaderIsDeclared:
 
 
 @functools.cache
-def _repository_corpus() -> Any:
+def _repository_corpus() -> changed_tests.Corpus:
     """The mapper's corpus for this repository (immutable), built once."""
     tree, error = changed_tests.tree_files(PROJECT_ROOT)
     assert tree is not None, error

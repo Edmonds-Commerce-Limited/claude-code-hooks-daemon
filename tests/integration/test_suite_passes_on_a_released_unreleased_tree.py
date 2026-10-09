@@ -14,6 +14,7 @@ is covered without anyone remembering to list it.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -31,13 +32,14 @@ TESTS_DIR: Final[Path] = REPO_ROOT / "tests"
 UNRELEASED_DIR: Final[str] = "CLAUDE/UPGRADES/UNRELEASED"
 SCAFFOLDING_NAME: Final[str] = "README.md"
 FIXTURE_DIRNAME: Final[str] = "cyber-flag"
-#: Idle-host budget for the whole nested run. It only stops a hang, so it is
-#: multiplied by the host load when used (N344); the nested run took 25 minutes
-#: at a load average of 17.
+#: Idle-host budget for EACH nested run (one per reader group, all at once). It
+#: only stops a hang, so it is multiplied by the host load when used (N344);
+#: the single nested run took 25 minutes at a load average of 17.
 RUN_TIMEOUT_SECONDS: Final[int] = 900
 FAILURE_TAIL_CHARS: Final[int] = 40000
-#: The readers run as this many concurrent nested pytest runs over the one copy.
-READER_RUN_GROUPS: Final[int] = 4
+#: The readers run as at most this many concurrent nested pytest runs over the
+#: one copy, and never more than the host has cores.
+READER_RUN_GROUPS: Final[int] = min(4, os.cpu_count() or 1)
 
 #: Puts the copy's ``src`` first on the runner's own import path only. A
 #: PYTHONPATH would leak into every upgrade the tests launch and shadow the
@@ -247,6 +249,8 @@ def partition_readers(readers: list[Path], groups: int, *, root: Path) -> list[l
     """
     if groups < 1:
         raise ValueError(f"groups must be at least 1, got {groups}")
+    if not readers:
+        raise ValueError("no test file mentions the holding area, so there is nothing to run")
     sized = sorted(
         readers, key=lambda path: ((root / path).stat().st_size, str(path)), reverse=True
     )
@@ -259,8 +263,24 @@ def partition_readers(readers: list[Path], groups: int, *, root: Path) -> list[l
     return buckets
 
 
-def _run_readers(released_tree: Path, readers: list[Path]) -> subprocess.CompletedProcess[str]:
-    """One nested pytest run over ``readers``, inside the released-state copy."""
+def _run_readers(released_tree: Path, readers: list[Path]) -> str | None:
+    """One nested pytest run over ``readers`` in the released-state copy.
+
+    Returns what to report when it failed or timed out, else ``None``, so one
+    group's timeout cannot hide another group's failure.
+    """
+    try:
+        result = _run_nested_pytest(released_tree, readers)
+    except subprocess.TimeoutExpired as expired:
+        return f"timed out after {expired.timeout:.0f}s running: {' '.join(map(str, readers))}"
+    if result.returncode == 0:
+        return None
+    return f"{result.stdout[-FAILURE_TAIL_CHARS:]}\n{result.stderr[-FAILURE_TAIL_CHARS:]}"
+
+
+def _run_nested_pytest(
+    released_tree: Path, readers: list[Path]
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
             sys.executable,
@@ -298,12 +318,9 @@ def test_the_holding_area_readers_pass_with_nothing_staged(released_tree: Path) 
     groups = partition_readers(readers, READER_RUN_GROUPS, root=REPO_ROOT)
     with ThreadPoolExecutor(max_workers=len(groups)) as pool:
         results = list(pool.map(lambda group: _run_readers(released_tree, group), groups))
-    failures = [result for result in results if result.returncode != 0]
+    failures = [result for result in results if result is not None]
     assert not failures, (
         "A test needs content staged in CLAUDE/UPGRADES/UNRELEASED/ and would fail at "
         "release prep, when that directory is emptied. Give it its own fixture.\n"
-        + "\n".join(
-            f"{result.stdout[-FAILURE_TAIL_CHARS:]}\n{result.stderr[-FAILURE_TAIL_CHARS:]}"
-            for result in failures
-        )
+        + "\n".join(failures)
     )

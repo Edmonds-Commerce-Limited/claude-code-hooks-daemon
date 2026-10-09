@@ -167,6 +167,39 @@ def test_a_working_candidate_does_not_wait_out_the_probe_timeout(tmp_path: Path)
     assert elapsed < 10.0, f"a working candidate answered after {elapsed:.2f}s of a 20s bound"
 
 
+def test_a_read_that_returns_at_once_does_not_end_the_wait_early() -> None:
+    """Without ``sleep`` the wait uses ``read -t``; on macOS that read can return instantly.
+
+    A watchdog trusting it would kill a working candidate straight away. The
+    wait must hold for the bound by the shell's own clock.
+    """
+    result = _run_in_library(
+        "read() { return 0; }\n"
+        "start=$SECONDS\n"
+        '_rv_wait_secs 2 && echo "waited $((SECONDS - start))"\n',
+        path="",
+    )
+
+    assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert int(result.stdout.split()[-1]) >= 2, result.stdout
+
+
+def test_the_watchdog_does_not_hold_the_callers_output_pipe(tmp_path: Path) -> None:
+    """The candidate answered; the watchdog's pending wait must not keep ``$(...)`` open."""
+    daemon_dir = tmp_path / "daemon"
+    _make_good_candidate(daemon_dir / "untracked" / "venv-py999-good")
+
+    started = time.monotonic()
+    result = _run_in_library(
+        'export HOOKS_DAEMON_VENV_PROBE_TIMEOUT=20\nout="$(_rv_candidate_runs '
+        f"'{daemon_dir}/untracked/venv-py999-good/bin/python')\"\n"
+    )
+    elapsed = time.monotonic() - started
+
+    assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert elapsed < 10.0, f"took {elapsed:.2f}s of a 20s bound"
+
+
 def _run_in_library(script: str, *, path: str | None = None) -> subprocess.CompletedProcess[str]:
     """Source the library, then run ``script`` in the same shell."""
     prelude = f'export PATH="{path}"\n' if path is not None else ""

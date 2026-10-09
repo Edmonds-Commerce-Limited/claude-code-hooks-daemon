@@ -151,18 +151,26 @@ _rv_dir_mtime() {
 _RV_PROBE_TIMEOUT_SECS="${HOOKS_DAEMON_VENV_PROBE_TIMEOUT:-5}"
 _RV_PROBE_OUTPUT=""
 
-# Waits the given seconds; succeeds only if the full bound elapsed. It waits
-# on the `read -t` builtin against a process-substitution pipe opened
-# read-write, which never delivers data or EOF. Two reasons it is not `sleep`:
-# `sleep` is looked up on PATH, and the hostile or stripped PATH this resolver
-# exists to survive may not have one (a watchdog whose `sleep` fails at once
-# would kill a WORKING candidate straight away); and the watchdog is killed
-# when the candidate answers, which orphans an external `sleep` that still
-# holds the caller's output pipe, so a `$(...)` around the resolver would wait
-# out the whole bound after the answer. A builtin dies with its subshell.
+# Waits the given seconds; succeeds only if the full bound elapsed. `sleep`
+# is looked up on PATH, and the hostile or stripped PATH this resolver
+# exists to survive may not have one: a watchdog whose `sleep` fails at once
+# would kill a WORKING candidate straight away. So with no `sleep`, wait on
+# `read -t` against a process-substitution pipe opened read-write, which
+# never delivers data or EOF and needs no PATH lookup at all. Some platforms
+# (macOS) duplicate the read end of that pipe, so the read can return at
+# once; the wait then repeats the read until the whole bound has elapsed by
+# the shell's own clock, rather than reporting a timeout that did not happen.
 _rv_wait_secs() {
-    read -r -t "$1" <> <(:)
-    [ "$?" -gt 128 ]
+    if command -v sleep > /dev/null; then
+        sleep "$1"
+        return
+    fi
+    local whole="${1%%.*}"
+    local deadline=$((SECONDS + ${whole:-0} + 1))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        read -r -t 1 <> <(:) || continue
+    done
+    return 0
 }
 
 # Echoes $1's parent pid; fails when $1 is gone. Read with builtins from /proc
@@ -213,7 +221,7 @@ _rv_candidate_runs() {
             && [ "$(_rv_parent_of "$pid")" = "$_rv_parent" ]; then
             _rv_kill_out="$(kill -KILL "$pid" 2>&1)"
         fi
-    ) &
+    ) < /dev/null > /dev/null 2> /dev/null &
     watchdog=$!
     wait "$pid"
     rc=$?
