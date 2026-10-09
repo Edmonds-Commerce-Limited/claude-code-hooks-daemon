@@ -136,6 +136,7 @@ READ_ONLY_VERBS: Final[frozenset[str]] = frozenset(
         "unexpand",
         "rev",
         "base64",
+        "tree",
     }
 )
 
@@ -144,6 +145,7 @@ WRITE_OPTIONS: Final[dict[str, frozenset[str]]] = {
     "git": frozenset({"--output"}),
     "less": frozenset({"-o", "-O", "--log-file"}),
     "sort": frozenset({"-o", "--output"}),
+    "docker": frozenset({"-o", "--output"}),
 }
 #: Readers that write their last file operand once they have more than this many.
 MAX_READ_OPERANDS: Final[dict[str, int]] = {"xxd": 1, "uniq": 1}
@@ -189,7 +191,17 @@ _FIND_PATH_FLAGS: Final[frozenset[str]] = frozenset(
 )
 _FIND_EXPRESSION_START: Final[tuple[str, ...]] = ("-", "(", "!", ")")
 
-_OUTPUT_REDIRECT_RE: Final[re.Pattern[str]] = re.compile(r"^(?:[0-9]*>|&>)")
+#: An output redirection, with its target when glued on (group 1 empty otherwise).
+_OUTPUT_REDIRECT_TARGET_RE: Final[re.Pattern[str]] = re.compile(r"^(?:[0-9]*>>?|&>>?)(?!&)(.*)$")
+
+#: What introduces a name `xargs` reads its input from.
+_XARGS_INPUT_OPERATORS: Final[frozenset[str]] = frozenset({"<<<", "<", "-a", "--arg-file"})
+
+_RUFF: Final[str] = "ruff"
+_RUFF_FIX_OPTIONS: Final[frozenset[str]] = frozenset({"--fix", "--fix-only", "--unsafe-fixes"})
+_RUFF_CHECK_OPTIONS: Final[frozenset[str]] = frozenset({"--check", "--diff"})
+_DOCKER: Final[str] = "docker"
+_DOCKER_BUILD: Final[str] = "build"
 
 #: Verbs that read lines into a variable, for a loop whose body writes through it.
 _READ_LOOP_VERBS: Final[frozenset[str]] = frozenset({"read", "mapfile", "readarray"})
@@ -305,9 +317,66 @@ _RULE: Final[Rule] = Rule(
 )
 
 
-def _redirects_output(command: SimpleCommand) -> bool:
-    """Does the command redirect its output into a file (`> f`, `2>> f`, `&> f`)?"""
-    return any(_OUTPUT_REDIRECT_RE.match(word) for word in command.words[1:])
+def _copy_destination(operands: Sequence[str], file_operands: Sequence[str]) -> str | None:
+    """Where a `cp` / `mv` puts its sources: the `-t` / `--target-directory` value,
+    else the last operand."""
+    for position, operand in enumerate(operands):
+        if operand.startswith("--target-directory="):
+            return operand.partition("=")[2]
+        is_target_flag = operand == "--target-directory" or (
+            operand.startswith("-") and not operand.startswith("--") and operand.endswith("t")
+        )
+        if is_target_flag and position + 1 < len(operands):
+            return operands[position + 1]
+    words = [operand for operand in file_operands if not operand.startswith("-")]
+    return words[-1] if words else None
+
+
+def _xargs_own_input(operands: Sequence[str]) -> list[str]:
+    """The names given to ``xargs`` itself: a here-string, an input redirect, ``-a`` / ``--arg-file``."""
+    found: list[str] = []
+    for position, operand in enumerate(operands):
+        following = operands[position + 1 : position + 2]
+        if operand.startswith("--arg-file="):
+            found.append(operand.partition("=")[2])
+        elif operand in _XARGS_INPUT_OPERATORS:
+            found.extend(following)
+    return found
+
+
+def _first_word(operands: Sequence[str]) -> str:
+    """The first operand that is not an option, or ''."""
+    return next((operand for operand in operands if not operand.startswith("-")), "")
+
+
+def _ruff_only_reads(operands: Sequence[str]) -> bool:
+    """`ruff check` without a fix option, or `ruff format --check` / `--diff`."""
+    subcommand = _first_word(operands)
+    if subcommand == "check":
+        return not any(operand in _RUFF_FIX_OPTIONS for operand in operands)
+    return subcommand == "format" and any(operand in _RUFF_CHECK_OPTIONS for operand in operands)
+
+
+def _redirect_targets(command: SimpleCommand) -> list[str]:
+    """The files the command's output redirections write (`> f`, `>>f`, `2> f`)."""
+    targets: list[str] = []
+    words = command.words[1:]
+    for position, word in enumerate(words):
+        glued = _OUTPUT_REDIRECT_TARGET_RE.match(word)
+        if glued is not None:
+            if glued.group(1):
+                targets.append(unquote(glued.group(1)))
+            elif position + 1 < len(words):
+                targets.append(unquote(words[position + 1]))
+    return targets
+
+
+def _variable_is_a_file(command: SimpleCommand, reads_only: bool) -> bool:
+    """Is a variable used where the command takes a file to change: an operand
+    of a command that does not only read, or the target of an output redirection?"""
+    if any("$" in target for target in _redirect_targets(command)):
+        return True
+    return not reads_only and any("$" in operand for operand in command.operands)
 
 
 def _copies_a_tree(operand: str) -> bool:
@@ -830,6 +899,10 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
         """Is the command known to only read the files it is given?"""
         if command.verb == _GIT:
             return git_subcommand(command) in GIT_READ_ONLY_SUBCOMMANDS
+        if command.verb == _RUFF:
+            return _ruff_only_reads(command.operands)
+        if command.verb == _DOCKER:
+            return _first_word(command.operands) == _DOCKER_BUILD
         return command.verb in READ_ONLY_VERBS
 
     def _wide_naming(self, word: str, roots: Sequence[str], base: str) -> str | None:
@@ -867,9 +940,8 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
             command
             for command in commands
             if command.verb not in _READ_LOOP_VERBS
-            and (not self._reads_only(command) or _redirects_output(command))
             and command.verb not in SHELL_INTERPRETERS
-            and any("$" in operand for operand in command.operands)
+            and _variable_is_a_file(command, self._reads_only(command))
         ]
         if not mutators:
             return None
@@ -925,8 +997,14 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
         )
         if copies_out:
             return None
+        for word in _xargs_own_input(operands):
+            glob = self._wide_naming(word, roots, base)
+            if glob is not None:
+                return glob
         for other in commands:
             if other.group != command.group or other is command:
+                continue
+            if other.verb == _FIND and not self._find_could_reach(other.operands):
                 continue
             for word in other.operands:
                 glob = self._wide_naming(word, roots, base)
@@ -955,19 +1033,24 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
             if operand.startswith(_FIND_EXPRESSION_START):
                 break
             starts.append(operand)
-        names = [
-            operands[i + 1]
-            for i, operand in enumerate(operands[:-1])
-            if operand in _FIND_NAME_FLAGS
-        ]
-        by_path = any(operand in _FIND_PATH_FLAGS for operand in operands)
-        if names and not by_path and not self._could_select(names):
+        if not self._find_could_reach(operands):
             return True, None
         for start in starts or ["."]:
             glob = self._wide_naming(start, roots, base)
             if glob is not None:
                 return True, glob
         return True, None
+
+    def _find_could_reach(self, operands: Sequence[str]) -> bool:
+        """Could this ``find``'s filters select a listed file? No when every file it
+        finds is chosen by ``-name`` patterns that cannot match one."""
+        names = [
+            operands[i + 1]
+            for i, operand in enumerate(operands[:-1])
+            if operand in _FIND_NAME_FLAGS
+        ]
+        by_path = any(operand in _FIND_PATH_FLAGS for operand in operands)
+        return not names or by_path or self._could_select(names)
 
     def _could_select(self, patterns: list[str]) -> bool:
         """Could a ``-name`` pattern select the file name a listed path ends in?"""
@@ -987,12 +1070,10 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
         operands = command.operands
         if not any(_copies_a_tree(operand) for operand in operands):
             return None
-        for operand in command.file_operands:
-            if not operand.startswith("-"):
-                glob = self._protecting_parent(str(Path(base) / operand), roots)
-                if glob is not None:
-                    return glob
-        return None
+        destination = _copy_destination(operands, command.file_operands)
+        if destination is None:
+            return None
+        return self._protecting_parent(str(Path(base) / destination), roots)
 
     def _reader_writes_violation(
         self, command: SimpleCommand, where: tuple[str, Sequence[str], bool, dict[str, Any]]
@@ -1075,8 +1156,9 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
         """Code nested past the depth bound: no verb is trusted, and any word that
         names a listed path, a directory above it, or could reach it is a denial.
 
-        Linear: each nested string is read once, and at most ``MAX_DEEP_BODIES``
-        are read before the rest is judged by whether it names the file.
+        Linear: the nested code is decoded in one flat pass
+        (``iter_normalised_shell_words``); past its own depth or size bound the
+        text is judged by whether it visibly names the file.
         """
         try:
             for word in iter_normalised_shell_words(body):

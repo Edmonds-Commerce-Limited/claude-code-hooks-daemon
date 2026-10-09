@@ -45,6 +45,19 @@ allowlist, `--env-file`/`-f` input options, wording), S11 (the perf sweep config
 Out of scope, listed in the guidance: B4, S1, S4, S7, S8 (hostile respellings). Tests were written before the code, but
 I did not capture a red run for this round.
 
+## Review round 2 (fixes)
+
+Review: `261009-00499-phase1b-review-r2-opus.md`. Tests (`TestReviewRound2`) were run BEFORE the code: 22 failed, 19
+passed (red: the `test_s1_xargs_input_given_on_the_command_itself_is_judged` cases with `<<<`, `<`, `-a`,
+`--arg-file`; `test_s2_a_loop_that_reads_the_file_and_writes_elsewhere_is_allowed` x3;
+`test_s3_copying_the_directory_out_is_allowed` x4 and the `--target-directory=` denial;
+`test_s4_a_find_whose_name_filter_cannot_match_feeds_xargs_freely` x3; `test_nit_these_readers_are_allowed` x5).
+After the code: all 41 pass (585 in the two handler test files). S1 judges xargs's own input, S2 counts a read loop as
+a writer only when the variable is a file operand of a non-reader or an output redirect target, S3 judges only the
+copy destination (`-t`, `--target-directory`, else the last operand), S4 skips a `find` whose `-name` filter cannot
+match; `tree`, `ruff check` / `ruff format --check` and `docker build` are read-only; the `_deep_violation` docstring
+is corrected.
+
 ## Tests
 
 - `tests/unit/handlers/pre_tool_use/test_write_protected_paths.py`: +about 230 cases (wrappers, read-only allowlist,

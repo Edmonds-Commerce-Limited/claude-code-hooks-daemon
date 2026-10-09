@@ -1325,6 +1325,145 @@ class TestOrdinaryReadsAreNotDenied:
         assert "cat P | tool" in section
 
 
+class TestReviewRound2:
+    """Plan 00499 Phase 1b review round 2 (S1 to S4 and the read-only nits)."""
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "xargs rm <<< {p}",
+            "xargs -I{{}} rm {{}} <<< {p}",
+            "xargs -0 bash -c 'rm \"$0\"' <<< {p}",
+            "xargs rm -f -a {p}",
+            "xargs --arg-file={p} rm",
+            "xargs --arg-file {p} shred -u",
+            "xargs rm < {p}",
+        ],
+    )
+    def test_s1_xargs_input_given_on_the_command_itself_is_judged(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is True
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "xargs cat <<< {p}",
+            "xargs rm <<< /tmp/other",
+            "xargs -a /tmp/list rm",
+            "xargs cat < {p}",
+        ],
+    )
+    def test_s1_same_input_for_a_reader_or_another_file_is_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is False
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            'while read -r l; do echo "$l" >> /tmp/out; done < {p}',
+            "while IFS='=' read -r k v; do printf '%s\\n' \"$k\" > /tmp/keys; done < {p}",
+            'grep -v "^#" {p} | while read -r l; do echo "$l" >> /tmp/out; done',
+            'cat {p} | while read -r l; do printf "%s\\n" "$l"; done',
+        ],
+    )
+    def test_s2_a_loop_that_reads_the_file_and_writes_elsewhere_is_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is False
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            'ls .claude/ccy/* | while read f; do rm "$f"; done',
+            'ls {p} | while read f; do echo x > "$f"; done',
+            "while read f; do truncate -s0 $f; done <<< {p}",
+        ],
+    )
+    def test_s2_a_loop_whose_variable_is_a_file_operand_is_still_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is True
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "cp -r .claude/ccy /tmp/copy",
+            "cp -a .claude/ccy/. /tmp/x",
+            "cp -r {r}/.claude/ccy /tmp/copy",
+            "cp -rt /tmp/x .claude/ccy",
+        ],
+    )
+    def test_s3_copying_the_directory_out_is_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is False
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "cp -r /tmp/dir/. .claude/ccy",
+            "cp -rt .claude/ccy /tmp/dir",
+            "cp -r --target-directory={r}/.claude/ccy /tmp/dir",
+        ],
+    )
+    def test_s3_copying_onto_the_directory_is_still_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is True
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "find . -name '*.pyc' | xargs rm -f",
+            "find . -name __pycache__ | xargs rm -rf",
+            "find {r} -iname '*.log' -print0 | xargs -0 rm -f",
+        ],
+    )
+    def test_s4_a_find_whose_name_filter_cannot_match_feeds_xargs_freely(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is False
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "find . -name 'ccy.env.*' | xargs rm -f",
+            "find .claude | xargs rm -f",
+            "find . -path '*ccy*' | xargs rm",
+            "ls .claude/ccy/* | xargs rm",
+        ],
+    )
+    def test_s4_an_unfiltered_or_matching_find_feeding_xargs_is_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is True
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "tree .claude/ccy",
+            "tree {p}",
+            "ruff check {p}",
+            "ruff format --check {p}",
+            "docker build {r}/.claude/ccy",
+            "docker build -f {p} .",
+            "shellcheck {p}",
+        ],
+    )
+    def test_nit_these_readers_are_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is False
+
+    @pytest.mark.parametrize("template", ["ruff format {p}", "ruff check --fix {p}"])
+    def test_nit_ruff_that_rewrites_the_file_is_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path, template: str
+    ) -> None:
+        assert _denied(handler, root, template) is True
+
+
 class TestGuidanceAndAcceptance:
     def test_the_guidance_no_longer_lists_closed_gaps(self) -> None:
         guidance = WriteProtectedPathsHandler().get_claude_md() or ""
