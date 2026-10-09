@@ -1426,6 +1426,49 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N381 — `test_subagent_full_qa_blocker` fails under the pytest a fresh venv installs
+
+**Source**: the Plan 00484 batch 3.1a review (2026-10-09,
+`subagent-reports/261009-00484-3.1a-review-r1-opus.md` in Plan 00484 once committed).
+
+**Evidence**: the file passes on main with the shared venv. In a worktree whose venv was built fresh, it fails
+because the full-QA blocker does not recognise a newer pytest's options. So the blocker's table of pytest options
+is pinned to one pytest version, while the venv resolves whatever version is current.
+
+**Status**: ⬜ Open. Remedy: find the options the newer pytest added, and either pin pytest in `uv.lock` /
+`pyproject.toml` or make the blocker treat an unknown option conservatively. Add a test run against the lock's pytest
+version.
+
+### N380 — agent branches pass their targeted tests and break the cross-cutting ones
+
+**Source**: the coordinator, 2026-10-09. After N379, `llm_qa.py changed --range 85c4c73b1..HEAD` was run over every
+merge since the last green gate.
+
+**Evidence**: 6 tests fail on main that no agent ran:
+
+- **00499 Phase 1:** the priority-band check, the default-enabled template consistency check (x2), and registry
+  option injection for `write_protected_paths`.
+- **00470 Task 6.4:** the `HookInputField` single-source check, and the event-socket enrichment "left untouched" test.
+
+Each test guards a property that every handler or every payload read must satisfy. None of them lives near the
+changed module, so a targeted run by name or import never selects them. Two more points:
+
+- `changed` with no `--range` on main refuses to run, because HEAD is the base itself
+  (`scripts/qa/run_changed_tests.py:1031-1038`). The advice "run `changed` on the merged head" therefore checks
+  nothing on main.
+- Agents CAN run `llm_qa.py changed`. R-SUBAGENT-FULL-QA blocks only `all` and `tests`
+  (`.claude/hooks-daemon.yaml:524-528`). The coordinator had told every agent not to run `llm_qa.py` at all, to keep
+  them off the host-wide QA lock while the full gate ran. That is why no branch carried a green `changed` record, and
+  `changed` would have run these whole-repo checks.
+
+**Status**: 🔄 Fixing. The six regressions are on a worktree branch, after a fact-check refuted two of this entry's
+first-draft claims. The remedies:
+
+1. Done in 8c9ac4cf4: `merge_qa_advisor` prints the exact `--range <pre-merge head>..HEAD` command.
+2. Agents run `llm_qa.py changed` on their own branch before handing off, except while the coordinator's full gate
+   holds the lock.
+3. The coordinator runs `changed --range <pre-merge>..HEAD` after every merge onto main.
+
 ### N379 — a branch merged after a green gate that never saw it
 
 **Source**: the coordinator, 2026-10-09. The B4 full gate ran on main at 85c4c73b1. The N359 and 00499 branches

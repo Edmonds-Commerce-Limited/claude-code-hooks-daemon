@@ -85,6 +85,7 @@ _WORK_REF: Final[re.Pattern[str]] = re.compile(
 QA_SCRIPT: Final[Path] = Path("scripts") / "qa" / "llm_qa.py"
 
 _SHORT_SHA: Final[int] = 12
+_HEAD: Final[str] = "HEAD"
 _ICON: Final[str] = "🔍"
 
 # CLAUDE/QA.md, "Before Merging: the Coordinator's Check": what to run when the
@@ -216,16 +217,23 @@ class MergeQaAdvisorHandler(PreToolUseHandlerBase):
         command = get_bash_command(hook_input) or ""
         cwd = self._cwd(hook_input)
         unrecorded: list[tuple[str, str]] = []
+        pre_merge: str | None = None
         for run in _merges(command):
-            unrecorded.extend(self._unrecorded(run, cwd))
+            found = self._unrecorded(run, cwd)
+            if found and pre_merge is None:
+                pre_merge = _commit_of(invocation_directory(run, cwd), _HEAD)
+            unrecorded.extend(found)
         if not unrecorded:
             return GatingResult(decision=Decision.ALLOW)
-        return GatingResult(decision=Decision.ALLOW, context=[self._advice(unrecorded)])
+        return GatingResult(decision=Decision.ALLOW, context=[self._advice(unrecorded, pre_merge)])
 
     @staticmethod
-    def _advice(unrecorded: list[tuple[str, str]]) -> str:
+    def _advice(unrecorded: list[tuple[str, str]], pre_merge: str | None) -> str:
         heads = "\n".join(f"  - {branch} at {head}" for branch, head in unrecorded)
         checks = "\n".join(f"  {check}" for check in _STATIC_CHECKS)
+        # Ledger 00474 N380: a bare `changed` on a clean merged head selects nothing.
+        start = pre_merge[:_SHORT_SHA] if pre_merge else "<the pre-merge head>"
+        post_merge = f"./scripts/qa/llm_qa.py changed --range {start}..HEAD"
         return (
             f"{_ICON} MERGE WITHOUT A RECORDED TARGETED QA RUN\n\n"
             f"No green `llm_qa.py changed` run is recorded for:\n{heads}\n\n"
@@ -234,8 +242,10 @@ class MergeQaAdvisorHandler(PreToolUseHandlerBase):
             "run the static checks on the touched files first (CLAUDE/QA.md, "
             "'Before Merging: the Coordinator's Check'), from the project root:\n"
             f"{checks}\n\n"
-            "Then `./scripts/qa/llm_qa.py changed` on the merged head. A passing run "
-            "on a clean tree records its head, and this advisory goes quiet for it.\n\n"
+            f"Then, after the merge, `{post_merge}`: it judges everything the merge "
+            "brought in, which a bare `changed` on the clean merged head does not (it "
+            "selects nothing). A passing run on a clean tree records its head, and this "
+            "advisory goes quiet for it.\n\n"
             "Advisory only - proceeding as requested."
         )
 

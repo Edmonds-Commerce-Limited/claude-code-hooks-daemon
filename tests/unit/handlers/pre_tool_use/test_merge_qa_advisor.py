@@ -140,6 +140,14 @@ class TestAdvises:
         for command in ("ruff check", "black --check", "mypy", "audit_error_hiding.py"):
             assert command in text
 
+    def test_the_post_merge_run_names_the_range_from_the_pre_merge_head(
+        self, handler: MergeQaAdvisorHandler, repo: Path, head: str
+    ) -> None:
+        """Ledger 00474 N380: a bare `changed` on the clean merged head selects nothing."""
+        pre_merge = _git(repo, "rev-parse", "HEAD")
+        text = _advice(handler, f"git merge --no-ff {_BRANCH}", repo)
+        assert f"llm_qa.py changed --range {pre_merge[:12]}..HEAD" in text
+
     def test_an_agent_dispatch_branch_is_a_work_branch(
         self, handler: MergeQaAdvisorHandler, repo: Path, head: str
     ) -> None:
