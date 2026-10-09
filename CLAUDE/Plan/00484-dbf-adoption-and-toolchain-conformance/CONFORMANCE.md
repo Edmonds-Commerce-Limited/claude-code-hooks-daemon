@@ -64,10 +64,10 @@ route.
 | Clause | Obligation (short)                                                     | Grade (project)          | Artefact   | One-line evidence                                                                                                                                                                                                                                                                                                                                                                                              |
 | ------ | ---------------------------------------------------------------------- | ------------------------ | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 4.1    | No defence routed through a non-conforming detector                    | NOT MET                  | NOT MET    | A's 9 identifier-less deny paths now print one (G5, Task 3.1a); B fails D5.2; D cannot host bespoke rules (see matrix)                                                                                                                                                                                                                                                                                         |
-| 4.2a   | Every printed identifier resolves offline                              | PARTLY MET               | MET        | `explain-rule` resolves every handler rule ID offline, including a client's project-handler rules, and since Task 3.1a the plan-QA and docs-QA check IDs too (G15, `rule_explain/checks.py`); at project level B's IDs resolve nowhere                                                                                                                                                                         |
+| 4.2a   | Every printed identifier resolves offline                              | PARTLY MET               | MET        | `explain-rule` resolves every handler rule ID offline, including a client's project-handler rules, and since Task 3.1a the plan-QA and docs-QA check IDs too (G15, `rule_explain/checks.py`); since Task 3.1b (G6) B's IDs resolve too, through `llm_qa.py --explain <ID>` (`:2688`), so the rest of the gap is the wrapped third-party tools' own identifiers                                                 |
 | 4.2b   | Remediation docs ship with the code, version tracked together          | MET                      | MET        | `Rule` objects live in handler source (`core/rule.py`, `get_rules()`)                                                                                                                                                                                                                                                                                                                                          |
-| 4.2c   | A defined place for a new rule's docs                                  | PARTLY MET               | MET        | Handlers: `Rule(blocked, why, fix, verbose)`. B: docstrings and `VIOLATION_TYPES` only, with no defined place                                                                                                                                                                                                                                                                                                  |
-| 4.2d   | Docs state the correct construction                                    | PARTLY MET               | MET        | `test_rule_parity.py:180` requires a non-empty `fix`; B has no remediation text keyed by ID                                                                                                                                                                                                                                                                                                                    |
+| 4.2c   | A defined place for a new rule's docs                                  | MET                      | MET        | Handlers: `Rule(blocked, why, fix, verbose)`. B (since Task 3.1b): an entry in `scripts/qa/qa-rules.json`, which `test_qa_rules.py` requires for every rule a checker prints                                                                                                                                                                                                                                   |
+| 4.2d   | Docs state the correct construction                                    | MET                      | MET        | `test_rule_parity.py:180` requires a non-empty `fix`; B (since Task 3.1b) has a `fix` per ID in `qa-rules.json`, checked non-empty by `test_qa_rules.py`. The generic-text check cannot tell whether a fix is correct                                                                                                                                                                                          |
 | 4.3a   | Forbid (disable or block) every route that bypasses the record         | NOT MET                  | NOT MET    | 6 `MUST_*_BECAUSE` in-band hatches; inline suppressions are KEPT BY DESIGN (owner rulings B1, B2), not forbidden: 78 remain after 228 were deleted (`SUPPRESSIONS.md`), and since Task 3.1b each must carry a reason, enforced by `check_inline_suppressions.py:214` (`judge_comments`), registered at `llm_qa.py:711`. So this stays a declared known gap against 4.3, not conformance                        |
 | 4.3b   | Irreducible cases directed to the project record                       | NOT MET                  | NOT MET    | Hatches send the agent to the command line or a file comment, never to the config                                                                                                                                                                                                                                                                                                                              |
 | 4.4a   | Entry point meets D5.1–5.4 for every defence                           | NOT MET                  | PARTLY MET | The hook path meets it; `llm_qa.py` itself still has no single-file subset (only `--path FILE` on three checkers, see D5.2 under B), so this stays NOT MET at project level                                                                                                                                                                                                                                    |
@@ -103,7 +103,7 @@ layer (B, D, `llm_qa.py`) and in the governance of exceptions. The handler layer
 | ----------------- | ----------------- | ---------------------- | -------------------- | ------------------------------------------ |
 | 4.1 bespoke rules | MET               | MET                    | MET                  | NOT MET (see gap G10)                      |
 | 4.2 harness       | PARTLY MET        | PARTLY MET             | MET                  | –                                          |
-| 4.3 stable ID     | MET               | PARTLY MET             | MET (wrapped)        | –                                          |
+| 4.3 stable ID     | MET               | MET                    | MET (wrapped)        | –                                          |
 | 4.4 SHOULD        | PARTLY MET        | NOT MET                | N/A                  | –                                          |
 | 5.1 local         | MET               | MET                    | MET                  | –                                          |
 | 5.2 single file   | PARTLY MET        | PARTLY MET             | MET                  | –                                          |
@@ -121,9 +121,9 @@ layer (B, D, `llm_qa.py`) and in the governance of exceptions. The handler layer
 
 | Scope                                 | MET | PARTLY MET | NOT MET | N/A |
 | ------------------------------------- | --- | ---------- | ------- | --- |
-| TOOLING, project level (29 rows)      | 6   | 11         | 7       | 5   |
+| TOOLING, project level (29 rows)      | 8   | 9          | 7       | 5   |
 | TOOLING, artefact level (29 rows)     | 13  | 6          | 5       | 5   |
-| DETECTOR matrix, A + B + C (45 cells) | 20  | 12         | 3       | 10  |
+| DETECTOR matrix, A + B + C (45 cells) | 22  | 11         | 2       | 10  |
 | D (one row, a classification)         | –   | –          | 1       | –   |
 
 Section 8 counts as N/A at the project level, because TOOLING §9.1 says it bears on the
@@ -181,9 +181,13 @@ MET: 4.1, 4.3a, 4.3b, 6.2a and 6.2b.
     checkers still take directories only; `check_authored_path_stat.py:300-303` still fails as
     vacuous on a file. They are the known gap.
   - Before: no checker accepted a file. `--path` and `--root` took directories.
-  - **D4.3 PARTLY MET.** Most checkers print a rule ID (`check_magic_values.py:662`).
-    `check_fail_open_inventory`, `check_dangerous_invocation_corpus` and
-    `check_declared_invariant_pairs` print row keys, which are not rule identifiers.
+  - **D4.3 MET since Task 3.1b (G6), with one note.** Every checker prints a stable rule ID,
+    and each resolves through `qa-rules.json` (see 4.2). `check_fail_open_inventory`,
+    `check_dangerous_invocation_corpus` and `check_declared_invariant_pairs` print one rule
+    ID of their own per violation; their ROW keys remain data, not identifiers. The `rule`
+    strings are not namespaced (`silent-pass`, not `R-...`), and a few IDs are shared by two
+    checkers (`unreadable-file`, `marker-missing-reason`, `handler-ref-unknown`), so an ID
+    names a class of finding rather than one script.
 - **C: Semgrep.** Natively, Semgrep's `check_id` is prefixed with the path of the rule file,
   which D4.3 names as unstable. The wrapper strips the prefix back to the author's `id:`
   (`run_semgrep_check.sh:101`), so the wrapped pair holds (TOOLING 4.1 point 1).
@@ -204,10 +208,26 @@ MET: 4.1, 4.3a, 4.3b, 6.2a and 6.2b.
 - **Correct construction is enforced for handler rules.** `test_rule_parity.py:162-196`
   requires non-empty `blocked`, `why`, `fix` and `verbose`, and checks that every rendering
   carries the ID.
-- **Gaps:**
-  - B's identifiers (`magic-timeout`, `silent-pass`, `bounded-intent-unbounded-read`, …)
-    appear in no document and have no lookup.
-  - The four project handlers listed under 4.1 print nothing to look up.
+- **B's identifiers resolve since Task 3.1b (G6).** `scripts/qa/qa-rules.json` holds one entry
+  per rule ID the `scripts/qa` checkers print (a statement, a fix and the scripts that print
+  it), and `llm_qa.py --explain <ID>` prints it (`explain_rule`, `llm_qa.py:2688`;
+  `explain_command`, `:2709`); `--explain` with no ID lists them all. A `family:name` ID such
+  as `public-pattern:aws-access-key` resolves to its family. `tests/unit/qa/test_qa_rules.py`
+  DISCOVERS the IDs from the checkers' source (a `RULE` constant, `rule=`, a `"rule":` key, an
+  assignment to `rule`, `_add(node, "<id>", ...)`, the keys of `VIOLATION_TYPES`) and fails if
+  a checker prints an ID with no entry, an entry names a rule no checker prints, or an entry's
+  `checks` list differs from the scripts that print it. The three row-key checkers
+  (`check_fail_open_inventory`, `check_dangerous_invocation_corpus`,
+  `check_declared_invariant_pairs`) print a single `rule` of their own
+  (`fail-open-inventory`, ...) in each violation, and those resolve; their ROW keys are data
+  and are not identifiers. Not covered: the identifiers of the wrapped third-party tools
+  (ruff, mypy, pyright, bandit, shellcheck, Semgrep rule IDs), which are theirs to document,
+  and the plan-QA and docs-QA check IDs, which `bin/hooks-daemon explain-rule` resolves
+  (G15). `check_signal_targets.py` renamed four constants to `RULE_*` so the discovery sees
+  them.
+- **Remaining gap:** B's rules are not rows of `hooks-daemon defences`. Which `scripts/qa`
+  checkers are Defences (and so listed there) is a Defence-membership call: the coordinator's
+  call, not made in this batch and not the owner's. 5.1 and 5.3 stay as graded until it is.
 
 ### 4.3: suppression routes that bypass the project record
 
@@ -436,6 +456,12 @@ generic-reason check is `utils/escape_hatch.is_acceptable_reason`, shared with t
 Not done, on purpose: `--disable-nosem` and bandit `--ignore-nosec` would make the tools IGNORE
 the kept directives, which contradicts B2 (they stay, with reasons); no `nosemgrep` exists today.
 The generic-reason check cannot tell whether a reason is true.
+
+**G6 closed (Task 3.1b).** `scripts/qa/qa-rules.json` (an entry per rule ID: statement, fix,
+printing scripts) and `llm_qa.py --explain [ID]` (`:2688`, `:2709`), guarded in both directions
+by `tests/unit/qa/test_qa_rules.py`; see 4.2. Open inside G6: B's rules are not rows of
+`hooks-daemon defences` (a Defence-membership call, the coordinator's, not made here); the
+wrapped tools' own identifiers are theirs.
 
 **G8 closed in part (Task 3.1b).** Phase 1 (first findings with IDs, absolute report path in
 the summary) and phase 2 for three checkers (`check_magic_values.py`, `audit_error_hiding.py`,

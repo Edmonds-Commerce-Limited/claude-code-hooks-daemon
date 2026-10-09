@@ -125,9 +125,9 @@ _SIGNAL_HAZARD_TEST_EXCEPTIONS: Final[dict[str, str]] = {
     ),
 }
 
-RAW_SIGNAL: Final[str] = "raw-signal"
-UNPROVEN_HANDLE: Final[str] = "unproven-process-handle"
-KILL_COMMAND: Final[str] = "kill-command"
+RULE_RAW_SIGNAL: Final[str] = "raw-signal"
+RULE_UNPROVEN_HANDLE: Final[str] = "unproven-process-handle"
+RULE_KILL_COMMAND: Final[str] = "kill-command"
 
 _RAW_SIGNAL_CALLS: Final[frozenset[str]] = frozenset(
     {"os.kill", "os.killpg", "signal.pthread_kill", "signal.pidfd_send_signal"}
@@ -334,10 +334,10 @@ def _check_raw_signal(call: ast.Call, name: str) -> str | None:
         return None
     # `os.kill(*target)` hides both the pid and the signal: unknown, so reported.
     if len(call.args) < 2 or any(isinstance(arg, ast.Starred) for arg in call.args[:2]):
-        return RAW_SIGNAL
+        return RULE_RAW_SIGNAL
     if _is_literal_zero(call.args[1]):
         return None
-    return RAW_SIGNAL
+    return RULE_RAW_SIGNAL
 
 
 def _check_handle_method(
@@ -354,12 +354,12 @@ def _check_handle_method(
         if provenances and all(_is_verified_handle_source(p) for p in provenances):
             return None
     if _called(receiver, aliases) == _PSUTIL_PROCESS or _any(bindings, receiver, _PSUTIL_SOURCES):
-        return UNPROVEN_HANDLE
+        return RULE_UNPROVEN_HANDLE
     if method != "send_signal":
         return None
     if _all(bindings, receiver, _POPEN_FACTORIES):
         return None
-    return UNPROVEN_HANDLE
+    return RULE_UNPROVEN_HANDLE
 
 
 def _check_kill_command(call: ast.Call, name: str) -> str | None:
@@ -377,7 +377,7 @@ def _check_kill_command(call: ast.Call, name: str) -> str | None:
         isinstance(element, ast.Constant) and element.value == _PROBE_FLAG
         for element in argv.elts[1:]
     )
-    return None if probe else KILL_COMMAND
+    return None if probe else RULE_KILL_COMMAND
 
 
 def scan_source(source: str, reported: str) -> list[Violation]:
@@ -449,7 +449,7 @@ def scanned_files() -> list[Path]:
 
 # --- Shell -----------------------------------------------------------------
 
-SHELL_UNPROVEN_KILL: Final[str] = "shell-unproven-kill"
+RULE_SHELL_UNPROVEN_KILL: Final[str] = "shell-unproven-kill"
 
 #: Shell functions that establish a pid is still the process the caller means:
 #: a command line and project root, a start time, a parent, or a job-table row.
@@ -928,7 +928,9 @@ def scan_shell_source(text: str, reported: str) -> list[Violation]:
             )
         if unproven:
             violations.append(
-                Violation(file=reported, line=words[0].line, rule=SHELL_UNPROVEN_KILL, call=call)
+                Violation(
+                    file=reported, line=words[0].line, rule=RULE_SHELL_UNPROVEN_KILL, call=call
+                )
             )
     return sorted(violations, key=lambda v: (v.file, v.line))
 

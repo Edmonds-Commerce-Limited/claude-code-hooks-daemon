@@ -170,9 +170,7 @@ class TestARunnerAfterAFailedDetector:
     def test_a_failed_runner_after_green_detectors_is_a_plain_failure(
         self, qa_dir: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any
     ) -> None:
-        code, _ = self._run(
-            qa_dir, monkeypatch, {"lint": _GREEN, "tests": _RED}, ["lint", "tests"]
-        )
+        code, _ = self._run(qa_dir, monkeypatch, {"lint": _GREEN, "tests": _RED}, ["lint", "tests"])
         out = capsys.readouterr().out
         assert code == 1
         assert "NOT MEANINGFUL" not in out

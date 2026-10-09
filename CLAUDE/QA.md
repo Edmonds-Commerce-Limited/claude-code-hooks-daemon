@@ -619,6 +619,15 @@ its first five findings as `<ID>  <file>:<line>  <text>`, says how many there ar
 path of the JSON. A finding with no identifier key (the row-key checkers) is
 listed only in the JSON.
 
+**Rule IDs.** Every rule ID a `scripts/qa` checker prints is explained in
+`scripts/qa/qa-rules.json` (a statement, a fix and the scripts that print it).
+`./scripts/qa/llm_qa.py --explain <ID>` prints one; `--explain` alone lists them
+all. `public-pattern:<name>` resolves to its `public-pattern` entry. A new rule
+needs an entry, and `tests/unit/qa/test_qa_rules.py` fails without one (it finds
+the IDs in the checkers' source, and also fails on an entry no checker prints).
+Handler rules (`R-...`) and the plan-QA and docs-QA check IDs resolve through
+`bin/hooks-daemon explain-rule <ID>` instead.
+
 **One file.** `check_magic_values.py`, `audit_error_hiding.py` and
 `audit_shell.py` take `--path FILE` (DETECTOR-SPEC 5.2): the file is judged as
 the tree run would judge it, findings go to stdout (JSON with `--json`), and the

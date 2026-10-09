@@ -147,6 +147,11 @@ agent.
       owner's: the post-write linters and `tdd_enforcement` out, `github_auto_close_keywords` in). Merged at
       `758b76a41` after three review rounds, the third verified by the coordinator.
     - **3.1b, QA layer**: the G1 detector (reasons inline, no baseline file, per B2), G6, G7 and G8.
+      **Done (3.1b):** G1 (`check_inline_suppressions.py`, six reasonless lines fixed), G6 (`qa-rules.json` and
+      `llm_qa.py --explain`, guarded both ways), G7 (runners after detectors; a runner after a failed detector is
+      NOT MEANINGFUL) and G8 (first findings with IDs and the absolute report path; `--path FILE` on three
+      checkers). Not done: `--path FILE` on the other checkers, and B rows in `hooks-daemon defences` (a
+      Defence-membership call for the coordinator). Evidence in [CONFORMANCE.md](CONFORMANCE.md).
     - **3.1c, config and CLI**: the G4 footer, G11 `probe --only`, and G12. Also fix the `exception_entries.py:16`
       docstring, which calls a plain string under `strict_mode` an error. The code makes it a warning.
   - **Coordinator call (under the owner's "go with the clear winners" instruction):** G5–G9, G12, G13 and G15 were

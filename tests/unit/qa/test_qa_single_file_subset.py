@@ -73,9 +73,7 @@ _CHECKERS: Final[tuple[SingleFileChecker, ...]] = (
 )
 
 
-def _run(
-    checker: SingleFileChecker, target: Path, *extra: str
-) -> subprocess.CompletedProcess[str]:
+def _run(checker: SingleFileChecker, target: Path, *extra: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(QA_DIR / checker.script), "--path", str(target), *extra],
         capture_output=True,

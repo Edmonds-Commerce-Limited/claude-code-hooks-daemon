@@ -193,7 +193,7 @@ class TestShellSuppressions:
         assert _findings(tmp_path) == []
 
     def test_an_extensionless_shell_script_is_scanned(self, tmp_path: Path) -> None:
-        _write(tmp_path, "bin/tool", f"#!/bin/bash\n{SHELLCHECK}=SC1090\n. \"$X\"\n")
+        _write(tmp_path, "bin/tool", f'#!/bin/bash\n{SHELLCHECK}=SC1090\n. "$X"\n')
         assert [f["file"] for f in _findings(tmp_path)] == ["bin/tool"]
 
     def test_an_extensionless_non_shell_file_is_not_scanned(self, tmp_path: Path) -> None:

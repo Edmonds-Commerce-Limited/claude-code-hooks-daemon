@@ -371,9 +371,7 @@ class DirectoryAudit:
 def audit_directory(root: Path) -> DirectoryAudit:
     """Audit every .sh / .bash file under root (recursively)."""
     candidates = sorted(
-        script
-        for suffix in sorted(_SHELL_SUFFIXES)
-        for script in walk_files(root, f"*{suffix}")
+        script for suffix in sorted(_SHELL_SUFFIXES) for script in walk_files(root, f"*{suffix}")
     )
     kept = [script for script in candidates if not _is_excluded(script, root)]
     violations = [violation for script in kept for violation in audit_file(script)]

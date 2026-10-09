@@ -2662,9 +2662,80 @@ def main_moved_command(args: Sequence[str], *, root: Path = PROJECT_ROOT) -> int
     return _VERDICT_EXIT[outcome.verdict]
 
 
+#: Where each rule ID a checker prints is explained (Plan 00484 G6).
+QA_RULES_FILE: Final[Path] = SCRIPTS_DIR / "qa-rules.json"
+_EXPLAIN_OPTION: Final[str] = "--explain"
+_FAMILY_SEPARATOR: Final[str] = ":"
+_EXPLAIN_USAGE: Final[str] = (
+    f"Usage: llm_qa.py {_EXPLAIN_OPTION} [RULE_ID]  (no ID lists every rule). "
+    "Daemon handler rules (R-...), plan-QA and docs-QA checks: "
+    "`bin/hooks-daemon explain-rule <ID>`."
+)
+
+
+def _qa_rules_document() -> dict[str, Any]:
+    """``qa-rules.json`` as parsed: ``{version, docs, description, rules}``."""
+    document: dict[str, Any] = json.loads(QA_RULES_FILE.read_text(encoding="utf-8"))
+    return document
+
+
+def _qa_rules() -> dict[str, dict[str, Any]]:
+    """The rule registry: ``{id: {statement, fix, checks}}`` from ``qa-rules.json``."""
+    rules: dict[str, dict[str, Any]] = _qa_rules_document()["rules"]
+    return rules
+
+
+def explain_rule(rule_id: str) -> str | None:
+    """What ``rule_id`` means and how to fix it, or None when no checker prints it.
+
+    An ID of the form ``family:name`` (``public-pattern:aws-access-key``) is
+    explained by its family entry, because the part after the colon is data
+    the checker computed, not a separate rule.
+    """
+    document = _qa_rules_document()
+    rules: dict[str, dict[str, Any]] = document["rules"]
+    entry = rules.get(rule_id) or rules.get(rule_id.partition(_FAMILY_SEPARATOR)[0])
+    if entry is None:
+        return None
+    return (
+        f"{rule_id}\n"
+        f"  What:       {entry['statement']}\n"
+        f"  Fix:        {entry['fix']}\n"
+        f"  Printed by: {', '.join(entry['checks'])}\n"
+        f"  Docs:       {document['docs']}\n"
+    )
+
+
+def explain_command(args: Sequence[str]) -> int:
+    """``llm_qa.py --explain [RULE_ID]``: explain one rule, or list every rule."""
+    if len(args) > 1:
+        print(f"llm_qa: {_EXPLAIN_OPTION} takes one rule ID. {_EXPLAIN_USAGE}", file=sys.stderr)
+        return EXIT_FAILURE
+    if not args:
+        for rule_id, entry in _qa_rules().items():
+            print(f"{rule_id}  {entry['statement']}")
+        print(f"\n{_EXPLAIN_USAGE}")
+        return EXIT_SUCCESS
+    text = explain_rule(args[0])
+    if text is None:
+        print(
+            f"llm_qa: no scripts/qa checker prints rule '{args[0]}'. {_EXPLAIN_USAGE}",
+            file=sys.stderr,
+        )
+        return EXIT_FAILURE
+    print(text, end="")
+    return EXIT_SUCCESS
+
+
 def main() -> int:
     """Entry point."""
     args = sys.argv[1:]
+
+    if args[:1] == [_EXPLAIN_OPTION]:
+        return explain_command(args[1:])
+    if _EXPLAIN_OPTION in args:
+        print(f"llm_qa: {_EXPLAIN_OPTION} runs on its own. {_EXPLAIN_USAGE}", file=sys.stderr)
+        return EXIT_FAILURE
 
     command_args = [arg for arg in args if arg != "--read-only"]
     if command_args[:1] == [MAIN_MOVED_COMMAND]:
@@ -2700,6 +2771,9 @@ def main() -> int:
             f"  {MAIN_MOVED_COMMAND} [{_START_OPTION} [{_RESTART_OPTION}] | {_ADVANCE_OPTION} | "
             f"{_FINISH_OPTION}] [MAIN_REF]: the batched gate's check on what would land "
             "(runs no tools)"
+        )
+        print(
+            f"  {_EXPLAIN_OPTION} [RULE_ID]: what a rule ID printed by a checker means, and its fix"
         )
         print(f"Tools: {', '.join(TOOL_REGISTRY)}")
         return EXIT_SUCCESS
