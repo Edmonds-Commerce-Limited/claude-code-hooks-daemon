@@ -117,3 +117,18 @@ class TestCmdDiskUsage:
         out = capsys.readouterr().out
         assert "TOTAL" in out
         assert "transcripts" in out
+
+    def test_decision_log_is_described_as_capped_at_write_time(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._untracked(tmp_path)
+
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
+            cli.cmd_disk_usage(_args(tmp_path))
+
+        out = " ".join(capsys.readouterr().out.split())
+        daemon_start_clause = out.split("Auto-reaped writers")[1].split(
+            "are bounded on daemon start"
+        )[0]
+        assert "decision.log" not in daemon_start_clause
+        assert "decision.log is capped at 4 MiB by the supervisor itself, at write time" in out

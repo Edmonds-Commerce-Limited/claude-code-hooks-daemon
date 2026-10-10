@@ -20,6 +20,7 @@ from claude_code_hooks_daemon.handlers.user_prompt_submit.idle_housekeeping_advi
     IdleHousekeepingAdvisoryHandler,
 )
 from claude_code_hooks_daemon.utils.stale_checkouts import DEFAULT_MAX_IDLE_DAYS
+from claude_code_hooks_daemon.utils.stale_litter import DEFAULT_SCRATCH_DAYS
 from claude_code_hooks_daemon.utils.stand_in_cron import DEFAULT_STAND_IN_DELAY_HOURS
 
 _KEY = "UserPromptSubmit.idle_housekeeping_advisory"
@@ -59,6 +60,17 @@ def test_a_valid_stale_worktree_days_is_applied_with_no_failure() -> None:
 
     assert registry.option_failures == {}
     assert handler._stale_worktree_days == 3
+
+
+@pytest.mark.parametrize("bad", [0, -3, "14", 1.5, True])
+def test_a_bad_stale_scratch_days_is_reported_and_the_handler_runs_on_the_default(
+    bad: object,
+) -> None:
+    registry, handler = _register(stale_scratch_days=bad, base_branch="develop")
+
+    assert "stale_scratch_days" in registry.option_failures[_KEY]
+    assert handler._stale_scratch_days == DEFAULT_SCRATCH_DAYS
+    assert handler._base_branch == "develop"
 
 
 _STOP_KEY = "Stop.auto_continue_stop"
