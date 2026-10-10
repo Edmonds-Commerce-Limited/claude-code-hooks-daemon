@@ -127,6 +127,11 @@ Evidence, with verified facts marked apart from inferences, is in
     write time (Plan 00181). Only the `cli.py:3170` wording ("bounded on daemon start") is wrong, and needs correcting.
   - **`refs/integration/changed-green/*`** (60 refs) has no sweep. Prune refs whose branch is gone.
   - `untracked/qa-interpreters/` (1.0 GB) is a reused cache that was filled once, so it needs no change.
+  - **Done** (merge `8ece5873d`, [report](subagent-reports/261010-task-4.1-follow-ups-sonnet.md)):
+    `idle_housekeeping_advisor` reports scratch files older than `stale_scratch_days` (default 14) and
+    `changed-green` refs whose branch is gone (at most 5 named, one `git update-ref --stdin` command for all), runs
+    nothing, and shares one 10 s scan budget across its three scans; the `decision.log` wording is corrected.
+  - **Left:** the transcripts item, `cleanupPeriodDays` in user settings, is for the owner or IaC (RUNBOOK).
 - [x] ✅ **Task 4.2**: Extend `idle_housekeeping_advisor` to report stale worktrees and daemons (report-first). Detection is `utils/stale_checkouts.py`; the advisory names each finding with its cleanup command and runs none. Options: `report_stale_checkouts`, `base_branch`, `stale_worktree_days`.
   - Remedies are real and never signal: `rm` of a proven-dead pid file, only this host's pid file, and a daemon with a vanished root gets a read-only `ps` and a human look. Merged 057116873.
 - [x] ✅ **Task 4.5**: Stale-scan follow-ups from the Task 4.2 review (`untracked/scratch/merge-review/housekeeping.md` is lost on restart, so the list is here).
