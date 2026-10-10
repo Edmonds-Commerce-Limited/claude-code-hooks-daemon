@@ -1579,7 +1579,7 @@ a related question, and the remedy should say whether it merges into the one rul
   decide the install mode. Building a path in order to scan the source tree is not a decision, and stays allowed.
   Fact-check: `subagent-reports/261009-fact-check-n386-sonnet.md`.
 
-Outcome: `cli.py` imports `get_untracked_dir`; `client_validator.py` and `utils/ccy_supervisor.py` call the rule;
+Outcome: `daemon/cli.py` imports `get_untracked_dir`; `install/client_validator.py` and `utils/ccy_supervisor.py` call the rule;
 `scripts/debug_info.py` loads `install_layout.py` by path (it runs on a bare interpreter). The shell function is
 `is_self_install_checkout` in `scripts/install/mode_guard.sh`, called by `setup_worktree.sh`, `health_check.sh`,
 `bootstrap-self-install.sh` and `detect_self_install_mode` (which keeps its extra `pyproject.toml` and real-clone terms),
