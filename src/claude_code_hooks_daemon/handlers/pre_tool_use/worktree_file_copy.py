@@ -74,6 +74,11 @@ _WRAPPERS = frozenset({"sudo", "env", "command", "nice", "time", "exec"})
 _MAX_WRAP_DEPTH = 4
 
 
+def _is_short_c_option(word: str | None) -> bool:
+    """Whether a word is a short-option cluster carrying `-c` (`-c`, `-nc`, `-ec`)."""
+    return word is not None and re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", word) is not None
+
+
 def _effective_command(segment: str, depth: int = 0) -> str:
     """The text of the command a segment finally runs, read word by word.
 
@@ -101,10 +106,7 @@ def _effective_command(segment: str, depth: int = 0) -> str:
                 (
                     i + 1
                     for i in range(index + 1, len(words) - 1)
-                    if words[i] is not None
-                    and words[i].startswith("-")
-                    and not words[i].startswith("--")
-                    and "c" in words[i]
+                    if _is_short_c_option(words[i])
                 ),
                 None,
             )
