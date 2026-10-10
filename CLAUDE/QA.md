@@ -465,7 +465,9 @@ took about 460 s before `changed_tests`, per Plan 00475's timings): `magic_value
 `doc_truth`, `doc_snippets`, `plan_qa`, `docs_qa`, `generated_doc_drift`,
 `handler_reference`, `hook_contract`, `input_contract`, `project_handlers` (the
 project handlers' own tests), `declared_invariant_pairs`, `skill_refs`,
-`canonical_callers`, `authored_path_stat`, `signal_targets`,
+`canonical_callers`, `authored_path_stat`, `install_mode_marker` (only
+`daemon/install_layout.py` and `scripts/install/mode_guard.sh` may test for
+`src/claude_code_hooks_daemon` to decide the install mode), `signal_targets`,
 `unreachable_handle_branch`, `fail_open_inventory`, `security`,
 `capture_corruption`, `dangerous_invocation_corpus`, `python_var_guidance`,
 `skip_list_substring`, `sensitive_content`, `british_english`, `git_history`,

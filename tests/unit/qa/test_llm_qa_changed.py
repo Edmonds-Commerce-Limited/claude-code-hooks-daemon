@@ -67,6 +67,7 @@ class TestTheChangedSelection:
             "skill_refs",
             "canonical_callers",
             "authored_path_stat",
+            "install_mode_marker",
             "signal_targets",
             "unreachable_handle_branch",
             "fail_open_inventory",

@@ -178,6 +178,16 @@
       "fix": "Add the reason after the directive (`nosec B404 - fixed argv, no shell`), in a second `#` segment of the same comment, or in the comment block directly above that names the suppression, its code or the tool. A comment about something else does not count. Better: fix the code so the suppression can go.",
       "checks": ["check_inline_suppressions.py"]
     },
+    "install-mode-marker": {
+      "statement": "A file other than the two definitions (`daemon/install_layout.py`, `scripts/install/mode_guard.sh`) tests whether `src/claude_code_hooks_daemon` exists on a root the caller supplied, in order to decide the install mode. A third copy of the test drifts: three of the first four Python copies used `.exists()` where the rule is `.is_dir()`.",
+      "fix": "Python: call `daemon.install_layout.is_self_install_mode` or `get_untracked_dir`; a script that runs without the package loads `install_layout.py` by file path, as `daemon/signal_standalone.py` does. Shell: source `scripts/install/mode_guard.sh` and call `is_self_install_checkout`. Building the path to SCAN the source tree, or testing a path deeper than the package directory, is not reported. There is no exemption marker.",
+      "checks": ["check_install_mode_marker.py"]
+    },
+    "install-mode-marker-unreadable": {
+      "statement": "The install-mode-marker check could not read a Python or shell file (unreadable or not UTF-8), so it cannot be shown free of an install-mode test.",
+      "fix": "Make the file readable UTF-8, or remove it if it is not source.",
+      "checks": ["check_install_mode_marker.py"]
+    },
     "kill-command": {
       "statement": "Python runs a `kill`, `pkill` or `killall` argv through `subprocess` (other than `kill -0`). `pkill` and `killall` pick their targets by pattern, so no pid is proven. The shell form is `shell-unproven-kill`.",
       "fix": "Signal through `claude_code_hooks_daemon.utils.safe_signal` (`signal_verified_daemon`, `stop_verified_daemon`, `signal_own_session_child`), or signal the Popen object itself. There is no exemption marker.",

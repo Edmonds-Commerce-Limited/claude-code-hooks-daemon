@@ -17,6 +17,29 @@ if [ -z "${OUTPUT_SH_LOADED+x}" ]; then
 fi
 
 #
+# is_self_install_checkout() - Is this checkout the daemon's own repository?
+#
+# The ONE shell definition of the self-install test. It is the shell twin of
+# daemon/install_layout.py::is_self_install_mode (the one Python definition):
+# true iff the daemon SOURCE DIRECTORY exists at the project root. The shell
+# cannot call the Python, so a parity test runs both on the same layouts
+# (tests/unit/install/test_self_install_shell_python_parity.py). Every script
+# that needs the answer calls this; a QA detector (check_install_mode_marker.py)
+# fails any other file that tests for the marker itself.
+#
+# Args:
+#   $1 - project_root: Path to project root
+#
+# Returns:
+#   Exit code 0 if self-install checkout, 1 otherwise (including an empty path)
+#
+is_self_install_checkout() {
+    local project_root="${1:-}"
+
+    [ -n "$project_root" ] && [ -d "$project_root/src/claude_code_hooks_daemon" ]
+}
+
+#
 # _is_real_daemon_clone() - Is a candidate directory a REAL daemon clone?
 #
 # The discriminator detect_self_install_mode needs for its third indicator:
@@ -63,7 +86,7 @@ detect_self_install_mode() {
     fi
 
     # Check for self-install indicators
-    if [ -d "$project_root/src/claude_code_hooks_daemon" ] && \
+    if is_self_install_checkout "$project_root" && \
        [ -f "$project_root/pyproject.toml" ] && \
        ! _is_real_daemon_clone "$project_root/.claude/hooks-daemon"; then
         return 0  # Self-install mode detected

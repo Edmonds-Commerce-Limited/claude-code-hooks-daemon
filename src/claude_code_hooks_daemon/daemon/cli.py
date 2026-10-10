@@ -60,6 +60,13 @@ from claude_code_hooks_daemon.core.handler_bases import StatusLineSegmentHandler
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.daemon.enforcement import enforce_single_daemon
+
+# The daemon's untracked directory for the current install mode: the ONE rule,
+# not a copy of it (self-install keeps it at ``{project}/untracked/``, a client
+# install at ``{project}/.claude/hooks-daemon/untracked/``).
+from claude_code_hooks_daemon.daemon.install_layout import (
+    get_untracked_dir as _daemon_untracked_dir,
+)
 from claude_code_hooks_daemon.daemon.metadata import (
     DaemonVenvMetadata,
     compute_project_lock_hash,
@@ -2632,19 +2639,6 @@ def _human_bytes(size: int) -> str:
             return f"{value:.1f} {unit}"
         value /= 1024
     return f"{value:.1f} GB"
-
-
-def _daemon_untracked_dir(project_root: Path) -> Path:
-    """Resolve the daemon's untracked directory for the current install mode.
-
-    Self-install (dogfooding) keeps venvs at ``{project}/untracked/``; normal
-    installs keep them at ``{project}/.claude/hooks-daemon/untracked/``.
-    Detection mirrors ``ProjectContext``: presence of
-    ``src/claude_code_hooks_daemon/`` at the project root signals self-install.
-    """
-    if (project_root / "src" / "claude_code_hooks_daemon").exists():
-        return project_root / "untracked"
-    return project_root / ".claude" / "hooks-daemon" / "untracked"
 
 
 def _read_project_handler_health(
