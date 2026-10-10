@@ -187,12 +187,13 @@ def probe_only_handler(hook_input: Mapping[str, Any]) -> str | None:
 
     Only an event whose MARKER is a probe-class source counts, for the reason
     :func:`probe_thread` gives: a field that switches the other guards off
-    must not be reachable from real traffic.
+    must not be reachable from real traffic. The name is returned as a config
+    key (dashes become underscores), the form the chain compares against.
     """
     if hook_input.get(SYNTHETIC_SOURCE_FIELD) not in PROBE_CLASS_SOURCES:
         return None
     raw = hook_input.get(PROBE_ONLY_FIELD)
-    return raw if isinstance(raw, str) and raw else None
+    return raw.replace("-", "_") if isinstance(raw, str) and raw else None
 
 
 def record_synthetic_source(record: Mapping[str, Any]) -> str | None:

@@ -514,8 +514,17 @@ the summary) and phase 2 for three checkers (`check_magic_values.py`, `audit_err
 `audit_shell.py` take `--path FILE`) are done; see 4.4 and D5.2/D5.3 under B. Review round 1
 (S4) fixed the claim that the file is judged "as the tree run would": the two audit scripts now
 refuse a file inside the repository that the tree run does not collect, as `check_magic_values.py`
-already did. Not done: `--path FILE` on the remaining checkers, and `llm_qa.py` itself has no file
-selection. Declared as a known gap (DETECTOR 5.2) in the declaration, Task 3.3.
+already did. Task 3.1d added `check_british_english.py --path FILE` (same scope rules as the tree
+run, one shared `out_of_scope_reason`). Not done: `--path FILE` on `check_module_length.py`
+(report-only, so a one-file answer has no pass/fail to give); on the checkers whose `--path` already
+takes a directory and writes a scoped artefact beside it (`check_python_var_guidance`,
+`check_skip_list_substring`, `check_eacces_safe_predicates`, `check_authored_path_stat`,
+`check_unreachable_handle_branch`, `check_inline_suppressions`, `check_sensitive_content`,
+`check_skill_references`, `check_github_urls`, `check_daemon_dir_cd_in_docs`,
+`check_install_mode_marker`, `check_released_changelog`: a file would change what the artefact
+means, so each needs its own design); and on the cross-file or whole-tree checkers (inventories,
+drift, doc-truth, handler-reference, hook-contract, repo-hygiene), where a single file is not the
+unit. `llm_qa.py` itself has no file selection. Declared as a known gap (DETECTOR 5.2) in the declaration, Task 3.3.
 
 **G7 closed (Task 3.1b; review round 1 S5).** See the 4.5 section: runners are registered and
 resolved after every detector, and a runner that PASSED after a failed detector is marked
@@ -541,12 +550,12 @@ amendment). A runner that failed stays a failure and the exit code is non-zero.
   project loads, bundled, project and plugin (`daemon/cli.py:6804`, the generator `defences`
   uses plus the project loader); a handler the event does not have, a non-probe source and a
   payload that contradicts `--only` are refused before anything is sent. `detector_entry_point`
-  now names it (`rule_explain/defences.py:131`). Known gap, not changed here (round 2 review,
-  reproduced): the docs generator files a project handler under event `project`, which
-  `defences.py:130` cannot map, so `defences` prints no `--only` command for a project handler at all
-  (`detector_entry_point` is null). `probe --only <config key>` accepts one; nothing points to it.
-  Remedy: map each project handler to its event and config key in `cmd_defences`, with a test that
-  feeds the printed `--only` value to `probe`. The `scan <handler> <paths>` mode and the next-major
+  now names it (`rule_explain/defences.py:131`). The project-handler gap is closed (Task 3.1d): the
+  docs generator still files a project handler under its class name and, when it cannot place it,
+  under event `project`, but `cmd_defences` re-keys each project handler by the event and config key
+  the project loader gives it (`_with_project_handler_keys`), so `defences` prints a working
+  `--only` command for it. `tests/unit/daemon/test_cli_defences_project_handlers.py` feeds the
+  printed value to the probe's own check. The `scan <handler> <paths>` mode and the next-major
   mandatory reason stay declared known gaps; no plan is to be filed for either.
 - **G12 closed, and G3's listing half with it.** `hooks-daemon exceptions [--json]`
   (`daemon/cli.py:6837`) lists `exclude_paths` / `extra_whitelist` entries with their reasons
