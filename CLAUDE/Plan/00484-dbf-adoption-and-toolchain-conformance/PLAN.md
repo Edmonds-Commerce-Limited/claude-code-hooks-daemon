@@ -164,7 +164,7 @@ agent.
       of globbing every handler; `core/chain.py` compares `probe_only` before normalising dashes; `--path FILE` on
       the remaining checkers; and B rows in `hooks-daemon defences`.
       **Done (3.1d):** project handlers get their real event and config key in `defences` (end to end on this
-      repository), the footer test covers all 201 handler files, dashes are normalised once in
+      repository), the footer test covers every handler file (200, by glob), dashes are normalised once in
       `probe_only_handler`, and `--path FILE` is on `check_british_english.py`; the other checkers are skipped with
       reasons in CONFORMANCE G8. Merged at `41f5db964` after one review round
       ([report](subagent-reports/261010-task-3.1d-follow-ups-sonnet.md)). B rows were left for a ruling.
