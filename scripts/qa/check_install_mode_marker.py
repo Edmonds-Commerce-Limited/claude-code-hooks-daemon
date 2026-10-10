@@ -35,7 +35,9 @@ supervisor wraps the user's Claude session and must start with no daemon clone
 present (a fresh teammate clone has none), so it cannot load
 ``install_layout.py`` and keeps its own copy of the test; a parity test pins
 that copy to the rule. That is a deliberate residual, not an allowlist entry.
-The rest of ``.claude/ccy/`` is scanned.
+The rest of ``.claude/ccy/`` is scanned, as far as git tracks or would track it:
+a gitignored file (Claude Code's edit snapshots in ``.claude/ccy/file-history/``)
+is not project code and is not judged.
 A guide for a RELEASED version under ``CLAUDE/UPGRADES/<major>/v<from>-to-v<to>/``
 (``<to>`` at or below this repository's version) is not scanned either: it is
 frozen history and must not depend on a function added later. Everything else
@@ -65,6 +67,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.git_repo import git_visible_paths
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.scan_scope import (
     relative_parts,
@@ -525,10 +528,14 @@ def _is_unscanned(parts: tuple[str, ...]) -> bool:
 
 
 def _candidate_files(root: Path) -> list[Path]:
+    # A gitignored file (Claude Code's edit snapshots under .claude/ccy/file-history)
+    # is not project code; ``None`` means ``root`` is not a git repository, so all count.
+    visible = git_visible_paths(root)
     return [
         path
         for path in walk_files(root)
-        if not any(part in _SKIP_DIRS for part in relative_parts(path, root))
+        if (visible is None or "/".join(relative_parts(path, root)) in visible)
+        and not any(part in _SKIP_DIRS for part in relative_parts(path, root))
         and not _is_unscanned(tuple(relative_parts(path, root)))
         and path.is_file()
         and not path.is_symlink()
