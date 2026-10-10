@@ -138,8 +138,12 @@ _KNOWN_KEYS: Final[frozenset[str]] = frozenset(
 #: those of the plugins most often installed beside it (xdist, timeout,
 #: randomly, rerunfailures, asyncio, html). A value can look like a path
 #: (``--basetemp /tmp/x``, ``--cov src``), so the grammar has to consume it
-#: before the operand test sees it. ``test_subagent_full_qa_blocker`` pins
-#: this set against the parser of the pytest actually installed.
+#: before the operand test sees it. An option missing from this set is judged
+#: both as taking a value and as a boolean, and the run is denied if either
+#: reading is the whole suite, so a pytest newer than the table can be
+#: over-denied but an unknown option cannot hide a suite word.
+#: ``test_subagent_full_qa_blocker`` fails when the installed pytest has an
+#: option the tables lack, as the signal to add it.
 PYTEST_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
     {
         # pytest core
@@ -186,11 +190,13 @@ PYTEST_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
         "--log-file-mode",
         "--log-format",
         "--log-level",
+        "--max-warnings",
         "--maxfail",
         "--override-ini",
         "--pastebin",
         "--pdbcls",
         "--pythonwarnings",
+        "--report-chars",
         "--rootdir",
         "--show-capture",
         "--tb",
@@ -212,7 +218,10 @@ PYTEST_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
         "--rsyncdir",
         "--rsyncignore",
         "--maxschedchunk",
+        "--px",
+        "--testrunuid",
         # pytest-timeout
+        "--session-timeout",
         "--timeout",
         "--timeout-method",
         "--timeout_method",
@@ -309,8 +318,12 @@ PYTEST_FLAG_OPTIONS: Final[frozenset[str]] = frozenset(
         "--no-cov",
         "--no-cov-on-fail",
         # pytest-xdist, pytest-randomly, pytest-html
+        "-d",
         "-f",
         "--looponfail",
+        "--loadscope-reorder",
+        "--no-loadscope-reorder",
+        "--timeout-disable-debugger-detection",
         "--randomly-dont-reset-seed",
         "--randomly-dont-reorganize",
         "--self-contained-html",
@@ -3734,7 +3747,7 @@ def _split_attached_redirect(argument: str) -> tuple[str, bool]:
     return argument[: found.start()], bool(_BARE_REDIRECT_OPERATOR.match(argument[found.start() :]))
 
 
-def _takes_next_word(flag: str, pattern: FullQaPattern) -> bool:
+def _takes_next_word(flag: str, pattern: FullQaPattern, *, unknown_is_flag: bool = False) -> bool:
     """Whether ``flag`` consumes the word after it as its value.
 
     A declared or grammar value flag does. Without a grammar nothing else
@@ -3742,14 +3755,17 @@ def _takes_next_word(flag: str, pattern: FullQaPattern) -> bool:
     (``-xvs``) and a short value option with its value attached (``-n8``)
     take nothing, and any other flag is a plugin's the grammar does not know:
     it is read as taking a value, so a path-shaped value
-    (``--json-report-file out/r.json``) never passes for a target.
+    (``--json-report-file out/r.json``) never passes for a target. With
+    ``unknown_is_flag`` it is read as a boolean instead; the caller judges
+    both readings, because neither alone is safe (the value reading hides a
+    path, the boolean reading hides a suite word).
     """
     if _FLAG_VALUE_SEPARATOR in flag:
         return False
     if flag in pattern.value_flags:
         return True
     known = pattern.flag_options
-    if known is None or flag in known:
+    if known is None or flag in known or unknown_is_flag:
         return False
     if flag.startswith(_LONG_FLAG_PREFIX):
         return True
@@ -4006,6 +4022,34 @@ def _run_verdict(
 ) -> _Verdict:
     """Whether these arguments make ``pattern.command`` run the whole suite.
 
+    Under a grammar an option it does not know is judged twice: as taking a
+    value and as a boolean. The run is full when either reading is, so an
+    unknown option can neither hide a path as its value nor swallow a suite
+    word that follows it.
+    """
+    verdict = _run_verdict_reading(
+        pattern, arguments, cwd, start, shape_only=shape_only, marked=marked
+    )
+    if verdict.full or pattern.flag_options is None:
+        return verdict
+    boolean = _run_verdict_reading(
+        pattern, arguments, cwd, start, shape_only=shape_only, marked=marked, unknown_is_flag=True
+    )
+    return boolean if boolean.full else verdict
+
+
+def _run_verdict_reading(
+    pattern: FullQaPattern,
+    arguments: Sequence[str],
+    cwd: Path | None,
+    start: Path | None = None,
+    *,
+    shape_only: bool = False,
+    marked: dict[str, bool] | None = None,
+    unknown_is_flag: bool = False,
+) -> _Verdict:
+    """One reading of :func:`_run_verdict` (see ``unknown_is_flag``).
+
     A word naming the whole suite (``full_words``, or a ``full_args`` path)
     makes the run full wherever it sits. Under a grammar every operand is a
     target (pytest stops on a path it cannot find); without one, or for
@@ -4042,7 +4086,7 @@ def _run_verdict(
             if argument.split(_FLAG_VALUE_SEPARATOR, 1)[0] in pattern.read_only_flags:
                 return _NOT_FULL
             if (
-                _takes_next_word(argument, pattern)
+                _takes_next_word(argument, pattern, unknown_is_flag=unknown_is_flag)
                 and index < len(arguments)
                 and not arguments[index].startswith(FLAG_PREFIX)
             ):

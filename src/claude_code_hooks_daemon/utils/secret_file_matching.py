@@ -41,6 +41,10 @@ import yaml
 
 from claude_code_hooks_daemon.utils import linear_shlex, shell_expansion
 from claude_code_hooks_daemon.utils.command_evasion import (
+    REGEX_PATTERN_ATTACHED_PREFIXES,
+    REGEXP_LONG_OPTION,
+    GitGrepRole,
+    git_grep_word_roles,
     git_subcommand_index,
     strip_transparent_reserved_words,
 )
@@ -1526,15 +1530,11 @@ _GH_TEXT_FLAGS: Final[frozenset[str]] = frozenset(
 _AWK_RUNNING_MARKERS: Final[tuple[str, ...]] = ("system", "getline", "|")
 #: Heads whose pattern operand is a regular expression, never a path.
 _REGEX_PATTERN_HEADS: Final[frozenset[str]] = _GREP_HEADS | frozenset({_RG_HEAD})
-_REGEXP_LONG_OPTION: Final[str] = "--regexp"
-_REGEX_PATTERN_ATTACHED_PREFIXES: Final[tuple[str, ...]] = (f"{_REGEXP_LONG_OPTION}=", "-e")
 _GIT_HEAD: Final[str] = "git"
 _GIT_GREP_SUBCOMMAND: Final[str] = "grep"
-#: ``git grep`` options whose separate value is the pattern, and those whose
-#: separate value is something else (a pattern FILE, a count, a depth).
-_GIT_GREP_PATTERN_OPTIONS: Final[frozenset[str]] = frozenset({"-e", _REGEXP_LONG_OPTION})
-_GIT_GREP_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
-    {"-f", "--file", "-A", "-B", "-C", "-m", "--max-depth", "--threads"}
+#: The roles ``git_grep_word_roles`` gives a regex pattern word.
+_GIT_GREP_PATTERN_ROLES: Final[frozenset[GitGrepRole]] = frozenset(
+    {GitGrepRole.PATTERN, GitGrepRole.PATTERN_ATTACHED}
 )
 _TEXT_OPERAND_PLACEHOLDER: Final[str] = "TEXT_OPERAND"
 #: Shells whose ``-c`` program string is read as shell commands (not ``python -c``).
@@ -1570,9 +1570,9 @@ def _is_text_operand(word: str, previous: str, head: str) -> bool:
     if head in _REGEX_PATTERN_HEADS:
         # The pattern given as an option's value is a regex like the positional
         # one: `--regexp=PAT`, `-ePAT`, and `--regexp PAT`.
-        if word.startswith(_REGEX_PATTERN_ATTACHED_PREFIXES):
+        if word.startswith(REGEX_PATTERN_ATTACHED_PREFIXES):
             return True
-        if previous == _REGEXP_LONG_OPTION:
+        if previous == REGEXP_LONG_OPTION:
             return True
     if word.startswith("-"):
         return False
@@ -1719,33 +1719,12 @@ def _git_grep_pattern_spans(segment: str) -> list[tuple[int, int]]:
     subcommand = git_subcommand_index(words, git_index)
     if subcommand is None or words[subcommand] != _GIT_GREP_SUBCOMMAND:
         return []
-    patterns: list[tuple[int, int]] = []
-    pattern_given = False
-    index = subcommand + 1
-    while index < len(words):
-        word = words[index]
-        if word == "--":
-            break
-        value_index: int | None = None
-        if word in _GIT_GREP_PATTERN_OPTIONS:
-            value_index, pattern_given = index + 1, True
-            index += 2
-        elif word.startswith(_REGEX_PATTERN_ATTACHED_PREFIXES):
-            value_index, pattern_given = index, True
-            index += 1
-        elif word in _GIT_GREP_VALUE_OPTIONS:
-            index += 2
-        elif word.startswith("-"):
-            index += 1
-        elif pattern_given:
-            break
-        else:
-            value_index, pattern_given = index, True
-            index += 1
-        if value_index is not None and value_index < len(words):
-            if _is_literal_quoted_word(words[value_index]):
-                patterns.append(spans[value_index])
-    return patterns
+    roles = git_grep_word_roles(words, subcommand)
+    return [
+        spans[index]
+        for index, role in sorted(roles.items())
+        if role in _GIT_GREP_PATTERN_ROLES and _is_literal_quoted_word(words[index])
+    ]
 
 
 def _segment_text_operands(segment: str, offset: int) -> tuple[str, list[tuple[int, int]]]:
