@@ -3644,7 +3644,8 @@ def cmd_defences(args: argparse.Namespace) -> int:
         args: Parsed CLI arguments with ``as_json`` (``--json``) and ``project_root``.
 
     Returns:
-        0 on success, 1 when the project or its config cannot be loaded.
+        0 on success, 1 when the project or its config cannot be loaded, or when
+        its QA rule registry is unusable (the handler rows are still listed).
     """
     from claude_code_hooks_daemon.rule_explain.defences import (
         QA_RULES_RELATIVE_PATH,
@@ -3674,28 +3675,33 @@ def cmd_defences(args: argparse.Namespace) -> int:
         discover_handler_rules(include_project_handlers=True),
     )
     rules_file = project_path / QA_RULES_RELATIVE_PATH
+    registry_usable = True
     if rules_file.is_file():
         active_classes = {
             record.handler: record.defect_class for record in records if record.defect_class
         }
         try:
             document = json.loads(rules_file.read_text(encoding="utf-8"))
+            if not isinstance(document, dict):
+                raise ValueError(f"top level is {type(document).__name__}, not an object")
             records.extend(collect_batch_defences(document, active_classes))
-        except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        except (OSError, ValueError, KeyError) as exc:
+            # The handler rows are valid whatever the registry holds, so they are
+            # still listed; the exit code stays 1 so a broken registry is not missed.
             print(
                 f"defences: {rules_file} is not a usable QA rule registry: {exc!r}", file=sys.stderr
             )
-            return 1
+            registry_usable = False
 
     if getattr(args, "as_json", False):
         print(json.dumps([record.to_dict() for record in records], indent=2))
-        return 0
-    for record in records:
-        print(
-            f"{record.rule_id or '-'}\t{record.handler}\t{record.event}\t"
-            f"{record.priority}\t{record.statement or '-'}\t{record.kind}"
-        )
-    return 0
+    else:
+        for record in records:
+            print(
+                f"{record.rule_id or '-'}\t{record.handler}\t{record.event}\t"
+                f"{record.priority}\t{record.statement or '-'}\t{record.kind}"
+            )
+    return 0 if registry_usable else 1
 
 
 def cmd_generate_docs(args: argparse.Namespace) -> int:

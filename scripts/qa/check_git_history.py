@@ -57,6 +57,7 @@ _DEFAULT_CONFIG: Final[Path] = _REPO_ROOT / ".claude" / "hooks-daemon.yaml"
 _TOOL_NAME: Final[str] = "git_history"
 
 _PUBLIC_RULE_PREFIX: Final[str] = "public-pattern"
+_INVALID_PATTERN_RULE: Final[str] = "public-pattern-invalid"
 _SECRET_RULE: Final[str] = "secret-word-list"
 
 _SURFACE_COMMIT_MESSAGE: Final[str] = "commit-message"
@@ -247,7 +248,7 @@ def _compile_public_patterns(
                 Violation(
                     surface=_SURFACE_CONFIG,
                     locator=name,
-                    rule=f"{_PUBLIC_RULE_PREFIX}:{name}",
+                    rule=_INVALID_PATTERN_RULE,
                     message=(
                         f"Public pattern '{name}' is not a valid regex ({exc}) — it "
                         "checked NOTHING. Fix the pattern; a rule that cannot compile "

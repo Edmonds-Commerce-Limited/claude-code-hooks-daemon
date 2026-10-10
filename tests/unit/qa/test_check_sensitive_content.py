@@ -575,7 +575,8 @@ class TestInvalidPublicPatternIsReported:
         data = _run_checker(tmp_path, config)
 
         assert data["summary"]["passed"] is False
-        assert any(v["rule"] == "public-pattern:broken" for v in data["violations"])
+        assert any(v["rule"] == "public-pattern-invalid" for v in data["violations"])
+        assert not any(v["rule"].startswith("public-pattern:") for v in data["violations"])
 
 
 class TestUnreadableFileIsReportedNotSilentlyDropped:

@@ -402,6 +402,7 @@ class TestInvalidConfiguration:
 
         assert data["summary"]["passed"] is False
         assert any(v["surface"] == "config" for v in data["violations"])
+        assert any(v["rule"] == "public-pattern-invalid" for v in data["violations"])
 
 
 class TestHistoryBaseline:

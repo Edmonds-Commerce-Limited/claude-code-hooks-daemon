@@ -311,9 +311,15 @@
       "checks": ["check_handler_reference.py"]
     },
     "public-pattern": {
-      "statement": "Content matches a named public sensitive-content pattern, or a configured pattern is not a valid regex and so checked nothing. The ID is `public-pattern:<name>`; the name says which pattern.",
-      "fix": "Remove or rewrite the matched text, or fix the pattern's regex. The pattern is declared in `.claude/hooks-daemon.yaml` under `sensitive_content`.",
+      "statement": "Content matches a named public sensitive-content pattern. The ID is `public-pattern:<name>`; the name says which pattern.",
+      "fix": "Remove or rewrite the matched text. The pattern is declared in `.claude/hooks-daemon.yaml` under `sensitive_content`.",
       "checks": ["check_git_history.py", "check_sensitive_content.py"]
+    },
+    "public-pattern-invalid": {
+      "statement": "A configured public sensitive-content pattern is not a valid regex, so it checked nothing and the scan could not be trusted.",
+      "fix": "Correct the pattern's regex in `.claude/hooks-daemon.yaml` under `sensitive_content`; the finding names the pattern.",
+      "checks": ["check_git_history.py", "check_sensitive_content.py"],
+      "meta": true
     },
     "qa-check-count-hardcoded": {
       "statement": "A document hard-codes how many QA checks exist, and the number goes stale.",
