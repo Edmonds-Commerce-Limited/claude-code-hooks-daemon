@@ -541,9 +541,12 @@ amendment). A runner that failed stays a failure and the exit code is non-zero.
   project loads, bundled, project and plugin (`daemon/cli.py:6804`, the generator `defences`
   uses plus the project loader); a handler the event does not have, a non-probe source and a
   payload that contradicts `--only` are refused before anything is sent. `detector_entry_point`
-  now names it (`rule_explain/defences.py:131`). Known wrinkle, not changed here: the docs
-  generator files a project handler under its class name, so `defences` prints that name for one,
-  while `--only` takes the config key. The `scan <handler> <paths>` mode and the next-major
+  now names it (`rule_explain/defences.py:131`). Known gap, not changed here (round 2 review,
+  reproduced): the docs generator files a project handler under event `project`, which
+  `defences.py:130` cannot map, so `defences` prints no `--only` command for a project handler at all
+  (`detector_entry_point` is null). `probe --only <config key>` accepts one; nothing points to it.
+  Remedy: map each project handler to its event and config key in `cmd_defences`, with a test that
+  feeds the printed `--only` value to `probe`. The `scan <handler> <paths>` mode and the next-major
   mandatory reason stay declared known gaps; no plan is to be filed for either.
 - **G12 closed, and G3's listing half with it.** `hooks-daemon exceptions [--json]`
   (`daemon/cli.py:6837`) lists `exclude_paths` / `extra_whitelist` entries with their reasons

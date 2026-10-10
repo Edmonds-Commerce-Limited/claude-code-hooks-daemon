@@ -502,7 +502,7 @@ class TestProbeOnly:
     def test_the_cli_accepts_a_project_handler(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """`defences` prints `--only <key>` for project handlers, so it must accept them."""
+        """A project handler's config key is accepted by `--only`, like a bundled handler's."""
         entry = _project_with_entry_point(tmp_path, "pre-tool-use", _CAPTURING_ENTRY_POINT)
         (tmp_path / ".claude" / "hooks-daemon.yaml").write_text(
             'version: "2.0"\nproject_handlers:\n  enabled: true\n'

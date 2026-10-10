@@ -154,6 +154,15 @@ agent.
       Defence-membership call for the coordinator). Evidence in [CONFORMANCE.md](CONFORMANCE.md).
     - **3.1c, config and CLI**: the G4 footer, G11 `probe --only`, and G12. Also fix the `exception_entries.py:16`
       docstring, which calls a plain string under `strict_mode` an error. The code makes it a warning.
+      **Done (3.1c):** G4 (one router footer asking for a recorded reason; the five inline footers removed), G11
+      (`probe --only` checked against every handler the project loads), G12 (`hooks-daemon exceptions`, including
+      `pyproject.toml` and `.pre-commit-config.yaml` as a coordinator call), and the docstring. §6.3 graded PARTLY
+      MET (inline `nosec`/`noqa`/`type: ignore` not listed). Merged at `bae5d3caf` after two review rounds
+      ([report](subagent-reports/261009-task-3.1c-config-cli-sonnet.md)).
+    - **3.1d, follow-ups from the three batches**: `defences` gives a project handler no `--only` entry point (its
+      event is filed as `project`; see CONFORMANCE G11); `test_single_disable_footer.py` names five files instead
+      of globbing every handler; `core/chain.py` compares `probe_only` before normalising dashes; `--path FILE` on
+      the remaining checkers; and B rows in `hooks-daemon defences`.
   - **Coordinator call (under the owner's "go with the clear winners" instruction):** G5–G9, G12, G13 and G15 were
     never put to the owner. Closing them is the default, so they are closed through the batches above. Resolved; not
     an owner ruling. Success criterion 3 ("the owner has ruled on every gap") therefore waits on the owner to confirm
