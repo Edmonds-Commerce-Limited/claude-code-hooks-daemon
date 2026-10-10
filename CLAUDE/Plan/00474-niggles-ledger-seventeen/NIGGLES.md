@@ -1461,6 +1461,23 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N391 — the install-mode detector's anchored-check rule and its skips are wider than they need to be
+
+**Source**: the N386 round 2 review (`untracked/agent-reports/auto/261010-120419-code-reviewer-adc697a9d7f04f1b2.md`),
+which approved the merge and left these as non-blocking.
+
+**Evidence**: `scripts/qa/check_install_mode_marker.py`:
+
+- Lines 347-376 flag a `__file__`-anchored stat check only when its answer is kept as a value. They miss an anchored
+  `if` that chooses a directory, a `return` of the check, `not X.is_dir()`, a ternary, and a positional argument.
+- Lines 91-94 skip all of `CLAUDE/UPGRADES/`, which also covers `v3/` and `upgrade-template/`, where live scripts sit.
+- Line 92 skips all of `.claude/ccy/`; only `claude-supervise.py` needs to stay self-contained, and its own copy of
+  the rule (around line 1782) still tests `.exists()` with no parity test.
+
+**Status**: ⬜ Open. Remedy: exempt an anchored check only when it is an `if` guard that just returns, raises, exits or
+prints, and flag every other use (with the five shapes above as tests); skip only released guides; narrow the ccy
+skip to the supervisor file, with a parity test for its copy.
+
 ### N390 — two readers of a git command's search and format option values
 
 **Source**: the Plan 00483 batch (b) round 2 review, carried from N383.
