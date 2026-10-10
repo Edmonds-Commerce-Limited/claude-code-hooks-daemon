@@ -2775,46 +2775,57 @@ class TestAnUnknownFlagUnderAGrammar:
         )
         assert find_full_qa_invocation("runner --flag tests/unit/x.py", patterns) is None
 
-    def test_every_option_of_the_running_pytest_is_known_or_fails_closed(
+    def test_every_option_of_the_running_pytest_is_in_a_table(
         self, pytestconfig: pytest.Config
     ) -> None:
-        """No pytest release can break the grammar: a gap in the table fails closed.
+        """The rot detector: a gap in the tables is reported, not hidden.
 
-        The tables are a precision aid. An option in neither is read as taking
-        a value, so ``pytest <option> tests/unit/x.py`` is judged as the bare,
-        whole-suite run it may be. Pinning the tables to the installed
-        pytest's parser (the old check) failed whenever a fresh venv resolved a
-        newer pytest (N381); this asserts the safe reading instead.
+        ``optparser`` is pytest's private argparse parser. A gap is SAFE (the
+        option is judged under both readings, see the tests below) but costs
+        precision, and this failure is the signal to add the option.
         """
         parser = pytestconfig._parser.optparser
-        options = {option for action in parser._actions for option in action.option_strings}
-        assert options, "the parser exposed no options; this test would prove nothing"
-        unknown = sorted(
+        options = {
             option
-            for option in options
+            for action in parser._actions
+            for option in action.option_strings
             if option.startswith("-")
-            and option not in PYTEST_FLAG_OPTIONS
-            and option not in PYTEST_VALUE_OPTIONS
+        }
+        assert options, "the parser exposed no options; this test would prove nothing"
+        missing = sorted(options - PYTEST_FLAG_OPTIONS - PYTEST_VALUE_OPTIONS)
+        assert not missing, missing
+
+    @pytest.mark.parametrize("position", ["before", "after"])
+    @pytest.mark.parametrize("option", ["--brand-new-bool", "-Z"])
+    def test_an_unknown_option_cannot_hide_a_suite_word(self, option: str, position: str) -> None:
+        """An unknown option is judged as a value AND as a boolean; either reading full denies."""
+        narrow = "tests/unit/qa/test_run_test_matrix.py"
+        command = (
+            f"pytest {option} {narrow}"
+            if position == "before"
+            else f"pytest {narrow} {option} tests"
         )
-        for option in unknown:
-            command = f"pytest {option} tests/unit/qa/test_run_test_matrix.py"
-            match = find_full_qa_invocation(command, _patterns(), cwd=_REPO_ROOT)
-            assert match is not None, option
+        match = find_full_qa_invocation(command, _patterns(), cwd=_REPO_ROOT)
+        assert match is not None, command
+
+    def test_an_unknown_option_beside_only_a_narrow_path_after_it_is_not_full(self) -> None:
+        command = "pytest tests/unit/qa/test_run_test_matrix.py --brand-new-bool"
+        assert find_full_qa_invocation(command, _patterns(), cwd=_REPO_ROOT) is None
 
 
-#: Options pytest 9.1 (and the xdist/timeout releases beside it) added to the
-#: parser. A boolean unknown to the grammar swallows the next word as its
-#: value, so ``pytest -d tests/unit/x.py`` reads as a bare, whole-suite run.
-_PYTEST_9_1_FLAG_OPTIONS: Final[tuple[str, ...]] = (
+#: Options added after the locked pytest 9.0.3. ``--max-warnings`` and
+#: ``--report-chars`` are pytest 9.1 core; the rest belong to pytest-xdist 3.8
+#: and pytest-timeout 2.4, which are not in pyproject or the lock. A boolean
+#: absent from the grammar would be judged under both readings and over-deny.
+_PYTEST_9_1_CORE_VALUE_OPTIONS: Final[tuple[str, ...]] = ("--max-warnings", "--report-chars")
+_LATER_PLUGIN_FLAG_OPTIONS: Final[tuple[str, ...]] = (
     "-d",
     "--loadscope-reorder",
     "--no-loadscope-reorder",
     "--timeout-disable-debugger-detection",
 )
-_PYTEST_9_1_VALUE_OPTIONS: Final[tuple[str, ...]] = (
-    "--max-warnings",
+_LATER_PLUGIN_VALUE_OPTIONS: Final[tuple[str, ...]] = (
     "--px",
-    "--report-chars",
     "--session-timeout",
     "--testrunuid",
 )
@@ -2823,18 +2834,23 @@ _PYTEST_9_1_VALUE_OPTIONS: Final[tuple[str, ...]] = (
 class TestThePytestOptionsOfALaterRelease:
     """N381: the tables were pinned to one pytest, so a newer one read as unknown."""
 
-    @pytest.mark.parametrize("option", _PYTEST_9_1_FLAG_OPTIONS)
+    @pytest.mark.parametrize("option", _LATER_PLUGIN_FLAG_OPTIONS)
     def test_a_later_boolean_does_not_swallow_the_test_path(self, option: str) -> None:
         command = f"pytest {option} tests/unit/qa/test_run_test_matrix.py"
         assert find_full_qa_invocation(command, _patterns(), cwd=_REPO_ROOT) is None
 
-    @pytest.mark.parametrize("option", _PYTEST_9_1_VALUE_OPTIONS)
+    @pytest.mark.parametrize(
+        "option", _PYTEST_9_1_CORE_VALUE_OPTIONS + _LATER_PLUGIN_VALUE_OPTIONS
+    )
     def test_a_later_value_option_takes_its_value(self, option: str) -> None:
         command = f"pytest {option} tests tests/unit/qa/test_run_test_matrix.py"
         assert find_full_qa_invocation(command, _patterns(), cwd=_REPO_ROOT) is None
         assert option in PYTEST_VALUE_OPTIONS
 
-    @pytest.mark.parametrize("option", _PYTEST_9_1_FLAG_OPTIONS + _PYTEST_9_1_VALUE_OPTIONS)
+    @pytest.mark.parametrize(
+        "option",
+        _LATER_PLUGIN_FLAG_OPTIONS + _PYTEST_9_1_CORE_VALUE_OPTIONS + _LATER_PLUGIN_VALUE_OPTIONS,
+    )
     def test_an_option_in_neither_table_still_fails_closed(self, option: str) -> None:
         """The conservative reading is the contract, not the table's completeness."""
         unknown = f"{option}-from-a-release-not-yet-made"

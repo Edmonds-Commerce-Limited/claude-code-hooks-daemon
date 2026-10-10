@@ -1530,8 +1530,6 @@ _GH_TEXT_FLAGS: Final[frozenset[str]] = frozenset(
 _AWK_RUNNING_MARKERS: Final[tuple[str, ...]] = ("system", "getline", "|")
 #: Heads whose pattern operand is a regular expression, never a path.
 _REGEX_PATTERN_HEADS: Final[frozenset[str]] = _GREP_HEADS | frozenset({_RG_HEAD})
-_REGEXP_LONG_OPTION: Final[str] = REGEXP_LONG_OPTION
-_REGEX_PATTERN_ATTACHED_PREFIXES: Final[tuple[str, ...]] = REGEX_PATTERN_ATTACHED_PREFIXES
 _GIT_HEAD: Final[str] = "git"
 _GIT_GREP_SUBCOMMAND: Final[str] = "grep"
 #: The roles ``git_grep_word_roles`` gives a regex pattern word.
@@ -1572,9 +1570,9 @@ def _is_text_operand(word: str, previous: str, head: str) -> bool:
     if head in _REGEX_PATTERN_HEADS:
         # The pattern given as an option's value is a regex like the positional
         # one: `--regexp=PAT`, `-ePAT`, and `--regexp PAT`.
-        if word.startswith(_REGEX_PATTERN_ATTACHED_PREFIXES):
+        if word.startswith(REGEX_PATTERN_ATTACHED_PREFIXES):
             return True
-        if previous == _REGEXP_LONG_OPTION:
+        if previous == REGEXP_LONG_OPTION:
             return True
     if word.startswith("-"):
         return False

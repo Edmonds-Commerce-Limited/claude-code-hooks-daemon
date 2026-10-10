@@ -103,20 +103,31 @@ class TestGitGrepWordRoles:
 
 
 class TestTheTwoConsumersAgree:
-    @pytest.mark.parametrize("command", SHAPES)
-    def test_the_secret_matcher_spans_are_the_pattern_roles(self, command: str) -> None:
-        spans = shell_word_spans(command)
-        words, sub = _words(command)
-        expected: list[tuple[int, int]] = []
-        if sub is not None and words[sub] == "grep":
-            roles = git_grep_word_roles(words, sub)
-            expected = [
-                spans[index]
-                for index, role in sorted(roles.items())
-                if role in (GitGrepRole.PATTERN, GitGrepRole.PATTERN_ATTACHED)
-                and index < len(words)
-                and ("'" in words[index] or '"' in words[index])
-            ]
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ("git grep 'a b'", [(9, 14)]),
+            ("git grep 'a b' src", [(9, 14)]),
+            ("git grep -e 'a b' src", [(12, 17)]),
+            ("git grep -e 'a b' -e 'c d' src", [(12, 17), (21, 26)]),
+            ("git grep -e'a b' src", [(9, 16)]),
+            ("git grep --regexp 'a b' src", [(18, 23)]),
+            ("git grep --regexp='a b' src", [(9, 23)]),
+            ("git grep -f patterns.txt 'a b'", [(25, 30)]),
+            ("git grep -A 3 'a b' src", [(14, 19)]),
+            ("git grep 'a b' 'c d'", [(9, 14)]),
+            ("git grep 'a b' -- 'c d'", [(9, 14)]),
+            ("git grep -- 'a b'", []),
+            ("git grep 'a b' -e 'c d'", [(9, 14), (18, 23)]),
+            ("git -C /tmp grep -e 'a b'", [(20, 25)]),
+            ("git log --grep 'a b'", []),
+            ("git grep -e", []),
+            ("git grep src", []),
+        ],
+    )
+    def test_the_secret_matcher_finds_these_pattern_spans(
+        self, command: str, expected: list[tuple[int, int]]
+    ) -> None:
         assert _git_grep_pattern_spans(command) == expected
 
     @pytest.mark.parametrize("command", SHAPES)

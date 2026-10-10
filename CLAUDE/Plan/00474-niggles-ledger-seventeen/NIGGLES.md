@@ -1785,13 +1785,19 @@ file really enumerates the handlers. Fact-check: `subagent-reports/261009-fact-c
 because the full-QA blocker does not recognise a newer pytest's options. So the blocker's table of pytest options
 is pinned to one pytest version, while the venv resolves whatever version is current.
 
-**Status**: ✅ Fixed. Hypothesis confirmed: the lock has pytest 9.0.3, a fresh venv resolves 9.1.1, and the two
-live-parser pin tests failed on the options 9.1 and the current xdist/timeout added (`--max-warnings`,
-`--report-chars`, `--px`, `--session-timeout`, `--testrunuid`, and the booleans `-d`, `--loadscope-reorder`,
-`--no-loadscope-reorder`, `--timeout-disable-debugger-detection`). The blocker already read an unknown option as taking
-a value (fail closed), so the defect was the test pinning the table's completeness, plus over-denial of a new boolean
-that swallowed the test path. The options are now in the tables, and the live checks assert the safe reading (an
-option in neither table fails closed; no value option is listed as a flag) instead of completeness. No lock edit.
+**Status**: ✅ Fixed. Hypothesis partly confirmed. The completeness pin tests do fail when the running pytest is newer
+than the tables: with pytest 9.1.1 overlaid they failed on `--max-warnings` and `--report-chars` (pytest 9.1 core) and on
+seven plugin options from pytest-xdist 3.8 and pytest-timeout 2.4 (`--px`, `--session-timeout`, `--testrunuid`, `-d`,
+`--loadscope-reorder`, `--no-loadscope-reorder`, `--timeout-disable-debugger-detection`). Neither plugin is in
+`pyproject.toml` or `uv.lock`. The lock has pytest 9.0.3; 9.1.1 got into the scratch venv because it was built with an
+unlocked `uv pip install`. `scripts/setup_worktree.sh` builds with `uv sync --frozen`, which honours the lock, so no
+evidence was found that the worktree build ignores it, and how the original failing venv was built is unverified.
+
+The blocker's reading of an unknown option was not safe in both positions: before a path it swallowed the path (fail
+closed), but after a narrow path `pytest <narrow> --brand-new-bool tests` swallowed the suite word and was allowed.
+Fix: under a grammar an unknown option is judged both as a value and as a boolean, and the run is denied if either
+reading is the whole suite. The options are in the tables, the completeness check stays as the signal to add the next
+ones, and red tests cover the after-path position. No lock edit.
 
 ### N380 — agent branches pass their targeted tests and break the cross-cutting ones
 
