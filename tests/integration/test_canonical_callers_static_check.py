@@ -26,9 +26,11 @@ The three tests below exercise the contract:
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -263,3 +265,93 @@ class TestFindTraversalErrorsAreNotSilenced:
         )
 
         assert result.returncode == 0, result.stdout + result.stderr
+
+
+WRAPPER_SCRIPT = REPO_ROOT / "scripts" / "qa" / "run_canonical_callers_check.sh"
+
+
+def _checkout_with(tmp_path: Path, *scripts: Path) -> Path:
+    """A bare checkout holding copies of ``scripts`` under scripts/qa and no untracked/ tree."""
+    qa_dir = tmp_path / "scripts" / "qa"
+    qa_dir.mkdir(parents=True)
+    for script in scripts:
+        shutil.copy2(script, qa_dir / script.name)
+    # The wrapper resolves a venv through the canonical library, which reads paths.py under src/.
+    (tmp_path / "scripts" / "lib").symlink_to(REPO_ROOT / "scripts" / "lib")
+    (tmp_path / "src").symlink_to(REPO_ROOT / "src")
+    return tmp_path
+
+
+class TestAFreshCheckoutHasNoScratchDirectory:
+    """N395: a new worktree has no untracked/scratch, so ``mktemp`` failed and the
+    check exited 1 having printed no violation header."""
+
+    def test_the_checker_passes_when_untracked_scratch_does_not_exist(self, tmp_path: Path) -> None:
+        checkout = _checkout_with(tmp_path, CHECKER_SCRIPT)
+        assert not (checkout / "untracked").exists()
+
+        result = subprocess.run(
+            [str(checkout / "scripts" / "qa" / CHECKER_SCRIPT.name)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "0 violations" in result.stdout
+
+
+class TestTheJsonWrapperNeverFailsWithoutACause:
+    """N395: ``passed: false`` with no violation and no error names nothing to fix."""
+
+    def _run_wrapper(self, tmp_path: Path, checker_body: str) -> dict[str, object]:
+        checkout = _checkout_with(tmp_path, WRAPPER_SCRIPT)
+        stub = checkout / "scripts" / "qa" / CHECKER_SCRIPT.name
+        stub.write_text(checker_body, encoding="utf-8")
+        stub.chmod(0o755)
+        # The bare checkout holds no venv, so the wrapper is pointed at the running one.
+        env = {**os.environ, "HOOKS_DAEMON_VENV_PATH": sys.prefix}
+        run = subprocess.run(
+            [str(checkout / "scripts" / "qa" / WRAPPER_SCRIPT.name)],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        report_path = checkout / "untracked" / "qa" / "canonical_callers.json"
+        assert report_path.exists(), run.stdout + run.stderr
+        report = json.loads((checkout / "untracked" / "qa" / "canonical_callers.json").read_text())
+        assert isinstance(report, dict)
+        return report
+
+    def test_a_checker_that_dies_without_a_report_is_recorded_as_an_error(
+        self, tmp_path: Path
+    ) -> None:
+        report = self._run_wrapper(tmp_path, "#!/bin/bash\necho 'mktemp exploded' >&2\nexit 1\n")
+
+        assert report["summary"] == {"total_violations": 0, "passed": False}
+        assert report["violations"] == []
+        assert "mktemp exploded" in str(report["error"])
+
+    def test_a_silent_failing_checker_still_gets_an_error(self, tmp_path: Path) -> None:
+        report = self._run_wrapper(tmp_path, "#!/bin/bash\nexit 3\n")
+
+        assert report["error"] and "3" in str(report["error"])
+
+    def test_a_clean_run_records_no_error(self, tmp_path: Path) -> None:
+        report = self._run_wrapper(
+            tmp_path, "#!/bin/bash\necho 'check_canonical_callers: 0 violations'\nexit 0\n"
+        )
+
+        assert report["summary"] == {"total_violations": 0, "passed": True}
+        assert report["error"] is None
+
+    def test_a_violation_report_needs_no_error(self, tmp_path: Path) -> None:
+        report = self._run_wrapper(
+            tmp_path,
+            "#!/bin/bash\necho 'check_canonical_callers: 1 violation(s) found' >&2\n"
+            "echo '' >&2\necho '  /x/y.sh' >&2\nexit 1\n",
+        )
+
+        assert report["violations"] == ["/x/y.sh"]
+        assert report["error"] is None

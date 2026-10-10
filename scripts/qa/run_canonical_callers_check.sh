@@ -9,6 +9,7 @@
 #   {
 #     "tool": "canonical_callers",
 #     "summary": { "total_violations": N, "passed": bool },
+#     "error": null | "<why the check failed when it names no violation>",
 #     "violations": [ "<repo-relative-path>", ... ]
 #   }
 #
@@ -72,15 +73,21 @@ for line in raw.splitlines():
 
 passed = (checker_rc == 0) and (count == 0)
 
+# A failure must say why. With no violation to name, the checker died or
+# failed before reporting one, so its own output is the cause.
+error = None
+if not passed and not violations:
+    error = raw.strip() or f"check_canonical_callers exited {checker_rc} and printed nothing"
+
 result = {
     "tool": "canonical_callers",
     "summary": {
         "total_violations": count,
         "passed": passed,
     },
+    "error": error,
     "violations": violations,
 }
-
 with open(output_path, "w") as fh:
     json.dump(result, fh, indent=2)
     fh.write("\n")
