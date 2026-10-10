@@ -119,10 +119,17 @@ This plan adds timing first, measures the hot spots from it, then makes the gate
 
 ## Success Criteria
 
-- [ ] A full gate run prints a per-step timing summary, and its report lists the slowest test files and tests.
-- [ ] A gate interrupted part-way and re-run in resume mode does not repeat the steps that already passed on the same
-  tree.
-- [ ] The full gate's wall-clock time, measured before and after, has dropped.
+- [x] A full gate run prints a per-step timing summary, and its report lists the slowest test files and tests.
+  Observed on the 2026-10-10 full gate on main (9,654.8 s total, tests 9,266.9 s).
+- [x] A gate interrupted part-way and re-run in resume mode does not repeat the steps that already passed on the same
+  tree. Observed on 2026-10-10: a commit during the full gate left `pyright` and `tests` unrecorded for the tree, and
+  `all --resume` reused the 41 other steps and re-ran only those two (3,659.8 s instead of 9,654.8 s).
+- [ ] The full gate's wall-clock time, measured before and after, has dropped. **Not demonstrated.** No single-pass
+  "before" total was ever recorded; the closest comparable run (2026-10-09, resumed after a reboot) took 9,779.8 s
+  for 129,518 tests, against 9,654.8 s for 135,644 tests today: 1.3% faster in total, about 6% faster per test, inside
+  the run-to-run noise (the py3.11 leg alone varied by about 700 s between two earlier runs). The measured savings are
+  per hot spot (Task 3.1). [Baseline report](subagent-reports/261010-gate-wall-clock-baseline-sonnet.md). For the
+  owner: accept the per-hot-spot savings as the outcome, or ask for a controlled before/after run on a quiet host.
 
 ## Delivery & Milestones
 
