@@ -178,6 +178,15 @@ agent.
     - **3.1e**: those four B rows (with the `Defence` schema fields they need), and the 3.1d review's should-fix
       items: `cmd_defences` loads project handlers twice (`daemon/cli.py:3647-3650`), and the end-to-end test wires
       its own probe check instead of calling `cmd_probe` with sending stubbed out.
+      **Done (3.1e):** `batch_defences` in `scripts/qa/qa-rules.json` names each checker's handler; `defences` lists
+      one `kind: batch-check` row per defect rule (16 on this repository; `meta: true` plumbing rules excluded, rule
+      IDs unique), takes the defect class from the handler's active row, and drops the rows when that handler is off.
+      Project handlers are discovered once; the end-to-end test calls `cmd_probe`. §5.3 (project) PARTLY MET. Merged
+      at `8098503d7` after two review rounds ([report](subagent-reports/261010-task-3.1e-b-rows-sonnet.md)).
+      Left, non-blocking: a registry whose top level is not an object makes `defences` exit 1 and lose the handler
+      rows (check the shape before collecting, and stop catching `AttributeError`); `public-pattern` also covers an
+      invalid configured regex, which wants its own `meta` rule; the 3.1e report's item 1 still says
+      `defect_class` where the registry now names a `handler`.
   - **Coordinator call (under the owner's "go with the clear winners" instruction):** G5–G9, G12, G13 and G15 were
     never put to the owner. Closing them is the default, so they are closed through the batches above. Resolved; not
     an owner ruling. Success criterion 3 ("the owner has ruled on every gap") therefore waits on the owner to confirm
