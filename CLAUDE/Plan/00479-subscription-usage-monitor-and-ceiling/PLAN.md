@@ -203,7 +203,8 @@ feedback loop.
 - [ ] ⬜ **Task 6.1**: Make an active override visible. While an override is in force and any window is over the
   ceiling, each prompt carries a short context naming the window, its percentage and the override's end. The status
   line shows an `override until HH:MM` chip. This changes no decision, so it is not an owner question.
-- [ ] ⬜ **Task 6.2**: A backstop the override cannot suppress. Blocked on owner question 5.
+- [ ] ⬜ **Task 6.2**: A backstop the override cannot suppress. Blocked on owner question 5. Also covers the resume
+  tick under an override, which lifts the pause without the Task 6.1 notice (the next ordinary prompt carries it).
 
 ## Open questions for the owner
 
