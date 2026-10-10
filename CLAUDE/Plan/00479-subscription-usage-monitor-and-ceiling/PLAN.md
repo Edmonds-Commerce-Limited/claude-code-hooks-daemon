@@ -205,6 +205,8 @@ feedback loop.
   line shows an `override until HH:MM` chip. This changes no decision, so it is not an owner question.
 - [ ] ⬜ **Task 6.2**: A backstop the override cannot suppress. Blocked on owner question 5. Also covers the resume
   tick under an override, which lifts the pause without the Task 6.1 notice (the next ordinary prompt carries it).
+  And an unreadable override marker: it counts as an override with no end, so it never expires while the file stays
+  unreadable (existing behaviour on main; Task 6.1 makes it visible but does not change it).
 
 ## Open questions for the owner
 
