@@ -108,8 +108,14 @@ This plan adds timing first, measures the hot spots from it, then makes the gate
   Reports: [subagent-reports/261009-task-3.1-hot-spots-sonnet.md](subagent-reports/261009-task-3.1-hot-spots-sonnet.md)
   and the two reviews beside it.
 
-- [ ] ⬜ **Task 3.2**: Evaluate pytest-xdist (running tests across cores): whether the suite is safe in parallel
+- [x] ❌ **Task 3.2**: Evaluate pytest-xdist (running tests across cores): whether the suite is safe in parallel
   (sockets, ports, working directory, the full-QA lock and its sink plugin), and adopt it if it is.
+  **DECLINED WITH EVIDENCE** (merge `232d1772e`, [report](subagent-reports/261010-task-3.2-xdist-sonnet.md)), on an
+  8-CPU host at load 12-21. With coverage, which the gate always uses, `-n 4` gave no gain (`tests/unit/core`: 126 s
+  serial, 131 s parallel). Without coverage it helped (`tests/unit/utils` about 2x, `tests/unit/handlers` 1.31x), but
+  the parallel handlers run had two extra failures, both hostile-input scaling timing tests that need a truly serial
+  lane. Installing xdist would also make `full_qa_gate` stop refusing a whole-suite run that holds no lock (shown on a
+  fixture suite), and break two pytest option-grammar pin tests. No code, config or dependency changed.
 
 ## Success Criteria
 
