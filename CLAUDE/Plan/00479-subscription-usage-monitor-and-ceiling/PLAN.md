@@ -200,9 +200,14 @@ the breaching window's reset. On 2026-10-08 it was written at 80%. Usage then ro
 limit, and three working agents died mid-task on HTTP 429. The behaviour matches the docs. The gap is the absence of a
 feedback loop.
 
-- [ ] ⬜ **Task 6.1**: Make an active override visible. While an override is in force and any window is over the
+- [x] ✅ **Task 6.1**: Make an active override visible. While an override is in force and any window is over the
   ceiling, each prompt carries a short context naming the window, its percentage and the override's end. The status
   line shows an `override until HH:MM` chip. This changes no decision, so it is not an owner question.
+  Done, merged at `c19f072db` after two review rounds ([report](subagent-reports/261010-task-6.1-visible-override-sonnet.md)):
+  one marker reader (`read_usage_override`), `override_notices` on each prompt (guarded, so a usage-read failure
+  never denies), and the chip (red over the ceiling, yellow under it, `override (end unknown)` for an unreadable
+  marker). Release note 012. Left: the pause-chip test in `test_usage_indicator.py` asserts only "no ⏸"; make it
+  fail the read for the pause record alone and assert `is None` again.
 - [ ] ⬜ **Task 6.2**: A backstop the override cannot suppress. Blocked on owner question 5. Also covers the resume
   tick under an override, which lifts the pause without the Task 6.1 notice (the next ordinary prompt carries it).
   And an unreadable override marker: it counts as an override with no end, so it never expires while the file stays
