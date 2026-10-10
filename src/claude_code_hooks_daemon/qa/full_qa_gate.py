@@ -201,6 +201,31 @@ def pytest_collection_modifyitems(
     _refuse_if_whole_suite_without_lock(config, len(selected_files))
 
 
+_XDIST_HOOK_NAME: Final[str] = "pytest_xdist_node_collection_finished"
+_XDIST_CONTROLLER_PLUGIN_NAME: Final[str] = "dsession"
+_XDIST_HOOK_MISSING_MESSAGE: Final[str] = (
+    f"{_UNABLE_TO_JUDGE_MESSAGE} The xdist controller is active but pytest "
+    f"offers no `{_XDIST_HOOK_NAME}` hook, so the gate cannot see what the "
+    "workers selected."
+)
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_configure(config: pytest.Config) -> None:
+    """Refuse an xdist controller whose selection-reporting hook does not exist.
+
+    The controller hook below is an `optionalhook`, which pluggy skips without
+    complaint when no such hook is declared -- so a renamed or removed xdist
+    hook would fail the gate OPEN. `trylast` so that xdist has registered its
+    controller (`dsession`) first.
+    """
+    if not config.pluginmanager.hasplugin(_XDIST_CONTROLLER_PLUGIN_NAME):
+        return
+    caller = getattr(config.hook, _XDIST_HOOK_NAME, None)
+    if caller is None or caller.spec is None:
+        pytest.exit(_XDIST_HOOK_MISSING_MESSAGE, returncode=1)
+
+
 class _HasConfig(Protocol):
     """The one attribute of an xdist node the gate reads."""
 

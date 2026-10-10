@@ -21,8 +21,14 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RULES_PATH = PROJECT_ROOT / "scripts" / "qa" / "changed_tests_map.yaml"
 HANDLERS_GLOB = "src/claude_code_hooks_daemon/handlers/*"
-#: How a test walks the handler package instead of importing one handler.
-ENUMERATION = re.compile(r"\b(?:walk_packages|iter_modules)\(|\.discover\(")
+#: A test that walks the handlers package module by module.
+WALKS_HANDLERS = re.compile(
+    r"(?:walk_packages\(\s*handlers\w*|iter_modules\(\s*event\w*)\.__path__"
+)
+#: A test that asks the registry for every built-in handler. Only counted as
+#: whole-repo under tests/integration: a unit test's ``discover()`` exercises
+#: the registry itself, which its own mirror tests already select.
+DISCOVERS_HANDLERS = re.compile(r"HandlerRegistry\b[\s\S]*\bregistry\.discover\(\)")
 
 
 def _load_runner() -> Any:
@@ -79,15 +85,22 @@ class TestThePinnedListCannotRotSilently:
         for relative in _pinned_tests():
             path = PROJECT_ROOT / relative
             assert path.is_file(), f"{relative} is pinned but does not exist"
-            assert ENUMERATION.search(
-                path.read_text(encoding="utf-8")
+            text = path.read_text(encoding="utf-8")
+            assert WALKS_HANDLERS.search(text) or DISCOVERS_HANDLERS.search(
+                text
             ), f"{relative} is pinned but no longer walks or discovers the handlers"
 
-    def test_no_enumerating_integration_test_is_missing_from_the_list(self) -> None:
+    def test_no_enumerating_test_is_missing_from_the_list(self) -> None:
         pinned = set(_pinned_tests())
-        enumerating = {
-            path.relative_to(PROJECT_ROOT).as_posix()
-            for path in (PROJECT_ROOT / "tests" / "integration").glob("test_*.py")
-            if ENUMERATION.search(path.read_text(encoding="utf-8"))
-        }
+        enumerating = set()
+        for path in (PROJECT_ROOT / "tests").rglob("test_*.py"):
+            relative = path.relative_to(PROJECT_ROOT)
+            if "fixtures" in relative.parts:
+                continue
+            text = path.read_text(encoding="utf-8")
+            whole_repo = WALKS_HANDLERS.search(text) or (
+                relative.parts[:2] == ("tests", "integration") and DISCOVERS_HANDLERS.search(text)
+            )
+            if whole_repo:
+                enumerating.add(relative.as_posix())
         assert enumerating <= pinned, sorted(enumerating - pinned)

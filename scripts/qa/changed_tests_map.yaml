@@ -118,7 +118,11 @@ rules:
       - tests/integration/test_project_handler_priority_collisions.py
       - tests/integration/test_pseudo_event_handler_visibility.py
       - tests/integration/test_template_priorities_match_the_constants.py
+      - tests/daemon/test_init_config.py
       - tests/unit/daemon/test_default_enabled_template_consistency.py
+      - tests/unit/handlers/test_autonomy_drivers.py
+      - tests/unit/qa/test_measure_instruction_footprint.py
+      - tests/unit/test_rule_parity.py
     why: these tests enumerate EVERY handler (pkgutil.walk_packages or
       HandlerRegistry.discover()), so they reach a changed handler through no
       import or path; tests/unit/qa/test_handler_enumerating_tests_are_selected.py
