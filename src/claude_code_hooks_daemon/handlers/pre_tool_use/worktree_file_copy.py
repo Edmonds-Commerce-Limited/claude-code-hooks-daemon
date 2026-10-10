@@ -14,6 +14,7 @@ from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import RESERVED_WORD_PREFIX
 from claude_code_hooks_daemon.utils.command_position import command_position_segments
+from claude_code_hooks_daemon.utils.shell_segmentation import resolve_shell_word, shell_word_spans
 
 # Both worktree root prefixes — untracked/ is manually managed, .claude/ is Claude Code managed
 _WORKTREE_PREFIXES = (ProjectPath.WORKTREES_DIR, ProjectPath.CLAUDE_WORKTREES_DIR)
@@ -61,11 +62,62 @@ _RELOCATION_VERBS: tuple[str, ...] = ("cp", "mv", "rsync", "install", "dd")
 _RELOCATION_VERB_RE = re.compile(
     r"""(?:^|[;&|\n"']|\$\()\s*"""
     + RESERVED_WORD_PREFIX
-    + r"(?:[A-Za-z_]\w*=\S*\s+)*(?:(?:ba|z|da|k)?sh\s+(?:(?:[-+]o\s+\w+|[-+]\w+)\s+)*?-\w*c\s+)?(?:sudo\s+)?(?:\S*/)?("
+    + r"(?:[A-Za-z_]\w*=\S*\s+)*(?:sudo\s+)?(?:\S*/)?("
     + "|".join(_RELOCATION_VERBS)
     + r")\b",
     re.IGNORECASE,
 )
+
+_SHELL_NAMES = frozenset({"bash", "sh", "zsh", "dash", "ksh"})
+# Wrappers that run the command after their own options.
+_WRAPPERS = frozenset({"sudo", "env", "command", "nice", "time", "exec"})
+_MAX_WRAP_DEPTH = 4
+
+
+def _effective_command(segment: str, depth: int = 0) -> str:
+    """The text of the command a segment finally runs, read word by word.
+
+    Skips `NAME=value` words, wrappers (`sudo`, `env`, ...) with their options and
+    a shell invocation up to its `-c`, whose body becomes the command
+    (`sudo bash --login -c 'cp ...'`, `/bin/bash -n -c '...'`). Reuses the shared
+    word readers; a word they cannot resolve ends the walk with the text as written.
+    """
+    spans = shell_word_spans(segment)
+    words = [resolve_shell_word(segment[a:b]) for a, b in spans]
+    index = 0
+    while index < len(words):
+        word = words[index]
+        if word is None:
+            return segment[spans[index][0] :]
+        name = word.rsplit("/", 1)[-1]
+        if (
+            re.match(r"[A-Za-z_]\w*=", word)
+            or (index > 0 and word.startswith("-"))
+            or name in _WRAPPERS
+        ):
+            index += 1
+        elif name in _SHELL_NAMES and depth < _MAX_WRAP_DEPTH:
+            body_at = next(
+                (
+                    i + 1
+                    for i in range(index + 1, len(words) - 1)
+                    if words[i] is not None
+                    and words[i].startswith("-")
+                    and not words[i].startswith("--")
+                    and "c" in words[i]
+                ),
+                None,
+            )
+            if body_at is None:
+                return segment[spans[index][0] :]
+            # The command-position view splices a `-c` body in without its quotes, so
+            # the body is the rest of the segment; a still-quoted body is one word.
+            quoted = body_at == len(words) - 1 and words[body_at] is not None
+            body = words[body_at] if quoted else segment[spans[body_at][0] :]
+            return _effective_command(body or "", depth + 1)
+        else:
+            break
+    return segment[spans[index][0] :] if index < len(spans) else segment
 
 
 class WorktreeFileCopyHandler(PreToolUseHandlerBase):
@@ -169,8 +221,12 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
             return False
 
         # Check for forbidden operations
-        if not _RELOCATION_VERB_RE.search(command):
+        # The verb is looked for in the segment as written and in the command
+        # it finally runs (through wrappers and a shell `-c`).
+        effective = _effective_command(command)
+        if not (_RELOCATION_VERB_RE.search(command) or _RELOCATION_VERB_RE.search(effective)):
             return False
+        command = effective if _RELOCATION_VERB_RE.search(effective) else command
 
         # Check patterns — the "main repo code dirs" alternation is built
         # from the ProjectLayout facade (Plan 00288 Task 4.3/C5) rather than

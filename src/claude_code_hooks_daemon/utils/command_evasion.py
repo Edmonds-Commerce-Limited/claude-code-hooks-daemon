@@ -71,6 +71,9 @@ SUBCOMMAND_SEPARATOR_CHARS = ";&|\n\r"
 QUOTED_SPAN_REGEX = r"""'[^']*'|"(?:[^"\\]|\\.)*\""""
 _SHELL_WORD_PIECE = rf"""(?:{QUOTED_SPAN_REGEX}|\\.|[^\s{SUBCOMMAND_SEPARATOR_CHARS}'"\\])"""
 
+# A pipe that ends a line: the shell continues the pipeline on the next line.
+PIPE_AT_LINE_END = re.compile(r"\|[ \t]*\n\s*")
+
 # Operands that name the process's own standard input, for an interpreter that
 # reads its program from a file argument (`python3 /dev/stdin`).
 STDIN_OPERANDS: Final = ("-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0")

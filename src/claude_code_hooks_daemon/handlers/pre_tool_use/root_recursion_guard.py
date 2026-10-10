@@ -32,6 +32,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils import linear_shlex
+from claude_code_hooks_daemon.utils.command_evasion import PIPE_AT_LINE_END
 from claude_code_hooks_daemon.utils.escape_hatch import command_declares_hatch
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 
@@ -255,10 +256,29 @@ def _tokenize(segment: str) -> list[str]:
         return segment.split()
 
 
-def _is_xargs(segment: str) -> bool:
-    """Whether a pipeline stage is ``xargs`` (after any ``VAR=value`` prefix)."""
-    tokens = [token for token in _tokenize(segment) if not re.match(r"^\w+=", token)]
-    return bool(tokens) and _command_token_basename(tokens[0]) == "xargs"
+# Pipe consumers that only read, count or format what they are given. A depth
+# bound limits the work only when the next stage is one of these (or absent):
+# `xargs`, `parallel`, `while read` and the like run a command on every entry.
+_DATA_CONSUMERS: Final = frozenset(
+    {"sort", "uniq", "wc", "grep", "egrep", "fgrep", "cat", "head", "tail", "cut", "tr", "tee"}
+    | {"awk", "less", "more", "column", "nl", "jq", "cmp", "diff", "basename", "dirname"}
+)
+_PREFIX_COMMANDS: Final = frozenset({"sudo", "env", "command", "nice", "time"})
+
+
+def _stage_head(segment: str) -> str:
+    """The command a pipeline stage runs, past assignments, ``sudo``/``env`` and options."""
+    for token in _tokenize(segment):
+        name = _command_token_basename(token)
+        if re.match(r"^\w+=", token) or name in _PREFIX_COMMANDS or token.startswith("-"):
+            continue
+        return name
+    return ""
+
+
+def _is_data_consumer(segment: str) -> bool:
+    """Whether a pipeline stage only reads what it is piped."""
+    return _stage_head(segment) in _DATA_CONSUMERS
 
 
 def _segment_is_dangerous(segment: str, feeds_xargs: bool = False) -> bool:
@@ -324,6 +344,8 @@ class RootRecursionGuardHandler(PreToolUseHandlerBase):
         # Escape hatch: explicit justification bypasses the block.
         if command_declares_hatch(command, _ESCAPE_HATCH):
             return False
+        # A pipe that ends a line continues the pipeline onto the next one.
+        command = PIPE_AT_LINE_END.sub("| ", command)
         parts = _SEGMENT_SPLIT_RE.split(command)
         separators = _SEGMENT_SPLIT_RE.findall(command)
         return any(
@@ -331,7 +353,7 @@ class RootRecursionGuardHandler(PreToolUseHandlerBase):
                 segment,
                 feeds_xargs=index < len(separators)
                 and separators[index] == "|"
-                and _is_xargs(parts[index + 1]),
+                and not _is_data_consumer(parts[index + 1]),
             )
             for index, segment in enumerate(parts)
         )

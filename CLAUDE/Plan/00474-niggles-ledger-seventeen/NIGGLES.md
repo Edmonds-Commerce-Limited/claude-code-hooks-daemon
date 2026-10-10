@@ -1461,6 +1461,14 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N387 — two readers of a git command's search and format option values
+
+**Source**: the Plan 00483 batch (b) round 2 review, carried from N383.
+
+**Evidence**: `secret_file_matching._git_grep_pattern_spans` and `command_position._blank_git_text` both place the pattern operand of `git grep`/`git log` by subcommand and option.
+
+**Status**: ⬜ Open. Remedy: one reader, used by both.
+
 ### N386 — the self-install rule is copied four times outside its one definition
 
 **Source**: the owner, 2026-10-09, on N384's first fix, which hand-rolled a fifth copy: "it should be a single source of
@@ -1555,7 +1563,7 @@ The batch (b) round-1 tip denied them only by accident. A directory with a space
 
 **Status**: ✅ Fixed on branch agent-a0faad4a67ec2a1cf-eb2b861e (Plan 00483 batch (c)): the shared `_GIT_GLOBAL_OPTION` in `utils/command_evasion.py` (behind `GIT_INVOCATION`, used by destructive_git and git_stash) reads a quoted or escaped word, so both handlers deny these shapes; they are in the must-deny tests. The quote pieces are shared with `_MESSAGE_BODY_PATTERN`.
 
-**Still open (NIT, from the same review)**: `secret_file_matching._git_grep_pattern_spans` duplicates the git text-option reader in `command_position._blank_git_text`. The guidance omission of `-e` is fixed in batch (c).
+The remaining duplicate-reader NIT from the same review is filed as N387; the guidance omission of `-e` is fixed in batch (c).
 
 ### N382 — `changed --range` does not select tests that discover handlers by scanning the package
 

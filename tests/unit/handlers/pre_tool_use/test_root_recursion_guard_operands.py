@@ -86,6 +86,12 @@ DANGEROUS = [
     "FOO=1 grep -r x /",
     "grep -r x . /",
     "grep -r x / --include=*.py",
+    # Review r2 B2: a line-end pipe, sudo/env before xargs, other runners.
+    "find / -maxdepth 1 -type d |\n  xargs grep -r x",
+    "find / -maxdepth 1 -type d | sudo xargs grep -r x",
+    "find / -maxdepth 1 -type d | env FOO=1 xargs rg x",
+    "find / -maxdepth 1 -type d | parallel grep -r x {}",
+    "find / -maxdepth 1 -type d | while read d; do grep -r x $d; done",
     # Review r1 B2: a depth bound does not excuse what find hands on.
     "find / -maxdepth 1 -exec grep -r x {} +",
     "find / -maxdepth 1 -exec grep -r x {} \\;",

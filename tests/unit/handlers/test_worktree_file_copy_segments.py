@@ -56,6 +56,13 @@ DANGEROUS = [
     "for f in a; do cp untracked/worktrees/foo/src/x.py src/; done",
     "cp untracked/worktrees/foo/src/x.py src/ && ls",
     "cp .claude/worktrees/foo/src/x.py src/",
+    # Review r2 B1: wrappers in front of the shell.
+    "sudo bash -c 'cp untracked/worktrees/X/src/file.py src/x.py'",
+    "/bin/bash -c 'cp untracked/worktrees/X/src/file.py src/x.py'",
+    "env bash -c 'cp untracked/worktrees/X/src/file.py src/x.py'",
+    "bash --login -c 'cp untracked/worktrees/X/src/file.py src/x.py'",
+    "bash --norc -c 'cp untracked/worktrees/X/src/file.py src/x.py'",
+    "sudo -E env FOO=1 sh -e -c 'mv untracked/worktrees/X/src/file.py src/x.py'",
     # Review r1 B1: a shell wrapper with options before `-c`.
     "sh -e -c 'cp untracked/worktrees/foo/src/x.py src/x.py'",
     "bash -x -c 'cp untracked/worktrees/foo/src/x.py src/x.py'",

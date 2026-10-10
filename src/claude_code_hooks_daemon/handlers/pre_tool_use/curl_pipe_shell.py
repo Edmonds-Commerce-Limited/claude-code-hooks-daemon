@@ -19,6 +19,7 @@ from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import (
     OPTIONAL_PATH,
     OPTIONAL_SUDO,
+    PIPE_AT_LINE_END,
     STDIN_OPERANDS,
 )
 from claude_code_hooks_daemon.utils.command_position import (
@@ -121,7 +122,6 @@ _PIPE_INTO_INTERPRETER_PATTERN = (
     + r"\b"
 )
 
-_PIPE_AT_LINE_END = re.compile(r"\|[ \t]*\n\s*")
 _DOWNLOADER = re.compile(r"\b(?:curl|wget)\b", re.IGNORECASE)
 _SHELL_NAMES = frozenset({"bash", "sh", "zsh", "ksh", "dash"})
 # A redirect word: `2>&1`, `>out`, `<in`, `&>f`.
@@ -267,7 +267,7 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
             return False
 
         # A pipe that ends a line continues the pipeline onto the next one.
-        view = _PIPE_AT_LINE_END.sub("| ", self._scannable(command))
+        view = PIPE_AT_LINE_END.sub("| ", self._scannable(command))
         if not re.search(_CURL_PIPE_SHELL_PATTERN, view, re.IGNORECASE):
             return False
         return _some_download_becomes_code(view)
