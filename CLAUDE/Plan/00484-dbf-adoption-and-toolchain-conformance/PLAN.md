@@ -124,7 +124,8 @@ agent.
 
 ### Phase 3: Close the gaps and hook in
 
-- [ ] ⬜ **Task 3.1**: Close the accepted gaps through the ledger, at most 3 branches at once.
+- [x] ✅ **Task 3.1**: Close the accepted gaps through the ledger, at most 3 branches at once. All six batches
+  (3.1a–3.1f) merged; the last at `a0bc70fbf`.
   G4 (B3) is partly closed: reasons accepted, and asked for under `strict_mode` (warning, not error). Planned for the
   next major (breaking config change): a reason required for every project on `exclude_paths`
   and `extra_whitelist`. `CLAUDE/UPGRADES/` keeps no upcoming-major notes, so it is tracked here.
