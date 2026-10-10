@@ -1461,6 +1461,17 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N395 — `canonical_callers` can fail with no violation and no error
+
+**Source**: the Plan 00500 venv-resolver fix branch's changed-tier QA (2026-10-10).
+
+**Evidence**: that run's `untracked/qa/canonical_callers.json` read `{"summary": {"total_violations": 0, "passed": false}, "error": null, "violations": []}`, and the step showed as FAILED, which also made `changed_tests` NOT
+MEANINGFUL. On main the same check passes. A failing check that names no violation and no error gives nobody anything
+to fix; the branch only changed two test files.
+
+**Status**: ⬜ Open. Remedy: find what sets `passed: false` without a violation (an exception swallowed into the
+summary, or a non-zero exit read as a failure), make the checker report the cause, with a test.
+
 ### N394 — `idle_housekeeping_advisor`'s description still promises one `update-ref -d` per ref
 
 **Source**: the Plan 00470 Task 4.1 fact-check (`CLAUDE/Plan/00470-persistent-session-optimisation/subagent-reports/261010-plan-fact-checker-sonnet.md`).
