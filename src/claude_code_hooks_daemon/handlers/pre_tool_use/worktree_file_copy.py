@@ -1,6 +1,8 @@
 """WorktreeFileCopyHandler - prevents copying files between worktrees and main repo."""
 
 import re
+import tempfile
+from enum import Enum
 from typing import Any, ClassVar
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
@@ -12,9 +14,16 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_layout import main_repo_code_dirs
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
-from claude_code_hooks_daemon.utils.command_evasion import RESERVED_WORD_PREFIX
+from claude_code_hooks_daemon.utils.command_evasion import (
+    RESERVED_WORD_PREFIX,
+    strip_reserved_word_prefix,
+)
 from claude_code_hooks_daemon.utils.command_position import command_position_segments
-from claude_code_hooks_daemon.utils.shell_segmentation import resolve_shell_word, shell_word_spans
+from claude_code_hooks_daemon.utils.shell_segmentation import (
+    peel_command_wrappers,
+    resolve_shell_word,
+    shell_word_spans,
+)
 
 # Both worktree root prefixes — untracked/ is manually managed, .claude/ is Claude Code managed
 _WORKTREE_PREFIXES = (ProjectPath.WORKTREES_DIR, ProjectPath.CLAUDE_WORKTREES_DIR)
@@ -69,8 +78,9 @@ _RELOCATION_VERB_RE = re.compile(
 )
 
 _SHELL_NAMES = frozenset({"bash", "sh", "zsh", "dash", "ksh"})
-# Wrappers that run the command after their own options.
-_WRAPPERS = frozenset({"sudo", "env", "command", "nice", "time", "exec"})
+# Wrappers that run the command after them and are not in the shared
+# `COMMAND_WRAPPERS` table, which `peel_command_wrappers` reads.
+_EXTRA_WRAPPERS = frozenset({"time", "exec"})
 _MAX_WRAP_DEPTH = 4
 
 
@@ -79,14 +89,28 @@ def _is_short_c_option(word: str | None) -> bool:
     return word is not None and re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", word) is not None
 
 
+def _words_before_unresolved(words: list[str | None]) -> list[str]:
+    """The leading resolved words, ending at the first one the shared reader could not resolve."""
+    resolved: list[str] = []
+    for word in words:
+        if word is None:
+            break
+        resolved.append(word)
+    return resolved
+
+
 def _effective_command(segment: str, depth: int = 0) -> str:
     """The text of the command a segment finally runs, read word by word.
 
-    Skips `NAME=value` words, wrappers (`sudo`, `env`, ...) with their options and
-    a shell invocation up to its `-c`, whose body becomes the command
-    (`sudo bash --login -c 'cp ...'`, `/bin/bash -n -c '...'`). Reuses the shared
-    word readers; a word they cannot resolve ends the walk with the text as written.
+    Skips `NAME=value` words, wrappers (`sudo`, `env`, `nice`, `command`, ...) with
+    their options and a shell invocation up to its `-c`, whose body becomes the
+    command (`sudo bash --login -c 'cp ...'`, `/bin/bash -n -c '...'`). The wrappers
+    are the shared `peel_command_wrappers` table, so each one's own option grammar
+    is honoured. A leading `(` or `{` opens a subshell or group and runs no command,
+    so it is dropped. A word the shared readers cannot resolve ends the walk with
+    the text as written.
     """
+    segment = strip_reserved_word_prefix(segment).lstrip("({ \t")
     spans = shell_word_spans(segment)
     words = [resolve_shell_word(segment[a:b]) for a, b in spans]
     index = 0
@@ -95,12 +119,15 @@ def _effective_command(segment: str, depth: int = 0) -> str:
         if word is None:
             return segment[spans[index][0] :]
         name = word.rsplit("/", 1)[-1]
-        if (
-            re.match(r"[A-Za-z_]\w*=", word)
-            or (index > 0 and word.startswith("-"))
-            or name in _WRAPPERS
-        ):
+        _, peeled = peel_command_wrappers(_words_before_unresolved(words[index:]))
+        if re.match(r"[A-Za-z_]\w*=", word):
             index += 1
+        elif peeled:
+            index += peeled
+        elif name in _EXTRA_WRAPPERS:
+            index += 1
+            while index < len(words) and (words[index] or "").startswith("-"):
+                index += 1
         elif name in _SHELL_NAMES and depth < _MAX_WRAP_DEPTH:
             body_at = next(
                 (i + 1 for i in range(index + 1, len(words) - 1) if _is_short_c_option(words[i])),
@@ -116,6 +143,284 @@ def _effective_command(segment: str, depth: int = 0) -> str:
         else:
             break
     return segment[spans[index][0] :] if index < len(spans) else segment
+
+
+# --- Operand reading (Plan 00474 N385) -------------------------------------------
+#
+# The original patterns recognise a destination only when it is SPELLED as a
+# main-repo code dir followed by `/`. A careless agent also copies into the
+# checkout root (`cp -r <wt>/src .`), names the destination first
+# (`cp -t src/ <wt>/x`), or has `find -exec` / `xargs` run the copy. These are
+# read from the operands of the copy the segment finally runs.
+#
+# How the destination is decided:
+#
+# * An explicit destination (`src/`, `./src`, `/abs/.../src`, `-t src/`) is a
+#   main-repo code dir when its first component, or for an absolute path any
+#   component, is one. This does not depend on the working directory, except
+#   that a relative destination inside a worktree cwd is that worktree's.
+# * A bare `.` destination is the working directory, so it depends on the cwd,
+#   which is tracked only from a LITERAL `cd`/`pushd` earlier in the same command
+#   (and the hook's own `cwd` field for where the command starts). A literal path
+#   inside a worktree is a worktree; a relative `cd` into a code dir is that code
+#   dir; any other absolute path is the main checkout, except the process temp dir;
+#   a `cd` the reader cannot resolve (`$VAR`, `$(...)`, `-`, no argument, `~`, a
+#   relative path elsewhere) leaves the cwd UNKNOWN, and a bare `.` is then NOT
+#   denied. The tradeoff is deliberate: a guess would deny `cd "$WT" && cp -r ... .`
+#   as often as it caught `cd "$ROOT" && cp -r ... .`, and an explicit code-dir
+#   destination is still denied whatever the cwd. A `cd` inside a subshell
+#   (`(cd x; ...)`) is not tracked, since it ends with the subshell.
+# * A bare `.` into the main checkout is denied only when the copy is a whole-tree
+#   one (`-r`/`-a`, `mv`, a bare worktree root, `<wt>/.`) or the source is a
+#   main-repo code path (`<wt>/src/x.py`). `cp <wt>/notes.txt .` is allowed.
+# * `xargs` and `find -exec` take their source from another stage: a pipeline
+#   stage just before `xargs`, or the `find` starting path, must name a worktree.
+
+_COPY_VERBS = frozenset({"cp", "mv", "rsync", "install"})
+_WORKTREE_PATH = re.compile(rf"(?:^|/)({_WORKTREE_RE}/)([^/]+)(?:/(.*))?$")
+_SCRATCH_ROOT = tempfile.gettempdir()
+_CD_VERBS = frozenset({"cd", "pushd"})
+_FIND_EXEC = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
+_FIND_EXEC_END = frozenset({";", "\\;", "+"})
+_FIND_PLACEHOLDER = "{}"
+# Options whose NEXT word is a value, not an operand.
+_VALUE_OPTIONS: dict[str, frozenset[str]] = {
+    "cp": frozenset({"-S", "--suffix", "--backup-suffix", "-t", "--target-directory"}),
+    "mv": frozenset({"-S", "--suffix", "-t", "--target-directory"}),
+    "install": frozenset(
+        {"-S", "--suffix", "-t", "--target-directory", "-m", "--mode", "-o", "-g"}
+    ),
+    "rsync": frozenset(
+        {"-e", "--rsh", "--exclude", "--include", "--exclude-from", "--include-from"}
+        | {"-f", "--filter", "--port", "--bwlimit", "--timeout", "--log-file", "--rsync-path"}
+    ),
+}
+_TARGET_DIRECTORY_VERBS = frozenset({"cp", "mv", "install"})
+_XARGS_VALUE_OPTIONS = frozenset({"-I", "-n", "-P", "-L", "-d", "-E", "-s", "-a"})
+_CLOSERS = frozenset({")", "}"})
+
+
+class _Cwd(Enum):
+    """Where a bare `.` points, as far as a literal `cd` in the command says."""
+
+    MAIN = "main"
+    MAIN_CODE = "main-code-dir"
+    WORKTREE = "worktree"
+    UNKNOWN = "unknown"
+
+
+def _worktree_path(word: str) -> tuple[str, str] | None:
+    """`(branch, rest-of-path)` when `word` is a path inside a worktree, else None."""
+    match = _WORKTREE_PATH.search(word)
+    return None if match is None else (match.group(2), match.group(3) or "")
+
+
+def _command_words(text: str) -> list[str]:
+    """Words of the command `text` runs, quotes removed; an unresolvable word stays as written.
+
+    Subshell and group punctuation around the command (`(cp a b)`, `{ cp a b; }`)
+    is dropped.
+    """
+    text = _effective_command(text)
+    words = [
+        resolved if resolved is not None else text[a:b]
+        for a, b in shell_word_spans(text)
+        for resolved in [resolve_shell_word(text[a:b])]
+    ]
+    while words and words[-1] in _CLOSERS:
+        words.pop()
+    if words and words[-1].endswith(")") and not words[-1].endswith("$()"):
+        words[-1] = words[-1].rstrip(")")
+    return words
+
+
+def _is_target_option(word: str) -> bool:
+    """`-t`, or a short cluster ending in it (`-rt`)."""
+    return re.fullmatch(r"-[A-Za-z]*t", word) is not None
+
+
+def _split_copy_operands(verb: str, args: list[str]) -> tuple[list[str], str | None, bool]:
+    """`(sources, destination, recursive)` of a `cp`/`mv`/`rsync`/`install` argument list.
+
+    The destination is `-t DIR` / `--target-directory=DIR` when given, otherwise
+    the last operand. Option values (`-S ~`, `rsync -e ssh`) are not operands.
+    """
+    value_options = _VALUE_OPTIONS[verb]
+    operands: list[str] = []
+    target: str | None = None
+    recursive = verb == "mv"
+    index = 0
+    options_ended = False
+    while index < len(args):
+        word = args[index]
+        index += 1
+        if options_ended or not word.startswith("-") or word == "-":
+            operands.append(word)
+        elif word == "--":
+            options_ended = True
+        elif word.startswith("--target-directory="):
+            target = word.partition("=")[2]
+        elif verb in _TARGET_DIRECTORY_VERBS and _is_target_option(word):
+            if index < len(args):
+                target = args[index]
+                index += 1
+            recursive = recursive or bool(re.search(r"[rRa]", word))
+        elif verb in _TARGET_DIRECTORY_VERBS and word.startswith("-t") and len(word) > 2:
+            target = word[2:]
+        elif word in value_options:
+            if word in {"-t", "--target-directory"} and index < len(args):
+                target = args[index]
+            index += 1
+        elif word in {"--recursive", "--archive"} or (
+            not word.startswith("--") and re.search(r"[rRa]", word[1:])
+        ):
+            recursive = True
+    if target is not None:
+        return operands, target, recursive
+    if len(operands) < 2:
+        return operands, None, recursive
+    return operands[:-1], operands[-1], recursive
+
+
+def _copy_operands(
+    words: list[str], pipe_names_worktree: bool
+) -> tuple[list[str], str | None, bool, bool] | None:
+    """`(sources, destination, recursive, fed)` of the copy `words` finally runs, or None.
+
+    `fed` means the sources are not all on the command line: they come from a
+    worktree path that another stage names (`find <wt> | xargs cp -t src/`, or
+    `find <wt> -exec cp {} src/ \\;`).
+    """
+    if not words:
+        return None
+    _, start = peel_command_wrappers(words)
+    words = words[start:]
+    if not words:
+        return None
+    verb = words[0].rsplit("/", 1)[-1]
+    if verb in _COPY_VERBS:
+        sources, destination, recursive = _split_copy_operands(verb, words[1:])
+        return sources, destination, recursive, False
+    if verb == "xargs":
+        return _xargs_operands(words[1:], pipe_names_worktree)
+    if verb == "find":
+        return _find_operands(words[1:])
+    return None
+
+
+def _xargs_operands(
+    args: list[str], pipe_names_worktree: bool
+) -> tuple[list[str], str | None, bool, bool] | None:
+    """The copy an `xargs` runs, fed by the stage before it when that stage names a worktree."""
+    index = 0
+    while index < len(args) and args[index].startswith("-") and args[index] != "--":
+        index += 2 if args[index] in _XARGS_VALUE_OPTIONS else 1
+    inner = _copy_operands(args[index + 1 if args[index : index + 1] == ["--"] else index :], False)
+    if inner is None:
+        return None
+    sources, destination, recursive, _ = inner
+    return sources, destination, recursive, pipe_names_worktree
+
+
+def _find_operands(args: list[str]) -> tuple[list[str], str | None, bool, bool] | None:
+    """The first copy a `find -exec ... {} ;` runs, its `{}` standing for each starting path."""
+    roots: list[str] = []
+    for word in args:
+        if word.startswith("-") or word in {"(", "!"}:
+            break
+        roots.append(word)
+    worktree_roots = [root for root in roots if _worktree_path(root)]
+    index = 0
+    while index < len(args):
+        if args[index] not in _FIND_EXEC:
+            index += 1
+            continue
+        end = next((i for i in range(index + 1, len(args)) if args[i] in _FIND_EXEC_END), None)
+        inner_words = args[index + 1 : end if end is not None else len(args)]
+        inner = _copy_operands(
+            [
+                worktree_roots[0] if w == _FIND_PLACEHOLDER and worktree_roots else w
+                for w in inner_words
+            ],
+            False,
+        )
+        if inner is not None:
+            return inner
+        index = end if end is not None else len(args)
+    return None
+
+
+def _next_cwd(words: list[str], cwd: _Cwd, code_dirs: tuple[str, ...]) -> _Cwd:
+    """The working directory after a `cd`/`pushd` command; `cwd` itself for any other command."""
+    if not words or words[0].rsplit("/", 1)[-1] not in _CD_VERBS:
+        return cwd
+    operands = [word for word in words[1:] if word == "-" or not word.startswith("-")]
+    if not operands:
+        return _Cwd.UNKNOWN
+    target = operands[0]
+    if target == "-" or any(char in target for char in "$`*?~"):
+        return _Cwd.UNKNOWN
+    if _worktree_path(target) is not None:
+        return _Cwd.WORKTREE
+    if target.startswith("/"):
+        scratch = target == _SCRATCH_ROOT or target.startswith(_SCRATCH_ROOT + "/")
+        return _Cwd.UNKNOWN if scratch else _Cwd.MAIN
+    parts = [part for part in target.split("/") if part not in {"", "."}]
+    if not parts:
+        return cwd
+    if ".." in parts:
+        return _Cwd.UNKNOWN
+    if cwd is _Cwd.WORKTREE:
+        return _Cwd.WORKTREE
+    if cwd is _Cwd.MAIN and parts[0] in code_dirs:
+        return _Cwd.MAIN_CODE
+    return _Cwd.UNKNOWN
+
+
+def _initial_cwd(hook_input: dict[str, Any]) -> _Cwd:
+    """The cwd the command starts in: a worktree when the hook says so, else the main checkout."""
+    cwd = hook_input.get(HookInputField.CWD)
+    if isinstance(cwd, str) and _worktree_path(cwd) is not None:
+        return _Cwd.WORKTREE
+    return _Cwd.MAIN
+
+
+def _is_whole_tree_or_code(source: str, code_dirs: tuple[str, ...]) -> bool:
+    """Whether a worktree source is the whole tree or a path inside a main-repo code dir."""
+    located = _worktree_path(source)
+    if located is None:
+        return False
+    rest = located[1].strip("/")
+    return rest in {"", "."} or rest.split("/")[0] in code_dirs
+
+
+def _destination_is_main_code(
+    destination: str,
+    cwd: _Cwd,
+    code_dirs: tuple[str, ...],
+    sources: list[str],
+    recursive: bool,
+    fed: bool,
+) -> bool:
+    """Whether the destination lands in the main checkout's code (see the block comment above)."""
+    if _worktree_path(destination) is not None:
+        return False
+    if destination.startswith("/"):
+        return any(part in code_dirs for part in destination.split("/"))
+    relative = destination
+    while relative.startswith("./"):
+        relative = relative[2:]
+    if cwd is _Cwd.WORKTREE:
+        return False
+    if relative in {"", "."}:
+        if cwd is _Cwd.MAIN_CODE:
+            return True
+        if cwd is not _Cwd.MAIN:
+            return False
+        return recursive or fed or any(_is_whole_tree_or_code(s, code_dirs) for s in sources)
+    if cwd is _Cwd.MAIN_CODE:
+        return not relative.startswith("..")
+    return relative.split("/")[0] in code_dirs
 
 
 class WorktreeFileCopyHandler(PreToolUseHandlerBase):
@@ -209,8 +514,55 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
         # run `.*` and would otherwise cross `&&`/`;` into the NEXT command,
         # and a segment that only prints a path (`grep`, `echo`) is blanked by
         # the command-position view unless its output feeds an executor.
-        return any(
-            self._segment_relocates(segment) for segment in command_position_segments(command)
+        #
+        # The segments are walked in order so that a literal `cd` before a copy
+        # says where a bare `.` destination points, and so that an `xargs` knows
+        # whether the stage feeding it named a worktree (see "Operand reading").
+        cwd = _initial_cwd(hook_input)
+        code_dirs = self._all_main_repo_code_dirs()
+        previous_names_worktree = False
+        for segment in command_position_segments(command):
+            words = _command_words(segment)
+            if words and words[0].rsplit("/", 1)[-1] in _CD_VERBS:
+                # A `cd` inside a subshell ends with it, so it is not tracked.
+                if not strip_reserved_word_prefix(segment).lstrip().startswith("("):
+                    cwd = _next_cwd(words, cwd, code_dirs)
+                continue
+            verdict = self._operands_relocate(words, cwd, code_dirs, previous_names_worktree)
+            # A copy whose operands were read is judged on them. The text patterns
+            # judge what the operands cannot be read from (`dd of=`, an unparsed shape).
+            if verdict if verdict is not None else self._segment_relocates(segment):
+                return True
+            previous_names_worktree = any(prefix in segment for prefix in _WORKTREE_PREFIXES)
+        return False
+
+    def _operands_relocate(
+        self,
+        words: list[str],
+        cwd: _Cwd,
+        code_dirs: tuple[str, ...],
+        previous_names_worktree: bool,
+    ) -> bool | None:
+        """Whether the copy these words run takes a worktree path into main-repo code.
+
+        None when the words are not a copy with a readable destination.
+        """
+        copy = _copy_operands(words, previous_names_worktree)
+        if copy is None:
+            return None
+        sources, destination, recursive, fed = copy
+        if destination is None:
+            return None
+        worktree_sources = [source for source in sources if _worktree_path(source)]
+        if not (worktree_sources or fed):
+            return False
+        into = _worktree_path(destination)
+        if into is not None:
+            # Within one worktree is fine; into ANOTHER worktree stays with the text patterns.
+            same = any((_worktree_path(s) or ("",))[0] == into[0] for s in worktree_sources)
+            return False if same else None
+        return _destination_is_main_code(
+            destination, cwd, code_dirs, worktree_sources or sources, recursive, fed
         )
 
     def _segment_relocates(self, command: str) -> bool:
@@ -285,6 +637,10 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
             "worktree path, and a `ls <worktree>/src/ && cp README.md src/` whose copy "
             "does not read the worktree, are allowed. The target must be a main-repo "
             "code dir, so `mv <worktree>/notes.txt tmp.txt` is not blocked.\n\n"
+            "A copy into the checkout root (`cp -r <worktree>/src .`, `rsync -a <worktree>/ ./`), "
+            "`cp -t src/ <worktree>/...`, and a copy behind a wrapper, `xargs` or `find -exec` "
+            "are blocked too. A bare `.` is the working directory: a literal `cd` earlier in "
+            "the same command decides it, and a `cd` into a worktree makes `.` that worktree.\n\n"
             "**Allowed**: operations within the same worktree branch. "
             "**To merge changes**: use `git merge` or `git cherry-pick` instead."
         )
