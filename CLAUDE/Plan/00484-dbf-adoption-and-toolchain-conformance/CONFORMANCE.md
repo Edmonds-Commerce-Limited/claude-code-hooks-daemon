@@ -254,7 +254,10 @@ MET: 4.1, 4.3a, 4.3b, 6.2a and 6.2b.
   Defence handler is a row (`audit_error_hiding`, `check_sensitive_content`,
   `check_inline_suppressions`). Membership is the `batch_defences` map in `qa-rules.json`; a
   row is every rule that script prints, marked `kind: batch-check`, with the defect class of
-  its handler counterpart. `check_british_english` is not a row: a spelling convention is not
+  its handler counterpart: the class and the enabled state come from the handler named in
+  `batch_defences` (`error_hiding_blocker`, `sensitive_content`, `qa_suppression`), and a
+  rule marked `meta` (checker plumbing: `config`, `unreadable-file`, `stale-exclusion`,
+  `unauditable-file`) is not a row; there are 16 rows. `check_british_english` is not a row: a spelling convention is not
   a defect class, and `BritishEnglishHandler` declares none (coordinator ruling). 5.3 is now
   PARTLY MET at project level (counts 11 PARTLY MET, 6 NOT MET); 5.1b and 5.1c stay PARTLY
   MET because the other B checkers are not rows.

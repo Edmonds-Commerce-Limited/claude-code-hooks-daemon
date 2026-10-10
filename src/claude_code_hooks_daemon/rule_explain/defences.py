@@ -132,37 +132,48 @@ def collect_active_defences(
     return records
 
 
-def collect_batch_defences(qa_rules: Mapping[str, Any]) -> list[Defence]:
-    """List the batch checkers that are the whole-tree form of a write-time handler.
+def collect_batch_defences(
+    qa_rules: Mapping[str, Any], handler_classes: Mapping[str, DefectClass]
+) -> list[Defence]:
+    """List the batch checkers that are the whole-tree form of an active Defence handler.
 
     Membership is the ``batch_defences`` map of ``qa-rules.json`` (script ->
-    ``step`` and ``defect_class``); rule IDs, statements
-    and the docs route are that file's own ``rules``, so no second registry
-    exists. One row per rule a declared script prints.
+    ``step`` and the config key of the ``handler`` it mirrors); rule IDs,
+    statements and the docs route are that file's own ``rules``, so no second
+    registry exists. One row per rule ID a declared script prints, leaving out
+    the rules marked ``meta`` (they report on the checker itself, not on a
+    defect). The defect class is the one the active handler's own row carries.
 
     Args:
         qa_rules: The parsed ``qa-rules.json`` document.
+        handler_classes: Defect class by config key of every active Defence handler.
+            A script whose handler is not in it is disabled or absent and gets no rows.
 
     Returns:
         The rows, in the declaration order of the scripts and of their rules;
         empty when the document declares no ``batch_defences``.
 
     Raises:
-        ValueError: A declared ``defect_class`` is not a ``DefectClass`` value, or
-            a declared script prints no rule in ``rules``.
+        ValueError: A declared script prints no non-meta rule in ``rules``.
     """
     declared: Mapping[str, Mapping[str, Any]] = qa_rules.get("batch_defences", {})
     rules: Mapping[str, Mapping[str, Any]] = qa_rules.get("rules", {})
     records: list[Defence] = []
     for script, entry in declared.items():
-        defect_class = DefectClass(entry["defect_class"])
         step = entry["step"]
         entry_point = f"{_QA_RUNNER} {step}"
-        printed = [(rule_id, rule) for rule_id, rule in rules.items() if script in rule["checks"]]
+        printed = [
+            (rule_id, rule)
+            for rule_id, rule in rules.items()
+            if script in rule["checks"] and not rule.get("meta", False)
+        ]
         if not printed:
             raise ValueError(
-                f"batch_defences names {script}, which prints no rule in qa-rules.json"
+                f"batch_defences names {script}, which prints no defect rule in qa-rules.json"
             )
+        defect_class = handler_classes.get(entry["handler"])
+        if defect_class is None:
+            continue
         records.extend(
             Defence(
                 rule_id=rule_id,

@@ -2,17 +2,11 @@
   "version": 1,
   "docs": "CLAUDE/QA.md",
   "description": "One entry per rule ID a scripts/qa checker prints (Plan 00484 G6). `llm_qa.py --explain <ID>` prints an entry. `checks` names the scripts that print the ID; tests/unit/qa/test_qa_rules.py fails when this file and the scripts disagree, in either direction.",
-  "batch_defences_description": "The checkers listed as batch-check rows of `hooks-daemon defences`: each is the whole-tree form of a write-time handler's defect class. `step` is the llm_qa.py step that runs it, `defect_class` a DefectClass value. A spelling convention is not a defect class, so check_british_english.py is not listed. The rows are every rule below whose `checks` names the script.",
+  "batch_defences_description": "The checkers listed as batch-check rows of `hooks-daemon defences`: each is the whole-tree form of a write-time handler's defect class. `step` is the llm_qa.py step that runs it, `handler` the write-time handler's config key: the row carries that handler's defect class and exists only while the handler is enabled. A spelling convention is not a defect class, so check_british_english.py is not listed. The rows are every rule below whose `checks` names the script, except a rule marked `meta: true`, which reports on the checker itself (its configuration, an unreadable file, a stale exclusion) rather than on a defect in the code.",
   "batch_defences": {
-    "audit_error_hiding.py": { "step": "error_hiding", "defect_class": "error-hiding" },
-    "check_sensitive_content.py": {
-      "step": "sensitive_content",
-      "defect_class": "sensitive-content"
-    },
-    "check_inline_suppressions.py": {
-      "step": "inline_suppressions",
-      "defect_class": "qa-suppression"
-    }
+    "audit_error_hiding.py": { "step": "error_hiding", "handler": "error_hiding_blocker" },
+    "check_sensitive_content.py": { "step": "sensitive_content", "handler": "sensitive_content" },
+    "check_inline_suppressions.py": { "step": "inline_suppressions", "handler": "qa_suppression" }
   },
   "rules": {
     "american-spelling": {
@@ -58,7 +52,8 @@
     "config": {
       "statement": "The sensitive-content checker's own configuration is invalid, so the scan could not be trusted.",
       "fix": "Correct the `sensitive_content` options in `.claude/hooks-daemon.yaml` named in the finding.",
-      "checks": ["check_sensitive_content.py"]
+      "checks": ["check_sensitive_content.py"],
+      "meta": true
     },
     "config-key-mismatch": {
       "statement": "In `docs/guides/HANDLER_REFERENCE.md` a handler section's `**Config key**` row names a different key from the section's own heading.",
@@ -448,7 +443,8 @@
     "stale-exclusion": {
       "statement": "An entry of `error_hiding_exclusions.json` matches no finding, so it drifted off its target or the code was fixed.",
       "fix": "Realign the entry to its target, or delete it.",
-      "checks": ["audit_error_hiding.py"]
+      "checks": ["audit_error_hiding.py"],
+      "meta": true
     },
     "stale-grandfather": {
       "statement": "A grandfathered ref in the history sweep's configuration no longer exists.",
@@ -468,7 +464,8 @@
     "unauditable-file": {
       "statement": "A file could not be opened or decoded, so it was never audited for error hiding.",
       "fix": "Make the file readable UTF-8, or remove it; an unaudited file is not a pass.",
-      "checks": ["audit_error_hiding.py"]
+      "checks": ["audit_error_hiding.py"],
+      "meta": true
     },
     "unbounded-skip-list-membership": {
       "statement": "A skip or exclude list entry is tested against a path with bare `in`, which is substring containment, so the guard stands down for any path that merely ends in the entry.",
@@ -548,7 +545,12 @@
     "unreadable-file": {
       "statement": "A file could not be read, decoded or tokenised, so it was never checked.",
       "fix": "Make the file readable UTF-8, or fix the parse error the finding names; an unread file is not a pass.",
-      "checks": ["check_github_urls.py", "check_inline_suppressions.py", "check_sensitive_content.py"]
+      "checks": [
+        "check_github_urls.py",
+        "check_inline_suppressions.py",
+        "check_sensitive_content.py"
+      ],
+      "meta": true
     },
     "unreleased-manifest-date": {
       "statement": "A released config-changes manifest still carries the UNRELEASED placeholder, or any other non-ISO `date:`, instead of its release date.",

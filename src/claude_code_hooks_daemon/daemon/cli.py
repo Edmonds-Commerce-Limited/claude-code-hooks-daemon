@@ -3674,7 +3674,17 @@ def cmd_defences(args: argparse.Namespace) -> int:
     )
     rules_file = project_path / QA_RULES_RELATIVE_PATH
     if rules_file.is_file():
-        records.extend(collect_batch_defences(json.loads(rules_file.read_text(encoding="utf-8"))))
+        active_classes = {
+            record.handler: record.defect_class for record in records if record.defect_class
+        }
+        try:
+            document = json.loads(rules_file.read_text(encoding="utf-8"))
+            records.extend(collect_batch_defences(document, active_classes))
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+            print(
+                f"defences: {rules_file} is not a usable QA rule registry: {exc!r}", file=sys.stderr
+            )
+            return 1
 
     if getattr(args, "as_json", False):
         print(json.dumps([record.to_dict() for record in records], indent=2))

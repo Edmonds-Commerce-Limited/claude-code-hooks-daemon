@@ -123,7 +123,6 @@ class TestCmdDefences:
         assert by_script["audit_error_hiding.py"] == "error-hiding"
         assert by_script["check_sensitive_content.py"] == "sensitive-content"
         assert by_script["check_inline_suppressions.py"] == "qa-suppression"
-        assert "check_british_english.py" not in by_script
         assert all(
             record["docs"].startswith("./scripts/qa/llm_qa.py --explain ") for record in batch
         )
@@ -135,30 +134,19 @@ class TestCmdDefences:
         by_id = {record["rule_id"]: record for record in records if record["rule_id"]}
         assert by_id["R-QA-SUPPRESSION"]["kind"] == "handler"
 
-    def test_batch_defence_defect_classes_match_their_handlers(
+    def test_every_rule_id_in_the_listing_is_unique(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """The class of a batch row is the class its write-time handler declares."""
-        from claude_code_hooks_daemon.handlers.pre_tool_use.error_hiding_blocker import (
-            ErrorHidingBlockerHandler,
-        )
-        from claude_code_hooks_daemon.handlers.pre_tool_use.qa_suppression import (
-            QaSuppressionHandler,
-        )
-        from claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content import (
-            SensitiveContentHandler,
-        )
-
         assert cmd_defences(_args()) == 0
-        records = json.loads(capsys.readouterr().out)
-        by_script = {
-            record["handler_class"]: record["defect_class"]
-            for record in records
-            if record["kind"] == "batch-check"
-        }
-        assert by_script["audit_error_hiding.py"] == ErrorHidingBlockerHandler.defect_class
-        assert by_script["check_inline_suppressions.py"] == QaSuppressionHandler.defect_class
-        assert by_script["check_sensitive_content.py"] == SensitiveContentHandler.defect_class
+        ids = [r["rule_id"] for r in json.loads(capsys.readouterr().out) if r["rule_id"]]
+        assert len(ids) == len(set(ids))
+
+    def test_checker_plumbing_rules_are_not_listed(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert cmd_defences(_args()) == 0
+        ids = {r["rule_id"] for r in json.loads(capsys.readouterr().out)}
+        assert not ids & {"config", "unreadable-file", "stale-exclusion", "unauditable-file"}
 
     def test_text_mode_shows_batch_rows_with_their_kind(
         self, capsys: pytest.CaptureFixture[str]

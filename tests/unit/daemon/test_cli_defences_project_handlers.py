@@ -177,3 +177,57 @@ class TestProjectHandlerEntryPoint:
         by_id = {r["rule_id"]: r for r in _defences(project, capsys) if r["rule_id"]}
         assert "R-PROJECT-CANARY" in by_id
         assert len(calls) == 1
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _with_qa_rules(project: Path, text: str | None = None) -> None:
+    """Give the scaffolded project the repository's QA rule registry (or ``text``)."""
+    target = project / "scripts" / "qa" / "qa-rules.json"
+    target.parent.mkdir(parents=True)
+    if text is None:
+        text = (_REPO_ROOT / "scripts" / "qa" / "qa-rules.json").read_text(encoding="utf-8")
+    target.write_text(text, encoding="utf-8")
+
+
+def _batch_scripts(project: Path, capsys: pytest.CaptureFixture[str]) -> set[str]:
+    return {r["handler_class"] for r in _defences(project, capsys) if r["kind"] == "batch-check"}
+
+
+class TestBatchRowsFollowTheirHandler:
+    def test_a_disabled_handler_removes_its_batch_rows(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        import yaml
+
+        project = _scaffold_project(tmp_path)
+        _with_qa_rules(project)
+        before = _batch_scripts(project, capsys)
+        assert "check_inline_suppressions.py" in before
+        config_path = project / ".claude" / "hooks-daemon.yaml"
+        config = yaml.safe_load(config_path.read_text())
+        config["handlers"]["pre_tool_use"]["qa_suppression"]["enabled"] = False
+        config_path.write_text(yaml.safe_dump(config))
+        assert _batch_scripts(project, capsys) == before - {"check_inline_suppressions.py"}
+
+    def test_a_malformed_registry_is_one_stderr_line_and_exit_one(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        project = _scaffold_project(tmp_path)
+        _with_qa_rules(project, "{ not json")
+        capsys.readouterr()
+        assert cmd_defences(argparse.Namespace(as_json=True, project_root=project)) == 1
+        err = capsys.readouterr().err.strip().splitlines()
+        assert len(err) == 1
+        assert "qa-rules.json" in err[0]
+
+    def test_a_registry_naming_a_check_that_prints_no_rule_exits_one(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        project = _scaffold_project(tmp_path)
+        declared = {"x.py": {"step": "s", "handler": "qa_suppression"}}
+        _with_qa_rules(project, json.dumps({"batch_defences": declared, "rules": {}}))
+        capsys.readouterr()
+        assert cmd_defences(argparse.Namespace(as_json=True, project_root=project)) == 1
+        assert "x.py" in capsys.readouterr().err
