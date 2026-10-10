@@ -34,6 +34,8 @@ def _no_real_stale_scan() -> Iterator[None]:
     module = "claude_code_hooks_daemon.handlers.user_prompt_submit.idle_housekeeping_advisor"
     with (
         patch(f"{module}.collect_stale_report", return_value=None),
+        patch(f"{module}.collect_scratch_report", return_value=None),
+        patch(f"{module}.collect_gone_branch_ref_report", return_value=None),
         patch(f"{module}.ProjectContext") as project_context,
     ):
         project_context.project_root.return_value = Path("/nonexistent-project-root")
@@ -447,4 +449,77 @@ class TestStaleCheckoutsReport:
         md = IdleHousekeepingAdvisoryHandler().get_claude_md()
         assert md is not None
         for option in ("report_stale_checkouts", "base_branch", "stale_worktree_days"):
+            assert option in md
+
+
+class TestLitterReports:
+    """Plan 00470 Task 4.1 follow-ups: old scratch files and changed-green refs of gone branches."""
+
+    def _fire(self, handler: IdleHousekeepingAdvisoryHandler) -> str:
+        return TestStaleCheckoutsReport()._fire(handler)
+
+    def test_both_reports_are_appended_to_the_guidance(self, tmp_path: Path) -> None:
+        handler = IdleHousekeepingAdvisoryHandler()
+        with (
+            patch(f"{_HANDLER_MODULE}.ProjectContext") as mock_pc,
+            patch(
+                f"{_HANDLER_MODULE}.collect_scratch_report", return_value="OLD SCRATCH FILES: x"
+            ) as scratch,
+            patch(
+                f"{_HANDLER_MODULE}.collect_gone_branch_ref_report",
+                return_value="CHANGED-GREEN REFS OF GONE BRANCHES: y",
+            ) as refs,
+        ):
+            mock_pc.project_root.return_value = tmp_path
+            blob = self._fire(handler)
+
+        assert "OLD SCRATCH FILES: x" in blob
+        assert "CHANGED-GREEN REFS OF GONE BRANCHES: y" in blob
+        scratch.assert_called_once_with(tmp_path / "untracked" / "scratch", 14)
+        refs.assert_called_once_with(tmp_path)
+
+    def test_each_report_can_be_switched_off(self, tmp_path: Path) -> None:
+        handler = IdleHousekeepingAdvisoryHandler()
+        apply_handler_options(
+            handler, {"report_stale_scratch": False, "report_gone_branch_refs": False}
+        )
+        with (
+            patch(f"{_HANDLER_MODULE}.ProjectContext") as mock_pc,
+            patch(f"{_HANDLER_MODULE}.collect_scratch_report") as scratch,
+            patch(f"{_HANDLER_MODULE}.collect_gone_branch_ref_report") as refs,
+        ):
+            mock_pc.project_root.return_value = tmp_path
+            self._fire(handler)
+
+        scratch.assert_not_called()
+        refs.assert_not_called()
+
+    def test_the_configured_age_reaches_the_scratch_scan(self, tmp_path: Path) -> None:
+        handler = IdleHousekeepingAdvisoryHandler()
+        apply_handler_options(handler, {"stale_scratch_days": 3})
+        with (
+            patch(f"{_HANDLER_MODULE}.ProjectContext") as mock_pc,
+            patch(f"{_HANDLER_MODULE}.collect_scratch_report", return_value=None) as scratch,
+        ):
+            mock_pc.project_root.return_value = tmp_path
+            self._fire(handler)
+
+        scratch.assert_called_once_with(tmp_path / "untracked" / "scratch", 3)
+
+    @pytest.mark.parametrize("value", [0, -1, "14", 1.5, True, None])
+    def test_stale_scratch_days_must_be_a_positive_int(self, value: object) -> None:
+        handler = IdleHousekeepingAdvisoryHandler()
+
+        with pytest.raises(ValueError, match="stale_scratch_days"):
+            apply_handler_options(handler, {"stale_scratch_days": value})
+
+    def test_a_bad_stale_scratch_days_is_named_at_validation(self) -> None:
+        problems = IdleHousekeepingAdvisoryHandler.validate_options({"stale_scratch_days": 0})
+
+        assert "stale_scratch_days" in problems
+
+    def test_claude_md_mentions_the_new_options(self) -> None:
+        md = IdleHousekeepingAdvisoryHandler().get_claude_md()
+        assert md is not None
+        for option in ("report_stale_scratch", "stale_scratch_days", "report_gone_branch_refs"):
             assert option in md

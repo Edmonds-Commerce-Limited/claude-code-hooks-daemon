@@ -3167,7 +3167,8 @@ def cmd_disk_usage(args: argparse.Namespace) -> int:
     print()
     print(
         "Auto-reaped writers (transcripts, thread-registry, context-sidecar, "
-        "payload-capture, logs, decision.log) are bounded on daemon start."
+        "payload-capture, logs) are bounded on daemon start. The supervisor's "
+        "decision.log is capped at 4 MiB by the supervisor itself, at write time."
     )
     print(
         "Reclaim venvs with `prune-venvs --stale --force` (legacy: `--legacy`) — "

@@ -805,6 +805,11 @@ handlers:
         report_stale_checkouts: true  # false drops the stale worktree/daemon section
         base_branch: main             # a worktree whose branch is merged into this is stale
         stale_worktree_days: 7        # a worktree whose branch has no commit for this many days is stale
+        # Plan 00470 Task 4.1 follow-ups: report-only, nothing is ever deleted. Each
+        # finding prints the command a human may choose to run.
+        report_stale_scratch: true    # false drops the old untracked/scratch/ files section
+        stale_scratch_days: 14        # a scratch file not modified for this many days is old (integer >= 1)
+        report_gone_branch_refs: true # false drops the refs/integration/changed-green/* of deleted branches
 
     standing_authorisations:  # Replay a standing request THIS project recorded (Plan 00223)
       # The HANDLER ships on so the options are discoverable; every

@@ -31,6 +31,12 @@ from claude_code_hooks_daemon.utils.stale_checkouts import (
     DEFAULT_MAX_IDLE_DAYS,
     collect_stale_report,
 )
+from claude_code_hooks_daemon.utils.stale_litter import (
+    DEFAULT_SCRATCH_DAYS,
+    SCRATCH_RELATIVE_PATH,
+    collect_gone_branch_ref_report,
+    collect_scratch_report,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,22 +66,45 @@ _USER_ROLES: Final[frozenset[str]] = frozenset({"user", "human"})
 
 
 _STALE_DAYS_OPTION: Final[str] = "stale_worktree_days"
+_SCRATCH_DAYS_OPTION: Final[str] = "stale_scratch_days"
 
 
 def _is_day_count(value: object) -> TypeGuard[int]:
-    """Whether ``value`` is a usable ``stale_worktree_days``.
+    """Whether ``value`` is a usable day-count option.
 
     ``True`` is an ``int`` to Python but never a day count, and ``0`` would call
-    every branch idle.
+    everything old.
     """
     return isinstance(value, int) and not isinstance(value, bool) and value >= 1
 
 
-def _stale_worktree_days_problem(value: object) -> str | None:
-    """Why ``value`` is not a usable ``stale_worktree_days``, or None when it is."""
+def _day_count_problem(option: str, value: object) -> str | None:
+    """Why ``value`` is not a usable ``option``, or None when it is."""
     if _is_day_count(value):
         return None
-    return f"stale_worktree_days must be an integer >= 1, got {value!r}"
+    return f"{option} must be an integer >= 1, got {value!r}"
+
+
+class _DayCountOption:
+    """A handler attribute that accepts only a whole number of days >= 1.
+
+    Bad config is rejected AT LOAD with a message naming the option, rather than
+    silently making every worktree idle or every scratch file old.
+    """
+
+    def __init__(self, option: str) -> None:
+        self._option = option
+        self._slot = f"_day_count_{option}"
+
+    def __get__(self, instance: object, owner: type | None = None) -> int:
+        value: int = getattr(instance, self._slot)
+        return value
+
+    def __set__(self, instance: object, value: object) -> None:
+        problem = _day_count_problem(self._option, value)
+        if problem is not None:
+            raise ValueError(problem)
+        setattr(instance, self._slot, value)
 
 
 def count_trailing_noop_recovery_ticks(messages: list[TranscriptMessage], marker: str) -> int:
@@ -118,6 +147,9 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
     """After N consecutive no-op recovery ticks, advise a report-first
     housekeeping pass dispatched to specialist sub-agents (beta, opt-in)."""
 
+    _stale_worktree_days = _DayCountOption(_STALE_DAYS_OPTION)
+    _stale_scratch_days = _DayCountOption(_SCRATCH_DAYS_OPTION)
+
     # Opt-in (beta): it changes how idle time is spent, so it waits for field
     # time. Enable with
     # `handlers.user_prompt_submit.idle_housekeeping_advisory.enabled: true`.
@@ -146,27 +178,16 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
         # Empty means "the repository's own default branch".
         self._base_branch: str = ""
         self._stale_worktree_days = DEFAULT_MAX_IDLE_DAYS
+        # Old scratch files and changed-green refs of gone branches (Plan 00470 Task 4.1).
+        self._report_stale_scratch: bool = True
+        self._stale_scratch_days = DEFAULT_SCRATCH_DAYS
+        self._report_gone_branch_refs: bool = True
         # Per-session housekeeping-pass counter (in-memory; resets on daemon
         # restart, which is acceptable for a bounded beta safety-net feature).
         # Bounded with atomic FIFO eviction.
         self._passes_by_session: BoundedFifoMap[str, int] = BoundedFifoMap(
             max_entries=_MAX_TRACKED_SESSIONS
         )
-
-    @property
-    def _stale_worktree_days(self) -> int:
-        return self.__stale_worktree_days
-
-    @_stale_worktree_days.setter
-    def _stale_worktree_days(self, value: object) -> None:
-        """Accept only a whole number of days >= 1, rejecting bad config AT LOAD.
-
-        ``True`` is an ``int`` to Python but never a day count, and ``0`` would
-        call every branch idle, so both are refused with a message naming why.
-        """
-        if not _is_day_count(value):
-            raise ValueError(_stale_worktree_days_problem(value))
-        self.__stale_worktree_days = value
 
     @staticmethod
     def validate_options(options: Mapping[str, Any]) -> dict[str, str]:
@@ -176,10 +197,11 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
         reported at session start while the handler runs on its default.
         """
         problems: dict[str, str] = {}
-        if _STALE_DAYS_OPTION in options:
-            problem = _stale_worktree_days_problem(options[_STALE_DAYS_OPTION])
-            if problem is not None:
-                problems[_STALE_DAYS_OPTION] = problem
+        for option in (_STALE_DAYS_OPTION, _SCRATCH_DAYS_OPTION):
+            if option in options:
+                problem = _day_count_problem(option, options[option])
+                if problem is not None:
+                    problems[option] = problem
         return problems
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
@@ -260,8 +282,25 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
                 f"{default}\n\n---\n\nPROJECT-SPECIFIC HOUSEKEEPING GUIDANCE "
                 f"(from {self._custom_guidance_doc}):\n{custom}"
             )
-        stale = self._stale_checkouts_report()
-        return guidance if stale is None else f"{guidance}\n\n{stale}"
+        reports = (
+            self._stale_checkouts_report(),
+            self._stale_scratch_report(),
+            self._gone_branch_refs_report(),
+        )
+        return "\n\n".join([guidance, *(report for report in reports if report is not None)])
+
+    def _stale_scratch_report(self) -> str | None:
+        """Old files under ``untracked/scratch/``, or None. Report-first, never deleted."""
+        if not self._report_stale_scratch:
+            return None
+        scratch = ProjectContext.project_root() / SCRATCH_RELATIVE_PATH
+        return collect_scratch_report(scratch, self._stale_scratch_days)
+
+    def _gone_branch_refs_report(self) -> str | None:
+        """Changed-green refs of branches that no longer exist, or None. Never deleted."""
+        if not self._report_gone_branch_refs:
+            return None
+        return collect_gone_branch_ref_report(ProjectContext.project_root())
 
     def _stale_checkouts_report(self) -> str | None:
         """Stale worktrees and daemons found this pass, or None when there are none.
@@ -351,7 +390,13 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
             "into `base_branch`, directory missing, or no commit for `stale_worktree_days`) "
             "and stale daemons (dead pid file, project root gone) with the exact cleanup "
             "command for each; it only names them, never runs them, and stays quiet when "
-            "nothing is stale (`report_stale_checkouts: false` turns it off). "
+            "nothing is stale (`report_stale_checkouts: false` turns it off). It also "
+            "reports files under `untracked/scratch/` older than `stale_scratch_days` "
+            "(count, size, oldest age, and a suggested `find ... -delete` it never runs; "
+            "`report_stale_scratch: false` turns it off) and "
+            "`refs/integration/changed-green/*` refs whose branch no longer exists locally "
+            "or on a remote, with the `git update-ref -d` for each "
+            "(`report_gone_branch_refs: false` turns it off). "
             "See docs/guides/CREATING_REPORTS.md."
         )
 
