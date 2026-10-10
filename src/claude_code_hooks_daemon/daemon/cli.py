@@ -2678,6 +2678,11 @@ def _load_project_handlers(config: "Config", project_path: Path) -> list[Any]:
     directory does not exist — neither is an error, and a generator with nothing
     to add must still render the rest of the document.
     """
+    return [handler for _event_type, handler in _discover_project_handlers(config, project_path)]
+
+
+def _discover_project_handlers(config: "Config", project_path: Path) -> list[tuple[Any, Any]]:
+    """This project's handlers as ``(EventType, handler)`` pairs; empty when none."""
     if not config.project_handlers.enabled:
         return []
 
@@ -2690,8 +2695,7 @@ def _load_project_handlers(config: "Config", project_path: Path) -> list[Any]:
     if not handlers_path.exists():
         return []
 
-    discovered = ProjectHandlerLoader.discover_handlers(handlers_path)
-    return [handler for _event_type, handler in discovered]
+    return list(ProjectHandlerLoader.discover_handlers(handlers_path))
 
 
 def _collect_enforcement_status_lines(project_path: Path) -> list[str]:
@@ -6797,6 +6801,39 @@ def cmd_issue_validity(args: argparse.Namespace) -> int:
     )
 
 
+def _loaded_handler_keys(
+    args: argparse.Namespace, project_root: Path, event_config_key: str
+) -> set[str]:
+    """Config keys of the enabled handlers this project loads for one event.
+
+    The set ``defences`` prints ``--only`` commands from: the same generator, so
+    bundled, project and plugin handlers all count.
+
+    Raises:
+        ProbeInputError: The project has no config to read them from.
+    """
+    from claude_code_hooks_daemon.daemon.hook_probe import ProbeInputError
+
+    config_path = project_root / ".claude" / "hooks-daemon.yaml"
+    if not config_path.exists():
+        raise ProbeInputError(f"no configuration at {config_path} to find handlers in")
+    config = Config.load(config_path)
+    _init_project_context_for_cli(args)
+    # The docs generator names a project handler by its class and files it under
+    # "project", so project handlers are added by the key the chain matches on.
+    keys = {
+        info[1]
+        for info in _build_docs_generator(config, project_root).active_handlers()
+        if info[2] == event_config_key
+    }
+    keys.update(
+        handler.config_key
+        for event_type, handler in _discover_project_handlers(config, project_root)
+        if event_type.name.lower() == event_config_key
+    )
+    return keys
+
+
 def cmd_exceptions(args: argparse.Namespace) -> int:
     """List every exception to a guard with the reason it carries (Plan 00484 G12).
 
@@ -6816,6 +6853,7 @@ def cmd_exceptions(args: argparse.Namespace) -> int:
         collect_in_file_hatches,
         collect_qa_exception_files,
     )
+    from claude_code_hooks_daemon.utils.git_repo import run_git
 
     # The raw file is read, so a config that fails validation can still be listed
     # (the listing is how an unreasoned exception in it gets found).
@@ -6830,12 +6868,7 @@ def cmd_exceptions(args: argparse.Namespace) -> int:
     except (OSError, yaml.YAMLError) as exc:
         print(f"ERROR: cannot read {config_path}: {exc}", file=sys.stderr)
         return 1
-    tracked = subprocess.run(  # nosec B603 B607 — fixed argv, no shell
-        ["git", "-C", str(project_path), "ls-files", "-z"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    tracked = run_git(project_path, "ls-files", "-z")
     if tracked.returncode != 0:
         print(
             f"ERROR: cannot list tracked files in {project_path}: {tracked.stderr.strip()}",
@@ -6901,6 +6934,7 @@ def cmd_probe(args: argparse.Namespace) -> int:
             session_id=probe_session_id(),
             probe_as=ProbeThread(asked) if asked else None,
             only=getattr(args, "only", None),
+            known_handlers=lambda: _loaded_handler_keys(args, project_root, event.config_key),
         )
         entry_point = entry_point_for(project_root, event)
     except (ProbeInputError, OSError) as exc:

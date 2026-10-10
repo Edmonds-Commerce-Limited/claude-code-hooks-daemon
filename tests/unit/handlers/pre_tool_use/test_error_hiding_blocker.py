@@ -267,11 +267,13 @@ class TestErrorHidingBlockerHandle:
         assert result.reason is not None
         assert "Handle failure explicitly" in result.reason
 
-    def test_reason_contains_disable_hint(self, handler: ErrorHidingBlockerHandler) -> None:
+    def test_reason_leaves_the_disable_footer_to_the_router(
+        self, handler: ErrorHidingBlockerHandler
+    ) -> None:
         hook_input = make_write_input("/tmp/test.sh", "cmd || true\n")
         result = handler.handle(hook_input)
         assert result.reason is not None
-        assert "error_hiding_blocker" in result.reason
+        assert "To disable" not in result.reason
 
     def test_returns_allow_for_clean_shell(self, handler: ErrorHidingBlockerHandler) -> None:
         hook_input = make_write_input(

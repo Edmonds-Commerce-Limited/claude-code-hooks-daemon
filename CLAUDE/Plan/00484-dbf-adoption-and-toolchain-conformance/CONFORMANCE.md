@@ -82,7 +82,7 @@ route.
 | 6.1    | A defined record location the toolchain loads                          | PARTLY MET               | MET        | `.claude/hooks-daemon.yaml` is loaded (`config/models.py:2717`); B's exception files are named by `QA_EXCEPTION_FILES` (`config/exceptions_listing.py:39`) and listed by `exceptions`                                                                                                                                                                                                                                                                                                                                                                |
 | 6.2a   | Every exception carries a justification; none defaulted, none omitted  | NOT MET                  | NOT MET    | `options: dict[str, Any]` (`models.py:58-78`); `enabled: bool` has no reason (`:72`); `never_want.reason` defaults to `""` (`:2111`)                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 6.2b   | Names hazard and scope; generic reasons rejected by a documented check | NOT MET                  | NOT MET    | No generic-reason check anywhere in `src/` or `scripts/`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| 6.3    | Record enumerable by the same means as the defences                    | PARTLY MET               | MET        | `hooks-daemon exceptions [--json]` lists the record with reasons (`daemon/cli.py:6800`, `config/exceptions_listing.py:95,128,158`), alongside `config --json` and `config-diff`                                                                                                                                                                                                                                                                                                                                                                      |
+| 6.3    | Record enumerable by the same means as the defences                    | PARTLY MET               | PARTLY MET | `hooks-daemon exceptions [--json]` lists config exceptions, disabled and downgraded handlers, in-file size hatches and eight QA exception files (`daemon/cli.py:6837`, `config/exceptions_listing.py:97,132,162`). Not listed: inline `nosec` / `noqa` / `type: ignore`, and exemption constants hard-coded in scripts                                                                                                                                                                                                                               |
 | 6.4    | SHOULD: documented defaults                                            | MET                      | MET        | `hooks-daemon.yaml.example`, `init_config.py`, `Handler.get_default_enabled`                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | 7.1    | SHOULD: terse per-defence summary with ID and docs route               | PARTLY MET               | MET        | Promoted prose sections now end with an `IDs:` line (G13, `claude_md_injector._with_rule_ids`); B's rules are still absent at project level                                                                                                                                                                                                                                                                                                                                                                                                          |
 | 7.2    | SHOULD: delivered automatically into a delimited generated region      | MET                      | MET        | The `<hooksdaemon>` block, regenerated on restart (`core/claude_md_injector.py`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -526,29 +526,38 @@ amendment). A runner that failed stays a failure and the exit code is non-zero.
 
 - **G4 footer closed; the next-major requirement stays a declared known gap.** Every
   `To disable:` footer now reads `(set enabled: false and record why beside it)`, from one
-  constant (`core/router.py:38`) that the two handlers carrying their own footer import
-  (`error_hiding_blocker.py:58`, `security_antipattern.py:138`). Reasons stay optional and a
+  constant (`core/router.py:38`). The router's footer is the only one: five handlers printed
+  their own as well (`write_clobber_guard`, `github_auto_close_keywords`, `git_message_backtick`,
+  `error_hiding_blocker`, `security_antipattern`), so a deny showed two disable instructions;
+  those lines are deleted and `tests/unit/core/test_single_disable_footer.py` pins it. Reasons stay optional and a
   reasonless entry under `daemon.strict_mode` stays a warning (owner ruling B3); the
   `exception_entries.py` docstring now says so. Making a reason mandatory is the breaking change
   for the next major and is not done here. `enabled: false` and `mode: warn` still have no
   reason field, so 6.2a stays NOT MET.
 - **G11 `probe --only` closed.** `hooks-daemon probe <event> --only <handler>` sends
-  `probe_only` (`daemon/hook_probe.py:234`); the chain consults only that handler
-  (`core/chain.py:1112`) and only for a probe-class source (`daemon/synthetic_traffic.py:185`), so
-  real traffic cannot switch guards off. A handler the event does not have, a non-probe source and
-  a payload that contradicts `--only` are refused before anything is sent. `detector_entry_point`
-  now names it (`rule_explain/defences.py:131`). A handler that is disabled in the project still
-  answers allow, and the verdict header says so. The `scan <handler> <paths>` mode is not built:
-  a follow-up plan, a coordinator call, and it is not yet filed.
+  `probe_only` (`daemon/hook_probe.py:247`); the chain consults only that handler
+  (`core/chain.py:1100`) and only for a probe-class source (`daemon/synthetic_traffic.py:185`), so
+  real traffic cannot switch guards off. The name is checked against the enabled handlers the
+  project loads, bundled, project and plugin (`daemon/cli.py:6804`, the generator `defences`
+  uses plus the project loader); a handler the event does not have, a non-probe source and a
+  payload that contradicts `--only` are refused before anything is sent. `detector_entry_point`
+  now names it (`rule_explain/defences.py:131`). Known wrinkle, not changed here: the docs
+  generator files a project handler under its class name, so `defences` prints that name for one,
+  while `--only` takes the config key. The `scan <handler> <paths>` mode and the next-major
+  mandatory reason stay declared known gaps; no plan is to be filed for either.
 - **G12 closed, and G3's listing half with it.** `hooks-daemon exceptions [--json]`
-  (`daemon/cli.py:6800`) lists `exclude_paths` / `extra_whitelist` entries with their reasons
+  (`daemon/cli.py:6837`) lists `exclude_paths` / `extra_whitelist` entries with their reasons
   (read from the raw config, since loading drops them), `enabled: false` and `mode: warn`
   handlers, `MUST_EXCEED_*_BECAUSE` declarations in tracked files, and the QA exception files.
   Limits, stated so they are not read as coverage: the in-file scan matches a token written as
   a comment opener plus the token, so a documentation code fence showing the hatch is listed too;
-  the QA exception file set (`config/exceptions_listing.py:39`) has six members, chosen by this
-  batch from `scripts/qa` and `contracts/` because the "6+" in the original finding named none.
-  Whether that membership is right is for the coordinator to confirm; it is not an owner ruling.
+  inline `nosec` / `noqa` / `type: ignore` annotations are not listed, and neither are exemption
+  constants hard-coded in scripts (for example `_EXEMPT_SUBPATHS` in
+  `check_python_var_guidance.py`); the QA exception file set
+  (`config/exceptions_listing.py:39`) has eight members, the six chosen from `scripts/qa` and
+  `contracts/` plus `pyproject.toml` (ruff per-file-ignores, mypy exclude and overrides, deptry
+  ignore) and `.pre-commit-config.yaml` (bandit `-s B101`), added on the coordinator's call. That
+  membership is a coordinator call, not an owner ruling.
 
 **G5, G9, G13, G15 status (Task 3.1a).** All four are closed except where noted.
 

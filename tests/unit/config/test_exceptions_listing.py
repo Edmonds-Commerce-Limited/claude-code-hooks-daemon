@@ -162,6 +162,11 @@ class TestQaExceptionFiles:
         assert [r.location for r in records] == [present]
         assert records[0].source == SOURCE_QA_EXCEPTION_FILE
 
+    @pytest.mark.parametrize("path", ["pyproject.toml", ".pre-commit-config.yaml"])
+    def test_the_tool_configs_that_carry_exemptions_are_declared(self, path: str) -> None:
+        """ruff per-file-ignores, mypy overrides, deptry ignores and bandit -s B101."""
+        assert path in QA_EXCEPTION_FILES
+
     def test_every_declared_file_exists_in_this_repository(self) -> None:
         """A renamed or deleted exception file must be re-declared, not silently dropped."""
         missing = [path for path in QA_EXCEPTION_FILES if not (_REPO_ROOT / path).is_file()]

@@ -410,6 +410,30 @@ class TestCmdProbe:
         assert "pre-tool-use" in capsys.readouterr().err
 
 
+_PROJECT_HANDLER = """from typing import Any
+
+from claude_code_hooks_daemon.core import Decision, HookResult
+from claude_code_hooks_daemon.core.handler import Handler
+
+
+class MyProjectGuardHandler(Handler):
+    def __init__(self) -> None:
+        super().__init__(handler_id="my-project-guard", priority=50, terminal=False)
+
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        return False
+
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        return HookResult(decision=Decision.ALLOW)
+
+    def get_claude_md(self) -> str | None:
+        return None
+
+    def get_acceptance_tests(self) -> list[Any]:
+        return []
+"""
+
+
 class TestProbeOnly:
     """``--only HANDLER`` restricts the chain to one handler (Plan 00484 G11)."""
 
@@ -420,6 +444,7 @@ class TestProbeOnly:
             project_root=tmp_path,
             session_id="manual-probe-fixed",
             only=only,
+            known_handlers=lambda: {"destructive_git", "sed_blocker"},
         )
 
     def test_the_named_handler_is_sent_as_the_restriction(self, tmp_path: Path) -> None:
@@ -438,6 +463,11 @@ class TestProbeOnly:
         with pytest.raises(ProbeInputError, match="no_such_handler"):
             self._build(dict(_BASH_PAYLOAD), tmp_path, "no_such_handler")
 
+    def test_a_payload_restriction_in_the_dashed_spelling_agrees(self, tmp_path: Path) -> None:
+        payload = {**_BASH_PAYLOAD, PROBE_ONLY_FIELD: "destructive-git"}
+        event = self._build(payload, tmp_path, "destructive_git")
+        assert event[PROBE_ONLY_FIELD] == "destructive_git"
+
     def test_a_non_probe_source_is_refused_because_it_would_be_ignored(
         self, tmp_path: Path
     ) -> None:
@@ -454,6 +484,7 @@ class TestProbeOnly:
 
     def test_the_cli_sends_the_restriction(self, tmp_path: Path) -> None:
         entry = _project_with_entry_point(tmp_path, "pre-tool-use", _CAPTURING_ENTRY_POINT)
+        (tmp_path / ".claude" / "hooks-daemon.yaml").write_text('version: "2.0"\n', encoding="utf-8")
         args = argparse.Namespace(
             project_root=tmp_path,
             event="PreToolUse",
@@ -466,10 +497,39 @@ class TestProbeOnly:
         sent = json.loads((entry.parent / "captured.json").read_text(encoding="utf-8"))
         assert sent[PROBE_ONLY_FIELD] == "destructive_git"
 
+    def test_the_cli_accepts_a_project_handler(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`defences` prints `--only <key>` for project handlers, so it must accept them."""
+        entry = _project_with_entry_point(tmp_path, "pre-tool-use", _CAPTURING_ENTRY_POINT)
+        (tmp_path / ".claude" / "hooks-daemon.yaml").write_text(
+            'version: "2.0"\nproject_handlers:\n  enabled: true\n'
+            "  path: .claude/project-handlers\n",
+            encoding="utf-8",
+        )
+        handler_dir = tmp_path / ".claude" / "project-handlers" / "pre_tool_use"
+        handler_dir.mkdir(parents=True)
+        (handler_dir / "my_project_guard.py").write_text(_PROJECT_HANDLER, encoding="utf-8")
+        args = argparse.Namespace(
+            project_root=tmp_path,
+            event="PreToolUse",
+            json=json.dumps(_BASH_PAYLOAD),
+            file=None,
+            probe_as=None,
+            only="my_project_guard",
+        )
+        # A bare tmp project has no git origin, which ProjectContext requires.
+        with patch("claude_code_hooks_daemon.daemon.cli._init_project_context_for_cli"):
+            code = cmd_probe(args)
+        assert code == 0, capsys.readouterr().err
+        sent = json.loads((entry.parent / "captured.json").read_text(encoding="utf-8"))
+        assert sent[PROBE_ONLY_FIELD] == "my_project_guard"
+
     def test_the_cli_refuses_an_unknown_handler_and_sends_nothing(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         entry = _project_with_entry_point(tmp_path, "pre-tool-use", _CAPTURING_ENTRY_POINT)
+        (tmp_path / ".claude" / "hooks-daemon.yaml").write_text('version: "2.0"\n', encoding="utf-8")
         args = argparse.Namespace(
             project_root=tmp_path,
             event="PreToolUse",

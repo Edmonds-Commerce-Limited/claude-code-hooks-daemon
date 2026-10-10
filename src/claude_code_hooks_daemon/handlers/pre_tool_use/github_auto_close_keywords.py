@@ -134,8 +134,7 @@ _RULE_VERBOSE: Final[str] = (
     "THERE IS NO ESCAPE HATCH. If this project genuinely wants "
     "auto-close commits to work (closing keywords are part of its "
     "workflow), this handler should be disabled — suggest that to "
-    "the user; do not try to work around the block.\n"
-    "To disable: handlers.pre_tool_use.github_auto_close_keywords"
+    "the user; do not try to work around the block."
 )
 
 

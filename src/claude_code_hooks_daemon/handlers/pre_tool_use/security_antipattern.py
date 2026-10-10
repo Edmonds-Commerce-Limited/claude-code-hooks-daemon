@@ -24,7 +24,6 @@ from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
-from claude_code_hooks_daemon.core.router import DISABLE_FOOTER_SUFFIX
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.strategies.security.common import should_skip
@@ -35,9 +34,6 @@ from claude_code_hooks_daemon.strategies.security.registry import (
 from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
 )
-
-# Config key hint shown in the denial message
-_CONFIG_HINT_HANDLER = "handlers.pre_tool_use.security_antipattern"
 
 # OWASP category used by the universal secret-detection strategy -- the ONE
 # clean signal that separates hardcoded credentials from everything else
@@ -134,8 +130,7 @@ def _verbose_content(why: str) -> str:
         "are properties of how a value FLOWS, which a regex cannot see). Do not "
         "read a passing write as 'this code is secure'.\n\n"
         "If this is test fixture code, place it in tests/fixtures/ or tests/assets/.\n"
-        "If this is rule documentation, place it in docs/ or eslint-rules/.\n\n"
-        f"To disable: {_CONFIG_HINT_HANDLER}  {DISABLE_FOOTER_SUFFIX}"
+        "If this is rule documentation, place it in docs/ or eslint-rules/."
     )
 
 

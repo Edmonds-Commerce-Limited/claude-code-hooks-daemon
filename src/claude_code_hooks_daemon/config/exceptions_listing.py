@@ -43,6 +43,8 @@ QA_EXCEPTION_FILES: Final[tuple[str, ...]] = (
     "contracts/claude-code-hooks/INPUT-ALLOWLIST.yaml",
     "scripts/qa/fail-open-boundaries.yaml",
     "scripts/qa/security-downgrade-inventory.yaml",
+    "pyproject.toml",
+    ".pre-commit-config.yaml",
 )
 
 _HATCH_RE: Final[re.Pattern[str]] = re.compile(

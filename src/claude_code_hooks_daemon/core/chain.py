@@ -1095,6 +1095,11 @@ class HandlerChain:
                     break
                 continue
 
+            # Probe restriction (Plan 00484 G11): `probe --only` runs one handler
+            # alone. Only a probe-class source can ask for it.
+            if only_handler is not None and handler.config_key != only_handler:
+                continue
+
             try:
                 # Scope gate (Plan 00423), BEFORE matches(). A handler the
                 # scope refuses is skipped entirely — not matched, not
@@ -1109,11 +1114,6 @@ class HandlerChain:
                 # exists to close. It is also the right seam — matches() is the
                 # handler's question about the PAYLOAD; whether to consult the
                 # handler at all is the registry's question about POLICY.
-                # Probe restriction (Plan 00484 G11): `probe --only` runs one
-                # handler alone. Only a probe-class source can ask for it.
-                if only_handler is not None and handler.config_key != only_handler:
-                    continue
-
                 if not scope_admits(handler.scope, hook_input):
                     logger.debug(
                         "Handler %s skipped - scope %s excludes this event",
