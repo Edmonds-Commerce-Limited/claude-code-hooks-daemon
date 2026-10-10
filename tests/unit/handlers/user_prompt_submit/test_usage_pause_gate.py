@@ -572,8 +572,53 @@ class TestOwnerOverride:
         handler = _handler(tmp_path, snapshot=_snapshot(five=95.0))
         result = _run(handler, tmp_path, _input("owner: I cleared it, do the thing"))
         assert result.decision == Decision.ALLOW
-        assert not result.context
+        assert "USAGE CEILING REACHED" not in "\n".join(result.context)
         assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is None
+
+    def test_the_prompt_says_the_ceiling_is_suppressed_while_usage_is_over(
+        self, tmp_path: Path
+    ) -> None:
+        write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
+        handler = _handler(tmp_path, snapshot=_snapshot(five=95.0))
+        result = _run(handler, tmp_path, _input("owner: carry on"))
+        assert result.decision == Decision.ALLOW
+        text = "\n".join(result.context)
+        assert "five_hour" in text
+        assert "95%" in text
+        assert "80%" in text
+        assert "override" in text
+
+    def test_no_notice_while_the_override_is_valid_but_usage_is_under(self, tmp_path: Path) -> None:
+        write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
+        handler = _handler(tmp_path, snapshot=_snapshot(five=10.0))
+        result = _run(handler, tmp_path, _input("owner: carry on"))
+        assert result.decision == Decision.ALLOW
+        assert not result.context
+
+    def test_a_raising_usage_loader_under_an_override_still_allows(self, tmp_path: Path) -> None:
+        """The gate is a SAFETY handler: an exception would become a DENY of every prompt."""
+        write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
+        handler = _handler(tmp_path, snapshot=_snapshot(five=95.0))
+
+        def boom(_now: float) -> UsageSnapshot | None:
+            raise RuntimeError("snapshot parse bug")
+
+        handler._usage_loader = boom
+        result = _run(handler, tmp_path, _input("owner: carry on"))
+        assert result.decision == Decision.ALLOW
+        assert not result.context
+
+    def test_no_notice_without_usage_data(self, tmp_path: Path) -> None:
+        write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
+        handler = _handler(tmp_path, snapshot=None)
+        assert not _run(handler, tmp_path, _input()).context
+
+    def test_no_notice_for_synthetic_traffic(self, tmp_path: Path) -> None:
+        """A probe's exemption is an override too; its verdict must not gain context."""
+        write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
+        handler = _handler(tmp_path, snapshot=_snapshot(five=95.0))
+        hook_input = {**_input(), "synthetic_source": "test-probe"}
+        assert not _run(handler, tmp_path, hook_input).context
 
     def test_the_override_ends_with_its_window(self, tmp_path: Path) -> None:
         write_usage_override(tmp_path, _SESSION, until=_NOW + 10, now=_NOW)

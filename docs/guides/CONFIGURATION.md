@@ -201,14 +201,19 @@ it does not end. Three handlers (`usage_pause_gate`, `usage_pause_tool_gate`,
   in a terminal (whether a `!`-prefixed command passes through the hooks is
   unverified), removes the pause and records an override until the latest reset
   among the windows over the ceiling (at most 8 days): no pause is started for
-  that session meanwhile, even with usage still over. `usage-pause status`
-  shows the state. A pause record is honoured for at most 8 days.
+  that session meanwhile, even with usage still over. While it is in force and
+  a window is over its ceiling, every prompt carries a line naming the window,
+  its percentage, the ceiling and the override's end time (UTC), so the session
+  knows the ceiling is suppressed. An override marker that cannot be read still
+  counts, with an unknown end, and is reported on every prompt. `usage-pause status` shows the state. A pause
+  record is honoured for at most 8 days.
 - The resume cron's prompt starts `[tick:usage-resume]`. When it fires, usage is
   re-read: under the ceiling the pause lifts and the declared crons are
   re-created; still over it, the next resume cron is scheduled.
 - The status line's usage segment (`usage_indicator`) shows the ceiling a host
   runs under as `⛔ 80%` (`⛔ 5h 80% 7d 95%` when the windows differ), and
-  `⏸ usage HH:MM` (local resume time) while paused.
+  `⏸ usage HH:MM` (local resume time) while paused, and `override until HH:MM`
+  while the owner's override is in force.
 
 No ceiling, an unknown hostname or missing, stale or API-key-only usage data
 never pauses a session; a debug log line says which.

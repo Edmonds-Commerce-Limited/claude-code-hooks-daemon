@@ -69,6 +69,7 @@ from claude_code_hooks_daemon.utils.usage_pause_gate import (
     default_usage_loader,
     is_resume_tick,
     load_project_config,
+    override_notices,
     render_lift_not_recorded_note,
     render_pause_directive,
     render_resume_lifted_directive,
@@ -167,7 +168,9 @@ class UsagePauseGateHandler(InitialThreadExemption, UserPromptSubmitHandlerBase)
             return self._hold_or_lift(hook_input, session_id, held, env)
         pause = try_start_pause(hook_input, env)
         if pause is None:
-            return BlockingResult(decision=Decision.ALLOW)
+            return BlockingResult(
+                decision=Decision.ALLOW, context=override_notices(hook_input, env)
+            )
         return BlockingResult(decision=Decision.ALLOW, context=[render_pause_directive(pause)])
 
     def _hold_or_lift(
@@ -285,7 +288,8 @@ class UsagePauseGateHandler(InitialThreadExemption, UserPromptSubmitHandlerBase)
             "when it no longer applies. A human can type "
             f"`{CLEAR_IN_SESSION}` in the session: it removes the record and records an "
             "override until the latest reset among the windows over the ceiling (at most "
-            "8 days), during which no pause is started for the session. "
+            "8 days), during which no pause is started for the session; each prompt then "
+            "carries a `USAGE CEILING SUPPRESSED` line while a window is over its ceiling. "
             "No ceiling, no usage data or an unknown host never pauses anything."
         )
 

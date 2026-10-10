@@ -29,6 +29,12 @@ else ``⛔ 5h 80% 7d 95%``, each limited window labelled). It is plain text,
 carries no background, and is hidden when no ceiling applies or there is no
 usage data to sit beside.
 
+**Override.** While the owner's ``usage-pause clear`` override is valid for the session
+the segment leads with ``override until HH:MM`` (red while a window is over the ceiling,
+yellow otherwise), because the override is what switches the ceiling off; a marker that
+cannot be read shows ``override (end unknown)`` in red. Like the pause chip it shows even
+when there is no usage snapshot.
+
 **Failed turn.** A session whose last turn ended on a rate limit or a credential
 error leads with ``⚠ usage limit HH:MM`` (red), read from the record
 ``stop_failure_recorder`` keeps and shown until the session's next prompt
@@ -57,10 +63,14 @@ from claude_code_hooks_daemon.utils.stop_failure_records import (
     default_records_path,
     latest_unresolved,
 )
+from claude_code_hooks_daemon.utils.usage_pause import read_usage_override
 from claude_code_hooks_daemon.utils.usage_pause_gate import (
+    PauseEnvironment,
     active_usage_pause,
+    current_breaches,
     load_project_config,
     session_ceiling,
+    untracked_dir,
 )
 
 logger = logging.getLogger(__name__)
@@ -186,6 +196,52 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
         hhmm = f"{datetime.fromtimestamp(pause.resume_at):%H:%M}"
         return f"{_CRITICAL}{_PAUSE_ICON} usage {hhmm}{_RESET}"
 
+    def _override_chips(
+        self, hook_input: dict[str, Any], now: float, snapshot: UsageSnapshot | None
+    ) -> list[str]:
+        """``override until HH:MM`` while the owner's override suppresses this session's ceiling.
+
+        Shown whenever the override is valid, not only while usage is over the ceiling: it
+        is what switches the guard off, and a breach can arrive at any point inside it
+        (red when one is already there, yellow otherwise). HH:MM is the end in the
+        machine's local zone, with the month and day when it is not today. A marker that
+        cannot be read reads ``override (end unknown)`` in red. ``[]`` without a session
+        id, a project context or an override; a failure is no chip.
+        """
+        try:
+            return self._override_chip_parts(hook_input, now, snapshot)
+        except Exception as exc:
+            # Deliberately broad: the status line fails silent by contract.
+            log_and_continue(
+                logger,
+                exc,
+                reason="the override chip fails silent ([]): the status line must never raise over an advisory chip",
+            )
+            return []
+
+    def _override_chip_parts(
+        self, hook_input: dict[str, Any], now: float, snapshot: UsageSnapshot | None
+    ) -> list[str]:
+        session_id = str(hook_input.get(HookInputField.SESSION_ID) or "")
+        directory = untracked_dir()
+        if not session_id or directory is None:
+            return []
+        override = read_usage_override(directory, session_id, now=now)
+        if override is None:
+            return []
+        if override.until is None:
+            return [f"{_CRITICAL}override (end unknown){_RESET}"]
+        end = datetime.fromtimestamp(override.until)
+        same_day = end.date() == datetime.fromtimestamp(now).date()
+        when = f"{end:%H:%M}" if same_day else f"{end:%m-%d %H:%M}"
+        env = PauseEnvironment(
+            clock=lambda: now,
+            config_loader=self._config_loader,
+            usage_loader=lambda _now: snapshot,
+        )
+        over = bool(current_breaches(hook_input, env))
+        return [f"{_CRITICAL if over else _YELLOW}override until {when}{_RESET}"]
+
     @staticmethod
     def _failure_chip(hook_input: dict[str, Any]) -> str | None:
         """``⚠ usage limit HH:MM`` while this session's last turn ended on an API error.
@@ -226,7 +282,8 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
             )
             snapshot = None
         usage = self._render(snapshot, now, self._ceiling_text(hook_input)) if snapshot else None
-        parts = [part for part in (failure_chip, pause_chip, usage) if part]
+        override_chips = self._override_chips(hook_input, now, snapshot)
+        parts = [part for part in (failure_chip, pause_chip, *override_chips, usage) if part]
         if not parts:
             return AdvisoryResult(context=[])
         return AdvisoryResult(context=[f"| {' '.join(parts)}"])
@@ -269,6 +326,11 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
                 "its reset is dropped; nothing is shown when no usage data exists (API-key "
                 "sessions, or before the first response). `⏸ usage 14:35` in red means the "
                 "session is paused on its host's usage ceiling and resumes at that local time. "
+                "`override until 14:35` means the owner's `usage-pause clear` override is in "
+                "force: the ceiling pauses nothing until that local time (with the month and "
+                "day when it is not today). It is red while a window is over the ceiling and "
+                "yellow while usage is under it; `override (end unknown)` in red means the override "
+                "marker exists but cannot be read, so its end is unknown. "
                 "`⛔ 80%` is the ceiling this host runs under (`⛔ 5h 80% 7d 95%` when the "
                 "windows differ); it is absent when no ceiling applies. `⚠ usage limit 14:02` "
                 "in red means this session's last turn ended on an API error at that local "
