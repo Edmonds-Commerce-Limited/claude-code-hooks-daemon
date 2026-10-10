@@ -122,7 +122,7 @@ This plan adds timing first, measures the hot spots from it, then makes the gate
 - [x] A full gate run prints a per-step timing summary, and its report lists the slowest test files and tests.
   Observed on the 2026-10-10 full gate on main (9,654.8 s total, tests 9,266.9 s).
 - [x] A gate interrupted part-way and re-run in resume mode does not repeat the steps that already passed on the same
-  tree. Observed live on 2026-10-10 at af764fec1: `all` interrupted (SIGINT) in the test matrix after 41 steps, then
+  tree. Observed live on 2026-10-10 at af764fec1: `all` interrupted (SIGINT) after its 41st recorded step, then
   `all --resume` on the unchanged tree printed "reused, passed on this tree" for 40 steps (about 293 s of step time
   not repeated) and re-ran the one that had failed, `plan_qa`. An earlier run showed the converse: after a mid-run
   commit changed the tree, `all --resume` re-ran every step and reused only `smoke_test`, recorded on the new tree.
