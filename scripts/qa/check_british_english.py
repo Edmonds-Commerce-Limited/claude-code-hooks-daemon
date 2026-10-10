@@ -285,10 +285,17 @@ def _single_file_problem(path: Path, root: Path) -> str | None:
         return f"{path}: no such file"
     if not path.is_file():
         return f"{path}: not a file (--path takes one file; the tree run takes none)"
-    resolved = path.resolve()
-    try:
-        rel_path = resolved.relative_to(root.resolve()).as_posix()
-    except ValueError:
+    _prime_src_path()
+
+    from claude_code_hooks_daemon.utils.path_containment import (
+        path_is_relative_to,
+        path_relative_to,
+    )
+
+    resolved, resolved_root = path.resolve(), root.resolve()
+    if path_is_relative_to(resolved, resolved_root):
+        rel_path = path_relative_to(resolved, resolved_root).as_posix()
+    else:
         rel_path = resolved.name  # outside the repository: only its own name can be judged
     reason = out_of_scope_reason(rel_path)
     if reason is not None:

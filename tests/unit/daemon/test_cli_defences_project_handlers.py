@@ -136,8 +136,6 @@ class TestProjectHandlerEntryPoint:
             project_root=project,
             session_id="s",
             only=only,
-            known_handlers=lambda: cli._loaded_handler_keys(
-                probe_args, project, event.config_key
-            ),
+            known_handlers=lambda: cli._loaded_handler_keys(probe_args, project, event.config_key),
         )
         assert hook_event["probe_only"] == only

@@ -3605,10 +3605,12 @@ def _with_project_handler_keys(
     }
     result: list[CollectedHandler] = []
     for info in active:
-        class_name, key, _event, *rest = info
+        class_name, key, _event, priority, behavior, description, enabled = info
         if key == class_name and class_name in rekeyed:
             event_key, config_key = rekeyed[class_name]
-            result.append((class_name, config_key, event_key, *rest))
+            result.append(
+                (class_name, config_key, event_key, priority, behavior, description, enabled)
+            )
         else:
             result.append(info)
     return result
