@@ -128,7 +128,10 @@ class TestScanFallback:
         daemon_dir = tmp_path / "daemon"
         daemon_dir.mkdir()
 
-        fingerprint = python_venv_fingerprint()
+        # The resolver keys on the root-slugged fingerprint, so the matching
+        # venv must carry it; the slug-less form is only found by the sorted
+        # scan, where a foreign name may sort first on some interpreters.
+        fingerprint = python_venv_fingerprint(daemon_dir)
         matching_venv = daemon_dir / "untracked" / f"venv-{fingerprint}"
         _make_venv_skeleton(matching_venv)
         foreign_venv = daemon_dir / "untracked" / "venv-py313-deadbeef"
