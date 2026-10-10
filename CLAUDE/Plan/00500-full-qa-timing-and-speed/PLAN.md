@@ -121,9 +121,11 @@ This plan adds timing first, measures the hot spots from it, then makes the gate
 
 - [x] A full gate run prints a per-step timing summary, and its report lists the slowest test files and tests.
   Observed on the 2026-10-10 full gate on main (9,654.8 s total, tests 9,266.9 s).
-- [x] A gate interrupted part-way and re-run in resume mode does not repeat the steps that already passed on the same
-  tree. Observed on 2026-10-10: a commit during the full gate left `pyright` and `tests` unrecorded for the tree, and
-  `all --resume` reused the 41 other steps and re-ran only those two (3,659.8 s instead of 9,654.8 s).
+- [ ] A gate interrupted part-way and re-run in resume mode does not repeat the steps that already passed on the same
+  tree. **Not yet observed live** (Task 2.2's tests cover it). On 2026-10-10 a commit during the full gate changed
+  the tree, so every step's result belonged to the old tree; `all --resume` (3,659.8 s) correctly re-ran them all and
+  reused only `smoke_test`, recorded on the new tree. That shows stale results are not reused, not that passing
+  ones are. A live check needs a gate interrupted on a tree that then stays still.
 - [ ] The full gate's wall-clock time, measured before and after, has dropped. **Not demonstrated.** No single-pass
   "before" total was ever recorded; the closest comparable run (2026-10-09, resumed after a reboot) took 9,779.8 s
   for 129,518 tests, against 9,654.8 s for 135,644 tests today: 1.3% faster in total, about 6% faster per test, inside

@@ -147,7 +147,8 @@ Evidence, with verified facts marked apart from inferences, is in
     nine of them usage-limit outages (outside outages, 0.03% and a maximum of 38,580 s). Ticks, long tool calls
     and task notifications end most long gaps, so this is not a human-paced profile, which 00452 Task 2.4 still
     needs. It also corrects 00452's "maximum 3,598 s, none over an hour", which holds only without an outage.
-    Dropped ticks could not be counted: the verdict log's rule field is empty (ledger N393).
+    Dropped ticks could not be counted: the verdict log's rule field is empty for the cron and usage-pause
+    handlers (ledger N393).
   - Note for 00452: the declared crons at :23 and :47 already keep gaps under 60 minutes. But the daemon DROPS ticks when the session is blocked on a human or has backed off (R-FAILSAFE-CRON-SUPPRESSED, R-FAILSAFE-CRON-BACKED-OFF), which is exactly when the cache goes cold. So the warming decision must account for suppressed ticks.
 - [ ] ⬜ **Task 4.3**: A/B the orchestrator: Sonnet main loop vs Opus, Opus sub-agents with pinned `model:` and structured verdict files; compare cost per tick, guard denies, and triage/verdict errors. Owner decides from the record.
 
