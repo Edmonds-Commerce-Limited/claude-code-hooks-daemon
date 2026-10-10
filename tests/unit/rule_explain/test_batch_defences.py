@@ -22,7 +22,7 @@ from claude_code_hooks_daemon.rule_explain.defences import (
 _DOCUMENT: dict[str, Any] = {
     "docs": "CLAUDE/QA.md",
     "batch_defences": {
-        "check_a.py": {"step": "a_step", "defect_class": "qa-suppression", "path_form": True},
+        "check_a.py": {"step": "a_step", "defect_class": "qa-suppression"},
         "check_b.py": {"step": "b_step", "defect_class": "error-hiding"},
     },
     "rules": {
@@ -65,10 +65,6 @@ class TestCollectBatchDefences:
         assert record.handler_class == "check_b.py"
         assert record.docs == "./scripts/qa/llm_qa.py --explain rule-three"
         assert record.detector_entry_point == "./scripts/qa/llm_qa.py b_step"
-
-    def test_a_check_with_a_path_form_names_it_as_the_entry_point(self) -> None:
-        record = collect_batch_defences(_DOCUMENT)[0]
-        assert record.detector_entry_point == "./scripts/qa/check_a.py --path <file>"
 
     def test_a_document_without_batch_defences_yields_no_rows(self) -> None:
         assert collect_batch_defences({"rules": {}}) == []

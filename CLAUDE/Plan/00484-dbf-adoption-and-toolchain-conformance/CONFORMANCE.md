@@ -75,10 +75,10 @@ route.
 | 4.5a   | Detectors run before runners                                           | MET                      | N/A        | MET since Task 3.1b: every runner (`RUNNER_TOOLS`, `llm_qa.py:898`) is registered after every static detector (`:843`), and `resolve_tools` moves a named runner after the detectors (`:1623-1625`). Pinned by `tests/unit/qa/test_llm_qa_detectors_first.py`                                                                                                                                                                                                                                                                                        |
 | 4.5b   | A detector failure stops lower levels counting                         | MET                      | N/A        | MET since Task 3.1b, in the amended form (every tool still runs, so the other findings are not hidden): once a detector has failed, `_run_tools` marks each runner that passed `NOT MEANINGFUL: detector failed` (`mark_not_meaningful`) and leaves it out of the pass count (`format_verdict`); a runner that failed itself stays a failure; the provenance record keeps the runner's real result so `--resume` still reuses it                                                                                                                     |
 | 5.1a   | List every active defence without running it                           | PARTLY MET               | PARTLY MET | `explain-rule --list` lists all installed rules, disabled ones included; HOOKS-DAEMON.md is active-only but has no IDs. Task 3.2 adds `hooks-daemon defences --json`, active-only with IDs ([reference](../../../docs/guides/TROUBLESHOOTING.md#cli-command-reference))                                                                                                                                                                                                                                                                              |
-| 5.1b   | Listing carries ID and a terse statement                               | PARTLY MET               | PARTLY MET | `explain-rule --list` does (`cli.py:8553-8557`); HOOKS-DAEMON.md does not; `defences` carries the ID and the `qa-rules.json` statement for the four batch checkers, and the other B checkers are absent                                                                                                                                                                                                                                                                                                                                              |
+| 5.1b   | Listing carries ID and a terse statement                               | PARTLY MET               | PARTLY MET | `explain-rule --list` does (`cli.py:8553-8557`); HOOKS-DAEMON.md does not; `defences` carries the ID and the `qa-rules.json` statement for the three batch checkers, and the other B checkers are absent                                                                                                                                                                                                                                                                                                                                             |
 | 5.1c   | Listing gives the route to full docs                                   | PARTLY MET               | MET        | `explain-rule <ID>`, stated once in the CLAUDE.md header and, since Task 3.1a, as the last line of `explain-rule --list`; a batch-check row's route is `llm_qa.py --explain <ID>`, and nothing for the B checkers that are not rows                                                                                                                                                                                                                                                                                                                  |
 | 5.2    | Listing derived from the active config                                 | PARTLY MET               | PARTLY MET | `--list` instantiates classes with no config (`lookup.py:84-88`); `docs_generator.py:324-329` skips the tag gates that `registry.py:244-262` applies                                                                                                                                                                                                                                                                                                                                                                                                 |
-| 5.3    | The project's own defences appear alongside bundled ones               | PARTLY MET               | PARTLY MET | Since Task 3.1e the rules of four B checkers (`check_british_english`, `audit_error_hiding`, `check_sensitive_content`, `check_inline_suppressions`) are `batch-check` rows of `hooks-daemon defences`, declared in `qa-rules.json`; the other B checkers are not Defences by the coordinator's call, so they stay unlisted; the 4 project handlers that denied with no rule now declare one (G5), and `hooks-daemon defences` lists the Defences only (owner ruling C1)                                                                             |
+| 5.3    | The project's own defences appear alongside bundled ones               | PARTLY MET               | PARTLY MET | Since Task 3.1e the rules of three B checkers (`audit_error_hiding`, `check_sensitive_content`, `check_inline_suppressions`) are `batch-check` rows of `hooks-daemon defences`, declared in `qa-rules.json`; the other B checkers are not Defences by the coordinator's call, so they stay unlisted; the 4 project handlers that denied with no rule now declare one (G5), and `hooks-daemon defences` lists the Defences only (owner ruling C1)                                                                                                     |
 | 6.1    | A defined record location the toolchain loads                          | PARTLY MET               | MET        | `.claude/hooks-daemon.yaml` is loaded (`config/models.py:2717`); B's exception files are named by `QA_EXCEPTION_FILES` (`config/exceptions_listing.py:39`) and listed by `exceptions`                                                                                                                                                                                                                                                                                                                                                                |
 | 6.2a   | Every exception carries a justification; none defaulted, none omitted  | NOT MET                  | NOT MET    | `options: dict[str, Any]` (`models.py:58-78`); `enabled: bool` has no reason (`:72`); `never_want.reason` defaults to `""` (`:2111`)                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 6.2b   | Names hazard and scope; generic reasons rejected by a documented check | NOT MET                  | NOT MET    | No generic-reason check anywhere in `src/` or `scripts/`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -251,13 +251,13 @@ MET: 4.1, 4.3a, 4.3b, 6.2a and 6.2b.
   is not MET.
 - **B rows in `defences` (Task 3.1e).** Which `scripts/qa` checkers are Defences is a
   Defence-membership call, the coordinator's and not the owner's: only the batch form of a
-  write-time handler is a row (`check_british_english`, `audit_error_hiding`,
-  `check_sensitive_content`, `check_inline_suppressions`). Membership is the `batch_defences`
-  map in `qa-rules.json`; a row is every rule that script prints, marked `kind: batch-check`,
-  with the defect class of its handler counterpart. `british_english` is advisory and declares
-  no `defect_class`, so the row carries a new `DefectClass.AMERICAN_SPELLING` that only the
-  batch check defends. 5.3 is now PARTLY MET at project level; 5.1b and 5.1c stay PARTLY MET
-  because the other B checkers are not rows.
+  Defence handler is a row (`audit_error_hiding`, `check_sensitive_content`,
+  `check_inline_suppressions`). Membership is the `batch_defences` map in `qa-rules.json`; a
+  row is every rule that script prints, marked `kind: batch-check`, with the defect class of
+  its handler counterpart. `check_british_english` is not a row: a spelling convention is not
+  a defect class, and `BritishEnglishHandler` declares none (coordinator ruling). 5.3 is now
+  PARTLY MET at project level (counts 11 PARTLY MET, 6 NOT MET); 5.1b and 5.1c stay PARTLY
+  MET because the other B checkers are not rows.
 
 ### 4.3: suppression routes that bypass the project record
 
@@ -354,7 +354,7 @@ level the daemon ships no accept-changes invocation, so the clause is N/A there.
 - **No single listing** meets all of 5.1: every active defence, with its ID, a terse
   statement and a docs route.
 - **5.3 is PARTLY MET at project level since Task 3.1e.** `defences` includes the rules of
-  four B checkers; the rest of B is not a Defence by the coordinator's call. The four project
+  three B checkers; the rest of B is not a Defence by the coordinator's call. The four project
   deny handlers that had no ID now declare one (G5).
 - **HOOKS-DAEMON.md can disagree with registration.** The gap is the tag gates, not the
   absent-key default. Both `docs_generator` and `registry.config_skip_reason` treat an absent
@@ -513,7 +513,7 @@ and `llm_qa.py --explain [ID]`, guarded in both directions by `tests/unit/qa/tes
 whose discovery now fails closed on an ID it cannot read; see 4.2. The six `shell-*` IDs that the
 first version missed are registered and resolve. The accuracy of the `fix` and `statement` text
 was checked entry by entry against each checker and corrected, once; 4.2d is graded PARTLY MET for
-that reason. G6's listing half closed in Task 3.1e: the rules of four B checkers are
+that reason. G6's listing half closed in Task 3.1e: the rules of three B checkers are
 `batch-check` rows of `hooks-daemon defences` (see 4.2); the rest of B is not listed by the
 coordinator's membership call, and the wrapped tools' own identifiers are theirs.
 
@@ -596,7 +596,7 @@ amendment). A runner that failed stays a failure and the exit code is non-zero.
   declare one, which is owner ruling C1 (content and commit gates are the Defence set; action
   guards are guardrails). `defect_class` is the closed `DefectClass` enum, and
   `tests/unit/test_defence_membership.py` pins the set and checks each member blocks. `explain-rule` and `explain-handler` print the class, or a guardrail
-  line, and `explain-rule --list` ends with a footer naming `explain-rule <ID>`. The four B
+  line, and `explain-rule --list` ends with a footer naming `explain-rule <ID>`. The three B
   batch checkers that mirror a handler are rows too (Task 3.1e, `kind: batch-check`).
 - **G13 closed.** A promoted section ends with an `IDs:` line: 11 promoted sections, 25 IDs.
 - **G15 closed.** `explain-rule plan-doc-size` prints the check's purpose and the umbrella

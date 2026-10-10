@@ -45,7 +45,6 @@ QA_RULES_RELATIVE_PATH = "scripts/qa/qa-rules.json"
 _BATCH_EVENT = "qa"
 _BATCH_PRIORITY = 0
 _QA_RUNNER = "./scripts/qa/llm_qa.py"
-_QA_SCRIPTS_DIR = "./scripts/qa"
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,7 +136,7 @@ def collect_batch_defences(qa_rules: Mapping[str, Any]) -> list[Defence]:
     """List the batch checkers that are the whole-tree form of a write-time handler.
 
     Membership is the ``batch_defences`` map of ``qa-rules.json`` (script ->
-    ``step``, ``defect_class`` and optional ``path_form``); rule IDs, statements
+    ``step`` and ``defect_class``); rule IDs, statements
     and the docs route are that file's own ``rules``, so no second registry
     exists. One row per rule a declared script prints.
 
@@ -158,11 +157,7 @@ def collect_batch_defences(qa_rules: Mapping[str, Any]) -> list[Defence]:
     for script, entry in declared.items():
         defect_class = DefectClass(entry["defect_class"])
         step = entry["step"]
-        entry_point = (
-            f"{_QA_SCRIPTS_DIR}/{script} --path <file>"
-            if entry.get("path_form")
-            else f"{_QA_RUNNER} {step}"
-        )
+        entry_point = f"{_QA_RUNNER} {step}"
         printed = [(rule_id, rule) for rule_id, rule in rules.items() if script in rule["checks"]]
         if not printed:
             raise ValueError(

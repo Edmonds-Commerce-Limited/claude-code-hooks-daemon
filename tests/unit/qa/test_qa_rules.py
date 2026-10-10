@@ -405,10 +405,12 @@ class TestExplain:
 class TestBatchDefencesDeclaration:
     """`batch_defences` is the one place the batch-check rows of `defences` are declared."""
 
-    def test_the_declared_checkers_are_exactly_the_four_with_a_handler_counterpart(self) -> None:
+    def test_the_declared_checkers_are_exactly_the_three_with_a_defence_counterpart(self) -> None:
         declared = json.loads(REGISTRY_FILE.read_text(encoding="utf-8"))["batch_defences"]
+        assert (
+            "check_british_english.py" not in declared
+        )  # a spelling convention, not a defect class
         assert set(declared) == {
-            "check_british_english.py",
             "audit_error_hiding.py",
             "check_sensitive_content.py",
             "check_inline_suppressions.py",
@@ -426,9 +428,3 @@ class TestBatchDefencesDeclaration:
         declared = json.loads(REGISTRY_FILE.read_text(encoding="utf-8"))["batch_defences"]
         for script, entry in declared.items():
             assert DefectClass(entry["defect_class"]), script
-
-    def test_each_declared_path_form_is_a_real_option_of_the_script(self) -> None:
-        declared = json.loads(REGISTRY_FILE.read_text(encoding="utf-8"))["batch_defences"]
-        for script, entry in declared.items():
-            if entry.get("path_form"):
-                assert '"--path"' in (QA_DIR / script).read_text(encoding="utf-8"), script

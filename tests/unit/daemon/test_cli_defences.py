@@ -115,7 +115,6 @@ class TestCmdDefences:
         records = json.loads(capsys.readouterr().out)
         batch = [record for record in records if record["kind"] == "batch-check"]
         assert {record["handler_class"] for record in batch} == {
-            "check_british_english.py",
             "audit_error_hiding.py",
             "check_sensitive_content.py",
             "check_inline_suppressions.py",
@@ -124,7 +123,7 @@ class TestCmdDefences:
         assert by_script["audit_error_hiding.py"] == "error-hiding"
         assert by_script["check_sensitive_content.py"] == "sensitive-content"
         assert by_script["check_inline_suppressions.py"] == "qa-suppression"
-        assert by_script["check_british_english.py"] == "american-spelling"
+        assert "check_british_english.py" not in by_script
         assert all(
             record["docs"].startswith("./scripts/qa/llm_qa.py --explain ") for record in batch
         )
@@ -166,7 +165,8 @@ class TestCmdDefences:
     ) -> None:
         assert cmd_defences(_args(as_json=False)) == 0
         lines = capsys.readouterr().out.splitlines()
-        assert any(line.startswith("american-spelling\tbritish_english\t") for line in lines)
+        assert any(line.startswith("bare-except\terror_hiding\t") for line in lines)
+        assert not any("british_english" in line for line in lines)
         assert all(line.split("\t")[-1] in {"handler", "batch-check"} for line in lines)
 
     def test_project_without_a_qa_rules_file_lists_handler_rows_only(
