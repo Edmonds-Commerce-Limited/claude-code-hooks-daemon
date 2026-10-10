@@ -62,3 +62,18 @@ Each deny case was written red first (24 failed before the change).
   and state that the reverse copy is not blocked.
 - Also: the `daemon_stats.py` silent-fallback exclusion line was realigned (23 to 25) after a
   line shift that came in from main; it failed the changed tier through no change of ours.
+
+## Review round 2 fixes (review: `261010-batch-c-review-r2-opus.md`)
+
+Deny cases written red first.
+
+- R2-B1: `worktree_file_copy` no longer uses a regex for shell wrappers. `_effective_command`
+  walks the words with `shell_word_spans` and `resolve_shell_word`, skipping assignments,
+  `sudo`/`env`/`command`/`nice` and a shell's options up to `-c`, then judges the body.
+  `sudo bash -c`, `/bin/bash -c`, `env bash -c`, `bash --login -c`, `bash --norc -c` deny.
+- R2-B2: a line-end pipe is joined to the next line with the shared `PIPE_AT_LINE_END` (now in
+  `command_evasion`, used by curl_pipe_shell too). `-maxdepth` excuses a `find` only when the
+  next pipe stage is a known data consumer (sort, wc, grep, head, ...), which also covers
+  `sudo`/`env xargs`, `parallel` and `while read`.
+- The N383 duplicate-reader note moved out of the Fixed entry into the open entry N387.
+- Known gap: `sudo -u bob ... sh -c` is not read (an option's value is taken as the command).
