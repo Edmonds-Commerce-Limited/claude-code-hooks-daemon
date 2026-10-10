@@ -321,7 +321,7 @@ def main() -> int:
         if arg == "--path" and index + 1 < len(args):
             scan_root = Path(args[index + 1]).resolve()
 
-    violations = scan_tree(scan_root) if scan_root.is_dir() else []
+    violations = scan_tree(scan_root)
     files_scanned = len(walk_files(scan_root, "*.py"))
     vacuous = vacuous_scan_failure(examined=files_scanned, noun="Python files", root=scan_root)
 

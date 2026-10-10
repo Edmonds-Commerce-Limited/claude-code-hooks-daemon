@@ -1461,6 +1461,19 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N396 — the ccy supervisor's copy of the self-install rule still uses `.exists()`
+
+**Source**: the N391 parity test (`tests/unit/qa/test_check_install_mode_marker.py`), 2026-10-10.
+
+**Evidence**: `_daemon_untracked_dir` in `.claude/ccy/claude-supervise.py` tests
+`(project_dir / "src" / "claude_code_hooks_daemon").exists()`; `install_layout.is_self_install_mode` tests `.is_dir()`.
+They agree on a directory, an absent path and another package, which is what the parity test covers. They disagree when
+a FILE sits at that path: the supervisor reads a self-install, the daemon a client install. N391 was told not to edit
+the supervisor, so the parity test leaves that layout out rather than asserting a disagreement.
+
+**Status**: ⬜ Open. Remedy: change `.exists()` to `.is_dir()` in the supervisor (then dogfood the hot reload per
+`CLAUDE/development/CcySupervisor.md`) and add the file-at-the-marker layout to the parity test.
+
 ### N395 — `canonical_callers` can fail with no violation and no error
 
 **Source**: the Plan 00500 venv-resolver fix branch's changed-tier QA (2026-10-10).
@@ -1469,8 +1482,16 @@ land in.
 MEANINGFUL. On main the same check passes. A failing check that names no violation and no error gives nobody anything
 to fix; the branch only changed two test files.
 
-**Status**: ⬜ Open. Remedy: find what sets `passed: false` without a violation (an exception swallowed into the
-summary, or a non-zero exit read as a failure), make the checker report the cause, with a test.
+**Status**: ✅ Fixed. Cause reproduced: `check_canonical_callers.sh` made its `find` temp file with
+`mktemp untracked/scratch/ccc-find.XXXXXX`, and a fresh worktree has no `untracked/scratch`. `mktemp` failed, `set -e`
+ended the checker with exit 1 and no `N violations` header, and the JSON wrapper read that as `count == 0`,
+`rc != 0`: `passed: false`, no violation, no error. Fixed in two places: the checker creates the directory
+(`mkdir -p`), and `run_canonical_callers_check.sh` now always writes an `error` field when it fails without a
+violation (the checker's own output, or its exit code when it printed nothing) and asserts that a failed report
+carries a violation or an error. Tests: `tests/integration/test_canonical_callers_static_check.py`
+(`TestAFreshCheckoutHasNoScratchDirectory`, `TestTheJsonWrapperNeverFailsWithoutACause`). Evidence: before the fix
+`scripts/qa/check_canonical_callers.sh` in a clean worktree printed the `mktemp` error and exited 1, and the
+existing grep/find stub tests failed for the same reason; after it, 12 of 12 pass.
 
 ### N394 — `idle_housekeeping_advisor`'s description still promises one `update-ref -d` per ref
 
@@ -1520,9 +1541,22 @@ which approved the merge and left these as non-blocking.
 - Line 92 skips all of `.claude/ccy/`; only `claude-supervise.py` needs to stay self-contained, and its own copy of
   the rule (around line 1782) still tests `.exists()` with no parity test.
 
-**Status**: ⬜ Open. Remedy: exempt an anchored check only when it is an `if` guard that just returns, raises, exits or
-prints, and flag every other use (with the five shapes above as tests); skip only released guides; narrow the ccy
-skip to the supervisor file, with a parity test for its copy.
+**Status**: ✅ Fixed in `scripts/qa/check_install_mode_marker.py`.
+
+- (a) An anchored check is exempt only as the whole test (or its `not`) of an `if` whose branches only return, raise,
+  exit or print. The five missed shapes (and an `if` whose body also assigns) are tests in
+  `tests/unit/qa/test_check_install_mode_marker.py`.
+- (b) Only a guide under `CLAUDE/UPGRADES/<major>/v<from>-to-v<to>/` whose target is at or below the repository's
+  `__version__` is skipped; `v3/` scripts, a guide for a later version, `UNRELEASED/` and `upgrade-template/` are
+  scanned (tested, including a v3 case).
+- (c) The skip is `.claude/ccy/claude-supervise.py` only. A parity test runs the supervisor's own
+  `_daemon_untracked_dir` against `install_layout.get_untracked_dir` on a self-install, a client layout and a
+  layout with only another package. `.claude/ccy/claude-supervise.py` was not edited.
+- The tightened detector found four sites on main (`check_authored_path_stat.py`, `check_eacces_safe_predicates.py`,
+  `check_skip_list_substring.py`, `check_unreachable_handle_branch.py`: `scan_tree(root) if root.is_dir() else []`).
+  `walk_files` already yields nothing for a missing root, so the redundant stat was removed; no exemption added.
+  `check_install_mode_marker.py` over the repository reports 0 violations (2507 files).
+- Found while writing the parity test: see N396.
 
 ### N390 — two readers of a git command's search and format option values
 

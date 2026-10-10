@@ -119,8 +119,11 @@ _ccc_scan_dir() {
     # is observable: find keeps walking past a traversal error (e.g. a
     # subdirectory it cannot read) but still exits non-zero, and that must
     # not be discarded the way "2>/dev/null" discarded it before.
+    # A fresh checkout (a new worktree) has no untracked/scratch yet.
+    local scratch_dir="${REPO_ROOT}/untracked/scratch"
+    mkdir -p "$scratch_dir"
     local find_list
-    find_list="$(mktemp "${REPO_ROOT}/untracked/scratch/ccc-find.XXXXXX")"
+    find_list="$(mktemp "${scratch_dir}/ccc-find.XXXXXX")"
     local find_rc=0
     find "$dir" -type f \( -name '*.sh' -o -name '*.bash' \) -print0 > "$find_list" || find_rc=$?
     if [ "$find_rc" -ne 0 ]; then

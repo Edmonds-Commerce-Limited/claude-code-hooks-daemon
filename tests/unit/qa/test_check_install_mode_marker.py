@@ -140,7 +140,8 @@ _PY_SCANS: Final[dict[str, str]] = {
         "def f():\n"
         "    scan_root = _DEFAULT_SCAN_ROOT\n"
         "    scan_root = Path(sys.argv[1]).resolve()\n"
-        "    return scan_root.is_dir()\n"
+        "    if not scan_root.is_dir():\n"
+        "        raise SystemExit(1)\n"
     ),
     "script-anchored-local": (
         "from pathlib import Path\n"
@@ -155,7 +156,9 @@ _PY_SCANS: Final[dict[str, str]] = {
     "file-anchored-inline": (
         "from pathlib import Path\n"
         "def f():\n"
-        "    return (Path(__file__).parents[2] / 'src' / 'claude_code_hooks_daemon').exists()\n"
+        "    if not (Path(__file__).parents[2] / 'src' / 'claude_code_hooks_daemon').exists():\n"
+        "        return 1\n"
+        "    return 0\n"
     ),
     "a-file-deeper-in-the-tree": (
         "def f(project_root):\n"
@@ -322,6 +325,50 @@ _PY_ANCHORED_DECISIONS: Final[dict[str, str]] = {
         "def f(g):\n"
         "    return g(self_install=(REPO_ROOT / 'src' / 'claude_code_hooks_daemon').exists())\n"
     ),
+    "if-choosing-a-directory": (
+        "from pathlib import Path\n"
+        "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+        "def f():\n"
+        "    if (REPO_ROOT / 'src' / 'claude_code_hooks_daemon').is_dir():\n"
+        "        base = REPO_ROOT / 'untracked'\n"
+        "    else:\n"
+        "        base = REPO_ROOT / '.claude' / 'hooks-daemon' / 'untracked'\n"
+        "    return base\n"
+    ),
+    "returned-check": (
+        "from pathlib import Path\n"
+        "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+        "def f():\n"
+        "    return (REPO_ROOT / 'src' / 'claude_code_hooks_daemon').is_dir()\n"
+    ),
+    "negated-value": (
+        "from pathlib import Path\n"
+        "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+        "def f():\n"
+        "    client_install = not (REPO_ROOT / 'src' / 'claude_code_hooks_daemon').is_dir()\n"
+        "    return client_install\n"
+    ),
+    "ternary": (
+        "from pathlib import Path\n"
+        "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+        "def f():\n"
+        "    marker = REPO_ROOT / 'src' / 'claude_code_hooks_daemon'\n"
+        "    return 'self' if marker.exists() else 'client'\n"
+    ),
+    "positional-argument": (
+        "from pathlib import Path\n"
+        "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+        "def f(g):\n"
+        "    return g((REPO_ROOT / 'src' / 'claude_code_hooks_daemon').exists())\n"
+    ),
+    "if-guard-whose-body-also-assigns": (
+        "from pathlib import Path\n"
+        "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+        "def f():\n"
+        "    if not (REPO_ROOT / 'src' / 'claude_code_hooks_daemon').is_dir():\n"
+        "        mode = 'client'\n"
+        "        return mode\n"
+    ),
 }
 
 
@@ -338,11 +385,125 @@ def test_scanning_a_subtree_does_not_flag_the_definition_itself(checker: ModuleT
     assert checker.scan_tree(_REPO_ROOT / "src") == []
 
 
+_PY_ANCHORED_GUARDS: Final[dict[str, str]] = {
+    name: (
+        "from pathlib import Path\n"
+        "import sys\n"
+        "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+        "def f():\n"
+        f"    if {test}:\n"
+        f"        {body}\n"
+        "    return 0\n"
+    )
+    for name, (test, body) in {
+        "return": ("not (REPO_ROOT / 'src' / 'claude_code_hooks_daemon').is_dir()", "return 1"),
+        "raise": (
+            "not (REPO_ROOT / 'src' / 'claude_code_hooks_daemon').exists()",
+            "raise SystemExit('no source tree')",
+        ),
+        "sys-exit": (
+            "not (REPO_ROOT / 'src' / 'claude_code_hooks_daemon').is_dir()",
+            "sys.exit(1)",
+        ),
+        "print": (
+            "not (REPO_ROOT / 'src' / 'claude_code_hooks_daemon').is_dir()",
+            "print('no source tree')",
+        ),
+        "positive-test": ("(REPO_ROOT / 'src' / 'claude_code_hooks_daemon').is_dir()", "return 2"),
+    }.items()
+}
+
+
+@pytest.mark.parametrize("name", sorted(_PY_ANCHORED_GUARDS))
+def test_a_file_anchored_if_guard_that_only_exits_is_a_scan(
+    checker: ModuleType, tmp_path: Path, name: str
+) -> None:
+    assert _flagged(checker, tmp_path, "pkg/mod.py", _PY_ANCHORED_GUARDS[name]) == []
+
+
 def test_the_ccy_supervisor_is_not_scanned_by_design(checker: ModuleType, tmp_path: Path) -> None:
     """It must start with no daemon present, so it keeps its own copy."""
     _write(tmp_path, ".claude/ccy/claude-supervise.py", _PY_DECISIONS["joinpath"])
 
     assert checker.scan_tree(tmp_path) == []
+
+
+def test_every_other_ccy_file_is_scanned(checker: ModuleType, tmp_path: Path) -> None:
+    _write(tmp_path, ".claude/ccy/helper.py", _PY_DECISIONS["joinpath"])
+    _write(tmp_path, ".claude/ccy/lib/claude-supervise.py", _PY_DECISIONS["joinpath"])
+
+    assert sorted(v.file for v in checker.scan_tree(tmp_path)) == [
+        ".claude/ccy/helper.py",
+        ".claude/ccy/lib/claude-supervise.py",
+    ]
+
+
+class TestOnlyReleasedUpgradeGuidesAreFrozen:
+    """A released guide must not depend on a function added later; a live script may."""
+
+    @pytest.mark.parametrize(
+        "relative",
+        [
+            "CLAUDE/UPGRADES/v2/v2.11-to-v2.12/pre-upgrade-tasks/check.py",
+            "CLAUDE/UPGRADES/v3/v3.57-to-v3.58/pre-upgrade-tasks/check.py",
+            "CLAUDE/UPGRADES/v3/v3.68.0-to-v3.69.0/post-upgrade-tasks/check.py",
+        ],
+    )
+    def test_a_guide_for_a_released_version_is_not_scanned(
+        self, checker: ModuleType, tmp_path: Path, relative: str
+    ) -> None:
+        _write(tmp_path, relative, _PY_DECISIONS["joinpath"])
+
+        assert checker.scan_tree(tmp_path) == []
+
+    @pytest.mark.parametrize(
+        "relative",
+        [
+            "CLAUDE/UPGRADES/v3/v3.69.0-to-v3.999.0/post-upgrade-tasks/check.py",
+            "CLAUDE/UPGRADES/v3/live_script.py",
+            "CLAUDE/UPGRADES/v3/not-a-version-dir/check.py",
+            "CLAUDE/UPGRADES/upgrade-template/post-upgrade-tasks/check.py",
+            "CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/check.py",
+        ],
+    )
+    def test_everything_else_under_upgrades_is_scanned(
+        self, checker: ModuleType, tmp_path: Path, relative: str
+    ) -> None:
+        _write(tmp_path, relative, _PY_DECISIONS["joinpath"])
+
+        assert [v.file for v in checker.scan_tree(tmp_path)] == [relative]
+
+    def test_the_cutoff_is_the_version_the_repository_is_at(self, checker: ModuleType) -> None:
+        from claude_code_hooks_daemon.version import __version__
+
+        current = tuple(int(part) for part in __version__.split("."))
+
+        assert checker.released_guide_cutoff() == current
+
+
+_SUPERVISOR_LAYOUTS: Final[dict[str, str]] = {
+    "self-install": "dir",
+    "client-install": "absent",
+    "other-package-only": "other",
+}
+
+
+@pytest.mark.parametrize("layout", sorted(_SUPERVISOR_LAYOUTS))
+def test_the_supervisors_copy_of_the_rule_agrees_with_install_layout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layout: str
+) -> None:
+    """`.claude/ccy/claude-supervise.py` cannot import the rule, so it keeps a copy."""
+    from claude_code_hooks_daemon.daemon.install_layout import get_untracked_dir
+    from tests.unit.supervise._load import load_supervisor_module
+
+    kind = _SUPERVISOR_LAYOUTS[layout]
+    if kind == "dir":
+        (tmp_path / "src" / "claude_code_hooks_daemon").mkdir(parents=True)
+    elif kind == "other":
+        (tmp_path / "src" / "other_package").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+
+    assert load_supervisor_module()._daemon_untracked_dir() == get_untracked_dir(tmp_path)
 
 
 def test_this_repository_has_no_third_copy(checker: ModuleType) -> None:

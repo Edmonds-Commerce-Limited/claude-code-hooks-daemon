@@ -23,18 +23,24 @@ environment, the working directory. A scan builds from where the script itself
 lives. The Python half therefore flags a stat call (``exists``, ``is_dir``,
 ``os.path.isdir`` ...) on a path that ENDS at the package directory, directly
 or through a name bound to it, unless the path's root is anchored to
-``__file__`` (``_REPO_ROOT = Path(__file__)...``) and the answer is only
-branched on. If the answer is kept as a value (``self_install = ...is_dir()``,
-``f(self_install=...)``) it is a decision even when anchored. A path that goes
-deeper (``.../version.py``, ``.../handlers``) is a file read or a scan, not the
-mode marker.
+``__file__`` (``_REPO_ROOT = Path(__file__)...``) and the check is the whole
+test of an ``if`` whose branches only return, raise, exit or print
+(``if not ROOT.is_dir(): return 1``). Any other use of an anchored answer (kept,
+returned, negated into a value, chosen between, passed as an argument) is a
+decision. A path that goes deeper (``.../version.py``, ``.../handlers``) is a
+file read or a scan, not the mode marker.
 
-``.claude/ccy/`` is not scanned, by design: the ccy supervisor wraps the user's
-Claude session and must start with no daemon clone present (a fresh teammate
-clone has none), so it cannot load ``install_layout.py`` and keeps its own copy
-of the test. That is a deliberate residual, not an allowlist entry.
-``CLAUDE/UPGRADES/`` is not scanned either: those are frozen historical upgrade
-guides, and a guide for an old version must not depend on a function added later. The shell half flags ``[ -d ... ]``, ``[[ -e ... ]]`` and ``test -d``
+``.claude/ccy/claude-supervise.py`` is not scanned, by design: the ccy
+supervisor wraps the user's Claude session and must start with no daemon clone
+present (a fresh teammate clone has none), so it cannot load
+``install_layout.py`` and keeps its own copy of the test; a parity test pins
+that copy to the rule. That is a deliberate residual, not an allowlist entry.
+The rest of ``.claude/ccy/`` is scanned.
+A guide for a RELEASED version under ``CLAUDE/UPGRADES/<major>/v<from>-to-v<to>/``
+(``<to>`` at or below this repository's version) is not scanned either: it is
+frozen history and must not depend on a function added later. Everything else
+there (``UNRELEASED/``, ``upgrade-template/``, a guide for a later version) is
+live and is scanned. The shell half flags ``[ -d ... ]``, ``[[ -e ... ]]`` and ``test -d``
 on a path ending at the package directory, directly or through a variable
 assigned from one.
 
@@ -65,6 +71,7 @@ from claude_code_hooks_daemon.utils.scan_scope import (
     vacuous_scan_failure,
     walk_files,
 )
+from claude_code_hooks_daemon.version import __version__
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _REPO_ROOT / "untracked" / "qa"
@@ -87,12 +94,13 @@ _DEFINITIONS: Final[frozenset[str]] = frozenset(
 #: (``--path src``) still recognises them.
 _DEFINITION_PATHS: Final[frozenset[Path]] = frozenset(_REPO_ROOT / d for d in _DEFINITIONS)
 
-#: Directory prefixes (below the scan root) that are not scanned, by design: see the module docstring.
-_UNSCANNED_PREFIXES: Final[tuple[tuple[str, ...], ...]] = (
-    (".claude", "ccy"),
-    ("CLAUDE", "UPGRADES"),
-)
-_PREFIX_DEPTH: Final[int] = 2
+#: The one file (below the scan root) that is not scanned, by design: see the module docstring.
+_SUPERVISOR_PARTS: Final[tuple[str, ...]] = (".claude", "ccy", "claude-supervise.py")
+
+#: Where upgrade guides live: ``CLAUDE/UPGRADES/<major>/v<from>-to-v<to>/``.
+_UPGRADES_PARTS: Final[tuple[str, ...]] = ("CLAUDE", "UPGRADES")
+_GUIDE_DEPTH: Final[int] = 4
+_GUIDE_DIR: Final[re.Pattern[str]] = re.compile(r"^v\d+(?:\.\d+)*-to-v(?P<target>\d+(?:\.\d+)*)$")
 
 #: Gitignored runtime state and other checkouts, never project source. Matched
 #: on the path BELOW the scan root (00466 N26), never on the absolute path.
@@ -124,6 +132,8 @@ _OS_PATH_PREDICATES: Final[frozenset[str]] = frozenset({"exists", "isdir", "isfi
 _PATH_IDENTITY_METHODS: Final[frozenset[str]] = frozenset({"resolve", "absolute", "expanduser"})
 _PATH_WRAPPERS: Final[frozenset[str]] = frozenset({"str", "Path", "PurePath", "fspath"})
 _FILE_NAME: Final[str] = "__file__"
+#: Calls a guard body may make: they leave the program or report, never choose a path.
+_EXIT_CALLS: Final[frozenset[str]] = frozenset({"print", "exit", "quit"})
 _BINDING_DEPTH: Final[int] = 4
 
 _PY_FIX: Final[str] = (
@@ -344,24 +354,41 @@ def _ends_at_marker(parts: list[str | None]) -> bool:
     return tuple(parts[-len(_MARKER_PARTS) :]) == _MARKER_PARTS
 
 
-def _kept_as_a_value(tree: ast.Module) -> set[int]:
-    """Calls whose answer is stored or handed on: ``x = p.is_dir()``, ``f(k=p.is_dir())``.
+def _is_exit_statement(statement: ast.stmt) -> bool:
+    """A statement that only leaves or reports: return, raise, ``exit()``, ``print()``."""
+    if isinstance(statement, ast.Return | ast.Raise):
+        return True
+    if not (isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call)):
+        return False
+    func = statement.value.func
+    name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+    return name in _EXIT_CALLS
 
-    A scan only branches on the answer (``if not root.is_dir(): fail``); keeping
-    it as a value is what a mode flag does.
+
+def _only_exits(statements: list[ast.stmt]) -> bool:
+    return all(_is_exit_statement(statement) for statement in statements)
+
+
+def _guard_checks(tree: ast.Module) -> set[int]:
+    """Calls that are the whole test of an ``if`` whose branches only exit or report.
+
+    ``if not ROOT.is_dir(): return 1`` checks that the scanner's own tree is
+    there. Every other use of the answer (kept, returned, negated into a value,
+    chosen between, passed on) is a mode decision, so only this shape is exempt.
     """
-    kept: set[int] = set()
+    guards: set[int] = set()
     for node in ast.walk(tree):
-        values: list[ast.expr | None] = []
-        if isinstance(node, ast.Assign | ast.AnnAssign):
-            values.append(node.value)
-        elif isinstance(node, ast.Call):
-            values.extend(keyword.value for keyword in node.keywords)
-        kept.update(id(value) for value in values if isinstance(value, ast.Call))
-    return kept
+        if not isinstance(node, ast.If):
+            continue
+        test = node.test
+        if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+            test = test.operand
+        if isinstance(test, ast.Call) and _only_exits(node.body) and _only_exits(node.orelse):
+            guards.add(id(test))
+    return guards
 
 
-def _decides(call: ast.Call, resolver: _Resolver, kept_as_a_value: set[int]) -> bool:
+def _decides(call: ast.Call, resolver: _Resolver, guards: set[int]) -> bool:
     target = _predicate_target(call)
     if target is None:
         return False
@@ -369,9 +396,10 @@ def _decides(call: ast.Call, resolver: _Resolver, kept_as_a_value: set[int]) -> 
         root, parts = resolver.flatten(candidate)
         if not _ends_at_marker(parts):
             continue
-        # Anchored to ``__file__`` is a scan root, unless the answer is kept as
-        # a value: "is the checkout I live in a self-install" is a decision.
-        if not resolver.is_anchored(root) or id(call) in kept_as_a_value:
+        # Anchored to ``__file__`` is a scan root only while the answer is just
+        # an ``if`` guard; any other use is "is the checkout I live in a
+        # self-install", which is a decision.
+        if not resolver.is_anchored(root) or id(call) not in guards:
             return True
     return False
 
@@ -379,7 +407,7 @@ def _decides(call: ast.Call, resolver: _Resolver, kept_as_a_value: set[int]) -> 
 def _python_decisions(tree: ast.Module) -> list[int]:
     module_scope = _Scope(tree)
     lines: set[int] = set()
-    kept = _kept_as_a_value(tree)
+    guards = _guard_checks(tree)
     scopes: list[tuple[ast.AST, _Scope | None]] = [(tree, None)]
     scopes.extend(
         (node, _Scope(node))
@@ -391,7 +419,7 @@ def _python_decisions(tree: ast.Module) -> list[int]:
         lines.update(
             node.lineno
             for node in _walk_scope(scope_node)
-            if isinstance(node, ast.Call) and _decides(node, resolver, kept)
+            if isinstance(node, ast.Call) and _decides(node, resolver, guards)
         )
     return sorted(lines)
 
@@ -451,12 +479,33 @@ def _is_shell(path: Path, head: str) -> bool:
     return any(Path(word).name in _SHELL_INTERPRETERS for word in words[:2])
 
 
+def released_guide_cutoff() -> tuple[int, ...]:
+    """The version this repository is at: a guide that targets it or an earlier one is released."""
+    return _version_tuple(__version__)
+
+
+def _version_tuple(text: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in text.split("."))
+
+
+def _is_released_guide(parts: tuple[str, ...]) -> bool:
+    """Whether ``parts`` (below the scan root) is inside a guide for a released version."""
+    if len(parts) < _GUIDE_DEPTH or parts[:2] != _UPGRADES_PARTS:
+        return False
+    match = _GUIDE_DIR.match(parts[3])
+    return match is not None and _version_tuple(match.group("target")) <= released_guide_cutoff()
+
+
+def _is_unscanned(parts: tuple[str, ...]) -> bool:
+    return parts == _SUPERVISOR_PARTS or _is_released_guide(parts)
+
+
 def _candidate_files(root: Path) -> list[Path]:
     return [
         path
         for path in walk_files(root)
         if not any(part in _SKIP_DIRS for part in relative_parts(path, root))
-        and relative_parts(path, root)[:_PREFIX_DEPTH] not in _UNSCANNED_PREFIXES
+        and not _is_unscanned(tuple(relative_parts(path, root)))
         and path.is_file()
         and not path.is_symlink()
         and (path.suffix == _PYTHON_SUFFIX or path.suffix in _SHELL_SUFFIXES or not path.suffix)
