@@ -201,12 +201,17 @@ agent.
 
 ## Success Criteria
 
-- [ ] The README and `explain-rule` name DBF and link to it. #65 and #67 are answered.
-- [ ] `CONFORMANCE.md` grades every MUST and SHOULD with evidence, and has survived a Fable
-  review.
+- [x] The README and `explain-rule` name DBF and link to it. #65 and #67 are answered
+  (Tasks 1.1–1.4).
+- [x] `CONFORMANCE.md` grades every MUST and SHOULD with evidence, and has survived a Fable
+  review: round 1 [SURVIVES WITH FIXES](subagent-reports/261010-conformance-fable-review-fable.md),
+  fixes [merged](subagent-reports/261010-conformance-fixes-sonnet.md), round 2
+  [READY TO MERGE](subagent-reports/261010-conformance-fable-review-r2-fable.md).
 - [ ] The owner has ruled on every gap. The accepted ones are closed, and the rest are listed
   in the declaration.
-- [ ] A DBF tool can list this daemon's defences without project-specific knowledge.
+- [x] A DBF tool can list this daemon's defences without project-specific knowledge:
+  `hooks-daemon defences --json` (Task 3.2); round 2 found every row carries a rule ID and
+  statement (artefact 5.1b MET).
 
 ## Delivery & Milestones
 
