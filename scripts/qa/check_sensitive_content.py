@@ -50,6 +50,7 @@ _OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / _ARTEFACT_NAME
 _DEFAULT_CONFIG: Final[Path] = _REPO_ROOT / ".claude" / "hooks-daemon.yaml"
 
 _PUBLIC_RULE_PREFIX: Final[str] = "public-pattern"
+_INVALID_PATTERN_RULE: Final[str] = "public-pattern-invalid"
 _SECRET_RULE: Final[str] = "secret-word-list"
 # A filename violation belongs to no line of the file; 0 is never a real
 # 1-based line number, so it reads unambiguously as "the name, not the body".
@@ -241,7 +242,7 @@ def _compile_public_patterns(
                 Violation(
                     file=str(config_path),
                     line=_FILENAME_LINE,
-                    rule=f"{_PUBLIC_RULE_PREFIX}:{name}",
+                    rule=_INVALID_PATTERN_RULE,
                     message=(
                         f"Public pattern '{name}' is not a valid regex ({exc}) — it "
                         "checked NOTHING. Fix the pattern; a rule that cannot compile "

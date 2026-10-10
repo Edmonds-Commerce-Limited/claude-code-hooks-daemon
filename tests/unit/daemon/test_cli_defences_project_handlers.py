@@ -231,3 +231,50 @@ class TestBatchRowsFollowTheirHandler:
         capsys.readouterr()
         assert cmd_defences(argparse.Namespace(as_json=True, project_root=project)) == 1
         assert "x.py" in capsys.readouterr().err
+
+
+def test_the_invalid_pattern_rule_is_checker_configuration_not_a_defence(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    registry = json.loads((_REPO_ROOT / "scripts/qa/qa-rules.json").read_text(encoding="utf-8"))
+    assert registry["rules"]["public-pattern-invalid"]["meta"] is True
+    project = _scaffold_project(tmp_path)
+    _with_qa_rules(project)
+    listed = {r["rule_id"] for r in _defences(project, capsys) if r["kind"] == "batch-check"}
+    assert "public-pattern-invalid" not in listed
+    assert "public-pattern" in listed
+
+
+class TestARegistryOfTheWrongShapeKeepsTheHandlerRows:
+    """A registry the user broke is visible (stderr, exit 1) but the handler rows are valid."""
+
+    @pytest.mark.parametrize("text", ["[]", '"text"', "3", "null"])
+    def test_a_top_level_that_is_not_an_object_is_one_stderr_line_and_exit_one(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], text: str
+    ) -> None:
+        project = _scaffold_project(tmp_path)
+        _with_qa_rules(project, text)
+        capsys.readouterr()
+        assert cmd_defences(argparse.Namespace(as_json=True, project_root=project)) == 1
+        captured = capsys.readouterr()
+        err = captured.err.strip().splitlines()
+        assert len(err) == 1
+        assert "qa-rules.json" in err[0]
+        assert "object" in err[0]
+        rows = json.loads(captured.out)
+        assert rows
+        assert {row["kind"] for row in rows} == {"handler"}
+
+    def test_a_bug_in_collection_is_not_reported_as_a_bad_registry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.rule_explain import defences
+
+        def broken(*_args: object, **_kwargs: object) -> list[object]:
+            raise AttributeError("a real bug")
+
+        project = _scaffold_project(tmp_path)
+        _with_qa_rules(project)
+        monkeypatch.setattr(defences, "collect_batch_defences", broken)
+        with pytest.raises(AttributeError, match="a real bug"):
+            cmd_defences(argparse.Namespace(as_json=True, project_root=project))
