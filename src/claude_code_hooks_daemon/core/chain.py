@@ -1026,14 +1026,18 @@ class HandlerChain:
             )
             if self.context_transform is not None and result.context:
                 result.context = self.context_transform(handler, result.context)
+            if result.rule is None and is_restrictive(result.decision):
+                # Read before any bookkeeping: a raising declaration is then a
+                # handler crash like any other (the caller's handler-level
+                # catch, which denies for a SAFETY+BLOCKING handler), never a
+                # half-recorded match.
+                declared = handler.get_rules()
+                if len(declared) == 1:
+                    result.rule = declared[0].rule_id
             handlers_executed.append(handler.name)
             executed_handlers.append(handler)
             matched_results.append(result)
             result.add_handler(handler.name)
-            if result.rule is None and is_restrictive(result.decision):
-                declared = handler.get_rules()
-                if len(declared) == 1:
-                    result.rule = declared[0].rule_id
 
             # Record THIS handler's own verdict now, before any later
             # handler's laxer/stricter result can change what the eventual

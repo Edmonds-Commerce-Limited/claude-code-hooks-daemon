@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants.priority import Priority
+from claude_code_hooks_daemon.constants.tags import HandlerTag
 from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
@@ -81,6 +82,22 @@ class TestChainRecordsTheRuleId:
         handler = _Handler("h", HookResult.deny(reason="r"), [_rule("R-A"), _rule("R-B")])
 
         assert _decisions(handler)[0].rule is None
+
+    def test_a_raising_rule_declaration_is_a_crash_with_no_half_recorded_match(self) -> None:
+        class _Raising(_Handler):
+            def get_rules(self) -> list[Rule]:
+                raise RuntimeError("boom")
+
+        handler = _Raising("h", HookResult.deny(reason="r"), [])
+        handler.tags = [HandlerTag.SAFETY, HandlerTag.BLOCKING]
+        chain = HandlerChain()
+        chain.add(handler)
+
+        executed = chain.execute({"tool_name": "Bash"})
+
+        assert executed.result.decision == Decision.DENY
+        assert executed.handlers_executed == ["h"]
+        assert executed.decisions == []
 
     def test_an_allow_from_a_single_rule_handler_records_none(self) -> None:
         handler = _Handler("h", HookResult.allow(), [_rule("R-ONLY")])

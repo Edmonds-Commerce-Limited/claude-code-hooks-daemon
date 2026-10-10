@@ -625,6 +625,17 @@ class TestDestructiveGitGetRules:
         assert result.decision.value == "deny"
         assert result.reason.startswith(f"BLOCKED [{RuleID.GIT_DESTRUCTIVE_UNREADABLE}]")
 
+    def test_a_pattern_deny_carries_its_rule_id(self, handler):
+        """The verdict log reads the rule ID from the result, not the reason text (N393)."""
+        result = handler.handle(
+            {"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}
+        )
+        assert result.rule == RuleID.GIT_RESET_HARD
+
+    def test_the_unreadable_deny_carries_its_rule_id(self, handler):
+        result = handler.handle({"tool_name": "Bash", "tool_input": {"command": "echo hello"}})
+        assert result.rule == RuleID.GIT_DESTRUCTIVE_UNREADABLE
+
     def test_no_duplicate_rule_ids(self, handler):
         """No two declared rules share a rule_id."""
         rule_ids = [rule.rule_id for rule in handler.get_rules()]
