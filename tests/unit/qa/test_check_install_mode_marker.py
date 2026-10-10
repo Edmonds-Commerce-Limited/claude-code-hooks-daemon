@@ -553,6 +553,22 @@ def test_the_supervisors_copy_of_the_rule_agrees_with_install_layout(
     assert load_supervisor_module()._daemon_untracked_dir() == get_untracked_dir(tmp_path)
 
 
+def test_gitignored_files_are_not_project_code(checker: ModuleType, tmp_path: Path) -> None:
+    """A gitignored file (Claude Code's edit snapshots) is skipped; a tracked sibling is not."""
+    source = _PY_DECISIONS["joinpath"]
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".claude" / "ccy").mkdir(parents=True)
+    (tmp_path / ".claude" / "ccy" / ".gitignore").write_text("*\n!.gitignore\n!other.py\n")
+    snapshot = "#!/bin/bash\n" + _SH_DECISIONS["single-bracket"]
+    _write(tmp_path, ".claude/ccy/file-history/x@v1", snapshot)
+    _write(tmp_path, ".claude/ccy/other.py", source)
+    subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True)
+
+    files = {v.file for v in checker.scan_tree(tmp_path)}
+
+    assert files == {".claude/ccy/other.py"}
+
+
 def test_this_repository_has_no_third_copy(checker: ModuleType) -> None:
     """The real tree: every file but the two definitions asks the rule."""
     violations = checker.scan_tree(_REPO_ROOT)

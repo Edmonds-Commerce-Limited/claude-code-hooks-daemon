@@ -1573,6 +1573,8 @@ which approved the merge and left these as non-blocking.
   `walk_files` already yields nothing for a missing root, so the redundant stat was removed; no exemption added.
   `check_install_mode_marker.py` over the repository reports 0 violations (2507 files).
 - Found while writing the parity test: see N396.
+- Hotfix: the wider `.claude/ccy/` scan read Claude Code's gitignored `file-history/` snapshots on the main checkout
+  (2 false violations). The detector now judges only `git_visible_paths` (tracked or would-be-tracked); 0 on `/workspace`.
 
 ### N390 — two readers of a git command's search and format option values
 
