@@ -2672,6 +2672,11 @@ def _load_project_handlers(config: "Config", project_path: Path) -> list[Any]:
     directory does not exist — neither is an error, and a generator with nothing
     to add must still render the rest of the document.
     """
+    return [handler for _event_type, handler in _discover_project_handlers(config, project_path)]
+
+
+def _discover_project_handlers(config: "Config", project_path: Path) -> list[tuple[Any, Any]]:
+    """This project's handlers as ``(EventType, handler)`` pairs; empty when none."""
     if not config.project_handlers.enabled:
         return []
 
@@ -2684,8 +2689,7 @@ def _load_project_handlers(config: "Config", project_path: Path) -> list[Any]:
     if not handlers_path.exists():
         return []
 
-    discovered = ProjectHandlerLoader.discover_handlers(handlers_path)
-    return [handler for _event_type, handler in discovered]
+    return list(ProjectHandlerLoader.discover_handlers(handlers_path))
 
 
 def _collect_enforcement_status_lines(project_path: Path) -> list[str]:
@@ -6791,6 +6795,95 @@ def cmd_issue_validity(args: argparse.Namespace) -> int:
     )
 
 
+def _loaded_handler_keys(
+    args: argparse.Namespace, project_root: Path, event_config_key: str
+) -> set[str]:
+    """Config keys of the enabled handlers this project loads for one event.
+
+    The set ``defences`` prints ``--only`` commands from: the same generator, so
+    bundled, project and plugin handlers all count.
+
+    Raises:
+        ProbeInputError: The project has no config to read them from.
+    """
+    from claude_code_hooks_daemon.daemon.hook_probe import ProbeInputError
+
+    config_path = project_root / ".claude" / "hooks-daemon.yaml"
+    if not config_path.exists():
+        raise ProbeInputError(f"no configuration at {config_path} to find handlers in")
+    config = Config.load(config_path)
+    _init_project_context_for_cli(args)
+    # The docs generator names a project handler by its class and files it under
+    # "project", so project handlers are added by the key the chain matches on.
+    keys = {
+        info[1]
+        for info in _build_docs_generator(config, project_root).active_handlers()
+        if info[2] == event_config_key
+    }
+    keys.update(
+        handler.config_key
+        for event_type, handler in _discover_project_handlers(config, project_root)
+        if event_type.name.lower() == event_config_key
+    )
+    return keys
+
+
+def cmd_exceptions(args: argparse.Namespace) -> int:
+    """List every exception to a guard with the reason it carries (Plan 00484 G12).
+
+    Reads the project's raw ``.claude/hooks-daemon.yaml`` (a reason is dropped
+    when the config loads, so the loaded ``Config`` cannot show it), the
+    ``MUST_EXCEED_*_BECAUSE`` hatches in tracked files, and the QA exception
+    files. An entry with nowhere to write a reason shows ``(no reason)``.
+
+    Returns:
+        0 on success; 1 when the config is missing or unreadable, or the tracked
+        files cannot be listed.
+    """
+    import yaml
+
+    from claude_code_hooks_daemon.config.exceptions_listing import (
+        collect_config_exceptions,
+        collect_in_file_hatches,
+        collect_qa_exception_files,
+    )
+    from claude_code_hooks_daemon.utils.git_repo import run_git
+
+    # The raw file is read, so a config that fails validation can still be listed
+    # (the listing is how an unreasoned exception in it gets found).
+    override = getattr(args, "project_root", None)
+    project_path = Path(override).resolve() if override else Path(get_project_path(None))
+    config_path = project_path / ".claude" / "hooks-daemon.yaml"
+    if not config_path.exists():
+        print(f"No configuration file found at: {config_path}", file=sys.stderr)
+        return 1
+    try:
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        print(f"ERROR: cannot read {config_path}: {exc}", file=sys.stderr)
+        return 1
+    tracked = run_git(project_path, "ls-files", "-z")
+    if tracked.returncode != 0:
+        print(
+            f"ERROR: cannot list tracked files in {project_path}: {tracked.stderr.strip()}",
+            file=sys.stderr,
+        )
+        return 1
+
+    records = [
+        *collect_config_exceptions(raw),
+        *collect_in_file_hatches(project_path, [Path(p) for p in tracked.stdout.split("\0") if p]),
+        *collect_qa_exception_files(project_path),
+    ]
+    if args.json:
+        print(json.dumps([record.as_dict() for record in records], indent=2))
+    else:
+        for record in records:
+            reason = record.reason if record.reason is not None else "(no reason)"
+            print(f"{record.source}\t{record.location}\t{record.value}\t{reason}")
+    return 0
+
+
 def cmd_probe(args: argparse.Namespace) -> int:
     """Send one hand-built payload through the project's hook entry point, marked.
 
@@ -6834,6 +6927,8 @@ def cmd_probe(args: argparse.Namespace) -> int:
             project_root=project_root,
             session_id=probe_session_id(),
             probe_as=ProbeThread(asked) if asked else None,
+            only=getattr(args, "only", None),
+            known_handlers=lambda: _loaded_handler_keys(args, project_root, event.config_key),
         )
         entry_point = entry_point_for(project_root, event)
     except (ProbeInputError, OSError) as exc:
@@ -10150,6 +10245,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser_config.set_defaults(func=cmd_config)
 
+    parser_exceptions = subparsers.add_parser(
+        "exceptions",
+        help="List every exception to a guard (config exclusions, disabled or downgraded "
+        "handlers, in-file hatches, QA exception files) with the reason it carries",
+    )
+    parser_exceptions.add_argument("--json", action="store_true", help="Output as JSON")
+    parser_exceptions.add_argument(
+        "--project-root", type=Path, help="Project root (auto-detected by default)"
+    )
+    parser_exceptions.set_defaults(func=cmd_exceptions)
+
     # repair command
     parser_repair = subparsers.add_parser("repair", help="Repair broken venv (runs uv sync)")
     parser_repair.set_defaults(func=cmd_repair)
@@ -11836,6 +11942,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Thread the probe stands for, so MAIN/SUB-scoped handlers judge it "
         "(default: main; sub also sends agent_id=manual-probe-agent)",
+    )
+    parser_probe.add_argument(
+        "--only",
+        metavar="HANDLER",
+        default=None,
+        help="Run only this handler (config key, e.g. destructive_git) instead of the whole "
+        "chain, so a detector can be exercised alone",
     )
     parser_probe.add_argument(
         "--project-root",

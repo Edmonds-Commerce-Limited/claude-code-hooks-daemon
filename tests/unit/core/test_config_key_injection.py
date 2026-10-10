@@ -3,7 +3,10 @@
 Plan 050: Every handler DENY/ASK response should include the fully-qualified
 config path so users can immediately know how to disable it.
 
-Format: handlers.{event_type}.{config_key}  (set enabled: false)
+Format: handlers.{event_type}.{config_key}  (set enabled: false and record why beside it)
+
+The footer asks for the reason because a disabled guard is an exception, and an
+exception nobody explained cannot be reviewed (Plan 00484 G4).
 """
 
 from typing import Any
@@ -15,6 +18,9 @@ from claude_code_hooks_daemon.core.router import EventRouter
 
 # Footer format constant (must match implementation)
 _DISABLE_FOOTER_PREFIX = "\n\nTo disable: handlers."
+
+# Written out, not imported: the test pins the text a person reads.
+DISABLE_FOOTER_SUFFIX = "(set enabled: false and record why beside it)"
 
 
 class StubHandler(Handler):
@@ -75,7 +81,7 @@ class TestConfigKeyInjectionInRouter:
 
         assert result.result.decision == Decision.DENY
         assert "To disable: handlers.pre_tool_use.destructive_git" in (result.result.reason or "")
-        assert "(set enabled: false)" in (result.result.reason or "")
+        assert DISABLE_FOOTER_SUFFIX in (result.result.reason or "")
 
     def test_ask_result_includes_config_path(self) -> None:
         """ASK result should include config path footer in reason."""
@@ -91,7 +97,7 @@ class TestConfigKeyInjectionInRouter:
 
         assert result.result.decision == Decision.ASK
         assert "To disable: handlers.pre_tool_use.risky_command" in (result.result.reason or "")
-        assert "(set enabled: false)" in (result.result.reason or "")
+        assert DISABLE_FOOTER_SUFFIX in (result.result.reason or "")
 
     def test_allow_result_does_not_include_config_path(self) -> None:
         """ALLOW result should NOT include config path footer."""
@@ -178,7 +184,7 @@ class TestConfigKeyInjectionInRouter:
 
         assert result.result.decision == Decision.DENY
         assert "To disable: handlers.pre_tool_use.strict_handler" in (result.result.reason or "")
-        assert "(set enabled: false)" in (result.result.reason or "")
+        assert DISABLE_FOOTER_SUFFIX in (result.result.reason or "")
 
     def test_footer_separated_by_blank_line(self) -> None:
         """Footer should be separated from original reason by a blank line."""
@@ -289,7 +295,7 @@ class TestConfigKeyInjectionInFrontController:
 
         assert result.decision == Decision.DENY
         assert "To disable: handlers.pre_tool_use.destructive_git" in (result.reason or "")
-        assert "(set enabled: false)" in (result.reason or "")
+        assert DISABLE_FOOTER_SUFFIX in (result.reason or "")
 
     def test_allow_result_not_modified(self) -> None:
         """FrontController ALLOW result should NOT be modified."""

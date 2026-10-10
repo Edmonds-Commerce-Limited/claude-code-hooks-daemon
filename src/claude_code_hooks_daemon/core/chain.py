@@ -40,7 +40,7 @@ from claude_code_hooks_daemon.core.dispatch_cancellation import (
     is_dispatch_cancelled,
     reset_dispatch_cancellation,
 )
-from claude_code_hooks_daemon.core.handler_scope import scope_admits
+from claude_code_hooks_daemon.core.handler_scope import probe_only_handler, scope_admits
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.utils.shell_segmentation import bind_event_cwd, reset_event_cwd
 
@@ -1070,6 +1070,7 @@ class HandlerChain:
             ends_on_allow = self.allow_is_final and not restrictive
             return bool(handler.terminal and (ends_on_restrictive or ends_on_allow))
 
+        only_handler = probe_only_handler(hook_input)
         for index, handler in enumerate(self.handlers):
             progress.entered = index + 1
             if (
@@ -1092,6 +1093,11 @@ class HandlerChain:
                 # dispatch is even attempted, not after paying its overhead.
                 if _apply_oversized_input(handler, payload_size, max_safety_input_bytes):
                     break
+                continue
+
+            # Probe restriction (Plan 00484 G11): `probe --only` runs one handler
+            # alone. Only a probe-class source can ask for it.
+            if only_handler is not None and handler.config_key != only_handler:
                 continue
 
             try:

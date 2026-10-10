@@ -13,8 +13,9 @@ Both forms are normalised once, at config load, to the plain pattern, so no
 handler ever sees the mapping. A reason is checked with the same hygiene as the
 ``MUST_*_BECAUSE`` hatches: a placeholder is rejected (a config error, not a
 silent drop, because a config is not an input a guard can fall back from).
-Under ``daemon.strict_mode`` a plain string is itself an error; for everyone
-else it becomes one at the next major.
+Under ``daemon.strict_mode`` a plain string loads and is reported as a warning
+(``Config.config_problems``, shown by the SessionStart config-problem advisory);
+a reason is required of everyone at the next major.
 """
 
 from __future__ import annotations

@@ -68,8 +68,6 @@ _MAX_PATHS_PER_SESSION = 2_000
 # the alternative (treating each as unique) would leak entries without bound.
 _UNKNOWN_SESSION = "<no-session-id>"
 
-_CONFIG_KEY_PATH = "handlers.pre_tool_use.write_clobber_guard.enabled"
-
 # Every tool whose success means this session knows the file's contents. An
 # Edit counts: Claude Code refuses an Edit to a file the session has not read.
 _TRACKED_TOOLS: frozenset[str] = frozenset({ToolName.READ, ToolName.EDIT, ToolName.WRITE})
@@ -222,9 +220,7 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
             message = formatter.verbose(_RULE)
 
         message += (
-            f"\n\nFILE: {path}\n"
-            f"AT RISK: {line_count} lines, which would be replaced wholesale\n\n"
-            f"To disable: {_CONFIG_KEY_PATH}: false"
+            f"\n\nFILE: {path}\n" f"AT RISK: {line_count} lines, which would be replaced wholesale"
         )
 
         return GatingResult(decision=Decision.DENY, reason=message, context=[], guidance=None)

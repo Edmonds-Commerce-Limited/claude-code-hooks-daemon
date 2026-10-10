@@ -40,9 +40,6 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
 
-# Config key hint shown in the denial message
-_CONFIG_HINT_HANDLER = "handlers.pre_tool_use.error_hiding_blocker"
-
 # Single rule (Plan 00116): every language's error-hiding pattern is the same
 # concept -- the language dimension lives in the strategy registry.
 _ERROR_HIDING_RULE = Rule(
@@ -53,8 +50,7 @@ _ERROR_HIDING_RULE = Rule(
     verbose=(
         "WHY BLOCKED:\n"
         "  Error hiding is a cardinal sin. Silent failure makes bugs invisible,\n"
-        "  delays diagnosis, and corrupts system state without warning.\n\n"
-        f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
+        "  delays diagnosis, and corrupts system state without warning."
     ),
 )
 

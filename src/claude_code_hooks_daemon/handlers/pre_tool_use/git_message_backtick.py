@@ -87,8 +87,7 @@ _RULE_VERBOSE = (
     f"  {_REMEDY_MESSAGE_FILE}\n\n"
     "Single quotes suppress substitution entirely, so backticks stay "
     "literal. A backslash-escaped \\` inside double quotes is also "
-    "safe and is not blocked.\n\n"
-    "To disable: handlers.pre_tool_use.git_message_backtick"
+    "safe and is not blocked."
 )
 
 

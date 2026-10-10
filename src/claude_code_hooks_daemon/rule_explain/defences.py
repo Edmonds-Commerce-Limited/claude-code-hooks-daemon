@@ -128,6 +128,8 @@ def _defence(
         defect_class=defect_class,
         docs=docs,
         detector_entry_point=(
-            f"hooks-daemon probe {event} --json <payload>" if event in EVENT_TYPE_MAPPING else None
+            f"hooks-daemon probe {event} --only {config_key} --json <payload>"
+            if event in EVENT_TYPE_MAPPING
+            else None
         ),
     )
