@@ -1480,7 +1480,13 @@ summary, or a non-zero exit read as a failure), make the checker report the caus
 ref report comes "with the `git update-ref -d` for each". The code prints at most 5 refs and one
 `git update-ref --stdin` command for all of them.
 
-**Status**: ⬜ Open. Remedy: correct the description, regenerate any generated docs that quote it, restart the daemon.
+**Correction (fact-check r4)**: the wording is in `get_claude_md()`, not `get_description()` (no such method in `src`).
+
+**Status**: ✅ Fixed. The `get_claude_md()` text now says at most 5 refs are named, with one `git update-ref --stdin`
+command that deletes them all (matching `collect_gone_branch_ref_report` in `utils/stale_litter.py`), and release note
+014 (same unreleased window) says the same. No generated doc quotes the old sentence (grep of `CLAUDE.md`, `docs/`: none;
+`CLAUDE.md` carries only the one-line index entry), so nothing needed regenerating. The daemon restart is the
+coordinator's.
 
 ### N393 — the verdict log records no rule ID
 
@@ -1491,8 +1497,17 @@ every record, so dropped ticks (R-FAILSAFE-CRON-SUPPRESSED, R-DECLARED-CRON-SUPP
 be counted from it; only the handler name (`usage-pause-gate`, 28 denies) was usable. Not yet confirmed whether the
 field is never written or only not written for these handlers.
 
-**Status**: ⬜ Open. Remedy: find the writer, confirm which verdicts carry a rule ID, and record the rule ID the
-handler's result already declares (Plan 00484 3.1a made every deny path declare one), with a test.
+**Correction (fact-check r4)**: the field is not empty on every record: it is null for `usage-pause-gate` and the
+`failsafe-cron*` handlers, while 1,139 of about 23,985 records carry one (`orchestrator-simulate`).
+
+**Status**: ✅ Fixed. The writer (`daemon/verdict_log.py`) was sound: it copies `HandlerVerdict.rule`, which the chain
+copies from `HookResult.rule`. Nothing but `orchestrator-simulate` ever set that field; deny paths put the rule ID in the
+reason text only. Now `under_rule` sets `rule`; the failsafe-cron suppressor and `destructive_git` set it on their
+denies; and the chain gives a restrictive result that names none the ID of its handler's rule when the handler declares
+exactly one (covers `usage-pause-gate`). Tests: `tests/unit/core/test_chain_verdict_rule_id.py` (a deny with a rule ID
+ends up in the log line). Remaining null: allows, and denies from a handler with several rules that builds its reason
+without `under_rule` or an explicit `rule=`. Readers of `verdicts.jsonl` (`verdict_report.py`, `cli.py`) treat the
+field as an opaque string, unchanged. Release note 016.
 
 ### N392 — the full-QA lock gate stops refusing an unlocked run once pytest-xdist is installed
 

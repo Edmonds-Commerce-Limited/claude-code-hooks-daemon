@@ -263,11 +263,13 @@ class HookResult(BaseModel, Generic[DecisionT]):
     # defaults to the raw deny ``reason`` when unset.
     halt_turn: bool = Field(default=False)
     stop_reason: str | None = Field(default=None)
-    # Optional sub-classification of WHICH internal check/pattern produced this
-    # decision (Plan 00209 verdict log). Purely internal metadata consumed by
-    # the verdict-log writer — never part of the Claude Code hook response, so
-    # to_json() never emits it. Most handlers never set it; that is fine, the
-    # verdict log records it as null in that case.
+    # The rule ID (``RuleID`` constant) this decision belongs to, or another
+    # sub-classification of WHICH check produced it (Plan 00209 verdict log).
+    # Purely internal metadata consumed by the verdict-log writer — never part
+    # of the Claude Code hook response, so to_json() never emits it.
+    # ``under_rule`` sets it; a restrictive result that leaves it unset takes
+    # the ID of the handler's rule when the handler declares exactly one (see
+    # ``HandlerChain``). Otherwise the verdict log records null.
     rule: str | None = Field(default=None)
 
     @field_validator("decision", mode="before")

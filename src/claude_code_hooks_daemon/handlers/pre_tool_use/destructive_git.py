@@ -967,6 +967,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             return GatingResult(
                 decision=Decision.DENY,
                 reason=f"{self._formatter.headline(unreadable)}\n\n{_GENERIC_DESTRUCTIVE_REASON}",
+                rule=unreadable.rule_id,
             )
         rule = self._rules_by_id[rule_id]
 
@@ -1002,6 +1003,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         return GatingResult(
             decision=Decision.DENY,
             reason=message,
+            rule=rule_id,
         )
 
     def get_claude_md(self) -> str | None:

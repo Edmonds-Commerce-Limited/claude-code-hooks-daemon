@@ -23,6 +23,7 @@ from claude_code_hooks_daemon.config.models import (
     PersistentCronConfig,
     PersistentCronsConfig,
 )
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.background_process_tracker import (
     watchdog_cron_prompt,
@@ -392,3 +393,35 @@ class TestTheAwaitingHumanOptOutFollowsTheHost:
 
     def test_a_non_matching_host_suppresses_the_tick(self, tmp_path: Path) -> None:
         assert self._run(tmp_path, "laptop") == Decision.DENY
+
+
+class TestEachDroppedTickNamesItsRule:
+    """N393: the verdict log counts dropped ticks by the rule ID the result carries."""
+
+    def test_a_suppressed_failsafe_tick_carries_its_rule(self, tmp_path: Path) -> None:
+        _arm_marker(tmp_path)
+        with (
+            patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path),
+            patch(_OWED_PATCH_TARGET, return_value=False),
+        ):
+            result = _handler().handle(_input(CANONICAL_CRON_PROMPT))
+        assert result.decision == Decision.DENY
+        assert result.rule == RuleID.FAILSAFE_CRON_SUPPRESSED
+
+    def test_a_suppressed_declared_tick_carries_its_rule(self, tmp_path: Path) -> None:
+        _arm_marker(tmp_path)
+        with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
+            result = _handler().handle(_input(_issue_sdlc_tick()))
+        assert result.decision == Decision.DENY
+        assert result.rule == RuleID.DECLARED_CRON_SUPPRESSED
+
+    def test_a_backed_off_failsafe_tick_carries_its_rule(self, tmp_path: Path) -> None:
+        handler = _handler()
+        with (
+            patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path),
+            patch(_OWED_PATCH_TARGET, return_value=False),
+        ):
+            results = [handler.handle(_input(CANONICAL_CRON_PROMPT)) for _ in range(2)]
+        assert results[0].decision == Decision.ALLOW
+        assert results[1].decision == Decision.DENY
+        assert results[1].rule == RuleID.FAILSAFE_CRON_BACKED_OFF

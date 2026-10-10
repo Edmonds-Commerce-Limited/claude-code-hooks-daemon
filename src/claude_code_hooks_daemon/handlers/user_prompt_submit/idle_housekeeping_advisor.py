@@ -402,7 +402,8 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
             "(count, size, oldest age, and a suggested `find ... -delete` it never runs; "
             "`report_stale_scratch: false` turns it off) and "
             "`refs/integration/changed-green/*` refs whose branch no longer exists locally "
-            "or on a remote, with the `git update-ref -d` for each "
+            "or on a remote (at most 5 named, with one `git update-ref --stdin` command that "
+            "deletes every one of them) "
             "(`report_gone_branch_refs: false` turns it off). "
             "See docs/guides/CREATING_REPORTS.md."
         )
