@@ -1461,6 +1461,19 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N392 — the full-QA lock gate stops refusing an unlocked run once pytest-xdist is installed
+
+**Source**: Plan 00500 Task 3.2 (`CLAUDE/Plan/00500-full-qa-timing-and-speed/subagent-reports/261010-task-3.2-xdist-sonnet.md`).
+
+**Evidence**: on a fixture suite, with pytest-xdist installed in a separate venv, `full_qa_gate` refused the serial
+whole-suite run that held no lock, but let the `-n 2` run through. xdist is not installed in this project's venvs and
+Task 3.2 declined it, so nothing is exposed today. The gate's refusal should not depend on which plugins happen to be
+installed.
+
+**Status**: ⬜ Open. Remedy: find why the gate's check does not fire under xdist (the sink plugin or the whole-suite
+detection on the controller versus the workers) and make it refuse there too, with a test that installs nothing (for
+example, simulate the xdist controller's options).
+
 ### N391 — the install-mode detector's anchored-check rule and its skips are wider than they need to be
 
 **Source**: the N386 round 2 review (`untracked/agent-reports/auto/261010-120419-code-reviewer-adc697a9d7f04f1b2.md`),
