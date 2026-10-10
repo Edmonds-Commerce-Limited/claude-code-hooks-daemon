@@ -240,10 +240,12 @@ rows:
       A deny would refuse the careful spelling and miss the careless one.
 
   # ------------------------------------------------ worktree isolation (N385)
-  # Each command starts with `cd /workspace` because the gate runs from
-  # whichever checkout it is in, possibly a worktree, and a hook `cwd` inside a
-  # worktree makes a bare `.` or a relative `src/` that worktree (allowed).
-  # The literal `cd` pins the working directory to the main checkout.
+  # Each command starts with `cd /workspace` because the gate hands the
+  # handler the cwd of whichever checkout it runs from, which may be a worktree,
+  # and inside a worktree a bare `.` or a relative `src/` is that worktree's
+  # (allowed). The literal `cd` replaces that cwd with an absolute path outside
+  # any worktree, which is all the handler reads from it; it does not check that
+  # `/workspace` is the real main checkout.
   - id: worktree-copy-whole-tree-into-root
     command: "cd /workspace && cp -r /workspace/.claude/worktrees/agent-x/src ."
     axis: worktree-isolation

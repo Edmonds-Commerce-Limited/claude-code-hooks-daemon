@@ -165,3 +165,63 @@ def test_a_cd_back_to_main_after_a_worktree_cd_is_main_again() -> None:
 def test_a_cd_inside_a_subshell_does_not_leak() -> None:
     """`(cd tmp)` ends with the subshell, so the next command still runs in main."""
     assert _denied(f"(cd {TMP}); cp -r {WT}/src .")
+
+
+ABSOLUTE_DESTINATION_ALLOWED = [
+    f"cp -r {WT}/src /workspace/untracked/scratch/src",
+    f"cp -r {WT}/tests /workspace/untracked/scratch/tests/",
+    f"cp -r {WT}/src {TMP}/src/",
+    f"cp -r {WT}/src /elsewhere/src/",
+]
+
+
+@pytest.mark.parametrize("command", ABSOLUTE_DESTINATION_ALLOWED)
+def test_an_absolute_destination_is_judged_on_its_first_component_under_the_root(
+    command: str,
+) -> None:
+    """A code-dir NAME deeper in the path (`untracked/scratch/src`) is not a code dir."""
+    assert not _denied(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        f"cp -r {WT}/src /workspace/src",
+        f"cp -r {WT}/tests /workspace/tests/",
+        f"cp {WT}/src/x.py /workspace/src/x.py",
+        f"cp -r {WT}/src /workspace/",
+    ],
+)
+def test_an_absolute_destination_under_the_root_is_still_denied(command: str) -> None:
+    assert _denied(command)
+
+
+INSIDE_A_WORKTREE_DENIED = [
+    "cp src/x.py /workspace/src/",
+    "cp -r src /workspace/src",
+    "cp -r . /workspace/src",
+    "cp -t /workspace/src/ src/x.py",
+    "cp -r tests /workspace/tests/",
+]
+
+
+@pytest.mark.parametrize("command", INSIDE_A_WORKTREE_DENIED)
+def test_a_relative_source_inside_a_worktree_cwd_is_a_worktree_source(command: str) -> None:
+    assert _denied(command, cwd=WT)
+    assert _denied(f"cd {WT}; {command}")
+
+
+INSIDE_A_WORKTREE_ALLOWED = [
+    "cp src/x.py src/y.py",
+    "cp -r src backup",
+    f"cp -r src {WT}/backup",
+    "cp src/x.py /workspace/untracked/scratch/x.py",
+    "cp /workspace/src/x.py src/",
+    "cp -r /workspace/src .",
+    "cp ../other/x.py /workspace/src/",
+]
+
+
+@pytest.mark.parametrize("command", INSIDE_A_WORKTREE_ALLOWED)
+def test_copying_within_a_worktree_or_into_it_stays_allowed(command: str) -> None:
+    assert not _denied(command, cwd=WT)

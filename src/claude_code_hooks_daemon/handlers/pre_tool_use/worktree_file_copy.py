@@ -19,6 +19,7 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     strip_reserved_word_prefix,
 )
 from claude_code_hooks_daemon.utils.command_position import command_position_segments
+from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     peel_command_wrappers,
     resolve_shell_word,
@@ -155,10 +156,15 @@ def _effective_command(segment: str, depth: int = 0) -> str:
 #
 # How the destination is decided:
 #
-# * An explicit destination (`src/`, `./src`, `/abs/.../src`, `-t src/`) is a
-#   main-repo code dir when its first component, or for an absolute path any
-#   component, is one. This does not depend on the working directory, except
+# * An explicit destination (`src/`, `./src`, `/abs/root/src`, `-t src/`) is a
+#   main-repo code dir when its first component is one; an absolute one is read
+#   after the main checkout root it sits under (taken from the worktree paths in
+#   the command, the cwd, or the project root), and under no known root it is
+#   outside the project. This does not depend on the working directory, except
 #   that a relative destination inside a worktree cwd is that worktree's.
+# * When the cwd is inside a worktree, a relative SOURCE is a worktree path:
+#   `cp src/x.py /root/src/` run from a worktree is the same copy as
+#   `cp <wt>/src/x.py /root/src/`.
 # * A bare `.` destination is the working directory, so it depends on the cwd,
 #   which is tracked only from a LITERAL `cd`/`pushd` earlier in the same command
 #   (and the hook's own `cwd` field for where the command starts). A literal path
@@ -350,39 +356,46 @@ def _find_operands(args: list[str]) -> tuple[list[str], str | None, bool, bool] 
     return None
 
 
-def _next_cwd(words: list[str], cwd: _Cwd, code_dirs: tuple[str, ...]) -> _Cwd:
-    """The working directory after a `cd`/`pushd` command; `cwd` itself for any other command."""
+def _next_cwd(
+    words: list[str], cwd: tuple[_Cwd, str], code_dirs: tuple[str, ...]
+) -> tuple[_Cwd, str]:
+    """The working directory after a `cd`/`pushd` command; `cwd` itself for any other command.
+
+    The second member is the directory's path while it is inside a worktree (what a
+    relative source resolves against), else empty.
+    """
+    kind, path = cwd
     if not words or words[0].rsplit("/", 1)[-1] not in _CD_VERBS:
         return cwd
     operands = [word for word in words[1:] if word == "-" or not word.startswith("-")]
     if not operands:
-        return _Cwd.UNKNOWN
+        return _Cwd.UNKNOWN, ""
     target = operands[0]
     if target == "-" or any(char in target for char in "$`*?~"):
-        return _Cwd.UNKNOWN
+        return _Cwd.UNKNOWN, ""
     if _worktree_path(target) is not None:
-        return _Cwd.WORKTREE
+        return _Cwd.WORKTREE, target
     if target.startswith("/"):
         scratch = target == _SCRATCH_ROOT or target.startswith(_SCRATCH_ROOT + "/")
-        return _Cwd.UNKNOWN if scratch else _Cwd.MAIN
+        return (_Cwd.UNKNOWN if scratch else _Cwd.MAIN), ""
     parts = [part for part in target.split("/") if part not in {"", "."}]
     if not parts:
         return cwd
     if ".." in parts:
-        return _Cwd.UNKNOWN
-    if cwd is _Cwd.WORKTREE:
-        return _Cwd.WORKTREE
-    if cwd is _Cwd.MAIN and parts[0] in code_dirs:
-        return _Cwd.MAIN_CODE
-    return _Cwd.UNKNOWN
+        return _Cwd.UNKNOWN, ""
+    if kind is _Cwd.WORKTREE:
+        return _Cwd.WORKTREE, path.rstrip("/") + "/" + "/".join(parts)
+    if kind is _Cwd.MAIN and parts[0] in code_dirs:
+        return _Cwd.MAIN_CODE, ""
+    return _Cwd.UNKNOWN, ""
 
 
-def _initial_cwd(hook_input: dict[str, Any]) -> _Cwd:
+def _initial_cwd(hook_input: dict[str, Any]) -> tuple[_Cwd, str]:
     """The cwd the command starts in: a worktree when the hook says so, else the main checkout."""
     cwd = hook_input.get(HookInputField.CWD)
     if isinstance(cwd, str) and _worktree_path(cwd) is not None:
-        return _Cwd.WORKTREE
-    return _Cwd.MAIN
+        return _Cwd.WORKTREE, cwd
+    return _Cwd.MAIN, ""
 
 
 def _is_whole_tree_or_code(source: str, code_dirs: tuple[str, ...]) -> bool:
@@ -394,6 +407,53 @@ def _is_whole_tree_or_code(source: str, code_dirs: tuple[str, ...]) -> bool:
     return rest in {"", "."} or rest.split("/")[0] in code_dirs
 
 
+def _resolve_in_worktree(source: str, cwd_path: str) -> str:
+    """A relative source made absolute against a worktree cwd, so it is seen as a worktree path.
+
+    A source that is already absolute, uses `~`/`$`, is an option, or climbs with
+    `..` is returned as written: its place is not known from the cwd alone.
+    """
+    if source.startswith(("/", "~", "$", "-")) or ".." in source.split("/"):
+        return source
+    rest = "/".join(part for part in source.split("/") if part not in {"", "."})
+    return cwd_path.rstrip("/") + ("/" + rest if rest else "")
+
+
+def _main_roots(paths: list[str]) -> list[str]:
+    """The main checkouts that the absolute worktree paths in `paths` live under.
+
+    `/workspace/.claude/worktrees/x/src` is a worktree of `/workspace`. The project
+    root, when the daemon knows it, counts too (stripped to its checkout when the
+    daemon itself runs inside a worktree).
+    """
+    candidates = list(paths)
+    project_root = resolve_project_root()
+    if project_root:
+        candidates.append(project_root)
+    roots: list[str] = []
+    for path in candidates:
+        match = _WORKTREE_PATH.search(path)
+        root = path[: match.start(1)].rstrip("/") if match else path.rstrip("/")
+        if path.startswith("/") and root and root not in roots:
+            roots.append(root)
+    return roots
+
+
+def _bare_directory_is_main_code(
+    cwd: _Cwd,
+    code_dirs: tuple[str, ...],
+    sources: list[str],
+    recursive: bool,
+    fed: bool,
+) -> bool:
+    """Whether a destination that is the cwd itself (`.`, `./`) is main-repo code."""
+    if cwd is _Cwd.MAIN_CODE:
+        return True
+    if cwd is not _Cwd.MAIN:
+        return False
+    return recursive or fed or any(_is_whole_tree_or_code(s, code_dirs) for s in sources)
+
+
 def _destination_is_main_code(
     destination: str,
     cwd: _Cwd,
@@ -401,23 +461,34 @@ def _destination_is_main_code(
     sources: list[str],
     recursive: bool,
     fed: bool,
+    roots: list[str],
 ) -> bool:
-    """Whether the destination lands in the main checkout's code (see the block comment above)."""
+    """Whether the destination lands in the main checkout's code (see the block comment above).
+
+    An absolute destination is read relative to the main checkout root it sits
+    under, and only its FIRST component there counts, so `<root>/src/x` is code and
+    `<root>/untracked/scratch/src` is not. One under no known root is outside the
+    project and is not judged.
+    """
     if _worktree_path(destination) is not None:
         return False
     if destination.startswith("/"):
-        return any(part in code_dirs for part in destination.split("/"))
+        for root in roots:
+            if destination == root or destination.startswith(root + "/"):
+                rest = destination[len(root) :].strip("/")
+                if rest in {"", "."}:
+                    return _bare_directory_is_main_code(
+                        _Cwd.MAIN, code_dirs, sources, recursive, fed
+                    )
+                return rest.split("/")[0] in code_dirs
+        return False
     relative = destination
     while relative.startswith("./"):
         relative = relative[2:]
     if cwd is _Cwd.WORKTREE:
         return False
     if relative in {"", "."}:
-        if cwd is _Cwd.MAIN_CODE:
-            return True
-        if cwd is not _Cwd.MAIN:
-            return False
-        return recursive or fed or any(_is_whole_tree_or_code(s, code_dirs) for s in sources)
+        return _bare_directory_is_main_code(cwd, code_dirs, sources, recursive, fed)
     if cwd is _Cwd.MAIN_CODE:
         return not relative.startswith("..")
     return relative.split("/")[0] in code_dirs
@@ -520,7 +591,7 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
         # whether the stage feeding it named a worktree (see "Operand reading").
         cwd = _initial_cwd(hook_input)
         code_dirs = self._all_main_repo_code_dirs()
-        previous_names_worktree = False
+        previous_names_worktree = False  # a stage before an `xargs` that names a worktree
         for segment in command_position_segments(command):
             words = _command_words(segment)
             if words and words[0].rsplit("/", 1)[-1] in _CD_VERBS:
@@ -539,7 +610,7 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
     def _operands_relocate(
         self,
         words: list[str],
-        cwd: _Cwd,
+        cwd: tuple[_Cwd, str],
         code_dirs: tuple[str, ...],
         previous_names_worktree: bool,
     ) -> bool | None:
@@ -553,6 +624,8 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
         sources, destination, recursive, fed = copy
         if destination is None:
             return None
+        if cwd[0] is _Cwd.WORKTREE:
+            sources = [_resolve_in_worktree(source, cwd[1]) for source in sources]
         worktree_sources = [source for source in sources if _worktree_path(source)]
         if not (worktree_sources or fed):
             return False
@@ -561,8 +634,9 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
             # Within one worktree is fine; into ANOTHER worktree stays with the text patterns.
             same = any((_worktree_path(s) or ("",))[0] == into[0] for s in worktree_sources)
             return False if same else None
+        roots = _main_roots([*worktree_sources, cwd[1]] if cwd[1] else worktree_sources)
         return _destination_is_main_code(
-            destination, cwd, code_dirs, worktree_sources or sources, recursive, fed
+            destination, cwd[0], code_dirs, worktree_sources or sources, recursive, fed, roots
         )
 
     def _segment_relocates(self, command: str) -> bool:
