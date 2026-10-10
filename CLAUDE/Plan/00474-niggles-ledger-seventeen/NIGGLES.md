@@ -1465,7 +1465,7 @@ land in.
 
 **Source**: the Plan 00483 batch (b) round 2 review, carried from N383.
 
-**Evidence**: `secret_file_matching._git_grep_pattern_spans` and `command_position._blank_git_text` both place the pattern operand of `git grep`/`git log` by subcommand and option.
+**Evidence**: `secret_file_matching._git_grep_pattern_spans` and `command_position._blank_git_text` both place the pattern operand of `git grep` by subcommand and option. (`_blank_git_text` also covers `git log` and the other read-only subcommands; `_git_grep_pattern_spans` answers only for `grep`, so the duplication is `git grep`'s.)
 
 **Status**: ⬜ Open. Remedy: one reader, used by both.
 
