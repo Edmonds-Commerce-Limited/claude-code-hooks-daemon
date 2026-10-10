@@ -595,6 +595,19 @@ class TestOwnerOverride:
         assert result.decision == Decision.ALLOW
         assert not result.context
 
+    def test_a_raising_usage_loader_under_an_override_still_allows(self, tmp_path: Path) -> None:
+        """The gate is a SAFETY handler: an exception would become a DENY of every prompt."""
+        write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
+        handler = _handler(tmp_path, snapshot=_snapshot(five=95.0))
+
+        def boom(_now: float) -> UsageSnapshot | None:
+            raise RuntimeError("snapshot parse bug")
+
+        handler._usage_loader = boom
+        result = _run(handler, tmp_path, _input("owner: carry on"))
+        assert result.decision == Decision.ALLOW
+        assert not result.context
+
     def test_no_notice_without_usage_data(self, tmp_path: Path) -> None:
         write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
         handler = _handler(tmp_path, snapshot=None)

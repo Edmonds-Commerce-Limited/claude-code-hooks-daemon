@@ -300,10 +300,12 @@ class UsageOverride:
     """The owner's override in force for a session.
 
     ``until`` is the epoch end time the marker records, or None when the marker
-    exists but cannot be read (it still counts as an override, with no known end).
+    exists but cannot be read (it still counts as an override, with no known end, and
+    holds for as long as it stays unreadable). ``path`` is the marker's file.
     """
 
     until: float | None
+    path: Path
 
 
 def read_usage_override(
@@ -334,7 +336,7 @@ def _read_override_markers(path: Path, session_id: str, *, now: float) -> list[U
             exc,
             reason=f"an override marker {path} that exists but cannot be read counts as an active override with no known end, because the alternative is pausing a session the owner just released",
         )
-        return [UsageOverride(until=None)]
+        return [UsageOverride(until=None, path=path)]
     except ValueError as exc:
         log_and_continue(
             logger,
@@ -345,7 +347,7 @@ def _read_override_markers(path: Path, session_id: str, *, now: float) -> list[U
     if not isinstance(raw, dict) or raw.get(FIELD_SESSION_ID) != session_id:
         return []
     until = _as_number(raw.get(FIELD_UNTIL))
-    return [UsageOverride(until=until)] if until is not None and now < until else []
+    return [UsageOverride(until=until, path=path)] if until is not None and now < until else []
 
 
 def usage_override_active(daemon_untracked_dir: Path, session_id: str, *, now: float) -> bool:

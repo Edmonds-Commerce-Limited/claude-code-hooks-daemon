@@ -204,7 +204,8 @@ it does not end. Three handlers (`usage_pause_gate`, `usage_pause_tool_gate`,
   that session meanwhile, even with usage still over. While it is in force and
   a window is over its ceiling, every prompt carries a line naming the window,
   its percentage, the ceiling and the override's end time (UTC), so the session
-  knows the ceiling is suppressed. `usage-pause status` shows the state. A pause
+  knows the ceiling is suppressed. An override marker that cannot be read still
+  counts, with an unknown end, and is reported on every prompt. `usage-pause status` shows the state. A pause
   record is honoured for at most 8 days.
 - The resume cron's prompt starts `[tick:usage-resume]`. When it fires, usage is
   re-read: under the ceiling the pause lifts and the declared crons are

@@ -306,6 +306,17 @@ class TestOverrideEndTime:
             override = usage_pause.read_usage_override(tmp_path, _SESSION, now=_NOW)
         assert override is not None
         assert override.until is None
+        assert override.path == usage_pause.override_path(tmp_path, _SESSION)
+
+    def test_an_unreadable_marker_never_expires_while_it_stays_unreadable(
+        self, tmp_path: Path
+    ) -> None:
+        """Existing behaviour, pinned: only the marker's content carries an end time."""
+        usage_pause.write_usage_override(tmp_path, _SESSION, until=_NOW + 100, now=_NOW)
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(Path, "read_text", _raise_permission_error)
+            far = _NOW + 100 * 86400
+            assert usage_pause.read_usage_override(tmp_path, _SESSION, now=far) is not None
 
     def test_no_session_id_is_no_override(self, tmp_path: Path) -> None:
         assert usage_pause.read_usage_override(tmp_path, "", now=_NOW) is None

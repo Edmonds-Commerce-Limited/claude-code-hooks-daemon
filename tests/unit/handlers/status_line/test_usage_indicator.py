@@ -292,7 +292,10 @@ class TestPausedSession:
     def test_an_unreadable_record_shows_no_pause_and_does_not_raise(self, tmp_path: Path) -> None:
         self._pause(tmp_path)
         with patch.object(Path, "read_text", side_effect=PermissionError("denied")):
-            assert self._render_paused(tmp_path) is None
+            text = self._render_paused(tmp_path)
+        # A blanket read failure also makes the (absent) override marker unreadable;
+        # only the pause chip is under test here.
+        assert text is None or "⏸" not in text
 
     def test_another_session_shows_no_pause(self, tmp_path: Path) -> None:
         self._pause(tmp_path, session="someone-else")
@@ -542,6 +545,31 @@ class TestOverrideChip:
         text = self._render(tmp_path)
         assert text is not None
         assert "override until" in _plain(text)
+        assert f"{_YELLOW}override until" in text
+
+    def test_red_when_over_the_ceiling(self, tmp_path: Path) -> None:
+        write_usage_override(tmp_path, self._SESSION, until=NOW + 3600, now=NOW)
+        _feed("main_thread_fractional.json")
+        text = self._render(tmp_path)
+        assert text is not None
+        assert f"{_CRITICAL}override until" in text
+
+    def test_an_unreadable_marker_reads_end_unknown_in_red(self, tmp_path: Path) -> None:
+        write_usage_override(tmp_path, self._SESSION, until=NOW + 3600, now=NOW)
+        with patch.object(Path, "read_text", side_effect=PermissionError("denied")):
+            text = self._render(tmp_path)
+        assert text is not None
+        assert f"{_CRITICAL}override (end unknown)" in text
+
+    def test_a_raising_usage_read_does_not_raise(self, tmp_path: Path) -> None:
+        write_usage_override(tmp_path, self._SESSION, until=NOW + 3600, now=NOW)
+        _feed("main_thread_fractional.json")
+        with patch(
+            "claude_code_hooks_daemon.utils.usage_pause_gate.find_breaches",
+            side_effect=RuntimeError("bug"),
+        ):
+            text = self._render(tmp_path)
+        assert text is None or "override" not in text
 
     def test_a_later_day_carries_its_date(self, tmp_path: Path) -> None:
         until = write_usage_override(tmp_path, self._SESSION, until=NOW + 2 * 86400, now=NOW)
@@ -579,11 +607,6 @@ class TestOverrideChip:
         text = self._render(tmp_path)
         assert text is not None
         assert "override" not in text
-
-    def test_an_unreadable_marker_shows_no_chip_and_does_not_raise(self, tmp_path: Path) -> None:
-        write_usage_override(tmp_path, self._SESSION, until=NOW + 3600, now=NOW)
-        with patch.object(Path, "read_text", side_effect=PermissionError("denied")):
-            assert self._render(tmp_path) is None
 
     def test_the_explanation_describes_the_chip(self) -> None:
         explanation = UsageIndicatorHandler().explain_segment()

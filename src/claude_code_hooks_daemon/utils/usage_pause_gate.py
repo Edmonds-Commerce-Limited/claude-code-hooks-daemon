@@ -579,37 +579,58 @@ def override_end_text(until: float, *, now: float) -> str:
     return f"{end:%Y-%m-%d %H:%M} UTC"
 
 
-def override_notice(hook_input: Mapping[str, Any], env: PauseEnvironment) -> str | None:
-    """The line telling a session the owner's override suppresses its ceiling, or None.
+def override_notices(hook_input: Mapping[str, Any], env: PauseEnvironment) -> list[str]:
+    """The line telling a session the owner's override suppresses its ceiling; ``[]`` for none.
 
-    Only while an override with a known end is in force for the session AND a window is
-    over its ceiling, so it changes no decision and never nags. No data, no ceiling or an
-    unreadable marker say nothing (Task 4.7). Total: the project context, the marker reader
-    and the usage reading each fail open on their own.
+    With a readable marker: only while a window is over its ceiling, so it never nags.
+    With a marker that exists but cannot be read (the override still holds, with no known
+    end): always, because that override would otherwise be silent. No data and no ceiling
+    say nothing (Task 4.7). Total: this runs inside a SAFETY handler, where the chain turns
+    any exception into a DENY of the prompt, so a failure is no notice.
     """
+    try:
+        return _override_notices(hook_input, env)
+    except Exception as exc:
+        # Deliberately broad, as in try_start_pause: a notice is advice only.
+        log_and_continue(
+            logger,
+            exc,
+            reason="an evaluation that raises means no override notice ([]): this runs inside a SAFETY handler and the chain would turn any exception from one into a DENY of the prompt",
+        )
+        return []
+
+
+def _override_notices(hook_input: Mapping[str, Any], env: PauseEnvironment) -> list[str]:
     session_id = str(hook_input.get(HookInputField.SESSION_ID) or "")
     if not session_id or is_synthetic_event(hook_input):
-        return None
+        return []
     now = env.clock()
     directory = untracked_dir()
     if directory is None:
-        return None
+        return []
     override = read_usage_override(directory, session_id, now=now)
-    if override is None or override.until is None:
-        return None
+    if override is None:
+        return []
+    if override.until is None:
+        return [
+            "USAGE CEILING SUPPRESSED: the owner's override (`usage-pause clear`) suppresses "
+            f"the pause, and its marker cannot be read ({override.path}), so its end is "
+            "unknown and it holds until the marker is fixed or deleted. This session is NOT "
+            "paused even if usage is over the ceiling."
+        ]
     breaches = current_breaches(hook_input, env)
     if not breaches:
-        return None
+        return []
     over = "; ".join(
         f"{b.window} at {_percent(b.used_percentage)} (ceiling {_percent(b.ceiling)})"
         for b in breaches
     )
-    return (
+    return [
         f"USAGE CEILING SUPPRESSED: {over}. The owner's override (`usage-pause clear`) "
         f"suppresses the pause until {override_end_text(override.until, now=now)}, so this "
         "session is NOT paused although usage is over the ceiling. Usage can reach the "
         "account's hard limit, and then requests fail with HTTP 429, while the override lasts."
-    )
+    ]
 
 
 def clear_pause(session_id: str) -> bool:

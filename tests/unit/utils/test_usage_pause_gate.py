@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.utils.usage_pause import (
     WINDOW_FIVE_HOUR,
     WINDOW_SEVEN_DAY,
     UsagePause,
+    override_path,
     read_usage_pause,
     write_usage_override,
     write_usage_pause,
@@ -671,7 +672,9 @@ class TestOverrideNotice:
         self, tmp_path: Path, snapshot: UsageSnapshot | None, now: float = _NOW
     ) -> str | None:
         with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
-            return gate.override_notice(self._input(), self._env(snapshot, now))
+            notices = gate.override_notices(self._input(), self._env(snapshot, now))
+        assert len(notices) <= 1
+        return notices[0] if notices else None
 
     def test_names_the_window_percentage_ceiling_and_end_time(self, tmp_path: Path) -> None:
         write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
@@ -716,20 +719,40 @@ class TestOverrideNotice:
         write_usage_override(tmp_path, "someone-else", until=_NOW + 3600, now=_NOW)
         assert self._notice(tmp_path, _snapshot(seven=97.0)) is None
 
-    def test_silent_when_the_marker_cannot_be_read(self, tmp_path: Path) -> None:
-        """No end time is known, so there is nothing true to say about it."""
+    @pytest.mark.parametrize("snapshot", [_snapshot(seven=97.0), _snapshot(seven=10.0), None])
+    def test_an_unreadable_marker_is_said_with_its_path_and_unknown_end(
+        self, tmp_path: Path, snapshot: UsageSnapshot | None
+    ) -> None:
+        """The override still holds (existing decision), so it is never a silent one."""
         write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
         with patch.object(Path, "read_text", side_effect=PermissionError("denied")):
-            assert self._notice(tmp_path, _snapshot(seven=97.0)) is None
+            notice = self._notice(tmp_path, snapshot)
+        assert notice is not None
+        assert "cannot be read" in notice
+        assert str(override_path(tmp_path, _SESSION)) in notice
+        assert "end is unknown" in notice
 
     def test_silent_without_a_project_context(self) -> None:
         with patch.object(ProjectContext, "daemon_untracked_dir", side_effect=RuntimeError("x")):
-            assert gate.override_notice(self._input(), self._env(_snapshot(seven=97.0))) is None
+            hook_input = self._input()
+            assert gate.override_notices(hook_input, self._env(_snapshot(seven=97.0))) == []
 
     def test_silent_for_an_empty_session_id(self, tmp_path: Path) -> None:
         with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
             hook_input = self._input("")
-            assert gate.override_notice(hook_input, self._env(_snapshot(seven=97.0))) is None
+            assert gate.override_notices(hook_input, self._env(_snapshot(seven=97.0))) == []
+
+    def test_a_usage_loader_that_raises_is_no_notice_not_an_exception(self, tmp_path: Path) -> None:
+        write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
+
+        def boom(_now: float) -> UsageSnapshot | None:
+            raise RuntimeError("snapshot parse bug")
+
+        env = gate.PauseEnvironment(
+            clock=lambda: _NOW, config_loader=self._config, usage_loader=boom
+        )
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            assert gate.override_notices(self._input(), env) == []
 
 
 class TestOverrideEndText:
