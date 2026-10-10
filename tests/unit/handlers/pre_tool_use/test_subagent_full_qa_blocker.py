@@ -2839,9 +2839,7 @@ class TestThePytestOptionsOfALaterRelease:
         command = f"pytest {option} tests/unit/qa/test_run_test_matrix.py"
         assert find_full_qa_invocation(command, _patterns(), cwd=_REPO_ROOT) is None
 
-    @pytest.mark.parametrize(
-        "option", _PYTEST_9_1_CORE_VALUE_OPTIONS + _LATER_PLUGIN_VALUE_OPTIONS
-    )
+    @pytest.mark.parametrize("option", _PYTEST_9_1_CORE_VALUE_OPTIONS + _LATER_PLUGIN_VALUE_OPTIONS)
     def test_a_later_value_option_takes_its_value(self, option: str) -> None:
         command = f"pytest {option} tests tests/unit/qa/test_run_test_matrix.py"
         assert find_full_qa_invocation(command, _patterns(), cwd=_REPO_ROOT) is None
