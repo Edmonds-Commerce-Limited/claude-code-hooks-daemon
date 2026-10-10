@@ -132,7 +132,7 @@ def collect_in_file_hatches(root: Path, files: Iterable[Path]) -> list[Exception
 
     A line whose reason is the ``<reason>`` placeholder is documentation naming
     the hatch, not a declaration. A file that is not UTF-8 text is read with
-undecodable bytes replaced.
+    undecodable bytes replaced.
     """
     records: list[ExceptionRecord] = []
     for relative in files:
