@@ -1539,9 +1539,13 @@ whole-suite run that held no lock, but let the `-n 2` run through. xdist is not 
 Task 3.2 declined it, so nothing is exposed today. The gate's refusal should not depend on which plugins happen to be
 installed.
 
-**Status**: ⬜ Open. Remedy: find why the gate's check does not fire under xdist (the sink plugin or the whole-suite
-detection on the controller versus the workers) and make it refuse there too, with a test that installs nothing (for
-example, simulate the xdist controller's options).
+**Status**: ✅ Fixed on branch `agent-ab9769c816332d0b8-fc3ca42b`. Cause: workers are exempt and the controller never
+collects, so `pytest_collection_modifyitems` judged nothing. `full_qa_gate.pytest_xdist_node_collection_finished`
+(an `optionalhook`) now judges the ids a worker collected, on the controller, which holds the lock. Tests simulate the
+controller with a plugin and a copy of xdist's hookspec. A real xdist 3.8.0 in a throwaway venv (reviewer) refused `-n 2`
+with rc=1. A `pytest_configure` check refuses the run when the controller is active and the hook has no spec, so a
+renamed hook cannot fail the gate open.
+Report: `subagent-reports/261010-n382-n392-sonnet.md`.
 
 ### N391 — the install-mode detector's anchored-check rule and its skips are wider than they need to be
 
@@ -1777,7 +1781,12 @@ never selected the test. The test finds its handlers with `pkgutil` and a source
 module, so an import-based selector cannot reach it. This is the same shape as N380: a whole-repo property test that
 lives far from the module that breaks it.
 
-**Status**: 🔄 The regression is fixed on main (a PARTIAL verdict row, with its reason). Still open: the selector
+**Status**: ✅ Fixed on branch `agent-ab9769c816332d0b8-fc3ca42b`: a declared rule in `scripts/qa/changed_tests_map.yaml`
+pins the 23 enumerating tests for any file under `handlers/` (1610 tests, 64 s with `--no-cov`, so every handler change
+now costs about a minute more); `tests/unit/qa/test_handler_enumerating_tests_are_selected.py` checks each still
+enumerates and that no test under `tests/` that walks the handlers package (or, under `tests/integration`, asks the
+registry for them) is missing. Earlier note: the regression was
+fixed on main (a PARTIAL verdict row, with its reason). The original remedy text follows: the selector
 should always run the tests that enumerate every handler whenever any file under `handlers/` changes. Two walk the
 package with `pkgutil.walk_packages` (blindness coverage, guidance coverage), and template consistency enumerates
 through `HandlerRegistry.discover()`. The selector's map sends `handlers/pre_tool_use/*.py` only to

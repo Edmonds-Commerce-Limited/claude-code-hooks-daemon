@@ -188,6 +188,114 @@ class TestWholeSuiteSizedRunSucceedsWithTheLock:
         assert "REFUSED" not in result.stdout
 
 
+#: Stands in for the pytest-xdist controller without installing it (N392).
+#: The controller's `pytest_collection` returns True, so it collects nothing and
+#: `pytest_collection_modifyitems` never fires there; it learns what the
+#: workers collected only through `pytest_xdist_node_collection_finished(node,
+#: ids)`. This plugin short-circuits collection and calls that hook through
+#: `session.config.hook`, so a misspelt hook name in the gate is caught. `_Spec`
+#: is a copy of xdist's hookspec; `__GLOB__` picks the test files whose ids the
+#: "workers" report.
+_XDIST_CONTROLLER_PLUGIN = """\
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+
+class _Spec:
+    @pytest.hookspec
+    def pytest_xdist_node_collection_finished(self, node, ids):
+        pass
+
+
+def pytest_addhooks(pluginmanager):
+    if __WITH_SPEC__:
+        pluginmanager.add_hookspecs(_Spec)
+
+
+def pytest_collection(session):
+    ids = [f"{p.as_posix()}::test_ok" for p in sorted(Path("tests").rglob("__GLOB__"))]
+    session.config.hook.pytest_xdist_node_collection_finished(
+        node=SimpleNamespace(config=session.config), ids=ids
+    )
+    return True
+"""
+
+
+class TestXdistControllerIsJudgedToo:
+    """N392: the controller collects nothing, so the gate must judge the ids
+    the workers report, or `-n 2` runs a whole suite with no lock."""
+
+    def _run(
+        self,
+        root: Path,
+        *,
+        glob: str = "test_*.py",
+        with_spec: bool = True,
+        extra_fds: tuple[int, ...] = (),
+    ) -> subprocess.CompletedProcess[str]:
+        plugin = _XDIST_CONTROLLER_PLUGIN.replace("__GLOB__", glob).replace(
+            "__WITH_SPEC__", repr(with_spec)
+        )
+        (root / "simxdist.py").write_text(plugin)
+        # xdist registers its controller as the plugin named "dsession".
+        (root / "dsession.py").write_text("")
+        env = {**os.environ, "PYTHONPATH": f"{SRC_ROOT}{os.pathsep}{root}"}
+        return subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                *_FORCED_PLUGIN_ARGS,
+                "-p",
+                "simxdist",
+                "-p",
+                "dsession",
+                "tests/",
+            ],
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            pass_fds=extra_fds,
+            timeout=Timeout.REQUEST_LONG,
+            check=False,
+        )
+
+    def test_a_whole_suite_reported_by_workers_without_the_lock_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        _write_fixture_suite(tmp_path, file_count=4)
+        result = self._run(tmp_path)
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "REFUSED" in result.stdout
+
+    def test_the_same_report_with_the_lock_held_is_not_refused(self, tmp_path: Path) -> None:
+        _write_fixture_suite(tmp_path, file_count=4)
+        with acquire_full_qa_lock(tmp_path) as fd:
+            os.set_inheritable(fd, True)
+            result = self._run(tmp_path, extra_fds=(fd,))
+        assert "REFUSED" not in result.stdout, result.stdout + result.stderr
+
+    def test_a_small_report_is_not_refused(self, tmp_path: Path) -> None:
+        _write_fixture_suite(tmp_path, file_count=4)
+        # One file of the four is under the threshold: only the ids differ.
+        result = self._run(tmp_path, glob="test_f0.py")
+        assert "REFUSED" not in result.stdout, result.stdout + result.stderr
+
+    def test_a_controller_whose_hook_does_not_exist_is_refused_not_ignored(
+        self, tmp_path: Path
+    ) -> None:
+        """If xdist stops offering the hook, an `optionalhook` impl would silently never run."""
+        _write_fixture_suite(tmp_path, file_count=4)
+        result = self._run(tmp_path, with_spec=False, glob="test_f0.py")
+        output = result.stdout + result.stderr
+        assert result.returncode == 1, output
+        assert "REFUSED" in output, output
+        assert "pytest_xdist_node_collection_finished" in output
+
+
 _FORCED_PLUGIN_ARGS: list[str] = ["-p", "claude_code_hooks_daemon_full_qa_gate_loader"]
 
 
