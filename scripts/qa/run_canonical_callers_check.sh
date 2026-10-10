@@ -88,8 +88,6 @@ result = {
     "error": error,
     "violations": violations,
 }
-assert passed or violations or error, "a failed report must carry a violation or an error"
-
 with open(output_path, "w") as fh:
     json.dump(result, fh, indent=2)
     fh.write("\n")

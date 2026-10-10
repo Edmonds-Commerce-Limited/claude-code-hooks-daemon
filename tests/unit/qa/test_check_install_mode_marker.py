@@ -361,6 +361,38 @@ _PY_ANCHORED_DECISIONS: Final[dict[str, str]] = {
         "def f(g):\n"
         "    return g((REPO_ROOT / 'src' / 'claude_code_hooks_daemon').exists())\n"
     ),
+    "positive-if-returning-a-path": (
+        "from pathlib import Path\n"
+        "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+        "def f():\n"
+        "    if (REPO_ROOT / 'src' / 'claude_code_hooks_daemon').is_dir():\n"
+        "        return REPO_ROOT / 'untracked'\n"
+        "    return REPO_ROOT / '.claude' / 'hooks-daemon' / 'untracked'\n"
+    ),
+    "negated-if-returning-a-path": (
+        "from pathlib import Path\n"
+        "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+        "def f():\n"
+        "    if not (REPO_ROOT / 'src' / 'claude_code_hooks_daemon').is_dir():\n"
+        "        return REPO_ROOT / '.claude' / 'hooks-daemon' / 'untracked'\n"
+        "    return REPO_ROOT / 'untracked'\n"
+    ),
+    "positive-if-returning-a-literal": (
+        "from pathlib import Path\n"
+        "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+        "def f():\n"
+        "    if (REPO_ROOT / 'src' / 'claude_code_hooks_daemon').is_dir():\n"
+        "        return 2\n"
+        "    return 0\n"
+    ),
+    "negated-if-returning-a-string": (
+        "from pathlib import Path\n"
+        "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+        "def f():\n"
+        "    if not (REPO_ROOT / 'src' / 'claude_code_hooks_daemon').is_dir():\n"
+        "        return 'client'\n"
+        "    return 'self'\n"
+    ),
     "if-guard-whose-body-also-assigns": (
         "from pathlib import Path\n"
         "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
@@ -409,7 +441,14 @@ _PY_ANCHORED_GUARDS: Final[dict[str, str]] = {
             "not (REPO_ROOT / 'src' / 'claude_code_hooks_daemon').is_dir()",
             "print('no source tree')",
         ),
-        "positive-test": ("(REPO_ROOT / 'src' / 'claude_code_hooks_daemon').is_dir()", "return 2"),
+        "bare-return": (
+            "not (REPO_ROOT / 'src' / 'claude_code_hooks_daemon').is_dir()",
+            "return",
+        ),
+        "return-none": (
+            "not (REPO_ROOT / 'src' / 'claude_code_hooks_daemon').is_dir()",
+            "return None",
+        ),
     }.items()
 }
 
@@ -473,12 +512,20 @@ class TestOnlyReleasedUpgradeGuidesAreFrozen:
 
         assert [v.file for v in checker.scan_tree(tmp_path)] == [relative]
 
-    def test_the_cutoff_is_the_version_the_repository_is_at(self, checker: ModuleType) -> None:
-        from claude_code_hooks_daemon.version import __version__
+    @pytest.mark.parametrize(
+        ("version", "expected"),
+        [("3.69.0", (3, 69, 0)), ("3.70.0rc1", (3, 70, 0)), ("4.0", (4, 0))],
+    )
+    def test_the_cutoff_is_the_version_the_repository_is_at(
+        self,
+        checker: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        version: str,
+        expected: tuple[int, ...],
+    ) -> None:
+        monkeypatch.setattr(checker, "__version__", version)
 
-        current = tuple(int(part) for part in __version__.split("."))
-
-        assert checker.released_guide_cutoff() == current
+        assert checker.released_guide_cutoff() == expected
 
 
 _SUPERVISOR_LAYOUTS: Final[dict[str, str]] = {

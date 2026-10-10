@@ -100,6 +100,7 @@ _SUPERVISOR_PARTS: Final[tuple[str, ...]] = (".claude", "ccy", "claude-supervise
 #: Where upgrade guides live: ``CLAUDE/UPGRADES/<major>/v<from>-to-v<to>/``.
 _UPGRADES_PARTS: Final[tuple[str, ...]] = ("CLAUDE", "UPGRADES")
 _GUIDE_DEPTH: Final[int] = 4
+_RELEASE_NUMBERS: Final[re.Pattern[str]] = re.compile(r"\d+(?:\.\d+)*")
 _GUIDE_DIR: Final[re.Pattern[str]] = re.compile(r"^v\d+(?:\.\d+)*-to-v(?P<target>\d+(?:\.\d+)*)$")
 
 #: Gitignored runtime state and other checkouts, never project source. Matched
@@ -355,9 +356,22 @@ def _ends_at_marker(parts: list[str | None]) -> bool:
 
 
 def _is_exit_statement(statement: ast.stmt) -> bool:
-    """A statement that only leaves or reports: return, raise, ``exit()``, ``print()``."""
-    if isinstance(statement, ast.Return | ast.Raise):
+    """A statement that only leaves or reports, never hands a chosen value back.
+
+    A bare ``return``, a literal int/None return (an exit code), a ``raise``,
+    ``exit()`` or ``print()``. ``return <path>`` is a choice between directories.
+    """
+    if isinstance(statement, ast.Raise):
         return True
+    if isinstance(statement, ast.Return):
+        value = statement.value
+        return value is None or (
+            isinstance(value, ast.Constant)
+            and (
+                value.value is None
+                or (isinstance(value.value, int) and not isinstance(value.value, bool))
+            )
+        )
     if not (isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call)):
         return False
     func = statement.value.func
@@ -381,10 +395,16 @@ def _guard_checks(tree: ast.Module) -> set[int]:
         if not isinstance(node, ast.If):
             continue
         test = node.test
-        if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
-            test = test.operand
-        if isinstance(test, ast.Call) and _only_exits(node.body) and _only_exits(node.orelse):
-            guards.add(id(test))
+        # Only the NEGATED form is a guard ("fail if the tree is missing");
+        # a positive test that exits is choosing a branch on the answer.
+        if not (isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not)):
+            continue
+        if (
+            isinstance(test.operand, ast.Call)
+            and _only_exits(node.body)
+            and _only_exits(node.orelse)
+        ):
+            guards.add(id(test.operand))
     return guards
 
 
@@ -485,7 +505,11 @@ def released_guide_cutoff() -> tuple[int, ...]:
 
 
 def _version_tuple(text: str) -> tuple[int, ...]:
-    return tuple(int(part) for part in text.split("."))
+    """Dotted numbers; a pre-release suffix (``0rc1``) keeps its leading digits."""
+    release = _RELEASE_NUMBERS.match(text)
+    if release is None:
+        raise ValueError(f"not a version number: {text!r}")
+    return tuple(int(part) for part in release.group().split("."))
 
 
 def _is_released_guide(parts: tuple[str, ...]) -> bool:

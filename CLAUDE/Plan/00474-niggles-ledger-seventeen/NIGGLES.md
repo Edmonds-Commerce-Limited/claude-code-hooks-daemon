@@ -1543,8 +1543,9 @@ which approved the merge and left these as non-blocking.
 
 **Status**: ✅ Fixed in `scripts/qa/check_install_mode_marker.py`.
 
-- (a) An anchored check is exempt only as the whole test (or its `not`) of an `if` whose branches only return, raise,
-  exit or print. The five missed shapes (and an `if` whose body also assigns) are tests in
+- (a) An anchored check is exempt only as the operand of a `not` that is the whole test of an `if` whose branches
+  only do a bare `return`, a literal int/None `return`, raise, exit or print (a positive test, or a `return <path>`,
+  chooses a directory and is flagged). The five missed shapes (and an `if` whose body also assigns) are tests in
   `tests/unit/qa/test_check_install_mode_marker.py`.
 - (b) Only a guide under `CLAUDE/UPGRADES/<major>/v<from>-to-v<to>/` whose target is at or below the repository's
   `__version__` is skipped; `v3/` scripts, a guide for a later version, `UNRELEASED/` and `upgrade-template/` are
