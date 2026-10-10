@@ -268,11 +268,13 @@ feedback loop.
   **First real pause, 2026-10-08 14:52 UTC**
   ([report](subagent-reports/261010-p479-first-real-pause-sonnet.md)):
 
-  - The seven-day window reached 80%. The gate denied tools, and the session replaced its crons with
-    the resume cron through real `CronDelete`/`CronCreate` calls. Steps one and two are observed.
+  - The seven-day window reached 80% and the gate denied tools: step one is observed. The session made no cron calls
+    before the owner cleared the pause seven minutes later, so the cron swap (step two) is still unobserved; the
+    only cron calls after it restored the crons the pause had removed.
   - The owner then lifted the pause with `! bin/hooks-daemon usage-pause clear`, so the resume tick was not observed.
-  - On 2026-10-10 the gate did lift a later pause by itself: the first prompt after the window reset re-read usage
-    and released the session.
+  - On 2026-10-10 at 09:35 UTC the gate lifted a later pause by itself, on an `issue-sdlc` tick: it re-read usage,
+    found it back under the ceiling, and released the session about 22.5 hours before the pause's recorded resume
+    (2026-10-11 08:02). So an early lift on falling usage is observed; a lift at the resume time is not.
   - Still open: Task 6.1. The override hid the window's climb to 100%.
 
   Left unticked until Phase 6 lands.
