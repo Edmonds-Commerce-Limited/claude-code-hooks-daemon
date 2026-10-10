@@ -16,23 +16,23 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
-from claude_code_hooks_daemon.utils.command_evasion import (
-    OPTIONAL_PATH,
-    OPTIONAL_SUDO,
-    PIPE_AT_LINE_END,
-    STDIN_OPERANDS,
-)
+from claude_code_hooks_daemon.utils.command_evasion import PIPE_AT_LINE_END, STDIN_OPERANDS
 from claude_code_hooks_daemon.utils.command_position import (
     SEGMENT_SEPARATORS,
     command_position_view,
 )
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     DATA_SINKS,
+    UnplaceableSubstitutionError,
+    peel_command_wrappers,
     quoted_heredoc_command_words,
     resolve_shell_word,
+    segment_command_chain,
     shell_word_spans,
+    split_unquoted,
     split_unquoted_spans,
     strip_quoted_heredoc_bodies,
+    substitution_inner_spans,
 )
 
 # Full first-fire teaching content (Plan 00116): reuses the pre-migration
@@ -57,7 +57,7 @@ _CURL_PIPE_SHELL_VERBOSE_CONTENT = (
 
 # Interpreters that execute piped content as code. Piping network content to any of
 # these is a remote-code-execution risk and must be blocked.
-_PIPED_INTERPRETERS = ("bash", "sh", "zsh", "ksh", "dash", "python", "perl", "ruby")
+_PIPED_INTERPRETERS = ("bash", "sh", "zsh", "ksh", "dash", "python", "perl", "ruby", "node")
 
 # The allowlist of heredoc receivers that consume a body as DATA is imported
 # from `utils.shell_segmentation` rather than defined here. It WAS defined
@@ -81,49 +81,30 @@ _PIPED_INTERPRETERS = ("bash", "sh", "zsh", "ksh", "dash", "python", "perl", "ru
 # safe habit this handler's own guidance recommends.
 _INTERPRETER_VERSION_SUFFIX = r"(?:\d[\d.]*)?"
 
-# Pattern: (curl|wget) ... | [sudo [flags]] [path/]<interpreter>[version]
-# - OPTIONAL_SUDO allows arbitrary sudo flags before the interpreter
-#   (e.g. "sudo -E bash", "sudo -E -H sh"), not just bare "sudo".
-# - OPTIONAL_PATH allows the interpreter to be named by path. Without it,
-#   `curl URL | /bin/bash` was ALLOWED while `curl URL | bash` was denied —
-#   and /bin/bash is how install docs commonly spell it, so the bypass was
-#   more likely to be typed by accident than on purpose.
-# - the interpreter alternation covers every shell/scripting interpreter in
-#   _PIPED_INTERPRETERS, not just bash/sh.
-_CURL_PIPE_SHELL_PATTERN = (
-    r"\b(curl|wget)\b.*\|\s*"
-    + OPTIONAL_SUDO
-    + OPTIONAL_PATH
-    + r"("
-    + "|".join(_PIPED_INTERPRETERS)
-    + r")"
-    + _INTERPRETER_VERSION_SUFFIX
-    + r"\b"
+# A command word that IS an interpreter: its basename, optionally versioned,
+# nothing else. `/bin/bash` and `python3.12` match; `sha256sum`, `bash.sh` and
+# `python.list` do not, so `curl URL | sudo tee /etc/apt/python.list` is data.
+_INTERPRETER_NAME = re.compile(
+    "(?:" + "|".join(_PIPED_INTERPRETERS) + ")" + _INTERPRETER_VERSION_SUFFIX, re.IGNORECASE
 )
 
-# The same tail, matched WITHOUT requiring a curl/wget in front: "this command
-# pipes into an interpreter somewhere". Being a data sink says nothing about
-# what CONSUMES the sink's output, and the receiving-segment scan only looks
-# LEFT of the `<<` opener, so it cannot see a pipe that follows the CLOSER --
-# `(cat <<'X' … X) | bash` fed a recognised sink and executed the body anyway.
-#
-# Only ever applied to a command whose quoted heredoc bodies are already
-# BLANKED. Applied to the raw text it would find the `| bash` written inside
-# the documentation body being exempted, and deny the very case the exemption
-# exists to serve.
-_PIPE_INTO_INTERPRETER_PATTERN = (
-    r"\|\s*"
-    + OPTIONAL_SUDO
-    + OPTIONAL_PATH
-    + r"("
-    + "|".join(_PIPED_INTERPRETERS)
-    + r")"
-    + _INTERPRETER_VERSION_SUFFIX
-    + r"\b"
-)
+# A pipe operator (`|` or `|&`) but not the `||` of an or-list.
+_PIPE_OPERATOR = re.compile(r"(?<!\|)\|(?!\|)&?")
+_ENV_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+# A word that is not resolvable stands in as this, so it can never be a wrapper.
+_UNREADABLE_WORD = "\x00"
+# What closes the text a pipe stage can sit in, glued to the stage's last word.
+_CLOSING_SYNTAX = ")`'\""
 
 _DOWNLOADER = re.compile(r"\b(?:curl|wget)\b", re.IGNORECASE)
+_DOWNLOADER_NAMES = frozenset({"curl", "wget"})
 _SHELL_NAMES = frozenset({"bash", "sh", "zsh", "ksh", "dash"})
+# Commands that run the file or stream they are given in the current shell.
+_SOURCE_NAMES = frozenset({"source", "."})
+_EVAL = "eval"
+_PROCESS_SUBSTITUTION_OPEN = "<("
+_COMMAND_SUBSTITUTION_OPEN = "$("
+_BACKTICK = "`"
 # A redirect word: `2>&1`, `>out`, `<in`, `&>f`.
 _REDIRECT_WORD = re.compile(r"[0-9]*[<>]|&>")
 # Options that take their value as the NEXT word, per interpreter.
@@ -131,6 +112,7 @@ _VALUE_OPTIONS = {
     "python": frozenset({"-W", "-X"}),
     "perl": frozenset({"-I"}),
     "ruby": frozenset({"-I", "-r"}),
+    "node": frozenset({"-r"}),
 }
 # A short-option cluster that carries the program: python `-c`/`-m`, perl and
 # ruby `-e`/`-E` (`-pe`, `-lane`).
@@ -138,6 +120,7 @@ _PROGRAM_OPTION = {
     "python": re.compile(r"-[bBdEiIOqsSuUvx]*[cm]"),
     "perl": re.compile(r"-[0-9acCdDFilnpsStTuUvwWxX]*[eE]"),
     "ruby": re.compile(r"-[acdlnpsSvwWxy]*e"),
+    "node": re.compile(r"-[ep]+"),
 }
 
 
@@ -175,27 +158,175 @@ def _stage_reads_stdin_as_code(words: list[str | None]) -> bool:
     return True
 
 
+def _resolved_words(text: str) -> list[str | None]:
+    """The words of ``text`` after quote removal; ``None`` for one that cannot be read."""
+    return [resolve_shell_word(text[a:b]) for a, b in shell_word_spans(text)]
+
+
+def _command_start(words: list[str | None]) -> int:
+    """Index of the word that names the command ``words`` run.
+
+    Skips leading `VAR=value` assignments and the shared wrapper table
+    (`sudo -u bob`, `env`, `nice -n 5`, `timeout 60`, `command`), in any
+    order. ``len(words)`` means nothing is left to run.
+    """
+    argv = [_UNREADABLE_WORD if word is None else word.lower() for word in words]
+    index = 0
+    while index < len(argv):
+        _, step = peel_command_wrappers(argv[index:])
+        index += step
+        if index < len(argv) and _ENV_ASSIGNMENT.match(argv[index]):
+            index += 1
+            continue
+        break
+    return index
+
+
+def _interpreter_head(words: list[str]) -> int | None:
+    """Index of the interpreter ``words`` run, or None when they run something else.
+
+    The closing syntax of the text the stage sits in (`$(curl x | sh)`,
+    `'curl x | sh'`) is glued to its last word, so it is not part of the name.
+    """
+    start = _command_start(list(words))
+    if start >= len(words):
+        return None
+    name = words[start].rstrip(_CLOSING_SYNTAX).rsplit("/", 1)[-1]
+    return start if _INTERPRETER_NAME.fullmatch(name) else None
+
+
+def _stage_words(text: str) -> tuple[list[str], list[str | None]]:
+    """A pipe stage's words as written, and the same words after quote removal."""
+    spans = shell_word_spans(text)
+    if spans and spans[-1][1] == len(text.rstrip()):
+        raw = [text[a:b] for a, b in spans]
+        return raw, [resolve_shell_word(word) for word in raw]
+    # An unterminated quote: the stage runs on inside quoted text.
+    raw = text.split()
+    return raw, [None] * len(raw)
+
+
+def _piped_interpreter_stages(view: str) -> list[tuple[int, list[str | None]]]:
+    """Every pipe stage of ``view`` that runs an interpreter, as ``(pipe offset, words)``.
+
+    ``words`` start at the interpreter, past any wrapper in front of it, so
+    `| env python3` and `| sudo -u bob python3` are stages of `python3`. A word
+    that cannot be resolved (it sits in quoted text that goes on past the
+    stage) is named by its own text, as the pipe scan always did.
+    """
+    spans = split_unquoted_spans(view, SEGMENT_SEPARATORS)
+    stages: list[tuple[int, list[str | None]]] = []
+    for pipe in _PIPE_OPERATOR.finditer(view):
+        at = pipe.end()
+        while at < len(view) and view[at] in " \t":
+            at += 1
+        end = next((e for s, e in spans if s <= at <= e), len(view))
+        text = view[at:end]
+        raw, words = _stage_words(text)
+        named = [
+            word.strip("'\"") if value is None else value
+            for word, value in zip(raw, words, strict=True)
+        ]
+        head = _interpreter_head(named)
+        if head is not None:
+            stage = words[head:]
+            stage[0] = named[head].rstrip(_CLOSING_SYNTAX)
+            stages.append((pipe.start(), stage))
+    return stages
+
+
 def _some_download_becomes_code(view: str) -> bool:
     """Whether any `curl|wget ... | <interpreter>` pipe in ``view`` runs the download.
 
-    The pattern search found a candidate; each pipe into an interpreter that
-    follows a downloader on the same line is judged by the stage's own words.
+    Each pipe into an interpreter that follows a downloader on the same line
+    is judged by the stage's own words.
     """
-    spans = split_unquoted_spans(view, SEGMENT_SEPARATORS)
-    line_start = 0
-    for line in view.split("\n"):
-        downloader = _DOWNLOADER.search(line)
-        if downloader is not None:
-            for pipe in re.finditer(_PIPE_INTO_INTERPRETER_PATTERN, line, re.IGNORECASE):
-                if pipe.start() < downloader.start():
-                    continue
-                at = line_start + pipe.start(1)
-                end = next((e for s, e in spans if s <= at <= e), len(view))
-                stage = view[at:end]
-                words = [resolve_shell_word(stage[a:b]) for a, b in shell_word_spans(stage)]
-                if not words or _stage_reads_stdin_as_code(words):
-                    return True
-        line_start += len(line) + 1
+    for pipe_at, words in _piped_interpreter_stages(view):
+        line_start = view.rfind("\n", 0, pipe_at) + 1
+        if _DOWNLOADER.search(view, line_start, pipe_at) and _stage_reads_stdin_as_code(words):
+            return True
+    return False
+
+
+def _downloads(inner: str) -> bool:
+    """Whether a substitution body runs `curl` or `wget` as one of its commands."""
+    for segment in split_unquoted(inner, SEGMENT_SEPARATORS):
+        chain = segment_command_chain(segment)
+        if chain is not None and chain[-1].rsplit("/", 1)[-1].lower() in _DOWNLOADER_NAMES:
+            return True
+    return False
+
+
+def _substitution_is_the_program(
+    words: list[str | None], head: int, is_process_substitution: bool
+) -> bool:
+    """Whether the substitution after ``words`` is handed over as the code to run.
+
+    ``words`` are the command in front of the substitution, which starts at
+    ``head``. A process substitution is the script when nothing but options
+    sits between the interpreter and it (`bash <(curl ...)`, `source <(...)`).
+    A command substitution is the program when it is the whole argument of
+    `eval` or of the interpreter's `-c`/`-e` option (`sh -c "$(curl ...)"`).
+    """
+    name = words[head]
+    if name is None:
+        return False
+    command = name.rsplit("/", 1)[-1]
+    rest = words[head + 1 :]
+    if is_process_substitution:
+        runs_a_file = command in _SOURCE_NAMES or _INTERPRETER_NAME.fullmatch(command) is not None
+        return runs_a_file and all(word is not None and word.startswith("-") for word in rest)
+    if command == _EVAL:
+        return not rest
+    option = rest[-1] if rest else None
+    if option is None:
+        return False
+    family = _interpreter_family(command)
+    if family in _SHELL_NAMES:
+        return option.startswith("-") and not option.startswith("--") and "c" in option[1:]
+    program_option = _PROGRAM_OPTION.get(family)
+    return program_option is not None and program_option.fullmatch(option) is not None
+
+
+def _substitution_runs_download(view: str) -> bool:
+    """Whether a substitution that downloads is itself run as code.
+
+    `sh -c "$(curl ...)"` is Homebrew's documented install form and
+    `bash <(curl ...)` is its cousin; neither has a pipe for the pipe scan to
+    see. The substitution must BE the program: `sh -c "echo $(curl ...)"`,
+    `diff <(curl a) <(curl b)` and `VERSION=$(curl ...)` hand the download over
+    as data and stay allowed.
+    """
+    try:
+        inner_spans = substitution_inner_spans(view)
+    except UnplaceableSubstitutionError:
+        # An unterminated quote or substitution: bash would reject it, and
+        # nothing here can say what it would have run.
+        return False
+    for start, end in inner_spans:
+        if not _downloads(view[start:end]):
+            continue
+        opener = view[max(start - 2, 0) : start]
+        if view[start - 1 : start] == _BACKTICK:
+            prefix, is_process = view[: start - 1], False
+        elif opener == _PROCESS_SUBSTITUTION_OPEN:
+            prefix, is_process = view[: start - 2], True
+        elif opener == _COMMAND_SUBSTITUTION_OPEN:
+            prefix, is_process = view[: start - 2], False
+        else:
+            continue
+        prefix = prefix.rstrip().removesuffix('"').rstrip()
+        spans = split_unquoted_spans(prefix, SEGMENT_SEPARATORS)
+        segment = prefix[spans[-1][0] : spans[-1][1]]
+        word_spans = shell_word_spans(segment)
+        # Words that stop short of the end of the prefix mean the substitution
+        # sits inside a quoted word (`sh -c "echo $(...)"`), not in a word of its own.
+        if not word_spans or word_spans[-1][1] != len(segment.rstrip()):
+            continue
+        words = _resolved_words(segment)
+        head = _command_start(words)
+        if head < len(words) and _substitution_is_the_program(words, head, is_process):
+            return True
     return False
 
 
@@ -268,9 +399,9 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
 
         # A pipe that ends a line continues the pipeline onto the next one.
         view = PIPE_AT_LINE_END.sub("| ", self._scannable(command))
-        if not re.search(_CURL_PIPE_SHELL_PATTERN, view, re.IGNORECASE):
+        if not _DOWNLOADER.search(view):
             return False
-        return _some_download_becomes_code(view)
+        return _some_download_becomes_code(view) or _substitution_runs_download(view)
 
     @staticmethod
     def _scannable(command: str) -> str:
@@ -328,7 +459,7 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
         # executes the body the exemption was about to blank. Checked on the
         # BLANKED text so a `| bash` inside the documentation body cannot
         # trigger it -- only one outside the bodies can.
-        if re.search(_PIPE_INTO_INTERPRETER_PATTERN, blanked):
+        if _piped_interpreter_stages(blanked):
             return command
         return command_position_view(blanked)
 
@@ -386,7 +517,15 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
             "`curl URL | python3 -c '...'`, `curl URL | perl -pe '...'`. "
             "`curl URL | python3`, `curl URL | python3 -` and every shell "
             "(`bash`, `sh -c`, `bash -s`) stay blocked, because there the "
-            "downloaded bytes are the program.\n\n"
+            "downloaded bytes are the program. A wrapper in front of the "
+            "interpreter does not hide it (`| env python3`, `| sudo -u bob python3`), "
+            "and `node` counts as an interpreter.\n\n"
+            "**Also blocked**: a download run as the program through a "
+            'substitution: `sh -c "$(curl URL)"` (Homebrew\'s install form), '
+            '`bash <(curl URL)`, `source <(curl URL)`, `eval "$(curl URL)"`. '
+            "A substitution used as data stays allowed (`diff <(curl a) <(curl b)`, "
+            '`sh -c "echo $(curl URL)"`). A same-command download-then-run '
+            "(`curl -o x.sh URL && bash x.sh`) is not detected.\n\n"
             "**Safe alternative**: download first, inspect, then execute:\n"
             "```\n"
             "curl -o untracked/scratch/script.sh URL\n"
