@@ -139,12 +139,24 @@ def test_a_home_that_holds_the_project_root_is_not_a_scan_root(
     assert _denied("grep -r x ~")
 
 
-def test_a_home_above_the_project_root_is_not_a_scan_root(
+def test_a_home_above_the_project_root_is_still_the_home_tree(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The usual layout: scanning HOME walks far more than the project, like `~`."""
     monkeypatch.setenv("HOME", "/home/user")
     monkeypatch.setattr(guard, "resolve_project_root", lambda: "/home/user/proj")
-    assert not _denied("rg x /home/user")
+    assert _denied("rg x /home/user")
+    assert _denied("grep -r x /home/user")
+    assert _denied("grep -r x ~")
+    assert not _denied("rg x /home/user/proj")
+
+
+def test_a_home_inside_the_project_root_is_not_a_scan_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", "/workspace/.home")
+    monkeypatch.setattr(guard, "resolve_project_root", lambda: "/workspace")
+    assert not _denied("rg x /workspace/.home")
 
 
 def test_a_home_beside_the_project_root_is_still_the_home_tree(

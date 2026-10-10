@@ -129,15 +129,17 @@ _CHILDREN_GLOB: Final = "/*"
 def _spelled_out_home() -> str | None:
     """The current user's ``HOME`` as a scan root, or None when it is not one.
 
-    ``/home/user`` is ``~`` spelled out. It is not a root when it equals or
-    holds the project root (a container whose HOME is the project): scanning
-    the project is then the ordinary scan this guard allows.
+    ``/home/user`` is ``~`` spelled out, so it is a root like ``~``, including
+    when it HOLDS the project (``/home/user/proj``): scanning it walks the whole
+    home directory, far more than the project. It is not a root when it equals
+    the project root or lies inside it (a container whose HOME is the project):
+    scanning it is then the ordinary project scan this guard allows.
     """
     home = os.environ.get("HOME", "").rstrip("/")
     if not home:
         return None
     project = (resolve_project_root() or "").rstrip("/")
-    if project and (project == home or project.startswith(home + "/")):
+    if project and (home == project or home.startswith(project + "/")):
         return None
     return home
 
