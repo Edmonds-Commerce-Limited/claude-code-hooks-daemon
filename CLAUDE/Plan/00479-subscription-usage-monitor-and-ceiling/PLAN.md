@@ -269,8 +269,8 @@ feedback loop.
   ([report](subagent-reports/261010-p479-first-real-pause-sonnet.md)):
 
   - The seven-day window reached 80% and the gate denied tools: step one is observed. The session made no cron calls
-    before the owner cleared the pause seven minutes later, so the cron swap (step two) is still unobserved; the
-    only cron calls after it restored the crons the pause had removed.
+    before the owner cleared the pause seven minutes later, so the cron swap (step two) is still unobserved. The
+    only cron call after the clear was one `CronList`, which found the declared crons still in place.
   - The owner then lifted the pause with `! bin/hooks-daemon usage-pause clear`, so the resume tick was not observed.
   - On 2026-10-10 at 09:35 UTC the gate lifted a later pause by itself, on an `issue-sdlc` tick: it re-read usage,
     found it back under the ceiling, and released the session about 22.5 hours before the pause's recorded resume
