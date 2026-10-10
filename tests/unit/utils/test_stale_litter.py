@@ -13,8 +13,10 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.utils.stale_checkouts import ScanDeadline
 from claude_code_hooks_daemon.utils.stale_litter import (
     CHANGED_GREEN_PREFIX,
+    MAX_LISTED_REFS,
     collect_gone_branch_ref_report,
     collect_scratch_report,
 )
@@ -105,6 +107,16 @@ class TestScratchReport:
         assert report is not None
         assert "SCAN INCOMPLETE" in report
 
+    def test_a_spent_shared_budget_makes_the_scratch_scan_incomplete(self, tmp_path: Path) -> None:
+        _write(tmp_path / "a.txt", 1, 30)
+        deadline = ScanDeadline(0.0)
+
+        report = collect_scratch_report(tmp_path, 14, now=_NOW, deadline=deadline)
+
+        assert report is not None
+        assert "SCAN INCOMPLETE" in report
+        assert deadline.exhausted
+
     def test_incomplete_scan_with_nothing_found_is_not_quiet(self, tmp_path: Path) -> None:
         for index in range(5):
             _write(tmp_path / f"f{index}.txt", 1, 1)
@@ -181,7 +193,7 @@ class TestGoneBranchRefReport:
 
         assert report is not None
         assert ref in report
-        assert f"git update-ref -d {ref}" in report
+        assert f"printf 'delete %s\\n' {ref} | git update-ref --stdin" in report
         assert "never runs" in report
 
     def test_reporting_deletes_nothing(self, repo: Path) -> None:
@@ -192,7 +204,64 @@ class TestGoneBranchRefReport:
 
         assert report is not None
         assert _git(repo, "for-each-ref", "--format=%(refname)", ref) == ref
-        assert f"update-ref -d {CHANGED_GREEN_PREFIX}main" not in report
+        assert f"{CHANGED_GREEN_PREFIX}main" not in report
+
+    def test_a_long_list_is_capped_and_one_command_covers_every_ref(self, repo: Path) -> None:
+        refs = [_record(repo, f"gone-{index:02d}") for index in range(MAX_LISTED_REFS + 3)]
+
+        report = collect_gone_branch_ref_report(repo)
+
+        assert report is not None
+        assert "and 3 more" in report
+        assert f"{len(refs)} changed-green refs" in report
+        listed = [line for line in report.splitlines() if line.startswith("  - ")]
+        assert len(listed) == MAX_LISTED_REFS
+        commands = [line for line in report.splitlines() if "git update-ref" in line]
+        assert len(commands) == 1
+        assert all(ref in commands[0] for ref in refs)
+
+    def test_the_batched_command_deletes_exactly_the_reported_refs(self, repo: Path) -> None:
+        _git(repo, "branch", "alive")
+        alive = _record(repo, "alive")
+        _record(repo, "gone/1")
+        _record(repo, "gone-2")
+
+        report = collect_gone_branch_ref_report(repo)
+
+        assert report is not None
+        command = next(line for line in report.splitlines() if "git update-ref" in line).strip()
+        subprocess.run(["bash", "-c", command], cwd=repo, check=True)
+        left = _git(repo, "for-each-ref", "--format=%(refname)", CHANGED_GREEN_PREFIX)
+        assert left == alive
+
+    def test_a_remote_name_containing_a_slash_is_split_on_the_remote(self, repo: Path) -> None:
+        _git(repo, "remote", "add", "team/fork", "https://example.invalid/x.git")
+        _git(repo, "update-ref", "refs/remotes/team/fork/feature", "HEAD")
+        _record(repo, "feature")
+
+        assert collect_gone_branch_ref_report(repo) is None
+
+    def test_a_remote_branch_with_a_slash_is_kept_and_its_tail_is_not(self, repo: Path) -> None:
+        _git(repo, "remote", "add", "origin", "https://example.invalid/x.git")
+        _git(repo, "update-ref", "refs/remotes/origin/user/topic", "HEAD")
+        _record(repo, "user/topic")
+        gone = _record(repo, "topic")
+
+        report = collect_gone_branch_ref_report(repo)
+
+        assert report is not None
+        assert gone in report
+        assert f"{CHANGED_GREEN_PREFIX}user/topic" not in report
+
+    def test_a_spent_shared_budget_makes_the_ref_scan_incomplete(self, repo: Path) -> None:
+        _record(repo, "gone")
+        deadline = ScanDeadline(0.0)
+
+        report = collect_gone_branch_ref_report(repo, deadline=deadline)
+
+        assert report is not None
+        assert "SCAN INCOMPLETE" in report
+        assert deadline.exhausted
 
     def test_a_same_named_tag_does_not_keep_the_ref(self, repo: Path) -> None:
         _git(repo, "tag", "ghost")

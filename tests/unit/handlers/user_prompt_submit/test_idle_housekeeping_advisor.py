@@ -10,11 +10,12 @@ Beta: opt-in (off by default), report-only.
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, ClassVar
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 import pytest
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.transcript_reader import ContentBlock, TranscriptMessage
 from claude_code_hooks_daemon.daemon.housekeeping import report_only_steps
@@ -24,6 +25,7 @@ from claude_code_hooks_daemon.handlers.user_prompt_submit.idle_housekeeping_advi
     IdleHousekeepingAdvisoryHandler,
     count_trailing_noop_recovery_ticks,
 )
+from claude_code_hooks_daemon.utils.stale_checkouts import SCAN_BUDGET_SECONDS
 
 _TICK = f"{_RECOVERY_MARKER} (automated hourly safety net). Resume if interrupted."
 
@@ -368,7 +370,7 @@ class TestStaleCheckoutsReport:
         assert "HOUSEKEEPING MODE" in blob
         assert "STALE CHECKOUTS: git worktree remove /w/a" in blob
         # No base_branch configured: the scan resolves the default itself, under its budget.
-        collect.assert_called_once_with(tmp_path, None, 7)
+        collect.assert_called_once_with(tmp_path, None, 7, deadline=ANY)
 
     def test_a_configured_base_branch_is_passed_through(self, tmp_path: Path) -> None:
         handler = IdleHousekeepingAdvisoryHandler()
@@ -380,7 +382,7 @@ class TestStaleCheckoutsReport:
             mock_pc.project_root.return_value = tmp_path
             self._fire(handler)
 
-        collect.assert_called_once_with(tmp_path, "develop", 7)
+        collect.assert_called_once_with(tmp_path, "develop", 7, deadline=ANY)
 
     @pytest.mark.parametrize("value", [0, -1, "7", 1.5, True, None])
     def test_stale_worktree_days_must_be_a_positive_int(self, value: object) -> None:
@@ -418,7 +420,7 @@ class TestStaleCheckoutsReport:
             mock_pc.project_root.return_value = tmp_path
             self._fire(handler)
 
-        collect.assert_called_once_with(tmp_path, "develop", 3)
+        collect.assert_called_once_with(tmp_path, "develop", 3, deadline=ANY)
 
     def test_can_be_switched_off(self, tmp_path: Path) -> None:
         handler = IdleHousekeepingAdvisoryHandler()
@@ -475,8 +477,8 @@ class TestLitterReports:
 
         assert "OLD SCRATCH FILES: x" in blob
         assert "CHANGED-GREEN REFS OF GONE BRANCHES: y" in blob
-        scratch.assert_called_once_with(tmp_path / "untracked" / "scratch", 14)
-        refs.assert_called_once_with(tmp_path)
+        scratch.assert_called_once_with(tmp_path / "untracked" / "scratch", 14, deadline=ANY)
+        refs.assert_called_once_with(tmp_path, deadline=ANY)
 
     def test_each_report_can_be_switched_off(self, tmp_path: Path) -> None:
         handler = IdleHousekeepingAdvisoryHandler()
@@ -500,11 +502,33 @@ class TestLitterReports:
         with (
             patch(f"{_HANDLER_MODULE}.ProjectContext") as mock_pc,
             patch(f"{_HANDLER_MODULE}.collect_scratch_report", return_value=None) as scratch,
+            patch(f"{_HANDLER_MODULE}.collect_gone_branch_ref_report", return_value=None),
         ):
             mock_pc.project_root.return_value = tmp_path
             self._fire(handler)
 
-        scratch.assert_called_once_with(tmp_path / "untracked" / "scratch", 3)
+        scratch.assert_called_once_with(tmp_path / "untracked" / "scratch", 3, deadline=ANY)
+
+    def test_the_three_scans_share_one_budget_under_the_chain_deadline(
+        self, tmp_path: Path
+    ) -> None:
+        handler = IdleHousekeepingAdvisoryHandler()
+        with (
+            patch(f"{_HANDLER_MODULE}.ProjectContext") as mock_pc,
+            patch(f"{_HANDLER_MODULE}.ScanDeadline") as make_deadline,
+            patch(f"{_HANDLER_MODULE}.collect_stale_report", return_value=None) as checkouts,
+            patch(f"{_HANDLER_MODULE}.collect_scratch_report", return_value=None) as scratch,
+            patch(f"{_HANDLER_MODULE}.collect_gone_branch_ref_report", return_value=None) as refs,
+        ):
+            mock_pc.project_root.return_value = tmp_path
+            self._fire(handler)
+
+        make_deadline.assert_called_once_with(SCAN_BUDGET_SECONDS)
+        shared = make_deadline.return_value
+        assert checkouts.call_args.kwargs["deadline"] is shared
+        assert scratch.call_args.kwargs["deadline"] is shared
+        assert refs.call_args.kwargs["deadline"] is shared
+        assert SCAN_BUDGET_SECONDS < Timeout.CHAIN_DEADLINE_DEFAULT
 
     @pytest.mark.parametrize("value", [0, -1, "14", 1.5, True, None])
     def test_stale_scratch_days_must_be_a_positive_int(self, value: object) -> None:

@@ -43,6 +43,9 @@ SCRATCH_MAX_ENTRIES: Final[int] = 100_000
 #: Wall-clock cap on one scratch scan, so it cannot stall the prompt it rides on.
 SCRATCH_BUDGET_SECONDS: Final[float] = 3.0
 
+#: Refs the report names; the rest are counted. The one command covers all of them.
+MAX_LISTED_REFS: Final[int] = 5
+
 #: Budget for the git calls of the gone-branch ref scan.
 REF_SCAN_BUDGET_SECONDS: Final[float] = 5.0
 
@@ -82,8 +85,7 @@ def _walk_scratch(
     cutoff_age_seconds: float,
     now: float,
     max_entries: int,
-    deadline: float,
-    clock: Callable[[], float],
+    deadline: ScanDeadline,
 ) -> _ScratchTally:
     """Count files older than the cutoff, stopping at the entry or time limit.
 
@@ -103,7 +105,7 @@ def _walk_scratch(
             continue
         with scanner:
             for entry in scanner:
-                if tally.entries_seen >= max_entries or clock() >= deadline:
+                if tally.entries_seen >= max_entries or deadline.expired():
                     tally.incomplete = True
                     return tally
                 tally.entries_seen += 1
@@ -133,8 +135,12 @@ def collect_scratch_report(
     max_entries: int = SCRATCH_MAX_ENTRIES,
     budget_seconds: float = SCRATCH_BUDGET_SECONDS,
     clock: Callable[[], float] = time.monotonic,
+    deadline: ScanDeadline | None = None,
 ) -> str | None:
     """The report on files under ``scratch`` older than ``max_age_days``, or None.
+
+    ``deadline`` is a budget shared with other scans; without one the scan gets
+    its own ``budget_seconds``.
 
     Quiet when the directory is absent or holds nothing old. A scan that hit its
     entry limit or time budget is never quiet: a short count from a scan that
@@ -143,14 +149,10 @@ def collect_scratch_report(
     if not scratch.is_dir():
         return None
     current = time.time() if now is None else now
-    tally = _walk_scratch(
-        scratch,
-        max_age_days * _SECONDS_PER_DAY,
-        current,
-        max_entries,
-        clock() + budget_seconds,
-        clock,
-    )
+    shared = deadline or ScanDeadline(budget_seconds, clock=clock)
+    tally = _walk_scratch(scratch, max_age_days * _SECONDS_PER_DAY, current, max_entries, shared)
+    if tally.incomplete:
+        shared.exhausted = True
     if tally.old_files == 0 and not tally.incomplete:
         return None
 
@@ -177,8 +179,27 @@ def collect_scratch_report(
     return "\n".join(lines)
 
 
+def _remote_branch_names(refname: str, remotes: tuple[str, ...]) -> set[str]:
+    """The branch name(s) a ``refs/remotes/...`` ref can stand for.
+
+    The remote is matched against the configured remote names (longest first),
+    because a remote name may itself contain a slash. A ref under no configured
+    remote has no known split, so every tail after a slash counts as live: a
+    branch is never reported gone on a guess.
+    """
+    rest = refname.removeprefix(_REMOTES_PREFIX)
+    for remote in sorted(remotes, key=len, reverse=True):
+        if rest.startswith(f"{remote}/"):
+            return {rest.removeprefix(f"{remote}/")}
+    return {rest[index + 1 :] for index, char in enumerate(rest) if char == "/"}
+
+
 def _gone_branch_refs(repo_root: Path, deadline: ScanDeadline) -> tuple[str, ...] | None:
     """Changed-green refs whose branch exists nowhere, or None when git cannot say."""
+    remote_listing = deadline.run(repo_root, "remote")
+    if remote_listing.returncode != 0:
+        return None
+    remotes = tuple(remote_listing.stdout.splitlines())
     listing = deadline.run(
         repo_root,
         "for-each-ref",
@@ -197,31 +218,41 @@ def _gone_branch_refs(repo_root: Path, deadline: ScanDeadline) -> tuple[str, ...
         elif refname.startswith(HEADS_PREFIX):
             live.add(refname.removeprefix(HEADS_PREFIX))
         elif refname.startswith(_REMOTES_PREFIX):
-            # refs/remotes/<remote>/<branch>: the branch may itself contain slashes.
-            _, _, branch = refname.removeprefix(_REMOTES_PREFIX).partition("/")
-            live.add(branch)
+            live |= _remote_branch_names(refname, remotes)
     return tuple(ref for ref in recorded if ref.removeprefix(CHANGED_GREEN_PREFIX) not in live)
 
 
 def collect_gone_branch_ref_report(
-    repo_root: Path, *, budget_seconds: float = REF_SCAN_BUDGET_SECONDS
+    repo_root: Path,
+    *,
+    budget_seconds: float = REF_SCAN_BUDGET_SECONDS,
+    deadline: ScanDeadline | None = None,
 ) -> str | None:
     """The report on changed-green refs of branches that no longer exist, or None.
 
     Quiet when git cannot answer, no ref is recorded, or every recorded branch
-    still exists locally or on a remote.
+    still exists locally or on a remote. At most ``MAX_LISTED_REFS`` refs are
+    named; the single command covers every one, so the report stays short however
+    many refs have piled up. ``deadline`` is a budget shared with other scans.
     """
-    deadline = ScanDeadline(budget_seconds)
-    gone = _gone_branch_refs(repo_root, deadline)
-    if not gone and not deadline.exhausted:
+    shared = deadline or ScanDeadline(budget_seconds)
+    gone = _gone_branch_refs(repo_root, shared)
+    if not gone and not shared.exhausted:
         return None
     lines = [
         "CHANGED-GREEN REFS OF GONE BRANCHES (report only; this advisory never runs "
-        "these - inspect, then choose):"
+        "the command below - inspect, then choose):"
     ]
-    if deadline.exhausted:
+    if shared.exhausted:
         lines.append("SCAN INCOMPLETE: the time budget ran out before git answered.")
-    for ref in gone or ():
-        lines.append(f"  - {ref}: no local or remote branch of that name remains")
-        lines.append(f"      git update-ref -d {shlex.quote(ref)}")
+    if gone:
+        noun = "ref" if len(gone) == 1 else "refs"
+        lines.append(
+            f"{len(gone)} changed-green {noun} whose branch no longer exists locally or on a remote:"
+        )
+        lines.extend(f"  - {ref}" for ref in gone[:MAX_LISTED_REFS])
+        if len(gone) > MAX_LISTED_REFS:
+            lines.append(f"  ... and {len(gone) - MAX_LISTED_REFS} more")
+        quoted = " ".join(shlex.quote(ref) for ref in gone)
+        lines.append(f"      printf 'delete %s\\n' {quoted} | git update-ref --stdin")
     return "\n".join(lines)

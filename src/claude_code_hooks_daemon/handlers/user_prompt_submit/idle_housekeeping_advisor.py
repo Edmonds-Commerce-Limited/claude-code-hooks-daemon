@@ -29,6 +29,8 @@ from claude_code_hooks_daemon.daemon.housekeeping import report_only_steps
 from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 from claude_code_hooks_daemon.utils.stale_checkouts import (
     DEFAULT_MAX_IDLE_DAYS,
+    SCAN_BUDGET_SECONDS,
+    ScanDeadline,
     collect_stale_report,
 )
 from claude_code_hooks_daemon.utils.stale_litter import (
@@ -282,27 +284,29 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
                 f"{default}\n\n---\n\nPROJECT-SPECIFIC HOUSEKEEPING GUIDANCE "
                 f"(from {self._custom_guidance_doc}):\n{custom}"
             )
+        # One budget for all three scans: their sum must stay under the chain deadline.
+        deadline = ScanDeadline(SCAN_BUDGET_SECONDS)
         reports = (
-            self._stale_checkouts_report(),
-            self._stale_scratch_report(),
-            self._gone_branch_refs_report(),
+            self._stale_checkouts_report(deadline),
+            self._stale_scratch_report(deadline),
+            self._gone_branch_refs_report(deadline),
         )
         return "\n\n".join([guidance, *(report for report in reports if report is not None)])
 
-    def _stale_scratch_report(self) -> str | None:
+    def _stale_scratch_report(self, deadline: ScanDeadline) -> str | None:
         """Old files under ``untracked/scratch/``, or None. Report-first, never deleted."""
         if not self._report_stale_scratch:
             return None
         scratch = ProjectContext.project_root() / SCRATCH_RELATIVE_PATH
-        return collect_scratch_report(scratch, self._stale_scratch_days)
+        return collect_scratch_report(scratch, self._stale_scratch_days, deadline=deadline)
 
-    def _gone_branch_refs_report(self) -> str | None:
+    def _gone_branch_refs_report(self, deadline: ScanDeadline) -> str | None:
         """Changed-green refs of branches that no longer exist, or None. Never deleted."""
         if not self._report_gone_branch_refs:
             return None
-        return collect_gone_branch_ref_report(ProjectContext.project_root())
+        return collect_gone_branch_ref_report(ProjectContext.project_root(), deadline=deadline)
 
-    def _stale_checkouts_report(self) -> str | None:
+    def _stale_checkouts_report(self, deadline: ScanDeadline) -> str | None:
         """Stale worktrees and daemons found this pass, or None when there are none.
 
         Report-first (Plan 00470 Task 4.2): the text names what is stale and the
@@ -313,7 +317,10 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
             return None
         # An unset base branch is resolved INSIDE the scan, under its time budget.
         return collect_stale_report(
-            ProjectContext.project_root(), self._base_branch or None, self._stale_worktree_days
+            ProjectContext.project_root(),
+            self._base_branch or None,
+            self._stale_worktree_days,
+            deadline=deadline,
         )
 
     def _load_custom_guidance(self) -> str | None:

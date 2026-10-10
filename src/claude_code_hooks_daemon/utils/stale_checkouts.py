@@ -169,6 +169,13 @@ class ScanDeadline:
         self._deadline = clock() + budget_seconds
         self.exhausted = False
 
+    def expired(self) -> bool:
+        """Whether the budget is spent. Records that the scan is incomplete when it is."""
+        if self._clock() < self._deadline:
+            return False
+        self.exhausted = True
+        return True
+
     def run(self, cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
         """Run git within the remaining budget, or refuse once it is spent."""
         remaining = self._deadline - self._clock()
@@ -482,14 +489,16 @@ def collect_stale_report(
     *,
     processes_fn: DaemonProcessesFn = default_daemon_processes,
     budget_seconds: float = SCAN_BUDGET_SECONDS,
+    deadline: ScanDeadline | None = None,
 ) -> str | None:
     """Detect stale worktrees and daemons for ``repo_root`` and render the report.
 
-    Every git call shares one ``budget_seconds``, including the lookup of the
-    default branch when ``base_branch`` is None; when it runs out the report says
-    the scan was incomplete.
+    Every git call shares one budget, including the lookup of the default branch
+    when ``base_branch`` is None; when it runs out the report says the scan was
+    incomplete. The budget is ``deadline`` when a caller running several scans
+    shares one, else a fresh ``budget_seconds``.
     """
-    deadline = ScanDeadline(budget_seconds)
+    deadline = deadline or ScanDeadline(budget_seconds)
     base = base_branch or default_branch(repo_root, run_fn=deadline.run) or FALLBACK_BASE_BRANCH
     worktrees = find_stale_worktrees(
         repo_root, base, max_idle_days=max_idle_days, run_fn=deadline.run
