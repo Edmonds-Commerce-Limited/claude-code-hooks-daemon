@@ -400,3 +400,35 @@ class TestExplain:
         monkeypatch.setattr(sys, "argv", ["llm_qa.py", "--help"])
         assert llm_qa.main() == 0
         assert "--explain" in capsys.readouterr().out
+
+
+class TestBatchDefencesDeclaration:
+    """`batch_defences` is the one place the batch-check rows of `defences` are declared."""
+
+    def test_the_declared_checkers_are_exactly_the_four_with_a_handler_counterpart(self) -> None:
+        declared = json.loads(REGISTRY_FILE.read_text(encoding="utf-8"))["batch_defences"]
+        assert set(declared) == {
+            "check_british_english.py",
+            "audit_error_hiding.py",
+            "check_sensitive_content.py",
+            "check_inline_suppressions.py",
+        }
+
+    def test_each_declared_step_runs_its_script_in_the_runner(self) -> None:
+        declared = json.loads(REGISTRY_FILE.read_text(encoding="utf-8"))["batch_defences"]
+        for script, entry in declared.items():
+            command = llm_qa.TOOL_REGISTRY[entry["step"]].command
+            assert any(part.endswith(script) for part in command), script
+
+    def test_each_declared_defect_class_is_a_defect_class_value(self) -> None:
+        from claude_code_hooks_daemon.constants.dbf import DefectClass
+
+        declared = json.loads(REGISTRY_FILE.read_text(encoding="utf-8"))["batch_defences"]
+        for script, entry in declared.items():
+            assert DefectClass(entry["defect_class"]), script
+
+    def test_each_declared_path_form_is_a_real_option_of_the_script(self) -> None:
+        declared = json.loads(REGISTRY_FILE.read_text(encoding="utf-8"))["batch_defences"]
+        for script, entry in declared.items():
+            if entry.get("path_form"):
+                assert '"--path"' in (QA_DIR / script).read_text(encoding="utf-8"), script

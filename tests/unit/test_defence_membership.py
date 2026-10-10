@@ -109,9 +109,14 @@ class TestDefenceMembership:
     ) -> None:
         used = {cls.defect_class for cls in library_handlers.values() if cls.defect_class}
         unused = set(DefectClass) - used
-        # The only member no library handler declares is the one this project's
-        # own plan_done_requires_holding_area project handler declares.
-        assert unused == {DefectClass.UNRECORDED_RELEASE_CONSEQUENCE}
+        # Two members no library handler declares: the one this project's own
+        # plan_done_requires_holding_area project handler declares, and the one
+        # only the batch check check_british_english.py defends (its write-time
+        # handler is advisory, so it is not a Defence).
+        assert unused == {
+            DefectClass.UNRECORDED_RELEASE_CONSEQUENCE,
+            DefectClass.AMERICAN_SPELLING,
+        }
 
     def test_a_free_string_is_not_a_defect_class(self) -> None:
         with pytest.raises(ValueError):

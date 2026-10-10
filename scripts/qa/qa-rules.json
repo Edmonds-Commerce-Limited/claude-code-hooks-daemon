@@ -2,6 +2,23 @@
   "version": 1,
   "docs": "CLAUDE/QA.md",
   "description": "One entry per rule ID a scripts/qa checker prints (Plan 00484 G6). `llm_qa.py --explain <ID>` prints an entry. `checks` names the scripts that print the ID; tests/unit/qa/test_qa_rules.py fails when this file and the scripts disagree, in either direction.",
+  "batch_defences_description": "The checkers listed as batch-check rows of `hooks-daemon defences`: each is the whole-tree form of a write-time handler's defect class. `step` is the llm_qa.py step that runs it, `defect_class` a DefectClass value, `path_form` true when `--path FILE` judges one file. The rows are every rule below whose `checks` names the script.",
+  "batch_defences": {
+    "check_british_english.py": {
+      "step": "british_english",
+      "defect_class": "american-spelling",
+      "path_form": true
+    },
+    "audit_error_hiding.py": { "step": "error_hiding", "defect_class": "error-hiding" },
+    "check_sensitive_content.py": {
+      "step": "sensitive_content",
+      "defect_class": "sensitive-content"
+    },
+    "check_inline_suppressions.py": {
+      "step": "inline_suppressions",
+      "defect_class": "qa-suppression"
+    }
+  },
   "rules": {
     "american-spelling": {
       "statement": "A British-English project wrote an American spelling.",

@@ -13,7 +13,7 @@ handler's own ``defect_class`` declaration, not a list of names kept here.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -22,10 +22,30 @@ from claude_code_hooks_daemon.daemon.docs_generator import CollectedHandler
 from claude_code_hooks_daemon.handlers.registry import EVENT_TYPE_MAPPING
 from claude_code_hooks_daemon.rule_explain.lookup import HandlerRules
 
-__all__ = ["Defence", "collect_active_defences"]
+__all__ = [
+    "KIND_BATCH_CHECK",
+    "KIND_HANDLER",
+    "QA_RULES_RELATIVE_PATH",
+    "Defence",
+    "collect_active_defences",
+    "collect_batch_defences",
+]
 
 # Behaviour label ``DocsGenerator`` gives a handler tagged ``blocking``.
 _BEHAVIOR_BLOCKING = "BLOCKING"
+
+#: ``Defence.kind`` of a row for a write-time handler rule.
+KIND_HANDLER = "handler"
+#: ``Defence.kind`` of a row for a ``scripts/qa`` checker that is the batch form of a handler.
+KIND_BATCH_CHECK = "batch-check"
+
+#: Where a project keeps the QA rule registry that also declares the batch-check rows.
+QA_RULES_RELATIVE_PATH = "scripts/qa/qa-rules.json"
+#: ``Defence.event`` of a batch-check row: it runs from the QA runner, not on a hook event.
+_BATCH_EVENT = "qa"
+_BATCH_PRIORITY = 0
+_QA_RUNNER = "./scripts/qa/llm_qa.py"
+_QA_SCRIPTS_DIR = "./scripts/qa"
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +67,10 @@ class Defence:
         docs: The command that prints the full documentation.
         detector_entry_point: The command that runs the defence by sending it a
             payload, or ``None`` when its event is not a wired hook event.
+        kind: ``handler`` for a write-time handler rule, ``batch-check`` for a
+            ``scripts/qa`` checker row. For a batch-check row ``handler`` is the
+            ``llm_qa.py`` step, ``handler_class`` the script, ``event`` is ``qa``
+            and ``priority`` is 0.
     """
 
     rule_id: str | None
@@ -59,6 +83,7 @@ class Defence:
     defect_class: DefectClass | None
     docs: str
     detector_entry_point: str | None
+    kind: str = KIND_HANDLER
 
     def to_dict(self) -> dict[str, Any]:
         """Return the record as a JSON-serialisable mapping."""
@@ -105,6 +130,60 @@ def collect_active_defences(
                     f"hooks-daemon explain-handler {info[1]}",
                 )
             )
+    return records
+
+
+def collect_batch_defences(qa_rules: Mapping[str, Any]) -> list[Defence]:
+    """List the batch checkers that are the whole-tree form of a write-time handler.
+
+    Membership is the ``batch_defences`` map of ``qa-rules.json`` (script ->
+    ``step``, ``defect_class`` and optional ``path_form``); rule IDs, statements
+    and the docs route are that file's own ``rules``, so no second registry
+    exists. One row per rule a declared script prints.
+
+    Args:
+        qa_rules: The parsed ``qa-rules.json`` document.
+
+    Returns:
+        The rows, in the declaration order of the scripts and of their rules;
+        empty when the document declares no ``batch_defences``.
+
+    Raises:
+        ValueError: A declared ``defect_class`` is not a ``DefectClass`` value, or
+            a declared script prints no rule in ``rules``.
+    """
+    declared: Mapping[str, Mapping[str, Any]] = qa_rules.get("batch_defences", {})
+    rules: Mapping[str, Mapping[str, Any]] = qa_rules.get("rules", {})
+    records: list[Defence] = []
+    for script, entry in declared.items():
+        defect_class = DefectClass(entry["defect_class"])
+        step = entry["step"]
+        entry_point = (
+            f"{_QA_SCRIPTS_DIR}/{script} --path <file>"
+            if entry.get("path_form")
+            else f"{_QA_RUNNER} {step}"
+        )
+        printed = [(rule_id, rule) for rule_id, rule in rules.items() if script in rule["checks"]]
+        if not printed:
+            raise ValueError(
+                f"batch_defences names {script}, which prints no rule in qa-rules.json"
+            )
+        records.extend(
+            Defence(
+                rule_id=rule_id,
+                handler=step,
+                handler_class=script,
+                event=_BATCH_EVENT,
+                priority=_BATCH_PRIORITY,
+                behavior=_BEHAVIOR_BLOCKING,
+                statement=rule["statement"],
+                defect_class=defect_class,
+                docs=f"{_QA_RUNNER} --explain {rule_id}",
+                detector_entry_point=entry_point,
+                kind=KIND_BATCH_CHECK,
+            )
+            for rule_id, rule in printed
+        )
     return records
 
 

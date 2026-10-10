@@ -65,3 +65,6 @@ class DefectClass(StrEnum):
     UNATTRIBUTED_VENDORED_DOC = "unattributed-vendored-doc"
     CONFLICT_MARKER = "conflict-marker"
     ISSUE_CLOSING_KEYWORD = "issue-closing-keyword"
+    #: Declared by no handler: the write-time counterpart is advisory, so only the
+    #: blocking batch check (``check_british_english.py``) defends this class.
+    AMERICAN_SPELLING = "american-spelling"
