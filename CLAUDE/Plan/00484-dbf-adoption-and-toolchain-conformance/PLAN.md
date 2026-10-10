@@ -163,6 +163,19 @@ agent.
       event is filed as `project`; see CONFORMANCE G11); `test_single_disable_footer.py` names five files instead
       of globbing every handler; `core/chain.py` compares `probe_only` before normalising dashes; `--path FILE` on
       the remaining checkers; and B rows in `hooks-daemon defences`.
+      **Done (3.1d):** project handlers get their real event and config key in `defences` (end to end on this
+      repository), the footer test covers all 201 handler files, dashes are normalised once in
+      `probe_only_handler`, and `--path FILE` is on `check_british_english.py`; the other checkers are skipped with
+      reasons in CONFORMANCE G8. Merged at `41f5db964` after one review round
+      ([report](subagent-reports/261010-task-3.1d-follow-ups-sonnet.md)). B rows were left for a ruling.
+    - **Coordinator call (B rows), not an owner ruling:** rows only for the batch checkers that are the batch form
+      of a write-time handler (`check_british_english`, `audit_error_hiding`, `check_sensitive_content`,
+      `check_inline_suppressions`), each with the same defect class and an `llm_qa.py`/`--path` entry point. This
+      keeps a Defence tied to a defect class, as ruling C1 does; every checker as a row would make "Defence" mean
+      any gate, and no rows would leave §5 short.
+    - **3.1e**: those four B rows (with the `Defence` schema fields they need), and the 3.1d review's should-fix
+      items: `cmd_defences` loads project handlers twice (`daemon/cli.py:3647-3650`), and the end-to-end test wires
+      its own probe check instead of calling `cmd_probe` with sending stubbed out.
   - **Coordinator call (under the owner's "go with the clear winners" instruction):** G5–G9, G12, G13 and G15 were
     never put to the owner. Closing them is the default, so they are closed through the batches above. Resolved; not
     an owner ruling. Success criterion 3 ("the owner has ruled on every gap") therefore waits on the owner to confirm
