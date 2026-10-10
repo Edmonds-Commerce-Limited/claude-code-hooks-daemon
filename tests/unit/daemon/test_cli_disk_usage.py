@@ -127,6 +127,8 @@ class TestCmdDiskUsage:
             cli.cmd_disk_usage(_args(tmp_path))
 
         out = " ".join(capsys.readouterr().out.split())
-        daemon_start_clause = out.split("are bounded on daemon start")[0]
+        daemon_start_clause = out.split("Auto-reaped writers")[1].split(
+            "are bounded on daemon start"
+        )[0]
         assert "decision.log" not in daemon_start_clause
         assert "decision.log is capped at 4 MiB by the supervisor itself, at write time" in out
