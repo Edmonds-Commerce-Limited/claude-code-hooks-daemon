@@ -103,11 +103,7 @@ def _effective_command(segment: str, depth: int = 0) -> str:
             index += 1
         elif name in _SHELL_NAMES and depth < _MAX_WRAP_DEPTH:
             body_at = next(
-                (
-                    i + 1
-                    for i in range(index + 1, len(words) - 1)
-                    if _is_short_c_option(words[i])
-                ),
+                (i + 1 for i in range(index + 1, len(words) - 1) if _is_short_c_option(words[i])),
                 None,
             )
             if body_at is None:
