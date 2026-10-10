@@ -220,8 +220,7 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
             message = formatter.verbose(_RULE)
 
         message += (
-            f"\n\nFILE: {path}\n"
-            f"AT RISK: {line_count} lines, which would be replaced wholesale"
+            f"\n\nFILE: {path}\n" f"AT RISK: {line_count} lines, which would be replaced wholesale"
         )
 
         return GatingResult(decision=Decision.DENY, reason=message, context=[], guidance=None)

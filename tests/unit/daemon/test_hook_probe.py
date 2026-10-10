@@ -484,7 +484,9 @@ class TestProbeOnly:
 
     def test_the_cli_sends_the_restriction(self, tmp_path: Path) -> None:
         entry = _project_with_entry_point(tmp_path, "pre-tool-use", _CAPTURING_ENTRY_POINT)
-        (tmp_path / ".claude" / "hooks-daemon.yaml").write_text('version: "2.0"\n', encoding="utf-8")
+        (tmp_path / ".claude" / "hooks-daemon.yaml").write_text(
+            'version: "2.0"\n', encoding="utf-8"
+        )
         args = argparse.Namespace(
             project_root=tmp_path,
             event="PreToolUse",
@@ -529,7 +531,9 @@ class TestProbeOnly:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         entry = _project_with_entry_point(tmp_path, "pre-tool-use", _CAPTURING_ENTRY_POINT)
-        (tmp_path / ".claude" / "hooks-daemon.yaml").write_text('version: "2.0"\n', encoding="utf-8")
+        (tmp_path / ".claude" / "hooks-daemon.yaml").write_text(
+            'version: "2.0"\n', encoding="utf-8"
+        )
         args = argparse.Namespace(
             project_root=tmp_path,
             event="PreToolUse",
