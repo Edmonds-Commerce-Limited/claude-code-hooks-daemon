@@ -33,6 +33,7 @@ from typing import Final
 
 from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
+from claude_code_hooks_daemon.utils.command_position import SHELL_NAMES
 from claude_code_hooks_daemon.utils.protected_file_index import (
     ExemptHook,
     ProtectedFileIndex,
@@ -91,7 +92,6 @@ _EXCLUDE_OPTION: Final[str] = "--exclude"
 _NEGATION: Final[str] = "!"
 _END_OF_OPTIONS: Final[str] = "--"
 
-_SHELLS: Final[frozenset[str]] = frozenset({"bash", "sh", "dash", "zsh", "ksh"})
 _SHELL_COMMAND_FLAG: Final[str] = "-c"
 _EVAL: Final[str] = "eval"
 _XARGS: Final[str] = "xargs"
@@ -382,7 +382,7 @@ def _reads(command: str, cwd: str | None, depth: int) -> Iterator[Read]:
         head = posixpath.basename(words[0])
         if head in _DIRECTORY_CHANGERS:
             current = _after_directory_change(words, current)
-        elif head in _SHELLS and _SHELL_COMMAND_FLAG in words[1:-1]:
+        elif head in SHELL_NAMES and _SHELL_COMMAND_FLAG in words[1:-1]:
             inner = words[words.index(_SHELL_COMMAND_FLAG, 1) + 1]
             yield from _reads(inner, current, depth + 1)
         elif head == _EVAL:

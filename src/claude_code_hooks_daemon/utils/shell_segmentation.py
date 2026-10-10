@@ -1068,6 +1068,7 @@ COMMAND_WRAPPERS: Final[dict[str, CommandWrapper]] = {
         value_flags=frozenset({"-u", "--unset", "-C", "--chdir"}), lone_dash_is_flag=True
     ),
     "nice": CommandWrapper(value_flags=frozenset({"-n", "--adjustment"})),
+    "ionice": CommandWrapper(value_flags=frozenset({"-c", "-n", "--class", "--classdata"})),
     "stdbuf": CommandWrapper(value_flags=frozenset({"-i", "-o", "-e"})),
     "command": CommandWrapper(value_flags=frozenset()),
 }

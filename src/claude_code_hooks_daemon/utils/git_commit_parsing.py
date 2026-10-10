@@ -33,6 +33,7 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     git_subcommand_index,
     normalise_line_continuations,
 )
+from claude_code_hooks_daemon.utils.command_position import SHELL_NAMES
 from claude_code_hooks_daemon.utils.shell_segmentation import command_word
 
 #: The commit message flags recognised as a WHOLE token (own token). The
@@ -862,7 +863,6 @@ def commit_subcommand_index(words: list[str]) -> int | None:
 #: Commands that run a string argument as shell: ``eval STRING`` and
 #: ``sh -c STRING`` (any option cluster carrying ``c``).
 _EVAL: Final[str] = "eval"
-_SHELLS: Final[frozenset[str]] = frozenset({"sh", "bash", "dash", "zsh", "ksh"})
 _SHELL_COMMAND_LETTER: Final[str] = "c"
 _DIRECTORY_CHANGERS: Final[frozenset[str]] = frozenset({"cd", "pushd"})
 _DIRECTORY_POPPER: Final[str] = "popd"
@@ -1034,7 +1034,7 @@ def _evaluated_string(segment: list[str]) -> str | None:
         name = command_word(word)
         if name == _EVAL:
             return " ".join(segment[position + 1 :])
-        if name in _SHELLS:
+        if name in SHELL_NAMES:
             for offset, option in enumerate(segment[position + 1 :], start=position + 1):
                 if not option.startswith("-"):
                     return None
