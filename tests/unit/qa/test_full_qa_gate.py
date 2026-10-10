@@ -188,6 +188,82 @@ class TestWholeSuiteSizedRunSucceedsWithTheLock:
         assert "REFUSED" not in result.stdout
 
 
+#: Stands in for the pytest-xdist controller without installing it (N392).
+#: The controller's `pytest_collection` returns True, so it collects nothing and
+#: `pytest_collection_modifyitems` never fires there; it learns what the
+#: workers collected only through `pytest_xdist_node_collection_finished(node,
+#: ids)`. This plugin does exactly that: it short-circuits collection and
+#: reports every test file's id to the gate's controller hook.
+_XDIST_CONTROLLER_PLUGIN = """\
+from pathlib import Path
+from types import SimpleNamespace
+
+from claude_code_hooks_daemon.qa import full_qa_gate
+
+
+def pytest_collection(session):
+    ids = [f"{p.as_posix()}::test_ok" for p in sorted(Path("tests").rglob("test_*.py"))]
+    full_qa_gate.pytest_xdist_node_collection_finished(
+        SimpleNamespace(config=session.config), ids
+    )
+    return True
+"""
+
+
+class TestXdistControllerIsJudgedToo:
+    """N392: the controller collects nothing, so the gate must judge the ids
+    the workers report, or `-n 2` runs a whole suite with no lock."""
+
+    def _run(
+        self, root: Path, *, extra_fds: tuple[int, ...] = ()
+    ) -> subprocess.CompletedProcess[str]:
+        (root / "simxdist.py").write_text(_XDIST_CONTROLLER_PLUGIN)
+        env = {**os.environ, "PYTHONPATH": f"{SRC_ROOT}{os.pathsep}{root}"}
+        return subprocess.run(
+            [sys.executable, "-m", "pytest", "-p", "simxdist", "tests/"],
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            pass_fds=extra_fds,
+            timeout=Timeout.REQUEST_LONG,
+            check=False,
+        )
+
+    def test_a_whole_suite_reported_by_workers_without_the_lock_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        _write_fixture_suite(tmp_path, file_count=4)
+        result = self._run(tmp_path)
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "REFUSED" in result.stdout
+
+    def test_the_same_report_with_the_lock_held_is_not_refused(self, tmp_path: Path) -> None:
+        _write_fixture_suite(tmp_path, file_count=4)
+        with acquire_full_qa_lock(tmp_path) as fd:
+            os.set_inheritable(fd, True)
+            result = self._run(tmp_path, extra_fds=(fd,))
+        assert "REFUSED" not in result.stdout, result.stdout + result.stderr
+
+    def test_a_small_report_is_not_refused(self, tmp_path: Path) -> None:
+        _write_fixture_suite(tmp_path, file_count=4)
+        # One file of the four is under the threshold: only the ids differ.
+        (tmp_path / "simxdist.py").write_text(
+            _XDIST_CONTROLLER_PLUGIN.replace('rglob("test_*.py")', 'rglob("test_f0.py")')
+        )
+        env = {**os.environ, "PYTHONPATH": f"{SRC_ROOT}{os.pathsep}{tmp_path}"}
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", "-p", "simxdist", "tests/"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=Timeout.REQUEST_LONG,
+            check=False,
+        )
+        assert "REFUSED" not in result.stdout, result.stdout + result.stderr
+
+
 _FORCED_PLUGIN_ARGS: list[str] = ["-p", "claude_code_hooks_daemon_full_qa_gate_loader"]
 
 

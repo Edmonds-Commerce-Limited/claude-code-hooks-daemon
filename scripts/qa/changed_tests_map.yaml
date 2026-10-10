@@ -98,6 +98,31 @@ rules:
     why: the ordinary-command regression gate (Plan 00483 R2) judges its corpus
       through EVERY PreToolUse handler, so a change to any one can flip an ALLOW
       to a deny; no unit test of the changed handler names that corpus
+  - glob: "src/claude_code_hooks_daemon/handlers/*"
+    tests:
+      - tests/integration/test_acceptance_contract.py
+      - tests/integration/test_acceptance_negative_case_requirement.py
+      - tests/integration/test_acceptance_test_coverage.py
+      - tests/integration/test_bash_write_blindness_coverage.py
+      - tests/integration/test_claude_md_guidance_coverage.py
+      - tests/integration/test_declared_behaviour_matches_source.py
+      - tests/integration/test_dogfooding_config.py
+      - tests/integration/test_every_handler_response_validates.py
+      - tests/integration/test_full_qa_gate_is_never_deadlocked.py
+      - tests/integration/test_generated_docs_are_path_agnostic.py
+      - tests/integration/test_handler_config_blocking.py
+      - tests/integration/test_handler_scope_defaults.py
+      - tests/integration/test_handlers_do_not_match_prose.py
+      - tests/integration/test_ordinary_command_regression_gate.py
+      - tests/integration/test_out_of_root_write_containment.py
+      - tests/integration/test_project_handler_priority_collisions.py
+      - tests/integration/test_pseudo_event_handler_visibility.py
+      - tests/integration/test_template_priorities_match_the_constants.py
+      - tests/unit/daemon/test_default_enabled_template_consistency.py
+    why: these tests enumerate EVERY handler (pkgutil.walk_packages or
+      HandlerRegistry.discover()), so they reach a changed handler through no
+      import or path; tests/unit/qa/test_handler_enumerating_tests_are_selected.py
+      checks each listed file still enumerates and that none is missing
   - glob: "src/claude_code_hooks_daemon/utils/secret_file_matching.py"
     tests: [tests/integration/test_ordinary_command_regression_gate.py]
     why: the matcher behind secret_file_guard, which the ordinary-command gate drives
