@@ -23,9 +23,18 @@ environment, the working directory. A scan builds from where the script itself
 lives. The Python half therefore flags a stat call (``exists``, ``is_dir``,
 ``os.path.isdir`` ...) on a path that ENDS at the package directory, directly
 or through a name bound to it, unless the path's root is anchored to
-``__file__`` (``_REPO_ROOT = Path(__file__)...``). A path that goes deeper
-(``.../version.py``, ``.../handlers``) is a file read or a scan, not the mode
-marker. The shell half flags ``[ -d ... ]``, ``[[ -e ... ]]`` and ``test -d``
+``__file__`` (``_REPO_ROOT = Path(__file__)...``) and the answer is only
+branched on. If the answer is kept as a value (``self_install = ...is_dir()``,
+``f(self_install=...)``) it is a decision even when anchored. A path that goes
+deeper (``.../version.py``, ``.../handlers``) is a file read or a scan, not the
+mode marker.
+
+``.claude/ccy/`` is not scanned, by design: the ccy supervisor wraps the user's
+Claude session and must start with no daemon clone present (a fresh teammate
+clone has none), so it cannot load ``install_layout.py`` and keeps its own copy
+of the test. That is a deliberate residual, not an allowlist entry.
+``CLAUDE/UPGRADES/`` is not scanned either: those are frozen historical upgrade
+guides, and a guide for an old version must not depend on a function added later. The shell half flags ``[ -d ... ]``, ``[[ -e ... ]]`` and ``test -d``
 on a path ending at the package directory, directly or through a variable
 assigned from one.
 
@@ -73,6 +82,17 @@ _MARKER_TEXT: Final[str] = "/".join(_MARKER_PARTS)
 _DEFINITIONS: Final[frozenset[str]] = frozenset(
     {"src/claude_code_hooks_daemon/daemon/install_layout.py", "scripts/install/mode_guard.sh"}
 )
+
+#: The same two files as absolute paths, so a scan rooted below the repository
+#: (``--path src``) still recognises them.
+_DEFINITION_PATHS: Final[frozenset[Path]] = frozenset(_REPO_ROOT / d for d in _DEFINITIONS)
+
+#: Directory prefixes (below the scan root) that are not scanned, by design: see the module docstring.
+_UNSCANNED_PREFIXES: Final[tuple[tuple[str, ...], ...]] = (
+    (".claude", "ccy"),
+    ("CLAUDE", "UPGRADES"),
+)
+_PREFIX_DEPTH: Final[int] = 2
 
 #: Gitignored runtime state and other checkouts, never project source. Matched
 #: on the path BELOW the scan root (00466 N26), never on the absolute path.
@@ -324,13 +344,34 @@ def _ends_at_marker(parts: list[str | None]) -> bool:
     return tuple(parts[-len(_MARKER_PARTS) :]) == _MARKER_PARTS
 
 
-def _decides(call: ast.Call, resolver: _Resolver) -> bool:
+def _kept_as_a_value(tree: ast.Module) -> set[int]:
+    """Calls whose answer is stored or handed on: ``x = p.is_dir()``, ``f(k=p.is_dir())``.
+
+    A scan only branches on the answer (``if not root.is_dir(): fail``); keeping
+    it as a value is what a mode flag does.
+    """
+    kept: set[int] = set()
+    for node in ast.walk(tree):
+        values: list[ast.expr | None] = []
+        if isinstance(node, ast.Assign | ast.AnnAssign):
+            values.append(node.value)
+        elif isinstance(node, ast.Call):
+            values.extend(keyword.value for keyword in node.keywords)
+        kept.update(id(value) for value in values if isinstance(value, ast.Call))
+    return kept
+
+
+def _decides(call: ast.Call, resolver: _Resolver, kept_as_a_value: set[int]) -> bool:
     target = _predicate_target(call)
     if target is None:
         return False
     for candidate in resolver.candidates(target):
         root, parts = resolver.flatten(candidate)
-        if _ends_at_marker(parts) and not resolver.is_anchored(root):
+        if not _ends_at_marker(parts):
+            continue
+        # Anchored to ``__file__`` is a scan root, unless the answer is kept as
+        # a value: "is the checkout I live in a self-install" is a decision.
+        if not resolver.is_anchored(root) or id(call) in kept_as_a_value:
             return True
     return False
 
@@ -338,6 +379,7 @@ def _decides(call: ast.Call, resolver: _Resolver) -> bool:
 def _python_decisions(tree: ast.Module) -> list[int]:
     module_scope = _Scope(tree)
     lines: set[int] = set()
+    kept = _kept_as_a_value(tree)
     scopes: list[tuple[ast.AST, _Scope | None]] = [(tree, None)]
     scopes.extend(
         (node, _Scope(node))
@@ -349,7 +391,7 @@ def _python_decisions(tree: ast.Module) -> list[int]:
         lines.update(
             node.lineno
             for node in _walk_scope(scope_node)
-            if isinstance(node, ast.Call) and _decides(node, resolver)
+            if isinstance(node, ast.Call) and _decides(node, resolver, kept)
         )
     return sorted(lines)
 
@@ -414,6 +456,7 @@ def _candidate_files(root: Path) -> list[Path]:
         path
         for path in walk_files(root)
         if not any(part in _SKIP_DIRS for part in relative_parts(path, root))
+        and relative_parts(path, root)[:_PREFIX_DEPTH] not in _UNSCANNED_PREFIXES
         and path.is_file()
         and not path.is_symlink()
         and (path.suffix == _PYTHON_SUFFIX or path.suffix in _SHELL_SUFFIXES or not path.suffix)
@@ -451,7 +494,7 @@ def _scan_file(path: Path, relative: str) -> tuple[bool, list[Violation]]:
         fix = _SH_FIX
     else:
         return False, []
-    if relative in _DEFINITIONS:
+    if relative in _DEFINITIONS or path.resolve() in _DEFINITION_PATHS:
         return True, []
     return True, [
         Violation(file=relative, line=line, message=f"decides the install mode itself; {fix}")

@@ -58,7 +58,7 @@ PROJECT_FORM_SAMPLES: Final[tuple[str, ...]] = (
 #: The ten suppressions in the tree whose reason is the comment block above them, not
 #: their own line. Each names a code of the directive, or a tool, or opens with SECURITY:.
 GENUINE_REASON_ABOVE: Final[tuple[tuple[str, int], ...]] = (
-    (".claude/ccy/claude-supervise.py", 9336),
+    (".claude/ccy/claude-supervise.py", 9289),
     ("init.sh", 1215),
     ("init.sh", 2566),
     ("init.sh", 2676),

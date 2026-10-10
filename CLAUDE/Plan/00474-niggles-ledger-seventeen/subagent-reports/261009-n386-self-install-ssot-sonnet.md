@@ -47,3 +47,10 @@ decides nothing (the tree keeps deliberate syntax-error fixtures).
 `src/claude_code_hooks_daemon/version.py`, a file marker. The detector does not match it (a path that deep is also
 read legitimately, e.g. to read the version). They need an owner decision on whether init.sh and provision.sh may
 source `mode_guard.sh`.
+
+## Round-1 review changes
+
+- `.claude/ccy/claude-supervise.py` is reverted to main: it must start with no daemon clone present, so it keeps its own copy (a deliberate residual). The v2.11 `verification.sh` is reverted too. The detector does not scan `.claude/ccy/` or `CLAUDE/UPGRADES/`, by design (module docstring).
+- `tests/acceptance/conftest.py` now calls `is_self_install_mode`; a `__file__`-anchored stat whose answer is kept as a value is still flagged.
+- The definitions are exempt by absolute path, so `--path src` does not flag them.
+- Both rows for those two files in the Sites table above are superseded by this section.

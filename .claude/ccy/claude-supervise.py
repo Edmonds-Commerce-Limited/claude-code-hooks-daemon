@@ -1772,64 +1772,17 @@ def _default_sidecar_dir() -> Path:
 def _daemon_untracked_dir() -> Path:
     """Resolve the daemon's untracked runtime dir (install-mode-aware).
 
-    The rule is ``daemon/install_layout.py`` -- the one definition the daemon
-    itself uses -- so the daemon (which writes/reads via ProjectContext) and
-    this standalone supervisor always agree on one location. Used for both the
-    context-sidecar dir and the supervisor status file.
+    Mirrors ``ProjectContext.daemon_untracked_dir()`` without importing the
+    daemon: self-install iff the daemon SOURCE tree is present at the project
+    root. Used for both the context-sidecar dir and the supervisor status file,
+    so the daemon (which writes/reads via ProjectContext) and the standalone
+    supervisor always agree on one location.
     """
     project_dir = Path(os.environ.get("CLAUDE_PROJECT_DIR") or Path.cwd())
-    return _canonical_untracked_dir_rule()(project_dir)
-
-
-#: Where ``install_layout.py`` sits inside a daemon source tree, and the two
-#: places such a tree is found relative to the checkout this script lives in:
-#: the checkout itself (self-install) or the client's ``.claude/hooks-daemon``
-#: clone.
-_INSTALL_LAYOUT_IN_TREE: tuple[str, ...] = (
-    "claude_code_hooks_daemon",
-    "daemon",
-    "install_layout.py",
-)
-_DAEMON_SOURCE_PARENTS: tuple[tuple[str, ...], ...] = (
-    ("src",),
-    (".claude", "hooks-daemon", "src"),
-)
-_INSTALL_LAYOUT_MODULE_NAME = "_ccy_install_layout"
-
-
-def _install_layout_path(checkout_root: Path) -> Path:
-    """The daemon's ``install_layout.py`` in the checkout this script lives in.
-
-    Raises:
-        FileNotFoundError: Neither layout holds the file -- a broken install,
-            reported rather than guessed around (a wrong untracked dir makes
-            the supervisor poll a path the daemon never writes).
-    """
-    for parent in _DAEMON_SOURCE_PARENTS:
-        candidate = checkout_root.joinpath(*parent, *_INSTALL_LAYOUT_IN_TREE)
-        if candidate.is_file():
-            return candidate
-    raise FileNotFoundError(
-        f"daemon install_layout.py not found under {checkout_root} "
-        "(looked in src/ and .claude/hooks-daemon/src/)"
-    )
-
-
-@functools.cache
-def _canonical_untracked_dir_rule() -> Callable[[Path], Path]:
-    """``install_layout.get_untracked_dir``, loaded by file path.
-
-    That file is standard-library only with no package imports, so this
-    script stays stdlib-only: it needs no venv and no ``claude_code_hooks_daemon``
-    on ``sys.path``.
-    """
-    layout_path = _install_layout_path(Path(__file__).resolve().parents[2])
-    spec = importlib.util.spec_from_file_location(_INSTALL_LAYOUT_MODULE_NAME, layout_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load {layout_path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return cast("Callable[[Path], Path]", module.get_untracked_dir)
+    self_install = (project_dir / "src" / "claude_code_hooks_daemon").exists()
+    if self_install:
+        return project_dir / "untracked"
+    return project_dir / ".claude" / "hooks-daemon" / "untracked"
 
 
 _WORKER_ERROR_LOG_NAME = "claude-supervise-worker.err.log"

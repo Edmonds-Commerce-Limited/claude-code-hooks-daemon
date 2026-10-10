@@ -56,6 +56,7 @@ import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon.cli import send_daemon_request
+from claude_code_hooks_daemon.daemon.install_layout import is_self_install_mode
 from claude_code_hooks_daemon.daemon.paths import socket_path_diagnosis
 from claude_code_hooks_daemon.daemon.source_fingerprint import (
     compute_current_project_fingerprints,
@@ -143,9 +144,9 @@ def _no_socket_reason() -> str:
     """
     reason = "Daemon not running — no live socket found under untracked/."
     # Self-install: this repo IS the daemon, so its socket lives at
-    # untracked/ rather than under .claude/hooks-daemon/ — the same test the
-    # daemon's own _get_untracked_dir makes, asked of this checkout.
-    self_install = (REPO_ROOT / "src" / "claude_code_hooks_daemon").is_dir()
+    # untracked/ rather than under .claude/hooks-daemon/ — the one rule, asked
+    # of this checkout.
+    self_install = is_self_install_mode(REPO_ROOT)
     diagnosis = socket_path_diagnosis(REPO_ROOT, self_install=self_install)
     if diagnosis is not None:
         return f"{reason} {diagnosis}"

@@ -1501,12 +1501,15 @@ Outcome: `cli.py` imports `get_untracked_dir`; `client_validator.py` and `utils/
 `bootstrap-self-install.sh` and `detect_self_install_mode` (which keeps its extra `pyproject.toml` and real-clone terms),
 with `tests/unit/install/test_self_install_shell_python_parity.py` running both on the same layouts. The detector is
 `scripts/qa/check_install_mode_marker.py` (`llm_qa.py install_mode_marker`, rule `install-mode-marker`). Copies the ledger
-and the fact-check both missed, found by the detector or the search behind it: `.claude/ccy/claude-supervise.py`
-(`.exists()`, now loads the rule by path from its own checkout), `scripts/bootstrap-self-install.sh`, and the
-`CLAUDE/UPGRADES/v2/v2.11-to-v2.12/verification.sh` self-install branch. `daemon/validation.py:105-125` asks a different
+and the fact-check both missed: `scripts/bootstrap-self-install.sh` and `tests/acceptance/conftest.py` now call the
+rule. Deliberate residuals: `.claude/ccy/claude-supervise.py` keeps its own copy (`.exists()`) because the supervisor
+wraps the user's session and must start with no daemon clone present (a first version loaded the rule by path and
+crashed a fresh teammate clone); the detector does not scan `.claude/ccy/` or `CLAUDE/UPGRADES/` by design. The frozen
+`CLAUDE/UPGRADES/v2/v2.11-to-v2.12/verification.sh` keeps its `[[ -d ]]` test: a historical guide must not depend on a
+function added later. `daemon/validation.py:105-125` asks a different
 question (does `pyproject.toml` name this package, which also holds for the daemon's own clone under a client's
 `.claude/hooks-daemon/`), so it is left alone. Residual, outside the detector by design: `init.sh:2394`,
-`provision.sh:68` and the top of `verification.sh` decide "is this the daemon repository" from
+`provision.sh:68` and the top of the v2.11 `verification.sh` decide "is this the daemon repository" from
 `src/claude_code_hooks_daemon/version.py`, a file marker one level deeper than the directory the detector matches.
 
 ### N385 — careless spellings the raw-text guards allow on main

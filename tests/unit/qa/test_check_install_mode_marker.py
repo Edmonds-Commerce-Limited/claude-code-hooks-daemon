@@ -310,6 +310,41 @@ class TestTheCommandLine:
         assert self._run(tmp_path).returncode == 1
 
 
+_PY_ANCHORED_DECISIONS: Final[dict[str, str]] = {
+    "bound-to-a-mode-name": (
+        "from pathlib import Path\n"
+        "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+        "self_install = (REPO_ROOT / 'src' / 'claude_code_hooks_daemon').is_dir()\n"
+    ),
+    "passed-as-a-keyword": (
+        "from pathlib import Path\n"
+        "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+        "def f(g):\n"
+        "    return g(self_install=(REPO_ROOT / 'src' / 'claude_code_hooks_daemon').exists())\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("name", sorted(_PY_ANCHORED_DECISIONS))
+def test_a_file_anchored_decision_is_still_reported(
+    checker: ModuleType, tmp_path: Path, name: str
+) -> None:
+    """Asking 'is the checkout I live in a self-install' is a decision, anchored or not."""
+    assert _flagged(checker, tmp_path, "pkg/mod.py", _PY_ANCHORED_DECISIONS[name]) != []
+
+
+def test_scanning_a_subtree_does_not_flag_the_definition_itself(checker: ModuleType) -> None:
+    """`--path src` shifts the scan-relative path; the definition stays exempt."""
+    assert checker.scan_tree(_REPO_ROOT / "src") == []
+
+
+def test_the_ccy_supervisor_is_not_scanned_by_design(checker: ModuleType, tmp_path: Path) -> None:
+    """It must start with no daemon present, so it keeps its own copy."""
+    _write(tmp_path, ".claude/ccy/claude-supervise.py", _PY_DECISIONS["joinpath"])
+
+    assert checker.scan_tree(tmp_path) == []
+
+
 def test_this_repository_has_no_third_copy(checker: ModuleType) -> None:
     """The real tree: every file but the two definitions asks the rule."""
     violations = checker.scan_tree(_REPO_ROOT)

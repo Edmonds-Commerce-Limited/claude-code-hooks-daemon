@@ -105,21 +105,8 @@ echo ""
 # Check 5: Daemon can load handler
 echo -e "${BLUE}[5/5] Checking handler loads successfully...${NC}"
 if command -v python3 &> /dev/null; then
-    # Detect self-install mode vs normal install with the one shared test, which
-    # lives in mode_guard.sh (in this checkout when self-installed, else in the
-    # client's daemon clone).
-    for mode_guard in "scripts/install/mode_guard.sh" ".claude/hooks-daemon/scripts/install/mode_guard.sh"; do
-        if [[ -f "$mode_guard" ]]; then
-            # shellcheck source=/dev/null
-            source "$mode_guard"
-            break
-        fi
-    done
-    if ! declare -F is_self_install_checkout > /dev/null; then
-        echo -e "${RED}❌ FAIL: mode_guard.sh not found in scripts/install or .claude/hooks-daemon/scripts/install${NC}"
-        exit 1
-    fi
-    if is_self_install_checkout "."; then
+    # Detect self-install mode vs normal install
+    if [[ -d "src/claude_code_hooks_daemon" ]]; then
         # Self-install mode: running from project root
         DAEMON_DIR="."
         if [[ -f "untracked/venv/bin/python" ]]; then
