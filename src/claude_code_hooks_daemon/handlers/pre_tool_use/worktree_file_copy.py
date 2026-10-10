@@ -13,7 +13,8 @@ from claude_code_hooks_daemon.core.project_layout import main_repo_code_dirs
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import RESERVED_WORD_PREFIX
-from claude_code_hooks_daemon.utils.shell_segmentation import strip_inert_spans
+from claude_code_hooks_daemon.utils.command_position import command_position_segments
+from claude_code_hooks_daemon.utils.shell_segmentation import resolve_shell_word, shell_word_spans
 
 # Both worktree root prefixes — untracked/ is manually managed, .claude/ is Claude Code managed
 _WORKTREE_PREFIXES = (ProjectPath.WORKTREES_DIR, ProjectPath.CLAUDE_WORKTREES_DIR)
@@ -43,14 +44,11 @@ _RELOCATION_VERBS: tuple[str, ...] = ("cp", "mv", "rsync", "install", "dd")
 # announcing catastrophic data loss. In `pip install` the program is `pip`;
 # `install` is an argument, and argument position is what this excludes.
 #
-# The opening quote counts, and that is load-bearing rather than incidental.
-# Every acceptance probe in this project wraps its command in `echo "..."` so
-# that a guard under test can never destroy anything when it is the guard
-# that is broken, and the guards are TEXT scanners for exactly that reason.
-# Requiring true command position would make `echo "cp <worktree> src/"` stop
-# matching, which reads as a passing probe against a handler that has
-# silently stopped working — the failure this handler's own deny message
-# calls CATASTROPHIC.
+# The opening quote counts so that a quoted body (`eval 'cp <wt> src/'`) the
+# command-position view leaves as written is still read. A data command's
+# quoted argument (`echo "cp <wt> src/"`, `grep 'mv <wt>' docs/`) never reaches
+# this pattern: the view blanks it, and it is only a command when its output
+# feeds an executor.
 #
 # The separator class includes the newline: a heredoc body runs each line as
 # its own command, so `cp` starting a line is in command position even though
@@ -58,14 +56,66 @@ _RELOCATION_VERBS: tuple[str, ...] = ("cp", "mv", "rsync", "install", "dd")
 #
 # Shell reserved words between the separator and the verb (`do cp`, `then mv`)
 # leave the verb in command position, so they are skipped (Plan 00422 N25).
+# So do leading `NAME=value` assignments and a shell invocation up to its `-c`
+# (`sh -e -c`, `bash -n -c`, `bash -o pipefail -c`), whose body the
+# command-position view splices in without its quotes.
 _RELOCATION_VERB_RE = re.compile(
     r"""(?:^|[;&|\n"']|\$\()\s*"""
     + RESERVED_WORD_PREFIX
-    + r"(?:sudo\s+)?(?:\S*/)?("
+    + r"(?:[A-Za-z_]\w*=\S*\s+)*(?:sudo\s+)?(?:\S*/)?("
     + "|".join(_RELOCATION_VERBS)
     + r")\b",
     re.IGNORECASE,
 )
+
+_SHELL_NAMES = frozenset({"bash", "sh", "zsh", "dash", "ksh"})
+# Wrappers that run the command after their own options.
+_WRAPPERS = frozenset({"sudo", "env", "command", "nice", "time", "exec"})
+_MAX_WRAP_DEPTH = 4
+
+
+def _is_short_c_option(word: str | None) -> bool:
+    """Whether a word is a short-option cluster carrying `-c` (`-c`, `-nc`, `-ec`)."""
+    return word is not None and re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", word) is not None
+
+
+def _effective_command(segment: str, depth: int = 0) -> str:
+    """The text of the command a segment finally runs, read word by word.
+
+    Skips `NAME=value` words, wrappers (`sudo`, `env`, ...) with their options and
+    a shell invocation up to its `-c`, whose body becomes the command
+    (`sudo bash --login -c 'cp ...'`, `/bin/bash -n -c '...'`). Reuses the shared
+    word readers; a word they cannot resolve ends the walk with the text as written.
+    """
+    spans = shell_word_spans(segment)
+    words = [resolve_shell_word(segment[a:b]) for a, b in spans]
+    index = 0
+    while index < len(words):
+        word = words[index]
+        if word is None:
+            return segment[spans[index][0] :]
+        name = word.rsplit("/", 1)[-1]
+        if (
+            re.match(r"[A-Za-z_]\w*=", word)
+            or (index > 0 and word.startswith("-"))
+            or name in _WRAPPERS
+        ):
+            index += 1
+        elif name in _SHELL_NAMES and depth < _MAX_WRAP_DEPTH:
+            body_at = next(
+                (i + 1 for i in range(index + 1, len(words) - 1) if _is_short_c_option(words[i])),
+                None,
+            )
+            if body_at is None:
+                return segment[spans[index][0] :]
+            # The command-position view splices a `-c` body in without its quotes, so
+            # the body is the rest of the segment; a still-quoted body is one word.
+            quoted = body_at == len(words) - 1 and words[body_at] is not None
+            body = words[body_at] if quoted else segment[spans[body_at][0] :]
+            return _effective_command(body or "", depth + 1)
+        else:
+            break
+    return segment[spans[index][0] :] if index < len(spans) else segment
 
 
 class WorktreeFileCopyHandler(PreToolUseHandlerBase):
@@ -84,7 +134,7 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
         )
         self._rule = Rule(
             rule_id=RuleID.WORKTREE_FILE_COPY,
-            blocked="`cp`/`mv`/`rsync` between a worktree and the main repo",
+            blocked="`cp`/`mv`/`rsync` from a worktree into the main repo's code dirs",
             why="Defeats worktree isolation, bypasses git tracking, and can "
             "nuke untracked work in the target directory",
             fix="cd into the worktree, commit, then git merge back",
@@ -145,25 +195,36 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
         relocation verb -- is prose that git stores, and denying it reports a
         catastrophic data-loss scenario to someone writing a sentence.
 
-        `strip_inert_spans` is this repository's existing answer to "what
-        command is actually being run", shared with `destructive_git`,
-        `pipe_blocker`, `merge_to_main_approval` and `daemon_location_guard`.
-        It blanks a `-m`/`-F` message value and a quoted-delimiter heredoc body
-        fed to a DATA SINK -- and only to a data sink, so `bash <<'EOF'` still
-        has its body judged, because the receiver runs those bytes whatever the
-        outer shell quoted.
+        `command_position_segments` is this repository's answer to "what
+        command is actually being run", shared with `destructive_git` and
+        `git_stash`. It blanks a `-m`/`-F` message value, a quoted-delimiter
+        heredoc body fed to a DATA SINK (not `bash <<'EOF'`, whose receiver
+        runs the bytes) and the arguments of `echo`/`grep`, and splits what is
+        left into command segments, which are judged one at a time.
         """
         command = get_bash_command(hook_input)
         if not command:
             return False
-        command = strip_inert_spans(command)
+        # Each command segment is judged on its own tokens. The path patterns
+        # run `.*` and would otherwise cross `&&`/`;` into the NEXT command,
+        # and a segment that only prints a path (`grep`, `echo`) is blanked by
+        # the command-position view unless its output feeds an executor.
+        return any(
+            self._segment_relocates(segment) for segment in command_position_segments(command)
+        )
 
+    def _segment_relocates(self, command: str) -> bool:
+        """Whether one command segment relocates a file from a worktree into main-repo code."""
         if not any(prefix in command for prefix in _WORKTREE_PREFIXES):
             return False
 
         # Check for forbidden operations
-        if not _RELOCATION_VERB_RE.search(command):
+        # The verb is looked for in the segment as written and in the command
+        # it finally runs (through wrappers and a shell `-c`).
+        effective = _effective_command(command)
+        if not (_RELOCATION_VERB_RE.search(command) or _RELOCATION_VERB_RE.search(effective)):
             return False
+        command = effective if _RELOCATION_VERB_RE.search(effective) else command
 
         # Check patterns — the "main repo code dirs" alternation is built
         # from the ProjectLayout facade (Plan 00288 Task 4.3/C5) rather than
@@ -216,9 +277,14 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
             "## worktree_file_copy — do not copy files between worktrees and the main repo\n\n"
             "`cp`, `mv`, and `rsync` operations that move files from a worktree directory "
             "(`untracked/worktrees/` or `.claude/worktrees/`) into the main repo "
-            "(`src/`, `tests/`, `config/`) — or vice versa — are blocked.\n\n"
+            "(`src/`, `tests/`, `config/`) are blocked. A copy the other way, from the "
+            "main repo into a worktree, is not.\n\n"
             "Worktrees are isolated branches. Cross-copying corrupts that isolation "
             "and can silently overwrite in-progress work.\n\n"
+            "Each command is judged on its own: a `grep` or `echo` that only MENTIONS a "
+            "worktree path, and a `ls <worktree>/src/ && cp README.md src/` whose copy "
+            "does not read the worktree, are allowed. The target must be a main-repo "
+            "code dir, so `mv <worktree>/notes.txt tmp.txt` is not blocked.\n\n"
             "**Allowed**: operations within the same worktree branch. "
             "**To merge changes**: use `git merge` or `git cherry-pick` instead."
         )
@@ -230,7 +296,10 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
         return [
             AcceptanceTest(
                 title="cp from worktree to main repo",
-                command='echo "cp untracked/worktrees/feature-branch/src/file.py src/"',
+                command=(
+                    "bash -n -c 'cp untracked/worktrees/acceptance-probe-absent/src/file.py "
+                    "src/acceptance-probe-absent.py'"
+                ),
                 dispatch_as_bash=True,
                 description="Blocks copying files from worktree to main repo (breaks isolation)",
                 expected_decision=Decision.DENY,
@@ -239,22 +308,31 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
                     r"worktree.*isolation",
                     r"git merge",
                 ],
-                safety_notes="Uses echo - safe to test",
+                safety_notes=(
+                    "bash -n only parses, so nothing runs; the source worktree does not exist "
+                    "either"
+                ),
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="rsync from worktree to main repo",
-                command='echo "rsync -av untracked/worktrees/feature/src/ src/"',
+                command=(
+                    "bash -n -c 'rsync -a --dry-run "
+                    "untracked/worktrees/acceptance-probe-absent/src/ src/'"
+                ),
                 dispatch_as_bash=True,
                 description="Blocks rsync from worktree to main repo",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"between a worktree and the main repo",
+                    r"from a worktree into the main repo",
                     r"git history",
                 ],
-                safety_notes="Uses echo - safe to test",
+                safety_notes=(
+                    "bash -n only parses, so nothing runs; --dry-run and a nonexistent source "
+                    "worktree back it up"
+                ),
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,

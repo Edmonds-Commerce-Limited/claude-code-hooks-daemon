@@ -1058,7 +1058,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             "(the `--` is `git log`'s) and `git reset HEAD f && ls --hard` are allowed, "
             "while `x && git reset --hard` is denied exactly as `git reset --hard` is. "
             "A flag must start a word, so `git clean -nd build-final/` is a dry run on "
-            "a directory whose NAME contains `-f`. The value of `--grep`, `-S`, `-G`, `--format` "
+            "a directory whose NAME contains `-f`. The value of `--grep`, `-S`, `-G`, `-e`, `--format` "
             "or `--pretty` on a read-only git command (`log`, `show`, `diff`, `grep`, "
             "...), and an `awk` program, is data: `git log --grep='git reset --hard'` "
             "and `awk '/git stash/ {print}'` are allowed. A quoted argument of a git "

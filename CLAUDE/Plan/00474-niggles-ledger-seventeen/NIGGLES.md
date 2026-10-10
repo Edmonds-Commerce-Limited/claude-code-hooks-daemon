@@ -1461,6 +1461,14 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N390 — two readers of a git command's search and format option values
+
+**Source**: the Plan 00483 batch (b) round 2 review, carried from N383.
+
+**Evidence**: `secret_file_matching._git_grep_pattern_spans` and `command_position._blank_git_text` both place the pattern operand of `git grep`/`git log` by subcommand and option.
+
+**Status**: ⬜ Open. Remedy: one reader, used by both.
+
 ### N389 — the development host's real name is in tracked plan files
 
 **Source**: the coordinator, 2026-10-09, while implementing N388. The N388 entry, as first committed in 3d1fa0ad6,
@@ -1612,7 +1620,9 @@ among the non-universal handlers, and release note 008 tells clients they can sw
 
 The batch (b) round-1 tip denied them only by accident. A directory with a space is an ordinary careless spelling, so the shape is in scope under the 00483 threat model. The probe is `untracked/scratch/00483-review-batch-b-probe4.py` (its output is `00483-r2-probe4-main.txt`).
 
-**Status**: ⬜ Open. Remedy: the shared `_GIT_GLOBAL_OPTION` (`utils/command_evasion.py:62`, behind `GIT_INVOCATION`, which both destructive_git and git_stash use) accepts a quoted or escaped option value for `-C`/`-c`/`--git-dir`/`--work-tree`, and these shapes are added to the must-deny tests. Also from that review, as NITs: the handler guidance omits `-e` from the data-valued options, and `_git_grep_pattern_spans` duplicates the new reader.
+**Status**: ✅ Fixed on branch agent-a0faad4a67ec2a1cf-eb2b861e (Plan 00483 batch (c)): the shared `_GIT_GLOBAL_OPTION` in `utils/command_evasion.py` (behind `GIT_INVOCATION`, used by destructive_git and git_stash) reads a quoted or escaped word, so both handlers deny these shapes; they are in the must-deny tests. The quote pieces are shared with `_MESSAGE_BODY_PATTERN`.
+
+The remaining duplicate-reader NIT from the same review is filed as N390; the guidance omission of `-e` is fixed in batch (c).
 
 ### N382 — `changed --range` does not select tests that discover handlers by scanning the package
 

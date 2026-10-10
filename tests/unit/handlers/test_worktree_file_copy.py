@@ -618,23 +618,20 @@ class TestEveryRelocationVerbIsCovered:
             'echo "rsync -av untracked/worktrees/feature/src/ src/"',
         ],
     )
-    def test_an_echo_wrapped_relocation_is_still_denied(
+    def test_an_echo_that_only_mentions_a_relocation_is_allowed(
         self, handler: WorktreeFileCopyHandler, command: str
     ) -> None:
-        """Every acceptance probe in this project is wrapped in `echo`.
+        """`echo` prints its argument and never runs it (Plan 00483 batch (c)).
 
-        That wrapper is what makes a probe safe to type: the guard under test
-        is the thing that might be broken, so the command must not be able to
-        relocate anything when it is. The guards are TEXT scanners to suit it,
-        and this handler's own declared probes are exactly these two strings.
-
-        Excluding argument position to fix the `pip install` false positive
-        must therefore keep an opening QUOTE as a verb position. Losing it
-        turns both declared probes green against a handler that has stopped
-        matching real copies — a passing test for a guard that no longer
-        guards, which is worse than the false positive it was fixing.
+        These two strings used to be this handler's declared acceptance probes,
+        denied on the strength of an opening QUOTE counting as a verb position.
+        That wrapper was a safety device for the probe, and it made the guard
+        deny a sentence. The probes are now real relocations whose source does
+        not exist (see ``get_acceptance_tests``), and an echo is judged as the
+        data it is. ``echo "cp ..." | bash`` still runs the text and is denied
+        (``test_worktree_file_copy_segments``).
         """
-        assert handler.matches(self._bash(command)) is True
+        assert handler.matches(self._bash(command)) is False
 
     @pytest.mark.parametrize(
         "command",

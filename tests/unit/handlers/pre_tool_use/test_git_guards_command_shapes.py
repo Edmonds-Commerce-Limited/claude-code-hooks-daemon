@@ -87,6 +87,18 @@ DANGEROUS = [
     "git log --grep='x' && git reset --hard",
     "awk '/x/ {print}' f && git stash",
     "git stash --help && git stash",
+    # N383: a quoted or escaped global-option value with a blank in it.
+    "git -C 'my dir' reset --hard",
+    'git -C "my dir" reset --hard',
+    "git -C my\\ dir reset --hard",
+    "git -C 'my dir' stash",
+    'git -C "my dir" stash push',
+    "git -C my\\ dir stash",
+    "git -C 'my dir' clean -fd",
+    "git -C 'my dir' checkout -- f",
+    "git -c 'user.name=A B' reset --hard",
+    "git -c user.name='A B' reset --hard",
+    "git -c 'user.name=A B' stash",
 ]
 
 
