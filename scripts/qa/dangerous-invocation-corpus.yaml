@@ -464,6 +464,73 @@ rows:
       the checkout is: the index is built from `git ls-files` and never walks the
       tree, so a big checkout costs the call nothing (Plan 00483 A2).
 
+  # ------------------------------ whole-filesystem scans, careless spellings (ledger N385)
+  - id: root-recursion-bash-c
+    command: "bash -c 'grep -r x /'"
+    axis: whole-filesystem-scan
+    verdict: COVERED
+    note: >-
+      Closed by root_recursion_guard (R-ROOT-RECURSION-CATASTROPHIC), ledger
+      N385. The `-c` body is read as a command of its own, quote-aware, so
+      `bash -c 'cd /tmp; grep -r x /'` is seen too. `bash -c 'grep -r x .'`
+      stays allowed.
+
+  - id: root-recursion-time-prefix
+    command: "time grep -r x /"
+    axis: whole-filesystem-scan
+    verdict: COVERED
+    note: >-
+      Closed by root_recursion_guard, ledger N385. The `time` reserved word
+      is skipped before the command is read.
+
+  - id: root-recursion-sudo-find
+    command: "sudo find / -name x"
+    axis: whole-filesystem-scan
+    verdict: COVERED
+    note: >-
+      Closed by root_recursion_guard, ledger N385. Wrappers are peeled with
+      the shared `peel_command_wrappers` (`sudo -u bob`, `env`, `nice`,
+      `timeout`, `command`).
+
+  - id: root-recursion-clustered-option
+    command: "grep -rm1 x /"
+    axis: whole-filesystem-scan
+    verdict: COVERED
+    note: >-
+      Closed by root_recursion_guard, ledger N385. A short cluster is read
+      letter by letter up to the first letter that takes a value, so `-rm1`
+      recurses and `-m1r` (a max-count of `1r`) does not.
+
+  - id: root-recursion-du-root
+    command: "du -sh /"
+    axis: whole-filesystem-scan
+    verdict: COVERED
+    note: >-
+      Closed by root_recursion_guard, ledger N385. SCOPE EXTENDED on purpose:
+      the guard named search tools, but `du` walks the same tree for the same
+      cost, and `-d`/`--max-depth` only limits what it prints, so no depth
+      bound excuses it. `du -sh /workspace` stays allowed.
+
+  - id: root-recursion-ls-recursive-root
+    command: "ls -R /"
+    axis: whole-filesystem-scan
+    verdict: COVERED
+    note: >-
+      Closed by root_recursion_guard, ledger N385. SCOPE EXTENDED on purpose,
+      for `-R`/`--recursive` only: `ls /`, `ls -la /` and `ls -r /` (reverse)
+      do not recurse and stay allowed.
+
+  - id: root-recursion-rg-home-directory
+    command: "rg x $HOME"
+    axis: whole-filesystem-scan
+    verdict: COVERED
+    note: >-
+      Denied before N385 as well. N385's `rg x /home/user` is the same tree
+      spelled out: `rg` is a recognised walker, `/home` is a root but a
+      directory below it is a project root, so the guard now also treats the
+      current user's HOME value as the home tree (unit-tested; the corpus
+      cannot pin HOME, so this row holds the `$HOME` spelling).
+
   # ---------------------------------------------------------------- the controls
   #
   # These rows exist so a clean run is evidence. If the harness stopped reading

@@ -57,7 +57,7 @@ SEGMENT_SEPARATORS: tuple[str, ...] = ("&&", "||", "|", "&", ";", "\n")
 DATA_HEADS: frozenset[str] = frozenset({"echo", "printf", "grep", "egrep", "fgrep", "rg"})
 
 #: Shells that run the string given to `-c`.
-_SHELLS: frozenset[str] = frozenset({"bash", "sh", "zsh", "dash", "ksh"})
+SHELL_NAMES: frozenset[str] = frozenset({"bash", "sh", "zsh", "dash", "ksh"})
 
 #: `rg --pre CMD` runs CMD on every file, so an `rg` carrying it is not data.
 _RG_PREPROCESSOR = "--pre"
@@ -137,7 +137,7 @@ def _executed_path(words: list[str | None], written: set[str]) -> str | None:
     if not words or words[0] is None:
         return None
     head = words[0].rsplit("/", 1)[-1]
-    if head in _SHELLS or head in SOURCE_HEADS:
+    if head in SHELL_NAMES or head in SOURCE_HEADS:
         operands = [word for word in words[1:] if word is None or not word.startswith("-")]
         candidate = operands[0] if operands else None
     else:
@@ -416,7 +416,7 @@ def _narrow(segment: str, may_run_output: bool, depth: int) -> str:
         ):
             return segment
         return f" {head} {_DATA_PLACEHOLDER} "
-    if head in _SHELLS and depth < _MAX_NESTING:
+    if head in SHELL_NAMES and depth < _MAX_NESTING:
         return _narrow_shell_body(segment, depth)
     if head == "gh":
         return _narrow_gh_prose(segment)
@@ -448,7 +448,7 @@ def _narrow_shell_body(segment: str, depth: int) -> str:
         (
             i
             for i, word in enumerate(words)
-            if (resolve_shell_word(word) or "").rsplit("/", 1)[-1] in _SHELLS
+            if (resolve_shell_word(word) or "").rsplit("/", 1)[-1] in SHELL_NAMES
         ),
         None,
     )

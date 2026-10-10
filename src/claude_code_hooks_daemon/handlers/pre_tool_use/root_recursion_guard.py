@@ -11,6 +11,12 @@ a catastrophic root location (``/``, ``/proc``, ``/sys``, ``/home``, ``/root``,
 (including ``/proc``, network mounts, container overlays) and, where ``grep`` is
 aliased to multi-threaded ``ugrep``, saturates every core.
 
+``du`` and ``ls -R`` are in scope too (ledger N385): they walk the same tree
+for the same cost, so ``du -sh /`` and ``ls -R /`` are blocked, while ``ls /``,
+``ls -la /`` and ``du -sh /workspace`` are not. The command is read past
+wrappers (``sudo``, ``time``, ``env``) and into ``bash -c '...'`` bodies, and
+the current user's home directory (``$HOME`` spelled out) is the home tree.
+
 Why ``pipe_blocker`` does not catch this: it allowlists ``grep``/``find`` as
 "cheap" filters and guards against output truncation, not resource blow-up. And
 ``... | head`` does NOT bound a ``-l``/``-rl`` scan — ``head`` closes the pipe,
@@ -21,6 +27,7 @@ Escape hatch (mirrors git_stash's ``MUST_STASH_BECAUSE=``):
     MUST_SCAN_ROOT_BECAUSE="reason"; grep -rl x /
 """
 
+import os
 import re
 from dataclasses import dataclass
 from typing import Any, Final
@@ -32,14 +39,25 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils import linear_shlex
-from claude_code_hooks_daemon.utils.command_evasion import PIPE_AT_LINE_END
+from claude_code_hooks_daemon.utils.command_evasion import (
+    PIPE_AT_LINE_END,
+    strip_reserved_word_prefix,
+)
+from claude_code_hooks_daemon.utils.command_position import (
+    SHELL_NAMES,
+    is_shell_command_option,
+)
 from claude_code_hooks_daemon.utils.escape_hatch import command_declares_hatch
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
+from claude_code_hooks_daemon.utils.shell_segmentation import (
+    peel_command_wrappers,
+    split_unquoted_spans,
+)
 
 # Full first-fire teaching content (Plan 00116), preserving the pre-migration
 # handler's rich prose verbatim.
 _ROOT_RECURSION_VERBOSE_CONTENT = (
-    "A recursive scanner (grep -r/-rl, ugrep, find, fd, rg) was pointed "
+    "A recursive scanner (grep -r/-rl, ugrep, find, fd, rg, du, ls -R) was pointed "
     "at /, /proc, /sys, /home, /root, ~ or $HOME. This walks the ENTIRE "
     "filesystem (including /proc, network mounts, container overlays) and, "
     "where grep is aliased to multi-threaded ugrep, saturates every core. "
@@ -66,18 +84,27 @@ _ALWAYS_RECURSIVE_SCANNERS: Final[frozenset[str]] = frozenset(
 # Grep-family scanners that recurse ONLY when given an -r/-R style flag.
 _GREP_FAMILY_SCANNERS: Final[frozenset[str]] = frozenset({"grep", "egrep", "fgrep", "ugrep"})
 
-# Explicit long/short recursion flags for the grep family.
-_GREP_RECURSIVE_FLAGS: Final[frozenset[str]] = frozenset(
-    {"-r", "-R", "--recursive", "--dereference-recursive"}
-)
+# Long recursion flags for the grep family.
+_GREP_RECURSIVE_LONG: Final[frozenset[str]] = frozenset({"--recursive", "--dereference-recursive"})
 
-# A short-flag cluster like -rl, -Rn, -rIl (recursion bundled with other flags).
-_SHORT_FLAG_CLUSTER_RE: Final[re.Pattern[str]] = re.compile(r"-[A-Za-z]+$")
+# `du` and `ls -R` walk a tree exactly as `find` does, so a catastrophic root
+# costs the same disk walk whatever the tool prints. `du` always walks (its
+# depth option limits the printing, not the walk); `ls` only with -R.
+_DU: Final = "du"
+_LS: Final = "ls"
+_LS_RECURSIVE_LONG: Final[frozenset[str]] = frozenset({"--recursive"})
 
-# Shell separators that delimit independent command segments. ``||`` and ``&&``
-# are matched before single ``|`` via ordered alternation. ``&`` is deliberately
-# NOT split on (it appears inside redirections like ``2>&1``).
-_SEGMENT_SPLIT_RE: Final[re.Pattern[str]] = re.compile(r"\|\||&&|;|\||\n")
+# A short-flag cluster like -rl, -Rn, -rm1 (recursion bundled with other flags).
+_SHORT_FLAG_CLUSTER_RE: Final[re.Pattern[str]] = re.compile(r"-[A-Za-z][A-Za-z0-9]*")
+
+# Shell separators that delimit independent command segments, longest first.
+# ``&`` is deliberately NOT split on (it appears inside redirections like
+# ``2>&1``). Read quote-aware, so a ``;`` inside ``bash -c '...'`` stays in the body.
+_SEGMENT_SEPARATORS: Final[tuple[str, ...]] = ("||", "&&", ";", "|", "\n")
+_PIPE: Final = "|"
+
+# A `bash -c` body is read as a command of its own, to this nesting.
+_MAX_SHELL_NESTING: Final = 3
 
 # Home-relative tokens that denote the user's entire home tree.
 _HOME_EXACT: Final[frozenset[str]] = frozenset({"~", "$HOME", "${HOME}"})
@@ -105,6 +132,10 @@ def _is_dangerous_root(token: str) -> bool:
     """
     root = token.rstrip("/") or token
     if root in _HOME_EXACT or root in _DEFAULT_EXACT_ROOTS:
+        return True
+    # `/home/user` is `~` spelled out: the same tree, so the same verdict.
+    home = os.environ.get("HOME", "").rstrip("/")
+    if home and root == home:
         return True
     if any(root.startswith(prefix + "/") for prefix in _DEFAULT_PREFIX_ROOTS):
         # An unreadable path counts as not-a-file, so it is judged as a tree.
@@ -160,8 +191,25 @@ _FD_SYNTAX: Final = _ScanSyntax(
     depth_long=frozenset({"max-depth"}),
     path_long=frozenset({"search-path", "base-directory"}),
 )
+_DU_SYNTAX: Final = _ScanSyntax(
+    short_values="dBtX",
+    long_values=frozenset(
+        {"max-depth", "block-size", "threshold", "exclude", "exclude-from", "files0-from"}
+    ),
+    pattern_operand=False,
+)
+_LS_SYNTAX: Final = _ScanSyntax(
+    short_values="IwT",
+    long_values=frozenset(
+        {"ignore", "hide", "width", "tabsize", "block-size", "format", "sort", "time"}
+        | {"time-style", "quoting-style", "indicator-style"}
+    ),
+    pattern_operand=False,
+)
 _SYNTAX_BY_COMMAND: Final[dict[str, _ScanSyntax]] = {
     **dict.fromkeys(_GREP_FAMILY_SCANNERS | {"rgrep"}, _GREP_SYNTAX),
+    _DU: _DU_SYNTAX,
+    _LS: _LS_SYNTAX,
     "rg": _RG_SYNTAX,
     "fd": _FD_SYNTAX,
     "fdfind": _FD_SYNTAX,
@@ -281,35 +329,85 @@ def _is_data_consumer(segment: str) -> bool:
     return _stage_head(segment) in _DATA_CONSUMERS
 
 
-def _segment_is_dangerous(segment: str, feeds_xargs: bool = False) -> bool:
+def _option_recurses(
+    arg: str, letters: str, syntax: _ScanSyntax, long_names: frozenset[str]
+) -> bool:
+    """Whether one option word asks a tool to recurse.
+
+    A short cluster is read letter by letter up to the first letter that takes
+    a value, because what follows that letter is the value and not more
+    options: ``-rm1`` recurses, ``-m1r`` is a max-count of ``1r``.
+    """
+    if arg.startswith("--"):
+        return arg in long_names
+    if _SHORT_FLAG_CLUSTER_RE.fullmatch(arg) is None:
+        return False
+    for letter in arg[1:]:
+        if letter in letters:
+            return True
+        if letter in syntax.short_values:
+            return False
+    return False
+
+
+def _recurses(command: str, args: list[str]) -> bool:
+    """Whether ``command`` with ``args`` walks the tree below its path operands."""
+    if command in _ALWAYS_RECURSIVE_SCANNERS or command == _DU:
+        return True
+    if command in _GREP_FAMILY_SCANNERS:
+        return any(_option_recurses(arg, "rR", _GREP_SYNTAX, _GREP_RECURSIVE_LONG) for arg in args)
+    if command == _LS:
+        return any(_option_recurses(arg, "R", _LS_SYNTAX, _LS_RECURSIVE_LONG) for arg in args)
+    return False
+
+
+def _command_start(tokens: list[str]) -> int:
+    """Index of the word that names the command ``tokens`` run.
+
+    Past ``VAR=value`` assignments and the shared wrapper table (``sudo -u bob``,
+    ``env``, ``nice -n 5``, ``timeout 60``, ``command``), in any order.
+    """
+    index = 0
+    while index < len(tokens):
+        if re.match(r"^\w+=", tokens[index]):
+            index += 1
+            continue
+        _, step = peel_command_wrappers(tokens[index:])
+        if not step:
+            break
+        index += step
+    return index
+
+
+def _shell_body_is_dangerous(args: list[str], depth: int) -> bool:
+    """Whether the ``-c`` string of a shell invocation holds a root-rooted scan."""
+    for position, arg in enumerate(args):
+        if not arg.startswith("-"):
+            return False
+        if is_shell_command_option(arg):
+            body = args[position + 1 :]
+            return bool(body) and _command_is_dangerous(body[0], depth + 1)
+    return False
+
+
+def _segment_is_dangerous(segment: str, feeds_xargs: bool = False, depth: int = 0) -> bool:
     """Return True if a single command segment is a root-rooted recursive scan.
 
     ``feeds_xargs``: its output is piped to ``xargs``, which runs a command on
     every entry, so a depth bound no longer limits the work.
     """
-    tokens = _tokenize(segment)
-    # Skip leading ``VAR=value`` environment assignments to find the real command.
-    index = 0
-    while index < len(tokens) and re.match(r"^\w+=", tokens[index]):
-        index += 1
+    tokens = _tokenize(strip_reserved_word_prefix(segment))
+    index = _command_start(tokens)
     if index >= len(tokens):
         return False
 
     command = _command_token_basename(tokens[index])
     args = tokens[index + 1 :]
 
-    if command in _ALWAYS_RECURSIVE_SCANNERS:
-        recursive = True
-    elif command in _GREP_FAMILY_SCANNERS:
-        recursive = any(
-            arg in _GREP_RECURSIVE_FLAGS
-            or (_SHORT_FLAG_CLUSTER_RE.fullmatch(arg) is not None and ("r" in arg or "R" in arg))
-            for arg in args
-        )
-    else:
-        return False
+    if command in SHELL_NAMES:
+        return depth < _MAX_SHELL_NESTING and _shell_body_is_dangerous(args, depth)
 
-    if not recursive:
+    if not _recurses(command, args):
         return False
 
     if command == "find":
@@ -317,6 +415,27 @@ def _segment_is_dangerous(segment: str, feeds_xargs: bool = False) -> bool:
     else:
         roots, bounded = _search_roots(_SYNTAX_BY_COMMAND[command], args)
     return not (bounded and not feeds_xargs) and any(_is_dangerous_root(root) for root in roots)
+
+
+def _command_is_dangerous(command: str, depth: int = 0) -> bool:
+    """Return True if any segment of ``command`` is a root-rooted recursive scan.
+
+    Segments are split quote-aware, so a ``;`` inside ``bash -c '...'`` stays in
+    the body; ``depth`` counts the ``-c`` bodies already entered.
+    """
+    # A pipe that ends a line continues the pipeline onto the next one.
+    command = PIPE_AT_LINE_END.sub("| ", command)
+    spans = split_unquoted_spans(command, _SEGMENT_SEPARATORS)
+    return any(
+        _segment_is_dangerous(
+            command[start:end],
+            feeds_xargs=index + 1 < len(spans)
+            and command[end : spans[index + 1][0]] == _PIPE
+            and not _is_data_consumer(command[spans[index + 1][0] : spans[index + 1][1]]),
+            depth=depth,
+        )
+        for index, (start, end) in enumerate(spans)
+    )
 
 
 class RootRecursionGuardHandler(PreToolUseHandlerBase):
@@ -330,7 +449,7 @@ class RootRecursionGuardHandler(PreToolUseHandlerBase):
         )
         self._rule = Rule(
             rule_id=RuleID.ROOT_RECURSION_CATASTROPHIC,
-            blocked="`grep -r`/`find`/`rg`/... rooted at `/`, `/proc`, `/sys`, `/home`, `/root`, `~`, `$HOME`",
+            blocked="`grep -r`/`find`/`rg`/`du`/`ls -R`/... rooted at `/`, `/proc`, `/sys`, `/home`, `/root`, `~`, `$HOME`",
             why="Walks the entire filesystem and can pin every CPU core for hours",
             fix='Scope the search to the project (e.g. `rg -l "pattern" .`)',
             verbose=_ROOT_RECURSION_VERBOSE_CONTENT,
@@ -344,19 +463,7 @@ class RootRecursionGuardHandler(PreToolUseHandlerBase):
         # Escape hatch: explicit justification bypasses the block.
         if command_declares_hatch(command, _ESCAPE_HATCH):
             return False
-        # A pipe that ends a line continues the pipeline onto the next one.
-        command = PIPE_AT_LINE_END.sub("| ", command)
-        parts = _SEGMENT_SPLIT_RE.split(command)
-        separators = _SEGMENT_SPLIT_RE.findall(command)
-        return any(
-            _segment_is_dangerous(
-                segment,
-                feeds_xargs=index < len(separators)
-                and separators[index] == "|"
-                and not _is_data_consumer(parts[index + 1]),
-            )
-            for index, segment in enumerate(parts)
-        )
+        return _command_is_dangerous(command)
 
     def get_rules(self) -> list[Rule]:
         """Return the single Rule backing this handler's blocking behaviour."""
@@ -393,8 +500,11 @@ class RootRecursionGuardHandler(PreToolUseHandlerBase):
             "location is blocked, because it walks the entire filesystem and can pin "
             "every CPU core for hours.\n\n"
             "**Blocked** (recursive scanner + dangerous root path):\n\n"
-            "- `grep -r`/`-R`/`-rl`, `ugrep -r`, `rgrep`, `find`, `fd`/`fdfind`, `rg`\n"
-            "- pointed at `/`, `/proc`, `/sys`, `/home`, `/root`, `~`, `$HOME`\n\n"
+            "- `grep -r`/`-R`/`-rl`, `ugrep -r`, `rgrep`, `find`, `fd`/`fdfind`, `rg`, "
+            "`du`, `ls -R`\n"
+            "- pointed at `/`, `/proc`, `/sys`, `/home`, `/root`, `~`, `$HOME` (or your "
+            "home directory spelled out)\n"
+            "- behind a wrapper (`sudo`, `time`, `env`) or inside `bash -c '...'`\n\n"
             "**Allowed**: the same scanners scoped to the project — "
             '`rg -l "x" .`, `grep -rl "x" "$CLAUDE_PROJECT_DIR"`, '
             "`grep -rl x src/`, `find . -name y`. Non-recursive `grep x /etc/hosts` "
@@ -402,7 +512,8 @@ class RootRecursionGuardHandler(PreToolUseHandlerBase):
             '(`rg "/home" src/`), a single file (`grep -r foo /proc/self/status`), '
             "a subdirectory of home (`~/projects`, `$HOME/proj`) and a scan bounded to "
             "one level (`find / -maxdepth 1`, `rg --max-depth 1 x /`) are allowed. "
-            "`grep -r x /`, `find / -name x` and `rg x ~` stay blocked.\n\n"
+            "`grep -r x /`, `find / -name x`, `du -sh /` and `rg x ~` stay blocked; "
+            "`ls /`, `ls -la /` and `du -sh /workspace` are allowed.\n\n"
             "**Note**: `... | head` does NOT bound a `-l`/`-rl` scan — a producer that "
             "matches nothing never writes, so it never receives SIGPIPE and runs to "
             "completion across the whole disk.\n\n"
