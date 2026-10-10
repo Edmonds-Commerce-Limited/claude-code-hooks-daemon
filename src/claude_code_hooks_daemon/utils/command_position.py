@@ -33,7 +33,11 @@ from __future__ import annotations
 import re
 from itertools import pairwise
 
-from claude_code_hooks_daemon.utils.command_evasion import git_subcommand_index
+from claude_code_hooks_daemon.utils.command_evasion import (
+    GitGrepRole,
+    git_grep_word_roles,
+    git_subcommand_index,
+)
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     is_inert_pipeline_stage,
     resolve_shell_word,
@@ -271,6 +275,11 @@ _READ_ONLY_GIT_SUBCOMMANDS: frozenset[str] = frozenset(
 _GIT_TEXT_OPTIONS: frozenset[str] = frozenset({"--grep", "-S", "-G", "-e"})
 _GIT_TEXT_OPTION_PREFIXES: tuple[str, ...] = ("--grep=", "--format=", "--pretty=", "-S", "-G", "-e")
 _GIT_GREP = "grep"
+#: The roles (see ``git_grep_word_roles``) whose quoted literal is data to
+#: `git grep`: the pattern, and the revisions and pathspecs beside it.
+_GIT_GREP_DATA_ROLES: frozenset[GitGrepRole | None] = frozenset(
+    {GitGrepRole.PATTERN, GitGrepRole.OPERAND}
+)
 #: Text a git command or awk may RUN: a `!` alias body, an awk `system` call or pipe.
 _GIT_RUNNABLE_MARKERS: tuple[str, ...] = ("!",)
 _AWK_RUNNABLE_MARKERS: tuple[str, ...] = ("system", "|")
@@ -310,12 +319,13 @@ def _blank_git_text(segment: str, words: list[tuple[int, int]]) -> list[str]:
     subcommand = None if git_at is None else git_subcommand_index(raw, git_at)
     if subcommand is None or raw[subcommand] not in _READ_ONLY_GIT_SUBCOMMANDS:
         return raw
-    grep = raw[subcommand] == _GIT_GREP
+    roles = git_grep_word_roles(raw, subcommand) if raw[subcommand] == _GIT_GREP else {}
     out = list(raw)
     for index in range(subcommand + 1, len(raw)):
         word = raw[index]
         after_option = raw[index - 1] in _GIT_TEXT_OPTIONS and index - 1 > subcommand
-        if after_option or (grep and not word.startswith("-")):
+        is_grep_data = roles.get(index) in _GIT_GREP_DATA_ROLES and not word.startswith("-")
+        if after_option or is_grep_data:
             out[index] = _blank_literal(word, _GIT_RUNNABLE_MARKERS, True)
         elif word.startswith(_GIT_TEXT_OPTION_PREFIXES):
             out[index] = _blank_literal(word, _GIT_RUNNABLE_MARKERS, False)

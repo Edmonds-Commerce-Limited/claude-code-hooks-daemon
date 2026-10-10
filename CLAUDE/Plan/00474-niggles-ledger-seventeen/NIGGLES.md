@@ -1580,7 +1580,10 @@ which approved the merge and left these as non-blocking.
 
 **Evidence**: `secret_file_matching._git_grep_pattern_spans` and `command_position._blank_git_text` both place the pattern operand of `git grep` by subcommand and option. (`_blank_git_text` also covers `git log` and the other read-only subcommands; `_git_grep_pattern_spans` answers only for `grep`, so the duplication is `git grep`'s.)
 
-**Status**: ⬜ Open. Remedy: one reader, used by both.
+**Status**: ✅ Fixed. `command_evasion.git_grep_word_roles` is the one reader of `git grep`'s option grammar (roles
+OPTION, PATTERN, PATTERN_ATTACHED, OPERAND). `_git_grep_pattern_spans` takes its pattern roles from it and
+`_blank_git_text` its data roles; neither walks the options itself. `tests/unit/utils/test_git_grep_roles.py` pins the
+reader and the parity of both consumers over 21 option shapes, including the pre-change blanking rule as an oracle.
 
 ### N389 — the development host's real name is in tracked plan files
 
@@ -1782,9 +1785,13 @@ file really enumerates the handlers. Fact-check: `subagent-reports/261009-fact-c
 because the full-QA blocker does not recognise a newer pytest's options. So the blocker's table of pytest options
 is pinned to one pytest version, while the venv resolves whatever version is current.
 
-**Status**: ⬜ Open. Remedy: find the options the newer pytest added, and either pin pytest in `uv.lock` /
-`pyproject.toml` or make the blocker treat an unknown option conservatively. Add a test run against the lock's pytest
-version.
+**Status**: ✅ Fixed. Hypothesis confirmed: the lock has pytest 9.0.3, a fresh venv resolves 9.1.1, and the two
+live-parser pin tests failed on the options 9.1 and the current xdist/timeout added (`--max-warnings`,
+`--report-chars`, `--px`, `--session-timeout`, `--testrunuid`, and the booleans `-d`, `--loadscope-reorder`,
+`--no-loadscope-reorder`, `--timeout-disable-debugger-detection`). The blocker already read an unknown option as taking
+a value (fail closed), so the defect was the test pinning the table's completeness, plus over-denial of a new boolean
+that swallowed the test path. The options are now in the tables, and the live checks assert the safe reading (an
+option in neither table fails closed; no value option is listed as a flag) instead of completeness. No lock edit.
 
 ### N380 — agent branches pass their targeted tests and break the cross-cutting ones
 

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from enum import Enum
 from typing import Final
 
 from claude_code_hooks_daemon.utils.heredoc_operators import remove_line_continuations
@@ -410,3 +411,83 @@ def git_subcommand_index(tokens: Sequence[str], git_index: int) -> int | None:
             # Valueless (`--no-pager`, `--bare`, `--paginate`).
             index += 1
     return None
+
+
+#: ``--regexp PAT`` / ``--regexp=PAT``, and ``-e PAT`` / ``-ePAT``: the pattern
+#: given as an option's value, for ``grep`` and ``git grep`` alike.
+REGEXP_LONG_OPTION: Final[str] = "--regexp"
+REGEX_PATTERN_ATTACHED_PREFIXES: Final[tuple[str, ...]] = (f"{REGEXP_LONG_OPTION}=", "-e")
+#: ``git grep`` options whose separate value is the pattern, and those whose
+#: separate value is something else (a pattern FILE, a count, a depth).
+GIT_GREP_PATTERN_OPTIONS: Final[frozenset[str]] = frozenset({"-e", REGEXP_LONG_OPTION})
+GIT_GREP_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
+    {"-f", "--file", "-A", "-B", "-C", "-m", "--max-depth", "--threads"}
+)
+
+
+class GitGrepRole(Enum):
+    """What one word after ``git grep`` is."""
+
+    OPTION = "option"
+    #: A pattern word standing alone: the first positional, or a ``-e`` value.
+    PATTERN = "pattern"
+    #: A pattern attached to its option (``-ePAT``, ``--regexp=PAT``).
+    PATTERN_ATTACHED = "pattern-attached"
+    #: Anything else that is not an option: a revision, a pathspec, or the
+    #: value of an option that does not take a pattern (``-f FILE``, ``-A 3``).
+    OPERAND = "operand"
+
+
+def git_grep_word_roles(words: Sequence[str], subcommand: int) -> dict[int, GitGrepRole]:
+    """The role of every word after the ``grep`` subcommand at ``subcommand``.
+
+    The single reader of ``git grep``'s option grammar. The pattern is the
+    first positional, or the value of ``-e``/``--regexp`` (then every
+    positional is a revision or pathspec). Everything after ``--`` is an
+    operand, and so is every word from the first positional that follows a
+    pattern: no later word is read as a pattern.
+
+    Args:
+        words: the command's shell words.
+        subcommand: index of the ``grep`` word (see :func:`git_subcommand_index`).
+
+    Returns:
+        Role by word index, for each index after ``subcommand``.
+    """
+    roles: dict[int, GitGrepRole] = {}
+    pattern_given = False
+    index = subcommand + 1
+    while index < len(words):
+        word = words[index]
+        if word == "--":
+            roles[index] = GitGrepRole.OPTION
+            roles.update(dict.fromkeys(range(index + 1, len(words)), GitGrepRole.OPERAND))
+            break
+        if word in GIT_GREP_PATTERN_OPTIONS:
+            roles[index] = GitGrepRole.OPTION
+            if index + 1 < len(words):
+                roles[index + 1] = GitGrepRole.PATTERN
+            pattern_given = True
+            index += 2
+        elif word.startswith(REGEX_PATTERN_ATTACHED_PREFIXES):
+            roles[index] = GitGrepRole.PATTERN_ATTACHED
+            pattern_given = True
+            index += 1
+        elif word in GIT_GREP_VALUE_OPTIONS:
+            roles[index] = GitGrepRole.OPTION
+            if index + 1 < len(words):
+                roles[index + 1] = GitGrepRole.OPERAND
+            index += 2
+        elif word.startswith("-"):
+            roles[index] = GitGrepRole.OPTION
+            index += 1
+        elif pattern_given:
+            for rest in range(index, len(words)):
+                is_option = words[rest].startswith("-")
+                roles[rest] = GitGrepRole.OPTION if is_option else GitGrepRole.OPERAND
+            break
+        else:
+            roles[index] = GitGrepRole.PATTERN
+            pattern_given = True
+            index += 1
+    return roles

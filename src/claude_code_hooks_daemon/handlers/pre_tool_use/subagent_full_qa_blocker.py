@@ -138,8 +138,10 @@ _KNOWN_KEYS: Final[frozenset[str]] = frozenset(
 #: those of the plugins most often installed beside it (xdist, timeout,
 #: randomly, rerunfailures, asyncio, html). A value can look like a path
 #: (``--basetemp /tmp/x``, ``--cov src``), so the grammar has to consume it
-#: before the operand test sees it. ``test_subagent_full_qa_blocker`` pins
-#: this set against the parser of the pytest actually installed.
+#: before the operand test sees it. An option missing from this set is read as
+#: taking a value (fail closed), so a pytest newer than the table is
+#: over-denied, never under-denied; ``test_subagent_full_qa_blocker`` checks
+#: that reading against the parser of the pytest actually installed.
 PYTEST_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
     {
         # pytest core
@@ -186,11 +188,13 @@ PYTEST_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
         "--log-file-mode",
         "--log-format",
         "--log-level",
+        "--max-warnings",
         "--maxfail",
         "--override-ini",
         "--pastebin",
         "--pdbcls",
         "--pythonwarnings",
+        "--report-chars",
         "--rootdir",
         "--show-capture",
         "--tb",
@@ -212,7 +216,10 @@ PYTEST_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
         "--rsyncdir",
         "--rsyncignore",
         "--maxschedchunk",
+        "--px",
+        "--testrunuid",
         # pytest-timeout
+        "--session-timeout",
         "--timeout",
         "--timeout-method",
         "--timeout_method",
@@ -309,8 +316,12 @@ PYTEST_FLAG_OPTIONS: Final[frozenset[str]] = frozenset(
         "--no-cov",
         "--no-cov-on-fail",
         # pytest-xdist, pytest-randomly, pytest-html
+        "-d",
         "-f",
         "--looponfail",
+        "--loadscope-reorder",
+        "--no-loadscope-reorder",
+        "--timeout-disable-debugger-detection",
         "--randomly-dont-reset-seed",
         "--randomly-dont-reorganize",
         "--self-contained-html",
