@@ -193,6 +193,18 @@ the daemon directs the model and then verifies what it did.
 
 - [x] ✅ **Task 5.1**: Write the configuration docs, the handler guidance, and a release note.
 
+### Phase 6: The owner's override, after the first real pause
+
+The first real pause showed a gap: the owner's override (`usage-pause clear`) suppressed the ceiling silently until
+the breaching window's reset. On 2026-10-08 it was written at 80%. Usage then rose unobserved to the account's hard
+limit, and three working agents died mid-task on HTTP 429. The behaviour matches the docs. The gap is the absence of a
+feedback loop.
+
+- [ ] ⬜ **Task 6.1**: Make an active override visible. While an override is in force and any window is over the
+  ceiling, each prompt carries a short context naming the window, its percentage and the override's end. The status
+  line shows an `override until HH:MM` chip. This changes no decision, so it is not an owner question.
+- [ ] ⬜ **Task 6.2**: A backstop the override cannot suppress. Blocked on owner question 5.
+
 ## Open questions for the owner
 
 1. **Resolved (owner)**: pause, then resume through a scheduled cron at the predicted reset,
@@ -208,6 +220,19 @@ the daemon directs the model and then verifies what it did.
    overrides.
 
 4. **Resolved (coordinator call)**: folding `persistent_crons` host selection into the `hosts:` block at the next major, with the old form working until then.
+
+5. **Open (owner)**: should anything pause a session through the owner's override? The override is the owner's
+   decision, and a backstop changes what it means, so the coordinator does not choose. Options:
+
+   - (a) No change. The override holds to the window's reset. Task 6.1's warnings are the only feedback.
+   - (b) A hard backstop, for example 95%, that pauses even under an override. Recommended: it keeps the head-room
+     for in-flight agents that the hard limit takes away.
+   - (c) Re-arm when usage rises a set number of points above the level recorded at clear time.
+   - (d) Scope the override to the windows that were breaching when it was written.
+
+   A related open fact: the live seven-day reset (2026-10-11 08:02) differed from the reset the override trusted
+   (2026-10-09 23:00). Whether the provider's window moves, and so whether the override should re-read `resets_at`, is
+   unconfirmed.
 
 ## Success Criteria
 
@@ -238,8 +263,19 @@ the daemon directs the model and then verifies what it did.
   to write the file; it then takes effect at the next ccy launch, and also makes this session
   the `issue-sdlc` cron's host. Live since the 2026-10-06 host reboot: the session after it
   has `HOOKS_DAEMON_HOSTNAME=cchd-sdlc-runner`, and the stop enforcer demanded the
-  host-limited `issue-sdlc` cron, which was created. The ceiling pause itself is now armed
-  in this session and is observed the first time a window reaches 80%.
+  host-limited `issue-sdlc` cron, which was created. On 2026-10-09 the owner renamed the alias
+  to `github-softwaredev-lifecycle-unattended`.
+  **First real pause, 2026-10-08 14:52 UTC**
+  ([report](subagent-reports/261010-p479-first-real-pause-sonnet.md)):
+
+  - The seven-day window reached 80%. The gate denied tools, and the session replaced its crons with
+    the resume cron through real `CronDelete`/`CronCreate` calls. Steps one and two are observed.
+  - The owner then lifted the pause with `! bin/hooks-daemon usage-pause clear`, so the resume tick was not observed.
+  - On 2026-10-10 the gate did lift a later pause by itself: the first prompt after the window reset re-read usage
+    and released the session.
+  - Still open: Task 6.1. The override hid the window's climb to 100%.
+
+  Left unticked until Phase 6 lands.
 
 - [x] Missing or stale usage data never stops a session (Task 4.7; acceptance step 6 and the
   chain test).
