@@ -1723,7 +1723,13 @@ the evidence is in `untracked/scratch/batchc-review/`. None of these came from b
 
 Each is a spelling a careless agent writes, so all are in scope under the 00483 threat model. Out of scope (hostile, by the reviewer's call, which the coordinator accepts): a local program whose only job is to run stdin, such as `python3 -c 'exec(sys.stdin.read())'`.
 
-**Status**: ⬜ Open. Remedy: one branch per guard, each shape a red test first and a must-deny gate row. The shared wrapper and `-c`-body readers that batch (b) and (c) reuse should cover most of the wrapper cases.
+**Status**: ⬜ Open (one branch per guard; each shape a red test first and a must-deny gate row). The shared wrapper and `-c`-body readers that batch (b) and (c) reuse should cover most of the wrapper cases.
+
+- **curl_pipe_shell**: ✅ Fixed on branch agent-a220a4cbce194b561-7e5be5a9, except one shape. The pipe stage is now read word by word through `peel_command_wrappers` (so `| env python3`, `| sudo -u bob python3`, `| env FOO=1 bash` are seen, and `sudo tee /etc/apt/python.list` is not mistaken for an interpreter), `node` is an interpreter, and a downloading `$(...)`, backtick or `<(...)` is denied when it is the program: `sh -c "$(curl ...)"`, `bash -c`, `python3 -c`, `eval`, `bash <(curl ...)`, `source <(curl ...)`. Tests: `tests/unit/handlers/pre_tool_use/test_curl_pipe_shell_careless.py` (written red first, 28 failing, then green; allow rows for `curl -o x.tar.gz && tar x`, `curl | jq`, `diff <(curl a) <(curl b)`, `sh -c "echo $(curl ...)"`). Gate rows: `remote-code-*` in `scripts/qa/dangerous-invocation-corpus.yaml`.
+  - **Left open, by decision**: `curl url -o x.sh && bash x.sh`. A same-command download-then-run is not reliably detectable. `curl -o x.sh U && sha256sum -c sums && bash x.sh` is the verified form the guard's own advice points at, and `bash -n x.sh` does not run the file, so a deny refuses the careful spelling; `curl -O`, `cd dir &&` and variable names lose the file name, so it would still miss the careless one. Recorded as `UNCOVERED-open` row `remote-code-download-then-run`.
+  - Round 1 review additions, also fixed: `bash < <(curl ...)` and `bash -s < <(curl ...)` (RVM's form); a downloading substitution that starts a command inside a `-c` body (`sh -c "cd /tmp && $(curl ...)"`, `bash -c "set -e; $(curl ...)"`); `exec bash <(curl ...)`; `eval -- "$(curl ...)"`. `curl | node --version` (and `-v`, `--help`, and the python/perl/ruby equivalents) is no longer denied, since no program is read. The `-c` option test and the source-head set are now the shared `is_shell_command_option` and `SOURCE_HEADS` in `utils/command_position.py`.
+  - Also still not seen: a download held in a variable and run later (`x=$(curl ...); bash -c "$x"`).
+- **worktree_file_copy** and **root_recursion_guard**: ⬜ Open.
 
 ### N384 — `/hooks-daemon optimise` recommends the `daemon_stats` health line to every project
 
