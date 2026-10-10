@@ -19,10 +19,13 @@ from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import PIPE_AT_LINE_END, STDIN_OPERANDS
 from claude_code_hooks_daemon.utils.command_position import (
     SEGMENT_SEPARATORS,
+    SOURCE_HEADS,
     command_position_view,
+    is_shell_command_option,
 )
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     DATA_SINKS,
+    END_OF_OPTIONS,
     UnplaceableSubstitutionError,
     peel_command_wrappers,
     quoted_heredoc_command_words,
@@ -99,9 +102,11 @@ _CLOSING_SYNTAX = ")`'\""
 _DOWNLOADER = re.compile(r"\b(?:curl|wget)\b", re.IGNORECASE)
 _DOWNLOADER_NAMES = frozenset({"curl", "wget"})
 _SHELL_NAMES = frozenset({"bash", "sh", "zsh", "ksh", "dash"})
-# Commands that run the file or stream they are given in the current shell.
-_SOURCE_NAMES = frozenset({"source", "."})
 _EVAL = "eval"
+# `exec bash ...` replaces the shell with bash: the same command, so it is peeled.
+_EXEC = "exec"
+# A shell redirect from a process substitution: `bash < <(curl ...)`.
+_STDIN_REDIRECT = "<"
 _PROCESS_SUBSTITUTION_OPEN = "<("
 _COMMAND_SUBSTITUTION_OPEN = "$("
 _BACKTICK = "`"
@@ -121,6 +126,13 @@ _PROGRAM_OPTION = {
     "perl": re.compile(r"-[0-9acCdDFilnpsStTuUvwWxX]*[eE]"),
     "ruby": re.compile(r"-[acdlnpsSvwWxy]*e"),
     "node": re.compile(r"-[ep]+"),
+}
+# Options that print something and exit: no program is read, so the piped bytes are not run.
+_NO_PROGRAM_OPTIONS = {
+    "python": frozenset({"-V", "--version", "-h", "--help"}),
+    "perl": frozenset({"-v", "-h"}),
+    "ruby": frozenset({"-v", "--version", "-h", "--help"}),
+    "node": frozenset({"-v", "--version", "-h", "--help", "-c", "--check"}),
 }
 
 
@@ -147,7 +159,7 @@ def _stage_reads_stdin_as_code(words: list[str | None]) -> bool:
             skip_next = False
         elif word in STDIN_OPERANDS:
             return True
-        elif _PROGRAM_OPTION[family].match(word):
+        elif _PROGRAM_OPTION[family].match(word) or word in _NO_PROGRAM_OPTIONS[family]:
             return False
         elif word in _VALUE_OPTIONS[family]:
             skip_next = True
@@ -175,7 +187,9 @@ def _command_start(words: list[str | None]) -> int:
     while index < len(argv):
         _, step = peel_command_wrappers(argv[index:])
         index += step
-        if index < len(argv) and _ENV_ASSIGNMENT.match(argv[index]):
+        if index < len(argv) and (
+            argv[index] == _EXEC or _ENV_ASSIGNMENT.match(argv[index]) is not None
+        ):
             index += 1
             continue
         break
@@ -258,7 +272,10 @@ def _downloads(inner: str) -> bool:
 
 
 def _substitution_is_the_program(
-    words: list[str | None], head: int, is_process_substitution: bool
+    words: list[str | None],
+    head: int,
+    is_process_substitution: bool,
+    is_redirected: bool = False,
 ) -> bool:
     """Whether the substitution after ``words`` is handed over as the code to run.
 
@@ -267,23 +284,28 @@ def _substitution_is_the_program(
     sits between the interpreter and it (`bash <(curl ...)`, `source <(...)`).
     A command substitution is the program when it is the whole argument of
     `eval` or of the interpreter's `-c`/`-e` option (`sh -c "$(curl ...)"`).
+    A process substitution redirected into the interpreter's stdin
+    (``is_redirected``) is its program whatever arguments follow
+    (`bash -s stable < <(curl ...)`).
     """
     name = words[head]
     if name is None:
         return False
     command = name.rsplit("/", 1)[-1]
     rest = words[head + 1 :]
+    if is_redirected:
+        return _INTERPRETER_NAME.fullmatch(command) is not None
     if is_process_substitution:
-        runs_a_file = command in _SOURCE_NAMES or _INTERPRETER_NAME.fullmatch(command) is not None
+        runs_a_file = command in SOURCE_HEADS or _INTERPRETER_NAME.fullmatch(command) is not None
         return runs_a_file and all(word is not None and word.startswith("-") for word in rest)
     if command == _EVAL:
-        return not rest
+        return all(word == END_OF_OPTIONS for word in rest)
     option = rest[-1] if rest else None
     if option is None:
         return False
     family = _interpreter_family(command)
     if family in _SHELL_NAMES:
-        return option.startswith("-") and not option.startswith("--") and "c" in option[1:]
+        return is_shell_command_option(option)
     program_option = _PROGRAM_OPTION.get(family)
     return program_option is not None and program_option.fullmatch(option) is not None
 
@@ -315,19 +337,50 @@ def _substitution_runs_download(view: str) -> bool:
             prefix, is_process = view[: start - 2], False
         else:
             continue
-        prefix = prefix.rstrip().removesuffix('"').rstrip()
-        spans = split_unquoted_spans(prefix, SEGMENT_SEPARATORS)
-        segment = prefix[spans[-1][0] : spans[-1][1]]
-        word_spans = shell_word_spans(segment)
-        # Words that stop short of the end of the prefix mean the substitution
-        # sits inside a quoted word (`sh -c "echo $(...)"`), not in a word of its own.
-        if not word_spans or word_spans[-1][1] != len(segment.rstrip()):
+        is_redirected = is_process and prefix.rstrip().endswith(_STDIN_REDIRECT)
+        if is_redirected:
+            # `bash < <(curl ...)`: the redirect is part of the same spelling.
+            prefix = prefix.rstrip().removesuffix(_STDIN_REDIRECT)
+        words = _words_before_substitution(prefix)
+        if words is None:
             continue
-        words = _resolved_words(segment)
         head = _command_start(words)
-        if head < len(words) and _substitution_is_the_program(words, head, is_process):
+        if head < len(words) and _substitution_is_the_program(
+            words, head, is_process, is_redirected
+        ):
             return True
     return False
+
+
+def _last_segment_words(text: str) -> list[str | None] | None:
+    """The words of the last command in ``text``, or None if it ends inside a quote."""
+    spans = split_unquoted_spans(text, SEGMENT_SEPARATORS)
+    segment = text[spans[-1][0] : spans[-1][1]]
+    word_spans = shell_word_spans(segment)
+    if not word_spans or word_spans[-1][1] != len(segment.rstrip()):
+        return None
+    return _resolved_words(segment)
+
+
+def _words_before_substitution(prefix: str) -> list[str | None] | None:
+    """The words of the command that a substitution right after ``prefix`` is the program of.
+
+    Either the substitution is a word of its own (`sh -c "$(...)"`, whose opening
+    quote is dropped), or it starts a command inside a double-quoted body
+    (`sh -c "cd /tmp && $(...)"`). One that follows other text in its command
+    (`sh -c "echo $(...)"`) is data, and gives None.
+    """
+    words = _last_segment_words(prefix.rstrip().removesuffix('"').rstrip())
+    if words is not None:
+        return words
+    quote = prefix.rfind('"')
+    if quote < 0:
+        return None
+    body = prefix[quote + 1 :]
+    body_spans = split_unquoted_spans(body, SEGMENT_SEPARATORS)
+    if body[body_spans[-1][0] : body_spans[-1][1]].strip():
+        return None
+    return _last_segment_words(prefix[:quote].rstrip())
 
 
 class CurlPipeShellHandler(PreToolUseHandlerBase):

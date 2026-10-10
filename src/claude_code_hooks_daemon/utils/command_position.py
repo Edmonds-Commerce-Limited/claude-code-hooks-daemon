@@ -73,7 +73,7 @@ _PLAIN_WORD = re.compile(r"[A-Za-z0-9_./:@=+,%-]+")
 _DOUBLE_QUOTE_ACTIVE: tuple[str, ...] = ('"', "$", "`", "\\", "!", "\n")
 
 #: Commands that run a file's text in the current shell.
-_SOURCE_HEADS: frozenset[str] = frozenset({"source", "."})
+SOURCE_HEADS: frozenset[str] = frozenset({"source", "."})
 
 #: What replaces the arguments of a data segment.
 _DATA_PLACEHOLDER = "_"
@@ -133,7 +133,7 @@ def _executed_path(words: list[str | None], written: set[str]) -> str | None:
     if not words or words[0] is None:
         return None
     head = words[0].rsplit("/", 1)[-1]
-    if head in _SHELLS or head in _SOURCE_HEADS:
+    if head in _SHELLS or head in SOURCE_HEADS:
         operands = [word for word in words[1:] if word is None or not word.startswith("-")]
         candidate = operands[0] if operands else None
     else:
@@ -422,6 +422,14 @@ def _has_rg_preprocessor(segment: str) -> bool:
     return False
 
 
+def is_shell_command_option(option: str) -> bool:
+    """Whether a shell option word takes the next word as the command string.
+
+    A short-option cluster carrying `c` (`-c`, `-ec`, `-lc`); a long option never does.
+    """
+    return option.startswith("-") and not option.startswith("--") and "c" in option[1:]
+
+
 def _narrow_shell_body(segment: str, depth: int) -> str:
     """Replace a literal `-c` body with its own command-position view."""
     spans = shell_word_spans(segment)
@@ -440,7 +448,7 @@ def _narrow_shell_body(segment: str, depth: int) -> str:
         option = resolve_shell_word(words[offset])
         if option is None or not option.startswith("-"):
             return segment
-        if not option.startswith("--") and "c" in option[1:]:
+        if is_shell_command_option(option):
             body = resolve_shell_word(words[offset + 1])
             if body is None:
                 return segment
