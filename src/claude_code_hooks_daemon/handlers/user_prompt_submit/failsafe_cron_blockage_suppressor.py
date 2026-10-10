@@ -380,7 +380,9 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             "failsafe_cron_blockage_suppressor: suppressing cron tick for session %s",
             session_id,
         )
-        return BlockingResult(decision=Decision.DENY, reason=RuleFormatter().verbose(_RULE))
+        return BlockingResult(
+            decision=Decision.DENY, reason=RuleFormatter().verbose(_RULE), rule=_RULE.rule_id
+        )
 
     def _default_config_loader(self) -> Config:
         """The project's daemon config; defaults when it cannot be loaded.
@@ -434,7 +436,7 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             session_id,
         )
         reason = f"{RuleFormatter().verbose(_DECLARED_RULE)}\n\nDeclared job: {tick.job_id}"
-        return BlockingResult(decision=Decision.DENY, reason=reason)
+        return BlockingResult(decision=Decision.DENY, reason=reason, rule=_DECLARED_RULE.rule_id)
 
     def _apply_backoff(self, cadence_path: Path, session_id: str) -> BlockingResult:
         """Advance the cadence and drop or deliver this tick accordingly.
@@ -456,7 +458,11 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             session_id,
             next_state.cadence_hours,
         )
-        return BlockingResult(decision=Decision.DENY, reason=RuleFormatter().verbose(_BACKOFF_RULE))
+        return BlockingResult(
+            decision=Decision.DENY,
+            reason=RuleFormatter().verbose(_BACKOFF_RULE),
+            rule=_BACKOFF_RULE.rule_id,
+        )
 
     def get_rules(self) -> list[Rule]:
         """Return the Rules backing this handler's DENY paths.

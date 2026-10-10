@@ -72,7 +72,7 @@ def _filed_under_rule(result: _ResultT, rule: Rule, blocked: str | None) -> _Res
         return result
     headline = RuleFormatter().headline(rule, blocked=blocked)
     reason = f"{headline}\n\n{result.reason}" if result.reason else headline
-    return result.model_copy(update={"reason": reason})
+    return result.model_copy(update={"reason": reason, "rule": rule.rule_id})
 
 
 class AdvisoryResult(HookResult[Literal[Decision.ALLOW, Decision.CONTINUE]]):

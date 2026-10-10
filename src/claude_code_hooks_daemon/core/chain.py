@@ -276,10 +276,10 @@ class HandlerVerdict:
         handler: Name of the handler that produced this verdict.
         decision: The handler's OWN decision (never the chain's merged one).
         terminal: Whether this handler is registered as terminal.
-        rule: Optional handler-set sub-classification (``HookResult.rule``),
-            e.g. pipe_blocker's "blacklisted" vs "unknown". None when the
-            handler did not set one — most handlers never do, and that is
-            fine; the verdict log records it as null in that case.
+        rule: The rule ID the result carries (``HookResult.rule``). None for a
+            non-restrictive result that names none, and for a restrictive one
+            from a handler that declares several rules and names none; the
+            verdict log records it as null in that case.
     """
 
     handler: str
@@ -1030,6 +1030,10 @@ class HandlerChain:
             executed_handlers.append(handler)
             matched_results.append(result)
             result.add_handler(handler.name)
+            if result.rule is None and is_restrictive(result.decision):
+                declared = handler.get_rules()
+                if len(declared) == 1:
+                    result.rule = declared[0].rule_id
 
             # Record THIS handler's own verdict now, before any later
             # handler's laxer/stricter result can change what the eventual
