@@ -19,6 +19,11 @@ code, and the kept ones are reported here for the owner.
 | Kept                                               | 78                   |
 | Fixtures / string mentions (not directives)        | 9 files, intentional |
 
+Reconciliation with the detector (CONFORMANCE.md uses this figure): `check_inline_suppressions.py`
+counts 113 directive comments at `fdd2b8710` (65 `nosec`, 12 `pragma: no cover`, 36
+`shellcheck disable`, no `type: ignore`, `noqa` or `nosemgrep`). The 78 above is the Python-only
+count of the deletion pass; the detector also reads shell scripts, which holds the `shellcheck disable` lines; the 78 and the Python share of the 113 differ by one and were not reconciled further.
+
 Deleted, by cause:
 
 - 193 `nosec` in `tests/` and `scripts/`: bandit runs only on `src/` and
