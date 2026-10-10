@@ -1,4 +1,4 @@
-"""`--path FILE` runs three QA checkers over a single file (Plan 00484 G8, DETECTOR-SPEC 5.2).
+"""`--path FILE` runs four QA checkers over a single file (Plan 00484 G8, DETECTOR-SPEC 5.2).
 
 DETECTOR-SPEC 5.2: a detector MUST support invocation over a subset, at
 minimum a single file, because a check that takes the whole tree is too slow
@@ -40,6 +40,7 @@ class SingleFileChecker:
     bad: str
     rule: str
     clean: str
+    other_kind: str = "notes.txt"  # a name the checker does not judge
 
 
 _CHECKERS: Final[tuple[SingleFileChecker, ...]] = (
@@ -69,6 +70,15 @@ _CHECKERS: Final[tuple[SingleFileChecker, ...]] = (
         "#!/bin/bash\nchmod +x hook 2>/dev/null || true\n",
         "double-suppression",
         "#!/bin/bash\necho ok\n",
+    ),
+    SingleFileChecker(
+        "check_british_english.py",
+        "british_english.json",
+        "notes.md",
+        "The behavior of the daemon is documented here.\n",
+        "american-spelling",
+        "The behaviour of the daemon is documented here.\n",
+        other_kind="notes.json",
     ),
 )
 
@@ -138,11 +148,11 @@ class TestAFileIsJudgedOnItsOwn:
     def test_a_file_of_another_kind_fails_rather_than_passing_vacuously(
         self, checker: SingleFileChecker, tmp_path: Path
     ) -> None:
-        target = tmp_path / "notes.txt"
+        target = tmp_path / checker.other_kind
         target.write_text("nothing to judge\n", encoding="utf-8")
         result = _run(checker, target)
         assert result.returncode == 1
-        assert "notes.txt" in result.stderr
+        assert checker.other_kind in result.stderr
 
 
 @dataclass(frozen=True)
@@ -163,6 +173,9 @@ _SCOPE_CASES: Final[tuple[ScopeCase, ...]] = (
     ScopeCase("audit_error_hiding.py", "tests/unit/qa/test_qa_single_file_subset.py", False),
     ScopeCase("audit_shell.py", "scripts/lib/portable_time.sh", True),
     ScopeCase("audit_shell.py", "init.sh", False),
+    ScopeCase("check_british_english.py", "README.md", True),
+    ScopeCase("check_british_english.py", "CHANGELOG.md", False),
+    ScopeCase("check_british_english.py", "CLAUDE/Plan/README.md", False),
 )
 
 

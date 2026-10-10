@@ -67,6 +67,13 @@ class TestProbeOnly:
         assert wanted.matches_called
         assert other.matches_called
 
+    def test_a_dashed_name_selects_the_handler_with_the_underscored_key(self) -> None:
+        wanted, other = _run(
+            _event(**{SYNTHETIC_SOURCE_FIELD: MANUAL_PROBE, PROBE_ONLY_FIELD: "wanted-handler"})
+        )
+        assert wanted.matches_called
+        assert not other.matches_called
+
     def test_real_traffic_cannot_restrict_the_chain(self) -> None:
         wanted, other = _run(_event(**{PROBE_ONLY_FIELD: "wanted_handler"}))
         assert wanted.matches_called

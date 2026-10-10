@@ -20,15 +20,34 @@ record exists to avoid.
 """
 
 from claude_code_hooks_daemon.daemon.synthetic_traffic import (
+    MANUAL_PROBE,
     PLAYBOOK_PROBE,
+    PROBE_ONLY_FIELD,
     SOCKET_STDIN_TEST,
     SYNTHETIC_SOURCE_FIELD,
     VERDICT_SYNTHETIC_FIELD,
     classify_synthetic,
     event_synthetic_source,
     is_synthetic_event,
+    probe_only_handler,
     record_synthetic_source,
 )
+
+
+class TestProbeOnlyHandler:
+    """``probe_only`` is normalised to the config key in this one place."""
+
+    def test_a_dashed_name_is_returned_as_the_underscored_config_key(self) -> None:
+        event = {SYNTHETIC_SOURCE_FIELD: MANUAL_PROBE, PROBE_ONLY_FIELD: "destructive-git"}
+        assert probe_only_handler(event) == "destructive_git"
+
+    def test_an_underscored_name_is_unchanged(self) -> None:
+        event = {SYNTHETIC_SOURCE_FIELD: MANUAL_PROBE, PROBE_ONLY_FIELD: "destructive_git"}
+        assert probe_only_handler(event) == "destructive_git"
+
+    def test_a_non_probe_source_names_no_handler(self) -> None:
+        event = {SYNTHETIC_SOURCE_FIELD: PLAYBOOK_PROBE, PROBE_ONLY_FIELD: "destructive-git"}
+        assert probe_only_handler(event) is None
 
 
 class TestClassifySynthetic:

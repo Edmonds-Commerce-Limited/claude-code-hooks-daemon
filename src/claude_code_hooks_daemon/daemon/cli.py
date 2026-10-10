@@ -180,7 +180,7 @@ if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.worktree_reaping import ProcessCwdsFn, RunGit, WorktreeAgeFn
     from claude_code_hooks_daemon.daemon.branch_safety import BranchClassification
     from claude_code_hooks_daemon.daemon.controller import DaemonController
-    from claude_code_hooks_daemon.daemon.docs_generator import DocsGenerator
+    from claude_code_hooks_daemon.daemon.docs_generator import CollectedHandler, DocsGenerator
     from claude_code_hooks_daemon.daemon.project_handler_health import (
         ProjectHandlerHealthState,
     )
@@ -3589,6 +3589,33 @@ def _build_docs_generator(config: Config, project_path: Path) -> "DocsGenerator"
     )
 
 
+def _with_project_handler_keys(
+    active: "list[CollectedHandler]", project_handlers: list[tuple[Any, Any]]
+) -> "list[CollectedHandler]":
+    """Re-key project handlers by their real event and config key.
+
+    The docs generator names a project handler by its class and, when it cannot
+    place it, files it under ``project``. Neither is something ``probe --only``
+    takes, so each project handler's entry is rewritten with the event and config
+    key the loader (the one ``probe --only`` checks against) gives it.
+    """
+    rekeyed = {
+        type(handler).__name__: (event_type.name.lower(), handler.config_key)
+        for event_type, handler in project_handlers
+    }
+    result: list[CollectedHandler] = []
+    for info in active:
+        class_name, key, _event, priority, behavior, description, enabled = info
+        if key == class_name and class_name in rekeyed:
+            event_key, config_key = rekeyed[class_name]
+            result.append(
+                (class_name, config_key, event_key, priority, behavior, description, enabled)
+            )
+        else:
+            result.append(info)
+    return result
+
+
 def cmd_defences(args: argparse.Namespace) -> int:
     """List every active defence: rule ID, handler, docs route and entry point.
 
@@ -3617,7 +3644,10 @@ def cmd_defences(args: argparse.Namespace) -> int:
     config = Config.load(config_path)
     _init_project_context_for_cli(args)
     records = collect_active_defences(
-        _build_docs_generator(config, project_path).active_handlers(),
+        _with_project_handler_keys(
+            _build_docs_generator(config, project_path).active_handlers(),
+            _discover_project_handlers(config, project_path),
+        ),
         discover_handler_rules(include_project_handlers=True),
     )
 

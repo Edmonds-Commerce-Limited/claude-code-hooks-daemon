@@ -265,12 +265,78 @@ def scan_content(rel_path: str, content: str) -> list[Violation]:
     ]
 
 
+def out_of_scope_reason(rel_path: str) -> str | None:
+    """Why the tree run would not judge ``rel_path``, or None when it would.
+
+    The single source of the tree run's skip rules, so ``--path FILE`` and the
+    whole-tree run can never disagree about a file.
+    """
+    extensions = tuple(_handler_class().CHECK_EXTENSIONS)
+    if not rel_path.endswith(extensions):
+        return f"only {', '.join(extensions)} files are prose this check reads"
+    if _is_exempt(rel_path):
+        return "a historical record, vendored copy or fixture"
+    return None
+
+
+def _single_file_problem(path: Path, root: Path) -> str | None:
+    """Why ``path`` cannot be judged as the tree run would judge it, or None."""
+    if not path.exists():
+        return f"{path}: no such file"
+    if not path.is_file():
+        return f"{path}: not a file (--path takes one file; the tree run takes none)"
+    _prime_src_path()
+
+    from claude_code_hooks_daemon.utils.path_containment import (
+        path_is_relative_to,
+        path_relative_to,
+    )
+
+    resolved, resolved_root = path.resolve(), root.resolve()
+    if path_is_relative_to(resolved, resolved_root):
+        rel_path = path_relative_to(resolved, resolved_root).as_posix()
+    else:
+        rel_path = resolved.name  # outside the repository: only its own name can be judged
+    reason = out_of_scope_reason(rel_path)
+    if reason is not None:
+        return f"{path}: not judged by the tree run ({reason}), so nothing was examined"
+    return None
+
+
+def run_single_file(path: Path, root: Path, *, json_output: bool) -> int:
+    """Judge one file as the tree run would. Writes no repository artefact.
+
+    Findings go to stdout (JSON with ``--json``). A file the tree run does not
+    judge, or one that cannot be read, is a failure: examining nothing is not a
+    pass.
+    """
+    problem = _single_file_problem(path, root)
+    if problem is not None:
+        print(f"check_british_english: {problem}", file=sys.stderr)
+        return 1
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        print(f"check_british_english: {path}: could not be read: {exc}", file=sys.stderr)
+        return 1
+    report = Report(violations=scan_content(str(path), content), files_scanned=1)
+    if json_output:
+        print(json.dumps(report.to_dict(), indent=2))
+    else:
+        for violation in report.violations:
+            print(
+                f"{violation.file}:{violation.line}: {violation.rule}: "
+                f"'{violation.american}' -> '{violation.british}'"
+            )
+        print(f"{len(report.violations)} violation(s) in {path}")
+    return 0 if report.passed else 1
+
+
 def scan(root: Path) -> Report:
     """Check every eligible tracked file in ``root``."""
     report = Report()
-    extensions = tuple(_handler_class().CHECK_EXTENSIONS)
     for rel_path in tracked_files(root):
-        if not rel_path.endswith(extensions) or _is_exempt(rel_path):
+        if out_of_scope_reason(rel_path) is not None:
             continue
         target = root / rel_path
         # A tracked path with no regular file behind it (sparse checkout,
@@ -289,9 +355,16 @@ def scan(root: Path) -> Report:
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Check tracked docs for American spellings.")
     parser.add_argument("--root", default=str(_PROJECT_ROOT), help="repository root to scan")
-    parser.add_argument("--json", action="store_true", help="write the JSON artifact")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="write the JSON artifact (with --path: print the JSON to stdout instead)",
+    )
     parser.add_argument(
         "--report-stdout", action="store_true", help="print the JSON report to stdout"
+    )
+    parser.add_argument(
+        "--path", type=Path, default=None, help="check this one file; writes no artefact"
     )
     return parser.parse_args(argv)
 
@@ -299,6 +372,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     root = Path(args.root)
+
+    if args.path is not None:
+        return run_single_file(args.path, root, json_output=args.json)
 
     try:
         report = scan(root)
