@@ -131,7 +131,8 @@ Evidence, with verified facts marked apart from inferences, is in
     `idle_housekeeping_advisor` reports scratch files older than `stale_scratch_days` (default 14) and
     `changed-green` refs whose branch is gone (at most 5 named, one `git update-ref --stdin` command for all), runs
     nothing, and shares one 10 s scan budget across its three scans; the `decision.log` wording is corrected.
-  - **Left:** the transcripts item, `cleanupPeriodDays` in user settings, is for the owner or IaC (RUNBOOK).
+  - **Left:** the transcripts item, `cleanupPeriodDays` in user settings, is for the owner or IaC
+    ([RUNBOOK.md §3a](RUNBOOK.md)).
 - [x] ✅ **Task 4.2**: Extend `idle_housekeeping_advisor` to report stale worktrees and daemons (report-first). Detection is `utils/stale_checkouts.py`; the advisory names each finding with its cleanup command and runs none. Options: `report_stale_checkouts`, `base_branch`, `stale_worktree_days`.
   - Remedies are real and never signal: `rm` of a proven-dead pid file, only this host's pid file, and a daemon with a vanished root gets a read-only `ps` and a human look. Merged 057116873.
 - [x] ✅ **Task 4.5**: Stale-scan follow-ups from the Task 4.2 review (`untracked/scratch/merge-review/housekeeping.md` is lost on restart, so the list is here).
@@ -141,6 +142,12 @@ Evidence, with verified facts marked apart from inferences, is in
   - Done: `paths.pid_path_for` (shared with `get_pid_path`, no mkdir), one `git_repo.parse_worktree_porcelain`, `stale_worktree_days` setter validation, `ScanDeadline` budget with an INCOMPLETE report line, unset `base_branch` uses `git_sync.default_branch`. The report holds no CLI-path literal, so that item needed no change.
 - [ ] ⬜ **Task 4.4**: Keep the prompt cache warm. The owner's intent is that the cache never expires in an always-on session. The design and the arithmetic belong to [Plan 00452](../00452-prompt-cache-observability-and-invalidation-protection/PLAN.md) Tasks 4.1–4.3. That plan rejected a fixed-interval warming cron, because warming loses when the probability of a next event is low. Its warming work is blocked on Task 2.4, which needs real idle-gap profiles.
   - This task feeds 00452. Collect this always-on session's gap profile, which unblocks 00452 Task 2.4.
+  - **Collected** ([report](subagent-reports/261010-task-4.4-gap-profile-sonnet.md)): 4 main sessions, 2026-09-15
+    to 2026-10-10, 24,075 gaps. p50 6.5 s, p95 326 s, p99 1,764 s; 5.24% over 5 minutes; 17 over 60 minutes,
+    nine of them usage-limit outages (outside outages, 0.03% and a maximum of 38,580 s). Ticks, long tool calls
+    and task notifications end most long gaps, so this is not a human-paced profile, which 00452 Task 2.4 still
+    needs. It also corrects 00452's "maximum 3,598 s, none over an hour", which holds only without an outage.
+    Dropped ticks could not be counted: the verdict log's rule field is empty (ledger N393).
   - Note for 00452: the declared crons at :23 and :47 already keep gaps under 60 minutes. But the daemon DROPS ticks when the session is blocked on a human or has backed off (R-FAILSAFE-CRON-SUPPRESSED, R-FAILSAFE-CRON-BACKED-OFF), which is exactly when the cache goes cold. So the warming decision must account for suppressed ticks.
 - [ ] ⬜ **Task 4.3**: A/B the orchestrator: Sonnet main loop vs Opus, Opus sub-agents with pinned `model:` and structured verdict files; compare cost per tick, guard denies, and triage/verdict errors. Owner decides from the record.
 

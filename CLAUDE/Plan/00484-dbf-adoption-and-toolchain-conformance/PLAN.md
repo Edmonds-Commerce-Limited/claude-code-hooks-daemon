@@ -169,8 +169,10 @@ agent.
       reasons in CONFORMANCE G8. Merged at `41f5db964` after one review round
       ([report](subagent-reports/261010-task-3.1d-follow-ups-sonnet.md)). B rows were left for a ruling.
     - **Coordinator call (B rows), not an owner ruling:** rows only for the batch checkers that are the batch form
-      of a write-time handler (`check_british_english`, `audit_error_hiding`, `check_sensitive_content`,
-      `check_inline_suppressions`), each with the same defect class and an `llm_qa.py`/`--path` entry point. This
+      of a write-time Defence handler (`audit_error_hiding`, `check_sensitive_content`,
+      `check_inline_suppressions`), each with the same defect class and an `llm_qa.py` entry point.
+      `check_british_english` was first listed and then dropped: its handler is advisory and declares no defect
+      class, because a spelling convention is not a defect. This
       keeps a Defence tied to a defect class, as ruling C1 does; every checker as a row would make "Defence" mean
       any gate, and no rows would leave §5 short.
     - **3.1e**: those four B rows (with the `Defence` schema fields they need), and the 3.1d review's should-fix

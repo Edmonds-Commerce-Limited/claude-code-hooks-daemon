@@ -60,6 +60,14 @@ server here once it exists. Requirements for it:
 - A usage ceiling (Plan 00479), if wanted, goes in that host's `hosts:` entry,
   never in this repository's tracked config.
 
+## 3a. Bound Claude Code's transcripts
+
+Claude Code's own transcripts (`~/.claude/projects/<project>/`) are the one
+unbounded store on an always-on host (Task 4.1 measured 2.9 GB, 2.3 GB of it
+sub-agent transcripts). They are Claude Code's files, so the daemon never
+deletes them. Set `cleanupPeriodDays` in the host's **user** settings (not this
+repository's), through IaC or by hand. Agents do not edit user settings.
+
 ## 4. After any restart
 
 - Run `bin/hooks-daemon status`. The daemon starts on the first hook call;

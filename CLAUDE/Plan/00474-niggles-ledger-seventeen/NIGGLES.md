@@ -1461,6 +1461,28 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N394 — `idle_housekeeping_advisor`'s description still promises one `update-ref -d` per ref
+
+**Source**: the Plan 00470 Task 4.1 fact-check (`CLAUDE/Plan/00470-persistent-session-optimisation/subagent-reports/261010-plan-fact-checker-sonnet.md`).
+
+**Evidence**: `get_description()` in `handlers/user_prompt_submit/idle_housekeeping_advisor.py` says the gone-branch
+ref report comes "with the `git update-ref -d` for each". The code prints at most 5 refs and one
+`git update-ref --stdin` command for all of them.
+
+**Status**: ⬜ Open. Remedy: correct the description, regenerate any generated docs that quote it, restart the daemon.
+
+### N393 — the verdict log records no rule ID
+
+**Source**: the Plan 00470 Task 4.4 gap profile (`CLAUDE/Plan/00470-persistent-session-optimisation/subagent-reports/261010-task-4.4-gap-profile-sonnet.md`).
+
+**Evidence**: `logs/hooks/verdicts.jsonl` (covering 2026-10-09 07:54 to 2026-10-10 16:04) has an empty rule field on
+every record, so dropped ticks (R-FAILSAFE-CRON-SUPPRESSED, R-DECLARED-CRON-SUPPRESSED, R-USAGE-PAUSE-PROMPT) cannot
+be counted from it; only the handler name (`usage-pause-gate`, 28 denies) was usable. Not yet confirmed whether the
+field is never written or only not written for these handlers.
+
+**Status**: ⬜ Open. Remedy: find the writer, confirm which verdicts carry a rule ID, and record the rule ID the
+handler's result already declares (Plan 00484 3.1a made every deny path declare one), with a test.
+
 ### N392 — the full-QA lock gate stops refusing an unlocked run once pytest-xdist is installed
 
 **Source**: Plan 00500 Task 3.2 (`CLAUDE/Plan/00500-full-qa-timing-and-speed/subagent-reports/261010-task-3.2-xdist-sonnet.md`).
