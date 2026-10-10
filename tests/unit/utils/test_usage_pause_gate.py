@@ -645,3 +645,96 @@ class TestClearPause:
         text = gate.render_lift_not_recorded_note(expires_at=_NOW + 3600)
         assert "NOT" in text
         assert "LIFTED" not in text
+
+
+class TestOverrideNotice:
+    """Plan 00479 Task 6.1: a prompt under the owner's override says the ceiling is suppressed."""
+
+    @staticmethod
+    def _config() -> Config:
+        return Config(
+            hosts={"runner": HostConfig(usage_ceiling=UsageCeilingConfig(max_used_percent=80))}
+        )
+
+    def _env(self, snapshot: UsageSnapshot | None, now: float = _NOW) -> gate.PauseEnvironment:
+        return gate.PauseEnvironment(
+            clock=lambda: now,
+            config_loader=self._config,
+            usage_loader=lambda _now: snapshot,
+        )
+
+    @staticmethod
+    def _input(session: str = _SESSION) -> dict[str, Any]:
+        return {"session_id": session, "hooks_daemon_hostname": "runner"}
+
+    def _notice(
+        self, tmp_path: Path, snapshot: UsageSnapshot | None, now: float = _NOW
+    ) -> str | None:
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            return gate.override_notice(self._input(), self._env(snapshot, now))
+
+    def test_names_the_window_percentage_ceiling_and_end_time(self, tmp_path: Path) -> None:
+        write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
+        notice = self._notice(tmp_path, _snapshot(seven=97.9))
+        assert notice is not None
+        assert "seven_day" in notice
+        assert "97%" in notice
+        assert "80%" in notice
+        assert "15:13 UTC" in notice
+        assert "2026" not in notice  # same UTC day: no date
+        assert "override" in notice
+
+    def test_names_every_window_over_its_ceiling(self, tmp_path: Path) -> None:
+        write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
+        notice = self._notice(tmp_path, _snapshot(five=91.0, seven=85.0))
+        assert notice is not None
+        assert "five_hour" in notice
+        assert "seven_day" in notice
+
+    def test_an_end_on_another_day_carries_its_date(self, tmp_path: Path) -> None:
+        write_usage_override(tmp_path, _SESSION, until=_NOW + 2 * 86400, now=_NOW)
+        notice = self._notice(tmp_path, _snapshot(seven=90.0))
+        assert notice is not None
+        assert "2026-09-23 14:13 UTC" in notice
+
+    def test_silent_when_usage_is_under_the_ceiling(self, tmp_path: Path) -> None:
+        write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
+        assert self._notice(tmp_path, _snapshot(five=10.0, seven=79.9)) is None
+
+    def test_silent_without_usage_data(self, tmp_path: Path) -> None:
+        write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
+        assert self._notice(tmp_path, None) is None
+
+    def test_silent_without_an_override(self, tmp_path: Path) -> None:
+        assert self._notice(tmp_path, _snapshot(seven=97.0)) is None
+
+    def test_silent_once_the_override_has_ended(self, tmp_path: Path) -> None:
+        write_usage_override(tmp_path, _SESSION, until=_NOW + 10, now=_NOW)
+        assert self._notice(tmp_path, _snapshot(seven=97.0), now=_NOW + 11) is None
+
+    def test_silent_for_another_sessions_override(self, tmp_path: Path) -> None:
+        write_usage_override(tmp_path, "someone-else", until=_NOW + 3600, now=_NOW)
+        assert self._notice(tmp_path, _snapshot(seven=97.0)) is None
+
+    def test_silent_when_the_marker_cannot_be_read(self, tmp_path: Path) -> None:
+        """No end time is known, so there is nothing true to say about it."""
+        write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
+        with patch.object(Path, "read_text", side_effect=PermissionError("denied")):
+            assert self._notice(tmp_path, _snapshot(seven=97.0)) is None
+
+    def test_silent_without_a_project_context(self) -> None:
+        with patch.object(ProjectContext, "daemon_untracked_dir", side_effect=RuntimeError("x")):
+            assert gate.override_notice(self._input(), self._env(_snapshot(seven=97.0))) is None
+
+    def test_silent_for_an_empty_session_id(self, tmp_path: Path) -> None:
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            hook_input = self._input("")
+            assert gate.override_notice(hook_input, self._env(_snapshot(seven=97.0))) is None
+
+
+class TestOverrideEndText:
+    def test_same_utc_day_is_a_clock_time(self) -> None:
+        assert gate.override_end_text(_NOW + 3600, now=_NOW) == "15:13 UTC"
+
+    def test_a_later_day_adds_the_date(self) -> None:
+        assert gate.override_end_text(_NOW + 86400, now=_NOW) == "2026-09-22 14:13 UTC"

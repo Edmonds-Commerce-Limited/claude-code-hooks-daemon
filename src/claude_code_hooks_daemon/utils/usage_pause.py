@@ -295,38 +295,62 @@ def write_usage_override(
     return capped
 
 
-def usage_override_active(daemon_untracked_dir: Path, session_id: str, *, now: float) -> bool:
-    """Whether the owner's override covers ``session_id`` at ``now``.
+@dataclass(frozen=True)
+class UsageOverride:
+    """The owner's override in force for a session.
 
-    Fails toward NOT pausing: a marker that exists but cannot be read counts as an
-    override (a warning says so), because the alternative is pausing a session the
-    owner just released. A malformed marker is ignored.
+    ``until`` is the epoch end time the marker records, or None when the marker
+    exists but cannot be read (it still counts as an override, with no known end).
+    """
+
+    until: float | None
+
+
+def read_usage_override(
+    daemon_untracked_dir: Path, session_id: str, *, now: float
+) -> UsageOverride | None:
+    """The owner's override covering ``session_id`` at ``now``, or None.
+
+    The one reader of the marker. Fails toward NOT pausing: a marker that exists
+    but cannot be read is an override with no known end (a warning says so),
+    because the alternative is pausing a session the owner just released. A
+    malformed, foreign-session or expired marker is no override.
     """
     if not session_id:
-        return False
+        return None
     path = override_path(daemon_untracked_dir, session_id)
+    return next(iter(_read_override_markers(path, session_id, now=now)), None)
+
+
+def _read_override_markers(path: Path, session_id: str, *, now: float) -> list[UsageOverride]:
+    """The override in ``path`` as a one-item list; ``[]`` when there is none in force."""
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return False
+        return []
     except OSError as exc:
         log_and_continue(
             logger,
             exc,
-            reason=f"an override marker {path} that exists but cannot be read counts as an active override (True), because the alternative is pausing a session the owner just released",
+            reason=f"an override marker {path} that exists but cannot be read counts as an active override with no known end, because the alternative is pausing a session the owner just released",
         )
-        return True
+        return [UsageOverride(until=None)]
     except ValueError as exc:
         log_and_continue(
             logger,
             exc,
-            reason=f"a malformed override marker {path} is ignored (False), so it cannot release a session by accident",
+            reason=f"a malformed override marker {path} is ignored ([]), so it cannot release a session by accident",
         )
-        return False
+        return []
     if not isinstance(raw, dict) or raw.get(FIELD_SESSION_ID) != session_id:
-        return False
+        return []
     until = _as_number(raw.get(FIELD_UNTIL))
-    return until is not None and now < until
+    return [UsageOverride(until=until)] if until is not None and now < until else []
+
+
+def usage_override_active(daemon_untracked_dir: Path, session_id: str, *, now: float) -> bool:
+    """Whether the owner's override covers ``session_id`` at ``now``."""
+    return read_usage_override(daemon_untracked_dir, session_id, now=now) is not None
 
 
 def clear_usage_pause(daemon_untracked_dir: Path, session_id: str) -> bool:

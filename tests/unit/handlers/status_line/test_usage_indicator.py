@@ -32,6 +32,7 @@ from claude_code_hooks_daemon.utils.stop_failure_records import (
 from claude_code_hooks_daemon.utils.usage_pause import (
     WINDOW_FIVE_HOUR,
     UsagePause,
+    write_usage_override,
     write_usage_pause,
 )
 
@@ -497,6 +498,96 @@ class TestCeilingSegment:
         handler._config_loader = lambda: Config()
         text = handler.handle({}).context[0]
         assert "⛔" not in text
+
+
+class TestOverrideChip:
+    """Plan 00479 Task 6.1: ``override until HH:MM`` shows while the owner's override is valid."""
+
+    _HOST = "sdlc-box"
+    _SESSION = "sess-1"
+
+    def _handler(self, limit: float | None = 80) -> UsageIndicatorHandler:
+        hosts = (
+            {self._HOST: HostConfig(usage_ceiling=UsageCeilingConfig(max_used_percent=limit))}
+            if limit is not None
+            else {}
+        )
+        handler = UsageIndicatorHandler()
+        handler._config_loader = lambda: Config(hosts=hosts)
+        return handler
+
+    def _render(
+        self, tmp_path: Path, session: str = "sess-1", limit: float | None = 80
+    ) -> str | None:
+        hook_input = {
+            HookInputField.SESSION_ID: session,
+            HookInputField.SESSION_HOSTNAME: self._HOST,
+        }
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            result = self._handler(limit).handle(hook_input)
+        return result.context[0] if result.context else None
+
+    def test_shows_the_end_time_when_over_the_ceiling(self, tmp_path: Path) -> None:
+        until = write_usage_override(tmp_path, self._SESSION, until=NOW + 3600, now=NOW)
+        _feed("main_thread_fractional.json")  # 7d 81.9: over 80
+        text = self._render(tmp_path)
+        assert text is not None
+        assert f"override until {datetime.fromtimestamp(until):%H:%M}" in _plain(text)
+        assert _CRITICAL in text.split("override")[0].rsplit("\033[0m", 1)[-1]
+
+    def test_also_shows_while_usage_is_under_the_ceiling(self, tmp_path: Path) -> None:
+        """The override is what switches the guard off, so it is visible whenever it is valid."""
+        write_usage_override(tmp_path, self._SESSION, until=NOW + 3600, now=NOW)
+        _feed("main_thread_integer.json")
+        text = self._render(tmp_path)
+        assert text is not None
+        assert "override until" in _plain(text)
+
+    def test_a_later_day_carries_its_date(self, tmp_path: Path) -> None:
+        until = write_usage_override(tmp_path, self._SESSION, until=NOW + 2 * 86400, now=NOW)
+        _feed("main_thread_integer.json")
+        text = self._render(tmp_path)
+        assert text is not None
+        assert f"override until {datetime.fromtimestamp(until):%m-%d %H:%M}" in _plain(text)
+
+    def test_shows_even_with_no_usage_data(self, tmp_path: Path) -> None:
+        write_usage_override(tmp_path, self._SESSION, until=NOW + 3600, now=NOW)
+        text = self._render(tmp_path)
+        assert text is not None
+        assert "override until" in _plain(text)
+        assert "📈" not in text
+
+    def test_absent_without_an_override(self, tmp_path: Path) -> None:
+        _feed("main_thread_fractional.json")
+        text = self._render(tmp_path)
+        assert text is not None
+        assert "override" not in text
+
+    def test_absent_once_the_override_has_ended(self, tmp_path: Path) -> None:
+        write_usage_override(tmp_path, self._SESSION, until=NOW + 10, now=NOW)
+        _feed("main_thread_fractional.json")
+        with patch(
+            "claude_code_hooks_daemon.handlers.status_line.usage_indicator.time.time",
+            lambda: NOW + 11,
+        ):
+            text = self._render(tmp_path)
+        assert text is None or "override" not in text
+
+    def test_absent_for_another_session(self, tmp_path: Path) -> None:
+        write_usage_override(tmp_path, "someone-else", until=NOW + 3600, now=NOW)
+        _feed("main_thread_fractional.json")
+        text = self._render(tmp_path)
+        assert text is not None
+        assert "override" not in text
+
+    def test_an_unreadable_marker_shows_no_chip_and_does_not_raise(self, tmp_path: Path) -> None:
+        write_usage_override(tmp_path, self._SESSION, until=NOW + 3600, now=NOW)
+        with patch.object(Path, "read_text", side_effect=PermissionError("denied")):
+            assert self._render(tmp_path) is None
+
+    def test_the_explanation_describes_the_chip(self) -> None:
+        explanation = UsageIndicatorHandler().explain_segment()
+        assert "override until" in explanation.how_to_read
 
 
 class TestHandlerContract:
