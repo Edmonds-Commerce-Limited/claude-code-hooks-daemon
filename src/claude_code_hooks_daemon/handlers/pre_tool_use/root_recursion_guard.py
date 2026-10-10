@@ -48,6 +48,7 @@ from claude_code_hooks_daemon.utils.command_position import (
     is_shell_command_option,
 )
 from claude_code_hooks_daemon.utils.escape_hatch import command_declares_hatch
+from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     peel_command_wrappers,
@@ -122,6 +123,25 @@ def _command_token_basename(token: str) -> str:
     return token.rsplit("/", 1)[-1]
 
 
+_CHILDREN_GLOB: Final = "/*"
+
+
+def _spelled_out_home() -> str | None:
+    """The current user's ``HOME`` as a scan root, or None when it is not one.
+
+    ``/home/user`` is ``~`` spelled out. It is not a root when it equals or
+    holds the project root (a container whose HOME is the project): scanning
+    the project is then the ordinary scan this guard allows.
+    """
+    home = os.environ.get("HOME", "").rstrip("/")
+    if not home:
+        return None
+    project = (resolve_project_root() or "").rstrip("/")
+    if project and (project == home or project.startswith(home + "/")):
+        return None
+    return home
+
+
 def _is_dangerous_root(token: str) -> bool:
     """Return True if ``token`` is a scan root that walks a whole catastrophic tree.
 
@@ -131,11 +151,12 @@ def _is_dangerous_root(token: str) -> bool:
     ``/proc`` or ``/sys`` is a single read: neither walks the tree.
     """
     root = token.rstrip("/") or token
+    if root.endswith(_CHILDREN_GLOB):
+        # `/*` is every child of the root: a walk of the same tree.
+        root = root[: -len(_CHILDREN_GLOB)].rstrip("/") or "/"
     if root in _HOME_EXACT or root in _DEFAULT_EXACT_ROOTS:
         return True
-    # `/home/user` is `~` spelled out: the same tree, so the same verdict.
-    home = os.environ.get("HOME", "").rstrip("/")
-    if home and root == home:
+    if root == _spelled_out_home():
         return True
     if any(root.startswith(prefix + "/") for prefix in _DEFAULT_PREFIX_ROOTS):
         # An unreadable path counts as not-a-file, so it is judged as a tree.
@@ -385,8 +406,9 @@ def _shell_body_is_dangerous(args: list[str], depth: int) -> bool:
         if not arg.startswith("-"):
             return False
         if is_shell_command_option(arg):
-            body = args[position + 1 :]
-            return bool(body) and _command_is_dangerous(body[0], depth + 1)
+            # The string is the first operand: options (and `--`) may still precede it.
+            operands = [word for word in args[position + 1 :] if not word.startswith("-")]
+            return bool(operands) and _command_is_dangerous(operands[0], depth + 1)
     return False
 
 

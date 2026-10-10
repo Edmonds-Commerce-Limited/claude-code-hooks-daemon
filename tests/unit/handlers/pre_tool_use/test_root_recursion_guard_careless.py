@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.handlers.pre_tool_use import root_recursion_guard as guard
 from claude_code_hooks_daemon.handlers.pre_tool_use.root_recursion_guard import (
     RootRecursionGuardHandler,
 )
@@ -123,6 +124,83 @@ def test_a_directory_below_the_home_directory_is_a_project_root(
     monkeypatch.setenv("HOME", "/home/user")
     assert not _denied("rg x /home/user/proj")
     assert not _denied("rg x /home/other/proj")
+
+
+def test_a_home_that_holds_the_project_root_is_not_a_scan_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When HOME is the project (a container), scanning the project is not a disk walk."""
+    monkeypatch.setenv("HOME", "/workspace")
+    monkeypatch.setattr(guard, "resolve_project_root", lambda: "/workspace")
+    assert not _denied("grep -r x /workspace")
+    assert not _denied("du -sh /workspace")
+    assert not _denied("find /workspace -name x")
+    assert _denied("grep -r x /")
+    assert _denied("grep -r x ~")
+
+
+def test_a_home_above_the_project_root_is_not_a_scan_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", "/home/user")
+    monkeypatch.setattr(guard, "resolve_project_root", lambda: "/home/user/proj")
+    assert not _denied("rg x /home/user")
+
+
+def test_a_home_beside_the_project_root_is_still_the_home_tree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", "/home/user")
+    monkeypatch.setattr(guard, "resolve_project_root", lambda: "/workspace")
+    assert _denied("rg x /home/user")
+
+
+CHILDREN_OF_A_ROOT = [
+    "du -sh /*",
+    "ls -R /*",
+    "grep -r x /*",
+    "find /*",
+    "find /* -name x",
+    "du -sh /home/*",
+    "grep -r x ~/*",
+    "du -sh $HOME/*",
+]
+
+CHILDREN_OF_A_PROJECT = [
+    "du -sh /workspace/*",
+    "grep -r x src/*",
+    "ls -R ./*",
+    "find /workspace/* -name x",
+]
+
+
+@pytest.mark.parametrize("command", CHILDREN_OF_A_ROOT)
+def test_a_dangerous_root_followed_by_a_glob_is_that_root(command: str) -> None:
+    assert _denied(command)
+
+
+@pytest.mark.parametrize("command", CHILDREN_OF_A_PROJECT)
+def test_a_glob_below_a_project_directory_stays_allowed(command: str) -> None:
+    assert not _denied(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "ionice -c 3 find / -name x",
+        "ionice -n 7 grep -r x /",
+        "sudo ionice -c3 du -sh /",
+        "bash -c -- 'grep -r x /'",
+        "bash -lc -- 'find / -name x'",
+    ],
+)
+def test_ionice_and_a_double_dash_before_the_body_do_not_hide_the_scan(command: str) -> None:
+    assert _denied(command)
+
+
+def test_ionice_over_a_scoped_scan_stays_allowed() -> None:
+    assert not _denied("ionice -c 3 find /workspace -name x")
+    assert not _denied("bash -c -- 'grep -r x .'")
 
 
 def test_an_unset_home_adds_no_root(monkeypatch: pytest.MonkeyPatch) -> None:

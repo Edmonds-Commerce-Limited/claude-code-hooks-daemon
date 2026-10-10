@@ -520,6 +520,31 @@ rows:
       for `-R`/`--recursive` only: `ls /`, `ls -la /` and `ls -r /` (reverse)
       do not recurse and stay allowed.
 
+  - id: root-recursion-children-glob
+    command: "du -sh /*"
+    axis: whole-filesystem-scan
+    verdict: COVERED
+    note: >-
+      Closed by root_recursion_guard, ledger N385 round 1. A dangerous root
+      followed by `/*` is that root (`ls -R /*`, `grep -r x /*`, `find /*`).
+      `du -sh /workspace/*` stays allowed.
+
+  - id: root-recursion-ionice-wrapper
+    command: "ionice -c 3 find / -name x"
+    axis: whole-filesystem-scan
+    verdict: COVERED
+    note: >-
+      Closed by root_recursion_guard, ledger N385 round 1. `ionice` is in the
+      shared `peel_command_wrappers` table, with its `-c`/`-n` values.
+
+  - id: root-recursion-shell-c-double-dash
+    command: "bash -c -- 'grep -r x /'"
+    axis: whole-filesystem-scan
+    verdict: COVERED
+    note: >-
+      Closed by root_recursion_guard, ledger N385 round 1. Options and `--`
+      may sit between `-c` and the command string.
+
   - id: root-recursion-rg-home-directory
     command: "rg x $HOME"
     axis: whole-filesystem-scan
