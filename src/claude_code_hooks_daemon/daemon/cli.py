@@ -3568,10 +3568,20 @@ def cmd_generate_playbook(args: argparse.Namespace) -> int:
         return 1
 
 
-def _build_docs_generator(config: Config, project_path: Path) -> "DocsGenerator":
+def _build_docs_generator(
+    config: Config,
+    project_path: Path,
+    project_handlers: list[tuple[Any, Any]] | None = None,
+) -> "DocsGenerator":
     """Build a ``DocsGenerator`` over the loaded config and every handler source.
 
     Shared by ``generate-docs`` and ``defences`` so both list the same handlers.
+
+    Args:
+        config: The loaded project configuration.
+        project_path: The project root.
+        project_handlers: This project's ``(EventType, handler)`` pairs when the
+            caller has already discovered them; discovered here when ``None``.
     """
     from claude_code_hooks_daemon.daemon.docs_generator import DocsGenerator
     from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
@@ -3580,12 +3590,17 @@ def _build_docs_generator(config: Config, project_path: Path) -> "DocsGenerator"
     registry = HandlerRegistry()
     registry.discover()
 
+    if project_handlers is None:
+        # Shared with generate-playbook — see the helper.
+        handler_instances = _load_project_handlers(config, project_path)
+    else:
+        handler_instances = [handler for _event_type, handler in project_handlers]
+
     return DocsGenerator(
         config=config.handlers.model_dump(),
         registry=registry,
         plugins=PluginLoader.load_from_plugins_config(config.plugins, project_path),
-        # Shared with generate-playbook — see the helper.
-        project_handlers=_load_project_handlers(config, project_path),
+        project_handlers=handler_instances,
         pseudo_events=config.pseudo_events or None,
     )
 
@@ -3622,6 +3637,8 @@ def cmd_defences(args: argparse.Namespace) -> int:
 
     Built from the loaded config through the same generator ``generate-docs``
     uses and the same rule index ``explain-rule`` reads (Plan 00484 Task 3.2).
+    A project that carries ``scripts/qa/qa-rules.json`` also gets the batch-check
+    rows it declares, marked ``kind: batch-check``.
 
     Args:
         args: Parsed CLI arguments with ``as_json`` (``--json``) and ``project_root``.
@@ -3629,7 +3646,11 @@ def cmd_defences(args: argparse.Namespace) -> int:
     Returns:
         0 on success, 1 when the project or its config cannot be loaded.
     """
-    from claude_code_hooks_daemon.rule_explain.defences import collect_active_defences
+    from claude_code_hooks_daemon.rule_explain.defences import (
+        QA_RULES_RELATIVE_PATH,
+        collect_active_defences,
+        collect_batch_defences,
+    )
     from claude_code_hooks_daemon.rule_explain.lookup import discover_handler_rules
 
     try:
@@ -3644,13 +3665,27 @@ def cmd_defences(args: argparse.Namespace) -> int:
 
     config = Config.load(config_path)
     _init_project_context_for_cli(args)
+    project_handlers = _discover_project_handlers(config, project_path)
     records = collect_active_defences(
         _with_project_handler_keys(
-            _build_docs_generator(config, project_path).active_handlers(),
-            _discover_project_handlers(config, project_path),
+            _build_docs_generator(config, project_path, project_handlers).active_handlers(),
+            project_handlers,
         ),
         discover_handler_rules(include_project_handlers=True),
     )
+    rules_file = project_path / QA_RULES_RELATIVE_PATH
+    if rules_file.is_file():
+        active_classes = {
+            record.handler: record.defect_class for record in records if record.defect_class
+        }
+        try:
+            document = json.loads(rules_file.read_text(encoding="utf-8"))
+            records.extend(collect_batch_defences(document, active_classes))
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+            print(
+                f"defences: {rules_file} is not a usable QA rule registry: {exc!r}", file=sys.stderr
+            )
+            return 1
 
     if getattr(args, "as_json", False):
         print(json.dumps([record.to_dict() for record in records], indent=2))
@@ -3658,7 +3693,7 @@ def cmd_defences(args: argparse.Namespace) -> int:
     for record in records:
         print(
             f"{record.rule_id or '-'}\t{record.handler}\t{record.event}\t"
-            f"{record.priority}\t{record.statement or '-'}"
+            f"{record.priority}\t{record.statement or '-'}\t{record.kind}"
         )
     return 0
 

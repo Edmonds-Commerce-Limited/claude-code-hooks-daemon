@@ -144,4 +144,5 @@ class TestCollectActiveDefences:
             "defect_class",
             "docs",
             "detector_entry_point",
+            "kind",
         }

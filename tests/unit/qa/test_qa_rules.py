@@ -400,3 +400,37 @@ class TestExplain:
         monkeypatch.setattr(sys, "argv", ["llm_qa.py", "--help"])
         assert llm_qa.main() == 0
         assert "--explain" in capsys.readouterr().out
+
+
+class TestBatchDefencesDeclaration:
+    """`batch_defences` is the one place the batch-check rows of `defences` are declared."""
+
+    def test_the_declared_checkers_are_exactly_the_three_with_a_defence_counterpart(self) -> None:
+        declared = json.loads(REGISTRY_FILE.read_text(encoding="utf-8"))["batch_defences"]
+        assert (
+            "check_british_english.py" not in declared
+        )  # a spelling convention, not a defect class
+        assert set(declared) == {
+            "audit_error_hiding.py",
+            "check_sensitive_content.py",
+            "check_inline_suppressions.py",
+        }
+
+    def test_each_declared_step_runs_its_script_in_the_runner(self) -> None:
+        declared = json.loads(REGISTRY_FILE.read_text(encoding="utf-8"))["batch_defences"]
+        for script, entry in declared.items():
+            command = llm_qa.TOOL_REGISTRY[entry["step"]].command
+            assert any(part.endswith(script) for part in command), script
+
+    def test_each_declared_handler_is_a_library_handler_config_key(self) -> None:
+        from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
+        from claude_code_hooks_daemon.utils.naming import class_name_to_config_key
+
+        registry = HandlerRegistry()
+        registry.discover("claude_code_hooks_daemon.handlers")
+        classes = (registry.get_handler_class(name) for name in registry.list_handlers())
+        keys = {class_name_to_config_key(cls.__name__) for cls in classes if cls is not None}
+        declared = json.loads(REGISTRY_FILE.read_text(encoding="utf-8"))["batch_defences"]
+        for script, entry in declared.items():
+            assert entry["handler"] in keys, script
+            assert "defect_class" not in entry, script

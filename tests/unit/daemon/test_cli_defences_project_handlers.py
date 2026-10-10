@@ -3,7 +3,9 @@
 The docs generator files a project handler under the event ``project`` (or its
 class name as the key), neither of which ``probe --only`` knows. The listing
 must name the handler's real event and its config key, and the command it
-prints must be one ``probe`` takes (Plan 00484 G11).
+prints must be one ``probe`` takes (Plan 00484 G11). The acceptance check runs
+``cmd_probe`` itself with only the send to the forwarder replaced, and the
+project's handlers are discovered once per ``defences`` run.
 """
 
 from __future__ import annotations
@@ -12,14 +14,15 @@ import argparse
 import json
 import re
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from claude_code_hooks_daemon.daemon import cli
-from claude_code_hooks_daemon.daemon.cli import cmd_defences, cmd_init_config
-from claude_code_hooks_daemon.daemon.hook_probe import build_probe_event, resolve_probe_event
+from claude_code_hooks_daemon.daemon import cli, hook_probe
+from claude_code_hooks_daemon.daemon.cli import cmd_defences, cmd_init_config, cmd_probe
+from claude_code_hooks_daemon.daemon.hook_probe import ProbeOutcome, resolve_probe_event
 
 _HANDLER_SOURCE = '''"""Project handler fixture that is a Defence."""
 
@@ -119,7 +122,10 @@ class TestProjectHandlerEntryPoint:
         )
 
     def test_the_printed_only_value_is_accepted_by_probe(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         project = _scaffold_project(tmp_path)
         by_id = {r["rule_id"]: r for r in _defences(project, capsys) if r["rule_id"]}
@@ -129,13 +135,99 @@ class TestProjectHandlerEntryPoint:
         event_name, only = match.groups()
 
         event = resolve_probe_event(event_name)
-        probe_args = argparse.Namespace(project_root=project)
-        hook_event = build_probe_event(
-            {"tool_name": "Bash", "tool_input": {"command": "true"}},
-            event=event,
+        hook = project / ".claude" / "hooks" / event.bash_key
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        hook.write_text("#!/bin/bash\n")
+        sent: list[dict[str, Any]] = []
+
+        def _record(
+            _entry_point: Path, hook_event: Mapping[str, Any], *, project_root: Path
+        ) -> ProbeOutcome:
+            sent.append(dict(hook_event))
+            return ProbeOutcome(0, "{}", "")
+
+        monkeypatch.setattr(hook_probe, "dispatch_probe", _record)
+        capsys.readouterr()
+        probe_args = argparse.Namespace(
             project_root=project,
-            session_id="s",
+            event=event_name,
+            json='{"tool_name": "Bash", "tool_input": {"command": "true"}}',
+            file=None,
             only=only,
-            known_handlers=lambda: cli._loaded_handler_keys(probe_args, project, event.config_key),
+            probe_as=None,
         )
-        assert hook_event["probe_only"] == only
+        assert cmd_probe(probe_args) == 0
+        assert [entry["probe_only"] for entry in sent] == [only]
+
+    def test_defences_discovers_project_handlers_once(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        project = _scaffold_project(tmp_path)
+        calls: list[Path] = []
+        real = cli._discover_project_handlers
+
+        def _counting(config: Any, project_path: Path) -> list[tuple[Any, Any]]:
+            calls.append(project_path)
+            return real(config, project_path)
+
+        monkeypatch.setattr(cli, "_discover_project_handlers", _counting)
+        by_id = {r["rule_id"]: r for r in _defences(project, capsys) if r["rule_id"]}
+        assert "R-PROJECT-CANARY" in by_id
+        assert len(calls) == 1
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _with_qa_rules(project: Path, text: str | None = None) -> None:
+    """Give the scaffolded project the repository's QA rule registry (or ``text``)."""
+    target = project / "scripts" / "qa" / "qa-rules.json"
+    target.parent.mkdir(parents=True)
+    if text is None:
+        text = (_REPO_ROOT / "scripts" / "qa" / "qa-rules.json").read_text(encoding="utf-8")
+    target.write_text(text, encoding="utf-8")
+
+
+def _batch_scripts(project: Path, capsys: pytest.CaptureFixture[str]) -> set[str]:
+    return {r["handler_class"] for r in _defences(project, capsys) if r["kind"] == "batch-check"}
+
+
+class TestBatchRowsFollowTheirHandler:
+    def test_a_disabled_handler_removes_its_batch_rows(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        import yaml
+
+        project = _scaffold_project(tmp_path)
+        _with_qa_rules(project)
+        before = _batch_scripts(project, capsys)
+        assert "check_inline_suppressions.py" in before
+        config_path = project / ".claude" / "hooks-daemon.yaml"
+        config = yaml.safe_load(config_path.read_text())
+        config["handlers"]["pre_tool_use"]["qa_suppression"]["enabled"] = False
+        config_path.write_text(yaml.safe_dump(config))
+        assert _batch_scripts(project, capsys) == before - {"check_inline_suppressions.py"}
+
+    def test_a_malformed_registry_is_one_stderr_line_and_exit_one(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        project = _scaffold_project(tmp_path)
+        _with_qa_rules(project, "{ not json")
+        capsys.readouterr()
+        assert cmd_defences(argparse.Namespace(as_json=True, project_root=project)) == 1
+        err = capsys.readouterr().err.strip().splitlines()
+        assert len(err) == 1
+        assert "qa-rules.json" in err[0]
+
+    def test_a_registry_naming_a_check_that_prints_no_rule_exits_one(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        project = _scaffold_project(tmp_path)
+        declared = {"x.py": {"step": "s", "handler": "qa_suppression"}}
+        _with_qa_rules(project, json.dumps({"batch_defences": declared, "rules": {}}))
+        capsys.readouterr()
+        assert cmd_defences(argparse.Namespace(as_json=True, project_root=project)) == 1
+        assert "x.py" in capsys.readouterr().err
