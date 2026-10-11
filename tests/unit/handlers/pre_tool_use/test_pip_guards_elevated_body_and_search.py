@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import DestructiveGitHandler
 from claude_code_hooks_daemon.handlers.pre_tool_use.pip_break_system import PipBreakSystemHandler
 from claude_code_hooks_daemon.handlers.pre_tool_use.sudo_pip import SudoPipHandler
 from claude_code_hooks_daemon.utils.command_position import command_position_view
@@ -111,3 +112,48 @@ class TestSearchPatternIsData:
     def test_git_output_piped_to_shell_is_still_judged(self) -> None:
         command = "git log --format='sudo pip install x' | sh"
         assert SudoPipHandler().matches(_bash(command)) is True
+
+
+class TestShellBodyPipedIntoAShell:
+    """A `bash -c` body whose output is piped to a shell is not blanked."""
+
+    @pytest.mark.parametrize(
+        ("handler", "command"),
+        [
+            (DestructiveGitHandler, "bash -c \"git log -1 --format='git reset --hard'\" | bash"),
+            (
+                DestructiveGitHandler,
+                "bash -c \"git log -1 --format='git reset --hard' | cat\" | bash",
+            ),
+            (DestructiveGitHandler, "sudo sh -c \"git log -1 --format='git reset --hard'\" | sh"),
+            (SudoPipHandler, "bash -c \"git log -1 --format='sudo pip install x'\" | bash"),
+            (
+                PipBreakSystemHandler,
+                "bash -c \"git log -1 --format='pip install --break-system-packages x'\" | bash",
+            ),
+        ],
+    )
+    def test_still_denied(self, handler: Any, command: str) -> None:
+        assert handler().matches(_bash(command)) is True
+
+
+class TestElevatedKeywordBeforePip:
+    """`sudo` goes after a leading keyword, not before it."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "sudo bash -c 'cd /srv; if true; then pip install nonexistent-pkg-zz; fi'",
+            "sudo bash -c 'cd /srv; for i in 1; do pip install nonexistent-pkg-zz; done'",
+            "sudo bash -c 'cd /srv; while true; do pip install nonexistent-pkg-zz; done'",
+            "sudo bash -c 'cd /srv; { pip install nonexistent-pkg-zz; }'",
+            "sudo bash -c 'cd /srv; (pip install nonexistent-pkg-zz)'",
+            "sudo bash -c 'cd /srv; if false; then true; else pip install nonexistent-pkg-zz; fi'",
+        ],
+    )
+    def test_denied(self, command: str) -> None:
+        assert SudoPipHandler().matches(_bash(command)) is True
+
+    def test_keyword_kept_in_front(self) -> None:
+        view = command_position_view("sudo bash -c 'cd /srv; if true; then pip install x; fi'")
+        assert "then sudo pip install x" in view

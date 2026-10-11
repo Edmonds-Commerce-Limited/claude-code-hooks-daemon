@@ -37,6 +37,7 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     GitGrepRole,
     git_grep_word_roles,
     git_subcommand_index,
+    strip_reserved_word_prefix,
 )
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     is_inert_pipeline_stage,
@@ -179,8 +180,12 @@ def _runs_written_script(command: str) -> bool:
     return False
 
 
-def command_position_view(command: str, _depth: int = 0) -> str:
-    """``command`` with every span that cannot run replaced by a placeholder."""
+def command_position_view(command: str, _depth: int = 0, _keep_text: bool = False) -> str:
+    """``command`` with every span that cannot run replaced by a placeholder.
+
+    ``_keep_text`` is set for a `-c` body whose own output a pipeline may run:
+    the git/awk search literals in it are then left as written.
+    """
     if _runs_written_script(command):
         return command
     stripped = strip_inert_spans(command)
@@ -191,7 +196,7 @@ def command_position_view(command: str, _depth: int = 0) -> str:
     for index, (start, end) in enumerate(spans):
         pieces.append(stripped[previous_end:start])
         may_run_output = _pipeline_may_run_output(stripped, spans, segments, index)
-        pieces.append(_narrow(segments[index], may_run_output, _depth))
+        pieces.append(_narrow(segments[index], may_run_output, _depth, _keep_text))
         previous_end = end
     pieces.append(stripped[previous_end:])
     return "".join(pieces)
@@ -464,7 +469,7 @@ def _pipeline_may_run_output(
     return False
 
 
-def _narrow(segment: str, may_run_output: bool, depth: int) -> str:
+def _narrow(segment: str, may_run_output: bool, depth: int, keep_text: bool = False) -> str:
     head = _head(segment)
     if head is None:
         return segment
@@ -477,8 +482,8 @@ def _narrow(segment: str, may_run_output: bool, depth: int) -> str:
             return segment
         return f" {head} {_DATA_PLACEHOLDER} "
     if head in SHELL_NAMES and depth < _MAX_NESTING:
-        return _narrow_shell_body(segment, depth)
-    if head in _TEXT_ARGUMENT_HEADS and not may_run_output:
+        return _narrow_shell_body(segment, depth, keep_text or may_run_output)
+    if head in _TEXT_ARGUMENT_HEADS and not (may_run_output or keep_text):
         # A search/format literal of a read-only git command (or an awk
         # program) is data for that command, in every guard and inside a
         # `bash -c` body alike: `git grep -n 'pip install --break-system-packages'`.
@@ -505,7 +510,7 @@ def is_shell_command_option(option: str) -> bool:
     return option.startswith("-") and not option.startswith("--") and "c" in option[1:]
 
 
-def _narrow_shell_body(segment: str, depth: int) -> str:
+def _narrow_shell_body(segment: str, depth: int, keep_text: bool) -> str:
     """Replace a literal `-c` body with its own command-position view."""
     spans = shell_word_spans(segment)
     words = [segment[start:end] for start, end in spans]
@@ -528,7 +533,7 @@ def _narrow_shell_body(segment: str, depth: int) -> str:
             if body is None:
                 return segment
             start, end = spans[offset + 1]
-            body_view = command_position_view(body, depth + 1)
+            body_view = command_position_view(body, depth + 1, keep_text)
             if _is_elevated(words[:shell_at]):
                 body_view = _elevate_later_segments(body_view)
             return segment[:start] + body_view + segment[end:]
@@ -555,12 +560,13 @@ def _elevate_later_segments(body_view: str) -> str:
     for index, (start, end) in enumerate(_segment_spans(body_view)):
         pieces.append(body_view[previous_end:start])
         text = body_view[start:end]
-        indent = text[: len(text) - len(text.lstrip())]
-        pieces.append(
-            text
-            if index == 0 or not text.strip()
-            else f"{indent}{_ELEVATOR_PREFIX}{text[len(indent):]}"
-        )
+        if index == 0 or not text.strip():
+            pieces.append(text)
+        else:
+            # After any keyword (`then`, `do`, `{`...) and `(`: `then sudo pip`.
+            lead = len(text) - len(strip_reserved_word_prefix(text))
+            lead += len(text[lead:]) - len(text[lead:].lstrip("( \t"))
+            pieces.append(f"{text[:lead]}{_ELEVATOR_PREFIX}{text[lead:]}")
         previous_end = end
     pieces.append(body_view[previous_end:])
     return "".join(pieces)
