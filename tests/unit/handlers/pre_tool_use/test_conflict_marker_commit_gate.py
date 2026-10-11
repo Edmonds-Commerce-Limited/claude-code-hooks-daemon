@@ -301,6 +301,7 @@ class TestAllowsWhatIsNotAnAddedMarker:
         result = _verdict(handler, "git commit -m x", outside)
         assert result.decision == Decision.DENY
         assert "NOT checked" in result.reason
+        assert result.rule == RuleID.CONFLICT_MARKER_COMMIT
 
 
 class TestWhatTheCommitRecords:
@@ -438,6 +439,7 @@ class TestATimedOutScanIsNotAFinding:
         assert result.decision == Decision.DENY
         assert RuleID.CONFLICT_MARKER_SCAN_TIMED_OUT in result.reason
         assert f"{RuleID.CONFLICT_MARKER_COMMIT}:" not in result.reason
+        assert result.rule == RuleID.CONFLICT_MARKER_SCAN_TIMED_OUT
 
     def test_the_reason_says_what_ran_out_that_nothing_was_found_and_to_retry(
         self, handler: ConflictMarkerCommitGateHandler, repo: Path
@@ -457,6 +459,7 @@ class TestATimedOutScanIsNotAFinding:
         assert result.decision == Decision.DENY
         assert RuleID.CONFLICT_MARKER_COMMIT in result.reason
         assert RuleID.CONFLICT_MARKER_SCAN_TIMED_OUT not in result.reason
+        assert result.rule == RuleID.CONFLICT_MARKER_COMMIT
 
     def test_a_non_timeout_git_failure_keeps_the_unchecked_rule(
         self, handler: ConflictMarkerCommitGateHandler, repo: Path

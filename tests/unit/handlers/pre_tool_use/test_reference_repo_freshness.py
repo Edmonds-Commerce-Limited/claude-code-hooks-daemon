@@ -29,6 +29,7 @@ from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.pre_tool_use.reference_repo_freshness import (
+    _STALE_RULE,
     ReferenceRepoFreshnessHandler,
 )
 from claude_code_hooks_daemon.reference_repos.cache import write_cache
@@ -561,7 +562,7 @@ class TestIsBlockingMatchesVerdict:
         handler._reference_repos = ReferenceReposConfig(mode=mode)
 
         predicted = handler._is_blocking("session-x", repo, mode)
-        actual = handler._verdict("message", "session-x", repo, mode)
+        actual = handler._verdict("message", "session-x", repo, mode, _STALE_RULE)
 
         assert predicted == (actual.decision == Decision.DENY)
 
@@ -569,10 +570,10 @@ class TestIsBlockingMatchesVerdict:
         self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
     ) -> None:
         repo = _repo(tmp_path)
-        handler._verdict("first", "session-x", repo, "block_once")
+        handler._verdict("first", "session-x", repo, "block_once", _STALE_RULE)
 
         predicted = handler._is_blocking("session-x", repo, "block_once")
-        actual = handler._verdict("message", "session-x", repo, "block_once")
+        actual = handler._verdict("message", "session-x", repo, "block_once", _STALE_RULE)
 
         assert predicted == (actual.decision == Decision.DENY)
 
@@ -1290,6 +1291,24 @@ class TestHandlerContract:
 
     def test_it_declares_an_acceptance_test(self, handler: ReferenceRepoFreshnessHandler) -> None:
         assert handler.get_acceptance_tests()
+
+    @pytest.mark.parametrize("mode", ["block", "block_once"])
+    def test_each_denial_carries_its_own_rule_id(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler, mode: Any
+    ) -> None:
+        """N393: the verdict log records which of the two rules denied."""
+        handler._reference_repos = ReferenceReposConfig(mode=mode)
+        stale = _repo(tmp_path, "alpha")
+        unknown = _repo(tmp_path, "beta")
+        write_cache(tmp_path, [_state(stale, behind=4)])
+
+        not_verified = handler.handle(_read(unknown / "x.py"))
+        behind = handler.handle(_read(stale / "x.py"))
+
+        assert not_verified.decision == Decision.DENY
+        assert not_verified.rule == RuleID.REFERENCE_REPO_NOT_VERIFIED
+        assert behind.decision == Decision.DENY
+        assert behind.rule == RuleID.REFERENCE_REPO_STALE
 
     def test_it_declares_both_rules_distinctly(
         self, handler: ReferenceRepoFreshnessHandler

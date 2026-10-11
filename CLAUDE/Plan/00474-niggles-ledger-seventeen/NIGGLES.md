@@ -77,6 +77,15 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N413 — `PipBreakSystemHandler` fails the hostile-input linearity test on `main`
+
+**Found**: Plan 00474 batch AB, running `tests/unit/handlers` in full. `tests/unit/handlers/test_safety_handlers_hostile_input_performance.py::TestBashCommandShapesStayLinear::test_every_safety_handler_stays_linear[nesting]`
+fails: `PipBreakSystemHandler cost grew 41x for 8x input on shape='nesting'`. It fails the same way on the main checkout
+(41x) and on this branch (45x to 46x), alone and in the full run, so batch AB did not cause it. The handler's matching
+was last changed by N407 (batch Y, per-segment matching inside `$( )` and backticks), which is the likely source.
+
+**Status**: ⬜ Open. Not fixed in batch AB (outside its scope).
+
 ### N285 — a sub-agent reports `PYTHONPATH=… pytest` denied as an upgrade-approval bypass
 
 **Found**: the N283 agent reported that setting `PYTHONPATH` in a test command
@@ -1634,6 +1643,29 @@ with a shell, a grown attribute list (`c.a.append`), a `list(a)` copy / slice / 
 symlinks and does not exclude `secret_file_guard`'s protected paths; the right fix is one exclusion in `_read_new` for
 every route at once, not per route.
 
+✅ Residuals cleared by batch AB: a list edited with `.insert(i, x)` or `.pop()`/`.pop(i)` (a literal whole-number index;
+an index only Python computes lands at the end for `insert` and removes nothing for `pop`) or rebuilt as
+`a = a + [...]` / `a = [...] + a` is judged as the argv it holds at the call, per function, through the same
+`_list_changes`/`_states_after` pass as `.append` (a change now carries an optional edit; a spliced `+` chain is set
+aside at the running call as the literal it replaces is). `os.execv`/`execve`/`execvp`/`execvpe` (program: the call's
+path, else the list's first word) and `os.execl`/`execle`/`execlp`/`execlpe` (argv0 and a trailing env dropped) judge a
+tracked list, a named-list spread or a literal argv, and `pty.spawn` joins the argv sinks; `f = open(p); exec(f.read())`
+and `p = Path(p); exec(p.read_text())` name the file as the `with open(p) as f` form does. A list that is edited and then
+run as `os.exec*`/`pty.spawn`/`create_subprocess_exec(*a)` no longer also has its first literal judged on its own, so
+`['pytest']` grown to a targeted run is allowed there as it is for `subprocess` (was a false deny). The work is bounded the same way (64 words per call,
+one pass per list, charged to the parse meter): 2000 to 2500 edits each followed by a run judge in 0.4 to 0.6 s, and
+the batch X perf inputs are unchanged (0.14 s, 0.17 s, 0.21 s, 0.36 s). Left: the batch X list of unfixed shapes minus
+these (`cmd.extend(other_named_list)`, a grown list returned from a function, `' '.join(grown)` run with a shell, a grown
+attribute list, a `list(a)` copy / slice / tuple, `**kw`, `os.spawn*`, an asyncio program given by keyword). Pinned by
+`TestListEditsAndExecRoutesReachAFullRun` in `tests/unit/handlers/pre_tool_use/test_subagent_full_qa_blocker.py`
+(62 red before the fix).
+
+✅ Protected paths, cleared by batch AB: `_read_new` now treats a file `secret_file_matching.path_is_protected(target, resolve_configured_patterns())` names (the accessor `lint_on_edit` and the other readers use; it resolves symlinks) as
+unseen, without opening it, so `python3 <path>`, `exec(open(p).read())`, `runpy.run_path(p)` and the `f = open(p)` form
+all follow the handler's `unseen_policy` for an unreadable script (deny with the unread-code id by default). Pinned by
+`TestAProtectedFileIsNeverRead` (a configured glob, a symlink to a protected file, the shipped defaults; `Path.open`
+fails the test if the protected file is opened). Report: `subagent-reports/261011-batch-ab-sonnet.md`.
+
 ### N408 — `gh_issue_comments`/`gh_pr_comments` deny mentions and miss `--json=comments`
 
 **Source**: Plan 00483 Task 3.2 re-probe (2026-10-11), proposal P8, probes ghc1-ghc3, ghc5, ghc8, ghc9 (report as
@@ -2053,6 +2085,21 @@ exactly one (covers `usage-pause-gate`). Tests: `tests/unit/core/test_chain_verd
 ends up in the log line). Remaining null: allows, and denies from a handler with several rules that builds its reason
 without `under_rule` or an explicit `rule=`. Readers of `verdicts.jsonl` (`verdict_report.py`, `cli.py`) treat the
 field as an opaque string, unchanged. Release note 016.
+
+✅ Remaining null cleared by batch AB: every deny of a handler that declares several rules now carries the rule it was
+filed under, on its `rule` field (an explicit `rule=`, since these handlers already build the `BLOCKED [id]` headline and
+`under_rule` would print it twice). Found by instantiating every handler and keeping those whose `get_rules()` has more
+than one rule (22), then reading each deny site: `ancestry_preserving_merge` (3 rules), `conflict_marker_commit_gate` (the
+three paths: finding, unchecked, timed out), `github_issue_assignment_guard`, `host_command_guard`, `pipe_blocker` (verbose,
+terse, prose, compound), `reference_repo_freshness` (`_verdict` takes the rule), `secret_file_guard` (both paths, including
+the fail-closed fallback), `security_antipattern` (the first issue's category), `self_matching_process_probe`,
+`upgrade_approval_guard`, `validate_instruction_content`, `validate_eslint_on_write`, `markdown_organization`,
+`npm_command`, `plan_number_helper`, `sensitive_content` (public-pattern and secret-term denies; its other denies already
+used `under_rule`) and `auto_continue_stop` (the five branch denies). Already complete: `destructive_git`,
+`failsafe_cron_blockage_suppressor`, the remaining `auto_continue_stop` and `sensitive_content` paths. Single-rule handlers
+(`plan_journal_guard`, `remote_docs_provenance`) get it from the chain. Still null by design: `ancestry_preserving_merge`'s
+defensive no-match fallback (unreachable through the daemon's dispatch, and no one rule applies). Each handler's existing test now asserts `result.rule`. Report:
+`subagent-reports/261011-batch-ab-sonnet.md`.
 
 ### N392 — the full-QA lock gate stops refusing an unlocked run once pytest-xdist is installed
 

@@ -803,7 +803,9 @@ class AutoContinueStopHandler(StopHandlerBase):
         if reader and self._is_qa_failure(reader):
             logger.info("QA failure detected - instructing Claude to fix and continue")
             reason = self._render_branch_message(RuleID.STOP_QA_FAILURE, hook_input)
-            result = BlockingResult(decision=Decision.DENY, reason=reason)
+            result = BlockingResult(
+                decision=Decision.DENY, reason=reason, rule=RuleID.STOP_QA_FAILURE
+            )
             self._log_stop_event(hook_input, Decision.DENY, reason)
             return result
 
@@ -824,7 +826,11 @@ class AutoContinueStopHandler(StopHandlerBase):
                     reason = self._render_branch_message(
                         RuleID.STOP_TAUTOLOGICAL_QUESTION, hook_input
                     )
-                    result = BlockingResult(decision=Decision.DENY, reason=reason)
+                    result = BlockingResult(
+                        decision=Decision.DENY,
+                        reason=reason,
+                        rule=RuleID.STOP_TAUTOLOGICAL_QUESTION,
+                    )
                     self._log_stop_event(hook_input, Decision.DENY, reason)
                     return result
                 logger.info("STOPPING BECAUSE: prefix detected - allowing stop")
@@ -847,7 +853,9 @@ class AutoContinueStopHandler(StopHandlerBase):
         if reader and reader.last_tool_result_was_error():
             logger.info("tool_use_error detected with no recovery - emitting recovery reason")
             reason = self._render_branch_message(RuleID.STOP_AFTER_TOOL_ERROR, hook_input)
-            result = BlockingResult(decision=Decision.DENY, reason=reason)
+            result = BlockingResult(
+                decision=Decision.DENY, reason=reason, rule=RuleID.STOP_AFTER_TOOL_ERROR
+            )
             self._log_stop_event(hook_input, Decision.DENY, reason)
             return result
 
@@ -873,7 +881,11 @@ class AutoContinueStopHandler(StopHandlerBase):
                     reason = self._render_branch_message(
                         RuleID.STOP_CONFIRMATION_QUESTION, hook_input
                     )
-                    result = BlockingResult(decision=Decision.DENY, reason=reason)
+                    result = BlockingResult(
+                        decision=Decision.DENY,
+                        reason=reason,
+                        rule=RuleID.STOP_CONFIRMATION_QUESTION,
+                    )
                     self._log_stop_event(hook_input, Decision.DENY, reason)
                     return result
 
@@ -889,7 +901,9 @@ class AutoContinueStopHandler(StopHandlerBase):
             challenge = self._goal_ledger_challenge(hook_input)
             if challenge is not None:
                 reason = f"{reason}\n\n{challenge}"
-            result = BlockingResult(decision=Decision.DENY, reason=reason)
+            result = BlockingResult(
+                decision=Decision.DENY, reason=reason, rule=RuleID.STOP_NO_REASON
+            )
             self._log_stop_event(hook_input, Decision.DENY, reason)
             return result
 

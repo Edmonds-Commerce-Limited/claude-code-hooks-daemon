@@ -252,6 +252,7 @@ class NpmCommandHandler(PreToolUseHandlerBase):
             return GatingResult(
                 decision=Decision.DENY,
                 reason=self._deny_reason(hook_input, _NPM_PIPED_RULE, dynamic_detail),
+                rule=_NPM_PIPED_RULE.rule_id,
             )
 
         # Check if it's npm run command
@@ -307,6 +308,7 @@ class NpmCommandHandler(PreToolUseHandlerBase):
         return GatingResult(
             decision=Decision.DENY,
             reason=self._deny_reason(hook_input, _NPM_NON_LLM_RULE, dynamic_detail),
+            rule=_NPM_NON_LLM_RULE.rule_id,
         )
 
     def get_rules(self) -> list[Rule]:

@@ -702,3 +702,44 @@ class TestPipeBlockerAggregatesItsStrategiesAcceptanceTests:
                     f"{test.title!r} is denied by project_containment before "
                     f"pipe_blocker sees it: {test.command!r}"
                 )
+
+
+class TestEveryDenyCarriesItsRuleId:
+    """N393: the verdict log records WHICH pipe rule denied, on every deny path."""
+
+    @staticmethod
+    def _bash(command: str) -> dict:
+        return {"tool_name": "Bash", "tool_input": {"command": command}}
+
+    @pytest.mark.parametrize(
+        ("command", "rule_id"),
+        [
+            ("pytest tests/ | tail -20", RuleID.PIPE_TO_TAIL),
+            ("pytest tests/ | head -20", RuleID.PIPE_TO_HEAD),
+            ("docker ps -a | tail -20", RuleID.PIPE_TO_TAIL),
+            ("for f in a b; do mytool $f; done | head -5", RuleID.PIPE_TO_HEAD),
+        ],
+    )
+    def test_the_verbose_deny(
+        self, handler: PipeBlockerHandler, command: str, rule_id: str
+    ) -> None:
+        result = handler.handle(self._bash(command))
+
+        assert result.decision == "deny"
+        assert result.rule == rule_id
+
+    def test_the_terse_repeat_carries_it_too(self, handler: PipeBlockerHandler) -> None:
+        hook_input = _with_transcript(self._bash("pytest tests/ | head -20"), "/tmp/t.jsonl")
+        handler.handle(hook_input)
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == "deny"
+        assert result.rule == RuleID.PIPE_TO_HEAD
+
+    def test_the_prose_deny_carries_it_too(self, handler: PipeBlockerHandler) -> None:
+        command = "cat <<EOF\nthe summary | tail of the notes\nEOF"
+        result = handler.handle(self._bash(command))
+
+        assert result.decision == "deny"
+        assert result.rule == RuleID.PIPE_TO_TAIL

@@ -247,6 +247,7 @@ class SecurityAntipatternHandler(PreToolUseHandlerBase):
         return GatingResult(
             decision=Decision.DENY,
             reason=self._format_reason(hook_input, issues, file_path),
+            rule=_classify_pattern(issues[0]),
         )
 
     def get_rules(self) -> list[Rule]:

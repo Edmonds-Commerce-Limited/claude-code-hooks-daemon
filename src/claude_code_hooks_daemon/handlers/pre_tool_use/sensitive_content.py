@@ -1687,7 +1687,9 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             f"Matched: {matched_text}"
         )
 
-        return GatingResult(decision=Decision.DENY, reason=message)
+        return GatingResult(
+            decision=Decision.DENY, reason=message, rule=_RULE_PUBLIC_PATTERN.rule_id
+        )
 
     @staticmethod
     def _deny_secret_term(
@@ -1715,7 +1717,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             f"{_SUBJECT_LABEL}: {subject}"
         )
 
-        return GatingResult(decision=Decision.DENY, reason=message)
+        return GatingResult(decision=Decision.DENY, reason=message, rule=_RULE_SECRET_TERM.rule_id)
 
     def get_claude_md(self) -> str | None:
         return (

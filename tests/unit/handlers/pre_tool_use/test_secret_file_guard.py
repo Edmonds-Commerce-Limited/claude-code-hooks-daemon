@@ -67,6 +67,41 @@ class TestInit:
         assert _handler().get_default_enabled() is True
 
 
+class TestEveryDenyCarriesItsRuleId:
+    """N393: the verdict log records WHICH of the three rules denied, not only the text."""
+
+    @pytest.mark.parametrize(
+        ("tool", "tool_input", "rule_id"),
+        [
+            ("Read", {"file_path": "/proj/.vault-pass"}, RuleID.SECRET_READ),
+            ("Bash", {"command": "cat /proj/.vault-pass"}, RuleID.SECRET_BASH_MENTION),
+            (
+                "Write",
+                {"file_path": "/proj/helper.sh", "content": "cat .vault-pass\n"},
+                RuleID.SECRET_SCRIPT_AUTHOR,
+            ),
+        ],
+    )
+    def test_each_route(self, tool: str, tool_input: dict[str, Any], rule_id: str) -> None:
+        result = _handler().handle(_hook_input(tool, tool_input))
+
+        assert result.decision == Decision.DENY
+        assert result.rule == rule_id
+
+    def test_the_fail_closed_fallback_names_the_rule_too(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(self: object, *_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic formatter failure")
+
+        monkeypatch.setattr(RuleFormatter, "verbose", _raise)
+
+        result = _handler().handle(_hook_input("Read", {"file_path": "/proj/.vault-pass"}))
+
+        assert result.decision == Decision.DENY
+        assert result.rule == RuleID.SECRET_READ
+
+
 class TestReadTools:
     def test_read_of_protected_path_matches(self) -> None:
         handler = _handler()

@@ -615,6 +615,22 @@ class TestSecurityAntipatternHandler:
         from claude_code_hooks_daemon.constants.rule_ids import RuleID
 
         assert result.reason.startswith(f"BLOCKED [{RuleID.SEC_HARDCODED_CREDS}]")
+        assert result.rule == RuleID.SEC_HARDCODED_CREDS
+
+    def test_handle_deny_carries_the_rule_of_the_first_issue(self, handler):
+        """N393: the verdict log records the category rule, not only the reason text."""
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/src/utils.ts",
+                "content": "ev" + "al(code);",
+            },
+        }
+        result = handler.handle(hook_input)
+        assert result.rule == RuleID.SEC_CODE_INJECTION
+        assert f"BLOCKED [{result.rule}]" in result.reason
 
     def test_handle_reason_contains_file_path(self, handler):
         """handle() reason should include the file path."""

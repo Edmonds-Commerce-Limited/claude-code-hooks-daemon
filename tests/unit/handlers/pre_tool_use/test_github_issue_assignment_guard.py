@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.github_issue_assignment_guard import (
     GithubIssueAssignmentGuardHandler,
@@ -282,6 +283,7 @@ class TestVerdicts:
         assert "bin/hooks-daemon issue-validity 5 --claim" in reason
         assert "retry" in reason.lower()
         assert "gh issue edit" not in reason
+        assert result.rule == RuleID.GH_ISSUE_UNASSIGNED
 
     def test_assigned_only_to_others_denies_and_forbids_claiming(
         self, tmp_path: Path, gh: FakeGh, make_handler: Factory
@@ -293,6 +295,7 @@ class TestVerdicts:
         assert "alice" in reason
         assert "do not" in reason.lower()
         assert "issue-validity 5 --claim" not in reason
+        assert result.rule == RuleID.GH_ISSUE_ASSIGNED_ELSEWHERE
 
     def test_an_unapproved_author_denies_and_offers_no_claim(
         self, tmp_path: Path, gh: FakeGh, make_handler: Factory
@@ -304,6 +307,7 @@ class TestVerdicts:
         assert result.decision is Decision.DENY
         assert "--claim" not in (result.reason or "")
         assert "approved" in (result.reason or "")
+        assert result.rule == RuleID.GH_ISSUE_AUTHOR_NOT_APPROVED
 
     def test_an_approved_author_passes_regardless_of_case(
         self, tmp_path: Path, gh: FakeGh, make_handler: Factory

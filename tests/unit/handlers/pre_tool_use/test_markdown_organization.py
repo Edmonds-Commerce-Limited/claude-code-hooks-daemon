@@ -2178,6 +2178,7 @@ class TestClaudeCodeSyncEnforcement:
         assert result.decision == Decision.DENY
         assert result.reason is not None
         assert "plansDirectory not set" in result.reason
+        assert result.rule == RuleID.MARKDOWN_PLAN_SYNC
 
     # ── plansDirectory mismatch ──
 
@@ -2778,6 +2779,7 @@ class TestMarkdownOrganizationDisclosureLadder:
 
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.MARKDOWN_WRONG_LOCATION}]")
+        assert result.rule == RuleID.MARKDOWN_WRONG_LOCATION
 
     def test_missing_transcript_path_is_always_verbose(
         self, handler: MarkdownOrganizationHandler
@@ -2805,6 +2807,7 @@ class TestMarkdownOrganizationDisclosureLadder:
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.MARKDOWN_UNTRACKED_MEMORY}]")
         assert "READING memory is still allowed" in result.reason
+        assert result.rule == RuleID.MARKDOWN_UNTRACKED_MEMORY
 
 
 class TestNestedDependencyTreesAndDeclaredProjectsAtAnyDepth:

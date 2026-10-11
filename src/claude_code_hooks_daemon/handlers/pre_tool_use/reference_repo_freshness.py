@@ -498,13 +498,13 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
             if known is None or subject not in known:
                 blocking = self._is_blocking(session_id, subject, config.mode)
                 message = self._not_verified(subject, project_root, blocking=blocking)
-                return self._verdict(message, session_id, subject, config.mode)
+                return self._verdict(message, session_id, subject, config.mode, _NOT_VERIFIED_RULE)
 
             state = known[subject]
             if state.needs_attention:
                 blocking = self._is_blocking(session_id, subject, config.mode)
                 message = self._stale(state, project_root, blocking=blocking)
-                return self._verdict(message, session_id, subject, config.mode)
+                return self._verdict(message, session_id, subject, config.mode, _STALE_RULE)
 
             note = self._unconfirmed(state, subject, session_id, project_root)
             if note is not None:
@@ -605,17 +605,20 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
             return True
         return not self._already_reported(session_id, str(subject))
 
-    def _verdict(self, message: str, session_id: str, subject: Path, mode: str) -> GatingResult:
+    def _verdict(
+        self, message: str, session_id: str, subject: Path, mode: str, rule: Rule
+    ) -> GatingResult:
         """Apply the configured enforcement posture to a problem already found.
 
         ``message`` must already be rendered for the outcome this produces
         -- see :meth:`_is_blocking`, called by ``handle()`` before this.
+        ``rule`` is the one the finding belongs to; a denial carries its ID.
         """
         if mode == _MODE_ADVISE:
             return GatingResult(decision=Decision.ALLOW, context=[message])
 
         if mode == _MODE_BLOCK:
-            return GatingResult.deny(message)
+            return GatingResult(decision=Decision.DENY, reason=message, rule=rule.rule_id)
 
         # block_once (the default): tell the reader once per repo per session.
         # Per REPO because each stale clone is its own surprise, and per SESSION
@@ -626,7 +629,7 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
             return GatingResult(decision=Decision.ALLOW, context=[message])
 
         self._record(session_id, str(subject))
-        return GatingResult.deny(message)
+        return GatingResult(decision=Decision.DENY, reason=message, rule=rule.rule_id)
 
     # ------------------------------------------------------------- self-report
 

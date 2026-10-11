@@ -317,6 +317,22 @@ class TestHandleBlockMode:
         assert result.reason is not None
         assert "MUST_SQUASH_BECAUSE" in result.reason
 
+    @pytest.mark.parametrize(
+        ("command", "rule_id"),
+        [
+            ("git merge --squash feature-branch", RuleID.GIT_MERGE_SQUASH),
+            ("gh pr merge --squash 123", RuleID.GH_PR_MERGE_SQUASH),
+            ("gh pr merge --rebase 123", RuleID.GH_PR_MERGE_REBASE),
+        ],
+    )
+    def test_the_deny_carries_the_rule_it_matched(
+        self, handler: AncestryPreservingMergeHandler, command: str, rule_id: str
+    ) -> None:
+        """N393: the verdict log records which of the three rules denied."""
+        result = handler.handle(_bash(command))
+        assert result.decision == Decision.DENY
+        assert result.rule == rule_id
+
     def test_gh_pr_merge_squash_reason(self, handler: AncestryPreservingMergeHandler) -> None:
         result = handler.handle(_bash("gh pr merge --squash 123"))
         assert result.decision == Decision.DENY

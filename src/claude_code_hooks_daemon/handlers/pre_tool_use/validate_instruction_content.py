@@ -251,7 +251,7 @@ class ValidateInstructionContentHandler(PreToolUseHandlerBase):
 
             message += f"\n\nFILE: {file_path}"
 
-            return GatingResult(decision=Decision.DENY, reason=message)
+            return GatingResult(decision=Decision.DENY, reason=message, rule=rule.rule_id)
 
         return GatingResult(
             decision=Decision.ALLOW,

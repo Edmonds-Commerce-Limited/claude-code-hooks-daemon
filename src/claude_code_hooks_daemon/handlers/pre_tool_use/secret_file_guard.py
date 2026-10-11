@@ -1683,6 +1683,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             return GatingResult(
                 decision=Decision.DENY,
                 reason=f"BLOCKED [{rule.rule_id}]: {rule.blocked}\n\nMatched protected glob: `{pattern}`",
+                rule=rule.rule_id,
             )
 
     def _build_deny_result(
@@ -1707,7 +1708,9 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         if route in _TOKEN_ECHO_ROUTES and token and token != pattern:
             message += f"\nMatched on this token from your input: `{token}`"
 
-        return GatingResult(decision=Decision.DENY, reason=message)
+        return GatingResult(
+            decision=Decision.DENY, reason=message, rule=_RULES_BY_ROUTE[rule_route].rule_id
+        )
 
     @staticmethod
     def _disclosed(hook_input: dict[str, Any], rule: Rule) -> str:

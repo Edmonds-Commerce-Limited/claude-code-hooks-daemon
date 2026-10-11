@@ -939,6 +939,7 @@ class TestValidateEslintOnWriteDisclosureLadder:
         result = handler.handle(self._hook_input(test_file, "/tmp/transcript-esl-a.jsonl"))
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.ESLINT_ERRORS}]")
+        assert result.rule == RuleID.ESLINT_ERRORS
 
     @patch("subprocess.run")
     def test_first_fire_is_verbose(
@@ -996,6 +997,7 @@ class TestValidateEslintOnWriteDisclosureLadder:
             result = handler.handle(self._hook_input(test_file, None))
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.ESLINT_TIMEOUT}]")
+        assert result.rule == RuleID.ESLINT_TIMEOUT
 
     def test_run_failure_uses_the_run_failure_rule(
         self, handler: ValidateEslintOnWriteHandler, tmp_path: Path
@@ -1008,6 +1010,7 @@ class TestValidateEslintOnWriteDisclosureLadder:
             result = handler.handle(self._hook_input(test_file, None))
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.ESLINT_RUN_FAILURE}]")
+        assert result.rule == RuleID.ESLINT_RUN_FAILURE
 
 
 class TestPerFileWorkspace:
