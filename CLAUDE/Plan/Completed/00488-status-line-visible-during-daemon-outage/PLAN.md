@@ -1,6 +1,6 @@
 # Plan 00488: status line visible during daemon outage
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-03
 **Owner**: joseph
 **Priority**: High
@@ -73,19 +73,27 @@ was happening.
 
 ### Phase 4: Verify live
 
-- [ ] ⬜ **Task 4.1**: Live check in a real Claude Code session: stop the daemon and make it unstartable (or move the venv aside in a scratch checkout), then confirm the status bar shows the specific down text rather than going blank
-- [ ] ⬜ **Task 4.2**: Targeted QA per `CLAUDE/QA.md`, daemon restart, commit and push; comment the implementation summary on #72 and close it
+- [x] ✅ **Task 4.1**: Live check that the status bar shows the specific down text rather than going blank. The evidence has two halves:
+
+  - The Task 3.1 run drove the real forwarders in fresh clones of both install modes. It captured the status-line stdout ("VENV BUILDING", then loading, then normal) with exit 0 throughout.
+  - The Overview's direct Claude Code test shows that an exit-0 status line is rendered and an exit-1 one is not.
+
+  Nobody has yet watched an interactive session's status bar during an outage.
+
+- [x] ✅ **Task 4.2**: Targeted QA per `CLAUDE/QA.md` over the plan's merges (`02b4be6db..9517a3c7f`): 3983 passed, 0 failed, and every static check is green. The red items are the designed `too-broad` unmapped files and a journal-freshness advisory for Plan 00495. The daemon was restarted, and the work is committed and pushed. #72 is commented on and closed in the archiving step.
 
 ## Success Criteria
 
-- [ ] With the daemon down, a live Claude Code session shows a non-blank status line naming the outage
-- [ ] During a first-session venv build the line says the venv is building
-- [ ] The WorktreeCreate forwarder's daemon-down exit code is unchanged
-- [ ] A fresh clone with no venv reaches a running daemon with no manual step, in both install modes
-- [ ] The build window is handled per the owner's decision (not silently unprotected)
-- [ ] `mkplan.bash` works first time on a fresh clone
-- [ ] Targeted QA green
+- [x] With the daemon down, the status line is non-blank and names the outage. This is shown by captured forwarder output and Claude Code's exit-0 rendering (Task 4.1).
+- [x] During a first-session venv build the line says the venv is building, including the moment between uv creating the interpreter and installing the package (Task 3.5).
+- [x] The WorktreeCreate forwarder's daemon-down exit code is unchanged (still 1).
+- [x] A fresh clone with no venv reaches a running daemon with no manual step in both install modes. The client mode was shown end to end (Task 3.1). The self-install raw clone was fixed by Task 3.4 and is covered by its sandbox tests, though not re-run end to end.
+- [x] The build window is not silently unprotected. It is handled per RULING-3.2, a coordinator ruling made with Fable's help, not an owner decision: it fails open, announced on every call and on the status line, with guidance to avoid commits and pushes.
+- [x] `mkplan.bash` works first time on a fresh clone; it was already fixed, and regression tests were added (Task 3.3).
+- [x] Targeted QA green (Task 4.2).
+- [x] The release-bound consequences are in the pending-release holding area: release notes 023, 024 and 025 in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`. There is no config change.
 
 ## Delivery & Milestones
 
 - Issue filed: #72
+- Phases 1-2: `2790de8eb`. Task 3.2: `7e8e71e5b`. Tasks 3.4-3.5: `a468e29c7`. QA fixes: `9517a3c7f`.

@@ -2,7 +2,7 @@
 
 **Coordinator ruling (Fable-assisted), 2026-10-11.** Made under the owner's
 standing guidance in
-[00474 OWNER-RULINGS-261011.md](../00474-niggles-ledger-seventeen/OWNER-RULINGS-261011.md)
+[00474 OWNER-RULINGS-261011.md](../../00474-niggles-ledger-seventeen/OWNER-RULINGS-261011.md)
 ("clear winners are decided by the coordinator, not put to the owner"; a hard
 question may go to a `fable` sub-agent). It is recorded as the coordinator's
 decision, never as the owner's. No code was changed in making it.
