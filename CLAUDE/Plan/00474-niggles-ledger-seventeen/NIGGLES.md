@@ -83,9 +83,13 @@ is the count at that date.
 9de5ed59a failed 3 tests on Python 3.12 and 3.13 (47714 passed). The failures were the `init.sh` rows of
 `TestTheBlockAboveMustBeAboutTheSuppression.test_the_genuine_reason_above_in_this_tree_still_passes`
 in `tests/unit/qa/test_check_inline_suppressions.py`. `GENUINE_REASON_ABOVE` names each suppression by
-`(path, line)`. Plan 00488 added lines above the three `init.sh` suppressions, which moved them from
-1215/2566/2676 to 1228/2653/2763. The range QA for 00488 passed, because `changed_tests` does not map
-`init.sh` to this test.
+`(path, line)`. Plan 00488 added lines above the three `init.sh` suppressions in two steps. Its Phases 1-2
+commit 4b54675ed (merged in 2790de8eb) moved them from 1215/2566/2676 to 1222/2573/2683, which is what
+CI on 9de5ed59a saw. Its Phase 3 commits, after 9de5ed59a, moved them again to 1228/2653/2763. The range
+QA for 00488 passed, because `changed_tests` does not map `init.sh` to this test. A fact-check
+(`subagent-reports/fact-check-n426.md`) refuted this as attributed to commits outside 00488. The
+coordinator checked: 4b54675ed is an ancestor of the 00488 merge 2790de8eb, so the attribution stands,
+and the two-step detail was added.
 
 **Fix applied** (0a8be8afe): the three line numbers were updated. This is a stopgap: the next `init.sh`
 edit above those lines breaks the test again.
