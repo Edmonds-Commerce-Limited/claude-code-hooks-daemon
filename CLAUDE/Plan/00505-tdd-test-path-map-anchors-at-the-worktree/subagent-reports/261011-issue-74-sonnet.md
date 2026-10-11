@@ -8,7 +8,8 @@ The glob match was also wrong, which the brief asked me to verify. A test with `
 
 ## Fix (tdd_enforcement.py)
 
-- `_checkout_root_for` uses `core.worktree_paths.enclosing_checkout`, the same helper other worktree-aware handlers use. It returns the worktree root for a nested worktree source. For a main-checkout source it returns the project root unchanged, so those sources resolve as before.
+- Coordinator review round: the first version relied on `enclosing_checkout`, which only knows `untracked/worktrees/` and `.claude/worktrees/`, so the issue's own `untracked/scratch/wt` stayed anchored at the main checkout. A new function `nested_git_checkout_root` in `core/worktree_paths.py` now returns the nearest ancestor below the project root with a `.git` entry (file for a linked worktree, directory for a nested clone). `enclosing_checkout` and its other callers are untouched. It is unit-tested in `tests/unit/core/test_worktree_paths.py`, and a handler test reproduces the issue literally: a real worktree at `untracked/scratch/wt`, a mirrored `tests/Small` mapping, and the test committed in the worktree. The write is allowed, and the deny names the worktree path when the test is removed. 223 passed across the two test files.
+- `_checkout_root_for` takes `nested_git_checkout_root` first, then falls back to `enclosing_checkout`, then to the project root. For a main-checkout source it returns the project root unchanged, so those sources resolve as before.
 - `path_matches_globs` now gets the checkout root as `project_root`.
 - `_workspace_anchor` resolves the workspace through the registry against the project-root equivalent of the source, then re-roots it at the checkout (`<worktree>/<workspace-rel>`). Declared sub-projects (`apps/api`) therefore anchor correctly inside a worktree. Flat and mirror both use it.
 

@@ -2431,14 +2431,16 @@ class TestMirrorTestPathMap:
         assert any("mirror" in record.message for record in caplog.records)
 
 
-def _make_nested_worktree(project: Path, name: str = "wt") -> Path:
+def _make_nested_worktree(
+    project: Path, name: str = "wt", parent: tuple[str, ...] = ("untracked", "worktrees")
+) -> Path:
     """A real git repository at ``project`` with a linked worktree nested in it."""
     git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
     subprocess.run([*git, "init", "-q", str(project)], check=True)
     subprocess.run(
         [*git, "-C", str(project), "commit", "-q", "--allow-empty", "-m", "root"], check=True
     )
-    worktree = project / "untracked" / "worktrees" / name
+    worktree = project.joinpath(*parent, name)
     subprocess.run(
         [*git, "-C", str(project), "worktree", "add", "-q", "-b", name, str(worktree)],
         check=True,
@@ -2506,6 +2508,30 @@ class TestDeclaredTestPathMapAnchorsAtTheWorktree:
         assert str(worktree.joinpath(*self._SMALL_REL)) in reason
         assert str(tmp_path.joinpath(*self._FLAT_REL)) not in reason
         assert str(tmp_path.joinpath(*self._SMALL_REL)) not in reason
+
+    def test_the_issue_reproduction_worktree_under_untracked_scratch_is_allowed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Issue #74 literally: the worktree is at ``untracked/scratch/wt``, a
+        location no naming convention recognises, with its test committed."""
+        worktree = _make_nested_worktree(tmp_path, "wt", ("untracked", "scratch"))
+        _anchor_project_root(monkeypatch, tmp_path)
+        test = _place_test(worktree / "tests" / "Small" / "Foo" / "BarTest.php")
+        git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+        subprocess.run([*git, "-C", str(worktree), "add", str(test)], check=True)
+        subprocess.run([*git, "-C", str(worktree), "commit", "-q", "-m", "test"], check=True)
+        handler = TddEnforcementHandler()
+        handler._test_path_map = [
+            {"source_glob": "src/**", "test_dir": "tests/Small", "mirror": True}
+        ]
+        source = worktree / "src" / "Foo" / "Bar.php"
+
+        assert handler.handle(_php_write(source)).decision == "allow"
+
+        test.unlink()
+        denied = handler.handle(_php_write(source))
+        assert denied.decision == "deny"
+        assert str(test) in (denied.reason or "")
 
     def test_a_main_checkout_test_does_not_satisfy_a_worktree_source(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

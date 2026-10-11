@@ -82,6 +82,28 @@ def enclosing_checkout(abs_path: str, project_root: Path) -> tuple[Path, Path] |
     return root.joinpath(*parts[:subpath_start]), Path(*in_worktree_parts)
 
 
+def nested_git_checkout_root(abs_path: str, project_root: Path) -> Path | None:
+    """The nearest ancestor of ``abs_path`` below ``project_root`` holding a ``.git`` entry.
+
+    A linked worktree has a ``.git`` FILE and a nested clone a ``.git``
+    directory, wherever they sit under the project (``untracked/scratch/wt``
+    as much as ``untracked/worktrees/<name>``). Unlike :func:`enclosing_checkout`
+    this does not depend on the directory naming convention. ``project_root``
+    itself is never returned: a path that is only in the main checkout, or
+    outside the project, yields ``None``. The result is resolved.
+    """
+    root = project_root.resolve()
+    absolute = Path(realpath(abs_path))
+    if not path_is_relative_to(absolute, root):
+        return None
+    for ancestor in absolute.parents:
+        if ancestor == root:
+            return None
+        if (ancestor / ".git").exists():
+            return ancestor
+    return None
+
+
 def effective_project_relative_path(abs_path: str, project_root: Path) -> str | None:
     """Classify ``abs_path`` relative to the nearest enclosing root.
 

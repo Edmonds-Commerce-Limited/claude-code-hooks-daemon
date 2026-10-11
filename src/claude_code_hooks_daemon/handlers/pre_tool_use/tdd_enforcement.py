@@ -23,7 +23,10 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 from claude_code_hooks_daemon.core.workspace import resolve_workspace
-from claude_code_hooks_daemon.core.worktree_paths import enclosing_checkout
+from claude_code_hooks_daemon.core.worktree_paths import (
+    enclosing_checkout,
+    nested_git_checkout_root,
+)
 from claude_code_hooks_daemon.strategies.tdd import TddStrategyRegistry
 from claude_code_hooks_daemon.strategies.tdd.protocol import TddStrategy
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
@@ -34,6 +37,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     resolve_project_root,
 )
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
+from claude_code_hooks_daemon.utils.realpath import realpath
 
 logger = logging.getLogger(__name__)
 
@@ -658,16 +662,21 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
     def _checkout_root_for(source_path: str, project_root: str | None) -> Path | None:
         """The checkout root that holds ``source_path``, or None without a project root.
 
-        The worktree's root when the file lives in a git worktree nested in the
-        project (``untracked/worktrees/<name>/``), else the project root itself,
-        returned exactly as given so a main-checkout source resolves unchanged.
-        A relative ``test_dir`` and a project-relative ``source_glob`` both
-        belong to THAT checkout: the project root would point at the main
-        checkout, whose copy of the test is not the one the agent wrote.
+        The nearest ancestor below the project root with a ``.git`` entry (a
+        linked worktree or nested clone, wherever it sits), else the worktree
+        the conventional ``untracked/worktrees/<name>/`` layout names, else the
+        project root itself, returned exactly as given so a main-checkout
+        source resolves unchanged. A relative ``test_dir`` and a
+        project-relative ``source_glob`` both belong to THAT checkout: the
+        project root would point at the main checkout, whose copy of the test
+        is not the one the agent wrote.
         """
         if project_root is None:
             return None
         root = Path(project_root)
+        nested = nested_git_checkout_root(source_path, root)
+        if nested is not None:
+            return nested
         located = enclosing_checkout(source_path, root)
         if located is None or located[0] == root.resolve():
             return root
@@ -683,11 +692,10 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
         under the project root), then re-rooted at ``checkout_root`` so a
         worktree source anchors at ``<worktree>/<workspace>``.
         """
-        located = enclosing_checkout(str(source), project_root)
-        if checkout_root == project_root or located is None:
+        if checkout_root == project_root:
             workspace = resolve_workspace(self._project_registry, source, project_root)
             return workspace.root, source
-        in_checkout = located[1]
+        in_checkout = path_relative_to(Path(realpath(str(source))), checkout_root.resolve())
         workspace = resolve_workspace(
             self._project_registry, project_root / in_checkout, project_root
         )
