@@ -39,7 +39,11 @@ runs: `if/then`, `bash -c`, `eval`, `env`, `nohup`, `timeout`, `python3 ./llm_qa
 - Acceptance tests: none added. The two existing acceptance probes are in-process payloads that never execute. A
   `bash -n -c` wrapper would make this handler read the command as parse-only and allow it, so it cannot express a
   deny here.
-- Residual fail-open: a user function named like a text sink is handled; a value reaching a call only through a route
-  the walk does not follow (for example a class attribute read via `getattr`) is not seen. This stays within the
-  handler's stated "resource guard, not a security boundary" scope.
+- Review round 1 (`261011-review-batch-i-opus.md`) fixes: `write`/`writelines` removed from the text sinks (they feed a
+  shell or a script that is then run); any name the code defines, rebinds or imports under (including `as` aliases) is
+  no longer a sink; the redundant `"pytest" in literals` clause is dropped and the parse and reach walk are done once
+  per script (`_parsed_reach`, cached). Seven new deny shapes were added to `_PYTHON_FULL_RUNS` (12 red before the fix).
+- Residual, pre-existing on main and left unfixed: a list built with `.append(...)` or `+=` and then passed to
+  `Popen(...)`, `asyncio.create_subprocess_exec(...)`, and `exec(open('runner.py').read())`. The reviewer's 34-script
+  probe misses exactly these 4 on both main and this branch.
 - N96 (the open decision on this handler) is unaffected: no structural change.

@@ -1491,7 +1491,8 @@ shell-level mention and real-run shape (wrappers, `if/then`, `eval`, `bash -c`, 
 direct `bash` heredocs) already judged correctly through this handler's own parser, and is now pinned. Pinned by
 `TestPythonHoldingAProgramNameIsNotRunningIt` and `TestMentionsAndRealRunsAtTheShellLevel` in
 `tests/unit/handlers/pre_tool_use/test_subagent_full_qa_blocker.py` (red count 10 before the fix) and the `n409-` rows of
-`tests/fixtures/ordinary_command_corpus.yaml`. Report:
+`tests/fixtures/ordinary_command_corpus.yaml`. Residual, pre-existing and unfixed: a list built by `.append`/`+=` then
+passed to `Popen`, `asyncio.create_subprocess_exec`, and `exec(open(...).read())` are not seen as runs. Report:
 `subagent-reports/261011-batch-i-n409-sonnet.md`.
 
 ### N408 — `gh_issue_comments`/`gh_pr_comments` deny mentions and miss `--json=comments`

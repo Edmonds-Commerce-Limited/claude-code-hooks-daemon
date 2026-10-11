@@ -78,6 +78,7 @@ from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import Enum
+from functools import lru_cache
 from itertools import islice, pairwise
 from pathlib import Path
 from typing import Any, Final
@@ -3178,7 +3179,8 @@ def _python_strings_of(code: str, argv: Sequence[str]) -> tuple[list[str], list[
     it holds instead, with no argv list read from it.
     """
     try:
-        return _python_strings(ast.parse(code), argv)
+        tree, reached = _parsed_reach(code)
+        return _python_strings(tree, reached, argv)
     except (SyntaxError, ValueError, RecursionError) as error:
         logger.debug("Python judged by its quoted literals, unparsable (%s)", error)
         return _string_literals(code), []
@@ -3387,13 +3389,12 @@ def _python_argvs(
 
 
 #: Calls that print, log, exit with or declare TEXT, so what they are given is
-#: prose rather than a command (N409). A function the code defines under one
-#: of these names is not a sink: it can run what it is given.
+#: prose rather than a command (N409). A name the code defines, rebinds or
+#: imports under one of these names is not a sink: it can run what it is given.
+#: ``write`` is deliberately absent: it feeds a shell or a script that is run.
 _TEXT_SINKS: Final[frozenset[str]] = frozenset(
     {
         "print",
-        "write",
-        "writelines",
         "warn",
         "warning",
         "info",
@@ -3483,9 +3484,13 @@ def _process_arguments(tree: ast.Module) -> set[int]:
     """
     nodes = list(ast.walk(tree))
     bound = _bindings(nodes)
-    defined = {
-        node.name for node in nodes if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    }
+    # A sink name the code defines, binds or imports under is not the sink.
+    defined = set(bound)
+    for node in nodes:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            defined.add(node.name)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            defined.update(alias.asname or alias.name for alias in node.names)
     pending: list[ast.AST] = []
     for node in nodes:
         if not isinstance(node, ast.Call):
@@ -3520,6 +3525,17 @@ def _process_arguments(tree: ast.Module) -> set[int]:
     return reached
 
 
+@lru_cache(maxsize=4)
+def _parsed_reach(code: str) -> tuple[ast.Module, frozenset[int]]:
+    """The parse of ``code`` and the ids of the expressions a call can receive.
+
+    Cached so one script is parsed and walked once however many judgements
+    read it. Raises what :func:`ast.parse` raises for code it cannot parse.
+    """
+    tree = ast.parse(code)
+    return tree, frozenset(_process_arguments(tree))
+
+
 def _passed_literals(code: str) -> list[str]:
     """The string literals of Python code that some call can receive (N409).
 
@@ -3527,8 +3543,7 @@ def _passed_literals(code: str) -> list[str]:
     stands, as it does for :func:`_python_strings_of`.
     """
     try:
-        tree = ast.parse(code)
-        reached = _process_arguments(tree)
+        tree, reached = _parsed_reach(code)
     except (SyntaxError, ValueError, RecursionError) as error:
         logger.debug("Python judged by its quoted literals, unparsable (%s)", error)
         return _string_literals(code)
@@ -3539,7 +3554,9 @@ def _passed_literals(code: str) -> list[str]:
     ]
 
 
-def _python_strings(tree: ast.Module, argv: Sequence[str]) -> tuple[list[str], list[list[str]]]:
+def _python_strings(
+    tree: ast.Module, reached: frozenset[int], argv: Sequence[str]
+) -> tuple[list[str], list[list[str]]]:
     """Every string a call can receive, and every argv list it can receive (review 8 M1).
 
     A string literal counts wherever it sits as long as a call can be handed
@@ -3551,7 +3568,6 @@ def _python_strings(tree: ast.Module, argv: Sequence[str]) -> tuple[list[str], l
     :func:`_python_argvs`).
     """
     nodes = list(ast.walk(tree))
-    reached = _process_arguments(tree)
     links = {
         id(side)
         for node in nodes
@@ -3653,9 +3669,7 @@ def _pytest_in_code(code: str, argv: Sequence[str] = ()) -> list[str] | None:
     calls = _calls_pytest(code)
     # Only a "pytest" some call is handed starts it (N409): a tool list that
     # names it, beside a process call for something else, runs nothing.
-    starts_pytest = (
-        _PYTEST in literals and _PYTEST in _passed_literals(code) and _starts_a_process(code)
-    )
+    starts_pytest = _PYTEST in _passed_literals(code) and _starts_a_process(code)
     if not calls and not starts_pytest:
         return None
     operands: list[str] = []

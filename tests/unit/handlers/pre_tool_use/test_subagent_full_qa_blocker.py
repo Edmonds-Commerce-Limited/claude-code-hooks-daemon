@@ -3545,6 +3545,39 @@ _PYTHON_FULL_RUNS: list[tuple[str, str]] = [
         f"import subprocess\nsubprocess.run(['bash', '-c', '{_QA}'])",
         "llm-qa-whole-suite",
     ),
+    # A write that feeds a shell, or a script that is then run, is a run.
+    (
+        "import subprocess\np = subprocess.Popen(['bash'], stdin=subprocess.PIPE, text=True)\n"
+        f"p.stdin.write('{_QA}\\n')",
+        "llm-qa-whole-suite",
+    ),
+    (
+        f"import subprocess\nopen('go.sh', 'w').write('{_QA}\\n')\n"
+        "subprocess.run(['bash', 'go.sh'])",
+        "llm-qa-whole-suite",
+    ),
+    (
+        f"import subprocess\nopen('go.sh', 'w').writelines(['{_QA}\\n'])\n"
+        "subprocess.run(['bash', 'go.sh'])",
+        "llm-qa-whole-suite",
+    ),
+    # A sink name rebound to a runner is a runner.
+    (
+        f"import subprocess\nlog = lambda c: subprocess.run(c, {_SHELL_TRUE})\nlog('{_QA}')",
+        "llm-qa-whole-suite",
+    ),
+    (
+        f"import subprocess\necho = subprocess.run\necho(['bash', '-c', '{_QA}'])",
+        "llm-qa-whole-suite",
+    ),
+    (
+        f"from subprocess import run as echo\necho(['bash', '-c', '{_QA}'])",
+        "llm-qa-whole-suite",
+    ),
+    (
+        f"import subprocess as info\ninfo.run('{_QA}', {_SHELL_TRUE})",
+        "llm-qa-whole-suite",
+    ),
 ]
 
 #: N409: mentions of a full-QA command at the shell level that run nothing.
