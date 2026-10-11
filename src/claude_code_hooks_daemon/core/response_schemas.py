@@ -404,6 +404,38 @@ TASK_CREATED_SCHEMA: Final[dict[str, Any]] = _top_level_block_schema(
 CONFIG_CHANGE_SCHEMA: Final[dict[str, Any]] = _top_level_block_schema(
     "ConfigChange", discard=("continue",)
 )
+
+
+def _elicitation_schema(event_name: str) -> dict[str, Any]:
+    """Elicitation / ElicitationResult: a documented ``action`` or a top-level block.
+
+    The docs discard ``reason``, ``systemMessage`` and ``continue`` for both
+    events. ``reason`` and ``continue`` stay undeclared (an emission is rejected,
+    not dead-lettered); ``systemMessage`` stays declared because the daemon's
+    own loud contract-substitute response carries it (recorded in ALLOWLIST.yaml
+    like the other dead-letter ``systemMessage`` events). The permissive
+    fallback cannot stand in: it refuses the documented top-level
+    ``decision: "block"``.
+    """
+    properties: dict[str, Any] = {
+        name: spec for name, spec in _UNIVERSAL_OUTPUT_PROPERTIES.items() if name != "continue"
+    }
+    properties["decision"] = {"type": "string", "const": "block"}
+    properties["hookSpecificOutput"] = {
+        "type": "object",
+        "properties": {
+            "hookEventName": {"type": "string", "const": event_name},
+            "action": {"type": "string", "enum": ["accept", "decline", "cancel"]},
+            "content": {"type": "object"},
+        },
+        "required": ["hookEventName"],
+        "additionalProperties": False,
+    }
+    return {"type": "object", "properties": properties, "additionalProperties": False}
+
+
+ELICITATION_SCHEMA: Final[dict[str, Any]] = _elicitation_schema("Elicitation")
+ELICITATION_RESULT_SCHEMA: Final[dict[str, Any]] = _elicitation_schema("ElicitationResult")
 TEAMMATE_IDLE_SCHEMA: Final[dict[str, Any]] = _CONTINUE_FALSE_SCHEMA
 TASK_COMPLETED_SCHEMA: Final[dict[str, Any]] = _CONTINUE_FALSE_SCHEMA
 
@@ -428,6 +460,8 @@ RESPONSE_SCHEMAS: Final[dict[str, dict[str, Any]]] = {
     "ConfigChange": CONFIG_CHANGE_SCHEMA,
     "TeammateIdle": TEAMMATE_IDLE_SCHEMA,
     "TaskCompleted": TASK_COMPLETED_SCHEMA,
+    "Elicitation": ELICITATION_SCHEMA,
+    "ElicitationResult": ELICITATION_RESULT_SCHEMA,
 }
 
 

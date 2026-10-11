@@ -123,6 +123,9 @@ class ProtectedFileIndex:
         the tool is handed by name is read whatever it skips and ignores.
         """
         bases = tuple(dict.fromkeys((os.path.normpath(root), os.path.realpath(root))))
+        # Whether naming a base defeats git's ignore depends on the base alone, so
+        # each is asked of git at most once however many ignored files lie below it.
+        defeats_ignore: dict[str, bool] = {}
         for entry in self.files:
             absolute = self._absolute(entry)
             base = next((candidate for candidate in bases if _is_under(absolute, candidate)), None)
@@ -133,13 +136,11 @@ class ProtectedFileIndex:
             named_outright = absolute == base
             if not named_outright and skip is not None and _skipped_below(base, absolute, skip):
                 continue
-            if (
-                view is TreeView.UNIGNORED
-                and entry.ignored
-                and not named_outright
-                and not self._root_defeats_ignore(base)
-            ):
-                continue
+            if view is TreeView.UNIGNORED and entry.ignored and not named_outright:
+                if base not in defeats_ignore:
+                    defeats_ignore[base] = self._root_defeats_ignore(base)
+                if not defeats_ignore[base]:
+                    continue
             if is_exempt is not None and is_exempt(absolute):
                 continue
             return entry.pattern

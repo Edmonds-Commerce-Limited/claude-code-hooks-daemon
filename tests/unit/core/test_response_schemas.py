@@ -530,3 +530,58 @@ class TestValidationHelpers:
 
         assert len(errors) == 1
         assert "jsonschema not installed" in errors[0]
+
+
+class TestElicitationSchemas:
+    """Elicitation and ElicitationResult accept a top-level ``decision: "block"``.
+
+    The vendored contract documents it ("Prints a top-level decision: block"), so
+    the permissive fallback, which refuses a top-level ``decision``, must not be
+    what validates these two events.
+    """
+
+    @pytest.mark.parametrize("event", ["Elicitation", "ElicitationResult"])
+    def test_top_level_block_is_valid(self, event: str) -> None:
+        assert validate_response(event, {"decision": "block"}) == []
+
+    @pytest.mark.parametrize("event", ["Elicitation", "ElicitationResult"])
+    def test_any_other_decision_is_refused(self, event: str) -> None:
+        assert validate_response(event, {"decision": "deny"}) != []
+
+    @pytest.mark.parametrize("event", ["Elicitation", "ElicitationResult"])
+    def test_documented_action_output_is_valid(self, event: str) -> None:
+        response = {
+            "hookSpecificOutput": {
+                "hookEventName": event,
+                "action": "accept",
+                "content": {"username": "alice"},
+            }
+        }
+        assert validate_response(event, response) == []
+
+    @pytest.mark.parametrize("event", ["Elicitation", "ElicitationResult"])
+    def test_an_undocumented_action_is_refused(self, event: str) -> None:
+        response = {"hookSpecificOutput": {"hookEventName": event, "action": "escalate"}}
+        assert validate_response(event, response) != []
+
+
+class TestFallbackSchemaNeverMeetsADecisionEvent:
+    """The permissive fallback refuses a top-level ``decision``, so no event whose
+    vendored contract documents one may be left on it."""
+
+    def test_no_event_on_the_fallback_documents_a_top_level_decision(self) -> None:
+        import json
+        from pathlib import Path
+
+        from claude_code_hooks_daemon.core.response_schemas import _permissive_response_schema
+
+        contract_dir = Path(__file__).resolve().parents[3] / "contracts" / "claude-code-hooks"
+        fallback = _permissive_response_schema()
+        offenders = []
+        for event, schema in RESPONSE_SCHEMAS.items():
+            contract = contract_dir / f"{event}.json"
+            if schema != fallback or not contract.is_file():
+                continue
+            if json.loads(contract.read_text(encoding="utf-8"))["top_level_decision_enum"]:
+                offenders.append(event)
+        assert offenders == []

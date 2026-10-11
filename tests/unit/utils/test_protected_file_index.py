@@ -240,6 +240,29 @@ class TestFindUnder:
     ) -> None:
         assert index.find_under(str(repo / ".hidden"), view=TreeView.UNIGNORED) == KEY
 
+    def test_the_root_is_asked_of_git_once_however_many_ignored_files_lie_below_it(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        many = ProtectedFileIndex(
+            project_root=str(repo),
+            patterns=PATTERNS,
+            files=tuple(
+                IndexedFile(relpath=f"ignored/n{n}/{KEY}", pattern=KEY, tracked=False, ignored=True)
+                for n in range(6)
+            ),
+        )
+        calls: list[tuple[str, ...]] = []
+        real_run_git = pfi.run_git
+
+        def spy(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+            calls.append(args)
+            return real_run_git(cwd, *args)
+
+        monkeypatch.setattr(pfi, "run_git", spy)
+
+        assert many.find_under(str(repo), view=TreeView.UNIGNORED) is None
+        assert calls == [("check-ignore", "-q", "--", str(repo))]
+
     def test_a_skip_hook_drops_a_hidden_directory(
         self, index: ProtectedFileIndex, repo: Path
     ) -> None:

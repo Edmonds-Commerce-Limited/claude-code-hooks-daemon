@@ -57,8 +57,18 @@ def environment_label(runtime: str | None) -> str:
 
 
 def current_environment() -> str:
-    """The environment label for what ``detect_container_runtime()`` finds now."""
-    return environment_label(detect_container_runtime())
+    """The environment label for this process's container runtime.
+
+    The runtime ``ProjectContext`` cached at startup is used when the context is
+    initialised, so the markers are not probed on every event. A process with no
+    initialised context (a CLI command) detects it.
+    """
+    try:
+        runtime = ProjectContext.container_runtime()
+    except RuntimeError as exc:
+        logger.debug("autonomy: no initialised project context, detecting the runtime: %s", exc)
+        runtime = detect_container_runtime()
+    return environment_label(runtime)
 
 
 def _project_config() -> Config:

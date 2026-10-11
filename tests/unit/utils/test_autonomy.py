@@ -32,7 +32,33 @@ class TestEnvironment:
     def test_an_unknown_runtime_is_a_generic_container_never_the_host(self) -> None:
         assert environment_label("kubernetes") == "generic"
 
-    def test_detects_when_not_told(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_uses_the_runtime_cached_at_startup_without_re_detecting(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _never_detect() -> str | None:
+            raise AssertionError("the runtime is probed again on every event")
+
+        monkeypatch.setattr(ProjectContext, "container_runtime", classmethod(lambda cls: "lxc"))
+        monkeypatch.setattr(autonomy, "detect_container_runtime", _never_detect)
+        assert current_environment() == "lxc"
+
+    def test_a_cached_host_is_the_host_not_a_reason_to_detect(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _never_detect() -> str | None:
+            raise AssertionError("the runtime is probed again on every event")
+
+        monkeypatch.setattr(ProjectContext, "container_runtime", classmethod(lambda cls: None))
+        monkeypatch.setattr(autonomy, "detect_container_runtime", _never_detect)
+        assert current_environment() == "host"
+
+    def test_detects_when_no_project_context_is_initialised(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _uninitialised(cls: type[ProjectContext]) -> str | None:
+            raise RuntimeError("ProjectContext not initialized")
+
+        monkeypatch.setattr(ProjectContext, "container_runtime", classmethod(_uninitialised))
         monkeypatch.setattr(autonomy, "detect_container_runtime", lambda: "podman")
         assert current_environment() == "podman"
         monkeypatch.setattr(autonomy, "detect_container_runtime", lambda: None)

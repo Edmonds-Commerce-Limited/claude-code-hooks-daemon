@@ -21,6 +21,9 @@
     "sessionTitle": {}
   },
   "discarded_fields": [],
+  "conditional_input_fields": {
+    "session_title": "Present when the session has a custom title, with the same meaning as the SessionStart session_title field (upstream: 'UserPromptSubmit hooks also receive `session_title` when the session has a custom title')."
+  },
   "notes": "decision: 'block' prevents the prompt from being processed; reason is shown to the user, not added to context. suppressOriginalPrompt only meaningful with decision: 'block'.",
   "input_example": {
     "session_id": "abc123",

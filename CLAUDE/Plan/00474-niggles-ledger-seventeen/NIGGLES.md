@@ -2229,8 +2229,16 @@ recorded `claude_code_version` to equal `META.json`'s `last_audited_claude_code_
 `unknown` with `reviewed_through: 2.1.293`, as v3.68.0 was. The changelog reviews for 2.1.272 to 2.1.293 found nothing
 that changes hook payloads or output, but nobody has re-read the hooks doc itself against the vendored per-event JSON.
 
-**Status**: Open. Follow `docs/guides/HOOK-CONTRACT-REFRESH.md` from "Manual steps for a CHANGED verdict" (RAW text
-only), including the input side, then record the audited version in `claude-code-versions.yaml`.
+**Status**: ✅ Fixed ([report](subagent-reports/261011-batch-n-sonnet.md)). The raw hooks doc was re-fetched (266649 bytes,
+sha256 `3a1f9445…`) and read against every per-event JSON, output and input side. One real gap: `Elicitation` and
+`ElicitationResult` document a top-level `decision: "block"` (and discard `reason`), which the vendored JSON denied and
+the permissive fallback schema would have rejected; both now have the contract entry and a bespoke response schema.
+`UserPromptSubmit` gained the documented `session_title` input. `META.json` and its two pinned tests moved to
+`last_audited_claude_code_version` 2.1.296. `TestAgreesWithContractMeta` now requires the newest recorded release version
+not to be AHEAD of the audited contract (a refresh between releases leaves META ahead until the next release records its
+tested version). `claude-code-versions.yaml` is untouched: v3.69.0 stays `unknown`, the next release records 2.1.296.
+The Claude Code changelog review stops at 2.1.293 (installed is 2.1.296), so the staleness advisory's review-drift half
+still speaks until the reviewer runs over 2.1.294 to 2.1.296.
 
 ### N374 — v3.69.0 release code review: non-blocking findings to work through
 
@@ -2278,7 +2286,13 @@ review: Grep targets named in `file_path` are now judged like `path` (a guard by
 report filenames stay under the filename limit with 256-character agent names. Still open, non-defects (cost and
 refactoring): the per-file `git check-ignore` calls in `find_under`, autonomy re-detecting the runtime per event, the
 hard-coded `"completed"` and duplicated pattern compilation in `cli.py`, the latent fallback-schema trap in
-`core/response_schemas.py:451`, and `sensitive_content` re-reading `.claude/fake-values.yaml`. Known residual of item 2:
+`core/response_schemas.py:451`, and `sensitive_content` re-reading `.claude/fake-values.yaml`.
+**Residuals worked in batch N** ([report](subagent-reports/261011-batch-n-sonnet.md)), test-first: `find_under` asks git
+about each root once per call; autonomy reads the runtime `ProjectContext` cached at startup (detecting only with no
+initialised context); the fallback-schema trap is real (Elicitation, ElicitationResult) and fixed, with a test that no
+event left on the fallback documents a top-level decision; `sensitive_content` caches the parsed registry keyed on the
+file's mtime and size. **Still open**: the `cli.py` pair (hard-coded `"completed"`, duplicated pattern compilation), because
+`daemon/cli.py` was off limits to that batch. Known residual of item 2:
 with a cold index, a glob carrying name text (`cat report-*.txt`) still gets no advisory, to keep
 `test_an_unrelated_star_bearing_token_stays_allowed` intact.
 
@@ -3047,16 +3061,16 @@ length and document it?
 The report filtered the 2.1.273 to 2.1.285 entries by keyword
 and did not read them in full, so each item below has to be verified before anyone acts on it.
 
-| Id   | Finding                                                                                                                     | Status                                                                                                                                   |
-| ---- | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| N330 | Read `rate_limits.spend_limit` in `core/usage_snapshot.py` (adopt).                                                         | ⬜ Open — verified (statusline docs list rate_limits.spend_limit, 2.1.251+); adopt when a consumer is wanted (owner call)                |
-| N331 | Verify `.claude/rules` write-time loading on 2.1.288 and correct `CLAUDE/DirectoryRoles.md` if it changed.                  | ❌ Not a defect — `DirectoryRoles.md` says "when matching files are touched", which 2.1.288 made true for Write and Edit as well as Read |
-| N332 | Guidance claims "run_in_background has no time limit"; reported false for unattended sessions since 2.1.285.                | ✅ Fixed                                                                                                                                 |
-| N333 | Define how `usage_pause` interacts with Claude Code's "Continue automatically at usage limit" wait.                         | ⬜ Open                                                                                                                                  |
-| N334 | Re-check the supervisor's post-compaction `/goal` and `continue` re-injection against the 2.1.274 fix (possibly redundant). | ⬜ Open                                                                                                                                  |
-| N335 | Compare `/doctor prompt-audit` with `skill_scan` and `docs_qa` (possible overlap).                                          | ⬜ Open                                                                                                                                  |
-| N336 | Make the supervisor's red-zone `/compact` aware of the `/autocompact` window.                                               | ⬜ Open                                                                                                                                  |
-| N337 | Gate the supervisor's idle `/compact` on `prompt_cache.warm`, so that compaction does not run against a cold cache.         | ⬜ Open                                                                                                                                  |
+| Id   | Finding                                                                                                                     | Status                                                                                                                                                                                                                                                                                                                                                                   |
+| ---- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| N330 | Read `rate_limits.spend_limit` in `core/usage_snapshot.py` (adopt).                                                         | ⬜ Open — verified (statusline docs list rate_limits.spend_limit, 2.1.251+); adopt when a consumer is wanted (owner call)                                                                                                                                                                                                                                                |
+| N331 | Verify `.claude/rules` write-time loading on 2.1.288 and correct `CLAUDE/DirectoryRoles.md` if it changed.                  | ❌ Not a defect — `DirectoryRoles.md` says "when matching files are touched", which 2.1.288 made true for Write and Edit as well as Read                                                                                                                                                                                                                                 |
+| N332 | Guidance claims "run_in_background has no time limit"; reported false for unattended sessions since 2.1.285.                | ✅ Fixed                                                                                                                                                                                                                                                                                                                                                                 |
+| N333 | Define how `usage_pause` interacts with Claude Code's "Continue automatically at usage limit" wait.                         | ⬜ Open — facts gathered, owner decision needed: when a real limit is hit despite the ceiling, should the daemon leave Claude Code's auto-continue alone (current behaviour: it only records `quota_auto_resume_*` and re-briefs) or hold the auto-continued prompt behind the pause until `resume_at`? See [batch N report](subagent-reports/261011-batch-n-sonnet.md). |
+| N334 | Re-check the supervisor's post-compaction `/goal` and `continue` re-injection against the 2.1.274 fix (possibly redundant). | ⬜ Open                                                                                                                                                                                                                                                                                                                                                                  |
+| N335 | Compare `/doctor prompt-audit` with `skill_scan` and `docs_qa` (possible overlap).                                          | ✅ Compared, no overlap to act on: complementary, see [batch N report](subagent-reports/261011-batch-n-sonnet.md); the optional one-off live `/doctor prompt-audit` run needs an interactive session and was not done                                                                                                                                                    |
+| N336 | Make the supervisor's red-zone `/compact` aware of the `/autocompact` window.                                               | ⬜ Open                                                                                                                                                                                                                                                                                                                                                                  |
+| N337 | Gate the supervisor's idle `/compact` on `prompt_cache.warm`, so that compaction does not run against a cold cache.         | ⬜ Open                                                                                                                                                                                                                                                                                                                                                                  |
 
 Idle compaction: the review found none in the Claude Code changelog or the vendored prompt-caching docs, so the
 owner's report is unconfirmed. Claude Code compacts by window size. The idle-gated `/compact` seen in sessions is the

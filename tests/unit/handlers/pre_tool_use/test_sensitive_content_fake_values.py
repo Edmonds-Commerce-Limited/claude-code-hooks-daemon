@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -107,6 +108,59 @@ class TestRegisteredFakesAreAllowed:
         reason = handler.scan_text(f"id {_UNLISTED_REAL_LOOKING}")
         assert reason is not None
         assert "session-uuid" in reason
+
+
+class TestRegistryIsNotReReadPerWrite:
+    """The registry file is parsed once per change, not once per matching write."""
+
+    @staticmethod
+    def _count_loads(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
+        from claude_code_hooks_daemon.handlers.pre_tool_use import sensitive_content
+        from claude_code_hooks_daemon.utils.fake_values import load_fake_values
+
+        loads: list[Path] = []
+
+        def counting(project_root: Path) -> Any:
+            loads.append(project_root)
+            return load_fake_values(project_root)
+
+        monkeypatch.setattr(sensitive_content, "load_fake_values", counting)
+        return loads
+
+    def test_repeated_matching_writes_parse_the_registry_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loads = self._count_loads(monkeypatch)
+        handler = _handler(tmp_path, _ANY_UUID_PATTERN, registry=_registry(_LISTED))
+        hook = _write(str(tmp_path / "docs.md"), f"session {_LISTED}")
+        for _ in range(3):
+            assert handler.matches(hook) is False
+        assert len(loads) == 1
+
+    def test_an_edited_registry_is_picked_up_on_the_next_write(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loads = self._count_loads(monkeypatch)
+        handler = _handler(tmp_path, _ANY_UUID_PATTERN, registry=_registry(_LISTED))
+        hook = _write(str(tmp_path / "docs.md"), f"session {_LISTED}")
+        assert handler.matches(hook) is False
+        # Same size, so only the modification time can tell the file changed.
+        target = tmp_path / REGISTRY_RELATIVE_PATH
+        target.write_text(_registry(_LISTED.replace("a", "b")), encoding="utf-8")
+        stat = target.stat()
+        os.utime(target, ns=(stat.st_atime_ns, stat.st_mtime_ns + 5_000_000_000))
+        assert handler.matches(hook) is True
+        assert len(loads) == 2
+
+    def test_a_registry_removed_after_being_read_allows_nothing_again(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._count_loads(monkeypatch)
+        handler = _handler(tmp_path, _ANY_UUID_PATTERN, registry=_registry(_LISTED))
+        hook = _write(str(tmp_path / "docs.md"), f"session {_LISTED}")
+        assert handler.matches(hook) is False
+        (tmp_path / REGISTRY_RELATIVE_PATH).unlink()
+        assert handler.matches(hook) is True
 
 
 @pytest.mark.parametrize("content", ["no uuid here", ""])
