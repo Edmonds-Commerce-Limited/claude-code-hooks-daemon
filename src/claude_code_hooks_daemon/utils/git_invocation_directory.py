@@ -52,8 +52,10 @@ def _steps(run: GitInvocation, cwd: Path | None) -> list[str | None]:
         steps.append(step)
         in_cd_chain = index < len(run.directory)
         if in_cd_chain and here is not None:
-            unplaced = step is None or _EXPANSION.search(step) is not None
-            here = None if unplaced else here / Path(step).expanduser()
+            if step is None or _EXPANSION.search(step):
+                here = None
+            else:
+                here = here / Path(step).expanduser()
     return steps
 
 

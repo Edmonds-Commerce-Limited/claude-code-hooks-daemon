@@ -1480,8 +1480,14 @@ with "this commit was NOT checked ... the directory needs an expansion the daemo
 without `cd` allows. Path judgement has resolved the one-level `$(git rev-parse --show-toplevel)` since FP batch 2;
 the commit gates do not.
 
-**Status**: ⬜ Open, in two parts. (a) Agent: resolve `$(git rev-parse --show-toplevel)` (and `$PWD`/`$(pwd)`) in
-the commit gates the way path judgement does. (b) Owner: whether a commit gate that cannot place the repository for
+**Status**: ⬜ Open for part (b) only. (a) 🟢 Fixed on branch `agent-a8b2dfbb8ae318a8c-68c99312`: `placement_problem` and
+`invocation_directory` take the start directory and read a `cd` or `-C` operand spelled `$(git rev-parse --show-toplevel)`, `$PWD`, `${PWD}` or `$(pwd)` through `expand_cwd_references`, the reading `substitute_cwd_expansions`
+(path judgement) now shares; each step is read in the directory the earlier `cd` steps reached. All five callers pass
+their start directory (conflict marker gate, two `destructive_git` branch/remote delete checks, `merge_qa_advisor`,
+`daemon_sync_after_merge`). The staged lint, docs QA, plan QA, guard config and remote docs commit gates do not use
+that code: they read the commit through `read_commit_form`, where an unstatable move is judged as the hook directory,
+never denied as NOT checked, so there was nothing to share. Pinned in `test_git_invocation_directory.py`,
+`test_conflict_marker_commit_gate.py` and ordinary-corpus rows `a8-cd-*`. (b) Owner: whether a commit gate that cannot place the repository for
 any other expansion (`cd $PROJ`) should allow with an advisory, as owner ruling R3 did for the secret guards, or stay
 fail-closed. Until (b) is ruled, `cd $PROJ && git commit` stays denied.
 
@@ -1493,8 +1499,12 @@ fail-closed. Until (b) is ruled, `cd $PROJ && git commit` stays denied.
 `-c core.x=1` or `-c user.email=…` global option before `commit` is denied. `-m "$(cat <<'EOF'…)"` with `-c` is
 allowed. So the quoted heredoc body is read as code only when a `-c` global option precedes `commit`.
 
-**Status**: ⬜ Open. Remedy: the git global-option reader (`GIT_INVOCATION`) hands the heredoc-sink decision the same
-segment it uses without `-c`; add the `-c` form as a gate row.
+**Status**: 🟢 Fixed on branch `agent-a8b2dfbb8ae318a8c-68c99312`. The heredoc-sink reader
+(`_git_data_subcommand_index`, the one place that skips git's global options for a body fed to `git`) now steps over a
+`-c key=value` (separate or attached) whose key runs nothing, so the decision is the one it makes without `-c`. A key
+git RUNS (`core.fsmonitor`, `core.pager`, `*.program`, `*.helper` and the like) or a value an expansion leaves
+unresolved keeps the body read as code. Pinned in `test_git_guards_heredoc_sinks.py`, ordinary-corpus row
+`a8-git-dash-c-commit-file-heredoc-mentions-reset-hard` and two dangerous-corpus COVERED rows.
 
 ### N400 — `destructive_git` and `git_stash` read a quoted heredoc in `gh … --body "$(cat <<'EOF' … EOF)"` as a command
 
@@ -1505,9 +1515,12 @@ shape under `gh issue comment` are denied (`destructive_git` for `reset --hard`,
 `--body-file - <<'EOF'`, plain-text bodies and `git commit -m "$(cat <<'EOF'…)"` are allowed. This is the standard
 PR-body idiom, and the ordinary shape of any PR or comment that describes a blocked command.
 
-**Status**: ⬜ Open. Remedy: treat the quoted-delimiter heredoc body of a `$(cat <<'EOF' …)` substitution as data
-when it is the value of a `gh` `--body`/`-b` option (the sink rule batch (b) added for the `gh` body heredoc); gate
-row `a8-*`.
+**Status**: 🟢 Fixed on branch `agent-a8b2dfbb8ae318a8c-68c99312`. `strip_message_bodies` (the `-m`/`-F` message
+reader that already treats `"$(cat <<'EOF' … EOF)"` as data) now also reads `--body`/`-b` when the owning command is
+`gh pr|issue|release|gist|api` (the groups `_GH_DATA_SUBCOMMANDS` names for the batch (b) `gh` heredoc sink); no
+parallel parser. An unquoted `<<EOF` body, a `cat … | bash` pipe, a bare `--body "$(git reset --hard)"` and a `-b` on
+any other command stay judged. Pinned in `test_git_guards_heredoc_sinks.py`, ordinary-corpus rows `a8-gh-*` and two
+dangerous-corpus COVERED rows.
 
 ### N398 — two `WorktreeFileCopyHandler` acceptance probes fail when the suite runs from a worktree
 
