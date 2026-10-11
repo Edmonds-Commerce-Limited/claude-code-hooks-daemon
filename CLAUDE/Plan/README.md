@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00506: comment extractor ignores unterminated block openers](00506-comment-extractor-ignores-unterminated-block-openers/PLAN.md) - In Progress (#75: a `/*` inside a string literal opens a block comment that runs to end of file, so `comment_size` denies a comment-free file)
-
 - [00501: session modes](00501-session-modes/PLAN.md) - Not Started, Medium (#91; first-class per-session modes shown in the status line: focus (`hooks-daemon focus <task>`), BLOCKED (awaiting-human, goal-blocked loop breaker), usage-paused; per-session awaiting-human storage; guards never gated)
 
 - [00496: upstream feature requests and issue kinds](00496-upstream-feature-requests-and-issue-kinds/PLAN.md) - Not Started (owner request: a formal process for project agents to file feature requests and other non-defect issues, mirroring the defect generator, guard and forms; security reports routed privately)
@@ -193,6 +191,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00506: comment extractor ignores unterminated block openers](Completed/00506-comment-extractor-ignores-unterminated-block-openers/PLAN.md) - Complete at merge `65bdc7499` + the archiving commit (#75: a block/doc opener with no closer later in the content is not a comment, so a `/*` inside a string no longer swallows the file and `comment_size` stops denying comment-free code; the text-scanning limitation is stated in the handler guidance; release note 028 in UNRELEASED)
+
 - [00505: tdd test path map anchors at the worktree](Completed/00505-tdd-test-path-map-anchors-at-the-worktree/PLAN.md) - Complete at merge `c436dc918` + the archiving commit (#74, duplicate #102: a declared `test_path_map` `test_dir` and its `source_glob` anchor at the checkout holding the source, the nearest `.git` ancestor below the project root, so a Write in a git worktree anywhere in the project finds its own test; release note 027 in UNRELEASED)
 
 - [00504: remote docs refresh keeps recorded fidelity](Completed/00504-remote-docs-refresh-keeps-recorded-fidelity/PLAN.md) - Complete at merge `78f03e21e` + the archiving commit (#73: `remote-docs refresh` re-fetches each document in the fidelity its provenance records, so verbatim stays verbatim; `--verbatim` still forces verbatim for every target; release note 026 in UNRELEASED)
@@ -251,8 +251,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00449: unlocked eviction race survives in other handlers](Completed/00449-unlocked-eviction-race-survives-in-other-handlers/PLAN.md) - Complete at `5e3e784f`…`28abcf6e` + the archiving commit (the v3.66.0 review found six more unlocked-eviction sites beyond Plan 00437's two; a `BoundedFifoMap` fixed 12 instances across 10 handlers, plus a per-thread `SideEffectJournal`; a semgrep gate holds the class at 0)
 
-- [00446: subagent report path claim is verified](Completed/00446-subagent-report-path-claim-is-verified/PLAN.md) - Complete at `10b6d6f7` + the archiving commit (from 00422 N15: a false `Report written to:` path — closed by neither remedy the entry listed, since one was costed against a call rather than its coverage and the other named a field SubagentStop does not carry)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -306,9 +304,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 506 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 431 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 432 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 52 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 51 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

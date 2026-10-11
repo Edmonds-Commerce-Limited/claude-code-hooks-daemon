@@ -1,6 +1,6 @@
 # Plan 00506: comment extractor ignores unterminated block openers
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-11
 **Owner**: dev
 **Priority**: Medium
@@ -57,17 +57,27 @@ tokenizer. The docstring rules a tokenizer out deliberately.
 
 ### Phase 2: Land
 
-- [ ] ⬜ **Task 2.1**: Review, coordinator checks, merge; comment on and close
-  #75.
+- [x] ✅ **Task 2.1**: Review, coordinator checks, merge; comment on and close
+  #75. The coordinator reviewed the diff and ran black and mypy (both clean);
+  288 tests passed. The merge is `65bdc7499`, and the daemon was restarted.
+  Range QA over `7da5389d3..65bdc7499` ran 4648 tests, with 0 failed. Its only
+  reds are the designed ones: `comment_size.py` is unmapped as `too-broad`, and
+  `plan_qa` has an advisory journal-freshness finding for Plan 00495. The Edit
+  decision is kept: an Edit adding only an opener whose closer lies outside
+  `new_string` is not counted. A test pins this and the guidance states it; a
+  fragment never saw a comment's middle lines anyway.
 
 ## Success Criteria
 
-- [ ] The reported reproduction is allowed, and a genuine over-limit block
+- [x] The reported reproduction is allowed, and a genuine over-limit block
   comment is still denied.
-- [ ] The limitation is stated in user-facing guidance.
-- [ ] The release-bound consequence, a behaviour change in comment extraction,
-  is in the pending-release holding area as a release note.
+- [x] The limitation is stated in user-facing guidance (`comment_size`'s
+  guidance text and its HANDLER_REFERENCE entry).
+- [x] The release-bound consequence, a behaviour change in comment extraction,
+  is in the pending-release holding area as release note 028 in
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
 ## Delivery & Milestones
 
 - Issue #75 triaged and claimed.
+- Fix: `97fd11602`, merged `65bdc7499`.
