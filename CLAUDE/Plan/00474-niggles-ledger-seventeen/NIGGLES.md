@@ -2297,7 +2297,13 @@ resolves main's root rather than its own.
 **Fix**: find where the worktree gets that file. Either point its `HOOKS_DAEMON_ROOT_DIR` at the worktree, or make the
 test hermetic against an inherited root. Then confirm the test passes inside a worktree.
 
-**Status**: ⬜ Open.
+**Status**: ⬜ Open. Verified NOT stale (batch G, 2026-10-11): run from a harness-created worktree the test still fails
+(1 failed, 6 passed). There `.claude/hooks-daemon.env` is a symlink to main's `/workspace/.claude/hooks-daemon.env`
+(`HOOKS_DAEMON_ROOT_DIR="/workspace"`), `init.sh:1213-1220` sources it over any inherited variable (so the test cannot
+override it through the subprocess env), and the launcher reports "Daemon already running" for main's daemon
+(`--project-root /workspace`) which never becomes ready for the Stop probe. `setup_worktree.sh:380-395` writes a
+checkout-correct file, so a worktree it builds is likely fine (not run here). Remaining fix: make harness worktree
+creation write that file the same way, or have the test skip when the env file resolves outside `REPO_ROOT`.
 
 ### N368 — the plan fact-checker marked claims unverifiable while the reference clone that settles them was on disk
 
@@ -2338,7 +2344,12 @@ timeout under host load (N344's class).
 - Separately, the three tests will fail for everyone once the lock moves to pytest 9.1 and ruff 0.16. Fix the
   supervisor findings and add the two options before bumping the lock.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed (agent-a5313785be3bc54d9-56f41b13, c213595a8) for the recipe: every documented install path already
+uses the lock (`CONTRIBUTING.md:21` and `setup_worktree.sh` use `uv sync --frozen --all-extras`); the one remaining
+off-lock recipe, the missing-semgrep remedy in `scripts/qa/run_semgrep_check.sh:49` (`uv pip install -e '.[dev]'`),
+now says `uv sync --frozen --all-extras`, pinned by a test. The coordinator's own recipe lives outside the repository.
+The second bullet (ruff 0.16 findings in the supervisor asset, pytest 9.1 option grammar) cannot reproduce on the
+locked ruff 0.15.11 / pytest 9.0.3 and stays a precondition of any lock bump, not a present defect.
 
 ### N364 — a read-only `git config --get-regexp` naming `user.name` is judged as an identity write
 
@@ -2644,7 +2655,11 @@ repository uses as a term of art in plans, rulings and handler guidance. It did 
 **Impact**: low. The advisory never blocks. But it nudges the agent to soften or drop an accurate risk statement, and
 in this repository "out of scope" is mostly that technical sense, so the advisory is mostly noise here.
 
-**Status**: ⬜ Open. Remedy candidates:
+**Status**: ✅ Fixed (agent-a5313785be3bc54d9-56f41b13, c213595a8): the `out_of_scope` category skips a sentence that
+cites the threat model, Non-Goals, an owner ruling/decision, `per plan/owner/ruling` or a limb; a bare "out of scope"
+(including one beside a reason in a different sentence) still fires, and the other categories are untouched.
+
+Original remedy candidates:
 
 - do not flag "out of scope" when the same sentence names the threat model, a plan's Non-Goals or a limb;
 - or make the phrase configurable per project, so this repository can exempt its term of art.
@@ -2888,7 +2903,7 @@ reproduction before it is fixed.
 | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | N338 | `project_containment` follows only the first `cd`: `cd <in-repo clone> && … && cd extensions && npm ci > ../untracked/scratch/x.txt` was denied as a write to `<repo>/../untracked/scratch/x.txt`, resolved from the root after the first `cd` instead of from `extensions/`.                                                                             | ⬜ Open                                                                                                                                                                                                                                      |
 | N339 | `bash_safe_mode` denies a fully gated group: `cd X && mkdir -p d && { ./qa.bash > d/o.txt 2>&1 && echo "exit=0" \|\| echo "exit=$?"; }`. The `;` that closes the `{ }` group is read as unguarded sequencing.                                                                                                                                             | ✅ Fixed on worktree-n339-compound                                                                                                                                                                                                           |
-| N340 | The "WRONG CLAUDE/ DIRECTORY" advisory fires on every Read of this repository's own `CLAUDE/Plan/...` files. In self-install mode the project's `CLAUDE/` is the authoritative copy, not "the daemon's internal docs copy".                                                                                                                               | ⬜ Open                                                                                                                                                                                                                                      |
+| N340 | The "WRONG CLAUDE/ DIRECTORY" advisory fires on every Read of this repository's own `CLAUDE/Plan/...` files. In self-install mode the project's `CLAUDE/` is the authoritative copy, not "the daemon's internal docs copy".                                                                                                                               | ✅ Fixed (agent-a5313785be3bc54d9-56f41b13, c213595a8): `daemon_docs_guard.matches` now stands down when `ProjectContext.self_install_mode` is true and still fires for a client install.                                                    |
 | N342 | `setup_worktree.sh` cannot create ANY worktree from a host checkout at `/home/<user>/Projects/EC/claude-code-hooks-daemon`: the socket path up to the branch name is already 103 bytes against the 104-byte AF_UNIX limit, so even the mandatory `worktree-` prefix does not fit. The merge rule "work happens in worktrees" is unsatisfiable from there. | ⬜ Open                                                                                                                                                                                                                                      |
 | N341 | `sensitive_content` denied `cd /home/<user>/... && git worktree remove … && git branch -d <name>`. The secret term was in the `cd` path, not in the branch name the branch-name surface exists to check; the matched text was redacted as part of the home path.                                                                                          | ✅ Fixed with N364 (batch B branch `agent-a4230a7966c0680b6-a3d7ec3b`): reproduced on main, the term is now judged only in the command that records metadata, and `git branch -d/-D/--delete` and `git tag -d/--delete` are no longer writes |
 
