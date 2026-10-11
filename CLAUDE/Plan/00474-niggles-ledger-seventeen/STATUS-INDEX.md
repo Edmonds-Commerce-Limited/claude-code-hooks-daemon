@@ -4,7 +4,7 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 
 | #          | Verdict                                                                                                                      | Origin              | Status                              |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------------------- |
-| N419       | `subagent_full_qa_blocker` judges an unknown program by flag shape alone (`ps -e`, `docker run -e`); GitHub Issue #69        | Issue #69 triage    | ⬜ Owner decision                   |
+| N419       | `subagent_full_qa_blocker` judges an unknown program by flag shape alone (`ps -e`, `docker run -e`); GitHub Issue #69        | Issue #69 triage    | 🔄 Ruled B (batch AL)               |
 | N418       | A helper that calls its own parameter ranks every call through it as may-run, whatever the call site passes                  | Batch AG review     | ✅ Fixed (batch AH); 🚫 limits      |
 | N417       | `subagent_full_qa_blocker` reads `pytest` text inside Python string data as a command (unmasked by N416's fix)               | Batch AE review     | ✅ Fixed (batch AG); residuals      |
 | N416       | `subagent_full_qa_blocker` advisory on `set -e`, `uniq -c` and other non-interpreter `-c`/`-e`/`-r` commands                 | Batch AB review     | ✅ Fixed (batch AE)                 |
@@ -12,43 +12,43 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 | N414       | Staging simulation residuals: `--refresh` without `-q`, `git diff --output=`, the blunt `<` test                             | Batch AC review     | ✅ Fixed (batch AE)                 |
 | N413       | `PipBreakSystemHandler` quadratic on a long nested-substitution word                                                         | Batch AB            | ✅ Fixed (batch AD)                 |
 | N412       | The daemon reads neither `mcp_server.source` nor the `mcp__<server>__` tool-name prefix                                      | Write-up            | ✅ Closed, no consumer              |
-| N411       | The Stop hook's 8-continuation cap may defeat the Stop handlers; one open question                                           | Write-up            | ⬜ Owner decision                   |
+| N411       | The Stop hook's 8-continuation cap may defeat the Stop handlers; one open question                                           | Write-up            | 🔄 Ruled A (batch AL)               |
 | N410       | `upgrade_approval_guard` denies a QA tool reached through a variable once `PYTHONPATH` is set                                | Write-up            | ✅ Fixed (batch O)                  |
 | N409       | `subagent_full_qa_blocker` denies an ordinary `python3 script.py` as a whole-suite run                                       | Write-up            | ✅ Fixed (residuals in body)        |
 | N408–N407  | `gh_*_comments`, `pip_break_system`, `sudo_pip` deny text that only mentions the flag (N407 skips obfuscation)               | Write-up            | ✅ Fixed (batch H)                  |
 | N406–N404  | `github_auto_close_keywords`, `ancestry_preserving_merge`, `git_message_backtick` deny quoted mentions                       | Write-up            | ✅ Fixed (25b9ae109)                |
 | N403       | `project_containment` ignores a preceding `cd`; a never-run loop and `eval "$name"` are documented limits                    | Write-up            | ✅ Fixed (8db7b9d78); 🚫 limits     |
-| N402       | The conflict-marker gate denies `cd "$(git rev-parse --show-toplevel)" && git commit`; part (b) is a ruling                  | Write-up            | ⬜ Owner decision (part b)          |
+| N402       | The conflict-marker gate denies `cd "$(git rev-parse --show-toplevel)" && git commit`; part (b) is a ruling                  | Write-up            | 🔄 Ruled B + guidance (batch AL)    |
 | N401–N400  | `destructive_git` and `git_stash` read a quoted heredoc body as a command                                                    | Write-up            | ✅ Fixed (f189ea120)                |
 | N399–N398  | `sed_blocker` denies a message that mentions sed; two worktree acceptance probes fail                                        | Write-up            | ✅ Fixed                            |
-| N397       | Copy-flag parsing and the `find -exec` list are re-implemented per handler; the copy half is not separable                   | Write-up            | ⬜ Owner decision (copy half)       |
-| N396       | The ccy supervisor's copy of the self-install rule still uses `.exists()` (live supervisor)                                  | Write-up            | ⬜ Owner decision                   |
+| N397       | Copy-flag parsing and the `find -exec` list are re-implemented per handler; the copy half is not separable                   | Write-up            | ✅ Ruled B: left as is              |
+| N396       | The ccy supervisor's copy of the self-install rule still uses `.exists()` (live supervisor)                                  | Write-up            | 🔄 Ruled A (supervisor)             |
 | N395–N390  | `canonical_callers`, advisor text, verdict-log rule IDs, xdist lock gate, install-mode and git option readers                | Write-up            | ✅ Fixed                            |
-| N389       | The development host's real name is in tracked plan files                                                                    | Write-up            | ⬜ Owner decision                   |
+| N389       | The development host's real name is in tracked plan files                                                                    | Write-up            | 🔄 Ruled A, B; #108                 |
 | N388–N386  | Host-segment role override, inline-suppression detector on ignored code, self-install rule copies                            | Write-up            | ✅ Fixed                            |
 | N385       | Careless spellings the raw-text guards allow on main; the shapes left open are decided limits                                | Write-up            | ✅ Fixed; 🚫 limits recorded        |
 | N384–N379  | `optimise` relevance, quoted git option values, `changed --range`, pytest drift, branch and merge gates                      | Write-up            | ✅ Fixed                            |
 | N378       | The `[awaiting-human]` marker is one project-wide file; owner ruled "fine to leave" (Plan 00501 may replace it)              | Write-up            | 🚫 Deliberate limit                 |
 | N377       | Synthetic sessions still read the account's live usage in three more places                                                  | Write-up            | ✅ Fixed                            |
-| N376       | Four tests fail under the full gate's concurrent load; the sweep half needs a serial-phase design                            | Write-up            | 🟡 Part fixed; ⬜ Owner decision    |
+| N376       | Four tests fail under the full gate's concurrent load; the sweep half needs a serial-phase design                            | Write-up            | 🟡 Part fixed; ruled: #107         |
 | N375       | The hook contract audit is at Claude Code 2.1.272 and the upstream hooks doc has changed                                     | Write-up            | ✅ Fixed (batch N report)           |
 | N374       | v3.69.0 release code review; defects fixed, one cold-index glob advisory residual is a decided limit                         | Write-up            | ✅ Fixed; 🚫 residual               |
 | N373       | An invalid `stand_in_delay_hours` unregisters the Stop handler; `bash_safe_mode` gained the same `validate_options` (N374)   | Write-up            | ✅ Fixed                            |
 | N372–N370  | Daemon-docs guard on the repo folder name, per-clone plan counter, sed guard on a `git -C` message                           | Write-up            | ✅ Fixed                            |
 | N369       | A forwarder integration test fails inside every harness worktree and passes on main                                          | Write-up            | ✅ Fixed (batch AC)                 |
 | N368–N362  | Fact-checker evidence, QA venv recipe, `git config` read, fenced token, `bash -c` pipe, merged-branch delete                 | Write-up            | ✅ Fixed                            |
-| N361       | The fake-values registry is not pre-filled; a commit-time BLOCK for a bad entry names no severity                            | Write-up            | ✅ Fixed; ⬜ Owner decision         |
+| N361       | The fake-values registry is not pre-filled; a commit-time BLOCK for a bad entry names no severity                            | Write-up            | ✅ Fixed; 🔄 ruled A (batch AM)     |
 | N360–N355  | Opt-in handlers across an upgrade, fact-check feed and records, protected-file index, nested-eval cost                       | Write-up            | ✅ Fixed                            |
 | N354       | The upgrade guard denies a `PYTHONPATH=… python -c` probe; a name built at run time is unseen (threat model)                 | Write-up            | ✅ Fixed; 🚫 limit                  |
 | N353–N343  | Dismissive-language, scan deadline, lock file, glob caps, scaling harness, timeouts, journal conflicts, CHANGELOG            | Write-up            | ✅ Fixed                            |
-| N342       | `setup_worktree.sh` cannot create any worktree from a host checkout whose path leaves no socket room                         | P487 host agent     | ⬜ Owner decision                   |
+| N342       | `setup_worktree.sh` cannot create any worktree from a host checkout whose path leaves no socket room                         | P487 host agent     | 🔄 Ruled: git min version; #110     |
 | N341–N338  | Four guard false positives met by the Plan 00487 host agent ([table](NIGGLES.md))                                            | P487 host agent     | ✅ Fixed                            |
-| N337       | Gate the supervisor's idle `/compact` on `prompt_cache.warm` (live supervisor)                                               | Plan 00486          | ⬜ Owner decision                   |
-| N336       | Make the supervisor's red-zone `/compact` aware of the `/autocompact` window (live supervisor)                               | Plan 00486          | ⬜ Owner decision                   |
+| N337       | Gate the supervisor's idle `/compact` on `prompt_cache.warm` (live supervisor)                                               | Plan 00486          | 🔄 Ruled inverse; #109              |
+| N336       | Make the supervisor's red-zone `/compact` aware of the `/autocompact` window (live supervisor)                               | Plan 00486          | 🔄 Ruled: reject bad config         |
 | N335–N331  | `/doctor prompt-audit` compared; `.claude/rules` loading is no defect; `run_in_background` text                              | Plan 00486          | ✅ Fixed or closed                  |
-| N334       | Re-check the supervisor's post-compaction `/goal` and `continue` re-injection (live supervisor)                              | Plan 00486          | ⬜ Owner decision                   |
-| N333       | How `usage_pause` should interact with Claude Code's "continue automatically at usage limit"                                 | Plan 00486          | ⬜ Owner decision                   |
-| N330       | Read `rate_limits.spend_limit` in `core/usage_snapshot.py`; adopt when a consumer is wanted                                  | Plan 00486          | ⬜ Owner decision                   |
+| N334       | Re-check the supervisor's post-compaction `/goal` and `continue` re-injection (live supervisor)                              | Plan 00486          | 🔄 Ruled check, remove; #106        |
+| N333       | How `usage_pause` should interact with Claude Code's "continue automatically at usage limit"                                 | Plan 00486          | ✅ Ruled A: left alone              |
+| N330       | Read `rate_limits.spend_limit` in `core/usage_snapshot.py`; adopt when a consumer is wanted                                  | Plan 00486          | 🔄 Ruled adopt (batch AM)           |
 | N329–N312  | Changelog-review and gate follow-ups: errexit, gated-install record, relay build, journal QA, module length                  | Write-up            | ✅ Fixed                            |
 | N311       | `upgrade_approval_guard` denies `(PYTHONPATH=… python -m pytest …)` in a subshell                                            | Safe-mode agent     | ✅ Fixed (22429c3a5)                |
 | N310       | `changed` selects no tests for "too-broad" files, so template/priority invariants broke main unseen                          | Coordinator         | 🔄 Instances fixed (2be30049c)      |
@@ -81,7 +81,7 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 | N283       | `secret_file_guard` misses a protected name in git `rev:path` syntax at the repository root (security)                       | N253 analysis       | ✅ Fixed (caa8ff966)                |
 | N282       | The N264 cross-worktree guard judges an in-process teammate by the coordinator's working directory                           | Coordinator         | ✅ Fixed (8eeead3e5)                |
 | N281       | A hostile-input sweep failed on slow runners: the 100,000-character scan timed out and denied (fail-closed)                  | Main CI             | ✅ Fixed (test only)                |
-| N280       | Something with pre-N271 code wrote an older `CLAUDE.md` guidance section into main during a test run                         | Coordinator         | ⬜ Owner decision (no repro)        |
+| N280       | Something with pre-N271 code wrote an older `CLAUDE.md` guidance section into main during a test run                         | Coordinator         | 🔄 Ruled: fix cause (batch AN)      |
 | N279       | `changed_tests` once selected 50 test files, ran 0 tests and still passed                                                    | p477 agent          | 🟡 Detection fixed, cause not found |
 | N278       | A branch merged with its targeted QA never run; main took three static-check failures                                        | Coordinator         | 🔄 Plan 00475 Task 4.2              |
 | N277       | `_resolve_python_cmd` in `init.sh` returns 0 after a failed resolve, with `PYTHON_CMD` empty                                 | p477 agent          | ✅ Fixed (f794ae2d6)                |

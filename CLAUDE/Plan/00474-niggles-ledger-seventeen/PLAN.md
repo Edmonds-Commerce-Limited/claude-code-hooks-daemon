@@ -39,16 +39,18 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). The one-line-per-niggle status
 table (124 rows) is in [STATUS-INDEX.md](STATUS-INDEX.md).
 Counted by the status column's emoji:
 
-- No row is open (⬜ Open) except the owner decisions below. N53 of archived ledger 00466 is 🟡: batch AJ reproduced
+- No row is open (⬜). N53 of archived ledger 00466 is 🟡: batch AJ reproduced
   the mechanism of an exit 127 and extended the diagnostic, but the live cause awaits a recurrence. The other 41 of the
   "42 still open in 00466" were fixed on main (39), fixed by batch AI (N33) or graduated to Plan 00485 (N96); see
   [the 00466 evidence](../Completed/00466-niggles-ledger-sixteen/STATUS-2026-10.md).
-- 15 rows carry an owner decision (⬜ Owner decision, including two fixed or part-fixed rows with a decision left).
-  Every one is put to the owner, with options and a recommendation, in
-  [OWNER-QUESTIONS-261011.md](OWNER-QUESTIONS-261011.md), with the open owner questions of Plans 00470, 00479,
-  00484 and 00500.
-- 102 rows carry ✅ (fixed, dismissed, remedied or closed); 7 of them also count above or below (1 with an owner decision, 6 with a 🚫 limit).
-- 7 rows record a deliberate limit (🚫); 8 are in progress or graduated (4 🔄, 3 🟡, 1 ↩️).
+- No row awaits an owner decision. The owner ruled on all 15 questions in
+  [OWNER-QUESTIONS-261011.md](OWNER-QUESTIONS-261011.md) on 2026-10-11, recorded in
+  [OWNER-RULINGS-261011.md](OWNER-RULINGS-261011.md):
+  - 3 rows are closed by the ruling;
+  - the rest are being implemented (batches AL, AM and AN, plus the supervisor items);
+  - the new work the owner asked for is filed as GitHub Issues #104 and #106 to #110.
+- 104 rows carry ✅ (fixed, dismissed, remedied or closed); 7 of them also count below (1 🔄, 6 🚫 limits).
+- 7 rows record a deliberate limit (🚫); 20 are in progress or graduated (16 🔄, 3 🟡, 1 ↩️).
 
 ## Tasks
 
