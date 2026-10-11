@@ -4,9 +4,10 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 
 | #          | Verdict                                                                                                            | Origin              | Status                              |
 | ---------- | ------------------------------------------------------------------------------------------------------------------ | ------------------- | ----------------------------------- |
-| N416       | `subagent_full_qa_blocker` advisory on a plain `set -e; …` command (not yet reproduced)                            | Batch AB review     | ⬜ Open                             |
-| N415       | `subagent_full_qa_blocker` misses `fh = open(p); src = fh.read(); exec(src)`                                       | Batch AB review     | ⬜ Open                             |
-| N414       | Staging simulation residuals: `--refresh` without `-q`, `git diff --output=`, the blunt `<` test                   | Batch AC review     | ⬜ Open                             |
+| N417       | `subagent_full_qa_blocker` reads `pytest` text inside Python string data as a command (unmasked by N416's fix)     | Batch AE review     | ⬜ Open                             |
+| N416       | `subagent_full_qa_blocker` advisory on `set -e`, `uniq -c` and other non-interpreter `-c`/`-e`/`-r` commands       | Batch AB review     | ✅ Fixed (batch AE)                 |
+| N415       | `subagent_full_qa_blocker` misses `fh = open(p); src = fh.read(); exec(src)`                                       | Batch AB review     | ✅ Fixed (batch AE); residuals      |
+| N414       | Staging simulation residuals: `--refresh` without `-q`, `git diff --output=`, the blunt `<` test                   | Batch AC review     | ✅ Fixed (batch AE)                 |
 | N413       | `PipBreakSystemHandler` quadratic on a long nested-substitution word                                               | Batch AB            | ✅ Fixed (batch AD)                 |
 | N412       | The daemon reads neither `mcp_server.source` nor the `mcp__<server>__` tool-name prefix                            | Write-up            | ✅ Closed, no consumer              |
 | N411       | The Stop hook's 8-continuation cap may defeat the Stop handlers; one open question                                 | Write-up            | ⬜ Owner decision                   |

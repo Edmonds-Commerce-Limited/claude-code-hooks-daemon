@@ -77,6 +77,20 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N417 — `subagent_full_qa_blocker` reads `pytest` text inside Python string data as a command
+
+**Found**: the batch AE reviewer (round 2). A probe wrapper script runs Python whose string literals hold `pytest`
+commands as DATA passed to an ordinary function call (a test table, not a subprocess argv). The handler judges those
+strings as full-suite runs and denies. On main the same text was often hidden behind an earlier unseen verdict, which
+`_first_full_run` returned first; batch AE (N416) made a positive match win over an earlier unseen one, which closed a
+real masking bypass (`gcc -c x.c && pytest`) and also exposes this false positive more often. Main already denies the
+identical script when nothing earlier in the command hides it, so the cause predates batch AE: the N409 rule that a
+string handed to a call may be a command.
+
+**Status**: ⬜ Open. Triage first: whether a string passed to a call with no process-launching sink (`subprocess.*`,
+`os.system`, `os.exec*`, `pty.spawn`, `create_subprocess_*`) should count at all under B5 (deny only on a positive
+finding). Probe scripts: `untracked/scratch/review-batch-x/run_ae_shell2.sh`, `ae_cmds2.txt`.
+
 ### N416 — `subagent_full_qa_blocker` raises `unrecognised-interpreter-inline-code` on a plain `set -e; …` command
 
 **Found**: the batch AB reviewer, as a side observation: the live blocker attached the
