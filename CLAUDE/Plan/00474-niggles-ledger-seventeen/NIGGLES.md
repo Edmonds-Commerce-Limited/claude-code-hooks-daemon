@@ -1471,14 +1471,15 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
-### N412 — the daemon's MCP guards key on the `mcp__<server>__` tool-name prefix, not the documented `mcp_server.source`
+### N412 — the daemon reads neither the documented `mcp_server.source` nor the `mcp__<server>__` tool-name prefix
 
 **Source**: the N375 hooks-contract refresh (batch N review round 1).
 
 **Evidence**: PreToolUse, PermissionRequest, PostToolUseFailure and PermissionDenied payloads for an MCP tool carry
 `mcp_server {name, source}` since Claude Code v2.1.274, and the hooks reference says "Base trust decisions on `source`
-rather than on `name` or the `mcp__<server>__` tool-name prefix". The daemon reads `mcp_server` nowhere in `src/`; any
-decision it makes about an MCP tool is by tool name. The field is now in the vendored contract
+rather than on `name` or the `mcp__<server>__` tool-name prefix". Nothing in `src/` reads `mcp_server` or matches
+`mcp__`, and no handler decides anything about an MCP tool as such (fact-checked, see
+[report](subagent-reports/261011-fact-check-batch-n-sonnet.md)): the gap is latent until a handler wants to. The field is now in the vendored contract
 (`conditional_input_fields`), so this is a recorded gap, not an unknown.
 
 **Status**: ⬜ Open.
@@ -2340,7 +2341,7 @@ evidence and a fix; several have probe scripts under `untracked/scratch/review-v
 10. The open-issue listing stops at 100 without saying so (`utils/github_issue_validity.py:75, 486-509`).
 11. Smaller: autonomy re-detects the container runtime per event (`utils/autonomy.py:57-59`); a hard-coded
     `"completed"` and duplicated pattern compilation in `cli.py:3925, 7751-7756`; the fallback response schema would
-    reject a top-level `decision` (`core/response_schemas.py:451`); an unreadable doc is logged only at DEBUG
+    reject a top-level `decision` (`core/response_schemas.py:451` at the time; `_permissive_response_schema` now); an unreadable doc is logged only at DEBUG
     (`docs_qa/checks/unlisted_fake_value.py:123`); repeated literals in `destructive_git.py:502-536`;
     `sensitive_content` re-reads `.claude/fake-values.yaml` on every matching write.
 
@@ -2352,7 +2353,7 @@ review: Grep targets named in `file_path` are now judged like `path` (a guard by
 report filenames stay under the filename limit with 256-character agent names. Still open, non-defects (cost and
 refactoring): the per-file `git check-ignore` calls in `find_under`, autonomy re-detecting the runtime per event, the
 hard-coded `"completed"` and duplicated pattern compilation in `cli.py`, the latent fallback-schema trap in
-`core/response_schemas.py:451`, and `sensitive_content` re-reading `.claude/fake-values.yaml`.
+`core/response_schemas.py:451` (now `_permissive_response_schema`, `:468-486`), and `sensitive_content` re-reading `.claude/fake-values.yaml`.
 **Residuals worked in batch N** ([report](subagent-reports/261011-batch-n-sonnet.md)), test-first: `find_under` asks git
 about each root once per call; autonomy reads the runtime `ProjectContext` cached at startup (detecting only with no
 initialised context); the fallback-schema trap is real (Elicitation, ElicitationResult) and fixed, with a test that no
