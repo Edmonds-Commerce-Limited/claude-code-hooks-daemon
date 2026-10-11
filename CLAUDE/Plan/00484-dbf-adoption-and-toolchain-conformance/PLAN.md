@@ -1,6 +1,6 @@
 # Plan 00484: DBF adoption and toolchain conformance
 
-**Status**: In Progress
+**Status**: Blocked
 **Created**: 2026-10-02
 **Owner**: dev
 **Priority**: Medium

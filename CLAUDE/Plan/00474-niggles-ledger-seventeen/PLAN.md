@@ -1,6 +1,6 @@
 # Plan 00474: niggles ledger seventeen
 
-**Status**: In Progress
+**Status**: Blocked
 **Created**: 2026-09-30
 **Owner**: dev
 **Priority**: Medium

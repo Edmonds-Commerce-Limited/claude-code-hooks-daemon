@@ -1,6 +1,6 @@
 # Plan 00470: persistent session optimisation
 
-**Status**: In Progress
+**Status**: Blocked
 **Created**: 2026-09-25
 **Owner**: dev
 **Priority**: Medium

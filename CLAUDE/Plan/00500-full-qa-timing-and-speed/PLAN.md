@@ -1,6 +1,6 @@
 # Plan 00500: full qa timing and speed
 
-**Status**: In Progress
+**Status**: Blocked
 **Created**: 2026-10-07
 **Owner**: dev
 **Priority**: High

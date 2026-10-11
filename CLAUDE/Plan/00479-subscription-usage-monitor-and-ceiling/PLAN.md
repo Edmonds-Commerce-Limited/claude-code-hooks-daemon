@@ -1,6 +1,6 @@
 # Plan 00479: subscription usage monitor and ceiling
 
-**Status**: In Progress
+**Status**: Blocked
 **Created**: 2026-10-02
 **Owner**: dev
 **Priority**: Medium
