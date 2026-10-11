@@ -992,7 +992,7 @@ def _write_target_tokens(
             index += 1
             continue
 
-        if token == "git" and _is_command_word(tokens, index, token):
+        if token == _GIT_PROGRAM and _is_command_word(tokens, index, token):
             targets.extend(
                 BashWriteDestination(output, authored=False)
                 for output in _git_output_files(tokens, index + 1)
@@ -1004,6 +1004,7 @@ def _write_target_tokens(
 
 #: ``git`` subcommands whose ``--output`` option writes the patch they make to a file.
 _GIT_OUTPUT_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"diff", "format-patch"})
+_GIT_PROGRAM: Final[str] = "git"
 _OUTPUT_OPTION: Final[str] = "--output"
 _GIT_CHANGE_DIRECTORY: Final[str] = "-C"
 

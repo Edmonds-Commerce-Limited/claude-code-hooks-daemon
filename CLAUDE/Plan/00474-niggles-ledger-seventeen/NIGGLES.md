@@ -158,7 +158,7 @@ many branches; a conservative merge belongs with a real flow analysis.
 2. `_write_target_tokens` (core/utils) reads `--output=F` / `--output F` of a `git diff` or `git format-patch` (global
    options skipped, `--` ends options) as a write target with `authored=False`. Conflict found: `get_written_file_paths`
    is the CONTENT accessor (`authored_only`), used by `lint_on_edit`, `validate_eslint_on_write`, `sed_blocker` and
-   `sensitive_content`-style guards, and a patch is not authored code, so it stays out of it (a `--output=x.py` must not
+   the plan fact-check feed, and a patch is not authored code, so it stays out of it (a `--output=x.py` must not
    be linted). Location guards (`get_bash_write_targets`) now see the file, and the staging simulation's
    `_written_names` uses that scan. A relative output path is joined with every `-C` of the git command in order (an
    absolute `-C` starts over); a `-C` holding an unresolvable expansion leaves the target unresolved. `format-patch -o DIR` writes unnamed files in a directory and is not modelled.
