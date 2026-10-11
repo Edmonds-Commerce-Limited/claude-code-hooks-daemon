@@ -56,6 +56,24 @@ def _trees(*digests: str) -> Callable[[Path], dict[str, str]]:
     return state
 
 
+@pytest.fixture(autouse=True)
+def daemon_starts(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Stub ``ensure_live_daemon``: a live-daemon step must never start a real one.
+
+    ``smoke_test`` is a live-daemon tool, so on a host with no daemon running (CI)
+    the real function starts one against this checkout, which rewrites the tracked
+    ``CLAUDE.md`` and touches the daemon pid file. A host with a daemon up hides it.
+    """
+    started: list[str] = []
+
+    def ensure(tool: str) -> str | None:
+        started.append(tool)
+        return None
+
+    monkeypatch.setattr(llm_qa, "ensure_live_daemon", ensure)
+    return started
+
+
 @pytest.fixture
 def qa_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(llm_qa, "QA_OUTPUT_DIR", tmp_path)
@@ -95,6 +113,12 @@ class TestEachStepRecordsItselfAsItFinishes:
         with pytest.raises(KeyboardInterrupt):
             llm_qa._run_tools(["lint", "format", "smoke_test"], read_only=False)
         assert set(llm_qa.read_provenance(qa_dir)) == {"lint", "format"}
+
+    def test_a_live_daemon_step_is_prepared_through_the_stub_never_a_real_daemon(
+        self, ran: list[str], daemon_starts: list[str]
+    ) -> None:
+        llm_qa._run_tools(["lint", "smoke_test"], read_only=False)
+        assert daemon_starts == ["smoke_test"]
 
     def test_the_file_holds_the_earlier_step_while_the_next_runs(
         self, qa_dir: Path, monkeypatch: pytest.MonkeyPatch, ran: list[str]

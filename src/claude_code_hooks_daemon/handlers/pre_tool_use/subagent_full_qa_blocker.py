@@ -6592,6 +6592,23 @@ def _read_code(path: str, here: Path | None, event: _Event, source: str) -> _Cod
     return cached
 
 
+def _over_budget_content(target: str) -> _CodeContent:
+    """What a file past the read budget holds: its first bytes if a binary, else unseen.
+
+    Reads at most :data:`_BINARY_PROBE_BYTES`, outside the event's read budget.
+    An unreadable file, and one without a NUL in its head (text too large to
+    read), is unseen, so the handler's ``unseen_policy`` decides.
+    """
+    try:
+        with Path(target).open("rb") as handle:
+            head = handle.read(_BINARY_PROBE_BYTES)
+    except OSError:
+        return _UNSEEN_CODE
+    if _NUL.encode() not in head:
+        return _UNSEEN_CODE
+    return _CodeContent(_Readable.TEXT, head.decode("utf-8", errors="replace"), target, False)
+
+
 def _read_new(target: str, event: _Event) -> _CodeContent:
     """Read a file not yet read in this event.
 
@@ -6631,7 +6648,10 @@ def _read_new(target: str, event: _Event) -> _CodeContent:
         return _UNSEEN_CODE
     left = event.read_budget
     if status.st_size > left:
-        return _UNSEEN_CODE
+        # A binary past the budget (a real `/usr/bin/docker` is tens of MB) holds
+        # no code to read; only its first bytes are needed to say so, so the verdict
+        # does not depend on how large the host's copy of a program happens to be.
+        return _over_budget_content(target)
     try:
         with Path(target).open("rb") as handle:
             data = handle.read(left + 1)

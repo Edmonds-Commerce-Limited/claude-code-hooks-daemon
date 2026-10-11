@@ -5,7 +5,14 @@ from __future__ import annotations
 import pytest
 
 from tests import load_scaling
-from tests.load_scaling import MAX_LOAD_FACTOR, load_factor, scaled_seconds
+from tests.load_scaling import (
+    MAX_LOAD_FACTOR,
+    TRACING_FACTOR,
+    load_factor,
+    scaled_cpu_seconds,
+    scaled_seconds,
+    tracing_factor,
+)
 
 
 class TestLoadFactor:
@@ -63,3 +70,37 @@ class TestScaledSeconds:
     def test_a_non_positive_base_is_refused(self) -> None:
         with pytest.raises(ValueError, match="positive"):
             scaled_seconds(0)
+
+
+class TestTracingFactor:
+    def test_an_untraced_run_scales_by_one(self) -> None:
+        assert tracing_factor(tracer_installed=False) == 1.0
+
+    def test_a_traced_run_scales_by_the_tracing_overhead(self) -> None:
+        assert tracing_factor(tracer_installed=True) == TRACING_FACTOR
+
+    def test_the_tracer_is_read_from_the_interpreter_when_nothing_is_passed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(load_scaling.sys, "gettrace", lambda: None)
+        assert tracing_factor() == 1.0
+        monkeypatch.setattr(load_scaling.sys, "gettrace", lambda: object())
+        assert tracing_factor() == TRACING_FACTOR
+
+
+class TestScaledCpuSeconds:
+    def test_an_idle_untraced_host_keeps_the_base(self) -> None:
+        got = scaled_cpu_seconds(
+            1.5, load_averages=(0.0, 0.0, 0.0), cpu_count=8, tracer_installed=False
+        )
+        assert got == 1.5
+
+    def test_load_and_tracing_multiply(self) -> None:
+        got = scaled_cpu_seconds(
+            1.5, load_averages=(24.0, 24.0, 0.0), cpu_count=8, tracer_installed=True
+        )
+        assert got == pytest.approx(1.5 * 3.0 * TRACING_FACTOR)
+
+    def test_a_non_positive_base_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="positive"):
+            scaled_cpu_seconds(0)
