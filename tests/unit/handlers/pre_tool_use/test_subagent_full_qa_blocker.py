@@ -3265,10 +3265,62 @@ class TestInlineCodeFlagIsNotReadOnSearchAndTextTools:
             "less -r f",
             "unzip -c a.zip",
             "mysql -e 'select 1'",
+            # N419: `ps -e` lists every process; `file -e`/`-c`/`-r` are file's own options.
+            "ps -e",
+            "ps -e -o pid,comm",
+            "/bin/ps -e",
+            "file -e elf x",
+            "file -c x",
+            "file -r x",
         ],
     )
     def test_a_search_or_text_tool_is_not_unseen(self, command: str) -> None:
         assert find_full_qa_invocation(command, _patterns()) is None, command
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "docker run -e A=1 img cmd",
+            "docker run --rm -it -e A=1 -e B=2 img cmd",
+            "docker run -d --name web -e A=1 -v /a:/b img",
+            "podman run -e A=1 img cmd",
+            "docker exec -e A=1 ctr cmd",
+            "docker run -e A=1 img",
+            "/usr/bin/docker run -e A=1 img cmd",
+        ],
+    )
+    def test_a_container_runtime_env_flag_before_the_image_is_not_unseen(
+        self, command: str
+    ) -> None:
+        """N419: `docker run -e KEY=V IMG` -- the `-e` is docker's env flag."""
+        assert find_full_qa_invocation(command, _patterns()) is None, command
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "docker run img perl -e 'system(\"pytest\")'",
+            "docker run -e A=1 img sh -c 'pytest tests/'",
+            "docker run --rm img ruby -e 'x=system(\"pytest\")'",
+            "podman run img php -r 'system(\"pytest\");'",
+            "docker exec ctr sh -c 'pytest'",
+            "docker run -e A=1 -v /a:/b img node -e 'run()'",
+            # An option whose value the walk does not know takes the value for the image, so
+            # the flags after it are judged -- the unsafe direction is never taken.
+            "docker run --unknown-opt val img sh -c 'pytest'",
+            # A subcommand the walk does not read keeps the generic rule.
+            "docker --context x run -e A=1 img cmd",
+            # The entrypoint is the program run inside the container, so its -e is code.
+            "docker run --entrypoint perl img -e x",
+            "docker build -e x .",
+        ],
+    )
+    def test_a_container_runtime_inline_code_flag_after_the_image_is_still_unseen(
+        self, command: str
+    ) -> None:
+        """N419: code handed to a program INSIDE the container is still unseen."""
+        match = find_full_qa_invocation(command, _patterns())
+        assert match is not None, command
+        assert match.fail_closed, command
 
     @pytest.mark.parametrize(
         "command",

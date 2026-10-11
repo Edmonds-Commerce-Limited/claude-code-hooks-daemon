@@ -2633,19 +2633,39 @@ class TestSilentStopAfterToolErrorReentryGuard:
         }
         assert handler.matches(hook_input) is True
 
-    def test_matches_true_when_stop_hook_active_but_transcript_missing(
+    def test_matches_false_when_stop_hook_active_and_no_transcript_path(
         self, handler: AutoContinueStopHandler
     ) -> None:
-        """stop_hook_active=true with no transcript_path → cannot prove prior
-        block exists → must NOT silently allow.
+        """N411: re-entry with no transcript_path stands down (allows the stop).
 
-        This protects against the bug shape where Claude Code sets
-        stop_hook_active=true but no transcript info is available.
+        The daemon cannot confirm or refute an earlier block, and treating the
+        stop as fresh would block again on every re-entry up to Claude Code's
+        8-continuation cap.
         """
-        hook_input = {"stop_hook_active": True}
-        # No transcript_path provided → has_recent_stop_hook_block returns
-        # False → matches must return True
-        assert handler.matches(hook_input) is True
+        assert handler.matches({"stop_hook_active": True}) is False
+
+    def test_matches_false_when_stop_hook_active_and_transcript_file_missing(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """N411: re-entry with a transcript path that does not exist stands down."""
+        hook_input = {
+            "transcript_path": str(tmp_path / "absent.jsonl"),
+            "stop_hook_active": True,
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_matches_false_when_stop_hook_active_and_transcript_unreadable(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """N411: a transcript path naming a directory (unreadable) stands down."""
+        hook_input = {"transcript_path": str(tmp_path), "stop_hook_active": True}
+        assert handler.matches(hook_input) is False
+
+    def test_matches_true_when_not_re_entry_and_transcript_missing(
+        self, handler: AutoContinueStopHandler
+    ) -> None:
+        """A fresh stop (stop_hook_active false) is unaffected by the stand-down."""
+        assert handler.matches({"stop_hook_active": False}) is True
 
 
 class TestAutoContinueStopGetClaudeMdGuidance:

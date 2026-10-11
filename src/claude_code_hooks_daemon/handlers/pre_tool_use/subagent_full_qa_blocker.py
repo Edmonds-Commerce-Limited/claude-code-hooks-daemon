@@ -937,8 +937,65 @@ _INLINE_CODE_FLAG_TEXT_TOOLS: Final[frozenset[str]] = frozenset(
         "less",
         "mysql",
         "psql",
+        # N419: `ps -e` is every process; `file -e`/`-c`/`-r` are file's own options.
+        "ps",
+        "file",
     }
 )
+
+#: Container runtimes (N419). Their `-e` is the env flag, but `docker run IMG sh -c
+#: '...'` hands a program INSIDE the container inline code, so a runtime is not a
+#: text tool: only the flags BEFORE the image are its own (`_container_args_after_image`).
+_CONTAINER_RUNTIMES: Final[frozenset[str]] = frozenset({"docker", "podman"})
+#: The subcommands whose first positional is the image (run, create) or container
+#: (exec) and whose remaining words are the command run inside it.
+_CONTAINER_RUN_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"run", "exec", "create"})
+#: Options that take their value as the NEXT word. An option missing from this list
+#: makes its value read as the image, which only moves the boundary EARLIER, so more
+#: flags are judged: the failure is toward the stricter verdict.
+_CONTAINER_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
+    {
+        "-e",
+        "--env",
+        "--env-file",
+        "-v",
+        "--volume",
+        "--mount",
+        "-p",
+        "--publish",
+        "-w",
+        "--workdir",
+        "-u",
+        "--user",
+        "--name",
+        "--network",
+        "--entrypoint",
+        "-l",
+        "--label",
+        "-m",
+        "--memory",
+        "-h",
+        "--hostname",
+    }
+)
+
+
+def _container_args_after_image(arguments: Sequence[str]) -> Sequence[str] | None:
+    """The words run INSIDE a container by ``docker|podman run|exec|create``.
+
+    Returns None when the invocation is not a shape this reads (a global option
+    before the subcommand, another subcommand): the caller then keeps the generic
+    inline-code rule. Returns the words after the image, or none if there is no image.
+    """
+    if not arguments or arguments[0] not in _CONTAINER_RUN_SUBCOMMANDS:
+        return None
+    index = 1
+    while index < len(arguments):
+        word = arguments[index]
+        if not word.startswith("-"):
+            return arguments[index + 1 :]
+        index += 2 if word in _CONTAINER_VALUE_OPTIONS else 1
+    return ()
 
 
 def _runs_inline_code(program: str, arguments: Sequence[str]) -> bool:
@@ -950,8 +1007,13 @@ def _runs_inline_code(program: str, arguments: Sequence[str]) -> bool:
     """
     if program in _INLINE_CODE_FLAG_EXEMPT_PROGRAMS:
         return False
-    if program.rsplit("/", 1)[-1] in _INLINE_CODE_FLAG_TEXT_TOOLS:
+    name = program.rsplit("/", 1)[-1]
+    if name in _INLINE_CODE_FLAG_TEXT_TOOLS:
         return False
+    if name in _CONTAINER_RUNTIMES:
+        inside = _container_args_after_image(arguments)
+        if inside is not None:
+            arguments = inside
     return any(argument in _INLINE_CODE_FLAGS for argument in arguments)
 
 

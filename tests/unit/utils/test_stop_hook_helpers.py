@@ -11,6 +11,7 @@ from claude_code_hooks_daemon.utils.stop_hook_helpers import (
     get_transcript_reader,
     has_recent_stop_hook_block,
     is_stop_hook_active,
+    transcript_is_readable,
 )
 
 
@@ -98,6 +99,29 @@ class TestGetTranscriptReader:
         msgs = reader.get_messages()
         assert len(msgs) == 1
         assert msgs[0].content == "Test message"
+
+
+class TestTranscriptIsReadable:
+    """transcript_is_readable() tells an unreadable transcript from a marker-free one."""
+
+    def test_false_for_none_and_empty(self) -> None:
+        """No path means no transcript."""
+        assert transcript_is_readable(None) is False
+        assert transcript_is_readable("") is False
+
+    def test_false_for_missing_file(self, tmp_path: Path) -> None:
+        """A path that does not exist is unreadable."""
+        assert transcript_is_readable(str(tmp_path / "absent.jsonl")) is False
+
+    def test_false_for_directory(self, tmp_path: Path) -> None:
+        """A directory cannot be read as a transcript."""
+        assert transcript_is_readable(str(tmp_path)) is False
+
+    def test_true_for_readable_file_without_marker(self, tmp_path: Path) -> None:
+        """A readable file counts as readable whatever it holds."""
+        path = tmp_path / "t.jsonl"
+        path.write_text("{}\n")
+        assert transcript_is_readable(str(path)) is True
 
 
 class TestHasRecentStopHookBlock:
