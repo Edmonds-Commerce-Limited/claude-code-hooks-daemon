@@ -77,6 +77,27 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N426 — a test pins `init.sh` suppressions by line number, and targeted QA never runs it for an `init.sh` change
+
+**Found**: by the coordinator on 2026-10-11, while checking CI before closing #69. Run 38170565811 on
+9de5ed59a failed 3 tests on Python 3.12 and 3.13 (47714 passed). The failures were the `init.sh` rows of
+`TestTheBlockAboveMustBeAboutTheSuppression.test_the_genuine_reason_above_in_this_tree_still_passes`
+in `tests/unit/qa/test_check_inline_suppressions.py`. `GENUINE_REASON_ABOVE` names each suppression by
+`(path, line)`. Plan 00488 added lines above the three `init.sh` suppressions, which moved them from
+1215/2566/2676 to 1228/2653/2763. The range QA for 00488 passed, because `changed_tests` does not map
+`init.sh` to this test.
+
+**Fix applied** (0a8be8afe): the three line numbers were updated. This is a stopgap: the next `init.sh`
+edit above those lines breaks the test again.
+
+**Candidate remedies**:
+
+1. Name each row by its directive and a neighbouring anchor rather than a line number, and resolve the
+   line at test time.
+2. Map the files `GENUINE_REASON_ABOVE` names to this test in `changed_tests_map.yaml`.
+
+**Status**: 🔄 Stopgap (0a8be8afe); remedy open.
+
 ### N425 — main CI red after the batch AL merge
 
 **Found**: by the coordinator on 2026-10-11, while checking CI before closing #69. Run 38153660205 on

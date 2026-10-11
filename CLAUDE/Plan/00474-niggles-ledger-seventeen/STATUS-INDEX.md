@@ -4,6 +4,7 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 
 | #          | Verdict                                                                                                                                | Origin              | Status                                 |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | -------------------------------------- |
+| N426       | A test pins three `init.sh` suppressions by line number; Plan 00488 moved them and targeted QA never ran it, so CI went red            | Coordinator         | 🔄 Stopgap (0a8be8afe); remedy open    |
 | N425       | Main CI red after batch AL: absolute-path docker case, three timing bounds, one bare wall-clock bound, a CLAUDE.md rewrite at teardown | Coordinator         | ✅ Fixed (939ff0d97); 🔄 CI to confirm |
 | N424       | LSP symbol-lookup guard denies a grep over a CLI's piped stdin, where no language server could answer                                  | Coordinator         | ⬜ Open                                |
 | N423       | Unrequested `/goal clear`: the designed retraction (all goal plans Blocked); a latent plan-root bug fixed alongside                    | Owner report        | ✅ Closed: by design; latent fix (AO)  |
