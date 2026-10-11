@@ -27,3 +27,21 @@ Branch `agent-a96662d45657fac9f-f9ac030c`. Both entries fixed; no owner question
 ruff, black (py311), mypy on touched sources clean; targeted tests green (the wide run's result is in the reply).
 Pre-existing: `tests/unit/install/test_bin_wrapper_project_anchoring.py::...test_a_global_anchor_selects_the_tree_the_command_reads` fails in this
 worktree environment (not touched by this batch).
+
+## Review round 1 (review copied to `261011-review-batch-m-opus.md`)
+
+1. **Restart: chose the explicit instruction, not a restart.** `upgrade.sh` has no daemon restart of its own (Layer 2 in
+   `upgrade_version.sh` does it earlier), so a restart here would be a new lifecycle step in a script that deliberately
+   leaves it to the earlier layer, with new failure modes (a daemon that will not start after the metadata block). The
+   instruction is one line, cannot fail, and the next restart regenerates the docs. The report, the `upgrade.sh`
+   warning, the summary and release note 018 all say the handlers run only after `hooks-daemon restart`.
+2. **Write safety:** temp file beside the target, mode copied, `Path.replace` over the resolved symlink target; any
+   `OSError` removes the temp file and returns False so the snippet fallback prints. Exit stays 1 because the handlers
+   genuinely do stop; the text says "could not edit" instead of a traceback.
+3. **Messages:** the config-options note, the summary and the metadata label (`restored:`) corrected; the report header
+   is `N handler(s) RESTORED: they would STOP running...` so the awk labels them apart.
+
+- Also: write-protected config (conservative glob match on `.claude/hooks-daemon.yaml` / basename), exit-2 retry without
+  `--apply`, CRLF preserved, tests for `enabled: false`, symlink, real format content, and `goal_injection` moved to
+  `post_tool_use`. Red before the fix: 8 failed in the unit file; the shell tests were updated alongside the script.
+- Residual left under N361: the substring "visibly fake" heuristic.

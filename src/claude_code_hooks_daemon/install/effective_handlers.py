@@ -15,7 +15,10 @@ other change.
 
 from __future__ import annotations
 
+import fnmatch
+import os
 import re
+import tempfile
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -149,6 +152,8 @@ def restore_snippet(changes: list[HandlerChange]) -> str:
 
 
 _UNIT_INDENT: Final[int] = 2
+_WRITE_PROTECTED_KEY: Final[str] = "write_protected_paths"
+_RESTART_COMMAND: Final[str] = ".claude/hooks-daemon/bin/hooks-daemon restart"
 #: ``handlers:`` on its own line, or with an empty inline mapping (what `init minimal` writes).
 _HANDLERS_LINE: Final[re.Pattern[str]] = re.compile(r"^handlers:[ \t]*(\{\}[ \t]*)?(#.*)?$")
 _EMPTY_INLINE_MAPPING: Final[re.Pattern[str]] = re.compile(r":[ \t]*\{\}")
@@ -210,6 +215,42 @@ def _add_handler_text(lines: list[str], event: str, keys: list[str], event_decla
     return True
 
 
+def _is_write_protected(config: Mapping[str, Any], config_path: Path) -> bool:
+    """Whether the project lists this config under ``write_protected_paths``.
+
+    The handler's own glob matcher is not reused: this is a conservative
+    check, so a listing that merely MIGHT cover the file counts as protection.
+    """
+    handler = _event_block(config, "pre_tool_use").get(_WRITE_PROTECTED_KEY)
+    options = handler.get("options") if isinstance(handler, Mapping) else None
+    globs = options.get("paths") if isinstance(options, Mapping) else None
+    if not isinstance(globs, list):
+        return False
+    candidates = [config_path.name, f"{config_path.parent.name}/{config_path.name}"]
+    for glob in (g for g in globs if isinstance(g, str)):
+        for pattern in {glob, glob.removeprefix("**/")}:
+            if any(fnmatch.fnmatchcase(name, pattern) for name in candidates):
+                return True
+    return False
+
+
+def _replace_file(target: Path, text: str) -> bool:
+    """Atomically replace ``target`` (through a symlink) with ``text``; False on OSError."""
+    real = target.resolve()
+    temp_name: str | None = None
+    try:
+        descriptor, temp_name = tempfile.mkstemp(dir=real.parent, prefix=f".{real.name}.")
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(text.encode("utf-8"))
+        Path(temp_name).chmod(real.stat().st_mode & 0o7777)
+        Path(temp_name).replace(real)
+    except OSError:
+        if temp_name is not None:
+            Path(temp_name).unlink(missing_ok=True)
+        return False
+    return True
+
+
 def apply_restore(config_path: Path, changes: list[HandlerChange]) -> bool:
     """Write ``enabled: true`` into the config for every handler that STOPPED.
 
@@ -229,8 +270,16 @@ def apply_restore(config_path: Path, changes: list[HandlerChange]) -> bool:
         file's shape (for example an inline ``handlers: {}``) is not one that
         can be edited safely.
     """
-    original = config_path.read_text(encoding="utf-8")
-    config = yaml.safe_load(original)
+    try:
+        raw = config_path.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    crlf = "\r\n" in raw
+    original = raw.replace("\r\n", "\n")
+    try:
+        config = yaml.safe_load(original)
+    except yaml.YAMLError:
+        return False
     if not isinstance(config, Mapping):
         return False
     wanted: dict[str, list[str]] = {}
@@ -239,6 +288,8 @@ def apply_restore(config_path: Path, changes: list[HandlerChange]) -> bool:
             wanted.setdefault(change.event, []).append(change.config_key)
     if not wanted:
         return True
+    if _is_write_protected(config, config_path):
+        return False
 
     lines = original.splitlines(keepends=True)
     if lines and not lines[-1].endswith("\n"):
@@ -263,8 +314,7 @@ def apply_restore(config_path: Path, changes: list[HandlerChange]) -> bool:
         block = _event_block(reloaded, event)
         if any(block.get(key) != {_ENABLED_KEY: True} for key in keys):
             return False
-    config_path.write_text(edited, encoding="utf-8")
-    return True
+    return _replace_file(config_path, edited.replace("\n", "\r\n") if crlf else edited)
 
 
 def format_changes(
@@ -291,8 +341,8 @@ def format_changes(
     ]
     if stopped and applied:
         lines.append(
-            f"{len(stopped)} handler(s) STOP running by default under the new rules: their "
-            "block is absent from your config."
+            f"{len(stopped)} handler(s) RESTORED: they would STOP running under the new rules "
+            "(their block is absent from your config)."
         )
         lines.extend(f"  - {c.config_path}" for c in stopped)
         lines.append(
@@ -302,13 +352,14 @@ def format_changes(
         )
         lines.append(
             "To stop one, set its `enabled: false` or delete its block "
-            "(several are noisy and four deny tool calls)."
+            "(several are noisy and some deny tool calls)."
         )
+        lines.append(f"Restart the daemon so the restored handlers take effect: {_RESTART_COMMAND}")
     elif stopped:
         if applied is False:
             lines.append(
-                "The upgrade could not edit .claude/hooks-daemon.yaml automatically "
-                "(its layout is not one that can be changed safely)."
+                "The upgrade could not edit .claude/hooks-daemon.yaml automatically (its "
+                "layout, permissions or write protection do not allow a safe edit)."
             )
         lines.append(
             f"{len(stopped)} handler(s) STOP running: their block is absent from "

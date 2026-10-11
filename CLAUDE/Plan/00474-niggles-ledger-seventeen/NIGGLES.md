@@ -2596,6 +2596,9 @@ repeated eight times) and the `unlisted-fake-value` SWEEP check reports any regi
 its sibling findings. Tests: `TestNotVisiblyFake` in `tests/unit/utils/test_fake_values.py` and
 `TestRegistryEntriesMustLookFake` in `tests/unit/docs_qa/checks/test_unlisted_fake_value.py` (10 red before the fix).
 Not done: a commit-time BLOCK for a bad entry (the sweep advises only); the owner ruling C7 names no severity.
+Recorded residual: "visibly fake" is a substring heuristic (`fake` anywhere, or one character repeated eight times), so
+a real-looking value that merely contains `fake` or ends in a long run still passes. Tighten it (require that little
+remains once `fake` and repeated runs are removed) if the registry ever takes entries from outside this repository.
 
 ### N360 — an upgrade should keep running the opt-in handlers that were running before it
 
@@ -2615,6 +2618,11 @@ project's real config carries across upgrades) and how to change it (`enabled: f
 note `CLAUDE/UPGRADES/UNRELEASED/release-notes/018-…`. Tests: `tests/unit/install/test_effective_handlers_apply.py`
 and `test_the_apply_flag_is_forwarded_and_defaults_off` (the new file failed to import and the CLI test failed before
 the fix). Not covered: a handler the project "specifically decided against" (the ruling says not to worry about it).
+Review round 1 follow-ups: the write is atomic (temp file in the same directory, `os`-level replace through a symlink,
+mode kept, `OSError` falls back to the snippet), CRLF is preserved, a config listed under `write_protected_paths` is
+never written, `upgrade.sh` retries without `--apply` on exit 2, records `restored:` (not `stops:`) in the metadata,
+corrects its "never edits your config" and "config file unchanged" messages, and tells the agent to restart the daemon
+(the write happens after Layer 2's restart).
 
 ### N359 — the plan fact-check feed points at the wrong files, diffs whole folders, and can consume a check unseen
 
