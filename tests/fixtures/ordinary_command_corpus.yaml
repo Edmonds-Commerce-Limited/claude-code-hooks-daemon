@@ -1555,6 +1555,42 @@ rows:
       pip install x
       sudo pip install x
       EOF
+  - id: n407-commit-message-names-sudo-heredoc-double-quoted
+    command: |-
+      git commit -m "fix: judge elevated heredocs
+
+      sudo -s <<EOF
+      pip install x
+      EOF"
+  - id: n407-commit-message-names-sudo-heredoc-single-quoted
+    command: |-
+      git commit -m 'fix
+
+      sudo bash <<EOF
+      pip install x
+      EOF'
+  - id: n407-commit-message-semicolon-sudo-heredoc
+    command: |-
+      git commit -m "docs; sudo -s <<EOF
+      pip install x
+      EOF"
+  - id: n407-python-string-names-sudo-heredoc
+    command: |-
+      python3 -c "print('''
+      sudo -s <<EOF
+      pip install x
+      EOF
+      ''')"
+  - id: n407-sudo-bash-script-operand-heredoc
+    command: |-
+      sudo bash script.sh <<EOF
+      pip install x
+      EOF
+  - id: n407-sudo-bash-flag-script-operand-heredoc
+    command: |-
+      sudo bash -e script.sh <<'EOF'
+      pip install x
+      EOF
   - id: n408-echo-names-issue-view
     command: |-
       echo 'gh issue view 5'

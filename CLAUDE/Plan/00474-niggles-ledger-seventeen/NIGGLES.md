@@ -1664,7 +1664,9 @@ mention deny were flipped. The INVENTORY misses (`pip --break-system-packages in
 - ✅ cleared by batch Y: `sudo -s` / `sudo -i` / `sudo bash` / `sudo sh -s` (also `doas`) with a heredoc body
   (`sudo -s <<'EOF' ... pip install x ... EOF`). `sudo_pip._elevated_heredoc_bodies` reads the heredocs fed to an
   elevated shell and judges the body's segments as `sudo`-headed; `sudo -s ls <<EOF` and a `-c` shell are not shells on
-  stdin, so they allow. Kept inside the handler (no change to the shared view).
+  stdin, so they allow. Kept inside the handler (no change to the shared view). Round 2: heredocs come from the
+  quote-aware `scan_heredocs` (a `<<` inside a commit message or a `python3 -c` string opens nothing), a shell given a
+  script operand (`sudo bash script.sh <<EOF`) allows unless `-s`, and `--login`/`--shell` count like `-i`/`-s`.
 - ✅ cleared by batch V: a `;`, `&&`, `|` or `&` inside a trailing `# comment` split the line, so
   `true # export X=1 && pip install` was judged as two commands. The comment now runs to the end of the line in the
   command-position splitter (`split_unquoted_spans(..., comments_end_at_newline=True)`, used only by

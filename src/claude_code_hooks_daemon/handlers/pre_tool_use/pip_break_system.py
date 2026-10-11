@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_p
 from claude_code_hooks_daemon.utils.command_position import (
     command_position_code_segments_with_separators,
 )
+from claude_code_hooks_daemon.utils.heredoc_operators import substitution_end
 
 # Full first-fire teaching content (Plan 00116): reuses the pre-migration
 # handler's rich prose verbatim, minus the invocation-specific `COMMAND:`
@@ -169,13 +170,10 @@ def _substitution_bodies(text: str) -> list[str]:
         if char == "'":
             in_single = not in_single
         elif not in_single and text.startswith("$(", index):
-            depth = 1
-            end = index + 2
-            while end < len(text) and depth:
-                depth += {"(": 1, ")": -1}.get(text[end], 0)
-                end += 1
-            bodies.append(text[index + 2 : end - 1 if depth == 0 else end])
-            index += 2
+            # Bash's grammar finds the close: a quoted `)` does not end it.
+            close = substitution_end(text, index + 1)
+            bodies.append(text[index + 2 : len(text) if close is None else close - 1])
+            index = len(text) if close is None else close
             continue
         elif not in_single and char == "`":
             end = text.find("`", index + 1)
