@@ -12,6 +12,12 @@ precision level as ``qa_suppression``/``security_antipattern`` elsewhere in
 this codebase. A comment marker inside a string literal (e.g. ``"a # b"`` in
 Python) can be misread as opening a comment; this is a documented, accepted
 limitation, not a defect to silently "fix" with a full parser per language.
+
+The one bounded exception is a block/doc opener with NO closing delimiter
+later in the content: valid code never has one, so it is a marker inside a
+string (``"src/*.rs"``) and yields no span. Scanning resumes on the next line
+as code, so a misread never runs to the end of the file. A marker whose closer
+does appear later is still read as a comment, up to that closer.
 """
 
 from dataclasses import dataclass
@@ -91,7 +97,8 @@ def extract_comment_spans(content: str, syntax: CommentSyntax) -> list[CommentSp
                 pass
             else:
                 span, index = _consume_delimited(lines, index, delimiter_hit, is_doc)
-                spans.append(span)
+                if span is not None:
+                    spans.append(span)
                 continue
 
         if marker_hit is not None:
@@ -151,12 +158,13 @@ def _find_first_delimiter(
 
 def _consume_delimited(
     lines: list[str], start_index: int, hit: _DelimiterHit, is_doc: bool
-) -> tuple[CommentSpan, int]:
+) -> tuple[CommentSpan | None, int]:
     """Consume a block/doc comment opening at ``lines[start_index][hit.position:]``.
 
     Returns the built span and the index of the NEXT line to resume from.
-    An unterminated comment (no closing delimiter before EOF) closes at the
-    last line of the file.
+    An opener with no closing delimiter before EOF is not a comment (valid
+    code never has one), so the span is ``None`` and scanning resumes on the
+    line AFTER the opener as ordinary code.
     """
     first_line = lines[start_index]
     search_from = hit.position + len(hit.start)
@@ -180,11 +188,7 @@ def _consume_delimited(
         collected.append(lines[cursor])
         cursor += 1
 
-    # Unterminated: runs to EOF.
-    span = CommentSpan(
-        text="\n".join(collected), start_line=start_index, end_line=line_total - 1, is_doc=is_doc
-    )
-    return span, line_total
+    return None, start_index + 1
 
 
 def _extend_comment_run(lines: list[str], start_index: int, syntax: CommentSyntax) -> int:

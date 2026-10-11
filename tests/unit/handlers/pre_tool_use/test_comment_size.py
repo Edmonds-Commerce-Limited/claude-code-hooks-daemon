@@ -179,6 +179,54 @@ class TestBrandNewFileGrowth:
         assert "comment" in (result.reason or "").lower()
 
 
+class TestUnterminatedOpenerIsNotAComment:
+    """GitHub #75: a block opener inside a string literal must not swallow the file."""
+
+    @staticmethod
+    def _rust_with_glob_in_string() -> str:
+        glob_literal = '    let p = "untracked/scratch/x' + "/" + '*.rs";'
+        lines = ["fn main() {", glob_literal, "}"]
+        lines += [f"fn f{n}() {{}}" for n in range(40)]
+        return "\n".join(lines) + "\n"
+
+    def test_comment_free_rust_file_with_glob_in_string_is_allowed(self) -> None:
+        default_handler = CommentSizeHandler()
+        hook_input = _make_write_input("/workspace/src/lib.rs", self._rust_with_glob_in_string())
+        assert default_handler.matches(hook_input) is False
+        assert default_handler.handle(hook_input).decision == Decision.ALLOW
+
+    def test_genuine_over_limit_terminated_block_comment_is_still_denied(self) -> None:
+        default_handler = CommentSizeHandler()
+        body = "\n".join(f" * line {n}" for n in range(45))
+        content = f"/*\n{body}\n */\nfn main() {{}}\n"
+        hook_input = _make_write_input("/workspace/src/lib.rs", content)
+        assert default_handler.matches(hook_input) is True
+        assert default_handler.handle(hook_input).decision == Decision.DENY
+
+    def test_edit_fragment_with_opener_and_no_closer_is_not_counted(
+        self, handler: CommentSizeHandler
+    ) -> None:
+        """Edit judges new_string alone; an opener whose closer lies outside it is no span.
+
+        Kept deliberately. Lines inside a comment (no opener) are already invisible to
+        a fragment, so the guard only ever sees a comment that opens AND closes inside
+        the edit; an edit that inserts a whole comment carries both delimiters. The
+        reverse choice (count to the end of the fragment) is what let a glob in a
+        string deny a comment-free edit.
+        """
+        new = "/*\n" + "\n".join(f" * line {n}" for n in range(10)) + "\n"
+        hook_input = _make_edit_input("/workspace/src/lib.rs", "fn a() {}\n", new)
+        assert handler.matches(hook_input) is False
+        assert handler.handle(hook_input).decision == Decision.ALLOW
+
+    def test_edit_fragment_with_whole_over_limit_block_comment_is_denied(
+        self, handler: CommentSizeHandler
+    ) -> None:
+        new = "/*\n" + "\n".join(f" * line {n}" for n in range(10)) + "\n */\n"
+        hook_input = _make_edit_input("/workspace/src/lib.rs", "fn a() {}\n", new)
+        assert handler.handle(hook_input).decision == Decision.DENY
+
+
 class TestEditGrowthTiering:
     def test_edit_that_grows_the_comment_is_denied(self, handler: CommentSizeHandler) -> None:
         old = "x = 1  # short\n"
