@@ -48,8 +48,10 @@ against forging the approval defends against nothing in scope.
   (sub-agent, worktree `worktree-rm-upg-approval`).
 - [x] ✅ **Task 1.2**: Delete `upgrade_approval_guard` with its registrations
   and tests; keep an old config naming it valid (retired key).
-- [x] ✅ **Task 1.3**: Add the phased-upgrade advisory (TDD). It is silent when
-  no release newer than the installed one is known in the current major.
+- [x] ✅ **Task 1.3**: Add the phased-upgrade advisory (TDD). For a MAJOR jump
+  it is silent when no release newer than the installed one is known in the
+  current major. A same-major jump of more than 10 minor releases still advises
+  going through an intermediate release.
 - [x] ✅ **Task 1.4**: The TARGET release's code runs the gate (`scripts/upgrade.sh`
   checks the target out, then runs its `upgrade_version.sh`), so an upgrade from
   any older install to this release meets no approval stop. Only a target of
