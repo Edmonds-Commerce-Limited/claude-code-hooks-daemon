@@ -650,6 +650,23 @@ class TestSimpleCommandsKeepTheirFileRedirections:
         (step,) = simple_commands(command)
         assert step.redirects == ()
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "{ cd /tmp && make; } > x",
+            "if true; then cd /tmp && make; fi > x",
+            "while false; do cd /tmp; done > x",
+        ],
+    )
+    def test_a_group_redirect_keeps_the_directory_before_the_group(self, command: str) -> None:
+        closer = simple_commands(command)[-1]
+        assert closer.redirects == ((">", "x"),)
+        assert closer.directory == ()
+
+    def test_the_directory_after_a_group_still_carries_the_cd(self) -> None:
+        last = simple_commands("{ cd /tmp; }; echo x > y")[-1]
+        assert last.directory == ("/tmp",)
+
     def test_each_command_keeps_its_own(self) -> None:
         first, second = simple_commands("cd sub && echo x > ../x")
         assert first.redirects == ()

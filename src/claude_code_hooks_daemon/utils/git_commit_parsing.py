@@ -956,6 +956,22 @@ _AND_OPERATOR: Final[str] = "&&"
 _SUBSHELL_CHARS: Final[str] = "()"
 
 
+#: Words that open a compound command whose redirect follows its closer.
+_GROUP_OPENERS: Final[frozenset[str]] = frozenset({"{", "if", "while", "until", "for", "select"})
+_GROUP_CLOSERS: Final[frozenset[str]] = frozenset({"}", "fi", "done"})
+
+
+def _group_openers(segment: list[str]) -> int:
+    """How many compound commands ``segment`` opens (``then { …`` opens one)."""
+    opened = 0
+    for word in segment:
+        if word in _GROUP_OPENERS:
+            opened += 1
+        elif word not in SHELL_RESERVED_COMMAND_PREFIXES:
+            break
+    return opened
+
+
 _Step = tuple[list[str], tuple[str | None, ...], bool, str, tuple[tuple[str, str], ...]]
 
 #: A redirection operator that names a file it writes. ``>&`` is not one of
@@ -1007,6 +1023,7 @@ def _walk(
     """
     found: list[_Step] = []
     stack: list[tuple[tuple[str | None, ...], bool]] = []
+    groups: list[tuple[tuple[str | None, ...], bool]] = []
     previous_operator = ""
     index = 0
     while index < len(words):
@@ -1028,6 +1045,14 @@ def _walk(
         while end < len(words) and not (is_operator(words[end]) and not is_redirection(words[end])):
             end += 2 if is_redirection(words[end]) else 1
         segment = [word for word in commit_option_words(words, index) if word]
+        # A redirect on a group (`{ …; } > x`, `if … fi > x`) is opened by the
+        # shell BEFORE the group runs, so it is read where the group began.
+        # The directory the group's own `cd` reached still carries on after it.
+        if segment[:1] and segment[0] in _GROUP_CLOSERS and groups:
+            opened_in = groups.pop()
+        else:
+            opened_in = None
+            groups.extend((directory, uncertain) for _ in range(_group_openers(segment)))
         moved = _after_directory_change(segment, directory)
         if moved != directory and previous_operator in _MOVE_DOUBTING_PRECEDING_OPERATORS:
             uncertain = True
@@ -1039,8 +1064,8 @@ def _walk(
             found.append(
                 (
                     segment,
-                    directory,
-                    uncertain,
+                    directory if opened_in is None else opened_in[0],
+                    uncertain if opened_in is None else opened_in[1],
                     previous_operator,
                     _write_redirects(words, index, end),
                 )

@@ -1499,11 +1499,29 @@ each time Claude calls a tool. To raise the cap, set `CLAUDE_CODE_STOP_HOOK_BLOC
 block stops (stop-explanation, goal ledger, cron enforcers, auto-continue, usage-pause). A session that is blocked
 eight times in a row without a tool call would be let go regardless of what those handlers want.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Assessed by batch R: no daemon Stop or SubagentStop handler can reach the cap, and no defect was found,
+so behaviour is unchanged. Full evidence with file:line:
+[subagent-reports/261011-batch-r-sonnet.md](subagent-reports/261011-batch-r-sonnet.md). In short:
 
-**Remedy**: assess whether any daemon Stop handler can hit the cap (stacked handlers blocking in turn, a re-entry loop
-with no tool call between) and what happens then: does the session end unrecorded, does a handler assume its block
-was honoured, should `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` be set by the ccy supervisor. Not fixed in batch N.
+- Every blocking handler denies at most once per chain, gated on `stop_hook_active` (`cron_enforcement.py:352`,
+  `cron_refresh.py:211`, `stand_in_cron.py:143`, `usage_pause_stop_gate.py:153`, `mode_interceptor.py:71`, the project
+  `release_blocker.py:258`; `AutoContinueStopHandler.matches` at `auto_continue_stop.py:758-766` stands down on a re-entry
+  confirmed by a `hook_blocking_error` marker in the transcript tail). Handlers stacked on one Stop event
+  (`cron_stop_enforcer` + `auto_continue_stop`, `terminal=False` for the first) merge into ONE block, so they count as one
+  continuation. Measured: across the 5 session transcripts of this workspace, 95 chains of Stop blocks, longest 1
+  consecutive block with no tool call in between; the daemon's own `stop-events.jsonl` shows no text-only
+  deny-to-deny pair in a real session (all 7 had more than 20 KB of transcript growth, i.e. tool calls).
+- The one path that can re-block on `stop_hook_active=true` is auto-continue's "silent-stop" branch (no marker in the last
+  20 transcript lines): 12 real-session occurrences, and the longest consecutive-deny run in a real session was 4, each
+  pair separated by tool calls, so the cap's counter had reset.
+- Overridden-block assumptions: nothing reads state recorded at block time as proof the block was honoured. The
+  `stop-events.jsonl` DENY line is write-only diagnostics; the human-blocked marker is written before the stand-in block
+  and is a statement about the stop, not the block; a lost stand-in block leaves the same state as the existing
+  re-entry allow (marker armed, no stand-in, a warning logged). `usage_pause_stop_gate.matches` records the pause before
+  its directive is delivered, so an overridden entry block would leave a pause with no resume cron, which needs eight
+  prior continuations the daemon cannot cause.
+- Recommendation (owner question, not acted on): do not have the ccy supervisor set `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`.
+  The daemon is below the cap by construction, and a raised cap only widens what a non-daemon Stop hook can loop on.
 
 ### N410 — `upgrade_approval_guard` denies a QA tool reached through a variable once `PYTHONPATH` is set
 
@@ -1676,11 +1694,19 @@ gate rows `n403-*`. Settles N338 once merged. Note: `cd sub; cmd > ../x` (`;`, n
 Residual, from the batch J review (`untracked/agent-reports/auto/261011-045019-code-reviewer-a7356ded644388004.md`),
 none a regression against main:
 
-- `D=/tmp; cd $D && echo x > x` writes outside the repository but draws only the unplaceable-`cd` advisory; an
-  earlier assignment is not substituted into the `cd` step before `placed_moves` (`project_containment.py` ~605).
-- A redirect on a `{ … }` or `if … fi` group is judged from inside the group, so `{ cd /tmp && make; } > x` is denied
-  though `x` lands in the repository (a false deny only). Remedy: give a group's redirects the directory in effect
-  before it opened.
+- ✅ cleared by batch R: `D=/tmp; cd $D && echo x > x` wrote outside the repository but drew only the unplaceable-`cd`
+  advisory. `_targets_after_cds` now substitutes the command's plain literal assignments (`known_variables`, the same
+  set the targets use) into each step's `cd` chain before `placed_moves` (`_literal_moves`), so the move is placed and
+  the write is denied. A name nothing pins is left as written and stays an advisory. Pinned by
+  `test_a_cd_through_a_literal_assignment_is_placed_and_denied` and two siblings in
+  `TestARedirectIsJudgedWhereTheChainsCdLandsIt`, plus ordinary-corpus row `n403-cd-through-literal-assignment-stays-inside`.
+- ✅ cleared by batch R: a redirect on a `{ … }`, `if … fi`, `while … done` or `for … done` group was judged from inside
+  the group, so `{ cd /tmp && make; } > x` was denied though `x` lands in the repository. `_walk`
+  (`utils/git_commit_parsing.py`) records the directory in effect where a group opens and gives the closer step
+  (`}`, `fi`, `done`), which carries the group's redirects, that directory; the `cd` the group reached still carries on
+  after it (`{ cd /tmp; }; echo x > y` writes in `/tmp`). Pinned in `TestSimpleCommandsKeepTheirFileRedirections`, the
+  group tests in `TestARedirectIsJudgedWhereTheChainsCdLandsIt` and ordinary-corpus rows `n403-group-*`/`n403-if-group-*`.
+  Not covered, still read the old way: a `case … esac` group.
 - ✅ cleared by batch P: A process substitution target after a `cd` (`cd /tmp && echo hi > >(cat)`) is read as a file
   name and denied. `>(`/`<(` targets are skipped in `_write_redirects`.
 - ✅ cleared by batch P: `command cd /tmp` is not read as a move (`_after_directory_change`, in

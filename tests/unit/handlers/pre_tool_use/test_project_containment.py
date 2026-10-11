@@ -1583,3 +1583,63 @@ class TestARedirectIsJudgedWhereTheChainsCdLandsIt:
         self, handler: ProjectContainmentHandler, repo: Path
     ) -> None:
         assert handler.matches(_bash("cd /tmp && echo x > x")) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "D=/tmp; cd $D && echo x > x",
+            "D=/tmp && cd $D && echo x > x",
+            'D=/tmp; cd "${D}" && echo x > x',
+            "D=/tmp; cd $D/sub && echo x | tee y",
+        ],
+    )
+    def test_a_cd_through_a_literal_assignment_is_placed_and_denied(
+        self, handler: ProjectContainmentHandler, repo: Path, command: str
+    ) -> None:
+        hook_input = _bash(command, cwd=str(repo))
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+
+    def test_a_cd_through_a_variable_that_lands_inside_is_allowed(
+        self, handler: ProjectContainmentHandler, repo: Path
+    ) -> None:
+        assert handler.matches(_bash("D=sub; cd $D && echo x > ../x", cwd=str(repo))) is False
+
+    def test_a_cd_through_a_variable_nothing_pins_is_an_advisory_not_a_deny(
+        self, handler: ProjectContainmentHandler, repo: Path
+    ) -> None:
+        hook_input = _bash("D=/tmp; cd $E && echo x > x", cwd=str(repo))
+        assert handler.handle(hook_input).decision == Decision.ALLOW
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "{ cd /tmp && make; } > x",
+            "{ cd /tmp && make; } 2> err.log",
+            "if true; then cd /tmp && make; fi > x",
+            "while false; do cd /tmp; done > x",
+            "for i in 1; do cd /tmp; done > x",
+        ],
+    )
+    def test_a_redirect_on_a_group_is_read_before_the_group_opened(
+        self, handler: ProjectContainmentHandler, repo: Path, command: str
+    ) -> None:
+        assert handler.matches(_bash(command, cwd=str(repo))) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd /tmp && { make; } > x",
+            "{ true; } > /tmp/x",
+            "cd /tmp && if true; then make; fi > x",
+            "{ cd /tmp; } && echo x > x",
+            "{ cd /tmp; }; echo x > x",
+        ],
+    )
+    def test_a_group_redirect_still_lands_where_the_shell_was(
+        self, handler: ProjectContainmentHandler, repo: Path, command: str
+    ) -> None:
+        hook_input = _bash(command, cwd=str(repo))
+        assert handler.matches(hook_input) is True
+        assert handler.handle(hook_input).decision == Decision.DENY
