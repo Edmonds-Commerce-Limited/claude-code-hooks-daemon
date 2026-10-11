@@ -157,7 +157,7 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   N143, N144, N152 (literal wrappers) and N153 fixed, branch worktree-p483-recur (merged f152ea9d9): a recursive search is judged by the files it would read; report:
   [subagent-reports/261004-task-3.1-batch-h-recursive-sonnet.md](subagent-reports/261004-task-3.1-batch-h-recursive-sonnet.md).
   N171, N172, N248 and N250 fixed, branch worktree-p483-ordin (merged cd7638c73): an unlistable directory, a missing daemon package, an unresolved word list and an unbuildable capture scanner each fail loudly instead of passing; report: [subagent-reports/261004-task-3.1-batch-i-ordinary-sonnet.md](subagent-reports/261004-task-3.1-batch-i-ordinary-sonnet.md).
-  N130 (and N348's cap half) fixed, branch worktree-n130-walk (merged 012915bd9; its capped walk was then removed by the A1/A2 merge dc5c9263b, and N130 is now answered by the cached protected-file index): a recursive search is examined by a capped scan that raises past 250000 entries or the deadline and is denied as incomplete, never answered as clean, and `rg`, `ag` and `git grep` read git's file lists; report: [subagent-reports/261004-n130-n348-implementation-sonnet.md](subagent-reports/261004-n130-n348-implementation-sonnet.md).
+  N130 (and N348's cap half) fixed, branch worktree-n130-walk (merged 012915bd9; its capped walk was then removed by the A1/A2 merge dc5c9263b): a recursive search is examined by a capped scan that raises past 250000 entries or the deadline and is denied as incomplete, never answered as clean, and `rg`, `ag` and `git grep` read git's file lists; report: [subagent-reports/261004-n130-n348-implementation-sonnet.md](subagent-reports/261004-n130-n348-implementation-sonnet.md).
 - [x] ✅ **Task 3.2**: Narrow each guard that causes an in-scope false positive while catching
   an out-of-scope shape (TDD: the false positive is the red test). Open: 16 of the 50 INVENTORY
   probes still deny when re-run on 2026-10-11 (43 denied on 2026-10-09; 27 were fixed by
@@ -175,7 +175,7 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   Reports:
   [subagent-reports/261011-task-3.2-recheck-sonnet.md](subagent-reports/261011-task-3.2-recheck-sonnet.md),
   [subagent-reports/261011-not-rerun-guards-sonnet.md](subagent-reports/261011-not-rerun-guards-sonnet.md).
-  Batch (b), the git guards, is merged (324b59962): `destructive_git` and
+  Batch (b), the git guards, is merged (commit 324b59962, merge fe54af5e6): `destructive_git` and
   `git_stash` judge each command segment on its own tokens and read a quoted `git`/`awk` pattern,
   a `gh` body heredoc and a printing `while read` loop as data; gate rows `a8-*`. Report:
   [subagent-reports/261009-batch-b-git-guards-sonnet.md](subagent-reports/261009-batch-b-git-guards-sonnet.md).
@@ -275,18 +275,21 @@ Owner questions sent 2026-10-05 as chunks A–D; see the backlog report
 ## Success Criteria
 
 - [x] No open ledger entry or `UNCOVERED-open` corpus row is left unclassified. Corpus half
-  met (0 open rows). 00474's later entries N353 to N398 (46) are classified under the
+  met: 1 of 67 rows is `UNCOVERED-open` (`remote-code-download-then-run`), and it is classified
+  as a recorded decision under 00474 N385 (a same-command download-then-run is not reliably
+  detectable). 00474's later entries N353 to N398 (46) are classified under the
   two-part test: 34 already classified, 9 in-scope and open (ordinary ledger work), 3
   out-of-scope or dismissable. Evidence:
   [subagent-reports/261011-task-3.2-recheck-sonnet.md](subagent-reports/261011-task-3.2-recheck-sonnet.md) section 4.
 - [x] Each dismissal is recorded both in the ledger and, for a command, in the corpus.
-  Evidence: Task 2.3 above; `check_dangerous_invocation_corpus.py` holds 37 rows, 0 open.
+  Evidence: Task 2.3 above; `scripts/qa/dangerous-invocation-corpus.yaml` (checked by
+  `check_dangerous_invocation_corpus.py`) holds 67 rows, the one open row classified above.
 - [x] Every blocking guard has a verdict in `INVENTORY.md`. Evidence: every file under
   `handlers/pre_tool_use/` is named in the inventory; Part H adds the three that were
-  missing. The 24 handlers of Part G are provisional file-level verdicts, and Parts A to F
+  missing. The 21 handlers of Part G are provisional file-level verdicts, and Parts A to F
   pre-date the A1/A2 removals.
 - [x] Every in-scope false positive found has a narrowing fix merged or a ledger entry. The
-  three false positives among the 50 probes are 00474 N400, N401 and N402; the six families
+  four false-positive probes among the 50 are covered by three entries, 00474 N400, N401 and N402; the six families
   the "not re-run" re-probe found (P4 to P9 in
   [subagent-reports/261011-not-rerun-guards-sonnet.md](subagent-reports/261011-not-rerun-guards-sonnet.md))
   are 00474 N404 to N409.

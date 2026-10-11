@@ -1313,6 +1313,14 @@ judged as it stands now.
 
 ## 1. write_protected_paths (`handlers/pre_tool_use/write_protected_paths.py`, 570 lines; Plan 00499; opt-in, priority 18)
 
+> **Superseded (closing fact-check, 2026-10-11,
+> [subagent-reports/261011-fact-check-closing-sonnet.md](subagent-reports/261011-fact-check-closing-sonnet.md)).** This
+> section describes the handler as it stood on 2026-10-09. Plan 00499 Phase 1b then grew it to 1,354 lines: it now denies
+> any command naming a listed file unless the command is a known reader (an unknown tool's read is refused too), and its
+> guidance covers the gaps listed below (`perl -i`, `rsync`, `find -delete`, `/bin/rm`, `bash -c`, brace lists,
+> `flock`); its remaining known gaps are interpreter code and heredocs fed to one. The line citations below no longer
+> point at the code they name. Read the handler and its guidance for the current behaviour.
+
 Summary: terminal DENY (R-WRITE-PROTECTED-PATH) of an agent write to a path the project lists under `options.paths`. Covers `Write`/`Edit`/`NotebookEdit` and the Bash routes `scan_bash_write_targets` names (redirect, `tee`, heredoc redirect, in-place `sed`, `dd of=`, copy/move/install/link onto, `rm`, `unlink`, `touch`, `truncate`, `: >`). Reading is never denied. Does nothing without `paths`.
 
 | branch                                             | file:line        | shapes handled                                                                            | scope verdict + limb                                                                                 | FP?        | notes                                                                                              |
