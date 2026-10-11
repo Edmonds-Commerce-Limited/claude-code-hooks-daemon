@@ -234,6 +234,9 @@ class TestMentionsAreDataNotCommands:
             "git -C /w merge --squash feature",
             "if true; then git merge --squash feature; fi",
             "eval 'gh pr merge 5 --squash'",
+            "f() { git merge --squash x; }; f",
+            "function f { gh pr merge 5 --rebase; }; f",
+            "f() ( git merge --squash x ); f",
         ],
     )
     def test_real_command_still_denies(

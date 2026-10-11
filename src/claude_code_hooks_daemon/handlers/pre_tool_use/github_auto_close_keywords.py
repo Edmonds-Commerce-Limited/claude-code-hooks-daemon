@@ -116,7 +116,8 @@ _GH_PR_BODY_PATTERN: Final[re.Pattern[str]] = re.compile(r"\bgh\s+pr\s+(?:create
 # body opener, and a path to the binary. A `git commit` named INSIDE an echo's
 # quoted argument is not at one of these positions.
 _COMMAND_START: Final[str] = (
-    r"(?:\A\s*(?:[({]\s*)*|`\s*|\$\(\s*)"
+    r"(?:\A\s*(?:(?:function\s+[\w.-]+(?:\s*\(\s*\))?|[\w.-]+\s*\(\s*\))\s*[({]\s*|[({]\s*)*"
+    r"|`\s*|\$\(\s*)"
     r"(?:(?:then|do|else|elif|if|while|until|!|\{|time|nohup|command|env|sudo|exec|xargs"
     r"|timeout(?:\s+-\S+)*\s+[0-9]\S*)\s+)*"
     r"(?:[A-Za-z_]\w*=\S*\s+)*"

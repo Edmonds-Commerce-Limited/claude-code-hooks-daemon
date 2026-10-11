@@ -205,6 +205,10 @@ class TestPrintedKeywordsAreNotMessages:
             "echo `git commit -m 'fixes #3'`",
             "cd repo\ngit commit -m 'fixes #3'",
             "git commit -m 'note; fixes #3'",
+            "do_it() { git commit -m 'fixes #3'; }; do_it",
+            "function do_it { git commit -m 'fixes #3'; }; do_it",
+            "do_it() ( git commit -m 'fixes #3' ); do_it",
+            "do_it()\n{\n  git commit -m 'fixes #3'\n}\ndo_it",
         ],
     )
     def test_real_message_still_denies(self, command: str) -> None:
