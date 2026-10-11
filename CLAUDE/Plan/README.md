@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00504: remote docs refresh keeps recorded fidelity](00504-remote-docs-refresh-keeps-recorded-fidelity/PLAN.md) - In Progress (#73: `remote-docs refresh` uses one `--verbatim` flag for every target instead of each document's recorded fidelity)
-
 - [00501: session modes](00501-session-modes/PLAN.md) - Not Started, Medium (#91; first-class per-session modes shown in the status line: focus (`hooks-daemon focus <task>`), BLOCKED (awaiting-human, goal-blocked loop breaker), usage-paused; per-session awaiting-human storage; guards never gated)
 
 - [00496: upstream feature requests and issue kinds](00496-upstream-feature-requests-and-issue-kinds/PLAN.md) - Not Started (owner request: a formal process for project agents to file feature requests and other non-defect issues, mirroring the defect generator, guard and forms; security reports routed privately)
@@ -193,6 +191,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00504: remote docs refresh keeps recorded fidelity](Completed/00504-remote-docs-refresh-keeps-recorded-fidelity/PLAN.md) - Complete at merge `78f03e21e` + the archiving commit (#73: `remote-docs refresh` re-fetches each document in the fidelity its provenance records, so verbatim stays verbatim; `--verbatim` still forces verbatim for every target; release note 026 in UNRELEASED)
+
 - [00488: status line visible during daemon outage](Completed/00488-status-line-visible-during-daemon-outage/PLAN.md) - Complete at `2790de8eb` + `7e8e71e5b` + `a468e29c7` + `9517a3c7f` + the archiving commit (owner request, #72: the status-line forwarder exits 0 on its down path and names venv building, venv missing and version mismatch; a raw self-install clone builds its own venv; the build window fails open, announced, per a coordinator ruling (RULING-3.2); a startup race no longer denies)
 
 - [00503: remove upgrade owner approval](Completed/00503-remove-upgrade-owner-approval/PLAN.md) - Complete at merge `6976bf009` + the archiving commit (owner request, #112: the exit-4 owner approval, `approve-upgrade`, the approval markers and `upgrade_approval_guard` removed; breaking items lead the exit-3 reading, large jumps get phasing advice, and an old config naming the guard still validates; release note 022 in UNRELEASED)
@@ -251,8 +251,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00445: acceptance harness honours the socket override](Completed/00445-acceptance-harness-honours-the-socket-override/PLAN.md) - Complete at `c4eeebdf` + the archiving commit (from 00422 N6 fault 2, which was not the worktree fault that entry assumed: the autouse env-isolation fixture strips the documented `CLAUDE_HOOKS_SOCKET_PATH` workaround from every wrapper subprocess)
 
-- [00444: gitfacts generic core moves to utils](Completed/00444-gitfacts-generic-core-moves-to-utils/PLAN.md) - Complete at `4db75ead` + the archiving commit (from 00422 N14: `docs_qa` depended on `plan_qa` for read-only git plumbing, and the ledger's "nothing about it is plan-specific" was overstated — `plan_counter()` is — so the generic core split out to `utils/git_facts.py` with `GitFacts` subclassing it, taking the ratchet's declared edges from four to two)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -306,9 +304,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 504 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 429 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 430 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 52 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 51 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

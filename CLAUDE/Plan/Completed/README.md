@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00444: gitfacts generic core moves to utils](00444-gitfacts-generic-core-moves-to-utils/PLAN.md) - Complete at `4db75ead` + the archiving commit (from 00422 N14: `docs_qa` depended on `plan_qa` for read-only git plumbing, and the ledger's "nothing about it is plan-specific" was overstated — `plan_counter()` is — so the generic core split out to `utils/git_facts.py` with `GitFacts` subclassing it, taking the ratchet's declared edges from four to two)
+
 - [00443: acceptance skip reason names the overflow](00443-acceptance-skip-reason-names-the-overflow/PLAN.md) - Complete at `0d84fb7e` + the archiving commit (from 00422 N6 remedy 2: the acceptance fixtures blamed a stopped daemon for an absent socket, so an over-limit checkout was told to restart — which reproduces the skip; remedy 3 declined with reasoning now that remedy 1 refuses loudly at creation time)
 
 - [00442: host name ladder falls through](00442-host-name-ladder-falls-through/PLAN.md) - Complete at `9acb1684` + the archiving commit (from 00422 N5 row (e): the documented "ladder, first hit wins" stopped at rung 2 when `gethostname()` cleaned to nothing — and the suite already asserted the fall-through principle for a rung where it could never be exercised)

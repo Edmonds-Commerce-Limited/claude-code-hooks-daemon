@@ -1,6 +1,6 @@
 # Plan 00504: remote docs refresh keeps recorded fidelity
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-11
 **Owner**: dev
 **Priority**: Medium
@@ -48,16 +48,21 @@ a document captured with `add --verbatim` becomes an extraction after a plain
 
 ### Phase 2: Land
 
-- [ ] ⬜ **Task 2.1**: Review, coordinator checks, merge; comment on #73 and
-  close it.
+- [x] ✅ **Task 2.1**: Review, coordinator checks, merge; comment on #73 and
+  close it. The coordinator reviewed the diff and ran black, mypy and the
+  remote-docs tests (312 passed), then merged at `78f03e21e`. Range QA over
+  `b4e081266..1a9ada815` passed 119 changed tests with 0 failed. Its only reds
+  are the designed ones: `cli.py` is unmapped as `too-broad`, and `plan_qa`
+  has an advisory journal-freshness finding for Plan 00495.
 
 ## Success Criteria
 
-- [ ] A mixed-fidelity corpus refreshes with no flag and keeps every
+- [x] A mixed-fidelity corpus refreshes with no flag and keeps every
   document's recorded fidelity.
-- [ ] `--verbatim` still overrides.
-- [ ] The release-bound consequence, a behaviour change in `refresh`, is in the
-  pending-release holding area as a release note.
+- [x] `--verbatim` still overrides.
+- [x] The release-bound consequence, a behaviour change in `refresh`, is in the
+  pending-release holding area as release note 026 in
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
 ## Delivery & Milestones
 
