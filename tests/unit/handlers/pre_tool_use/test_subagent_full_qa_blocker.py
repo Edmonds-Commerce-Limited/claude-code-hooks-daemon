@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import pytest
+from tests.load_scaling import scaled_cpu_seconds
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -3286,7 +3287,6 @@ class TestInlineCodeFlagIsNotReadOnSearchAndTextTools:
             "podman run -e A=1 img cmd",
             "docker exec -e A=1 ctr cmd",
             "docker run -e A=1 img",
-            "/usr/bin/docker run -e A=1 img cmd",
         ],
     )
     def test_a_container_runtime_env_flag_before_the_image_is_not_unseen(
@@ -3294,6 +3294,34 @@ class TestInlineCodeFlagIsNotReadOnSearchAndTextTools:
     ) -> None:
         """N419: `docker run -e KEY=V IMG` -- the `-e` is docker's env flag."""
         assert find_full_qa_invocation(command, _patterns()) is None, command
+
+    @pytest.mark.parametrize("size_over_budget", [0, 1])
+    @pytest.mark.parametrize("present", [False, True])
+    def test_an_absolute_path_container_runtime_is_judged_like_a_bare_one(
+        self, tmp_path: Path, present: bool, size_over_budget: int
+    ) -> None:
+        """The verdict never depends on what the host has installed at that path.
+
+        A real ``/usr/bin/docker`` is a binary far past the read budget; it was
+        read as unseen code, so the same command passed on a host with no docker
+        and was denied on one with it.
+        """
+        program = tmp_path / "docker"
+        if present:
+            size = _blocker_module._MAX_READ_BYTES + size_over_budget
+            program.write_bytes(b"\x7fELF\x00" + b"\x00" * size)
+        command = f"{program} run -e A=1 img cmd"
+        assert find_full_qa_invocation(command, _patterns()) is None, command
+
+    def test_a_script_past_the_read_budget_without_a_nul_is_still_unseen(
+        self, tmp_path: Path
+    ) -> None:
+        """Only a binary is excused: text code too large to read cannot be judged."""
+        script = tmp_path / "big.sh"
+        script.write_bytes(b"#!/bin/sh\n" + b"# x\n" * (_blocker_module._MAX_READ_BYTES // 4 + 1))
+        script.chmod(0o755)
+        match = find_full_qa_invocation(str(script), _patterns())
+        assert match is not None and match.pattern_id == "code-that-cannot-be-read"
 
     @pytest.mark.parametrize(
         "command",
@@ -4111,7 +4139,7 @@ class TestResidualRoutesReviewRound2:
         script.write_text(code, encoding="utf-8")
         start = time.perf_counter()
         find_full_qa_invocation(f"python3 {script}", _patterns(), cwd=_REPO_ROOT)
-        assert time.perf_counter() - start < 1.5
+        assert time.perf_counter() - start < scaled_cpu_seconds(1.5)
 
     def test_many_appends_each_run_are_judged_quickly(self, tmp_path: Path) -> None:
         body = "".join(f"a.append('x{i}')\nsubprocess.run(a)\n" for i in range(2000))
@@ -4119,7 +4147,7 @@ class TestResidualRoutesReviewRound2:
         script.write_text("import subprocess\na=['ruff']\n" + body, encoding="utf-8")
         start = time.perf_counter()
         find_full_qa_invocation(f"python3 {script}", _patterns(), cwd=_REPO_ROOT)
-        assert time.perf_counter() - start < 1.5
+        assert time.perf_counter() - start < scaled_cpu_seconds(1.5)
 
 
 _PTY_RUN = "import pty\n"
@@ -4350,7 +4378,7 @@ class TestListEditsAndExecRoutesReachAFullRun:
         script.write_text(body + f"{_EXEC}(s0)\n", encoding="utf-8")
         start = time.perf_counter()
         find_full_qa_invocation(f"python3 {script}", _patterns(), cwd=tmp_path)
-        assert time.perf_counter() - start < 1.5
+        assert time.perf_counter() - start < scaled_cpu_seconds(1.5)
 
     def test_many_chains_and_literal_loops_are_judged_quickly(self, tmp_path: Path) -> None:
         body = "".join(
@@ -4359,7 +4387,7 @@ class TestListEditsAndExecRoutesReachAFullRun:
             f"    {_EXEC}(s{i})\n"
             for i in range(1500)
         )
-        assert self._timed(tmp_path, body) < 1.5
+        assert self._timed(tmp_path, body) < scaled_cpu_seconds(1.5)
 
     def test_a_restart_in_place_is_judged_like_the_subprocess_form(self, root: Path) -> None:
         code = "import os, sys\nos.execv(sys.executable, [sys.executable] + sys.argv)"
@@ -4382,18 +4410,20 @@ class TestListEditsAndExecRoutesReachAFullRun:
     )
     def test_many_edits_each_run_are_judged_quickly(self, tmp_path: Path, edit: str) -> None:
         body = "".join(f"{edit.format(i=i)}\nsubprocess.run(a)\n" for i in range(2000))
-        assert self._timed(tmp_path, f"import subprocess\na=['ruff']\n{body}") < 1.5
+        code = f"import subprocess\na=['ruff']\n{body}"
+        assert self._timed(tmp_path, code) < scaled_cpu_seconds(1.5)
 
     def test_many_exec_and_spawn_calls_are_judged_quickly(self, tmp_path: Path) -> None:
         body = "".join(
             f"a.append('x{i}')\nos.execvp('ls', a)\nos.execl('ls', 'ls', *a)\npty.spawn(a)\n"
             for i in range(1500)
         )
-        assert self._timed(tmp_path, f"import os, pty\na=['ruff']\n{body}") < 1.5
+        code = f"import os, pty\na=['ruff']\n{body}"
+        assert self._timed(tmp_path, code) < scaled_cpu_seconds(1.5)
 
     def test_many_open_exec_calls_are_judged_quickly(self, tmp_path: Path) -> None:
         body = "".join(f"f = open('f{i}.py')\n{_EXEC}(f.read())\n" for i in range(1500))
-        assert self._timed(tmp_path, body) < 1.5
+        assert self._timed(tmp_path, body) < scaled_cpu_seconds(1.5)
 
 
 class TestAProtectedFileIsNeverRead:
