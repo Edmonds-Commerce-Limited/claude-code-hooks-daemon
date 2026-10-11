@@ -41,6 +41,16 @@ class TestInvocationDirectory:
         run = _only("git -C /elsewhere status")
         assert invocation_directory(run, Path("/start")) == Path("/elsewhere")
 
+    @pytest.mark.parametrize("prefix", ["builtin", "command", "command -p"])
+    def test_a_cd_behind_a_builtin_or_command_prefix_moves(self, prefix: str) -> None:
+        run = _only(f"{prefix} cd sub && git status")
+        assert invocation_directory(run, Path("/start")) == Path("/start/sub")
+
+    @pytest.mark.parametrize("prefix", ["command -v", "command -V"])
+    def test_command_lookup_flags_do_not_move(self, prefix: str) -> None:
+        run = _only(f"{prefix} cd && git status")
+        assert invocation_directory(run, Path("/start")) == Path("/start")
+
 
 @pytest.fixture()
 def checkout(tmp_path: Path) -> Path:

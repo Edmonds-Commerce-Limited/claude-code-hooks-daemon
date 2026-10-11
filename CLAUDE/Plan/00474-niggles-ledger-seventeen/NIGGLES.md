@@ -1489,10 +1489,31 @@ allowed because the tool binary is the readable file that gets judged. Without `
 allowed too. Pinned by `TestVariableToolUnderSteeringIsPinned` in
 `tests/unit/handlers/pre_tool_use/test_upgrade_approval_guard.py`, which asserts today's deny so that a fix flips it.
 
-**Status**: ⬜ Open. Remedy: in `_variable_program_is_upgrade`, when the program word is a variable and the command
-carries no upgrade entry point (`_UPGRADE_ENTRY_RE`) and no upgrade-shaped argument (`_UPGRADE_SHAPED_ARG_RE`), do not
-treat an unreadable first operand as "cannot tell"; keep the deny only when the program or the operand is itself
-unresolvable AND the command names the upgrade (the gate's own scripts). Not fixed in batch L.
+**Status**: ✅ Fixed by batch O (merged; review approved: every shape now allowed for `$V/X` was already allowed for `X`
+named directly). `_variable_program_is_upgrade` now takes the program word. When it ends in a literal tool name
+(`$V/ruff`; not a shell, wrapper or python, which `_program_is_literal_tool` excludes) and no argument carries an
+expansion, "cannot tell" no longer counts as the upgrade under a steering variable: upgrade-shaped arguments
+(`--project-root`, the daemon dir) still deny, and a readable script operand is still judged by content. A bare `$V`,
+`$V/python`, `$V/bash`, `$V/env` or an expanded operand keeps the old deny. Owner ruling B5 ("A guard denies only on a
+positive finding", OWNER-RULINGS-261006.md) is the basis for allowing an unreadable-operand tool with no finding
+against it. `TestVariableToolUnderSteering` (the former Pinned class) asserts the allow; corpus rows `n410-*`.
+
+Residual, from the batch O review (`untracked/agent-reports/auto/261011-052052-code-reviewer-a12043eb8bcf00a07.md`):
+
+- ✅ cleared by batch P: The handler docstring (`upgrade_approval_guard.py` ~877-886) does not describe the new
+  `$V/<tool>` branch.
+- ✅ cleared by batch P: Only the FIRST operand is judged for the handoff signature, so `$V/tool run <sig>`,
+  `$V/tool --flag val <sig>` and `$V/tool < <sig>` pass; the test docstring (~1395-1405) says "a readable script
+  operand". Now every non-option operand (a leading `<` stripped) is judged by content.
+- ✅ cleared by batch P: `_SHELL_HEADS` (~265) omits `ash`, `mksh`, `yash`, `fish`, `tcsh`, `csh` and `busybox`
+  (added; `busybox sh x` is read as the applet `sh x`).
+- ✅ cleared by batch P: No corpus/test row pins the decision for `$V/hooks-daemon upgrade`. Pinned, but as ALLOW, not
+  deny: `upgrade` is the skill's name; the CLI has no `upgrade` subcommand (`bin/hooks-daemon upgrade` runs nothing), so
+  the entry points are the scripts, which `$V/upgrade.sh` under a steering variable still denies. Owner: say so if the
+  word should be denied anyway.
+- ✅ cleared by batch P: `CLAUDE/QA.md` says `merge_qa_advisor` prints the `--range` command "after every merge"; it does so only when the
+  merged head has no green record, and the advisor's own text (~246) says "selects nothing" where a bare `changed` on
+  main now refuses.
 
 ### N409 — `subagent_full_qa_blocker` denies an ordinary `python3 script.py` as a whole-suite run
 
@@ -1626,12 +1647,13 @@ none a regression against main:
 - A redirect on a `{ … }` or `if … fi` group is judged from inside the group, so `{ cd /tmp && make; } > x` is denied
   though `x` lands in the repository (a false deny only). Remedy: give a group's redirects the directory in effect
   before it opened.
-- A process substitution target after a `cd` (`cd /tmp && echo hi > >(cat)`) is read as a file name and denied.
-  Remedy: skip `>(`/`<(` targets in `_write_redirects`.
-- `command cd /tmp` is not read as a move (`_after_directory_change` strips `builtin`, not `command`); the git gates
-  share the gap.
-- Test data at `test_git_commit_parsing.py` ~624-638 writes operators with a trailing space and strips it in the
-  assertion; write them plainly.
+- ✅ cleared by batch P: A process substitution target after a `cd` (`cd /tmp && echo hi > >(cat)`) is read as a file
+  name and denied. `>(`/`<(` targets are skipped in `_write_redirects`.
+- ✅ cleared by batch P: `command cd /tmp` is not read as a move (`_after_directory_change`, in
+  `utils/git_commit_parsing.py`, strips `builtin`, not `command`). `command [-p]` is now transparent (`command -v cd`
+  is not a move); the git gates read directories through the same function, pinned via `invocation_directory`.
+- ✅ cleared by batch P: Test data at `test_git_commit_parsing.py` ~624-638 writes operators with a trailing space and
+  strips it in the assertion; written plainly now.
 
 ### N402 — the conflict-marker commit gate denies `cd "$(git rev-parse --show-toplevel)" && git commit`
 
@@ -2148,13 +2170,16 @@ changed module, so a targeted run by name or import never selects them. Two more
   them off the host-wide QA lock while the full gate ran. That is why no branch carried a green `changed` record, and
   `changed` would have run these whole-repo checks.
 
-**Status**: 🔄 Fixing. The six regressions are on a worktree branch, after a fact-check refuted two of this entry's
-first-draft claims. The remedies:
+**Status**: 🟢 Fixed. The six regressions were fixed on a worktree branch, after a fact-check refuted two of this
+entry's first-draft claims. The remedies:
 
 1. Done in 8c9ac4cf4: `merge_qa_advisor` prints the exact `--range <pre-merge head>..HEAD` command.
 2. Agents run `llm_qa.py changed` on their own branch before handing off, except while the coordinator's full gate
    holds the lock.
 3. The coordinator runs `changed --range <pre-merge>..HEAD` after every merge onto main.
+
+Items 2 and 3 were the unchecked part: `CLAUDE/QA.md` carried the split table but not the lock exception nor the
+bare-`changed`-refuses-on-main consequence. Both are now stated under that table. No owner decision is involved.
 
 ### N379 — a branch merged after a green gate that never saw it
 
@@ -2389,12 +2414,14 @@ Residual, from the batch K review (none a regression):
   `*/*/` only, while the daemon's `highest_plan_number` searches every non-numbered subfolder at any depth, so a plan
   at `Completed/2025/00300-x` is counted by the daemon and missed by mkplan; the comment at ~187 claiming the scan
   "mirrors the daemon's" is wrong. Remedy: one scan, pinned by a shared fixture test.
-- The counter-only fallback advice (`plan_number_helper.py` ~767, and the CLAUDE.md block generated from it) still
+- ✅ cleared by batch P (CLAUDE.md block regenerates on the coordinator's daemon restart): The counter-only fallback
+  advice (`plan_number_helper.py` ~767, and the CLAUDE.md block generated from it) still
   says "read the counter and add 1", which reuses a number when the counter lags. Remedy: take the higher of the
   counter and the highest plan on disk, then add 1.
 - `CLAUDE/Routine/mkroutine.bash` (~226-229) still refuses when its own counter lags the disk. Remedy: the same
   advance, with a test.
-- No test asserts `CLAUDE/Plan/mkplan.bash` is byte-identical to the bundled template; a one-sided edit is caught only
+- ✅ cleared by batch P (`tests/unit/scripts/test_mkplan_template_parity.py`): No test asserts
+  `CLAUDE/Plan/mkplan.bash` is byte-identical to the bundled template; a one-sided edit is caught only
   by the session-start `deployed_artefact_drift` advisory. Remedy: a byte-parity unit test.
 
 ### N370 — the sed guard denies a `git -C <dir> commit -m` message that mentions an in-place sed edit
@@ -2432,7 +2459,7 @@ test hermetic against an inherited root. Then confirm the test passes inside a w
 (1 failed, 6 passed). There `.claude/hooks-daemon.env` is a symlink to main's `/workspace/.claude/hooks-daemon.env`
 (`HOOKS_DAEMON_ROOT_DIR="/workspace"`), `init.sh:1213-1220` sources it over any inherited variable (so the test cannot
 override it through the subprocess env), and the launcher reports "Daemon already running" for main's daemon
-(`--project-root /workspace`) which never becomes ready for the Stop probe. `setup_worktree.sh:380-395` writes a
+(`--project-root /workspace`) which never becomes ready for the Stop probe. `setup_worktree.sh:377-399` writes a
 checkout-correct file, so a worktree it builds is likely fine (not run here). Remaining fix: make harness worktree
 creation write that file the same way, or have the test skip when the env file resolves outside `REPO_ROOT`.
 
@@ -2477,7 +2504,7 @@ timeout under host load (N344's class).
 
 **Status**: ✅ Fixed (agent-a5313785be3bc54d9-56f41b13, c213595a8) for the recipe: every documented install path already
 uses the lock (`CONTRIBUTING.md:21` and `setup_worktree.sh` use `uv sync --frozen --all-extras`); the one remaining
-off-lock recipe, the missing-semgrep remedy in `scripts/qa/run_semgrep_check.sh:49` (`uv pip install -e '.[dev]'`),
+off-lock recipe, the missing-semgrep remedy in `scripts/qa/run_semgrep_check.sh:51` (`uv pip install -e '.[dev]'`),
 now says `uv sync --frozen --all-extras`, pinned by a test. The coordinator's own recipe lives outside the repository.
 The second bullet (ruff 0.16 findings in the supervisor asset, pytest 9.1 option grammar) cannot reproduce on the
 locked ruff 0.15.11 / pytest 9.0.3 and stays a precondition of any lock bump, not a present defect.
@@ -2601,7 +2628,18 @@ a tag-named branch, substitutions and any git failure stay denied, and every ref
 
 Worth weighing: a docs-QA or commit check that a new entry matches a "visibly fake" shape.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed (batch M, branch `agent-a96662d45657fac9f-f9ac030c`). The header comment existed (`.claude/fake-values.yaml`)
+but was one paragraph; it is now a large STOP banner saying every change must be a clear fake. The registry is
+pre-filled with six more kinds (`email-address`, `password`, `api-token`, `hostname`, `person-name`, `home-path`), all
+`fake`-word or repeated-character values and none given a `fake_looking` regex, so no remote-docs swap or sweep
+behaviour changes. `FakeValuesRegistry.not_visibly_fake()` defines "visibly fake" (the word `fake`, or one character
+repeated eight times) and the `unlisted-fake-value` SWEEP check reports any registry entry that is not, at ADVISE like
+its sibling findings. Tests: `TestNotVisiblyFake` in `tests/unit/utils/test_fake_values.py` and
+`TestRegistryEntriesMustLookFake` in `tests/unit/docs_qa/checks/test_unlisted_fake_value.py` (10 red before the fix).
+Not done: a commit-time BLOCK for a bad entry (the sweep advises only); the owner ruling C7 names no severity.
+Recorded residual: "visibly fake" is a substring heuristic (`fake` anywhere, or one character repeated eight times), so
+a real-looking value that merely contains `fake` or ends in a long run still passes. Tighten it (require that little
+remains once `fake` and repeated runs are removed) if the registry ever takes entries from outside this repository.
 
 ### N360 — an upgrade should keep running the opt-in handlers that were running before it
 
@@ -2610,7 +2648,22 @@ each opt-in handler that was running before, so the project's real configuration
 then tell the agent what it did, why, and how to change it. Plan 00493's report found the losses but did not restore
 them.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed (batch M, branch `agent-a96662d45657fac9f-f9ac030c`), following owner ruling C6 (written in
+`CLAUDE/Plan/Completed/00483-threat-model-conformance-audit/OWNER-RULINGS-261006.md`). `check-effective-handlers`
+takes `--apply`, which `scripts/upgrade.sh` now passes: `apply_restore` in
+`src/claude_code_hooks_daemon/install/effective_handlers.py` inserts `enabled: true` for each handler that would stop,
+textually (comments and layout survive; an empty inline `{}` for `handlers:` or an event is opened up), re-parses the
+result, and writes only if every restored handler resolves as enabled. Any layout it cannot edit safely is left
+untouched and the report falls back to the YAML snippet, saying so. The report now says what was written, why (the
+project's real config carries across upgrades) and how to change it (`enabled: false` or delete the block). Release
+note `CLAUDE/UPGRADES/UNRELEASED/release-notes/018-…`. Tests: `tests/unit/install/test_effective_handlers_apply.py`
+and `test_the_apply_flag_is_forwarded_and_defaults_off` (the new file failed to import and the CLI test failed before
+the fix). Not covered: a handler the project "specifically decided against" (the ruling says not to worry about it).
+Review round 1 follow-ups: the write is atomic (temp file in the same directory, `os`-level replace through a symlink,
+mode kept, `OSError` falls back to the snippet), CRLF is preserved, a config listed under `write_protected_paths` is
+never written, `upgrade.sh` retries without `--apply` on exit 2, records `restored:` (not `stops:`) in the metadata,
+corrects its "never edits your config" and "config file unchanged" messages, and tells the agent to restart the daemon
+(the write happens after Layer 2's restart).
 
 ### N359 — the plan fact-check feed points at the wrong files, diffs whole folders, and can consume a check unseen
 

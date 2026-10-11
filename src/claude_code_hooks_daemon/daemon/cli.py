@@ -4408,6 +4408,7 @@ def cmd_check_effective_handlers(args: argparse.Namespace) -> int:
             to_version=args.to_version,
             config_path=config_path,
             output_format=args.format,
+            apply=getattr(args, "apply", False),
         )
     except ConfigYamlError as e:
         print(f"ERROR: {e}", file=sys.stderr)
@@ -10702,6 +10703,14 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["text", "json"],
         default="text",
         help="Output format: text (default) or json",
+    )
+    parser_effective.add_argument(
+        "--apply",
+        action="store_true",
+        help=(
+            "Write `enabled: true` into the config for each handler that would stop running, "
+            "so the project keeps what it ran before (N360)"
+        ),
     )
     parser_effective.set_defaults(func=cmd_check_effective_handlers)
 

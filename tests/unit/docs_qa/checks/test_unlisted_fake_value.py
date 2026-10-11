@@ -144,3 +144,21 @@ class TestEdit:
     def test_non_markdown_is_not_judged(self, tmp_path: Path, relative: str) -> None:
         root = _project(tmp_path)
         assert _edit(root, relative, f"session {_UNLISTED}\n") == []
+
+
+class TestRegistryEntriesMustLookFake:
+    """N361 (owner ruling C7): a registry entry that does not look fake is a finding."""
+
+    def test_a_real_looking_entry_is_a_finding_on_the_registry(self, tmp_path: Path) -> None:
+        real_looking = "-".join(("8e11bfb5", "7dc2", "432b", "9206", "928fa5c35731"))
+        root = _project(tmp_path, registry=_REGISTRY + f"      - '{real_looking}'\n")
+        findings = _sweep(root)
+        assert len(findings) == 1
+        assert findings[0].path == REGISTRY_RELATIVE_PATH
+        assert findings[0].severity is Severity.ADVISE
+        assert real_looking in findings[0].message
+        assert "session-uuid" in findings[0].message
+        assert "obviously fake" in findings[0].remediation
+
+    def test_an_all_fake_registry_is_clean(self, tmp_path: Path) -> None:
+        assert _sweep(_project(tmp_path)) == []

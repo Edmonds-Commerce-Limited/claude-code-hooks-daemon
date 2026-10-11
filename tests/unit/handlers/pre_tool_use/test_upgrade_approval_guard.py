@@ -1392,17 +1392,17 @@ class TestDenyMessageContent:
         assert "scripts/upgrade.sh" in result.reason
 
 
-class TestVariableToolUnderSteeringIsPinned:
-    """N410: a QA tool reached through a variable is denied once ``PYTHONPATH`` is set.
+class TestVariableToolUnderSteering:
+    """N410: a QA tool reached through a variable is allowed under ``PYTHONPATH``.
 
-    No upgrade is run. The trigger is the conjunction of (a) a steering variable
-    (``PYTHONPATH`` matches ``PYTHON*``) anywhere in the command and (b) a program
-    word that is a variable (``$V/ruff``) whose first positional operand is not a
-    readable file (``check``, ``src``): ``_variable_program_is_upgrade`` then
-    reports "cannot tell", which counts as the upgrade once something steers. The
-    same tools by literal path are allowed because the tool binary itself is the
-    readable file that gets judged. These tests pin TODAY's verdict so that fixing
-    N410 flips them deliberately.
+    No upgrade is run, and nothing in the command names one: the program word
+    has a literal tool name (``$V/ruff``) that is not an upgrade entry point,
+    an interpreter, a shell or a wrapper, and its operands are not
+    upgrade-shaped. Owner ruling B5 (OWNER-RULINGS-261006.md): "A guard denies
+    only on a positive finding." A variable-program tool given a readable file
+    at ANY operand position (past option words and a ``<`` redirect) is still
+    judged by that file's content, and a program or
+    operand that is itself unresolvable still counts as the upgrade.
     """
 
     _BIN = "/opt/venv/bin"
@@ -1410,11 +1410,103 @@ class TestVariableToolUnderSteeringIsPinned:
     @pytest.mark.parametrize(
         "tool", ["black --check --target-version py311 src", "ruff check src", "mypy src"]
     )
-    def test_variable_tool_with_pythonpath_is_denied_today(
+    def test_variable_tool_with_pythonpath_is_allowed(
         self, handler: UpgradeApprovalGuardHandler, tool: str
     ) -> None:
         command = f"V={self._BIN} && PYTHONPATH=/w/src $V/{tool}"
+        assert handler.matches(_bash(command)) is False
+
+    @pytest.mark.parametrize("tool", ["ruff", "ruff --version", "black --version"])
+    def test_variable_tool_without_operand_is_allowed(
+        self, handler: UpgradeApprovalGuardHandler, tool: str
+    ) -> None:
+        assert handler.matches(_bash(f"PYTHONPATH=/w/src $V/{tool}")) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "PYTHONPATH=/w/src $V/ruff --project-root /p",
+            "PYTHONPATH=/w/src $V/ruff .claude/hooks-daemon",
+            "PYTHONPATH=/w/src $V/upgrade.sh",
+            "PYTHONPATH=/w/src $V/ruff $TARGET",
+            "PYTHONPATH=/w/src $V check src",
+            "PYTHONPATH=/w/src $V/bash up.sh",
+            "PYTHONPATH=/w/src $V/python up.py",
+            "PYTHONPATH=/w/src $V/env sh up.sh",
+        ],
+    )
+    def test_unresolvable_or_upgrade_shaped_variable_program_is_still_denied(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
         assert handler.matches(_bash(command)) is True
+
+    def test_variable_tool_given_a_readable_upgrade_script_is_denied(
+        self, handler: UpgradeApprovalGuardHandler, tmp_path: Path
+    ) -> None:
+        script = tmp_path / "renamed.sh"
+        script.write_text("HOOKS_DAEMON_UPGRADE_HANDOFF=1\n")
+        assert handler.matches(_bash(f"PYTHONPATH=/w/src $V/tool {script}")) is True
+
+    @pytest.mark.parametrize(
+        "shape",
+        [
+            "run {script}",
+            "--flag val {script}",
+            "< {script}",
+            "<{script}",
+            "check src {script}",
+        ],
+    )
+    def test_readable_upgrade_script_at_any_operand_position_is_denied(
+        self, handler: UpgradeApprovalGuardHandler, tmp_path: Path, shape: str
+    ) -> None:
+        script = tmp_path / "renamed.sh"
+        script.write_text("HOOKS_DAEMON_UPGRADE_HANDOFF=1\n")
+        operands = shape.format(script=script)
+        assert handler.matches(_bash(f"PYTHONPATH=/w/src $V/tool {operands}")) is True
+
+    def test_variable_tool_given_an_ordinary_readable_file_is_allowed(
+        self, handler: UpgradeApprovalGuardHandler, tmp_path: Path
+    ) -> None:
+        readable = tmp_path / "notes.txt"
+        readable.write_text("nothing here\n")
+        assert handler.matches(_bash(f"PYTHONPATH=/w/src $V/tool run --out x {readable}")) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "bin/hooks-daemon upgrade",
+            "$V/hooks-daemon upgrade",
+            "PYTHONPATH=/w/src $V/hooks-daemon upgrade",
+        ],
+    )
+    def test_hooks_daemon_upgrade_word_is_not_an_entry_point(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        """`upgrade` is the skill's name, not a CLI subcommand (the CLI has none,
+        so this runs nothing); the entry points are the scripts the skill shims
+        to, which are denied by name whatever leads the program word."""
+        assert handler.matches(_bash(command)) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "PYTHONPATH=/w/src $V/upgrade.sh",
+            "PYTHONPATH=/w/src $V/hooks-daemon-skill/scripts/upgrade.sh",
+        ],
+    )
+    def test_variable_led_upgrade_script_is_denied(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is True
+
+    @pytest.mark.parametrize("shell", ["ash", "mksh", "yash", "fish", "tcsh", "csh", "busybox sh"])
+    def test_every_common_shell_reading_the_upgrade_script_is_denied(
+        self, handler: UpgradeApprovalGuardHandler, tmp_path: Path, shell: str
+    ) -> None:
+        script = tmp_path / "renamed.sh"
+        script.write_text("HOOKS_DAEMON_UPGRADE_HANDOFF=1\n")
+        assert handler.matches(_bash(f"PYTHONPATH=/w/src {shell} {script}")) is True
 
     @pytest.mark.parametrize(
         "tool", ["black --check --target-version py311 src", "ruff check src", "mypy src"]

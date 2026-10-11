@@ -70,6 +70,25 @@ def _registry_finding(error: FakeValuesError) -> Finding:
     )
 
 
+def _not_visibly_fake_findings(registry: FakeValuesRegistry) -> list[Finding]:
+    return [
+        Finding(
+            check_id=CHECK_ID,
+            severity=Severity.ADVISE,
+            message=(
+                f"`{REGISTRY_RELATIVE_PATH}` lists `{value}` as a `{kind}` fake, but it does "
+                "not look obviously fake."
+            ),
+            remediation=(
+                "Replace it with a value that is obviously fake without anyone knowing it is "
+                "one: the word `fake`, or a character repeated eight or more times."
+            ),
+            path=REGISTRY_RELATIVE_PATH,
+        )
+        for kind, value in registry.not_visibly_fake()
+    ]
+
+
 def _unreadable_finding(rel_path: str, error: Exception) -> Finding:
     return Finding(
         check_id=CHECK_ID,
@@ -125,9 +144,9 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
     registry, problems = _load(context)
     if registry is None:
         return problems
+    findings = _not_visibly_fake_findings(registry)
     if not any(entry.fake_looking is not None for entry in registry.kinds.values()):
-        return []
-    findings: list[Finding] = []
+        return findings
     for rel_path in context.markdown_paths or ():
         abs_path = authored_path(context.project_root, rel_path)
         if not abs_path.is_file():

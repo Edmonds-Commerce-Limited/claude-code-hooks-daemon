@@ -869,6 +869,9 @@ _DIRECTORY_POPPER: Final[str] = "popd"
 _CD_OPTIONS: Final[frozenset[str]] = frozenset({"-P", "-L", "-e", "-@"})
 _HOME: Final[str] = "~"
 _BUILTIN: Final[str] = "builtin"
+_COMMAND_PREFIX: Final[str] = "command"
+#: Words that run the command after them unchanged, so a `cd` behind them moves.
+_TRANSPARENT_PREFIXES: Final[frozenset[str]] = frozenset({_BUILTIN, _COMMAND_PREFIX})
 _ASSIGNMENT_WORD: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 
 
@@ -976,6 +979,8 @@ def _write_redirects(words: list[str], start: int, end: int) -> tuple[tuple[str,
             continue
         if operator == ">&" and _DESCRIPTOR_TARGET.fullmatch(target):
             continue
+        if target.startswith((">(", "<(")):
+            continue  # a process substitution, not a file
         found.append((operator, target))
     return tuple(found)
 
@@ -1089,7 +1094,16 @@ def _after_directory_change(
 ) -> tuple[str | None, ...]:
     """``directory`` after ``segment`` when it is a ``cd``/``pushd``/``popd``."""
     words = segment
-    while words and (words[0] in SHELL_RESERVED_COMMAND_PREFIXES or words[0] == _BUILTIN):
+    while words and (
+        words[0] in SHELL_RESERVED_COMMAND_PREFIXES or words[0] in _TRANSPARENT_PREFIXES
+    ):
+        if words[0] == _COMMAND_PREFIX:
+            words = words[1:]
+            if words[:1] == ["-p"]:
+                words = words[1:]
+            if words[:1] and words[0].startswith("-"):
+                return directory  # `command -v cd` looks `cd` up, it does not run it
+            continue
         words = words[1:]
     if not words:
         return directory

@@ -455,6 +455,18 @@ does not keep it.
 | Sub-agent (any kind) | `./scripts/qa/llm_qa.py changed`, plus named tools the change calls for (`llm_qa.py handler_reference docs_qa ...`) and `pytest` on explicit test files or directories narrower than `tests/unit`                      | A commit hash and the targeted results                                    |
 | Coordinator          | The same `llm_qa.py changed` over the combined head when it merges branches (`--no-ff`), or the static checks under "Before Merging" for a branch with no targeted result. `llm_qa.py all` only at release preparation | A fast-forward of `main`, or the failures sent back to the branch's agent |
 
+Two details of the split, because a green targeted run by name or import
+selects nothing that guards a property every handler or payload read must
+satisfy (the cross-cutting checks):
+
+- A sub-agent runs `llm_qa.py changed` on its own branch before handing over.
+  The only exception is while the coordinator's full gate holds the host-wide
+  QA lock; the hand-over then says the run is owed.
+- On `main` itself a bare `llm_qa.py changed` refuses (HEAD is the base), so
+  the coordinator runs `llm_qa.py changed --range <pre-merge head>..HEAD`
+  after a merge onto `main`. `merge_qa_advisor` prints that exact command only
+  when the merged head has no green record.
+
 ### The Targeted Tier in Detail
 
 `llm_qa.py changed` runs EVERY cheap repo-wide static check on every run,

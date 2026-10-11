@@ -158,13 +158,13 @@ CLAUDE/Plan/mkplan.bash "descriptive-kebab-name"
 
 (Use the project's configured plan directory if it is not `CLAUDE/Plan/`.) The script takes a lock, reads the same authoritative git counter (`hooksdaemon.latestPlanNumber`), assigns the next number atomically, creates the `NNNNN-name/` folder, scaffolds `PLAN.md`, and advances the counter — so concurrent runs can never collide on a number. It prints the new folder path on stdout. You still add the README index row yourself (the script reminds you).
 
-**If you only need the *number* (not a folder)**, read the counter and add 1 — this is the fallback, not the primary path:
+**If you only need the *number* (not a folder)**, read the counter, then take the higher of the counter and the highest plan on disk — this is the fallback, not the primary path:
 
 ```
 git config --local hooksdaemon.latestPlanNumber
 ```
 
-Add 1 to that value (zero-pad to 5 digits, e.g. counter `117` → next plan `00118`). The git counter is the source of truth; the daemon keeps it correct across branches.
+Take the higher of the counter and the highest plan number on disk (`Completed/` included), then add 1 (zero-pad to 5 digits, e.g. highest `117` → next plan `00118`). The counter is per clone, so on its own it lags a plan made in another clone; `mkplan.bash` and the daemon both take that higher value.
 
 **Do NOT** scan `CLAUDE/Plan/` with `ls`/`find`/glob pipelines to discover the next number. Folder scans miss plans in `Completed/` and other subdirectories, and disagree across branches. The folder scan is only used to bootstrap the counter when the git key is unset (which `mkplan.bash` and the daemon both handle).
 

@@ -1134,7 +1134,7 @@ if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
         echo ""
         _info "${_BOLD}Newly-available / recommended config options${_NC}"
         echo "$_cfg_out"
-        _info "Review per upgrade.md step 5. Enabling is your choice; the daemon never edits your config."
+        _info "Review per upgrade.md step 5. Enabling is your choice; the only edit the upgrade makes to your config is restoring the opt-in handlers that ran before (reported below)."
         _info "Re-run manually: \"$_metadata_venv_python\" -m claude_code_hooks_daemon.daemon.cli check-config-migrations --from ${FROM_VERSION#v} --to ${TARGET_SEMVER#v} --project-root \"$PROJECT_ROOT\""
     elif [ "$_cfg_rc" -eq 0 ]; then
         _ok "Config options: nothing new to enable for this upgrade."
@@ -1156,15 +1156,28 @@ echo ""
 _info "${_BOLD}Daemon version: ${FROM_VERSION:-unknown} -> ${TARGET_DISPLAY}${_NC}"
 _metadata_handler_changes=""
 if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
+    _run_effective_handlers() {
+        "$_metadata_venv_python" -m claude_code_hooks_daemon.daemon.cli \
+            check-effective-handlers \
+            --from "${FROM_VERSION#v}" \
+            --to "${TARGET_SEMVER#v}" \
+            --config "$_metadata_config_file" "$@" 2>&1
+    }
+    # --apply restores the handlers that ran before (N360, owner ruling C6). A
+    # target that predates the flag rejects it with exit 2; run again without
+    # it so the report is not lost.
     _eff_rc=0
-    if _eff_out="$("$_metadata_venv_python" -m claude_code_hooks_daemon.daemon.cli \
-        check-effective-handlers \
-        --from "${FROM_VERSION#v}" \
-        --to "${TARGET_SEMVER#v}" \
-        --config "$_metadata_config_file" 2>&1)"; then
+    if _eff_out="$(_run_effective_handlers --apply)"; then
         _eff_rc=0
     else
         _eff_rc=$?
+    fi
+    if [ "$_eff_rc" -eq 2 ]; then
+        if _eff_out="$(_run_effective_handlers)"; then
+            _eff_rc=0
+        else
+            _eff_rc=$?
+        fi
     fi
 
     if [ "$_eff_rc" -eq 1 ]; then
@@ -1172,11 +1185,19 @@ if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
         _warn "${_BOLD}HANDLERS THAT CHANGE STATE WITH THIS UPGRADE${_NC}"
         echo "$_eff_out"
         _metadata_handler_changes="$(printf '%s\n' "$_eff_out" | awk '
+            /handler\(s\) RESTORED/ {kind = "restored"}
             /handler\(s\) STOP/ {kind = "stops"}
             /handler\(s\) START/ {kind = "starts"}
             /^  - handlers\./ {printf "%s%s:%s", sep, kind, $2; sep = ","}')"
-        _info "Commit message: hooks daemon ${FROM_VERSION#v} -> ${TARGET_SEMVER#v}, and name the handlers above that stop or start running."
-        if [ "$_metadata_config_summary" = "no config changes" ]; then
+        _info "Commit message: hooks daemon ${FROM_VERSION#v} -> ${TARGET_SEMVER#v}, and name the handlers above that were restored, stop or start running."
+        if printf '%s\n' "$_eff_out" | grep -q 'handler(s) RESTORED'; then
+            _warn "${_BOLD}RESTART THE DAEMON${_NC} for the restored handlers to take effect: this step edited ${_metadata_config_file} after the daemon was restarted, so the running daemon and its generated guidance still have them off."
+            if [ "$_metadata_config_summary" = "no config changes" ]; then
+                _metadata_config_summary="config file edited by the upgrade: opt-in handlers restored with enabled: true; restart the daemon to apply"
+            else
+                _metadata_config_summary="${_metadata_config_summary}; opt-in handlers restored with enabled: true (restart the daemon to apply)"
+            fi
+        elif [ "$_metadata_config_summary" = "no config changes" ]; then
             _metadata_config_summary="config file unchanged, but the effective handler set changed"
         else
             _metadata_config_summary="${_metadata_config_summary}; the effective handler set changed"
