@@ -100,7 +100,12 @@ edit above those lines breaks the test again.
    line at test time.
 2. Map the files `GENUINE_REASON_ABOVE` names to this test in `changed_tests_map.yaml`.
 
-**Status**: 🔄 Stopgap (0a8be8afe); remedy open.
+**Remedies applied** (merge 6b300656d; report `subagent-reports/261011-n426-anchor-sonnet.md`; coordinator review):
+
+1. Each `GENUINE_REASON_ABOVE` row is `(path, directive comment, occurrence)` and resolves to its line at test time. A missing occurrence fails with an assertion naming the table.
+2. `changed_tests_map.yaml` maps each of the six files the table names to this test. A test fails if a future row names an unmapped file.
+
+**Status**: ✅ Fixed (6b300656d).
 
 ### N425 — main CI red after the batch AL merge
 
