@@ -1471,6 +1471,37 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N412 — the daemon's MCP guards key on the `mcp__<server>__` tool-name prefix, not the documented `mcp_server.source`
+
+**Source**: the N375 hooks-contract refresh (batch N review round 1).
+
+**Evidence**: PreToolUse, PermissionRequest, PostToolUseFailure and PermissionDenied payloads for an MCP tool carry
+`mcp_server {name, source}` since Claude Code v2.1.274, and the hooks reference says "Base trust decisions on `source`
+rather than on `name` or the `mcp__<server>__` tool-name prefix". The daemon reads `mcp_server` nowhere in `src/`; any
+decision it makes about an MCP tool is by tool name. The field is now in the vendored contract
+(`conditional_input_fields`), so this is a recorded gap, not an unknown.
+
+**Status**: ⬜ Open.
+
+**Remedy**: list the daemon handlers that decide anything by MCP tool name; for each, decide whether to read
+`mcp_server.source`. Likely none today, in which case close this as "no consumer".
+
+### N411 — the Stop hook's 8-consecutive-continuation cap may defeat the daemon's Stop handlers
+
+**Source**: the N375 hooks-contract refresh (batch N review round 1); raw hooks doc line ~2683.
+
+**Evidence**: "Claude Code applies an 8-consecutive-continuation cap: after stop hooks have continued the turn eight
+times in a row, Claude Code overrides the next block and ends the turn. The count of consecutive continuations resets
+each time Claude calls a tool. To raise the cap, set `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`." The daemon's Stop handlers
+block stops (stop-explanation, goal ledger, cron enforcers, auto-continue, usage-pause). A session that is blocked
+eight times in a row without a tool call would be let go regardless of what those handlers want.
+
+**Status**: ⬜ Open.
+
+**Remedy**: assess whether any daemon Stop handler can hit the cap (stacked handlers blocking in turn, a re-entry loop
+with no tool call between) and what happens then: does the session end unrecorded, does a handler assume its block
+was honoured, should `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` be set by the ccy supervisor. Not fixed in batch N.
+
 ### N410 — `upgrade_approval_guard` denies a QA tool reached through a variable once `PYTHONPATH` is set
 
 **Source**: the Plan 00474 coordinator's check-script call (2026-10-11), denied with R-UPGRADE-APPROVAL-ENV-BYPASS
@@ -2255,10 +2286,20 @@ recorded `claude_code_version` to equal `META.json`'s `last_audited_claude_code_
 that changes hook payloads or output, but nobody has re-read the hooks doc itself against the vendored per-event JSON.
 
 **Status**: ✅ Fixed ([report](subagent-reports/261011-batch-n-sonnet.md)). The raw hooks doc was re-fetched (266649 bytes,
-sha256 `3a1f9445…`) and read against every per-event JSON, output and input side. One real gap: `Elicitation` and
-`ElicitationResult` document a top-level `decision: "block"` (and discard `reason`), which the vendored JSON denied and
-the permissive fallback schema would have rejected; both now have the contract entry and a bespoke response schema.
-`UserPromptSubmit` gained the documented `session_title` input. `META.json` and its two pinned tests moved to
+sha256 `3a1f9445…`) and checked against every per-event JSON by script, output side first. The first pass missed the input
+side (review round 1); a second pass, plus a diff against the 2026-09-16 raw copy kept in the main checkout, found the rest.
+Real gaps: `Elicitation` and `ElicitationResult` document a top-level `decision: "block"` (and discard `reason`), which the vendored JSON denied and
+the permissive fallback schema would have rejected; both now have the contract entry and a bespoke response schema
+(their notes record that Claude Code ignored a top-level `decision` there from v2.1.105 until v2.1.284).
+`UserPromptSubmit` gained the documented `session_title` input. Input side: `mcp_server {name, source}` (v2.1.274) is now a
+conditional input field on PreToolUse, PermissionRequest, PostToolUseFailure and PermissionDenied (the daemon reads it
+nowhere: recorded gap, N412), and `agent_id` (v2.1.290) on TaskCreated, TaskCompleted and TeammateIdle. Newly documented
+and recorded, not acted on: the `onFailure` hook config (`"continue"` default or `"block"`, v2.1.295; a policy hook that
+fails would otherwise let the action through, worth considering for the daemon's own hook registration) and the Stop
+hook's 8-consecutive-continuation cap (`CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`, N411). Residual: `core/hook_result.py:76` does
+not list Elicitation or ElicitationResult among the events that carry a top-level block, so if they are ever wired,
+`_format_top_level_block_response` would add a `reason` the new schema rejects; decide then whether to wire them and drop
+`reason` for them with a test. `META.json` and its two pinned tests moved to
 `last_audited_claude_code_version` 2.1.296. `TestAgreesWithContractMeta` now requires the newest recorded release version
 not to be AHEAD of the audited contract (a refresh between releases leaves META ahead until the next release records its
 tested version). `claude-code-versions.yaml` is untouched: v3.69.0 stays `unknown`, the next release records 2.1.296.

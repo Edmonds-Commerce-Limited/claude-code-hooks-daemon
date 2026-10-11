@@ -815,7 +815,11 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
 
     @staticmethod
     def _registry_stamp(project_root: Path) -> tuple[int, int]:
-        """(mtime_ns, size) of the registry file; ``(0, 0)`` when it cannot be stat'd."""
+        """(mtime_ns, size) of the registry file; ``(0, 0)`` when it cannot be stat'd.
+
+        Known limit: a rewrite of the same size within the filesystem's timestamp
+        resolution keeps the previous parse until the file next changes.
+        """
         try:
             stat = (project_root / REGISTRY_RELATIVE_PATH).stat()
         except OSError as exc:

@@ -4,13 +4,22 @@
 
 Re-fetched `https://code.claude.com/docs/en/hooks.md` raw (266649 bytes, sha256
 `3a1f944503d05a61fdc0fac62add9ba3d877ccb03dd4ef9c3c79881c973938ef`; the prior audit held 322902).
-The previous raw text is not kept, so there was no textual diff; instead each of the 33 per-event
-JSON files was checked against the new doc's event section by script (output fields, enums,
-decision enum, decision-control table rows, input tables), then the hits read by hand.
+Correction after review round 1: this section first said the previous raw text was not kept and that
+field names matched. Both were wrong. A copy from 2026-09-16 exists at
+`/workspace/untracked/scratch/hooks-raw.md` in the main checkout and was diffed against the new text;
+the first pass checked output fields and a heuristic of input-table rows and so missed the
+`mcp_server` object. Each of the 33 per-event JSON files was also checked by script against the new
+doc's event section (output fields, enums, decision enum, decision-control table rows, input tables).
 
 Findings:
 
-- All 33 events still documented; field names and enums match, except:
+- All 33 events still documented; output-side field names and enums match, except:
+- Input side, added in round 2: `mcp_server {name, source}` (v2.1.274) on PreToolUse,
+  PermissionRequest, PostToolUseFailure, PermissionDenied (daemon reads it nowhere: N412);
+  `agent_id` (v2.1.290) on TaskCreated, TaskCompleted, TeammateIdle.
+- Newly documented, recorded only: `onFailure` hook config (v2.1.295); Stop hook 8-continuation cap
+  and `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` (ledger N411); Elicitation(Result) ignored a top-level
+  `decision` from v2.1.105 to v2.1.284.
 - `Elicitation` and `ElicitationResult`: the doc (decision table and "Other ways to decline an
   elicitation") says a top-level `"decision": "block"` declines, and that `reason`, `systemMessage`
   and `continue` are discarded. The vendored JSON had `top_level_decision_enum: null`. Both JSON files
