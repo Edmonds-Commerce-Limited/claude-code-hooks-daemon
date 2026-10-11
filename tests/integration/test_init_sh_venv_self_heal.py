@@ -314,4 +314,9 @@ class TestTheHealthyPathIsUntouched:
             'ensure_daemon || echo "missing=$_HOOKS_DAEMON_VENV_MISSING"',
         )
         assert "missing=false" in result.stdout, result.stdout + result.stderr
-        assert not calls.exists()
+        # Only the read-only `probe` (is a build running?) may be asked, never `hook`,
+        # which would start a build (Plan 00488 Task 3.5).
+        verbs = (
+            [line.split()[0] for line in calls.read_text().splitlines()] if calls.exists() else []
+        )
+        assert set(verbs) <= {"probe"}, verbs

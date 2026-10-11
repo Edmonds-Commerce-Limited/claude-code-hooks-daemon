@@ -364,6 +364,14 @@ export HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH"
 
 This tells daemon code to use workspace root instead of `.claude/hooks-daemon/`.
 
+A raw `git clone` of this repository has no env file (it is gitignored). When
+the checkout carries every marker of the daemon's own source tree (the
+`src/claude_code_hooks_daemon` package, `install.py`, `scripts/bootstrap-self-install.sh`,
+`scripts/venv_bootstrap.sh`, a `pyproject.toml` named `claude-code-hooks-daemon`)
+and has no real clone under `.claude/hooks-daemon/`, `init.sh` uses the project
+itself as the root. The first hook then builds the venv in the background, with
+no manual step; `scripts/bootstrap-self-install.sh` stays the foreground route.
+
 ### 3. Path Resolution
 
 Daemon code (in `daemon/paths.py`) checks for `HOOKS_DAEMON_ROOT_DIR`:

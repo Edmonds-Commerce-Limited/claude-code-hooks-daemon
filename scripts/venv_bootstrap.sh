@@ -28,6 +28,14 @@
 #                             switched automatic builds off (disabled)
 #       Exit 0 whatever the state; 2 on a usage error.
 #
+#   venv_bootstrap.sh probe  <daemon_dir>
+#       Read-only: is a build holding the venv lock now? Prints state=running
+#       (with the same log=, pid=, elapsed= lines as `hook`) when one is, and
+#       state=idle when none is. Starts nothing and creates nothing. init.sh
+#       asks it when a venv resolves yet the daemon will not start: the first
+#       moments of a build leave an interpreter that cannot import the
+#       package yet (Plan 00488 Task 3.5). Exit 0; 2 on a usage error.
+#
 #   venv_bootstrap.sh repair <daemon_dir>
 #       bin/hooks-daemon repair, before any venv exists. Builds in the
 #       FOREGROUND (the CLI has no hook timeout), waiting for a build already
@@ -96,7 +104,7 @@ _VB_EX_USAGE=2
 _VB_MIN_PYTHON="3.11"
 
 _vb_usage() {
-    echo "usage: venv_bootstrap.sh hook|repair <daemon_dir>" >&2
+    echo "usage: venv_bootstrap.sh hook|probe|repair <daemon_dir>" >&2
     echo "       venv_bootstrap.sh build <daemon_dir> <python> <fingerprint> <inputs>" >&2
     exit "$_VB_EX_USAGE"
 }
@@ -279,6 +287,15 @@ _vb_build_under_lock() {
     print_error "  Hooks will not retry until pyproject.toml, uv.lock, the Python interpreter or the uv binary changes."
     print_error "  After fixing the cause, retry in the foreground: $daemon_dir/bin/hooks-daemon repair"
     return 1
+}
+
+_vb_probe() {
+    local daemon_dir="$1"
+    if venv_lock_is_held "$daemon_dir"; then
+        _vb_print_running "$daemon_dir"
+    else
+        echo "state=idle"
+    fi
 }
 
 _vb_hook() {
@@ -685,7 +702,7 @@ _vb_main() {
     local verb="${1:-}"
     local daemon_dir="${2:-}"
     case "$verb" in
-        hook | repair)
+        hook | probe | repair)
             [ "$#" -eq 2 ] || _vb_usage
             ;;
         build)
@@ -703,6 +720,7 @@ _vb_main() {
 
     case "$verb" in
         hook) _vb_hook "$daemon_dir" ;;
+        probe) _vb_probe "$daemon_dir" ;;
         repair) _vb_repair "$daemon_dir" ;;
         build) _vb_build "$daemon_dir" "$3" "$4" "$5" ;;
     esac

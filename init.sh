@@ -1229,7 +1229,40 @@ if [[ -f "$PROJECT_PATH/.claude/hooks-daemon.env" ]]; then
     source "$PROJECT_PATH/.claude/hooks-daemon.env"
 fi
 
-# Set daemon root directory (defaults to .claude/hooks-daemon, can be overridden)
+#
+# _is_raw_self_install_clone() - Is this a fresh clone of the daemon's OWN repository?
+#
+# Plan 00488 Task 3.4. .claude/hooks-daemon.env is gitignored, so a fresh clone
+# of this repository has none, and without it the daemon is looked for in
+# .claude/hooks-daemon/ (the client layout) and never found. The env file's
+# whole content is "the root is the project itself", which a raw clone can
+# derive instead of waiting for a human to run scripts/bootstrap-self-install.sh.
+#
+# Every marker must hold, so that no client project can match: the daemon's
+# source package, the client installer, the two self-install scripts, a
+# pyproject.toml that names this project, and NO real clone under
+# .claude/hooks-daemon (its own pyproject.toml; the self-install daemon's bare
+# bin/ link has none). Plain greps and file tests only: no venv exists yet.
+#
+# Returns 0 if so, 1 otherwise.
+#
+_is_raw_self_install_clone() {
+    [[ ! -f "$PROJECT_PATH/.claude/hooks-daemon.env" ]] || return 1
+    [[ ! -f "$PROJECT_PATH/.claude/hooks-daemon/pyproject.toml" ]] || return 1
+    [[ -d "$PROJECT_PATH/src/claude_code_hooks_daemon" ]] || return 1
+    [[ -f "$PROJECT_PATH/install.py" ]] || return 1
+    [[ -f "$PROJECT_PATH/scripts/bootstrap-self-install.sh" ]] || return 1
+    [[ -f "$PROJECT_PATH/scripts/venv_bootstrap.sh" ]] || return 1
+    [[ -f "$PROJECT_PATH/pyproject.toml" ]] || return 1
+    grep -qE '^name = "claude-code-hooks-daemon"' "$PROJECT_PATH/pyproject.toml"
+}
+
+# Set daemon root directory (defaults to .claude/hooks-daemon, can be overridden).
+# A raw clone of the daemon's own repository supplies the root its missing env
+# file would have, so it reaches the venv self-heal with no manual step.
+if [[ -z "${HOOKS_DAEMON_ROOT_DIR:-}" ]] && _is_raw_self_install_clone; then
+    HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH"
+fi
 HOOKS_DAEMON_ROOT_DIR="${HOOKS_DAEMON_ROOT_DIR:-$PROJECT_PATH/.claude/hooks-daemon}"
 
 #
@@ -2238,13 +2271,48 @@ _clone_version() {
 # 00454 message stands. Sets the _HOOKS_DAEMON_BOOTSTRAP_* globals. Returns 0.
 #
 _venv_self_heal() {
+    _venv_driver_verb hook
+}
+
+#
+# _venv_build_running() - Is a venv build holding the build lock right now?
+#
+# Plan 00488 Task 3.5. Read-only (the driver's `probe` verb starts nothing).
+# For a venv that RESOLVES but cannot start the daemon: the first moments of a
+# build leave an interpreter that cannot import the package yet, and that must
+# read as "building", not as a broken venv. A clone too old to ship `probe`
+# answers with a usage error, which is "not known to be building".
+#
+# Sets the _HOOKS_DAEMON_BOOTSTRAP_* globals when it is. Returns 0 if a build
+# is running, 1 otherwise.
+#
+_venv_build_running() {
+    _venv_driver_verb probe
+    if [[ "$_HOOKS_DAEMON_BOOTSTRAP_STATE" == "running" ]]; then
+        return 0
+    fi
+    _HOOKS_DAEMON_BOOTSTRAP_STATE=""
+    return 1
+}
+
+#
+# _venv_driver_verb() - Run one verb of the clone's venv_bootstrap.sh, keep its answer.
+#
+# Args:
+#   $1 - the verb (hook or probe)
+#
+# Sets the _HOOKS_DAEMON_BOOTSTRAP_* globals from the driver's key=value
+# protocol. Returns 0.
+#
+_venv_driver_verb() {
+    local verb="$1"
     local driver="$HOOKS_DAEMON_ROOT_DIR/scripts/venv_bootstrap.sh"
     [[ -f "$driver" ]] || return 0
 
     # stdout is the driver's key=value protocol; its stderr is left on this
     # hook's stderr, where Claude Code's debug log keeps it.
     local output rc=0
-    output="$(bash "$driver" hook "$HOOKS_DAEMON_ROOT_DIR")" || rc=$?
+    output="$(bash "$driver" "$verb" "$HOOKS_DAEMON_ROOT_DIR")" || rc=$?
     if [[ "$rc" -ne 0 ]]; then
         _HOOKS_DAEMON_BOOTSTRAP_STATE="error"
         _HOOKS_DAEMON_BOOTSTRAP_DETAIL="$driver exited $rc (its output is on the hook's stderr)"
@@ -2776,6 +2844,17 @@ ensure_daemon() {
             _HOOKS_DAEMON_NOT_INSTALLED=true
             _detect_needs_provision
         fi
+    elif _daemon_clone_present && _venv_build_running; then
+        # Plan 00488 Task 3.5: a venv resolves, yet the daemon cannot start,
+        # and a build holds the lock. The build has made the interpreter but
+        # not yet installed the package, so this is the build window, not a
+        # broken venv: same state, same status text and same fail-open as the
+        # moments before the interpreter existed (RULING-3.2).
+        _HOOKS_DAEMON_VENV_MISSING=true
+        if ! _HOOKS_DAEMON_VENV_MISSING_VERSION="$(_clone_version)"; then
+            _HOOKS_DAEMON_VENV_MISSING_VERSION=""
+        fi
+        _HOOKS_DAEMON_STATUS_DOWN_TEXT="$_HOOKS_DAEMON_STATUS_TEXT_VENV_BUILDING"
     fi
     return 1
 }
