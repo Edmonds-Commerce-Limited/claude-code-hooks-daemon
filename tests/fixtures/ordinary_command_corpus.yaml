@@ -1405,6 +1405,51 @@ rows:
   - id: a9-grep-home-projects
     command: |-
       grep -rl x --include=*.py ~/projects
+  # --- N407/N408: the pip and gh view guards judge what runs, not what is named
+  - id: n407-echo-break-system-flag
+    command: |-
+      echo 'never run pip install --break-system-packages x'
+  - id: n407-echo-sudo-pip-install
+    command: |-
+      echo "never run sudo pip install x"
+  - id: n407-grep-break-system-pattern
+    command: |-
+      grep -rn 'pip install --break-system-packages' docs/
+  - id: n407-grep-sudo-pip-pattern
+    command: |-
+      grep -rn 'sudo pip install' docs/
+  - id: n407-comment-names-sudo-pip
+    command: |-
+      ls # sudo pip install x
+  - id: n407-commit-message-names-flag
+    command: |-
+      git commit -m 'docs: never pip install --break-system-packages'
+  - id: n407-gh-comment-names-sudo-pip
+    command: |-
+      gh issue comment 5 --body 'do not sudo pip install x'
+  - id: n407-quoted-heredoc-names-sudo-pip
+    command: |-
+      cat > untracked/scratch/n407-notes.md <<'EOF'
+      Never run sudo pip install x
+      EOF
+  - id: n408-echo-names-issue-view
+    command: |-
+      echo 'gh issue view 5'
+  - id: n408-echo-names-pr-view
+    command: |-
+      echo "gh pr view 5"
+  - id: n408-grep-names-issue-view
+    command: |-
+      grep -rn 'gh issue view' docs/
+  - id: n408-commit-message-names-pr-view
+    command: |-
+      git commit -m 'docs: always add --comments to gh pr view'
+  - id: n408-pr-view-json-equals-comments
+    command: |-
+      gh pr view 5 --json=comments
+  - id: n408-issue-view-quoted-jq-pipe
+    command: |-
+      gh issue view 5 --jq '.comments | length' --json comments
   # --- messages that only mention a guarded thing (00474 N404-N406) -----------
   - id: n404-commit-heredoc-message-with-code-span
     command: |-

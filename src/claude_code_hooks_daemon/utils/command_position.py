@@ -263,6 +263,32 @@ def command_position_segments(command: str) -> list[str]:
     return [view[start:end] for start, end in _segment_spans(view)]
 
 
+def without_comment(segment: str) -> str:
+    """``segment`` up to the first word that starts a shell comment.
+
+    The segment splitter keeps comment text as a command on purpose (the
+    conservative reading), so a guard that matches ONE command's own words
+    cuts the comment off first: `true # sudo pip install x` runs `true`.
+
+    Only the guards that call this (pip_break_system, sudo_pip and the gh view
+    comment guards) cut comments; git_stash and destructive_git still judge
+    comment text as commands.
+    """
+    for start, _end in shell_word_spans(segment):
+        if segment[start] == "#":
+            return segment[:start]
+    return segment
+
+
+def command_position_code_segments(command: str) -> list[str]:
+    """:func:`command_position_segments` with each segment's trailing comment removed.
+
+    git_stash and destructive_git still judge comment text (they use
+    :func:`command_position_segments`); only the guards that opt in cut it.
+    """
+    return [without_comment(segment) for segment in command_position_segments(command)]
+
+
 #: Commands whose quoted multi-word arguments are search patterns, programs or
 #: format strings handed to THAT command, never a second command line:
 #: `git log --grep='git reset --hard'`, `awk '/git stash/ {print}'`.
