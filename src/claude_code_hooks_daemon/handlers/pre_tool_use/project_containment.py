@@ -40,6 +40,7 @@ separate handler rather than weakening an existing one to make room.
 
 import json
 import logging
+import shlex
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -62,6 +63,7 @@ from claude_code_hooks_daemon.core.utils import (
     get_bash_command,
     is_device_path,
     needs_expansion,
+    scan_bash_write_destinations,
     scan_bash_write_targets,
     split_heredocs,
     substitute_cwd_expansions,
@@ -70,6 +72,9 @@ from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.claude_config import claude_config_dir, session_config_dir
 from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.git_commit_parsing import SimpleCommand, simple_commands
+from claude_code_hooks_daemon.utils.git_facts import landing_directories
+from claude_code_hooks_daemon.utils.git_invocation_directory import placed_moves
 from claude_code_hooks_daemon.utils.heredoc_operators import scan_heredocs
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
@@ -495,7 +500,39 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         # unresolved and denied (Plan 00466 N101 round 12, N215). Text it
         # could not read is returned beside the paths, never folded into
         # "nothing".
-        scan = scan_bash_write_targets(hook_input)
+        command = get_bash_command(hook_input)
+        cwd = hook_input.get(HookInputField.CWD)
+        moving = self._steps_after_a_cd(command, cwd)
+        if moving:
+            # A relative target is joined to the directory the chain's `cd`
+            # moves reach (ledger 00474 N403), so the whole-command reading
+            # below leaves it unjoined and each step is read where it runs.
+            paths, unreadable, unresolved = self._bash_targets(command or "", None)
+            targets.extend(paths)
+            step_paths, step_unresolved = self._targets_after_cds(moving, command or "", str(cwd))
+            targets.extend(step_paths)
+            unresolved.extend(u for u in step_unresolved if u not in unresolved)
+        else:
+            paths, unreadable, unresolved = self._bash_targets(command or "", cwd)
+            targets.extend(paths)
+        return targets, unreadable, unresolved
+
+    def _bash_targets(self, command: str, cwd: Any) -> tuple[list[str], str | None, list[str]]:
+        """``(paths, unreadable, unresolved)`` for ``command`` read from ``cwd``.
+
+        A relative target is joined to ``cwd``; with no ``cwd`` it is left out of
+        ``paths`` (or left relative), which :meth:`_is_outside` never denies.
+        """
+        if not command:
+            return [], None, []
+        targets: list[str] = []
+        scan_input: dict[str, Any] = {
+            HookInputField.TOOL_NAME: ToolName.BASH,
+            HookInputField.TOOL_INPUT: {"command": command},
+        }
+        if cwd is not None:
+            scan_input[HookInputField.CWD] = cwd
+        scan = scan_bash_write_targets(scan_input)
         targets.extend(scan.paths)
         unresolved = list(scan.unresolved)
 
@@ -517,25 +554,96 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         # denied, while `curl ... -o ../../../tmp/x.sh` stayed relative and
         # `_is_outside` treats every relative path as never-outside -- an ALLOW
         # for a write that lands in exactly the same place.
-        command = get_bash_command(hook_input)
-        if command:
-            cwd = hook_input.get(HookInputField.CWD)
-            known = known_variables(command)
-            for target, runs in self._destination_targets(command):
-                if is_device_path(target):
-                    continue
-                substituted = substitute_known_variables(
-                    substitute_cwd_expansions(target, command, cwd), known
-                )
-                if substituted is None or needs_expansion(substituted):
-                    # A token in a body its receiver reads as data names
-                    # nothing the command writes.
-                    if runs and target not in unresolved:
-                        unresolved.append(target)
-                    continue
-                targets.append(self._resolve_against_cwd(substituted, cwd))
+        known = known_variables(command)
+        for target, runs in self._destination_targets(command):
+            if is_device_path(target):
+                continue
+            substituted = substitute_known_variables(
+                substitute_cwd_expansions(target, command, cwd), known
+            )
+            if substituted is None or needs_expansion(substituted):
+                # A token in a body its receiver reads as data names
+                # nothing the command writes.
+                if runs and target not in unresolved:
+                    unresolved.append(target)
+                continue
+            targets.append(self._resolve_against_cwd(substituted, cwd))
 
         return targets, scan.unreadable, unresolved
+
+    @staticmethod
+    def _steps_after_a_cd(command: str | None, cwd: Any) -> list[SimpleCommand]:
+        """The simple commands of ``command`` when any runs after a ``cd``/``pushd``.
+
+        Empty when none does, or when the hook ``cwd`` is not an absolute path
+        to start from: the command is then read from ``cwd`` as a whole.
+        """
+        if not command or not isinstance(cwd, str) or not Path(cwd).is_absolute():
+            return []
+        steps = simple_commands(command)
+        return steps if any(step.directory for step in steps) else []
+
+    def _targets_after_cds(
+        self, steps: list[SimpleCommand], command: str, cwd: str
+    ) -> tuple[list[str], list[str]]:
+        """``(paths, unresolved)`` for each step of ``command`` read where it runs.
+
+        The directory is that of the step's ``cd`` chain, read from the shell's
+        own start (``cwd``) by the one reading git judgement uses
+        (:func:`landing_directories`): a chain that may not have taken effect
+        (``cd a || cd b``) is read both ways. A chain that cannot be placed
+        (``cd "$UNKNOWN"``) leaves the step's relative targets unresolved, which
+        is an advisory and not a deny (Plan 00483 A1). A step before any ``cd``
+        runs in ``cwd`` itself.
+        """
+        start = Path(cwd)
+        known = known_variables(command)
+        assignments = "".join(f"{name}={shlex.quote(value)}; " for name, value in known.items())
+        paths: list[str] = []
+        unresolved: list[str] = []
+        for step in steps:
+            text = assignments + self._step_text(step)
+            placed, problem = placed_moves(step.directory, start)
+            if problem is not None:
+                unresolved.extend(
+                    f"{target} (relative to a cd the daemon cannot place)"
+                    for target in self._relative_targets(text)
+                )
+                continue
+            optional = 0 if step.moves_certain else len(step.directory)
+            for directory in landing_directories(placed, optional, start):
+                step_paths, _unreadable, step_unresolved = self._bash_targets(text, str(directory))
+                paths.extend(step_paths)
+                unresolved.extend(step_unresolved)
+        return paths, unresolved
+
+    @staticmethod
+    def _step_text(step: SimpleCommand) -> str:
+        """``step`` written back as one command: its words, then its file redirections."""
+        words = [shlex.quote(word) for word in step.words]
+        for operator, target in step.redirects:
+            words.extend((operator, shlex.quote(target)))
+        return " ".join(words)
+
+    def _relative_targets(self, text: str) -> list[str]:
+        """The write targets ``text`` names that are relative to the directory it runs in."""
+        known = known_variables(text)
+        named = [
+            candidate.destination for candidate in scan_bash_write_destinations(text).destinations
+        ]
+        named.extend(target for target, _runs in self._destination_targets(text))
+        relative: list[str] = []
+        for target in named:
+            substituted = substitute_known_variables(target, known)
+            if (
+                substituted
+                and not is_device_path(substituted)
+                and not substituted.startswith("~")
+                and not Path(substituted).is_absolute()
+                and target not in relative
+            ):
+                relative.append(target)
+        return relative
 
     @staticmethod
     def _resolve_against_cwd(target: str, cwd: Any) -> str:

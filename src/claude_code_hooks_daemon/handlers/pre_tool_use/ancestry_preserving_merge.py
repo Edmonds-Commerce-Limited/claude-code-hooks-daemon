@@ -28,7 +28,9 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     GIT_INVOCATION,
     SUBCOMMAND_SEPARATOR_CHARS,
 )
+from claude_code_hooks_daemon.utils.command_position import command_position_segments
 from claude_code_hooks_daemon.utils.escape_hatch import command_declares_hatch
+from claude_code_hooks_daemon.utils.shell_segmentation import strip_inert_spans
 
 # Mode values (mirrors git_stash's mode option, Plan 00207 Task 1.2).
 _MODE_BLOCK = "block"
@@ -193,10 +195,23 @@ class AncestryPreservingMergeHandler(PreToolUseHandlerBase):
         self._rules_by_id: dict[str, Rule] = {rule.rule_id: rule for rule in self._rules}
         self._formatter = RuleFormatter()
 
+    @staticmethod
+    def _executable_segments(command: str) -> list[str]:
+        """The command's segments with every inert span read as data (N405).
+
+        A ``-m`` message, a quoted-delimiter heredoc body fed to a data sink,
+        and the arguments of ``echo``/``grep`` only NAME a merge; they do not
+        run one. ``strip_inert_spans`` blanks the first two and
+        ``command_position_segments`` reduces the rest, then each segment is
+        matched on its own so one segment's text never completes another's.
+        """
+        return command_position_segments(strip_inert_spans(command))
+
     def _match_label(self, command: str) -> str | None:
         """Return the label of the first matching ancestry-severing pattern."""
+        segments = self._executable_segments(command)
         for pattern, label in _ANCESTRY_SEVERING_PATTERNS:
-            if pattern.search(command):
+            if any(pattern.search(segment) for segment in segments):
                 return label
         return None
 
@@ -206,8 +221,9 @@ class AncestryPreservingMergeHandler(PreToolUseHandlerBase):
         Mirrors ``_match_label`` exactly (same ordered pattern list), so the
         two can never disagree about which pattern matched first.
         """
+        segments = self._executable_segments(command)
         for pattern, rule_id in self._pattern_rule_ids:
-            if pattern.search(command):
+            if any(pattern.search(segment) for segment in segments):
                 return rule_id
         return None
 
@@ -335,22 +351,22 @@ class AncestryPreservingMergeHandler(PreToolUseHandlerBase):
             return [
                 AcceptanceTest(
                     title="git merge --squash (warn mode)",
-                    command='echo "git merge --squash feature-branch"',
+                    command="bash -n -c 'git merge --squash no-such-branch-acceptance-test'",
                     description="Allows git merge --squash with an advisory warning",
                     expected_decision=Decision.ALLOW,
                     expected_message_patterns=[r"WARNING", r"ancestor"],
-                    safety_notes="Uses echo - safe to test",
+                    safety_notes="The named branch does not exist, so git refuses it harmlessly.",
                     test_type=TestType.ADVISORY,
                     recommended_model=RecommendedModel.SONNET,
                     requires_main_thread=False,
                 ),
                 AcceptanceTest(
                     title="gh pr merge --rebase (warn mode)",
-                    command='echo "gh pr merge --rebase 123"',
+                    command="bash -n -c 'gh pr merge --rebase 999999999'",
                     description="Allows gh pr merge --rebase with an advisory warning",
                     expected_decision=Decision.ALLOW,
                     expected_message_patterns=[r"WARNING", r"ancestor"],
-                    safety_notes="Uses echo - safe to test",
+                    safety_notes="bash -n -c only parses the command and never runs it.",
                     test_type=TestType.ADVISORY,
                     recommended_model=RecommendedModel.SONNET,
                     requires_main_thread=False,
@@ -360,36 +376,40 @@ class AncestryPreservingMergeHandler(PreToolUseHandlerBase):
         return [
             AcceptanceTest(
                 title="git merge --squash",
-                command='echo "git merge --squash feature-branch"',
+                command="bash -n -c 'git merge --squash no-such-branch-acceptance-test'",
                 dispatch_as_bash=True,
                 description="Blocks git merge --squash (severs ancestry)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED", r"ancestor"],
-                safety_notes="Uses echo - safe to test",
+                safety_notes=(
+                    "bash -n -c only parses the command and never runs it, and the branch "
+                    "does not exist. Not echo-wrapped: an echo only names the command and "
+                    "is deliberately allowed."
+                ),
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="gh pr merge --squash",
-                command='echo "gh pr merge --squash 123"',
+                command="bash -n -c 'gh pr merge --squash 999999999'",
                 dispatch_as_bash=True,
                 description="Blocks gh pr merge --squash (severs ancestry)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED", r"ancestor"],
-                safety_notes="Uses echo - safe to test",
+                safety_notes="bash -n -c only parses the command and never runs it; PR 999999999 does not exist.",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="gh pr merge --rebase",
-                command='echo "gh pr merge --rebase 123"',
+                command="bash -n -c 'gh pr merge --rebase 999999999'",
                 dispatch_as_bash=True,
                 description="Blocks gh pr merge --rebase (severs ancestry, widened this plan's scope)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED", r"ancestor"],
-                safety_notes="Uses echo - safe to test",
+                safety_notes="bash -n -c only parses the command and never runs it; PR 999999999 does not exist.",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,

@@ -1481,9 +1481,19 @@ INVENTORY fq_py_a/fq_py_b probes
 lists `"pytest"` in a constant, is denied as a full-suite run; the shell-script counterpart allows. Sub-agent role
 only, but the deny is hard and the script is ordinary dev tooling.
 
-**Status**: ⬜ Open. Remedy: in the script-file chain require the program string to be the argument of the process
-call, not any literal in the file, or report the script as UNSEEN with an advisory as the guard does for other opaque
-commands. May interact with the open N96 decision on this handler.
+**Status**: 🟢 Fixed. A string in Python code is now a command only when a call can be handed it:
+`_process_arguments` in `subagent_full_qa_blocker.py` follows each call's arguments (and a method call's receiver)
+through names, loop variables, parameter defaults, attributes, dict/subscript values and function returns, and calls to
+text sinks (`print`, logging, `exit`, `add_argument`, unless the script defines a function of that name) pass nothing on.
+A `"pytest"` literal starts pytest only when so reached (`_passed_literals`); unparseable Python keeps judging every
+literal (fail closed). The N405 shape (`command_position_segments(strip_inert_spans(...))`) was not needed: every
+shell-level mention and real-run shape (wrappers, `if/then`, `eval`, `bash -c`, `$(...)`, backticks, `&`, piped and
+direct `bash` heredocs) already judged correctly through this handler's own parser, and is now pinned. Pinned by
+`TestPythonHoldingAProgramNameIsNotRunningIt` and `TestMentionsAndRealRunsAtTheShellLevel` in
+`tests/unit/handlers/pre_tool_use/test_subagent_full_qa_blocker.py` (red count 10 before the fix) and the `n409-` rows of
+`tests/fixtures/ordinary_command_corpus.yaml`. Residual, pre-existing and unfixed: a list built by `.append`/`+=` then
+passed to `Popen`, `asyncio.create_subprocess_exec`, and `exec(open(...).read())` are not seen as runs. Report:
+`subagent-reports/261011-batch-i-n409-sonnet.md`.
 
 ### N408 — `gh_issue_comments`/`gh_pr_comments` deny mentions and miss `--json=comments`
 
@@ -1501,7 +1511,9 @@ are read as shell words, so `--json=comments`, `--json=a,comments` and a `|` ins
 handled; the suggested fix is spliced into the real view segment (also `--json=` field lists). Both handlers use it
 and their acceptance commands are now `bash -n -c '...'` with a nonexistent number. Pinned by
 `tests/unit/handlers/pre_tool_use/test_gh_view_comments_command_position.py`, `tests/unit/utils/test_gh_view_comments.py`
-and corpus rows `n408-*`; two older tests that asserted the mention deny were flipped.
+and corpus rows `n408-*`; two older tests that asserted the mention deny were flipped. Review r1: `--comments=<v>`
+(any value but `false`), `-c`, `--help`/`-h` and `--web`/`-w` are accepted. Residual, pre-existing on main and not
+fixed here: none specific to N408.
 
 ### N407 — `pip_break_system` and `sudo_pip` deny commands that only mention the flag or `sudo pip install`
 
@@ -1519,7 +1531,10 @@ subshells, `$(...)`, backticks, `&`, `!`, `cat <<'EOF' | bash` and `bash <<'EOF'
 `bash -n -c '...'` with a nonexistent package. Pinned by
 `tests/unit/handlers/pre_tool_use/test_pip_guards_command_position.py`,
 `tests/unit/utils/test_command_position_comments.py` and corpus rows `n407-*`; two older tests that asserted the
-mention deny were flipped. The INVENTORY misses (`pip --break-system-packages install`, the env var, `sudo -u USER pip install`) are separate and not part of this entry.
+mention deny were flipped. The INVENTORY misses (`pip --break-system-packages install`, the env var, `sudo -u USER pip install`) are separate and not part of this entry. Residual gaps, pre-existing on main and not fixed here (batch H review r1):
+`sudo_pip` misses `sudo -u root pip install`, `sudo -iu root ...`, `sudo env pip install`,
+`sudo bash -c 'pip install ...'` and `doas pip install`; `pip_break_system` misses
+`PIP_BREAK_SYSTEM_PACKAGES=1 pip install` and a versioned `pip3.11`.
 
 ### N406 — `github_auto_close_keywords` denies a quoted `echo` or a `python3 - <<'EOF'` that only prints a keyword
 
@@ -1528,8 +1543,9 @@ mention deny were flipped. The INVENTORY misses (`pip --break-system-packages in
 **Evidence**: real commit/PR messages and `grep`/`git log --grep` mentions behave; an `echo` of a closing keyword plus
 issue reference, or a heredoc fed to `python3`, is denied. Lower impact.
 
-**Status**: ⬜ Open. Remedy: scan only the message of a real `git commit|merge|tag` or `gh pr create|edit` segment,
-not the text of an earlier segment or a heredoc fed to a non-git receiver.
+**Status**: ✅ Fixed (branch agent-a2f6348f56d8df606-7aed436a, 25b9ae109). The handler now matches the git/gh message
+token only at command position and blanks heredoc bodies not owned by a git/gh message command, so an `echo` or a
+`python3 - <<'EOF'` that prints a keyword allows while real messages still deny.
 
 ### N405 — `ancestry_preserving_merge` denies text that mentions `--squash` or `--rebase` merges
 
@@ -1538,8 +1554,9 @@ not the text of an earlier segment or a heredoc fed to a non-git receiver.
 **Evidence**: a commit message, `echo` or `grep` naming `git merge --squash`, `gh pr merge --squash` or `--rebase` is
 denied; `git log --grep=` already allows.
 
-**Status**: ⬜ Open. Remedy: match at command position per segment, and read a quoted `-m`/`echo`/`grep` argument
-and a quoted-heredoc body as data (`strip_inert_spans`, as `merge_to_main_approval` already does).
+**Status**: ✅ Fixed (branch agent-a2f6348f56d8df606-7aed436a, 25b9ae109). The handler matches the three patterns per
+segment of `command_position_segments(strip_inert_spans(command))`, so mentions in a message, echo, grep or quoted
+heredoc allow while real merges still deny.
 
 ### N404 — `git_message_backtick` denies the `-m "$(cat <<'EOF' … EOF)"` commit idiom when the body has a code span
 
@@ -1550,8 +1567,9 @@ bt_sq_dq, reproduced on b8095b83d); bt7-bt9 allow (report as N409).
 body holds a Markdown backtick span; so is a `-m "…"` written inside a single-quoted message. Highest impact of
 N404-N409: it is the form agents are told to use.
 
-**Status**: ⬜ Open. Remedy: judge the `-m` value from its shell quote context (a quoted-delimiter heredoc body inside
-`$(cat <<'EOF' …)` is literal; a `-m "` inside single quotes is not an option); gate rows for the heredoc form.
+**Status**: ✅ Fixed (branch agent-a2f6348f56d8df606-7aed436a, 25b9ae109). The scan runs over `strip_message_bodies(command)`, which
+blanks a single-quoted message and the quoted-delimiter `$(cat <<'EOF' …)` idiom, while a plain double-quoted or
+unquoted-heredoc backtick still denies; gate rows added.
 
 ### N403 — `project_containment` resolves a relative redirect against the hook cwd, ignoring a preceding `cd`
 
@@ -1563,8 +1581,34 @@ an absolute path instead). The code joins every target against the payload `cwd`
 also corrects N338's "follows only the first `cd`"; same root cause as N28. Path judgement elsewhere
 (`landing_directories`, N299) already follows `cd`.
 
-**Status**: ⬜ Open. Remedy: resolve redirect targets from the directory the chain's `cd` moves land in, failing
-closed only when that directory cannot be placed; gate row for `cd sub && cmd > ../x`.
+**Status**: ✅ Fixed by batch J (merged in 8db7b9d78). `simple_commands` now keeps each command's
+file-writing redirections beside the `cd` chain it runs in; `project_containment` reads every step of a command that
+contains a `cd`/`pushd` from the directories `landing_directories` gives it (a chain that may not have taken effect
+is read both ways, a subshell's `cd` ends with it), after `placed_moves` (new, in `git_invocation_directory`, sharing
+`expand_cwd_references` with the commit gates) reads `$PWD`, `$(pwd)` and `$(git rev-parse --show-toplevel)` in the
+directory reached so far. A chain that cannot be placed (`cd "$UNKNOWN"`) leaves that step's relative targets
+unresolved: under Plan 00483 A1 (ratified by the owner as B5, "A guard denies only on a positive finding") that is an
+ALLOW with an advisory, not a deny, as every other unknown target. A
+command with no `cd`, or no absolute hook cwd, is read as before. Pinned by
+`TestARedirectIsJudgedWhereTheChainsCdLandsIt` (`test_project_containment.py`), `TestPlacedMoves`
+(`test_git_invocation_directory.py`), `TestSimpleCommandsKeepTheirFileRedirections` (`test_git_commit_parsing.py`) and
+gate rows `n403-*`. Settles N338 once merged. Note: `cd sub; cmd > ../x` (`;`, not `&&`) is still denied, because the
+`cd` may fail and leave the command where it started.
+
+Residual, from the batch J review (`untracked/agent-reports/auto/261011-045019-code-reviewer-a7356ded644388004.md`),
+none a regression against main:
+
+- `D=/tmp; cd $D && echo x > x` writes outside the repository but draws only the unplaceable-`cd` advisory; an
+  earlier assignment is not substituted into the `cd` step before `placed_moves` (`project_containment.py` ~605).
+- A redirect on a `{ … }` or `if … fi` group is judged from inside the group, so `{ cd /tmp && make; } > x` is denied
+  though `x` lands in the repository (a false deny only). Remedy: give a group's redirects the directory in effect
+  before it opened.
+- A process substitution target after a `cd` (`cd /tmp && echo hi > >(cat)`) is read as a file name and denied.
+  Remedy: skip `>(`/`<(` targets in `_write_redirects`.
+- `command cd /tmp` is not read as a move (`_after_directory_change` strips `builtin`, not `command`); the git gates
+  share the gap.
+- Test data at `test_git_commit_parsing.py` ~624-638 writes operators with a trailing space and strips it in the
+  assertion; write them plainly.
 
 ### N402 — the conflict-marker commit gate denies `cd "$(git rev-parse --show-toplevel)" && git commit`
 
@@ -1576,7 +1620,7 @@ with "this commit was NOT checked ... the directory needs an expansion the daemo
 without `cd` allows. Path judgement has resolved the one-level `$(git rev-parse --show-toplevel)` since FP batch 2;
 the commit gates do not.
 
-**Status**: ⬜ Open for part (b) only. (a) 🟢 Fixed on branch `agent-a8b2dfbb8ae318a8c-68c99312`: `placement_problem` and
+**Status**: ⬜ Open for part (b) only. (a) 🟢 Fixed by batch E (merged in f189ea120): `placement_problem` and
 `invocation_directory` take the start directory and read a `cd` or `-C` operand spelled `$(git rev-parse --show-toplevel)`, `$PWD`, `${PWD}` or `$(pwd)` through `expand_cwd_references`, the reading `substitute_cwd_expansions`
 (path judgement) now shares; each step is read in the directory the earlier `cd` steps reached. All five callers pass
 their start directory (conflict marker gate, two `destructive_git` branch/remote delete checks, `merge_qa_advisor`,
@@ -1595,7 +1639,7 @@ fail-closed. Until (b) is ruled, `cd $PROJ && git commit` stays denied.
 `-c core.x=1` or `-c user.email=…` global option before `commit` is denied. `-m "$(cat <<'EOF'…)"` with `-c` is
 allowed. So the quoted heredoc body is read as code only when a `-c` global option precedes `commit`.
 
-**Status**: 🟢 Fixed on branch `agent-a8b2dfbb8ae318a8c-68c99312`. The heredoc-sink reader
+**Status**: 🟢 Fixed by batch E (merged in f189ea120). The heredoc-sink reader
 (`_git_data_subcommand_index`, the one place that skips git's global options for a body fed to `git`) now steps over a
 `-c key=value` whose key runs nothing, so the decision is the one it makes without `-c`. A key
 git RUNS (`core.fsmonitor`, `core.pager`, `*.program`, `*.helper` and the like) or a value an expansion leaves
@@ -1611,7 +1655,7 @@ shape under `gh issue comment` are denied (`destructive_git` for `reset --hard`,
 `--body-file - <<'EOF'`, plain-text bodies and `git commit -m "$(cat <<'EOF'…)"` are allowed. This is the standard
 PR-body idiom, and the ordinary shape of any PR or comment that describes a blocked command.
 
-**Status**: 🟢 Fixed on branch `agent-a8b2dfbb8ae318a8c-68c99312`. `strip_message_bodies` (the `-m`/`-F` message
+**Status**: 🟢 Fixed by batch E (merged in f189ea120). `strip_message_bodies` (the `-m`/`-F` message
 reader that already treats `"$(cat <<'EOF' … EOF)"` as data) now also reads `--body`/`-b` when the owning command is
 `gh pr|issue|release|gist|api` (the groups `_GH_DATA_SUBCOMMANDS` names for the batch (b) `gh` heredoc sink); no
 parallel parser. An unquoted `<<EOF` body, a `cat … | bash` pipe, a bare `--body "$(git reset --hard)"` and a `-b` on
@@ -1682,7 +1726,7 @@ depended on where QA runs.
 **Status**: 🟡 Half fixed. The `find -exec` half is done; the copy-operand half stays open.
 
 - Done: `FIND_EXEC_ACTIONS`, `FIND_EXEC_TERMINATORS` and `find_exec_end` live in `utils/find_expression.py`
-  (`recursive_search.py` imports them), and the
+  (`recursive_search.py` imports `FIND_EXEC_ACTIONS` and `find_exec_end`), and the
   five private copies are gone. All five held the same four members. Terminator handling matched too, except that
   `worktree_file_copy.py` also ends an action on `\;` (its words keep the backslash when the shell text cannot be
   resolved); the other readers never saw that spelling. That handler keeps `_FIND_EXEC_END = FIND_EXEC_TERMINATORS | {"\\;"}`, passed to `find_exec_end`, so no verdict moved. `tests/unit/handlers/test_find_exec_actions_characterisation.py`
@@ -2294,7 +2338,14 @@ too. The daemon's `counter + 1` path (`plan_numbering.py:180`) does not look at 
 daemon keeps it correct across branches"; nothing says across clones. Remedy: `mkplan.bash` advances the counter to
 the highest plan number on disk instead of dying on that drift, and the daemon's path checks the disk the same way.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed (batch K branch `agent-aae597d16acf27198-5da7ea18`, merge pending). Reproduced first: with the
+counter at 208 and `00212-…` or `Completed/00250-…` on disk, `mkplan.bash` died "counter (208) is behind the highest
+plan on disk", and `next_plan_number_for_target` returned `00006` for counter 5 with `Completed/00020-…` on disk
+(3 mkplan tests and 1 daemon test red). Now `mkplan.bash` (the CLAUDE/Plan copy and the bundled template) prints a
+note and advances the counter to the disk high-water mark, and the daemon path returns `max(counter, disk) + 1`.
+A counter ahead of the disk is still trusted. Tests: `tests/unit/scripts/test_mkplan_counter_drift.py`,
+`test_counter_behind_disk_is_overtaken_by_the_disk`. `mkroutine.bash` keeps its own refusal (separate counter, not
+reported).
 
 ### N370 — the sed guard denies a `git -C <dir> commit -m` message that mentions an in-place sed edit
 
@@ -2327,7 +2378,13 @@ resolves main's root rather than its own.
 **Fix**: find where the worktree gets that file. Either point its `HOOKS_DAEMON_ROOT_DIR` at the worktree, or make the
 test hermetic against an inherited root. Then confirm the test passes inside a worktree.
 
-**Status**: ⬜ Open.
+**Status**: ⬜ Open. Verified NOT stale (batch G, 2026-10-11): run from a harness-created worktree the test still fails
+(1 failed, 6 passed). There `.claude/hooks-daemon.env` is a symlink to main's `/workspace/.claude/hooks-daemon.env`
+(`HOOKS_DAEMON_ROOT_DIR="/workspace"`), `init.sh:1213-1220` sources it over any inherited variable (so the test cannot
+override it through the subprocess env), and the launcher reports "Daemon already running" for main's daemon
+(`--project-root /workspace`) which never becomes ready for the Stop probe. `setup_worktree.sh:380-395` writes a
+checkout-correct file, so a worktree it builds is likely fine (not run here). Remaining fix: make harness worktree
+creation write that file the same way, or have the test skip when the env file resolves outside `REPO_ROOT`.
 
 ### N368 — the plan fact-checker marked claims unverifiable while the reference clone that settles them was on disk
 
@@ -2368,7 +2425,12 @@ timeout under host load (N344's class).
 - Separately, the three tests will fail for everyone once the lock moves to pytest 9.1 and ruff 0.16. Fix the
   supervisor findings and add the two options before bumping the lock.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed (agent-a5313785be3bc54d9-56f41b13, c213595a8) for the recipe: every documented install path already
+uses the lock (`CONTRIBUTING.md:21` and `setup_worktree.sh` use `uv sync --frozen --all-extras`); the one remaining
+off-lock recipe, the missing-semgrep remedy in `scripts/qa/run_semgrep_check.sh:49` (`uv pip install -e '.[dev]'`),
+now says `uv sync --frozen --all-extras`, pinned by a test. The coordinator's own recipe lives outside the repository.
+The second bullet (ruff 0.16 findings in the supervisor asset, pytest 9.1 option grammar) cannot reproduce on the
+locked ruff 0.15.11 / pytest 9.0.3 and stays a precondition of any lock bump, not a present defect.
 
 ### N364 — a read-only `git config --get-regexp` naming `user.name` is judged as an identity write
 
@@ -2674,7 +2736,11 @@ repository uses as a term of art in plans, rulings and handler guidance. It did 
 **Impact**: low. The advisory never blocks. But it nudges the agent to soften or drop an accurate risk statement, and
 in this repository "out of scope" is mostly that technical sense, so the advisory is mostly noise here.
 
-**Status**: ⬜ Open. Remedy candidates:
+**Status**: ✅ Fixed (agent-a5313785be3bc54d9-56f41b13, c213595a8): the `out_of_scope` category skips a sentence that
+cites the threat model, Non-Goals, an owner ruling/decision, `per plan/owner/ruling` or a limb; a bare "out of scope"
+(including one beside a reason in a different sentence) still fires, and the other categories are untouched.
+
+Original remedy candidates:
 
 - do not flag "out of scope" when the same sentence names the threat model, a plan's Non-Goals or a limb;
 - or make the phrase configurable per project, so this repository can exempt its term of art.
@@ -2916,11 +2982,25 @@ reproduction before it is fixed.
 
 | Id   | Finding                                                                                                                                                                                                                                                                                                                                                   | Status                                                                                                                                                                                                                                       |
 | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| N338 | `project_containment` follows only the first `cd`: `cd <in-repo clone> && … && cd extensions && npm ci > ../untracked/scratch/x.txt` was denied as a write to `<repo>/../untracked/scratch/x.txt`, resolved from the root after the first `cd` instead of from `extensions/`.                                                                             | ⬜ Open                                                                                                                                                                                                                                      |
+| N338 | `project_containment` follows only the first `cd`: `cd <in-repo clone> && … && cd extensions && npm ci > ../untracked/scratch/x.txt` was denied as a write to `<repo>/../untracked/scratch/x.txt`, resolved from the root after the first `cd` instead of from `extensions/`.                                                                             | ✅ Fixed by N403 (merge 8db7b9d78)                                                                                                                                                                                                           |
 | N339 | `bash_safe_mode` denies a fully gated group: `cd X && mkdir -p d && { ./qa.bash > d/o.txt 2>&1 && echo "exit=0" \|\| echo "exit=$?"; }`. The `;` that closes the `{ }` group is read as unguarded sequencing.                                                                                                                                             | ✅ Fixed on worktree-n339-compound                                                                                                                                                                                                           |
-| N340 | The "WRONG CLAUDE/ DIRECTORY" advisory fires on every Read of this repository's own `CLAUDE/Plan/...` files. In self-install mode the project's `CLAUDE/` is the authoritative copy, not "the daemon's internal docs copy".                                                                                                                               | ⬜ Open                                                                                                                                                                                                                                      |
-| N342 | `setup_worktree.sh` cannot create ANY worktree from a host checkout at `/home/<user>/Projects/EC/claude-code-hooks-daemon`: the socket path up to the branch name is already 103 bytes against the 104-byte AF_UNIX limit, so even the mandatory `worktree-` prefix does not fit. The merge rule "work happens in worktrees" is unsatisfiable from there. | ⬜ Open                                                                                                                                                                                                                                      |
+| N340 | The "WRONG CLAUDE/ DIRECTORY" advisory fires on every Read of this repository's own `CLAUDE/Plan/...` files. In self-install mode the project's `CLAUDE/` is the authoritative copy, not "the daemon's internal docs copy".                                                                                                                               | ✅ Fixed (agent-a5313785be3bc54d9-56f41b13, c213595a8): `daemon_docs_guard.matches` now stands down when `ProjectContext.self_install_mode` is true and still fires for a client install.                                                    |
+| N342 | `setup_worktree.sh` cannot create ANY worktree from a host checkout at `/home/<user>/Projects/EC/claude-code-hooks-daemon`: the socket path up to the branch name is already 103 bytes against the 104-byte AF_UNIX limit, so even the mandatory `worktree-` prefix does not fit. The merge rule "work happens in worktrees" is unsatisfiable from there. | ⬜ Open — OWNER question (batch K, see below)                                                                                                                                                                                                |
 | N341 | `sensitive_content` denied `cd /home/<user>/... && git worktree remove … && git branch -d <name>`. The secret term was in the `cd` path, not in the branch name the branch-name surface exists to check; the matched text was redacted as part of the home path.                                                                                          | ✅ Fixed with N364 (batch B branch `agent-a4230a7966c0680b6-a3d7ec3b`): reproduced on main, the term is now judged only in the command that records metadata, and `git branch -d/-D/--delete` and `git tag -d/--delete` are no longer writes |
+
+**N338**: settled by N403 (batch J, merged in 8db7b9d78), which reads every redirect from the directory the whole
+`cd` chain reaches, so `cd <clone> && … && cd extensions && npm ci > ../untracked/scratch/x.txt` is judged from
+`<clone>/extensions`.
+
+**N342, owner question (batch K)**: `scripts/setup_worktree.sh` already pre-flights the socket path and refuses with
+"shorten the branch name", which cannot help when the host root alone leaves no room (the worktree socket is
+`<root>/untracked/worktrees/<branch>/untracked/daemon.sock`, 43 bytes of fixed layout plus the branch). The daemon
+itself starts fine (its socket falls back to `/tmp`); the refusal exists because the acceptance gates look for the
+socket under `untracked/`. Every fix changes a convention, so it is the owner's call. Which of: (a) let the worktrees
+live at a short path outside the repo (a `WORKTREES_DIR` override), which `project_containment` and the
+worktree-isolation guards currently treat as outside the project; (b) teach the acceptance gates to follow the
+socket discovery file and drop the refusal for an over-length path; or (c) declare a maximum host-checkout path
+length and document it?
 
 **N339, second reproduction** (coordinator, this container, 2026-10-03): `… && for b in a b c; do git -C x/$b rev-parse HEAD || exit 1; done` was denied as having no safety prelude. Every step in it is gated, but the `;` inside the loop syntax (`do … ; done`) was read as unguarded sequencing. This is the same class as the `{ …; }` group above. A fix should parse compound-command syntax (`{ }`, `for/while … do … done`, `if … fi`) rather than treat each `;` as a separator.
 

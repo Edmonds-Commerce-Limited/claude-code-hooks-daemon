@@ -11,6 +11,7 @@ rather than judge the wrong repository.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Final
 
@@ -45,6 +46,55 @@ def _step_problem(step: str | None) -> str | None:
     return None
 
 
+def _expanded(
+    steps: Sequence[str | None], here: Path | None, *, advance: bool
+) -> tuple[list[str | None], Path | None]:
+    """``steps`` with the working-directory spellings read in the directory reached so far.
+
+    ``here`` is where the first step is read (``None``: nothing is resolved).
+    With ``advance`` each step then moves ``here``; it stops moving at any step
+    :func:`_step_problem` rejects. Returns the steps and the final ``here``.
+    """
+    expanded: list[str | None] = []
+    for step in steps:
+        if step is not None and here is not None:
+            step = expand_cwd_references(step, str(here))
+        expanded.append(step)
+        if advance and here is not None:
+            if step is None or _step_problem(step) is not None:
+                here = None
+            else:
+                here = here / Path(step).expanduser()
+    return expanded, here
+
+
+def placed_moves(
+    moves: Sequence[str | None], cwd: Path
+) -> tuple[tuple[str | None, ...], str | None]:
+    """A ``cd``/``pushd`` chain read from ``cwd``, and why it cannot be placed, else None.
+
+    For a caller that judges a path in the directory a chain reaches but runs no
+    git command (ledger 00474 N403). The ``$PWD`` family is read as
+    :func:`_steps` reads it, and a ``~`` step is made absolute, so the result can
+    go to :func:`~claude_code_hooks_daemon.utils.git_facts.landing_directories`
+    as it stands. The first step :func:`_step_problem` rejects is the problem;
+    the steps are only meaningful when there is none.
+    """
+    here = cwd if cwd.is_absolute() else None
+    expanded, _ = _expanded(moves, here, advance=True)
+    for step in expanded:
+        problem = _step_problem(step)
+        if problem is not None:
+            return tuple(expanded), problem
+    return (
+        tuple(
+            str(Path(step).expanduser()) if step is not None and step.startswith("~") else step
+            for step in expanded
+        ),
+        None,
+    )
+
+
 def _steps(run: GitInvocation, cwd: Path) -> list[str | None]:
     """The directory steps of ``run``: each ``cd`` target, then each ``-C`` value.
 
@@ -60,20 +110,11 @@ def _steps(run: GitInvocation, cwd: Path) -> list[str | None]:
     assigns ``PWD``. A ``PWD=`` set by an EARLIER statement of the command is
     not visible to a :class:`GitInvocation`, so it is not mirrored here.
     """
-    steps: list[str | None] = []
     resolving = cwd.is_absolute() and not any(a.startswith("PWD=") for a in run.assignments)
-    here: Path | None = cwd if resolving else None
-    for index, step in enumerate((*run.directory, *dash_c_values(run.global_options))):
-        if step is not None and here is not None:
-            step = expand_cwd_references(step, str(here))
-        steps.append(step)
-        if index < len(run.directory) and here is not None:
-            # Stop advancing at any step placement_problem rejects.
-            if step is None or _step_problem(step) is not None:
-                here = None
-            else:
-                here = here / Path(step).expanduser()
-    return steps
+    moves, here = _expanded(run.directory, cwd if resolving else None, advance=True)
+    # The -C values are all read where the last cd left the shell.
+    dash_c, _ = _expanded(dash_c_values(run.global_options), here, advance=False)
+    return [*moves, *dash_c]
 
 
 def placement_problem(run: GitInvocation, cwd: Path) -> str | None:

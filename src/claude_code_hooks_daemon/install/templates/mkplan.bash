@@ -46,8 +46,8 @@
 #      (`hooksdaemon.latestPlanNumber`), bootstrapping from a filesystem
 #      scan when the counter is unset — exactly like the hooks daemon does.
 #      A brand-new project (no counter, no plans) starts at 00001.
-#   5. Sanity-checks the number against the folders on disk and refuses to
-#      proceed on drift or collision.
+#   5. Sanity-checks the number against the folders on disk: advances a lagging
+#      counter to the highest plan on disk, and refuses to proceed on collision.
 #   6. Creates <plan-dir>/NNNNN-name/ and scaffolds PLAN.md.
 #   7. Advances the git counter so the next plan reads counter + 1.
 #
@@ -758,11 +758,15 @@ else
     counter="$fs_highest"
 fi
 
-# Drift guard: the git counter is authoritative, but if the filesystem already
-# holds a HIGHER number the counter is stale and counter+1 would collide or
-# mis-order. Refuse and tell the user how to reconcile.
+# Drift guard: the counter lives in each clone's local git config, so a clone
+# can lag the plan folders it holds (plans pulled from elsewhere). The disk is
+# the truth about which numbers are taken: advance the counter to it rather
+# than refuse, and allocate the number after it. The advanced value is written
+# with the new plan below, like any other allocation.
 if (( fs_highest > counter )); then
-    die "counter ($counter) is behind the highest plan on disk ($fs_highest). The counter is stale; reconcile with: git -C '$repo_root' config --local $COUNTER_KEY $fs_highest"
+    printf 'mkplan: counter (%s) is behind the highest plan on disk (%s); advancing it\n' \
+        "$counter" "$fs_highest" >&2
+    counter="$fs_highest"
 fi
 
 next=$((counter + 1))

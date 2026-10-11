@@ -57,13 +57,13 @@ class TestGhIssueCommentsHandler:
         }
         assert handler.matches(hook_input) is True
 
-    def test_matches_with_web_flag(self, handler: GhIssueCommentsHandler) -> None:
-        """Should match gh issue view --web without --comments."""
+    def test_not_matches_with_web_flag(self, handler: GhIssueCommentsHandler) -> None:
+        """--web opens the browser and fetches no comments to miss (N408 review)."""
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "gh issue view 123 --web"},
         }
-        assert handler.matches(hook_input) is True
+        assert handler.matches(hook_input) is False
 
     def test_matches_with_repo_before_number(self, handler: GhIssueCommentsHandler) -> None:
         """Should match when --repo comes before the issue number."""
