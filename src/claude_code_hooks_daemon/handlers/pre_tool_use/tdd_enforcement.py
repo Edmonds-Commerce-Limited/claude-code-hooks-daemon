@@ -23,6 +23,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 from claude_code_hooks_daemon.core.workspace import resolve_workspace
+from claude_code_hooks_daemon.core.worktree_paths import enclosing_checkout
 from claude_code_hooks_daemon.strategies.tdd import TddStrategyRegistry
 from claude_code_hooks_daemon.strategies.tdd.protocol import TddStrategy
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
@@ -607,13 +608,16 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
             return []
 
         project_root = resolve_project_root()
+        checkout_root = self._checkout_root_for(source_path, project_root)
         candidates: list[Path] = []
         for mapping in mappings:
             if not path_matches_globs(
-                source_path, [mapping.source_glob], project_root=project_root
+                source_path,
+                [mapping.source_glob],
+                project_root=None if checkout_root is None else str(checkout_root),
             ):
                 continue
-            if project_root is None:
+            if project_root is None or checkout_root is None:
                 # Nothing to anchor a relative dir against. Degrade to the
                 # inferred candidates rather than guessing a root — a guessed
                 # root would produce a path that silently never exists, which
@@ -628,14 +632,14 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
 
             test_dir = Path(mapping.test_dir)
             project_root_path = Path(project_root)
-            workspace = resolve_workspace(
-                self._project_registry, Path(source_path), project_root_path
+            workspace_root, source_in_workspace = self._workspace_anchor(
+                Path(source_path), project_root_path, checkout_root
             )
             if not mapping.mirror:
-                candidates.append(workspace.root / test_dir / test_filename)
+                candidates.append(workspace_root / test_dir / test_filename)
                 continue
             try:
-                relative_parts = path_relative_to(Path(source_path), workspace.root).parts
+                relative_parts = path_relative_to(source_in_workspace, workspace_root).parts
             except ValueError as exc:
                 # A mirror is defined relative to the workspace; a source the
                 # glob matched from outside it has no such relation, so the
@@ -647,8 +651,48 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
                 )
                 continue
             mirrored = _dirs_after_window(relative_parts, _glob_literal_root(mapping.source_glob))
-            candidates.append(workspace.root / test_dir / Path(*mirrored) / test_filename)
+            candidates.append(workspace_root / test_dir / Path(*mirrored) / test_filename)
         return candidates
+
+    @staticmethod
+    def _checkout_root_for(source_path: str, project_root: str | None) -> Path | None:
+        """The checkout root that holds ``source_path``, or None without a project root.
+
+        The worktree's root when the file lives in a git worktree nested in the
+        project (``untracked/worktrees/<name>/``), else the project root itself,
+        returned exactly as given so a main-checkout source resolves unchanged.
+        A relative ``test_dir`` and a project-relative ``source_glob`` both
+        belong to THAT checkout: the project root would point at the main
+        checkout, whose copy of the test is not the one the agent wrote.
+        """
+        if project_root is None:
+            return None
+        root = Path(project_root)
+        located = enclosing_checkout(source_path, root)
+        if located is None or located[0] == root.resolve():
+            return root
+        return located[0]
+
+    def _workspace_anchor(
+        self, source: Path, project_root: Path, checkout_root: Path
+    ) -> tuple[Path, Path]:
+        """The source's workspace root and the source path inside that checkout.
+
+        The workspace is resolved through the registry against the project-root
+        equivalent of the source (the registry's declared project roots live
+        under the project root), then re-rooted at ``checkout_root`` so a
+        worktree source anchors at ``<worktree>/<workspace>``.
+        """
+        located = enclosing_checkout(str(source), project_root)
+        if checkout_root == project_root or located is None:
+            workspace = resolve_workspace(self._project_registry, source, project_root)
+            return workspace.root, source
+        in_checkout = located[1]
+        workspace = resolve_workspace(
+            self._project_registry, project_root / in_checkout, project_root
+        )
+        workspace_rel = path_relative_to(workspace.root, project_root)
+        return checkout_root / workspace_rel, checkout_root / in_checkout
 
     def _map_layout_mirror_paths(self, source_path: str, test_filename: str) -> list[Path]:
         """Candidate test paths from NESTED ``layout.test_dirs`` entries.

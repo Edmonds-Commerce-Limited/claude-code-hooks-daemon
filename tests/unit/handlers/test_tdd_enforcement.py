@@ -1,5 +1,6 @@
 """Comprehensive tests for TddEnforcementHandler."""
 
+import subprocess
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -2428,6 +2429,173 @@ class TestMirrorTestPathMap:
 
         assert tmp_path / "tests" / "Small" not in [c.parent.parent for c in candidates]
         assert any("mirror" in record.message for record in caplog.records)
+
+
+def _make_nested_worktree(project: Path, name: str = "wt") -> Path:
+    """A real git repository at ``project`` with a linked worktree nested in it."""
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+    subprocess.run([*git, "init", "-q", str(project)], check=True)
+    subprocess.run(
+        [*git, "-C", str(project), "commit", "-q", "--allow-empty", "-m", "root"], check=True
+    )
+    worktree = project / "untracked" / "worktrees" / name
+    subprocess.run(
+        [*git, "-C", str(project), "worktree", "add", "-q", "-b", name, str(worktree)],
+        check=True,
+    )
+    return worktree
+
+
+class TestDeclaredTestPathMapAnchorsAtTheWorktree:
+    """A declared ``test_dir`` is anchored at the checkout holding the source (Plan 00505).
+
+    A source inside a git worktree nested in the project used to be checked
+    against the MAIN checkout's mapped directory, so the test the agent wrote in
+    its own worktree was never searched and the write was denied.
+    """
+
+    _SOURCE_REL = ("src", "PackageType", "OptimiseProbe.php")
+    _FLAT_REL = ("tests", "Flat", "OptimiseProbeTest.php")
+    _SMALL_REL = ("tests", "Small", "PackageType", "OptimiseProbeTest.php")
+
+    @staticmethod
+    def _entries() -> list[dict[str, object]]:
+        return [
+            {"source_glob": "src/**", "test_dir": "tests/Flat"},
+            {"source_glob": "src/**", "test_dir": "tests/Small", "mirror": True},
+        ]
+
+    def _handler(self) -> TddEnforcementHandler:
+        handler = TddEnforcementHandler()
+        handler._test_path_map = self._entries()
+        return handler
+
+    def test_a_worktree_source_finds_its_own_flat_test(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        worktree = _make_nested_worktree(tmp_path)
+        _anchor_project_root(monkeypatch, tmp_path)
+        _place_test(worktree.joinpath(*self._FLAT_REL))
+
+        decision = self._handler().handle(_php_write(worktree.joinpath(*self._SOURCE_REL)))
+
+        assert decision.decision == "allow"
+
+    def test_a_worktree_source_finds_its_own_mirrored_test(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        worktree = _make_nested_worktree(tmp_path)
+        _anchor_project_root(monkeypatch, tmp_path)
+        _place_test(worktree.joinpath(*self._SMALL_REL))
+
+        decision = self._handler().handle(_php_write(worktree.joinpath(*self._SOURCE_REL)))
+
+        assert decision.decision == "allow"
+
+    def test_the_deny_names_the_worktree_locations_not_the_main_checkouts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        worktree = _make_nested_worktree(tmp_path)
+        _anchor_project_root(monkeypatch, tmp_path)
+
+        denied = self._handler().handle(_php_write(worktree.joinpath(*self._SOURCE_REL)))
+
+        assert denied.decision == "deny"
+        reason = denied.reason or ""
+        assert str(worktree.joinpath(*self._FLAT_REL)) in reason
+        assert str(worktree.joinpath(*self._SMALL_REL)) in reason
+        assert str(tmp_path.joinpath(*self._FLAT_REL)) not in reason
+        assert str(tmp_path.joinpath(*self._SMALL_REL)) not in reason
+
+    def test_a_main_checkout_test_does_not_satisfy_a_worktree_source(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        worktree = _make_nested_worktree(tmp_path)
+        _anchor_project_root(monkeypatch, tmp_path)
+        _place_test(tmp_path.joinpath(*self._FLAT_REL))
+
+        decision = self._handler().handle(_php_write(worktree.joinpath(*self._SOURCE_REL)))
+
+        assert decision.decision == "deny"
+
+    def test_a_main_checkout_source_resolves_exactly_as_before(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        worktree = _make_nested_worktree(tmp_path)
+        _anchor_project_root(monkeypatch, tmp_path)
+        source = tmp_path.joinpath(*self._SOURCE_REL)
+
+        denied = self._handler().handle(_php_write(source))
+        assert denied.decision == "deny"
+        reason = denied.reason or ""
+        assert str(tmp_path.joinpath(*self._FLAT_REL)) in reason
+        assert str(tmp_path.joinpath(*self._SMALL_REL)) in reason
+        assert str(worktree) not in reason
+
+        _place_test(tmp_path.joinpath(*self._SMALL_REL))
+        assert self._handler().handle(_php_write(source)).decision == "allow"
+
+    def test_an_anchored_glob_matches_relative_to_the_worktree(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``apps/app/src/**`` must match ``<worktree>/apps/app/src/...``, not
+        only ``<root>/apps/app/src/...``."""
+        worktree = _make_nested_worktree(tmp_path)
+        _anchor_project_root(monkeypatch, tmp_path)
+        handler = TddEnforcementHandler()
+        handler._test_path_map = [
+            {"source_glob": "apps/app/src/**", "test_dir": "apps/app/tests/Small", "mirror": True}
+        ]
+        expected = worktree / "apps" / "app" / "tests" / "Small" / "Entity" / "CompanyTest.php"
+        source = worktree / "apps" / "app" / "src" / "Entity" / "Company.php"
+
+        denied = handler.handle(_php_write(source))
+
+        assert denied.decision == "deny"
+        assert str(expected) in (denied.reason or "")
+
+    def test_a_declared_project_inside_a_worktree_keeps_its_workspace_anchor(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The workspace is resolved from the declared registry, then re-rooted at
+        the worktree, so ``apps/api`` anchors at ``<worktree>/apps/api``."""
+        worktree = _make_nested_worktree(tmp_path)
+        _anchor_project_root(monkeypatch, tmp_path)
+        handler = TddEnforcementHandler()
+        handler._test_path_map = [{"source_glob": "**/src/**", "test_dir": "tests/Flat"}]
+        handler._project_registry = ProjectRegistry(
+            project_root=tmp_path,
+            projects=(
+                DeclaredProject(
+                    name="api",
+                    root=tmp_path / "apps" / "api",
+                    layout=LayoutConfig(),
+                ),
+            ),
+            root_layout=TestLayoutTestDirsAsMirrorRoots._layout(("tests",)),
+        )
+        source = worktree / "apps" / "api" / "src" / "Thing.php"
+        expected = worktree / "apps" / "api" / "tests" / "Flat" / "ThingTest.php"
+
+        denied = handler.handle(_php_write(source))
+
+        assert denied.decision == "deny"
+        assert str(expected) in (denied.reason or "")
+
+    def test_layout_test_dirs_mirror_roots_already_anchor_at_the_worktree(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``layout.test_dirs`` mirror roots derive their anchor from the source
+        path itself, so they never had the defect."""
+        worktree = _make_nested_worktree(tmp_path)
+        _anchor_project_root(monkeypatch, tmp_path)
+        handler = TddEnforcementHandler()
+        handler._project_layout = TestLayoutTestDirsAsMirrorRoots._layout(("tests", "tests/Small"))
+        source = worktree.joinpath(*self._SOURCE_REL)
+
+        candidates = handler._map_layout_mirror_paths(str(source), "OptimiseProbeTest.php")
+
+        assert candidates == [worktree.joinpath(*self._SMALL_REL)]
 
 
 class TestLayoutTestDirsAsMirrorRoots:
