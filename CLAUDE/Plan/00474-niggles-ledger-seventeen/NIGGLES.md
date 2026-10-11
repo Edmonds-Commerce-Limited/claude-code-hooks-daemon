@@ -2437,7 +2437,7 @@ test hermetic against an inherited root. Then confirm the test passes inside a w
 (1 failed, 6 passed). There `.claude/hooks-daemon.env` is a symlink to main's `/workspace/.claude/hooks-daemon.env`
 (`HOOKS_DAEMON_ROOT_DIR="/workspace"`), `init.sh:1213-1220` sources it over any inherited variable (so the test cannot
 override it through the subprocess env), and the launcher reports "Daemon already running" for main's daemon
-(`--project-root /workspace`) which never becomes ready for the Stop probe. `setup_worktree.sh:380-395` writes a
+(`--project-root /workspace`) which never becomes ready for the Stop probe. `setup_worktree.sh:377-399` writes a
 checkout-correct file, so a worktree it builds is likely fine (not run here). Remaining fix: make harness worktree
 creation write that file the same way, or have the test skip when the env file resolves outside `REPO_ROOT`.
 
@@ -2482,7 +2482,7 @@ timeout under host load (N344's class).
 
 **Status**: ✅ Fixed (agent-a5313785be3bc54d9-56f41b13, c213595a8) for the recipe: every documented install path already
 uses the lock (`CONTRIBUTING.md:21` and `setup_worktree.sh` use `uv sync --frozen --all-extras`); the one remaining
-off-lock recipe, the missing-semgrep remedy in `scripts/qa/run_semgrep_check.sh:49` (`uv pip install -e '.[dev]'`),
+off-lock recipe, the missing-semgrep remedy in `scripts/qa/run_semgrep_check.sh:51` (`uv pip install -e '.[dev]'`),
 now says `uv sync --frozen --all-extras`, pinned by a test. The coordinator's own recipe lives outside the repository.
 The second bullet (ruff 0.16 findings in the supervisor asset, pytest 9.1 option grammar) cannot reproduce on the
 locked ruff 0.15.11 / pytest 9.0.3 and stays a precondition of any lock bump, not a present defect.
