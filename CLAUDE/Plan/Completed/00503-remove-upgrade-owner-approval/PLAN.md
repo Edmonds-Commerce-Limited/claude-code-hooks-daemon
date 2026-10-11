@@ -1,6 +1,6 @@
 # Plan 00503: remove upgrade owner approval
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-11
 **Owner**: dev
 **Priority**: High
@@ -65,18 +65,21 @@ against forging the approval defends against nothing in scope.
 - [x] ✅ **Task 2.1**: Review (r1 changes required, r2 applied), coordinator
   checks, merged at 6976bf009.
 - [x] ✅ **Task 2.2**: Plan 00477 Task 5.3 marked moot.
-- [ ] 🔄 **Task 2.3**: Range QA over the merge, then archive.
+- [x] ✅ **Task 2.3**: Range QA over the merge, then archive. 9770 tests passed,
+  0 failed; every static check green. The only red items are the designed
+  `too-broad` unmapped files and a journal-freshness advisory for Plan 00495.
 
 ## Success Criteria
 
-- [ ] No code path exits 4 or reads an approval marker; `approve-upgrade` is
+- [x] No code path exits 4 or reads an approval marker; `approve-upgrade` is
   not a CLI verb.
-- [ ] `upgrade_approval_guard` is absent from source, config and generated
+- [x] `upgrade_approval_guard` is absent from source, config and generated
   guidance, and a config still naming it validates.
-- [ ] The phasing advisory has tests and never changes the exit code.
-- [ ] The release-bound consequences (the removed handler and verb) are in
+- [x] The phasing advisory has tests and never changes the exit code.
+- [x] The release-bound consequences (the removed handler and verb) are in
   the pending-release holding area: a release note and the manifest entries.
 
 ## Delivery & Milestones
 
 - Issue #112 filed and claimed.
+- Merged at `6976bf009` (review r1 changes applied in r2).
