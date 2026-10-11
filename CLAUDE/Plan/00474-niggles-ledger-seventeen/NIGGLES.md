@@ -1516,8 +1516,8 @@ unchanged. Full evidence with file:line:
   reach the cap of 8.
 - Measured, not guaranteed: across the 5 session transcripts of this workspace there were 95 chains of Stop blocks and
   the longest was 1 consecutive block with no tool call in between; the daemon's own `stop-events.jsonl` shows no
-  text-only deny-to-deny pair in a real session (all 7 had more than 20 KB of transcript growth). 12 real-session denies
-  carried `stop_hook_active=true` (the no-marker path), and the longest consecutive-deny run was 4, each pair separated by
+  text-only deny-to-deny pair in a real session (all 7 had more than 20 KB of transcript growth). 12 real-session denies (sessions with a transcript; the
+  log holds 401 such denies in all, the rest from test and probe sessions with none) carried `stop_hook_active=true` (the no-marker path), and the longest consecutive-deny run was 4, each pair separated by
   tool calls. The measured sessions never came near the cap.
 - Overridden-block assumptions: nothing reads state recorded at block time as proof the block was honoured. The
   `stop-events.jsonl` DENY line is write-only diagnostics; the human-blocked marker is written before the stand-in block
@@ -1721,7 +1721,7 @@ none a regression against main:
 
 - `utils/git_commit_parsing.py:959-961`: `case … esac` is not in the opener/closer sets, so `case x in x) cd /tmp;; esac > x`
   is still a false deny; the lexer also reads `x)` as a subshell close.
-- `utils/git_commit_parsing.py:1076` (`_walk`, via `_after_directory_change`): a `cd` that may never run is treated as one
+- `utils/git_commit_parsing.py:1070` (`_walk`, via `_after_directory_change`): a `cd` that may never run is treated as one
   that did: a function body (`f() { cd /tmp; }; echo x > x`), a group in a pipeline that runs in a subshell
   (`{ cd /tmp; } | cat > x`), and a loop body that never runs (`while false; do cd /tmp; done; echo x > x`). False
   denies only.
