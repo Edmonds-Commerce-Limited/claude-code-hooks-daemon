@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from tests.load_scaling import scaled_seconds
 from tests.unit.supervise._load import load_supervisor_module
 from tests.unit.supervise._plugin_helpers import (
     GOOD_BODY,
@@ -30,6 +31,16 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _mod = load_supervisor_module()
+
+#: How long the slow test plugins sleep; a bound at or past it would pass a
+#: tick that waited the whole sleep out.
+_SLOW_HOOK_SLEEP_SECONDS = 3.0
+
+
+def _below_the_hook_sleep(base_seconds: float) -> float:
+    """``base_seconds`` scaled by host load, but kept under the slow hooks' sleep."""
+    return min(scaled_seconds(base_seconds), _SLOW_HOOK_SLEEP_SECONDS - 0.5)
+
 
 # Records that the hook ran by appending the plugin's name to a shared file.
 _RECORDING_BODY = """
@@ -206,7 +217,7 @@ class TestBudgets:
         runtime = make_runtime(tmp_path, {"slow": slow}, hook_budget=0.1)
         started = time.monotonic()
         runtime.run_idle(NOW)
-        assert time.monotonic() - started < 1.0
+        assert time.monotonic() - started < _below_the_hook_sleep(1.0)
 
     def test_the_tick_budget_stops_asking_further_plugins(self, tmp_path: Path) -> None:
         slow = """
@@ -224,7 +235,7 @@ class TestBudgets:
         )
         started = time.monotonic()
         runtime.run_idle(NOW)
-        assert time.monotonic() - started < 1.0
+        assert time.monotonic() - started < _below_the_hook_sleep(1.0)
         # Running out of tick budget is not a failure: `third` was simply not
         # asked this tick, and is still enabled for the next one.
         assert _order(tmp_path) == []

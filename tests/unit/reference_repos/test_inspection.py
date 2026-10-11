@@ -22,6 +22,7 @@ from typing import Final
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.reference_repos.inspection import inspect_repo
 from claude_code_hooks_daemon.reference_repos.model import Checkability
 from claude_code_hooks_daemon.utils import git_sync
@@ -288,7 +289,7 @@ class TestTheInspectorDoesNoNetworkIO:
         def _record(
             cwd: Path,
             *args: str,
-            timeout: float = git_setup_timeout(),
+            timeout: float = Timeout.GIT_CONTEXT,
             env: Mapping[str, str] | None = None,
         ) -> subprocess.CompletedProcess[str]:
             spawned.append(tuple(args))

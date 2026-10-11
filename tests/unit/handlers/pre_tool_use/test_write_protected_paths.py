@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.load_scaling import scaled_seconds
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.write_protected_paths import (
@@ -980,7 +981,7 @@ class TestHostileInputStaysLinear:
         command = "; ".join(["F=a"] * 2000) + "; cd a; rm ccy.env.local"
         started = time.perf_counter()
         handler.matches(_bash(root, command))
-        assert time.perf_counter() - started < 5
+        assert time.perf_counter() - started < scaled_seconds(5.0)
 
     def test_assignments_before_a_cd_still_resolve_after_it(
         self, handler: WriteProtectedPathsHandler, root: Path

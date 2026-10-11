@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tests.support.git_fixtures import git_setup_timeout
+from claude_code_hooks_daemon.constants.timeout import Timeout
 
 _OPEN_TAG = "<hooksdaemon>"
 _CLOSE_TAG = "</hooksdaemon>"
@@ -925,7 +925,7 @@ class TestAutoCommitDoesNotFightTheAgentForTheIndexLock:
         real = module.run_git
 
         def spy(
-            cwd: Path, *args: str, timeout: float = git_setup_timeout()
+            cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT
         ) -> subprocess.CompletedProcess[str]:
             calls.append(args)
             return real(cwd, *args, timeout=timeout)
@@ -993,7 +993,7 @@ class TestAutoCommitDoesNotFightTheAgentForTheIndexLock:
         real = module.run_git
 
         def spy(
-            cwd: Path, *args: str, timeout: float = git_setup_timeout()
+            cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT
         ) -> subprocess.CompletedProcess[str]:
             if args:
                 timeouts[args[0]] = timeout
@@ -1033,7 +1033,7 @@ class TestAutoCommitDoesNotFightTheAgentForTheIndexLock:
         real = module.run_git
 
         def spy(
-            cwd: Path, *args: str, timeout: float = git_setup_timeout()
+            cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT
         ) -> subprocess.CompletedProcess[str]:
             if args:
                 timeouts[args[0]] = timeout
@@ -1075,7 +1075,7 @@ class TestAutoCommitDoesNotFightTheAgentForTheIndexLock:
         )
 
         def fail_the_write(
-            cwd: Path, *args: str, timeout: float = git_setup_timeout()
+            cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT
         ) -> subprocess.CompletedProcess[str]:
             if args and args[0] in ("commit", "add"):
                 return subprocess.CompletedProcess(["git", *args], 128, "", contention)

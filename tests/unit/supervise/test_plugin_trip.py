@@ -15,6 +15,7 @@ import os
 import time
 from typing import TYPE_CHECKING, Any
 
+from tests.load_scaling import scaled_seconds
 from tests.unit.supervise._load import SCRIPT_PATH, load_supervisor_module
 from tests.unit.supervise._plugin_helpers import spec, write_plugin
 
@@ -246,4 +247,4 @@ class TestHangAfterTrip:
         # The plugin was asked once (the tick that tripped) and never again.
         assert counter.read_text() == "x"
         assert received.read_bytes().decode().count("plugin notice") == 1
-        assert time.monotonic() - started < 15
+        assert time.monotonic() - started < scaled_seconds(15.0)

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.project_layout import ProjectLayout
 from claude_code_hooks_daemon.plan_qa.context import (
     edit_context,
@@ -740,7 +741,7 @@ class TestStagedContextReadsTheCommittedTree:
         def run_git(
             cwd: Path,
             *args: str,
-            timeout: float = git_setup_timeout(),
+            timeout: float = Timeout.GIT_CONTEXT,
             env: Mapping[str, str] | None = None,
         ) -> "subprocess.CompletedProcess[str]":
             if args[0] == "ls-files":

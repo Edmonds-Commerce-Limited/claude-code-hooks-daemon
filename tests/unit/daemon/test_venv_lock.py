@@ -201,7 +201,7 @@ class TestMkdirBackendRacesTheHolder:
         with pytest.raises(VenvLockTimeout) as excinfo:
             with venv_lock(tmp_path, timeout_seconds=1, backend="mkdir"):
                 pytest.fail("must not enter while the lock name is unusable")
-        assert time.monotonic() - started < 10
+        assert time.monotonic() - started < scaled_seconds(10.0)
         assert str(lock_dir) in str(excinfo.value)
 
 

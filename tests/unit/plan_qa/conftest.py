@@ -13,8 +13,8 @@ from subprocess import CompletedProcess
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils import git_facts as gitfacts_module
-from tests.support.git_fixtures import git_setup_timeout
 
 
 @pytest.fixture
@@ -35,7 +35,7 @@ def git_diff_spawns(monkeypatch: MonkeyPatch) -> Iterator[list[tuple[str, ...]]]
     def recording(
         cwd: Path,
         *args: str,
-        timeout: float = git_setup_timeout(),
+        timeout: float = Timeout.GIT_CONTEXT,
         env: Mapping[str, str] | None = None,
     ) -> CompletedProcess[str]:
         if args and args[0] == "diff":

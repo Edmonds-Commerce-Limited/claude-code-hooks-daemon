@@ -436,7 +436,7 @@ class TestTheBuildUnderTheDaemon:
 
         real_run_git = git_file_states.run_git
 
-        def loaded_host(cwd: Path, *args: str, timeout: float = git_setup_timeout()) -> object:
+        def loaded_host(cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT) -> object:
             if timeout <= Timeout.GIT_CONTEXT:
                 return subprocess.CompletedProcess(["git", *args], 124, "", "timed out")
             return real_run_git(cwd, *args, timeout=timeout)
