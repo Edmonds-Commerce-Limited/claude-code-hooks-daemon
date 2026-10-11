@@ -19,7 +19,21 @@ Scope: `sudo_pip` and `pip_break_system` misses listed under N407 "Residual gaps
 - Acceptance tests unchanged (already `bash -n -c '...'` with a nonexistent package).
 - Ledger: N407 residuals marked cleared; obfuscation deliberately skipped.
 
-## Results
+## Round 2 (review FIX FIRST)
+
+- B1: the env var is judged by `_leading_assignment` / `_env_var_governs_pip_install`: a real assignment only (prefix,
+  after `env`, after `export`/`declare -x`). `git grep`, `find -name`, `ls`, `docker run -e` allow; tests and corpus rows
+  added.
+- B2: the value is unquoted before the falsy test; `'0'`, `"false"`, `''` allow.
+- N1: a bare `export` no longer denies. It denies only when a truthy assignment governs a pip install (same-command
+  prefix, `env`, or an earlier `export` in the line followed by a pip install). `export ...=1; echo pip install x` and
+  `; ls` allow; `export ...=1 && pip install x` and `; pip3 install x` deny. A later `=0` export or prefix overrides.
+- N2: cleared `sudo --user root`, `sudo -p 'pw: '`, `sudo pip -q install`. Not cleared: `sudo bash -c 'echo hi; pip install x'` (the splitter cuts at `;`); recorded as a residual.
+- N3: recorded as a residual, with the comment-splitting quirk found while testing (a `;`/`&&` inside a trailing comment
+  splits). The test helper skips the comment mention for compound texts.
+- Results: pip guard tests 332 passed; corpus gate and wiring 494 passed; black, ruff, mypy, pyright clean.
+
+## Results (round 1)
 
 - Pip guard tests (4 files): 296 passed. Corpus gate + wiring tests: 488 passed.
 - black, ruff, mypy clean on touched files. pyright reports only an environmental

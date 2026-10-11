@@ -41,6 +41,9 @@ _SUDO_DENY = [
     "sudo -E bash -lc 'pip3 install nonexistent-pkg-zz'",
     "doas pip install nonexistent-pkg-zz",
     "doas -u root pip install nonexistent-pkg-zz",
+    "sudo --user root pip install nonexistent-pkg-zz",
+    "sudo -p 'pw: ' pip install nonexistent-pkg-zz",
+    "sudo pip -q install nonexistent-pkg-zz",
     "sudo pip3.11 install nonexistent-pkg-zz",
     "sudo python3.11 -m pip install nonexistent-pkg-zz",
 ]
@@ -65,8 +68,13 @@ _BREAK_DENY = [
     "PIP_BREAK_SYSTEM_PACKAGES=true pip3 install nonexistent-pkg-zz",
     "FOO=1 PIP_BREAK_SYSTEM_PACKAGES=1 pip install nonexistent-pkg-zz",
     "env PIP_BREAK_SYSTEM_PACKAGES=1 pip install nonexistent-pkg-zz",
-    "export PIP_BREAK_SYSTEM_PACKAGES=1",
     "export PIP_BREAK_SYSTEM_PACKAGES=1 && pip install nonexistent-pkg-zz",
+    "export PIP_BREAK_SYSTEM_PACKAGES=1; pip3 install nonexistent-pkg-zz",
+    "declare -x PIP_BREAK_SYSTEM_PACKAGES=1; python3 -m pip install nonexistent-pkg-zz",
+    "export PIP_BREAK_SYSTEM_PACKAGES='yes'; pip install nonexistent-pkg-zz",
+    "export PIP_BREAK_SYSTEM_PACKAGES=0 && PIP_BREAK_SYSTEM_PACKAGES=1 pip install x",
+    "PIP_BREAK_SYSTEM_PACKAGES='1' pip install nonexistent-pkg-zz",
+    "PIP_BREAK_SYSTEM_PACKAGES=1 sudo pip install nonexistent-pkg-zz",
     "bash -c 'PIP_BREAK_SYSTEM_PACKAGES=1 pip install nonexistent-pkg-zz'",
     "pip3.11 install --break-system-packages nonexistent-pkg-zz",
     "python3.11 -m pip install --break-system-packages nonexistent-pkg-zz",
@@ -76,6 +84,18 @@ _BREAK_DENY = [
 _BREAK_ALLOW = [
     "PIP_BREAK_SYSTEM_PACKAGES=0 pip install nonexistent-pkg-zz",
     "export PIP_BREAK_SYSTEM_PACKAGES=false",
+    "PIP_BREAK_SYSTEM_PACKAGES='0' pip install nonexistent-pkg-zz",
+    'PIP_BREAK_SYSTEM_PACKAGES="false" pip install nonexistent-pkg-zz',
+    "PIP_BREAK_SYSTEM_PACKAGES='' pip install nonexistent-pkg-zz",
+    "export PIP_BREAK_SYSTEM_PACKAGES=1",
+    "export PIP_BREAK_SYSTEM_PACKAGES=1; ls",
+    "export PIP_BREAK_SYSTEM_PACKAGES=1; echo pip install x",
+    "export PIP_BREAK_SYSTEM_PACKAGES=1; export PIP_BREAK_SYSTEM_PACKAGES=0; pip install x",
+    "PIP_BREAK_SYSTEM_PACKAGES=1 make",
+    "git grep -n PIP_BREAK_SYSTEM_PACKAGES=1",
+    "find . -name PIP_BREAK_SYSTEM_PACKAGES=1",
+    "ls PIP_BREAK_SYSTEM_PACKAGES=1",
+    "docker run -e PIP_BREAK_SYSTEM_PACKAGES=1 img",
     "pip3.11 install --user nonexistent-pkg-zz",
     "python3.11 -m pip install nonexistent-pkg-zz",
     "pip --version",
@@ -84,13 +104,17 @@ _BREAK_ALLOW = [
 
 
 def _mentions(dangerous: str) -> list[str]:
+    # A `;`/`&&` inside a trailing comment still splits the line (splitter
+    # limitation, recorded as an N407 residual), so a compound dangerous text
+    # is not offered as a comment.
+    comment = [] if (";" in dangerous or "&&" in dangerous) else [f"true # {dangerous}"]
     return [
+        *comment,
         f'echo "{dangerous}"',
         f"echo '{dangerous}'",
         f'git commit -m "docs: never run {dangerous}"',
         f"git commit -m 'docs: never run {dangerous}'",
         f"grep -rn '{dangerous}' docs/",
-        f"true # {dangerous}",
         f"cat > notes.md <<'EOF'\nNever run {dangerous}\nEOF",
     ]
 

@@ -1459,6 +1459,24 @@ rows:
   - id: n407-env-var-falsy-value
     command: |-
       PIP_BREAK_SYSTEM_PACKAGES=0 ls
+  - id: n407-git-grep-env-var
+    command: |-
+      git grep -n PIP_BREAK_SYSTEM_PACKAGES=1
+  - id: n407-find-name-env-var
+    command: |-
+      find . -name PIP_BREAK_SYSTEM_PACKAGES=1
+  - id: n407-ls-env-var-text
+    command: |-
+      ls PIP_BREAK_SYSTEM_PACKAGES=1
+  - id: n407-docker-run-env-var
+    command: |-
+      docker run -e PIP_BREAK_SYSTEM_PACKAGES=1 img
+  - id: n407-bare-export-env-var
+    command: |-
+      export PIP_BREAK_SYSTEM_PACKAGES=1
+  - id: n407-quoted-falsy-env-var-prefix
+    command: |-
+      PIP_BREAK_SYSTEM_PACKAGES='0' ls
   - id: n408-echo-names-issue-view
     command: |-
       echo 'gh issue view 5'

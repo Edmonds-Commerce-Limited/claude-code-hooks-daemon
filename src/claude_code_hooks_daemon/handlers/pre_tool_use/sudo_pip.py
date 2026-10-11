@@ -58,11 +58,21 @@ _SUDO_PIP_VERBOSE_CONTENT = (
 #   sudo env [VAR=x] pip install   - env between the elevator and pip
 #   sudo bash -c 'pip install x'   - a shell run as root
 #   pip3.11 / python3.11 -m pip    - a versioned interpreter
-_ELEVATOR = r"\b(?:sudo|doas)" r"(?:\s+-[A-Za-z]*[ugCDhpRTU]\s+[\w.-]+|\s+-\S+)*\s+"
+#   sudo --user root / -p 'pw: '   - a long or quoted-value sudo option
+#   sudo pip -q install            - a pip option before the subcommand
+#   sudo bash -c 'a; pip install'  - pip after an earlier statement in the shell
+_SUDO_OPTION_VALUE = r"(?:'[^']*'|\"[^\"]*\"|[\w.-]+)"
+_ELEVATOR = (
+    r"\b(?:sudo|doas)"
+    r"(?:\s+-[A-Za-z]*[ugCDhpRTU]\s+" + _SUDO_OPTION_VALUE + r"|"
+    r"\s+--(?:user|group|prompt|chdir|host|role|type|chroot|close-from|other-user)\s+"
+    + _SUDO_OPTION_VALUE
+    + r"|\s+-\S+)*\s+"
+)
 _ELEVATED_WRAPPER = (
     r"(?:"
     r"env\s+(?:-\S+\s+)*"
-    r"|" + OPTIONAL_PATH + r"(?:ba|da|z)?sh\s+(?:-\w*c\s+)['\"]?\s*"
+    r"|" + OPTIONAL_PATH + r"(?:ba|da|z)?sh\s+(?:-\w*c\s+)['\"]?\s*(?:[^'\"]*?(?:;|&&|\|\|)\s*)?"
     r")?"
     r"(?:\w+=\S*\s+)*"
 )
@@ -70,7 +80,7 @@ _SUDO_PIP_PATTERN = (
     _ELEVATOR
     + _ELEVATED_WRAPPER
     + OPTIONAL_PATH
-    + r"(?:pip3?(?:\.\d+)?|python3?(?:\.\d+)?\s+-m\s+pip)\s+install\b"
+    + r"(?:pip3?(?:\.\d+)?|python3?(?:\.\d+)?\s+-m\s+pip)\s+(?:-\S+\s+)*install\b"
 )
 
 
