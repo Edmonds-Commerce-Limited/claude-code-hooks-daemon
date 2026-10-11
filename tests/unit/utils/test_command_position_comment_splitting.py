@@ -205,6 +205,18 @@ class TestDoubtfulHashIsNeverAComment:
     def test_the_line_is_split_after_the_doubtful_hash(self, prefix: str) -> None:
         assert len(segment_spans(prefix + "; git reset --hard")) >= 2
 
+    @pytest.mark.parametrize("head", ["(( 1 #x ))", "( ls #x )", "(( 1 #x ))\n(( 2 ))"])
+    @pytest.mark.parametrize("sep", ["; ", " || ", " && "])
+    def test_a_hash_inside_an_arithmetic_or_subshell_group_does_not_hide_the_next_command(
+        self, head: str, sep: str
+    ) -> None:
+        for real in _REAL_COMMANDS:
+            assert _any_guard_denies(head + sep + real), (head, sep, real)
+        assert SudoPipHandler().matches(_bash(head + sep + "sudo pip install x"))
+        assert PipBreakSystemHandler().matches(
+            _bash(head + sep + "pip install --break-system-packages x")
+        )
+
     def test_a_backslash_newline_before_hash_continues_the_word(self) -> None:
         assert len(segment_spans("echo a\\\n#; git reset --hard")) == 2
 

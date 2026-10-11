@@ -2878,7 +2878,7 @@ class _Nesting:
             self.closed_at = index + 1
             return 1
         if unquoted:
-            if char == "(" and self.parens:
+            if char == "(":
                 self.parens += 1
             elif char == ")" and self.parens:
                 self.parens -= 1

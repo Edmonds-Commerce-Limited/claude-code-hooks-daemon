@@ -78,6 +78,20 @@ guard (the data-head `\ #` rows that allowed in round 1 now deny).
 Round 2 results: `tests/unit/utils` + `tests/unit/handlers/pre_tool_use` + corpus gate: 18489 passed, 1 skipped, 0
 failed. black, ruff, mypy and pyright clean on the touched source files.
 
+## Round 3
+
+Review finding: a bare `(` counted only when already nested, so `(( 1 #x )); sudo pip install x` and
+`(( 1 #x )) || ...` allowed. `_Nesting.observe` now counts every unquoted `(`, so a `#` inside an arithmetic command or
+a plain subshell falls back to main's splitting. Test: `test_a_hash_inside_an_arithmetic_or_subshell_group_...` (3 heads
+x 3 separators x all six guards, plus sudo_pip and pip_break_system by name).
+
+Probes (all from `/workspace/untracked/scratch/review-batch-v/`, run against this branch and against `/workspace/src`):
+`probe.py` byte-identical to `main.json`; `probe2.py` and `probe3.py` identical to main; `probe5.py` `(( 1 #x ))` rows
+deny as on main. The only rows weaker than main are text bash really treats as a comment or a syntax error:
+`let x=1 #y; ...` (probe5), `echo a\\ #c; ...` (escaped backslash, then a real comment), `echo ...; echo #c; git reset`,
+`grep ... # note | sudo pip install x`, and `echo a)#c; ...` (unmatched `)`, a syntax error that never runs).
+Round 3 results: 18498 passed, 1 skipped, 0 failed; black, ruff, mypy, pyright clean.
+
 ## Ledger
 
 NIGGLES.md N407: both comment-splitting residual lines marked "cleared by batch V". The unrelated `git grep` quoted
