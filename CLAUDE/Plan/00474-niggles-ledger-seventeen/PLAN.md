@@ -47,7 +47,7 @@ Counted by the status column's emoji:
   [OWNER-QUESTIONS-261011.md](OWNER-QUESTIONS-261011.md) on 2026-10-11, recorded in
   [OWNER-RULINGS-261011.md](OWNER-RULINGS-261011.md):
   - 2 rows are closed by the ruling (N333, N397);
-  - 12 are in progress (🔄): batches AL, AM and AN, the supervisor items, or a GitHub issue;
+  - 12 of the 15 went into progress: batches AL, AM and AN, the supervisor items, or a GitHub issue (rows since fixed are counted below);
   - 1 stays part-fixed (🟡, N376), with its remainder tracked in #107;
   - the new work the owner asked for is filed as GitHub Issues #106 to #110. #104, the usage-aware sub-agent cutoff, came from a separate owner request the same day, not from this sheet.
 - 109 rows carry ✅ (fixed, dismissed, remedied or closed); 6 of them also carry a 🚫 limit.

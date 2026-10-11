@@ -123,7 +123,7 @@ known-gaps = [
 ]
 notes = [
   "ruff, pyright and shellcheck run as checks; no Defence is routed through them (TOOLING 4.1 point 3).",
-  "Hook-time defences are guardrails for a careless agent, not a guarantee against a hostile one. The hook layer does not fail open in general: on an installed project, PreToolUse denies every call except the daemon recovery command when the daemon cannot be reached, and Stop and SubagentStop block. It fails open only in named setup states: CI enforcement, repository not configured, venv missing, not installed, version mismatch.",
+  "Hook-time defences are guardrails for a careless agent, not a guarantee against a hostile one. The hook layer does not fail open in general: on an installed project, PreToolUse denies every call except the daemon recovery command when the daemon cannot be reached, and Stop and SubagentStop block. It fails open for tool calls only in named setup states (for example the CI passthrough, or a project that is not installed). With `ci_enabled: true` a missing daemon fails closed. The per-state map is in CLAUDE/Security/FailOpenBoundaries.md.",
 ]
 
 [tool.defence-before-fix.artefact]

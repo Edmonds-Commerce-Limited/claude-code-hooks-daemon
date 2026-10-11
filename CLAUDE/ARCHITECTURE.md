@@ -787,11 +787,12 @@ plugins:
 
 This is an owner ruling. The daemon helps an agent that makes mistakes. It does not defend
 against an agent that sets out to defeat it. A hostile agent wins anyway: it can edit the hook scripts or the daemon itself, and the
-hook layer fails open in its named setup states (CI enforcement, repository not configured,
-venv missing, not installed, version mismatch). On an installed project an unreachable
-daemon does NOT open the gate: PreToolUse denies every call except the recovery command,
-and Stop and SubagentStop block (`.claude/init.sh`; handler-level boundaries are in
-[Security/FailOpenBoundaries.md](Security/FailOpenBoundaries.md)). So no guard is judged on
+hook layer fails open for tool calls in some setup states (for example the CI passthrough,
+and a project that is not installed). On an installed project an unreachable daemon does NOT
+open the gate for tool calls: PreToolUse denies every call except the recovery command, and
+Stop and SubagentStop block. Other events, such as PostToolUse and UserPromptSubmit, pass
+through. The full per-state, per-event map is in `.claude/init.sh` and
+[Security/FailOpenBoundaries.md](Security/FailOpenBoundaries.md). So no guard is judged on
 whether it survives an out-of-scope shape. It is still judged on every ordinary respelling, such
 as a global option, quoting, or a path with `git` in it, because a careless agent produces those
 without trying.

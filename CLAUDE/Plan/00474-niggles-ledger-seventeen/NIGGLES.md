@@ -81,7 +81,7 @@ is the count at that date.
 
 **Origin**: owner report, 2026-10-11. A `/goal clear` the owner did not type appeared in the session.
 
-**Evidence**: the supervisor's `untracked/supervise/decision.log` records `would-goal-clear: goal clear trigger -> injected '/goal clear'` at 15:02:59 UTC. The goal ledger retired Plan 00500 (`terminal-status`) at 15:02:57, owned
+**Evidence**: the supervisor's `untracked/supervise/decision.log` records `would-goal-clear: goal clear trigger -> would inject /goal clear; injected '/goal clear'` at 15:02:59 UTC. The goal ledger retired Plan 00500 (`terminal-status`) at 15:02:57, owned
 by this session. The `/goal` named five plans (00470, 00474, 00479, 00484, 00500).
 
 **Cause** (batch AO, confirmed): the retraction was the designed behaviour. At 12:59 UTC, commit a17535d43 set all
@@ -137,7 +137,8 @@ upgrade. That breaks owner ruling B5, under which a guard denies only on a posit
 - **Fix:** a leading `$(...)` or backtick program word is rejoined. Its inner command is checked for the upgrade, then
   it is judged like a `$PY` program, by its `-m` module.
 - **Tests:** 5 allowed shapes and 13 still-denied shapes.
-- **Review:** probed about 50 shapes and found no new bypass. `-m <any module>` and `-c` match the existing `$PY`
+- **Review:** the batch AO round-1 code review, whose reply was auto-saved under the gitignored
+  `untracked/agent-reports/auto/` and is not tracked, probed about 50 shapes and found no new bypass. `-m <any module>` and `-c` match the existing `$PY`
   design, which is a hostile-only note under the threat model.
 - **Release note:** 021.
 
@@ -146,16 +147,21 @@ upgrade. That breaks owner ruling B5, under which a guard denies only on a posit
 **Origin**: the fact-check of the 00484 conformance declaration
 (`subagent-reports/261011-fact-check-sheet-b-apply-sonnet.md`).
 
-**Evidence**: `CLAUDE/ARCHITECTURE.md` (about line 790) says "the hook layer fails open when the daemon does not
+**Evidence**: `CLAUDE/ARCHITECTURE.md` (about line 790) said "the hook layer fails open when the daemon does not
 answer". The README's new conformance declaration says the hook layer "does not fail open in general", which the
 fact-checker matched to `.claude/init.sh`. `CLAUDE/Security/FailOpenBoundaries.md` is the canonical page. Not yet
 checked: which states really fail open, and so which sentence is stale.
 
-**Status**: ✅ Fixed. The README is right. `.claude/init.sh` fails closed on an installed project: PreToolUse denies
-everything except the recovery command, and Stop/SubagentStop block. It fails open only in the named setup states.
-FailOpenBoundaries.md covers handler-level boundaries, not this one. ARCHITECTURE.md now says exactly that, and its
-threat-model point stands on the routes a hostile agent really has (editing the hooks or the daemon, and the setup
-states).
+**Status**: ✅ Fixed. Both docs were partly wrong, and a second fact-check
+(`subagent-reports/261011-fact-check-n420-n423-sonnet.md`) corrected my first fix. What `.claude/init.sh` really does:
+
+- **Installed project, daemon unreachable:** PreToolUse denies everything except the recovery command, and
+  Stop/SubagentStop block. Other events, such as PostToolUse and UserPromptSubmit, pass through.
+- **Under `ci_enabled: true`:** a missing daemon fails CLOSED. The fail-open CI case is the passthrough, CI without
+  `ci_enabled`. Other setup states, such as not installed, fail open for tool calls.
+
+ARCHITECTURE.md and the README now say that and point at FailOpenBoundaries.md, which does cover `init.sh` (its lines
+66-68, 106-118 and 158) for the full per-state map.
 
 ### N419 — `subagent_full_qa_blocker` still judges an unknown program by flag shape alone (GitHub Issue #69)
 
