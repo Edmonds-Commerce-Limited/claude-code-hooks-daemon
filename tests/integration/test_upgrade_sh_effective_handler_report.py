@@ -113,7 +113,56 @@ class TestEffectiveHandlerReport:
         assert "HANDLERS THAT CHANGE STATE" in fields["stdout"]
         assert "handlers.pre_tool_use.lsp_enforcement" in fields["stdout"]
         assert "enabled: true" in fields["stdout"]
-        assert "stops:handlers.pre_tool_use.lsp_enforcement" in fields["CHANGES"]
+        assert "restored:handlers.pre_tool_use.lsp_enforcement" in fields["CHANGES"]
+        assert "stops:" not in fields["CHANGES"]
+
+    def test_restored_handlers_tell_the_agent_to_restart_and_the_summary_says_the_file_changed(
+        self, tmp_path: Path
+    ) -> None:
+        fields = _run_report(tmp_path, _config("minimal"), "v3.67.0")
+
+        assert "RESTART THE DAEMON" in fields["stdout"]
+        assert "hooks-daemon restart" in fields["stdout"]
+        assert fields["SUMMARY"] != _NO_CHANGES
+        assert "unchanged" not in fields["SUMMARY"]
+        assert "restored" in fields["SUMMARY"]
+
+    def test_the_config_options_note_no_longer_claims_the_daemon_never_edits_the_config(
+        self,
+    ) -> None:
+        assert "the daemon never edits your config" not in _source()
+
+    def test_an_older_target_that_rejects_apply_still_yields_the_report(
+        self, tmp_path: Path
+    ) -> None:
+        fake = tmp_path / "fake-python"
+        fake.write_text(
+            "#!/bin/bash\n"
+            'for arg in "$@"; do\n'
+            '  if [ "$arg" = "--apply" ]; then echo "unrecognized arguments: --apply"; exit 2; fi\n'
+            "done\n"
+            'echo "1 handler(s) STOP running: their block is absent from your config."\n'
+            'echo "  - handlers.pre_tool_use.lsp_enforcement"\n'
+            "exit 1\n",
+            encoding="utf-8",
+        )
+        fake.chmod(0o755)
+        config_file = tmp_path / "hooks-daemon.yaml"
+        config_file.write_text("version: '2.0'\n", encoding="utf-8")
+        script = _PRELUDE + f"""\
+FROM_VERSION="v3.67.0"
+TARGET_DISPLAY="v3.68.0"
+TARGET_SEMVER="v3.68.0"
+_metadata_venv_python="{fake}"
+_metadata_config_file="{config_file}"
+_metadata_config_summary="{_NO_CHANGES}"
+""" + _report_block() + 'echo "CHANGES=$_metadata_handler_changes"\n'
+        result = _run(script)
+
+        assert result.returncode == 0, result.stderr
+        assert "HANDLERS THAT CHANGE STATE" in result.stdout
+        assert "unrecognized arguments" not in result.stdout
+        assert "CHANGES=stops:handlers.pre_tool_use.lsp_enforcement" in result.stdout
 
     def test_summary_cannot_say_no_config_changes_while_the_set_differs(
         self, tmp_path: Path
@@ -121,7 +170,6 @@ class TestEffectiveHandlerReport:
         fields = _run_report(tmp_path, _config("minimal"), "v3.67.0")
 
         assert fields["SUMMARY"] != _NO_CHANGES
-        assert "effective handler set changed" in fields["SUMMARY"]
 
     def test_current_full_config_reports_no_change(self, tmp_path: Path) -> None:
         fields = _run_report(tmp_path, _config("full"), "v3.67.0")

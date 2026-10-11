@@ -97,3 +97,21 @@ def test_malformed_yaml_is_a_value_error_for_every_config_reader(tmp_path: Path)
 
     with pytest.raises(ValueError, match="not valid YAML"):
         config_cli.run_check_effective_handlers("3.69.0", "3.69.0", config)
+
+
+def test_the_apply_flag_is_forwarded_and_defaults_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """N360: ``--apply`` makes the upgrade write ``enabled: true`` for handlers it would stop."""
+    seen: list[bool] = []
+
+    def record(**kwargs: Any) -> dict[str, Any]:
+        seen.append(kwargs["apply"])
+        return {"has_changes": False}
+
+    monkeypatch.setattr(config_cli, "run_check_effective_handlers", record)
+    cli.cmd_check_effective_handlers(_args(tmp_path / "c.yaml"))
+    applying = _args(tmp_path / "c.yaml")
+    applying.apply = True
+    cli.cmd_check_effective_handlers(applying)
+    assert seen == [False, True]

@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.install.config_migrations import (
 )
 from claude_code_hooks_daemon.install.config_validator import ConfigValidator
 from claude_code_hooks_daemon.install.effective_handlers import (
+    apply_restore,
     effective_handler_changes,
     format_changes,
     restore_snippet,
@@ -345,6 +346,7 @@ def run_check_effective_handlers(
     to_version: str,
     config_path: Path,
     output_format: str = "text",
+    apply: bool = False,
 ) -> dict[str, Any]:
     """Report the handlers an upgrade starts or stops running for this config.
 
@@ -358,25 +360,33 @@ def run_check_effective_handlers(
         to_version: Version it upgrades to.
         config_path: Path to the project's hooks-daemon.yaml.
         output_format: 'text' adds a ``text`` report; 'json' leaves it out.
+        apply: Write ``enabled: true`` into the config for every handler that
+            would stop running, so the project keeps what it ran before
+            (N360, owner ruling C6).
 
     Returns:
-        Dictionary with ``has_changes``, ``changes``, ``restore_snippet`` and
-        ``text`` (if format='text').
+        Dictionary with ``has_changes``, ``changes``, ``restore_snippet``,
+        ``applied`` (True only when ``apply`` wrote or found nothing to write)
+        and ``text`` (if format='text').
 
     Raises:
         FileNotFoundError: If the config file doesn't exist.
         ValueError: If the config is not a YAML mapping or a version is invalid.
     """
     changes = effective_handler_changes(_load_yaml(config_path), from_version, to_version)
+    applied = apply_restore(config_path, changes) if apply and changes else None
     result: dict[str, Any] = {
         "from_version": from_version,
         "to_version": to_version,
         "has_changes": bool(changes),
         "changes": [c.to_dict() for c in changes],
         "restore_snippet": restore_snippet(changes),
+        "applied": bool(applied),
     }
     if output_format == "text":
-        result["text"] = format_changes(changes, from_version, to_version) if changes else ""
+        result["text"] = (
+            format_changes(changes, from_version, to_version, applied=applied) if changes else ""
+        )
     return result
 
 
