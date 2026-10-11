@@ -117,6 +117,21 @@ With `ci_enabled: true`, a start under way is CI-enforced exactly as a start
 that failed (DR-2). The call is denied with the CI-enforced reason, and no
 recovery command is exempt, since CI enforcement exempts none.
 
+## The venv build window is a declared fail-open
+
+On a fresh checkout the Plan 00456 self-heal builds the missing venv in the
+background, and no daemon can answer until it finishes, so no guard judges any
+tool call meanwhile. PreToolUse stays fail-open in that window, like every other
+named setup state in `init.sh`. The window is not caller-induced: cloning
+produces it, and the agent can neither shorten nor lengthen it. Its trace is
+in-band: every hook event carries "all safety handlers are inactive" plus the
+build state with a short line telling the agent to keep to reads and ordinary
+edits, the status line reads "venv building", and Stop and SubagentStop block.
+Waiting (Plan 00488 option A) cannot fit inside the hook timeout, and denying
+(option B) wedges the agent, since even `sleep` is denied. Decided by the
+coordinator, Fable-assisted, not the owner:
+[RULING-3.2](../Plan/00488-status-line-visible-during-daemon-outage/RULING-3.2-build-window.md).
+
 ## Limits no reading of the command text closes
 
 A guard that judges a Bash command before it runs sees text, not the disk the

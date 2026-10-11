@@ -789,13 +789,18 @@ certain no other environment's venv lives there."
         fi
 
         local _hd_venv_state_note=""
+        # Tool calls are not judged while the build runs (RULING-3.2, Plan 00488).
+        local _hd_build_window_guidance="Until the status line clears, keep to reads and ordinary edits. Do not commit,
+push, delete branches or touch protected files meanwhile: no guard is judging
+these calls."
         case "$_HOOKS_DAEMON_BOOTSTRAP_STATE" in
             started)
                 _hd_venv_missing_remedy="A BUILD HAS STARTED — nothing to do but wait.
 The missing venv is being built in the background for this project path only,
 under the venv build lock. Other environments' venvs are not touched.
 Build log: $_HOOKS_DAEMON_BOOTSTRAP_LOG
-When it finishes, the next hook starts the daemon on its own."
+When it finishes, the next hook starts the daemon on its own.
+$_hd_build_window_guidance"
                 _hd_venv_state_note=" - a venv build is running in the background"
                 ;;
             running)
@@ -808,7 +813,8 @@ Build process: pid $_HOOKS_DAEMON_BOOTSTRAP_PID, running for ${_HOOKS_DAEMON_BOO
 Build log: ${_HOOKS_DAEMON_BOOTSTRAP_LOG:-not recorded here (another process, such as an upgrade or a repair, holds the venv build lock)}${_hd_build_who}
 When it finishes, the next hook starts the daemon, or starts this path's own
 build if the one running belonged to another environment. A background build
-is stopped and reported as failed if it outlives its bound."
+is stopped and reported as failed if it outlives its bound.
+$_hd_build_window_guidance"
                 _hd_venv_state_note=" - a venv build is running in the background"
                 ;;
             failed)

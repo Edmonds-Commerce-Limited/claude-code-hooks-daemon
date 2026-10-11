@@ -788,7 +788,7 @@ plugins:
 This is an owner ruling. The daemon helps an agent that makes mistakes. It does not defend
 against an agent that sets out to defeat it. A hostile agent wins anyway: it can edit the hook scripts or the daemon itself, and the
 hook layer fails open for tool calls in some setup states (for example the CI passthrough,
-and a project that is not installed). On an installed project an unreachable daemon does NOT
+a venv build under way, and a project that is not installed). On an installed project an unreachable daemon does NOT
 open the gate for tool calls: PreToolUse denies every call except the recovery command, and
 Stop and SubagentStop block. Other events, such as PostToolUse and UserPromptSubmit, pass
 through. The full per-state, per-event map is in `.claude/init.sh` and

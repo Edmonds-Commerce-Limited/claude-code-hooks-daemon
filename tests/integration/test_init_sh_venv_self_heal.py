@@ -129,6 +129,50 @@ class TestTheHookHealsTheVenv:
         sandbox.wait_for_build()
 
 
+#: The behavioural line of RULING-3.2 (Plan 00488): no guard judges calls in the build window.
+_BUILD_WINDOW_GUIDANCE = "keep to reads and ordinary edits"
+
+
+class TestTheBuildWindowStaysFailOpenButTellsTheAgentHowToBehave:
+    """Ruling 3.2, option C: PreToolUse still allows, and says what to refrain from."""
+
+    def _assert_allow_with_guidance(self, result: subprocess.CompletedProcess[str]) -> None:
+        context = _context(result)
+        assert _BUILD_WINDOW_GUIDANCE in context.lower(), context
+        for word in ("commit", "push", "protected files", "no guard"):
+            assert word in context.lower(), context
+        assert "permissionDecision" not in result.stdout, result.stdout
+
+    def test_the_started_state_carries_the_line_and_still_allows(self, sandbox: Sandbox) -> None:
+        sandbox.stub_uv(sleep=3)
+        result = sandbox.hook()
+        assert "build has started" in _context(result).lower()
+        self._assert_allow_with_guidance(result)
+        sandbox.wait_for_build()
+
+    def test_the_running_state_carries_the_line_and_still_allows(self, sandbox: Sandbox) -> None:
+        sandbox.stub_uv(sleep=3)
+        sandbox.hook()
+        result = sandbox.hook()
+        assert "already running" in _context(result).lower()
+        self._assert_allow_with_guidance(result)
+        sandbox.wait_for_build()
+
+    def test_the_failed_state_does_not_carry_the_line(self, sandbox: Sandbox) -> None:
+        sandbox.stub_uv(fail=True)
+        sandbox.hook()
+        sandbox.wait_for_build()
+        assert _BUILD_WINDOW_GUIDANCE not in _context(sandbox.hook()).lower()
+
+    def test_the_refused_state_does_not_carry_the_line(self, sandbox: Sandbox) -> None:
+        assert _BUILD_WINDOW_GUIDANCE not in _context(sandbox.hook()).lower()
+
+    def test_the_disabled_state_does_not_carry_the_line(self, sandbox: Sandbox) -> None:
+        sandbox.stub_uv()
+        result = sandbox.hook(extra_env={"HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP": "1"})
+        assert _BUILD_WINDOW_GUIDANCE not in _context(result).lower()
+
+
 class TestAFailedBuild:
     def test_is_reported_with_its_log_and_repair_and_is_not_respawned(
         self, sandbox: Sandbox
