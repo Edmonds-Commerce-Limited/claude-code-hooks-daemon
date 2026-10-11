@@ -77,6 +77,21 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N425 — main CI red after the batch AL merge
+
+**Found**: by the coordinator on 2026-10-11, while checking CI before closing #69. Run 38153660205 on
+merge 13f0b895c failed QA on Python 3.11, 3.12 and 3.13: 5 failed, 48097 passed, 1 error. The local
+targeted run of the same change had passed.
+
+- The docker-before-image case fails for `/usr/bin/docker run -e A=1 img cmd` (N419), on the runner only.
+- Three `test_subagent_full_qa_blocker.py` timing tests exceed their bounds on the runner.
+- `test_no_elapsed_time_is_compared_to_a_bare_number` flags a bare wall-clock bound.
+- At the teardown of `test_an_interrupted_run_keeps_the_steps_that_finished`, the conftest guard reports
+  that `CLAUDE.md` was rewritten, and the pid file changed during the test. This is the N280 symptom on a
+  runner with no daemon of its own. It ran before batch AN's jail reached main.
+
+**Status**: 🔄 Sub-agent dispatched (worktree `worktree-ci-al-fix`). #69 stays open until CI is green.
+
 ### N424 — the LSP symbol-lookup guard denies a grep over a CLI's piped output
 
 **Found**: by the coordinator on 2026-10-11. After a daemon restart,
