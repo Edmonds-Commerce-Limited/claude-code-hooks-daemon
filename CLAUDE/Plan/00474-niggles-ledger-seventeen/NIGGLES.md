@@ -1754,11 +1754,28 @@ none a regression against main:
 Residual, from the batch R review (`untracked/agent-reports/auto/261011-063431-code-reviewer-a7ba1954a42f7e6d1.md`),
 none a regression against main:
 
-- `utils/git_commit_parsing.py:959-961`: `case … esac` is not in the opener/closer sets, so `case x in x) cd /tmp;; esac > x`
-  is still a false deny; the lexer also reads `x)` as a subshell close.
-- `utils/git_commit_parsing.py:1070` (`_walk`, via `_after_directory_change`): a `cd` that may never run is treated as one
-  that did: a function body (`f() { cd /tmp; }; echo x > x`), a group in a pipeline that runs in a subshell
-  (`{ cd /tmp; } | cat > x`), and a loop body that never runs (`while false; do cd /tmp; done; echo x > x`). False
+- ✅ cleared by batch T: `utils/git_commit_parsing.py:959-961`: `case … esac` is not in the opener/closer sets, so
+  `case x in x) cd /tmp;; esac > x` was a false deny; the lexer also reads `x)` as a subshell close. `case`/`esac` are now
+  a group, and a case pattern's `)` (and an optional leading `(`) is no longer a subshell boundary, so it cannot pop an
+  enclosing subshell's frame.
+- ✅ cleared by batch T: a group in a pipeline (`{ cd /tmp; } | cat > x`, `( cd /tmp ) | cat > x`, `cd /tmp | cat > x`):
+  each stage starts from the directory the pipeline began in, so its `cd` no longer carries to the next stage or past the
+  pipeline's end.
+- ✅ cleared by batch T: a function definition (`f() { cd /tmp; }; echo x > x`, `f ()`, `function f {`, `function f() {`)
+  does not apply its body's `cd` to what follows, unless the function's name appears as a word later in the command
+  (`f() { cd /tmp; }; f; echo x > x` still moves, so a real move still denies).
+- Residual, from the batch T review: a function that is defined and then called without its name appearing as a word
+  (`"$@"`, `$g`, `eval "$name"`) counts as never called, so its body's `cd` is not carried to what follows. A write after
+  such a call is read from the directory before the definition: an allow where main denied. Accepted under the
+  careless-agent threat model (nothing hostile is assumed); closing it would mean treating any dynamic command word as a
+  possible call, which denies every ordinary `"$@"` after a definition.
+- Batch T round 2: a `name=()` array assignment is no longer taken for a function name (`_FUNCTION_NAME`), so
+  `arr=()` then `{ cd /tmp; }` keeps its move; `function f { if …` keeps the frames of the groups it opens.
+- Residual (batch T review r2): a `cd` in a pipeline's last stage still carries past the pipeline (errs toward deny);
+  a correct fix must track nesting depth at the `|`. A round-2 attempt that reset at the next operator also reset inside
+  a compound last stage (`ls | { cd /tmp; cat > y; }`), an allow where main denied, and was reverted in round 3.
+- `utils/git_commit_parsing.py` (`_walk`, via `_after_directory_change`): a loop body that never runs
+  (`while false; do cd /tmp; done; echo x > x`) is treated as one that did. Needs evaluation; left as it is. False
   denies only.
 - `handlers/pre_tool_use/project_containment.py:607`: the literal-assignment substitution carries the existing `;`
   both-ways reading to variables, so `D=sub; cd $D; cd .. && echo x > x` is denied, as the literal `cd sub; cd ..` already is.

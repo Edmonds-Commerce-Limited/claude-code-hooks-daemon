@@ -1658,3 +1658,58 @@ class TestARedirectIsJudgedWhereTheChainsCdLandsIt:
         hook_input = _bash(command, cwd=str(repo))
         assert handler.matches(hook_input) is True
         assert handler.handle(hook_input).decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "case x in x) cd /tmp;; esac > x",
+            "case x in a|b) cd /tmp;; esac > x",
+            "case x in a) cd /tmp;; b) true;; esac > x",
+            "( cd sub && case x in a) true;; esac > x )",
+            "{ cd /tmp; } | cat > x",
+            "( cd /tmp ) | cat > x",
+            "cd /tmp | cat > x",
+            "{ cd /tmp; } | cat; echo x > x",
+            "f() { cd /tmp; }; echo x > x",
+            "function f { cd /tmp; }; echo x > x",
+            "function f() { cd /tmp; }; echo x > x",
+        ],
+    )
+    def test_a_move_the_shell_never_makes_is_not_carried(
+        self, handler: ProjectContainmentHandler, repo: Path, command: str
+    ) -> None:
+        assert handler.matches(_bash(command, cwd=str(repo))) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "case x in x) cd /tmp;; esac; echo x > x",
+            "case x in x) cd /tmp;; esac && echo x > x",
+            "( cd /tmp && case x in a) true;; esac; echo x > x )",
+            "cd /tmp && { true; } | cat > x",
+            "f() { cd /tmp; }; f; echo x > x",
+            "f() { cd /tmp; }; f && echo x > x",
+            "function f { cd /tmp; }; f && echo x > x",
+            "files=()\n{ cd /tmp; ls; }\necho x > out.txt",
+            "arr=()\n{ cd /tmp; }\necho x > x",
+            "arr=(); { cd /tmp; }; echo x > x",
+            "arr=(); { cd /tmp; }\necho x > x",
+            "case x in a) cd /tmp;& b) true;; esac; echo x > x",
+            "case x in a) cd /tmp;;& b) true;; esac; echo x > x",
+            "cd /tmp && case x in a|b) true;; esac; echo x > x",
+            "x=$(cd /tmp && case y in y) true;; esac; echo x > x)",
+            "cd /tmp && a |& b > x",
+            "ls | { cd /tmp; cat > y; }",
+            "true | { cd /tmp; echo x > y; }",
+            "true | { cd /tmp && echo x > y; }",
+            "true | { cd /tmp\necho x > y\n}",
+            "true |(cd /tmp; echo x > y)",
+            "x | cd /tmp && echo x > y",
+        ],
+    )
+    def test_a_move_the_shell_does_make_still_denies(
+        self, handler: ProjectContainmentHandler, repo: Path, command: str
+    ) -> None:
+        hook_input = _bash(command, cwd=str(repo))
+        assert handler.matches(hook_input) is True
+        assert handler.handle(hook_input).decision == Decision.DENY
