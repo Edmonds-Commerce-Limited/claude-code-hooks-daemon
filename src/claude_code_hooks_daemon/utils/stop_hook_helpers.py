@@ -133,6 +133,30 @@ def _read_tail_lines(transcript_path: str, lookback: int) -> list[str]:
     return lines[-lookback:]
 
 
+def transcript_is_readable(transcript_path: str | None) -> bool:
+    """Return True when the transcript file can be opened for reading.
+
+    Separates "the transcript cannot be read" (no path, missing file, a
+    directory, no permission) from "the transcript was read and holds no block
+    marker". ``has_recent_stop_hook_block`` returns False for both; a Stop
+    handler that must stand down on a re-entry it cannot verify needs to tell
+    them apart (N411).
+
+    Args:
+        transcript_path: Path to the JSONL transcript file (may be None/empty).
+
+    Returns:
+        True if the file opens for reading, False otherwise.
+    """
+    if not transcript_path:
+        return False
+    try:
+        with open(transcript_path, "rb"):
+            return True
+    except OSError:
+        return False
+
+
 def has_recent_stop_hook_block(
     transcript_path: str | None,
     lookback: int = _DEFAULT_BLOCK_LOOKBACK,

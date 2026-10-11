@@ -78,6 +78,7 @@ from claude_code_hooks_daemon.utils.stand_in_cron import (
 from claude_code_hooks_daemon.utils.stop_hook_helpers import (
     get_transcript_reader,
     has_recent_stop_hook_block,
+    transcript_is_readable,
     is_stop_hook_active,
 )
 from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
@@ -752,11 +753,21 @@ class AutoContinueStopHandler(StopHandlerBase):
         # - Genuine re-entry: stop_hook_active=True AND a prior Stop block marker
         #   exists in the transcript tail (Claude Code re-fired Stop after we
         #   denied) — skip to avoid an infinite loop.
-        # - Silent-stop bug: stop_hook_active=True but NO prior block marker —
-        #   Claude Code spuriously set the flag after a tool error or empty turn.
-        #   Treat as a normal Stop and run the routing logic.
+        # - Silent-stop bug: stop_hook_active=True but NO prior block marker in a
+        #   transcript we CAN read — Claude Code spuriously set the flag after a
+        #   tool error or empty turn. Treat as a normal Stop and run the routing.
+        # - Unverifiable re-entry: stop_hook_active=True and the transcript cannot
+        #   be read (N411). Stand down: Claude Code overrides the 8th consecutive
+        #   Stop-hook block, and treating each unverifiable re-entry as fresh
+        #   would block every time up to that cap.
         if is_stop_hook_active(hook_input):
             transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+            if not transcript_is_readable(transcript_path):
+                logger.info(
+                    "stop_hook_active=true and the transcript cannot be read - "
+                    "standing down (cannot verify, will not re-block)"
+                )
+                return False
             if has_recent_stop_hook_block(transcript_path):
                 logger.debug("Stop hook re-entry confirmed by transcript block marker - skipping")
                 return False
