@@ -106,6 +106,13 @@ def _segment_spans(text: str) -> list[tuple[int, int]]:
     return split_unquoted_spans(masked, SEGMENT_SEPARATORS)
 
 
+def segment_spans(text: str) -> list[tuple[int, int]]:
+    """Offsets of the command segments of ``text``, for a caller that needs the
+    positions rather than the redacted view (the message text stays in
+    ``text``, so it can still be read)."""
+    return _segment_spans(text)
+
+
 def _normalise_path(path: str) -> str:
     """``path`` without leading `./`, so `./s.sh` and `s.sh` compare equal."""
     while path.startswith("./"):
