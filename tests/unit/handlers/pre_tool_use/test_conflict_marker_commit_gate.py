@@ -694,6 +694,31 @@ class TestCwdExpansionsInTheCdAreChecked:
         assert result.decision == Decision.DENY
         assert "NOT checked" in result.reason
 
+    def test_the_deny_names_the_forms_that_do_reach_the_project_root(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        """N402 (b): fail-closed stays, and the reason names the readable spellings."""
+        result = _verdict(handler, "cd $PROJ && git commit -m x", repo)
+        assert result.decision == Decision.DENY
+        assert 'cd "$(git rev-parse --show-toplevel)"' in result.reason
+        assert 'cd "$PWD"' in result.reason
+        assert 'cd "$(pwd)"' in result.reason
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            'cd "$(git rev-parse --show-toplevel)" && git commit -m x',
+            'cd "$PWD" && git commit -m x',
+            'cd "$(pwd)" && git commit -m x',
+        ],
+    )
+    def test_the_named_forms_are_allowed_when_the_tree_is_clean(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path, template: str
+    ) -> None:
+        """The spellings the deny recommends really do pass."""
+        _stage(repo, "doc.md", "# Doc\n\nfirst\nsecond\n")
+        assert _verdict(handler, template, repo).decision == Decision.ALLOW
+
 
 class TestRoutineIdiomsStillCommit:
     """Review 1 M4: fail-closed placement must not refuse the everyday shapes."""
