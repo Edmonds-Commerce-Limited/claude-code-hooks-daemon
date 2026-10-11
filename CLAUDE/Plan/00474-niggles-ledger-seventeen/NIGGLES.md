@@ -87,21 +87,23 @@ targeted run of the same change had passed.
 - Three `test_subagent_full_qa_blocker.py` timing tests exceed their bounds on the runner.
 - `test_no_elapsed_time_is_compared_to_a_bare_number` flags a bare wall-clock bound.
 - At the teardown of `test_an_interrupted_run_keeps_the_steps_that_finished`, the conftest guard reports
-  that `CLAUDE.md` was rewritten, and the pid file changed during the test. This is the N280 symptom on a
-  runner with no daemon of its own. It ran before batch AN's jail reached main.
+  that `CLAUDE.md` was rewritten, and the pid file changed during the test. The `CLAUDE.md` rewrite
+  matches N280; the pid-file change does not, because N280's pid file was unchanged. It ran before batch AN's jail reached main.
 
 **Causes and fixes** (merge 939ff0d97; report `subagent-reports/261011-ci-al-fix-sonnet.md`; review APPROVE):
 
 1. **Docker case.** An absolute-path program is also tried as a script file, and a file over the 16 MiB
    read budget was judged UNSEEN. The runner's real `/usr/bin/docker` is that large. An over-budget file
    with a NUL byte in its head is now a binary, the same verdict a small file already got. Over-budget
-   text still fails closed. The tests no longer depend on what the host has installed.
+   text stays UNSEEN, so `unseen_policy` decides (advisory by default, denied under `deny`). The tests no longer depend on what the host has installed.
 2. **Timing bounds.** The code did not get slower. CI runs under coverage tracing, which made the same
-   work 3–4x slower. `scaled_cpu_seconds` adds a tracing factor when `sys.gettrace()` is set.
+   work 3–4x slower locally and 6–7x slower on the runner (1.7–2.2 s against about 0.3 s), within the
+   tracing factor of 8. `scaled_cpu_seconds` adds a tracing factor when `sys.gettrace()` is set.
 3. **Bare bounds.** Three bare 1.5 s bounds from batch AL now use `scaled_cpu_seconds`.
 4. **Teardown error.** `test_llm_qa_resume.py` stubbed `run_tool` but not `ensure_live_daemon`, so on a
    host with no daemon running, `smoke_test` started a real one. That daemon rewrote `CLAUDE.md` and the
-   pid file. An autouse stub now prevents it. This is the strongest lead yet for N280.
+   pid file. An autouse stub now prevents it. It is a candidate for N280's writer, not a confirmed one
+   (see N280).
 
 Non-blocking review follow-ups:
 
@@ -743,14 +745,18 @@ behaves as before, apart from running its restore inside `doc_write_jail.allowed
 6. Write a refusal to stderr when recording it fails.
 7. Drop the test that only checks a file exists.
 
-**Probable cause** (N425, merge 939ff0d97): `tests/unit/qa/test_llm_qa_resume.py` did not stub
-`ensure_live_daemon`. On a host with no daemon running, `smoke_test` started a real daemon for the
-checkout, and its start-up rewrote `CLAUDE.md` with the code of the tree it ran from, which also changed
-the pid file. That matches the CI teardown error exactly. It also matches the original report, where the
-pid file changed and older guidance appeared, if a worktree's run started a daemon. An autouse stub now
-stops it. Not reproduced in the original setting.
+**A related writer, found by N425** (merge 939ff0d97): `tests/unit/qa/test_llm_qa_resume.py` did not
+stub `ensure_live_daemon`. On a host with no daemon running, `smoke_test` started a real daemon, whose
+start-up rewrote `CLAUDE.md` and changed the pid file. That caused the CI teardown error, and an autouse
+stub now prevents it.
 
-**Status**: ✅ Guarded (the jail refuses the write); probable cause fixed by N425. 🔄 Follow-ups 1–7 open.
+It is a candidate for the original N280 event, not a confirmed cause. Two facts do not fit:
+
+- The pid file did NOT change in the original report.
+- `ClaudeMdInjector` skips a linked worktree, which rules out the route through a worktree run.
+
+**Status**: ✅ Guarded (the jail refuses the write). The original writer is still unconfirmed, and one
+candidate writer is fixed by N425. 🔄 Follow-ups 1–7 open.
 
 ### N279 — `changed_tests` once selected 50 test files, ran 0 tests and did not fail
 
