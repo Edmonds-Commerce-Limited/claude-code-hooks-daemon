@@ -1,5 +1,7 @@
 """Tests for DaemonDocsGuardHandler."""
 
+from typing import Any, ClassVar
+
 import pytest
 
 from claude_code_hooks_daemon.core import Decision
@@ -13,8 +15,10 @@ class TestDaemonDocsGuardHandler:
 
     @pytest.fixture
     def handler(self):
-        """Create handler instance."""
-        return DaemonDocsGuardHandler()
+        """Create a client-install handler (the advisory's own situation)."""
+        instance = DaemonDocsGuardHandler()
+        instance.self_install_reader = lambda: False
+        return instance
 
     # Initialization Tests
     def test_init_sets_correct_name(self, handler):
@@ -237,3 +241,31 @@ class TestDaemonDocsGuardHandler:
         assert result.decision == Decision.ALLOW
         context_text = "\n".join(result.context or [])
         assert "hooks-daemon" in context_text
+
+
+class TestSelfInstallStandsDown:
+    """N340: in self-install mode the project's CLAUDE/ IS the daemon's CLAUDE/."""
+
+    _READ: ClassVar[dict[str, Any]] = {
+        "tool_name": "Read",
+        "tool_input": {"file_path": "/workspace/.claude/hooks-daemon/CLAUDE/Plan/README.md"},
+    }
+
+    def test_self_install_does_not_match(self):
+        handler = DaemonDocsGuardHandler()
+        handler.self_install_reader = lambda: True
+        assert handler.matches(self._READ) is False
+
+    def test_client_install_still_matches(self):
+        handler = DaemonDocsGuardHandler()
+        handler.self_install_reader = lambda: False
+        assert handler.matches(self._READ) is True
+
+    def test_unresolvable_install_mode_fails_closed_to_client(self):
+        handler = DaemonDocsGuardHandler()
+
+        def _raise() -> bool:
+            raise RuntimeError("ProjectContext not initialized")
+
+        handler.self_install_reader = _raise
+        assert handler.matches(self._READ) is True
