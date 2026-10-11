@@ -45,6 +45,11 @@ Quote (line 3597): "Re-check the supervisor's post-compaction `/goal` and `conti
 - (c) A removes dead behaviour if proven redundant. B keeps a harmless duplicate.
 - (d) Recommendation: A for the check only; remove nothing without evidence from a live compaction.
 - (e) The edit is in the live supervisor (`.claude/ccy/claude-supervise.py`), so the owner's or the infrastructure setup's to apply. An agent can do the read-only re-check.
+- Re-check done ([report](subagent-reports/261011-n334-recheck-sonnet.md)): `continue` is still needed, since the 2.1.274
+  fix covers only a `/goal` lost on `--continue`/`--resume` of a compacted session, while `continue` restarts the
+  interrupted turn in a live one. Whether the `/goal` side is redundant cannot be told without a live compaction with
+  an active `/goal`, which needs the owner (the live supervisor). So the question narrows to: run that live check, or
+  leave the supervisor as it is.
 
 ## 5. N336: red-zone `/compact` aware of the `/autocompact` window
 
