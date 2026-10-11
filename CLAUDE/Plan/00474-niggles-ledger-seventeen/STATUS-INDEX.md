@@ -4,6 +4,7 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 
 | #          | Verdict                                                                                                                      | Origin              | Status                              |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------------------- |
+| N420       | ARCHITECTURE.md says the hook layer fails open when the daemon does not answer; the README says it does not in general       | Fact-check          | ✅ Fixed (ARCHITECTURE.md)          |
 | N419       | `subagent_full_qa_blocker` judges an unknown program by flag shape alone (`ps -e`, `docker run -e`); GitHub Issue #69        | Issue #69 triage    | 🔄 Ruled B (batch AL)               |
 | N418       | A helper that calls its own parameter ranks every call through it as may-run, whatever the call site passes                  | Batch AG review     | ✅ Fixed (batch AH); 🚫 limits      |
 | N417       | `subagent_full_qa_blocker` reads `pytest` text inside Python string data as a command (unmasked by N416's fix)               | Batch AE review     | ✅ Fixed (batch AG); residuals      |
@@ -30,7 +31,7 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 | N384–N379  | `optimise` relevance, quoted git option values, `changed --range`, pytest drift, branch and merge gates                      | Write-up            | ✅ Fixed                            |
 | N378       | The `[awaiting-human]` marker is one project-wide file; owner ruled "fine to leave" (Plan 00501 may replace it)              | Write-up            | 🚫 Deliberate limit                 |
 | N377       | Synthetic sessions still read the account's live usage in three more places                                                  | Write-up            | ✅ Fixed                            |
-| N376       | Four tests fail under the full gate's concurrent load; the sweep half needs a serial-phase design                            | Write-up            | 🟡 Part fixed; ruled: #107         |
+| N376       | Four tests fail under the full gate's concurrent load; the sweep half needs a serial-phase design                            | Write-up            | 🟡 Part fixed; ruled: #107          |
 | N375       | The hook contract audit is at Claude Code 2.1.272 and the upstream hooks doc has changed                                     | Write-up            | ✅ Fixed (batch N report)           |
 | N374       | v3.69.0 release code review; defects fixed, one cold-index glob advisory residual is a decided limit                         | Write-up            | ✅ Fixed; 🚫 residual               |
 | N373       | An invalid `stand_in_delay_hours` unregisters the Stop handler; `bash_safe_mode` gained the same `validate_options` (N374)   | Write-up            | ✅ Fixed                            |

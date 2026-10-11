@@ -77,6 +77,22 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N420 — ARCHITECTURE.md and README disagree on whether the hook layer fails open
+
+**Origin**: the fact-check of the 00484 conformance declaration
+(`subagent-reports/261011-fact-check-sheet-b-apply-sonnet.md`).
+
+**Evidence**: `CLAUDE/ARCHITECTURE.md` (about line 790) says "the hook layer fails open when the daemon does not
+answer". The README's new conformance declaration says the hook layer "does not fail open in general", which the
+fact-checker matched to `.claude/init.sh`. `CLAUDE/Security/FailOpenBoundaries.md` is the canonical page. Not yet
+checked: which states really fail open, and so which sentence is stale.
+
+**Status**: ✅ Fixed. The README is right. `.claude/init.sh` fails closed on an installed project: PreToolUse denies
+everything except the recovery command, and Stop/SubagentStop block. It fails open only in the named setup states.
+FailOpenBoundaries.md covers handler-level boundaries, not this one. ARCHITECTURE.md now says exactly that, and its
+threat-model point stands on the routes a hostile agent really has (editing the hooks or the daemon, and the setup
+states).
+
 ### N419 — `subagent_full_qa_blocker` still judges an unknown program by flag shape alone (GitHub Issue #69)
 
 **Origin**: issue-sdlc triage of GitHub Issue #69 (filed against v3.67.0).

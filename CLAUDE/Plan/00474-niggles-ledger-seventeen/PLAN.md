@@ -36,7 +36,7 @@ not-a-defect with the reasoning kept.
 ## Niggles
 
 Full write-ups are in [NIGGLES.md](NIGGLES.md). The one-line-per-niggle status
-table (124 rows) is in [STATUS-INDEX.md](STATUS-INDEX.md).
+table (125 rows) is in [STATUS-INDEX.md](STATUS-INDEX.md).
 Counted by the status column's emoji:
 
 - No row is open (⬜). N53 of archived ledger 00466 is 🟡: batch AJ reproduced
@@ -50,7 +50,7 @@ Counted by the status column's emoji:
   - 12 are in progress (🔄): batches AL, AM and AN, the supervisor items, or a GitHub issue;
   - 1 stays part-fixed (🟡, N376), with its remainder tracked in #107;
   - the new work the owner asked for is filed as GitHub Issues #106 to #110. #104, the usage-aware sub-agent cutoff, came from a separate owner request the same day, not from this sheet.
-- 104 rows carry ✅ (fixed, dismissed, remedied or closed); 7 of them also count below (1 🔄, 6 🚫 limits).
+- 105 rows carry ✅ (fixed, dismissed, remedied or closed); 7 of them also count below (1 🔄, 6 🚫 limits).
 - 7 rows record a deliberate limit (🚫); 20 are in progress or graduated (16 🔄, 3 🟡, 1 ↩️).
 
 ## Tasks
