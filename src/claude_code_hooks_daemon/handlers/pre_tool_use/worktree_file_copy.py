@@ -20,6 +20,11 @@ from claude_code_hooks_daemon.utils.command_evasion import (
 )
 from claude_code_hooks_daemon.utils.command_position import command_position_segments
 from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
+from claude_code_hooks_daemon.utils.recursive_search import (
+    FIND_EXEC_ACTIONS,
+    FIND_EXEC_TERMINATORS,
+    find_exec_end,
+)
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     peel_command_wrappers,
     resolve_shell_word,
@@ -186,8 +191,9 @@ _COPY_VERBS = frozenset({"cp", "mv", "rsync", "install"})
 _WORKTREE_PATH = re.compile(rf"(?:^|/)({_WORKTREE_RE}/)([^/]+)(?:/(.*))?$")
 _SCRATCH_ROOT = tempfile.gettempdir()
 _CD_VERBS = frozenset({"cd", "pushd"})
-_FIND_EXEC = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
-_FIND_EXEC_END = frozenset({";", "\\;", "+"})
+# Words here are resolved from the shell text but an unresolvable one keeps its
+# backslash, so `\;` ends an action as well as the shared terminators.
+_FIND_EXEC_END = FIND_EXEC_TERMINATORS | {"\\;"}
 _FIND_PLACEHOLDER = "{}"
 # Options whose NEXT word is a value, not an operand.
 _VALUE_OPTIONS: dict[str, frozenset[str]] = {
@@ -338,10 +344,10 @@ def _find_operands(args: list[str]) -> tuple[list[str], str | None, bool, bool] 
     worktree_roots = [root for root in roots if _worktree_path(root)]
     index = 0
     while index < len(args):
-        if args[index] not in _FIND_EXEC:
+        if args[index] not in FIND_EXEC_ACTIONS:
             index += 1
             continue
-        end = next((i for i in range(index + 1, len(args)) if args[i] in _FIND_EXEC_END), None)
+        end = find_exec_end(args, index + 1, _FIND_EXEC_END)
         inner_words = args[index + 1 : end if end is not None else len(args)]
         inner = _copy_operands(
             [

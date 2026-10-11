@@ -1475,9 +1475,21 @@ land in.
   `write_protected_paths.py` and `utils/recursive_search.py`, `_FIND_ACTIONS` in `root_recursion_guard.py`, and
   `_FIND_EXEC_ACTIONS` in `subagent_full_qa_blocker.py`.
 
-**Status**: ⬜ Open. Remedy: one shared helper for each (a copy-operand reader built on `bash_file_writes`' flag
-syntax, and one `FIND_EXEC_ACTIONS` constant with the `;`/`+` terminator reader), then delete the copies. Left alone
-in N385 so the fix stayed one guard wide.
+**Status**: 🟡 Half fixed. The `find -exec` half is done; the copy-operand half stays open.
+
+- Done: `FIND_EXEC_ACTIONS`, `FIND_EXEC_TERMINATORS` and `find_exec_end` live in `utils/recursive_search.py`, and the
+  five private copies are gone. All five held the same four members. Terminator handling matched too, except that
+  `worktree_file_copy.py` also ends an action on `\;` (its words keep the backslash when the shell text cannot be
+  resolved); the other readers never saw that spelling. That handler keeps `_FIND_EXEC_END = FIND_EXEC_TERMINATORS | {"\\;"}`, passed to `find_exec_end`, so no verdict moved. `tests/unit/handlers/test_find_exec_actions_characterisation.py`
+  pins every reader over the four actions and the `;`, `\;`, `+` and missing terminators.
+- Open, not separable without a behaviour change: `_split_copy_operands` cannot be rebuilt on `bash_file_writes`'
+  `_FlagSyntax`/`_parse`. `_parse` reads a short cluster by letter (a value letter takes the rest of the cluster or the
+  next word); the copy reader only knows whole-word value options and reads recursion letters (`r`, `R`, `a`) out of any
+  other cluster. So `rsync -avze ssh src dst` keeps `ssh` as an operand today and `_parse` would consume it, and
+  `cp -rS x a b` differs the same way; both change which word is the destination. `_next_cwd` is not the same logic as
+  the `cd` tracking either: `bash_file_writes` only LISTS each `cd` operand, while `_next_cwd` classifies the cwd
+  (main, main code dir, worktree, unknown) as a state machine. Remedy, if wanted: decide the clustered-flag verdicts on
+  purpose in `worktree_file_copy` (a behaviour change with its own tests), then move the grammar onto a shared reader.
 
 ### N396 — the ccy supervisor's copy of the self-install rule still uses `.exists()`
 

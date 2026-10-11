@@ -50,6 +50,7 @@ from claude_code_hooks_daemon.utils.command_position import (
 from claude_code_hooks_daemon.utils.escape_hatch import command_declares_hatch
 from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
+from claude_code_hooks_daemon.utils.recursive_search import FIND_EXEC_ACTIONS
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     peel_command_wrappers,
     split_unquoted_spans,
@@ -246,9 +247,6 @@ def _depth_within_bound(value: str | None) -> bool:
     return value is not None and value.isdigit() and int(value) <= _BOUNDED_DEPTH
 
 
-_FIND_ACTIONS: Final = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
-
-
 def _find_roots(args: list[str]) -> tuple[list[str], bool]:
     """The start paths of a ``find`` and whether ``-maxdepth`` bounds it."""
     index = 0
@@ -264,7 +262,7 @@ def _find_roots(args: list[str]) -> tuple[list[str], bool]:
         roots.append(args[index])
         index += 1
     # `-exec`/`-ok` hand every entry to another command, which may recurse.
-    runs_a_command = any(arg in _FIND_ACTIONS for arg in args)
+    runs_a_command = any(arg in FIND_EXEC_ACTIONS for arg in args)
     bounded = not runs_a_command and any(
         arg == "-maxdepth" and _depth_within_bound(following)
         for arg, following in zip(args, [*args[1:], ""], strict=True)
