@@ -9,7 +9,7 @@ did, why, and how to change it.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 import yaml
@@ -128,7 +128,7 @@ class TestUpgradeKeepsRunningWhatRan:
 
     @pytest.mark.parametrize("profile", ["minimal", "full"])
     def test_a_generated_config_keeps_every_handler_it_ran_before(
-        self, tmp_path: Path, profile: str
+        self, tmp_path: Path, profile: Literal["minimal", "full"]
     ) -> None:
         path = _write(tmp_path, generate_config(profile))
         before = path.read_text(encoding="utf-8")
