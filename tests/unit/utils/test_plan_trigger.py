@@ -202,3 +202,26 @@ class TestMatchedPlanWriteOrEdit:
         plan_file.write_text("# Example\n", encoding="utf-8")
         result = matched_plan_write_or_edit(_hook_input(plan_file), layout)
         assert result == (str(plan_file), _PLAN_FOLDER)
+
+
+class TestPlanRootFor:
+    """N423: the plan root is the directory holding the plan folders, which an
+    archived plan's PLAN.md sits one level BELOW (``<root>/Completed/<folder>``)."""
+
+    def test_live_plan_root_is_the_grandparent(self) -> None:
+        from claude_code_hooks_daemon.utils.plan_trigger import plan_root_for
+
+        plan_md = Path("/p/CLAUDE/Plan/00123-example/PLAN.md")
+        assert plan_root_for(plan_md, ("Completed",)) == Path("/p/CLAUDE/Plan")
+
+    def test_archived_plan_root_skips_the_archive_directory(self) -> None:
+        from claude_code_hooks_daemon.utils.plan_trigger import plan_root_for
+
+        plan_md = Path("/p/CLAUDE/Plan/Completed/00123-example/PLAN.md")
+        assert plan_root_for(plan_md, ("Completed",)) == Path("/p/CLAUDE/Plan")
+
+    def test_every_configured_archive_name_is_skipped(self) -> None:
+        from claude_code_hooks_daemon.utils.plan_trigger import plan_root_for
+
+        plan_md = Path("/p/CLAUDE/Plan/Cancelled/00123-example/PLAN.md")
+        assert plan_root_for(plan_md, ("Completed", "Cancelled")) == Path("/p/CLAUDE/Plan")
