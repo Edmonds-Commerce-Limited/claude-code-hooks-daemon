@@ -134,7 +134,7 @@ repository enters the window with no human step, because `init.sh` derives the
 root its gitignored env file would have set (Task 3.4). Waiting (Plan 00488 option A) cannot fit inside the hook timeout, and denying
 (option B) wedges the agent, since even `sleep` is denied. Decided by the
 coordinator, Fable-assisted, not the owner:
-[RULING-3.2](../Plan/00488-status-line-visible-during-daemon-outage/RULING-3.2-build-window.md).
+[RULING-3.2](../Plan/Completed/00488-status-line-visible-during-daemon-outage/RULING-3.2-build-window.md).
 
 ## Limits no reading of the command text closes
 
