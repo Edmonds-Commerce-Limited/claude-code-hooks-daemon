@@ -78,7 +78,10 @@ _MESSAGE_LETTER: Final[str] = "m"
 _PATHSPEC_SEPARATOR: Final[str] = "--"
 _GIT_TOKEN: Final[str] = "git"
 _COMMIT_TOKEN: Final[str] = "commit"
-_ADD_TOKEN: Final[str] = "add"
+ADD_TOKEN: Final[str] = "add"
+UPDATE_INDEX_TOKEN: Final[str] = "update-index"
+APPLY_TOKEN: Final[str] = "apply"
+STAGING_SUBCOMMANDS: Final[frozenset[str]] = frozenset({ADD_TOKEN, UPDATE_INDEX_TOKEN, APPLY_TOKEN})
 
 #: The ``-a``/``--all`` flag, which makes a commit record the WORKING TREE
 #: rather than the index.
@@ -724,6 +727,9 @@ class StagingRun:
     optional_moves: int
     #: The :attr:`SimpleCommand.position` of the ``git add``.
     position: int = 0
+    #: ``add``, ``update-index`` or ``apply``: the three commands that put a
+    #: path into the index, each followed with its own reading.
+    subcommand: str = ADD_TOKEN
 
 
 def _commit_moves(run: GitInvocation) -> tuple[str | None, ...]:
@@ -807,9 +813,10 @@ def _staging_runs(invocations: Sequence[GitInvocation]) -> tuple[StagingRun, ...
             moves=_commit_moves(run),
             optional_moves=_optional_moves(run),
             position=run.position,
+            subcommand=run.subcommand,
         )
         for run in invocations[:last_commit]
-        if run.subcommand == _ADD_TOKEN
+        if run.subcommand in STAGING_SUBCOMMANDS
     )
 
 

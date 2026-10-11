@@ -448,6 +448,154 @@ class TestASplitIndexRepository:
         assert after == before
 
 
+_NEW_FILE_PATCH = (
+    "diff --git a/patched.txt b/patched.txt\n"
+    "new file mode 100644\n"
+    "--- /dev/null\n"
+    "+++ b/patched.txt\n"
+    "@@ -0,0 +1 @@\n"
+    "+from the patch\n"
+)
+_DELETE_PATCH = (
+    "diff --git a/a.txt b/a.txt\n"
+    "deleted file mode 100644\n"
+    "--- a/a.txt\n"
+    "+++ /dev/null\n"
+    "@@ -1 +0,0 @@\n"
+    "-clean\n"
+)
+_STALE_PATCH = (
+    "diff --git a/leak.txt b/leak.txt\n"
+    "--- a/leak.txt\n"
+    "+++ b/leak.txt\n"
+    "@@ -1 +1 @@\n"
+    "-never there\n"
+    "+changed\n"
+)
+
+
+class TestUpdateIndexAdd:
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ("git update-index --add leak.txt && git commit -m x", {"leak.txt"}),
+            ("git update-index --add -- leak.txt && git commit -m x", {"leak.txt"}),
+            ("git update-index --add a.txt; git commit -m x", set()),
+            ("cd sub && git update-index --add f.txt && git commit -m x", set()),
+        ],
+    )
+    def test_the_named_path_is_staged_on_the_copy(
+        self, repo: Path, command: str, expected: set[str]
+    ) -> None:
+        with simulated_staging(read_commit_form(command), repo, repo) as env:
+            assert env is not None
+            assert _staged(repo, env) == expected
+
+    def test_remove_stages_a_deletion(self, repo: Path) -> None:
+        (repo / "a.txt").unlink()
+        reading = read_commit_form("git update-index --remove a.txt && git commit -m x")
+
+        with simulated_staging(reading, repo, repo) as env:
+            assert _staged(repo, env) == {"a.txt"}
+
+    def test_the_real_index_is_not_touched(self, repo: Path) -> None:
+        reading = read_commit_form("git update-index --add leak.txt && git commit -m x")
+
+        with simulated_staging(reading, repo, repo):
+            pass
+
+        assert _git(repo, "diff", "--cached", "--name-only") == ""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git update-index --add $F && git commit -m x",
+            "git update-index --index-info && git commit -m x",
+            "git update-index --cacheinfo 100644,abc,leak.txt && git commit -m x",
+            "git update-index --add nosuch.txt && git commit -m x",
+        ],
+    )
+    def test_a_form_it_cannot_follow_takes_the_whole_working_tree(
+        self, repo: Path, command: str
+    ) -> None:
+        with simulated_staging(read_commit_form(command), repo, repo) as env:
+            assert _staged(repo, env) == {"leak.txt"}
+
+
+class TestApplyCached:
+    def test_a_new_file_patch_is_staged_with_the_patch_content(self, repo: Path) -> None:
+        _write(repo, "p.patch", _NEW_FILE_PATCH)
+        reading = read_commit_form("git apply --cached p.patch && git commit -m x")
+
+        with simulated_staging(reading, repo, repo) as env:
+            assert _staged(repo, env) == {"patched.txt"}
+            assert run_git(repo, "show", ":patched.txt", env=env).stdout == "from the patch\n"
+        assert not (repo / "patched.txt").exists()
+        assert _git(repo, "diff", "--cached", "--name-only") == ""
+
+    def test_a_deletion_patch_stages_the_deletion(self, repo: Path) -> None:
+        _write(repo, "p.patch", _DELETE_PATCH)
+        reading = read_commit_form("git apply --cached p.patch && git commit -m x")
+
+        with simulated_staging(reading, repo, repo) as env:
+            assert _staged(repo, env) == {"a.txt"}
+
+    def test_the_patch_is_found_where_the_command_moves_to(self, repo: Path) -> None:
+        _write(repo, "sub/p.patch", _NEW_FILE_PATCH.replace("patched.txt", "sub/patched.txt"))
+        reading = read_commit_form("cd sub && git apply --cached p.patch && git commit -m x")
+
+        with simulated_staging(reading, repo, repo) as env:
+            assert _staged(repo, env) == {"sub/patched.txt"}
+
+    def test_a_patch_that_does_not_apply_still_stages_the_paths_it_touches(
+        self, repo: Path
+    ) -> None:
+        _write(repo, "p.patch", _STALE_PATCH)
+        reading = read_commit_form("git apply --cached p.patch; git commit -m x")
+
+        with simulated_staging(reading, repo, repo) as env:
+            assert _staged(repo, env) == {"leak.txt"}
+
+    def test_an_apply_without_cached_stages_nothing(self, repo: Path) -> None:
+        _write(repo, "p.patch", _NEW_FILE_PATCH)
+        reading = read_commit_form("git apply p.patch && git commit -m x")
+
+        with simulated_staging(reading, repo, repo) as env:
+            assert _staged(repo, env) == set()
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git apply --cached missing.patch && git commit -m x",
+            "git apply --cached $P && git commit -m x",
+            "git apply --cached - && git commit -m x",
+            "git apply --cached && git commit -m x",
+            "git apply --cached -p0 p.patch && git commit -m x",
+            "git diff > q.patch && git apply --cached q.patch && git commit -m x",
+        ],
+    )
+    def test_an_unreadable_patch_takes_the_whole_working_tree(
+        self, repo: Path, command: str
+    ) -> None:
+        _write(repo, "p.patch", _NEW_FILE_PATCH)
+        with simulated_staging(read_commit_form(command), repo, repo) as env:
+            assert "leak.txt" in _staged(repo, env)
+
+    def test_a_patch_with_no_file_header_takes_the_whole_working_tree(self, repo: Path) -> None:
+        _write(repo, "p.patch", "not a patch\n")
+        reading = read_commit_form("git apply --cached p.patch && git commit -m x")
+
+        with simulated_staging(reading, repo, repo) as env:
+            assert "leak.txt" in _staged(repo, env)
+
+    def test_a_quoted_header_path_takes_the_whole_working_tree(self, repo: Path) -> None:
+        _write(repo, "p.patch", '--- /dev/null\n+++ "b/we\\tird.txt"\n@@ -0,0 +1 @@\n+x\n')
+        reading = read_commit_form("git apply --cached p.patch; git commit -m x")
+
+        with simulated_staging(reading, repo, repo) as env:
+            assert "leak.txt" in _staged(repo, env)
+
+
 def _fail_the_first_add(
     refused: "subprocess.CompletedProcess[str]", accepted: "subprocess.CompletedProcess[str]"
 ) -> Callable[..., "subprocess.CompletedProcess[str]"]:

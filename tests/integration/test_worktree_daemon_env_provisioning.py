@@ -109,6 +109,36 @@ class TestTheSetupScriptProvisionsIt:
         assert not offenders, f"the env file must be written fresh, not copied: {offenders}"
 
 
+class TestTheBootstrapScriptWritesTheSameCheckoutAgnosticFile:
+    """N369: a harness worktree SYMLINKS the main checkout's env file (seed).
+
+    The bootstrap script wrote the main checkout's absolute path into it, so
+    every harness worktree's hooks resolved the main checkout's daemon and the
+    forwarder tests failed there. The file must carry the unexpanded
+    `$PROJECT_PATH` the installer writes, which init.sh expands per checkout.
+    """
+
+    _BOOTSTRAP = _REPO_ROOT / "scripts" / "bootstrap-self-install.sh"
+
+    def test_it_writes_the_unexpanded_project_path(self) -> None:
+        writes = [
+            line
+            for line in self._BOOTSTRAP.read_text().splitlines()
+            if "hooks-daemon.env" in line and line.lstrip().startswith("printf")
+        ]
+        assert len(writes) == 1, writes
+        assert '"\\$PROJECT_PATH"' in writes[0], writes[0]
+        assert "REPO_ROOT" not in writes[0], writes[0]
+
+    def test_the_text_it_writes_resolves_per_checkout(self, tmp_path: Path) -> None:
+        env_file = tmp_path / "hooks-daemon.env"
+        env_file.write_text('HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH"\n', encoding="utf-8")
+        first, second = tmp_path / "main", tmp_path / "worktree"
+
+        assert _sourced_root_dir(env_file, first) == str(first)
+        assert _sourced_root_dir(env_file, second) == str(second)
+
+
 class TestTheSetupScriptProvisionsADevVenv:
     """The worktree exists to run QA, so its venv must carry the dev extras.
 

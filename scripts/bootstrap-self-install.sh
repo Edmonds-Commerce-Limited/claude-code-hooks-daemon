@@ -67,7 +67,13 @@ UV_PROJECT_ENVIRONMENT="$VENV_DIR" uv sync --frozen --all-extras --python "$PYTH
 # The gitignored file init.sh's repo guard accepts on mere existence. Written
 # AFTER the venv so a failed sync never leaves a checkout that claims to be
 # configured; the guard would then wave through a daemon that cannot start.
-printf 'HOOKS_DAEMON_ROOT_DIR="%s"\n' "$REPO_ROOT" > .claude/hooks-daemon.env
+#
+# The value is the text `$PROJECT_PATH`, expanded by init.sh against whichever
+# checkout sources the file, and NOT this checkout's path: a harness worktree
+# shares this file through a seed symlink (worktree_create `seed`), so a baked
+# path would point every worktree's hooks at this checkout's daemon (N369).
+# install.py's create_daemon_env writes the same text.
+printf 'HOOKS_DAEMON_ROOT_DIR="%s"\n' "\$PROJECT_PATH" > .claude/hooks-daemon.env
 echo "Wrote .claude/hooks-daemon.env"
 
 ./bin/hooks-daemon restart

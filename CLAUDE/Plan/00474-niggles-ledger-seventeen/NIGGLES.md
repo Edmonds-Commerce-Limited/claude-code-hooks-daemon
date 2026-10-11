@@ -783,9 +783,17 @@ that branch only, so all seven are open on `main`.
   `remote_docs_commit_gate` read that index. An add whose scope cannot be read is applied as
   `git add -A --ignore-errors`; a simulation that cannot finish (timeout, fatal) denies with "run `git add`
   as its own call". It runs with `core.splitIndex=false`. `guard_config_commit_gate` (advisory only) still
-  reads the real index for the add. Still not done: one shared simulation per dispatch (five gates each
-  simulate, so a timing-out add costs up to 5s per gate), and `git apply --cached` /
-  `update-index --add` are not simulated (as before the merge). Reports:
+  reads the real index for the add. **Batch AC (261011)**: `git update-index --add/--remove/--force-remove/--replace`
+  and `git apply --cached`/`--index` are now simulated too. `StagingRun` carries its `subcommand`
+  (`utils/git_commit_parsing.py`, `STAGING_SUBCOMMANDS`); `update-index` runs against the scratch index with a
+  whitelist of flags, and `apply --cached` runs `git apply --cached <patch>` for real on the scratch index, falling
+  back to staging the `+++ b/` / `--- a/` header paths when the patch will not apply. An unreadable patch (missing,
+  stdin, shell-built, quoted or prefix-less header, over 8 MiB, no header), an unknown flag (`-p0`, `--cacheinfo`,
+  `--index-info`) or a failure takes the existing policy: an add of every working-tree change. An `apply` without
+  `--cached`/`--index` stages nothing. `plan_qa/command_journal.py` still counts only `git add` as covering a journal.
+  Not done, and only a performance note, not a defect: one shared simulation per dispatch (five gates each simulate,
+  so a timing-out add costs up to 5s per gate); each gate's verdict is correct on its own, so nothing was changed.
+  Reports:
   [subagent-reports/261002-commit-gate-same-cmd-sonnet.md](subagent-reports/261002-commit-gate-same-cmd-sonnet.md),
   [subagent-reports/261002-commit-gate-round2-sonnet.md](subagent-reports/261002-commit-gate-round2-sonnet.md).
 
@@ -2672,7 +2680,17 @@ resolves main's root rather than its own.
 **Fix**: find where the worktree gets that file. Either point its `HOOKS_DAEMON_ROOT_DIR` at the worktree, or make the
 test hermetic against an inherited root. Then confirm the test passes inside a worktree.
 
-**Status**: ⬜ Open. Verified NOT stale (batch G, 2026-10-11): run from a harness-created worktree the test still fails
+**Status**: ✅ Fixed on the branch of batch AC (261011), cause and test. Reproduced in a harness worktree (1 failed,
+12 passed). Cause: `scripts/bootstrap-self-install.sh` wrote the main checkout's ABSOLUTE path into
+`.claude/hooks-daemon.env`, and the harness seeds that file into every worktree as a symlink (`worktree_create`
+`seed`, which the config comment says is safe because the value is "resolved at runtime"); `install.py` and
+`setup_worktree.sh` already write the unexpanded `$PROJECT_PATH`, so only the bootstrap script was wrong. The script now
+writes `"$PROJECT_PATH"` (pinned by `TestTheBootstrapScriptWritesTheSameCheckoutAgnosticFile`). The test
+`test_stop_forwarder_exits_2_on_block_with_socket_stdin` skips, naming the remedy, when the checkout's env file pins a
+literal root that is not the checkout under test. This dev container's `/workspace/.claude/hooks-daemon.env` still holds
+the old literal (outside any worktree, not edited here): re-running the bootstrap, or replacing that one line with
+`HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH"`, makes the test run, not skip, in every worktree. Earlier finding:
+verified NOT stale (batch G, 2026-10-11): run from a harness-created worktree the test still fails
 (1 failed, 6 passed). There `.claude/hooks-daemon.env` is a symlink to main's `/workspace/.claude/hooks-daemon.env`
 (`HOOKS_DAEMON_ROOT_DIR="/workspace"`), `init.sh:1213-1220` sources it over any inherited variable (so the test cannot
 override it through the subprocess env), and the launcher reports "Daemon already running" for main's daemon
@@ -2995,7 +3013,12 @@ here: add a map rule for `handlers/pre_tool_use/*.py` naming the performance tes
 **Status**: ✅ Fixed (commit 4b2235800). `_walk` takes a `depth` and inlines an evaluated string only while
 `depth < MAX_EVAL_NESTING` (4, the nested-shell cap the performance test's shapes are built around); past it the
 command stays one ordinary step and its body goes unjudged, per ruling A1. Pinned by `TestEvalNestingIsCapped` in
-`tests/unit/utils/test_git_commit_parsing.py`.
+`tests/unit/utils/test_git_commit_parsing.py`. **Map rule added (batch AC, 261011)**: `scripts/qa/changed_tests_map.yaml`
+now maps `handlers/pre_tool_use/*.py` and `utils/git_commit_parsing.py` to
+`tests/unit/handlers/test_safety_handlers_hostile_input_performance.py`; pinned by
+`tests/unit/qa/test_performance_test_is_wired.py`. Observed while running it: its `[nesting]` shape fails on this
+branch with `PipBreakSystemHandler cost grew 43x for 8x input`, reproduced twice. The branch changes nothing that handler
+reads, so this looks like a separate finding for the coordinator to confirm on main.
 
 ### N356 — a grep regex inside a quoted `bash -c` string is read as a protected-path glob
 
