@@ -4,10 +4,13 @@ Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies. Numbering continues from
 [ledger sixteen](../Completed/00466-niggles-ledger-sixteen/NIGGLES.md).
 
-### 65 entries still open in the archived ledger 00466
+### 42 entries still open in the archived ledger 00466
 
 Ledger 00466 was archived as Superseded by this one. Its PLAN.md index holds 157
-entry rows, 65 of them not in a terminal state. They stay open, are not copied
+entry rows, 56 of them marked ⬜ or 🔄 (the earlier figure of 65 does not
+reconcile to its status column). Of those, 14 are resolved in the sections below
+(N222, N95, N42 and N79 fixed; N45, N57, N68, N71, N72, N77, N78 and N89
+dismissed; N62 and N74 no change), leaving 42. They stay open, are not copied
 here, and are tracked from this ledger by reference to that
 [index](../Completed/00466-niggles-ledger-sixteen/PLAN.md). Its branches are all
 resolved: landed (n101, n211, lifecycle, d-00376) or dropped, their branch-only
@@ -69,7 +72,10 @@ kept, with verbatim write-ups where the branch had one, in
 [CARRIED-REFIX-BRANCHES.md](CARRIED-REFIX-BRANCHES.md). Some numbers come from
 other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 
-**Status**: ⬜ Open (all 55).
+**Status**: ✅ 0 open of 55. Counted from the entries' "On main" lines in
+[CARRIED-REFIX-BRANCHES.md](CARRIED-REFIX-BRANCHES.md): every one reads fixed,
+dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
+is the count at that date.
 
 ### N285 — a sub-agent reports `PYTHONPATH=… pytest` denied as an upgrade-approval bypass
 
@@ -2507,7 +2513,7 @@ evidence and a fix; several have probe scripts under `untracked/scratch/review-v
     (`docs_qa/checks/unlisted_fake_value.py:123`); repeated literals in `destructive_git.py:502-536`;
     `sensitive_content` re-reads `.claude/fake-values.yaml` on every matching write.
 
-**Status**: Defects ✅ fixed before the v3.69.0 tag (RELEASING.md: a release carries no known defect), merged at
+**Status**: ✅ Fixed, with one 🚫 deliberate limit (the cold-index glob, "Known residual of item 2" below). Defects fixed before the v3.69.0 tag (RELEASING.md: a release carries no known defect), merged at
 9028bc3a1, one commit each, test-first ([report](subagent-reports/261008-v369-review-defect-fixes-sonnet.md)): items 1
 to 8, the docstring and 100-issue halves of 9 and 10, the unreadable-doc logging in 11, the destructive_git named
 constants, `bash_safe_mode` gaining `validate_options` (the N373 class), and two items from the Step 1c Claude Code
@@ -2551,7 +2557,7 @@ The scaling sweep now takes the minimum of CPU-time samples and the chain deadli
 (`UpgradeApprovalGuardHandler` 25x for 8x input in-suite, 3 of 3 passes alone on py3.12), the `[.md]` deep-path
 sweep (`RemoteDocsProvenanceHandler` 73x for 8x) and `test_client_owned_asset_lint`'s 120-second shellcheck timeout.
 
-**Status**: PARTLY FIXED (batch D, branch `agent-aeccce8de2ff73867-3d7478ce`); the sweep half needs a design decision.
+**Status**: 🟡 Partly fixed (batch D, branch `agent-aeccce8de2ff73867-3d7478ce`); ⬜ Owner decision for the sweep half (serial phase).
 
 Fixed: the supervisor end-to-end test (`test_abandoned_input_flush.py`) now keeps its child alive until the decision
 log holds the compact, with a load-scaled hang cap, instead of `sleep 0.5` (the supervisor logs its child's argv into
