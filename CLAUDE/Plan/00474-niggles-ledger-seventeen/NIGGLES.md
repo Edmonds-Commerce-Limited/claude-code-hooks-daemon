@@ -1783,19 +1783,24 @@ none a regression against main:
 - ✅ cleared by batch T: a function definition (`f() { cd /tmp; }; echo x > x`, `f ()`, `function f {`, `function f() {`)
   does not apply its body's `cd` to what follows, unless the function's name appears as a word later in the command
   (`f() { cd /tmp; }; f; echo x > x` still moves, so a real move still denies).
-- Residual, from the batch T review: a function that is defined and then called without its name appearing as a word
-  (`"$@"`, `$g`, `eval "$name"`) counts as never called, so its body's `cd` is not carried to what follows. A write after
-  such a call is read from the directory before the definition: an allow where main denied. Accepted under the
-  careless-agent threat model (nothing hostile is assumed); closing it would mean treating any dynamic command word as a
-  possible call, which denies every ordinary `"$@"` after a definition.
+- ✅ cleared by batch Z (in part): a function called through an expansion (`g=f; $g`, `${g}`, `"$@"`, `"$1"`) was
+  treated as never called, an allow where main denied. A later COMMAND word (not an argument: `echo "$@"` is not one)
+  that is a `$` expansion now counts as a possible call of every function defined, so the body's `cd` applies with
+  `uncertain=True` (`_calls_through_expansion`, in `_walk`). Only adds denies. Still open: `eval "$name"` (the evaluated
+  string is walked on its own, without the definition), accepted under the careless-agent threat model.
 - Batch T round 2: a `name=()` array assignment is no longer taken for a function name (`_FUNCTION_NAME`), so
   `arr=()` then `{ cd /tmp; }` keeps its move; `function f { if …` keeps the frames of the groups it opens.
-- Residual (batch T review r2): a `cd` in a pipeline's last stage still carries past the pipeline (errs toward deny);
-  a correct fix must track nesting depth at the `|`. A round-2 attempt that reset at the next operator also reset inside
-  a compound last stage (`ls | { cd /tmp; cat > y; }`), an allow where main denied, and was reverted in round 3.
-- `utils/git_commit_parsing.py` (`_walk`, via `_after_directory_change`): a loop body that never runs
-  (`while false; do cd /tmp; done; echo x > x`) is treated as one that did. Needs evaluation; left as it is. False
-  denies only.
+- ✅ cleared by batch Z: a `cd` in a pipeline's last stage carried past the pipeline (`x | cd /tmp && echo > y` placed
+  `y` in /tmp though bash runs the last stage in a subshell). `_walk` now records the nesting depth
+  (`len(stack) + len(groups)`) and the start state at each `|` (`pipelines`), and restores that start only when a
+  non-pipe operator arrives at the SAME depth or a closer (`}`, `fi`, `done`, `esac`, `)`) returns the nesting to it.
+  An operator deeper than the mark is inside a compound last stage and ends nothing, so `ls | { cd /tmp; cat > y; }`,
+  `true | { cd /tmp && echo x > y; }`, `true | { cd /tmp\necho x > y\n}` and `true |(cd /tmp; echo x > y)` still deny;
+  `echo hi | { cd sub && git commit -m x; }` still resolves to `('sub',)`, uncertain. A case pattern's `|` is not a
+  pipe and records no mark. This is the one deliberate loosening: `x | cd /tmp && echo > y` and `x | cd /tmp; echo > y`
+  now place `y` at the pipeline's start directory.
+- Deliberate limit: a loop body that never runs (`while false; do cd /tmp; done; echo x > x`) is treated as one that
+  did. Telling needs the loop condition evaluated, which a static walk cannot do. Left as it is. False denies only.
 - `handlers/pre_tool_use/project_containment.py:607`: the literal-assignment substitution carries the existing `;`
   both-ways reading to variables, so `D=sub; cd $D; cd .. && echo x > x` is denied, as the literal `cd sub; cd ..` already is.
 - ✅ cleared by batch P: A process substitution target after a `cd` (`cd /tmp && echo hi > >(cat)`) is read as a file

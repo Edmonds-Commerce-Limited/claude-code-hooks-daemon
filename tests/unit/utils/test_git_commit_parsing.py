@@ -745,14 +745,90 @@ class TestSimpleCommandsKeepTheirFileRedirections:
             "true | { cd /tmp && echo x > y; }",
             "true | { cd /tmp\necho x > y\n}",
             "true |(cd /tmp; echo x > y)",
-            "x | cd /tmp && echo x > y",
+            "true | (cd /tmp; echo x > y)",
+            "true | { cd /tmp; echo a | cat; echo x > y; }",
+            "true | { cd /tmp; { true; }; echo x > y; }",
+            "true | { cd /tmp; (true); echo x > y; }",
+            "true | if true; then cd /tmp; echo x > y; fi",
+            "true | while true; do cd /tmp; echo x > y; done",
         ],
     )
-    def test_a_cd_in_the_last_stage_is_still_in_effect_for_what_follows_it(
-        self, command: str
-    ) -> None:
+    def test_a_cd_inside_a_compound_last_stage_is_in_effect_within_it(self, command: str) -> None:
         step = [s for s in simple_commands(command) if s.redirects][-1]
         assert "/tmp" in step.directory
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "x | cd /tmp && echo x > y",
+            "x | cd /tmp; echo x > y",
+            "x | cd /tmp\necho x > y",
+            "x | y | cd /tmp && echo x > y",
+            "x |& cd /tmp && echo x > y",
+            "x | { cd /tmp; }; echo x > y",
+            "x | { cd /tmp && true; } && echo x > y",
+            "x |(cd /tmp); echo x > y",
+            "x | if true; then cd /tmp; fi; echo x > y",
+            "x | { y | cd /tmp; }; echo x > y",
+        ],
+    )
+    def test_a_cd_in_the_last_stage_ends_with_the_pipeline(self, command: str) -> None:
+        step = [s for s in simple_commands(command) if s.redirects][-1]
+        assert step.directory == ()
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "case a in a|b) cd /tmp; echo x > y;; esac",
+            "case a in b) true;; a|b) cd /tmp; echo x > y;; esac",
+            "true | case a in a|b) cd /tmp; echo x > y;; esac",
+        ],
+    )
+    def test_a_case_pattern_bar_is_not_a_pipeline(self, command: str) -> None:
+        step = [s for s in simple_commands(command) if s.redirects][-1]
+        assert "/tmp" in step.directory
+
+    def test_a_pipeline_after_a_cd_restores_that_directory(self) -> None:
+        last = simple_commands("cd sub && x | cd /tmp && echo x > y")[-1]
+        assert last.directory == ("sub",)
+
+    def test_a_last_stage_cd_in_a_group_ends_at_the_pipeline_in_that_group(self) -> None:
+        last = simple_commands("{ x | cd /tmp; echo a > b; }; echo x > y")[-1]
+        assert last.directory == ()
+
+    def test_a_cd_in_a_last_stage_still_moves_a_git_commit_inside_its_group(self) -> None:
+        (invocation,) = git_invocations("echo hi | { cd sub && git commit -m x; }")
+        assert invocation.directory == ("sub",)
+        assert invocation.moves_certain is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "f() { cd /tmp; }; g=f; $g; echo x > x",
+            "f() { cd /tmp; }; ${g}; echo x > x",
+            'f() { cd /tmp; }; "$@"; echo x > x',
+            'f() { cd /tmp; }; "$1"; echo x > x',
+            "f() { cd /tmp; }; FOO=1 $g; echo x > x",
+            "f() { cd /tmp; }; true && $g; echo x > x",
+            "function f { cd /tmp; }; $g; echo x > x",
+        ],
+    )
+    def test_a_function_called_through_an_expansion_may_have_moved(self, command: str) -> None:
+        last = simple_commands(command)[-1]
+        assert last.directory == ("/tmp",)
+        assert last.moves_certain is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "f() { cd /tmp; }; echo $g; echo x > x",
+            'f() { cd /tmp; }; echo "$@"; echo x > x',
+            "f() { cd /tmp; }; g=$h; echo x > x",
+            "f() { cd /tmp; }; echo x > x",
+        ],
+    )
+    def test_an_expansion_that_is_not_a_command_word_is_not_a_call(self, command: str) -> None:
+        assert simple_commands(command)[-1].directory == ()
 
     def test_an_and_if_pipeline_keeps_the_directory_before_it(self) -> None:
         last = simple_commands("cd sub && a |& b && echo x > y")[-1]

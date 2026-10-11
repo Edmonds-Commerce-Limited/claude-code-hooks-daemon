@@ -1640,6 +1640,12 @@ rows:
   - id: n403-function-definition-cd-is-not-run
     command: |-
       f() { cd /tmp; }; echo x > untracked/scratch/n403-func.txt
+  - id: n403-last-stage-cd-does-not-carry-past-the-pipeline
+    command: |-
+      echo hi | cd /tmp && echo x > untracked/scratch/n403-last-stage.txt
+  - id: n403-last-stage-cd-does-not-carry-past-the-pipeline-semicolon
+    command: |-
+      echo hi | cd /tmp; echo x > untracked/scratch/n403-last-stage-semi.txt
   # --- Plan 00474 N410: a QA tool reached through a variable under a steering variable ---
   - id: n410-variable-ruff-under-pythonpath
     command: |-

@@ -147,7 +147,6 @@ _UNCERTAIN_MOVES = [
     "cd sub || cd other; git commit -m x f.txt",
     "false || cd sub && git commit -m x f.txt",
     "cd sub && echo hi; git commit -m x f.txt",
-    "echo hi | cd sub && git commit -m x f.txt",
     "(cd sub; git commit -m x f.txt)",
 ]
 #: Moves every one of which must succeed for the commit to run at all.
@@ -260,15 +259,16 @@ class TestCommitDirectory:
 
     @pytest.mark.parametrize(
         "command",
-        [
-            "echo hi | { cd sub && git commit -m x f.txt; }",
-            "echo hi | cd sub && git commit -m x f.txt",
-        ],
+        ["echo hi | { cd sub && git commit -m x f.txt; }"],
     )
-    def test_a_cd_in_a_pipelines_last_stage_still_places_the_commit(
+    def test_a_cd_in_a_compound_last_stage_still_places_the_commit(
         self, twin: Path, command: str
     ) -> None:
         assert commit_directory(read_commit_form(command), twin) == twin / "sub"
+
+    def test_a_cd_in_a_bare_last_stage_ends_with_the_pipeline(self, twin: Path) -> None:
+        command = "echo hi | cd sub && git commit -m x f.txt"
+        assert commit_directory(read_commit_form(command), twin) == twin
 
     def test_a_bare_commit_with_a_cd_is_resolved_too(self, twin: Path) -> None:
         reading = read_commit_form("cd sub && git commit -m x")

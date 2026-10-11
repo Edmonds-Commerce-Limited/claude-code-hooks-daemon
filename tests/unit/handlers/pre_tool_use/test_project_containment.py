@@ -1704,7 +1704,9 @@ class TestARedirectIsJudgedWhereTheChainsCdLandsIt:
             "true | { cd /tmp && echo x > y; }",
             "true | { cd /tmp\necho x > y\n}",
             "true |(cd /tmp; echo x > y)",
-            "x | cd /tmp && echo x > y",
+            "true | (cd /tmp; echo x > y)",
+            "f() { cd /tmp; }; g=f; $g; echo x > y",
+            'f() { cd /tmp; }; "$@"; echo x > y',
         ],
     )
     def test_a_move_the_shell_does_make_still_denies(
@@ -1713,3 +1715,14 @@ class TestARedirectIsJudgedWhereTheChainsCdLandsIt:
         hook_input = _bash(command, cwd=str(repo))
         assert handler.matches(hook_input) is True
         assert handler.handle(hook_input).decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        ["x | cd /tmp && echo x > y", "x | cd /tmp; echo x > y", "x |& cd /tmp; echo x > y"],
+    )
+    def test_a_cd_in_a_bare_last_stage_ends_with_the_pipeline(
+        self, handler: ProjectContainmentHandler, repo: Path, command: str
+    ) -> None:
+        """Bash runs the last stage in a subshell, so `y` lands in the start directory."""
+        hook_input = _bash(command, cwd=str(repo))
+        assert not handler.matches(hook_input)

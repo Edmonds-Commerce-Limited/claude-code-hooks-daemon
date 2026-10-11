@@ -1067,6 +1067,59 @@ def _write_redirects(words: list[str], start: int, end: int) -> tuple[tuple[str,
     return tuple(found)
 
 
+#: A command word that is one parameter expansion (`$g`, `${g}`, `$@`, `$1`; the
+#: lexer has already removed the quotes of `"$@"`).
+_EXPANSION_WORD: Final[re.Pattern[str]] = re.compile(
+    r"\$(\{[^}]+\}|[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?!$-])"
+)
+#: Words that may stand before a command word without being it.
+_BEFORE_COMMAND_WORDS: Final[frozenset[str]] = frozenset(
+    {*SHELL_RESERVED_COMMAND_PREFIXES, "{", "!"}
+)
+
+
+def _calls_through_expansion(words: list[str]) -> bool:
+    """Whether a command in ``words`` is named by an expansion (`$g`, `"$@"`), so it may call anything."""
+    at_command = True
+    index = 0
+    while index < len(words):
+        word = words[index]
+        if is_redirection(word):
+            index += 2
+            continue
+        index += 1
+        if is_operator(word):
+            at_command = True
+        elif at_command and word not in _BEFORE_COMMAND_WORDS and not _ASSIGNMENT_WORD.match(word):
+            if _EXPANSION_WORD.fullmatch(word):
+                return True
+            at_command = False
+    return False
+
+
+#: A pipeline's last stage: the nesting depth at its `|`, and the state it began in.
+_PipelineMark = tuple[int, _State]
+
+
+def _pipeline_ended_by_operator(marks: list[_PipelineMark], depth: int) -> _State | None:
+    """Where a pipeline began, when a non-pipe operator at ``depth`` ends its last stage."""
+    if marks and marks[-1][0] == depth:
+        return marks.pop()[1]
+    return None
+
+
+def _pipeline_ended_by_closer(marks: list[_PipelineMark], depth: int) -> _State | None:
+    """Where the outermost pipeline began, when a closer returns the nesting to ``depth``.
+
+    A last stage that is a group or subshell ends with its closer, and so does a
+    pipeline inside a group the closer shuts.
+    """
+    began: _State | None = None
+    while marks and marks[-1][0] >= depth:
+        began = marks.pop()[1]
+    return began
+
+
 #: How many levels of ``eval``/``sh -c`` strings are inlined. Each level re-lexes
 #: the whole remaining text, so unbounded nesting costs quadratic time; past the
 #: cap the command is kept as one ordinary step and its body goes unjudged.
@@ -1097,13 +1150,23 @@ def _walk(
     last_segment: list[str] = []
     defining: str | None = None
     expecting_pattern = False
+    # The last stage of each pipeline still open: the nesting depth at its `|`
+    # and where the pipeline began. Bash runs that stage in a subshell, so its
+    # `cd` ends with it: at the next non-pipe operator at the SAME depth, or
+    # when a closer returns the nesting to it. An operator deeper than that is
+    # inside a compound last stage (`ls | { cd /tmp; cat > y; }`) and ends nothing.
+    pipelines: list[_PipelineMark] = []
     index = 0
     while index < len(words):
         if is_operator(words[index]) and not is_redirection(words[index]):
             if words[index] == _EMPTY_PARENS:
                 defining = _defined_function(last_segment)
+            operator_depth: int | None = None
+            in_case_pattern = expecting_pattern  # its `|` separates patterns, it pipes nothing
             # The lexer joins adjacent operators (`);`), so each is read in turn.
             for char in words[index]:
+                if operator_depth is None and char not in _SUBSHELL_CHARS:
+                    operator_depth = len(stack) + len(groups)
                 if expecting_pattern and char in _SUBSHELL_CHARS:
                     # A `case` pattern's `)` (and an optional leading `(`) is
                     # not a subshell boundary.
@@ -1113,14 +1176,24 @@ def _walk(
                 elif char == _SUBSHELL_CLOSE:
                     directory, uncertain = stack.pop() if stack else (directory, uncertain)
                     stage_start = (directory, uncertain)
+                    began = _pipeline_ended_by_closer(pipelines, len(stack) + len(groups))
+                    if began is not None:
+                        directory, uncertain = stage_start = began
             previous_operator = "".join(
                 char for char in words[index] if char not in _SUBSHELL_CHARS
             )
-            # A stage that is followed by another ends with its subshell. The
-            # LAST stage is not reset: a `cd` in it still carries past the
-            # pipeline (a false deny, never a false allow), because telling
-            # `x | cd /tmp && …` from `x | { cd /tmp && …; }` needs nesting depth.
+            if operator_depth is not None and previous_operator not in _PIPE_OPERATORS:
+                began = _pipeline_ended_by_operator(pipelines, operator_depth)
+                if began is not None:
+                    directory, uncertain = stage_start = began
+            # A stage that is followed by another ends with its subshell.
             if previous_operator in _PIPE_OPERATORS:
+                if (
+                    operator_depth is not None
+                    and not in_case_pattern
+                    and not (pipelines and pipelines[-1][0] == operator_depth)
+                ):
+                    pipelines.append((operator_depth, stage_start))
                 directory, uncertain = stage_start
             if directory and previous_operator != _AND_OPERATOR:
                 uncertain = True
@@ -1140,6 +1213,8 @@ def _walk(
         closers = _leading_closers(segment)
         opened_in: _State | None = None
         forgotten: _State | None = None
+        pipeline_began: _State | None = None
+        possibly_called = False
         if closers and groups:
             # `} done` closes two groups on one segment: the redirect belongs
             # to the outermost, so each closer word pops its own frame.
@@ -1147,8 +1222,14 @@ def _walk(
                 frame = groups.pop()
                 opened_in = frame[:2]
                 if frame[2] is not None and frame[2] not in words[end:]:
-                    forgotten = opened_in  # a function body that nothing calls never ran
+                    # A body nothing calls by name never ran, unless a later
+                    # command word is an expansion (`$g`, `"$@"`) that may name it.
+                    if _calls_through_expansion(words[end:]):
+                        possibly_called = True
+                    else:
+                        forgotten = opened_in
             stage_start = opened_in if opened_in is not None else stage_start
+            pipeline_began = _pipeline_ended_by_closer(pipelines, len(stack) + len(groups))
         else:
             groups.extend(
                 (directory, uncertain, name) for name in _opened_group_names(segment, defining)
@@ -1165,6 +1246,10 @@ def _walk(
         directory = moved
         if forgotten is not None:
             directory, uncertain = forgotten
+        if possibly_called:
+            uncertain = True
+        if pipeline_began is not None:
+            directory, uncertain = stage_start = pipeline_began
         body = _evaluated_string(segment) if depth < MAX_EVAL_NESTING else None
         if body is not None:
             found.extend(_walk(command_words(body), directory, uncertain, depth + 1))
