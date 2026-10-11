@@ -22,7 +22,7 @@ intent.
 
 import hashlib
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
@@ -182,13 +182,14 @@ def load_fake_values(project_root: Path) -> FakeValuesRegistry:
 
 def swap_unlisted_fakes(
     text: str,
-    patterns: Mapping[str, re.Pattern[str]],
+    patterns: Mapping[str, Sequence[re.Pattern[str]]],
     registry: FakeValuesRegistry,
 ) -> tuple[str, tuple[ValueSwap, ...]]:
     """Replace every unlisted fake in ``text`` with a listed fake of the same kind.
 
-    ``patterns`` maps a kind name to the public-pattern regex that judges it;
-    a kind's own ``fake_looking`` regex is applied as well. Only kinds the
+    ``patterns`` maps a kind name to the public-pattern regexes that judge it
+    (every one applies, as in the guard); a kind's own ``fake_looking`` regex is
+    applied as well. Only kinds the
     registry lists are touched. Occurrences of one original share one
     replacement and distinct originals get distinct ones, so a page that keeps
     two sessions apart still does. A listed value already in ``text`` is left
@@ -200,7 +201,9 @@ def swap_unlisted_fakes(
     """
     swaps: list[ValueSwap] = []
     for name, entry in registry.kinds.items():
-        regexes = [rx for rx in (patterns.get(name), entry.fake_looking) if rx is not None]
+        regexes = [*patterns.get(name, ())]
+        if entry.fake_looking is not None:
+            regexes.append(entry.fake_looking)
         found: list[tuple[int, str]] = []
         for regex in regexes:
             found.extend((m.start(), m.group(0)) for m in regex.finditer(text))

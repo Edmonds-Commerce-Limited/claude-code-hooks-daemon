@@ -8053,7 +8053,7 @@ def _capture_value_swapper(project_root: Path) -> Any:
 
     from claude_code_hooks_daemon.constants import HandlerID
     from claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content import (
-        compiled_public_pattern,
+        compile_public_pattern,
     )
     from claude_code_hooks_daemon.utils.fake_values import (
         FakeValuesError,
@@ -8076,7 +8076,7 @@ def _capture_value_swapper(project_root: Path) -> Any:
     options = handler_options(
         config.handlers.pre_tool_use.get(HandlerID.SENSITIVE_CONTENT.config_key)
     )
-    patterns: dict[str, re.Pattern[str]] = {}
+    patterns: dict[str, list[re.Pattern[str]]] = {}
     for entry in options.get("public_patterns", []):
         if not isinstance(entry, dict):
             raise _ContentGuardUnavailableError(
@@ -8088,11 +8088,19 @@ def _capture_value_swapper(project_root: Path) -> Any:
         source = entry.get("pattern")
         if name not in registry.kinds or not source:
             continue
-        # The guard's own compiler, so the swapper and the guard cannot drift;
-        # a pattern that does not compile is dropped there with a warning.
-        compiled = compiled_public_pattern(str(source))
-        if compiled is not None:
-            patterns[str(name)] = compiled
+        # The guard's own compiler, so the swapper and the guard cannot drift.
+        # The guard drops a pattern that does not compile; here that would let
+        # the real value into the vendored page, so the capture is refused.
+        try:
+            compiled = compile_public_pattern(str(source))
+        except re.error as exc:
+            raise _ContentGuardUnavailableError(
+                f"the public pattern for `{name}` does not compile ({exc}); nothing was "
+                "written, because a value of that kind cannot be found with a pattern "
+                "that cannot be read. Fix the pattern and retry."
+            ) from exc
+        # Every pattern configured for a kind applies, as in the guard.
+        patterns.setdefault(str(name), []).append(compiled)
     return lambda text: swap_unlisted_fakes(text, patterns, registry)
 
 

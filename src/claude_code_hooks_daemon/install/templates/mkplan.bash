@@ -183,7 +183,7 @@ acquire_lock() {
     trap release_lock EXIT INT TERM
 }
 
-# Walk one directory for scan_highest, recursing into every folder that is not
+# Walk one directory for filesystem_highest, recursing into every folder that is not
 # itself a plan. Sets the global `scan_highest_result`. Callers own the glob
 # options (nullglob, dotglob).
 scan_plan_tree() {
@@ -787,15 +787,9 @@ fi
 next=$((counter + 1))
 printf -v padded '%0*d' "$NUMBER_WIDTH" "$next"
 
-# Collision guard: nothing on disk may already carry this number (active or
-# archived). filesystem_highest already covers the common case, but check the
-# concrete number explicitly for a precise error.
-shopt -s nullglob
-existing=( "$plan_dir/$padded-"*/ "$plan_dir"/*/"$padded-"*/ )
-shopt -u nullglob
-if (( ${#existing[@]} > 0 )); then
-    die "plan number $padded already exists on disk: ${existing[0]}"
-fi
+# No separate collision scan: the counter is at least filesystem_highest (above),
+# so $next is above every number the one shared scan rule can find. A second
+# scan with a different rule would refuse numbers the daemon considers free.
 
 target="$plan_dir/$padded-$name"
 if [[ -e "$target" ]]; then

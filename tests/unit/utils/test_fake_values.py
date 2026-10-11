@@ -116,7 +116,7 @@ class TestSwapUnlistedFakes:
 
     def test_unlisted_value_is_replaced_by_a_listed_one(self, registry: FakeValuesRegistry) -> None:
         text, swaps = swap_unlisted_fakes(
-            f'{{"session_id": "{_REAL_LOOKING}"}}', {"session-uuid": _UUID_RE}, registry
+            f'{{"session_id": "{_REAL_LOOKING}"}}', {"session-uuid": [_UUID_RE]}, registry
         )
         assert _REAL_LOOKING not in text
         assert _ALL_A in text
@@ -134,7 +134,7 @@ class TestSwapUnlistedFakes:
         self, registry: FakeValuesRegistry
     ) -> None:
         text, swaps = swap_unlisted_fakes(
-            f"{_REAL_LOOKING} again {_REAL_LOOKING}", {"session-uuid": _UUID_RE}, registry
+            f"{_REAL_LOOKING} again {_REAL_LOOKING}", {"session-uuid": [_UUID_RE]}, registry
         )
         assert text == f"{_ALL_A} again {_ALL_A}"
         assert [swap.occurrences for swap in swaps] == [2]
@@ -143,7 +143,7 @@ class TestSwapUnlistedFakes:
         self, registry: FakeValuesRegistry
     ) -> None:
         text, swaps = swap_unlisted_fakes(
-            f"{_REAL_LOOKING} {_OTHER_REAL_LOOKING}", {"session-uuid": _UUID_RE}, registry
+            f"{_REAL_LOOKING} {_OTHER_REAL_LOOKING}", {"session-uuid": [_UUID_RE]}, registry
         )
         assert text == f"{_ALL_A} {_ALL_B}"
         assert [swap.replacement for swap in swaps] == [_ALL_A, _ALL_B]
@@ -152,7 +152,7 @@ class TestSwapUnlistedFakes:
         self, registry: FakeValuesRegistry
     ) -> None:
         text, swaps = swap_unlisted_fakes(
-            f"{_ALL_A} {_REAL_LOOKING}", {"session-uuid": _UUID_RE}, registry
+            f"{_ALL_A} {_REAL_LOOKING}", {"session-uuid": [_UUID_RE]}, registry
         )
         assert text == f"{_ALL_A} {_ALL_B}"
         assert [swap.replacement for swap in swaps] == [_ALL_B]
@@ -160,22 +160,32 @@ class TestSwapUnlistedFakes:
     def test_text_without_unlisted_values_is_returned_unchanged(
         self, registry: FakeValuesRegistry
     ) -> None:
-        text, swaps = swap_unlisted_fakes(_ALL_A, {"session-uuid": _UUID_RE}, registry)
+        text, swaps = swap_unlisted_fakes(_ALL_A, {"session-uuid": [_UUID_RE]}, registry)
         assert text == _ALL_A
         assert swaps == ()
 
     def test_a_kind_the_registry_does_not_list_is_never_swapped(
         self, registry: FakeValuesRegistry
     ) -> None:
-        text, swaps = swap_unlisted_fakes(_REAL_LOOKING, {"profanity": _UUID_RE}, registry)
+        text, swaps = swap_unlisted_fakes(_REAL_LOOKING, {"profanity": [_UUID_RE]}, registry)
         assert text == _REAL_LOOKING
         assert swaps == ()
+
+    def test_every_pattern_listed_for_a_kind_is_applied(self, registry: FakeValuesRegistry) -> None:
+        token_re = re.compile(r"sess-[0-9a-f]{12}")
+        token = "sess-" + "0123456789ab"
+        text, swaps = swap_unlisted_fakes(
+            f"{_REAL_LOOKING} {token}", {"session-uuid": [token_re, _UUID_RE]}, registry
+        )
+        assert _REAL_LOOKING not in text
+        assert token not in text
+        assert len(swaps) == 2
 
     def test_running_out_of_listed_fakes_fails_fast(self, registry: FakeValuesRegistry) -> None:
         with pytest.raises(FakeValuesError, match="no unused listed fake"):
             swap_unlisted_fakes(
                 f"{_REAL_LOOKING} {_OTHER_REAL_LOOKING} {_THIRD_REAL_LOOKING}",
-                {"session-uuid": _UUID_RE},
+                {"session-uuid": [_UUID_RE]},
                 registry,
             )
 

@@ -71,6 +71,17 @@ def _script_allocation(repo: Path) -> int:
     return int(_git(repo, "config", "--local", _COUNTER_KEY))
 
 
+def test_a_plan_nested_inside_a_numbered_folder_does_not_block_its_number(repo: Path) -> None:
+    """The collision check follows the scan's rule: a numbered folder is not searched."""
+    plan_dir = repo / "CLAUDE" / "Plan"
+    (plan_dir / "00050-plan" / "00051-nested").mkdir(parents=True)
+    _git(repo, "config", "--local", _COUNTER_KEY, "50")
+
+    assert highest_plan_number(plan_dir) == 50
+    assert _script_allocation(repo) == 51
+    assert (plan_dir / "00051-probe").is_dir()
+
+
 @pytest.mark.parametrize(
     ("folders", "expected_highest"),
     [

@@ -2364,8 +2364,12 @@ file's mtime and size. ~~**Still open**: the `cli.py` pair (hard-coded `"complet
 `daemon/cli.py` was off limits to that batch.~~ ✅ cleared by batch Q
 ([report](subagent-reports/261011-batch-q-sonnet.md)): `CiRunState.is_completed` (built on the existing
 `_CI_COMPLETED`) replaces the literal in `cli.py`; `_capture_value_swapper` now compiles through the guard's own
-`compiled_public_pattern` (made public), so a bad regex is dropped with the guard's warning instead of a traceback and a
-non-mapping entry refuses the capture with "nothing was written". Known residual of item 2:
+`compile_public_pattern` (made public), so the two cannot drift. Round 2 (review fixes): a pattern for a registry kind
+that does not compile, and a non-mapping entry, refuse the capture with "nothing was written" and no traceback (the
+first draft dropped the pattern and wrote the real value); every pattern configured for a kind now applies
+(`swap_unlisted_fakes` takes a sequence per kind, not last-wins); the guard skips a non-mapping `public_patterns` entry
+with a logged warning instead of an `AttributeError` at hook time; `mkplan.bash` lost its second collision scan, which
+used a different rule from `filesystem_highest`. Known residual of item 2:
 with a cold index, a glob carrying name text (`cat report-*.txt`) still gets no advisory, to keep
 `test_an_unrelated_star_bearing_token_stays_allowed` intact.
 

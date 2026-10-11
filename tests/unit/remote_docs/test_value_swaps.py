@@ -43,7 +43,7 @@ def _swapper(tmp_path: Path) -> ValueSwapper:
         encoding="utf-8",
     )
     registry = load_fake_values(tmp_path)
-    return lambda text: swap_unlisted_fakes(text, {"session-uuid": _UUID_RE}, registry)
+    return lambda text: swap_unlisted_fakes(text, {"session-uuid": [_UUID_RE]}, registry)
 
 
 def _swap_block(**overrides: object) -> str:
