@@ -147,6 +147,7 @@ _UNCERTAIN_MOVES = [
     "cd sub || cd other; git commit -m x f.txt",
     "false || cd sub && git commit -m x f.txt",
     "cd sub && echo hi; git commit -m x f.txt",
+    "echo hi | cd sub && git commit -m x f.txt",
     "(cd sub; git commit -m x f.txt)",
 ]
 #: Moves every one of which must succeed for the commit to run at all.
@@ -157,8 +158,6 @@ _CERTAIN_MOVES = [
     "(cd sub && git commit -m x f.txt)",
     "git -C sub commit -m x f.txt",
     "git commit -m x f.txt",
-    # A pipeline's last stage is a subshell: the `cd` never reaches the commit.
-    "echo hi | cd sub && git commit -m x f.txt",
 ]
 
 
@@ -258,6 +257,18 @@ class TestCommitDirectory:
     )
     def test_an_unstatable_move_is_none(self, twin: Path, command: str) -> None:
         assert commit_directory(read_commit_form(command), twin) is None
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo hi | { cd sub && git commit -m x f.txt; }",
+            "echo hi | cd sub && git commit -m x f.txt",
+        ],
+    )
+    def test_a_cd_in_a_pipelines_last_stage_still_places_the_commit(
+        self, twin: Path, command: str
+    ) -> None:
+        assert commit_directory(read_commit_form(command), twin) == twin / "sub"
 
     def test_a_bare_commit_with_a_cd_is_resolved_too(self, twin: Path) -> None:
         reading = read_commit_form("cd sub && git commit -m x")

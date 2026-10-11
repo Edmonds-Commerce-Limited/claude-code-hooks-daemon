@@ -58,6 +58,14 @@ plus the gate 964 passed. black (py311), ruff, mypy and pyright on the touched s
 Results: 18129 selected tests passed (utils, command_journal, ordinary-command gate, out-of-root containment,
 write-blindness, all `pre_tool_use` unit tests) after the one expectation change above; black, ruff, mypy, pyright clean.
 
+## Round 3
+
+Round-2 item 4 (reset after the last pipeline stage) is reverted: it also fired at the first operator inside a compound
+last stage, so `ls | { cd /tmp; cat > y; }` and four siblings were allowed where main denies. The reset between stages
+stays. `echo hi | cd sub && git commit` is back in `_UNCERTAIN_MOVES`. New deny/placement tests for the five shapes plus
+`x | cd /tmp && echo x > y`, and a git-directory test that `echo hi | { cd sub && git commit -m x f.txt; }` resolves to
+`sub`. Residual recorded under N403.
+
 ## Ledger
 
 N403 residual list in `NIGGLES.md`: the case, pipeline and function lines are marked "cleared by batch T"; the loop-body

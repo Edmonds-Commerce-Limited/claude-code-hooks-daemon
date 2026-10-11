@@ -737,13 +737,22 @@ class TestSimpleCommandsKeepTheirFileRedirections:
         last = simple_commands("function f { if true; then cd /tmp; fi; }; f; echo x > x")[-1]
         assert last.directory == ("/tmp",)
 
-    def test_a_cd_in_the_last_stage_does_not_carry_past_the_pipeline(self) -> None:
-        last = simple_commands("x | cd /tmp && echo x > y")[-1]
-        assert last.directory == ()
-
-    def test_a_cd_in_the_last_stage_is_placed_at_the_pipelines_start(self) -> None:
-        last = simple_commands("cd sub && x |& cd /tmp && echo x > y")[-1]
-        assert last.directory == ("sub",)
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "ls | { cd /tmp; cat > y; }",
+            "true | { cd /tmp; echo x > y; }",
+            "true | { cd /tmp && echo x > y; }",
+            "true | { cd /tmp\necho x > y\n}",
+            "true |(cd /tmp; echo x > y)",
+            "x | cd /tmp && echo x > y",
+        ],
+    )
+    def test_a_cd_in_the_last_stage_is_still_in_effect_for_what_follows_it(
+        self, command: str
+    ) -> None:
+        step = [s for s in simple_commands(command) if s.redirects][-1]
+        assert "/tmp" in step.directory
 
     def test_an_and_if_pipeline_keeps_the_directory_before_it(self) -> None:
         last = simple_commands("cd sub && a |& b && echo x > y")[-1]

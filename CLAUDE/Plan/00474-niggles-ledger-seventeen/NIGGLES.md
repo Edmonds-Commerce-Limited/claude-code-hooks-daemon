@@ -1735,9 +1735,10 @@ none a regression against main:
   careless-agent threat model (nothing hostile is assumed); closing it would mean treating any dynamic command word as a
   possible call, which denies every ordinary `"$@"` after a definition.
 - Batch T round 2: a `name=()` array assignment is no longer taken for a function name (`_FUNCTION_NAME`), so
-  `arr=()` then `{ cd /tmp; }` keeps its move; a pipeline's last stage no longer carries its `cd` past the pipeline
-  (`x | cd /tmp && echo > y` is read from the pipeline's start); `function f { if …` keeps the frames of the groups it
-  opens.
+  `arr=()` then `{ cd /tmp; }` keeps its move; `function f { if …` keeps the frames of the groups it opens.
+- Residual (batch T review r2): a `cd` in a pipeline's last stage still carries past the pipeline (errs toward deny);
+  a correct fix must track nesting depth at the `|`. A round-2 attempt that reset at the next operator also reset inside
+  a compound last stage (`ls | { cd /tmp; cat > y; }`), an allow where main denied, and was reverted in round 3.
 - `utils/git_commit_parsing.py` (`_walk`, via `_after_directory_change`): a loop body that never runs
   (`while false; do cd /tmp; done; echo x > x`) is treated as one that did. Needs evaluation; left as it is. False
   denies only.

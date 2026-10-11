@@ -1097,7 +1097,6 @@ def _walk(
     last_segment: list[str] = []
     defining: str | None = None
     expecting_pattern = False
-    in_pipeline = False
     index = 0
     while index < len(words):
         if is_operator(words[index]) and not is_redirection(words[index]):
@@ -1117,14 +1116,15 @@ def _walk(
             previous_operator = "".join(
                 char for char in words[index] if char not in _SUBSHELL_CHARS
             )
-            # Every stage of a pipeline, the last included, runs in a subshell:
-            # the shell is back where the pipeline began when it ends.
-            if previous_operator in _PIPE_OPERATORS or in_pipeline:
+            # A stage that is followed by another ends with its subshell. The
+            # LAST stage is not reset: a `cd` in it still carries past the
+            # pipeline (a false deny, never a false allow), because telling
+            # `x | cd /tmp && …` from `x | { cd /tmp && …; }` needs nesting depth.
+            if previous_operator in _PIPE_OPERATORS:
                 directory, uncertain = stage_start
             if directory and previous_operator != _AND_OPERATOR:
                 uncertain = True
-            in_pipeline = previous_operator in _PIPE_OPERATORS
-            if not in_pipeline:
+            if previous_operator not in _PIPE_OPERATORS:
                 stage_start = (directory, uncertain)
             if previous_operator.startswith(_CASE_CLAUSE_ENDS):
                 expecting_pattern = True

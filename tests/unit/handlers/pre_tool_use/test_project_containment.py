@@ -1699,6 +1699,12 @@ class TestARedirectIsJudgedWhereTheChainsCdLandsIt:
             "cd /tmp && case x in a|b) true;; esac; echo x > x",
             "x=$(cd /tmp && case y in y) true;; esac; echo x > x)",
             "cd /tmp && a |& b > x",
+            "ls | { cd /tmp; cat > y; }",
+            "true | { cd /tmp; echo x > y; }",
+            "true | { cd /tmp && echo x > y; }",
+            "true | { cd /tmp\necho x > y\n}",
+            "true |(cd /tmp; echo x > y)",
+            "x | cd /tmp && echo x > y",
         ],
     )
     def test_a_move_the_shell_does_make_still_denies(
