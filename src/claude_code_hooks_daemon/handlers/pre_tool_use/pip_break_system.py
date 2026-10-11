@@ -71,7 +71,10 @@ _FALSY_VALUES = frozenset({"", "0", "false", "no", "off"})
 _ASSIGNMENT = re.compile(r"(\w+)=('[^']*'|\"[^\"]*\"|\S*)\s*")
 _EXPORT_HEAD = re.compile(r"(?:export|(?:declare|typeset)\s+-\w*x\w*)\s+")
 _ENV_HEAD = re.compile(r"env\s+(?:-\S+\s+)*")
-_SHELL_C_HEAD = re.compile(r"(?:\S*/)?(?:ba|da|z)?sh\s+-\w*c\s+['\"]?\s*")
+# The path prefix is tried only where a whitespace-free run STARTS: the leftmost
+# match of an unanchored `(?:\S*/)?` always begins at a run start anyway, and
+# trying it from every offset inside one long run (`$($($(...`) is quadratic.
+_SHELL_C_HEAD = re.compile(r"(?:(?<!\S)\S*/)?(?:ba|da|z)?sh\s+-\w*c\s+['\"]?\s*")
 _PIPE_SEPARATORS = frozenset({"|", "|&"})
 # A `&` backgrounds the command before it into a subshell, like a pipe stage.
 _BACKGROUND_SEPARATOR = "&"
