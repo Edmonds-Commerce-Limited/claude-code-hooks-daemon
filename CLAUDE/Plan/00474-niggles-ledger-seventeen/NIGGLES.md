@@ -2355,7 +2355,7 @@ review: Grep targets named in `file_path` are now judged like `path` (a guard by
 report filenames stay under the filename limit with 256-character agent names. Still open, non-defects (cost and
 refactoring): the per-file `git check-ignore` calls in `find_under`, autonomy re-detecting the runtime per event, the
 hard-coded `"completed"` and duplicated pattern compilation in `cli.py`, the latent fallback-schema trap in
-`core/response_schemas.py:451` (now `_permissive_response_schema`, `:468-486`), and `sensitive_content` re-reading `.claude/fake-values.yaml`.
+`core/response_schemas.py:451` (now `_permissive_response_schema`, `:468-487`), and `sensitive_content` re-reading `.claude/fake-values.yaml`.
 **Residuals worked in batch N** ([report](subagent-reports/261011-batch-n-sonnet.md)), test-first: `find_under` asks git
 about each root once per call; autonomy reads the runtime `ProjectContext` cached at startup (detecting only with no
 initialised context); the fallback-schema trap is real (Elicitation, ElicitationResult) and fixed, with a test that no
