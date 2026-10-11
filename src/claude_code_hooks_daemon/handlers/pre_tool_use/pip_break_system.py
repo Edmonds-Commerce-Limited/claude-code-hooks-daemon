@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_p
 from claude_code_hooks_daemon.utils.command_position import (
     command_position_code_segments_with_separators,
 )
+from claude_code_hooks_daemon.utils.heredoc_operators import substitution_end
 
 # Full first-fire teaching content (Plan 00116): reuses the pre-migration
 # handler's rich prose verbatim, minus the invocation-specific `COMMAND:`
@@ -78,10 +79,13 @@ _TRAILING_REDIRECT = re.compile(r"\s*(?:\d*|&)(?:>>?|<)&?\s*[^\s()<>]+\s*$")
 # `unset VAR` / `export -n VAR` take the variable out of the environment again.
 _UNSET_HEAD = re.compile(rf"unset\s+(?:-\S+\s+)*(?:\S+\s+)*?{_ENV_VAR_NAME}\b")
 _EXPORT_UNMARK_HEAD = re.compile(rf"export\s+-\w*n\w*\s+(?:\S+\s+)*?{_ENV_VAR_NAME}\b")
-# `xargs` options may take a value (`-n 1`, `-I {}`); `command` takes none that matter.
+# `xargs` options that take a separate value (`-a FILE`, `-I X`, `-d D`, `-E S`,
+# `-s N`, `-L N`, `-n N`, `-P N`); any other option is one word (`-r`, `-0`,
+# `--arg-file=FILE`). `command` takes no option that matters.
+_XARGS_VALUE_OPTION = r"-[aIdEsLnP]\s+\S+\s+"
 _PIP_INSTALL_HEAD = re.compile(
     r"(?:(?:sudo|doas)\s+(?:-\S+\s+)*|uv\s+|nohup\s+|time\s+|command\s+(?:-\S+\s+)*"
-    r"|xargs\s+(?:-\S+\s+(?:\d+\s+|\{\}\s+)?)*)*(?:\S*/)?"
+    r"|xargs\s+(?:" + _XARGS_VALUE_OPTION + r"|-\S+\s+)*)*(?:\S*/)?"
     r"(?:pip3?(?:\.\d+)?|python3?(?:\.\d+)?\s+-m\s+pip)\s+(?:-\S+\s+)*install\b",
     re.IGNORECASE,
 )
@@ -149,16 +153,47 @@ def _strip_closes(text: str, open_groups: int) -> tuple[str, int]:
     return (candidate, closes) if closes else (text.rstrip(), 0)
 
 
-def _env_var_governs_pip_install(items: list[tuple[str, str]]) -> bool:
+def _substitution_bodies(text: str) -> list[str]:
+    """The bodies of the `$( ... )` and backtick substitutions that run in ``text``.
+
+    Single-quoted text is literal and skipped; a double-quoted span still
+    expands. A body keeps any substitution nested in it (read again by the caller).
+    """
+    bodies: list[str] = []
+    in_single = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == "'":
+            in_single = not in_single
+        elif not in_single and text.startswith("$(", index):
+            # Bash's grammar finds the close: a quoted `)` does not end it.
+            close = substitution_end(text, index + 1)
+            bodies.append(text[index + 2 : len(text) if close is None else close - 1])
+            index = len(text) if close is None else close
+            continue
+        elif not in_single and char == "`":
+            end = text.find("`", index + 1)
+            end = len(text) if end == -1 else end
+            bodies.append(text[index + 1 : end])
+            index = end
+        index += 1
+    return bodies
+
+
+def _env_var_governs_pip_install(items: list[tuple[str, str]], exported: bool = False) -> bool:
     """Whether a truthy PIP_BREAK_SYSTEM_PACKAGES governs a pip install.
 
     ``items`` are ``(separator before, segment)`` pairs. An export is undone by
     ``unset`` / ``export -n``, is dropped when the `( ... )` group it was made
     in closes, and is neither made nor undone by a stage of a pipeline (each
     stage is a subshell) -- though a stage still inherits what was exported
-    before the pipeline.
+    before the pipeline. A command substitution is a subshell that inherits the
+    export too, so ``exported`` starts True for the body of one.
     """
-    exported = False
     groups: list[bool] = []
     for index, (separator, segment) in enumerate(items):
         next_separator = items[index + 1][0] if index + 1 < len(items) else ""
@@ -171,6 +206,13 @@ def _env_var_governs_pip_install(items: list[tuple[str, str]]) -> bool:
         text, closes = _strip_closes(text, len(groups))
         is_export, value, rest = _leading_assignment(text)
         stripped = strip_reserved_word_prefix(text)
+        if exported and any(
+            _env_var_governs_pip_install(
+                command_position_code_segments_with_separators(body), exported=True
+            )
+            for body in _substitution_bodies(text)
+        ):
+            return True
         if _UNSET_HEAD.match(stripped) or _EXPORT_UNMARK_HEAD.match(stripped):
             if not in_pipeline:
                 exported = False

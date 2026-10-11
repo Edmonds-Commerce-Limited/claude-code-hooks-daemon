@@ -17,8 +17,16 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
-from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH
-from claude_code_hooks_daemon.utils.command_position import command_position_code_segments
+from claude_code_hooks_daemon.utils.command_evasion import (
+    OPTIONAL_PATH,
+    strip_reserved_word_prefix,
+)
+from claude_code_hooks_daemon.utils.command_position import (
+    command_position_code_segments,
+    is_shell_command_option,
+    segment_spans,
+)
+from claude_code_hooks_daemon.utils.heredoc_operators import scan_heredocs
 
 # Full first-fire teaching content (Plan 00116): reuses the pre-migration
 # handler's rich prose verbatim, minus the invocation-specific `COMMAND:`
@@ -86,6 +94,114 @@ _SUDO_PIP_PATTERN = (
 )
 
 
+# A sudo option that takes the next word as its value (`-u root`, `-iu root`).
+_VALUE_OPTION_CLUSTER = re.compile(r"-[A-Za-z]*[ugCDhpRTU]")
+_LONG_VALUE_OPTIONS = frozenset(
+    f"--{name}"
+    for name in (
+        "user",
+        "group",
+        "prompt",
+        "chdir",
+        "host",
+        "role",
+        "type",
+        "chroot",
+        "close-from",
+        "other-user",
+    )
+)
+_LOGIN_SHELL_LONG_OPTIONS = frozenset({"--login", "--shell"})
+_SHELL_BINARIES = frozenset({"bash", "sh", "zsh", "dash", "ksh"})
+# A shell option that takes the next word as its value (`bash -o pipefail`).
+_SHELL_VALUE_OPTIONS = frozenset({"-o", "+o", "-O", "+O"})
+_REDIRECT_WORD = re.compile(r"\d*[<>]")
+
+
+def _shell_reads_stdin(options: list[str]) -> bool:
+    """Whether a shell with these words after its name reads its script from stdin.
+
+    `-c` takes the program from a string, and a script operand names a file to
+    run (the heredoc is then only that file's stdin) -- unless `-s` is given.
+    """
+    stdin_script = False
+    index = 0
+    while index < len(options):
+        word = options[index]
+        if not word.startswith(("-", "+")):
+            return stdin_script
+        if word in _SHELL_VALUE_OPTIONS:
+            index += 1
+        elif not word.startswith("--"):
+            if is_shell_command_option(word):
+                return False
+            stdin_script = stdin_script or "s" in word[1:]
+        index += 1
+    return True
+
+
+def _feeds_elevated_shell(head: str) -> bool:
+    """Whether ``head`` (the command text before a `<<`) runs a shell as root on stdin.
+
+    `sudo -i` / `sudo -s` / `--login` / `--shell` (no command after the
+    options) and `sudo bash` (`sh -s`, a path) read their script from the
+    heredoc. Any other command just consumes the text as data.
+    """
+    words = [
+        word for word in strip_reserved_word_prefix(head).split() if not _REDIRECT_WORD.match(word)
+    ]
+    if not words or words[0].rsplit("/", 1)[-1] not in ("sudo", "doas"):
+        return False
+    login_shell = False
+    index = 1
+    while index < len(words) and words[index].startswith("-") and words[index] != "--":
+        option = words[index]
+        index += 1
+        if option.startswith("--"):
+            login_shell = login_shell or option in _LOGIN_SHELL_LONG_OPTIONS
+            if option in _LONG_VALUE_OPTIONS:
+                index += 1
+        else:
+            login_shell = login_shell or any(flag in option[1:] for flag in "is")
+            if _VALUE_OPTION_CLUSTER.fullmatch(option):
+                index += 1
+    if index >= len(words):
+        return login_shell
+    if words[index].rsplit("/", 1)[-1] not in _SHELL_BINARIES:
+        return False
+    return _shell_reads_stdin(words[index + 1 :])
+
+
+def _elevated_heredoc_bodies(command: str) -> list[str]:
+    """The bodies of the heredocs ``command`` feeds to an elevated shell.
+
+    Heredocs come from the repo's quote-aware scanner, so a `<<` inside a
+    quoted string (a commit message, a `python3 -c` program) opens nothing.
+    """
+    bodies: list[str] = []
+    for heredoc in scan_heredocs(command).heredocs:
+        spans = segment_spans(command[: heredoc.operator.start])
+        if not spans:
+            continue
+        start, end = spans[-1]
+        if _feeds_elevated_shell(command[start:end]):
+            bodies.append(heredoc.body(command))
+    return bodies
+
+
+def _elevated_body_runs_pip(command: str) -> bool:
+    """Whether a heredoc body run by an elevated shell installs with pip."""
+    return any(
+        re.search(
+            _SUDO_PIP_PATTERN,
+            f"sudo {strip_reserved_word_prefix(segment).lstrip('( ')}",
+            re.IGNORECASE,
+        )
+        for body in _elevated_heredoc_bodies(command)
+        for segment in command_position_code_segments(body)
+    )
+
+
 class SudoPipHandler(PreToolUseHandlerBase):
     """Block sudo pip install commands.
 
@@ -150,7 +266,7 @@ class SudoPipHandler(PreToolUseHandlerBase):
         return any(
             re.search(_SUDO_PIP_PATTERN, segment, re.IGNORECASE)
             for segment in command_position_code_segments(command)
-        )
+        ) or _elevated_body_runs_pip(command)
 
     def get_rules(self) -> list[Rule]:
         """Return the single Rule backing this handler's blocking behaviour."""

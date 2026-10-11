@@ -1661,8 +1661,12 @@ mention deny were flipped. The INVENTORY misses (`pip --break-system-packages in
   guards see the root-run command; single and double quotes, `sh`/`bash`, `doas`, `-u root`, nesting, `if` and `$(...)`
   all deny, and an `echo`/commit-message/grep mention still allows. `sudo` goes after a leading `then`/`do`/`else`/
   `{`/`(`. A `-c` body whose output is piped into a shell keeps its git text unblanked (`_keep_text`).
-- Residual (not cleared, batch W): `sudo -s` / `sudo -i` with a heredoc body (`sudo -s <<'EOF' ... pip install x ... EOF`)
-  is not elevated: only a `-c` program is.
+- ✅ cleared by batch Y: `sudo -s` / `sudo -i` / `sudo bash` / `sudo sh -s` (also `doas`) with a heredoc body
+  (`sudo -s <<'EOF' ... pip install x ... EOF`). `sudo_pip._elevated_heredoc_bodies` reads the heredocs fed to an
+  elevated shell and judges the body's segments as `sudo`-headed; `sudo -s ls <<EOF` and a `-c` shell are not shells on
+  stdin, so they allow. Kept inside the handler (no change to the shared view). Round 2: heredocs come from the
+  quote-aware `scan_heredocs` (a `<<` inside a commit message or a `python3 -c` string opens nothing), a shell given a
+  script operand (`sudo bash script.sh <<EOF`) allows unless `-s`, and `--login`/`--shell` count like `-i`/`-s`.
 - ✅ cleared by batch V: a `;`, `&&`, `|` or `&` inside a trailing `# comment` split the line, so
   `true # export X=1 && pip install` was judged as two commands. The comment now runs to the end of the line in the
   command-position splitter (`split_unquoted_spans(..., comments_end_at_newline=True)`, used only by
@@ -1690,8 +1694,10 @@ none blocking; the coordinator corrected the `sudo_pip.py` comment that claimed 
 Residual, from the batch U review (none blocking; the regression it found, a group followed by a redirect, is fixed in
 batch U round 2 together with the background `&` and group-after-keyword findings):
 
-- `export X=1; x=$(pip install x)` is not seen: the pip install inside a command substitution is not a segment head.
-- `xargs -a r.txt pip install` is not seen: an `xargs` option with a non-numeric, non-`{}` value breaks the head match.
+- `export X=1; x=$(pip install x)` is not seen: the pip install inside a command substitution is not a segment head. ✅ cleared by batch Y
+  (`pip_break_system._substitution_bodies` reads `$( )` and backtick bodies outside single quotes and judges them with the export inherited).
+- `xargs -a r.txt pip install` is not seen: an `xargs` option with a non-numeric, non-`{}` value breaks the head match. ✅ cleared by batch Y
+  (`_XARGS_VALUE_OPTION`: `-a`, `-I`, `-d`, `-E`, `-s`, `-L`, `-n`, `-P` take a value; other options are one word).
 - The segment splitter splits inside a trailing comment (`ls # note | sudo pip install x` denies); pre-existing. ✅ cleared by batch V
 
 ### N406 — `github_auto_close_keywords` denies a quoted `echo` or a `python3 - <<'EOF'` that only prints a keyword
