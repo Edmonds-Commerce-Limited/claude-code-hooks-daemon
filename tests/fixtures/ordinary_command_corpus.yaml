@@ -1405,3 +1405,32 @@ rows:
   - id: a9-grep-home-projects
     command: |-
       grep -rl x --include=*.py ~/projects
+  # --- N409: a full-QA command named, never run ------------------------------
+  - id: n409-echo-names-full-qa
+    command: |-
+      echo ./scripts/qa/llm_qa.py all
+  - id: n409-bash-c-echo-names-full-qa
+    command: |-
+      bash -c 'echo ./scripts/qa/llm_qa.py all'
+  - id: n409-heredoc-to-notes-names-full-qa
+    command: |-
+      cat > notes.md <<'EOF'
+      run ./scripts/qa/llm_qa.py all
+      EOF
+  - id: n409-python-print-names-full-qa
+    command: |-
+      python3 -c "print('./scripts/qa/llm_qa.py all')"
+  - id: n409-python-heredoc-tool-list-names-pytest
+    command: |-
+      python3 - <<'PY'
+      import subprocess
+      TOOLS = ['ruff', 'black', 'pytest']
+      subprocess.run(['ruff', 'check', '.'])
+      PY
+  - id: n409-python-heredoc-known-script-names-run-all
+    command: |-
+      python3 - <<'PY'
+      import subprocess
+      KNOWN = ['run_all.sh']
+      subprocess.run(['git', 'status'])
+      PY

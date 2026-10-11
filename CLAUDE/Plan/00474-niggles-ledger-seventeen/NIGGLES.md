@@ -1481,9 +1481,18 @@ INVENTORY fq_py_a/fq_py_b probes
 lists `"pytest"` in a constant, is denied as a full-suite run; the shell-script counterpart allows. Sub-agent role
 only, but the deny is hard and the script is ordinary dev tooling.
 
-**Status**: ⬜ Open. Remedy: in the script-file chain require the program string to be the argument of the process
-call, not any literal in the file, or report the script as UNSEEN with an advisory as the guard does for other opaque
-commands. May interact with the open N96 decision on this handler.
+**Status**: 🟢 Fixed. A string in Python code is now a command only when a call can be handed it:
+`_process_arguments` in `subagent_full_qa_blocker.py` follows each call's arguments (and a method call's receiver)
+through names, loop variables, parameter defaults, attributes, dict/subscript values and function returns, and calls to
+text sinks (`print`, logging, `exit`, `add_argument`, unless the script defines a function of that name) pass nothing on.
+A `"pytest"` literal starts pytest only when so reached (`_passed_literals`); unparseable Python keeps judging every
+literal (fail closed). The N405 shape (`command_position_segments(strip_inert_spans(...))`) was not needed: every
+shell-level mention and real-run shape (wrappers, `if/then`, `eval`, `bash -c`, `$(...)`, backticks, `&`, piped and
+direct `bash` heredocs) already judged correctly through this handler's own parser, and is now pinned. Pinned by
+`TestPythonHoldingAProgramNameIsNotRunningIt` and `TestMentionsAndRealRunsAtTheShellLevel` in
+`tests/unit/handlers/pre_tool_use/test_subagent_full_qa_blocker.py` (red count 10 before the fix) and the `n409-` rows of
+`tests/fixtures/ordinary_command_corpus.yaml`. Report:
+`subagent-reports/261011-batch-i-n409-sonnet.md`.
 
 ### N408 — `gh_issue_comments`/`gh_pr_comments` deny mentions and miss `--json=comments`
 

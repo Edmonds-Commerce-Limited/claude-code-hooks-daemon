@@ -3386,16 +3386,172 @@ def _python_argvs(
     return [[head, *tail] for head in heads]
 
 
-def _python_strings(tree: ast.Module, argv: Sequence[str]) -> tuple[list[str], list[list[str]]]:
-    """Every string the code holds or builds, and every argv list it holds (review 8 M1).
+#: Calls that print, log, exit with or declare TEXT, so what they are given is
+#: prose rather than a command (N409). A function the code defines under one
+#: of these names is not a sink: it can run what it is given.
+_TEXT_SINKS: Final[frozenset[str]] = frozenset(
+    {
+        "print",
+        "write",
+        "writelines",
+        "warn",
+        "warning",
+        "info",
+        "debug",
+        "error",
+        "exception",
+        "critical",
+        "fatal",
+        "log",
+        "exit",
+        "echo",
+        "secho",
+        "add_argument",
+        "add_parser",
+        "add_argument_group",
+    }
+)
 
-    Every string literal counts, wherever it sits: a command held in a
-    variable, a constant, a dict or a function's return is as much a
-    command as one written in the call. A string, or an argv, BUILT by an
-    expression is judged whole, from the root of its expression only, never
-    once per link of a ``+`` chain (see :func:`_python_argvs`).
+
+def _callee_name(call: ast.Call) -> str:
+    """The name a call is made by: ``run`` for ``subprocess.run(...)``, else empty."""
+    if isinstance(call.func, ast.Name):
+        return call.func.id
+    if isinstance(call.func, ast.Attribute):
+        return call.func.attr
+    return ""
+
+
+def _bindings(nodes: Iterable[ast.AST]) -> dict[str, list[ast.expr]]:
+    """Each name or attribute the code binds, with every expression it is given.
+
+    Assignments, loop variables, walrus targets, parameter defaults, and a
+    function's returns under the function's name. Attributes are keyed by
+    their attribute name alone (``self.cmd`` binds ``cmd``): a superset of
+    what one object holds, which only widens what counts as passed on.
+    """
+    bound: dict[str, list[ast.expr]] = {}
+
+    def bind(target: ast.AST, value: ast.expr) -> None:
+        for part in ast.walk(target):
+            if isinstance(part, ast.Name):
+                bound.setdefault(part.id, []).append(value)
+            elif isinstance(part, ast.Attribute):
+                bound.setdefault(part.attr, []).append(value)
+
+    for node in nodes:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                bind(target, node.value)
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)) and node.value is not None:
+            bind(node.target, node.value)
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            bind(node.target, node.iter)
+        elif isinstance(node, ast.NamedExpr):
+            bind(node.target, node.value)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for part in ast.walk(node):
+                if isinstance(part, ast.Return) and part.value is not None:
+                    bound.setdefault(node.name, []).append(part.value)
+            positional = [*node.args.posonlyargs, *node.args.args]
+            # Defaults line up with the LAST parameters, so there are fewer of them.
+            for parameter, default in zip(
+                reversed(positional), reversed(node.args.defaults), strict=False
+            ):
+                bound.setdefault(parameter.arg, []).append(default)
+            for keyword_parameter, keyword_default in zip(
+                node.args.kwonlyargs, node.args.kw_defaults, strict=True
+            ):
+                if keyword_default is not None:
+                    bound.setdefault(keyword_parameter.arg, []).append(keyword_default)
+    return bound
+
+
+def _process_arguments(tree: ast.Module) -> set[int]:
+    """The ids of every expression that can reach a call as an argument (N409).
+
+    A string is a command only when something is handed it. This follows
+    each call's arguments (and the receiver of a method call, so
+    ``cmd.split()`` passes ``cmd`` on) through the names they read: a name
+    to everything it is bound to, a call to the returns of the function it
+    names, an attribute to what that attribute is bound to. A literal that
+    no call receives (a constant in a table, a log line, a help string) is
+    data and is never reached. Calls to a text sink (:data:`_TEXT_SINKS`)
+    are not followed, so ``print("pytest")`` passes nothing on.
+
+    Iterative, so a deeply nested expression costs its size once.
     """
     nodes = list(ast.walk(tree))
+    bound = _bindings(nodes)
+    defined = {
+        node.name for node in nodes if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    pending: list[ast.AST] = []
+    for node in nodes:
+        if not isinstance(node, ast.Call):
+            continue
+        name = _callee_name(node)
+        if name in _TEXT_SINKS and name not in defined:
+            continue
+        pending.extend(node.args)
+        pending.extend(keyword.value for keyword in node.keywords)
+        if isinstance(node.func, ast.Attribute):
+            pending.append(node.func.value)
+    reached: set[int] = set()
+    followed: set[str] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in reached:
+            continue
+        reached.add(id(current))
+        pending.extend(ast.iter_child_nodes(current))
+        key = (
+            current.id
+            if isinstance(current, ast.Name)
+            else (
+                current.attr
+                if isinstance(current, ast.Attribute)
+                else _callee_name(current) if isinstance(current, ast.Call) else ""
+            )
+        )
+        if key and key not in followed:
+            followed.add(key)
+            pending.extend(bound.get(key, []))
+    return reached
+
+
+def _passed_literals(code: str) -> list[str]:
+    """The string literals of Python code that some call can receive (N409).
+
+    Code that cannot be parsed has no calls to read, so every quoted literal
+    stands, as it does for :func:`_python_strings_of`.
+    """
+    try:
+        tree = ast.parse(code)
+        reached = _process_arguments(tree)
+    except (SyntaxError, ValueError, RecursionError) as error:
+        logger.debug("Python judged by its quoted literals, unparsable (%s)", error)
+        return _string_literals(code)
+    return [
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) in reached
+    ]
+
+
+def _python_strings(tree: ast.Module, argv: Sequence[str]) -> tuple[list[str], list[list[str]]]:
+    """Every string a call can receive, and every argv list it can receive (review 8 M1).
+
+    A string literal counts wherever it sits as long as a call can be handed
+    it: a command held in a variable, a constant, a dict or a function's
+    return is as much a command as one written in the call (N409: a string
+    no call receives is data, see :func:`_process_arguments`). A string, or an
+    argv, BUILT by an expression is judged whole, from the root of its
+    expression only, never once per link of a ``+`` chain (see
+    :func:`_python_argvs`).
+    """
+    nodes = list(ast.walk(tree))
+    reached = _process_arguments(tree)
     links = {
         id(side)
         for node in nodes
@@ -3406,6 +3562,8 @@ def _python_strings(tree: ast.Module, argv: Sequence[str]) -> tuple[list[str], l
     texts: list[str] = []
     argvs: list[list[str]] = []
     for node in nodes:
+        if id(node) not in reached:
+            continue
         if isinstance(node, ast.Constant) or (
             isinstance(node, (ast.JoinedStr, ast.BinOp, ast.Call)) and id(node) not in links
         ):
@@ -3493,7 +3651,11 @@ def _pytest_in_code(code: str, argv: Sequence[str] = ()) -> list[str] | None:
     """
     literals = _string_literals(code)
     calls = _calls_pytest(code)
-    starts_pytest = _PYTEST in literals and _starts_a_process(code)
+    # Only a "pytest" some call is handed starts it (N409): a tool list that
+    # names it, beside a process call for something else, runs nothing.
+    starts_pytest = (
+        _PYTEST in literals and _PYTEST in _passed_literals(code) and _starts_a_process(code)
+    )
     if not calls and not starts_pytest:
         return None
     operands: list[str] = []
