@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import repository_root, scan_bash_write_targets
+from claude_code_hooks_daemon.utils.recursive_search import FIND_EXEC_ACTIONS
 from claude_code_hooks_daemon.utils.shell_expansion import (
     TooManyToEnumerateError,
     iter_normalised_shell_words,
@@ -184,7 +185,6 @@ _FIND: Final[str] = "find"
 _FIND_WRITE_FLAGS: Final[frozenset[str]] = frozenset(
     {"-delete", "-fprint", "-fprint0", "-fls", "-fprintf"}
 )
-_FIND_EXEC_FLAGS: Final[frozenset[str]] = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
 _FIND_NAME_FLAGS: Final[frozenset[str]] = frozenset({"-name", "-iname"})
 _FIND_PATH_FLAGS: Final[frozenset[str]] = frozenset(
     {"-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex"}
@@ -1021,7 +1021,7 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
         base, roots, _untrusted, _hook_input = where
         operands = command.operands
         acts = any(operand in _FIND_WRITE_FLAGS for operand in operands) or any(
-            operand in _FIND_EXEC_FLAGS
+            operand in FIND_EXEC_ACTIONS
             and position + 1 < len(operands)
             and unquote(operands[position + 1]).rsplit("/", 1)[-1] not in READ_ONLY_VERBS
             for position, operand in enumerate(operands)

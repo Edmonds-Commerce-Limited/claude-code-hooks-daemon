@@ -98,6 +98,7 @@ from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.command_evasion import normalise_line_continuations
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
+from claude_code_hooks_daemon.utils.recursive_search import FIND_EXEC_ACTIONS, find_exec_end
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     END_OF_OPTIONS,
     FLAG_PREFIX,
@@ -641,8 +642,6 @@ _SOURCE_COMMANDS: Final[frozenset[str]] = frozenset({"source", "."})
 #: searches ``.``) has no path text to read at all, and is unseen.
 _FIND: Final[str] = "find"
 _FIND_PLACEHOLDER: Final[str] = "{}"
-_FIND_EXEC_ACTIONS: Final[frozenset[str]] = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
-_FIND_ACTION_TERMINATORS: Final[frozenset[str]] = frozenset({";", "+"})
 _FIND_PATH_STOP: Final[frozenset[str]] = frozenset({"!", "("})
 _FIND_SELECTED_FILES: Final[str] = "the files find selects"
 #: ``xargs [options] cmd args`` runs ``cmd`` with ``args`` plus words from
@@ -3014,13 +3013,11 @@ def _resolve_find(
     while index < len(rest):
         word = rest[index]
         index += 1
-        if word not in _FIND_EXEC_ACTIONS:
+        if word not in FIND_EXEC_ACTIONS:
             continue
-        action: list[str] = []
-        while index < len(rest) and rest[index] not in _FIND_ACTION_TERMINATORS:
-            action.append(rest[index])
-            index += 1
-        index += 1  # step past the `;` or `+` terminator, if one was found
+        end = find_exec_end(rest, index)
+        action = rest[index:end]
+        index = len(rest) if end is None else end + 1  # past the terminator, if one was found
         if not action:
             continue
         argv: list[str] = []
