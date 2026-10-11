@@ -437,6 +437,7 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
             return GatingResult(
                 decision=Decision.DENY,
                 reason=self._deny_reason(hook_input, denials[0]),
+                rule=denials[0].rule.rule_id,
             )
         if advisories:
             return GatingResult(

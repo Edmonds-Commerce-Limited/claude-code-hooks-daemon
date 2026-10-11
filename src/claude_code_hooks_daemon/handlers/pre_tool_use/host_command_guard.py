@@ -435,7 +435,7 @@ class HostCommandGuardHandler(PreToolUseHandlerBase):
             if transcript_path:
                 tracker.mark_disclosed(transcript_path, rule.rule_id)
             message = self._formatter.verbose(rule)
-        return GatingResult(decision=Decision.DENY, reason=message)
+        return GatingResult(decision=Decision.DENY, reason=message, rule=rule.rule_id)
 
     def get_claude_md(self) -> str | None:
         return (

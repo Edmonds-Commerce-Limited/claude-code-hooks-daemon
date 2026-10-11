@@ -147,6 +147,7 @@ class TestImplementationLogs:
         assert result.decision == "deny"
         assert result.reason is not None
         assert "implementation logs" in result.reason.lower()
+        assert result.rule == RuleID.INSTRUCTION_IMPLEMENTATION_LOG
 
     def test_blocks_added_class_log(
         self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
@@ -203,6 +204,7 @@ class TestStatusIndicators:
         assert result.decision == "deny"
         assert result.reason is not None
         assert "status indicators" in result.reason.lower()
+        assert result.rule == RuleID.INSTRUCTION_STATUS_INDICATOR
 
     def test_blocks_green_circle_done(
         self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]

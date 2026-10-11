@@ -479,7 +479,9 @@ def _unchecked(reason: str) -> GatingResult:
     headline = _FORMATTER.headline(
         _RULE, blocked=f"this commit was NOT checked for merge-conflict markers, because {reason}"
     )
-    return GatingResult(decision=Decision.DENY, reason=f"{headline}\n\n{_REPHRASE}")
+    return GatingResult(
+        decision=Decision.DENY, reason=f"{headline}\n\n{_REPHRASE}", rule=_RULE.rule_id
+    )
 
 
 def _timed_out() -> GatingResult:
@@ -487,6 +489,7 @@ def _timed_out() -> GatingResult:
     return GatingResult(
         decision=Decision.DENY,
         reason=_FORMATTER.verbose(_TIMED_OUT_RULE),
+        rule=_TIMED_OUT_RULE.rule_id,
     )
 
 
@@ -568,6 +571,7 @@ class ConflictMarkerCommitGateHandler(PreToolUseHandlerBase):
             reason=(
                 f"{self._teaching(hook_input)}\n\n{_findings_block(findings)}\n\n{_EXAMPLE_ADVICE}"
             ),
+            rule=_RULE.rule_id,
         )
 
     def _teaching(self, hook_input: dict[str, Any]) -> str:

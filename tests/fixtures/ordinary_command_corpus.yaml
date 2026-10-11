@@ -1686,6 +1686,38 @@ rows:
       cmd.append('tests/unit/x.py')
       subprocess.run(cmd)
       PY
+  - id: n409-python-heredoc-insert-targeted-pytest
+    command: |-
+      python3 - <<'PY'
+      import subprocess
+      cmd = ['pytest']
+      cmd.insert(1, 'tests/unit/x.py')
+      subprocess.run(cmd)
+      PY
+  - id: n409-python-heredoc-concatenated-targeted-pytest
+    command: |-
+      python3 - <<'PY'
+      import subprocess
+      cmd = ['pytest']
+      cmd = cmd + ['tests/unit/x.py']
+      subprocess.run(cmd)
+      PY
+  - id: n409-python-heredoc-execvp-targeted-pytest
+    command: |-
+      python3 - <<'PY'
+      import os
+      cmd = ['pytest']
+      cmd.append('tests/unit/x.py')
+      os.execvp(cmd[0], cmd)
+      PY
+  - id: n409-python-heredoc-pty-spawn-targeted-pytest
+    command: |-
+      python3 - <<'PY'
+      import pty
+      cmd = ['pytest']
+      cmd.append('tests/unit/x.py')
+      pty.spawn(cmd)
+      PY
   - id: n409-python-heredoc-asyncio-targeted-pytest
     command: |-
       python3 - <<'PY'

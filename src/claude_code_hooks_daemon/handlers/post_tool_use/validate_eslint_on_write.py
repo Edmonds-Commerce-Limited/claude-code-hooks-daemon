@@ -396,6 +396,7 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
                 return BlockingResult(
                     decision=Decision.DENY,
                     reason=self._deny_reason(hook_input, _ESLINT_ERRORS_RULE, error_message),
+                    rule=_ESLINT_ERRORS_RULE.rule_id,
                 )
 
             logger.info("ESLint validation passed for %s", file_path_obj.name)
@@ -409,6 +410,7 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
                     _ESLINT_TIMEOUT_RULE,
                     f"ESLint timed out after {Timeout.ESLINT_CHECK} seconds",
                 ),
+                rule=_ESLINT_TIMEOUT_RULE.rule_id,
             )
         except Exception as e:
             return BlockingResult(
@@ -416,6 +418,7 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
                 reason=self._deny_reason(
                     hook_input, _ESLINT_RUN_FAILURE_RULE, f"Failed to run ESLint: {e!s}"
                 ),
+                rule=_ESLINT_RUN_FAILURE_RULE.rule_id,
             )
 
     def get_enforcement_status(self, project_root: Path) -> list[str]:

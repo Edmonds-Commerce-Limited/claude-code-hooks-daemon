@@ -33,7 +33,7 @@ from claude_code_hooks_daemon.constants import (
     Priority,
 )
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
-from claude_code_hooks_daemon.core import GatingResult, get_data_layer
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
@@ -323,7 +323,7 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
             "It prints the new folder path on stdout. You still add the README "
             "index row yourself."
         )
-        return GatingResult.deny(reason=message)
+        return GatingResult(decision=Decision.DENY, reason=message, rule=self._rule_mkdir.rule_id)
 
     @staticmethod
     def _extracts_latest(command: str) -> bool:
@@ -711,13 +711,17 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
                         f"\n📖 See `{self._plan_workflow_docs}` for plan structure and conventions."
                     )
 
-            return GatingResult.deny(reason=message)
+            return GatingResult(
+                decision=Decision.DENY, reason=message, rule=self._rule_discovery.rule_id
+            )
 
         except Exception as e:
             # Gracefully handle errors - still block the broken command
             message += f"\n\n⚠️ Could not determine next plan number ({e}). Starting from 00001 if this is a new project."
 
-            return GatingResult.deny(reason=message)
+            return GatingResult(
+                decision=Decision.DENY, reason=message, rule=self._rule_discovery.rule_id
+            )
 
     def get_claude_md(self) -> str | None:
         return (
@@ -786,12 +790,7 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Plan Number Helper."""
-        from claude_code_hooks_daemon.core import (
-            AcceptanceTest,
-            Decision,
-            RecommendedModel,
-            TestType,
-        )
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
             AcceptanceTest(

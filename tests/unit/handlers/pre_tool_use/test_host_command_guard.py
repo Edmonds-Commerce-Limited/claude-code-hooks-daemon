@@ -48,6 +48,8 @@ def _denied_rule(handler: HostCommandGuardHandler, command: str) -> str:
     assert result.decision == "deny"
     named = [rule.rule_id for rule in handler.get_rules() if rule.rule_id in result.reason]
     assert len(named) == 1, result.reason
+    # N393: the verdict log records the rule, not only the reason text.
+    assert result.rule == named[0], result.reason
     return named[0]
 
 

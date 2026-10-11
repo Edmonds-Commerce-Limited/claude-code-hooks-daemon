@@ -954,6 +954,7 @@ class TestNpmCommandDisclosureLadder:
         result = handler.handle(self._non_llm_input("/tmp/transcript-npm-a.jsonl"))
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.NPM_NON_LLM_COMMAND}]")
+        assert result.rule == RuleID.NPM_NON_LLM_COMMAND
 
     def test_first_fire_is_verbose(self, handler: NpmCommandHandler) -> None:
         result = handler.handle(self._non_llm_input("/tmp/transcript-npm-b.jsonl"))
@@ -986,6 +987,8 @@ class TestNpmCommandDisclosureLadder:
         self, handler: NpmCommandHandler
     ) -> None:
         """Two DIFFERENT rules for the SAME agent both disclose verbose."""
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+
         transcript = "/tmp/transcript-npm-f.jsonl"
         piped_input = {
             "tool_name": "Bash",
@@ -998,6 +1001,8 @@ class TestNpmCommandDisclosureLadder:
         assert "PHILOSOPHY" in non_llm_result.reason
         assert piped_result.reason is not None
         assert "Piping npm/npx commands is pointless" in piped_result.reason
+        assert non_llm_result.rule == RuleID.NPM_NON_LLM_COMMAND
+        assert piped_result.rule == RuleID.NPM_PIPED_COMMAND
 
 
 class TestNpmCommandMonorepoWorkspace:

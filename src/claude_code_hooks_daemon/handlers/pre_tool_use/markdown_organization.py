@@ -679,7 +679,11 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
                 tracker.mark_disclosed(transcript_path, RuleID.MARKDOWN_PLAN_SYNC)
             message = formatter.verbose(_RULE_PLAN_SYNC)
 
-        return GatingResult.deny(reason=f"{message}\n\n{detail}")
+        return GatingResult(
+            decision=Decision.DENY,
+            reason=f"{message}\n\n{detail}",
+            rule=_RULE_PLAN_SYNC.rule_id,
+        )
 
     def _check_claude_code_sync(
         self, hook_input: dict[str, Any] | None = None
@@ -1424,7 +1428,9 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
 
         message += f"\n\nAttempted to write: {file_path}"
 
-        return GatingResult(decision=Decision.DENY, reason=message)
+        return GatingResult(
+            decision=Decision.DENY, reason=message, rule=_RULE_WRONG_LOCATION.rule_id
+        )
 
     def _deny_untracked_memory(
         self, target: str, hook_input: dict[str, Any] | None = None
@@ -1456,7 +1462,9 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
 
         message += f"\n\nBlocked write: {target}"
 
-        return GatingResult(decision=Decision.DENY, reason=message)
+        return GatingResult(
+            decision=Decision.DENY, reason=message, rule=_RULE_UNTRACKED_MEMORY.rule_id
+        )
 
     def get_claude_md(self) -> str | None:
         if not self._allow_untracked_claude_memory:

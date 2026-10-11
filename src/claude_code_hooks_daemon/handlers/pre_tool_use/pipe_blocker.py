@@ -1159,7 +1159,9 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         # template is what turned a defensible block into an embarrassing
         # one (Plan 00209 §1).
         if self._looks_like_prose(source_segment):
-            return GatingResult(decision=Decision.DENY, reason=self._prose_reason(rule_id))
+            return GatingResult(
+                decision=Decision.DENY, reason=self._prose_reason(rule_id), rule=rule_id
+            )
 
         # A pipe fed by a whole loop/if/case/group has no one producer, so no
         # whitelist line can name it; the unknown-command template would
@@ -1169,6 +1171,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             return GatingResult(
                 decision=Decision.DENY,
                 reason=self._compound_reason(rule_id, closer, command, verbose=first_fire),
+                rule=rule_id,
             )
 
         # Differentiate: known expensive vs unrecognized, verbose vs terse
@@ -1183,7 +1186,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             else:
                 reason = self._unknown_terse_reason(rule_id, source_segment, command)
 
-        return GatingResult(decision=Decision.DENY, reason=reason)
+        return GatingResult(decision=Decision.DENY, reason=reason, rule=rule_id)
 
     def get_rules(self) -> list[Rule]:
         """Return the 2 Rule objects backing this handler's blocking behaviour."""

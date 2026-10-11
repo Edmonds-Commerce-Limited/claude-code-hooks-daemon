@@ -1478,7 +1478,7 @@ class UpgradeApprovalGuardHandler(PreToolUseHandlerBase):
             message = self._formatter.verbose(rule)
 
         message += f"\n\n{violation.note}"
-        return GatingResult(decision=Decision.DENY, reason=message)
+        return GatingResult(decision=Decision.DENY, reason=message, rule=rule.rule_id)
 
     def get_claude_md(self) -> str | None:
         return (

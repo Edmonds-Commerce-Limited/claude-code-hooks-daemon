@@ -1178,6 +1178,7 @@ class TestDisclosureLadder:
         )
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.PLAN_NUMBER_DISCOVERY}]")
+        assert result.rule == RuleID.PLAN_NUMBER_DISCOVERY
 
     @patch(
         "claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.next_plan_number_for_target"
@@ -1222,6 +1223,7 @@ class TestDisclosureLadder:
         )
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.PLAN_FOLDER_MKDIR}]")
+        assert result.rule == RuleID.PLAN_FOLDER_MKDIR
 
     def test_mkdir_second_fire_is_terse_but_still_names_scaffolder(
         self, handler: PlanNumberHelperHandler

@@ -1437,6 +1437,7 @@ class TestAutoContinueStopHandlerExplainerBehaviours:
         assert result.decision == Decision.DENY
         assert result.reason is not None
         assert "qa fail" in result.reason.lower()  # the QA-failure reason fired
+        assert result.rule == RuleID.STOP_QA_FAILURE
 
     def test_handle_pytest_failures_banner_triggers_qa_branch(
         self, handler: AutoContinueStopHandler, tmp_path: Path
@@ -1886,6 +1887,7 @@ class TestBranch3StaleReaderRace:
             f"BLOCKED [{RuleID.STOP_CONFIRMATION_QUESTION}]"
         ), f"Expected Branch 3 auto-continue but got: {reason[:80]}"
         assert "AUTO-CONTINUE: Yes, proceed" in reason
+        assert result.rule == RuleID.STOP_CONFIRMATION_QUESTION
 
     def test_confirmation_in_fresh_transcript_after_user_as_last_message(
         self, handler: AutoContinueStopHandler, tmp_path: Path
@@ -1961,6 +1963,7 @@ class TestBranch3StaleReaderRace:
             f"BLOCKED [{RuleID.STOP_CONFIRMATION_QUESTION}]"
         ), f"Expected Branch 3 auto-continue but got: {reason[:80]}"
         assert "AUTO-CONTINUE: Yes, proceed" in reason
+        assert result.rule == RuleID.STOP_CONFIRMATION_QUESTION
 
 
 class TestHasStopExplanationStaleTranscriptRace:
@@ -3087,6 +3090,7 @@ class TestAutoContinueStopAfterToolUseError:
             "Case A must NOT fall through to the generic explain-or-continue "
             f"reason. Got reason: {result.reason!r}"
         )
+        assert result.rule == RuleID.STOP_AFTER_TOOL_ERROR
 
     def test_case_b_stopping_because_overrides_tool_error_branch(
         self, handler: AutoContinueStopHandler, tmp_path: Path
@@ -3253,6 +3257,7 @@ class TestRhetoricalContinueHardBlock:
         assert result.decision == Decision.DENY
         assert result.reason is not None
         assert "continue" in result.reason.lower()
+        assert result.rule == RuleID.STOP_TAUTOLOGICAL_QUESTION
 
     def test_stopping_because_should_i_proceed_is_denied(
         self, handler: AutoContinueStopHandler, tmp_path: Path
@@ -3459,6 +3464,7 @@ class TestAutoContinueStopDisclosureLadder:
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.STOP_NO_REASON}]")
         assert "DO NOT STOP because the context window" in result.reason
+        assert result.rule == RuleID.STOP_NO_REASON
 
     def test_no_reason_second_fire_is_terse_but_actionable(
         self, handler: AutoContinueStopHandler

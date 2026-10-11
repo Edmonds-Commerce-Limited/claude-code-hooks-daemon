@@ -172,6 +172,7 @@ class TestDenies:
         result = handler.handle(_bash(_INCIDENT))
         assert result.reason is not None
         assert RuleID.PGREP_SELF_MATCH in result.reason
+        assert result.rule == RuleID.PGREP_SELF_MATCH
 
     def test_deny_shows_the_concrete_rewrite(
         self, handler: SelfMatchingProcessProbeHandler
@@ -364,6 +365,7 @@ class TestWrapperPidWaits:
         assert result.reason is not None
         assert RuleID.WAIT_ON_WRAPPER_PID in result.reason
         assert "setsid" in result.reason
+        assert result.rule == RuleID.WAIT_ON_WRAPPER_PID
 
     @pytest.mark.parametrize(
         "expected",

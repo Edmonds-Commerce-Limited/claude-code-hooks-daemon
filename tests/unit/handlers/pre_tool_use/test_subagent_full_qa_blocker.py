@@ -52,6 +52,7 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.subagent_full_qa_blocker imp
     find_full_qa_invocation,
     parse_full_qa_patterns,
 )
+from claude_code_hooks_daemon.utils import secret_file_matching
 
 
 def _live_options() -> dict[str, Any]:
@@ -3845,6 +3846,190 @@ class TestResidualRoutesReviewRound2:
         start = time.perf_counter()
         find_full_qa_invocation(f"python3 {script}", _patterns(), cwd=_REPO_ROOT)
         assert time.perf_counter() - start < 1.5
+
+
+_PTY_RUN = "import pty\n"
+_OS = "import os\n"
+_SUB = "import subprocess\n"
+_TARGET = "tests/unit/x.py"
+
+#: N409 batch AB: a list EDITED (insert, pop, ``a = a + [...]``) into a full run, and the
+#: ``os.exec*`` / ``pty.spawn`` routes that start a process from a list or a literal argv.
+_EDIT_AND_EXEC_FULL_RUNS: list[str] = [
+    f"{_SUB}a=['{_PROGRAM}']\na.insert(1,'all')\nsubprocess.run(a)",
+    f"{_SUB}a=['all']\na.insert(0,'{_PROGRAM}')\nsubprocess.run(a)",
+    f"{_SUB}a=['{_PROGRAM}']\na.insert(len(a),'all')\nsubprocess.run(a)",
+    f"{_SUB}a=['pytest','{_TARGET}']\na.pop()\nsubprocess.run(a)",
+    f"{_SUB}a=['ls','pytest']\na.pop(0)\nsubprocess.run(a)",
+    f"{_SUB}a=['pytest','{_TARGET}']\na.pop(-1)\nsubprocess.Popen(a)",
+    f"{_SUB}a=['{_PROGRAM}']\na=a+['all']\nsubprocess.run(a)",
+    f"{_SUB}a=['all']\na=['{_PROGRAM}']+a\nsubprocess.run(a)",
+    f"{_SUB}a=['pytest']\na=a+['-q']\nsubprocess.run(a)",
+    f"{_SUB}a=['{_PROGRAM}']\na=a+['x']+['all']\nsubprocess.run(a)",
+    f"{_SUB}def g():\n    a=['{_PROGRAM}']\n    a=a+['all']\n    subprocess.run(a)\ng()",
+    f"{_OS}a=['{_PROGRAM}']\na.append('all')\nos.execv(a[0], a)",
+    f"{_OS}a=[]\na.append('{_PROGRAM}')\na.append('all')\nos.execvp(a[0], a)",
+    f"{_OS}a=['{_PROGRAM}']\na.insert(1,'all')\nos.execve('{_PROGRAM}', a, {{}})",
+    f"{_OS}a=['x']\na.append('all')\nos.execvpe('{_PROGRAM}', a, {{}})",
+    f"{_OS}os.execv('{_PROGRAM}', ['x','all'])",
+    f"{_OS}os.execve('{_PROGRAM}', ('x','all'), {{}})",
+    f"{_OS}os.execl('{_PROGRAM}', 'x', 'all')",
+    f"{_OS}os.execle('{_PROGRAM}', 'x', 'all', {{}})",
+    f"{_OS}os.execlp('pytest', 'pytest')",
+    f"{_OS}os.execlpe('pytest', 'pytest', {{}})",
+    f"{_OS}a=['all']\nos.execl('{_PROGRAM}', 'x', *a)",
+    "from os import execvp\na=['pytest']\na.append('-q')\nexecvp('pytest', a)",
+    f"{_PTY_RUN}a=['{_PROGRAM}']\na.append('all')\npty.spawn(a)",
+    f"{_PTY_RUN}a=['{_PROGRAM}']\na.insert(1,'all')\npty.spawn(a)",
+    f"{_PTY_RUN}pty.spawn(['{_PROGRAM}','all'])",
+    f"{_PTY_RUN}a=['pytest','{_TARGET}']\na.pop()\npty.spawn(a)",
+    f"f = open('{_RUN_PY}')\n{_EXEC}(f.read())",
+    f"f = open('{_RUN_PY}')\n{_EXEC}(compile(f.read(), 'x', 'ex' + 'ec'))",
+    f"from pathlib import Path\np = Path('{_RUN_PY}')\n{_EXEC}(p.read_text())",
+]
+
+#: The same shapes that stay targeted or never run: data, a stack, an unrun list.
+_EDIT_AND_EXEC_ALLOWED: list[str] = [
+    f"{_SUB}a=['pytest']\na.insert(1,'{_TARGET}')\nsubprocess.run(a)",
+    f"{_SUB}a=['pytest']\na.insert(1,'all')\nprint(a)\nsubprocess.run(['ls'])",
+    f"{_SUB}a=['pytest','{_TARGET}','-q']\na.pop()\nsubprocess.run(a)",
+    f"{_SUB}a=['pytest','{_TARGET}','-q']\na.pop(2)\nsubprocess.run(a)",
+    f"{_SUB}a=['ls','-l']\nx=a.pop()\nprint(x)\nsubprocess.run(a)",
+    f"{_SUB}a=['pytest']\na=a+['{_TARGET}']\nsubprocess.run(a)",
+    f"{_SUB}a=['{_TARGET}']\na=['pytest']+a\nsubprocess.run(a)",
+    f"{_SUB}a=['pytest']\na=a+['all']\nprint(a)\nsubprocess.run(['ls'])",
+    f"{_SUB}d={{'k': 1}}\nd.pop('k')\nsubprocess.run(['ls'])",
+    f"{_OS}a=['pytest']\na.append('{_TARGET}')\nos.execvp(a[0], a)",
+    f"{_OS}a=['pytest']\na.insert(1,'{_TARGET}')\nos.execvp('pytest', a)",
+    f"{_OS}os.execvp('ls', ['ls','-l'])",
+    f"{_OS}os.execl('/bin/ls', 'ls', '-l')",
+    f"{_OS}os.execlp('pytest', 'pytest', '{_TARGET}')",
+    f"{_OS}os.execle('/bin/ls', 'ls', '-l', {{}})",
+    f"{_OS}a=['ls']\nos.execv('/bin/ls', a)",
+    f"{_PTY_RUN}a=['pytest']\na.append('{_TARGET}')\npty.spawn(a)",
+    f"{_PTY_RUN}pty.spawn(['ls','-l'])",
+    f"f = open('{_RUN_PY}')\nprint(f.read())",
+]
+
+
+class TestListEditsAndExecRoutesReachAFullRun:
+    """N409 batch AB: insert/pop/``a = a + [...]``, ``os.exec*`` and ``pty.spawn`` are judged."""
+
+    @staticmethod
+    def _judge(code: str, root: Path) -> Any:
+        return find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=root)
+
+    @pytest.fixture
+    def root(self, tmp_path: Path) -> Path:
+        """A directory whose runner file holds a bare pytest run."""
+        (tmp_path / _RUN_PY).write_text("import subprocess\nsubprocess.run('pytest')\n")
+        return tmp_path
+
+    @pytest.mark.parametrize("code", _EDIT_AND_EXEC_FULL_RUNS)
+    def test_the_route_to_a_full_run_is_denied(self, code: str, root: Path) -> None:
+        assert self._judge(code, root) is not None, code
+
+    @pytest.mark.parametrize("code", _EDIT_AND_EXEC_ALLOWED)
+    def test_a_targeted_or_unrun_shape_stays_allowed(self, code: str, root: Path) -> None:
+        (root / _RUN_PY).write_text("print('data')\n")
+        assert self._judge(code, root) is None, code
+
+    @pytest.mark.parametrize("code", _EDIT_AND_EXEC_FULL_RUNS)
+    def test_a_script_file_is_judged_like_the_same_code_on_stdin(
+        self, code: str, root: Path
+    ) -> None:
+        script = root / "tool.py"
+        script.write_text(code + "\n", encoding="utf-8")
+        assert find_full_qa_invocation(f"python3 {script}", _patterns(), cwd=root) is not None
+
+    def test_a_restart_in_place_is_judged_like_the_subprocess_form(self, root: Path) -> None:
+        code = "import os, sys\nos.execv(sys.executable, [sys.executable] + sys.argv)"
+        assert (self._judge(code, root) is None) == (
+            self._judge("import subprocess, sys\nsubprocess.run([sys.executable] + sys.argv)", root)
+            is None
+        )
+
+    @staticmethod
+    def _timed(tmp_path: Path, code: str) -> float:
+        script = tmp_path / "many.py"
+        script.write_text(code, encoding="utf-8")
+        start = time.perf_counter()
+        find_full_qa_invocation(f"python3 {script}", _patterns(), cwd=_REPO_ROOT)
+        return time.perf_counter() - start
+
+    @pytest.mark.parametrize(
+        "edit",
+        ["a.insert(0,'x{i}')", "a.insert(1,'x{i}')", "a.pop()", "a=a+['x{i}']", "a=['y']+a"],
+    )
+    def test_many_edits_each_run_are_judged_quickly(self, tmp_path: Path, edit: str) -> None:
+        body = "".join(f"{edit.format(i=i)}\nsubprocess.run(a)\n" for i in range(2000))
+        assert self._timed(tmp_path, f"import subprocess\na=['ruff']\n{body}") < 1.5
+
+    def test_many_exec_and_spawn_calls_are_judged_quickly(self, tmp_path: Path) -> None:
+        body = "".join(
+            f"a.append('x{i}')\nos.execvp('ls', a)\nos.execl('ls', 'ls', *a)\npty.spawn(a)\n"
+            for i in range(1500)
+        )
+        assert self._timed(tmp_path, f"import os, pty\na=['ruff']\n{body}") < 1.5
+
+    def test_many_open_exec_calls_are_judged_quickly(self, tmp_path: Path) -> None:
+        body = "".join(f"f = open('f{i}.py')\n{_EXEC}(f.read())\n" for i in range(1500))
+        assert self._timed(tmp_path, body) < 1.5
+
+
+class TestAProtectedFileIsNeverRead:
+    """N409: code in a file the secret-file guard protects is unseen, never opened."""
+
+    @pytest.fixture
+    def sealed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        """A harmless script under a protected name, and a guard that fails if it is opened."""
+        monkeypatch.setattr(
+            secret_file_matching, "resolve_configured_patterns", lambda: ("*.sealed",)
+        )
+        hidden = tmp_path / "hidden.sealed"
+        hidden.write_text("print('data')\n", encoding="utf-8")
+        real_open = Path.open
+
+        def guarded(self: Path, *args: Any, **kwargs: Any) -> Any:
+            assert self.name != hidden.name, "a protected file was opened"
+            return real_open(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "open", guarded)
+        return hidden
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "python3 hidden.sealed",
+            "python3 ./hidden.sealed --flag",
+            f"{_EXEC}(open('hidden.sealed').read())",
+            "import runpy\nrunpy.run_path('hidden.sealed')",
+            f"f = open('hidden.sealed')\n{_EXEC}(f.read())",
+            f"with open('hidden.sealed') as h:\n    {_EXEC}(h.read())",
+        ],
+    )
+    def test_it_is_unseen_and_denied_as_unreadable(self, sealed: Path, command: str) -> None:
+        text = command if command.startswith("python3 ") else _python_heredoc(command)
+        match = find_full_qa_invocation(text, _patterns(), cwd=sealed.parent)
+        assert match is not None
+        assert match.pattern_id == _blocker_module._UNREAD_CODE_ID
+
+    def test_a_symlink_to_a_protected_file_is_unseen_too(self, sealed: Path) -> None:
+        (sealed.parent / "tool.py").symlink_to(sealed)
+        match = find_full_qa_invocation("python3 tool.py", _patterns(), cwd=sealed.parent)
+        assert match is not None
+        assert match.pattern_id == _blocker_module._UNREAD_CODE_ID
+
+    def test_an_unprotected_file_is_still_read(self, sealed: Path) -> None:
+        (sealed.parent / "plain.py").write_text("print('data')\n", encoding="utf-8")
+        assert find_full_qa_invocation("python3 plain.py", _patterns(), cwd=sealed.parent) is None
+
+    def test_the_shipped_defaults_protect_without_any_configuration(self, tmp_path: Path) -> None:
+        name = "x." + "sec" + "ret" + ".py"
+        (tmp_path / name).write_text("print('data')\n", encoding="utf-8")
+        match = find_full_qa_invocation(f"python3 {name}", _patterns(), cwd=tmp_path)
+        assert match is not None
+        assert match.pattern_id == _blocker_module._UNREAD_CODE_ID
 
 
 class TestMentionsAndRealRunsAtTheShellLevel:

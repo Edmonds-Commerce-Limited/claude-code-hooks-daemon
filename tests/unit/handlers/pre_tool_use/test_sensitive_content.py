@@ -2304,6 +2304,7 @@ class TestDisclosureLadder:
 
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.SENSITIVE_PUBLIC_PATTERN}]")
+        assert result.rule == RuleID.SENSITIVE_PUBLIC_PATTERN
 
     def test_secret_term_never_leaks_regardless_of_disclosure_state(self, tmp_path: Path) -> None:
         """The no-echo contract holds on BOTH the verbose and terse fire."""
@@ -2325,6 +2326,8 @@ class TestDisclosureLadder:
         assert "entry 1 of 1" in (terse_result.reason or "")
         assert terse_result.reason is not None
         assert terse_result.reason.startswith(f"BLOCKED [{RuleID.SENSITIVE_SECRET_TERM}]")
+        assert verbose_result.rule == RuleID.SENSITIVE_SECRET_TERM
+        assert terse_result.rule == RuleID.SENSITIVE_SECRET_TERM
 
     def test_missing_transcript_path_is_always_verbose(self) -> None:
         handler = _handler_with_public_patterns(

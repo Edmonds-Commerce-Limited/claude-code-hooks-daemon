@@ -111,6 +111,7 @@ class TestApproveUpgradeCommand:
         assert result.decision == "deny"
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{AGENT_RULE_ID}]")
+        assert result.rule == AGENT_RULE_ID
 
     def test_denies_when_chained_after_another_command(
         self, handler: UpgradeApprovalGuardHandler
@@ -186,6 +187,7 @@ class TestApprovalMarkerWrites:
         assert result.decision == "deny"
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{AGENT_RULE_ID}]")
+        assert result.rule == AGENT_RULE_ID
 
     @pytest.mark.parametrize(
         "command",
@@ -217,6 +219,7 @@ class TestApprovalMarkerFileTool:
         assert result.decision == "deny"
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{AGENT_RULE_ID}]")
+        assert result.rule == AGENT_RULE_ID
 
     def test_denies_edit(self, handler: UpgradeApprovalGuardHandler) -> None:
         hook_input = _edit("untracked/upgrade-approvals/4.0.0.approved")
@@ -252,6 +255,7 @@ class TestEnvVarBypass:
         assert result.decision == "deny"
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
+        assert result.rule == ENV_RULE_ID
 
     @pytest.mark.parametrize(
         "command",
@@ -306,6 +310,7 @@ class TestUpgradeSteeringVariables:
         assert result.decision == "deny"
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
+        assert result.rule == ENV_RULE_ID
 
     @pytest.mark.parametrize(
         "command",
@@ -375,6 +380,7 @@ class TestUpgradeRecognisedByWhatItIs:
         result = handler.handle(hook_input)
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
+        assert result.rule == ENV_RULE_ID
 
     def test_denies_steering_a_renamed_copy_of_layer1(
         self, handler: UpgradeApprovalGuardHandler, tmp_path: Any
@@ -447,6 +453,7 @@ class TestSteeredRunOnAnUnresolvableScriptFailsClosed:
         result = handler.handle(hook_input)
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
+        assert result.rule == ENV_RULE_ID
 
     def test_a_steered_relative_script_with_no_cwd_is_denied(
         self, handler: UpgradeApprovalGuardHandler
@@ -582,6 +589,7 @@ class TestVariableInterpreterRunningAKnownProgram:
         result = handler.handle(hook_input)
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
+        assert result.rule == ENV_RULE_ID
 
 
 class TestSteeredLiteralInterpreterInAGroupOrAfterAnExport:
@@ -643,6 +651,7 @@ class TestSteeredLiteralInterpreterInAGroupOrAfterAnExport:
         result = handler.handle(hook_input)
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
+        assert result.rule == ENV_RULE_ID
 
 
 class TestSteeredInterpreterRunAfterALeadingCd:
@@ -707,6 +716,7 @@ class TestSteeredInterpreterRunAfterALeadingCd:
         result = handler.handle(hook_input)
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
+        assert result.rule == ENV_RULE_ID
 
     @pytest.mark.parametrize(
         "command_template",
@@ -762,6 +772,7 @@ class TestSteeredUpgradesStayDeniedWhateverTheInterpreter:
         result = handler.handle(hook_input)
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
+        assert result.rule == ENV_RULE_ID
 
     def test_a_script_whose_content_carries_the_handoff_variable(
         self, handler: UpgradeApprovalGuardHandler, tmp_path: Path
@@ -825,6 +836,7 @@ class TestEverySpellingOfSteeringIsSteering:
         result = handler.handle(hook_input)
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
+        assert result.rule == ENV_RULE_ID
 
     @pytest.mark.parametrize(
         "command",
@@ -878,6 +890,7 @@ class TestInstallerSteeringVariables:
         result = handler.handle(hook_input)
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
+        assert result.rule == ENV_RULE_ID
 
     def test_allows_it_elsewhere(self, handler: UpgradeApprovalGuardHandler) -> None:
         assert handler.matches(_bash("UV_INDEX_URL=https://mirror/simple uv sync")) is False
@@ -906,6 +919,7 @@ class TestUvLocationSteering:
         result = handler.handle(hook_input)
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
+        assert result.rule == ENV_RULE_ID
 
     @pytest.mark.parametrize(
         "command",
@@ -923,6 +937,7 @@ class TestUvLocationSteering:
         result = handler.handle(hook_input)
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
+        assert result.rule == ENV_RULE_ID
 
     @pytest.mark.parametrize(
         "command",
@@ -970,6 +985,7 @@ class TestDaemonCloneGitMetadataWrites:
         result = handler.handle(hook_input)
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{AGENT_RULE_ID}]")
+        assert result.rule == AGENT_RULE_ID
 
     def test_denies_a_write_tool(self, handler: UpgradeApprovalGuardHandler) -> None:
         assert handler.matches(_write("/p/.claude/hooks-daemon/.git/config", "[url]")) is True
@@ -1013,6 +1029,7 @@ class TestManualCheckoutOfTheDaemonClone:
         result = handler.handle(hook_input)
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{AGENT_RULE_ID}]")
+        assert result.rule == AGENT_RULE_ID
 
     @pytest.mark.parametrize(
         "command",
@@ -1063,6 +1080,7 @@ class TestDaemonCloneRemoteAndConfigRedirection:
         result = handler.handle(hook_input)
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{AGENT_RULE_ID}]")
+        assert result.rule == AGENT_RULE_ID
 
     @pytest.mark.parametrize(
         "command",
@@ -1101,6 +1119,7 @@ class TestVenvVersionStampForgery:
         assert result.decision == "deny"
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{AGENT_RULE_ID}]")
+        assert result.rule == AGENT_RULE_ID
 
     def test_denies_write_tool(self, handler: UpgradeApprovalGuardHandler) -> None:
         hook_input = _write("untracked/venv-abc123/.daemon-version", "4.0.0\n")

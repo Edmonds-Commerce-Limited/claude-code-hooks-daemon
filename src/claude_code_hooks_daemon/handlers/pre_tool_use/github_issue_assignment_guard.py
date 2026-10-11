@@ -333,7 +333,11 @@ class GithubIssueAssignmentGuardHandler(PreToolUseHandlerBase):
         if denials:
             rule = denials[0][0]
             detail = "\n\n".join(text for _, text in denials)
-            return GatingResult.deny(f"{RuleFormatter().verbose(rule)}\n\n{detail}")
+            return GatingResult(
+                decision=Decision.DENY,
+                reason=f"{RuleFormatter().verbose(rule)}\n\n{detail}",
+                rule=rule.rule_id,
+            )
         if advisories:
             return GatingResult(decision=Decision.ALLOW, context=advisories)
         return GatingResult(decision=Decision.ALLOW)
