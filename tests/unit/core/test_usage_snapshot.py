@@ -398,6 +398,8 @@ class TestSpendLimit:
             {"used_percentage": -1, "resets_at": 1800010800},
             {"used_percentage": "x", "resets_at": 1800010800},
             {"used_percentage": float("inf"), "resets_at": 1800010800},
+            {"used_percentage": 1e308, "resets_at": 1800010800},
+            {"used_percentage": 10000.5, "resets_at": 1800010800},
             {"used_percentage": 10},
             "not-a-dict",
             None,
@@ -407,6 +409,31 @@ class TestSpendLimit:
         tracker = UsageTracker()
         tracker.update_from_status_event(self._payload(spend), now=NOW)
         assert tracker.latest(now=NOW) is None
+
+    def test_percentage_at_the_cap_is_kept(self) -> None:
+        tracker = UsageTracker()
+        tracker.update_from_status_event(
+            self._payload({"used_percentage": 10000, "resets_at": 1800010800}), now=NOW
+        )
+        snap = tracker.latest(now=NOW)
+        assert snap is not None and snap.spend_limit is not None
+
+    @pytest.mark.parametrize("value", [1e308, 10000.5])
+    def test_file_with_an_absurd_spend_percentage_is_ignored(
+        self, state_file: Path, value: float
+    ) -> None:
+        UsageTracker().update_from_status_event(
+            load_status_payload("main_thread_integer.json"), now=NOW, state_file=state_file
+        )
+        data = json.loads(state_file.read_text("utf-8"))
+        data["spend_limit"] = {
+            "used_percentage": value,
+            "resets_at": 1800010800,
+            "observed_at": NOW,
+        }
+        state_file.write_text(json.dumps(data), "utf-8")
+        snap = UsageTracker().latest(now=NOW, state_file=state_file)
+        assert snap is not None and snap.five_hour is not None and snap.spend_limit is None
 
     def test_malformed_spend_limit_keeps_the_good_windows(self) -> None:
         tracker = UsageTracker()

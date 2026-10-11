@@ -73,6 +73,10 @@ PERSIST_HEARTBEAT_SECONDS: Final[float] = 60.0
 
 _MAX_PERCENT: Final[float] = 100.0
 
+#: Upper bound on a gateway spend percentage. The limit may be exceeded, so 100 is not a
+#: ceiling there, but a value past this is not a reading (and would render absurdly).
+MAX_SPEND_PERCENT: Final[float] = 10_000.0
+
 
 @dataclass(frozen=True)
 class UsageWindow:
@@ -116,7 +120,8 @@ def _parse_window(
 ) -> UsageWindow | None:
     """A validated window, or None when the payload value cannot be trusted.
 
-    ``may_exceed_max`` admits a percentage above 100 (the gateway spend limit).
+    ``may_exceed_max`` admits a percentage above 100, up to :data:`MAX_SPEND_PERCENT`
+    (the gateway spend limit).
     """
     if not isinstance(raw, dict):
         return None
@@ -126,7 +131,11 @@ def _parse_window(
         return None
     if isinstance(resets_at, bool) or not isinstance(resets_at, (int, float)):
         return None
-    if not math.isfinite(pct) or pct < 0.0 or (pct > _MAX_PERCENT and not may_exceed_max):
+    if (
+        not math.isfinite(pct)
+        or pct < 0.0
+        or pct > (MAX_SPEND_PERCENT if may_exceed_max else _MAX_PERCENT)
+    ):
         return None
     if not math.isfinite(resets_at) or resets_at <= 0:
         return None
