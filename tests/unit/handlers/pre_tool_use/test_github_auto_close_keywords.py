@@ -165,6 +165,35 @@ class TestNegativeCases:
         assert not handler.matches(_bash("git commit -m 'Plan 00275: work on #tags'"))
 
 
+class TestPrintedKeywordsAreNotMessages:
+    """N406: an echo or non-git heredoc that prints a keyword records nothing."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo \"git commit -m 'fixes #3'\"",
+            "echo 'git commit -m \"closes #4\"'",
+            "python3 - <<'EOF'\nprint(\"git commit -m 'fixes #3'\")\nEOF",
+            "cat <<'EOF'\ngit commit -m 'Fixes #3'\nEOF",
+        ],
+    )
+    def test_printed_text_is_allowed(self, command: str) -> None:
+        assert not GithubAutoCloseKeywordsHandler().matches(_bash(command))
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git commit -m 'Fixes #3'",
+            "git commit -m \"$(cat <<'EOF'\nFixes #3\nEOF\n)\"",
+            "git commit -F - <<'EOF'\nCloses #4\nEOF",
+            "echo start && git commit -m 'resolves #5'",
+            "gh pr create --title t --body 'Fixes #3'",
+        ],
+    )
+    def test_real_message_still_denies(self, command: str) -> None:
+        assert GithubAutoCloseKeywordsHandler().matches(_bash(command))
+
+
 class TestScratchFileRoute:
     def test_dash_f_file_with_closing_reference_is_denied(self, tmp_path: Path) -> None:
         msg = tmp_path / "msg.txt"

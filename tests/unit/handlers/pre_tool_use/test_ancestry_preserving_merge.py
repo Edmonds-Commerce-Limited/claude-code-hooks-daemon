@@ -80,11 +80,6 @@ class TestMatchesGitMergeSquash:
     def test_case_insensitive(self, handler: AncestryPreservingMergeHandler) -> None:
         assert handler.matches(_bash("GIT MERGE --SQUASH feature-branch")) is True
 
-    def test_inside_echo_quotes(self, handler: AncestryPreservingMergeHandler) -> None:
-        # Acceptance tests wrap dangerous commands in echo for safe testing
-        # (destructive_git / git_stash precedent) — the handler must still see it.
-        assert handler.matches(_bash('echo "git merge --squash feature-branch"')) is True
-
     def test_in_command_chain(self, handler: AncestryPreservingMergeHandler) -> None:
         assert handler.matches(_bash("git fetch && git merge --squash feature-branch")) is True
 
@@ -130,9 +125,6 @@ class TestMatchesGhPrMergeSquash:
     def test_case_insensitive(self, handler: AncestryPreservingMergeHandler) -> None:
         assert handler.matches(_bash("GH PR MERGE --SQUASH 123")) is True
 
-    def test_inside_echo_quotes(self, handler: AncestryPreservingMergeHandler) -> None:
-        assert handler.matches(_bash('echo "gh pr merge --squash 123"')) is True
-
 
 class TestMatchesGhPrMergeRebase:
     """gh pr merge --rebase — the case that widened this plan's scope."""
@@ -149,9 +141,6 @@ class TestMatchesGhPrMergeRebase:
 
     def test_case_insensitive(self, handler: AncestryPreservingMergeHandler) -> None:
         assert handler.matches(_bash("GH PR MERGE --REBASE 123")) is True
-
-    def test_inside_echo_quotes(self, handler: AncestryPreservingMergeHandler) -> None:
-        assert handler.matches(_bash('echo "gh pr merge --rebase 123"')) is True
 
 
 class TestFalsePositivesStayAllowed:
@@ -203,6 +192,48 @@ class TestFalsePositivesStayAllowed:
     def test_none_command(self, handler: AncestryPreservingMergeHandler) -> None:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": None}}
         assert handler.matches(hook_input) is False
+
+
+class TestMentionsAreDataNotCommands:
+    """N405: text that only names a squash/rebase merge is not one."""
+
+    @pytest.fixture
+    def handler(self) -> AncestryPreservingMergeHandler:
+        return AncestryPreservingMergeHandler()
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'git commit -m "never use gh pr merge --squash"',
+            "git commit -m 'git merge --squash is blocked here'",
+            "grep -rn 'git merge --squash' docs/",
+            "echo 'gh pr merge --rebase is blocked here'",
+            'echo "git merge --squash feature-branch"',
+            'echo "gh pr merge --squash 123"',
+            "cat <<'EOF'\nnever run gh pr merge --squash 12\nEOF",
+            "git commit -F - <<'EOF'\nDocument git merge --squash\nEOF",
+            "git commit -m \"$(cat <<'EOF'\nwhy gh pr merge --rebase is out\nEOF\n)\"",
+        ],
+    )
+    def test_mention_is_allowed(
+        self, handler: AncestryPreservingMergeHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git merge --squash feature",
+            "git fetch && gh pr merge 5 --rebase",
+            "echo done; git merge --squash feature",
+            'git commit -m "x" && git merge --squash feature',
+            "bash <<'EOF'\ngit merge --squash feature\nEOF",
+        ],
+    )
+    def test_real_command_still_denies(
+        self, handler: AncestryPreservingMergeHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is True
 
 
 class TestEscapeHatch:

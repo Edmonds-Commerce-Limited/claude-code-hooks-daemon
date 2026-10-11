@@ -1515,8 +1515,9 @@ is denied.
 **Evidence**: real commit/PR messages and `grep`/`git log --grep` mentions behave; an `echo` of a closing keyword plus
 issue reference, or a heredoc fed to `python3`, is denied. Lower impact.
 
-**Status**: ⬜ Open. Remedy: scan only the message of a real `git commit|merge|tag` or `gh pr create|edit` segment,
-not the text of an earlier segment or a heredoc fed to a non-git receiver.
+**Status**: ✅ Fixed (branch agent-a2f6348f56d8df606-7aed436a, COMMIT_N406). The handler now matches the git/gh message
+token only at command position and blanks heredoc bodies not owned by a git/gh message command, so an `echo` or a
+`python3 - <<'EOF'` that prints a keyword allows while real messages still deny.
 
 ### N405 — `ancestry_preserving_merge` denies text that mentions `--squash` or `--rebase` merges
 
@@ -1525,8 +1526,9 @@ not the text of an earlier segment or a heredoc fed to a non-git receiver.
 **Evidence**: a commit message, `echo` or `grep` naming `git merge --squash`, `gh pr merge --squash` or `--rebase` is
 denied; `git log --grep=` already allows.
 
-**Status**: ⬜ Open. Remedy: match at command position per segment, and read a quoted `-m`/`echo`/`grep` argument
-and a quoted-heredoc body as data (`strip_inert_spans`, as `merge_to_main_approval` already does).
+**Status**: ✅ Fixed (branch agent-a2f6348f56d8df606-7aed436a, COMMIT_N405). The handler matches the three patterns per
+segment of `command_position_segments(strip_inert_spans(command))`, so mentions in a message, echo, grep or quoted
+heredoc allow while real merges still deny.
 
 ### N404 — `git_message_backtick` denies the `-m "$(cat <<'EOF' … EOF)"` commit idiom when the body has a code span
 
@@ -1537,8 +1539,9 @@ bt_sq_dq, reproduced on b8095b83d); bt7-bt9 allow (report as N409).
 body holds a Markdown backtick span; so is a `-m "…"` written inside a single-quoted message. Highest impact of
 N404-N409: it is the form agents are told to use.
 
-**Status**: ⬜ Open. Remedy: judge the `-m` value from its shell quote context (a quoted-delimiter heredoc body inside
-`$(cat <<'EOF' …)` is literal; a `-m "` inside single quotes is not an option); gate rows for the heredoc form.
+**Status**: ✅ Fixed (branch agent-a2f6348f56d8df606-7aed436a, COMMIT_N404). The scan runs over `strip_message_bodies(command)`, which
+blanks a single-quoted message and the quoted-delimiter `$(cat <<'EOF' …)` idiom, while a plain double-quoted or
+unquoted-heredoc backtick still denies; gate rows added.
 
 ### N403 — `project_containment` resolves a relative redirect against the project root, ignoring a preceding `cd`
 

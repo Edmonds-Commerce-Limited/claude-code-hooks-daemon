@@ -1381,3 +1381,34 @@ rows:
   - id: a9-grep-home-projects
     command: |-
       grep -rl x --include=*.py ~/projects
+  # --- messages that only mention a guarded thing (00474 N404-N406) -----------
+  - id: n404-commit-heredoc-message-with-code-span
+    command: |-
+      git commit -m "$(cat <<'EOF'
+      fix: handle `None` in the parser
+
+      The `parse` helper returned early.
+      EOF
+      )"
+  - id: n404-commit-single-quoted-message-naming-dash-m
+    command: |-
+      git commit -m 'document the -m "`x`" flag'
+  - id: n405-commit-message-names-squash-merge
+    command: |-
+      git commit -m "never use gh pr merge --squash"
+  - id: n405-echo-names-rebase-merge
+    command: |-
+      echo 'gh pr merge --rebase is blocked here'
+  - id: n405-heredoc-body-names-squash-merge
+    command: |-
+      cat <<'EOF'
+      never run git merge --squash on a shared branch
+      EOF
+  - id: n406-echo-prints-closing-keyword
+    command: |-
+      echo "git commit -m 'fixes #3'"
+  - id: n406-python-heredoc-prints-closing-keyword
+    command: |-
+      python3 - <<'EOF'
+      print("git commit -m 'fixes #3'")
+      EOF

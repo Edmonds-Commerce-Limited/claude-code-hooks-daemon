@@ -42,6 +42,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
+from claude_code_hooks_daemon.utils.shell_segmentation import strip_message_bodies
 
 # Subcommands that take a -m/--message value. `git tag -a vX -m "..."` carries
 # the identical hazard, and CLAUDE/development/RELEASING.md instructs exactly
@@ -126,9 +127,16 @@ class GitMessageBacktickHandler(PreToolUseHandlerBase):
             return False
         if not _GIT_SUBCOMMAND_PATTERN.search(command):
             return False
+        # Judge the -m value from its shell quote context (N404): blank every
+        # message value bash cannot execute -- a single-quoted one, which also
+        # swallows a `-m "..."` written inside it, and the quoted-delimiter
+        # `"$(cat <<'EOF' ... EOF)"` idiom whose body is literal. A value that
+        # CAN substitute (a plain double-quoted one, an unquoted heredoc) is
+        # left intact and scanned.
+        scanned = strip_message_bodies(command)
         return any(
             _UNESCAPED_BACKTICK_PATTERN.search(message)
-            for message in _DOUBLE_QUOTED_MESSAGE_PATTERN.findall(command)
+            for message in _DOUBLE_QUOTED_MESSAGE_PATTERN.findall(scanned)
         )
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:

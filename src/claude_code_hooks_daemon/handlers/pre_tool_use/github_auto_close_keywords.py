@@ -52,6 +52,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
+from claude_code_hooks_daemon.utils.heredoc_operators import scan_heredocs
 from claude_code_hooks_daemon.utils.message_files import read_message_files
 
 _LOGGER = logging.getLogger(__name__)
@@ -110,6 +111,48 @@ _GH_PR_BODY_PATTERN: Final[re.Pattern[str]] = re.compile(r"\bgh\s+pr\s+(?:create
 # separators here, because a heredoc body legitimately follows the command
 # across newlines and must stay inside its segment.
 _SEGMENT_SEPARATOR_PATTERN: Final[re.Pattern[str]] = re.compile(r"&&|\|\||;")
+
+# Where a command may begin inside a piece: the start of the piece, a new line,
+# a pipe stage, or an opening group/substitution, then any `sudo`/`env`-style
+# prefix and `VAR=value` assignments. A `git commit` named INSIDE a quoted
+# argument (`echo "git commit -m 'fixes #3'"`) is not at one of these positions.
+_COMMAND_START: Final[str] = (
+    r"(?:\A|[\n|(){]|\$\()\s*(?:(?:env|time|command|sudo)\s+)*(?:[A-Za-z_]\w*=\S*\s+)*"
+)
+
+_GIT_COMMAND_START: Final[re.Pattern[str]] = re.compile(
+    _COMMAND_START + r"(?P<token>" + _GIT_SUBCOMMAND_PATTERN.pattern + r")"
+)
+_GH_COMMAND_START: Final[re.Pattern[str]] = re.compile(
+    _COMMAND_START + r"(?P<token>" + _GH_PR_BODY_PATTERN.pattern + r")"
+)
+
+_BLANKED_BODY: Final[str] = "HEREDOC_BODY"
+
+
+def _without_foreign_heredoc_bodies(command: str) -> str:
+    """``command`` with every heredoc body blanked unless a git/gh message
+    command owns it.
+
+    A body fed to ``python3 -``, ``cat`` or any other receiver is that
+    receiver's input, never a message; one fed to ``git commit -F -`` or built
+    by ``-m "$(cat <<'EOF'`` IS the message and is kept. The owner is read off
+    the opener line, which is where the receiver is named.
+    """
+    pieces: list[str] = []
+    copied_to = 0
+    for heredoc in scan_heredocs(command).heredocs:
+        line_start = command.rfind("\n", 0, heredoc.operator.start) + 1
+        line_end = command.find("\n", heredoc.operator.end)
+        opener = command[line_start : len(command) if line_end < 0 else line_end]
+        if _GIT_SUBCOMMAND_PATTERN.search(opener) or _GH_PR_BODY_PATTERN.search(opener):
+            continue
+        pieces.append(command[copied_to : heredoc.body_start])
+        pieces.append(_BLANKED_BODY + "\n")
+        copied_to = heredoc.closer_start
+    pieces.append(command[copied_to:])
+    return "".join(pieces)
+
 
 _REWRITE_EXAMPLES: Final[str] = (
     '"Addresses #123", "Refs #123" or "See #123" — GitHub links these but does not close'
@@ -200,15 +243,16 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
 
         The command is split on ``&&``/``||``/``;``; within each piece, only
         the text from a ``git commit|merge|tag`` or ``gh pr create|edit``
-        token to the end of that piece is a candidate. Everything else —
-        greps, tag listings, unrelated commands — is never scanned, so
-        reading is never blocked.
+        token AT COMMAND POSITION to the end of that piece is a candidate.
+        Everything else — greps, tag listings, an ``echo`` that prints a
+        commit command, a heredoc fed to ``python3`` — is never scanned, so
+        reading and printing are never blocked (N406).
         """
         segments: list[str] = []
-        for piece in _SEGMENT_SEPARATOR_PATTERN.split(command):
-            token = _GIT_SUBCOMMAND_PATTERN.search(piece) or _GH_PR_BODY_PATTERN.search(piece)
+        for piece in _SEGMENT_SEPARATOR_PATTERN.split(_without_foreign_heredoc_bodies(command)):
+            token = _GIT_COMMAND_START.search(piece) or _GH_COMMAND_START.search(piece)
             if token:
-                segments.append(piece[token.start() :])
+                segments.append(piece[token.start("token") :])
         return segments
 
     def _message_file_texts(self, segment: str, hook_input: dict[str, Any]) -> list[str]:

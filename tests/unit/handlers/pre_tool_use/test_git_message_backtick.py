@@ -258,3 +258,47 @@ class TestDeclaredMetadataIsReal:
         guidance = GitMessageBacktickHandler().get_claude_md()
         assert "single" in guidance.lower()
         assert "-F" in guidance
+
+
+class TestQuoteContextOfTheMessageValue:
+    """N404: the `-m` value is judged from its shell quote context."""
+
+    @pytest.fixture
+    def handler(self) -> GitMessageBacktickHandler:
+        return GitMessageBacktickHandler()
+
+    def test_quoted_heredoc_message_with_code_span_is_allowed(
+        self, handler: GitMessageBacktickHandler
+    ) -> None:
+        command = (
+            "git commit -m \"$(cat <<'EOF'\n"
+            f"fix: use {BACKTICK}foo{BACKTICK} here\n\n"
+            f"Body names {BACKTICK}bar{BACKTICK}.\n"
+            'EOF\n)"'
+        )
+        assert handler.matches(_bash(command)) is False
+
+    def test_quoted_heredoc_message_for_git_tag_is_allowed(
+        self, handler: GitMessageBacktickHandler
+    ) -> None:
+        command = "git tag -a v1.0 -m \"$(cat <<'EOF'\n" f'release {BACKTICK}x{BACKTICK}\nEOF\n)"'
+        assert handler.matches(_bash(command)) is False
+
+    def test_unquoted_heredoc_delimiter_still_denies(
+        self, handler: GitMessageBacktickHandler
+    ) -> None:
+        """An unquoted delimiter makes bash run the body's backticks."""
+        command = f'git commit -m "$(cat <<EOF\nfix: use {BACKTICK}foo{BACKTICK}\nEOF\n)"'
+        assert handler.matches(_bash(command)) is True
+
+    def test_double_quoted_option_inside_single_quoted_message_is_allowed(
+        self, handler: GitMessageBacktickHandler
+    ) -> None:
+        command = f"git commit -m 'document the -m \"{BACKTICK}x{BACKTICK}\" flag'"
+        assert handler.matches(_bash(command)) is False
+
+    def test_plain_double_quoted_backtick_still_denies_beside_a_single_quoted_one(
+        self, handler: GitMessageBacktickHandler
+    ) -> None:
+        command = f"git commit -m 'a' -m \"see {BACKTICK}ls{BACKTICK}\""
+        assert handler.matches(_bash(command)) is True
