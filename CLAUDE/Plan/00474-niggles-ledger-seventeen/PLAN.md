@@ -36,10 +36,10 @@ not-a-defect with the reasoning kept.
 ## Niggles
 
 Full write-ups are in [NIGGLES.md](NIGGLES.md). The one-line-per-niggle status
-table (128 rows) is in [STATUS-INDEX.md](STATUS-INDEX.md).
+table (129 rows) is in [STATUS-INDEX.md](STATUS-INDEX.md).
 Counted by the status column's emoji:
 
-- No row is open (⬜). N53 of archived ledger 00466 is 🟡: batch AJ reproduced
+- 1 row is open (⬜): N424, the LSP guard denying a grep over piped output. N53 of archived ledger 00466 is 🟡: batch AJ reproduced
   the mechanism of an exit 127 and extended the diagnostic, but the live cause awaits a recurrence. The other 41 of the
   "42 still open in 00466" were fixed on main (39), fixed by batch AI (N33) or graduated to Plan 00485 (N96); see
   [the 00466 evidence](../Completed/00466-niggles-ledger-sixteen/STATUS-2026-10.md).

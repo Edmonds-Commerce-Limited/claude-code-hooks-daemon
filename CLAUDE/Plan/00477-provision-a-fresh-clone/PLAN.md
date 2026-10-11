@@ -123,19 +123,19 @@ stale: the clone's checked-out tag, the venv and the running daemon.
   it, rebuild the venv through the clone's own build path, then restart. The
   old daemon keeps serving until the new one is ready, and a failed sync leaves
   it in place and says so loudly.
-- [ ] ⬜ **Task 5.3**: Decide with the owner how this meets the upgrade approval
-  gate and the agent guards. An agent that edits and commits
-  `daemon.expected_version` must not be able to move the daemon to a version of
-  its choosing, including a downgrade to an older release. That is what
-  `R-UPGRADE-APPROVAL-AGENT` forbids by hand.
+- [x] ✅ **Task 5.3**: How this meets the upgrade approval gate and its agent guard.
+  Moot: on 2026-10-11 the owner had the approval tier and `upgrade_approval_guard`
+  removed (Plan 00503, GitHub #112), under the careless-not-hostile threat model. A
+  committed `daemon.expected_version` change is reviewed like any other commit,
+  and the sync runs the target release's own pre-deploy gate, whose reading
+  confirmation still applies.
 - [ ] ⬜ **Task 5.4**: Tests: a pulled newer version syncs and restarts; a sync
-  failure keeps the old daemon; a steered version change is refused per 5.3;
-  the daemon's own repository never syncs.
+  failure keeps the old daemon; the daemon's own repository never syncs.
 
 ## Success Criteria
 
 - [ ] After a pull that changes `daemon.expected_version`, the next session runs
-  the daemon at the new version without a manual step, subject to Task 5.3.
+  the daemon at the new version without a manual step.
 - [ ] In a fresh clone of a configured fixture project, the first session shows
   the human a message naming `provision` and the expected version.
 - [ ] Running provision brings up the daemon at exactly that version, with no

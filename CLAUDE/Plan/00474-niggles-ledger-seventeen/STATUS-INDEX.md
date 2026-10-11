@@ -4,6 +4,7 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 
 | #          | Verdict                                                                                                                      | Origin              | Status                                |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------- | ------------------------------------- |
+| N424       | LSP symbol-lookup guard denies a grep over a CLI's piped stdin, where no language server could answer                        | Coordinator         | ⬜ Open                               |
 | N423       | Unrequested `/goal clear`: the designed retraction (all goal plans Blocked); a latent plan-root bug fixed alongside          | Owner report        | ✅ Closed: by design; latent fix (AO) |
 | N422       | Main is red: two `tests/unit/config` invariants fail (handler options read by hand; `AGENT_ID_EVENTS` short of 3 events)     | Coordinator         | ✅ Fixed (batch AO)                   |
 | N421       | The upgrade-approval guard denies a plain pytest run with `PYTHONPATH` and a `$(...)` interpreter (B5)                       | Coordinator         | ✅ Fixed (batch AO)                   |

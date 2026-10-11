@@ -77,6 +77,22 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N424 — the LSP symbol-lookup guard denies a grep over a CLI's piped output
+
+**Found**: by the coordinator on 2026-10-11. After a daemon restart,
+`bin/hooks-daemon handlers 2>&1 | grep -c upgrade_approval` was denied with
+R-LSP-SYMBOL-LOOKUP ("pattern 'upgrade_approval' looks like a symbol search").
+The grep reads a command's output on stdin, not source files, so no language
+server could answer it. An LSP lookup is only an alternative when the grep searches
+files. The same shape had been denied earlier in the session for a grep
+over a scripts directory, which is at least a file search.
+
+**Candidate remedy**: the handler stands down when the grep has no file or
+directory operand and reads from a pipe. This follows B5: a guard denies only
+on a positive finding, and a pipe is not one.
+
+**Status**: ⬜ Open.
+
 ### N423 — an unrequested `/goal clear`: the designed retraction, plus a latent plan-root bug
 
 **Origin**: owner report, 2026-10-11. A `/goal clear` the owner did not type appeared in the session.

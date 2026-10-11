@@ -44,21 +44,26 @@ against forging the approval defends against nothing in scope.
 
 ### Phase 1: Implement
 
-- [ ] 🔄 **Task 1.1**: Remove the approval tier from the gate and the CLI
+- [x] ✅ **Task 1.1**: Remove the approval tier from the gate and the CLI
   (sub-agent, worktree `worktree-rm-upg-approval`).
-- [ ] 🔄 **Task 1.2**: Delete `upgrade_approval_guard` with its registrations
-  and tests; keep an old config naming it valid.
-- [ ] 🔄 **Task 1.3**: Add the phased-upgrade advisory (TDD).
-- [ ] 🔄 **Task 1.4**: Establish whether an upgrade from an older install runs
-  the gate from the target's code, and document the route for one that does not.
-- [ ] 🔄 **Task 1.5**: Docs, release note, config-changes and truth-changes
-  entries.
+- [x] ✅ **Task 1.2**: Delete `upgrade_approval_guard` with its registrations
+  and tests; keep an old config naming it valid (retired key).
+- [x] ✅ **Task 1.3**: Add the phased-upgrade advisory (TDD). It is silent when
+  no release newer than the installed one is known in the current major.
+- [x] ✅ **Task 1.4**: The TARGET release's code runs the gate (`scripts/upgrade.sh`
+  checks the target out, then runs its `upgrade_version.sh`), so an upgrade from
+  any older install to this release meets no approval stop. Only a target of
+  v3.68.0 or v3.69.0 still prints one; `LLM-UPDATE.md` says to target a later
+  release instead.
+- [x] ✅ **Task 1.5**: Docs, release note 022, config-changes and truth-changes
+  entries in `CLAUDE/UPGRADES/UNRELEASED/` (v3.69.0 is already tagged).
 
 ### Phase 2: Land
 
-- [ ] ⬜ **Task 2.1**: Review, coordinator QA, merge.
-- [ ] ⬜ **Task 2.2**: Plan 00477 Task 5.3 asks the owner how provisioning
-  should satisfy the approval rule; mark it moot there.
+- [x] ✅ **Task 2.1**: Review (r1 changes required, r2 applied), coordinator
+  checks, merged at 6976bf009.
+- [x] ✅ **Task 2.2**: Plan 00477 Task 5.3 marked moot.
+- [ ] 🔄 **Task 2.3**: Range QA over the merge, then archive.
 
 ## Success Criteria
 
