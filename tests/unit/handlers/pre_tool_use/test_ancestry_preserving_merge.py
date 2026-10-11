@@ -228,6 +228,12 @@ class TestMentionsAreDataNotCommands:
             "echo done; git merge --squash feature",
             'git commit -m "x" && git merge --squash feature',
             "bash <<'EOF'\ngit merge --squash feature\nEOF",
+            "bash -c 'git merge --squash feature'",
+            "cat <<'EOF' | bash\ngh pr merge --rebase 5\nEOF",
+            "sudo git merge --squash feature",
+            "git -C /w merge --squash feature",
+            "if true; then git merge --squash feature; fi",
+            "eval 'gh pr merge 5 --squash'",
         ],
     )
     def test_real_command_still_denies(

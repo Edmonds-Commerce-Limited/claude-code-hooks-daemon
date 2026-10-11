@@ -201,7 +201,10 @@ class GitMessageBacktickHandler(PreToolUseHandlerBase):
         return [
             AcceptanceTest(
                 title="double-quoted backtick message blocked",
-                command=f'git commit -m "now allows {backtick}git branch{backtick} so it holds"',
+                command=(
+                    "bash -n -c 'git commit -m "
+                    f'"now allows {backtick}git branch{backtick} so it holds"\''
+                ),
                 dispatch_as_bash=True,
                 description="Backticks in a double-quoted -m are executed by bash, not quoted",
                 expected_decision=Decision.DENY,

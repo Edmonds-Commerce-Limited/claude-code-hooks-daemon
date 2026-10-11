@@ -52,7 +52,8 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
-from claude_code_hooks_daemon.utils.heredoc_operators import scan_heredocs
+from claude_code_hooks_daemon.utils.command_position import segment_spans
+from claude_code_hooks_daemon.utils.heredoc_operators import Heredoc, scan_heredocs
 from claude_code_hooks_daemon.utils.message_files import read_message_files
 
 _LOGGER = logging.getLogger(__name__)
@@ -107,17 +108,20 @@ _GIT_SUBCOMMAND_PATTERN: Final[re.Pattern[str]] = re.compile(
 # never scanned.
 _GH_PR_BODY_PATTERN: Final[re.Pattern[str]] = re.compile(r"\bgh\s+pr\s+(?:create|edit)\b")
 
-# Command separators that bound a message-bearing segment. Newlines are NOT
-# separators here, because a heredoc body legitimately follows the command
-# across newlines and must stay inside its segment.
-_SEGMENT_SEPARATOR_PATTERN: Final[re.Pattern[str]] = re.compile(r"&&|\|\||;")
-
-# Where a command may begin inside a piece: the start of the piece, a new line,
-# a pipe stage, or an opening group/substitution, then any `sudo`/`env`-style
-# prefix and `VAR=value` assignments. A `git commit` named INSIDE a quoted
-# argument (`echo "git commit -m 'fixes #3'"`) is not at one of these positions.
+# Where a command may begin inside a segment. Segments come from the shared
+# splitter in `utils.command_position` (`;`, `&&`, `||`, `|`, `&`, newlines,
+# outside quotes), so this only skips what can PRECEDE the command word inside
+# one: a group or substitution opener, a control keyword (`then`, `do`, `!`),
+# a launcher (`sudo`, `nohup`, `timeout N`), assignments, a `bash -c "` / `eval "`
+# body opener, and a path to the binary. A `git commit` named INSIDE an echo's
+# quoted argument is not at one of these positions.
 _COMMAND_START: Final[str] = (
-    r"(?:\A|[\n|(){]|\$\()\s*(?:(?:env|time|command|sudo)\s+)*(?:[A-Za-z_]\w*=\S*\s+)*"
+    r"(?:\A\s*(?:[({]\s*)*|`\s*|\$\(\s*)"
+    r"(?:(?:then|do|else|elif|if|while|until|!|\{|time|nohup|command|env|sudo|exec|xargs"
+    r"|timeout(?:\s+-\S+)*\s+[0-9]\S*)\s+)*"
+    r"(?:[A-Za-z_]\w*=\S*\s+)*"
+    r"(?:(?:bash|sh|zsh|dash|ksh)\s+(?:-\w+\s+)*-\w*c\s+|eval\s+)?"
+    r"[\"']?(?:[\w./-]*/)?"
 )
 
 _GIT_COMMAND_START: Final[re.Pattern[str]] = re.compile(
@@ -127,31 +131,87 @@ _GH_COMMAND_START: Final[re.Pattern[str]] = re.compile(
     _COMMAND_START + r"(?P<token>" + _GH_PR_BODY_PATTERN.pattern + r")"
 )
 
-_BLANKED_BODY: Final[str] = "HEREDOC_BODY"
+# A receiver that RUNS the text it is fed as shell, so a heredoc body handed to
+# it holds real commands and must be kept.
+_SHELL_RECEIVER_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"(?<![\w./-])(?:bash|sh|zsh|dash|ksh|eval|source|xargs)(?![\w.-])"
+)
+_STATEMENT_SEPARATOR_PATTERN: Final[re.Pattern[str]] = re.compile(r"&&|\|\||;|&")
+_PIPE_SEPARATOR_PATTERN: Final[re.Pattern[str]] = re.compile(r"(?<!\|)\|(?!\|)")
+
+# Stands in for a heredoc body that no message or shell receives.
+_FOREIGN_BODY_PLACEHOLDER: Final[str] = "<foreign heredoc body>"
+
+# Stands in for a newline inside a kept body, so the shared splitter keeps the
+# body inside the statement that owns it. Same width: offsets stay valid.
+_BODY_NEWLINE_MASK: Final[str] = "\x01"
 
 
-def _without_foreign_heredoc_bodies(command: str) -> str:
-    """``command`` with every heredoc body blanked unless a git/gh message
-    command owns it.
+def _receiving_stages(text: str, heredoc: Heredoc) -> list[str]:
+    """The heredoc's OWN receiver stage and the pipe stages after it.
 
-    A body fed to ``python3 -``, ``cat`` or any other receiver is that
-    receiver's input, never a message; one fed to ``git commit -F -`` or built
-    by ``-m "$(cat <<'EOF'`` IS the message and is kept. The owner is read off
-    the opener line, which is where the receiver is named.
+    Never another command sharing the opener line: ``cat <<'EOF' > n.md && git
+    commit -m wip`` is received by ``cat``.
+    """
+    line_start = text.rfind("\n", 0, heredoc.operator.start) + 1
+    line_end = text.find("\n", heredoc.operator.end)
+    line_end = len(text) if line_end < 0 else line_end
+    receiver = _STATEMENT_SEPARATOR_PATTERN.split(text[line_start : heredoc.operator.start])[-1]
+    tail = _STATEMENT_SEPARATOR_PATTERN.split(text[heredoc.operator.end : line_end])[0]
+    return [receiver, *_PIPE_SEPARATOR_PATTERN.split(tail)]
+
+
+def _body_is_message(text: str, heredoc: Heredoc) -> bool:
+    """A git/gh message command receives the body and no shell runs it."""
+    stages = _receiving_stages(text, heredoc)
+    is_message = any(
+        _GIT_SUBCOMMAND_PATTERN.search(stage) or _GH_PR_BODY_PATTERN.search(stage)
+        for stage in stages
+    )
+    return is_message and not any(_SHELL_RECEIVER_PATTERN.search(stage) for stage in stages)
+
+
+def _body_is_foreign(text: str, heredoc: Heredoc) -> bool:
+    """Quoted (so inert to bash) and received by no message command or shell."""
+    if not heredoc.operator.quoted:
+        return False
+    stages = _receiving_stages(text, heredoc)
+    return not any(
+        _GIT_SUBCOMMAND_PATTERN.search(stage)
+        or _GH_PR_BODY_PATTERN.search(stage)
+        or _SHELL_RECEIVER_PATTERN.search(stage)
+        for stage in stages
+    )
+
+
+def _blank_foreign_and_mask_kept_bodies(command: str) -> tuple[str, str]:
+    """``(text, masked)``: ``command`` with foreign heredoc bodies blanked, and
+    the same text with the newlines of the kept bodies masked.
+
+    A body fed to ``python3 -`` or ``cat`` is that receiver's input, never a
+    message. One fed to ``git commit -F -``, built by ``-m "$(cat <<'EOF'``, or
+    run by a shell IS a message (or commands) and is kept, its lines held
+    together so the segment that owns it reads the whole body.
     """
     pieces: list[str] = []
     copied_to = 0
     for heredoc in scan_heredocs(command).heredocs:
-        line_start = command.rfind("\n", 0, heredoc.operator.start) + 1
-        line_end = command.find("\n", heredoc.operator.end)
-        opener = command[line_start : len(command) if line_end < 0 else line_end]
-        if _GIT_SUBCOMMAND_PATTERN.search(opener) or _GH_PR_BODY_PATTERN.search(opener):
+        if not _body_is_foreign(command, heredoc):
             continue
         pieces.append(command[copied_to : heredoc.body_start])
-        pieces.append(_BLANKED_BODY + "\n")
+        pieces.append(_FOREIGN_BODY_PLACEHOLDER + "\n")
         copied_to = heredoc.closer_start
     pieces.append(command[copied_to:])
-    return "".join(pieces)
+    text = "".join(pieces)
+
+    chars = list(text)
+    for heredoc in scan_heredocs(text).heredocs:
+        if not _body_is_message(text, heredoc):
+            continue
+        for index in range(heredoc.body_start - 1, heredoc.closer_end):
+            if chars[index] == "\n":
+                chars[index] = _BODY_NEWLINE_MASK
+    return text, "".join(chars)
 
 
 _REWRITE_EXAMPLES: Final[str] = (
@@ -248,11 +308,13 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
         commit command, a heredoc fed to ``python3`` — is never scanned, so
         reading and printing are never blocked (N406).
         """
+        text, masked = _blank_foreign_and_mask_kept_bodies(command)
         segments: list[str] = []
-        for piece in _SEGMENT_SEPARATOR_PATTERN.split(_without_foreign_heredoc_bodies(command)):
-            token = _GIT_COMMAND_START.search(piece) or _GH_COMMAND_START.search(piece)
+        for start, end in segment_spans(masked):
+            segment = masked[start:end]
+            token = _GIT_COMMAND_START.search(segment) or _GH_COMMAND_START.search(segment)
             if token:
-                segments.append(piece[token.start("token") :])
+                segments.append(text[start + token.start("token") : end])
         return segments
 
     def _message_file_texts(self, segment: str, hook_input: dict[str, Any]) -> list[str]:
@@ -397,7 +459,7 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
             return [
                 AcceptanceTest(
                     title="auto-close keyword reference (warn mode)",
-                    command="git commit -m 'Fixes #123'",
+                    command="bash -n -c \"git commit -m 'Fixes #123'\"",
                     description="Warn mode allows with advisory context",
                     expected_decision=Decision.ALLOW,
                     expected_message_patterns=[r"auto-clos"],
@@ -412,7 +474,7 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
         return [
             AcceptanceTest(
                 title="closing keyword with issue reference blocked",
-                command="git commit -m 'Fixes #123'",
+                command="bash -n -c \"git commit -m 'Fixes #123'\"",
                 dispatch_as_bash=True,
                 description="Keyword+reference auto-closes on the default branch",
                 expected_decision=Decision.DENY,
@@ -424,7 +486,7 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="gh pr body with closing reference blocked",
-                command="gh pr create --title 'x' --body 'Fixes #123'",
+                command="bash -n -c \"gh pr create --title 'x' --body 'Fixes #123'\"",
                 dispatch_as_bash=True,
                 description="A PR body is the primary auto-close vector",
                 expected_decision=Decision.DENY,

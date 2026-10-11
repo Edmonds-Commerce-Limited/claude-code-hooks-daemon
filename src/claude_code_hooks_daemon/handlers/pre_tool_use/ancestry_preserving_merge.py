@@ -351,7 +351,7 @@ class AncestryPreservingMergeHandler(PreToolUseHandlerBase):
             return [
                 AcceptanceTest(
                     title="git merge --squash (warn mode)",
-                    command="git merge --squash no-such-branch-acceptance-test",
+                    command="bash -n -c 'git merge --squash no-such-branch-acceptance-test'",
                     description="Allows git merge --squash with an advisory warning",
                     expected_decision=Decision.ALLOW,
                     expected_message_patterns=[r"WARNING", r"ancestor"],
@@ -362,11 +362,11 @@ class AncestryPreservingMergeHandler(PreToolUseHandlerBase):
                 ),
                 AcceptanceTest(
                     title="gh pr merge --rebase (warn mode)",
-                    command="gh pr merge --rebase 999999999",
+                    command="bash -n -c 'gh pr merge --rebase 999999999'",
                     description="Allows gh pr merge --rebase with an advisory warning",
                     expected_decision=Decision.ALLOW,
                     expected_message_patterns=[r"WARNING", r"ancestor"],
-                    safety_notes="PR 999999999 does not exist, so gh refuses it harmlessly.",
+                    safety_notes="bash -n -c only parses the command and never runs it.",
                     test_type=TestType.ADVISORY,
                     recommended_model=RecommendedModel.SONNET,
                     requires_main_thread=False,
@@ -376,14 +376,15 @@ class AncestryPreservingMergeHandler(PreToolUseHandlerBase):
         return [
             AcceptanceTest(
                 title="git merge --squash",
-                command="git merge --squash feature-branch",
+                command="bash -n -c 'git merge --squash no-such-branch-acceptance-test'",
                 dispatch_as_bash=True,
                 description="Blocks git merge --squash (severs ancestry)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED", r"ancestor"],
                 safety_notes=(
-                    "Denied before bash runs, so no merge occurs. Not echo-wrapped: "
-                    "an echo only names the command and is deliberately allowed."
+                    "bash -n -c only parses the command and never runs it, and the branch "
+                    "does not exist. Not echo-wrapped: an echo only names the command and "
+                    "is deliberately allowed."
                 ),
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
@@ -391,24 +392,24 @@ class AncestryPreservingMergeHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="gh pr merge --squash",
-                command="gh pr merge --squash 123",
+                command="bash -n -c 'gh pr merge --squash 999999999'",
                 dispatch_as_bash=True,
                 description="Blocks gh pr merge --squash (severs ancestry)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED", r"ancestor"],
-                safety_notes="Denied before bash runs, so no PR is merged.",
+                safety_notes="bash -n -c only parses the command and never runs it; PR 999999999 does not exist.",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="gh pr merge --rebase",
-                command="gh pr merge --rebase 123",
+                command="bash -n -c 'gh pr merge --rebase 999999999'",
                 dispatch_as_bash=True,
                 description="Blocks gh pr merge --rebase (severs ancestry, widened this plan's scope)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED", r"ancestor"],
-                safety_notes="Denied before bash runs, so no PR is merged.",
+                safety_notes="bash -n -c only parses the command and never runs it; PR 999999999 does not exist.",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
