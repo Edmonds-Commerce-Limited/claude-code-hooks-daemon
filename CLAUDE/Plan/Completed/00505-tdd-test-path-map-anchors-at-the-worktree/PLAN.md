@@ -1,6 +1,6 @@
 # Plan 00505: tdd test path map anchors at the worktree
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-11
 **Owner**: dev
 **Priority**: Medium
@@ -46,17 +46,28 @@ defect and is closed with this plan.
 
 ### Phase 2: Land
 
-- [ ] ⬜ **Task 2.1**: Review, coordinator checks, merge; comment on and close
-  #74 and #102.
+- [x] ✅ **Task 2.1**: Review, coordinator checks, merge; comment on and close
+  #74 and #102. The review took one round. The first version only recognised
+  the `untracked/worktrees/` and `.claude/worktrees/` layouts, and the issue's
+  reproduction uses `untracked/scratch/wt`. A new
+  `worktree_paths.nested_git_checkout_root` now finds the nearest `.git`
+  ancestor, and `enclosing_checkout` is unchanged. Coordinator checks were
+  black, ruff and mypy (all clean), and 223 tests passed. The merge is
+  `c436dc918` and the daemon was restarted. Range QA over `cf135889d..c436dc918`
+  ran 2738 tests, with 0 failed. Its only reds are the designed ones:
+  `tdd_enforcement.py` is unmapped as `too-broad`, and `plan_qa` has an
+  advisory journal-freshness finding for Plan 00495.
 
 ## Success Criteria
 
-- [ ] A Write inside a worktree whose declared test exists in that worktree is
-  allowed.
-- [ ] A source in the main checkout resolves as before.
-- [ ] The release-bound consequence, a behaviour change in `tdd_enforcement`,
-  is in the pending-release holding area as a release note.
+- [x] A Write inside a worktree whose declared test exists in that worktree is
+  allowed, wherever the worktree sits under the project.
+- [x] A source in the main checkout resolves as before.
+- [x] The release-bound consequence, a behaviour change in `tdd_enforcement`,
+  is in the pending-release holding area as release note 027 in
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
 ## Delivery & Milestones
 
 - Issue #74 triaged and claimed; #102 marked a duplicate.
+- Fix: `e253e1088` + review round `b7f7ee139`, merged `c436dc918`.
