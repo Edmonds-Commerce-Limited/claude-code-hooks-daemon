@@ -77,6 +77,27 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N423 — completing an already-archived plan clears the whole `/goal`, live plans included
+
+**Origin**: owner report, 2026-10-11. A `/goal clear` the owner did not type appeared in the session.
+
+**Evidence**: the supervisor's `untracked/supervise/decision.log` records `would-goal-clear: goal clear trigger -> injected '/goal clear'` at 15:02:59 UTC. The goal ledger retired Plan 00500 (`terminal-status`) at 15:02:57, owned
+by this session. The live `/goal` named five plans (00470, 00474, 00479, 00484, 00500), so four were still live.
+
+**Cause** (read from code; not yet reproduced): the sheet-B sub-agent ran `git mv` on 00500 into `Completed/` and
+then flipped its Status in the moved file. `GoalInjectionHandler._maybe_refresh_on_retirement`
+(`handlers/post_tool_use/goal_injection.py` about lines 1339-1344) derives the plan root as
+`plan_md_path.parent.parent`. For an archived plan that is `CLAUDE/Plan/Completed`, so
+`GoalLedger.live_plan_refs(plan_dir)` finds no live plan there. With `refs` empty, it calls `clear_goal_signal` for
+every owner, and the supervisor types `/goal clear`. It should have re-rendered the goal naming the four live plans.
+
+**Related**: the owner also asked how to tell a supervisor `/goal clear` from a human one (GitHub Issue #106), because only a human clear
+should turn automated goals off. Today the supervisor's clear is the bare literal `/goal clear`, with nothing marking it as
+the supervisor's.
+
+**Status**: ⬜ Open, queued for batch AO. Reproduce it red: ledger a goal over two plans, archive one with the status flip
+inside `Completed/`, and assert the other stays in the signal. Resolve the plan root from config, not from the path depth.
+
 ### N422 — main is red: two `tests/unit/config` invariants fail on main
 
 **Origin**: found while checking batch AM's QA, 2026-10-11. Both tests also fail on main at 582115bfb, so the
