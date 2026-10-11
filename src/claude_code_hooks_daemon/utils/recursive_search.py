@@ -34,6 +34,7 @@ from typing import Final
 from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
 from claude_code_hooks_daemon.utils.command_position import SHELL_NAMES
+from claude_code_hooks_daemon.utils.find_expression import FIND_EXEC_ACTIONS, find_exec_end
 from claude_code_hooks_daemon.utils.protected_file_index import (
     ExemptHook,
     ProtectedFileIndex,
@@ -99,10 +100,6 @@ _XARGS_VALUE_FLAGS: Final[frozenset[str]] = frozenset(
     {"-I", "-n", "-P", "-L", "-s", "-d", "-E", "-a", "-J"}
 )
 _FIND: Final[str] = "find"
-#: The `find` actions that run another command on what they find.
-FIND_EXEC_ACTIONS: Final[frozenset[str]] = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
-#: The words that end such a command (`;` as the shell hands it over, or `+`).
-FIND_EXEC_TERMINATORS: Final[frozenset[str]] = frozenset({";", "+"})
 _FIND_LEADING_OPTIONS: Final[frozenset[str]] = frozenset({"-H", "-L", "-P"})
 _FIND_EXPRESSION_STARTS: Final[frozenset[str]] = frozenset({"(", "!", ")"})
 # git grep reads the working tree instead of the index with either of these.
@@ -485,19 +482,6 @@ def _find_roots(words: list[str]) -> tuple[str, ...]:
             break
         roots.append(word)
     return tuple(roots) or (".",)
-
-
-def find_exec_end(
-    words: Sequence[str],
-    start: int,
-    terminators: frozenset[str] = FIND_EXEC_TERMINATORS,
-) -> int | None:
-    """Index of the terminator that ends the ``find`` action command starting at ``start``.
-
-    ``start`` is the index of the first word after the ``-exec``-style action.
-    None when no word from there on is a terminator (the command runs to the end).
-    """
-    return next((i for i in range(start, len(words)) if words[i] in terminators), None)
 
 
 def _find_execs_a_search(words: list[str]) -> bool:

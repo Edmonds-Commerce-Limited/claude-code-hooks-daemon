@@ -97,8 +97,8 @@ from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.command_evasion import normalise_line_continuations
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.find_expression import FIND_EXEC_ACTIONS, find_exec_end
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
-from claude_code_hooks_daemon.utils.recursive_search import FIND_EXEC_ACTIONS, find_exec_end
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     END_OF_OPTIONS,
     FLAG_PREFIX,

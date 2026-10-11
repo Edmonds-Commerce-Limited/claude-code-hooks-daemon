@@ -48,9 +48,9 @@ from claude_code_hooks_daemon.utils.command_position import (
     is_shell_command_option,
 )
 from claude_code_hooks_daemon.utils.escape_hatch import command_declares_hatch
+from claude_code_hooks_daemon.utils.find_expression import FIND_EXEC_ACTIONS
 from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
-from claude_code_hooks_daemon.utils.recursive_search import FIND_EXEC_ACTIONS
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     peel_command_wrappers,
     split_unquoted_spans,

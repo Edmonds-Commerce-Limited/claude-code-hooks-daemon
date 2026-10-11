@@ -42,7 +42,6 @@ coordinator); none is an owner ruling. The command-shaped ones have a
 
 **Still open, residuals stated precisely (not dismissed):**
 
-- **N124** — the grep/rg pattern shapes are fixed; the `find -regex`/`-iregex` operand is still read as a path (see its entry in [CARRIED-REFIX-BRANCHES.md](CARRIED-REFIX-BRANCHES.md)).
 - **N222** — the guard half is changed, not removed: `SCAN_DEADLINE_SECONDS` is still used at `secret_file_guard.py` lines 1403 and 1616, but A1 (merge dc5c9263b) made the timeout outcome allow with an advisory instead of deny. What remains is the test half: about 15 tests that assert wall-clock bounds and fail on a loaded host. Remedy: switch them to the load-scaled helper N95 already uses.
 - **N260** — the `sys.path` half is fixed (257847b51). Still open, direction corrected: `.github/workflows/qa.yml` (line 498) passes only `--import-mode=importlib`, while the local runner (`daemon/cli.py`, lines 6384-6396) passes that plus `-p no:claude_code_hooks_daemon.qa.full_qa_gate`. CI therefore loads the full-QA gate plugin and the local run does not, so a run can be green locally and red on CI.
 
@@ -53,6 +52,8 @@ opener) are each run in real bash, which executes the line after the fake body, 
 `tests/unit/handlers/pre_tool_use/test_heredoc_blanking_n42_shapes.py` (42 cases); three corpus rows
 (`heredoc-empty-body-runs-next-line`, `heredoc-here-string-is-no-opener`, `heredoc-opener-in-comment-is-no-opener`)
 are `COVERED` in `scripts/qa/dangerous-invocation-corpus.yaml`. No source change was needed.
+
+**Plan 00474 batch A write-back (2026-10-11), not yet marked in the 00466 index:** N124 is fixed in full (the `find -regex`/`-iregex` operand is inert text; red test first; see its entry in [CARRIED-REFIX-BRANCHES.md](CARRIED-REFIX-BRANCHES.md)). N242 is dismissed as fixed by the N136 merge: its `python -m` cases passed on main unchanged, and are now pinned at handler level.
 
 **Fixed, not yet marked in the 00466 index:** N170, N130 and N136 (statuses corrected in CARRIED-REFIX-BRANCHES.md, merges 9b2e15be1 and 012915bd9/dc5c9263b); N79 (the ordinary-command corpus is 391 rows now, above the 200 asked).
 

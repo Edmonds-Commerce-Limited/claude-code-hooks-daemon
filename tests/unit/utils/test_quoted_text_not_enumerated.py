@@ -30,6 +30,7 @@ from claude_code_hooks_daemon.utils.shell_segmentation import shell_word_spans
 
 _PROTECTED = "." + "vault" + "-pass"
 _PREFIX = _PROTECTED[:-2]  # a truncation that globs to the protected name
+_SECRET_WORD = "sec" + "ret"  # the stem of a default protected glob
 
 
 @pytest.fixture(autouse=True)
@@ -88,6 +89,25 @@ _TEXT_OPERAND_COMMANDS = {
     "git grep after global options": r"git -C src -c color.ui=never grep -n '.*Foo' -- .",
     "git grep after context option value": r"git grep -C 3 '.*Foo' HEAD",
     "awk pattern": r"awk '/^tests\/.*py:[0-9]+/ {print $1}' log.txt",
+    "N124 find -regex": "find . -regex '.*decision:.*'",
+    "N124 find -iregex": r"find . -iregex '.*\.py$'",
+    "N124 find -regex with a path root": r"find src tests -type f -regex '.*/test_[a-z_]+\.py'",
+    "N124 find -regextype then -regex": r"find . -regextype posix-extended -regex '.*(a|b)\.py'",
+    "N124 find -regex double-quoted": 'find . -regex ".*decision:.*"',
+    "N124 find -regex naming a protected spelling": f"find . -regex '.*{_PROTECTED}.*'",
+    "N124 find -regex then -print": "find . -regex '.*x.*' -print",
+    "N124 find -regex piped to wc": f"find . -regex '.*{_PREFIX}.*' | wc -l",
+    "N124 find -regex piped to grep": f"find . -regex '.*{_PREFIX}.*' | grep -c x",
+    "N124 find -regex piped through text consumers": (
+        "find . -regex '.*decision:.*' -print0 | sort -z | uniq | head -n 5"
+    ),
+    "N124 find -regex piped to awk printing": (
+        "find . -regex '.*decision:.*' | awk '{print $1}' | cut -d/ -f2"
+    ),
+    "N124 find -regex then a separate command": "find . -regex '.*decision:.*' && echo done",
+    "N124 find -regex on a variable root": "find \"$PWD\" -regex '.*decision:.*'",
+    "N242 python -m dotted module": f"python3 -m pkg.{_SECRET_WORD}_x",
+    "N242 python -m dotted module with options": f"python3.12 -I -m a.b.{_SECRET_WORD}_x --help",
     "printf with escaped backticks in a double-quoted body": (
         "printf '%s\\n' \"Triage: see (\\`CLAUDE/Plan/00472-model-tier/\\`, "
         '\\`untracked/**/x.md\\`, \\`src/*/*/y.py\\`)" > untracked/scratch/x.md'
@@ -139,6 +159,48 @@ class TestTextOperandsAreNotJudgedAsGlobs:
 
 class TestWhatStillDenies:
     """The other direction: the relaxation must not open these."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"find . -regex '.*{_PREFIX}.*' -exec cat {{}} +",
+            f"find . -iregex '.*{_PREFIX}.*' -execdir cat {{}} ';'",
+            f"find . -regex '.*{_PREFIX}.*' -ok cat {{}} ';'",
+            f"find . -regex '.*{_PREFIX}.*' | xargs cat",
+            f"find . -regex '.*{_PREFIX}.*' -delete",
+            f"find . -iregex '.*{_PREFIX}.*' -delete",
+            f"find . -regex '.*{_PREFIX}.*' | while read f; do cat \"$f\"; done",
+            f"find . -regex '.*{_PREFIX}.*' | parallel cat",
+            f"find . -regex '.*{_PREFIX}.*' | sh",
+            f"find . -regex '.*{_PREFIX}.*' -printf 'cat %p\\n' | bash",
+            f"find . -regex '.*{_PREFIX}.*' | grep x | xargs cat",
+            f"find . -regex '.*{_PREFIX}.*' | sort | while read f; do cat \"$f\"; done",
+            f"find . -regex '.*{_PREFIX}.*' | awk '{{system(\"cat \" $0)}}'",
+            f"find {_PROTECTED} -regex '.*'",
+            f"find . -regex '.*x' -name '{_PREFIX}*'",
+            f"find . -regex '.*x' && cat {_PROTECTED}",
+            f"find . -regex .*{_PREFIX}*",
+            f'find . -regex "$(cat {_PROTECTED})"',
+        ],
+    )
+    def test_a_find_regex_that_can_reach_the_file_is_still_denied(
+        self, command: str, tmp_path: Path
+    ) -> None:
+        (tmp_path / _PROTECTED).write_text("x")
+        decision, _ = _verdict(command, tmp_path)
+        assert decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"python3 -m pkg.{_SECRET_WORD}_x && cat pkg.{_SECRET_WORD}_x",
+            f"python3 -m pytest tests/test_x.{_SECRET_WORD}",
+            f"python3 -m pkg.{_SECRET_WORD}_x .claude/block-words.{_SECRET_WORD}",
+        ],
+    )
+    def test_dash_m_exempts_only_the_module_name(self, command: str, tmp_path: Path) -> None:
+        decision, _ = _verdict(command, tmp_path)
+        assert decision == Decision.DENY
 
     @pytest.mark.parametrize(
         "command",

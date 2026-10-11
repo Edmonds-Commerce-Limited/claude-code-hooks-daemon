@@ -19,12 +19,12 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     strip_reserved_word_prefix,
 )
 from claude_code_hooks_daemon.utils.command_position import command_position_segments
-from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
-from claude_code_hooks_daemon.utils.recursive_search import (
+from claude_code_hooks_daemon.utils.find_expression import (
     FIND_EXEC_ACTIONS,
     FIND_EXEC_TERMINATORS,
     find_exec_end,
 )
+from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     peel_command_wrappers,
     resolve_shell_word,
