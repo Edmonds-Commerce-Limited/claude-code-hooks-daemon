@@ -4160,6 +4160,24 @@ def _receives_stdin(call: ast.Call) -> bool:
     )
 
 
+class _Scope:
+    """A function or lambda being walked: its parameters, nested functions and returns (N418)."""
+
+    __slots__ = ("keyword_only", "name", "names", "nested", "parent", "positional", "returns")
+
+    def __init__(self, name: str | None, arguments: ast.arguments, parent: _Scope | None) -> None:
+        self.name = name
+        self.parent = parent
+        self.positional = [item.arg for item in (*arguments.posonlyargs, *arguments.args)]
+        self.keyword_only = [item.arg for item in arguments.kwonlyargs]
+        self.names = {*self.positional, *self.keyword_only}
+        for extra in (arguments.vararg, arguments.kwarg):
+            if extra is not None:
+                self.names.add(extra.arg)
+        self.nested: set[str] = set()
+        self.returns: list[ast.expr] = []
+
+
 class _CallRanker:
     """How far each call of a script carries a string it is handed (N417).
 
@@ -4178,11 +4196,20 @@ class _CallRanker:
         self._imported: set[str] = set()
         self._functions: set[str] = set()
         self._launcher_values: dict[str, bool] = {}
-        calls: list[tuple[str | None, ast.Call]] = []
+        #: The scope each call sits in, for the parameters it can name (N418).
+        self._call_scope: dict[int, _Scope | None] = {}
+        #: A plain function's parameters that it CALLS (a callback), by function name.
+        self._callbacks: dict[str, set[str]] = {}
+        self._callback_calls: set[int] = set()
+        self._factory_cache: dict[str, list[str]] = {}
+        definitions: dict[str, list[_Scope | None]] = {}
+        calls: list[tuple[str | None, _Scope | None, ast.Call]] = []
         members: dict[str, set[str]] = {}
-        stack: list[tuple[ast.AST, str | None, str | None]] = [(tree, None, None)]
+        stack: list[tuple[ast.AST, str | None, str | None, _Scope | None]] = [
+            (tree, None, None, None)
+        ]
         while stack:
-            node, owner, klass = stack.pop()
+            node, owner, klass, scope = stack.pop()
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 for alias in node.names:
                     self._imported.add(alias.asname or alias.name)
@@ -4190,10 +4217,25 @@ class _CallRanker:
                         self._aliases[alias.asname] = alias.name
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 self._functions.add(node.name)
-                if klass is not None and not isinstance(node, ast.ClassDef):
+                is_function = not isinstance(node, ast.ClassDef)
+                if klass is not None and is_function:
                     members.setdefault(klass, set()).add(node.name)
+                if is_function:
+                    # Only a function that is not a method can be told apart by name.
+                    inner = _Scope(node.name if klass is None else None, node.args, scope)
+                    definitions.setdefault(node.name, []).append(inner if klass is None else None)
+                    if scope is not None:
+                        scope.nested.add(node.name)
+                    scope = inner
+                else:
+                    definitions.setdefault(node.name, []).append(None)
                 owner = node.name
                 klass = node.name if isinstance(node, ast.ClassDef) else None
+            elif isinstance(node, ast.Lambda):
+                scope = _Scope(None, node.args, scope)
+            elif isinstance(node, ast.Return):
+                if scope is not None and node.value is not None:
+                    scope.returns.append(node.value)
             elif (
                 isinstance(node, ast.Assign)
                 and isinstance(node.value, ast.Lambda)
@@ -4202,23 +4244,51 @@ class _CallRanker:
                 for target in node.targets:
                     if isinstance(target, ast.Name):
                         self._functions.add(target.id)
+                        definitions.setdefault(target.id, []).append(None)
                         owner = target.id
             elif isinstance(node, ast.Call):
-                calls.append((owner, node))
-            stack.extend((child, owner, klass) for child in ast.iter_child_nodes(node))
+                calls.append((owner, scope, node))
+                self._call_scope[id(node)] = scope
+            stack.extend((child, owner, klass, scope) for child in ast.iter_child_nodes(node))
+        self._plain: dict[str, _Scope] = {
+            name: found[0]
+            for name, found in definitions.items()
+            if len(found) == 1 and found[0] is not None
+        }
+        self._find_callbacks(calls)
+        self._factories: set[str] = {
+            name
+            for name in self._callbacks
+            if self._plain[name].returns
+            and all(
+                (isinstance(value, ast.Name) and value.id in self._plain[name].nested)
+                or isinstance(value, ast.Lambda)
+                for value in self._plain[name].returns
+            )
+        }
         self._rank: dict[str, int] = {}
         callers: dict[str, set[str]] = {}
-        for owner, call in calls:
-            leaf = self._leaf(call)
-            if owner is None:
+        for factory in self._factories:
+            for value in self._plain[factory].returns:
+                if isinstance(value, ast.Name):
+                    # The function a factory hands back is what a call to its result runs.
+                    callers.setdefault(value.id, set()).add(factory)
+        for owner, _scope, call in calls:
+            if owner is None or id(call) in self._callback_calls:
                 continue
             for handed in self._function_arguments(call):
                 # A function passed on may be called by it: the owner is as far as it goes.
                 callers.setdefault(handed, set()).add(owner)
+            leaf = self._leaf(call, final=False)
+            here = self._callback_rank(call, final=False)
             if leaf is None:
                 callers.setdefault(_callee_name(call), set()).add(owner)
-            elif leaf > self._rank.get(owner, _CARRIES_NOTHING):
-                self._rank[owner] = leaf
+            else:
+                here = max(here, leaf)
+                for factory in self._factories_of(_callee_name(call)):
+                    callers.setdefault(factory, set()).add(owner)
+            if here > self._rank.get(owner, _CARRIES_NOTHING):
+                self._rank[owner] = here
         for klass_name, methods in members.items():
             for method in methods:
                 callers.setdefault(method, set()).add(klass_name)
@@ -4230,7 +4300,145 @@ class _CallRanker:
                     self._rank[caller] = self._rank[name]
                     work.append(caller)
 
-    def _leaf(self, call: ast.Call) -> int | None:
+    def _binder(self, name: str, scope: _Scope | None) -> _Scope | None:
+        """The plain function whose parameter ``name`` is at ``scope``, else None (N418).
+
+        A name the script also binds, defines or imports elsewhere is never
+        read as a parameter, so a reassigned parameter keeps its old reading.
+        """
+        if name in self._bound or name in self._functions or name in self._imported:
+            return None
+        while scope is not None:
+            if name in scope.names:
+                if (
+                    scope.name is not None
+                    and self._plain.get(scope.name) is scope
+                    and (name in scope.positional or name in scope.keyword_only)
+                ):
+                    return scope
+                return None
+            scope = scope.parent
+        return None
+
+    def _find_callbacks(self, calls: list[tuple[str | None, _Scope | None, ast.Call]]) -> None:
+        """Find each plain function's parameters that it calls, to a fixed point (N418).
+
+        A function that calls a parameter, or hands one on as the callback of
+        another such function, runs whatever each CALL SITE passes there.
+        """
+        sites: dict[str, list[ast.Call]] = {}
+        pending: list[tuple[str, str]] = []
+        for _owner, scope, call in calls:
+            if not isinstance(call.func, ast.Name):
+                continue
+            binder = self._binder(call.func.id, scope)
+            if binder is not None and binder.name is not None:
+                self._callback_calls.add(id(call))
+                self._depend(binder.name, call.func.id, pending)
+            elif call.func.id in self._plain:
+                sites.setdefault(call.func.id, []).append(call)
+        while pending:
+            function, parameter = pending.pop()
+            for call in sites.get(function, ()):
+                value = self._argument_for(call, function, parameter)
+                if isinstance(value, ast.Name):
+                    binder = self._binder(value.id, self._call_scope.get(id(call)))
+                    if binder is not None and binder.name is not None:
+                        self._depend(binder.name, value.id, pending)
+
+    def _depend(self, function: str, parameter: str, pending: list[tuple[str, str]]) -> None:
+        """Record that ``function`` calls ``parameter``, queueing it once."""
+        parameters = self._callbacks.setdefault(function, set())
+        if parameter not in parameters:
+            parameters.add(parameter)
+            pending.append((function, parameter))
+
+    def _argument_for(self, call: ast.Call, function: str, parameter: str) -> ast.expr | None:
+        """The expression a call passes for ``parameter`` of the plain ``function``, else None."""
+        if not isinstance(call.func, ast.Name):
+            return None
+        for keyword in call.keywords:
+            if keyword.arg is None:
+                return None
+            if keyword.arg == parameter:
+                return keyword.value
+        positional = self._plain[function].positional
+        if parameter not in positional:
+            return None
+        index = positional.index(parameter)
+        if index < len(call.args) and not any(
+            isinstance(item, ast.Starred) for item in call.args[: index + 1]
+        ):
+            return call.args[index]
+        return None
+
+    def _value_rank(self, value: ast.expr, final: bool) -> int:
+        """How far a function VALUE handed as a callback carries the string it is called on."""
+        if _launcher_named(value, self._aliases):
+            return _RUNS_IT
+        if not isinstance(value, (ast.Name, ast.Attribute)):
+            return _MAY_RUN_IT
+        name = _callee_name_of(value)
+        if name in self._functions:
+            if name in self._callbacks:
+                return _MAY_RUN_IT
+            # Before the ranks settle, a script function is carried by the owner's call edges.
+            return self._rank.get(name, _CARRIES_NOTHING) if final else _CARRIES_NOTHING
+        local = name in self._bound or name in self._imported
+        if not local and (name in _TEXT_SINKS or name in _DATA_CALLS):
+            return _CARRIES_NOTHING
+        return _MAY_RUN_IT
+
+    def _callback_rank(self, call: ast.Call, final: bool) -> int:
+        """What the callbacks a call hands to a script function add to its rank (N418).
+
+        The function calls the parameters in :attr:`_callbacks`; what runs is
+        what THIS site passes there. A value that is itself a parameter of
+        the enclosing function is that function's dependency instead, until
+        the ranks are final, and an unknown callback after.
+        """
+        function = _callee_name(call)
+        parameters = self._callbacks.get(function)
+        if not parameters:
+            return _CARRIES_NOTHING
+        scope = self._call_scope.get(id(call))
+        rank = _CARRIES_NOTHING
+        for parameter in parameters:
+            value = self._argument_for(call, function, parameter)
+            if value is None:
+                return _MAY_RUN_IT if rank < _RUNS_IT else rank
+            if isinstance(value, ast.Name) and self._binder(value.id, scope) is not None:
+                if final:
+                    rank = max(rank, _MAY_RUN_IT)
+                continue
+            rank = max(rank, self._value_rank(value, final))
+        return rank
+
+    def _factories_of(self, name: str) -> list[str]:
+        """The factories a name is bound to the result of, when it is bound to nothing else."""
+        if name not in self._factory_cache:
+            values = self._bound.get(name, [])
+            found = [
+                value.func.id
+                for value in values
+                if isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Name)
+                and value.func.id in self._factories
+            ]
+            self._factory_cache[name] = found if values and len(found) == len(values) else []
+        return self._factory_cache[name]
+
+    def _factory_rank(self, name: str, final: bool) -> int:
+        """The rank of calling the result of a factory, per what each bound call passed it."""
+        rank = _CARRIES_NOTHING
+        for value in self._bound[name]:
+            if isinstance(value, ast.Call):
+                rank = max(rank, self._callback_rank(value, final))
+                if final:
+                    rank = max(rank, self._rank.get(_callee_name(value), _CARRIES_NOTHING))
+        return rank
+
+    def _leaf(self, call: ast.Call, final: bool = True) -> int | None:
         """The rank a call has on its own, or None when it depends on a function of the script."""
         name = _callee_name(call)
         real = self._aliases.get(name, name)
@@ -4257,6 +4465,9 @@ class _CallRanker:
             return _RUNS_IT if _launcher_named(call.func, self._aliases) else _MAY_RUN_IT
         if name in self._bound and self._names_a_launcher(name):
             return _RUNS_IT
+        if self._factories_of(name):
+            # `label = wrap(str); label(text)`: what `wrap` was handed decides.
+            return self._factory_rank(name, final)
         return _MAY_RUN_IT
 
     @staticmethod
@@ -4281,7 +4492,14 @@ class _CallRanker:
     def rank(self, call: ast.Call) -> int:
         """How far ``call`` carries a string it is handed."""
         leaf = self._leaf(call)
-        rank = self._rank.get(_callee_name(call), _CARRIES_NOTHING) if leaf is None else leaf
+        rank = (
+            max(
+                self._rank.get(_callee_name(call), _CARRIES_NOTHING),
+                self._callback_rank(call, final=True),
+            )
+            if leaf is None
+            else leaf
+        )
         if rank < _RUNS_IT and any(
             self._rank.get(name, _CARRIES_NOTHING) == _RUNS_IT
             for name in self._function_arguments(call)

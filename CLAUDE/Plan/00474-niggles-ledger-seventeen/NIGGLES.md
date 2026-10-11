@@ -77,17 +77,33 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
-### N418 — a generic helper handed both a launcher and a data function ranks every call through it as may-run
+### N418 — a helper that calls its own parameter ranks every call through it as may-run
 
-**Found**: the batch AG reviewer (round 3, `untracked/scratch/review-batch-x/run_b5_ag.sh`, `b5_ag_cases.txt`). The
-`_CallRanker` (N417) ranks a script function by EVERY function value it is ever handed, so a helper that receives
-`subprocess.run` at one call site and `str.upper` at another ranks as may-run at both. `dispatch(str.upper, 'pytest')`
-and `label = wrap(str); label('pytest')` get the unseen verdict (an advisory under the default `unseen_policy`; a deny
-under `unseen_policy: deny`) though the `pytest` string only ever reaches a data function. Main denied those shapes
-outright, so batch AG already softened them; this is what is left.
+**Found**: the batch AG reviewer (round 3, `untracked/scratch/review-batch-x/run_b5_ag.sh`, `b5_ag_cases.txt`). A
+helper's rank in the `_CallRanker` (N417) comes from its own BODY. When the body calls one of its own parameters
+(`handler(payload)`, `fn(*a)`), that call is to code the ranker cannot read, so the helper ranks as may-run whatever a
+call site passes. `dispatch(str.upper, 'pytest')` and `label = wrap(str); label('pytest')` therefore get the unseen
+verdict (an advisory under the default `unseen_policy`; a deny under `unseen_policy: deny`) though the `pytest` string
+only ever reaches a data function. Main denied those shapes outright, so batch AG already softened them; this is what
+was left.
 
-**Status**: ⬜ Open. Agent-workable: rank each call site by the function value it actually passes, not the helper by
-the union of all of them, keeping the cost linear.
+**Status**: ✅ Fixed (batch AH). The ranker now finds, to a fixed point, the parameters each plain (non-method,
+singly defined) function calls, or hands on as the callback of another such function. A call to it is ranked by the
+value that SITE passes for each of them: a launcher is a run, a script function takes its own rank, a known data
+function carries nothing, anything else (an imported function, a variable, a missing or starred argument) may run it.
+`label = wrap(str)` is read the same way when `wrap` is a factory (every return is a nested function or lambda): the
+result is ranked by what `wrap` was passed, plus the rank of the nested function. Every batch AG deny holds
+(`sorted(key=go)`, `max(key=subprocess.run)`, `map`, `filter`, `Thread(target=...)`, aliases, `partial`, depth 500,
+1000 and 2000 chains); `dispatch(str.upper, 'pytest')` and `wrap(str)('pytest')` now allow. Cost stays linear: one
+walk, each (function, parameter) dependency added once, each call site read once per such parameter; a chain of n
+forwarding helpers with n sites measured 0.05, 0.11, 0.21 and 0.46 s at n = 500, 1000, 2000 and 4000. Pinned by
+`TestCallbackRankedPerCallSite`. Report: `subagent-reports/261011-batch-ah-sonnet.md`.
+
+Residuals under N418: a parameter name that the script also assigns, defines, imports or gives a default anywhere is
+never read as a callback (old may-run reading); a method (`obj.dispatch(...)`) or a callback hidden in `*args` is
+may-run; a lambda or an alias of a launcher handed as the callback is may-run, not a run; a helper that forwards its
+callback to unreadable code still ranks may-run; the forwarding call INSIDE a helper stays may-run for the literals in
+that body.
 
 ### N417 — `subagent_full_qa_blocker` reads `pytest` text inside Python string data as a command
 
