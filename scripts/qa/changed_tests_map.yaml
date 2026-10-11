@@ -219,3 +219,14 @@ rules:
       - tests/unit/handlers/pre_tool_use/test_quarantine_artefact_read_guard.py
     why: the index build and its cache are read by both guards; the isolation
       test pins that a build never outlives the test that started it
+  - glob: "tests/jail_site/*.py"
+    tests: [tests/unit/test_doc_write_jail.py]
+    why: the doc-write jail and the sitecustomize that arms spawned Pythons; the
+      test drives both in-process and through a real child interpreter
+  - glob: "tests/conftest.py"
+    tests:
+      - tests/unit/test_doc_write_jail.py
+      - tests/unit/test_tracked_doc_guard.py
+      - tests/unit/test_conftest_docs_guard_culprit.py
+    why: it arms the jail and owns the tracked-doc guard those three pin; every
+      test imports it, so inference alone maps it to nothing useful

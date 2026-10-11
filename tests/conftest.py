@@ -3,6 +3,10 @@
 This module provides test fixtures and utilities used across all test files.
 """
 
+import atexit
+import os
+import shutil
+import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -34,6 +38,7 @@ from claude_code_hooks_daemon.utils import protected_file_index
 # conftest. It sits at `tests/` root rather than in a subdirectory because the
 # relay-dependent gates it covers straddle `acceptance/` and `integration/`.
 # Outside CI it does nothing at all — see the module docstring.
+from tests.jail_site import doc_write_jail
 from tests.relay_gate_guard import fresh_relay_build, pytest_runtest_makereport
 from tests.signal_safety_net import install as install_signal_safety_net
 from tests.signal_safety_net import uninstall as uninstall_signal_safety_net
@@ -536,9 +541,55 @@ def isolate_daemon_path_overrides(monkeypatch):
 #: the suite: it can be committed by accident, it makes an unrelated later run
 #: look dirty, and — because the damage is a plausible-looking regeneration
 #: rather than a crash — nothing about it reads as a failure.
-_TRACKED_FILES_NO_TEST_MAY_WRITE = ("CLAUDE.md", ".claude/HOOKS-DAEMON.md")
+_TRACKED_FILES_NO_TEST_MAY_WRITE = doc_write_jail.PROTECTED_RELATIVE_PATHS
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _arm_doc_write_jail() -> Path:
+    """Refuse writes to the generated docs of EVERY checkout, for this run and its children.
+
+    Plan 00474 N280: the guard below restores after the fact and only for this
+    checkout. This stops the write at the source, in every checkout of the
+    repository (so a run in a linked worktree cannot touch the main checkout),
+    in this process and, through the environment, in every Python it spawns.
+    Armed at import so collection-time code is covered too.
+
+    Returns:
+        The refusal log the autouse fixture below reads.
+    """
+    log_dir = Path(tempfile.mkdtemp(prefix="doc-write-jail-"))
+    atexit.register(shutil.rmtree, log_dir, ignore_errors=True)
+    log = log_dir / "refusals.log"
+    protected = doc_write_jail.protected_paths(doc_write_jail.checkout_roots(_REPO_ROOT))
+    doc_write_jail.install(protected, log)
+    os.environ.update(doc_write_jail.environment_for_children(protected, log))
+    return log
+
+
+_DOC_WRITE_JAIL_LOG = _arm_doc_write_jail()
+
+
+@pytest.fixture(autouse=True)
+def no_test_writes_a_generated_doc_of_any_checkout():
+    """Fail the test whose code (or whose spawned Python) tried to write a protected doc.
+
+    The jail raises inside the writer, but a writer may catch it (the injector
+    treats an unwritable CLAUDE.md as advisory), which would leave a green test
+    whose code had just tried to damage the repository. The refusal log is the
+    record that cannot be swallowed.
+    """
+    offset = doc_write_jail.log_offset(_DOC_WRITE_JAIL_LOG)
+    yield
+    refusals = doc_write_jail.refusals_since(_DOC_WRITE_JAIL_LOG, offset)
+    if refusals:
+        raise AssertionError(
+            "This test (or a Python it spawned) tried to write a tracked generated "
+            "doc of a checkout of this repository; the jail refused every attempt "
+            "(pid, event, path):\n  "
+            + "\n  ".join(refusals)
+            + "\nPoint the code at a tmp_path project. See tests/jail_site/doc_write_jail.py."
+        )
 
 
 #: Where content is preserved before the guard overwrites it. Gitignored, so it
@@ -695,7 +746,8 @@ def no_test_writes_tracked_generated_docs():
         preserved = _preserve_rejected_write(name, _REPO_ROOT / name)
         if preserved is not None:
             preserved_paths.append(str(preserved))
-        (_REPO_ROOT / name).write_bytes(original)
+        with doc_write_jail.allowed():
+            (_REPO_ROOT / name).write_bytes(original)
         restored.append(name)
 
     culprit_note = ""
