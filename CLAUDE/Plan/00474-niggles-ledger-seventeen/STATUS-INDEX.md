@@ -4,7 +4,7 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 
 | #          | Verdict                                                                                                            | Origin              | Status                              |
 | ---------- | ------------------------------------------------------------------------------------------------------------------ | ------------------- | ----------------------------------- |
-| N417       | `subagent_full_qa_blocker` reads `pytest` text inside Python string data as a command (unmasked by N416's fix)     | Batch AE review     | ⬜ Open                             |
+| N417       | `subagent_full_qa_blocker` reads `pytest` text inside Python string data as a command (unmasked by N416's fix)     | Batch AE review     | ✅ Fixed (batch AG); residuals      |
 | N416       | `subagent_full_qa_blocker` advisory on `set -e`, `uniq -c` and other non-interpreter `-c`/`-e`/`-r` commands       | Batch AB review     | ✅ Fixed (batch AE)                 |
 | N415       | `subagent_full_qa_blocker` misses `fh = open(p); src = fh.read(); exec(src)`                                       | Batch AB review     | ✅ Fixed (batch AE); residuals      |
 | N414       | Staging simulation residuals: `--refresh` without `-q`, `git diff --output=`, the blunt `<` test                   | Batch AC review     | ✅ Fixed (batch AE)                 |
