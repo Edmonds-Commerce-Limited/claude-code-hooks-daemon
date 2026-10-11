@@ -1390,3 +1390,50 @@ class TestDenyMessageContent:
         assert result.reason is not None
         assert "Layer 1" in result.reason
         assert "scripts/upgrade.sh" in result.reason
+
+
+class TestVariableToolUnderSteeringIsPinned:
+    """N410: a QA tool reached through a variable is denied once ``PYTHONPATH`` is set.
+
+    No upgrade is run. The trigger is the conjunction of (a) a steering variable
+    (``PYTHONPATH`` matches ``PYTHON*``) anywhere in the command and (b) a program
+    word that is a variable (``$V/ruff``) whose first positional operand is not a
+    readable file (``check``, ``src``): ``_variable_program_is_upgrade`` then
+    reports "cannot tell", which counts as the upgrade once something steers. The
+    same tools by literal path are allowed because the tool binary itself is the
+    readable file that gets judged. These tests pin TODAY's verdict so that fixing
+    N410 flips them deliberately.
+    """
+
+    _BIN = "/opt/venv/bin"
+
+    @pytest.mark.parametrize(
+        "tool", ["black --check --target-version py311 src", "ruff check src", "mypy src"]
+    )
+    def test_variable_tool_with_pythonpath_is_denied_today(
+        self, handler: UpgradeApprovalGuardHandler, tool: str
+    ) -> None:
+        command = f"V={self._BIN} && PYTHONPATH=/w/src $V/{tool}"
+        assert handler.matches(_bash(command)) is True
+
+    @pytest.mark.parametrize(
+        "tool", ["black --check --target-version py311 src", "ruff check src", "mypy src"]
+    )
+    def test_literal_path_tool_with_pythonpath_is_allowed(
+        self, handler: UpgradeApprovalGuardHandler, tool: str, tmp_path: Path
+    ) -> None:
+        binary = tmp_path / tool.split()[0]
+        binary.write_text("#!/bin/sh\n")
+        command = f"PYTHONPATH=/w/src {binary} {tool.partition(' ')[2]}"
+        assert handler.matches(_bash(command)) is False
+
+    def test_variable_tool_without_a_steering_variable_is_allowed(
+        self, handler: UpgradeApprovalGuardHandler
+    ) -> None:
+        assert handler.matches(_bash(f"V={self._BIN} && $V/ruff check src")) is False
+
+    def test_variable_python_dash_m_with_pythonpath_is_allowed(
+        self, handler: UpgradeApprovalGuardHandler
+    ) -> None:
+        command = f"V={self._BIN} && PYTHONPATH=/w/src $V/python -m pytest tests/x.py"
+        assert handler.matches(_bash(command)) is False

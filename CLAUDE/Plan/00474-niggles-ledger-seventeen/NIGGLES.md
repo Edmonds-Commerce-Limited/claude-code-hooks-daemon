@@ -1471,6 +1471,29 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N410 — `upgrade_approval_guard` denies a QA tool reached through a variable once `PYTHONPATH` is set
+
+**Source**: the Plan 00474 coordinator's check-script call (2026-10-11), denied with R-UPGRADE-APPROVAL-ENV-BYPASS
+although it ran no upgrade
+([subagent-reports/261011-batch-l-gh-body-scope-sonnet.md](subagent-reports/261011-batch-l-gh-body-scope-sonnet.md)).
+
+**Evidence**: the command set `V=/workspace/untracked/venv-…/bin`, then ran `$V/python -m pytest …`,
+`$V/black --check …`, `$V/ruff check …` and `$V/mypy …` chained with `&&`; it named no hooks-daemon and no upgrade verb,
+and the same commands with literal interpreter paths were allowed. Reproduced against `matches()`: the trigger is the
+conjunction of (a) a steering variable anywhere in the command, here `PYTHONPATH=…` matching the `PYTHON*` entry of
+`_UPGRADE_STEERING_VARS`, and (b) a program word that is a variable (`$V/black`, `$V/ruff`, `$V/mypy`) whose first
+positional operand is not a readable file (`src`, `check`). `_variable_program_is_upgrade` falls through to
+`_script_run_is_upgrade("src", …)`, which cannot read it and returns "cannot tell", and a steered command counts "cannot
+tell" as the upgrade. `$V/python -m pytest` is allowed (the `-m` branch returns False), and the literal-path forms are
+allowed because the tool binary is the readable file that gets judged. Without `PYTHONPATH` the variable forms are
+allowed too. Pinned by `TestVariableToolUnderSteeringIsPinned` in
+`tests/unit/handlers/pre_tool_use/test_upgrade_approval_guard.py`, which asserts today's deny so that a fix flips it.
+
+**Status**: ⬜ Open. Remedy: in `_variable_program_is_upgrade`, when the program word is a variable and the command
+carries no upgrade entry point (`_UPGRADE_ENTRY_RE`) and no upgrade-shaped argument (`_UPGRADE_SHAPED_ARG_RE`), do not
+treat an unreadable first operand as "cannot tell"; keep the deny only when the program or the operand is itself
+unresolvable AND the command names the upgrade (the gate's own scripts). Not fixed in batch L.
+
 ### N409 — `subagent_full_qa_blocker` denies an ordinary `python3 script.py` as a whole-suite run
 
 **Source**: Plan 00483 Task 3.2 re-probe of the not-re-run guards (2026-10-11), proposal P9, probe fq1 and the
