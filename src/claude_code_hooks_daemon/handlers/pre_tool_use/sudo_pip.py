@@ -17,7 +17,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
-from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, SUDO_INVOCATION
+from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH
 from claude_code_hooks_daemon.utils.command_position import command_position_code_segments
 
 # Full first-fire teaching content (Plan 00116): reuses the pre-migration
@@ -51,7 +51,27 @@ _SUDO_PIP_VERBOSE_CONTENT = (
 # OPTIONAL_SUDO covers the former (and is shared with curl_pipe_shell, which
 # had already learned this lesson in isolation); OPTIONAL_PATH covers the
 # latter for both `pip` and the `python -m pip` spelling.
-_SUDO_PIP_PATTERN = SUDO_INVOCATION + OPTIONAL_PATH + r"(?:pip3?|python3?\s+-m\s+pip)\s+install\b"
+#
+# Further respellings (batch S, still careless rather than hostile):
+#   sudo -u root pip install       - an option that TAKES a value (-u/-g/-C/...)
+#   doas pip install               - sudo's OpenBSD-lineage twin
+#   sudo env [VAR=x] pip install   - env between the elevator and pip
+#   sudo bash -c 'pip install x'   - a shell run as root
+#   pip3.11 / python3.11 -m pip    - a versioned interpreter
+_ELEVATOR = r"\b(?:sudo|doas)" r"(?:\s+-[A-Za-z]*[ugCDhpRTU]\s+[\w.-]+|\s+-\S+)*\s+"
+_ELEVATED_WRAPPER = (
+    r"(?:"
+    r"env\s+(?:-\S+\s+)*"
+    r"|" + OPTIONAL_PATH + r"(?:ba|da|z)?sh\s+(?:-\w*c\s+)['\"]?\s*"
+    r")?"
+    r"(?:\w+=\S*\s+)*"
+)
+_SUDO_PIP_PATTERN = (
+    _ELEVATOR
+    + _ELEVATED_WRAPPER
+    + OPTIONAL_PATH
+    + r"(?:pip3?(?:\.\d+)?|python3?(?:\.\d+)?\s+-m\s+pip)\s+install\b"
+)
 
 
 class SudoPipHandler(PreToolUseHandlerBase):

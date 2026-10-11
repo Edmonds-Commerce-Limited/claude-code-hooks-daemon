@@ -1640,6 +1640,20 @@ mention deny were flipped. The INVENTORY misses (`pip --break-system-packages in
 `sudo bash -c 'pip install ...'` and `doas pip install`; `pip_break_system` misses
 `PIP_BREAK_SYSTEM_PACKAGES=1 pip install` and a versioned `pip3.11`.
 
+**Residuals, batch S** (pinned by `tests/unit/handlers/pre_tool_use/test_pip_guards_residual_forms.py` and corpus rows
+`n407-*`; report `subagent-reports/261011-batch-s-sonnet.md`):
+
+- ✅ cleared by batch S: `sudo -u root pip install`, `sudo -iu root pip install` (a value-taking sudo option).
+- ✅ cleared by batch S: `sudo env [VAR=x] pip install`.
+- ✅ cleared by batch S: `sudo bash -c 'pip install x'` (also `sh`/`zsh`/`dash`, a path, `-lc`).
+- ✅ cleared by batch S: `doas pip install` (and `doas -u root`).
+- ✅ cleared by batch S: `PIP_BREAK_SYSTEM_PACKAGES=1 pip install x`, via `env` and `export`. A falsy value
+  (`0`, `false`, `no`, `off`) or an empty one is allowed.
+- ✅ cleared by batch S: versioned `pip3.11` and `python3.11 -m pip` in both guards.
+- ✅ cleared by batch S: INVENTORY miss `pip --break-system-packages install` (flag before the subcommand).
+- Deliberately skipped: obfuscation (`$P install`, base64, `sudo $(echo pip) ...`) - careless, not hostile. `sudo` with
+  a value-taking option not in `ugCDhpRTU` is read as a plain flag.
+
 ### N406 — `github_auto_close_keywords` denies a quoted `echo` or a `python3 - <<'EOF'` that only prints a keyword
 
 **Source**: Plan 00483 Task 3.2 re-probe (2026-10-11), proposal P6, probes ac7, ac9 (report as N409).

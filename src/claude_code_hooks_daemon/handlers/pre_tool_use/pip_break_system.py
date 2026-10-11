@@ -45,9 +45,28 @@ _PIP_BREAK_SYSTEM_VERBOSE_CONTENT = (
 # Any form of pip install with --break-system-packages in ONE command segment:
 # pip/pip3/python -m pip/python3 -m pip (also behind a path or `uv`) + install
 # + the flag.
-_PIP_BREAK_SYSTEM_PATTERN = re.compile(
-    r"\b(pip3?|python3?\s+-m\s+pip)\s+install\s+.*--break-system-packages",
+#
+# The flag may also sit BEFORE the subcommand (`pip --break-system-packages
+# install x`), and the interpreter may be versioned (`pip3.11`,
+# `python3.11 -m pip`), so both are asserted as lookaheads after the binary.
+_PIP_BREAK_SYSTEM_FLAG_PATTERN = re.compile(
+    r"\b(?:pip3?(?:\.\d+)?|python3?(?:\.\d+)?\s+-m\s+pip)\s+"
+    r"(?=.*\binstall\b)(?=.*--break-system-packages)",
     re.IGNORECASE,
+)
+
+# The same switch set through pip's environment: `PIP_BREAK_SYSTEM_PACKAGES=1
+# pip install x`, `env PIP_...=1 pip ...`, `export PIP_...=1`. A falsy value
+# (0, false, no, off) or an empty one switches nothing on, so it is not a
+# finding.
+_PIP_BREAK_SYSTEM_ENV_PATTERN = re.compile(
+    r"(?:^|[\s'\"])PIP_BREAK_SYSTEM_PACKAGES=(?!(?:0|false|no|off)(?!\w))['\"]?\w",
+    re.IGNORECASE,
+)
+
+_PIP_BREAK_SYSTEM_PATTERNS = (
+    _PIP_BREAK_SYSTEM_FLAG_PATTERN,
+    _PIP_BREAK_SYSTEM_ENV_PATTERN,
 )
 
 
@@ -113,8 +132,9 @@ class PipBreakSystemHandler(PreToolUseHandlerBase):
         # used to cross `&&`, `;`, `#` and quotes, so an echo, a comment, a
         # grep pattern or a message that only NAMED the flag was denied.
         return any(
-            _PIP_BREAK_SYSTEM_PATTERN.search(segment)
+            pattern.search(segment)
             for segment in command_position_code_segments(command)
+            for pattern in _PIP_BREAK_SYSTEM_PATTERNS
         )
 
     def get_rules(self) -> list[Rule]:
