@@ -191,6 +191,24 @@ fixed: a name rebound in only ONE branch of an `if` drops the file text, so `if 
 `else: src = ''` is allowed. Merging branch states needs a copy of the tracked names per `if`, which is not linear on
 many branches; a conservative merge belongs with a real flow analysis.
 
+Batch AK: two of the batch AE reviewer's residual shapes are fixed. (1) A text-preserving method chain keeps the
+file's text: `.strip()`, `.rstrip()`, `.lstrip()`, `.replace(a, b)`, `.format(...)`, `.encode()`, `.decode()`,
+`str(...)` and a plain f-string field around the read all still judge the file, and so does a name bound to such a
+chain (`_file_read_by`, one iterative pass down the wrapping). `{x!r}` and a format spec are not the text and do not
+count. (2) A `for` over a literal list or tuple of string paths binds its variable to every one of them inside the
+loop and each is judged (`for p in [F]: exec(open(p).read())`, `Path(p).read_text()`, `runpy.run_path(p)`, and a text
+read in the loop and run after it); a loop over any non-literal iterable, or a list held in a name, is unchanged.
+Linear: the walk holds one extra name-to-paths map. Tests: `_TEXT_CHAIN_AND_LOOP_FULL_RUNS`,
+`_TEXT_CHAIN_AND_LOOP_ALLOWED`, a timing test.
+
+**Deliberate limit (coordinator's engineering judgement, not an owner ruling)**: two shapes stay allowed because they
+need flow analysis beyond the single source-ordered walk. (a) A name rebound in only ONE branch of an `if`
+(`if c: src = open(F).read()` / `else: src = ''`, or the reverse) follows the latest textual binding, so which branch
+ran is not known. (b) A function defined before the read and called after it (`def go(): exec(src)`, then
+`src = open(F).read()`, then `go()`) is walked where it is defined, where `src` is not yet bound. Both can only miss a
+run, never invent one (B5). Pinned by `_TEXT_FLOW_LIMITS_ALLOWED`; a real flow analysis (branch merge, call-site
+ordering) is the fix if either is ever wanted.
+
 ### N414 — commit-gate staging simulation residuals after batch AC (N246)
 
 **Found**: the batch AC reviewer, round 3 (`untracked/scratch/review-ac/probe_dirty.py`). Batch AC merged
