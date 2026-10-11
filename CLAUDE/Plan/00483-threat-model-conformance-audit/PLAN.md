@@ -159,9 +159,16 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   N171, N172, N248 and N250 fixed, branch worktree-p483-ordin (merged cd7638c73): an unlistable directory, a missing daemon package, an unresolved word list and an unbuildable capture scanner each fail loudly instead of passing; report: [subagent-reports/261004-task-3.1-batch-i-ordinary-sonnet.md](subagent-reports/261004-task-3.1-batch-i-ordinary-sonnet.md).
   N130 (and N348's cap half) fixed, branch worktree-n130-walk (merged 012915bd9; its capped walk was then removed by the A1/A2 merge dc5c9263b, and N130 is now answered by the cached protected-file index): a recursive search is examined by a capped scan that raises past 250000 entries or the deadline and is denied as incomplete, never answered as clean, and `rg`, `ag` and `git grep` read git's file lists; report: [subagent-reports/261004-n130-n348-implementation-sonnet.md](subagent-reports/261004-n130-n348-implementation-sonnet.md).
 - [ ] 🔄 **Task 3.2**: Narrow each guard that causes an in-scope false positive while catching
-  an out-of-scope shape (TDD: the false positive is the red test). Open: 43 of the 50 INVENTORY
-  probes still deny when re-run on 2026-10-09 (batches b and c of the status audit, which
-  file or fix them). Batch (b), the git guards, is fixed on its branch: `destructive_git` and
+  an out-of-scope shape (TDD: the false positive is the red test). Open: 16 of the 50 INVENTORY
+  probes still deny when re-run on 2026-10-11 (43 denied on 2026-10-09; 27 were fixed by
+  batches (b) and (c), none regressed). Of the 16, 12 are deliberate policy (6 `sed` word, 6
+  `| head`/`| tail`) and 4 are in-scope false positives with no ledger entry yet: a `gh --body "$(cat <<'EOF'` heredoc and a `git -c k=v commit -F - <<'EOF'` heredoc read as code by
+  `destructive_git`/`git_stash`, and `cd "$(git rev-parse --show-toplevel)" && git commit` /
+  `cd $PROJ && git commit` denied by the commit conflict gate. Three ledger entries are
+  proposed (P1 to P3) in the report and not yet filed; the audit's "not re-run" guards (Parts C
+  and F) are still not re-probed. Report:
+  [subagent-reports/261011-task-3.2-recheck-sonnet.md](subagent-reports/261011-task-3.2-recheck-sonnet.md).
+  Batch (b), the git guards, is merged (324b59962): `destructive_git` and
   `git_stash` judge each command segment on its own tokens and read a quoted `git`/`awk` pattern,
   a `gh` body heredoc and a printing `while read` loop as data; gate rows `a8-*`. Report:
   [subagent-reports/261009-batch-b-git-guards-sonnet.md](subagent-reports/261009-batch-b-git-guards-sonnet.md).
@@ -260,16 +267,21 @@ Owner questions sent 2026-10-05 as chunks A–D; see the backlog report
 
 ## Success Criteria
 
-- [ ] No open ledger entry or `UNCOVERED-open` corpus row is left unclassified. Corpus half
-  met (0 open rows). Open: 00474's own later entries (N353 to N381) have not been triaged
-  under the two-part test.
+- [x] No open ledger entry or `UNCOVERED-open` corpus row is left unclassified. Corpus half
+  met (0 open rows). 00474's later entries N353 to N398 (46) are classified under the
+  two-part test: 34 already classified, 9 in-scope and open (ordinary ledger work), 3
+  out-of-scope or dismissable. Evidence:
+  [subagent-reports/261011-task-3.2-recheck-sonnet.md](subagent-reports/261011-task-3.2-recheck-sonnet.md) section 4.
 - [x] Each dismissal is recorded both in the ledger and, for a command, in the corpus.
   Evidence: Task 2.3 above; `check_dangerous_invocation_corpus.py` holds 37 rows, 0 open.
 - [x] Every blocking guard has a verdict in `INVENTORY.md`. Evidence: every file under
   `handlers/pre_tool_use/` is named in the inventory; Part H adds the three that were
   missing. The 24 handlers of Part G are provisional file-level verdicts, and Parts A to F
   pre-date the A1/A2 removals.
-- [ ] Every in-scope false positive found has a narrowing fix merged or a ledger entry.
+- [ ] Every in-scope false positive found has a narrowing fix merged or a ledger entry. Missing:
+  the three in-scope false positives left among the 50 probes (P1 `gh --body "$(cat <<'EOF'`
+  heredoc, P2 `git -c k=v commit -F -` heredoc, P3 `cd <expansion> && git commit` conflict
+  gate) have no ledger entry yet; the audit's "not re-run" guards are also not re-probed.
 
 ## Delivery & Milestones
 
