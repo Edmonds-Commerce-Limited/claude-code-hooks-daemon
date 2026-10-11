@@ -205,9 +205,10 @@ _GIT_CONFIG_ASSIGNING_FLAGS: Final[tuple[str, ...]] = ("--add", "--replace-all")
 # `git config <key> <value>`: a key and a value are two operands.
 _GIT_CONFIG_ASSIGNMENT_OPERANDS: Final[int] = 2
 
-# `git branch -d <name>` removes a branch: the name already exists and nothing
-# new is recorded, so deleting a term-bearing branch is the remedy, not a leak.
-_GIT_BRANCH_DELETE_FLAGS: Final[tuple[str, ...]] = ("-d", "-D", "--delete")
+# `git branch -d <name>` / `git tag -d <name>` remove a ref: the name already
+# exists and nothing new is recorded, so deleting a term-bearing branch or tag
+# is the remedy, not a leak.
+_GIT_REF_DELETE_FLAGS: Final[tuple[str, ...]] = ("-d", "-D", "--delete")
 
 # Where one command ends and the next begins. Longest first so `||` is not read
 # as two pipes. A metadata value is judged within its OWN command only, so a
@@ -500,8 +501,8 @@ def _records_nothing(subcommand: str, arguments: list[str]) -> bool:
     message is part of that message and exempts nothing.
     """
     if subcommand in _GIT_LISTING_SUBCOMMANDS:
-        return any(flag in arguments for flag in _GIT_READ_ONLY_FLAGS) or (
-            subcommand == "branch" and any(flag in arguments for flag in _GIT_BRANCH_DELETE_FLAGS)
+        return any(
+            flag in arguments for flag in (*_GIT_READ_ONLY_FLAGS, *_GIT_REF_DELETE_FLAGS)
         )
     if subcommand != _GIT_CONFIG_SUBCOMMAND:
         return False
@@ -1369,6 +1370,10 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         be undone without rewriting published history.
         """
         tokens = _shell_tokens(command)
+        # A subshell opener glues to the word (`(git commit ...)`); the command
+        # is still git.
+        if tokens:
+            tokens = [tokens[0].lstrip("({"), *tokens[1:]]
         for position, token in enumerate(tokens[:-1]):
             if token != _GIT_EXECUTABLE and not token.endswith(f"/{_GIT_EXECUTABLE}"):
                 continue

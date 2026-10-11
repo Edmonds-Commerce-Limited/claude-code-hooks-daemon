@@ -104,6 +104,8 @@ class TestOnlyTheMetadataCommandIsScanned:
             f"git branch -d {_TERM}-old",
             f"git branch -D {_TERM}-old",
             f"git branch --delete {_TERM}-old",
+            f"git tag -d {_TERM}-old",
+            f"git tag --delete {_TERM}-old",
         ],
     )
     def test_term_outside_the_metadata_value_is_allowed(
@@ -120,6 +122,11 @@ class TestOnlyTheMetadataCommandIsScanned:
             f"git status\ngit branch {_TERM}-work",
             f"git fetch && git merge --no-ff -m 'merge {_TERM}' feature",
             f"echo hi | git commit -m '{_TERM}'",
+            f"git tag {_TERM}",
+            f"git tag -a x -m {_TERM}",
+            f"(git commit -m '{_TERM}')",
+            f"{{ git commit -m '{_TERM}'; }}",
+            f"(cd /x && git tag {_TERM})",
         ],
     )
     def test_term_in_the_metadata_value_of_a_compound_command_is_denied(
