@@ -537,7 +537,7 @@ class RootRecursionGuardHandler(PreToolUseHandlerBase):
             "a subdirectory of home (`~/projects`, `$HOME/proj`) and a scan bounded to "
             "one level (`find / -maxdepth 1`, `rg --max-depth 1 x /`) are allowed. "
             "`grep -r x /`, `find / -name x`, `du -sh /` and `rg x ~` stay blocked; "
-            "`ls /`, `ls -la /` and `du -sh /workspace` are allowed.\n\n"
+            "`ls /`, `ls -la /` and `du -sh .` are allowed.\n\n"
             "**Note**: `... | head` does NOT bound a `-l`/`-rl` scan — a producer that "
             "matches nothing never writes, so it never receives SIGPIPE and runs to "
             "completion across the whole disk.\n\n"
