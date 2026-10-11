@@ -89,6 +89,10 @@ _EXPANSION_MARKERS: tuple[str, ...] = ("$", "`", "<(", ">(")
 _GH_PROSE_SUBCOMMANDS: frozenset[str] = frozenset({"pr", "issue", "release"})
 _GH_PROSE_FLAGS: frozenset[str] = frozenset({"--title", "--body", "--notes", "-t", "-b", "-n"})
 
+#: Commands that run what follows as root; a shell they run elevates its whole `-c` body.
+_ELEVATORS: frozenset[str] = frozenset({"sudo", "doas"})
+_ELEVATOR_PREFIX = "sudo "
+
 #: How deep a `bash -c` body is read inside another.
 _MAX_NESTING = 3
 
@@ -474,6 +478,11 @@ def _narrow(segment: str, may_run_output: bool, depth: int) -> str:
         return f" {head} {_DATA_PLACEHOLDER} "
     if head in SHELL_NAMES and depth < _MAX_NESTING:
         return _narrow_shell_body(segment, depth)
+    if head in _TEXT_ARGUMENT_HEADS and not may_run_output:
+        # A search/format literal of a read-only git command (or an awk
+        # program) is data for that command, in every guard and inside a
+        # `bash -c` body alike: `git grep -n 'pip install --break-system-packages'`.
+        return blank_quoted_text_arguments(segment)
     if head == "gh":
         return _narrow_gh_prose(segment)
     return segment
@@ -519,8 +528,42 @@ def _narrow_shell_body(segment: str, depth: int) -> str:
             if body is None:
                 return segment
             start, end = spans[offset + 1]
-            return segment[:start] + command_position_view(body, depth + 1) + segment[end:]
+            body_view = command_position_view(body, depth + 1)
+            if _is_elevated(words[:shell_at]):
+                body_view = _elevate_later_segments(body_view)
+            return segment[:start] + body_view + segment[end:]
     return segment
+
+
+def _is_elevated(words_before_shell: list[str]) -> bool:
+    """Whether the words ahead of a shell name run it through `sudo` or `doas`."""
+    return any(
+        (resolve_shell_word(word) or "").rsplit("/", 1)[-1] in _ELEVATORS
+        for word in words_before_shell
+    )
+
+
+def _elevate_later_segments(body_view: str) -> str:
+    """``body_view`` with each segment after the first headed by `sudo`.
+
+    The splitter cuts a `sudo bash -c 'cd d; pip install x'` body at `;`, which
+    leaves the second command without the `sudo` that runs it. The first
+    segment already follows `sudo bash -c` in the line, so only later ones need it.
+    """
+    pieces: list[str] = []
+    previous_end = 0
+    for index, (start, end) in enumerate(_segment_spans(body_view)):
+        pieces.append(body_view[previous_end:start])
+        text = body_view[start:end]
+        indent = text[: len(text) - len(text.lstrip())]
+        pieces.append(
+            text
+            if index == 0 or not text.strip()
+            else f"{indent}{_ELEVATOR_PREFIX}{text[len(indent):]}"
+        )
+        previous_end = end
+    pieces.append(body_view[previous_end:])
+    return "".join(pieces)
 
 
 def _narrow_gh_prose(segment: str) -> str:

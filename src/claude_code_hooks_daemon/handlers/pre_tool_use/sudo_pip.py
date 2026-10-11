@@ -60,11 +60,9 @@ _SUDO_PIP_VERBOSE_CONTENT = (
 #   pip3.11 / python3.11 -m pip    - a versioned interpreter
 #   sudo --user root / -p 'pw: '   - a long or quoted-value sudo option
 #   sudo pip -q install            - a pip option before the subcommand
-#   sudo sh -c "a; pip install"    - pip after an earlier statement, but only in a
-#                                    double-quoted body: the segment splitter cuts a
-#                                    single-quoted body at `;`/`&&` before this
-#                                    pattern sees it, so `sudo bash -c 'cd d; pip
-#                                    install x'` is NOT caught (N407 residual)
+#   sudo sh -c "a; pip install"    - pip after an earlier statement: the view heads
+#                                    every later segment of a sudo/doas shell's
+#                                    `-c` body with `sudo`, so any quoting works
 _SUDO_OPTION_VALUE = r"(?:'[^']*'|\"[^\"]*\"|[\w.-]+)"
 _ELEVATOR = (
     r"\b(?:sudo|doas)"
