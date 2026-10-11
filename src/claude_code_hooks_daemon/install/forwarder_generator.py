@@ -134,8 +134,10 @@ def _render_raw_stdout_daemon_down_block(event_file_name: str) -> str:
     :attr:`EventIDMeta.daemon_down_stdout` — nothing for a parsed value
     (``WorktreeCreate``), a visible marker for a display line
     (``StatusLine``). The diagnostic goes to stderr (the same ``HOOKS DAEMON
-    ERROR [type]`` line ``emit_hook_error`` logs) and the exit is non-zero, so
-    the hook is "not handled" rather than answered with a JSON object.
+    ERROR [type]`` line ``emit_hook_error`` logs) and the exit is the event's
+    :attr:`EventIDMeta.daemon_down_exit_code` — non-zero for a value, so the
+    hook is "not handled" rather than answered with a JSON object, and zero
+    for a display line, which Claude Code would otherwise not render.
     """
     meta = _METAS_BY_BASH_KEY[event_file_name]
     if meta.daemon_down_stdout:
@@ -170,12 +172,13 @@ def _render_raw_stdout_daemon_down_block(event_file_name: str) -> str:
         "    # raw_stdout event (generated; Plan 00189): Claude Code reads this\n"
         "    # hook's stdout RAW, so a JSON error here would be taken literally.\n"
         f"{loading_lines}"
-        "    # Diagnostic on stderr; non-zero exit = not handled.\n"
+        "    # Diagnostic on stderr; the exit code is the event's (a value: non-zero =\n"
+        "    # not handled; a display line: 0, as Claude Code blanks a failing one).\n"
         f"{stdout_lines}"
         f'    echo "HOOKS DAEMON ERROR [daemon_startup_failed]: {meta.json_key} hook: '
         "failed to start hooks daemon. Use the hooks-daemon skill to check logs "
         '(Skill tool: skill=hooks-daemon, args=logs)" >&2\n'
-        "    exit 1\n"
+        f"    exit {meta.daemon_down_exit_code}\n"
         "fi\n"
     )
 

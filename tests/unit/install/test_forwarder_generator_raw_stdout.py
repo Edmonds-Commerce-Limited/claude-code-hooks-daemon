@@ -10,8 +10,10 @@ so a daemon that cannot start yields the literal path ``/<cwd>/{...json...}``.
 The contract for a ``raw_stdout`` event's daemon-down branch is: never JSON on
 stdout — only the catalogue's per-event ``daemon_down_stdout`` (empty for a
 parsed VALUE such as the worktree path; a visible marker for a DISPLAY line
-such as the status line) — the diagnostic on stderr, and a non-zero exit so
-Claude Code treats the hook as not handled. It is generalised over the
+such as the status line) — the diagnostic on stderr, and the catalogue's
+``daemon_down_exit_code``: non-zero for a value (Claude Code treats the hook as
+not handled), zero for a display line (Claude Code renders nothing at all for a
+non-zero status line command, GitHub #72). It is generalised over the
 catalogue's ``raw_stdout`` flag (single source of truth), so the tests below
 run over EVERY wired ``raw_stdout`` event and keep one JSON-decision event as
 the control.
@@ -111,7 +113,9 @@ def test_raw_stdout_forwarder_daemon_down_prints_only_the_catalogue_text(
         f"{meta.daemon_down_stdout!r}, got {result.stdout!r}"
     )
     assert "{" not in result.stdout, f"{event_file_name}: JSON reached a raw stdout"
-    assert result.returncode != 0, f"{event_file_name}: must exit non-zero (not handled)"
+    assert (
+        result.returncode == meta.daemon_down_exit_code
+    ), f"{event_file_name}: exit code must be the catalogue's daemon_down_exit_code"
     assert result.returncode != 99, f"{event_file_name}: transport ran with the daemon down"
     assert "HOOKS DAEMON ERROR" in result.stderr
     assert "daemon_startup_failed" in result.stderr
@@ -132,8 +136,20 @@ def test_status_line_daemon_down_keeps_the_visible_marker(tmp_path: Path) -> Non
     result = _run_generated_forwarder(tmp_path, "status-line")
 
     assert result.stdout.strip() == "⚠️ DAEMON FAILED"
-    assert result.returncode == 1
+    # Claude Code renders nothing for a status line command that exits non-zero
+    # (GitHub #72), so a display line must exit 0 for its marker to be seen.
+    assert EventID.STATUS_LINE.daemon_down_exit_code == 0
+    assert result.returncode == 0
     assert "daemon_startup_failed" in result.stderr
+
+
+def test_exit_code_is_a_catalogue_property_of_the_event_kind() -> None:
+    """A display event exits 0, a parsed-value event exits 1; every event listed."""
+    for meta in wired_event_metas():
+        if not meta.raw_stdout:
+            continue
+        expected = 0 if meta.daemon_down_stdout else 1
+        assert meta.daemon_down_exit_code == expected, meta.bash_key
 
 
 def test_status_line_daemon_down_text_can_be_named_by_init_sh() -> None:
@@ -266,7 +282,7 @@ class TestDaemonDownStdoutIsEscaped:
         result = _run_generated_forwarder(tmp_path, "status-line")
 
         assert result.stdout.strip() == _HOSTILE_STDOUT
-        assert result.returncode == 1
+        assert result.returncode == 0
 
     def test_the_shipped_text_is_unaffected_by_escaping(self, tmp_path: Path) -> None:
         """No catalogue entry needs escaping today, and the output is unchanged."""

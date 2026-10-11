@@ -1,6 +1,6 @@
 # Plan 00488: status line visible during daemon outage
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-03
 **Owner**: joseph
 **Priority**: High
@@ -47,15 +47,15 @@ read `⚠️ DAEMON FAILED`, which misdescribes a normal, self-healing state.
 
 ### Phase 1: Exit contract per raw_stdout event
 
-- [ ] ⬜ **Task 1.1**: RED — change `tests/unit/install/test_forwarder_generator_raw_stdout.py` so the STATUS_LINE forwarder must end its daemon-down branch with `exit 0` (it currently asserts `exit 1`, pinning the defect), and WORKTREE_CREATE keeps `exit 1`
-- [ ] ⬜ **Task 1.2**: GREEN — make the exit code a per-event catalogue property (alongside `daemon_down_stdout`) instead of hard-coding `exit 1` in `_render_raw_stdout_daemon_down_block`; a display event exits 0, a value event exits 1
-- [ ] ⬜ **Task 1.3**: Regenerate the deployed forwarders and confirm `.claude/hooks/status-line` changed
+- [x] ✅ **Task 1.1**: RED — change `tests/unit/install/test_forwarder_generator_raw_stdout.py` so the STATUS_LINE forwarder must end its daemon-down branch with `exit 0` (it currently asserts `exit 1`, pinning the defect), and WORKTREE_CREATE keeps `exit 1`
+- [x] ✅ **Task 1.2**: GREEN — make the exit code a per-event catalogue property (alongside `daemon_down_stdout`) instead of hard-coding `exit 1` in `_render_raw_stdout_daemon_down_block`; a display event exits 0, a value event exits 1
+- [x] ✅ **Task 1.3**: Regenerate the deployed forwarders and confirm `.claude/hooks/status-line` changed
 
 ### Phase 2: Name the outage
 
-- [ ] ⬜ **Task 2.1**: RED — tests for `init.sh` setting `_HOOKS_DAEMON_STATUS_DOWN_TEXT` in the venv-missing branch: a "venv building" text while the Plan 00456 self-heal build is running, a distinct text when no self-heal is possible (damaged clone, orphan venv), and one for version mismatch
-- [ ] ⬜ **Task 2.2**: GREEN — set those texts in `init.sh` where `_HOOKS_DAEMON_VENV_MISSING` / `_HOOKS_DAEMON_VERSION_MISMATCH` / the bootstrap state are decided; keep each line short enough for a status bar
-- [ ] ⬜ **Task 2.3**: Check `status-line-explained` (Plan 00369) and `CLAUDE/Architecture/StatusLine.md` describe the down texts; update the one canonical home
+- [x] ✅ **Task 2.1**: RED — tests for `init.sh` setting `_HOOKS_DAEMON_STATUS_DOWN_TEXT` in the venv-missing branch: a "venv building" text while the Plan 00456 self-heal build is running, a distinct text when no self-heal is possible (damaged clone, orphan venv), and one for version mismatch
+- [x] ✅ **Task 2.2**: GREEN — set those texts in `init.sh` where `_HOOKS_DAEMON_VENV_MISSING` / `_HOOKS_DAEMON_VERSION_MISMATCH` / the bootstrap state are decided; keep each line short enough for a status bar
+- [x] ✅ **Task 2.3**: Check `status-line-explained` (Plan 00369) and `CLAUDE/Architecture/StatusLine.md` describe the down texts; update the one canonical home
 
 ### Phase 3: Fresh clone recovers with no human step
 
@@ -67,7 +67,7 @@ was happening.
 
 - [ ] ⬜ **Task 3.1**: Acceptance test from a genuinely fresh clone, in BOTH install modes (self-install and a client project with `.claude/hooks-daemon/`): no venv anywhere, open a session, take no manual step. Assert the venv builds, the daemon starts, and the status line goes from "venv building" to normal. Record gaps found
 - [ ] ⬜ **Task 3.2**: Decide (owner input) how to treat the unprotected build window. Options: PreToolUse waits on the build lock up to a bound, or denies with "daemon still building" instead of failing open, or keep failing open but announce it every turn. Record the decision in the plan's owner-decisions file and implement it
-- [ ] ⬜ **Task 3.3**: Plan counter drift on a new checkout. `hooksdaemon.latestPlanNumber` read 414 against 487 plans on disk, and `mkplan.bash` refused until it was reconciled by hand. The counter lives in `.git/config`, so a fresh clone or a second view drifts. When the on-disk maximum is ahead, reconcile it automatically (the counter can only move forward) instead of refusing
+- [x] ✅ **Task 3.3**: Plan counter drift on a new checkout. `hooksdaemon.latestPlanNumber` read 414 against 487 plans on disk, and `mkplan.bash` refused until it was reconciled by hand. The counter lives in `.git/config`, so a fresh clone or a second view drifts. When the on-disk maximum is ahead, reconcile it automatically (the counter can only move forward) instead of refusing
 
 ### Phase 4: Verify live
 

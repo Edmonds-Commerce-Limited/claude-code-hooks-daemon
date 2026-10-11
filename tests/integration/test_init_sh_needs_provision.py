@@ -236,7 +236,8 @@ class TestStatusLine:
 
         assert not result.stdout.lstrip().startswith("{")
 
-    def test_a_venv_less_clone_keeps_the_generic_marker(self, tmp_path: Path) -> None:
+    def test_a_venv_less_clone_names_the_missing_venv(self, tmp_path: Path) -> None:
+        """Not NEEDS_PROVISION: a clone is present, so Plan 00488 names the venv state."""
         project = _fresh_clone(tmp_path)
         resolve_venv = project / ".claude" / "hooks-daemon" / "scripts" / "lib" / "resolve_venv.sh"
         resolve_venv.parent.mkdir(parents=True)
@@ -244,7 +245,8 @@ class TestStatusLine:
 
         result = _run(project, "status-line")
 
-        assert result.stdout.strip() == "⚠️ DAEMON FAILED"
+        assert "VENV MISSING" in result.stdout
+        assert PROVISION_COMMAND not in result.stdout
 
 
 class TestWarnMode:

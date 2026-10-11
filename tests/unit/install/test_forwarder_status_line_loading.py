@@ -86,7 +86,8 @@ def test_status_line_genuine_failure_is_still_reported_distinctly(tmp_path: Path
     result = _run_with_init_sh(tmp_path, "status-line", _DAEMON_DOWN_INIT_SH)
 
     assert result.stdout.strip() == "⚠️ DAEMON FAILED"
-    assert result.returncode == 1
+    # Exit 0: Claude Code renders nothing for a failing status line (GitHub #72).
+    assert result.returncode == 0
     assert "daemon_startup_failed" in result.stderr
 
 
