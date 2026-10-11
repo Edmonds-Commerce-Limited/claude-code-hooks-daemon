@@ -1566,7 +1566,7 @@ with "this commit was NOT checked ... the directory needs an expansion the daemo
 without `cd` allows. Path judgement has resolved the one-level `$(git rev-parse --show-toplevel)` since FP batch 2;
 the commit gates do not.
 
-**Status**: ⬜ Open for part (b) only. (a) 🟢 Fixed on branch `agent-a8b2dfbb8ae318a8c-68c99312`: `placement_problem` and
+**Status**: ⬜ Open for part (b) only. (a) 🟢 Fixed by batch E (merged in f189ea120): `placement_problem` and
 `invocation_directory` take the start directory and read a `cd` or `-C` operand spelled `$(git rev-parse --show-toplevel)`, `$PWD`, `${PWD}` or `$(pwd)` through `expand_cwd_references`, the reading `substitute_cwd_expansions`
 (path judgement) now shares; each step is read in the directory the earlier `cd` steps reached. All five callers pass
 their start directory (conflict marker gate, two `destructive_git` branch/remote delete checks, `merge_qa_advisor`,
@@ -1585,7 +1585,7 @@ fail-closed. Until (b) is ruled, `cd $PROJ && git commit` stays denied.
 `-c core.x=1` or `-c user.email=…` global option before `commit` is denied. `-m "$(cat <<'EOF'…)"` with `-c` is
 allowed. So the quoted heredoc body is read as code only when a `-c` global option precedes `commit`.
 
-**Status**: 🟢 Fixed on branch `agent-a8b2dfbb8ae318a8c-68c99312`. The heredoc-sink reader
+**Status**: 🟢 Fixed by batch E (merged in f189ea120). The heredoc-sink reader
 (`_git_data_subcommand_index`, the one place that skips git's global options for a body fed to `git`) now steps over a
 `-c key=value` whose key runs nothing, so the decision is the one it makes without `-c`. A key
 git RUNS (`core.fsmonitor`, `core.pager`, `*.program`, `*.helper` and the like) or a value an expansion leaves
@@ -1601,7 +1601,7 @@ shape under `gh issue comment` are denied (`destructive_git` for `reset --hard`,
 `--body-file - <<'EOF'`, plain-text bodies and `git commit -m "$(cat <<'EOF'…)"` are allowed. This is the standard
 PR-body idiom, and the ordinary shape of any PR or comment that describes a blocked command.
 
-**Status**: 🟢 Fixed on branch `agent-a8b2dfbb8ae318a8c-68c99312`. `strip_message_bodies` (the `-m`/`-F` message
+**Status**: 🟢 Fixed by batch E (merged in f189ea120). `strip_message_bodies` (the `-m`/`-F` message
 reader that already treats `"$(cat <<'EOF' … EOF)"` as data) now also reads `--body`/`-b` when the owning command is
 `gh pr|issue|release|gist|api` (the groups `_GH_DATA_SUBCOMMANDS` names for the batch (b) `gh` heredoc sink); no
 parallel parser. An unquoted `<<EOF` body, a `cat … | bash` pipe, a bare `--body "$(git reset --hard)"` and a `-b` on
@@ -1672,7 +1672,7 @@ depended on where QA runs.
 **Status**: 🟡 Half fixed. The `find -exec` half is done; the copy-operand half stays open.
 
 - Done: `FIND_EXEC_ACTIONS`, `FIND_EXEC_TERMINATORS` and `find_exec_end` live in `utils/find_expression.py`
-  (`recursive_search.py` imports them), and the
+  (`recursive_search.py` imports `FIND_EXEC_ACTIONS` and `find_exec_end`), and the
   five private copies are gone. All five held the same four members. Terminator handling matched too, except that
   `worktree_file_copy.py` also ends an action on `\;` (its words keep the backslash when the shell text cannot be
   resolved); the other readers never saw that spelling. That handler keeps `_FIND_EXEC_END = FIND_EXEC_TERMINATORS | {"\\;"}`, passed to `find_exec_end`, so no verdict moved. `tests/unit/handlers/test_find_exec_actions_characterisation.py`
