@@ -41,7 +41,7 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 | N372–N370  | Daemon-docs guard on the repo folder name, per-clone plan counter, sed guard on a `git -C` message                                    | Write-up            | ✅ Fixed                            |
 | N369       | A forwarder integration test fails inside every harness worktree and passes on main                                                   | Write-up            | ✅ Fixed (batch AC)                 |
 | N368–N362  | Fact-checker evidence, QA venv recipe, `git config` read, fenced token, `bash -c` pipe, merged-branch delete                          | Write-up            | ✅ Fixed                            |
-| N361       | The fake-values registry is not pre-filled; a commit-time BLOCK for a bad entry names no severity                                     | Write-up            | ✅ Fixed; 🔄 ruled A (batch AM)     |
+| N361       | The fake-values registry is not pre-filled; a commit-time BLOCK for a bad entry names no severity                                     | Write-up            | ✅ Fixed (batch M, AM)             |
 | N360–N355  | Opt-in handlers across an upgrade, fact-check feed and records, protected-file index, nested-eval cost                                | Write-up            | ✅ Fixed                            |
 | N354       | The upgrade guard denies a `PYTHONPATH=… python -c` probe; a name built at run time is unseen (threat model)                          | Write-up            | ✅ Fixed; 🚫 limit                  |
 | N353–N343  | Dismissive-language, scan deadline, lock file, glob caps, scaling harness, timeouts, journal conflicts, CHANGELOG                     | Write-up            | ✅ Fixed                            |
@@ -52,7 +52,7 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 | N335–N331  | `/doctor prompt-audit` compared; `.claude/rules` loading is no defect; `run_in_background` text                                       | Plan 00486          | ✅ Fixed or closed                  |
 | N334       | Re-check the supervisor's post-compaction `/goal` and `continue` re-injection (live supervisor)                                       | Plan 00486          | 🔄 Ruled check, remove; #106        |
 | N333       | How `usage_pause` should interact with Claude Code's "continue automatically at usage limit"                                          | Plan 00486          | ✅ Ruled A: left alone              |
-| N330       | Read `rate_limits.spend_limit` in `core/usage_snapshot.py`; adopt when a consumer is wanted                                           | Plan 00486          | 🔄 Ruled adopt (batch AM)           |
+| N330       | Read `rate_limits.spend_limit` in `core/usage_snapshot.py`; adopt when a consumer is wanted                                           | Plan 00486          | ✅ Fixed (batch AM)                 |
 | N329–N312  | Changelog-review and gate follow-ups: errexit, gated-install record, relay build, journal QA, module length                           | Write-up            | ✅ Fixed                            |
 | N311       | `upgrade_approval_guard` denies `(PYTHONPATH=… python -m pytest …)` in a subshell                                                     | Safe-mode agent     | ✅ Fixed (22429c3a5)                |
 | N310       | `changed` selects no tests for "too-broad" files, so template/priority invariants broke main unseen                                   | Coordinator         | 🔄 Instances fixed (2be30049c)      |

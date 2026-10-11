@@ -50,8 +50,8 @@ Counted by the status column's emoji:
   - 12 are in progress (🔄): batches AL, AM and AN, the supervisor items, or a GitHub issue;
   - 1 stays part-fixed (🟡, N376), with its remainder tracked in #107;
   - the new work the owner asked for is filed as GitHub Issues #106 to #110. #104, the usage-aware sub-agent cutoff, came from a separate owner request the same day, not from this sheet.
-- 105 rows carry ✅ (fixed, dismissed, remedied or closed); 7 of them also count below (1 🔄, 6 🚫 limits).
-- 7 rows record a deliberate limit (🚫); 20 are in progress or graduated (16 🔄, 3 🟡, 1 ↩️).
+- 106 rows carry ✅ (fixed, dismissed, remedied or closed); 6 of them also carry a 🚫 limit.
+- 7 rows record a deliberate limit (🚫); 18 are in progress or graduated (14 🔄, 3 🟡, 1 ↩️).
 
 ## Tasks
 
