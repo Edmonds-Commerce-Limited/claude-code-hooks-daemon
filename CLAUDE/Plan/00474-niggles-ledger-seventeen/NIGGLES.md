@@ -1612,6 +1612,22 @@ list, so `os.execv*`/`pty.spawn` of a grown list and `list.insert`/`a = a + [...
 `TestResidualPythonRoutesToAFullRun` and the `n409-python-heredoc-mutated-*`/`asyncio-targeted` corpus rows. Report:
 `subagent-reports/261011-batch-x-sonnet.md`.
 
+Batch X round 2 (review FIX FIRST): a comprehension/generator/set/dict target is now bound to its iterable in
+`_bindings` (a grown or plain list run as `[run(c) for c in cmds]` is denied, which also closes the plain-literal gap on
+main); a list belongs to the function it is built in and only the literal in effect at a running call is set aside
+(`_function_scopes`, `_states_after`); the work is bounded (64 words per call, one sweep per list, memoised alias
+roots, charged to the parse meter): reviewer perf inputs went 15 s / 7 s / 6 s to about 0.2-0.45 s against 0.1-0.2 s on
+main. `run_path` only matches `runpy.run_path` (or a name imported from `runpy`); `exec(compile(open(f).read(), ...))`
+and `with open(f) as h: exec(h.read())` are read.
+
+Residuals under N409, not fixed (all also allowed on main unless noted): `.insert`/`.pop`, `a = a + [...]`,
+`cmd.extend(other_named_list)` (starred name not resolved), a grown list returned from a function, `' '.join(grown)` run
+with a shell, a grown attribute list (`c.a.append`), a `list(a)` copy / slice / tuple of a grown list, a keyword-unpacked
+`**kw` argv, `os.exec*` and `pty.spawn` of a grown list; an `asyncio.create_subprocess_exec` program given by keyword;
+`f = open(p); exec(f.read())`. The in-process file reader (`exec`/`run_path`, as `python3 <path>` on main) follows
+symlinks and does not exclude `secret_file_guard`'s protected paths; the right fix is one exclusion in `_read_new` for
+every route at once, not per route.
+
 ### N408 — `gh_issue_comments`/`gh_pr_comments` deny mentions and miss `--json=comments`
 
 **Source**: Plan 00483 Task 3.2 re-probe (2026-10-11), proposal P8, probes ghc1-ghc3, ghc5, ghc8, ghc9 (report as

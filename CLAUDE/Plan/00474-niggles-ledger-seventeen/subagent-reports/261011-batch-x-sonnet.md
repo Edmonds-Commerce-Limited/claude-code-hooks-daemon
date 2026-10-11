@@ -37,6 +37,26 @@ exist in the repo root, and a missing script is allowed by the handler's existin
 such file allows; the process would fail before running anything). With a `runner.py` that runs a full suite present,
 it denies (tested with a tmp_path file). No other probe CASE fails (the baseline for the other CASES was not run).
 
+## Round 2 (review FIX FIRST)
+
+- Comprehension bypass: `_bindings` binds `ast.comprehension` targets to their iterable (list, generator, set, dict).
+  Deny rows added for each shape, for append/extend/`+=`, a shell string and a bare `['pytest']`.
+- Literal hidden module-wide: lists are keyed by (function, name) (`_function_scopes`); only the literal of the last
+  replacing assignment before a running call is set aside. Two-function deny rows added (both orders).
+- Quadratic cost: `_list_changes` sorts once; `_states_after` is one sweep per list; alias roots memoised in a set;
+  at most 64 words per call; words charged to the parse meter (past it, lists are judged as written). Timing tests: the
+  reviewer's 3000-alias/300-run and 2000 append-and-run scripts finish in under 1.5 s.
+- Perf (perf2.sh, branch vs main, noisy host): alias chain 40 KB 0.44 s vs 0.15 s; alias fan 0.32 s vs 0.18 s;
+  2000 append-run 0.46 s vs 0.19 s (was 15.1 s, 7.2 s, 5.8 s). perf.sh n=500: interleaved 0.22 vs 0.10, async spread
+  0.29 vs 0.26, exec_many 0.14 vs 0.17.
+- Renamed the directory test to `..._is_absent_like_a_script` and asserted both None; added a FIFO test asserting both deny.
+- `run_path` is `runpy.run_path` (aliased module, or imported name) only; `router.run_path(...)` runs nothing.
+- Also read: `exec(compile(open(f).read(), ...))`, `with open(f) as h: exec(h.read())`.
+- Probes (run2.sh, branch vs main): test_probe_x 14 failing on branch vs 27 on main; x2 4 vs 5; x3 0 vs 2; x4 4 vs 4
+  (param/loop allow cases, pre-existing false denies identical on main). Every row failing on the branch also fails on
+  main; no row is weaker than main.
+- Checks: handler tests plus corpus gate 1683 passed; black, ruff, mypy, pyright clean.
+
 ## Left
 
 - Absent file named by exec/run_path allows (above).
