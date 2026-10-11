@@ -1,4 +1,4 @@
-"""The pre-deploy upgrade gate (Plan 00376 Phase 3).
+"""The pre-deploy upgrade gate (Plan 00376 Phase 3; Plan 00503 removed owner approval).
 
 Layer 2 (``scripts/upgrade_version.sh``) runs this once the daemon checkout
 sits on the target and before anything is deployed into the project. It
@@ -12,12 +12,16 @@ returns one verdict:
   not passed ``--skip-reading-confirmation=<digest>`` with the digest of THIS
   listing. There is no terminal inference: an agent and a human get the same
   stop.
-- ``NEEDS_APPROVAL`` -- the upgrade breaks the project, so the owner must
-  approve it: a MAJOR bump, a crossed config-changes manifest declaring
-  ``breaking: true``, a ``critical`` pre-upgrade task detected in the project,
-  or a range the gate cannot read. The approval is a marker only
-  :func:`run_approval` writes -- it needs a terminal and a typed phrase naming
-  both versions -- bound to this upgrade's from/to versions and install path.
+
+What breaks the project -- a MAJOR bump, a crossed config-changes manifest
+declaring ``breaking: true``, a ``critical`` pre-upgrade task detected in the
+project, or a range the gate cannot read -- is listed first and prominently in
+that same reading. It stops nothing on its own: confirming the reading is the
+whole gate.
+
+A large jump (a MAJOR boundary, or more than :data:`PHASE_MINOR_RELEASES` minor
+releases) also prints advice to upgrade in phases through an intermediate
+release. It is advice only and never changes the verdict or the exit code.
 
 The FROM side is what is INSTALLED (:func:`installed_version`): the venv's
 stamp, else the project's committed ``HOOKS-DAEMON.md`` marker. The checkout is
@@ -26,13 +30,13 @@ sits on the target and would make every range empty. Only the stamp is
 verified, though: the marker is an ordinary tracked file an agent edits
 routinely, so a marker-derived FROM that has caught up to or passed the target
 (``evaluate_gate``'s ``from_untrusted``) is never read as "nothing to
-install" -- it gets ``NEEDS_APPROVAL`` like any other range the gate cannot
-vouch for, the same answer a venv stamp already at the target gets with no
-matching :func:`gated_install_stamp` receipt.
+install" -- it is listed as a range the gate cannot vouch for, the same answer
+a venv stamp already at the target gets with no matching
+:func:`gated_install_stamp` receipt.
 
 The caller (bash) turns a stop into an abort that puts the daemon checkout
 back on the installed version (Task 1.2), so a stopped upgrade deploys
-nothing, and removes a used approval only once the upgrade has completed.
+nothing.
 
 Standard library only, like everything it loads: it runs before the target's
 venv exists (see ``upgrade_gate_standalone.py``).
@@ -51,13 +55,15 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Final, TextIO
+from typing import Final
 
 from claude_code_hooks_daemon.daemon.install_layout import get_untracked_dir
 from claude_code_hooks_daemon.install.upgrade_guides import (
     UNRELEASED_DIRNAME,
     UPGRADES_SUBPATH,
+    crossed_guide_dirs,
     guide_documents,
+    guide_target_release,
     release_tuple,
 )
 from claude_code_hooks_daemon.install.upgrade_tasks import (
@@ -70,21 +76,19 @@ from claude_code_hooks_daemon.install.upgrade_tasks import (
 )
 from claude_code_hooks_daemon.install.version_parse import strip_tag_prefix
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
-from claude_code_hooks_daemon.utils.one_shot_approval import OneShotApprovalStore
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
-from claude_code_hooks_daemon.utils.path_predicates import path_is_file, read_text_or_reason
 
 logger = logging.getLogger(__name__)
 
-#: Sub-directory of the daemon's untracked dir holding upgrade approvals.
-APPROVAL_SUBDIR: Final[str] = "upgrade-approvals"
+#: Sub-directory of the daemon's untracked dir holding the gated-install receipt.
+GATED_INSTALL_SUBDIR: Final[str] = "upgrade-gate"
 #: The flag a caller passes to confirm it has read the listing; its value is
 #: the listing's digest.
 SKIP_READING_FLAG: Final[str] = "--skip-reading-confirmation"
-#: The human's command; the version and ``--from`` are appended.
-APPROVE_COMMAND: Final[str] = "hooks-daemon approve-upgrade"
-#: What an unreadable installed version is recorded as in an approval.
+#: What an unreadable installed version is called in the listing and its digest.
 UNKNOWN_VERSION: Final[str] = "unknown"
+#: More minor releases than this in one upgrade earns the advice to go in phases.
+PHASE_MINOR_RELEASES: Final[int] = 10
 #: Where the project's generated daemon document records the installed release.
 HOOKS_DAEMON_DOC: Final[Path] = Path(".claude") / "HOOKS-DAEMON.md"
 
@@ -102,26 +106,19 @@ _RELEASE_RE: Final[re.Pattern[str]] = re.compile(r"^[vV]?\d+(?:\.\d+){0,2}(?:\+\
 _DOC_MARKER_RE: Final[re.Pattern[str]] = re.compile(r"Generated on [^(\n]*\(v(\d+\.\d+\.\d+)\)")
 _DIGEST_LENGTH: Final[int] = 12
 _RULE: Final[str] = "=" * 70
-_APPROVAL_PHRASE: Final[str] = "approve upgrade from {frm} to v{to}"
 _UNKNOWN_FROM_PHRASE: Final[str] = "an unknown version"
-_STANDALONE_REL: Final[str] = "src/claude_code_hooks_daemon/install/upgrade_gate_standalone.py"
-_APPROVAL_USED_PREFIX: Final[str] = "approval-marker="
 _VERDICT_PREFIX: Final[str] = "verdict="
 _NONCE_PREFIX: Final[str] = "nonce="
 #: Only the gate's own user may read or write its verdict file.
 _VERDICT_FILE_MODE: Final[int] = 0o600
 _EARLIEST_RELEASE: Final[str] = "0.0.0"
-#: What the gate last let through, in the approvals directory the upgrade
-#: guard already keeps agents from writing.
+#: What the gate last let through.
 GATED_INSTALL_FILENAME: Final[str] = "gated-install.json"
 _FIELD_STAMP: Final[str] = "stamp"
 _FIELD_RECORDED_AT: Final[str] = "recorded_at"
 
-_FIELD_TO: Final[str] = "to"
-_FIELD_FROM: Final[str] = "from"
 _FIELD_DAEMON_DIR: Final[str] = "daemon_dir"
 _FIELD_PROJECT_ROOT: Final[str] = "project_root"
-_FIELD_APPROVED_AT: Final[str] = "approved_at"
 
 
 class GateVerdict(Enum):
@@ -129,28 +126,17 @@ class GateVerdict(Enum):
 
     PROCEED = "proceed"
     NEEDS_ACKNOWLEDGEMENT = "needs-acknowledgement"
-    NEEDS_APPROVAL = "needs-approval"
 
     @property
     def exit_code(self) -> int:
-        """0 to proceed; 3 and 4 to stop (1 is a crash and 2 an argparse error)."""
+        """0 to proceed; 3 to stop for the reading (1 is a crash and 2 an argparse error)."""
         return _EXIT_CODES[self]
 
 
 _EXIT_CODES: Final[dict[GateVerdict, int]] = {
     GateVerdict.PROCEED: 0,
     GateVerdict.NEEDS_ACKNOWLEDGEMENT: 3,
-    GateVerdict.NEEDS_APPROVAL: 4,
 }
-
-
-class ApprovalState(Enum):
-    """What the approval store holds for one upgrade."""
-
-    ABSENT = "absent"
-    VALID = "valid"
-    INVALID = "invalid"
-    UNREADABLE = "unreadable"
 
 
 @dataclass(frozen=True)
@@ -171,10 +157,8 @@ class GateReport:
     digest: str
     acknowledgement: str | None
     verdict: GateVerdict
-    approval_marker: Path
-    approval_state: ApprovalState
-    approval_used: Path | None = None
     notes: list[str] = field(default_factory=list)
+    advisories: list[str] = field(default_factory=list)
 
     @property
     def applicable(self) -> list[TaskFinding]:
@@ -191,13 +175,13 @@ def _is_release(version: str | None) -> bool:
     return bool(version) and _RELEASE_RE.match(str(version)) is not None
 
 
-def approval_key(version: str) -> str:
-    """The release a marker approves, build metadata and ``v`` dropped (``4.0.0``)."""
+def release_key(version: str) -> str:
+    """The release a version names, build metadata and ``v`` dropped (``4.0.0``)."""
     return ".".join(str(part) for part in release_tuple(version))
 
 
 def _version_key(version: str | None) -> str:
-    return approval_key(version) if version and _is_release(version) else UNKNOWN_VERSION
+    return release_key(version) if version and _is_release(version) else UNKNOWN_VERSION
 
 
 def installed_version(installed_stamp: str | None, project_root: Path) -> tuple[str | None, str]:
@@ -209,7 +193,7 @@ def installed_version(installed_stamp: str | None, project_root: Path) -> tuple[
     when neither can be read.
     """
     if installed_stamp and _is_release(installed_stamp):
-        return approval_key(installed_stamp), SOURCE_VENV_STAMP
+        return release_key(installed_stamp), SOURCE_VENV_STAMP
     doc = project_root / HOOKS_DAEMON_DOC
     if doc.is_file():
         match = _DOC_MARKER_RE.search(doc.read_text(encoding="utf-8", errors="replace"))
@@ -324,78 +308,63 @@ def _digest(
     return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()[:_DIGEST_LENGTH]
 
 
-def _approval_payload(
-    *, to_version: str, from_version: str | None, daemon_dir: Path, project_root: Path
-) -> dict[str, str]:
-    return {
-        _FIELD_TO: approval_key(to_version),
-        _FIELD_FROM: _version_key(from_version),
-        _FIELD_DAEMON_DIR: str(daemon_dir.resolve()),
-        _FIELD_PROJECT_ROOT: str(project_root.resolve()),
-    }
+def _guide_targets(upgrades_dir: Path, from_version: str, to_version: str) -> list[tuple[int, ...]]:
+    """The release each crossed guide directory leads to, oldest first."""
+    targets = (
+        guide_target_release(guide_dir)
+        for guide_dir in crossed_guide_dirs(upgrades_dir, from_version, to_version)
+    )
+    return [target for target in targets if target is not None]
 
 
-def write_approval(
-    untracked_dir: Path,
-    *,
-    to_version: str,
-    from_version: str | None,
-    daemon_dir: Path,
-    project_root: Path,
-) -> Path:
-    """Record the owner's approval for exactly this upgrade; return the marker path.
+def _tag(release: tuple[int, ...]) -> str:
+    return "v" + ".".join(str(part) for part in release)
 
-    Called by :func:`run_approval` only, once the owner has typed the phrase.
+
+def phasing_advice(upgrades_dir: Path, from_version: str, to_version: str) -> list[str]:
+    """Advice to upgrade in phases when the jump is large; empty when it is not.
+
+    A jump is large when it crosses a MAJOR boundary, or spans more than
+    :data:`PHASE_MINOR_RELEASES` minor releases of one major. The intermediate
+    release named is one the upgrade tree knows (a crossed guide's target), so
+    it is a real release newer than the installed one. A MAJOR jump with no
+    such release known (the installed version is already the last of its
+    major) gets no advice, since there is no stop to name. This is advice
+    only: nothing here stops an upgrade or changes an exit code.
     """
-    payload = _approval_payload(
-        to_version=to_version,
-        from_version=from_version,
-        daemon_dir=daemon_dir,
-        project_root=project_root,
-    )
-    payload[_FIELD_APPROVED_AT] = datetime.now(UTC).isoformat(timespec="seconds")
-    marker = OneShotApprovalStore(APPROVAL_SUBDIR).path(untracked_dir, payload[_FIELD_TO])
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    return marker
-
-
-def check_approval(
-    untracked_dir: Path,
-    *,
-    to_version: str,
-    from_version: str | None,
-    daemon_dir: Path,
-    project_root: Path,
-) -> ApprovalState:
-    """Whether a marker for ``to_version`` exists and approves THIS upgrade."""
-    expected = _approval_payload(
-        to_version=to_version,
-        from_version=from_version,
-        daemon_dir=daemon_dir,
-        project_root=project_root,
-    )
-    marker = OneShotApprovalStore(APPROVAL_SUBDIR).path(untracked_dir, expected[_FIELD_TO])
-    is_file = path_is_file(marker, unreadable_means=None)
-    if is_file is None:
-        return ApprovalState.UNREADABLE
-    if not is_file:
-        return ApprovalState.ABSENT
-    read = read_text_or_reason(marker, errors="replace")
-    if read.text is None:
-        return ApprovalState.UNREADABLE
-    try:
-        recorded = json.loads(read.text)
-    except json.JSONDecodeError:
-        return ApprovalState.INVALID
-    if not isinstance(recorded, dict):
-        return ApprovalState.INVALID
-    matches = all(recorded.get(name) == value for name, value in expected.items())
-    return ApprovalState.VALID if matches else ApprovalState.INVALID
+    from_v = release_tuple(from_version)
+    to_v = release_tuple(to_version)
+    if from_v >= to_v:
+        return []
+    known = _guide_targets(upgrades_dir, from_version, to_version)
+    target = _tag(to_v)
+    if to_v[0] > from_v[0]:
+        last_of_current = [release for release in known if release[0] == from_v[0]]
+        if not last_of_current:
+            return []
+        return [
+            f"This upgrade crosses a MAJOR boundary (v{from_v[0]}.x -> v{to_v[0]}.x). "
+            f"Consider upgrading in phases: go to {_tag(max(last_of_current))} first, "
+            f"check the project works, then continue to {target}."
+        ]
+    if to_v[1] - from_v[1] > PHASE_MINOR_RELEASES:
+        reachable = [
+            release
+            for release in known
+            if release[:2] <= (from_v[0], from_v[1] + PHASE_MINOR_RELEASES)
+        ]
+        stop = _tag(max(reachable)) if reachable else "an intermediate release"
+        return [
+            f"This upgrade spans {to_v[1] - from_v[1]} minor releases "
+            f"(v{from_v[0]}.{from_v[1]} -> v{to_v[0]}.{to_v[1]}). "
+            f"Consider upgrading in phases: go to {stop} first, check the project works, "
+            f"then continue to {target}."
+        ]
+    return []
 
 
 def _gated_install_path(untracked_dir: Path) -> Path:
-    return untracked_dir / APPROVAL_SUBDIR / GATED_INSTALL_FILENAME
+    return untracked_dir / GATED_INSTALL_SUBDIR / GATED_INSTALL_FILENAME
 
 
 def _install_binding(daemon_dir: Path, project_root: Path) -> dict[str, str]:
@@ -414,12 +383,10 @@ def record_gated_install(
     already equals the target (fresh review MAJOR 1): ``hooks-daemon repair``
     after a manual checkout writes the same stamp with no gate involved.
 
-    review2 MINOR 3, stated plainly: this record is unsigned JSON, protected
-    only by ``upgrade_approval_guard`` denying a write under
-    ``upgrade-approvals/`` by any agent route. It carries no FROM version and
-    nothing binds it to a git commit. A forged marker already grants an
-    upgrade's approval (the same guard, the same predicate); this is not a
-    stronger class of defence than that one, and should not be cited as one.
+    Stated plainly: this record is unsigned JSON that nothing protects. It
+    carries no FROM version and nothing binds it to a git commit. It only
+    keeps a careless repair from reading as a gated install; it is not a
+    defence against anyone forging it.
     """
     payload = _install_binding(daemon_dir, project_root)
     payload[_FIELD_STAMP] = stamp
@@ -476,24 +443,15 @@ def _decide(
     findings: list[TaskFinding],
     escalations: list[str],
     acknowledgement: str | None,
-    marker: Path,
-    state: ApprovalState,
     notes: list[str],
+    advisories: list[str],
 ) -> GateReport:
     digest = _digest(daemon_dir, from_version, to_version, guides, findings, escalations)
     has_reading = bool(guides or escalations or [f for f in findings if f.applies is not False])
-    used: Path | None = None
-    if not has_reading:
-        verdict = GateVerdict.PROCEED
-    elif acknowledgement != digest:
+    if has_reading and acknowledgement != digest:
         verdict = GateVerdict.NEEDS_ACKNOWLEDGEMENT
-    elif not escalations:
-        verdict = GateVerdict.PROCEED
-    elif state is ApprovalState.VALID:
-        verdict = GateVerdict.PROCEED
-        used = marker
     else:
-        verdict = GateVerdict.NEEDS_APPROVAL
+        verdict = GateVerdict.PROCEED
     return GateReport(
         daemon_dir=daemon_dir,
         project_root=project_root,
@@ -509,10 +467,8 @@ def _decide(
         digest=digest,
         acknowledgement=acknowledgement,
         verdict=verdict,
-        approval_marker=marker,
-        approval_state=state,
-        approval_used=used,
         notes=notes,
+        advisories=advisories,
     )
 
 
@@ -525,10 +481,9 @@ def _unknown_range_report(
     target_ref: str,
     include_unreleased: bool,
     acknowledgement: str | None,
-    untracked_dir: Path,
     unknown_reason: str | None = None,
 ) -> GateReport:
-    """A range the gate cannot read: detect everything, and send it to the owner."""
+    """A range the gate cannot read: detect everything, and list why it is unreadable."""
     findings: list[TaskFinding] = []
     guides: list[Path] = []
     escalations: list[str] = []
@@ -545,11 +500,10 @@ def _unknown_range_report(
             include_unreleased=include_unreleased,
         )
         findings = evaluate(tasks, project_root)
-        # review4 follow-up: symmetric with the findings scan above -- an
-        # unknown FROM means show every guide up to TO, not none. Dropping
-        # this list left a guarded branch install (Plan 00291) informing the
-        # owner of nothing, including a staged UNRELEASED document it exists
-        # to surface, whenever the range could not be verified.
+        # Symmetric with the findings scan above: an unknown FROM means show
+        # every guide up to TO, not none, so a staged UNRELEASED document a
+        # guarded branch install (Plan 00291) exists to surface is still read
+        # whenever the range could not be verified.
         guides = _reading_list(upgrades_dir, _EARLIEST_RELEASE, to_version, include_unreleased)
     if unknown_reason is not None:
         escalations.append(unknown_reason)
@@ -560,18 +514,6 @@ def _unknown_range_report(
             "ruled out"
         )
     escalations.extend(_critical_escalations(findings, daemon_dir))
-    key = approval_key(to_version) if target_is_release else strip_tag_prefix(to_version)
-    state = (
-        check_approval(
-            untracked_dir,
-            to_version=to_version,
-            from_version=from_version,
-            daemon_dir=daemon_dir,
-            project_root=project_root,
-        )
-        if target_is_release
-        else ApprovalState.ABSENT
-    )
     return _decide(
         daemon_dir=daemon_dir,
         project_root=project_root,
@@ -584,9 +526,8 @@ def _unknown_range_report(
         findings=findings,
         escalations=escalations,
         acknowledgement=acknowledgement,
-        marker=OneShotApprovalStore(APPROVAL_SUBDIR).path(untracked_dir, key),
-        state=state,
         notes=[],
+        advisories=[],
     )
 
 
@@ -616,12 +557,9 @@ def evaluate_gate(
     this False.
     ``acknowledgement`` is the value the caller passed with
     ``--skip-reading-confirmation`` (None when it passed no flag); it counts
-    only when it equals this listing's digest. A valid approval is reported in
-    ``approval_used`` and left in place: the caller removes it once the
-    upgrade has completed, so a failure after the gate does not spend it.
+    only when it equals this listing's digest.
     """
-    ref = target_ref or (f"v{approval_key(to_version)}" if _is_release(to_version) else to_version)
-    store = OneShotApprovalStore(APPROVAL_SUBDIR)
+    ref = target_ref or (f"v{release_key(to_version)}" if _is_release(to_version) else to_version)
     if installed_stamp and target_stamp and installed_stamp == target_stamp:
         gated = gated_install_stamp(untracked_dir, daemon_dir=daemon_dir, project_root=project_root)
         if gated != target_stamp:
@@ -633,7 +571,6 @@ def evaluate_gate(
                 target_ref=ref,
                 include_unreleased=include_unreleased,
                 acknowledgement=acknowledgement,
-                untracked_dir=untracked_dir,
                 unknown_reason=(
                     f"the venv stamp says {target_stamp} is already installed, but no upgrade "
                     "through this gate installed it (a repair after a manual checkout writes "
@@ -655,14 +592,12 @@ def evaluate_gate(
             digest="",
             acknowledgement=acknowledgement,
             verdict=GateVerdict.PROCEED,
-            approval_marker=store.path(untracked_dir, strip_tag_prefix(to_version)),
-            approval_state=ApprovalState.ABSENT,
-            notes=[f"{target_stamp} is already installed: nothing new to read or approve."],
+            notes=[f"{target_stamp} is already installed: nothing new to read."],
         )
     # review2 BLOCKER 1: an untrusted FROM (the doc marker, not a venv stamp)
     # that has caught up to or passed the target is exactly as suspect as a
     # stamp with no matching receipt (checked above), and gets the same
-    # answer: an unknown range, sent to the owner. A trusted FROM (a real
+    # answer: an unknown range, listed as such. A trusted FROM (a real
     # stamp, or a caller that already knows its own installed release) is
     # unaffected and keeps deciding on the normal range logic below --
     # including a deliberate downgrade, which this is not: it has no receipt
@@ -682,7 +617,6 @@ def evaluate_gate(
             target_ref=ref,
             include_unreleased=include_unreleased,
             acknowledgement=acknowledgement,
-            untracked_dir=untracked_dir,
             unknown_reason=(
                 f"the installed version ({_from_label(from_version)}) is read only from "
                 f"{HOOKS_DAEMON_DOC.as_posix()} (no venv stamp names it), an ordinary tracked "
@@ -699,7 +633,6 @@ def evaluate_gate(
             target_ref=ref,
             include_unreleased=include_unreleased,
             acknowledgement=acknowledgement,
-            untracked_dir=untracked_dir,
         )
     upgrades_dir = daemon_dir / UPGRADES_SUBPATH
     notes: list[str] = []
@@ -707,6 +640,7 @@ def evaluate_gate(
     guides: list[Path] = []
     findings: list[TaskFinding] = []
     escalations: list[str] = []
+    advisories: list[str] = []
     if downgrade:
         notes.append("This is a downgrade: no upgrade guide describes it.")
     else:
@@ -722,6 +656,7 @@ def evaluate_gate(
         escalations = _escalations(
             daemon_dir, from_version, to_version, include_unreleased, findings
         )
+        advisories = phasing_advice(upgrades_dir, from_version, to_version)
     return _decide(
         daemon_dir=daemon_dir,
         project_root=project_root,
@@ -734,15 +669,8 @@ def evaluate_gate(
         findings=findings,
         escalations=escalations,
         acknowledgement=acknowledgement,
-        marker=store.path(untracked_dir, approval_key(to_version)),
-        state=check_approval(
-            untracked_dir,
-            to_version=to_version,
-            from_version=from_version,
-            daemon_dir=daemon_dir,
-            project_root=project_root,
-        ),
         notes=notes,
+        advisories=advisories,
     )
 
 
@@ -760,9 +688,13 @@ def _reading_lines(report: GateReport) -> list[str]:
         _RULE,
         f"Upgrading from {_from_label(report.from_version)} to v{to}",
     ]
+    if report.escalations:
+        lines.extend(["", "READ THIS FIRST: this upgrade is likely to break the project, because:"])
+        lines.extend(f"  ! {reason}" for reason in report.escalations)
     if not report.range_known:
         lines.extend(
             [
+                "",
                 "The gate does not know which version this project last installed,",
                 f"so every upgrade guide up to v{to} is listed. Read the ones newer",
                 "than the version you last installed.",
@@ -782,48 +714,13 @@ def _reading_lines(report: GateReport) -> list[str]:
         )
         for finding in applicable:
             lines.extend(format_findings_line(finding))
-    if report.escalations:
-        lines.extend(["", "This upgrade needs the project owner, because:"])
-        lines.extend(f"  ! {reason}" for reason in report.escalations)
     return lines
 
 
-def _approval_lines(report: GateReport) -> list[str]:
-    frm = _version_key(report.from_version)
-    to = approval_key(report.to_version) if _is_release(report.to_version) else report.to_version
-    daemon_dir = report.daemon_dir
-    lines = [
-        "",
-        "UPGRADE STOPPED before anything was deployed: this upgrade needs the project",
-        "owner's approval. An agent must not record it: report the reasons above to",
-        "the user and stop.",
-    ]
-    if report.approval_state is ApprovalState.INVALID:
-        lines.append(
-            f"(The marker at {report.approval_marker} was not written by approve-upgrade "
-            "for this upgrade, so it does not count.)"
-        )
-    if report.approval_state is ApprovalState.UNREADABLE:
-        lines.append(
-            f"(The marker at {report.approval_marker} exists but is unreadable, so it does "
-            "not count. Fix the file's permissions or ownership rather than approving again.)"
-        )
-    lines.extend(
-        [
-            "The owner approves ONE run of exactly this upgrade, in their own terminal (it",
-            "asks them to type a confirmation phrase naming both versions). With a daemon",
-            "that has the command:",
-            f"  .claude/hooks-daemon/bin/{APPROVE_COMMAND} {to} --from {frm}",
-            "or, from ANY installed version, with this release's own code (the gate's own",
-            "Python 3.11+ runs it):",
-            f'  tmp="$(mktemp -d)" && git -C "{daemon_dir}" archive {report.target_ref} src '
-            f'| tar -x -C "$tmp" && "{sys.executable}" "$tmp/{_STANDALONE_REL}" approve '
-            f'--daemon-dir "{daemon_dir}" --project-root "{report.project_root}" '
-            f"--from {frm} --to {to}",
-            f"Then re-run the upgrade with {SKIP_READING_FLAG}={report.digest}",
-        ]
-    )
-    return lines
+def _advisory_lines(report: GateReport) -> list[str]:
+    if not report.advisories:
+        return []
+    return ["", *(f"ADVICE: {advice}" for advice in report.advisories)]
 
 
 def _verdict_lines(report: GateReport) -> list[str]:
@@ -845,13 +742,7 @@ def _verdict_lines(report: GateReport) -> list[str]:
             ]
         )
         return lines
-    if report.verdict is GateVerdict.NEEDS_APPROVAL:
-        return _approval_lines(report)
-    lines = [""]
-    if report.approval_used is not None:
-        lines.append(f"✓ Owner's approval accepted ({report.approval_used}).")
-    lines.append(f"✓ Reading confirmed ({SKIP_READING_FLAG}); proceeding.")
-    return lines
+    return ["", f"✓ Reading confirmed ({SKIP_READING_FLAG}); proceeding."]
 
 
 def format_gate_report(report: GateReport) -> str:
@@ -860,8 +751,8 @@ def format_gate_report(report: GateReport) -> str:
         lines = [f"  {note}" for note in report.notes]
         if not report.already_installed:
             lines.append("✓ No upgrade guides or pre-upgrade tasks for this version range")
-        return "\n".join(lines)
-    return "\n".join(_reading_lines(report) + _verdict_lines(report))
+        return "\n".join(lines + _advisory_lines(report))
+    return "\n".join(_reading_lines(report) + _advisory_lines(report) + _verdict_lines(report))
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -899,7 +790,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--untracked-dir",
         type=Path,
         default=None,
-        help="Where approvals live (default: the project's daemon untracked dir)",
+        help="Where the gated-install receipt lives (default: the project's daemon untracked dir)",
     )
     parser.add_argument(
         "--verdict-file",
@@ -913,8 +804,6 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _write_verdict(path: Path, nonce: str, report: GateReport) -> None:
     lines = [f"{_NONCE_PREFIX}{nonce}", f"{_VERDICT_PREFIX}{report.verdict.value}"]
-    if report.approval_used is not None:
-        lines.append(f"{_APPROVAL_USED_PREFIX}{report.approval_used}")
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, _VERDICT_FILE_MODE)
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
         handle.write("\n".join(lines) + "\n")
@@ -924,11 +813,9 @@ def main(argv: list[str] | None = None) -> int:
     """Evaluate the gate, print its report to stderr, return the verdict's exit code.
 
     With ``--verdict-file`` the verdict is written there, first line the
-    caller's ``--nonce``, then ``verdict=<verdict>`` and, when an owner's
-    approval let the upgrade through, ``approval-marker=<path>`` for the
-    caller to remove once the upgrade completes. The caller believes a zero
-    exit only with that file (fresh review BLOCKER 1): a stdout line is what
-    any wrapper process can print. A PROCEED for a target stamp is recorded
+    caller's ``--nonce``, then ``verdict=<verdict>``. The caller believes a
+    zero exit only with that file (fresh review BLOCKER 1): a stdout line is
+    what any wrapper process can print. A PROCEED for a target stamp is recorded
     (:func:`record_gated_install`) as what the gate let through.
     """
     args = _build_parser().parse_args(argv)
@@ -999,7 +886,7 @@ def _build_record_install_parser() -> argparse.ArgumentParser:
         "--untracked-dir",
         type=Path,
         default=None,
-        help="Where approvals live (default: the project's daemon untracked dir)",
+        help="Where the gated-install receipt lives (default: the project's daemon untracked dir)",
     )
     return parser
 
@@ -1029,88 +916,3 @@ def record_install_main(argv: list[str] | None = None) -> int:
     )
     print(f"Recorded {args.stamp} as a gated install: {path}", file=sys.stderr)
     return 0
-
-
-def run_approval(
-    *,
-    project_root: Path,
-    daemon_dir: Path,
-    from_version: str | None,
-    to_version: str,
-    untracked_dir: Path,
-    stdin: TextIO,
-    stdout: TextIO,
-) -> int:
-    """The owner's approval of one upgrade: a terminal and a typed phrase, or nothing.
-
-    An agent's shell has no terminal on stdin, so this refuses it outright;
-    the phrase names both versions, so a human confirms the exact upgrade the
-    gate stopped. Returns 0 when the marker was written, 1 otherwise.
-    """
-    frm = _from_label(from_version)
-    to = approval_key(to_version)
-    if not stdin.isatty():
-        print(
-            "approve-upgrade must be run by the project owner in their own terminal: "
-            "there is no terminal on stdin, so nothing was approved.",
-            file=stdout,
-        )
-        return 1
-    phrase = _APPROVAL_PHRASE.format(frm=frm, to=to)
-    print(f"To approve ONE upgrade of {project_root} from {frm} to v{to}, type:", file=stdout)
-    print(f"  {phrase}", file=stdout)
-    stdout.flush()
-    answer = stdin.readline().strip()
-    if answer != phrase:
-        print("That is not the phrase, so nothing was approved.", file=stdout)
-        return 1
-    marker = write_approval(
-        untracked_dir,
-        to_version=to,
-        from_version=from_version,
-        daemon_dir=daemon_dir,
-        project_root=project_root,
-    )
-    print(f"Approved one upgrade from {frm} to v{to}; marker: {marker}", file=stdout)
-    print(
-        f"The upgrade re-run with {SKIP_READING_FLAG}=<digest> uses it, and removes it once "
-        "that upgrade completes.",
-        file=stdout,
-    )
-    return 0
-
-
-def _build_approve_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="upgrade-gate approve",
-        description="The project owner's one-shot approval of one upgrade (needs a terminal).",
-    )
-    parser.add_argument("--daemon-dir", type=Path, required=True, help="The daemon checkout")
-    parser.add_argument("--project-root", type=Path, required=True, help="The project")
-    parser.add_argument(
-        "--from",
-        dest="from_version",
-        required=True,
-        help=f"The installed release the gate named (or {UNKNOWN_VERSION})",
-    )
-    parser.add_argument("--to", dest="to_version", required=True, help="The target release")
-    parser.add_argument("--untracked-dir", type=Path, default=None, help="Override (tests)")
-    return parser
-
-
-def approve_main(argv: list[str] | None = None) -> int:
-    """``upgrade_gate_standalone.py approve ...``: run :func:`run_approval` on the terminal."""
-    args = _build_approve_parser().parse_args(argv)
-    project_root = Path(args.project_root).resolve()
-    frm = None if args.from_version == UNKNOWN_VERSION else str(args.from_version)
-    return run_approval(
-        project_root=project_root,
-        daemon_dir=Path(args.daemon_dir).resolve(),
-        from_version=frm,
-        to_version=str(args.to_version),
-        untracked_dir=(
-            Path(args.untracked_dir) if args.untracked_dir else get_untracked_dir(project_root)
-        ),
-        stdin=sys.stdin,
-        stdout=sys.stdout,
-    )

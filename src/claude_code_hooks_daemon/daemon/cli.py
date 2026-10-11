@@ -5167,58 +5167,6 @@ def cmd_approve_merge(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_approve_upgrade(args: argparse.Namespace) -> int:
-    """The owner's one-shot approval of one upgrade (Plan 00376 Task 3.2).
-
-    The owner's route through the upgrade gate's escalation (a MAJOR bump, a
-    crossed ``breaking: true`` manifest, a ``critical`` pre-upgrade task
-    detected in the project, or an unknown installed version). Delegates to
-    ``upgrade_gate.run_approval``: it needs a terminal on stdin and the typed
-    phrase naming both versions, and writes a marker bound to the from/to
-    versions and this install's paths, which the next upgrade of exactly that
-    range uses and removes once it completes.
-
-    Returns:
-        0 on marker written, 1 on refusal.
-    """
-    from claude_code_hooks_daemon.daemon.install_layout import (
-        get_untracked_dir,
-        is_self_install_mode,
-    )
-    from claude_code_hooks_daemon.install.upgrade_gate import (
-        UNKNOWN_VERSION,
-        approval_key,
-        run_approval,
-    )
-
-    raw = str(args.version).strip()
-    try:
-        approval_key(raw)
-    except ValueError:
-        print(f"ERROR: {raw!r} is not a release version (e.g. 4.0.0 or v4.0.0)", file=sys.stderr)
-        return 1
-
-    if getattr(args, "project_root", None):
-        project_path = Path(args.project_root).resolve()
-    else:
-        project_path = get_project_path(None)
-    daemon_dir = (
-        project_path
-        if is_self_install_mode(project_path)
-        else project_path / ".claude" / "hooks-daemon"
-    )
-    from_version = str(args.from_version).strip()
-    return run_approval(
-        project_root=project_path,
-        daemon_dir=daemon_dir,
-        from_version=None if from_version == UNKNOWN_VERSION else from_version,
-        to_version=raw,
-        untracked_dir=get_untracked_dir(project_path),
-        stdin=sys.stdin,
-        stdout=sys.stdout,
-    )
-
-
 class _CronPauseRefusedError(Exception):
     """A ``cron-pause``/``cron-resume`` request that must not proceed."""
 
@@ -11697,35 +11645,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Project root override (default: auto-detected)",
     )
     parser_approve_merge.set_defaults(func=cmd_approve_merge)
-
-    # approve-upgrade command (Plan 00376 Task 3.2): the owner's one-shot
-    # approval for an upgrade the pre-deploy gate escalated
-    parser_approve_upgrade = subparsers.add_parser(
-        "approve-upgrade",
-        help=(
-            "The project owner's one-shot approval of one upgrade the gate stopped "
-            "(needs a terminal and a typed confirmation phrase)"
-        ),
-    )
-    parser_approve_upgrade.add_argument(
-        "version",
-        metavar="VERSION",
-        help="Target release of the upgrade being approved (e.g. 4.0.0)",
-    )
-    parser_approve_upgrade.add_argument(
-        "--from",
-        dest="from_version",
-        required=True,
-        help="The installed release the gate's stop message named (or 'unknown')",
-    )
-    parser_approve_upgrade.add_argument(
-        "--project-root",
-        dest="project_root",
-        type=Path,
-        default=None,
-        help="Project root override (default: auto-detected)",
-    )
-    parser_approve_upgrade.set_defaults(func=cmd_approve_upgrade)
 
     # cron-pause / cron-resume (ledger 00422 N4): the session-scoped spelling
     # for "cancel this declared cron for now"

@@ -344,7 +344,7 @@ class VersionCheckHandler(SessionStartHandlerBase):
             "",
             "A restart cannot fix this: it runs the same installed version.",
             f"TO SYNC, a human runs: {command}",
-            "A breaking upgrade stops at the owner's approval gate. Nothing has been changed: "
+            "An upgrade stops first to have its upgrade guides read. Nothing has been changed: "
             "this notice never moves the daemon to another version by itself.",
         ]
         return lines

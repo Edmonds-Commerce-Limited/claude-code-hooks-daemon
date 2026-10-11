@@ -865,7 +865,7 @@ What this decides:
   unless a project opts into `unseen_policy: deny`).
 - No guard gains an escape hatch an agent can type (Plan 00259). An agent talking itself into
   an exception is the careless agent, not the hostile one.
-- Human-gated steps stay human-gated: release, `approve-upgrade`, and protected-path
+- Human-gated steps stay human-gated: release and protected-path
   disclosure. Their guards keep the shapes they already close.
 - A protected file stays protected against every ORDINARY read route, including `Grep -l`
   and an interpreter one-liner.

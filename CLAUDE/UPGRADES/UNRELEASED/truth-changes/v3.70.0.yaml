@@ -1,0 +1,28 @@
+# Drafted by Plan 00503. The VERSION in the filename is a target, not a decision.
+version: "3.70.0"
+
+truth_changes:
+  - topic: install-and-upgrade
+    id: upgrade-pre-deploy-gate
+    was: >
+      A hooks-daemon upgrade that crosses a MAJOR version, a `breaking: true`
+      config-changes manifest, a critical pre-upgrade task with hits or an
+      unreadable installed version exits 4 and waits for the project owner to
+      approve it in their own terminal with `hooks-daemon approve-upgrade`;
+      the `upgrade_approval_guard` handler denies an agent recording that
+      approval.
+    now: >
+      There is no owner approval. The upgrade's only stop is the reading
+      confirmation (exit 3): what used to need approval is listed first,
+      under "READ THIS FIRST", in the same listing, and the caller re-runs
+      with `--skip-reading-confirmation=<digest>` once it has read it. The
+      `approve-upgrade` command, the `upgrade-approvals/` markers, exit code
+      4 and the `upgrade_approval_guard` handler are gone (a config that still
+      names the handler keeps validating). A large jump - a MAJOR boundary or
+      more than ten minor releases - also prints advice to upgrade in phases
+      through an intermediate release; it is advice only and never stops the
+      upgrade.
+
+      IF YOUR PROJECT'S DOCS OR AUTOMATION TELL AN AGENT TO STOP AND ASK THE
+      OWNER TO RUN `approve-upgrade`, OR TREAT UPGRADE EXIT CODE 4 AS A STOP,
+      UPDATE THEM.

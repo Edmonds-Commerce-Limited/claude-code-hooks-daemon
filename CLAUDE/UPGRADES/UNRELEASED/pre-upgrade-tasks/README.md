@@ -8,7 +8,7 @@ Pre- and post-upgrade tasks share **one schema and one loader** (`src/claude_cod
 
 The upgrade gate (`src/claude_code_hooks_daemon/install/upgrade_gate.py`). Every upgrade runs it (through Layer 1, or with Layer 2 run directly) in `run_pre_deploy_phase` (`scripts/upgrade_version.sh`), once the daemon checkout sits on the target and before anything is deployed into the project. For every guide the upgrade crosses (and this holding area, on a branch install) it runs each task's detection over the project and names the affected lines at `file:line`. A task that detects nothing is not shown, so a project the change does not touch hears nothing.
 
-The gate then stops the upgrade until it is acknowledged. Nothing is deployed, and the daemon checkout goes back to the installed version when that version can be told (the venv stamp, `.claude/HOOKS-DAEMON.md`, or the commit Layer 1 moved from); otherwise, or when the reset fails, the stop prints the command that puts it back. See `CLAUDE/LLM-UPDATE.md` ("The pre-deploy gate") for the stop, the `--skip-reading-confirmation=<digest>` re-run, and the owner's approval that a `critical` task with hits requires.
+The gate then stops the upgrade until it is acknowledged. Nothing is deployed, and the daemon checkout goes back to the installed version when that version can be told (the venv stamp, `.claude/HOOKS-DAEMON.md`, or the commit Layer 1 moved from); otherwise, or when the reset fails, the stop prints the command that puts it back. See `CLAUDE/LLM-UPDATE.md` ("The pre-deploy gate") for the stop, the `--skip-reading-confirmation=<digest>` re-run, and the `READ THIS FIRST` entry a `critical` task with hits gets in the listing.
 
 ## The detection contract (what a pre-upgrade task adds)
 

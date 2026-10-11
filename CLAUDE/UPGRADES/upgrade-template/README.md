@@ -103,7 +103,7 @@ Do NOT check the new version out yourself, and do not replace the clone by
 hand: the upgrade checks it out, runs the pre-deploy gate against what is
 installed, and puts the clone back if the gate stops. Moving
 `.claude/hooks-daemon` to another ref by hand installs a version the gate
-never read, and `upgrade_approval_guard` denies it.
+never read.
 
 ```bash
 git -C .claude/hooks-daemon fetch --tags
@@ -402,18 +402,16 @@ cp .claude/hooks-daemon.yaml.backup .claude/hooks-daemon.yaml
 
 **Option A - Re-run the upgrade script** (recommended; an agent can run this
 too). The script handles a downgrade the same way it handles an upgrade --
-through the pre-deploy gate, which may stop and ask the project owner to
-approve it. This folds into Step 4 below; skip Options B and C if you use it:
+through the pre-deploy gate, which may stop for the reading to be
+confirmed. This folds into Step 4 below; skip Options B and C if you use it:
 
 ```bash
 bash .claude/hooks-daemon/scripts/upgrade.sh --project-root "$PWD" v{PREV_VERSION}
 ```
 
-**Option B - Manual git checkout, OWNER-ONLY.** `cd`-ing into
-`.claude/hooks-daemon/`, and any `git checkout`/`switch`/`reset` (etc.) of
-that clone, is denied for an agent -- it is exactly the route the pre-deploy
-gate exists to require approval for. The project owner runs this in their own
-terminal instead, never an agent:
+**Option B - Manual git checkout, OWNER-ONLY.** Moving `.claude/hooks-daemon/`
+to another ref by hand skips the pre-deploy gate, so an agent does not do it.
+The project owner runs this in their own terminal instead:
 
 ```bash
 git -C .claude/hooks-daemon checkout vX.Y  # Previous working version

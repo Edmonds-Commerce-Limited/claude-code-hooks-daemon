@@ -6,47 +6,39 @@ terminal is attached:
 
 - the FROM side is what is INSTALLED (the venv stamp, else the project's
   ``HOOKS-DAEMON.md`` marker), never the checkout, which may already be on the
-  target (review MAJOR 1); with neither, the owner must approve;
+  target (review MAJOR 1); with neither, the range is unknown;
 - a caller with something to read stops until it passes
   ``--skip-reading-confirmation=<digest>``, the digest of the listing it was
   shown (review MINOR 6);
-- a change that breaks the project also needs the owner's one-shot approval,
-  a marker bound to this upgrade's from/to versions and install path, which a
-  bare ``touch`` cannot forge (review MAJOR 4).
+- a change that breaks the project (a MAJOR bump, a breaking manifest, a
+  critical task, an unreadable installed version) is listed prominently in
+  that same reading and stops nothing further: there is no owner approval and
+  no second exit code (Plan 00503);
+- a large jump prints advice to upgrade in phases, and never changes the exit.
 """
 
 from __future__ import annotations
 
 import errno
-import io
-import json
-import sys
 from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.install import upgrade_gate as upgrade_gate_module
 from claude_code_hooks_daemon.install.upgrade_gate import (
-    APPROVAL_SUBDIR,
-    ApprovalState,
+    GATED_INSTALL_SUBDIR,
     GateReport,
     GateVerdict,
-    approval_key,
-    approve_main,
     breaking_manifests,
-    check_approval,
     evaluate_gate,
     format_gate_report,
     gated_install_stamp,
     installed_version,
     main,
+    phasing_advice,
     record_gated_install,
     record_install_main,
-    run_approval,
-    write_approval,
+    release_key,
 )
-from claude_code_hooks_daemon.utils.one_shot_approval import OneShotApprovalStore
-from claude_code_hooks_daemon.utils.path_predicates import TextOrReason
 
 _REPO_UPGRADES_ROOT = Path(__file__).resolve().parents[3]
 
@@ -166,12 +158,6 @@ def _acked(
         to,
         acknowledgement=first.digest,
         include_unreleased=include_unreleased,
-    )
-
-
-def _approve(untracked: Path, daemon_dir: Path, project: Path, frm: str, to: str) -> Path:
-    return write_approval(
-        untracked, to_version=to, from_version=frm, daemon_dir=daemon_dir, project_root=project
     )
 
 
@@ -353,7 +339,7 @@ class TestAlreadyInstalled:
             installed_stamp="v4.0.0",
             target_stamp="v4.0.0",
         )
-        assert acknowledged.verdict is GateVerdict.NEEDS_APPROVAL
+        assert acknowledged.verdict is GateVerdict.PROCEED
 
     def test_the_gate_records_what_it_let_through(
         self, daemon_dir: Path, project: Path, untracked: Path
@@ -416,7 +402,7 @@ class TestGatedInstallStampFailsClosedOnAnUnreadableReceipt:
     def test_invalid_utf8_bytes_fail_closed_instead_of_crashing(
         self, daemon_dir: Path, project: Path, untracked: Path
     ) -> None:
-        path = untracked / APPROVAL_SUBDIR / "gated-install.json"
+        path = untracked / GATED_INSTALL_SUBDIR / "gated-install.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"\xff\xfe\x00not valid utf-8")
 
@@ -434,7 +420,7 @@ class TestGatedInstallStampFailsClosedOnAnUnreadableReceipt:
         specific ``Path.read_text`` call `gated_install_stamp` makes instead,
         which fails the same way for root and non-root alike.
         """
-        path = untracked / APPROVAL_SUBDIR / "gated-install.json"
+        path = untracked / GATED_INSTALL_SUBDIR / "gated-install.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('{"stamp": "v3.65.0"}', encoding="utf-8")
 
@@ -453,16 +439,16 @@ class TestGatedInstallStampFailsClosedOnAnUnreadableReceipt:
 
 
 class TestUnknownRange:
-    """Review MINOR 2 / MAJOR 1: an unreadable range fails closed to the owner."""
+    """Review MINOR 2 / MAJOR 1: an unreadable range fails closed to the reading."""
 
-    def test_an_unknown_previous_version_needs_the_owner(
+    def test_an_unknown_previous_version_needs_the_reading_confirmed(
         self, daemon_dir: Path, project: Path, untracked: Path
     ) -> None:
         stopped = _gate(daemon_dir, project, untracked, None, "3.65.0")
         assert stopped.verdict is GateVerdict.NEEDS_ACKNOWLEDGEMENT
         assert "installed version is unknown" in format_gate_report(stopped)
         acknowledged = _acked(daemon_dir, project, untracked, None, "3.65.0")
-        assert acknowledged.verdict is GateVerdict.NEEDS_APPROVAL
+        assert acknowledged.verdict is GateVerdict.PROCEED
 
     def test_an_unknown_previous_version_still_runs_every_detection_up_to_the_target(
         self, daemon_dir: Path, upgrades: Path, project: Path, untracked: Path
@@ -472,25 +458,14 @@ class TestUnknownRange:
         assert "01-old.md" in text
         assert "tools/qa.sh:2" in text
 
-    def test_the_owner_can_approve_an_unknown_previous_version(
+    def test_a_target_that_is_not_a_release_lists_why_and_proceeds_once_confirmed(
         self, daemon_dir: Path, project: Path, untracked: Path
     ) -> None:
-        write_approval(
-            untracked,
-            to_version="3.65.0",
-            from_version=None,
-            daemon_dir=daemon_dir,
-            project_root=project,
-        )
-        assert _acked(daemon_dir, project, untracked, None, "3.65.0").verdict is (
-            GateVerdict.PROCEED
-        )
-
-    def test_a_target_that_is_not_a_release_needs_the_owner(
-        self, daemon_dir: Path, project: Path, untracked: Path
-    ) -> None:
+        unconfirmed = _gate(daemon_dir, project, untracked, "3.64.0", "0123abc")
+        assert unconfirmed.verdict is GateVerdict.NEEDS_ACKNOWLEDGEMENT
+        assert "is not a release version" in format_gate_report(unconfirmed)
         report = _acked(daemon_dir, project, untracked, "3.64.0", "0123abc")
-        assert report.verdict is GateVerdict.NEEDS_APPROVAL
+        assert report.verdict is GateVerdict.PROCEED
 
     def test_an_unknown_previous_version_still_lists_every_guide_up_to_the_target(
         self, daemon_dir: Path, upgrades: Path, project: Path, untracked: Path
@@ -595,45 +570,45 @@ class TestInstalledVersion:
 
 
 class TestEscalation:
-    def test_a_major_bump_needs_the_owner(
+    """What used to need the owner is read prominently and stops nothing more."""
+
+    def test_a_major_bump_is_listed_and_proceeds_once_confirmed(
         self, daemon_dir: Path, project: Path, untracked: Path
     ) -> None:
+        stopped = _gate(daemon_dir, project, untracked, "3.66.0", "4.0.0")
+        assert stopped.verdict is GateVerdict.NEEDS_ACKNOWLEDGEMENT
+        assert any("MAJOR" in reason for reason in stopped.escalations)
+        assert "MAJOR version change" in format_gate_report(stopped)
         report = _acked(daemon_dir, project, untracked, "3.66.0", "4.0.0")
-        assert report.verdict is GateVerdict.NEEDS_APPROVAL
-        assert any("MAJOR" in reason for reason in report.escalations)
+        assert report.verdict is GateVerdict.PROCEED
+        assert report.verdict.exit_code == 0
 
-    def test_the_stop_prints_an_approval_command_the_new_code_can_run(
+    def test_the_breaking_reasons_come_before_the_guides_in_the_listing(
+        self, daemon_dir: Path, upgrades: Path, project: Path, untracked: Path
+    ) -> None:
+        _guide(upgrades, "v3.66.0-to-v4.0.0")
+        text = format_gate_report(_gate(daemon_dir, project, untracked, "3.66.0", "4.0.0"))
+        assert "MAJOR version change" in text
+        assert text.index("MAJOR version change") < text.index("v3.66.0-to-v4.0.0.md")
+
+    def test_no_stop_names_an_owner_or_an_approval_command(
         self, daemon_dir: Path, project: Path, untracked: Path
     ) -> None:
-        first = _gate(daemon_dir, project, untracked, "3.66.0", "4.0.0")
-        report = evaluate_gate(
-            daemon_dir=daemon_dir,
-            project_root=project,
-            from_version="3.66.0",
-            to_version="4.0.0",
-            include_unreleased=False,
-            acknowledgement=first.digest,
-            untracked_dir=untracked,
-            target_ref="v4.0.0",
-        )
+        report = _gate(daemon_dir, project, untracked, "3.66.0", "4.0.0")
         text = format_gate_report(report)
-        assert "approve-upgrade 4.0.0 --from 3.66.0" in text
-        assert f'git -C "{daemon_dir}" archive v4.0.0 src' in text
-        assert 'upgrade_gate_standalone.py" approve' in text
-        assert "terminal" in text
-        # Fresh review D7: a bare `python3` is 3.9 on the hosts that need an override.
-        assert f'"{sys.executable}" "$tmp/' in text
-        assert 'python3 "$tmp/' not in text
+        assert "approve-upgrade" not in text
+        assert "owner" not in text.lower()
+        assert f"--skip-reading-confirmation={report.digest}" in text
 
-    def test_a_crossed_breaking_manifest_needs_the_owner(
+    def test_a_crossed_breaking_manifest_is_listed_and_proceeds_once_confirmed(
         self, daemon_dir: Path, upgrades: Path, project: Path, untracked: Path
     ) -> None:
         _write(upgrades / "config-changes" / "v3.65.0.yaml", 'version: "3.65.0"\nbreaking: true\n')
         report = _acked(daemon_dir, project, untracked, "3.64.0", "3.65.0")
-        assert report.verdict is GateVerdict.NEEDS_APPROVAL
+        assert report.verdict is GateVerdict.PROCEED
         assert any("v3.65.0.yaml" in reason for reason in report.escalations)
 
-    def test_a_critical_pre_task_with_hits_needs_the_owner(
+    def test_a_critical_pre_task_with_hits_is_listed_and_proceeds_once_confirmed(
         self, daemon_dir: Path, upgrades: Path, project: Path, untracked: Path
     ) -> None:
         _pre_task(
@@ -644,7 +619,7 @@ class TestEscalation:
             pattern="plan-qa[^\\n]*--json",
         )
         report = _acked(daemon_dir, project, untracked, "3.64.0", "3.65.0")
-        assert report.verdict is GateVerdict.NEEDS_APPROVAL
+        assert report.verdict is GateVerdict.PROCEED
         assert any("01-rename.md" in reason for reason in report.escalations)
 
     def test_a_critical_pre_task_without_hits_does_not_escalate(
@@ -656,243 +631,107 @@ class TestEscalation:
         report = _gate(daemon_dir, project, untracked, "3.64.0", "3.65.0")
         assert report.escalations == []
 
-    def test_a_bound_approval_lets_it_through_and_is_named_not_consumed(
+    def test_a_stale_approval_marker_is_ignored(
         self, daemon_dir: Path, project: Path, untracked: Path
     ) -> None:
-        marker = _approve(untracked, daemon_dir, project, "3.66.0", "4.0.0")
-        report = _acked(daemon_dir, project, untracked, "3.66.0", "v4.0.0")
-        assert report.verdict is GateVerdict.PROCEED
-        assert report.approval_used == marker
-        assert marker.exists(), "consumed by the caller only once the upgrade completes"
-
-    def test_an_approval_is_not_used_while_reading_is_unacknowledged(
-        self, daemon_dir: Path, project: Path, untracked: Path
-    ) -> None:
-        _approve(untracked, daemon_dir, project, "3.66.0", "4.0.0")
-        report = _gate(daemon_dir, project, untracked, "3.66.0", "4.0.0")
-        assert report.verdict is GateVerdict.NEEDS_ACKNOWLEDGEMENT
-        assert report.approval_used is None
-
-    def test_a_touched_marker_is_not_an_approval(
-        self, daemon_dir: Path, project: Path, untracked: Path
-    ) -> None:
-        marker = OneShotApprovalStore(APPROVAL_SUBDIR).path(untracked, "4.0.0")
+        """A project that ran the old approval route leaves a marker behind."""
+        marker = untracked / "upgrade-approvals" / "4.0.0.approved"
         marker.parent.mkdir(parents=True)
-        marker.touch()
+        marker.write_text("{}\n", encoding="utf-8")
         report = _acked(daemon_dir, project, untracked, "3.66.0", "4.0.0")
-        assert report.verdict is GateVerdict.NEEDS_APPROVAL
-        assert "not written by approve-upgrade for this upgrade" in format_gate_report(report)
+        assert report.verdict is GateVerdict.PROCEED
+        assert marker.exists(), "the gate neither reads nor removes it"
 
-    @pytest.mark.parametrize(
-        ("frm", "other_daemon"),
-        [("3.65.0", False), ("3.66.0", True)],
-        ids=["another-from", "another-install"],
-    )
-    def test_an_approval_for_another_upgrade_does_not_count(
-        self,
-        tmp_path: Path,
-        daemon_dir: Path,
-        project: Path,
-        untracked: Path,
-        frm: str,
-        other_daemon: bool,
+
+class TestPhasingAdvice:
+    """A large jump gets advice to go through an intermediate release; never a stop."""
+
+    def _advice(self, upgrades: Path, frm: str, to: str) -> list[str]:
+        return phasing_advice(upgrades, frm, to)
+
+    def test_a_major_boundary_names_the_last_release_of_the_current_major(
+        self, upgrades: Path
     ) -> None:
-        write_approval(
-            untracked,
-            to_version="4.0.0",
-            from_version=frm,
-            daemon_dir=tmp_path / "elsewhere" if other_daemon else daemon_dir,
-            project_root=project,
+        _guide(upgrades, "v3.66.0-to-v3.67.0")
+        _guide(upgrades, "v3.67.0-to-v3.68.0")
+        _guide(upgrades, "v3.68.0-to-v4.0.0")
+        advice = self._advice(upgrades, "3.66.0", "4.0.0")
+        assert len(advice) == 1
+        assert "in phases" in advice[0]
+        assert "v3.68.0" in advice[0]
+        assert "v4.0.0" in advice[0]
+
+    def test_a_major_boundary_with_no_known_newer_release_gives_no_advice(
+        self, upgrades: Path
+    ) -> None:
+        """Nothing newer than the installed release is known, so no stop can be named."""
+        assert self._advice(upgrades, "3.66.0", "4.0.0") == []
+
+    def test_already_on_the_last_release_of_the_major_is_not_told_to_go_there(
+        self, upgrades: Path
+    ) -> None:
+        _guide(upgrades, "v3.69.0-to-v3.70.0")
+        assert self._advice(upgrades, "3.70.0", "4.0.0") == []
+        assert self._advice(upgrades, "3.70.0", "4.0.0") == self._advice(
+            upgrades / "missing", "3.70.0", "4.0.0"
         )
+
+    def test_a_short_guide_name_is_named_as_a_real_tag(self, upgrades: Path) -> None:
+        _guide(upgrades, "v3.57-to-v3.58")
+        advice = self._advice(upgrades, "3.50.0", "4.0.0")
+        assert len(advice) == 1
+        assert "v3.58.0" in advice[0]
+        assert "v3.58 " not in advice[0]
+        assert "v3.58," not in advice[0]
+
+    def test_more_than_ten_minor_releases_names_an_intermediate_release(
+        self, upgrades: Path
+    ) -> None:
+        _guide(upgrades, "v3.55.0-to-v3.58.0")
+        _guide(upgrades, "v3.58.0-to-v3.60.0")
+        _guide(upgrades, "v3.60.0-to-v3.62.0")
+        advice = self._advice(upgrades, "3.50.0", "3.62.0")
+        assert len(advice) == 1
+        assert "in phases" in advice[0]
+        assert "v3.60.0" in advice[0]
+
+    def test_ten_minor_releases_is_not_a_large_jump(self, upgrades: Path) -> None:
+        assert self._advice(upgrades, "3.50.0", "3.60.0") == []
+
+    def test_a_patch_or_small_upgrade_has_no_advice(self, upgrades: Path) -> None:
+        assert self._advice(upgrades, "3.66.0", "3.66.5") == []
+        assert self._advice(upgrades, "3.66.0", "3.68.0") == []
+
+    def test_a_downgrade_has_no_advice(self, upgrades: Path) -> None:
+        assert self._advice(upgrades, "4.0.0", "3.50.0") == []
+
+    def test_the_advice_is_printed_and_changes_neither_verdict_nor_exit_code(
+        self, daemon_dir: Path, upgrades: Path, project: Path, untracked: Path
+    ) -> None:
+        _guide(upgrades, "v3.66.0-to-v3.67.0")
+        stopped = _gate(daemon_dir, project, untracked, "3.66.0", "4.0.0")
+        assert stopped.verdict is GateVerdict.NEEDS_ACKNOWLEDGEMENT
+        assert stopped.advisories
+        assert "in phases" in format_gate_report(stopped)
         assert _acked(daemon_dir, project, untracked, "3.66.0", "4.0.0").verdict is (
-            GateVerdict.NEEDS_APPROVAL
+            GateVerdict.PROCEED
         )
 
+    def test_the_advice_does_not_change_the_digest(
+        self, daemon_dir: Path, upgrades: Path, project: Path, untracked: Path
+    ) -> None:
+        _guide(upgrades, "v3.66.0-to-v3.67.0")
+        large = _gate(daemon_dir, project, untracked, "3.66.0", "4.0.0")
+        assert large.advisories
+        again = _gate(daemon_dir, project, untracked, "3.66.0", "4.0.0")
+        assert large.digest == again.digest
 
-class TestApprovalMarker:
-    def test_the_marker_records_what_it_approves(
+    def test_the_advice_is_printed_even_when_there_is_nothing_to_read(
         self, daemon_dir: Path, project: Path, untracked: Path
     ) -> None:
-        marker = _approve(untracked, daemon_dir, project, "v3.66.0", "4.0")
-        payload = json.loads(marker.read_text(encoding="utf-8"))
-        assert payload["to"] == "4.0.0"
-        assert payload["from"] == "3.66.0"
-        assert payload["daemon_dir"] == str(daemon_dir.resolve())
-        assert payload["project_root"] == str(project.resolve())
-
-    def test_check_distinguishes_absent_valid_and_invalid(
-        self, daemon_dir: Path, project: Path, untracked: Path
-    ) -> None:
-        kwargs = {
-            "to_version": "4.0.0",
-            "from_version": "3.66.0",
-            "daemon_dir": daemon_dir,
-            "project_root": project,
-        }
-        assert check_approval(untracked, **kwargs) is ApprovalState.ABSENT
-        marker = _approve(untracked, daemon_dir, project, "3.66.0", "4.0.0")
-        assert check_approval(untracked, **kwargs) is ApprovalState.VALID
-        marker.write_text("4.0.0 approved\n", encoding="utf-8")
-        assert check_approval(untracked, **kwargs) is ApprovalState.INVALID
-
-
-class TestUnreadableApprovalMarker:
-    """N323: a marker that exists but cannot be read is not a missing one."""
-
-    @staticmethod
-    def _state(daemon_dir: Path, project: Path, untracked: Path) -> ApprovalState:
-        return check_approval(
-            untracked,
-            to_version="4.0.0",
-            from_version="3.66.0",
-            daemon_dir=daemon_dir,
-            project_root=project,
-        )
-
-    @staticmethod
-    def _refuse_reads(monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            upgrade_gate_module,
-            "read_text_or_reason",
-            lambda path, **_: TextOrReason(reason="[Errno 13] Permission denied"),
-        )
-
-    def test_a_marker_the_read_refuses_is_unreadable_not_absent(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        daemon_dir: Path,
-        project: Path,
-        untracked: Path,
-    ) -> None:
-        _approve(untracked, daemon_dir, project, "3.66.0", "4.0.0")
-        self._refuse_reads(monkeypatch)
-        assert self._state(daemon_dir, project, untracked) is ApprovalState.UNREADABLE
-
-    def test_an_unreadable_marker_fails_closed_and_the_message_names_permissions(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        daemon_dir: Path,
-        project: Path,
-        untracked: Path,
-    ) -> None:
-        _approve(untracked, daemon_dir, project, "3.66.0", "4.0.0")
-        self._refuse_reads(monkeypatch)
-        report = _acked(daemon_dir, project, untracked, "3.66.0", "4.0.0")
-        assert report.verdict is GateVerdict.NEEDS_APPROVAL
-        assert report.approval_state is ApprovalState.UNREADABLE
-        text = format_gate_report(report)
-        assert "unreadable" in text
-        assert "permissions" in text
-
-
-class _FakeTty(io.StringIO):
-    def __init__(self, text: str, *, tty: bool) -> None:
-        super().__init__(text)
-        self._tty = tty
-
-    def isatty(self) -> bool:
-        return self._tty
-
-
-class TestRunApproval:
-    """Review MAJOR 4: only a human at a terminal who types the phrase approves."""
-
-    def _run(
-        self, daemon_dir: Path, project: Path, untracked: Path, answer: str, *, tty: bool
-    ) -> tuple[int, str]:
-        out = io.StringIO()
-        code = run_approval(
-            project_root=project,
-            daemon_dir=daemon_dir,
-            from_version="3.66.0",
-            to_version="4.0.0",
-            untracked_dir=untracked,
-            stdin=_FakeTty(answer, tty=tty),
-            stdout=out,
-        )
-        return code, out.getvalue()
-
-    def test_no_terminal_no_approval(
-        self, daemon_dir: Path, project: Path, untracked: Path
-    ) -> None:
-        code, out = self._run(
-            daemon_dir, project, untracked, "approve upgrade from v3.66.0 to v4.0.0\n", tty=False
-        )
-        assert code != 0
-        assert "terminal" in out
-        assert not (untracked / APPROVAL_SUBDIR).exists()
-
-    def test_the_wrong_phrase_is_refused(
-        self, daemon_dir: Path, project: Path, untracked: Path
-    ) -> None:
-        code, _out = self._run(daemon_dir, project, untracked, "yes\n", tty=True)
-        assert code != 0
-        assert not (untracked / APPROVAL_SUBDIR).exists()
-
-    def test_the_phrase_naming_the_versions_records_a_bound_marker(
-        self, daemon_dir: Path, project: Path, untracked: Path
-    ) -> None:
-        code, out = self._run(
-            daemon_dir, project, untracked, "approve upgrade from v3.66.0 to v4.0.0\n", tty=True
-        )
-        assert code == 0
-        assert "approve upgrade from v3.66.0 to v4.0.0" in out
-        assert (
-            check_approval(
-                untracked,
-                to_version="4.0.0",
-                from_version="3.66.0",
-                daemon_dir=daemon_dir,
-                project_root=project,
-            )
-            is ApprovalState.VALID
-        )
-
-    def test_an_unknown_installed_version_is_not_typed_as_vunknown(
-        self, daemon_dir: Path, project: Path, untracked: Path
-    ) -> None:
-        """Fresh review N4: the phrase asked a human to type `vunknown`."""
-        phrase = "approve upgrade from an unknown version to v4.0.0"
-        out = io.StringIO()
-        code = run_approval(
-            project_root=project,
-            daemon_dir=daemon_dir,
-            from_version=None,
-            to_version="4.0.0",
-            untracked_dir=untracked,
-            stdin=_FakeTty(f"{phrase}\n", tty=True),
-            stdout=out,
-        )
-        assert code == 0, out.getvalue()
-        assert phrase in out.getvalue()
-        assert "vunknown" not in out.getvalue()
-
-    def test_approve_main_refuses_without_a_terminal(
-        self,
-        daemon_dir: Path,
-        project: Path,
-        untracked: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.setattr(
-            "sys.stdin", _FakeTty("approve upgrade from v3.66.0 to v4.0.0\n", tty=False)
-        )
-        code = approve_main(
-            [
-                "--daemon-dir",
-                str(daemon_dir),
-                "--project-root",
-                str(project),
-                "--from",
-                "3.66.0",
-                "--to",
-                "4.0.0",
-                "--untracked-dir",
-                str(untracked),
-            ]
-        )
-        assert code != 0
-        assert not (untracked / APPROVAL_SUBDIR).exists()
+        report = _gate(daemon_dir, project, untracked, "3.40.0", "3.62.0")
+        assert report.verdict is GateVerdict.PROCEED
+        assert "in phases" in format_gate_report(report)
 
 
 class TestBreakingManifests:
@@ -930,10 +769,10 @@ class TestTheRealTree:
         assert report.verdict is GateVerdict.PROCEED
 
 
-class TestApprovalKey:
+class TestReleaseKey:
     @pytest.mark.parametrize("raw", ["4.0.0", "v4.0.0", "4.0.0+main.abc1234", "v4.0"])
     def test_every_spelling_of_a_release_shares_one_key(self, raw: str) -> None:
-        assert approval_key(raw) == "4.0.0"
+        assert release_key(raw) == "4.0.0"
 
 
 class TestVerdictExitCodes:
@@ -943,6 +782,10 @@ class TestVerdictExitCodes:
         assert GateVerdict.PROCEED.exit_code == 0
         assert 1 not in codes
         assert 2 not in codes
+
+    def test_there_is_no_owner_approval_verdict_or_exit_four(self) -> None:
+        assert {verdict.name for verdict in GateVerdict} == {"PROCEED", "NEEDS_ACKNOWLEDGEMENT"}
+        assert {verdict.exit_code for verdict in GateVerdict} == {0, 3}
 
 
 class TestMain:
@@ -1051,10 +894,13 @@ class TestMain:
         err = capsys.readouterr().err
         assert "already installed" not in err
         digest = err.split("--skip-reading-confirmation=", 1)[1].split()[0]
-        assert main([*argv, "--acknowledgement", digest]) == GateVerdict.NEEDS_APPROVAL.exit_code
         assert (
             gated_install_stamp(untracked, daemon_dir=daemon_dir, project_root=project) is None
-        ), "a range the gate refused to read must record no install"
+        ), "a range the gate stopped on must record no install"
+        assert main([*argv, "--acknowledgement", digest]) == 0
+        assert (
+            gated_install_stamp(untracked, daemon_dir=daemon_dir, project_root=project) == "v4.0.0"
+        ), "a confirmed upgrade is recorded like any other the gate lets through"
 
     def test_a_doc_marker_ahead_of_the_target_is_not_a_silent_downgrade(
         self,
@@ -1073,9 +919,9 @@ class TestMain:
         err = capsys.readouterr().err
         assert "downgrade" not in err
         digest = err.split("--skip-reading-confirmation=", 1)[1].split()[0]
-        assert main([*argv, "--acknowledgement", digest]) == GateVerdict.NEEDS_APPROVAL.exit_code
+        assert main([*argv, "--acknowledgement", digest]) == 0
 
-    def test_an_approval_used_is_written_to_the_verdict_file_for_the_caller_to_consume(
+    def test_a_major_upgrade_has_two_outcomes_only_stop_for_reading_or_proceed(
         self,
         tmp_path: Path,
         daemon_dir: Path,
@@ -1083,7 +929,6 @@ class TestMain:
         untracked: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        marker = _approve(untracked, daemon_dir, project, "3.66.0", "4.0.0")
         verdict_file = tmp_path / "verdict"
         argv = self._argv(
             daemon_dir,
@@ -1098,11 +943,11 @@ class TestMain:
             "--nonce",
             "n0nce",
         )
-        main(argv)
+        assert main(argv) == GateVerdict.NEEDS_ACKNOWLEDGEMENT.exit_code
         digest = capsys.readouterr().err.split("--skip-reading-confirmation=", 1)[1].split()[0]
         verdict_file.unlink()
         assert main([*argv, "--acknowledgement", digest]) == 0
-        assert f"approval-marker={marker}" in verdict_file.read_text().splitlines()
+        assert verdict_file.read_text().splitlines() == ["nonce=n0nce", "verdict=proceed"]
 
     def test_a_verdict_file_already_there_is_never_reused(
         self, tmp_path: Path, daemon_dir: Path, project: Path, untracked: Path

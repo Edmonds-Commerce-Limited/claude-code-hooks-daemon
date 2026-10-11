@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (75 handlers)
+### PreToolUse (74 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -38,7 +38,6 @@
 | 20 | git_message_backtick | BLOCKING | Block a double-quoted git message whose backticks would be executed |
 | 20 | lock_file_edit_blocker | BLOCKING | Block direct editing of package manager lock files |
 | 20 | merge_to_main_approval | BLOCKING | Deny a merge into the main checkout's default branch while the key is on |
-| 20 | upgrade_approval_guard | BLOCKING | Deny an agent action that grants or bypasses the owner's upgrade approval |
 | 21 | pip_break_system | BLOCKING | Block pip install --break-system-packages commands |
 | 22 | host_command_guard | BLOCKING | Deny the four commands of owner ruling A6 that reach past the project |
 | 22 | sudo_pip | BLOCKING | Block sudo pip install commands |

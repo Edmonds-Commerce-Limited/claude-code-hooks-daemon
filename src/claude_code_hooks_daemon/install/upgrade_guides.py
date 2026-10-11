@@ -80,6 +80,16 @@ def checked_range(from_version: str, to_version: str) -> tuple[tuple[int, ...], 
     return from_v, to_v
 
 
+def guide_target_release(guide_dir: Path) -> tuple[int, ...] | None:
+    """The release a guide directory leads to, or None when its name is not a guide's.
+
+    ``v3.57-to-v3.58`` -> ``(3, 58, 0)``: padded like every release tuple, so a
+    short name never yields a version that is not a real tag.
+    """
+    match = _GUIDE_DIR_RE.match(guide_dir.name)
+    return release_tuple(match.group("to")) if match else None
+
+
 def crossed_guide_dirs(upgrades_dir: Path, from_version: str, to_version: str) -> list[Path]:
     """Every versioned guide directory in ``(from_version, to_version]``, oldest first.
 
@@ -94,10 +104,9 @@ def crossed_guide_dirs(upgrades_dir: Path, from_version: str, to_version: str) -
         if not major_dir.is_dir():
             continue
         for guide_dir in major_dir.iterdir():
-            match = _GUIDE_DIR_RE.match(guide_dir.name)
-            if match is None or not guide_dir.is_dir():
+            target_v = guide_target_release(guide_dir)
+            if target_v is None or not guide_dir.is_dir():
                 continue
-            target_v = release_tuple(match.group("to"))
             if from_v < target_v <= to_v:
                 crossed.append((target_v, guide_dir))
     crossed.sort(key=lambda item: (item[0], item[1].name))

@@ -8,18 +8,11 @@ do not invoke it via ``-m``:
         --installed-stamp <venv stamp> --target-stamp <stamp> --target-ref <ref> \\
         [--include-unreleased] [--acknowledgement <digest>]
 
-    python3 .../upgrade_gate_standalone.py approve --daemon-dir <daemon_dir> \\
-        --project-root <root> --from <installed> --to <target>
-
     python3 .../upgrade_gate_standalone.py record-install --daemon-dir <daemon_dir> \\
         --project-root <root> --stamp <stamp>
 
-The second form is the project owner's approval, from the target's own code
-(an installed daemon older than the gate has no ``approve-upgrade``). It needs
-a terminal and a typed phrase, so an agent's shell cannot run it.
-
-The third form is what a FRESH install calls, so its first re-run is not sent
-to the owner as an install of unknown history (N327).
+The second form is what a FRESH install calls, so its first re-run is not
+stopped as an install of unknown history (N327).
 
 Layer 2 (``scripts/upgrade_version.sh``) runs the gate BEFORE it builds the
 target's venv, so a stopped upgrade has changed nothing but the checkout,
@@ -32,7 +25,7 @@ dependencies first -- the pattern ``daemon/signal_standalone.py`` established.
 third-party module and no package ``__init__`` loads, and that every package
 import of a loaded file is itself in the load list below.
 
-The floor is 3.11 because ``utils/one_shot_approval.py`` imports
+The floor is 3.11 because ``install/upgrade_gate.py`` imports
 ``datetime.UTC``; the daemon itself needs the same.
 """
 
@@ -69,7 +62,6 @@ _LOAD_ORDER: tuple[tuple[str, str], ...] = (
     ("claude_code_hooks_daemon.utils.escape_hatch", "utils/escape_hatch.py"),
     ("claude_code_hooks_daemon.utils.deliberate_swallow", "utils/deliberate_swallow.py"),
     ("claude_code_hooks_daemon.install.upgrade_tasks", "install/upgrade_tasks.py"),
-    ("claude_code_hooks_daemon.utils.one_shot_approval", "utils/one_shot_approval.py"),
     ("claude_code_hooks_daemon.daemon.install_layout", "daemon/install_layout.py"),
     ("claude_code_hooks_daemon.install.upgrade_gate", "install/upgrade_gate.py"),
 )
@@ -100,12 +92,9 @@ else:
         upgrade_gate = _load_by_file_path(_dotted, _PACKAGE_ROOT / _relative)
 
 
-_APPROVE_SUBCOMMAND = "approve"
 _RECORD_INSTALL_SUBCOMMAND = "record-install"
 
 if __name__ == "__main__":
-    if sys.argv[1:2] == [_APPROVE_SUBCOMMAND]:
-        sys.exit(upgrade_gate.approve_main(sys.argv[2:]))
     if sys.argv[1:2] == [_RECORD_INSTALL_SUBCOMMAND]:
         sys.exit(upgrade_gate.record_install_main(sys.argv[2:]))
     sys.exit(upgrade_gate.main())

@@ -22,7 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 _PACKAGE = REPO_ROOT / "src" / "claude_code_hooks_daemon"
 SCRIPT_PATH = _PACKAGE / "install" / "upgrade_gate_standalone.py"
 _SYSTEM_PYTHON = Path("/usr/bin/python3")
-#: ``one_shot_approval.py`` imports ``datetime.UTC`` (3.11); the daemon's own
+#: ``upgrade_gate.py`` imports ``datetime.UTC`` (3.11); the daemon's own
 #: floor is the same.
 _SYNTAX_FLOOR = (3, 11)
 _NEEDS_ACKNOWLEDGEMENT = 3
@@ -77,7 +77,6 @@ class TestNoThirdPartyImports:
             "install/upgrade_guides.py",
             "install/install_stamp.py",
             "install/version_parse.py",
-            "utils/one_shot_approval.py",
             "utils/path_containment.py",
             "utils/path_predicates.py",
             "daemon/install_layout.py",
@@ -152,7 +151,7 @@ class TestEndToEndWithoutVenv:
         )
         assert passed.returncode == 0, passed.stderr
 
-    def test_approve_refuses_without_a_terminal_and_writes_nothing(self, tmp_path: Path) -> None:
+    def test_there_is_no_approve_subcommand_and_nothing_is_written(self, tmp_path: Path) -> None:
         project = tmp_path / "project"
         project.mkdir()
         untracked = tmp_path / "untracked"
@@ -178,8 +177,8 @@ class TestEndToEndWithoutVenv:
             env=_clean_env(),
             check=False,
         )
-        assert result.returncode == 1
-        assert "terminal" in result.stdout
+        assert result.returncode == 2
+        assert "unrecognized arguments" in result.stderr
         assert not untracked.exists()
 
 

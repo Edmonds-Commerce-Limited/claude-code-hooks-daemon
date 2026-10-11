@@ -20,8 +20,31 @@ from claude_code_hooks_daemon.install.upgrade_guides import (
     crossed_guide_dirs,
     guide_document,
     guide_documents,
+    guide_target_release,
     unreleased_staged_documents,
 )
+
+
+class TestGuideTargetRelease:
+    """The release a guide directory name leads to, parsed in one place."""
+
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            ("v3.68.0-to-v3.69.0", (3, 69, 0)),
+            ("v3.57-to-v3.58", (3, 58, 0)),
+            ("v2.32-to-v3.0", (3, 0, 0)),
+        ],
+    )
+    def test_the_target_is_padded_to_a_full_release(
+        self, name: str, expected: tuple[int, ...]
+    ) -> None:
+        assert guide_target_release(Path(name)) == expected
+
+    @pytest.mark.parametrize("name", ["README.md", "v3.68.0", "notes", "v3-to-v4.x"])
+    def test_a_name_that_is_not_a_guide_dir_has_no_target(self, name: str) -> None:
+        assert guide_target_release(Path(name)) is None
+
 
 _TASK_HEADER = """# Task: {title}
 

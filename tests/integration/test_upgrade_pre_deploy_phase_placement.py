@@ -105,11 +105,12 @@ def test_the_gate_honours_the_flag_and_never_infers_from_a_terminal() -> None:
 
 def test_the_bash_stop_codes_are_the_gates_own() -> None:
     text = _script()
-    for name, verdict in (
-        ("GATE_NEEDS_ACKNOWLEDGEMENT", GateVerdict.NEEDS_ACKNOWLEDGEMENT),
-        ("GATE_NEEDS_APPROVAL", GateVerdict.NEEDS_APPROVAL),
-    ):
-        assert re.search(rf"^{name}={verdict.exit_code}$", text, re.MULTILINE), name
+    assert re.search(
+        rf"^GATE_NEEDS_ACKNOWLEDGEMENT={GateVerdict.NEEDS_ACKNOWLEDGEMENT.exit_code}$",
+        text,
+        re.MULTILINE,
+    )
+    assert "GATE_NEEDS_APPROVAL" not in text, "the owner-approval stop (exit 4) is gone"
 
 
 def test_a_stop_restores_the_installed_version_not_a_handed_over_ref() -> None:
@@ -301,19 +302,16 @@ def test_the_gate_runs_in_a_cleared_environment_and_a_zero_exit_needs_its_verdic
 
 
 def test_the_verdict_dir_ignores_an_inherited_tmpdir() -> None:
-    """review2 MINOR 1: a bare `mktemp -d` honours inherited TMPDIR, and the
-    upgrade guard denies TMPDIR only on the SAME command as the upgrade."""
+    """review2 MINOR 1: a bare `mktemp -d` honours an inherited TMPDIR."""
     body = _function_body(_script(), _GATE)
     assert "mktemp -d -p /tmp" in body
 
 
-def test_the_used_approval_is_removed_only_on_success_on_both_paths() -> None:
+def test_no_approval_marker_is_read_or_consumed() -> None:
     text = _script()
-    calls = [m.start() for m in re.finditer(r"^\s*consume_used_approval\s*$", text, re.MULTILINE)]
-    assert len(calls) == 2, calls
-    fast_path_exit = text.index("exit 0\nfi", text.index(_FAST_PATH_START))
-    assert calls[0] < fast_path_exit
-    assert calls[1] > text.index('log_step "17"')
+    assert "consume_used_approval" not in text
+    assert "APPROVAL_MARKER_USED" not in text
+    assert "approval-marker" not in text
 
 
 def test_the_layer1_handoff_is_a_file_bound_to_the_parent_process() -> None:
