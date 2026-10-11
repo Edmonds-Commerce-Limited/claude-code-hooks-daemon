@@ -459,9 +459,8 @@ run_pre_deploy_phase() {
     nonce="$("$od_bin" -An -N16 -tx1 /dev/urandom)" || nonce=""
     nonce="${nonce//[[:space:]]/}"
     # -p /tmp: review2 MINOR 1. A bare `mktemp -d` honours an inherited
-    # TMPDIR, which the upgrade guard denies only on the SAME command as the
-    # upgrade -- an earlier `export TMPDIR=...` is not that. Fixing the
-    # directory here removes the inherited value from this decision.
+    # TMPDIR, so an inherited value could steer where the verdict file lives.
+    # Fixing the directory here removes the inherited value from this decision.
     if [ -z "$nonce" ] || ! verdict_dir="$(mktemp -d -p /tmp)"; then
         print_error "Could not set up the pre-deploy gate's verdict file (no /dev/urandom, or mktemp failed)."
         abort_before_deploy 1 "$undecided"

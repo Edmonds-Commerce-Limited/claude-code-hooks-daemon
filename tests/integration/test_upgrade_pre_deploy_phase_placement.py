@@ -302,8 +302,7 @@ def test_the_gate_runs_in_a_cleared_environment_and_a_zero_exit_needs_its_verdic
 
 
 def test_the_verdict_dir_ignores_an_inherited_tmpdir() -> None:
-    """review2 MINOR 1: a bare `mktemp -d` honours inherited TMPDIR, and the
-    upgrade guard denies TMPDIR only on the SAME command as the upgrade."""
+    """review2 MINOR 1: a bare `mktemp -d` honours an inherited TMPDIR."""
     body = _function_body(_script(), _GATE)
     assert "mktemp -d -p /tmp" in body
 

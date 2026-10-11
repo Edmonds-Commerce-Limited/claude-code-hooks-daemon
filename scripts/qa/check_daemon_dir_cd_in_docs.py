@@ -87,9 +87,9 @@ _SKIP_FILES: Final[frozenset[str]] = frozenset({"CHANGELOG.md"})
 #: How far above a match an exemption marker may sit and still apply -- enough
 #: for a heading and a short explanatory paragraph, not the whole file.
 _CONTEXT_WINDOW: Final[int] = 8
-#: The step is real and correct, but only the project OWNER may run it (an
-#: agent is denied some other way already, e.g. a manual git checkout of the
-#: daemon clone).
+#: The step is real and correct, but only the project OWNER runs it (an agent
+#: moving the daemon clone by hand, e.g. a manual git checkout, skips the
+#: pre-deploy gate).
 _OWNER_ONLY_MARKER: Final[str] = "OWNER-ONLY"
 #: The snippet illustrates the exact shape `daemon_location_guard` denies, as
 #: documentation OF the guard -- not an instruction to run it.

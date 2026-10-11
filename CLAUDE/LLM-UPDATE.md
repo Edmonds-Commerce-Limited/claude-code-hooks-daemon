@@ -308,8 +308,8 @@ file; anything else stops the upgrade with a message saying so. When no `uv` is
 found the error names both fixes: install `uv` into one of those locations, or
 run the upgrade yourself with `--uv <path>`. There is no config key for it: a
 repository cannot carry one user's environment, and what builds the venv is
-the human's to choose per run. `--uv` is the human's to type, so the guard
-denies an agent passing it; if an upgrade needs one, tell the user.
+the human's to choose per run. `--uv` is the human's to type: an agent does
+not pass it; if an upgrade needs one, tell the user.
 
 Before it fetches, Layer 1 drops `GIT_CONFIG_COUNT`/`KEY_*`/`VALUE_*` and
 `GIT_CONFIG_PARAMETERS`, requires origin to name exactly one URL, and refuses

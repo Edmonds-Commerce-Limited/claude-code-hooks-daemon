@@ -661,10 +661,28 @@ class TestPhasingAdvice:
         assert "v3.68.0" in advice[0]
         assert "v4.0.0" in advice[0]
 
-    def test_a_major_boundary_without_a_known_release_still_advises(self, upgrades: Path) -> None:
-        advice = self._advice(upgrades, "3.66.0", "4.0.0")
+    def test_a_major_boundary_with_no_known_newer_release_gives_no_advice(
+        self, upgrades: Path
+    ) -> None:
+        """Nothing newer than the installed release is known, so no stop can be named."""
+        assert self._advice(upgrades, "3.66.0", "4.0.0") == []
+
+    def test_already_on_the_last_release_of_the_major_is_not_told_to_go_there(
+        self, upgrades: Path
+    ) -> None:
+        _guide(upgrades, "v3.69.0-to-v3.70.0")
+        assert self._advice(upgrades, "3.70.0", "4.0.0") == []
+        assert self._advice(upgrades, "3.70.0", "4.0.0") == self._advice(
+            upgrades / "missing", "3.70.0", "4.0.0"
+        )
+
+    def test_a_short_guide_name_is_named_as_a_real_tag(self, upgrades: Path) -> None:
+        _guide(upgrades, "v3.57-to-v3.58")
+        advice = self._advice(upgrades, "3.50.0", "4.0.0")
         assert len(advice) == 1
-        assert "last v3 release" in advice[0]
+        assert "v3.58.0" in advice[0]
+        assert "v3.58 " not in advice[0]
+        assert "v3.58," not in advice[0]
 
     def test_more_than_ten_minor_releases_names_an_intermediate_release(
         self, upgrades: Path
@@ -700,8 +718,9 @@ class TestPhasingAdvice:
         )
 
     def test_the_advice_does_not_change_the_digest(
-        self, daemon_dir: Path, project: Path, untracked: Path
+        self, daemon_dir: Path, upgrades: Path, project: Path, untracked: Path
     ) -> None:
+        _guide(upgrades, "v3.66.0-to-v3.67.0")
         large = _gate(daemon_dir, project, untracked, "3.66.0", "4.0.0")
         assert large.advisories
         again = _gate(daemon_dir, project, untracked, "3.66.0", "4.0.0")

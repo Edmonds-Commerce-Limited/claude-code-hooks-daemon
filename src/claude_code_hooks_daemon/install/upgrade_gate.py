@@ -63,6 +63,7 @@ from claude_code_hooks_daemon.install.upgrade_guides import (
     UPGRADES_SUBPATH,
     crossed_guide_dirs,
     guide_documents,
+    guide_target_release,
     release_tuple,
 )
 from claude_code_hooks_daemon.install.upgrade_tasks import (
@@ -118,7 +119,6 @@ _FIELD_RECORDED_AT: Final[str] = "recorded_at"
 
 _FIELD_DAEMON_DIR: Final[str] = "daemon_dir"
 _FIELD_PROJECT_ROOT: Final[str] = "project_root"
-_GUIDE_TARGET_SEPARATOR: Final[str] = "-to-v"
 
 
 class GateVerdict(Enum):
@@ -310,11 +310,11 @@ def _digest(
 
 def _guide_targets(upgrades_dir: Path, from_version: str, to_version: str) -> list[tuple[int, ...]]:
     """The release each crossed guide directory leads to, oldest first."""
-    return [
-        release_tuple(guide_dir.name.split(_GUIDE_TARGET_SEPARATOR, 1)[1])
+    targets = (
+        guide_target_release(guide_dir)
         for guide_dir in crossed_guide_dirs(upgrades_dir, from_version, to_version)
-        if _GUIDE_TARGET_SEPARATOR in guide_dir.name
-    ]
+    )
+    return [target for target in targets if target is not None]
 
 
 def _tag(release: tuple[int, ...]) -> str:
@@ -327,8 +327,10 @@ def phasing_advice(upgrades_dir: Path, from_version: str, to_version: str) -> li
     A jump is large when it crosses a MAJOR boundary, or spans more than
     :data:`PHASE_MINOR_RELEASES` minor releases of one major. The intermediate
     release named is one the upgrade tree knows (a crossed guide's target), so
-    it is a real release; with none known the advice says where to look. This
-    is advice only: nothing here stops an upgrade or changes an exit code.
+    it is a real release newer than the installed one. A MAJOR jump with no
+    such release known (the installed version is already the last of its
+    major) gets no advice, since there is no stop to name. This is advice
+    only: nothing here stops an upgrade or changes an exit code.
     """
     from_v = release_tuple(from_version)
     to_v = release_tuple(to_version)
@@ -338,15 +340,12 @@ def phasing_advice(upgrades_dir: Path, from_version: str, to_version: str) -> li
     target = _tag(to_v)
     if to_v[0] > from_v[0]:
         last_of_current = [release for release in known if release[0] == from_v[0]]
-        stop = (
-            _tag(max(last_of_current))
-            if last_of_current
-            else f"the last v{from_v[0]} release (see `git tag -l 'v{from_v[0]}.*'`)"
-        )
+        if not last_of_current:
+            return []
         return [
             f"This upgrade crosses a MAJOR boundary (v{from_v[0]}.x -> v{to_v[0]}.x). "
-            f"Consider upgrading in phases: go to {stop} first, check the project works, "
-            f"then continue to {target}."
+            f"Consider upgrading in phases: go to {_tag(max(last_of_current))} first, "
+            f"check the project works, then continue to {target}."
         ]
     if to_v[1] - from_v[1] > PHASE_MINOR_RELEASES:
         reachable = [
