@@ -302,7 +302,7 @@ def command_position_code_segments_with_separators(command: str) -> list[tuple[s
     previous_end = 0
     pending = ""
     for start, end in _segment_spans(view):
-        pending += view[previous_end:start].strip()
+        pending += view[previous_end:start].strip(" \t")
         previous_end = end
         segment = without_comment(view[start:end])
         if not segment.strip():

@@ -1675,6 +1675,13 @@ none blocking; the coordinator corrected the `sudo_pip.py` comment that claimed 
   the same accident. ✅ cleared by batch U
 - `export X=1; command pip install x` and `export X=1; xargs pip install < r.txt` allow (`_PIP_INSTALL_HEAD` ~69-75). ✅ cleared by batch U
 
+Residual, from the batch U review (none blocking; the regression it found, a group followed by a redirect, is fixed in
+batch U round 2 together with the background `&` and group-after-keyword findings):
+
+- `export X=1; x=$(pip install x)` is not seen: the pip install inside a command substitution is not a segment head.
+- `xargs -a r.txt pip install` is not seen: an `xargs` option with a non-numeric, non-`{}` value breaks the head match.
+- The segment splitter splits inside a trailing comment (`ls # note | sudo pip install x` denies); pre-existing.
+
 ### N406 — `github_auto_close_keywords` denies a quoted `echo` or a `python3 - <<'EOF'` that only prints a keyword
 
 **Source**: Plan 00483 Task 3.2 re-probe (2026-10-11), proposal P6, probes ac7, ac9 (report as N409).

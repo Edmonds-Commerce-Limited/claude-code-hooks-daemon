@@ -72,6 +72,9 @@ _EXPORT_HEAD = re.compile(r"(?:export|(?:declare|typeset)\s+-\w*x\w*)\s+")
 _ENV_HEAD = re.compile(r"env\s+(?:-\S+\s+)*")
 _SHELL_C_HEAD = re.compile(r"(?:\S*/)?(?:ba|da|z)?sh\s+-\w*c\s+['\"]?\s*")
 _PIPE_SEPARATORS = frozenset({"|", "|&"})
+# A `&` backgrounds the command before it into a subshell, like a pipe stage.
+_BACKGROUND_SEPARATOR = "&"
+_TRAILING_REDIRECT = re.compile(r"\s*(?:\d*|&)(?:>>?|<)&?\s*[^\s()<>]+\s*$")
 # `unset VAR` / `export -n VAR` take the variable out of the environment again.
 _UNSET_HEAD = re.compile(rf"unset\s+(?:-\S+\s+)*(?:\S+\s+)*?{_ENV_VAR_NAME}\b")
 _EXPORT_UNMARK_HEAD = re.compile(rf"export\s+-\w*n\w*\s+(?:\S+\s+)*?{_ENV_VAR_NAME}\b")
@@ -114,7 +117,7 @@ def _leading_assignment(segment: str) -> tuple[bool, str | None, str]:
 
 def _is_pipe(separator: str) -> bool:
     """Whether ``separator`` joins two stages of one pipeline (`|` or `|&`)."""
-    return separator in _PIPE_SEPARATORS
+    return separator.strip() in _PIPE_SEPARATORS
 
 
 def _open_groups(text: str, stack: list[bool], exported: bool) -> str:
@@ -125,14 +128,25 @@ def _open_groups(text: str, stack: list[bool], exported: bool) -> str:
     return text
 
 
+def _without_trailing_redirects(text: str) -> str:
+    """``text`` without the redirects ending it (`2>/dev/null`, `> log`, `&>f`, `2>&1`)."""
+    while (match := _TRAILING_REDIRECT.search(text)) is not None:
+        text = text[: match.start()]
+    return text
+
+
 def _strip_closes(text: str, open_groups: int) -> tuple[str, int]:
-    """Strip up to ``open_groups`` trailing `)` from ``text``; return it and how many."""
+    """Strip up to ``open_groups`` trailing `)` from ``text``; return it and how many.
+
+    Redirects after the paren (`(...) 2>/dev/null`) do not keep the group open,
+    but are left on ``text`` when no group closes there.
+    """
     closes = 0
-    text = text.rstrip()
-    while closes < open_groups and text.endswith(")"):
-        text = text[:-1].rstrip()
+    candidate = _without_trailing_redirects(text.rstrip()).rstrip()
+    while closes < open_groups and candidate.endswith(")"):
+        candidate = candidate[:-1].rstrip()
         closes += 1
-    return text, closes
+    return (candidate, closes) if closes else (text.rstrip(), 0)
 
 
 def _env_var_governs_pip_install(items: list[tuple[str, str]]) -> bool:
@@ -148,8 +162,12 @@ def _env_var_governs_pip_install(items: list[tuple[str, str]]) -> bool:
     groups: list[bool] = []
     for index, (separator, segment) in enumerate(items):
         next_separator = items[index + 1][0] if index + 1 < len(items) else ""
-        in_pipeline = _is_pipe(separator) or _is_pipe(next_separator)
-        text = _open_groups(segment.strip(), groups, exported)
+        in_pipeline = (
+            _is_pipe(separator)
+            or _is_pipe(next_separator)
+            or next_separator.strip() == _BACKGROUND_SEPARATOR
+        )
+        text = _open_groups(strip_reserved_word_prefix(segment).strip(), groups, exported)
         text, closes = _strip_closes(text, len(groups))
         is_export, value, rest = _leading_assignment(text)
         stripped = strip_reserved_word_prefix(text)

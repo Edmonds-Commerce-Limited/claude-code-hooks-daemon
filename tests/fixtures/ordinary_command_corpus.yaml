@@ -1489,6 +1489,18 @@ rows:
   - id: n407-export-in-group-then-pip
     command: |-
       (export PIP_BREAK_SYSTEM_PACKAGES=1); pip install x
+  - id: n407-export-in-group-redirected-then-pip
+    command: |-
+      (export PIP_BREAK_SYSTEM_PACKAGES=1) 2>/dev/null; pip install x
+  - id: n407-export-in-group-file-redirect-then-pip
+    command: |-
+      (export PIP_BREAK_SYSTEM_PACKAGES=1) > log; pip install x
+  - id: n407-export-in-group-and-redirect-then-pip
+    command: |-
+      (cd /x && export PIP_BREAK_SYSTEM_PACKAGES=1) &>log; pip install x
+  - id: n407-export-backgrounded-then-pip
+    command: |-
+      export PIP_BREAK_SYSTEM_PACKAGES=1 & pip install x
   - id: n408-echo-names-issue-view
     command: |-
       echo 'gh issue view 5'

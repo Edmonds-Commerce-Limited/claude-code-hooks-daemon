@@ -41,9 +41,28 @@ All four cleared, test-first (the new test file was run red before the fix).
 - An `xargs` option whose value is neither numeric nor `{}` (`-I %`, `-d ,`)
   breaks the head match, so that form allows.
 
+## Round 2 (review found one regression)
+
+1. Regression fixed: a trailing redirect after the closing paren (`2>/dev/null`,
+   `> log`, `&>log`, `2>&1`) is looked past when closing a group, so
+   `(export X=1) 2>/dev/null; pip install x` allows again. Three allow tests
+   (plus `2>&1`) and three corpus rows.
+2. A `&` after a segment is treated like a pipe for export persistence, so
+   `export X=1 & pip install x` allows (also with a newline after `&` or `|`).
+3. A leading reserved word (`then`, `do`...) is stripped before groups are
+   opened, so `if true; then ( X=1 pip install x ); fi` denies.
+4. Helper tests added for newline, `&`, `;;` and `2>&1 |`, plus a parity test
+   over every corpus command. The newline case found a real bug: the helper
+   stripped the newline out of the separator, so it now strips only spaces and tabs.
+5. Recorded as residuals under N407, not fixed: `x=$(pip install x)` after an
+   export, `xargs -a r.txt pip install`, and the splitter splitting inside a
+   trailing comment.
+
 ## Results
 
 - Targeted pytest (pip handler tests, `tests/unit/utils`, the corpus gate
-  `tests/integration/test_ordinary_command_regression_gate.py`): 2464 passed.
+  `tests/integration/test_ordinary_command_regression_gate.py`): 2464 passed
+  in round 1; round 2 ran a wider selection of the same directories, 9248
+  passed, 1 skipped.
 - black, ruff, mypy and pyright clean on the touched files.
 - Full suite not run, as instructed.

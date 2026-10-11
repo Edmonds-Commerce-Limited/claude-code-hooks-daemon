@@ -58,6 +58,12 @@ _DENY = [
     f"export {_VAR}=1; (unset {_VAR}); pip install x",
     # a pipe stage's unset does not cancel the outer export
     f"export {_VAR}=1; unset {_VAR} | cat; pip install x",
+    # a group behind a keyword
+    f"if true; then ( {_VAR}=1 pip install x ); fi",
+    f"if true; then (export {_VAR}=1; pip install x); fi",
+    f"while true; do (export {_VAR}=1; pip install x) > log; done",
+    # an export before a backgrounded command still reaches it
+    f"export {_VAR}=1; pip install x &",
 ]
 
 _ALLOW = [
@@ -75,6 +81,15 @@ _ALLOW = [
     f"(export {_VAR}=1); pip install x",
     f"( export {_VAR}=1 ); pip install x",
     f"(export {_VAR}=1; true) && pip install x",
+    # a redirect after the closing paren does not keep the group open
+    f"(export {_VAR}=1) 2>/dev/null; pip install x",
+    f"(export {_VAR}=1) > log; pip install x",
+    f"(cd /x && export {_VAR}=1) &>log; pip install x",
+    f"(export {_VAR}=1) 2>&1; pip install x",
+    # a backgrounded export is a subshell
+    f"export {_VAR}=1 & pip install x",
+    f"export {_VAR}=1 &\npip install x",
+    f"export {_VAR}=1 |\npip install x",
     # mentions and look-alikes
     f"export {_VAR}=1; command ls",
     f"export {_VAR}=1; xargs ls < r.txt",
