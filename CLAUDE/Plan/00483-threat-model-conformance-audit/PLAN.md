@@ -164,10 +164,15 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   batches (b) and (c), none regressed). Of the 16, 12 are deliberate policy (6 `sed` word, 6
   `| head`/`| tail`) and 4 are in-scope false positives with no ledger entry yet: a `gh --body "$(cat <<'EOF'` heredoc and a `git -c k=v commit -F - <<'EOF'` heredoc read as code by
   `destructive_git`/`git_stash`, and `cd "$(git rev-parse --show-toplevel)" && git commit` /
-  `cd $PROJ && git commit` denied by the commit conflict gate. Three ledger entries are
-  proposed (P1 to P3) in the report and not yet filed; the audit's "not re-run" guards (Parts C
-  and F) are still not re-probed. Report:
-  [subagent-reports/261011-task-3.2-recheck-sonnet.md](subagent-reports/261011-task-3.2-recheck-sonnet.md).
+  `cd $PROJ && git commit` denied by the commit conflict gate. These three are filed as
+  00474 N400, N401 and N402. The audit's "not re-run" guards (Parts C and F) are now
+  re-probed on main b8095b83d: they deny only commands that merely mention the target text,
+  and six further ledger entries (P4 to P9: git_message_backtick, ancestry_preserving_merge,
+  github_auto_close_keywords, pip_break_system with sudo_pip, gh_issue/pr_comments,
+  subagent_full_qa_blocker script chain) are proposed in the second report and not yet filed.
+  Reports:
+  [subagent-reports/261011-task-3.2-recheck-sonnet.md](subagent-reports/261011-task-3.2-recheck-sonnet.md),
+  [subagent-reports/261011-not-rerun-guards-sonnet.md](subagent-reports/261011-not-rerun-guards-sonnet.md).
   Batch (b), the git guards, is merged (324b59962): `destructive_git` and
   `git_stash` judge each command segment on its own tokens and read a quoted `git`/`awk` pattern,
   a `gh` body heredoc and a printing `while read` loop as data; gate rows `a8-*`. Report:
@@ -279,9 +284,11 @@ Owner questions sent 2026-10-05 as chunks A–D; see the backlog report
   missing. The 24 handlers of Part G are provisional file-level verdicts, and Parts A to F
   pre-date the A1/A2 removals.
 - [ ] Every in-scope false positive found has a narrowing fix merged or a ledger entry. Missing:
-  the three in-scope false positives left among the 50 probes (P1 `gh --body "$(cat <<'EOF'`
-  heredoc, P2 `git -c k=v commit -F -` heredoc, P3 `cd <expansion> && git commit` conflict
-  gate) have no ledger entry yet; the audit's "not re-run" guards are also not re-probed.
+  the three false positives among the 50 probes are filed (N400, N401, N402), and the
+  "not re-run" guards are re-probed, but that re-probe found six more families with no ledger
+  entry yet (P4 to P9 in
+  [subagent-reports/261011-not-rerun-guards-sonnet.md](subagent-reports/261011-not-rerun-guards-sonnet.md)).
+  Tick once they are filed in 00474 NIGGLES.md or ruled correct denies.
 
 ## Delivery & Milestones
 
