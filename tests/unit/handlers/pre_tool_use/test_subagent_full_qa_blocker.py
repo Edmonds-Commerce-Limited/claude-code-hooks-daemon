@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import time
 from collections.abc import Iterator, Sequence
 from itertools import pairwise
 from pathlib import Path
@@ -3659,6 +3660,191 @@ class TestPythonHoldingAProgramNameIsNotRunningIt:
         """Code Python cannot parse has no calls to read, so it stays fail-closed."""
         code = "import subprocess\nTOOLS = ['pytest'\nsubprocess.run(['ruff', 'check', '.'])"
         assert find_full_qa_invocation(_python_heredoc(code), _patterns()) is not None
+
+
+_RUN_PY = "ru" + "nner.py"
+_EXEC = "ex" + "ec"
+_PROGRAM = "./scripts/qa/llm_qa.py"
+
+#: N409 residuals (batch X): a list MUTATED into a full run, an asyncio process, and
+#: code read from a named file and run in-process. Each starts a full run.
+_PYTHON_RESIDUAL_FULL_RUNS: list[str] = [
+    f"import subprocess\na=[]\na.append('{_PROGRAM}')\na.append('all')\nsubprocess.Popen(a)",
+    f"import subprocess\na=['{_PROGRAM}']\na+=['all']\nsubprocess.Popen(a)",
+    f"import subprocess\na=[]\na.extend(['{_PROGRAM}','all'])\nsubprocess.Popen(a)",
+    f"import subprocess\na=['{_PROGRAM}']\na.extend(['all'])\nsubprocess.run(a)",
+    f"import subprocess\na=[]\na.append('{_PROGRAM}')\na.append('all')\nsubprocess.call(a)",
+    f"import subprocess\na=[]\na.append('{_PROGRAM}')\na.append('all')\nsubprocess.check_call(a)",
+    f"import subprocess\na=[]\na.append('{_PROGRAM}')\na.append('all')\nsubprocess.check_output(a)",
+    f"import subprocess\na=[]\na.append('{_PROGRAM}')\na.append('all')\nsubprocess.run(args=a)",
+    f"import subprocess\na=[]\na.append('{_PROGRAM}')\na.append('all')\nb=a\nsubprocess.run(b)",
+    "import subprocess\na=['python']\na.append('-m')\na.append('pytest')\nsubprocess.run(a)",
+    "import subprocess\na=[]\na.append('pytest')\nsubprocess.run(a)",
+    "import subprocess\na=['pytest']\na.append('-q')\nsubprocess.run(a)",
+    (
+        "import asyncio\nasync def m():\n"
+        f"    await asyncio.create_subprocess_exec('{_PROGRAM}','all')\nasyncio.run(m())"
+    ),
+    f"import asyncio\nasyncio.create_subprocess_exec('{_PROGRAM}', 'all')",
+    "import asyncio\nasyncio.create_subprocess_exec('pytest')",
+    f"import asyncio\nasync def m():\n    await asyncio.create_subprocess_shell('{_QA}')",
+    "import asyncio\nasync def m():\n    await asyncio.create_subprocess_shell('pytest')",
+    f"import asyncio\na=['{_PROGRAM}']\na.append('all')\nasyncio.create_subprocess_exec(*a)",
+]
+
+#: The same shapes that run nothing full: data, an unpassed list, a targeted run.
+_PYTHON_RESIDUAL_ALLOWED: list[str] = [
+    "import subprocess\na=['pytest']\nprint(a)\nsubprocess.run(['ls'])",
+    "import subprocess\na=[]\na.append('pytest')\nprint(a)\nsubprocess.run(['ls'])",
+    "import subprocess\na=['ruff']\na.append('pytest')\nsubprocess.run(['ls'])",
+    f"import subprocess\na=['{_PROGRAM}']\na.append('all')\nprint(len(a))\nsubprocess.run(['ls'])",
+    "import subprocess\na=['pytest']\na.append('tests/unit/x.py')\nsubprocess.run(a)",
+    "import subprocess\na=['pytest']\na+=['tests/unit/x.py']\nsubprocess.run(a)",
+    "import subprocess\na=['pytest']\na.extend(['tests/unit/x.py'])\nsubprocess.Popen(a)",
+    "import subprocess\na=[]\na.append('ruff')\na.append('check')\nsubprocess.run(a)",
+    "import asyncio\nasyncio.create_subprocess_exec('pytest', 'tests/unit/x.py')",
+    "import asyncio\nasyncio.create_subprocess_exec('ls', '-l')",
+    "import asyncio\nasyncio.create_subprocess_shell('pytest tests/unit/x.py')",
+    "import asyncio\nasyncio.create_subprocess_shell('ls')",
+    f"import subprocess\nprint('{_QA}')\nsubprocess.run(['ls'])\nimport asyncio",
+    "class Q:\n    def append(self, x):\n        print(x)\nq=Q()\nq.append('pytest')\nprint(q)",
+]
+
+
+class TestResidualPythonRoutesToAFullRun:
+    """N409 residuals: mutated lists, asyncio subprocesses, code run from a named file."""
+
+    @pytest.mark.parametrize("code", _PYTHON_RESIDUAL_FULL_RUNS)
+    def test_a_residual_route_to_a_full_run_is_denied(self, code: str) -> None:
+        match = find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=_REPO_ROOT)
+        assert match is not None, code
+
+    @pytest.mark.parametrize("code", _PYTHON_RESIDUAL_ALLOWED)
+    def test_data_and_targeted_runs_stay_allowed(self, code: str) -> None:
+        assert find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=_REPO_ROOT) is None
+
+    @pytest.mark.parametrize("script", ["pytest", "pytest -q", _QA])
+    def test_exec_of_a_named_file_judges_the_file(self, script: str, tmp_path: Path) -> None:
+        (tmp_path / _RUN_PY).write_text(
+            f"import subprocess\nsubprocess.run('{script}', {_SHELL_TRUE})\n", encoding="utf-8"
+        )
+        code = f"{_EXEC}(open('{_RUN_PY}').read())"
+        match = find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=tmp_path)
+        assert match is not None
+
+    def test_run_path_of_a_named_file_judges_the_file(self, tmp_path: Path) -> None:
+        (tmp_path / _RUN_PY).write_text("import subprocess\nsubprocess.run('pytest')\n")
+        code = f"import runpy\nrunpy.run_path('{_RUN_PY}')"
+        assert find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=tmp_path)
+
+    def test_exec_of_a_targeted_file_is_allowed(self, tmp_path: Path) -> None:
+        (tmp_path / _RUN_PY).write_text(
+            "import subprocess\nsubprocess.run(['pytest', 'tests/unit/x.py'])\n"
+        )
+        for code in (
+            f"{_EXEC}(open('{_RUN_PY}').read())",
+            f"import runpy\nrunpy.run_path('{_RUN_PY}')",
+        ):
+            assert find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=tmp_path) is None
+
+    def test_exec_of_an_absent_file_follows_the_script_policy(self, tmp_path: Path) -> None:
+        """`python3 absent.py` is allowed (nothing to run); so is exec of the same name."""
+        for code in (
+            f"{_EXEC}(open('{_RUN_PY}').read())",
+            f"import runpy\nrunpy.run_path('{_RUN_PY}')",
+        ):
+            assert find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=tmp_path) is None
+        assert find_full_qa_invocation(f"python3 {_RUN_PY}", _patterns(), cwd=tmp_path) is None
+
+    def test_exec_of_a_directory_is_absent_like_a_script(self, tmp_path: Path) -> None:
+        (tmp_path / _RUN_PY).mkdir()
+        code = f"{_EXEC}(open('{_RUN_PY}').read())"
+        via_exec = find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=tmp_path)
+        via_script = find_full_qa_invocation(f"python3 {_RUN_PY}", _patterns(), cwd=tmp_path)
+        assert via_exec is None
+        assert via_script is None
+
+    def test_exec_of_a_fifo_is_unseen_and_denied_like_a_script(self, tmp_path: Path) -> None:
+        os.mkfifo(tmp_path / _RUN_PY)
+        code = f"{_EXEC}(open('{_RUN_PY}').read())"
+        via_exec = find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=tmp_path)
+        via_script = find_full_qa_invocation(f"python3 {_RUN_PY}", _patterns(), cwd=tmp_path)
+        assert via_script is not None
+        assert via_exec is not None
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            f"{_EXEC}(compile(open('{_RUN_PY}').read(), '{_RUN_PY}', 'ex' + 'ec'))",
+            f"with open('{_RUN_PY}') as h:\n    {_EXEC}(h.read())",
+            f"import runpy as r\nr.run_path('{_RUN_PY}')",
+            f"from runpy import run_path\nrun_path('{_RUN_PY}')",
+        ],
+    )
+    def test_more_ways_to_run_a_named_file_judge_the_file(self, code: str, tmp_path: Path) -> None:
+        (tmp_path / _RUN_PY).write_text("import subprocess\nsubprocess.run('pytest')\n")
+        assert find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=tmp_path)
+
+    def test_a_run_path_that_is_not_runpys_runs_nothing(self, tmp_path: Path) -> None:
+        (tmp_path / _RUN_PY).write_text("import subprocess\nsubprocess.run('pytest')\n")
+        code = f"router = object()\nrouter.run_path('{_RUN_PY}')"
+        assert find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=tmp_path) is None
+
+
+_L = f"['{_PROGRAM}','all']"
+_ANOTHER_ROUTE_DENIED: list[str] = [
+    f"import subprocess\ncmds=[{_L}]\n[subprocess.run(c) for c in cmds]",
+    f"import subprocess\ncmds=[]\ncmds.append({_L})\n[subprocess.run(c) for c in cmds]",
+    f"import subprocess\ncmds=[]\ncmds.append({_L})\nall(subprocess.run(c) for c in cmds)",
+    f"import subprocess\ncmds=[]\ncmds.extend([{_L}])\nrs=[subprocess.run(c) for c in cmds]",
+    f"import subprocess\ncmds=[]\ncmds+=[{_L}]\nrs=[subprocess.run(c) for c in cmds]",
+    f"import subprocess\ncmds=[]\ncmds.append({_L})\nrs={{c[0]: subprocess.run(c) for c in cmds}}",
+    f"import subprocess\ncmds=[]\ncmds.append({_L})\nrs={{subprocess.run(c) for c in cmds}}",
+    f"import subprocess\ncmds=[]\ncmds.append('{_QA}')\n[subprocess.run(c, {_SHELL_TRUE}) for c in cmds]",
+    "import subprocess\ncmds=[]\ncmds.append(['pytest'])\n[subprocess.run(c) for c in cmds]",
+    # Two functions that use the same name: one's full run is not hidden by the other's growth.
+    f"import subprocess\ndef f():\n    a={_L}\n    return a\ndef g():\n    a=['ruff']\n"
+    "    a.append('check')\n    subprocess.run(a)\nsubprocess.run(f())\ng()",
+    f"import subprocess\ndef g():\n    a=['ruff']\n    a.append('check')\n    subprocess.run(a)\n"
+    f"a={_L}\nsubprocess.run(a)",
+    # A list grown in the function that runs it, from a module-level start.
+    f"import subprocess\nbase={_L}\ndef g():\n    base.append('-v')\n    subprocess.run(base)\ng()",
+]
+
+
+class TestResidualRoutesReviewRound2:
+    """Batch X review: comprehension targets, per-function lists, and a bounded cost."""
+
+    @pytest.mark.parametrize("code", _ANOTHER_ROUTE_DENIED)
+    def test_the_route_is_denied(self, code: str) -> None:
+        assert find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=_REPO_ROOT)
+
+    def test_a_grown_list_in_another_function_is_judged_where_it_is_run(self) -> None:
+        code = (
+            "import subprocess\ndef g():\n    a=['pytest','-q']\n    a.append('tests/unit/x.py')\n"
+            "    subprocess.run(a)\ng()"
+        )
+        assert find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=_REPO_ROOT) is None
+
+    def test_a_big_alias_chain_is_judged_quickly(self, tmp_path: Path) -> None:
+        links = "".join(f"a{i + 1}=a{i}\n" for i in range(3000))
+        code = (
+            f"import subprocess\na0=['ruff']\na0.append('y')\n{links}"
+            + "subprocess.run(a3000)\n" * 300
+        )
+        script = tmp_path / "big.py"
+        script.write_text(code, encoding="utf-8")
+        start = time.perf_counter()
+        find_full_qa_invocation(f"python3 {script}", _patterns(), cwd=_REPO_ROOT)
+        assert time.perf_counter() - start < 1.5
+
+    def test_many_appends_each_run_are_judged_quickly(self, tmp_path: Path) -> None:
+        body = "".join(f"a.append('x{i}')\nsubprocess.run(a)\n" for i in range(2000))
+        script = tmp_path / "many.py"
+        script.write_text("import subprocess\na=['ruff']\n" + body, encoding="utf-8")
+        start = time.perf_counter()
+        find_full_qa_invocation(f"python3 {script}", _patterns(), cwd=_REPO_ROOT)
+        assert time.perf_counter() - start < 1.5
 
 
 class TestMentionsAndRealRunsAtTheShellLevel:

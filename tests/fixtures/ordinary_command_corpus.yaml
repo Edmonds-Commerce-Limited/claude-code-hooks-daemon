@@ -1669,6 +1669,29 @@ rows:
       KNOWN = ['run_all.sh']
       subprocess.run(['git', 'status'])
       PY
+  - id: n409-python-heredoc-mutated-list-never-run
+    command: |-
+      python3 - <<'PY'
+      import subprocess
+      tools = ['ruff']
+      tools.append('pytest')
+      print(tools)
+      subprocess.run(['git', 'status'])
+      PY
+  - id: n409-python-heredoc-mutated-list-targeted-pytest
+    command: |-
+      python3 - <<'PY'
+      import subprocess
+      cmd = ['pytest']
+      cmd.append('tests/unit/x.py')
+      subprocess.run(cmd)
+      PY
+  - id: n409-python-heredoc-asyncio-targeted-pytest
+    command: |-
+      python3 - <<'PY'
+      import asyncio
+      asyncio.create_subprocess_exec('pytest', 'tests/unit/x.py')
+      PY
   # --- Plan 00474 N403: a redirect is judged where the chain's cd lands it ---------
   - id: n403-cd-sub-redirect-to-parent
     cwd: tests

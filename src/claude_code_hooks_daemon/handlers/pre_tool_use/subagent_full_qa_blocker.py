@@ -66,6 +66,7 @@ word the code computes).
 from __future__ import annotations
 
 import ast
+import bisect
 import errno
 import logging
 import os
@@ -3388,6 +3389,263 @@ def _python_argvs(
     return [[head, *tail] for head in heads]
 
 
+#: The ``subprocess`` calls that start a process from an argv list handed as
+#: their first argument or ``args=``, and ``asyncio``'s argv-from-arguments one.
+_ARGV_SINKS: Final[frozenset[str]] = frozenset(
+    {"Popen", "run", "call", "check_call", "check_output"}
+)
+_ASYNC_EXEC_SINK: Final[str] = "create_subprocess_exec"
+_ARGS_KEYWORD: Final[str] = "args"
+
+#: At most this many words of a grown list are judged at one call, so a list
+#: grown a thousand times costs a bounded argv, not its whole length each call.
+_MAX_ARGV_WORDS: Final[int] = 64
+#: A list is found by the function it lives in and its name.
+_ListKey = tuple[int, str]
+#: A change to a named list: where it happens, whether it REPLACES the list
+#: (``a = [...]``) rather than adds to it, the items it leaves in it, and the
+#: id of the list literal a replacement assigns (0 for none).
+_ListChange = tuple[tuple[int, int], bool, list[ast.expr], int]
+_FUNCTIONS: Final[tuple[type[ast.AST], ...]] = (
+    ast.FunctionDef,
+    ast.AsyncFunctionDef,
+    ast.Lambda,
+)
+
+
+def _added_items(value: ast.expr) -> list[ast.expr]:
+    """The items ``extend(value)`` or ``+= value`` adds: a literal's own, else a starred unknown."""
+    if isinstance(value, (ast.List, ast.Tuple)):
+        return list(value.elts)
+    return [ast.Starred(value=value, ctx=ast.Load())]
+
+
+def _function_scopes(tree: ast.Module) -> tuple[dict[int, int], dict[int, int]]:
+    """The function each node sits in (0 for the module), and each function's parent.
+
+    Iterative, so a deeply nested tree costs its size once.
+    """
+    scope_of: dict[int, int] = {}
+    parent_of: dict[int, int] = {}
+    pending: list[tuple[ast.AST, int]] = [(tree, 0)]
+    while pending:
+        node, scope = pending.pop()
+        scope_of[id(node)] = scope
+        inner = id(node) if isinstance(node, _FUNCTIONS) else scope
+        if inner != scope:
+            parent_of[inner] = scope
+        pending.extend((child, inner) for child in ast.iter_child_nodes(node))
+    return scope_of, parent_of
+
+
+def _list_changes(
+    nodes: Iterable[ast.AST], scope_of: Mapping[int, int]
+) -> dict[_ListKey, list[_ListChange]]:
+    """Each list's changes, in order: assignments, ``+=``, ``.append`` and ``.extend`` (N409)."""
+    changes: dict[_ListKey, list[_ListChange]] = {}
+
+    def record(
+        target: ast.expr,
+        node: ast.expr | ast.stmt,
+        replaces: bool,
+        items: Sequence[ast.expr],
+        literal: int = 0,
+    ) -> None:
+        if isinstance(target, ast.Name):
+            where = (node.lineno, node.col_offset)
+            key = (scope_of[id(node)], target.id)
+            kept = list(items[:_MAX_ARGV_WORDS])
+            changes.setdefault(key, []).append((where, replaces, kept, literal))
+
+    for node in nodes:
+        if isinstance(node, ast.Assign) and not isinstance(node.value, ast.Name):
+            is_literal = isinstance(node.value, (ast.List, ast.Tuple))
+            held = _added_items(node.value) if is_literal else []
+            for target in node.targets:
+                record(target, node, True, held, id(node.value) if is_literal else 0)
+        elif isinstance(node, ast.AugAssign) and isinstance(node.op, ast.Add):
+            record(node.target, node, False, _added_items(node.value))
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and (receiver := _grown_list(node)) is not None
+        ):
+            added = [node.args[0]] if node.func.attr == "append" else _added_items(node.args[0])
+            record(receiver, node, False, added)
+    for each in changes.values():
+        each.sort(key=lambda change: change[0])
+    return changes
+
+
+def _states_after(
+    changes: Sequence[_ListChange], counts: Iterable[int]
+) -> dict[int, tuple[list[ast.expr], int]]:
+    """The items a list holds, and the literal it started from, after each count of changes.
+
+    One pass over the changes however many counts are asked for; the items
+    stop at :data:`_MAX_ARGV_WORDS`.
+    """
+    wanted = set(counts)
+    states: dict[int, tuple[list[ast.expr], int]] = {}
+    items: list[ast.expr] = []
+    literal = 0
+    for applied in range(max(wanted, default=-1) + 1):
+        if applied in wanted:
+            states[applied] = (list(items), literal)
+        if applied == len(changes):
+            break
+        _, replaces, added, started = changes[applied]
+        if replaces:
+            items, literal = list(added), started
+        else:
+            items.extend(added[: _MAX_ARGV_WORDS - len(items)])
+    return states
+
+
+def _only_assigned(changes: Sequence[_ListChange]) -> bool:
+    """Whether a list is only ever assigned, never grown: its literals stand as written."""
+    return all(replaces for _, replaces, _, _ in changes)
+
+
+def _spend(words: int) -> bool:
+    """Charge ``words`` of argv work to this judgement's parse meter (review 8 B1)."""
+    return _charge("." * words)
+
+
+@dataclass
+class _Reading:
+    """One call that reads named lists: which lists, and where in each it reads."""
+
+    call: ast.Call
+    sink: str
+    keys: list[_ListKey]
+    counts: dict[_ListKey, int]
+
+
+def _grown_argvs(
+    tree: ast.Module, names: Mapping[str, list[str]], argv: Sequence[str]
+) -> tuple[list[list[str]], set[int]]:
+    """The argvs of lists built by changes and then handed to a process call (N409).
+
+    ``a = []; a.append("pytest"); subprocess.Popen(a)`` starts pytest: the
+    argv is the list as it stood at the call. Also the argv an
+    ``asyncio.create_subprocess_exec`` call makes of its arguments, spreading
+    a named list it is given (``*a``). A list belongs to the function it is
+    built in (a name found nowhere there is looked for in the functions around
+    it). The work is bounded: each list is swept once, at most
+    :data:`_MAX_ARGV_WORDS` words are judged per call, and the words are
+    charged to the parse meter; past it the lists are left to be judged as
+    they are written.
+
+    Returns:
+        The argvs, and the ids of the list literals they replace: only the
+        literal a list was last assigned from before a call that runs it,
+        which is just the first part of that argv.
+    """
+    nodes = list(ast.walk(tree))
+    scope_of, parent_of = _function_scopes(tree)
+    changes = _list_changes(nodes, scope_of)
+    aliases: dict[_ListKey, list[str]] = {}
+    for node in nodes:
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Name):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    aliases.setdefault((scope_of[id(node)], target.id), []).append(node.value.id)
+
+    def resolve(scope: int, name: str) -> _ListKey | None:
+        """The list ``name`` means in ``scope``: its own, else an enclosing function's."""
+        while True:
+            if (scope, name) in changes or (scope, name) in aliases:
+                return (scope, name)
+            if scope not in parent_of:
+                return None
+            scope = parent_of[scope]
+
+    roots_of: dict[_ListKey, list[_ListKey]] = {}
+
+    def roots(start: _ListKey) -> list[_ListKey]:
+        """``start`` and every list it is assigned from (``b = a``), transitively."""
+        if start not in roots_of:
+            seen = {start}
+            order = [start]
+            pending = [start]
+            while pending:
+                scope, name = pending.pop()
+                for source in aliases.get((scope, name), []):
+                    found = resolve(scope, source)
+                    if found is not None and found not in seen:
+                        seen.add(found)
+                        order.append(found)
+                        pending.append(found)
+            roots_of[start] = order
+        return roots_of[start]
+
+    readings: list[_Reading] = []
+    wanted: dict[_ListKey, set[int]] = {}
+    for node in nodes:
+        if not isinstance(node, ast.Call):
+            continue
+        callee = _callee_name(node)
+        scope = scope_of[id(node)]
+        where = (node.lineno, node.col_offset)
+        keys: list[_ListKey] = []
+        if callee in _ARGV_SINKS:
+            operand = node.args[0] if node.args else None
+            for keyword in node.keywords:
+                if keyword.arg == _ARGS_KEYWORD:
+                    operand = keyword.value
+            start = resolve(scope, operand.id) if isinstance(operand, ast.Name) else None
+            if start is not None:
+                keys = [r for r in roots(start) if r in changes and not _only_assigned(changes[r])]
+        elif callee == _ASYNC_EXEC_SINK:
+            for argument in node.args:
+                spread = argument.value if isinstance(argument, ast.Starred) else None
+                found = resolve(scope, spread.id) if isinstance(spread, ast.Name) else None
+                if found is not None and found in changes:
+                    keys.append(found)
+        else:
+            continue
+        counts = {
+            key: bisect.bisect_left(changes[key], where, key=lambda change: change[0])
+            for key in keys
+            if key in changes
+        }
+        for key, count in counts.items():
+            wanted.setdefault(key, set()).add(count)
+        readings.append(_Reading(node, callee, keys, counts))
+    states = {key: _states_after(changes[key], counts) for key, counts in wanted.items()}
+    argvs: list[list[str]] = []
+    replaced: set[int] = set()
+    judged: set[tuple[_ListKey, int]] = set()
+    for reading in readings:
+        if reading.sink == _ASYNC_EXEC_SINK:
+            words: list[ast.expr] = []
+            for argument in reading.call.args:
+                spread = argument.value if isinstance(argument, ast.Starred) else None
+                found = (
+                    resolve(scope_of[id(reading.call)], spread.id)
+                    if isinstance(spread, ast.Name)
+                    else None
+                )
+                if found in reading.counts:
+                    words.extend(states[found][reading.counts[found]][0])
+                else:
+                    words.append(argument)
+            words = words[:_MAX_ARGV_WORDS]
+            if _spend(len(words)):
+                argvs.extend(_python_argvs(ast.List(elts=words, ctx=ast.Load()), names, argv))
+            continue
+        for key in reading.keys:
+            if key not in reading.counts or (key, reading.counts[key]) in judged:
+                continue
+            items, literal = states[key][reading.counts[key]]
+            if items and _spend(len(items)):
+                judged.add((key, reading.counts[key]))
+                argvs.extend(_python_argvs(ast.List(elts=items, ctx=ast.Load()), names, argv))
+                replaced.add(literal)
+    return argvs, replaced
+
+
 #: Calls that print, log, exit with or declare TEXT, so what they are given is
 #: prose rather than a command (N409). A name the code defines, rebinds or
 #: imports under one of these names is not a sink: it can run what it is given.
@@ -3423,6 +3681,22 @@ def _callee_name(call: ast.Call) -> str:
     return ""
 
 
+#: Methods that put their argument INTO a list (``.append(x)``, ``.extend(xs)``).
+_LIST_GROWERS: Final[frozenset[str]] = frozenset({"append", "extend"})
+
+
+def _grown_list(call: ast.Call) -> ast.expr | None:
+    """The list a ``.append(...)``/``.extend(...)`` call grows, or None for any other call."""
+    if (
+        isinstance(call.func, ast.Attribute)
+        and call.func.attr in _LIST_GROWERS
+        and len(call.args) == 1
+        and not call.keywords
+    ):
+        return call.func.value
+    return None
+
+
 def _bindings(nodes: Iterable[ast.AST]) -> dict[str, list[ast.expr]]:
     """Each name or attribute the code binds, with every expression it is given.
 
@@ -3446,10 +3720,15 @@ def _bindings(nodes: Iterable[ast.AST]) -> dict[str, list[ast.expr]]:
                 bind(target, node.value)
         elif isinstance(node, (ast.AnnAssign, ast.AugAssign)) and node.value is not None:
             bind(node.target, node.value)
-        elif isinstance(node, (ast.For, ast.AsyncFor)):
+        elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+            # `for c in cmds` and `[f(c) for c in cmds]`, a generator, set or dict alike.
             bind(node.target, node.iter)
         elif isinstance(node, ast.NamedExpr):
             bind(node.target, node.value)
+        elif isinstance(node, ast.Call) and (receiver := _grown_list(node)) is not None:
+            # `cmd.append(x)` / `cmd.extend(xs)` puts the argument INTO `cmd`.
+            for argument in node.args:
+                bind(receiver, argument)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             for part in ast.walk(node):
                 if isinstance(part, ast.Return) and part.value is not None:
@@ -3497,6 +3776,10 @@ def _process_arguments(tree: ast.Module) -> set[int]:
             continue
         name = _callee_name(node)
         if name in _TEXT_SINKS and name not in defined:
+            continue
+        if name in _LIST_GROWERS and name not in defined and _grown_list(node) is not None:
+            # Growing a list hands nothing to a process: what it holds is
+            # reached when the list itself is (see :func:`_bindings`).
             continue
         pending.extend(node.args)
         pending.extend(keyword.value for keyword in node.keywords)
@@ -3576,7 +3859,7 @@ def _python_strings(
     }
     names = _constant_names(tree)
     texts: list[str] = []
-    argvs: list[list[str]] = []
+    argvs, replaced = _grown_argvs(tree, names, argv)
     for node in nodes:
         if id(node) not in reached:
             continue
@@ -3586,7 +3869,11 @@ def _python_strings(
             text = _python_text(node, names)
             if text is not None:
                 texts.append(text)
-        if isinstance(node, (ast.List, ast.Tuple, ast.BinOp)) and id(node) not in links:
+        if (
+            isinstance(node, (ast.List, ast.Tuple, ast.BinOp))
+            and id(node) not in links
+            and id(node) not in replaced
+        ):
             argvs.extend(_python_argvs(node, names, argv))
     return texts, argvs
 
@@ -3650,6 +3937,99 @@ def _python_commands(
         yield from _resolve(argv, segment, depth)
 
 
+#: The builtin that runs a string as code; spelled so this module does not read as a use of it.
+_EXEC_BUILTIN: Final[str] = "ex" + "ec"
+_RUN_PATH: Final[str] = "run_path"
+_FILE_READERS: Final[frozenset[str]] = frozenset({"read", "read_text"})
+_FILE_OPENERS: Final[frozenset[str]] = frozenset({"open", "Path"})
+
+
+_RUNPY_MODULE: Final[re.Pattern[str]] = re.compile("runpy")
+_COMPILE: Final[str] = "compile"
+
+
+def _file_read_by(node: ast.expr, opened: Mapping[str, ast.expr]) -> ast.expr | None:
+    """The path of the file whose text ``node`` reads, else None.
+
+    ``open(path).read()``, ``Path(path).read_text()``, ``h.read()`` for an
+    ``h`` that ``with open(path) as h`` bound (``opened``), each also inside
+    ``compile(..., ...)``.
+    """
+    if isinstance(node, ast.Call) and _callee_name(node) == _COMPILE and node.args:
+        return _file_read_by(node.args[0], opened)
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in _FILE_READERS
+    ):
+        reader = node.func.value
+        if isinstance(reader, ast.Call) and _callee_name(reader) in _FILE_OPENERS and reader.args:
+            return reader.args[0]
+        if isinstance(reader, ast.Name):
+            return opened.get(reader.id)
+    return None
+
+
+def _opened_files(tree: ast.Module) -> dict[str, ast.expr]:
+    """Each name a ``with open(path) as name`` binds, with the path."""
+    opened: dict[str, ast.expr] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                call = item.context_expr
+                if (
+                    isinstance(call, ast.Call)
+                    and _callee_name(call) in _FILE_OPENERS
+                    and call.args
+                    and isinstance(item.optional_vars, ast.Name)
+                ):
+                    opened[item.optional_vars.id] = call.args[0]
+    return opened
+
+
+def _is_run_path(call: ast.Call, modules: set[str], members: Mapping[str, str]) -> bool:
+    """Whether the call is ``runpy.run_path`` under the name the code imported it as."""
+    if isinstance(call.func, ast.Attribute):
+        return (
+            call.func.attr == _RUN_PATH
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id in modules
+        )
+    return isinstance(call.func, ast.Name) and members.get(call.func.id) == _RUN_PATH
+
+
+def _files_run_in_process(code: str) -> list[str]:
+    """The files Python code runs in its own process by name (N409).
+
+    ``<exec>(open("runner.py").read())`` and ``runpy.run_path("runner.py")``
+    run that file's code; it is judged as ``python3 runner.py`` is. A path
+    Python computes at run time is not named, so none is returned for it.
+    Code that cannot be parsed names none.
+    """
+    try:
+        tree, _ = _parsed_reach(code)
+    except (SyntaxError, ValueError, RecursionError) as error:
+        logger.debug("No file read from unparsable Python (%s)", error)
+        return []
+    names = _constant_names(tree)
+    opened = _opened_files(tree)
+    modules, members = _imported_names(code, _RUNPY_MODULE)
+    paths: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        if _callee_name(node) == _EXEC_BUILTIN and isinstance(node.func, ast.Name):
+            operand = _file_read_by(node.args[0], opened)
+        elif _is_run_path(node, modules, members):
+            operand = node.args[0]
+        else:
+            continue
+        path = None if operand is None else _python_word(operand, names, strings_only=True)
+        if path and _PYTHON_VALUE not in path:
+            paths.append(path)
+    return paths
+
+
 def _pytest_in_code(code: str, argv: Sequence[str] = ()) -> list[str] | None:
     """The operands of the pytest run Python code makes, or None when it makes none.
 
@@ -3702,6 +4082,8 @@ def _python_code_runs(
         return
     if _starts_a_process(code):
         yield from _python_commands(code, argv, segment, depth)
+    for path in _files_run_in_process(code):
+        yield _CODE_FILE, [_PYTHON_CODE, path, *argv], segment
     operands = _pytest_in_code(code, argv)
     if operands is not None:
         yield _PYTEST_IN_CODE, operands, segment

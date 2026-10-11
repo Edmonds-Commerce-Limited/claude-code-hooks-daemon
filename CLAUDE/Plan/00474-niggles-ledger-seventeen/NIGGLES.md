@@ -1595,9 +1595,38 @@ shell-level mention and real-run shape (wrappers, `if/then`, `eval`, `bash -c`, 
 direct `bash` heredocs) already judged correctly through this handler's own parser, and is now pinned. Pinned by
 `TestPythonHoldingAProgramNameIsNotRunningIt` and `TestMentionsAndRealRunsAtTheShellLevel` in
 `tests/unit/handlers/pre_tool_use/test_subagent_full_qa_blocker.py` (red count 10 before the fix) and the `n409-` rows of
-`tests/fixtures/ordinary_command_corpus.yaml`. Residual, pre-existing and unfixed: a list built by `.append`/`+=` then
-passed to `Popen`, `asyncio.create_subprocess_exec`, and `exec(open(...).read())` are not seen as runs. Report:
+`tests/fixtures/ordinary_command_corpus.yaml`. Residual, pre-existing: a list built by `.append`/`+=` then
+passed to `Popen`, `asyncio.create_subprocess_exec`, and `exec(open(...).read())` were not seen as runs. Report:
 `subagent-reports/261011-batch-i-n409-sonnet.md`.
+
+✅ Residual cleared by batch X: a list grown by `.append`/`.extend`/`+=` and then handed to `Popen`/`run`/`call`/
+`check_call`/`check_output` (also via `args=` and a `b = a` alias) is judged as the argv it held at the call
+(`_grown_argvs`); `.append`/`.extend` pass nothing on by themselves (`_bindings`), so a grown list that is never run is
+data and `['pytest']` then `.append('tests/unit/x.py')` is a targeted run; `asyncio.create_subprocess_exec(...)`
+(awaited or not, `*a` spread of a named list) is judged as an argv and `create_subprocess_shell` as shell text; and
+`exec(open('f').read())` / `exec(Path('f').read_text())` / `runpy.run_path('f')` judge the named file as `python3 f` does
+(`_files_run_in_process`). Left: a file that does not exist is allowed, as `python3 absent.py` is (nothing can run),
+so the probe case `exec_open` (`runner.py` absent from the repo root) still allows; a path Python computes at run time is
+not named and keeps the pre-existing fail-closed `exec` handling; only the five `subprocess` sinks follow a mutated
+list, so `os.execv*`/`pty.spawn` of a grown list and `list.insert`/`a = a + [...]` are not tracked. Pinned by
+`TestResidualPythonRoutesToAFullRun` and the `n409-python-heredoc-mutated-*`/`asyncio-targeted` corpus rows. Report:
+`subagent-reports/261011-batch-x-sonnet.md`.
+
+Batch X round 2 (review FIX FIRST): a comprehension/generator/set/dict target is now bound to its iterable in
+`_bindings` (a grown or plain list run as `[run(c) for c in cmds]` is denied, which also closes the plain-literal gap on
+main); a list belongs to the function it is built in and only the literal in effect at a running call is set aside
+(`_function_scopes`, `_states_after`); the work is bounded (64 words per call, one sweep per list, memoised alias
+roots, charged to the parse meter): reviewer perf inputs went 15 s / 7 s / 6 s to about 0.2-0.45 s against 0.1-0.2 s on
+main. `run_path` only matches `runpy.run_path` (or a name imported from `runpy`); `exec(compile(open(f).read(), ...))`
+and `with open(f) as h: exec(h.read())` are read.
+
+Residuals under N409, not fixed (all also allowed on main unless noted): `.insert`/`.pop`, `a = a + [...]`,
+`cmd.extend(other_named_list)` (starred name not resolved), a grown list returned from a function, `' '.join(grown)` run
+with a shell, a grown attribute list (`c.a.append`), a `list(a)` copy / slice / tuple of a grown list, a keyword-unpacked
+`**kw` argv, `os.exec*` and `pty.spawn` of a grown list; an `asyncio.create_subprocess_exec` program given by keyword;
+`f = open(p); exec(f.read())`. The in-process file reader (`exec`/`run_path`, as `python3 <path>` on main) follows
+symlinks and does not exclude `secret_file_guard`'s protected paths; the right fix is one exclusion in `_read_new` for
+every route at once, not per route.
 
 ### N408 — `gh_issue_comments`/`gh_pr_comments` deny mentions and miss `--json=comments`
 
