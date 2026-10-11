@@ -1484,6 +1484,14 @@ depended on where QA runs.
   under `.claude/worktrees/x`, so the regression shows on the main checkout too. It failed before the fix (2 probes).
 - Other handlers: those reading the hook `cwd` also pass the contract test from this worktree after the fix (only
   these two probes failed), so no other acceptance probe depends on cwd in this way today.
+- Regression and second fix: `cwd: "/"` turned `tests/acceptance/test_playbook_harness.py` red on main. That harness
+  drives probes through the whole daemon chain, and `project_containment` denies the relative destination `src/` read
+  against `/` as outside the project, before the handler answers. Both harnesses plan probes with `plan_probe`, so the
+  probe now declares `cwd: "$MAIN_CHECKOUT_DIR"`, a placeholder `expand_project_dir` resolves with the new
+  `main_checkout_root` (the parent of `.claude/worktrees/` or `untracked/worktrees/`, else the project root itself). The
+  handler is unchanged. Red test first: `test_the_event_the_playbook_dispatches_stays_inside_the_main_checkout`
+  (main and worktree roots) plus unit tests of the placeholder. Report:
+  `subagent-reports/261011-n398-hotfix-sonnet.md`.
 
 ### N397 — copy-flag parsing and the `find -exec` action list are re-implemented per handler
 

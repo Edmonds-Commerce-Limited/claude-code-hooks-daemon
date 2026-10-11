@@ -37,6 +37,7 @@ from claude_code_hooks_daemon.daemon.playbook_harness import (
     build_event,
     daemon_error,
     expand_project_dir,
+    main_checkout_root,
     plan_probe,
     split_playbook,
     verdict,
@@ -89,6 +90,37 @@ class TestExpandProjectDir:
     def test_the_variable_is_expanded_wherever_it_sits_not_only_at_the_start(self) -> None:
         """It appears mid-string in Bash payloads, not only as a path prefix."""
         assert expand_project_dir("cd $CLAUDE_PROJECT_DIR && ls", _ROOT) == "cd /repo && ls"
+
+
+class TestMainCheckoutDir:
+    """`$MAIN_CHECKOUT_DIR` is the checkout a worktree was made from (N398)."""
+
+    def test_a_main_checkout_resolves_to_itself(self) -> None:
+        assert main_checkout_root(_ROOT) == _ROOT
+
+    def test_a_claude_worktree_resolves_to_the_checkout_that_holds_it(self) -> None:
+        assert main_checkout_root(_ROOT / ".claude" / "worktrees" / "agent-x") == _ROOT
+
+    def test_a_manual_worktree_resolves_to_the_checkout_that_holds_it(self) -> None:
+        assert main_checkout_root(_ROOT / "untracked" / "worktrees" / "wt") == _ROOT
+
+    def test_a_subdirectory_of_a_worktree_resolves_to_the_checkout(self) -> None:
+        assert main_checkout_root(_ROOT / ".claude" / "worktrees" / "w" / "src") == _ROOT
+
+    def test_the_placeholder_is_expanded_wherever_it_sits(self) -> None:
+        worktree = _ROOT / ".claude" / "worktrees" / "w"
+        assert expand_project_dir("$MAIN_CHECKOUT_DIR/src", worktree) == "/repo/src"
+        assert expand_project_dir("${MAIN_CHECKOUT_DIR}/src", worktree) == "/repo/src"
+
+    def test_the_project_dir_variable_still_names_the_worktree(self) -> None:
+        worktree = _ROOT / ".claude" / "worktrees" / "w"
+        assert expand_project_dir("$CLAUDE_PROJECT_DIR", worktree) == str(worktree)
+
+    def test_a_declared_extra_hook_input_is_expanded(self) -> None:
+        worktree = _ROOT / ".claude" / "worktrees" / "w"
+        probe = plan_probe(_block(extra_hook_input={"cwd": "$MAIN_CHECKOUT_DIR"}), worktree)
+        assert isinstance(probe, ExecutableProbe)
+        assert probe.extra_hook_input == {"cwd": "/repo"}
 
 
 class TestPlanProbeExpandsThePayload:

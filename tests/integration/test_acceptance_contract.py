@@ -78,6 +78,7 @@ from claude_code_hooks_daemon.daemon.playbook_harness import (
     ExecutableProbe,
     FixtureAction,
     SkippedProbe,
+    build_event,
     plan_probe,
 )
 from claude_code_hooks_daemon.handlers.project_loader import ProjectHandlerLoader
@@ -435,6 +436,43 @@ class TestWorktreeCopyProbesDoNotDependOnWhereTheSuiteRuns:
         for test in tests:
             probe = plan_probe(test, worktree_root)
             assert not isinstance(probe, SkippedProbe)
+            failures.extend(
+                _drive_executable_probe(
+                    probe, instances[(test["source"], test["handler_name"])], source=test["source"]
+                )
+            )
+        assert not failures, "\n".join(failures)
+
+    @pytest.mark.parametrize("suite_root_parts", [(), (".claude", "worktrees", "x")])
+    def test_the_event_the_playbook_dispatches_stays_inside_the_main_checkout(
+        self, tmp_path: Path, suite_root_parts: tuple[str, ...]
+    ) -> None:
+        """The playbook harness sends the probe through the whole daemon chain.
+
+        `project_containment` runs before the handler under test and denies a
+        relative destination that resolves outside the project, which answers
+        in the handler's place. So the cwd the probe declares must be the main
+        checkout, and `src/` read against it must stay inside that checkout,
+        whether the suite runs from the main checkout or from a worktree.
+        """
+        main_root = tmp_path / "main"
+        suite_root = main_root.joinpath(*suite_root_parts)
+        suite_root.mkdir(parents=True)
+        tests = [
+            test
+            for test in _collect_all_blocking_tests()
+            if test["handler_name"] == "WorktreeFileCopyHandler" and test.get("tool_payload")
+        ]
+        assert tests, "WorktreeFileCopyHandler declares no driven BLOCKING test"
+        instances = _handler_instances()
+
+        failures: list[str] = []
+        for test in tests:
+            probe = plan_probe(test, suite_root)
+            assert isinstance(probe, ExecutableProbe)
+            event = build_event(probe, run_id="r1")
+            assert Path(event["cwd"]) == main_root, test["title"]
+            assert (Path(event["cwd"]) / "src").is_relative_to(main_root), test["title"]
             failures.extend(
                 _drive_executable_probe(
                     probe, instances[(test["source"], test["handler_name"])], source=test["source"]
