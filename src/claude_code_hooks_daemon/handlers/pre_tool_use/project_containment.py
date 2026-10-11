@@ -42,6 +42,7 @@ import json
 import logging
 import shlex
 import tempfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
@@ -603,7 +604,7 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         unresolved: list[str] = []
         for step in steps:
             text = assignments + self._step_text(step)
-            placed, problem = placed_moves(step.directory, start)
+            placed, problem = placed_moves(self._literal_moves(step.directory, known), start)
             if problem is not None:
                 unresolved.extend(
                     f"{target} (relative to a cd the daemon cannot place)"
@@ -616,6 +617,21 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
                 paths.extend(step_paths)
                 unresolved.extend(step_unresolved)
         return paths, unresolved
+
+    @staticmethod
+    def _literal_moves(
+        moves: Sequence[str | None], known: dict[str, str]
+    ) -> tuple[str | None, ...]:
+        """``moves`` with each ``$NAME`` a plain assignment of the command pins replaced.
+
+        Only a literal assignment is substituted (``D=/tmp; cd $D``): a name
+        nothing pins stays as written, which :func:`placed_moves` then reports
+        as a ``cd`` it cannot place.
+        """
+        return tuple(
+            None if move is None else (substitute_known_variables(move, known) or move)
+            for move in moves
+        )
 
     @staticmethod
     def _step_text(step: SimpleCommand) -> str:
