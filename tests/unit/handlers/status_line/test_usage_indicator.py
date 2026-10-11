@@ -159,6 +159,61 @@ class TestRendering:
         assert f"{_YELLOW}5h 60% 3h 0m\033[0m" in rendered
 
 
+class TestSpendLimitChip:
+    """The gateway spend limit (``rate_limits.spend_limit``) beside the 5h/7d chips."""
+
+    @staticmethod
+    def _feed_spend(spend: object, *, with_windows: bool = True) -> None:
+        payload = load_status_payload("main_thread_integer.json")
+        if not with_windows:
+            payload["rate_limits"] = {}
+        payload["rate_limits"]["spend_limit"] = spend
+        get_data_layer().usage.update_from_status_event(payload, now=NOW)
+
+    def test_green_spend_chip_follows_the_other_chips(self) -> None:
+        self._feed_spend({"used_percentage": 5, "resets_at": 1_800_010_800})
+        rendered = _render()
+        assert rendered is not None
+        assert _plain(rendered) == "| 📈 5h13%|7d3%|$5%"
+        assert f"{_GREEN}$5%\033[0m" in rendered
+
+    def test_warning_spend_chip_adds_countdown_and_colour(self) -> None:
+        self._feed_spend({"used_percentage": 62.8, "resets_at": 1_800_010_800})
+        rendered = _render()
+        assert rendered is not None
+        assert f"{_YELLOW}$ 62% 3h 0m\033[0m" in rendered
+
+    def test_spend_over_the_limit_is_critical_and_unclamped(self) -> None:
+        self._feed_spend({"used_percentage": 140, "resets_at": 1_800_010_800})
+        rendered = _render()
+        assert rendered is not None
+        assert f"{_CRITICAL}$ 140% 3h 0m\033[0m" in rendered
+
+    def test_spend_alone_still_shows_the_segment(self) -> None:
+        self._feed_spend({"used_percentage": 5, "resets_at": 1_800_010_800}, with_windows=False)
+        rendered = _render()
+        assert rendered is not None
+        assert _plain(rendered) == "| 📈 $5%"
+
+    def test_hidden_when_absent(self) -> None:
+        _feed("main_thread_integer.json")
+        rendered = _render()
+        assert rendered is not None
+        assert "$" not in _plain(rendered)
+
+    @pytest.mark.parametrize("spend", ["junk", None, {"used_percentage": "x"}, {"resets_at": 1}])
+    def test_malformed_spend_never_breaks_the_segment(self, spend: object) -> None:
+        self._feed_spend(spend)
+        rendered = _render()
+        assert rendered is not None
+        assert _plain(rendered) == "| 📈 5h13%|7d3%"
+
+    def test_explanation_names_the_spend_chip(self) -> None:
+        explanation = UsageIndicatorHandler().explain_segment()
+        assert "$" in explanation.glyphs
+        assert "spend" in explanation.how_to_read.lower()
+
+
 class TestColour:
     @pytest.mark.parametrize(
         ("used", "colour"),
