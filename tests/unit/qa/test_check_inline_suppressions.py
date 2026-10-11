@@ -355,8 +355,8 @@ class TestTheBlockAboveMustBeAboutTheSuppression:
         with pytest.raises(AssertionError, match="0 comment"):
             _anchored_line(texts, NOSEC + " B999", 0, "mod.py")
 
-    def test_the_anchors_resolve_to_the_lines_they_replaced(self) -> None:
-        """Each anchor pointed at a known line when it replaced a line number."""
+    def test_every_anchor_resolves_to_its_own_line(self) -> None:
+        """No two rows resolve to the same suppression, so the table still names ten."""
         resolved = []
         for relative, anchor, occurrence in GENUINE_REASON_ABOVE:
             path = _REPO_ROOT / relative
