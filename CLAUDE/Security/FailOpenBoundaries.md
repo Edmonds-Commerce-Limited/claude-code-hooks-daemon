@@ -127,7 +127,11 @@ produces it, and the agent can neither shorten nor lengthen it. Its trace is
 in-band: every hook event carries "all safety handlers are inactive" plus the
 build state with a short line telling the agent to keep to reads and ordinary
 edits, the status line reads "venv building", and Stop and SubagentStop block.
-Waiting (Plan 00488 option A) cannot fit inside the hook timeout, and denying
+The whole window reads this way, including its first moments, when uv has made
+the interpreter but not yet installed the package: a held venv build lock is
+what marks the window (Task 3.5), not the venv's contents. A raw clone of this
+repository enters the window with no human step, because `init.sh` derives the
+root its gitignored env file would have set (Task 3.4). Waiting (Plan 00488 option A) cannot fit inside the hook timeout, and denying
 (option B) wedges the agent, since even `sleep` is denied. Decided by the
 coordinator, Fable-assisted, not the owner:
 [RULING-3.2](../Plan/00488-status-line-visible-during-daemon-outage/RULING-3.2-build-window.md).
