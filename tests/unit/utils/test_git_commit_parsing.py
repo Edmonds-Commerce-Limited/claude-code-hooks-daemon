@@ -917,3 +917,39 @@ class TestSimpleCommandsKeepTheirFileRedirections:
         assert first.redirects == ()
         assert second.redirects == ((">", "../x"),)
         assert second.directory == ("sub",)
+
+
+class TestAStagingRunsStdinIsFedOnlyByItsOwnInput:
+    """``stdin_fed`` is a real input redirect, heredoc or here-string on the run's own
+    segment, or a pipe into it (ledger 00474 N414 item 3)."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git update-index --index-info < entries.txt && git commit -m x",
+            "git update-index --index-info <<EOF\nEOF\ngit commit -m x",
+            "git update-index --index-info <<< 'x' && git commit -m x",
+            "git update-index --index-info 0< entries.txt && git commit -m x",
+            "git update-index --index-info < <(cat e) && git commit -m x",
+            "printf '' | git update-index --index-info && git commit -m x",
+        ],
+    )
+    def test_a_real_input_feed_is_fed(self, command: str) -> None:
+        (staging,) = read_commit_form(command).stagings
+        assert staging.stdin_fed is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git update-index --index-info && git commit -m 'a < b'",
+            "git update-index --index-info && git commit -m 'a <<< b'",
+            "git update-index --index-info && git commit -m x < in.txt",
+            "cat < in.txt; git update-index --index-info && git commit -m x",
+            "git update-index --index-info; wc -l <<< x; git commit -m x",
+            "git update-index --index-info > out.txt && git commit -m x",
+            "git update-index --index-info 2>&1 && git commit -m x",
+        ],
+    )
+    def test_text_and_other_commands_inputs_do_not_feed_it(self, command: str) -> None:
+        (staging,) = read_commit_form(command).stagings
+        assert staging.stdin_fed is False

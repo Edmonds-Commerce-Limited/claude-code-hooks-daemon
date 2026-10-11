@@ -84,7 +84,13 @@ is the count at that date.
 only (nothing denied), but a false positive on the most ordinary shell shape. Not yet reproduced by the coordinator;
 the reviewer's command text was not kept.
 
-**Status**: ⬜ Open. Reproduce first; then find which token read as an interpreter.
+**Status**: ✅ Fixed (batch AE). Reproduced: `_runs_inline_code` read the program NAME as unknown and any `-e`/`-c`/`-r`
+argument as inline code. `set -e; cd x; ls`, `set -e; echo hi` and bare `set -e` fired because `set -e` is a shell
+builtin option; `sort f | uniq -c` fired on `uniq -c` (the coordinator's lead was right). `set -euo pipefail` did not
+(a cluster is not an exact flag). The same shape also fired on `echo -e`, `rm -r`, `cp -r`, `ls -r`, `diff -r`,
+`tr -c`, `cat -e`, `stat -c`, `du -c`, `read -r`, `declare -r` and `pip install -r`. Fix: those programs join
+`_INLINE_CODE_FLAG_TEXT_TOOLS` (exact name, so `perl -e`, `foo -c` and `grepx -c` keep their verdict). Tests in
+`TestInlineCodeFlagIsNotReadOnSearchAndTextTools`.
 
 ### N415 — `subagent_full_qa_blocker` misses `fh = open(p); src = fh.read(); exec(src)`
 
@@ -92,8 +98,12 @@ the reviewer's command text was not kept.
 through a second name before `exec`, so the batch AB `f = open(p); exec(f.read())` tracking does not see it. Allowed
 on main and on the batch AB branch alike (no regression).
 
-**Status**: ⬜ Open. Agent-workable: carry a name bound to `<handle>.read()` / `<path>.read_text()` to the `exec`
-that consumes it, as the list tracking already carries names.
+**Status**: ✅ Fixed (batch AE). `_operands_run_in_process` now walks the code once in source order (explicit stack,
+linear) holding the names bound to an opened file and the names bound to a read file's text; `src = fh.read()`,
+`src = Path(p).read_text()` and `with open(p) as fh: src = fh.read()` then `exec(src)` (also inside `compile`) judge
+the file. A later store to the name (assignment, `for`, `with`) drops it; `src += ...` keeps it. Branches are not
+modelled: the latest textual binding wins, which can only miss a run, never invent one. Tests: `_EDIT_AND_EXEC_FULL_RUNS`,
+`_REBOUND_TEXT_ALLOWED`, a linearity test.
 
 ### N414 — commit-gate staging simulation residuals after batch AC (N246)
 
@@ -110,7 +120,19 @@ that consumes it, as the list tracking already carries names.
 3. `StagingRun.stdin_fed` is a plain substring test for `<`, so a `-m 'a < b'` or a `<<<` also counts. It only affects
    `--index-info` runs (whole tree instead of nothing). Narrow it to a real redirect if that code is touched again.
 
-**Status**: ⬜ Open. All three agent-workable.
+**Status**: ✅ Fixed (batch AE).
+
+1. "needs update" / "needs merge" are nothing-staged messages; `--refresh` prints them on STDOUT, so the check reads
+   stderr and stdout. Dirty-tree test for both options, plus a test that another failure still takes the whole tree.
+2. `_write_target_tokens` (core/utils) reads `--output=F` / `--output F` of a `git diff` or `git format-patch` (global
+   options skipped, `--` ends options) as a write target with `authored=False`. Conflict found: `get_written_file_paths`
+   is the CONTENT accessor (`authored_only`), used by `lint_on_edit`, `validate_eslint_on_write`, `sed_blocker` and
+   `sensitive_content`-style guards, and a patch is not authored code, so it stays out of it (a `--output=x.py` must not
+   be linted). Location guards (`get_bash_write_targets`) now see the file, and the staging simulation's
+   `_written_names` uses that scan. `format-patch -o DIR` writes unnamed files in a directory and is not modelled.
+3. `SimpleCommand.reads_input` is true only when the command's own words carry an input redirection word
+   (`<`, `<<`, `<<<`, `0<`, `<&`); `StagingRun.stdin_fed` is that or a pipe into the run. Quoted text and another
+   command's redirect no longer count. Known limit: a lone quoted `'<'` word lexes like an operator.
 
 ### N413 — `PipBreakSystemHandler` fails the hostile-input linearity test on `main`
 

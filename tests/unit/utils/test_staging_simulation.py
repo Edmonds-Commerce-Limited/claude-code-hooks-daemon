@@ -681,6 +681,69 @@ class TestApplyCached:
             assert _staged(repo, env) == {"we\tird.txt"}
 
 
+class TestARefreshInADirtyTreeStagesNothing:
+    """``update-index --refresh`` without ``-q`` exits 1 on a modified file (N414 item 1)."""
+
+    @pytest.mark.parametrize("option", ["--refresh", "--really-refresh"])
+    def test_needs_update_is_nothing_staged_not_the_whole_tree(
+        self, repo: Path, option: str
+    ) -> None:
+        _write(repo, "a.txt", "edited\n")
+        reading = read_commit_form(f"git update-index {option} && git commit -m x")
+
+        with simulated_staging(reading, repo, repo) as env:
+            assert _staged(repo, env) == set()
+
+    def test_a_refresh_that_fails_for_another_reason_still_takes_the_whole_tree(
+        self, repo: Path
+    ) -> None:
+        reading = read_commit_form("git update-index --refresh && git commit -m x")
+        refused = subprocess.CompletedProcess([], 128, "", "fatal: something else")
+
+        with patch.object(staging_module, "run_git", _fail_update_index(refused)):
+            with simulated_staging(reading, repo, repo) as env:
+                assert env is not None
+                assert "leak.txt" in _staged(repo, env)
+
+
+def _fail_update_index(
+    refused: "subprocess.CompletedProcess[str]",
+) -> Callable[..., "subprocess.CompletedProcess[str]"]:
+    def run(directory: Path, *args: str, **kwargs: Any) -> "subprocess.CompletedProcess[str]":
+        if "update-index" in args[:3]:
+            return refused
+        return run_git(directory, *args, **kwargs)
+
+    return run
+
+
+class TestAPatchGitDiffWritesTakesTheWholeTree:
+    """``git diff --output=p.patch`` rewrites ``p.patch``, so the file on disk is stale (N414 item 2)."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git diff --output=p.patch && git apply --cached p.patch && git commit -m x",
+            "git diff --output p.patch && git apply --cached p.patch && git commit -m x",
+            "git diff --cached --output=p.patch; git apply --cached p.patch && git commit -m x",
+            "git format-patch -1 --output=p.patch && git apply --cached p.patch && git commit -m x",
+        ],
+    )
+    def test_the_stale_patch_is_not_simulated(self, repo: Path, command: str) -> None:
+        _write(repo, "p.patch", _NEW_FILE_PATCH)
+        with simulated_staging(read_commit_form(command), repo, repo) as env:
+            assert "leak.txt" in _staged(repo, env)
+
+    def test_a_patch_diff_did_not_write_is_still_simulated(self, repo: Path) -> None:
+        _write(repo, "p.patch", _NEW_FILE_PATCH)
+        reading = read_commit_form(
+            "git diff --output=q.patch && git apply --cached p.patch && git commit -m x"
+        )
+
+        with simulated_staging(reading, repo, repo) as env:
+            assert _staged(repo, env) == {"patched.txt"}
+
+
 def _fail_the_first_add(
     refused: "subprocess.CompletedProcess[str]", accepted: "subprocess.CompletedProcess[str]"
 ) -> Callable[..., "subprocess.CompletedProcess[str]"]:

@@ -3236,6 +3236,27 @@ class TestInlineCodeFlagIsNotReadOnSearchAndTextTools:
             "tail -c 10 file.txt",
             "grep -c foo file.txt | wc -l",
             "cat file.txt | grep -c foo",
+            # N416: a builtin or a coreutil whose `-e`/`-c`/`-r` is its own option.
+            "set -e; cd x; ls",
+            "set -e; echo hi",
+            "set -euo pipefail; make test",
+            "set -e",
+            "sort f | uniq -c",
+            "uniq -c f",
+            "echo -e 'a\\tb'",
+            "rm -r build",
+            "cp -r a b",
+            "ls -r",
+            "diff -r a b",
+            "tr -c a-z x",
+            "cat -e f",
+            "stat -c %s f",
+            "du -c f",
+            "read -r line",
+            "declare -r X=1",
+            "readonly -p",
+            "xargs -r ls",
+            "pip install -r requirements.txt",
         ],
     )
     def test_a_search_or_text_tool_is_not_unseen(self, command: str) -> None:
@@ -3886,6 +3907,15 @@ _EDIT_AND_EXEC_FULL_RUNS: list[str] = [
     f"f = open('{_RUN_PY}')\n{_EXEC}(f.read())",
     f"f = open('{_RUN_PY}')\n{_EXEC}(compile(f.read(), 'x', 'ex' + 'ec'))",
     f"from pathlib import Path\np = Path('{_RUN_PY}')\n{_EXEC}(p.read_text())",
+    # N415: the read text passes through a second name before it is run.
+    f"fh = open('{_RUN_PY}')\nsrc = fh.read()\n{_EXEC}(src)",
+    f"from pathlib import Path\nsrc = Path('{_RUN_PY}').read_text()\n{_EXEC}(src)",
+    f"from pathlib import Path\np = Path('{_RUN_PY}')\nsrc = p.read_text()\n{_EXEC}(src)",
+    f"with open('{_RUN_PY}') as fh:\n    src = fh.read()\n{_EXEC}(src)",
+    f"src = open('{_RUN_PY}').read()\n{_EXEC}(compile(src, 'x', 'ex' + 'ec'))",
+    f"def go():\n    src = open('{_RUN_PY}').read()\n    {_EXEC}(src)\ngo()",
+    # Text added to the file's text is still the file's text.
+    f"src = open('{_RUN_PY}').read()\nsrc += 'x = 1'\n{_EXEC}(src)",
 ]
 
 #: The same shapes that stay targeted or never run: data, a stack, an unrun list.
@@ -3909,6 +3939,16 @@ _EDIT_AND_EXEC_ALLOWED: list[str] = [
     f"{_PTY_RUN}a=['pytest']\na.append('{_TARGET}')\npty.spawn(a)",
     f"{_PTY_RUN}pty.spawn(['ls','-l'])",
     f"f = open('{_RUN_PY}')\nprint(f.read())",
+    f"src = open('{_RUN_PY}').read()\nprint(src)",
+]
+
+#: N415: a name rebound to something that is not the read file's text runs nothing of it.
+_REBOUND_TEXT_ALLOWED: list[str] = [
+    f"src = open('{_RUN_PY}').read()\nsrc = 'print(1)'\n{_EXEC}(src)",
+    f"fh = open('{_RUN_PY}')\nsrc = fh.read()\nsrc = input()\n{_EXEC}(src)",
+    f"fh = open('{_RUN_PY}')\nfh = open('other.txt')\nsrc = fh.read()\n{_EXEC}(src)",
+    f"src = open('{_RUN_PY}').read()\nfor src in ['print(1)']:\n    pass\n{_EXEC}(src)",
+    f"src = open('{_RUN_PY}').read()\n{_EXEC}('print(1)')",
 ]
 
 
@@ -3941,6 +3981,19 @@ class TestListEditsAndExecRoutesReachAFullRun:
         script = root / "tool.py"
         script.write_text(code + "\n", encoding="utf-8")
         assert find_full_qa_invocation(f"python3 {script}", _patterns(), cwd=root) is not None
+
+    @pytest.mark.parametrize("code", _REBOUND_TEXT_ALLOWED)
+    def test_a_rebound_name_no_longer_counts(self, code: str, root: Path) -> None:
+        (root / "other.txt").write_text("print('data')\n")
+        assert self._judge(code, root) is None, code
+
+    def test_the_text_tracking_is_linear(self, tmp_path: Path) -> None:
+        body = "".join(f"s{i} = open('{_RUN_PY}').read()\ns{i} = 'x'\n" for i in range(3000))
+        script = tmp_path / "many_reads.py"
+        script.write_text(body + f"{_EXEC}(s0)\n", encoding="utf-8")
+        start = time.perf_counter()
+        find_full_qa_invocation(f"python3 {script}", _patterns(), cwd=tmp_path)
+        assert time.perf_counter() - start < 1.5
 
     def test_a_restart_in_place_is_judged_like_the_subprocess_form(self, root: Path) -> None:
         code = "import os, sys\nos.execv(sys.executable, [sys.executable] + sys.argv)"

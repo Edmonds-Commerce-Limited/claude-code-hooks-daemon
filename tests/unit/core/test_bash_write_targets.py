@@ -35,7 +35,7 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.core.utils import get_bash_write_targets
+from claude_code_hooks_daemon.core.utils import get_bash_write_targets, get_written_file_paths
 
 
 def _bash(command: str, cwd: str | None = None) -> dict[str, object]:
@@ -478,3 +478,54 @@ class TestOrderAndDuplicates:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestGitDiffFamilyOutputOptions:
+    """``git diff --output`` and ``git format-patch --output`` write a patch file.
+
+    The file is a location a guard must see, but it is a patch and not authored
+    code, so the content accessor (``authored_only``) never reports it.
+    """
+
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ("git diff --output=/tmp/p.patch", ["/tmp/p.patch"]),
+            ("git diff --output /tmp/p.patch", ["/tmp/p.patch"]),
+            ("git -C sub diff HEAD --output=/tmp/p.patch -- a.txt", ["/tmp/p.patch"]),
+            ("git format-patch -1 --output=/tmp/all.patch", ["/tmp/all.patch"]),
+            ("git format-patch -1 --output /tmp/all.patch", ["/tmp/all.patch"]),
+            (
+                "git diff --cached --output=/tmp/a.patch && git diff --output=/tmp/b.patch",
+                ["/tmp/a.patch", "/tmp/b.patch"],
+            ),
+        ],
+    )
+    def test_the_output_file_is_a_write_target(self, command: str, expected: list[str]) -> None:
+        assert get_bash_write_targets(_bash(command)) == expected
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git diff --output=/tmp/p.patch",
+            "git format-patch -1 --output=/tmp/p.patch",
+        ],
+    )
+    def test_it_is_not_authored_content(self, command: str) -> None:
+        assert get_bash_write_targets(_bash(command), authored_only=True) == []
+        assert get_written_file_paths(_bash(command)) == []
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git diff --stat",
+            "git status --output=/tmp/p.patch",
+            "git commit -m '--output=/tmp/p.patch'",
+            "echo git diff --output=/tmp/p.patch",
+            "grep -- --output=x file",
+            "git diff -- --output=/tmp/p.patch",
+            "git diff --output",
+        ],
+    )
+    def test_anything_else_is_not_a_write(self, command: str) -> None:
+        assert get_bash_write_targets(_bash(command)) == []

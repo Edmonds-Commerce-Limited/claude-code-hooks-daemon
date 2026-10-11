@@ -826,9 +826,7 @@ def _staging_runs(invocations: Sequence[GitInvocation], command: str) -> tuple[S
         return ()
     piped = {step.position for step in simple_commands(command) if step.operator == _PIPE}
     written = _written_names(command) if any(r.subcommand == APPLY_TOKEN for r in staging) else ()
-    # A "<" anywhere (redirect, heredoc, here-string) may feed any run's stdin;
-    # reading which run it feeds is not worth the false negatives.
-    reads_input = _INPUT_REDIRECT in command
+    fed = {step.position for step in simple_commands(command) if step.reads_input}
     return tuple(
         StagingRun(
             arguments=run.arguments,
@@ -836,7 +834,7 @@ def _staging_runs(invocations: Sequence[GitInvocation], command: str) -> tuple[S
             optional_moves=_optional_moves(run),
             position=run.position,
             subcommand=run.subcommand,
-            stdin_fed=reads_input or run.position in piped,
+            stdin_fed=run.position in fed or run.position in piped,
             written_names=frozenset(written),
         )
         for run in staging
@@ -844,12 +842,16 @@ def _staging_runs(invocations: Sequence[GitInvocation], command: str) -> tuple[S
 
 
 def _written_names(command: str) -> list[str]:
-    """Base names of the files ``command`` plainly writes (redirects, ``tee``...)."""
+    """Base names of the files ``command`` plainly writes (redirects, ``tee``, a diff's ``--output``).
+
+    Not only authored content: a patch is stale whoever wrote it, so a copy, a
+    move or a diff's output counts too.
+    """
     # Imported here: core.utils imports this package's lexers at load time.
-    from claude_code_hooks_daemon.core.utils import get_written_file_paths
+    from claude_code_hooks_daemon.core.utils import get_bash_write_targets
 
     hook_input = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": "/"}
-    return [Path(path).name for path in get_written_file_paths(hook_input)]
+    return [Path(path).name for path in get_bash_write_targets(hook_input)]
 
 
 def read_commit_form(command: str) -> CommitReading:
@@ -955,6 +957,10 @@ class SimpleCommand:
     #: carries no redirection, so this is the only place a command's ``> file``
     #: is kept with the ``directory`` it runs in.
     redirects: tuple[tuple[str, str], ...] = ()
+    #: True when the command's own words carry an input redirect, heredoc or
+    #: here-string (``< f``, ``<<EOF``, ``<<< s``); a ``<`` inside a quoted
+    #: argument is no redirect. A pipe into the command is not counted here.
+    reads_input: bool = False
 
 
 def simple_commands(command: str) -> list[SimpleCommand]:
@@ -968,10 +974,16 @@ def simple_commands(command: str) -> list[SimpleCommand]:
             position=position,
             git=_git_run(segment, directory, uncertain, position),
             redirects=redirects,
+            reads_input=reads_input,
         )
-        for position, (segment, directory, uncertain, operator, redirects) in enumerate(
-            _walk(command_words(command), ())
-        )
+        for position, (
+            segment,
+            directory,
+            uncertain,
+            operator,
+            redirects,
+            reads_input,
+        ) in enumerate(_walk(command_words(command), ()))
     ]
 
 
@@ -1042,7 +1054,7 @@ def _leading_closers(segment: list[str]) -> int:
     return closed
 
 
-_Step = tuple[list[str], tuple[str | None, ...], bool, str, tuple[tuple[str, str], ...]]
+_Step = tuple[list[str], tuple[str | None, ...], bool, str, tuple[tuple[str, str], ...], bool]
 #: The directory chain and whether it is uncertain, at one point of a walk.
 _State = tuple[tuple[str | None, ...], bool]
 #: A group's opening state, and the function name when the group is its body.
@@ -1104,6 +1116,22 @@ def _write_redirects(words: list[str], start: int, end: int) -> tuple[tuple[str,
             continue  # a process substitution, not a file
         found.append((operator, target))
     return tuple(found)
+
+
+#: A process substitution used as an argument (``<(cmd)``) feeds no stdin.
+_PROCESS_SUBSTITUTION_IN: Final[str] = "<("
+
+
+def _reads_input(words: list[str], start: int, end: int) -> bool:
+    """Whether ``words[start:end]`` carries an input redirect, heredoc or here-string.
+
+    A redirection is an operator WORD, so ``a < b`` inside a quoted argument is
+    one word and is not read as one.
+    """
+    return any(
+        is_redirection(word) and _INPUT_REDIRECT in word and word != _PROCESS_SUBSTITUTION_IN
+        for word in words[start:end]
+    )
 
 
 #: A command word that is one parameter expansion (`$g`, `${g}`, `$@`, `$1`; the
@@ -1303,6 +1331,7 @@ def _walk(
                     uncertain if opened_in is None else opened_in[1],
                     previous_operator,
                     _write_redirects(words, index, end),
+                    _reads_input(words, index, end),
                 )
             )
         index = end
