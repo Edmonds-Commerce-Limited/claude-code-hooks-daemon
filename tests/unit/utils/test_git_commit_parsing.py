@@ -663,6 +663,23 @@ class TestSimpleCommandsKeepTheirFileRedirections:
         assert closer.redirects == ((">", "x"),)
         assert closer.directory == ()
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "for i in 1; do cd /tmp; { true; } done > x",
+            "if true; then cd /tmp; { true; } fi > x",
+        ],
+    )
+    def test_a_combined_closer_pops_one_group_per_closer_word(self, command: str) -> None:
+        closer = simple_commands(command)[-1]
+        assert closer.redirects == ((">", "x"),)
+        assert closer.directory == ()
+
+    def test_the_stack_stays_balanced_after_a_combined_closer(self) -> None:
+        last = simple_commands("{ { true; } } > a; cd /tmp; { true; } > b")[-1]
+        assert last.redirects == ((">", "b"),)
+        assert last.directory == ("/tmp",)
+
     def test_the_directory_after_a_group_still_carries_the_cd(self) -> None:
         last = simple_commands("{ cd /tmp; }; echo x > y")[-1]
         assert last.directory == ("/tmp",)

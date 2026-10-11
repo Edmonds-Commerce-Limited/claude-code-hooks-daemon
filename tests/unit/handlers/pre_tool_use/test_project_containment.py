@@ -1606,6 +1606,21 @@ class TestARedirectIsJudgedWhereTheChainsCdLandsIt:
     ) -> None:
         assert handler.matches(_bash("D=sub; cd $D && echo x > ../x", cwd=str(repo))) is False
 
+    def test_a_combined_closer_reads_the_outer_loop_redirect_before_the_loop(
+        self, handler: ProjectContainmentHandler, repo: Path
+    ) -> None:
+        command = "for i in 1; do cd /tmp; { true; } done > x"
+        assert handler.matches(_bash(command, cwd=str(repo))) is False
+
+    @pytest.mark.parametrize(
+        "command", ["D=/tmp; pushd $D && echo x > x", "D=/tmp; (cd $D && echo x > x)"]
+    )
+    def test_a_variable_move_is_denied_as_the_literal_move_is(
+        self, handler: ProjectContainmentHandler, repo: Path, command: str
+    ) -> None:
+        # Both are advisories, not denies, on main: the `$D` move cannot be placed there.
+        assert handler.handle(_bash(command, cwd=str(repo))).decision == Decision.DENY
+
     def test_a_cd_through_a_variable_nothing_pins_is_an_advisory_not_a_deny(
         self, handler: ProjectContainmentHandler, repo: Path
     ) -> None:

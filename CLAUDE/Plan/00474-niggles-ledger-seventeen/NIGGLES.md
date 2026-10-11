@@ -1499,29 +1499,37 @@ each time Claude calls a tool. To raise the cap, set `CLAUDE_CODE_STOP_HOOK_BLOC
 block stops (stop-explanation, goal ledger, cron enforcers, auto-continue, usage-pause). A session that is blocked
 eight times in a row without a tool call would be let go regardless of what those handlers want.
 
-**Status**: ✅ Assessed by batch R: no daemon Stop or SubagentStop handler can reach the cap, and no defect was found,
-so behaviour is unchanged. Full evidence with file:line:
+**Status**: ⬜ Open, on one owner question (below). Assessed by batch R; no defect was changed and behaviour is
+unchanged. Full evidence with file:line:
 [subagent-reports/261011-batch-r-sonnet.md](subagent-reports/261011-batch-r-sonnet.md). In short:
 
-- Every blocking handler denies at most once per chain, gated on `stop_hook_active` (`cron_enforcement.py:352`,
-  `cron_refresh.py:211`, `stand_in_cron.py:143`, `usage_pause_stop_gate.py:153`, `mode_interceptor.py:71`, the project
-  `release_blocker.py:258`; `AutoContinueStopHandler.matches` at `auto_continue_stop.py:758-766` stands down on a re-entry
-  confirmed by a `hook_blocking_error` marker in the transcript tail). Handlers stacked on one Stop event
+- Every blocking handler except auto-continue denies at most once per chain, gated on `stop_hook_active`
+  (`cron_enforcement.py:352`, `cron_refresh.py:211`, `stand_in_cron.py:143`, `usage_pause_stop_gate.py:153`,
+  `mode_interceptor.py:71`, the project `release_blocker.py:258`). Handlers stacked on one Stop event
   (`cron_stop_enforcer` + `auto_continue_stop`, `terminal=False` for the first) merge into ONE block, so they count as one
-  continuation. Measured: across the 5 session transcripts of this workspace, 95 chains of Stop blocks, longest 1
-  consecutive block with no tool call in between; the daemon's own `stop-events.jsonl` shows no text-only
-  deny-to-deny pair in a real session (all 7 had more than 20 KB of transcript growth, i.e. tool calls).
-- The one path that can re-block on `stop_hook_active=true` is auto-continue's "silent-stop" branch (no marker in the last
-  20 transcript lines): 12 real-session occurrences, and the longest consecutive-deny run in a real session was 4, each
-  pair separated by tool calls, so the cap's counter had reset.
+  continuation.
+- Auto-continue is one-shot per chain only while the block marker is visible. `AutoContinueStopHandler.matches`
+  (`auto_continue_stop.py:758-766`) stands down on a re-entry only when `has_recent_stop_hook_block`
+  (`utils/stop_hook_helpers.py:161-167`) finds a `hook_blocking_error` marker; that function returns False for a missing
+  transcript path, a missing or unreadable file, or a marker more than 20 lines back, and `matches` then treats the stop
+  as fresh and blocks again on every re-entry. Nothing in the code bounds that, so with an unreadable transcript it can
+  reach the cap of 8.
+- Measured, not guaranteed: across the 5 session transcripts of this workspace there were 95 chains of Stop blocks and
+  the longest was 1 consecutive block with no tool call in between; the daemon's own `stop-events.jsonl` shows no
+  text-only deny-to-deny pair in a real session (all 7 had more than 20 KB of transcript growth). 12 real-session denies
+  carried `stop_hook_active=true` (the no-marker path), and the longest consecutive-deny run was 4, each pair separated by
+  tool calls. The measured sessions never came near the cap.
 - Overridden-block assumptions: nothing reads state recorded at block time as proof the block was honoured. The
   `stop-events.jsonl` DENY line is write-only diagnostics; the human-blocked marker is written before the stand-in block
   and is a statement about the stop, not the block; a lost stand-in block leaves the same state as the existing
   re-entry allow (marker armed, no stand-in, a warning logged). `usage_pause_stop_gate.matches` records the pause before
   its directive is delivered, so an overridden entry block would leave a pause with no resume cron, which needs eight
   prior continuations the daemon cannot cause.
-- Recommendation (owner question, not acted on): do not have the ccy supervisor set `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`.
-  The daemon is below the cap by construction, and a raised cap only widens what a non-daemon Stop hook can loop on.
+- Decision for the owner: should auto-continue stand down (allow the stop) when `stop_hook_active` is set and it cannot
+  read the transcript, or keep treating that stop as fresh? The first bounds the daemon at one block per chain in every
+  case; the second keeps blocking a stop whose earlier block it cannot confirm. Behaviour is unchanged until decided.
+- Separate question, recommendation only: the measurements give no reason for the ccy supervisor to set
+  `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`; a raised cap also widens what a non-daemon Stop hook can loop on.
 
 ### N410 — `upgrade_approval_guard` denies a QA tool reached through a variable once `PYTHONPATH` is set
 
@@ -1706,7 +1714,19 @@ none a regression against main:
   (`}`, `fi`, `done`), which carries the group's redirects, that directory; the `cd` the group reached still carries on
   after it (`{ cd /tmp; }; echo x > y` writes in `/tmp`). Pinned in `TestSimpleCommandsKeepTheirFileRedirections`, the
   group tests in `TestARedirectIsJudgedWhereTheChainsCdLandsIt` and ordinary-corpus rows `n403-group-*`/`n403-if-group-*`.
-  Not covered, still read the old way: a `case … esac` group.
+  A combined closer segment (`} done`, `} fi`) pops one frame per closer word (round 2).
+
+Residual, from the batch R review (`untracked/agent-reports/auto/261011-063431-code-reviewer-a7ba1954a42f7e6d1.md`),
+none a regression against main:
+
+- `utils/git_commit_parsing.py:959-961`: `case … esac` is not in the opener/closer sets, so `case x in x) cd /tmp;; esac > x`
+  is still a false deny; the lexer also reads `x)` as a subshell close.
+- `utils/git_commit_parsing.py:1076` (`_walk`, via `_after_directory_change`): a `cd` that may never run is treated as one
+  that did: a function body (`f() { cd /tmp; }; echo x > x`), a group in a pipeline that runs in a subshell
+  (`{ cd /tmp; } | cat > x`), and a loop body that never runs (`while false; do cd /tmp; done; echo x > x`). False
+  denies only.
+- `handlers/pre_tool_use/project_containment.py:607`: the literal-assignment substitution carries the existing `;`
+  both-ways reading to variables, so `D=sub; cd $D; cd .. && echo x > x` is denied, as the literal `cd sub; cd ..` already is.
 - ✅ cleared by batch P: A process substitution target after a `cd` (`cd /tmp && echo hi > >(cat)`) is read as a file
   name and denied. `>(`/`<(` targets are skipped in `_write_redirects`.
 - ✅ cleared by batch P: `command cd /tmp` is not read as a move (`_after_directory_change`, in

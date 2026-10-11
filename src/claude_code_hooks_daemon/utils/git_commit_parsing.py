@@ -972,6 +972,16 @@ def _group_openers(segment: list[str]) -> int:
     return opened
 
 
+def _leading_closers(segment: list[str]) -> int:
+    """How many compound commands ``segment`` closes before any other word."""
+    closed = 0
+    for word in segment:
+        if word not in _GROUP_CLOSERS:
+            break
+        closed += 1
+    return closed
+
+
 _Step = tuple[list[str], tuple[str | None, ...], bool, str, tuple[tuple[str, str], ...]]
 
 #: A redirection operator that names a file it writes. ``>&`` is not one of
@@ -1048,8 +1058,12 @@ def _walk(
         # A redirect on a group (`{ …; } > x`, `if … fi > x`) is opened by the
         # shell BEFORE the group runs, so it is read where the group began.
         # The directory the group's own `cd` reached still carries on after it.
-        if segment[:1] and segment[0] in _GROUP_CLOSERS and groups:
-            opened_in = groups.pop()
+        closers = _leading_closers(segment)
+        if closers and groups:
+            # `} done` closes two groups on one segment: the redirect belongs
+            # to the outermost, so each closer word pops its own frame.
+            for _ in range(min(closers, len(groups))):
+                opened_in = groups.pop()
         else:
             opened_in = None
             groups.extend((directory, uncertain) for _ in range(_group_openers(segment)))

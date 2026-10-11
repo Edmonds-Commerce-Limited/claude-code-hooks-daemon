@@ -59,8 +59,12 @@ daemon handler get there, and what does each assume about an overridden block?
 
 Stacking: non-terminal blockers (`cron_stop_enforcer`, `usage_pause_stop_gate`) and the terminal auto-continue run in
 one dispatch and merge into one response (most restrictive wins), so they are ONE continuation, not several. A
-re-entry loop is the other route to the cap, and every handler above breaks it on the first re-entry. By design the
-daemon contributes at most one continuation to a chain with no tool call between, against a cap of 8.
+re-entry loop is the other route to the cap. Every handler above except auto-continue breaks it on the first re-entry.
+Auto-continue breaks it only while the block marker is visible: `has_recent_stop_hook_block`
+(`utils/stop_hook_helpers.py:161-167`) returns False for a missing transcript path, a missing or unreadable file, or a
+marker more than 20 lines back, and `matches` (`auto_continue_stop.py:758-766`) then treats the stop as fresh and blocks
+again on every re-entry. Nothing in the code bounds that, so an unreadable transcript can take it to the cap of 8. What
+keeps the daemon under the cap in practice is the marker being found, which is measured, not guaranteed.
 
 ### Measured
 
@@ -94,13 +98,18 @@ daemon contributes at most one continuation to a chain with no tool call between
 - `subagent_report_persistence` runs on every SubagentStop including re-entries, so an overridden block still persists
   the reply.
 
-Conclusion: no concrete defect, so no behaviour change.
+Conclusion: no behaviour change; N411 stays open on the owner question below. The measured sessions never came near
+the cap.
 
-### Recommendation (owner question, not acted on)
+### Owner question (not acted on)
 
-Do not have the ccy supervisor set `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`. The daemon stays below the default cap by
-construction and by measurement, and a raised cap only widens the loop a non-daemon Stop hook could run. If a future
-handler is added that blocks without a `stop_hook_active` gate, `test_stop_chain_terminal_shadowing.py` style coverage
-should be extended to assert the one-block-per-chain rule; that is a suggestion, not a finding.
+Should auto-continue stand down (allow the stop) when `stop_hook_active` is set and it cannot read the transcript, or keep
+treating that stop as fresh? Standing down bounds the daemon at one block per chain in every case; keeping it blocks a
+stop whose earlier block it cannot confirm.
+
+### Recommendation (separate, not acted on)
+
+The measurements give no reason for the ccy supervisor to set `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`; a raised cap also
+widens the loop a non-daemon Stop hook could run.
 
 Nothing under `.claude/ccy/`, no settings.json and no `ccy.env.local` was touched.
