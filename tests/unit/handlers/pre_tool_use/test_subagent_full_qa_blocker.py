@@ -3309,6 +3309,8 @@ class TestInlineCodeFlagIsNotReadOnSearchAndTextTools:
             "docker run --unknown-opt val img sh -c 'pytest'",
             # A subcommand the walk does not read keeps the generic rule.
             "docker --context x run -e A=1 img cmd",
+            # The entrypoint is the program run inside the container, so its -e is code.
+            "docker run --entrypoint perl img -e x",
             "docker build -e x .",
         ],
     )
