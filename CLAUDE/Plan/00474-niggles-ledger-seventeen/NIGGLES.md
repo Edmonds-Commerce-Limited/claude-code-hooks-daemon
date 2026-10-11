@@ -90,7 +90,7 @@ reported.
 **Cause**: `_runs_inline_code` (`subagent_full_qa_blocker.py:944-955`) flags any program outside
 `_INLINE_CODE_FLAG_TEXT_TOOLS` and git that takes an exact `-e`, `-E`, `-c`, `-r` or `--eval`. That is a deny-list of
 known non-interpreters, grown one spelling at a time (N302, N416). The issue proposes the opposite: judge the shape
-only for known interpreters. The comment at lines 851-858 records the current fail-closed choice as deliberate.
+only for known interpreters. The comment at lines 852-858 records the current fail-closed choice as deliberate.
 
 **Status**: ⬜ Owner decision.
 
