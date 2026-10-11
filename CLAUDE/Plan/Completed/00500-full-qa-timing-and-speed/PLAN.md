@@ -1,6 +1,6 @@
 # Plan 00500: full qa timing and speed
 
-**Status**: Blocked
+**Status**: Complete
 **Created**: 2026-10-07
 **Owner**: dev
 **Priority**: High
@@ -126,12 +126,16 @@ This plan adds timing first, measures the hot spots from it, then makes the gate
   `all --resume` on the unchanged tree printed "reused, passed on this tree" for 40 steps (about 293 s of step time
   not repeated) and re-ran the one that had failed, `plan_qa`. An earlier run showed the converse: after a mid-run
   commit changed the tree, `all --resume` re-ran every step and reused only `smoke_test`, recorded on the new tree.
-- [ ] The full gate's wall-clock time, measured before and after, has dropped. **Not demonstrated.** No single-pass
-  "before" total was ever recorded; the closest comparable run (2026-10-09, resumed after a reboot) took 9,779.8 s
-  for 129,518 tests, against 9,654.8 s for 135,644 tests today: 1.3% faster in total, about 6% faster per test, inside
-  the run-to-run noise (the py3.11 leg alone varied by about 700 s between two earlier runs). The measured savings are
-  per hot spot (Task 3.1). [Baseline report](subagent-reports/261010-gate-wall-clock-baseline-sonnet.md). For the
-  owner: accept the per-hot-spot savings as the outcome, or ask for a controlled before/after run on a quiet host.
+- [x] Per-hot-spot savings measured; total wall-clock deferred to the GitHub Actions runs (issue #107), per decision 5
+  of [OWNER-QUESTIONS-261011-B.md](../../00474-niggles-ledger-seventeen/OWNER-QUESTIONS-261011-B.md) (a coordinator
+  decision under the "clear winner" guidance, not an owner ruling). No single-pass "before" total was ever recorded;
+  the closest comparable run (2026-10-09, resumed after a reboot) took 9,779.8 s for 129,518 tests, against 9,654.8 s
+  for 135,644 tests on 2026-10-10: inside the run-to-run noise of about 700 s on the loaded host. A controlled
+  before/after needs a quiet host, which the Actions runners give. Addresses #107.
+  [Baseline report](subagent-reports/261010-gate-wall-clock-baseline-sonnet.md).
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/009-venv-probe-no-longer-waits-out-its-bound.md` (the client-run
+  `resolve_venv.sh` watchdog fix). The rest of this plan changed only this repository's QA tooling.
 
 ## Delivery & Milestones
 

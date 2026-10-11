@@ -77,6 +77,74 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N423 — completing an already-archived plan clears the whole `/goal`, live plans included
+
+**Origin**: owner report, 2026-10-11. A `/goal clear` the owner did not type appeared in the session.
+
+**Evidence**: the supervisor's `untracked/supervise/decision.log` records `would-goal-clear: goal clear trigger -> injected '/goal clear'` at 15:02:59 UTC. The goal ledger retired Plan 00500 (`terminal-status`) at 15:02:57, owned
+by this session. The live `/goal` named five plans (00470, 00474, 00479, 00484, 00500), so four were still live.
+
+**Cause** (read from code; not yet reproduced): the sheet-B sub-agent ran `git mv` on 00500 into `Completed/` and
+then flipped its Status in the moved file. `GoalInjectionHandler._maybe_refresh_on_retirement`
+(`handlers/post_tool_use/goal_injection.py` about lines 1339-1344) derives the plan root as
+`plan_md_path.parent.parent`. For an archived plan that is `CLAUDE/Plan/Completed`, so
+`GoalLedger.live_plan_refs(plan_dir)` finds no live plan there. With `refs` empty, it calls `clear_goal_signal` for
+every owner, and the supervisor types `/goal clear`. It should have re-rendered the goal naming the four live plans.
+
+**Related**: the owner also asked how to tell a supervisor `/goal clear` from a human one (GitHub Issue #106), because only a human clear
+should turn automated goals off. Today the supervisor's clear is the bare literal `/goal clear`, with nothing marking it as
+the supervisor's.
+
+**Status**: ⬜ Open, queued for batch AO. Reproduce it red: ledger a goal over two plans, archive one with the status flip
+inside `Completed/`, and assert the other stays in the signal. Resolve the plan root from config, not from the path depth.
+
+### N422 — main is red: two `tests/unit/config` invariants fail on main
+
+**Origin**: found while checking batch AM's QA, 2026-10-11. Both tests also fail on main at 582115bfb, so the
+batch did not cause them.
+
+**Evidence**: running `tests/unit/config/test_handler_options_accessor.py` and
+`tests/unit/config/test_scope_requires_agent_id_event.py` on main gives 2 failed, 44 passed:
+
+- `test_no_source_file_reads_handler_options_by_hand` names `install/effective_handlers.py:225`, which reads handler
+  options by hand rather than through `config.models.handler_options`. That file was last changed by batch M
+  (7029aca44, review 30cf086e9).
+- `test_every_contract_declaring_agent_id_is_in_the_set`: the shipped contracts for `TeammateIdle`, `TaskCreated` and
+  `TaskCompleted` declare `agent_id`, but `AGENT_ID_EVENTS` (`constants/events.py`) does not list them.
+
+**Status**: ⬜ Open, queued for batch AO. Fix the code, never the invariant. Check whether adding the three events to
+`AGENT_ID_EVENTS` changes any scope verdict.
+
+### N421 — the upgrade-approval guard denies a plain pytest run that sets `PYTHONPATH`
+
+**Origin**: coordinator, 2026-10-11.
+
+**Evidence**: R-UPGRADE-APPROVAL-ENV-BYPASS denied this command, in which nothing runs an upgrade:
+`W=<worktree>; PYTHONPATH=$W/src $(ls -d $W/untracked/venv-*/bin/python) -m pytest $W/tests/... -c $W/pyproject.toml --rootdir $W`.
+The same shape with a literal interpreter path ran unblocked. So the trigger looks like the command-substituted
+program word with a `PYTHON*` assignment: the guard appears to treat a program it cannot read as possibly the
+upgrade. That breaks owner ruling B5, under which a guard denies only on a positive finding.
+
+**Status**: ⬜ Open, queued for batch AO. Reproduce it red with `bin/hooks-daemon probe`, find the branch, and make the
+unreadable-program case need upgrade evidence (an upgrade argument or the clone path), as the deny text itself
+describes.
+
+### N420 — ARCHITECTURE.md and README disagree on whether the hook layer fails open
+
+**Origin**: the fact-check of the 00484 conformance declaration
+(`subagent-reports/261011-fact-check-sheet-b-apply-sonnet.md`).
+
+**Evidence**: `CLAUDE/ARCHITECTURE.md` (about line 790) says "the hook layer fails open when the daemon does not
+answer". The README's new conformance declaration says the hook layer "does not fail open in general", which the
+fact-checker matched to `.claude/init.sh`. `CLAUDE/Security/FailOpenBoundaries.md` is the canonical page. Not yet
+checked: which states really fail open, and so which sentence is stale.
+
+**Status**: ✅ Fixed. The README is right. `.claude/init.sh` fails closed on an installed project: PreToolUse denies
+everything except the recovery command, and Stop/SubagentStop block. It fails open only in the named setup states.
+FailOpenBoundaries.md covers handler-level boundaries, not this one. ARCHITECTURE.md now says exactly that, and its
+threat-model point stands on the routes a hostile agent really has (editing the hooks or the daemon, and the setup
+states).
+
 ### N419 — `subagent_full_qa_blocker` still judges an unknown program by flag shape alone (GitHub Issue #69)
 
 **Origin**: issue-sdlc triage of GitHub Issue #69 (filed against v3.67.0).

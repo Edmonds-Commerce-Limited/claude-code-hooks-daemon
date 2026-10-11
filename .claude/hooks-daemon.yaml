@@ -1613,6 +1613,11 @@ documentation:
       # the daemon does not enforce fails the edit and the commit, every
       # instance, no grandfathering. Warning here would be a baseline.
       unenforced-approval-gate: block
+      # Ledger 00474 N361 (owner ruling C7): a fake-values registry entry that
+      # is not visibly fake exempts a real-looking value from sensitive_content,
+      # so a commit adding one is denied. Only the STAGED half carries BLOCK
+      # findings; every other finding of this check stays ADVISE.
+      unlisted-fake-value: block
     grandfather_allowlist: []
     # Plan 00289: frozen historical records are excluded from the corpus
     # ENTIRELY, not merely capped at advisory severity the way

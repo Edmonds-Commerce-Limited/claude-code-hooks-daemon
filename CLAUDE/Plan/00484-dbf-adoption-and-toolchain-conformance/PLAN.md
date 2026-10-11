@@ -196,8 +196,11 @@ agent.
 - [x] ✅ **Task 3.2**: A machine-readable enumeration of active defences (§5): rule ID,
   handler, defect class, docs link, and the detector entry point, so a DBF tool can read
   them. Reuse the generate-docs data rather than a second source. Done: `hooks-daemon defences --json`, see [the report](subagent-reports/261004-task-3.2-defence-enumeration-sonnet.md).
-- [ ] ⬜ **Task 3.3**: Publish the conformance declaration (§9.2), with its known gaps, from
-  the README.
+- [x] ✅ **Task 3.3**: Publish the conformance declaration (§9.2), with its known gaps, from
+  the README. Done: README "Conformance declaration" subsection under "Defence Before Fix", from the drafted text in
+  [CONFORMANCE.md](CONFORMANCE.md), re-checked against the tree. It publishes the `toolchain` level only (G16's
+  permitted form: no `detector` declaration is made) and lists G11's `scan <handler> <paths>` mode as a known gap
+  (`probe --only` itself is closed).
 
 ## Success Criteria
 
@@ -207,8 +210,9 @@ agent.
   review: round 1 [SURVIVES WITH FIXES](subagent-reports/261010-conformance-fable-review-fable.md),
   fixes [merged](subagent-reports/261010-conformance-fixes-sonnet.md), round 2
   [READY TO MERGE](subagent-reports/261010-conformance-fable-review-r2-fable.md).
-- [ ] The owner has ruled on every gap. The accepted ones are closed, and the rest are listed
-  in the declaration.
+- [x] Every gap is closed or listed in the declaration (decision 4 of
+  [OWNER-QUESTIONS-261011-B.md](../00474-niggles-ledger-seventeen/OWNER-QUESTIONS-261011-B.md): the coordinator's
+  closure calls stand, with the rest listed in the declaration; not an owner ruling).
 - [x] A DBF tool can list this daemon's defences without project-specific knowledge:
   `hooks-daemon defences --json` (Task 3.2); round 2 found every row carries a rule ID and
   statement (artefact 5.1b MET).

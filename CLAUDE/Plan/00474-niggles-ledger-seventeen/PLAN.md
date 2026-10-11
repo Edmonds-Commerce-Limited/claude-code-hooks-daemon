@@ -36,19 +36,22 @@ not-a-defect with the reasoning kept.
 ## Niggles
 
 Full write-ups are in [NIGGLES.md](NIGGLES.md). The one-line-per-niggle status
-table (124 rows) is in [STATUS-INDEX.md](STATUS-INDEX.md).
+table (128 rows) is in [STATUS-INDEX.md](STATUS-INDEX.md).
 Counted by the status column's emoji:
 
-- No row is open (⬜ Open) except the owner decisions below. N53 of archived ledger 00466 is 🟡: batch AJ reproduced
+- 3 rows are open (⬜): N421, N422 and N423, all queued for batch AO. N53 of archived ledger 00466 is 🟡: batch AJ reproduced
   the mechanism of an exit 127 and extended the diagnostic, but the live cause awaits a recurrence. The other 41 of the
   "42 still open in 00466" were fixed on main (39), fixed by batch AI (N33) or graduated to Plan 00485 (N96); see
   [the 00466 evidence](../Completed/00466-niggles-ledger-sixteen/STATUS-2026-10.md).
-- 15 rows carry an owner decision (⬜ Owner decision, including two fixed or part-fixed rows with a decision left).
-  Every one is put to the owner, with options and a recommendation, in
-  [OWNER-QUESTIONS-261011.md](OWNER-QUESTIONS-261011.md), with the open owner questions of Plans 00470, 00479,
-  00484 and 00500.
-- 102 rows carry ✅ (fixed, dismissed, remedied or closed); 7 of them also count above or below (1 with an owner decision, 6 with a 🚫 limit).
-- 7 rows record a deliberate limit (🚫); 8 are in progress or graduated (4 🔄, 3 🟡, 1 ↩️).
+- No row awaits an owner decision. The owner ruled on all 15 questions in
+  [OWNER-QUESTIONS-261011.md](OWNER-QUESTIONS-261011.md) on 2026-10-11, recorded in
+  [OWNER-RULINGS-261011.md](OWNER-RULINGS-261011.md):
+  - 2 rows are closed by the ruling (N333, N397);
+  - 12 are in progress (🔄): batches AL, AM and AN, the supervisor items, or a GitHub issue;
+  - 1 stays part-fixed (🟡, N376), with its remainder tracked in #107;
+  - the new work the owner asked for is filed as GitHub Issues #106 to #110. #104, the usage-aware sub-agent cutoff, came from a separate owner request the same day, not from this sheet.
+- 105 rows carry ✅ (fixed, dismissed, remedied or closed); 7 of them also count below (1 🔄, 6 🚫 limits).
+- 7 rows record a deliberate limit (🚫); 20 are in progress or graduated (16 🔄, 3 🟡, 1 ↩️).
 
 ## Tasks
 

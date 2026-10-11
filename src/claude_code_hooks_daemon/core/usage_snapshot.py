@@ -7,6 +7,13 @@ seconds). No other hook event carries usage, so the daemon keeps the last
 reading here for every handler that wants it: the status-line segment today,
 a host usage ceiling later.
 
+Behind a Claude apps gateway the payload also carries ``rate_limits.spend_limit``
+(same two fields, but ``used_percentage`` runs past 100 once the limit is
+exceeded). It is kept as a third window, ``UsageSnapshot.spend_limit``; it is
+a dollar budget, not a subscription window, so it never feeds
+:meth:`UsageSnapshot.highest_used_percentage`. Its optional ``used_usd``,
+``limit_usd`` and ``period`` fields are not read.
+
 **Usage is account-wide**, not per-session, so there is ONE snapshot and not
 one per session. Two copies of it exist:
 
@@ -51,6 +58,7 @@ RATE_LIMITS_KEY: Final[str] = "rate_limits"
 #: Window keys, as the payload and the persisted file spell them.
 FIVE_HOUR_KEY: Final[str] = "five_hour"
 SEVEN_DAY_KEY: Final[str] = "seven_day"
+SPEND_LIMIT_KEY: Final[str] = "spend_limit"
 
 _USED_PERCENTAGE: Final[str] = "used_percentage"
 _RESETS_AT: Final[str] = "resets_at"
@@ -64,6 +72,10 @@ STATE_FILE_NAME: Final[str] = "usage-snapshot.json"
 PERSIST_HEARTBEAT_SECONDS: Final[float] = 60.0
 
 _MAX_PERCENT: Final[float] = 100.0
+
+#: Upper bound on a gateway spend percentage. The limit may be exceeded, so 100 is not a
+#: ceiling there, but a value past this is not a reading (and would render absurdly).
+MAX_SPEND_PERCENT: Final[float] = 10_000.0
 
 
 @dataclass(frozen=True)
@@ -91,15 +103,26 @@ class UsageSnapshot:
 
     five_hour: UsageWindow | None
     seven_day: UsageWindow | None
+    spend_limit: UsageWindow | None = None
 
     def highest_used_percentage(self) -> float | None:
-        """The larger used percentage of the present windows, or None if neither is."""
+        """The larger used percentage of the present subscription windows, or None.
+
+        The gateway spend limit is deliberately excluded: it is a dollar budget,
+        not a subscription window, and a usage ceiling is set against the windows.
+        """
         values = [w.used_percentage for w in (self.five_hour, self.seven_day) if w is not None]
         return max(values) if values else None
 
 
-def _parse_window(raw: object, observed_at: float) -> UsageWindow | None:
-    """A validated window, or None when the payload value cannot be trusted."""
+def _parse_window(
+    raw: object, observed_at: float, *, may_exceed_max: bool = False
+) -> UsageWindow | None:
+    """A validated window, or None when the payload value cannot be trusted.
+
+    ``may_exceed_max`` admits a percentage above 100, up to :data:`MAX_SPEND_PERCENT`
+    (the gateway spend limit).
+    """
     if not isinstance(raw, dict):
         return None
     pct = raw.get(_USED_PERCENTAGE)
@@ -108,21 +131,25 @@ def _parse_window(raw: object, observed_at: float) -> UsageWindow | None:
         return None
     if isinstance(resets_at, bool) or not isinstance(resets_at, (int, float)):
         return None
-    if not math.isfinite(pct) or not 0.0 <= pct <= _MAX_PERCENT:
+    if (
+        not math.isfinite(pct)
+        or pct < 0.0
+        or pct > (MAX_SPEND_PERCENT if may_exceed_max else _MAX_PERCENT)
+    ):
         return None
     if not math.isfinite(resets_at) or resets_at <= 0:
         return None
     return UsageWindow(float(pct), int(resets_at), observed_at)
 
 
-def _parse_persisted_window(raw: object) -> UsageWindow | None:
+def _parse_persisted_window(raw: object, *, may_exceed_max: bool = False) -> UsageWindow | None:
     """A window read back from the state file (which also carries ``observed_at``)."""
     if not isinstance(raw, dict):
         return None
     observed = raw.get(_OBSERVED_AT)
     if isinstance(observed, bool) or not isinstance(observed, (int, float)):
         return None
-    return _parse_window(raw, float(observed))
+    return _parse_window(raw, float(observed), may_exceed_max=may_exceed_max)
 
 
 def _window_to_json(window: UsageWindow) -> dict[str, float | int]:
@@ -140,20 +167,24 @@ def _live(window: UsageWindow | None, now: float) -> UsageWindow | None:
     return window
 
 
-def _read_file(state_file: Path) -> tuple[UsageWindow | None, UsageWindow | None]:
-    """The persisted windows, or (None, None) when the file is absent or unusable."""
+_Windows = tuple[UsageWindow | None, UsageWindow | None, UsageWindow | None]
+
+
+def _read_file(state_file: Path) -> _Windows:
+    """The persisted (5h, 7d, spend) windows, or all None when the file is absent or unusable."""
     try:
         data: Any = json.loads(state_file.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return (None, None)
+        return (None, None, None)
     except (OSError, ValueError) as exc:
         logger.debug("Usage snapshot file unreadable (%s): %s", state_file, exc)
-        return (None, None)
+        return (None, None, None)
     if not isinstance(data, dict):
-        return (None, None)
+        return (None, None, None)
     return (
         _parse_persisted_window(data.get(FIVE_HOUR_KEY)),
         _parse_persisted_window(data.get(SEVEN_DAY_KEY)),
+        _parse_persisted_window(data.get(SPEND_LIMIT_KEY), may_exceed_max=True),
     )
 
 
@@ -226,8 +257,9 @@ class UsageTracker:
         self._lock = threading.Lock()
         self._five_hour: UsageWindow | None = None
         self._seven_day: UsageWindow | None = None
+        self._spend_limit: UsageWindow | None = None
         # (percentage, resets_at) pairs last handed to the persister, and when.
-        self._persisted_key: tuple[tuple[float, int] | None, tuple[float, int] | None] | None = None
+        self._persisted_key: tuple[tuple[float, int] | None, ...] | None = None
         self._persisted_at: float = 0.0
 
     def reset(self) -> None:
@@ -235,6 +267,7 @@ class UsageTracker:
         with self._lock:
             self._five_hour = None
             self._seven_day = None
+            self._spend_limit = None
             self._persisted_key = None
             self._persisted_at = 0.0
 
@@ -257,42 +290,35 @@ class UsageTracker:
             return
         five = _parse_window(rate_limits.get(FIVE_HOUR_KEY), now)
         seven = _parse_window(rate_limits.get(SEVEN_DAY_KEY), now)
-        if five is None and seven is None:
+        spend = _parse_window(rate_limits.get(SPEND_LIMIT_KEY), now, may_exceed_max=True)
+        if five is None and seven is None and spend is None:
             return
         with self._lock:
             if five is not None:
                 self._five_hour = five
             if seven is not None:
                 self._seven_day = seven
+            if spend is not None:
+                self._spend_limit = spend
             self._persist_locked(state_file, now)
 
     def _persist_locked(self, state_file: Path | None, now: float) -> None:
         """Write the file if the reading changed or the heartbeat elapsed. Never raises."""
         if state_file is None:
             return
-        key = (
-            (
-                (self._five_hour.used_percentage, self._five_hour.resets_at)
-                if self._five_hour
-                else None
-            ),
-            (
-                (self._seven_day.used_percentage, self._seven_day.resets_at)
-                if self._seven_day
-                else None
-            ),
+        windows = (
+            (SEVEN_DAY_KEY, self._seven_day),
+            (FIVE_HOUR_KEY, self._five_hour),
+            (SPEND_LIMIT_KEY, self._spend_limit),
         )
+        key = tuple((w.used_percentage, w.resets_at) if w else None for _, w in windows)
         if key == self._persisted_key and now - self._persisted_at < PERSIST_HEARTBEAT_SECONDS:
             return
         # Recorded before the write, so a failing disk is retried once per
         # change or heartbeat rather than on every Status event.
         self._persisted_key = key
         self._persisted_at = now
-        payload = {
-            name: _window_to_json(window)
-            for name, window in ((FIVE_HOUR_KEY, self._five_hour), (SEVEN_DAY_KEY, self._seven_day))
-            if window is not None
-        }
+        payload = {name: _window_to_json(window) for name, window in windows if window is not None}
         _write_state_file(state_file, payload)
 
     def latest(self, *, now: float, state_file: Path | None = None) -> UsageSnapshot | None:
@@ -306,10 +332,10 @@ class UsageTracker:
             state_file: Host-wide file to fall back to, or None for memory only.
         """
         with self._lock:
-            five, seven = self._five_hour, self._seven_day
-        if five is None and seven is None and state_file is not None:
-            five, seven = _read_file(state_file)
-        five, seven = _live(five, now), _live(seven, now)
-        if five is None and seven is None:
+            five, seven, spend = self._five_hour, self._seven_day, self._spend_limit
+        if five is None and seven is None and spend is None and state_file is not None:
+            five, seven, spend = _read_file(state_file)
+        five, seven, spend = _live(five, now), _live(seven, now), _live(spend, now)
+        if five is None and seven is None and spend is None:
             return None
-        return UsageSnapshot(five_hour=five, seven_day=seven)
+        return UsageSnapshot(five_hour=five, seven_day=seven, spend_limit=spend)

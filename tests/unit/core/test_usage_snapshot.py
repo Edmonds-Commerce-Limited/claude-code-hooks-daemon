@@ -118,10 +118,10 @@ class TestUpdate:
         tracker.update_from_status_event({"rate_limits": "x"}, now=NOW)
         assert tracker.latest(now=NOW) is None
 
-    def test_spend_limit_and_unknown_keys_are_ignored(self) -> None:
+    def test_unknown_keys_are_ignored(self) -> None:
         tracker = UsageTracker()
         tracker.update_from_status_event(
-            {"rate_limits": {"spend_limit": {"used_percentage": 140, "resets_at": 1800010800}}},
+            {"rate_limits": {"mystery": {"used_percentage": 40, "resets_at": 1800010800}}},
             now=NOW,
         )
         assert tracker.latest(now=NOW) is None
@@ -350,6 +350,127 @@ class TestStateFile:
 
     def test_lives_directly_in_the_daemon_untracked_dir(self, tmp_path: Path) -> None:
         assert usage_state_file(tmp_path) == tmp_path / "usage-snapshot.json"
+
+
+class TestSpendLimit:
+    """``rate_limits.spend_limit`` (gateway spend limit; percentage may exceed 100)."""
+
+    @staticmethod
+    def _payload(spend: Any) -> dict[str, Any]:
+        return {"rate_limits": {"spend_limit": spend}}
+
+    def test_spend_limit_alone_gives_a_snapshot(self) -> None:
+        tracker = UsageTracker()
+        tracker.update_from_status_event(
+            self._payload({"used_percentage": 62.8, "resets_at": 1800010800, "used_usd": 3}),
+            now=NOW,
+        )
+        snap = tracker.latest(now=NOW)
+        assert snap is not None
+        assert snap.five_hour is None and snap.seven_day is None
+        assert snap.spend_limit == UsageWindow(62.8, 1800010800, NOW)
+
+    def test_percentage_above_100_is_kept(self) -> None:
+        tracker = UsageTracker()
+        tracker.update_from_status_event(
+            self._payload({"used_percentage": 140, "resets_at": 1800010800}), now=NOW
+        )
+        snap = tracker.latest(now=NOW)
+        assert snap is not None and snap.spend_limit is not None
+        assert snap.spend_limit.used_percentage == 140.0
+
+    def test_spend_limit_sits_beside_the_subscription_windows(self) -> None:
+        tracker = UsageTracker()
+        payload = load_status_payload("main_thread_integer.json")
+        payload["rate_limits"]["spend_limit"] = {"used_percentage": 5, "resets_at": 1800010800}
+        tracker.update_from_status_event(payload, now=NOW)
+        snap = tracker.latest(now=NOW)
+        assert snap is not None
+        assert snap.five_hour is not None and snap.spend_limit is not None
+
+    def test_spend_limit_does_not_feed_the_subscription_ceiling_figure(self) -> None:
+        snap = UsageSnapshot(None, None, spend_limit=UsageWindow(140.0, 5, 0.0))
+        assert snap.highest_used_percentage() is None
+
+    @pytest.mark.parametrize(
+        "spend",
+        [
+            {"used_percentage": -1, "resets_at": 1800010800},
+            {"used_percentage": "x", "resets_at": 1800010800},
+            {"used_percentage": float("inf"), "resets_at": 1800010800},
+            {"used_percentage": 1e308, "resets_at": 1800010800},
+            {"used_percentage": 10000.5, "resets_at": 1800010800},
+            {"used_percentage": 10},
+            "not-a-dict",
+            None,
+        ],
+    )
+    def test_malformed_spend_limit_is_ignored(self, spend: Any) -> None:
+        tracker = UsageTracker()
+        tracker.update_from_status_event(self._payload(spend), now=NOW)
+        assert tracker.latest(now=NOW) is None
+
+    def test_percentage_at_the_cap_is_kept(self) -> None:
+        tracker = UsageTracker()
+        tracker.update_from_status_event(
+            self._payload({"used_percentage": 10000, "resets_at": 1800010800}), now=NOW
+        )
+        snap = tracker.latest(now=NOW)
+        assert snap is not None and snap.spend_limit is not None
+
+    @pytest.mark.parametrize("value", [1e308, 10000.5])
+    def test_file_with_an_absurd_spend_percentage_is_ignored(
+        self, state_file: Path, value: float
+    ) -> None:
+        UsageTracker().update_from_status_event(
+            load_status_payload("main_thread_integer.json"), now=NOW, state_file=state_file
+        )
+        data = json.loads(state_file.read_text("utf-8"))
+        data["spend_limit"] = {
+            "used_percentage": value,
+            "resets_at": 1800010800,
+            "observed_at": NOW,
+        }
+        state_file.write_text(json.dumps(data), "utf-8")
+        snap = UsageTracker().latest(now=NOW, state_file=state_file)
+        assert snap is not None and snap.five_hour is not None and snap.spend_limit is None
+
+    def test_malformed_spend_limit_keeps_the_good_windows(self) -> None:
+        tracker = UsageTracker()
+        payload = load_status_payload("main_thread_integer.json")
+        payload["rate_limits"]["spend_limit"] = "junk"
+        tracker.update_from_status_event(payload, now=NOW)
+        snap = tracker.latest(now=NOW)
+        assert snap is not None and snap.five_hour is not None and snap.spend_limit is None
+
+    def test_expired_spend_limit_is_absent(self) -> None:
+        tracker = UsageTracker()
+        tracker.update_from_status_event(
+            self._payload({"used_percentage": 50, "resets_at": 1800010800}), now=NOW
+        )
+        assert tracker.latest(now=NOW + 20000) is None
+
+    def test_spend_limit_survives_a_restart_through_the_file(self, state_file: Path) -> None:
+        UsageTracker().update_from_status_event(
+            self._payload({"used_percentage": 140, "resets_at": 1800010800}),
+            now=NOW,
+            state_file=state_file,
+        )
+        snap = UsageTracker().latest(now=NOW, state_file=state_file)
+        assert snap is not None and snap.spend_limit is not None
+        assert snap.spend_limit.used_percentage == 140.0
+
+    def test_file_with_malformed_spend_limit_keeps_the_other_windows(
+        self, state_file: Path
+    ) -> None:
+        UsageTracker().update_from_status_event(
+            load_status_payload("main_thread_integer.json"), now=NOW, state_file=state_file
+        )
+        data = json.loads(state_file.read_text("utf-8"))
+        data["spend_limit"] = {"used_percentage": "x"}
+        state_file.write_text(json.dumps(data), "utf-8")
+        snap = UsageTracker().latest(now=NOW, state_file=state_file)
+        assert snap is not None and snap.five_hour is not None and snap.spend_limit is None
 
 
 class TestDataLayerAccessor:

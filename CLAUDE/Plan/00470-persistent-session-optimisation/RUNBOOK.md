@@ -52,7 +52,8 @@ spelling of ccy's `--continue` pass-through. Record the unit used on the
 server here once it exists. Requirements for it:
 
 - It passes `--continue` on every restart after the first.
-- It sets `HOOKS_DAEMON_HOSTNAME=cchd-sdlc-runner` when the session is the SDLC
+- It sets `HOOKS_DAEMON_HOSTNAME=github-softwaredev-lifecycle-unattended` (the owner's 2026-10-09 rename of
+  `cchd-sdlc-runner`) when the session is the SDLC
   runner, so the `issue-sdlc` job's `hosts:` filter declares it (PLAN.md
   Task 6.2).
 - It backs off between restarts. A session that dies at once on start, for

@@ -192,6 +192,34 @@ class TestHandle:
         assert result.reason.startswith(f"BLOCKED [{RuleID.DOCS_QA_COMMIT}]")
         assert "pointer-resolves" in result.reason
 
+    @pytest.mark.parametrize(
+        ("check_modes", "decision"),
+        [({"unlisted-fake-value": "block"}, Decision.DENY), ({}, Decision.ALLOW)],
+    )
+    def test_staged_registry_entry_that_is_not_visibly_fake_follows_check_modes(
+        self, tmp_path: Path, check_modes: dict[str, str], decision: Decision
+    ) -> None:
+        """N361: the registry check is a per-check block, whatever the gate default is."""
+        root = tmp_path / "repo"
+        _init_repo(root)
+        registry = root / ".claude" / "fake-values.yaml"
+        registry.parent.mkdir()
+        real_looking = "-".join(("8e11bfb5", "7dc2", "432b", "9206", "928fa5c35731"))
+        registry.write_text(f"kinds:\n  session-uuid:\n    values:\n      - '{real_looking}'\n")
+        _git(root, "add", "-A")
+        policy = DocumentationPolicy(
+            enabled=True,
+            qa=DocumentationQaPolicy(commit_gate_mode="warn", check_modes=check_modes),
+        )
+
+        with _patched_root(root):
+            result = _handler(policy).handle(_bash_input("git commit -m 'x'", cwd=str(root)))
+        assert result.decision == decision
+        if decision == Decision.DENY:
+            assert result.reason is not None
+            assert result.reason.startswith(f"BLOCKED [{RuleID.DOCS_QA_COMMIT}]")
+            assert "unlisted-fake-value" in result.reason
+
     def test_missing_cwd_is_treated_as_same_repo(self, tmp_path: Path) -> None:
         root = tmp_path / "repo"
         _init_repo(root)
