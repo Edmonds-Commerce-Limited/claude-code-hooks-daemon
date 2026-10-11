@@ -24,8 +24,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00484: DBF adoption and toolchain conformance](00484-dbf-adoption-and-toolchain-conformance/PLAN.md) - In Progress (owner ruling: fully adopt Defence Before Fix and link it, #65 and #67; assess the daemon as a DBF toolchain against TOOLING-SPEC and let DBF tools enumerate its defences)
 
-- [00483: threat model conformance audit](00483-threat-model-conformance-audit/PLAN.md) - In Progress (owner ruling: the daemon is guardrails, not armour; check every guard, open ledger entry and uncovered corpus row against the careless-not-hostile threat model, dismiss the out-of-scope ones on record, fix and narrow the rest)
-
 - [00482: handler crash containment](00482-handler-crash-containment/PLAN.md) - Not Started (owner ruling after #68: handlers must never crash; a crash gets a crash record and a bug-report request, non-safety handlers are disabled after N crashes, safety guards stay fail-closed pending the owner's decision)
 
 - [00481: release 3.67 retrospective - how #68 shipped, and the QA gaps](00481-release-3-67-retrospective-qa-gaps/PLAN.md) - Not Started (owner request: a causal account, gate by gate, of how #68 reached a release, then a realistic-command corpus gate and an evaluation-error release signal, each proven against the pre-fix tree)
@@ -197,6 +195,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00483: threat model conformance audit](Completed/00483-threat-model-conformance-audit/PLAN.md) - Complete at batch (c) `4981618fc` + the Task 3.2 re-probe `8e84e6b76` + the archiving commit (owner ruling: the daemon is guardrails, not armour; every guard, open ledger entry and uncovered corpus row checked against the careless-not-hostile threat model, the out-of-scope ones dismissed on record, the rest narrowed or filed as 00474 N400-N409)
+
 - [00499: write-protected paths, and the ccy.env.local.dist template](Completed/00499-write-protected-paths-and-ccy-env-local-dist/PLAN.md) - Complete at Phase 1b merge `64823600a` + the archiving commit (owner rulings: `ccy.env.local` is IaC-written only; an opt-in `write_protected_paths` guard denies every Write/Edit/Bash route onto a listed path, live-probed; the dist template was cancelled because ccy writes it)
 
 - [00480: plan fact checker and debounce](Completed/00480-plan-fact-checker-and-debounce/PLAN.md) - Complete, the feed shipped in v3.69.0, with the N359 delivery fixes at merge `7aa463588` + the archiving commit (owner ruling after ledger 00474 N290: a Sonnet fact itemiser/verifier wired into plan QA through a first-class debounce; the final live run refuted a planted false claim delivered unasked)
@@ -255,8 +255,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00441: the two link resolvers agree](Completed/00441-the-two-link-resolvers-agree/PLAN.md) - Complete at `c607a6d6` + the archiving commit (from 00422 N5 rows (j)(k)(l): one finding per link instead of per occurrence at all three stages, one shared literal-resolution rule instead of two copies, and a relocation message that no longer calls a plan archived when the resolver deliberately found it in the LIVE root)
 
-- [00440: cached config for per event handlers](Completed/00440-cached-config-for-per-event-handlers/PLAN.md) - Complete at `8d42b548` + the archiving commit (from 00422 N5 row (b): `cron_stop_enforcer` re-parsed the whole config from both `matches()` and `handle()`, ~153 ms at every turn end; now 23.5 µs warm, invalidated on `(st_mtime_ns, st_size)` so an operator's edit still lands without a restart)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -310,9 +308,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 502 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 425 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 426 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 54 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 53 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

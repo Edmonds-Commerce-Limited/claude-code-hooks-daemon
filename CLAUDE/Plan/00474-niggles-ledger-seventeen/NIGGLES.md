@@ -1471,6 +1471,86 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N409 — `subagent_full_qa_blocker` denies an ordinary `python3 script.py` as a whole-suite run
+
+**Source**: Plan 00483 Task 3.2 re-probe of the not-re-run guards (2026-10-11), proposal P9, probe fq1 and the
+INVENTORY fq_py_a/fq_py_b probes
+(`../00483-threat-model-conformance-audit/subagent-reports/261011-not-rerun-guards-sonnet.md`).
+
+**Evidence**: a sub-agent's `python3 script.py`, where the script imports `subprocess`, runs `ruff check .` and only
+lists `"pytest"` in a constant, is denied as a full-suite run; the shell-script counterpart allows. Sub-agent role
+only, but the deny is hard and the script is ordinary dev tooling.
+
+**Status**: ⬜ Open. Remedy: in the script-file chain require the program string to be the argument of the process
+call, not any literal in the file, or report the script as UNSEEN with an advisory as the guard does for other opaque
+commands. May interact with the open N96 decision on this handler.
+
+### N408 — `gh_issue_comments`/`gh_pr_comments` deny mentions and miss `--json=comments`
+
+**Source**: Plan 00483 Task 3.2 re-probe (2026-10-11), proposal P8, probes ghc1-ghc3, ghc5, ghc8, ghc9 (report as
+N409).
+
+**Evidence**: a command that only mentions `gh issue view` / `gh pr view` (ghc1-3, ghc9) is denied; a real view that
+does request comments as `--json=comments` (ghc5), or whose quoted `--jq` holds a `|` before `--json comments` (ghc8),
+is also denied.
+
+**Status**: ⬜ Open. Remedy: one shared helper for both handlers: command-position match, quote-aware segment end,
+and `--json=comments` plus the `--json` field list accepted.
+
+### N407 — `pip_break_system` and `sudo_pip` deny commands that only mention the flag or `sudo pip install`
+
+**Source**: Plan 00483 Task 3.2 re-probe (2026-10-11), proposal P7, probes pip1-pip5, pip8, pip9, sp1-sp3, sp7
+(report as N409).
+
+**Evidence**: the patterns' `.*` crosses `&&`, `;`, `#` and quotes, so an `echo`, a comment or a grep naming the flag
+is denied.
+
+**Status**: ⬜ Open. Remedy: `command_position_segments` with the install tokens read in the same segment (as
+`dangerous_permissions` does) and heredoc bodies read as data. The INVENTORY misses (`pip --break-system-packages install`, the env var, `sudo -u USER pip install`) are separate and not part of this entry.
+
+### N406 — `github_auto_close_keywords` denies a quoted `echo` or a `python3 - <<'EOF'` that only prints a keyword
+
+**Source**: Plan 00483 Task 3.2 re-probe (2026-10-11), proposal P6, probes ac7, ac9 (report as N409).
+
+**Evidence**: real commit/PR messages and `grep`/`git log --grep` mentions behave; an `echo` of a closing keyword plus
+issue reference, or a heredoc fed to `python3`, is denied. Lower impact.
+
+**Status**: ⬜ Open. Remedy: scan only the message of a real `git commit|merge|tag` or `gh pr create|edit` segment,
+not the text of an earlier segment or a heredoc fed to a non-git receiver.
+
+### N405 — `ancestry_preserving_merge` denies text that mentions `--squash` or `--rebase` merges
+
+**Source**: Plan 00483 Task 3.2 re-probe (2026-10-11), proposal P5, probes anc1-anc3, anc9, anc10 (report as N409).
+
+**Evidence**: a commit message, `echo` or `grep` naming `git merge --squash`, `gh pr merge --squash` or `--rebase` is
+denied; `git log --grep=` already allows.
+
+**Status**: ⬜ Open. Remedy: match at command position per segment, and read a quoted `-m`/`echo`/`grep` argument
+and a quoted-heredoc body as data (`strip_inert_spans`, as `merge_to_main_approval` already does).
+
+### N404 — `git_message_backtick` denies the `-m "$(cat <<'EOF' … EOF)"` commit idiom when the body has a code span
+
+**Source**: Plan 00483 Task 3.2 re-probe (2026-10-11), proposal P4, probes bt1, bt2 (INVENTORY bt_heredoc and
+bt_sq_dq, reproduced on b8095b83d); bt7-bt9 allow (report as N409).
+
+**Evidence**: the canonical heredoc message form, whose quoted delimiter makes the body literal, is denied when the
+body holds a Markdown backtick span; so is a `-m "…"` written inside a single-quoted message. Highest impact of
+N404-N409: it is the form agents are told to use.
+
+**Status**: ⬜ Open. Remedy: judge the `-m` value from its shell quote context (a quoted-delimiter heredoc body inside
+`$(cat <<'EOF' …)` is literal; a `-m "` inside single quotes is not an option); gate rows for the heredoc form.
+
+### N403 — `project_containment` resolves a relative redirect against the project root, ignoring a preceding `cd`
+
+**Source**: coordinator, 00474 merge work (2026-10-11).
+
+**Evidence**: `cd <dir> && cmd > ../file` was judged as if `../file` were relative to the project root, so a redirect
+that lands inside the repository was denied as outside it (the coordinator used an absolute path instead). Path
+judgement elsewhere (`landing_directories`, N299) already follows `cd`.
+
+**Status**: ⬜ Open. Remedy: resolve redirect targets from the directory the chain's `cd` moves land in, failing
+closed only when that directory cannot be placed; gate row for `cd sub && cmd > ../x`.
+
 ### N402 — the conflict-marker commit gate denies `cd "$(git rev-parse --show-toplevel)" && git commit`
 
 **Source**: Plan 00483 Task 3.2 re-check (2026-10-11), proposal P3, probes d-h1 and d-h4

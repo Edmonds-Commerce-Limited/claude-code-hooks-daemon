@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00440: cached config for per event handlers](00440-cached-config-for-per-event-handlers/PLAN.md) - Complete at `8d42b548` + the archiving commit (from 00422 N5 row (b): `cron_stop_enforcer` re-parsed the whole config from both `matches()` and `handle()`, ~153 ms at every turn end; now 23.5 µs warm, invalidated on `(st_mtime_ns, st_size)` so an operator's edit still lands without a restart)
+
 - [00439: fence splitter moves out of plan qa](00439-fence-splitter-moves-out-of-plan-qa/PLAN.md) - Complete at `712cbf2e` + the archiving commit (from 00422 N5 row (h): `utils/markdown_links.py` said "it imports neither of them" six lines above an import of `plan_qa.model`; the splitter moved to `utils/markdown_fences.py`, and the guard written to prove it found six such edges where the ledger named one — the other four are now a declared ratchet, filed as N14)
 
 - [00438: kill suggestion can name the protected group](00438-kill-suggestion-can-name-the-protected-group/PLAN.md) - Complete at `d9990531` + the archiving commit (from 00422 N5 row (i): `exclude_pgids` was honoured when deciding what breaches and ignored when building the `kill --` the report prints, so the harvester could recommend killing its own group)

@@ -1,6 +1,6 @@
 # Plan 00483: threat model conformance audit
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-02
 **Owner**: dev
 **Priority**: High
@@ -12,9 +12,9 @@
 The owner ruled that the daemon is guardrails, not armour. It helps a careless agent, and it
 does not defend against a hostile one, which can simply stop the daemon. The ruling is written
 down in
-[ARCHITECTURE.md § Threat model](../../ARCHITECTURE.md#threat-model-the-agent-is-careless-not-hostile).
+[ARCHITECTURE.md § Threat model](../../../ARCHITECTURE.md#threat-model-the-agent-is-careless-not-hostile).
 It was reviewed in
-[261002-threat-model-review-fable.md](../00474-niggles-ledger-seventeen/subagent-reports/261002-threat-model-review-fable.md).
+[261002-threat-model-review-fable.md](../../00474-niggles-ledger-seventeen/subagent-reports/261002-threat-model-review-fable.md).
 The README carries a short "Guardrails, not armour" section.
 
 The ruling came after many rounds of work went into chasing obfuscated shapes. One example
@@ -90,8 +90,8 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   N85 with `hooks-daemon probe` (allowed). The owner delegated the decisions on N154, N230 and
   N240 to a Fable subagent; see `RULINGS-owner-delegated-fable.md`. Classify every open entry
   in ledger 00474: its index, its carried lists
-  ([CARRIED-REFIX-BRANCHES.md](../00474-niggles-ledger-seventeen/CARRIED-REFIX-BRANCHES.md),
-  [CARRIED-N53-BRANCH.md](../00474-niggles-ledger-seventeen/CARRIED-N53-BRANCH.md)), and
+  ([CARRIED-REFIX-BRANCHES.md](../../00474-niggles-ledger-seventeen/CARRIED-REFIX-BRANCHES.md),
+  [CARRIED-N53-BRANCH.md](../../00474-niggles-ledger-seventeen/CARRIED-N53-BRANCH.md)), and
   the 65 entries still open in archived ledger 00466. Each entry is either an in-scope defect,
   dismissed under the threat model with the shape named, or already fixed on main (verified
   by reproduction, not assumed).
@@ -158,7 +158,7 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   [subagent-reports/261004-task-3.1-batch-h-recursive-sonnet.md](subagent-reports/261004-task-3.1-batch-h-recursive-sonnet.md).
   N171, N172, N248 and N250 fixed, branch worktree-p483-ordin (merged cd7638c73): an unlistable directory, a missing daemon package, an unresolved word list and an unbuildable capture scanner each fail loudly instead of passing; report: [subagent-reports/261004-task-3.1-batch-i-ordinary-sonnet.md](subagent-reports/261004-task-3.1-batch-i-ordinary-sonnet.md).
   N130 (and N348's cap half) fixed, branch worktree-n130-walk (merged 012915bd9; its capped walk was then removed by the A1/A2 merge dc5c9263b, and N130 is now answered by the cached protected-file index): a recursive search is examined by a capped scan that raises past 250000 entries or the deadline and is denied as incomplete, never answered as clean, and `rg`, `ag` and `git grep` read git's file lists; report: [subagent-reports/261004-n130-n348-implementation-sonnet.md](subagent-reports/261004-n130-n348-implementation-sonnet.md).
-- [ ] 🔄 **Task 3.2**: Narrow each guard that causes an in-scope false positive while catching
+- [x] ✅ **Task 3.2**: Narrow each guard that causes an in-scope false positive while catching
   an out-of-scope shape (TDD: the false positive is the red test). Open: 16 of the 50 INVENTORY
   probes still deny when re-run on 2026-10-11 (43 denied on 2026-10-09; 27 were fixed by
   batches (b) and (c), none regressed). Of the 16, 12 are deliberate policy (6 `sed` word, 6
@@ -169,7 +169,9 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   re-probed on main b8095b83d: they deny only commands that merely mention the target text,
   and six further ledger entries (P4 to P9: git_message_backtick, ancestry_preserving_merge,
   github_auto_close_keywords, pip_break_system with sudo_pip, gh_issue/pr_comments,
-  subagent_full_qa_blocker script chain) are proposed in the second report and not yet filed.
+  subagent_full_qa_blocker script chain) are proposed in the second report and filed as 00474
+  N404 to N409. Every in-scope false positive the audit found therefore has a merged fix or a
+  00474 ledger entry; the open entries' narrowing is ledger work from here, not this plan's.
   Reports:
   [subagent-reports/261011-task-3.2-recheck-sonnet.md](subagent-reports/261011-task-3.2-recheck-sonnet.md),
   [subagent-reports/261011-not-rerun-guards-sonnet.md](subagent-reports/261011-not-rerun-guards-sonnet.md).
@@ -283,12 +285,14 @@ Owner questions sent 2026-10-05 as chunks A–D; see the backlog report
   `handlers/pre_tool_use/` is named in the inventory; Part H adds the three that were
   missing. The 24 handlers of Part G are provisional file-level verdicts, and Parts A to F
   pre-date the A1/A2 removals.
-- [ ] Every in-scope false positive found has a narrowing fix merged or a ledger entry. Missing:
-  the three false positives among the 50 probes are filed (N400, N401, N402), and the
-  "not re-run" guards are re-probed, but that re-probe found six more families with no ledger
-  entry yet (P4 to P9 in
-  [subagent-reports/261011-not-rerun-guards-sonnet.md](subagent-reports/261011-not-rerun-guards-sonnet.md)).
-  Tick once they are filed in 00474 NIGGLES.md or ruled correct denies.
+- [x] Every in-scope false positive found has a narrowing fix merged or a ledger entry. The
+  three false positives among the 50 probes are 00474 N400, N401 and N402; the six families
+  the "not re-run" re-probe found (P4 to P9 in
+  [subagent-reports/261011-not-rerun-guards-sonnet.md](subagent-reports/261011-not-rerun-guards-sonnet.md))
+  are 00474 N404 to N409.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/017-guards-judge-what-runs-not-what-is-mentioned.md`
+  (batches (b) and (c), merged after v3.69.0). The earlier Task 3.1 narrowing shipped in releases up to v3.69.0.
 
 ## Delivery & Milestones
 

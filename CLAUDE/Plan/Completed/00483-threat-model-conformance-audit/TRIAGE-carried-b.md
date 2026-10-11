@@ -1,9 +1,9 @@
 # Plan 00483 Task 2.1: triage of carried entries, branch `worktree-n466-small-a`
 
 Scope: the 22 entries under `## Branch worktree-n466-small-a` in
-[CARRIED-REFIX-BRANCHES.md](../00474-niggles-ledger-seventeen/CARRIED-REFIX-BRANCHES.md)
+[CARRIED-REFIX-BRANCHES.md](../../00474-niggles-ledger-seventeen/CARRIED-REFIX-BRANCHES.md)
 (N124 to N257). Each was judged on current main, with the two-part test from
-[ARCHITECTURE.md](../../ARCHITECTURE.md#threat-model-the-agent-is-careless-not-hostile).
+[ARCHITECTURE.md](../../../ARCHITECTURE.md#threat-model-the-agent-is-careless-not-hostile).
 No source was edited and nothing was committed.
 
 Method. Bash probes ran through `bin/hooks-daemon probe PreToolUse` with fixtures that carry
