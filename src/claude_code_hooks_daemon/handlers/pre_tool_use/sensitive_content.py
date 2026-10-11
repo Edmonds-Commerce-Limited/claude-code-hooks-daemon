@@ -48,6 +48,7 @@ from claude_code_hooks_daemon.core.dispatch_cancellation import is_dispatch_canc
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.core.utils import split_heredocs
 from claude_code_hooks_daemon.remote_docs.provenance import (
     is_faithful_vendored_copy,
     is_remote_tree_document,
@@ -55,7 +56,11 @@ from claude_code_hooks_daemon.remote_docs.provenance import (
 from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils import secret_redaction as sr
-from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, git_subcommand_index
+from claude_code_hooks_daemon.utils.command_evasion import (
+    OPTIONAL_PATH,
+    git_subcommand_index,
+    normalise_line_continuations,
+)
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.fake_values import (
     FakeValuesError,
@@ -79,6 +84,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
 from claude_code_hooks_daemon.utils.path_predicates import read_text_or_reason
 from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
+from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 from claude_code_hooks_daemon.utils.staging_simulation import (
     INCOMPLETE_SIMULATION_BLOCKED,
     SimulationIncompleteError,
@@ -171,7 +177,42 @@ _GIT_METADATA_WRITE_SUBCOMMANDS: Final[tuple[str, ...]] = (
 # must stay allowed: searching for a term and removing it are exactly the work
 # of cleaning a repository, and a guard that blocks its own remedy gets
 # switched off.
-_GIT_READ_ONLY_FLAGS: Final[tuple[str, ...]] = ("--grep", "--list", "-l", "--get")
+#
+# Only the subcommands that have a LISTING form honour these. A flag word inside
+# a commit message (`git commit -m 'add --list'`) is a message, not a listing,
+# so `commit`, `checkout`, `switch` and `merge` never take the exemption.
+_GIT_READ_ONLY_FLAGS: Final[tuple[str, ...]] = ("--grep", "--list", "-l")
+_GIT_LISTING_SUBCOMMANDS: Final[tuple[str, ...]] = ("tag", "branch")
+
+# `git config` records an identity only when it ASSIGNS a value. These flags
+# read or remove, and removal puts nothing into a repository.
+_GIT_CONFIG_SUBCOMMAND: Final[str] = "config"
+_GIT_CONFIG_NON_ASSIGNING_FLAGS: Final[tuple[str, ...]] = (
+    "--get",
+    "--get-all",
+    "--get-regexp",
+    "--get-urlmatch",
+    "--list",
+    "-l",
+    "--show-origin",
+    "--show-scope",
+    "--unset",
+    "--unset-all",
+    "--remove-section",
+    "--rename-section",
+)
+_GIT_CONFIG_ASSIGNING_FLAGS: Final[tuple[str, ...]] = ("--add", "--replace-all")
+# `git config <key> <value>`: a key and a value are two operands.
+_GIT_CONFIG_ASSIGNMENT_OPERANDS: Final[int] = 2
+
+# `git branch -d <name>` removes a branch: the name already exists and nothing
+# new is recorded, so deleting a term-bearing branch is the remedy, not a leak.
+_GIT_BRANCH_DELETE_FLAGS: Final[tuple[str, ...]] = ("-d", "-D", "--delete")
+
+# Where one command ends and the next begins. Longest first so `||` is not read
+# as two pipes. A metadata value is judged within its OWN command only, so a
+# term in an unrelated `cd <path>` earlier on the line is not metadata.
+_COMMAND_SEPARATORS: Final[tuple[str, ...]] = ("||", "&&", "|", ";", "\n")
 
 _GIT_COMMIT_SUBCOMMAND: Final[str] = "commit"
 
@@ -446,6 +487,30 @@ def _commit_options(command: str) -> list[str] | None:
             continue
         return tokens[subcommand_index + 1 :]
     return None
+
+
+def _records_nothing(subcommand: str, arguments: list[str]) -> bool:
+    """True when this metadata-capable git invocation only reads or removes.
+
+    ``git tag -l <pattern>`` / ``git branch --list <pattern>`` take a ref pattern
+    as an operand and create nothing, and ``git branch -d <name>`` removes a
+    name that already exists: inspecting and cleaning, not adding. ``git config``
+    records an identity only when it assigns, so any read flag, or a lone key,
+    is a read. ``arguments`` are SHELL tokens, so a flag word inside a quoted
+    message is part of that message and exempts nothing.
+    """
+    if subcommand in _GIT_LISTING_SUBCOMMANDS:
+        return any(flag in arguments for flag in _GIT_READ_ONLY_FLAGS) or (
+            subcommand == "branch" and any(flag in arguments for flag in _GIT_BRANCH_DELETE_FLAGS)
+        )
+    if subcommand != _GIT_CONFIG_SUBCOMMAND:
+        return False
+    if any(flag in arguments for flag in _GIT_CONFIG_ASSIGNING_FLAGS):
+        return False
+    if any(flag in arguments for flag in _GIT_CONFIG_NON_ASSIGNING_FLAGS):
+        return True
+    operands = [argument for argument in arguments if not argument.startswith("-")]
+    return len(operands) < _GIT_CONFIG_ASSIGNMENT_OPERANDS
 
 
 def _is_git_commit(command: str) -> tuple[bool, bool]:
@@ -908,19 +973,19 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         if not command:
             return []
         haystacks: list[_Haystack] = []
-        if self._writes_git_metadata(command) or _GH_BODY_PATTERN.search(command):
-            # Git metadata: five of the seven surfaces that can carry a term
-            # into a repository, none of them a file write -- one
-            # `git commit -m "<term>"` re-contaminates a history that was
-            # just rewritten clean. A `gh` body inline on the command line
-            # is judged the same way, as the command itself.
-            haystacks.append(_Haystack(subject=command, text=command))
+        # Git metadata: five of the seven surfaces that can carry a term
+        # into a repository, none of them a file write -- one
+        # `git commit -m "<term>"` re-contaminates a history that was
+        # just rewritten clean. A `gh` body inline on the command line
+        # is judged the same way, as the command that records it.
+        for recording in self._metadata_commands(command):
+            haystacks.append(_Haystack(subject=recording, text=recording))
             # Both surfaces can put the text in a FILE instead, and the file
             # route is read under the SAME condition as the inline one. A
             # reader placed under the `gh` branch alone is how `git commit -F`
             # went unscanned while `git commit -m` was denied (Plan 00412,
             # D-PUB-2).
-            haystacks.extend(self._message_file_haystacks(command, hook_input))
+            haystacks.extend(self._message_file_haystacks(recording, hook_input))
         is_commit, commits_all = _is_git_commit(command)
         if is_commit:
             reading = read_commit_form(command)
@@ -1303,7 +1368,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         term through into a commit message — the one leak surface that cannot
         be undone without rewriting published history.
         """
-        tokens = command.split()
+        tokens = _shell_tokens(command)
         for position, token in enumerate(tokens[:-1]):
             if token != _GIT_EXECUTABLE and not token.endswith(f"/{_GIT_EXECUTABLE}"):
                 continue
@@ -1313,13 +1378,40 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             subcommand = tokens[subcommand_index]
             if subcommand not in _GIT_METADATA_WRITE_SUBCOMMANDS:
                 continue
-            # `git tag -l <pattern>` / `git branch --list <pattern>` /
-            # `git config --get <key>` take a ref pattern as an operand and
-            # create nothing — inspecting what needs cleaning, not adding to it.
-            if any(flag in tokens for flag in _GIT_READ_ONLY_FLAGS):
+            if _records_nothing(subcommand, tokens[subcommand_index + 1 :]):
                 continue
             return True
         return False
+
+    @classmethod
+    def _metadata_commands(cls, command: str) -> list[str]:
+        """The text of each command in ``command`` that records metadata.
+
+        A metadata value is judged within its OWN command. Scanning the whole
+        line meant a term in an unrelated ``cd <path>`` (or a ``grep`` for it)
+        denied a ``git switch -c`` that carried none (ledger 00474 N364, N341).
+
+        A heredoc body belongs to the command whose line opens it, so it is
+        kept when that command qualifies (``git commit -F - <<'EOF'``) and
+        dropped with the unrelated command otherwise.
+        """
+        whole = normalise_line_continuations(command)
+        without_bodies, heredocs = split_heredocs(whole)
+        commands = [
+            piece.strip()
+            for piece in split_unquoted(without_bodies, _COMMAND_SEPARATORS)
+            if cls._is_metadata_command(piece)
+        ]
+        for heredoc in heredocs:
+            opener = heredoc.opener_line.strip()
+            if any(opener in found or found in opener for found in commands):
+                commands.append(heredoc.body)
+        return commands
+
+    @classmethod
+    def _is_metadata_command(cls, command: str) -> bool:
+        """True for a git metadata write or a ``gh`` body publication."""
+        return cls._writes_git_metadata(command) or bool(_GH_BODY_PATTERN.search(command))
 
     def _haystacks(self, hook_input: dict[str, Any], file_path: str) -> list[_Haystack]:
         """Every piece of text this write would introduce: its PATH and its body.
