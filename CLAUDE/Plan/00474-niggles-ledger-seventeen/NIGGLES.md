@@ -183,7 +183,7 @@ only for known interpreters. The comment at lines 852-858 records the current fa
 - `ps` and `file` join the exempt text tools.
 
 - docker/podman `run`/`exec`/`create` are judged only on the words after the image, so `-e A=1` before the image is
-  silent. `--entrypoint perl img -e x` and `sh -c` after the image stay unseen.
+  silent. `--entrypoint perl img -e x` and `sh -c` after the image are still flagged.
 
 - Release note 020. Addresses GitHub Issue #69.
 

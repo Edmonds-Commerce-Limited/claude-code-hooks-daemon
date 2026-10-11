@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00503: remove upgrade owner approval](00503-remove-upgrade-owner-approval/PLAN.md) - In Progress, High (#112; owner request: drop the exit-4 owner approval, `approve-upgrade` and `upgrade_approval_guard`; keep the reading confirmation; advise phasing large jumps)
+
 - [00501: session modes](00501-session-modes/PLAN.md) - Not Started, Medium (#91; first-class per-session modes shown in the status line: focus (`hooks-daemon focus <task>`), BLOCKED (awaiting-human, goal-blocked loop breaker), usage-paused; per-session awaiting-human storage; guards never gated)
 
 - [00496: upstream feature requests and issue kinds](00496-upstream-feature-requests-and-issue-kinds/PLAN.md) - Not Started (owner request: a formal process for project agents to file feature requests and other non-defect issues, mirroring the defect generator, guard and forms; security reports routed privately)
