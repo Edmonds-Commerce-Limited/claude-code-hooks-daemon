@@ -1540,13 +1540,15 @@ N404-N409: it is the form agents are told to use.
 **Status**: ⬜ Open. Remedy: judge the `-m` value from its shell quote context (a quoted-delimiter heredoc body inside
 `$(cat <<'EOF' …)` is literal; a `-m "` inside single quotes is not an option); gate rows for the heredoc form.
 
-### N403 — `project_containment` resolves a relative redirect against the project root, ignoring a preceding `cd`
+### N403 — `project_containment` resolves a relative redirect against the hook cwd, ignoring a preceding `cd`
 
 **Source**: coordinator, 00474 merge work (2026-10-11).
 
-**Evidence**: `cd <dir> && cmd > ../file` was judged as if `../file` were relative to the project root, so a redirect
-that lands inside the repository was denied as outside it (the coordinator used an absolute path instead). Path
-judgement elsewhere (`landing_directories`, N299) already follows `cd`.
+**Evidence**: `cd <dir> && cmd > ../file` was judged as if `../file` were relative to the hook's `cwd` (the project
+root in that session), so a redirect that lands inside the repository was denied as outside it (the coordinator used
+an absolute path instead). The code joins every target against the payload `cwd` and follows no `cd` at all, which
+also corrects N338's "follows only the first `cd`"; same root cause as N28. Path judgement elsewhere
+(`landing_directories`, N299) already follows `cd`.
 
 **Status**: ⬜ Open. Remedy: resolve redirect targets from the directory the chain's `cd` moves land in, failing
 closed only when that directory cannot be placed; gate row for `cd sub && cmd > ../x`.
@@ -1563,7 +1565,7 @@ the commit gates do not.
 
 **Status**: ⬜ Open, in two parts. (a) Agent: resolve `$(git rev-parse --show-toplevel)` (and `$PWD`/`$(pwd)`) in
 the commit gates the way path judgement does. (b) Owner: whether a commit gate that cannot place the repository for
-any other expansion (`cd $PROJ`) should allow with an advisory, as owner ruling R3 did for the secret guards, or stay
+any other expansion (`cd $PROJ`) should allow with an advisory, as owner ruling A1 (settling Q4-R3) did for the secret guards, or stay
 fail-closed. Until (b) is ruled, `cd $PROJ && git commit` stays denied.
 
 ### N401 — `destructive_git` reads a `git -c k=v commit -F - <<'EOF'` message body as a command
@@ -1653,7 +1655,8 @@ depended on where QA runs.
 
 **Status**: 🟡 Half fixed. The `find -exec` half is done; the copy-operand half stays open.
 
-- Done: `FIND_EXEC_ACTIONS`, `FIND_EXEC_TERMINATORS` and `find_exec_end` live in `utils/recursive_search.py`, and the
+- Done: `FIND_EXEC_ACTIONS`, `FIND_EXEC_TERMINATORS` and `find_exec_end` live in `utils/find_expression.py`
+  (`recursive_search.py` imports them), and the
   five private copies are gone. All five held the same four members. Terminator handling matched too, except that
   `worktree_file_copy.py` also ends an action on `\;` (its words keep the backslash when the shell text cannot be
   resolved); the other readers never saw that spelling. That handler keeps `_FIND_EXEC_END = FIND_EXEC_TERMINATORS | {"\\;"}`, passed to `find_exec_end`, so no verdict moved. `tests/unit/handlers/test_find_exec_actions_characterisation.py`
@@ -2279,7 +2282,8 @@ same message without the sed word was allowed.
 `--work-tree`), the way the other git-aware guards parse it. Test both spellings.
 
 **Status**: ✅ Fixed on branch `agent-a212b0493fe461dab-aedeff9c` (merge pending). Reproduced on main for
-`-C` and `-c` spellings. `_GIT_COMMIT` is now `GIT_INVOCATION + "commit\b"` (the shared pattern from
+`-C` and `-c` spellings. The commit pattern is built on `GIT_INVOCATION` (now `_GIT_MESSAGE_COMMAND` in
+`sed_blocker.py`, covering commit, merge and tag since N399; the shared pattern from
 `utils/command_evasion.py`), so `git -C <dir>`, `-c k=v` and `--git-dir=` all reach the commit subcommand; the
 same-segment rule is untouched. The exemption text in the handler guidance names the global options. Tests in
 `tests/unit/handlers/test_sed_blocker_git_global_options.py`: seven allowed commit spellings and six shapes where an
