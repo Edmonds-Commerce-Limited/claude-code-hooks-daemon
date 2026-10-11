@@ -103,6 +103,9 @@ _FIND: Final[str] = "find"
 FIND_EXEC_ACTIONS: Final[frozenset[str]] = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
 #: The words that end such a command (`;` as the shell hands it over, or `+`).
 FIND_EXEC_TERMINATORS: Final[frozenset[str]] = frozenset({";", "+"})
+#: The `find` tests whose operand is a regular expression matched against the
+#: whole path, never a path to open.
+FIND_REGEX_TESTS: Final[frozenset[str]] = frozenset({"-regex", "-iregex"})
 _FIND_LEADING_OPTIONS: Final[frozenset[str]] = frozenset({"-H", "-L", "-P"})
 _FIND_EXPRESSION_STARTS: Final[frozenset[str]] = frozenset({"(", "!", ")"})
 # git grep reads the working tree instead of the index with either of these.
@@ -498,6 +501,21 @@ def find_exec_end(
     None when no word from there on is a terminator (the command runs to the end).
     """
     return next((i for i in range(start, len(words)) if words[i] in terminators), None)
+
+
+def find_regex_operand_indexes(words: Sequence[str]) -> list[int]:
+    """Indexes of the regular-expression operands of a ``find`` command.
+
+    ``words`` is the whole command, ``find`` first. Empty when it is not a
+    ``find`` command, and also when it runs another command on what it finds
+    (:data:`FIND_EXEC_ACTIONS`): the expression then decides which files that
+    command reads, so its text is not judged as inert here.
+    """
+    if not words or words[0].rsplit("/", 1)[-1] != _FIND:
+        return []
+    if any(word in FIND_EXEC_ACTIONS for word in words):
+        return []
+    return [index + 1 for index, word in enumerate(words[:-1]) if word in FIND_REGEX_TESTS]
 
 
 def _find_execs_a_search(words: list[str]) -> bool:

@@ -1531,6 +1531,10 @@ _AWK_RUNNING_MARKERS: Final[tuple[str, ...]] = ("system", "getline", "|")
 #: Heads whose pattern operand is a regular expression, never a path.
 _REGEX_PATTERN_HEADS: Final[frozenset[str]] = _GREP_HEADS | frozenset({_RG_HEAD})
 _GIT_HEAD: Final[str] = "git"
+_FIND_HEAD: Final[str] = "find"
+#: A ``find`` whose region also names ``xargs`` may hand the names it matches to
+#: a reader, so its regex is not inert.
+_XARGS_WORD: Final[re.Pattern[str]] = re.compile(r"\bxargs\b")
 _GIT_GREP_SUBCOMMAND: Final[str] = "grep"
 #: The roles ``git_grep_word_roles`` gives a regex pattern word.
 _GIT_GREP_PATTERN_ROLES: Final[frozenset[GitGrepRole]] = frozenset(
@@ -1652,6 +1656,8 @@ def _text_operand_spans(text: str, offset: int, depth: int) -> set[tuple[int, in
         for start, end in split_unquoted_spans(region, _SEGMENT_SEPARATORS):
             segment = region[start:end]
             head, spans = _segment_text_operands(segment, offset + region_start + start)
+            if head == _FIND_HEAD and _XARGS_WORD.search(region):
+                spans = []
             operands.update(dict.fromkeys(spans, head))
             program = _shell_dash_c_program_span(segment, head)
             if program is not None:
@@ -1727,6 +1733,30 @@ def _git_grep_pattern_spans(segment: str) -> list[tuple[int, int]]:
     ]
 
 
+def _find_regex_spans(segment: str) -> list[tuple[int, int]]:
+    """``(start, end)`` within ``segment`` of each literal-quoted ``-regex`` /
+    ``-iregex`` operand of a ``find`` that runs nothing on what it finds (ledger
+    00474 N124). The operand is a regular expression matched against paths,
+    like a grep pattern, never a path. ``-name`` / ``-path`` operands are
+    globs and stay judged as such."""
+    # recursive_search -> protected_file_index -> git_repo imports this module
+    # at load time, so the shared find reader can only be imported lazily.
+    from claude_code_hooks_daemon.utils.recursive_search import find_regex_operand_indexes
+
+    spans = shell_word_spans(segment)
+    words = [segment[start:end] for start, end in spans]
+    find_index = next(
+        (index for index, word in enumerate(words) if word.rsplit("/", 1)[-1] == _FIND_HEAD), None
+    )
+    if find_index is None:
+        return []
+    return [
+        spans[find_index + index]
+        for index in find_regex_operand_indexes(words[find_index:])
+        if _is_literal_quoted_word(words[find_index + index])
+    ]
+
+
 def _segment_text_operands(segment: str, offset: int) -> tuple[str, list[tuple[int, int]]]:
     """The segment's command word and the absolute ``(start, end)`` of each
     text operand in it; ``segment`` begins at ``offset`` in the command. No
@@ -1736,6 +1766,8 @@ def _segment_text_operands(segment: str, offset: int) -> tuple[str, list[tuple[i
         git_grep_spans = _git_grep_pattern_spans(segment)
         # git grep prints matched content, like grep, so it is judged as grep.
         return (_GIT_GREP_SUBCOMMAND, [(offset + s, offset + e) for s, e in git_grep_spans])
+    if head == _FIND_HEAD:
+        return head, [(offset + s, offset + e) for s, e in _find_regex_spans(segment)]
     if head not in _TEXT_CONSUMER_HEADS:
         return head, []
     spans = shell_word_spans(segment)
