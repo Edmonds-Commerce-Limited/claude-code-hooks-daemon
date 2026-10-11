@@ -122,3 +122,6 @@ class TestAHookInTheHalfBuiltVenvWindow:
 
         assert "already running" not in result.stdout.lower(), result.stdout
         assert "build has started" not in result.stdout.lower(), result.stdout
+        # Positive control: with no lock held, this same state is denied.
+        assert "permissionDecision" in result.stdout, result.stdout
+        assert "deny" in result.stdout, result.stdout

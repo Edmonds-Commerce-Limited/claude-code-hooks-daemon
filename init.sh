@@ -2287,9 +2287,6 @@ _venv_self_heal() {
 # is running, 1 otherwise.
 #
 _venv_build_running() {
-    local driver="$HOOKS_DAEMON_ROOT_DIR/scripts/venv_bootstrap.sh"
-    [[ -f "$driver" ]] || return 1
-
     _venv_driver_verb probe
     if [[ "$_HOOKS_DAEMON_BOOTSTRAP_STATE" == "running" ]]; then
         return 0

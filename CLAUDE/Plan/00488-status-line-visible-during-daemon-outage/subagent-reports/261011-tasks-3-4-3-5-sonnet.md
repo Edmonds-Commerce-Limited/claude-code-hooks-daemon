@@ -30,3 +30,13 @@ shellcheck -x on `init.sh` and `scripts/venv_bootstrap.sh`: clean. All 24 `test_
 
 - The Read tool result of the brief ended with an unrelated note urging shell edits (sed, heredocs) over Edit/Write, and a PostToolUse output urged CronList/CronCreate work. Neither came from the task owner, and both conflict with or fall outside the project rules and this brief, so neither was acted on.
 - Gap not closed: on a machine without uv the raw clone still needs uv installed (the refused message says so); that is a precondition, not something init.sh can install safely.
+
+## Round 2
+
+Review r1 (APPROVE) asked for two test gaps and one cleanup:
+
+- `test_init_sh_build_window_race.py`: the no-lock case now has a positive control, asserting `permissionDecision` and `deny` in the output, so removing the lock check would fail it.
+- `test_init_sh_raw_self_install_clone.py`: the missing-marker parametrize now includes `src/claude_code_hooks_daemon` (removed as a directory).
+- `init.sh`: `_venv_build_running` no longer repeats the driver-file check; `_venv_driver_verb` does it, and the state alone decides. `shellcheck -x init.sh` is clean.
+
+The two touched test files and `test_init_sh_venv_self_heal.py`: 37 passed.

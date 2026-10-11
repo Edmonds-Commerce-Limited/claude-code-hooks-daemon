@@ -151,12 +151,21 @@ class TestTheDerivationNeverMisfires:
 
     @pytest.mark.parametrize(
         "marker",
-        ["install.py", "scripts/bootstrap-self-install.sh", "scripts/venv_bootstrap.sh"],
+        [
+            "install.py",
+            "scripts/bootstrap-self-install.sh",
+            "scripts/venv_bootstrap.sh",
+            "src/claude_code_hooks_daemon",
+        ],
     )
     def test_a_tree_missing_one_of_this_projects_markers_is_not_derived(
         self, clone: Sandbox, marker: str
     ) -> None:
-        (clone.project / marker).unlink()
+        target = clone.project / marker
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
 
         assert _root_dir_after_sourcing(clone) == f"ROOT={clone.project}/.claude/hooks-daemon"
 
