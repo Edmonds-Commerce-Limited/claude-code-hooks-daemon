@@ -99,10 +99,11 @@ PREMATURE_STOP_PATTERNS: list[str] = [
 _OUT_OF_SCOPE_CATEGORY = "out_of_scope"
 _CITED_REASON = re.compile(
     r"\bthreat[- ]model\b|\bnon-?goals?\b|\bowner(?:'s)? (?:ruling|decision)\b"
-    r"|\bper (?:the )?(?:owner|ruling|plan)\b|\blimb[- ]?\d\b",
+    r"|\bper (?:the )?(?:owner|ruling)\b|\bper (?:the )?plan\s+\d{3,5}\b"
+    r"|\blimb[- ]?\d+\s+of\b|\(limb[- ]?\d+\)",
     re.IGNORECASE,
 )
-_SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+|\n+")
+_SENTENCE_BREAK = re.compile(r"(?<=[.!?;])\s+|\n+")
 
 
 def _without_cited_reason_sentences(text: str) -> str:
@@ -113,7 +114,7 @@ def _without_cited_reason_sentences(text: str) -> str:
 # Category name -> pattern list
 _CATEGORY_PATTERNS: list[tuple[str, list[str]]] = [
     ("not_our_problem", NOT_OUR_PROBLEM_PATTERNS),
-    ("out_of_scope", OUT_OF_SCOPE_PATTERNS),
+    (_OUT_OF_SCOPE_CATEGORY, OUT_OF_SCOPE_PATTERNS),
     ("someone_elses_job", SOMEONE_ELSES_JOB_PATTERNS),
     ("defer_ignore", DEFER_IGNORE_PATTERNS),
     ("premature_stop", PREMATURE_STOP_PATTERNS),

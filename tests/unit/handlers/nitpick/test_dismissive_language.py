@@ -120,6 +120,31 @@ class TestOutOfScopeGroundedInACitedReason:
         text = "The threat model is documented. That failing test is out of scope."
         assert self._fires(text)
 
+    def test_a_bare_per_the_plan_does_not_ground_a_deflection(self) -> None:
+        text = "Per the plan I ran the tests, and the lint failure is out of scope."
+        assert self._fires(text)
+
+    def test_a_semicolon_separates_the_reason_from_the_deflection(self) -> None:
+        text = "The threat model is documented; that failing test is out of scope."
+        assert self._fires(text)
+
+    def test_a_passing_limb_number_does_not_ground_a_deflection(self) -> None:
+        text = "I fixed limb 2 first, and the other failure is out of scope."
+        assert self._fires(text)
+
+    def test_per_plan_with_an_id_does_not_fire(self) -> None:
+        assert not self._fires("That is out of scope per plan 00483.")
+
+    def test_limb_citation_shapes_do_not_fire(self) -> None:
+        assert not self._fires("Evasion is out of scope under limb 2 of the rule.")
+        assert not self._fires("Deliberate evasion is out of scope (limb 1).")
+
+    def test_owner_decision_does_not_fire(self) -> None:
+        assert not self._fires("That is out of scope by the owner decision A1.")
+
+    def test_per_ruling_does_not_fire(self) -> None:
+        assert not self._fires("That is out of scope per ruling R3.")
+
     def test_other_categories_are_not_exempted_by_a_citation(self) -> None:
         assert self._fires("Per the threat model, that was a pre-existing issue.")
 
