@@ -1514,6 +1514,21 @@ rows:
     command: |-
       ls # a && sudo pip install x
       # b | sudo pip install y
+  - id: n407-git-grep-break-flag-pattern
+    command: |-
+      git grep -n 'pip install --break-system-packages'
+  - id: n407-git-log-s-sudo-pip-pattern
+    command: |-
+      git log -S 'sudo pip install' --oneline
+  - id: n407-rg-break-flag-pattern
+    command: |-
+      rg 'pip install --break-system-packages' docs/
+  - id: n407-echo-names-sudo-bash-program
+    command: |-
+      echo "sudo bash -c 'cd /srv; pip install x'"
+  - id: n407-grep-names-sudo-sh-program
+    command: |-
+      grep -rn "sudo sh -c 'echo hi && pip install x'" docs/
   - id: n408-echo-names-issue-view
     command: |-
       echo 'gh issue view 5'

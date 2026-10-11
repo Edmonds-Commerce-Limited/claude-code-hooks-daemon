@@ -1655,16 +1655,24 @@ mention deny were flipped. The INVENTORY misses (`pip --break-system-packages in
 - ✅ cleared by batch S (round 2): `sudo --user root pip install`, `sudo -p 'pw: ' pip install`, `sudo pip -q install`.
 - ✅ cleared by batch S: versioned `pip3.11` and `python3.11 -m pip` in both guards.
 - ✅ cleared by batch S: INVENTORY miss `pip --break-system-packages install` (flag before the subcommand).
-- Residual (not cleared): `sudo bash -c 'echo hi; pip install x'` - the splitter cuts the quoted shell program at `;`,
-  so the `pip install` segment no longer carries the `sudo`. Needs the splitter to keep a `sudo ... -c '...'` program
-  whole.
+- ✅ cleared by batch W: `sudo bash -c 'echo hi; pip install x'` - the splitter cut the quoted shell program at `;`,
+  so the `pip install` segment no longer carried the `sudo`. `_narrow_shell_body` in `utils/command_position.py` now
+  heads every later segment of a `sudo`/`doas` shell's `-c` body with `sudo` (`_elevate_later_segments`), so both
+  guards see the root-run command; single and double quotes, `sh`/`bash`, `doas`, `-u root`, nesting, `if` and `$(...)`
+  all deny, and an `echo`/commit-message/grep mention still allows. `sudo` goes after a leading `then`/`do`/`else`/
+  `{`/`(`. A `-c` body whose output is piped into a shell keeps its git text unblanked (`_keep_text`).
+- Residual (not cleared, batch W): `sudo -s` / `sudo -i` with a heredoc body (`sudo -s <<'EOF' ... pip install x ... EOF`)
+  is not elevated: only a `-c` program is.
 - ✅ cleared by batch V: a `;`, `&&`, `|` or `&` inside a trailing `# comment` split the line, so
   `true # export X=1 && pip install` was judged as two commands. The comment now runs to the end of the line in the
   command-position splitter (`split_unquoted_spans(..., comments_end_at_newline=True)`, used only by
   `command_position._segment_spans`); a newline still ends it. Pinned by
   `tests/unit/utils/test_command_position_comment_splitting.py` and corpus rows `n407-comment-*`.
-- Residual (not cleared): a `git grep` / `git log -S` mention with a quoted multi-word pattern
-  (`git grep -n 'pip install --break-system-packages'`) denies.
+- ✅ cleared by batch W: a `git grep` / `git log -S` mention with a quoted multi-word pattern
+  (`git grep -n 'pip install --break-system-packages'`) denied. Cause: the quoted-text blanking for read-only `git`
+  and `awk` ran only in `command_position_argument_segments`, which the pip guards do not use. `_narrow` now applies
+  `blank_quoted_text_arguments` in the shared view (unless the pipeline may run the output), so every guard and every
+  `bash -c` body gets it. `rg` already allowed.
 - Deliberately skipped: obfuscation (`$P install`, base64, `sudo $(echo pip) ...`) - careless, not hostile. `sudo` with
   a value-taking option not in `ugCDhpRTU` is read as a plain flag.
 
