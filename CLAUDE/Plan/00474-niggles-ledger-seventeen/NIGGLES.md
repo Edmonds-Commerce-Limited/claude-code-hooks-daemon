@@ -1461,6 +1461,30 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N398 — two `WorktreeFileCopyHandler` acceptance probes fail when the suite runs from a worktree
+
+**Source**: the coordinator (2026-10-11), seen in the N397 agent's QA.
+
+**Evidence**: `tests/integration/test_acceptance_contract.py::TestEveryDeclaredInputProducesItsDeclaredVerdict` passed
+on the main checkout and failed from a worktree under `.claude/worktrees/`, where every agent's QA runs. Reproduced from
+this worktree: "cp from worktree to main repo" and "rsync from worktree to main repo" each reported
+"expected_decision=DENY but matches() returned False for its own declared input". Cause: the in-process driver sends
+`cwd` = the checkout the suite runs from, and the N385 change reads a relative destination (`src/`) against that cwd. In
+a worktree the cwd is a worktree, so the probe read as a copy inside one worktree. The handler is right; the probes
+depended on where QA runs.
+
+**Status**: 🟢 Fixed.
+
+- Fix chosen: the probes declare their own cwd (`extra_hook_input`, `_MAIN_CHECKOUT_CWD = {cwd: "/"}`), a path that is
+  no worktree and so reads as the main checkout. The handler is not weakened. An absolute main-checkout destination was
+  rejected because the main checkout's path is not known to a declared probe, and `$CLAUDE_PROJECT_DIR` expands to the
+  worktree in exactly the case that fails. Pinning the cwd in the harness was rejected: other probes need the cwd to be
+  the checkout they write fixtures into.
+- Red test first: `TestWorktreeCopyProbesDoNotDependOnWhereTheSuiteRuns` drives the handler's probes with a project root
+  under `.claude/worktrees/x`, so the regression shows on the main checkout too. It failed before the fix (2 probes).
+- Other handlers: those reading the hook `cwd` also pass the contract test from this worktree after the fix (only
+  these two probes failed), so no other acceptance probe depends on cwd in this way today.
+
 ### N397 — copy-flag parsing and the `find -exec` action list are re-implemented per handler
 
 **Source**: the N385 worktree_file_copy round 1 review (2026-10-10).

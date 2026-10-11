@@ -409,6 +409,40 @@ class TestEveryBlockingTestDeclaresAWayToDriveIt:
         )
 
 
+class TestWorktreeCopyProbesDoNotDependOnWhereTheSuiteRuns:
+    """N398: a probe whose verdict hangs on the cwd must pin the cwd itself.
+
+    The in-process driver sends `cwd` = the checkout the suite runs from. Run
+    from a worktree under `.claude/worktrees/`, that is a worktree, and a
+    relative destination such as `src/` then reads as a copy WITHIN one
+    worktree. The probe declares the cwd its relative destination is read
+    against, so the verdict is the same from the main checkout and from a
+    worktree. Driven here with a worktree root on the main checkout too.
+    """
+
+    def test_worktree_file_copy_probes_deny_from_a_worktree_cwd(self, tmp_path: Path) -> None:
+        worktree_root = tmp_path / ".claude" / "worktrees" / "x"
+        worktree_root.mkdir(parents=True)
+        tests = [
+            test
+            for test in _collect_all_blocking_tests()
+            if test["handler_name"] == "WorktreeFileCopyHandler" and test.get("tool_payload")
+        ]
+        assert tests, "WorktreeFileCopyHandler declares no driven BLOCKING test"
+        instances = _handler_instances()
+
+        failures: list[str] = []
+        for test in tests:
+            probe = plan_probe(test, worktree_root)
+            assert not isinstance(probe, SkippedProbe)
+            failures.extend(
+                _drive_executable_probe(
+                    probe, instances[(test["source"], test["handler_name"])], source=test["source"]
+                )
+            )
+        assert not failures, "\n".join(failures)
+
+
 class TestEveryDeclaredInputProducesItsDeclaredVerdict:
     """The contract half: a declared input must really produce what it claims.
 
