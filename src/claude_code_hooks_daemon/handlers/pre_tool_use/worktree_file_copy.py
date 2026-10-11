@@ -190,8 +190,11 @@ def _effective_command(segment: str, depth: int = 0) -> str:
 # The cwd the acceptance probes run their relative `src/` destination from. A
 # probe sent with the suite's own checkout as cwd reads `src/` as a path inside
 # whichever worktree the suite runs from, so its verdict would depend on where
-# QA runs. A cwd that is no worktree is the main checkout to this handler.
-_MAIN_CHECKOUT_CWD: dict[str, Any] = {HookInputField.CWD: "/"}
+# QA runs. The harnesses resolve `$MAIN_CHECKOUT_DIR` to the checkout holding
+# the worktree (the checkout itself outside one). It must be a real checkout
+# root rather than `/`: the playbook harness drives the whole chain, and
+# `project_containment` denies `src/` read against `/` as outside the project.
+_MAIN_CHECKOUT_CWD: dict[str, Any] = {HookInputField.CWD: "$MAIN_CHECKOUT_DIR"}
 
 _COPY_VERBS = frozenset({"cp", "mv", "rsync", "install"})
 _WORKTREE_PATH = re.compile(rf"(?:^|/)({_WORKTREE_RE}/)([^/]+)(?:/(.*))?$")

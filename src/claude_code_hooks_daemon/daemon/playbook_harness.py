@@ -56,6 +56,14 @@ DISPATCHABLE_EVENTS = frozenset({"PreToolUse", "PostToolUse"})
 #: (`acceptance_path`, `project_dir_path`); a client's root is not this one's.
 _PROJECT_DIR_PATTERN = re.compile(r"\$\{CLAUDE_PROJECT_DIR\}|\$CLAUDE_PROJECT_DIR")
 
+#: The checkout a worktree was made from; see `main_checkout_root`.
+_MAIN_CHECKOUT_PATTERN = re.compile(r"\$\{MAIN_CHECKOUT_DIR\}|\$MAIN_CHECKOUT_DIR")
+
+_WORKTREE_PREFIX_PARTS = (
+    Path(ProjectPath.CLAUDE_WORKTREES_DIR).parts,
+    Path(ProjectPath.WORKTREES_DIR).parts,
+)
+
 _FILE_PATH_KEY = "file_path"
 
 #: One `Decision.DENY`, two wire spellings. The daemon's own
@@ -262,13 +270,33 @@ class SkippedProbe:
             raise ValueError("a skipped probe must carry a reason")
 
 
+def main_checkout_root(project_root: Path) -> Path:
+    """The checkout `project_root` was made from, when it is a worktree.
+
+    A suite run from a worktree under `.claude/worktrees/` or
+    `untracked/worktrees/` has that worktree as its project root, while the
+    daemon the playbook harness talks to guards the checkout that holds it. A
+    probe that must be read from the main checkout names it with
+    `$MAIN_CHECKOUT_DIR` so its verdict does not depend on where QA runs.
+    Outside a worktree this is `project_root` itself.
+    """
+    for prefix in _WORKTREE_PREFIX_PARTS:
+        width = len(prefix)
+        parts = project_root.parts
+        for start in range(len(parts) - width):
+            if parts[start : start + width] == prefix:
+                return Path(*parts[:start])
+    return project_root
+
+
 def expand_project_dir(value: str, project_root: Path) -> str:
-    """Resolve `$CLAUDE_PROJECT_DIR` against this checkout.
+    """Resolve `$CLAUDE_PROJECT_DIR` and `$MAIN_CHECKOUT_DIR` against this checkout.
 
     Substring replacement rather than a prefix strip: the variable appears
     mid-string in Bash payloads, not only as a path prefix.
     """
-    return _PROJECT_DIR_PATTERN.sub(str(project_root), value)
+    expanded = _PROJECT_DIR_PATTERN.sub(str(project_root), value)
+    return _MAIN_CHECKOUT_PATTERN.sub(str(main_checkout_root(project_root)), expanded)
 
 
 def _expand(value: Any, project_root: Path) -> Any:
