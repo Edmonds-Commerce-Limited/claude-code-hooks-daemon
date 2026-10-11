@@ -3821,6 +3821,70 @@ class TestStringsOnlyCountAtAProcess:
         assert match is None or match.fail_closed
 
 
+_CALLBACK_HELPER = "def dispatch(handler, payload):\n    return handler(payload)\n"
+_CALLBACK_FACTORY = "def wrap(fn):\n    def inner(*a):\n        return fn(*a)\n    return inner\n"
+
+
+class TestCallbackRankedPerCallSite:
+    """N418: a helper that calls its own parameter is ranked by what each site passes there."""
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "import subprocess\n" + _CALLBACK_HELPER + "dispatch(subprocess.run, ['ls'])\n"
+            "dispatch(str.upper, 'pytest')",
+            "import subprocess\n" + _CALLBACK_FACTORY + "run = wrap(subprocess.run)\n"
+            "run(['ls'])\nlabel = wrap(str)\nlabel('pytest')",
+            "import subprocess\n" + _CALLBACK_HELPER + "def outer(cb, c):\n    dispatch(cb, c)\n"
+            "outer(len, 'pytest')\nsubprocess.run(['ls'])",
+            "import subprocess\n" + _CALLBACK_HELPER + "dispatch(handler=len, payload='pytest')\n"
+            "subprocess.run(['ls'])",
+        ],
+    )
+    def test_a_data_function_at_a_site_makes_it_data(self, code: str) -> None:
+        assert find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=_REPO_ROOT) is None
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "import subprocess\n" + _CALLBACK_HELPER + "dispatch(subprocess.run, ['pytest'])",
+            "import subprocess\n" + _CALLBACK_HELPER + "dispatch(str.upper, 'x')\n"
+            "dispatch(subprocess.run, ['pytest'])",
+            "import subprocess\n"
+            + _CALLBACK_FACTORY
+            + "run = wrap(subprocess.run)\nrun(['pytest'])",
+            "import subprocess\n" + _CALLBACK_HELPER + "def go(c):\n    subprocess.run(c)\n"
+            "dispatch(go, ['pytest'])",
+            "import subprocess\n" + _CALLBACK_HELPER + "def outer(cb, c):\n    dispatch(cb, c)\n"
+            "outer(subprocess.run, ['pytest'])",
+        ],
+    )
+    def test_a_launcher_at_a_site_is_still_a_run(self, code: str) -> None:
+        match = find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=_REPO_ROOT)
+        assert match is not None, code
+        assert not match.fail_closed, code
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "import subprocess\nfrom lib import hook\n"
+            + _CALLBACK_HELPER
+            + "dispatch(hook, 'pytest')",
+            "import subprocess\nfrom lib import hook\n"
+            + _CALLBACK_FACTORY
+            + "label = wrap(hook)\nlabel('pytest')",
+            "import subprocess\nfrom lib import hook\n"
+            + _CALLBACK_HELPER
+            + "def outer(cb, c):\n    dispatch(cb, c)\nouter(hook, 'pytest')",
+            "import subprocess\n" + _CALLBACK_HELPER + "dispatch(*[len, 'pytest'])",
+        ],
+    )
+    def test_an_unknown_callback_is_still_judged_unseen(self, code: str) -> None:
+        match = find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=_REPO_ROOT)
+        assert match is not None, code
+        assert match.fail_closed, code
+
+
 _RUN_PY = "ru" + "nner.py"
 _EXEC = "ex" + "ec"
 _PROGRAM = "./scripts/qa/llm_qa.py"
