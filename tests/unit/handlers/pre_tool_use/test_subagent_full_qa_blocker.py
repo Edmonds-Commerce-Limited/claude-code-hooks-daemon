@@ -3477,6 +3477,204 @@ class TestSelfLocationSymlinkLoopIsResolved:
         assert match.fail_closed
 
 
+def _python_heredoc(code: str) -> str:
+    """A ``python3`` run of ``code`` fed on stdin through a quoted heredoc."""
+    return f"python3 - <<'PY'\n{code}\nPY"
+
+
+#: Built from parts, like ``_SHELL_OUT``: the literal keyword reads as a use of it.
+_SHELL_TRUE = "shell=" + "True"
+_QA = "./scripts/qa/llm_qa.py all"
+
+#: N409: Python that holds a program name as DATA, and never hands it to a call.
+_PYTHON_MENTIONS: list[str] = [
+    "import subprocess\nTOOLS = ['ruff', 'black', 'pytest']\nsubprocess.run(['ruff', 'check', '.'])",
+    "import subprocess\nKNOWN = ['run_all.sh']\nsubprocess.run(['git', 'status'])",
+    f"import subprocess\nprint('{_QA}')\nsubprocess.run(['ls'])",
+    "import subprocess\nHELP = 'pytest tests'\nsubprocess.run(['ls'])",
+    "import subprocess\nprint('pytest')\nsubprocess.run(['ls'])",
+    f"import logging, subprocess\nlogging.info('run {_QA}')\nsubprocess.run(['ls'])",
+    f"import subprocess, sys\nsys.exit('run pytest tests or {_QA}')",
+    f"import subprocess\nsubprocess.run(['ls'])\n# the coordinator runs {_QA}",
+    f'import subprocess\n"""Runs {_QA}? No."""\nsubprocess.run([\'ls\'])',
+]
+
+#: N409: Python that hands a full run to a process, by every route a value takes.
+_PYTHON_FULL_RUNS: list[tuple[str, str]] = [
+    ("import subprocess\nsubprocess.run('pytest')", "pytest-whole-suite"),
+    ("import subprocess\nsubprocess.run(['pytest'])", "pytest-whole-suite"),
+    ("import subprocess\nsubprocess.run(cmd='pytest')", "pytest-whole-suite"),
+    ("import subprocess\nC = 'pytest'\nsubprocess.run(C)", "pytest-whole-suite"),
+    (f"import os\n{_SHELL_OUT}('pytest')", "pytest-whole-suite"),
+    ("import subprocess\nfor t in ['pytest']:\n    subprocess.run(t)", "pytest-whole-suite"),
+    (
+        "import subprocess\nsubprocess.run(['python', '-m', 'pytest'])",
+        "pytest-whole-suite",
+    ),
+    ("import subprocess\nsubprocess.run(['sh', '-c', 'pytest'])", "pytest-whole-suite"),
+    ("import subprocess\nsubprocess.run(['run_all.sh'])", "run-all"),
+    ("import subprocess\nsubprocess.run('run_all.sh')", "run-all"),
+    ("import subprocess\nK = ['run_all.sh']\nsubprocess.run(K)", "run-all"),
+    (f"import subprocess\nsubprocess.run('{_QA}', {_SHELL_TRUE})", "llm-qa-whole-suite"),
+    (f"import subprocess\nC = '{_QA}'\nsubprocess.run(C, {_SHELL_TRUE})", "llm-qa-whole-suite"),
+    (f"import subprocess\nC = '{_QA}'\nsubprocess.run(C.split())", "llm-qa-whole-suite"),
+    (
+        f"import subprocess, shlex\nC = '{_QA}'\nsubprocess.run(shlex.split(C))",
+        "llm-qa-whole-suite",
+    ),
+    (
+        f"import subprocess\ndef full():\n    return '{_QA}'\n"
+        f"subprocess.run(full(), {_SHELL_TRUE})",
+        "llm-qa-whole-suite",
+    ),
+    (
+        f"import subprocess\nJOBS = {{'full': '{_QA}'}}\n"
+        f"subprocess.run(JOBS['full'], {_SHELL_TRUE})",
+        "llm-qa-whole-suite",
+    ),
+    (
+        f"import subprocess\nclass Q:\n    def __init__(self):\n        self.cmd = '{_QA}'\n"
+        f"    def go(self):\n        subprocess.run(self.cmd, {_SHELL_TRUE})",
+        "llm-qa-whole-suite",
+    ),
+    (
+        f"import subprocess\ndef go(cmd='{_QA}'):\n    subprocess.run(cmd, {_SHELL_TRUE})",
+        "llm-qa-whole-suite",
+    ),
+    (
+        f"import subprocess\nsubprocess.run(['bash', '-c', '{_QA}'])",
+        "llm-qa-whole-suite",
+    ),
+    # A write that feeds a shell, or a script that is then run, is a run.
+    (
+        "import subprocess\np = subprocess.Popen(['bash'], stdin=subprocess.PIPE, text=True)\n"
+        f"p.stdin.write('{_QA}\\n')",
+        "llm-qa-whole-suite",
+    ),
+    (
+        f"import subprocess\nopen('go.sh', 'w').write('{_QA}\\n')\n"
+        "subprocess.run(['bash', 'go.sh'])",
+        "llm-qa-whole-suite",
+    ),
+    (
+        f"import subprocess\nopen('go.sh', 'w').writelines(['{_QA}\\n'])\n"
+        "subprocess.run(['bash', 'go.sh'])",
+        "llm-qa-whole-suite",
+    ),
+    # A sink name rebound to a runner is a runner.
+    (
+        f"import subprocess\nlog = lambda c: subprocess.run(c, {_SHELL_TRUE})\nlog('{_QA}')",
+        "llm-qa-whole-suite",
+    ),
+    (
+        f"import subprocess\necho = subprocess.run\necho(['bash', '-c', '{_QA}'])",
+        "llm-qa-whole-suite",
+    ),
+    (
+        f"from subprocess import run as echo\necho(['bash', '-c', '{_QA}'])",
+        "llm-qa-whole-suite",
+    ),
+    (
+        f"import subprocess as info\ninfo.run('{_QA}', {_SHELL_TRUE})",
+        "llm-qa-whole-suite",
+    ),
+]
+
+#: N409: mentions of a full-QA command at the shell level that run nothing.
+_SHELL_MENTIONS: list[str] = [
+    f"echo {_QA}",
+    f"printf '%s\\n' \"run {_QA}\"",
+    f"bash -c 'echo {_QA}'",
+    f"cat <<'EOF'\n{_QA}\nEOF",
+    f"cat > notes.md <<'EOF'\nrun {_QA}\nEOF",
+    f"cat <<'EOF' | tee notes.txt\n{_QA}\nEOF",
+    f"git commit -m 'run {_QA}'",
+    "grep -r 'pytest tests' .",
+    f"python3 -c \"print('{_QA}')\"",
+    f"python3 - <<'PY'\n# run {_QA}\nprint('hi')\nPY",
+]
+
+#: N409: every route a real full run takes through wrappers and control flow.
+_SHELL_FULL_RUNS: list[str] = [
+    f"if true; then {_QA}; fi",
+    f'bash -c "{_QA}"',
+    f"eval '{_QA}'",
+    f"env X=1 {_QA}",
+    f"nohup {_QA}",
+    f"timeout 5 {_QA}",
+    f"python3 {_QA}",
+    f"uv run {_QA}",
+    f"cat <<'EOF' | bash\n{_QA}\nEOF",
+    f"bash <<'EOF'\n{_QA}\nEOF",
+    f"({_QA})",
+    f"echo $({_QA})",
+    f"echo `{_QA}`",
+    f"sleep 1 & {_QA} &",
+    f"echo ok; python3 {_QA}",
+]
+
+
+class TestPythonHoldingAProgramNameIsNotRunningIt:
+    """N409: a Python script is judged by what its process calls are GIVEN.
+
+    A name held in a constant, a log line or a help string that no call
+    receives is data. The same name reaching a call, by any route a value
+    takes, is still the run it names.
+    """
+
+    @pytest.mark.parametrize("code", _PYTHON_MENTIONS)
+    def test_a_name_no_call_receives_is_not_a_run(self, code: str) -> None:
+        assert find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=_REPO_ROOT) is None
+
+    @pytest.mark.parametrize(("code", "pattern_id"), _PYTHON_FULL_RUNS)
+    def test_a_name_a_call_receives_is_still_a_run(self, code: str, pattern_id: str) -> None:
+        match = find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=_REPO_ROOT)
+        assert match is not None, code
+        assert match.pattern_id == pattern_id
+
+    @pytest.mark.parametrize("code", _PYTHON_MENTIONS)
+    def test_a_script_file_is_judged_like_the_same_code_on_stdin(
+        self, code: str, tmp_path: Path
+    ) -> None:
+        script = tmp_path / "tool.py"
+        script.write_text(code + "\n", encoding="utf-8")
+        assert find_full_qa_invocation(f"python3 {script}", _patterns(), cwd=_REPO_ROOT) is None
+
+    @pytest.mark.parametrize(("code", "pattern_id"), _PYTHON_FULL_RUNS)
+    def test_a_script_file_that_runs_a_suite_is_denied(
+        self, code: str, pattern_id: str, tmp_path: Path
+    ) -> None:
+        script = tmp_path / "tool.py"
+        script.write_text(code + "\n", encoding="utf-8")
+        match = find_full_qa_invocation(f"python3 {script}", _patterns(), cwd=_REPO_ROOT)
+        assert match is not None, code
+        assert match.pattern_id == pattern_id
+
+    def test_a_logging_helper_the_script_defines_is_not_a_text_sink(self) -> None:
+        """A function the code defines under a sink's name can run what it is given."""
+        code = f"import os\ndef info(c):\n    {_SHELL_OUT}(c)\ninfo('pytest')"
+        assert find_full_qa_invocation(_python_heredoc(code), _patterns()) is not None
+
+    def test_unparseable_python_keeps_judging_every_literal(self) -> None:
+        """Code Python cannot parse has no calls to read, so it stays fail-closed."""
+        code = "import subprocess\nTOOLS = ['pytest'\nsubprocess.run(['ruff', 'check', '.'])"
+        assert find_full_qa_invocation(_python_heredoc(code), _patterns()) is not None
+
+
+class TestMentionsAndRealRunsAtTheShellLevel:
+    """N409: a command that only NAMES a full run is allowed; every way to run one denies."""
+
+    @pytest.mark.parametrize("command", _SHELL_MENTIONS)
+    def test_a_mention_is_not_a_run(self, command: str) -> None:
+        assert find_full_qa_invocation(command, _patterns(), cwd=_REPO_ROOT) is None
+
+    @pytest.mark.parametrize("command", _SHELL_FULL_RUNS)
+    def test_a_real_run_is_denied(self, command: str) -> None:
+        match = find_full_qa_invocation(command, _patterns(), cwd=_REPO_ROOT)
+        assert match is not None, command
+        assert match.pattern_id == "llm-qa-whole-suite"
+
+
 class TestBashSourceDirnameTrimIsResolved:
     """Plan 00463 round 9c: ``${BASH_SOURCE[0]%/*}`` -- the coreutils-free
     spelling of ``dirname "${BASH_SOURCE[0]}"`` -- is resolved the same way
