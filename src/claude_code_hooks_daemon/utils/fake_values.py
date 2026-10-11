@@ -167,8 +167,21 @@ def load_fake_values(project_root: Path) -> FakeValuesRegistry:
     if not source.is_file():
         return FakeValuesRegistry()
     try:
-        loaded = yaml.safe_load(source.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        text = source.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise FakeValuesError(f"{source}: cannot be read as YAML ({exc})") from exc
+    return parse_fake_values(text, source)
+
+
+def parse_fake_values(text: str, source: Path) -> FakeValuesRegistry:
+    """Parse registry ``text`` (``source`` names it in errors).
+
+    Raises:
+        FakeValuesError: ``text`` is not YAML or does not follow the schema.
+    """
+    try:
+        loaded = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
         raise FakeValuesError(f"{source}: cannot be read as YAML ({exc})") from exc
     if not isinstance(loaded, dict) or not isinstance(loaded.get(_KEY_KINDS), dict):
         raise FakeValuesError(f"{source}: must hold a `{_KEY_KINDS}` mapping")

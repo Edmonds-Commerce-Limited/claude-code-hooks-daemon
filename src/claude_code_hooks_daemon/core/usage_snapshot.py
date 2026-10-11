@@ -309,11 +309,7 @@ class UsageTracker:
         # change or heartbeat rather than on every Status event.
         self._persisted_key = key
         self._persisted_at = now
-        payload = {
-            name: _window_to_json(window)
-            for name, window in windows
-            if window is not None
-        }
+        payload = {name: _window_to_json(window) for name, window in windows if window is not None}
         _write_state_file(state_file, payload)
 
     def latest(self, *, now: float, state_file: Path | None = None) -> UsageSnapshot | None:

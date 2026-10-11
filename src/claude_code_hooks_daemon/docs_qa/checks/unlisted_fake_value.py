@@ -1,4 +1,4 @@
-"""Check ``unlisted-fake-value`` (EDIT and SWEEP; Plan 00492, owner ruling D1).
+"""Check ``unlisted-fake-value`` (EDIT, STAGED and SWEEP; Plan 00492, owner ruling D1).
 
 Docs may use any fake value on the project's registry
 (:data:`~claude_code_hooks_daemon.utils.fake_values.REGISTRY_RELATIVE_PATH`),
@@ -14,7 +14,17 @@ A vendored page (one that opens with provenance frontmatter) cannot be edited,
 so its remedy is to capture it again: ``remote-docs add --force`` swaps the
 unlisted fakes for listed ones and records the swap in the provenance.
 
-**Severity is ADVISE.** A missing registry is silent: a project that keeps
+**Commit time BLOCKS a registry entry that is not visibly fake** (ledger 00474
+N361, owner ruling C7). The STAGED stage reads the registry as the commit will
+record it and denies a listed value that fails
+:meth:`~claude_code_hooks_daemon.utils.fake_values.FakeValuesRegistry.not_visibly_fake`,
+or a registry that cannot be parsed (every guard that reads it would raise).
+Only entries the commit ADDS or CHANGES are judged, so an older entry never
+turns every later commit into a sticky failure. The finding is severity BLOCK;
+whether it denies is the project's ``documentation.qa.check_modes`` entry for
+this check id, as for every docs QA check.
+
+**Severity is ADVISE** everywhere else. A missing registry is silent: a project that keeps
 none has declared no fakes. A registry that cannot be parsed is reported once
 against the registry file, never silently read as empty.
 """
@@ -37,6 +47,7 @@ from claude_code_hooks_daemon.utils.fake_values import (
     FakeValuesError,
     FakeValuesRegistry,
     load_fake_values,
+    parse_fake_values,
 )
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
@@ -89,6 +100,41 @@ def _not_visibly_fake_findings(registry: FakeValuesRegistry) -> list[Finding]:
     ]
 
 
+def _staged_registry_finding(error: FakeValuesError) -> Finding:
+    return Finding(
+        check_id=CHECK_ID,
+        severity=Severity.BLOCK,
+        message=f"The staged fake-values registry cannot be read, so no fake can be judged: {error}",
+        remediation=f"Fix `{REGISTRY_RELATIVE_PATH}` so it follows the registry schema.",
+        path=REGISTRY_RELATIVE_PATH,
+    )
+
+
+def _staged_not_visibly_fake_findings(
+    staged: FakeValuesRegistry, head: FakeValuesRegistry
+) -> list[Finding]:
+    already_in_head = set(head.not_visibly_fake())
+    return [
+        Finding(
+            check_id=CHECK_ID,
+            severity=Severity.BLOCK,
+            message=(
+                f"This commit adds `{value}` to `{REGISTRY_RELATIVE_PATH}` as a `{kind}` fake, "
+                "but it does not look obviously fake."
+            ),
+            remediation=(
+                "Replace it with a value that is obviously fake without anyone knowing it is "
+                "one: the word `fake`, or a character repeated eight or more times. Never put a "
+                "real-looking value in the registry: it exempts that value from "
+                "`sensitive_content`."
+            ),
+            path=REGISTRY_RELATIVE_PATH,
+        )
+        for kind, value in staged.not_visibly_fake()
+        if (kind, value) not in already_in_head
+    ]
+
+
 def _unreadable_finding(rel_path: str, error: Exception) -> Finding:
     return Finding(
         check_id=CHECK_ID,
@@ -119,6 +165,37 @@ def _findings_for(rel_path: str, content: str, registry: FakeValuesRegistry) -> 
                 )
             )
     return findings
+
+
+def _run_staged(context: CheckContext) -> list[Finding]:
+    gitfacts = context.gitfacts
+    if gitfacts is None:
+        return []
+    touched = [
+        change
+        for change in gitfacts.staged_changes()
+        if change.path == REGISTRY_RELATIVE_PATH and not change.status.startswith("D")
+    ]
+    if not touched:
+        return []
+    text = gitfacts.recorded_text(REGISTRY_RELATIVE_PATH)
+    if text is None:
+        return []
+    source = context.project_root / REGISTRY_RELATIVE_PATH
+    try:
+        staged = parse_fake_values(text, source)
+    except FakeValuesError as error:
+        return [_staged_registry_finding(error)]
+    head_text = gitfacts.head_file_text(REGISTRY_RELATIVE_PATH)
+    try:
+        head = (
+            parse_fake_values(head_text, source) if head_text is not None else FakeValuesRegistry()
+        )
+    except FakeValuesError as error:
+        # An unreadable previous version vouches for nothing, so every staged entry is judged.
+        logger.debug("HEAD registry unreadable, judging every staged entry: %s", error)
+        head = FakeValuesRegistry()
+    return _staged_not_visibly_fake_findings(staged, head)
 
 
 def _load(context: CheckContext) -> tuple[FakeValuesRegistry | None, list[Finding]]:
@@ -173,5 +250,6 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
 
 CHECKS: Final[tuple[CheckSpec, ...]] = (
     CheckSpec(check_id=CHECK_ID, stage=CheckStage.EDIT, run=_run_edit),
+    CheckSpec(check_id=CHECK_ID, stage=CheckStage.STAGED, run=_run_staged),
     CheckSpec(check_id=CHECK_ID, stage=CheckStage.SWEEP, run=_run_sweep),
 )
