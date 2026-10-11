@@ -35,13 +35,15 @@ not-a-defect with the reasoning kept.
 ## Niggles
 
 Full write-ups are in [NIGGLES.md](NIGGLES.md). The one-line-per-niggle status
-table (122 rows) is in [STATUS-INDEX.md](STATUS-INDEX.md).
+table (123 rows) is in [STATUS-INDEX.md](STATUS-INDEX.md).
 Counted by the status column's emoji:
 
-- 1 row is open (⬜ Open): the 42 entries still open in 00466.
+- 1 row is open (⬜ Open): N53 of archived ledger 00466, whose cause was never reproduced. The other 41 of the "42 still
+  open in 00466" were fixed on main (39), fixed by batch AI (N33) or graduated to Plan 00485 (N96); see
+  [the 00466 evidence](../Completed/00466-niggles-ledger-sixteen/STATUS-2026-10.md).
 - 15 rows carry an owner decision (⬜ Owner decision, including three fixed or part-fixed rows with a decision left).
-- 100 more rows are fixed, dismissed, remedied or closed (✅; 102 carry ✅, two of them already counted above).
-- 5 rows record a deliberate limit (🚫); the rest are in progress or graduated (🔄, 🟡, ↩️).
+- 100 rows are fixed, dismissed, remedied or closed (✅; some of them also count in the lines above and below).
+- 5 rows record a deliberate limit (🚫); 7 are in progress or graduated (4 🔄, 2 🟡, 1 ↩️).
 
 ## Tasks
 

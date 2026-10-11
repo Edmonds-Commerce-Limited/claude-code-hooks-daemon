@@ -94,7 +94,8 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 | N269       | `secret_file_guard` expands a single-quoted grep regex as a filename glob                                          | Coordinator         | ✅ Fixed (a7ebcae9b)                |
 | N268       | A symlinked-project daemon test's teardown refuses a daemon that is exiting                                        | Main CI             | ✅ Fixed (1a61af7d0)                |
 | N267       | Dropping a stale branch always needs a human, even when nothing can be lost                                        | Owner               | ✅ Fixed (74dbdc970)                |
-| 42 entries | Still open in archived ledger 00466 ([index](../Completed/00466-niggles-ledger-sixteen/PLAN.md); 56 less 14 fixed) | 00466 close-out     | ⬜ Open                             |
+| N53        | Ledger 00466: WorktreeCreate exit 127 under the daemon; stderr diagnostic landed, cause not reproduced (residual). | 00466 close-out     | ⬜ Open (residual)                  |
+| N96        | 00466: `subagent_full_qa_blocker.py` is one 5,300-line handler; split graduated                                    | 00466 close-out     | 🔄 Plan 00485                       |
 | N222 work  | Saved `tests/scaling.py` diff obsolete: 4115b5f9e, d97464d6e superseded it ([saved](UNFINISHED-N252-SCALING.md))   | 00466 cleanup       | ✅ Fixed (batch D)                  |
 | 22 entries | Carried from the dropped `worktree-n466-small-a` branch ([list](CARRIED-REFIX-BRANCHES.md))                        | 00466 cleanup       | ✅ 0 open (bodies)                  |
 | 15 entries | Carried from the dropped `worktree-p422-close` branch ([list](CARRIED-REFIX-BRANCHES.md))                          | 00466 cleanup       | ✅ 0 open (bodies)                  |

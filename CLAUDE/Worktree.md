@@ -72,10 +72,27 @@ answers one of those failures.
   lost when the branch is dropped, which is how ledger 00466's N53 and N253
   branches ended up holding entries `main` never had.
 
-## The Worktree's Own Daemon Answers Its Own Hooks
+## Which Daemon Answers a Worktree's Hooks
 
-Two things have to be true for a worktree's `.claude/hooks/*` to reach the
-daemon running in THAT worktree, and both are handled for you.
+The daemon that answers a hook is the one belonging to the checkout whose
+`.claude/hooks/*` Claude Code ran, and that depends on how the session started:
+
+- **A session whose project directory is the worktree** (Claude Code started
+  inside it) runs the worktree's hooks via `$CLAUDE_PROJECT_DIR`. `init.sh`
+  derives `PROJECT_PATH` from its own location (`init.sh:1196-1204`), sources
+  that checkout's `.claude/hooks-daemon.env` (`:1213-1216`), and builds the
+  socket under `$HOOKS_DAEMON_ROOT_DIR/untracked` (`:1510`, `:1526`). The
+  worktree's own daemon answers.
+- **A sub-agent in a harness-created worktree** (`isolation: worktree`) is a
+  child of a session whose project directory is the MAIN checkout, so its
+  hooks are main's and main's daemon answers. A harness worktree whose
+  `.claude/hooks-daemon.env` is a symlink to main's file with a literal
+  `HOOKS_DAEMON_ROOT_DIR` (Plan 00474 N369) resolves main's root even when
+  `init.sh` runs from the worktree.
+
+The rest of this section covers the first case. Two things have to be true for
+a worktree's `.claude/hooks/*` to reach the daemon running in THAT worktree,
+and both are handled for you.
 
 **`.claude/hooks-daemon.env` must exist in the worktree.** It is gitignored,
 so `git worktree add` never brings it across, and `init.sh` only enters
@@ -132,8 +149,10 @@ the merge. `./bin/hooks-daemon regenerate-docs` still writes it in a worktree
 when asked.
 
 **The worktree's daemon idles out while you work, and QA copes.** A session
-working in a worktree sends its hooks to the main checkout's daemon, so the
-worktree's own daemon sees no traffic and stops after `idle_timeout_seconds`.
+working in a worktree on behalf of a main-checkout session (a sub-agent, see
+"Which Daemon Answers a Worktree's Hooks") sends its hooks to the main
+checkout's daemon, so the worktree's own daemon sees no traffic and stops after
+`idle_timeout_seconds`.
 `llm_qa.py` starts it again, just before each check that probes it (every
 `ToolConfig` with `live_daemon=True`), and prints a `DAEMON STARTED` line; it
 never restarts a running one, so a stale daemon still fails `smoke_test`'s
