@@ -4212,6 +4212,9 @@ class _CallRanker:
             leaf = self._leaf(call)
             if owner is None:
                 continue
+            for handed in self._function_arguments(call):
+                # A function passed on may be called by it: the owner is as far as it goes.
+                callers.setdefault(handed, set()).add(owner)
             if leaf is None:
                 callers.setdefault(_callee_name(call), set()).add(owner)
             elif leaf > self._rank.get(owner, _CARRIES_NOTHING):
@@ -4237,6 +4240,10 @@ class _CallRanker:
             return _RUNS_IT if _receives_stdin(call) else _MAY_RUN_IT
         if real in _PROCESS_SINKS:
             return _RUNS_IT
+        if any(_launcher_named(value, self._aliases) for value in self._callable_arguments(call)):
+            # `sorted(L, key=subprocess.run)`, `Thread(target=subprocess.run, ...)`,
+            # `partial(subprocess.run, ...)`: a call that is handed a launcher runs it.
+            return _RUNS_IT
         if name in self._functions:
             return None
         local = name in self._bound or name in self._imported
@@ -4250,13 +4257,18 @@ class _CallRanker:
             return _RUNS_IT if _launcher_named(call.func, self._aliases) else _MAY_RUN_IT
         if name in self._bound and self._names_a_launcher(name):
             return _RUNS_IT
-        if any(
-            isinstance(argument, (ast.Name, ast.Attribute))
-            and _launcher_named(argument, self._aliases)
-            for argument in call.args
-        ):
-            return _RUNS_IT  # `partial(subprocess.run, ...)`
         return _MAY_RUN_IT
+
+    @staticmethod
+    def _callable_arguments(call: ast.Call) -> list[ast.expr]:
+        """The arguments, positional or keyword, that are a bare name or attribute."""
+        values = [*call.args, *(keyword.value for keyword in call.keywords)]
+        return [value for value in values if isinstance(value, (ast.Name, ast.Attribute))]
+
+    def _function_arguments(self, call: ast.Call) -> list[str]:
+        """The names of the script's own functions the call is handed."""
+        names = [_callee_name_of(value) for value in self._callable_arguments(call)]
+        return [name for name in names if name in self._functions]
 
     def _names_a_launcher(self, name: str) -> bool:
         """Whether a variable is bound to a process-starting function (`run = subprocess.run`)."""
@@ -4269,7 +4281,21 @@ class _CallRanker:
     def rank(self, call: ast.Call) -> int:
         """How far ``call`` carries a string it is handed."""
         leaf = self._leaf(call)
-        return self._rank.get(_callee_name(call), _CARRIES_NOTHING) if leaf is None else leaf
+        rank = self._rank.get(_callee_name(call), _CARRIES_NOTHING) if leaf is None else leaf
+        if rank < _RUNS_IT and any(
+            self._rank.get(name, _CARRIES_NOTHING) == _RUNS_IT
+            for name in self._function_arguments(call)
+        ):
+            # `list(map(go, L))`, `Thread(target=go, args=(L,))`: `go` runs what it is given.
+            return _RUNS_IT
+        return rank
+
+
+def _callee_name_of(value: ast.expr) -> str:
+    """The name of a bare name or attribute expression, else empty."""
+    if isinstance(value, ast.Name):
+        return value.id
+    return value.attr if isinstance(value, ast.Attribute) else ""
 
 
 def _process_arguments(tree: ast.Module) -> tuple[set[int], set[int]]:

@@ -3748,6 +3748,16 @@ _PYTHON_ROUTES_TO_A_PROCESS: list[str] = [
     "import subprocess, functools\nfunctools.partial(subprocess.run, ['pytest'])",
     "import subprocess\ngo = lambda c: subprocess.run([c])\ngo(['pytest'])",
     "import subprocess\np = subprocess.Popen('sh', stdin=subprocess.PIPE)\np.stdin.write('pytest -q\\n')",
+    # A launcher, or a script function that runs its argument, handed to a call as a
+    # callback (positional or keyword), including a data call.
+    "import subprocess\ndef go(c):\n    subprocess.run(c)\nsorted([['pytest']], key=go)",
+    "import subprocess\nmax([['pytest']], key=subprocess.run)",
+    "import subprocess\ndef go(c):\n    subprocess.run(c)\nlist(map(go, [['pytest']]))",
+    "import subprocess\ndef go(c):\n    subprocess.run(c)\nlist(filter(go, [['pytest']]))",
+    "import subprocess, threading\ndef go(c):\n    subprocess.run(c)\n"
+    "threading.Thread(target=go, args=(['pytest'],)).start()",
+    "import subprocess, threading\n"
+    "threading.Thread(target=subprocess.run, args=(['pytest'],)).start()",
 ]
 
 
