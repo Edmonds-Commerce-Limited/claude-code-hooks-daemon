@@ -27,12 +27,22 @@ from tests.integration.test_a_retried_hook_never_restarts_a_slow_start import (
     _slow_project,
 )
 from tests.integration.test_init_sh_pretooluse_fail_closed import BASH, _stdin_text
+from tests.load_scaling import scaled_seconds
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _LOADING = "⏳ hooks daemon loading…"
 
 #: Well under the 15 s start deadline, and under the slowed init.
 _FIRST_ANSWER_BUDGET_SECONDS = 4.0
+
+
+def _first_answer_budget_seconds() -> float:
+    """The budget scaled by host load, but kept under the slowed init's delay.
+
+    The assertion is that the line answered BEFORE the daemon finished starting,
+    so a limit at or past the init delay would pass an answer that waited for it.
+    """
+    return min(scaled_seconds(_FIRST_ANSWER_BUDGET_SECONDS), _INIT_DELAY_SECONDS - 1.0)
 
 
 @pytest.fixture
@@ -85,11 +95,11 @@ def test_status_line_answers_loading_at_once_while_the_daemon_starts(sandbox: Pa
 
     out, code, elapsed = _status_hook(project, env, python)
     assert (out, code) == (_LOADING, 0)
-    assert elapsed < _FIRST_ANSWER_BUDGET_SECONDS, elapsed
+    assert elapsed < _first_answer_budget_seconds(), elapsed
 
     retry_out, retry_code, retry_elapsed = _status_hook(project, env, python)
     assert (retry_out, retry_code) == (_LOADING, 0)
-    assert retry_elapsed < _FIRST_ANSWER_BUDGET_SECONDS, retry_elapsed
+    assert retry_elapsed < _first_answer_budget_seconds(), retry_elapsed
 
     # The daemon finishes starting in the background; the line then stops
     # being the loading line.

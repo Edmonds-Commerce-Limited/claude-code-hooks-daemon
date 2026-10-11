@@ -492,10 +492,12 @@ jobs:
       # Kept as its own step rather than folded into the coverage run:
       # --import-mode=importlib is required here (the directory name contains a
       # hyphen, so it is not an importable package) and must not be applied to
-      # the main suite.
+      # the main suite. The full-QA gate plugin is unloaded here exactly as
+      # `hooks-daemon test-project-handlers` unloads it (N260), so a run is
+      # green or red the same way locally and here.
       - name: Project handler tests
         if: ${{ !cancelled() }}
-        run: pytest .claude/project-handlers --import-mode=importlib
+        run: pytest .claude/project-handlers --import-mode=importlib -p no:claude_code_hooks_daemon.qa.full_qa_gate
 
       - name: Upload coverage
         if: matrix.python-version == '3.12'

@@ -23,6 +23,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from tests.support.git_fixtures import git_setup_timeout
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -52,7 +53,7 @@ def _git(repo: Path, *args: str) -> None:
         ["git", "-C", str(repo), *args],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
 
 
@@ -649,6 +650,6 @@ class TestACommandThatStagesOrCommitsMoreThanOnce:
             capture_output=True,
             check=True,
             text=True,
-            timeout=Timeout.GIT_CONTEXT,
+            timeout=git_setup_timeout(),
         )
         assert staged.stdout == ""

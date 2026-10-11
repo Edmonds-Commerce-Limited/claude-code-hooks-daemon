@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from tests.load_scaling import scaled_seconds
 from tests.unit.supervise._load import SCRIPT_PATH, load_supervisor_module
 from tests.unit.supervise._plugin_helpers import (
     GOOD_BODY,
@@ -693,7 +694,7 @@ class TestLiveFailurePath:
         assert restarts.restarts == 1
         assert host.status_entries()[0]["reason"] == "wedge in on_idle"
         assert received.read_bytes().decode().count("plugin notice") == 1
-        assert time.monotonic() - started < 15
+        assert time.monotonic() - started < scaled_seconds(15.0)
 
 
 class TestLoadRefusalsReachTheSession:

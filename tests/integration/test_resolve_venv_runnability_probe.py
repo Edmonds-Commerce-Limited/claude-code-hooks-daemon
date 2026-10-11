@@ -25,10 +25,25 @@ import textwrap
 import time
 from pathlib import Path
 
+from tests.load_scaling import scaled_seconds
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RESOLVE_VENV_SH = REPO_ROOT / "scripts" / "lib" / "resolve_venv.sh"
 BASH = shutil.which("bash") or "/bin/bash"
 _TIMEOUT_SECONDS = 30
+#: The probe bound the "does not wait it out" tests give a working candidate.
+_LONG_PROBE_BOUND_SECONDS = 20.0
+
+
+def _below_the_probe_bound(base_seconds: float) -> float:
+    """``base_seconds`` scaled by host load, but never reaching the 20 s probe bound.
+
+    Those tests assert the caller did NOT wait out the bound, so a scaled limit
+    at or past it would pass a caller that did.
+    """
+    return min(scaled_seconds(base_seconds), _LONG_PROBE_BOUND_SECONDS - 2.0)
+
+
 #: Above Linux's default pid_max, so no process can have it.
 _NONEXISTENT_PID = 2**22 + 7
 
@@ -146,7 +161,7 @@ def test_hanging_candidate_is_bounded_by_the_probe_timeout(tmp_path: Path) -> No
         "a hanging candidate must NOT be reported as resolved.\n"
         f"stdout={result.stdout!r} stderr={result.stderr!r}"
     )
-    assert elapsed < 10.0, f"probe must respect its bound; took {elapsed:.2f}s"
+    assert elapsed < scaled_seconds(10.0), f"probe must respect its bound; took {elapsed:.2f}s"
 
 
 def test_a_working_candidate_does_not_wait_out_the_probe_timeout(tmp_path: Path) -> None:
@@ -164,7 +179,9 @@ def test_a_working_candidate_does_not_wait_out_the_probe_timeout(tmp_path: Path)
     elapsed = time.monotonic() - started
 
     assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
-    assert elapsed < 10.0, f"a working candidate answered after {elapsed:.2f}s of a 20s bound"
+    assert elapsed < _below_the_probe_bound(
+        10.0
+    ), f"a working candidate answered after {elapsed:.2f}s of a 20s bound"
 
 
 def test_a_read_that_returns_at_once_does_not_end_the_wait_early() -> None:
@@ -194,7 +211,7 @@ def test_the_watchdog_does_not_hold_the_callers_output_pipe(tmp_path: Path) -> N
     elapsed = time.monotonic() - started
 
     assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
-    assert elapsed < 10.0, f"took {elapsed:.2f}s of a 20s bound"
+    assert elapsed < _below_the_probe_bound(10.0), f"took {elapsed:.2f}s of a 20s bound"
 
 
 def _good_probe_in_a_substitution(daemon_dir: Path, bound: str) -> str:
@@ -366,7 +383,7 @@ def test_hanging_candidate_is_bounded_when_path_has_no_sleep(tmp_path: Path) -> 
 
     assert result.returncode != 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
     assert "timed out after 1s" in result.stderr
-    assert elapsed < 10.0, f"probe must respect its bound; took {elapsed:.2f}s"
+    assert elapsed < scaled_seconds(10.0), f"probe must respect its bound; took {elapsed:.2f}s"
 
 
 def test_good_candidate_alone_is_unaffected(tmp_path: Path) -> None:

@@ -1,5 +1,6 @@
 """Tests for EventRouter."""
 
+import threading
 import time
 from unittest.mock import patch
 
@@ -11,6 +12,7 @@ from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.core.router import EventRouter
+from tests.load_scaling import scaled_seconds
 
 
 class MockHandler(Handler):
@@ -27,6 +29,7 @@ class MockHandler(Handler):
         super().__init__(name=name, priority=priority, terminal=terminal, tags=tags)
         self.matches_called = False
         self.handle_called = False
+        self.handle_started = threading.Event()
         self.match_result = True
         self.handle_result = HookResult.allow()
         self.sleep_in_handle = 0.0
@@ -39,6 +42,7 @@ class MockHandler(Handler):
     def handle(self, hook_input: dict) -> HookResult:
         """Track handle call."""
         self.handle_called = True
+        self.handle_started.set()
         if self.sleep_in_handle:
             time.sleep(self.sleep_in_handle)
         return self.handle_result
@@ -338,11 +342,10 @@ class TestEventRouter:
         result = router.route(EventType.PRE_TOOL_USE, {"toolName": "Bash"}, deadline_seconds=0.01)
 
         # `slow` keeps running as a straggler in the background past the
-        # chain's own dispatch timeout above -- poll rather than assert
-        # immediately, same as test_chain.py's analogous case.
-        deadline = time.perf_counter() + 2.0
-        while not slow.handle_called and time.perf_counter() < deadline:
-            time.sleep(0.01)
+        # chain's own dispatch timeout above -- wait on its own event rather
+        # than a fixed wall-clock poll (N376). The wait is a hang guard,
+        # scaled by host load; the assertion is that the handler ran at all.
+        assert slow.handle_started.wait(scaled_seconds(10.0)) is True
         assert slow.handle_called is True
         assert guard.handle_called is False
         assert result.result.decision == Decision.DENY

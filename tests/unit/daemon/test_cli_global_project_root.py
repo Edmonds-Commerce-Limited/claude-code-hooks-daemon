@@ -28,8 +28,8 @@ from pathlib import Path
 from typing import Final
 
 import pytest
+from tests.support.git_fixtures import git_setup_timeout
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon.cli import apply_global_project_root
 
 _CLI_MODULE: Final[str] = "claude_code_hooks_daemon.daemon.cli"
@@ -138,7 +138,7 @@ class TestBothArgvOrdersAgree:
             capture_output=True,
             text=True,
             cwd=str(cwd),
-            timeout=Timeout.GIT_CONTEXT,
+            timeout=git_setup_timeout(),
             check=False,
         )
 

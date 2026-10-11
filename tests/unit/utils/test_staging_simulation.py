@@ -15,7 +15,6 @@ from unittest.mock import patch
 
 import pytest
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils import staging_simulation as staging_module
 from claude_code_hooks_daemon.utils.git_commit_parsing import read_commit_form
 from claude_code_hooks_daemon.utils.git_repo import run_git
@@ -23,6 +22,7 @@ from claude_code_hooks_daemon.utils.staging_simulation import (
     SimulationIncompleteError,
     simulated_staging,
 )
+from tests.support.git_fixtures import git_setup_timeout
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -31,7 +31,7 @@ def _git(repo: Path, *args: str) -> str:
         capture_output=True,
         check=True,
         text=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
     return result.stdout
 

@@ -18,6 +18,7 @@ import pytest
 
 from claude_code_hooks_daemon.plan_qa.checks import journal_entry_ordering
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, Level, Stage
+from tests.support.git_fixtures import git_setup_timeout
 
 _EDIT = next(spec for spec in journal_entry_ordering.CHECKS if spec.stage is Stage.EDIT)
 _SWEEP = next(spec for spec in journal_entry_ordering.CHECKS if spec.stage is Stage.SWEEP)
@@ -283,7 +284,6 @@ def _sweep_check_ids(
     import json
     import subprocess
 
-    from claude_code_hooks_daemon.constants.timeout import Timeout
     from claude_code_hooks_daemon.daemon.cli import cmd_plan_qa
 
     root = tmp_path / "repo"
@@ -313,7 +313,7 @@ def _sweep_check_ids(
         ["git", "init", str(root)],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
 
     cmd_plan_qa(
@@ -342,7 +342,6 @@ def _sweep_check_ids_with_correction(
     import json
     import subprocess
 
-    from claude_code_hooks_daemon.constants.timeout import Timeout
     from claude_code_hooks_daemon.daemon.cli import cmd_plan_qa
 
     root = tmp_path / "repo"
@@ -372,7 +371,7 @@ def _sweep_check_ids_with_correction(
         ["git", "init", str(root)],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
 
     cmd_plan_qa(

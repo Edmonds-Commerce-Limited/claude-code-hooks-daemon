@@ -28,6 +28,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.load_scaling import scaled_seconds
 from tests.venv_bootstrap_sandbox import (
     BASH,
     CLONE_VERSION,
@@ -63,7 +64,9 @@ class TestTheHookHealsTheVenv:
         assert log_lines, f"the message must name the build's log:\n{context}"
         assert str(sandbox.clone / "untracked") in log_lines[0]
         assert_never_suggests_install_or_force(context)
-        assert elapsed < 20, f"the hook must return without waiting for the build ({elapsed:.1f}s)"
+        assert elapsed < scaled_seconds(
+            20.0
+        ), f"the hook must return without waiting for the build ({elapsed:.1f}s)"
         sandbox.wait_for_build()
         assert len(sandbox.uv_calls()) == 1
 

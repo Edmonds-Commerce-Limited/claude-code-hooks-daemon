@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.project_layout import ProjectLayout
 from claude_code_hooks_daemon.docs_qa import corpus as corpus_module
 from claude_code_hooks_daemon.docs_qa.context import edit_context, staged_context, sweep_context
@@ -18,6 +17,7 @@ from claude_code_hooks_daemon.docs_qa.policy import (
 )
 from claude_code_hooks_daemon.docs_qa.runner import run_stage
 from claude_code_hooks_daemon.docs_qa.types import CheckStage
+from tests.support.git_fixtures import git_setup_timeout
 
 
 def _git(root: Path, *args: str) -> None:
@@ -25,7 +25,7 @@ def _git(root: Path, *args: str) -> None:
         ["git", "-C", str(root), *args],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
 
 

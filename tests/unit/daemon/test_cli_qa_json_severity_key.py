@@ -20,8 +20,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from tests.support.git_fixtures import git_setup_timeout
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon.cli import cmd_docs_qa, cmd_plan_qa
 from claude_code_hooks_daemon.docs_qa.types import Severity
 from claude_code_hooks_daemon.plan_qa.types import Level
@@ -66,7 +66,7 @@ def _drifted_plan_tree(tmp_path: Path) -> Path:
         ["git", "init", str(root)],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
     return root
 

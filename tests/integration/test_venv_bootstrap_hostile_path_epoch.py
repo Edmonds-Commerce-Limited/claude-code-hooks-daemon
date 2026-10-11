@@ -32,6 +32,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from tests.load_scaling import scaled_seconds
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VENV_BOOTSTRAP_SH = REPO_ROOT / "scripts" / "venv_bootstrap.sh"
@@ -116,7 +117,10 @@ class TestWatchdogNeverKillsWronglyUnderHostilePath:
             elapsed = time.monotonic() - started
 
             assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
-            assert elapsed < 10.0, f"watchdog must respect its bound; took {elapsed:.2f}s"
+            # Scaled by host load, but never past the 30 s the watched process
+            # lives for: a watchdog that never fired would then still fail.
+            bound = min(scaled_seconds(10.0), 25.0)
+            assert elapsed < bound, f"watchdog must respect its bound; took {elapsed:.2f}s"
             # The watchdog only SIGNALS -- give the process a moment to die.
             proc.wait(timeout=Timeout.PROCESS_DEATH_WAIT)
             assert proc.returncode is not None and proc.returncode != 0
@@ -169,7 +173,7 @@ class TestWatchdogNeverKillsWronglyUnderHostilePath:
             result = _run(harness)
             elapsed = time.monotonic() - started
 
-            assert elapsed < 10.0, f"must not hang; took {elapsed:.2f}s"
+            assert elapsed < scaled_seconds(10.0), f"must not hang; took {elapsed:.2f}s"
             assert (
                 "no epoch-second source" in result.stderr.lower()
             ), f"must fail loudly, not silently. stderr={result.stderr!r}"

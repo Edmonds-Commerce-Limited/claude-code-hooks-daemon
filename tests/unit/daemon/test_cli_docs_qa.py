@@ -7,8 +7,8 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests.support.git_fixtures import git_setup_timeout
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon.cli import cmd_docs_qa, main
 
 
@@ -45,7 +45,7 @@ def _git(root: Path, *args: str) -> None:
         ["git", "-C", str(root), *args],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
 
 

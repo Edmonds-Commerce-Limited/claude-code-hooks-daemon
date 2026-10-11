@@ -127,9 +127,13 @@ _SED_VIA_XARGS = re.compile(
     re.IGNORECASE,
 )
 
-# The commit subcommand after any run of git global options (`-C <dir>`,
-# `-c k=v`, `--git-dir=...`), by the shared invocation pattern.
-_GIT_COMMIT = re.compile(GIT_INVOCATION + r"commit\b")
+# The git subcommands that take a message (`commit`, `merge -m`, `tag -m`),
+# after any run of git global options (`-C <dir>`, `-c k=v`, `--git-dir=...`),
+# by the shared invocation pattern.
+_GIT_MESSAGE_SUBCOMMANDS: tuple[str, ...] = ("commit", "merge", "tag")
+_GIT_MESSAGE_COMMAND = re.compile(
+    GIT_INVOCATION + r"(?:" + "|".join(_GIT_MESSAGE_SUBCOMMANDS) + r")\b"
+)
 
 
 class SedBlockerHandler(PreToolUseHandlerBase):
@@ -149,7 +153,8 @@ class SedBlockerHandler(PreToolUseHandlerBase):
     3. Write tool creating .sh/.bash files containing sed commands
 
     Exempts (Bash):
-    1. A `git commit` message mentioning sed, with no separator before it
+    1. A `git commit`, `git merge` or `git tag` message mentioning sed, with no
+       separator before it
     2. A `gh` issue/PR/release body mentioning sed, same separator rule
     3. A command containing a grep, or an echo without a `sed 's/` substitution
        (so `cat f | sed 's/x/y/' | grep z` passes, `... | wc -l` does not)
@@ -245,7 +250,7 @@ class SedBlockerHandler(PreToolUseHandlerBase):
         - git diff && sed -i 's/foo/bar/g' file.txt
         - sed -i 's/foo/bar/g' file.txt && git commit
 
-        Key: sed must appear AFTER 'git commit' in the command string.
+        Key: sed must appear AFTER 'git commit' (or `merge`/`tag`) in the command string.
         """
         # Text a data-sink heredoc carries is prose, so it is blanked first; what
         # remains is split where bash splits it (quote-aware, newline included),
@@ -253,7 +258,7 @@ class SedBlockerHandler(PreToolUseHandlerBase):
         if self._sed_pattern.search(command) is None:
             return False
         text = strip_quoted_heredoc_bodies(command)
-        if _GIT_COMMIT.search(text) is None:
+        if _GIT_MESSAGE_COMMAND.search(text) is None:
             return False
         segments = split_unquoted_spans(text, SEGMENT_SEPARATORS)
         # A sed inside `$( )`, backticks or `<( )` is RUN by bash while the
@@ -272,8 +277,8 @@ class SedBlockerHandler(PreToolUseHandlerBase):
         for sed_match in self._sed_pattern.finditer(text):
             sed_pos = sed_match.start()
             segment_start = next(start for start, end in segments if start <= sed_pos <= end)
-            commit = _GIT_COMMIT.search(text, segment_start, sed_pos)
-            if commit is None:
+            message_command = _GIT_MESSAGE_COMMAND.search(text, segment_start, sed_pos)
+            if message_command is None:
                 # sed is a SEPARATE command (`git commit -m x && sed -i ...`, or
                 # the same after a newline), not part of the commit message.
                 return False
@@ -496,9 +501,9 @@ class SedBlockerHandler(PreToolUseHandlerBase):
             "blocked anyway — DELIBERATELY, and the deny message says so: `-n` and "
             "`-i` differ by one character. `Read` with `offset`/`limit` does the same "
             "job, as does `awk 'NR>=1 && NR<=20' file`.\n"
-            "2. A `git commit` message mentioning sed (sed must follow `git commit` with "
-            "no command separator between; git's own global options such as "
-            "`git -C <dir> commit` are fine).\n"
+            "2. A `git commit`, `git merge -m` or `git tag -m` message mentioning sed (sed "
+            "must follow the git command with no command separator between; git's own "
+            "global options such as `git -C <dir> commit` are fine).\n"
             "3. A `gh` issue/PR/release body mentioning sed (same separator rule).\n"
             "4. The command contains a `grep`, or an `echo` that does not itself carry a "
             "`sed 's/…'` substitution.\n"

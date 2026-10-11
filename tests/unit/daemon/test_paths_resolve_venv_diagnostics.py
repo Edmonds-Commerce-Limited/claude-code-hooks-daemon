@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 import pytest
+from tests.load_scaling import scaled_seconds
 
 from claude_code_hooks_daemon.daemon.paths import (
     _cli_resolve_venv,
@@ -1017,7 +1018,7 @@ class TestRunnabilityProbe:
         elapsed = time.monotonic() - started
 
         assert resolved is None
-        assert elapsed < 3.0, f"probe must respect its bound; took {elapsed:.2f}s"
+        assert elapsed < scaled_seconds(3.0), f"probe must respect its bound; took {elapsed:.2f}s"
 
     def test_scan_fallback_falls_through_to_good_second_candidate(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

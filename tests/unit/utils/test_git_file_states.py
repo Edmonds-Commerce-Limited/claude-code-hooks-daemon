@@ -12,7 +12,6 @@ from unittest.mock import patch
 
 import pytest
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils import git_file_states
 from claude_code_hooks_daemon.utils.git_file_states import (
     gitignore_negation,
@@ -21,6 +20,7 @@ from claude_code_hooks_daemon.utils.git_file_states import (
     unignore_advice,
 )
 from claude_code_hooks_daemon.utils.secret_file_matching import protected_among
+from tests.support.git_fixtures import git_setup_timeout
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -28,7 +28,7 @@ def _git(repo: Path, *args: str) -> None:
         ["git", "-C", str(repo), *args],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
 
 

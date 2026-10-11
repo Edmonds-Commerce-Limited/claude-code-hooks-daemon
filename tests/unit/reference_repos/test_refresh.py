@@ -18,9 +18,9 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.reference_repos.refresh import refresh_repo
 from claude_code_hooks_daemon.utils import git_sync
+from tests.support.git_fixtures import git_setup_timeout
 
 
 def _run(cwd: Path, *args: str) -> str:
@@ -29,7 +29,7 @@ def _run(cwd: Path, *args: str) -> str:
         capture_output=True,
         text=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
     return result.stdout.strip()
 
@@ -57,7 +57,7 @@ def _remote_and_clone(tmp_path: Path) -> tuple[Path, Path]:
         ["git", "init", "--bare", "-b", "main", str(origin)],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
     _run(seed, "remote", "add", "origin", str(origin))
     _run(seed, "push", "-u", "origin", "main")
@@ -67,7 +67,7 @@ def _remote_and_clone(tmp_path: Path) -> tuple[Path, Path]:
         ["git", "clone", str(origin), str(clone)],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
     _identity(clone)
     return origin, clone
@@ -80,7 +80,7 @@ def _advance_origin(tmp_path: Path, origin: Path, name: str = "extra.md") -> Non
             ["git", "clone", str(origin), str(pusher)],
             capture_output=True,
             check=True,
-            timeout=Timeout.GIT_CONTEXT,
+            timeout=git_setup_timeout(),
         )
         _identity(pusher)
     _commit(pusher, name, "more\n")

@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.plan_qa.context import (
 from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, Level
 from claude_code_hooks_daemon.utils.git_commit_parsing import extract_commit_pathspecs
+from tests.support.git_fixtures import git_setup_timeout
 
 
 @dataclass(frozen=True)
@@ -77,7 +78,7 @@ def _scaffold(tmp_path: Path) -> Path:
         ["git", "init", str(root)],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
     return root
 
@@ -94,7 +95,7 @@ def _commit_scaffold(root: Path) -> None:
             ["git", "-C", str(root), *args],
             capture_output=True,
             check=True,
-            timeout=Timeout.GIT_CONTEXT,
+            timeout=git_setup_timeout(),
         )
 
 
@@ -270,7 +271,7 @@ class TestStagedContext:
                 ["git", "-C", str(repo), *args],
                 capture_output=True,
                 check=True,
-                timeout=Timeout.GIT_CONTEXT,
+                timeout=git_setup_timeout(),
             )
 
         root = _scaffold(tmp_path)
@@ -547,7 +548,7 @@ def _git(root: Path, *args: str) -> None:
         ["git", "-C", str(root), *args],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
 
 

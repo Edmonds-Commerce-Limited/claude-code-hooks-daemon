@@ -7,9 +7,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from tests.support.git_fixtures import git_setup_timeout
 from tests.vault_payloads import vault_file_bytes
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.session_start import gitignore_safety_checker as gsc_module
 from claude_code_hooks_daemon.handlers.session_start.gitignore_safety_checker import (
@@ -676,7 +676,7 @@ def _git(repo: Path, *args: str) -> None:
         ["git", "-C", str(repo), *args],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
 
 

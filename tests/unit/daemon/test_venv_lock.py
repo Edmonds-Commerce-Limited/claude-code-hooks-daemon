@@ -29,6 +29,7 @@ import time
 from pathlib import Path
 
 import pytest
+from tests.load_scaling import scaled_seconds
 
 from claude_code_hooks_daemon.daemon.venv_lock import (
     DEFAULT_TIMEOUT_SECONDS,
@@ -200,7 +201,7 @@ class TestMkdirBackendRacesTheHolder:
         with pytest.raises(VenvLockTimeout) as excinfo:
             with venv_lock(tmp_path, timeout_seconds=1, backend="mkdir"):
                 pytest.fail("must not enter while the lock name is unusable")
-        assert time.monotonic() - started < 10
+        assert time.monotonic() - started < scaled_seconds(10.0)
         assert str(lock_dir) in str(excinfo.value)
 
 
@@ -238,5 +239,6 @@ class TestBackendSelection:
         finally:
             holder.kill()
             holder.wait()
-        assert elapsed < 10
+        # Scaled by host load, but never past the 30 s the lock is held for.
+        assert elapsed < min(scaled_seconds(10.0), 25.0)
         assert "1s" in str(excinfo.value)

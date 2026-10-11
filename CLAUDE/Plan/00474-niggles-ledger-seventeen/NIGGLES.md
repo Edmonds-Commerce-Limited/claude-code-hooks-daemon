@@ -42,8 +42,9 @@ coordinator); none is an owner ruling. The command-shaped ones have a
 
 **Still open, residuals stated precisely (not dismissed):**
 
-- **N222** — the guard half is changed, not removed: `SCAN_DEADLINE_SECONDS` is still used at `secret_file_guard.py` lines 1403 and 1616, but A1 (merge dc5c9263b) made the timeout outcome allow with an advisory instead of deny. What remains is the test half: about 15 tests that assert wall-clock bounds and fail on a loaded host. Remedy: switch them to the load-scaled helper N95 already uses.
-- **N260** — the `sys.path` half is fixed (257847b51). Still open, direction corrected: `.github/workflows/qa.yml` (line 498) passes only `--import-mode=importlib`, while the local runner (`daemon/cli.py`, lines 6384-6396) passes that plus `-p no:claude_code_hooks_daemon.qa.full_qa_gate`. CI therefore loads the full-QA gate plugin and the local run does not, so a run can be green locally and red on CI.
+- **N222** — FIXED (batch D, branch `agent-aeccce8de2ff73867-3d7478ce`). The guard half was changed earlier (A1, merge dc5c9263b: the timeout outcome allows with an advisory). The test half: 22 assertions across 15 files compared (six more found by the widened pin: clock differences such as `time.monotonic() - started < 15`) an elapsed time to a bare number (`test_chain`, `test_venv_lock`, `test_paths_resolve_venv_diagnostics`, and the venv-bootstrap, resolve-venv probe, ensure-venv-lock, init.sh self-heal, relay nc-rung and status-line integration tests). Each now goes through `tests.load_scaling.scaled_seconds`. Where the bound separates "returned early" from "waited out a fixed delay" (a 30 s held lock, a 20 s probe bound, a 7 s slowed init, a 5 s stub build), the scaled limit is capped below that delay, or the delay scales with the bound, so the assertion keeps its meaning. `tests/unit/test_wall_clock_bounds_are_load_scaled.py` fails on any new `assert <elapsed> < <number>`. `tests/daemon/test_server.py`'s concurrency bound is left alone: it separates one delay from three and is not a hang guard.
+- **N260** — FIXED (batch D). The `sys.path` half was fixed earlier (257847b51). The flags half: `.github/workflows/qa.yml` ran `pytest .claude/project-handlers --import-mode=importlib` while the local runner (`cmd_test_project_handlers`) adds `-p no:claude_code_hooks_daemon.qa.full_qa_gate`. On this tree the gate does not refuse the CI form (238 passed), because it counts `tests/` under the launch directory; but that count is the launch directory's, so a client project with a small `tests/` would see a refusal in CI and not locally. CI now passes the same flag. `tests/unit/qa/test_project_handler_ci_flags_match_local.py` reads both command lines from their sources and fails if either flag drifts.
+- **N95** (archived ledger 00466) — FIXED (batch D). The shared `tests/support/git_fixtures.git_setup_timeout` existed, but 56 test files still handed `Timeout.GIT_CONTEXT` (5 s) to their own fixture git calls (113 uses, 95 of them as `timeout=`). They now use `git_setup_timeout()`, except the fakes that stand in for product git functions (spies and `loaded_host` in six files), which keep the product's `Timeout.GIT_CONTEXT` default so a call site that drops its explicit timeout is still caught; the first pass wrongly changed those, and review reverted them. `tests/unit/test_fixtures_never_use_the_hook_path_git_budget.py` fails on any `timeout=Timeout.GIT_CONTEXT` outside the two files whose subject is the product constant (`test_project_context.py`, `test_git_fixtures.py`).
 
 **N42 (batch C, branch `agent-a212b0493fe461dab-aedeff9c`)** — fixed by earlier work; all shapes now verified. Nine
 shapes (the seven in the entry, with its `<<-` and `git commit -F -` forms, and an unquoted-then-quoted same-line
@@ -1509,6 +1510,21 @@ PR-body idiom, and the ordinary shape of any PR or comment that describes a bloc
 when it is the value of a `gh` `--body`/`-b` option (the sink rule batch (b) added for the `gh` body heredoc); gate
 row `a8-*`.
 
+### N399 — `sed_blocker` denies a `git merge -m` or `git tag -m` message that only mentions sed
+
+**Source**: the coordinator, 2026-10-11.
+
+**Evidence**: `git merge --no-ff topic -m 'the sed blocker now covers merge'` was denied while the same message on
+`git commit -m` was allowed. The message exemption (`_is_git_command`) looked only for the `commit` subcommand,
+through `GIT_INVOCATION`; `merge -m` and `tag -m`/`-a -m` take a message too.
+
+**Status**: ✅ Fixed (batch D). The exemption now covers `commit`, `merge` and `tag` after any git global options,
+built on the shared `GIT_INVOCATION`. The batch-C rule stays: a sed inside `$( )`, a backtick or `<( )` is never a
+mention, and a sed in a command of its own is still denied. Red-first tests in
+`tests/unit/handlers/test_sed_blocker_git_message_commands.py` (79 cases, 32 red before the change). The handler's
+guidance text, `CLAUDE.md` and `docs/guides/HANDLER_REFERENCE.md` name the three commands; no acceptance probe was
+touched.
+
 ### N398 — two `WorktreeFileCopyHandler` acceptance probes fail when the suite runs from a worktree
 
 **Source**: the coordinator (2026-10-11), seen in the N397 agent's QA.
@@ -2108,8 +2124,23 @@ The scaling sweep now takes the minimum of CPU-time samples and the chain deadli
 (`UpgradeApprovalGuardHandler` 25x for 8x input in-suite, 3 of 3 passes alone on py3.12), the `[.md]` deep-path
 sweep (`RemoteDocsProvenanceHandler` 73x for 8x) and `test_client_owned_asset_lint`'s 120-second shellcheck timeout.
 
-**Status**: Open. Run the performance sweeps outside the concurrent phase (their own serial shard or marker), and make
-the supervisor end-to-end test wait on its event rather than a fixed time. Never loosen a threshold.
+**Status**: PARTLY FIXED (batch D, branch `agent-aeccce8de2ff73867-3d7478ce`); the sweep half needs a design decision.
+
+Fixed: the supervisor end-to-end test (`test_abandoned_input_flush.py`) now keeps its child alive until the decision
+log holds the compact, with a load-scaled hang cap, instead of `sleep 0.5` (the supervisor logs its child's argv into
+the same log, so the grep pattern brackets its first character to avoid matching itself); the router straggler test
+(`test_router.py`) waits on a `threading.Event` the handler sets, not a 2 s poll; `test_client_owned_asset_lint`'s
+120 s shellcheck timeout is load-scaled; the chain deadline tests were already on a manual clock (verified, no change).
+
+Still open, not changed: running the performance sweeps (`test_safety_handlers_hostile_input_performance.py`: the
+`[nesting]`, `[.md]` deep-path and combinatorial sweeps) outside the concurrent phase. `run_test_matrix.py` runs the
+PRIMARY leg, with every shard, in phase 1 beside each extra interpreter's `unit` leg; only the extras' `rest` legs are
+serial. A serial shard for the primary therefore means a second primary leg in phase 2, which the runner does not
+model: checkpoint keys are `py{version}-{scope}`, results are keyed by `PlannedRun`, `primary_report_from_shards` and
+the coverage combine assume one primary leg, and `fully_covered_versions` reads scopes. That is a runner redesign, not
+a minimal change, so it is left for the owner or coordinator to choose between (a) that redesign, (b) a `--serial`
+pass after the matrix that runs the marked sweeps alone (which would add a stage), or (c) leaving the sweeps and
+accepting a re-run on a loaded host. Never loosen a threshold.
 
 ### N373 — an invalid `stand_in_delay_hours` silently unregisters the whole Stop enforcement handler
 

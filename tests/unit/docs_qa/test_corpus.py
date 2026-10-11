@@ -11,7 +11,6 @@ import pytest
 
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.constants.paths import ProjectPath
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.docs_qa.corpus import (
     _CACHE_SCHEMA_VERSION,
     COMMON_VENDORED_BUILD_DIR_NAMES,
@@ -39,6 +38,7 @@ from claude_code_hooks_daemon.docs_qa.policy import (
     DocumentationTreesPolicy,
 )
 from claude_code_hooks_daemon.utils.vendor_paths import VendorScope
+from tests.support.git_fixtures import git_setup_timeout
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -46,7 +46,7 @@ def _git(repo: Path, *args: str) -> None:
         ["git", "-C", str(repo), *args],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
 
 

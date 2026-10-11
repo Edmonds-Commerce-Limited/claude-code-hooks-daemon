@@ -253,7 +253,9 @@ class TestTheHookStartsOneDetachedBuild:
         log = Path(out["log"][0])
         assert log.parent == daemon_dir / "untracked"
         assert log.name.startswith(".venv-bootstrap-") and log.name.endswith(".log")
-        assert elapsed < 10, f"the hook must not wait for the build ({elapsed:.1f}s)"
+        assert elapsed < scaled_seconds(
+            10.0
+        ), f"the hook must not wait for the build ({elapsed:.1f}s)"
 
         _wait_for_lock_release(daemon_dir)
         assert len(_uv_calls(tmp_path)) == 1
@@ -263,14 +265,18 @@ class TestTheHookStartsOneDetachedBuild:
 
     def test_the_hook_returns_before_a_slow_build_finishes(self, tmp_path: Path) -> None:
         daemon_dir = _daemon_dir(tmp_path)
-        env = _env(tmp_path, with_uv=_stub_uv(tmp_path, sleep=5))
+        # The build's length and the bound scale together, so the bound stays
+        # below the build however loaded the host is.
+        factor = math.ceil(load_factor())
+        env = _env(tmp_path, with_uv=_stub_uv(tmp_path, sleep=5 * factor))
 
         started = time.monotonic()
         result = _run("hook", daemon_dir, env)
         elapsed = time.monotonic() - started
 
         assert _fields(result.stdout)["state"] == ["started"], result.stdout + result.stderr
-        assert elapsed < 4, f"a 5s build must not hold the hook for {elapsed:.1f}s"
+        bound = 4 * factor
+        assert elapsed < bound, f"a {5 * factor}s build must not hold the hook for {elapsed:.1f}s"
         _wait_for_lock_release(daemon_dir)
         assert _resolves(daemon_dir, env)
 

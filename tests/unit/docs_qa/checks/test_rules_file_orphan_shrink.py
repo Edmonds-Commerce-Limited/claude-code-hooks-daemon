@@ -3,11 +3,11 @@
 import subprocess
 from pathlib import Path
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.docs_qa.checks.rules_file_orphan_shrink import CHECK_ID, CHECKS
 from claude_code_hooks_daemon.docs_qa.context import staged_context
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
 from claude_code_hooks_daemon.docs_qa.types import CheckContext, CheckStage, Finding, Severity
+from tests.support.git_fixtures import git_setup_timeout
 
 
 def _run_staged(context: CheckContext) -> list[Finding]:
@@ -22,7 +22,7 @@ def _git(root: Path, *args: str) -> None:
         ["git", "-C", str(root), *args],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
 
 

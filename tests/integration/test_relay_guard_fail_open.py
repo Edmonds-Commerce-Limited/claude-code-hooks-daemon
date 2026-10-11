@@ -58,6 +58,7 @@ from claude_code_hooks_daemon.install.forwarder_generator import (
 from claude_code_hooks_daemon.utils.cli_command import install_recovery_command
 from tests.daemon_like_process import daemon_like_process
 from tests.deep_json import TOO_DEEP_FOR_ANY_PYTHON, nested_call
+from tests.load_scaling import scaled_seconds
 
 #: A probe sent through a hook forwarder is marked (Plan 00466 N12).
 _MAIN_PROBE = {SYNTHETIC_SOURCE_FIELD: TEST_PROBE, PROBE_AS_FIELD: ProbeThread.MAIN.value}
@@ -1031,7 +1032,9 @@ def test_nc_rung_round_trip_completes_promptly(tmp_path: Path) -> None:
         server.join()
 
         assert result.returncode == 0, result.stderr.decode()
-        assert elapsed < 5.0, f"nc rung took {elapsed:.1f}s — the -N EOF-shutdown fix regressed"
+        assert elapsed < scaled_seconds(
+            5.0
+        ), f"nc rung took {elapsed:.1f}s — the -N EOF-shutdown fix regressed"
         assert server.received is not None, "the nc rung's own EOF-framed socket was never reached"
         # The per-event socket protocol is unwrapped (DESIGN-socket-relay.md
         # §2): the daemon receives exactly the raw stdin payload, not the

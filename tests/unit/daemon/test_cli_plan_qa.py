@@ -6,8 +6,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from tests.support.git_fixtures import git_setup_timeout
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon.cli import cmd_plan_qa
 
 _CONFIG_ENABLED = "plan_workflow:\n  enabled: true\n"
@@ -54,7 +54,7 @@ def _scaffold(tmp_path: Path, config_body: str = _CONFIG_ENABLED) -> Path:
         ["git", "init", str(root)],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
     return root
 
@@ -145,7 +145,7 @@ class TestSweep:
             ["git", "init", str(root)],
             capture_output=True,
             check=True,
-            timeout=Timeout.GIT_CONTEXT,
+            timeout=git_setup_timeout(),
         )
 
         assert cmd_plan_qa(_args(root, sweep=True)) == 2
@@ -271,14 +271,14 @@ class TestCheckStaged:
             ["git", "-C", str(root), "add", "-A"],
             ["git", "-C", str(root), "commit", "-m", "initial"],
         ):
-            subprocess.run(cmd, capture_output=True, check=True, timeout=Timeout.GIT_CONTEXT)
+            subprocess.run(cmd, capture_output=True, check=True, timeout=git_setup_timeout())
         plan_md = root / "CLAUDE/Plan/00001-first/PLAN.md"
         plan_md.write_text("# Plan 00001: first\n\n**Status**: Complete\n")
         subprocess.run(
             ["git", "-C", str(root), "add", "-A"],
             capture_output=True,
             check=True,
-            timeout=Timeout.GIT_CONTEXT,
+            timeout=git_setup_timeout(),
         )
 
         assert cmd_plan_qa(_args(root, check_staged=True)) == 1
@@ -294,7 +294,7 @@ class TestCheckStaged:
             ["git", "-C", str(root), "add", "-A"],
             ["git", "-C", str(root), "commit", "-m", "initial"],
         ):
-            subprocess.run(cmd, capture_output=True, check=True, timeout=Timeout.GIT_CONTEXT)
+            subprocess.run(cmd, capture_output=True, check=True, timeout=git_setup_timeout())
         assert cmd_plan_qa(_args(root, check_staged=True)) == 0
 
 
@@ -350,7 +350,7 @@ class TestASweepNeverCertifiesATreeItNeverExamined:
             ["git", "init", str(root)],
             capture_output=True,
             check=True,
-            timeout=Timeout.GIT_CONTEXT,
+            timeout=git_setup_timeout(),
         )
         return root
 

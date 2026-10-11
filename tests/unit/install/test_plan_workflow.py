@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.install.plan_workflow import (
     plan_template_default_path,
     planlib_template_path,
 )
+from tests.support.git_fixtures import git_setup_timeout
 
 
 class TestBootstrapPlanWorkflow:
@@ -437,13 +438,13 @@ class TestMkplanUsesProjectTemplate:
             ["git", "init", str(repo)],
             capture_output=True,
             check=True,
-            timeout=Timeout.GIT_CONTEXT,
+            timeout=git_setup_timeout(),
         )
         subprocess.run(
             ["git", "-C", str(repo), "config", "user.name", "Template Tester"],
             capture_output=True,
             check=True,
-            timeout=Timeout.GIT_CONTEXT,
+            timeout=git_setup_timeout(),
         )
         bootstrap_plan_workflow(repo)
         plan_dir = repo / "CLAUDE" / "Plan"
@@ -504,13 +505,13 @@ class TestMkplanScaffoldsJournal:
             ["git", "init", str(repo)],
             capture_output=True,
             check=True,
-            timeout=Timeout.GIT_CONTEXT,
+            timeout=git_setup_timeout(),
         )
         subprocess.run(
             ["git", "-C", str(repo), "config", "user.name", "Journal Tester"],
             capture_output=True,
             check=True,
-            timeout=Timeout.GIT_CONTEXT,
+            timeout=git_setup_timeout(),
         )
         bootstrap_plan_workflow(repo)
         return repo, repo / "CLAUDE" / "Plan"
@@ -843,7 +844,7 @@ class TestDedupeAgentDeployment:
         then, but nothing is invested, so merging still costs one `git rm -r`.
         """
         bootstrap_plan_workflow(tmp_path)
-        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, timeout=Timeout.GIT_CONTEXT)
+        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, timeout=git_setup_timeout())
         completed = subprocess.run(
             [str(tmp_path / "CLAUDE" / "Plan" / MKPLAN_SCRIPT_NAME), "some-new-thing"],
             cwd=tmp_path,
