@@ -1658,9 +1658,13 @@ mention deny were flipped. The INVENTORY misses (`pip --break-system-packages in
 - Residual (not cleared): `sudo bash -c 'echo hi; pip install x'` - the splitter cuts the quoted shell program at `;`,
   so the `pip install` segment no longer carries the `sudo`. Needs the splitter to keep a `sudo ... -c '...'` program
   whole.
-- Residual (splitter, pre-existing on main): a `;` or `&&` inside a trailing `# comment` still splits the line, so
-  `true # export X=1 && pip install` is judged as two commands; and a `git grep` / `git log -S` mention with a quoted
-  multi-word pattern (`git grep -n 'pip install --break-system-packages'`) denies.
+- ✅ cleared by batch V: a `;`, `&&`, `|` or `&` inside a trailing `# comment` split the line, so
+  `true # export X=1 && pip install` was judged as two commands. The comment now runs to the end of the line in the
+  command-position splitter (`split_unquoted_spans(..., comments_end_at_newline=True)`, used only by
+  `command_position._segment_spans`); a newline still ends it. Pinned by
+  `tests/unit/utils/test_command_position_comment_splitting.py` and corpus rows `n407-comment-*`.
+- Residual (not cleared): a `git grep` / `git log -S` mention with a quoted multi-word pattern
+  (`git grep -n 'pip install --break-system-packages'`) denies.
 - Deliberately skipped: obfuscation (`$P install`, base64, `sudo $(echo pip) ...`) - careless, not hostile. `sudo` with
   a value-taking option not in `ugCDhpRTU` is read as a plain flag.
 
@@ -1680,7 +1684,7 @@ batch U round 2 together with the background `&` and group-after-keyword finding
 
 - `export X=1; x=$(pip install x)` is not seen: the pip install inside a command substitution is not a segment head.
 - `xargs -a r.txt pip install` is not seen: an `xargs` option with a non-numeric, non-`{}` value breaks the head match.
-- The segment splitter splits inside a trailing comment (`ls # note | sudo pip install x` denies); pre-existing.
+- The segment splitter splits inside a trailing comment (`ls # note | sudo pip install x` denies); pre-existing. ✅ cleared by batch V
 
 ### N406 — `github_auto_close_keywords` denies a quoted `echo` or a `python3 - <<'EOF'` that only prints a keyword
 

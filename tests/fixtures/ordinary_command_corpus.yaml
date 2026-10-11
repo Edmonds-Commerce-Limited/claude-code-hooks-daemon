@@ -1501,6 +1501,19 @@ rows:
   - id: n407-export-backgrounded-then-pip
     command: |-
       export PIP_BREAK_SYSTEM_PACKAGES=1 & pip install x
+  - id: n407-comment-pipe-then-sudo-pip
+    command: |-
+      ls # note | sudo pip install x
+  - id: n407-comment-andand-then-export-pip
+    command: |-
+      true # export PIP_BREAK_SYSTEM_PACKAGES=1 && pip install x
+  - id: n407-comment-semicolon-then-break-flag
+    command: |-
+      ls # note; pip install --break-system-packages x
+  - id: n407-comment-line-then-next-line-comment
+    command: |-
+      ls # a && sudo pip install x
+      # b | sudo pip install y
   - id: n408-echo-names-issue-view
     command: |-
       echo 'gh issue view 5'

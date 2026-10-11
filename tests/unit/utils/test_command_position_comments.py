@@ -33,7 +33,7 @@ class TestWithoutComment:
 
 class TestCommandPositionCodeSegments:
     def test_comment_text_is_not_a_command_but_a_later_command_is(self) -> None:
-        segments = command_position_code_segments("true # note; sudo pip install x")
+        segments = command_position_code_segments("true # note; x\nsudo pip install x")
         assert not any("note" in s for s in segments)
         assert any("sudo pip install x" in s for s in segments)
 

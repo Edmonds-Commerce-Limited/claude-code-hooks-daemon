@@ -2839,9 +2839,16 @@ def split_unquoted(text: str, separators: Sequence[str]) -> list[str]:
     return [text[start:end] for start, end in split_unquoted_spans(text, separators)]
 
 
-def split_unquoted_spans(text: str, separators: Sequence[str]) -> list[tuple[int, int]]:
+def split_unquoted_spans(
+    text: str, separators: Sequence[str], *, comments_end_at_newline: bool = False
+) -> list[tuple[int, int]]:
     """:func:`split_unquoted` as ``(start, end)`` offsets into ``text``, for a
-    caller that must map a segment back to where it sits."""
+    caller that must map a segment back to where it sits.
+
+    By default a comment's separators still split (the conservative reading for
+    a caller that judges comment text). With ``comments_end_at_newline`` a
+    comment runs to the end of its line and only the newline splits there.
+    """
     spans: list[tuple[int, int]] = []
     start = 0
     in_single = False
@@ -2866,7 +2873,7 @@ def split_unquoted_spans(text: str, separators: Sequence[str]) -> list[tuple[int
             in_comment = char != _NEWLINE
             matched = (
                 next((sep for sep in separators if text.startswith(sep, index)), None)
-                if may_separate
+                if may_separate and (char == _NEWLINE or not comments_end_at_newline)
                 else None
             )
             if matched is not None:
