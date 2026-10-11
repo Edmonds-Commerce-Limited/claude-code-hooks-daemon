@@ -1,6 +1,6 @@
 # Owner questions, 2026-10-11 (Plan 00474)
 
-One sheet for the 14 rows of [STATUS-INDEX.md](STATUS-INDEX.md) marked "Owner decision" (section 9, N373, turned out
+One sheet for the 15 rows (section 16, N419, added later) of [STATUS-INDEX.md](STATUS-INDEX.md) marked "Owner decision" (section 9, N373, turned out
 already settled in code and stays only as a note). Each section gives the
 question, the options, what each does, the coordinator's recommendation (a recommendation, not a ruling), and who can
 implement it. Quoted text and line numbers are from [NIGGLES.md](NIGGLES.md). To answer, reply with the row id and a
@@ -158,6 +158,16 @@ Quote (lines 1731-1733): "should auto-continue stand down (allow the stop) when 
 - (c) A bounds the daemon at one block per chain in every case. B keeps blocking a stop whose earlier block it cannot confirm, so an unreadable transcript could reach the cap of 8.
 - (d) Recommendation: A, on the principle of a bounded daemon; measured sessions never came near the cap, so B is also safe today. Do not set `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` in the supervisor.
 - (e) An agent can implement A. Any cap variable would be the supervisor's, and so the owner's.
+
+## 16. N419: `subagent_full_qa_blocker` judges an unknown program by flag shape (GitHub Issue #69)
+
+Added after the sheet was written, from the issue-sdlc triage of #69.
+
+- (a) Question: should the inline-code check judge only known interpreters, or keep judging every unknown program and extend the exempt list?
+- (b) Options: A, an allow-list of interpreters. B, keep the shape rule and exempt `ps`, `file` and `docker` (for `-e`).
+- (c) A fixes the whole class, but an interpreter missing from the list then passes silently. B stays fail-closed, but fixes only the spellings reported so far; 9 of the 11 in #69 are already silent on main.
+- (d) Recommendation: B. It follows the N302/N416 precedent, and the default policy is an advisory, so a miss costs context, never a denial.
+- (e) An agent can implement either.
 
 ## Deliberate limits recorded on the coordinator's judgement
 

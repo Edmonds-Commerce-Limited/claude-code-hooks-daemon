@@ -4,6 +4,7 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 
 | #          | Verdict                                                                                                                      | Origin              | Status                              |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------------------- |
+| N419       | `subagent_full_qa_blocker` judges an unknown program by flag shape alone (`ps -e`, `docker run -e`); GitHub Issue #69        | Issue #69 triage    | ⬜ Owner decision                   |
 | N418       | A helper that calls its own parameter ranks every call through it as may-run, whatever the call site passes                  | Batch AG review     | ✅ Fixed (batch AH); 🚫 limits      |
 | N417       | `subagent_full_qa_blocker` reads `pytest` text inside Python string data as a command (unmasked by N416's fix)               | Batch AE review     | ✅ Fixed (batch AG); residuals      |
 | N416       | `subagent_full_qa_blocker` advisory on `set -e`, `uniq -c` and other non-interpreter `-c`/`-e`/`-r` commands                 | Batch AB review     | ✅ Fixed (batch AE)                 |

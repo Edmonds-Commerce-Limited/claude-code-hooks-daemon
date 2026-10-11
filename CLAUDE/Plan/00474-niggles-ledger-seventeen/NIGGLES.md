@@ -77,6 +77,31 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N419 — `subagent_full_qa_blocker` still judges an unknown program by flag shape alone (GitHub Issue #69)
+
+**Origin**: issue-sdlc triage of GitHub Issue #69 (filed against v3.67.0).
+
+**Evidence**: re-probed on main (`bin/hooks-daemon probe PreToolUse --as sub`, Bash payloads, this repo's own
+`full_qa_patterns`). Nine of the eleven reported commands are now silent, thanks to the N302 and N416 text-tool
+exemptions: `wc -c`, `head -c`, `grep -e/-E/-c`, `gzip -c`, `tar -c`, `ls -r` and `sort -r`. Two still raise
+`unrecognised-interpreter-inline-code`: `ps -e` and `docker run -e A=1 img cmd`. So does `file -e x f`, which was not
+reported.
+
+**Cause**: `_runs_inline_code` (`subagent_full_qa_blocker.py:944-955`) flags any program outside
+`_INLINE_CODE_FLAG_TEXT_TOOLS` and git that takes an exact `-e`, `-E`, `-c`, `-r` or `--eval`. That is a deny-list of
+known non-interpreters, grown one spelling at a time (N302, N416). The issue proposes the opposite: judge the shape
+only for known interpreters. The comment at lines 851-858 records the current fail-closed choice as deliberate.
+
+**Status**: ⬜ Owner decision.
+
+- **A**: invert the rule to an allow-list of interpreters (perl, ruby, node, php, and so on). This fixes the class. But an
+  unlisted interpreter's inline code then passes silently, which loosens a QA gate.
+- **B**: keep the shape rule and extend the exempt list (`ps`, `file`, and `docker` for `-e` only). This fixes the
+  spellings only.
+
+Recommendation: B. It matches the N302/N416 precedent and keeps the gate fail-closed. The default policy is advisory,
+so the cost of a miss is context noise, never a denial.
+
 ### N418 — a helper that calls its own parameter ranks every call through it as may-run
 
 **Found**: the batch AG reviewer (round 3, `untracked/scratch/review-batch-x/run_b5_ag.sh`, `b5_ag_cases.txt`). A
