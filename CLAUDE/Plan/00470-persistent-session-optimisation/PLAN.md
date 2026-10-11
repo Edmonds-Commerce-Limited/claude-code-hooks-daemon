@@ -95,19 +95,28 @@ Evidence, with verified facts marked apart from inferences, is in
 
   - No bug found: `auto_continue_stop` is the only writer and is scoped to the main thread, which a teammate's `agent_id` fails. Pinned in `tests/unit/handlers/stop/test_awaiting_human_marker_scope.py`, through the real chain, with a positive control and a sensitivity check.
 
-- [ ] 🔄 **Task 3.5**: Server runbook: systemd/ccy restart with `--continue`, `autoContinueAtUsageLimit` on.
+- [ ] 🚫 **Task 3.5**: Server runbook: systemd/ccy restart with `--continue`, `autoContinueAtUsageLimit` on.
+
+  - **Waiting on the owner or IaC to apply** the restart unit, `HOOKS_DAEMON_HOSTNAME=github-softwaredev-lifecycle-unattended` and the user
+    setting `autoContinueAtUsageLimit: true`, as recommended in item 7 of
+    [OWNER-QUESTIONS-261011-B.md](../00474-niggles-ledger-seventeen/OWNER-QUESTIONS-261011-B.md) (the coordinator's
+    decision under the "clear winner" guidance, not an owner ruling).
 
   - [RUNBOOK.md](RUNBOOK.md) holds the verified parts. `autoContinueAtUsageLimit` belongs in user settings: a project settings file turns it off. `--continue` is what restores crons.
+
   - Owner input: the host's restart unit around ccy is outside this repository. It is recorded in RUNBOOK.md §3 once it exists.
+
   - Owner ruling D10 (2026-10-06): inspect the public fedora-desktop reference clone and this VM's server install, then
     tell the owner what infrastructure agents must do. Report:
     [261006-ccy-environment-inspection-sonnet.md](subagent-reports/261006-ccy-environment-inspection-sonnet.md).
+
     - **Task 2.3**: no restart is needed. The supervisor is this repository's bind-mounted file, and its `--worker`
       hot-reloaded three seconds after the file's last write. To verify, compare the worker's `lstart` with the file's
       mtime.
     - **Task 3.5 gaps, for infrastructure agents**: nothing restarts a crashed `claude` or supervisor while the VM is
       up; boot restore is fedora-desktop's `ccy-sessions-restore.service` (with `--continue`), unconfirmed on this
       host; `autoContinueAtUsageLimit` is not provisioned anywhere; `HOOKS_DAEMON_HOSTNAME` is not set.
+
   - Owner ruling A1 (2026-10-06): the supervisor's Esc before a forced compact is not a human rejection. The compact
     instruction now says so and asks for interrupted tool calls to be retried. Merged `70331d361` on the owner's
     instruction (77 targeted tests, ruff and black clean; full QA owed in the combined post-merge run). Live: the
@@ -115,7 +124,10 @@ Evidence, with verified facts marked apart from inferences, is in
 
 ### Phase 4: Housekeeping and cost (owner: orchestrator; code by sub-agents)
 
-- [ ] 🔄 **Task 4.1**: Measure disk/log growth on the server; add rotation where it is unbounded.
+- [ ] 🚫 **Task 4.1**: Measure disk/log growth on the server; add rotation where it is unbounded.
+  - **Waiting on the owner or IaC to apply** `"cleanupPeriodDays": 14` in `~/.claude/settings.json`, as recommended in
+    item 8 of [OWNER-QUESTIONS-261011-B.md](../00474-niggles-ledger-seventeen/OWNER-QUESTIONS-261011-B.md)
+    (coordinator decision, not an owner ruling). Claude Code's own default of 30 days bounds the store meanwhile.
   - Measured ([report](subagent-reports/261009-task-4.1-growth-sonnet.md)). Every daemon-written store is bounded
     except those below.
   - **Claude Code transcripts** (`~/.claude/projects/<project>/`, 2.9 GB, sub-agent transcripts 2.3 GB) are Claude
@@ -140,7 +152,9 @@ Evidence, with verified facts marked apart from inferences, is in
   - It parses the worktree listing separately from `worktree_reaping`, so the two can give different verdicts. Share one parser.
   - Validate `stale_worktree_days` (int ≥ 1); put one deadline across the scan's git calls; pass the CLI path in rather than a literal; revisit the `base_branch` default.
   - Done: `paths.pid_path_for` (shared with `get_pid_path`, no mkdir), one `git_repo.parse_worktree_porcelain`, `stale_worktree_days` setter validation, `ScanDeadline` budget with an INCOMPLETE report line, unset `base_branch` uses `git_sync.default_branch`. The report holds no CLI-path literal, so that item needed no change.
-- [ ] ⬜ **Task 4.4**: Keep the prompt cache warm. The owner's intent is that the cache never expires in an always-on session. The design and the arithmetic belong to [Plan 00452](../00452-prompt-cache-observability-and-invalidation-protection/PLAN.md) Tasks 4.1–4.3. That plan rejected a fixed-interval warming cron, because warming loses when the probability of a next event is low. Its warming work is blocked on Task 2.4, which needs real idle-gap profiles.
+- [x] ✅ **Task 4.4**: Keep the prompt cache warm. This plan's part is done (decision 2 of
+  [OWNER-QUESTIONS-261011-B.md](../00474-niggles-ledger-seventeen/OWNER-QUESTIONS-261011-B.md), a coordinator decision):
+  the gap profile was collected, and the warming work stays with Plan 00452, blocked on its Task 2.4. The owner's intent is that the cache never expires in an always-on session. The design and the arithmetic belong to [Plan 00452](../00452-prompt-cache-observability-and-invalidation-protection/PLAN.md) Tasks 4.1–4.3. That plan rejected a fixed-interval warming cron, because warming loses when the probability of a next event is low. Its warming work is blocked on Task 2.4, which needs real idle-gap profiles.
   - This task feeds 00452. Collect this always-on session's gap profile, which unblocks 00452 Task 2.4.
   - **Collected** ([report](subagent-reports/261010-task-4.4-gap-profile-sonnet.md)): 4 main sessions, 2026-09-15
     to 2026-10-10, 24,075 gaps. p50 6.5 s, p95 326 s, p99 1,764 s; 5.24% over 5 minutes; 17 over 60 minutes,
@@ -150,7 +164,12 @@ Evidence, with verified facts marked apart from inferences, is in
     Dropped ticks could not be counted: the verdict log's rule field is empty for the cron and usage-pause
     handlers (ledger N393).
   - Note for 00452: the declared crons at :23 and :47 already keep gaps under 60 minutes. But the daemon DROPS ticks when the session is blocked on a human or has backed off (R-FAILSAFE-CRON-SUPPRESSED, R-FAILSAFE-CRON-BACKED-OFF), which is exactly when the cache goes cold. So the warming decision must account for suppressed ticks.
-- [ ] ⬜ **Task 4.3**: A/B the orchestrator: Sonnet main loop vs Opus, Opus sub-agents with pinned `model:` and structured verdict files; compare cost per tick, guard denies, and triage/verdict errors. Owner decides from the record.
+- [x] ❌ **Task 4.3**: A/B the orchestrator: Sonnet main loop vs Opus, Opus sub-agents with pinned `model:` and structured verdict files; compare cost per tick, guard denies, and triage/verdict errors. **DECLINED** (decision 1 of
+  [OWNER-QUESTIONS-261011-B.md](../00474-niggles-ledger-seventeen/OWNER-QUESTIONS-261011-B.md), a coordinator decision
+  under the "clear winner" guidance, not an owner ruling). A fair comparison needs days of matched running on a quiet
+  host with usage headroom; the dev host is too loaded and the account hit its hard limit on 2026-10-08, so the record
+  would be noise. Model choice also lives in Claude Code's settings and the per-agent `model:` pins. Reopens only if
+  quiet capacity appears.
 
 ### Phase 5: A human block must not halt everything (owner request)
 
@@ -215,7 +234,7 @@ waited on one bandit decision.
 - [ ] Total cron expiry is recovered by the supervisor watchdog, proven by test.
 - [ ] After a simulated usage-limit stop, the session re-dispatches queued work from the queue file alone.
 - [ ] A teammate stop cannot silence the lead's ticks, proven by test.
-- [ ] The orchestrator model decision cites the Phase 4 measurements.
+- [x] The orchestrator model decision: the experiment is declined (Task 4.3), so no model is chosen from a measured comparison.
 
 ## Delivery & Milestones
 

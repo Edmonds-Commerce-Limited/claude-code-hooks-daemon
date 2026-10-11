@@ -94,6 +94,49 @@ Defences with their defect classes, and `hooks-daemon explain-rule <ID>` names
 the method and says which of the two a rule is. It is a method for catching
 careless mistakes, not a claim to stop a hostile agent or prompt injection.
 
+#### Conformance declaration
+
+This is the project's declaration against the Defence Before Fix
+[toolchain specification](https://defence-before-fix.github.io), at method
+version 1.1.0. The two levels are declared separately: the **project** level is
+this repository's own assembled toolchain (the daemon plus `scripts/qa`), and the
+**artefact** level is the daemon as installed into a consuming project. Only the
+`toolchain` declaration is made; the project does not declare a `detector`
+conformance. The clause-by-clause grading, with evidence, is in
+[CONFORMANCE.md](CLAUDE/Plan/00484-dbf-adoption-and-toolchain-conformance/CONFORMANCE.md).
+A conformance claim does not verify that a recorded exception reason is true.
+
+```toml
+[tool.defence-before-fix]
+method = "1.1.0"
+
+[tool.defence-before-fix.project]
+toolchain = "0.2.0"
+known-gaps = [
+  "TOOLING 4.1 / DETECTOR 5.2: a bundled content handler cannot be run over an existing file or tree (the `scan <handler> <paths>` mode of G11 is not built; `hooks-daemon probe --only <handler>` runs one handler over a supplied payload), and only a few scripts/qa checkers judge a single file (--path FILE).",
+  "TOOLING 4.2 / 5.3 / DETECTOR 6.1: the bespoke Semgrep rule IDs (scripts/qa/semgrep/) resolve through neither llm_qa.py --explain nor explain-rule, and appear in no listing. The text of the scripts/qa fixes was reviewed by hand and is not mechanically tied to the checkers.",
+  "TOOLING 4.3: the in-band MUST_*_BECAUSE hatches and the reasoned inline directives (nosec, pragma: no cover, shellcheck disable) are kept by design, not forbidden. They require a specific reason but are never written to the project record, and no baseline file exists.",
+  "TOOLING 4.4: llm_qa.py has no single-file or tree subset, and names only the first findings of a failing tool.",
+  "TOOLING 5.1 / 5.2: explain-rule --list is derived from installed code, not the active configuration; hooks-daemon defences and HOOKS-DAEMON.md skip the enable_tags / disable_tags gates; the scripts/qa checkers that are not Defences have no row.",
+  "TOOLING 6.1 / 6.3: the scripts/qa exception files are named by a constant in src/, not by .claude/hooks-daemon.yaml; hooks-daemon exceptions does not list inline directives or exemption constants hard-coded in scripts.",
+  "TOOLING 6.2: enabled: false and mode: warn carry no reason field, and a reason on exclude_paths / extra_whitelist is optional until the next major release.",
+]
+notes = [
+  "ruff, pyright and shellcheck run as checks; no Defence is routed through them (TOOLING 4.1 point 3).",
+  "Hook-time defences are guardrails for a careless agent, not a guarantee against a hostile one. The hook layer does not fail open in general: on an installed project, PreToolUse denies every call except the daemon recovery command when the daemon cannot be reached, and Stop and SubagentStop block. It fails open only in named setup states: CI enforcement, repository not configured, venv missing, not installed, version mismatch.",
+]
+
+[tool.defence-before-fix.artefact]
+toolchain = "0.2.0"
+known-gaps = [
+  "TOOLING 4.1 / 4.4 / DETECTOR 5.2: a bundled content handler (qa_suppression, error_hiding_blocker, security_antipattern) cannot be run over an existing file or tree; hooks-daemon probe --only runs one handler over a supplied payload only.",
+  "TOOLING 4.3: the in-band MUST_*_BECAUSE hatches are kept by design. They require a specific reason, and are never written to the project record.",
+  "TOOLING 5.1 / 5.2 / 5.3: explain-rule --list is derived from installed code, not the active configuration, and hooks-daemon defences inherits the enable_tags / disable_tags skip of the docs generator.",
+  "TOOLING 6.2: enabled: false and mode: warn carry no reason field, and a reason on exclude_paths / extra_whitelist is optional until the next major release.",
+  "TOOLING 6.3: hooks-daemon exceptions does not list inline directives or exemption constants hard-coded in scripts.",
+]
+```
+
 ---
 
 ## Where this came from

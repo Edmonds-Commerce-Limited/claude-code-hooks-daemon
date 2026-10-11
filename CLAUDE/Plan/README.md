@@ -6,8 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00501: session modes](00501-session-modes/PLAN.md) - Not Started, Medium (#91; first-class per-session modes shown in the status line: focus (`hooks-daemon focus <task>`), BLOCKED (awaiting-human, goal-blocked loop breaker), usage-paused; per-session awaiting-human storage; guards never gated)
 
-- [00500: full qa timing and speed](00500-full-qa-timing-and-speed/PLAN.md) - Blocked on the owner ([owner questions](00474-niggles-ledger-seventeen/OWNER-QUESTIONS-261011.md)), High (owner request: the full QA gate is too slow and restarts from the top after every reboot; record per-step and per-test timing, find the hot spots, add checkpoints so an interrupted gate resumes, then speed it up)
-
 - [00496: upstream feature requests and issue kinds](00496-upstream-feature-requests-and-issue-kinds/PLAN.md) - Not Started (owner request: a formal process for project agents to file feature requests and other non-defect issues, mirroring the defect generator, guard and forms; security reports routed privately)
 
 - [00495: performance improvement programme](00495-performance-improvement-programme/PLAN.md) - In Progress (owner report: daemon startup and the status bar at session start got much slower; profile current main against earlier releases, fix the ranked causes, add a regression guard, and re-answer the Rust question from new numbers)
@@ -195,6 +193,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00500: full qa timing and speed](Completed/00500-full-qa-timing-and-speed/PLAN.md) - Complete at merge `c02cf9838` + the archiving commit (owner request: per-step timing, a resumable and sharded gate, and the measured hot spots cut; total wall-clock deferred to the Actions runs, #107)
+
 - [00483: threat model conformance audit](Completed/00483-threat-model-conformance-audit/PLAN.md) - Complete at batch (c) `4981618fc` + the Task 3.2 re-probe `8e84e6b76` + the archiving commit (owner ruling: the daemon is guardrails, not armour; every guard, open ledger entry and uncovered corpus row checked against the careless-not-hostile threat model, the out-of-scope ones dismissed on record, the rest narrowed or filed as 00474 N400-N409)
 
 - [00499: write-protected paths, and the ccy.env.local.dist template](Completed/00499-write-protected-paths-and-ccy-env-local-dist/PLAN.md) - Complete at Phase 1b merge `64823600a` + the archiving commit (owner rulings: `ccy.env.local` is IaC-written only; an opt-in `write_protected_paths` guard denies every Write/Edit/Bash route onto a listed path, live-probed; the dist template was cancelled because ccy writes it)
@@ -253,8 +253,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00442: host name ladder falls through](Completed/00442-host-name-ladder-falls-through/PLAN.md) - Complete at `9acb1684` + the archiving commit (from 00422 N5 row (e): the documented "ladder, first hit wins" stopped at rung 2 when `gethostname()` cleaned to nothing — and the suite already asserted the fall-through principle for a rung where it could never be exercised)
 
-- [00441: the two link resolvers agree](Completed/00441-the-two-link-resolvers-agree/PLAN.md) - Complete at `c607a6d6` + the archiving commit (from 00422 N5 rows (j)(k)(l): one finding per link instead of per occurrence at all three stages, one shared literal-resolution rule instead of two copies, and a relocation message that no longer calls a plan archived when the resolver deliberately found it in the LIVE root)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -308,9 +306,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 502 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 426 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 427 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 53 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 52 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

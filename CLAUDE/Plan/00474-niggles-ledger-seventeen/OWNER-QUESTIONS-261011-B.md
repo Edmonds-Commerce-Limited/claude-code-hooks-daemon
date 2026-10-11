@@ -10,24 +10,26 @@ Of the nine items, six are decided by the coordinator, three are yours to apply,
 
 **1. The model experiment (Plan 00470, "always-on session", Task 4.3): dropped, not run.**
 The plan proposed running the coordinator session for a while on Sonnet and for a while on Opus, with Opus sub-agents,
-and comparing cost per hour, guard blocks and wrong verdicts, for you to pick from the record. Decision: do not run it.
+and comparing cost per tick, guard denies and triage or verdict errors, for you to pick from the record. Decision: do not run it.
 A fair comparison needs days of matched running on a quiet host with usage headroom; today you ruled the dev host is
-too loaded for the full suite, and on 2026-10-08 the account hit its hard limit (three agents died on it), so the
+too loaded for the full suite, and on 2026-10-09 the account hit its hard limit (three agents died on it), so the
 record would be noise.
 Model choice also lives in Claude Code's own settings and the per-agent `model:` pins, which already exist and are not
 to be fought. Next: the task is closed as declined, with this reason, and reopens only if quiet capacity appears.
 
 **2. Keeping the prompt cache warm (Plan 00470 Task 4.4, feeding Plan 00452): this plan's part is complete.**
-The task was to collect this always-on session's idle-gap profile. Collected (24,075 gaps over four weeks). The rest
+The task was to collect this always-on session's idle-gap profile. Collected (24,075 gaps over 25 days, 2026-09-15 to 2026-10-10). The rest
 of the warming work belongs to Plan 00452, which still needs a gap profile from a project paced by a person, because
 this one is paced by crons. Next: Task 4.4 is marked done in 00470 and 00452 stays blocked on its Task 2.4, with one
 optional action for you in the "Owner to apply" section below.
 
 **3. A usage backstop under your override (Plan 00479, "usage monitor", open question 5, blocking Task 6.2).**
 Background: when usage nears the subscription limit the daemon pauses the session; you can override the pause with
-`usage-pause clear`. On 2026-10-08 that override hid a climb from 80% to 100% and three agents died on the hard
-limit. The question was whether anything may pause the session through your override. Today you separately ruled a
-95% single-thread cutoff that blocks sub-agent spawns (issue #104). That answers it: the cutoff is the backstop.
+`usage-pause clear`. An override written on 2026-10-08 hid a climb from 80% to 100%, and three agents died on the
+hard limit from about 22:30 UTC on 2026-10-09. The question was whether anything may pause the session through your
+override. Today you separately asked for a 95% single-thread cutoff that blocks sub-agent spawns (issue #104, filed
+for later and not yet designed). The coordinator reads that as the answer: the cutoff is the backstop. That reading
+is the coordinator's, not yours, and #104 lists override handling as an open design point.
 Decision: the override keeps meaning "do not pause me", and the 95% cutoff applies even under an override, so past
 95% the main thread keeps working alone and no new sub-agent can be started to die on the hard limit. No full pause
 is added under an override. Next: Task 6.2 is built as "the #104 cutoff ignores the override", plus its two small
@@ -37,9 +39,10 @@ tick rather than trusting the one it was written with.
 
 **4. The conformance gap calls (Plan 00484, "DBF conformance", success criterion 3 and Task 3.3).**
 Background: the project's own conformance audit found sixteen gaps against the Defence Before Fix specification.
-Five of them (you ruled on 2026-10-05) are closed as you said. The rest were closed by the coordinator's calls:
-eight simply fixed through the ledger, G3 fixed, G10 confirmed, G14 reworded to what the code does, G16 graded at
-both levels, and one piece of G11 (`probe --only`) deferred to a follow-up plan. You said today that the deliberate
+Three of them (G1, G2 and G4) were among your rulings of 2026-10-05 and are closed as you said. The rest were closed
+by the coordinator's calls: eight simply fixed through the ledger, G3 fixed, G10 confirmed, G14 reworded to what the
+code does, G16 graded at both levels, and G11 done except its tree-sweep `scan` mode, which is deferred to a
+follow-up plan (`probe --only` is already done). You said today that the deliberate
 limits recorded on the coordinator's judgement are "fine". The same reasoning extends here: every call is a closure
 or a correction, where fixing is the default and no gap is being accepted or declared out of scope on your behalf.
 The only deferred piece (G11) will be listed in the declaration as a known gap. Decision: the calls stand, success
@@ -67,7 +70,7 @@ assumed from the fedora-desktop setup but unconfirmed on this host. Recommended,
 
 - a systemd unit (or shell loop) around ccy with `Restart=always` and a back-off (`RestartSec=30` or more), that
   passes `--continue` on every restart after the first, so crons and context resume;
-- `HOOKS_DAEMON_HOSTNAME=cchd-sdlc-runner` in that unit's environment for the SDLC runner session, so its declared
+- `HOOKS_DAEMON_HOSTNAME=github-softwaredev-lifecycle-unattended` (your 2026-10-09 rename, the name the `issue-sdlc` job's host filter matches) in that unit's environment for the SDLC runner session, so its declared
   jobs are selected by host;
 - `autoContinueAtUsageLimit: true` in the host's **user** settings (`~/.claude/settings.json`), which Claude Code
   requires there (a project file can only turn it off) and needs v2.1.234 or later.
