@@ -4217,10 +4217,9 @@ class _CallRanker:
                         self._aliases[alias.asname] = alias.name
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 self._functions.add(node.name)
-                is_function = not isinstance(node, ast.ClassDef)
-                if klass is not None and is_function:
+                if klass is not None and not isinstance(node, ast.ClassDef):
                     members.setdefault(klass, set()).add(node.name)
-                if is_function:
+                if not isinstance(node, ast.ClassDef):
                     # Only a function that is not a method can be told apart by name.
                     inner = _Scope(node.name if klass is None else None, node.args, scope)
                     definitions.setdefault(node.name, []).append(inner if klass is None else None)
