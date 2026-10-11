@@ -4009,7 +4009,12 @@ def _files_run_in_process(code: str) -> list[str]:
     try:
         tree, _ = _parsed_reach(code)
     except (SyntaxError, ValueError, RecursionError) as error:
-        logger.debug("No file read from unparsable Python (%s)", error)
+        log_and_continue(
+            logger,
+            error,
+            reason="unparsable Python names no file to run in-process; its quoted literals are still judged by the literal fallback, so nothing is allowed on this path",
+            level=logging.DEBUG,
+        )
         return []
     names = _constant_names(tree)
     opened = _opened_files(tree)
