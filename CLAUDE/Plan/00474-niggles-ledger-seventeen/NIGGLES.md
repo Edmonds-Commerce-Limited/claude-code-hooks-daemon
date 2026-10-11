@@ -1563,18 +1563,34 @@ an absolute path instead). The code joins every target against the payload `cwd`
 also corrects N338's "follows only the first `cd`"; same root cause as N28. Path judgement elsewhere
 (`landing_directories`, N299) already follows `cd`.
 
-**Status**: 🟢 Fixed on branch `agent-ad9ffaba8e0cf3c94-0ef7ac7a`. `simple_commands` now keeps each command's
+**Status**: ✅ Fixed by batch J (merged in 8db7b9d78). `simple_commands` now keeps each command's
 file-writing redirections beside the `cd` chain it runs in; `project_containment` reads every step of a command that
 contains a `cd`/`pushd` from the directories `landing_directories` gives it (a chain that may not have taken effect
 is read both ways, a subshell's `cd` ends with it), after `placed_moves` (new, in `git_invocation_directory`, sharing
 `expand_cwd_references` with the commit gates) reads `$PWD`, `$(pwd)` and `$(git rev-parse --show-toplevel)` in the
 directory reached so far. A chain that cannot be placed (`cd "$UNKNOWN"`) leaves that step's relative targets
-unresolved: under Plan 00483 A1 that is an ALLOW with an advisory, not a deny, as every other unknown target. A
+unresolved: under Plan 00483 A1 (ratified by the owner as B5, "A guard denies only on a positive finding") that is an
+ALLOW with an advisory, not a deny, as every other unknown target. A
 command with no `cd`, or no absolute hook cwd, is read as before. Pinned by
 `TestARedirectIsJudgedWhereTheChainsCdLandsIt` (`test_project_containment.py`), `TestPlacedMoves`
 (`test_git_invocation_directory.py`), `TestSimpleCommandsKeepTheirFileRedirections` (`test_git_commit_parsing.py`) and
 gate rows `n403-*`. Settles N338 once merged. Note: `cd sub; cmd > ../x` (`;`, not `&&`) is still denied, because the
 `cd` may fail and leave the command where it started.
+
+Residual, from the batch J review (`untracked/agent-reports/auto/261011-045019-code-reviewer-a7356ded644388004.md`),
+none a regression against main:
+
+- `D=/tmp; cd $D && echo x > x` writes outside the repository but draws only the unplaceable-`cd` advisory; an
+  earlier assignment is not substituted into the `cd` step before `placed_moves` (`project_containment.py` ~605).
+- A redirect on a `{ … }` or `if … fi` group is judged from inside the group, so `{ cd /tmp && make; } > x` is denied
+  though `x` lands in the repository (a false deny only). Remedy: give a group's redirects the directory in effect
+  before it opened.
+- A process substitution target after a `cd` (`cd /tmp && echo hi > >(cat)`) is read as a file name and denied.
+  Remedy: skip `>(`/`<(` targets in `_write_redirects`.
+- `command cd /tmp` is not read as a move (`_after_directory_change` strips `builtin`, not `command`); the git gates
+  share the gap.
+- Test data at `test_git_commit_parsing.py` ~624-638 writes operators with a trailing space and strips it in the
+  assertion; write them plainly.
 
 ### N402 — the conflict-marker commit gate denies `cd "$(git rev-parse --show-toplevel)" && git commit`
 
