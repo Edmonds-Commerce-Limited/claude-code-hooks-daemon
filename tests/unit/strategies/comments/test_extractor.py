@@ -121,18 +121,60 @@ class TestBlockComments:
         assert spans[0].end_line == 3
         assert spans[0].line_count == 4
 
-    def test_unterminated_block_comment_closes_at_eof(self) -> None:
-        content = "/* never closes\nmore text\n"
-        spans = extract_comment_spans(content, SLASH_SYNTAX)
-        assert len(spans) == 1
-        assert spans[0].end_line == 1
-
     def test_line_comment_after_block_comment_is_separate(self) -> None:
         content = "/* block */\n// line\n"
         spans = extract_comment_spans(content, SLASH_SYNTAX)
         assert len(spans) == 2
         assert spans[0].is_doc is False
         assert spans[1].text == "// line"
+
+
+class TestUnterminatedOpeners:
+    """An opener with no closer later in the content is not a comment span (GitHub #75)."""
+
+    def test_unterminated_block_opener_yields_no_span(self) -> None:
+        assert extract_comment_spans("/* never closes\nmore text\n", SLASH_SYNTAX) == []
+
+    def test_unterminated_doc_opener_yields_no_span(self) -> None:
+        assert extract_comment_spans("/** never closes\nmore text\n", SLASH_DOC_SYNTAX) == []
+
+    def test_unterminated_python_docstring_opener_yields_no_span(self) -> None:
+        assert extract_comment_spans('"""never closes\nx = 1\n', PYTHON_SYNTAX) == []
+
+    def test_opener_inside_a_string_does_not_swallow_the_following_code(self) -> None:
+        glob_literal = 'let p = "src' + "/" + '*.rs";'
+        lines = ["fn main() {", f"    {glob_literal}", "}"]
+        lines += [f"fn f{n}() {{}}" for n in range(40)]
+        assert extract_comment_spans("\n".join(lines) + "\n", SLASH_SYNTAX) == []
+
+    def test_scanning_resumes_on_the_next_line_as_code(self) -> None:
+        opener = 'let p = "a' + "/" + '*b";'
+        content = f"{opener}\n// real comment\nx = 1\n"
+        spans = extract_comment_spans(content, SLASH_SYNTAX)
+        assert [span.text for span in spans] == ["// real comment"]
+        assert spans[0].start_line == 1
+
+    def test_terminated_comment_later_is_still_extracted(self) -> None:
+        opener = 'let p = "a' + "/" + '*b";'
+        content = f"{opener}\n// line comment\n"
+        spans = extract_comment_spans(content, SLASH_SYNTAX)
+        assert len(spans) == 1
+        assert spans[0].text == "// line comment"
+
+    def test_closer_on_a_later_line_makes_it_a_comment_as_before(self) -> None:
+        # A marker in a string that IS bounded by a later closer is still read as a
+        # comment: the documented, accepted limitation.
+        content = 'let p = "a' + "/" + '*b";\nlet q = 1;\n*/\n'
+        spans = extract_comment_spans(content, SLASH_SYNTAX)
+        assert len(spans) == 1
+        assert spans[0].start_line == 0
+        assert spans[0].end_line == 2
+
+    def test_terminated_multi_line_block_comment_is_unchanged(self) -> None:
+        content = "/*\n * one\n * two\n */\ncode();\n"
+        spans = extract_comment_spans(content, SLASH_SYNTAX)
+        assert [(s.start_line, s.end_line) for s in spans] == [(0, 3)]
+        assert spans[0].text == "/*\n * one\n * two\n */"
 
 
 class TestDocComments:

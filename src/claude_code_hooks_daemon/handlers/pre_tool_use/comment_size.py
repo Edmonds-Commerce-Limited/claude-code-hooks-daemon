@@ -434,6 +434,13 @@ class CommentSizeHandler(PreToolUseHandlerBase):
             "or `n/a`, is not a reason and the block still applies.\n\n"
             "**Docstrings and JSDoc are API documentation, not comments** — exempt "
             "from this handler entirely (still subject to `comment_changelog`).\n\n"
+            "**Comments are found by text scanning, not a language parser.** A comment "
+            "marker inside a string literal can be misread as a comment. A block opener "
+            "(`/*`) with no closer later in the content is not a comment, so a glob such "
+            'as `"src/*.rs"` cannot swallow the rest of the file; one whose closer does '
+            "appear later is still read as a comment up to that closer. An `Edit` is "
+            "judged on its `new_string` alone, so an opener whose closer lies outside it "
+            "is not counted.\n\n"
             "**Excluded paths**: vendor/build/fixture dirs are skipped by default. "
             "Exempt more paths via "
             "`handlers.pre_tool_use.comment_size.options.exclude_paths` or the "

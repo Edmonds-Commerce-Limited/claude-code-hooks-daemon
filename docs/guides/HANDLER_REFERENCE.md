@@ -1500,6 +1500,13 @@ counts as growth since there is nothing to compare against).
 **Docstrings and JSDoc are API documentation, not comments** — exempt from
 this handler entirely (still subject to `comment_changelog`).
 
+**Comments are found by text scanning, not a language parser.** A comment
+marker inside a string literal can be misread as a comment. A block opener
+(`/*`) with no closer later in the content is not a comment, so a glob such as
+`"src/*.rs"` cannot swallow the rest of the file; one whose closer does appear
+later is still read as a comment up to that closer. An `Edit` is judged on its
+`new_string` alone, so an opener whose closer lies outside it is not counted.
+
 **Escape hatch** (in-content, matching the daemon's `MUST_..._BECAUSE`
 convention):
 
