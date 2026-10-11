@@ -4,9 +4,9 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 
 | #          | Verdict                                                                                                                               | Origin              | Status                              |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------------------- |
-| N423       | Unrequested `/goal clear`: the designed retraction (all goal plans Blocked); a latent plan-root bug fixed alongside                   | Owner report        | 🔄 In review (batch AO)             |
-| N422       | Main is red: two `tests/unit/config` invariants fail (handler options read by hand; `AGENT_ID_EVENTS` short of 3 events)              | Coordinator         | 🔄 In review (batch AO)             |
-| N421       | The upgrade-approval guard denies a plain pytest run with `PYTHONPATH` and a `$(...)` interpreter (B5)                                | Coordinator         | 🔄 In review (batch AO)             |
+| N423       | Unrequested `/goal clear`: the designed retraction (all goal plans Blocked); a latent plan-root bug fixed alongside                   | Owner report        | ✅ Closed: by design; latent fix (AO) |
+| N422       | Main is red: two `tests/unit/config` invariants fail (handler options read by hand; `AGENT_ID_EVENTS` short of 3 events)              | Coordinator         | ✅ Fixed (batch AO)                 |
+| N421       | The upgrade-approval guard denies a plain pytest run with `PYTHONPATH` and a `$(...)` interpreter (B5)                                | Coordinator         | ✅ Fixed (batch AO)                 |
 | N420       | ARCHITECTURE.md says the hook layer fails open when the daemon does not answer; the README says it does not in general                | Fact-check          | ✅ Fixed (ARCHITECTURE.md)          |
 | N419       | `subagent_full_qa_blocker` judges an unknown program by flag shape alone (`ps -e`, `docker run -e`); GitHub Issue #69                 | Issue #69 triage    | 🔄 Ruled B (batch AL)               |
 | N418       | A helper that calls its own parameter ranks every call through it as may-run, whatever the call site passes                           | Batch AG review     | ✅ Fixed (batch AH); 🚫 limits      |

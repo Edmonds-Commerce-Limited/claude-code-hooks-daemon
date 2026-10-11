@@ -99,7 +99,7 @@ reading `Completed/` as the plan root. That bug is real in the code, but it is u
 should turn automated goals off. Today the supervisor's clear is the bare literal `/goal clear`, with nothing marking it as
 the supervisor's.
 
-**Status**: 🔄 Latent plan-root bug fixed on branch `worktree-batch-ao` (cfb642cb6), in review. Telling a supervisor
+**Status**: ✅ Closed. The incident was the designed retraction. The latent plan-root bug was fixed in batch AO (merge c777978d4). Telling a supervisor
 `/goal clear` from a human one is GitHub Issue #106.
 
 ### N422 — main is red: two `tests/unit/config` invariants fail on main
@@ -116,8 +116,9 @@ batch did not cause them.
 - `test_every_contract_declaring_agent_id_is_in_the_set`: the shipped contracts for `TeammateIdle`, `TaskCreated` and
   `TaskCompleted` declare `agent_id`, but `AGENT_ID_EVENTS` (`constants/events.py`) does not list them.
 
-**Status**: ⬜ Open, queued for batch AO. Fix the code, never the invariant. Check whether adding the three events to
-`AGENT_ID_EVENTS` changes any scope verdict.
+**Status**: ✅ Fixed (batch AO, merge c777978d4). `effective_handlers.py` reads through `handler_options`.
+`AGENT_ID_EVENTS` lives in `core/handler_scope.py`, not `constants/events.py`. It now lists the three events, whose
+contracts do declare `agent_id`. The default scope is still `ALL`, so no existing verdict changes. Both invariants pass.
 
 ### N421 — the upgrade-approval guard denies a plain pytest run that sets `PYTHONPATH`
 
@@ -129,9 +130,16 @@ The same shape with a literal interpreter path ran unblocked. So the trigger loo
 program word with a `PYTHON*` assignment: the guard appears to treat a program it cannot read as possibly the
 upgrade. That breaks owner ruling B5, under which a guard denies only on a positive finding.
 
-**Status**: ⬜ Open, queued for batch AO. Reproduce it red with `bin/hooks-daemon probe`, find the branch, and make the
-unreadable-program case need upgrade evidence (an upgrade argument or the clone path), as the deny text itself
-describes.
+**Status**: ✅ Fixed (batch AO, merge c777978d4).
+
+- **Cause:** shlex split the `$(...)` program, and the unreadable remainder counted as the upgrade because `PYTHONPATH`
+  steers.
+- **Fix:** a leading `$(...)` or backtick program word is rejoined. Its inner command is checked for the upgrade, then
+  it is judged like a `$PY` program, by its `-m` module.
+- **Tests:** 5 allowed shapes and 13 still-denied shapes.
+- **Review:** probed about 50 shapes and found no new bypass. `-m <any module>` and `-c` match the existing `$PY`
+  design, which is a hostile-only note under the threat model.
+- **Release note:** 021.
 
 ### N420 — ARCHITECTURE.md and README disagree on whether the hook layer fails open
 
