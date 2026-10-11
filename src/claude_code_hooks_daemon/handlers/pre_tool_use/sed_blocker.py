@@ -20,12 +20,14 @@ from claude_code_hooks_daemon.core.utils import (
     get_file_path,
     scan_bash_write_destinations,
 )
-from claude_code_hooks_daemon.utils.command_evasion import RESERVED_WORD_PREFIX
+from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION, RESERVED_WORD_PREFIX
 from claude_code_hooks_daemon.utils.command_position import SEGMENT_SEPARATORS
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 from claude_code_hooks_daemon.utils.shell_segmentation import (
+    UnplaceableSubstitutionError,
     split_unquoted_spans,
     strip_quoted_heredoc_bodies,
+    substitution_inner_spans,
 )
 
 #: Acceptance subdirectory for this handler's acceptance-test fixtures.
@@ -125,7 +127,9 @@ _SED_VIA_XARGS = re.compile(
     re.IGNORECASE,
 )
 
-_GIT_COMMIT = re.compile(r"\bgit\s+commit\b")
+# The commit subcommand after any run of git global options (`-C <dir>`,
+# `-c k=v`, `--git-dir=...`), by the shared invocation pattern.
+_GIT_COMMIT = re.compile(GIT_INVOCATION + r"commit\b")
 
 
 class SedBlockerHandler(PreToolUseHandlerBase):
@@ -252,6 +256,19 @@ class SedBlockerHandler(PreToolUseHandlerBase):
         if _GIT_COMMIT.search(text) is None:
             return False
         segments = split_unquoted_spans(text, SEGMENT_SEPARATORS)
+        # A sed inside `$( )`, backticks or `<( )` is RUN by bash while the
+        # message is built, so it is no mention. A span that cannot be placed
+        # relaxes nothing.
+        try:
+            executed_spans = substitution_inner_spans(text)
+        except UnplaceableSubstitutionError:
+            return False
+        # The span is a command of its own, so a quoted heredoc fed to a data
+        # sink inside it (the `-m "$(cat <<'EOF' ... EOF)"` idiom) is blanked
+        # there, where it is top level; a body bash RUNS is kept and found.
+        for start, end in executed_spans:
+            if self._sed_pattern.search(strip_quoted_heredoc_bodies(text[start:end])):
+                return False
         for sed_match in self._sed_pattern.finditer(text):
             sed_pos = sed_match.start()
             segment_start = next(start for start, end in segments if start <= sed_pos <= end)
@@ -480,7 +497,8 @@ class SedBlockerHandler(PreToolUseHandlerBase):
             "`-i` differ by one character. `Read` with `offset`/`limit` does the same "
             "job, as does `awk 'NR>=1 && NR<=20' file`.\n"
             "2. A `git commit` message mentioning sed (sed must follow `git commit` with "
-            "no command separator between).\n"
+            "no command separator between; git's own global options such as "
+            "`git -C <dir> commit` are fine).\n"
             "3. A `gh` issue/PR/release body mentioning sed (same separator rule).\n"
             "4. The command contains a `grep`, or an `echo` that does not itself carry a "
             "`sed 's/…'` substitution.\n"

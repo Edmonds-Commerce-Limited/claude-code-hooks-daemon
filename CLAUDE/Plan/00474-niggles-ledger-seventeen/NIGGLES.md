@@ -46,6 +46,14 @@ coordinator); none is an owner ruling. The command-shaped ones have a
 - **N222** — the guard half is changed, not removed: `SCAN_DEADLINE_SECONDS` is still used at `secret_file_guard.py` lines 1403 and 1616, but A1 (merge dc5c9263b) made the timeout outcome allow with an advisory instead of deny. What remains is the test half: about 15 tests that assert wall-clock bounds and fail on a loaded host. Remedy: switch them to the load-scaled helper N95 already uses.
 - **N260** — the `sys.path` half is fixed (257847b51). Still open, direction corrected: `.github/workflows/qa.yml` (line 498) passes only `--import-mode=importlib`, while the local runner (`daemon/cli.py`, lines 6384-6396) passes that plus `-p no:claude_code_hooks_daemon.qa.full_qa_gate`. CI therefore loads the full-QA gate plugin and the local run does not, so a run can be green locally and red on CI.
 
+**N42 (batch C, branch `agent-a212b0493fe461dab-aedeff9c`)** — fixed by earlier work; all shapes now verified. Nine
+shapes (the seven in the entry, with its `<<-` and `git commit -F -` forms, and an unquoted-then-quoted same-line
+opener) are each run in real bash, which executes the line after the fake body, and judged through the real chain:
+`destructive_git`, `pipe_blocker` and `curl_pipe_shell` all deny. Real quoted bodies stay allowed. Tests in
+`tests/unit/handlers/pre_tool_use/test_heredoc_blanking_n42_shapes.py` (42 cases); three corpus rows
+(`heredoc-empty-body-runs-next-line`, `heredoc-here-string-is-no-opener`, `heredoc-opener-in-comment-is-no-opener`)
+are `COVERED` in `scripts/qa/dangerous-invocation-corpus.yaml`. No source change was needed.
+
 **Fixed, not yet marked in the 00466 index:** N170, N130 and N136 (statuses corrected in CARRIED-REFIX-BRANCHES.md, merges 9b2e15be1 and 012915bd9/dc5c9263b); N79 (the ordinary-command corpus is 391 rows now, above the 200 asked).
 
 ### 55 entries carried from the six dropped re-fix branches
@@ -2119,7 +2127,12 @@ same message without the sed word was allowed.
 **Fix**: recognise the commit subcommand after git's global options (`-C <dir>`, `-c k=v`, `--git-dir`,
 `--work-tree`), the way the other git-aware guards parse it. Test both spellings.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed on branch `agent-a212b0493fe461dab-aedeff9c` (merge pending). Reproduced on main for
+`-C` and `-c` spellings. `_GIT_COMMIT` is now `GIT_INVOCATION + "commit\b"` (the shared pattern from
+`utils/command_evasion.py`), so `git -C <dir>`, `-c k=v` and `--git-dir=` all reach the commit subcommand; the
+same-segment rule is untouched. The exemption text in the handler guidance names the global options. Tests in
+`tests/unit/handlers/test_sed_blocker_git_global_options.py`: seven allowed commit spellings and six shapes where an
+executed sed stays denied.
 
 ### N369 — a forwarder integration test fails inside every worktree and passes on main
 
@@ -2245,7 +2258,13 @@ in `tests/unit/handlers/stop/test_auto_continue_stop_stand_in.py`.
 says every pipe is judged on its own producer, and that a pipe inside `$( )` belongs to the command inside it. The
 `bash -c` string should be parsed the same way; instead the whole thing is judged as a pipe from `bash`.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed on branch `agent-a212b0493fe461dab-aedeff9c` (merge pending). Reproduced on main for
+single-quoted `bash -c`/`bash -lc` (a double-quoted body already passed). `_substitution_content_start` in
+`pipe_blocker.py` now opens a frame for a single-quoted program that follows a `sh`/`bash`/`dash`/`zsh`/`ksh` `-c`
+flag cluster, closed by the next single quote, so the pipe is attributed to the command inside the body and a `$( )`
+inside the body is a real substitution frame. The handler guidance says so. Tests in
+`tests/unit/handlers/pre_tool_use/test_pipe_blocker_shell_dash_c.py`: ten cheap bodies allowed, five expensive
+producers blocked and named, a pipe after the closing quote still judged on the wrapper.
 
 ### N362 — deleting a MERGED remote branch is denied; only an unmerged delete should be human-only
 

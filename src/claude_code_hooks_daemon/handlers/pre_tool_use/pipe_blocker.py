@@ -246,6 +246,20 @@ _SINGLE_QUOTE = "'"
 _DOUBLE_QUOTE = '"'
 _BACKSLASH = "\\"
 
+# A single quote that opens the program argument of a shell run with `-c`
+# (`bash -c '`, `sh -lc '`, `zsh -l -c '`): the text before the quote ends with
+# the shell word, optional flags, and a flag cluster carrying `c`.
+_SHELL_STRING_OPENER = "'"
+#
+# The shell word must sit at a COMMAND position: the last command of the text
+# before the quote starts with optional assignments, wrappers (`sudo`, `env`)
+# and a path, then the shell. `echo bash -c '...'` passes the words to echo as
+# data, so it is not a shell program.
+_SHELL_C_BEFORE_QUOTE = re.compile(
+    r"\A(?:\w+=\S*\s+)*(?:(?:\S*/)?(?:sudo|env|exec|command|nohup|time)(?:\s+-\S+(?:\s+\w+)?)*\s+)*"
+    r"(?:\S*/)?(?:ba|da|z|k)?sh\s+(?:-\S+\s+)*-[A-Za-z]*c\s+\Z",
+)
+
 # Returned when the pipe is not inside any substitution: scan from the start
 # of the command, which is the pre-existing top-level behaviour.
 _TOP_LEVEL_CONTENT_START = 0
@@ -604,6 +618,17 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             text = text[: -len(_SUBSTITUTION_CLOSER)].rstrip()
         return text
 
+    @classmethod
+    def _is_shell_c_program(cls, before_quote: str) -> bool:
+        """Does the text before a single quote end in a shell run with `-c`,
+        with the shell at a command position (not an argument to `echo`)?"""
+        last_command = split_unquoted(before_quote, _CHAIN_SEPARATORS)[-1]
+        last_command = split_unquoted(last_command, _PIPE_SEPARATORS)[-1]
+        # Keep the trailing blank the pattern requires; strip only the front.
+        trailing = last_command[len(last_command.rstrip()) :]
+        head = cls._command_inside(last_command.strip()) + trailing
+        return _SHELL_C_BEFORE_QUOTE.search(head) is not None
+
     @staticmethod
     def _substitution_content_start(command: str, pipe_index: int) -> int:
         """Where the INNERMOST command substitution or quoted argument
@@ -633,8 +658,8 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         An unbalanced or exotic construct degrades to a shallower frame (or to
         top level), which is the pre-existing behaviour rather than a crash.
         """
-        # (content_start, opened_by_backtick) for each substitution still open.
-        open_frames: list[tuple[int, bool]] = []
+        # (content_start, opener) for each substitution or shell string still open.
+        open_frames: list[tuple[int, str]] = []
         in_single_quotes = False
         in_double_quotes = False
         quote_content_start: int | None = None
@@ -654,6 +679,19 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
                 continue
 
             if char == _SINGLE_QUOTE and not in_double_quotes:
+                if open_frames and open_frames[-1][1] == _SHELL_STRING_OPENER:
+                    # The closing quote of a `bash -c '...'` body.
+                    open_frames.pop()
+                    index += 1
+                    continue
+                if PipeBlockerHandler._is_shell_c_program(command[:index]):
+                    # `bash -c '...'`: the body is a shell program, so a pipe
+                    # or `$(` inside it is real and belongs to the command
+                    # inside the body, like a substitution (N363). The body
+                    # holds no single quote of its own, so the next one closes it.
+                    open_frames.append((index + 1, _SHELL_STRING_OPENER))
+                    index += 1
+                    continue
                 # Deliberately does NOT set quote_content_start: a single
                 # quote suppresses ALL shell interpretation, including the
                 # pipe itself, so unlike a double-quoted argument there is no
@@ -671,19 +709,23 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
                 continue
 
             if command[index : index + _SUBSTITUTION_OPENER_WIDTH] in _SUBSTITUTION_OPENERS:
-                open_frames.append((index + _SUBSTITUTION_OPENER_WIDTH, False))
+                open_frames.append((index + _SUBSTITUTION_OPENER_WIDTH, _SUBSTITUTION_OPENERS[0]))
                 index += _SUBSTITUTION_OPENER_WIDTH
                 continue
 
             if char == _BACKTICK:
-                if open_frames and open_frames[-1][1]:
+                if open_frames and open_frames[-1][1] == _BACKTICK:
                     open_frames.pop()
                 else:
-                    open_frames.append((index + 1, True))
+                    open_frames.append((index + 1, _BACKTICK))
                 index += 1
                 continue
 
-            if char == _SUBSTITUTION_CLOSER and open_frames and not open_frames[-1][1]:
+            if (
+                char == _SUBSTITUTION_CLOSER
+                and open_frames
+                and open_frames[-1][1] == _SUBSTITUTION_OPENERS[0]
+            ):
                 open_frames.pop()
                 index += 1
                 continue
@@ -1208,6 +1250,10 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             "because `echo` is cheap — the output being thrown away is pytest's. "
             "Nesting and `<( )` behave the same. Whitelisted inner producers are "
             "still fine: `echo $(git log --format=%H | head -1)` is allowed. "
+            "The single-quoted program of `bash -c '...'` (also `sh`, `zsh`, "
+            "`dash`, `ksh`) is read the same way: its pipes are judged on the "
+            "command inside, so `bash -c 'grep x f | sort | tail -n 2'` is allowed "
+            "and `bash -c 'pytest | tail -3'` is blocked on `pytest`. "
             "A `$( )` or backtick inside SINGLE quotes is literal text, so it is "
             "not treated as a substitution. That exemption is about SUBSTITUTION "
             "only — an ordinary single-quoted ARGUMENT containing `| head` is "
