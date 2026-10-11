@@ -507,12 +507,42 @@ class TestUpdateIndexAdd:
         assert _git(repo, "diff", "--cached", "--name-only") == ""
 
     @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ("git update-index --chmod=+x a.txt && git commit -m x", {"a.txt"}),
+            ("git update-index -q --refresh && git commit -m x", set()),
+            ("git update-index --really-refresh && git commit -m x", set()),
+            ("git update-index --assume-unchanged a.txt && git commit -m x", set()),
+            ("git update-index --no-assume-unchanged a.txt && git commit -m x", set()),
+            ("git update-index --skip-worktree a.txt && git commit -m x", set()),
+            ("git update-index --no-skip-worktree a.txt && git commit -m x", set()),
+            ("git update-index --add --info-only leak.txt && git commit -m x", {"leak.txt"}),
+            ("git update-index --index-info && git commit -m x", set()),
+            ("git update-index --add nosuch.txt && git commit -m x", set()),
+            ("git update-index --add nosuch.txt; git commit -m x", set()),
+        ],
+    )
+    def test_an_option_that_stages_no_new_content_does_not_take_the_whole_tree(
+        self, repo: Path, command: str, expected: set[str]
+    ) -> None:
+        with simulated_staging(read_commit_form(command), repo, repo) as env:
+            assert _staged(repo, env) == expected
+
+    def test_cacheinfo_stages_the_named_object_under_the_named_path(self, repo: Path) -> None:
+        blob = _git(repo, "rev-parse", "HEAD:a.txt").strip()
+        reading = read_commit_form(
+            f"git update-index --add --cacheinfo 100644,{blob},copy.txt && git commit -m x"
+        )
+
+        with simulated_staging(reading, repo, repo) as env:
+            assert _staged(repo, env) == {"copy.txt"}
+
+    @pytest.mark.parametrize(
         "command",
         [
             "git update-index --add $F && git commit -m x",
-            "git update-index --index-info && git commit -m x",
-            "git update-index --cacheinfo 100644,abc,leak.txt && git commit -m x",
-            "git update-index --add nosuch.txt && git commit -m x",
+            "git update-index --stdin && git commit -m x",
+            "git update-index --index-version 4 && git commit -m x",
         ],
     )
     def test_a_form_it_cannot_follow_takes_the_whole_working_tree(
@@ -547,14 +577,12 @@ class TestApplyCached:
         with simulated_staging(reading, repo, repo) as env:
             assert _staged(repo, env) == {"sub/patched.txt"}
 
-    def test_a_patch_that_does_not_apply_still_stages_the_paths_it_touches(
-        self, repo: Path
-    ) -> None:
+    def test_a_patch_that_does_not_apply_stages_nothing_as_git_is_atomic(self, repo: Path) -> None:
         _write(repo, "p.patch", _STALE_PATCH)
         reading = read_commit_form("git apply --cached p.patch; git commit -m x")
 
         with simulated_staging(reading, repo, repo) as env:
-            assert _staged(repo, env) == {"leak.txt"}
+            assert _staged(repo, env) == set()
 
     def test_an_apply_without_cached_stages_nothing(self, repo: Path) -> None:
         _write(repo, "p.patch", _NEW_FILE_PATCH)
@@ -581,19 +609,24 @@ class TestApplyCached:
         with simulated_staging(read_commit_form(command), repo, repo) as env:
             assert "leak.txt" in _staged(repo, env)
 
-    def test_a_patch_with_no_file_header_takes_the_whole_working_tree(self, repo: Path) -> None:
+    def test_a_file_that_is_not_a_patch_stages_nothing(self, repo: Path) -> None:
         _write(repo, "p.patch", "not a patch\n")
-        reading = read_commit_form("git apply --cached p.patch && git commit -m x")
-
-        with simulated_staging(reading, repo, repo) as env:
-            assert "leak.txt" in _staged(repo, env)
-
-    def test_a_quoted_header_path_takes_the_whole_working_tree(self, repo: Path) -> None:
-        _write(repo, "p.patch", '--- /dev/null\n+++ "b/we\\tird.txt"\n@@ -0,0 +1 @@\n+x\n')
         reading = read_commit_form("git apply --cached p.patch; git commit -m x")
 
         with simulated_staging(reading, repo, repo) as env:
-            assert "leak.txt" in _staged(repo, env)
+            assert _staged(repo, env) == set()
+
+    def test_a_quoted_header_path_is_applied_by_git_itself(self, repo: Path) -> None:
+        _write(
+            repo,
+            "p.patch",
+            'diff --git "a/we\\tird.txt" "b/we\\tird.txt"\nnew file mode 100644\n'
+            '--- /dev/null\n+++ "b/we\\tird.txt"\n@@ -0,0 +1 @@\n+x\n',
+        )
+        reading = read_commit_form("git apply --cached p.patch; git commit -m x")
+
+        with simulated_staging(reading, repo, repo) as env:
+            assert _staged(repo, env) == {"we\tird.txt"}
 
 
 def _fail_the_first_add(

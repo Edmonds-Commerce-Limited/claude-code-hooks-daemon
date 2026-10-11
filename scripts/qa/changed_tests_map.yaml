@@ -107,6 +107,21 @@ rules:
     tests: [tests/unit/handlers/test_safety_handlers_hostile_input_performance.py]
     why: the command walker every Bash guard calls; the deep-eval shape of the
       hostile-input performance test pins its cost (N357)
+  - glob: "src/claude_code_hooks_daemon/utils/linear_shlex.py"
+    tests: [tests/unit/handlers/test_safety_handlers_hostile_input_performance.py]
+    why: a lexer every Bash guard calls; the hostile-input performance test pins its cost (N357)
+  - glob: "src/claude_code_hooks_daemon/utils/shell_segmentation.py"
+    tests: [tests/unit/handlers/test_safety_handlers_hostile_input_performance.py]
+    why: a lexer every Bash guard calls; the hostile-input performance test pins its cost (N357)
+  - glob: "src/claude_code_hooks_daemon/utils/shell_expansion.py"
+    tests: [tests/unit/handlers/test_safety_handlers_hostile_input_performance.py]
+    why: a lexer every Bash guard calls; the hostile-input performance test pins its cost (N357)
+  - glob: "src/claude_code_hooks_daemon/utils/simple_commands.py"
+    tests: [tests/unit/handlers/test_safety_handlers_hostile_input_performance.py]
+    why: a lexer every Bash guard calls; the hostile-input performance test pins its cost (N357)
+  - glob: "src/claude_code_hooks_daemon/utils/command_evasion.py"
+    tests: [tests/unit/handlers/test_safety_handlers_hostile_input_performance.py]
+    why: a lexer every Bash guard calls; the hostile-input performance test pins its cost (N357)
   - glob: "src/claude_code_hooks_daemon/handlers/*"
     tests:
       - tests/integration/test_acceptance_contract.py

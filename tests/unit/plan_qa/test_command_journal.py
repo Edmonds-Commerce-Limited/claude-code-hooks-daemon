@@ -117,6 +117,21 @@ class TestWhatDoesNotCount:
         command = _LIVE.replace("git add", "git -C /other add")
         assert _plans(command, root) == frozenset()
 
+    @pytest.mark.parametrize(
+        "staging",
+        [
+            "git update-index --add CLAUDE/Plan/00470-widget/JOURNAL",
+            "git apply --cached CLAUDE/Plan/00470-widget/p.patch",
+        ],
+    )
+    def test_update_index_and_apply_do_not_cover_the_journal(
+        self, root: Path, staging: str
+    ) -> None:
+        command = (
+            f"CLAUDE/Plan/mkplan.bash --journal 470 finding b.md && {staging} " "&& git commit -m x"
+        )
+        assert _plans(command, root) == frozenset()
+
     def test_update_only_add_does_not_stage_a_new_day_file(self, root: Path) -> None:
         assert _plans(_LIVE.replace("CLAUDE/Plan/00470-widget", "-u"), root) == frozenset()
 

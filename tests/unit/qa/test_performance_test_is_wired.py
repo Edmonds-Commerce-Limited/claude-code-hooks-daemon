@@ -47,6 +47,11 @@ class TestPerformanceTestRunsWhenAGuardChanges:
             f"{_PACKAGE}/handlers/pre_tool_use/a_brand_new_guard.py",
             f"{_PACKAGE}/handlers/pre_tool_use/host_command_guard.py",
             f"{_PACKAGE}/utils/git_commit_parsing.py",
+            f"{_PACKAGE}/utils/linear_shlex.py",
+            f"{_PACKAGE}/utils/shell_segmentation.py",
+            f"{_PACKAGE}/utils/shell_expansion.py",
+            f"{_PACKAGE}/utils/simple_commands.py",
+            f"{_PACKAGE}/utils/command_evasion.py",
         ],
     )
     def test_the_change_selects_it(self, relative: str) -> None:

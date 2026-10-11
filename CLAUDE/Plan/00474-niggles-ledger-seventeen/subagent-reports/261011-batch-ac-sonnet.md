@@ -4,11 +4,11 @@
 
 - `utils/git_commit_parsing.py`: `StagingRun.subcommand`; `STAGING_SUBCOMMANDS` = add, update-index, apply;
   `ADD_TOKEN`, `UPDATE_INDEX_TOKEN`, `APPLY_TOKEN` public.
-- `utils/staging_simulation.py`: `update-index` runs against the scratch index with a flag whitelist
-  (`--add --remove --force-remove --replace --verbose -q`); `apply` runs only with `--cached`/`--index`, runs the real
-  `git apply --cached` on the scratch index, and on a failed apply stages the paths named by the patch's `---`/`+++`
-  headers (from the repo root). Unreadable patch, unknown flag, failure: the existing policy (add of every change).
-  `UnreadablePatchError` plus `log_and_continue` keep the error-hiding audit clean.
+- `utils/staging_simulation.py`: `update-index` runs against the scratch index with a flag whitelist (round 2 added the
+  non-content options: `--chmod=±x`, `--refresh`, assume-unchanged, skip-worktree, `--info-only`, `--cacheinfo`;
+  `--index-info` stages nothing); `apply` runs only with `--cached`/`--index` and runs the real `git apply --cached`.
+  Both are atomic as in git: a failed run stages nothing (round 2; the header-path fallback was removed). A patch
+  that is not a file, an unknown flag or an unexpected failure takes the existing policy (add of every change).
 - `plan_qa/command_journal.py`: only `git add` covers a journal (`ADD_TOKEN` check).
 - Finding: `git apply --cached` run from a subdirectory ignores patch paths outside it, so the simulation matches git.
 - Shared simulation per dispatch: a performance note only (a timing-out add costs up to 5s per gate); verdicts are correct

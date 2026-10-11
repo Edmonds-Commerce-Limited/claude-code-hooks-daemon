@@ -694,8 +694,9 @@ class CommitReading:
     #: (ledger 00474 N307). ``form`` and ``moves`` above describe the first of
     #: them, or all of them combined when there are several.
     runs: tuple[CommitRun, ...] = ()
-    #: The ``git add`` runs that come before the last commit (ledger 00474 N246):
-    #: what they stage is part of what that commit records.
+    #: The staging runs (``git add``, ``update-index``, ``apply``) that come before
+    #: the last commit (ledger 00474 N246): what they stage is part of what that
+    #: commit records.
     stagings: tuple[StagingRun, ...] = ()
 
     @property
@@ -720,12 +721,15 @@ class CommitRun:
 
 @dataclass(frozen=True)
 class StagingRun:
-    """One ``git add`` of a command, and where it runs (``optional_moves`` as in :class:`CommitRun`)."""
+    """One staging run (``git add``, ``update-index`` or ``apply``) of a command, and where it runs.
+
+    ``optional_moves`` is as in :class:`CommitRun`.
+    """
 
     arguments: tuple[str, ...]
     moves: tuple[str | None, ...]
     optional_moves: int
-    #: The :attr:`SimpleCommand.position` of the ``git add``.
+    #: The :attr:`SimpleCommand.position` of the staging run.
     position: int = 0
     #: ``add``, ``update-index`` or ``apply``: the three commands that put a
     #: path into the index, each followed with its own reading.
@@ -802,7 +806,7 @@ def _combined_form(runs: Sequence[CommitRun]) -> CommitForm:
 
 
 def _staging_runs(invocations: Sequence[GitInvocation]) -> tuple[StagingRun, ...]:
-    """The ``git add`` runs that come before the last ``git commit``."""
+    """The staging runs (add, update-index, apply) that come before the last ``git commit``."""
     last_commit = max(
         (position for position, run in enumerate(invocations) if run.subcommand == _COMMIT_TOKEN),
         default=-1,

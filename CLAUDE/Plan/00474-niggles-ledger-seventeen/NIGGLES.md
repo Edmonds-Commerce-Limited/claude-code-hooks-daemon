@@ -786,11 +786,13 @@ that branch only, so all seven are open on `main`.
   reads the real index for the add. **Batch AC (261011)**: `git update-index --add/--remove/--force-remove/--replace`
   and `git apply --cached`/`--index` are now simulated too. `StagingRun` carries its `subcommand`
   (`utils/git_commit_parsing.py`, `STAGING_SUBCOMMANDS`); `update-index` runs against the scratch index with a
-  whitelist of flags, and `apply --cached` runs `git apply --cached <patch>` for real on the scratch index, falling
-  back to staging the `+++ b/` / `--- a/` header paths when the patch will not apply. An unreadable patch (missing,
-  stdin, shell-built, quoted or prefix-less header, over 8 MiB, no header), an unknown flag (`-p0`, `--cacheinfo`,
-  `--index-info`) or a failure takes the existing policy: an add of every working-tree change. An `apply` without
-  `--cached`/`--index` stages nothing. `plan_qa/command_journal.py` still counts only `git add` as covering a journal.
+  whitelist of flags (round 2 added `--chmod=±x`, `--refresh`, `--really-refresh`, `--[no-]assume-unchanged`,
+  `--[no-]skip-worktree`, `--ignore-missing`, `--unmerged`, `--ignore-submodules`, `--info-only`, `--cacheinfo`;
+  `--index-info` reads stdin and stages nothing), and `apply --cached` runs the real `git apply --cached <patch>` on the
+  scratch index. Both are atomic like git: `update-index --add nosuch` and a patch that does not apply stage nothing. A
+  patch that is not a file where the command runs (stdin, written by an earlier step), an unknown flag (`-p0`,
+  `--stdin`, `--index-version`) or an unexpected failure takes the existing policy: an add of every working-tree
+  change. An `apply` without `--cached`/`--index` stages nothing. `plan_qa/command_journal.py` still counts only `git add` as covering a journal.
   Not done, and only a performance note, not a defect: one shared simulation per dispatch (five gates each simulate,
   so a timing-out add costs up to 5s per gate); each gate's verdict is correct on its own, so nothing was changed.
   Reports:

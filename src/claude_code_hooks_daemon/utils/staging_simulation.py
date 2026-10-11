@@ -8,11 +8,14 @@ a scratch object directory, and hands back the environment that points git at
 them. A gate that asks git with that environment judges the tree the commit
 will record. The real index, object store and working tree are never written.
 
-``git update-index`` (with ``--add``/``--remove``) and ``git apply --cached``/
-``--index`` are run against the same copy: the second from a patch file this
-reading can open, whose ``---``/``+++`` headers name the paths it touches (staged
-from the working tree when the patch itself will not apply). A patch it cannot
-open or state the paths of is treated like an unreadable add.
+``git update-index`` and ``git apply --cached``/``--index`` are run against the
+same copy, as the real commands would run. Both are atomic: a run that fails
+leaves the copy as it was, so a failure that git would share (a path that does
+not exist, a patch that does not apply) stages nothing, as for ``git add``. An
+``apply`` is run only when its patch file exists where the command runs;
+otherwise (a patch an earlier step writes, stdin) it is treated like an
+unreadable add. ``update-index --index-info`` reads its entries from stdin,
+which this reading cannot see, so that option stages nothing here.
 
 An add whose scope cannot be read (a pathspec the shell builds, an interactive
 or file-driven option, a directory the command reaches by a move this reading
@@ -39,7 +42,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Final
 
-from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
     ADD_TOKEN,
     APPLY_TOKEN,
@@ -102,13 +104,36 @@ _LONG_FLAGS: Final[frozenset[str]] = frozenset(
     }
 )
 
-#: ``git update-index`` options that put a named path into the index or take it
-#: out; ``--cacheinfo``, ``--index-info``, ``--stdin`` and the rest name content
-#: this reading cannot follow.
+#: ``git update-index`` options that are safe to run against the scratch index:
+#: those that put a named path in or take it out, set a mode or a bit, or only
+#: refresh. ``--split-index``, ``--untracked-cache``, ``--fsmonitor``,
+#: ``--index-version`` and ``--stdin`` write shared state or read input this
+#: reading cannot see, so they are unreadable.
 _UPDATE_INDEX_SHORT_LETTERS: Final[frozenset[str]] = frozenset("q")
 _UPDATE_INDEX_LONG_FLAGS: Final[frozenset[str]] = frozenset(
-    {"--add", "--remove", "--force-remove", "--replace", "--verbose"}
+    {
+        "--add",
+        "--remove",
+        "--force-remove",
+        "--replace",
+        "--verbose",
+        "--chmod=+x",
+        "--chmod=-x",
+        "--refresh",
+        "--really-refresh",
+        "--assume-unchanged",
+        "--no-assume-unchanged",
+        "--skip-worktree",
+        "--no-skip-worktree",
+        "--ignore-missing",
+        "--unmerged",
+        "--ignore-submodules",
+        "--info-only",
+        "--cacheinfo",
+        "--index-info",
+    }
 )
+_INDEX_INFO_FLAG: Final[str] = "--index-info"
 
 #: ``git apply`` options that leave the patch's meaning alone; ``-p<n>``, ``-C``,
 #: ``--directory``, ``--include`` and ``--exclude`` change the paths, so are unreadable.
@@ -116,12 +141,6 @@ _APPLY_TO_INDEX_FLAGS: Final[frozenset[str]] = frozenset({"--cached", "--index"}
 _APPLY_SHORT_LETTERS: Final[str] = "v"
 _APPLY_LONG_FLAGS: Final[frozenset[str]] = frozenset({*_APPLY_TO_INDEX_FLAGS, "--verbose"})
 _STDIN_OPERAND: Final[str] = "-"
-_MAX_PATCH_BYTES: Final[int] = 8 * 1024 * 1024
-_OLD_HEADER: Final[str] = "--- "
-_NEW_HEADER: Final[str] = "+++ "
-_OLD_SIDE: Final[str] = "a/"
-_NEW_SIDE: Final[str] = "b/"
-_DEV_NULL: Final[str] = "/dev/null"
 
 #: What git says when an add stages NOTHING because of the paths it was given,
 #: rather than because git could not run: the real add fails the same way.
@@ -130,16 +149,23 @@ _NOTHING_STAGED_MESSAGES: Final[tuple[str, ...]] = (
     "ignored by one of your .gitignore files",
 )
 
+#: The same for ``git update-index``, which is atomic: a path that does not exist
+#: leaves the index as it was.
+_UPDATE_INDEX_NOTHING_STAGED_MESSAGES: Final[tuple[str, ...]] = (
+    "does not exist and --remove not passed",
+    "Unable to process path",
+    "cannot add to the index",
+    "git update-index: --cacheinfo cannot add",
+    "is not a valid object",
+    "invalid object",
+)
+
 
 class SimulationIncompleteError(Exception):
-    """The copy of the index is not what the command's ``git add`` would leave.
+    """The copy of the index is not what the command's staging run would leave.
 
     The message is the reason to give the user; a gate denies with it.
     """
-
-
-class UnreadablePatchError(Exception):
-    """A patch file whose touched paths this reading cannot state."""
 
 
 @contextmanager
@@ -152,7 +178,7 @@ def simulated_staging(
 ) -> Iterator[dict[str, str] | None]:
     """Yield the environment of the index ``reading``'s ``git add`` runs leave, else ``None``.
 
-    ``None`` when no ``git add`` comes before the commit, or git could not set
+    ``None`` when no staging run (add, update-index, apply) comes before the commit, or git could not set
     the copy up; the caller then reads the real index, as it always did. The
     scratch copy is removed when the block ends.
 
@@ -261,13 +287,20 @@ def _readable_arguments(
 def _update_index(
     directory: Path, arguments: Sequence[str], repo_root: Path, env: Mapping[str, str]
 ) -> None:
-    """``git update-index <arguments>`` against the scratch index; a failure takes every change."""
-    result = run_git(directory, *_NO_SPLIT_INDEX, UPDATE_INDEX_TOKEN, *arguments, env=env)
-    if result.returncode != 0:
-        logger.debug(
-            "staging simulation: update-index failed (%s); taking every change", result.stderr
-        )
-        _add_everything(repo_root, env)
+    """``git update-index <arguments>`` against the scratch index.
+
+    ``--index-info`` is dropped (its entries come from stdin, which this reading
+    cannot see). A failure git would share, a path that does not exist, is no
+    staging, as for ``git add``; any other failure takes every change.
+    """
+    run_arguments = [word for word in arguments if word != _INDEX_INFO_FLAG]
+    result = run_git(directory, *_NO_SPLIT_INDEX, UPDATE_INDEX_TOKEN, *run_arguments, env=env)
+    if result.returncode == 0:
+        return
+    if any(message in result.stderr for message in _UPDATE_INDEX_NOTHING_STAGED_MESSAGES):
+        return
+    logger.debug("staging simulation: update-index failed (%s); taking every change", result.stderr)
+    _add_everything(repo_root, env)
 
 
 def _patch_operands(arguments: Sequence[str]) -> list[str]:
@@ -285,81 +318,25 @@ def _patch_operands(arguments: Sequence[str]) -> list[str]:
 def _apply_patches(
     directory: Path, arguments: Sequence[str], repo_root: Path, env: Mapping[str, str]
 ) -> None:
-    """Apply each patch file to the scratch index; an unreadable patch takes every change.
+    """Apply each patch file to the scratch index, as ``git apply --cached`` would.
 
-    A patch that does not apply cleanly still stages the paths its headers name,
-    taken from the working tree: the commit may run after the failed apply (``;``)
-    and the gate must not judge less than could be staged.
+    A patch that is not a file where the command runs (stdin, or one an earlier
+    step writes) cannot be read, so it takes every change. ``git apply`` is
+    atomic: a patch that does not apply leaves the index as it was, so it stages
+    nothing, exactly as the real command would.
     """
     operands = _patch_operands(arguments)
-    if not operands or _STDIN_OPERAND in operands:
+    if (
+        not operands
+        or _STDIN_OPERAND in operands
+        or not all((directory / operand).is_file() for operand in operands)
+    ):
         _add_everything(repo_root, env)
         return
-    try:
-        patches = [(operand, _patch_paths(directory / operand)) for operand in operands]
-    except UnreadablePatchError as error:
-        log_and_continue(
-            logger,
-            error,
-            reason="a patch whose paths cannot be stated is simulated as an add of every working-tree change, never as less than it could stage",
-            level=logging.DEBUG,
-        )
-        _add_everything(repo_root, env)
-    else:
-        for operand, touched in patches:
-            applied = run_git(
-                directory, *_NO_SPLIT_INDEX, APPLY_TOKEN, "--cached", operand, env=env
-            )
-            if applied.returncode != 0:
-                logger.debug(
-                    "staging simulation: apply failed (%s); staging its paths", applied.stderr
-                )
-                # Header paths are relative to the repository root, whatever the directory.
-                _add(repo_root, [_END_OF_OPTIONS, *touched], repo_root, env)
-
-
-def _patch_paths(patch: Path) -> list[str]:
-    """The paths ``patch`` touches, from its file headers.
-
-    Raises:
-        UnreadablePatchError: If the file cannot be read in full, names a path
-            in quotes (special characters) or with no ``a/``/``b/`` prefix, or
-            names no path at all.
-    """
-    try:
-        if patch.stat().st_size > _MAX_PATCH_BYTES:
-            raise UnreadablePatchError(f"patch {patch} is larger than {_MAX_PATCH_BYTES} bytes")
-        text = patch.read_text(encoding="utf-8", errors="replace")
-    except OSError as error:
-        raise UnreadablePatchError(f"patch {patch} unreadable ({error})") from error
-    paths: dict[str, None] = {}
-    old_name = ""
-    for line in text.splitlines():
-        if line.startswith(_OLD_HEADER):
-            old_name = _header_name(line[len(_OLD_HEADER) :], _OLD_SIDE)
-        elif line.startswith(_NEW_HEADER):
-            name = _header_name(line[len(_NEW_HEADER) :], _NEW_SIDE)
-            if name == _DEV_NULL:
-                name = old_name
-            if not name or name == _DEV_NULL or name.startswith('"'):
-                raise UnreadablePatchError(f"patch {patch} names a path this reading cannot state")
-            paths[name] = None
-    if not paths:
-        raise UnreadablePatchError(f"patch {patch} names no file")
-    return list(paths)
-
-
-def _header_name(header: str, side: str) -> str:
-    """The path of a ``---``/``+++`` header with its ``a/``/``b/`` side prefix removed.
-
-    The empty string when the header carries no such prefix (``-p0`` patches).
-    """
-    name = header.split("\t")[0]
-    if name == _DEV_NULL:
-        return name
-    if name.startswith('"'):
-        return name
-    return name[len(side) :] if name.startswith(side) else ""
+    for operand in operands:
+        applied = run_git(directory, *_NO_SPLIT_INDEX, APPLY_TOKEN, "--cached", operand, env=env)
+        if applied.returncode != 0:
+            logger.debug("staging simulation: apply failed (%s); nothing staged", applied.stderr)
 
 
 def _is_repository(directory: Path, repo_root: Path) -> bool:

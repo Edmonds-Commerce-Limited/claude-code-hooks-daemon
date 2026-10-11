@@ -120,23 +120,34 @@ class TestTheBootstrapScriptWritesTheSameCheckoutAgnosticFile:
 
     _BOOTSTRAP = _REPO_ROOT / "scripts" / "bootstrap-self-install.sh"
 
-    def test_it_writes_the_unexpanded_project_path(self) -> None:
+    def _run_the_script_s_write(self, directory: Path) -> Path:
+        """Run the script's own `printf ... > .claude/hooks-daemon.env` line in `directory`."""
         writes = [
             line
             for line in self._BOOTSTRAP.read_text().splitlines()
             if "hooks-daemon.env" in line and line.lstrip().startswith("printf")
         ]
         assert len(writes) == 1, writes
-        assert '"\\$PROJECT_PATH"' in writes[0], writes[0]
-        assert "REPO_ROOT" not in writes[0], writes[0]
+        (directory / ".claude").mkdir(parents=True)
+        subprocess.run(
+            ["bash", "-c", writes[0]],
+            cwd=directory,
+            env={"REPO_ROOT": str(directory), "PATH": "/usr/bin:/bin"},
+            check=True,
+        )
+        return directory / ".claude" / "hooks-daemon.env"
 
-    def test_the_text_it_writes_resolves_per_checkout(self, tmp_path: Path) -> None:
-        env_file = tmp_path / "hooks-daemon.env"
-        env_file.write_text('HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH"\n', encoding="utf-8")
-        first, second = tmp_path / "main", tmp_path / "worktree"
+    def test_it_writes_the_unexpanded_project_path(self, tmp_path: Path) -> None:
+        env_file = self._run_the_script_s_write(tmp_path / "main")
 
-        assert _sourced_root_dir(env_file, first) == str(first)
-        assert _sourced_root_dir(env_file, second) == str(second)
+        assert env_file.read_text(encoding="utf-8") == 'HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH"\n'
+
+    def test_the_file_it_writes_resolves_per_checkout(self, tmp_path: Path) -> None:
+        env_file = self._run_the_script_s_write(tmp_path / "main")
+        worktree = tmp_path / "worktree"
+
+        assert _sourced_root_dir(env_file, tmp_path / "main") == str(tmp_path / "main")
+        assert _sourced_root_dir(env_file, worktree) == str(worktree)
 
 
 class TestTheSetupScriptProvisionsADevVenv:
