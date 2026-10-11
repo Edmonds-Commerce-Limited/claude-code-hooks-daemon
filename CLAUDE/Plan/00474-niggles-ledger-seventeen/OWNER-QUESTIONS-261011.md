@@ -1,6 +1,7 @@
 # Owner questions, 2026-10-11 (Plan 00474)
 
-One sheet for the 15 rows of [STATUS-INDEX.md](STATUS-INDEX.md) marked "Owner decision". Each section gives the
+One sheet for the 14 rows of [STATUS-INDEX.md](STATUS-INDEX.md) marked "Owner decision" (section 9, N373, turned out
+already settled in code and stays only as a note). Each section gives the
 question, the options, what each does, the coordinator's recommendation (a recommendation, not a ruling), and who can
 implement it. Quoted text and line numbers are from [NIGGLES.md](NIGGLES.md). To answer, reply with the row id and a
 letter, for example "N396 A".
@@ -91,15 +92,12 @@ Quote (line 3108): "Not done: a commit-time BLOCK for a bad entry (the sweep adv
 - (d) Recommendation: B; only this repository's agents write the file.
 - (e) An agent can implement A.
 
-## 9. N373: `bash_safe_mode` setters drop the whole handler on a bad value
+## 9. N373: `bash_safe_mode` setters drop the whole handler on a bad value (settled in code, no question)
 
-Quote (lines 2829-2830): "Those setters are unchanged since v3.68.0 ... whether it should report through `option_failures` instead is open."
-
-- (a) Question: should a bad `mode` or `exempt_patterns` keep the handler on defaults and report on `option_failures`?
-- (b) Options: A, report through `option_failures` and keep the handler on defaults (as done for `stand_in_delay_hours`). B, leave: the handler is dropped with a WARNING.
-- (c) A keeps the guard running and makes the error visible at session start. B keeps the documented rejection but silently loses the handler.
-- (d) Recommendation: A.
-- (e) An agent can implement A.
+The fact-check of this sheet ([report](subagent-reports/261011-fact-check-blocked-status-sonnet.md)) found the
+question stale: option A was already implemented as N374 item 12 (commit fa264c98f). `BashSafeModeHandler.validate_options`
+(`handlers/pre_tool_use/bash_safe_mode.py:244-262`) reports a bad `mode` or `exempt_patterns` and keeps the handler on
+its defaults. That was a coordinator change, not your ruling; it is listed under the limits below for confirmation.
 
 ## 10. N376: performance sweeps fail under the full gate's concurrent load
 
@@ -163,7 +161,7 @@ Quote (lines 1731-1733): "should auto-continue stand down (allow the stop) when 
 
 ## Deliberate limits recorded on the coordinator's judgement
 
-These carry the lock marker in STATUS-INDEX and were recorded as limits, not ruled by you:
+These carry the 🚫 marker in STATUS-INDEX and were recorded as limits, not ruled by you:
 
 - N415 residual: a one-branch `if` rebind and a function defined before the read, in `subagent_full_qa_blocker`.
 - N418 residual: a helper that calls its own parameter ranks every call through it as may-run.
@@ -173,7 +171,10 @@ These carry the lock marker in STATUS-INDEX and were recorded as limits, not rul
 - N354: a name built at run time is unseen by the upgrade guard (threat model).
 - N378 is also marked as a limit but was ruled by you ("fine to leave"); it is listed for completeness.
 
-Single question: confirm all of these as limits, or name the ones to reopen.
+Also a coordinator call rather than yours: N373's `bash_safe_mode` now keeps the handler on defaults and reports a bad
+option (section 9).
+
+Single question: confirm all of these (and the N373 call), or name the ones to reopen.
 
 ## N53 (ledger 00466)
 

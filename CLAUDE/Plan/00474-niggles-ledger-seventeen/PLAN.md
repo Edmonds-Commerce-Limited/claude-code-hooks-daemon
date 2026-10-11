@@ -42,11 +42,11 @@ Counted by the status column's emoji:
   the mechanism of an exit 127 and extended the diagnostic, but the live cause awaits a recurrence. The other 41 of the
   "42 still open in 00466" were fixed on main (39), fixed by batch AI (N33) or graduated to Plan 00485 (N96); see
   [the 00466 evidence](../Completed/00466-niggles-ledger-sixteen/STATUS-2026-10.md).
-- 15 rows carry an owner decision (⬜ Owner decision, including three fixed or part-fixed rows with a decision left).
+- 14 rows carry an owner decision (⬜ Owner decision, including two fixed or part-fixed rows with a decision left).
   Every one is put to the owner, with options and a recommendation, in
   [OWNER-QUESTIONS-261011.md](OWNER-QUESTIONS-261011.md), with the open owner questions of Plans 00470, 00479,
   00484 and 00500.
-- 102 rows carry ✅ (fixed, dismissed, remedied or closed); 8 of them also count above or below (2 with an owner decision, 6 with a 🚫 limit).
+- 102 rows carry ✅ (fixed, dismissed, remedied or closed); 7 of them also count above or below (1 with an owner decision, 6 with a 🚫 limit).
 - 7 rows record a deliberate limit (🚫); 8 are in progress or graduated (4 🔄, 3 🟡, 1 ↩️).
 
 ## Tasks

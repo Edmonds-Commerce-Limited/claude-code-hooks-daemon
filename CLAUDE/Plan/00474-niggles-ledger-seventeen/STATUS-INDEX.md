@@ -32,7 +32,7 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 | N376       | Four tests fail under the full gate's concurrent load; the sweep half needs a serial-phase design                            | Write-up            | 🟡 Part fixed; ⬜ Owner decision    |
 | N375       | The hook contract audit is at Claude Code 2.1.272 and the upstream hooks doc has changed                                     | Write-up            | ✅ Fixed (batch N report)           |
 | N374       | v3.69.0 release code review; defects fixed, one cold-index glob advisory residual is a decided limit                         | Write-up            | ✅ Fixed; 🚫 residual               |
-| N373       | An invalid `stand_in_delay_hours` unregisters the Stop handler; `bash_safe_mode` setters are an open ruling                  | Write-up            | ✅ Fixed; ⬜ Owner decision         |
+| N373       | An invalid `stand_in_delay_hours` unregisters the Stop handler; `bash_safe_mode` gained the same `validate_options` (N374)   | Write-up            | ✅ Fixed                            |
 | N372–N370  | Daemon-docs guard on the repo folder name, per-clone plan counter, sed guard on a `git -C` message                           | Write-up            | ✅ Fixed                            |
 | N369       | A forwarder integration test fails inside every harness worktree and passes on main                                          | Write-up            | ✅ Fixed (batch AC)                 |
 | N368–N362  | Fact-checker evidence, QA venv recipe, `git config` read, fenced token, `bash -c` pipe, merged-branch delete                 | Write-up            | ✅ Fixed                            |

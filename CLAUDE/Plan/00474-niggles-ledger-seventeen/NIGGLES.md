@@ -2827,7 +2827,10 @@ a `validate_options` like `IdleHousekeepingAdvisoryHandler`'s, so the registry w
 `tests/unit/handlers/test_registry_option_validation.py` register through `register_all` with 24, 0, -1, `"3"`,
 `True` and NaN. Same class, not fixed: `bash_safe_mode`'s `mode` and `exempt_patterns` setters raise and drop the
 handler. Those setters are unchanged since v3.68.0, and the docstrings describe the rejection at load as intended; whether it should
-report through `option_failures` instead is open.
+report through `option_failures` instead was left open here, but N374 item 12 (commit fa264c98f) then gave
+`bash_safe_mode` a `validate_options` (`handlers/pre_tool_use/bash_safe_mode.py:244-262`), so a bad `mode` or
+`exempt_patterns` is now reported and the handler stays on its defaults. Settled in code (a coordinator change, put to
+the owner for confirmation with the limits); no open ruling remains on this row.
 
 ### N372 — the daemon-docs guard warns on the project's own `CLAUDE/` when the repo folder ends in `hooks-daemon`
 
