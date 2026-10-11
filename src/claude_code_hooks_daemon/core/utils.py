@@ -2,6 +2,7 @@
 
 import logging
 import os
+import posixpath
 import re
 from pathlib import Path
 from typing import Any, Final, NamedTuple, cast
@@ -991,8 +992,55 @@ def _write_target_tokens(
             index += 1
             continue
 
+        if token == "git" and _is_command_word(tokens, index, token):
+            targets.extend(
+                BashWriteDestination(output, authored=False)
+                for output in _git_output_files(tokens, index + 1)
+            )
+
         index += 1
     return targets
+
+
+#: ``git`` subcommands whose ``--output`` option writes the patch they make to a file.
+_GIT_OUTPUT_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"diff", "format-patch"})
+_OUTPUT_OPTION: Final[str] = "--output"
+_GIT_CHANGE_DIRECTORY: Final[str] = "-C"
+
+
+def _git_output_files(tokens: list[str], start: int) -> list[str]:
+    """The files ``--output`` names in the diff or format-patch whose words start at ``start``.
+
+    Reads to the end of the simple command. A patch git writes is not code the
+    command authored, so callers report these as not authored. Any other
+    subcommand names none (a commit message that says ``--output=x``).
+    """
+    end = start
+    while end < len(tokens) and not _is_command_boundary(tokens[end]):
+        end += 1
+    words = tokens[start:end]
+    position = 0
+    directory = ""
+    while position < len(words) and words[position].startswith(_FLAG_PREFIX):
+        if words[position] == _GIT_CHANGE_DIRECTORY and position + 1 < len(words):
+            # Each -C is relative to the one before it; an absolute one starts over.
+            # Text the shell expands stays in the path, so the target is left unresolved.
+            directory = (
+                posixpath.join(directory, words[position + 1]) if directory else words[position + 1]
+            )
+        position += 2 if words[position] in _GIT_VALUE_OPTIONS else 1
+    if position >= len(words) or words[position] not in _GIT_OUTPUT_SUBCOMMANDS:
+        return []
+    outputs: list[str] = []
+    arguments = words[position + 1 :]
+    for offset, word in enumerate(arguments):
+        if word == _END_OF_OPTIONS:
+            break
+        if word.startswith(_OUTPUT_OPTION + "="):
+            outputs.append(word[len(_OUTPUT_OPTION) + 1 :])
+        elif word == _OUTPUT_OPTION and offset + 1 < len(arguments):
+            outputs.append(arguments[offset + 1])
+    return [posixpath.join(directory, output) if directory else output for output in outputs]
 
 
 #: Tokens that end one simple command and start the next.

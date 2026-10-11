@@ -160,6 +160,10 @@ _UPDATE_INDEX_NOTHING_STAGED_MESSAGES: Final[tuple[str, ...]] = (
     "git update-index: --cacheinfo cannot add",
     "is not a valid object",
     "invalid object",
+    # ``--refresh`` without ``-q`` in a dirty tree lists the files it could not
+    # refresh and exits 1; it changes no entry's content.
+    "needs update",
+    "needs merge",
 )
 
 
@@ -304,7 +308,9 @@ def _update_index(
     result = run_git(directory, *_NO_SPLIT_INDEX, UPDATE_INDEX_TOKEN, *run_arguments, env=env)
     if result.returncode == 0:
         return
-    if any(message in result.stderr for message in _UPDATE_INDEX_NOTHING_STAGED_MESSAGES):
+    # ``--refresh`` reports a file it cannot refresh on stdout, the rest on stderr.
+    said = result.stderr + result.stdout
+    if any(message in said for message in _UPDATE_INDEX_NOTHING_STAGED_MESSAGES):
         return
     logger.debug("staging simulation: update-index failed (%s); taking every change", result.stderr)
     _add_everything(repo_root, env)

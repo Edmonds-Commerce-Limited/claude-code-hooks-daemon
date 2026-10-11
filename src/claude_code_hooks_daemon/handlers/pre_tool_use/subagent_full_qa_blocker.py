@@ -890,6 +890,44 @@ _INLINE_CODE_FLAG_TEXT_TOOLS: Final[frozenset[str]] = frozenset(
         "tail",
         "cut",
         "jq",
+        # N416: shell builtins and coreutils whose `-e`/`-c`/`-r` is an option of
+        # their own (`set -e`, `uniq -c`, `rm -r`, `read -r`, `pip install -r`),
+        # never code handed to an interpreter.
+        "set",
+        "echo",
+        "read",
+        "declare",
+        "local",
+        "typeset",
+        "uniq",
+        "rm",
+        "cp",
+        "ls",
+        "diff",
+        "tr",
+        "cat",
+        "stat",
+        "du",
+        "pip",
+        "pip3",
+        # Build, archive, transfer and database tools: `-c` compile or stdout,
+        # `-e` environment or a SQL statement, `-r` recursive.
+        "gcc",
+        "g++",
+        "cc",
+        "clang",
+        "clang++",
+        "make",
+        "zip",
+        "unzip",
+        "tar",
+        "gzip",
+        "scp",
+        "rsync",
+        "wget",
+        "less",
+        "mysql",
+        "psql",
     }
 )
 
@@ -4135,15 +4173,19 @@ _RUNPY_MODULE: Final[re.Pattern[str]] = re.compile("runpy")
 _COMPILE: Final[str] = "compile"
 
 
-def _file_read_by(node: ast.expr, opened: Mapping[str, ast.expr]) -> ast.expr | None:
+def _file_read_by(
+    node: ast.expr, opened: Mapping[str, ast.expr], texts: Mapping[str, ast.expr]
+) -> ast.expr | None:
     """The path of the file whose text ``node`` reads, else None.
 
     ``open(path).read()``, ``Path(path).read_text()``, ``h.read()`` for an
-    ``h`` that ``with open(path) as h`` bound (``opened``), each also inside
-    ``compile(..., ...)``.
+    ``h`` that ``with open(path) as h`` bound (``opened``), a name that an
+    earlier read bound (``texts``), each also inside ``compile(..., ...)``.
     """
+    if isinstance(node, ast.Name):
+        return texts.get(node.id)
     if isinstance(node, ast.Call) and _callee_name(node) == _COMPILE and node.args:
-        return _file_read_by(node.args[0], opened)
+        return _file_read_by(node.args[0], opened, texts)
     if (
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
@@ -4157,30 +4199,100 @@ def _file_read_by(node: ast.expr, opened: Mapping[str, ast.expr]) -> ast.expr | 
     return None
 
 
-def _opened_files(tree: ast.Module) -> dict[str, ast.expr]:
-    """Each name a ``with open(path) as name`` or ``name = open(path)`` binds, with the path."""
+def _opener_path(call: ast.expr) -> ast.expr | None:
+    """The path ``open(path)`` / ``Path(path)`` is given, else None."""
+    if isinstance(call, ast.Call) and _callee_name(call) in _FILE_OPENERS and call.args:
+        return call.args[0]
+    return None
+
+
+def _bind_file_names(
+    node: ast.AST, opened: dict[str, ast.expr], texts: dict[str, ast.expr]
+) -> None:
+    """Record what a finished ``name = ...`` or ``with ... as name`` binds.
+
+    A file opened (``name = open(path)``, ``with open(path) as name``) goes to
+    ``opened``; the text of a file read (``name = open(path).read()``,
+    ``name = handle.read()``) goes to ``texts``.
+    """
+    if isinstance(node, ast.withitem):
+        path = _opener_path(node.context_expr)
+        if path is not None and isinstance(node.optional_vars, ast.Name):
+            opened[node.optional_vars.id] = path
+    elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+        target = node.targets[0]
+        if not isinstance(target, ast.Name):
+            return
+        path = _opener_path(node.value)
+        if path is not None:
+            opened[target.id] = path
+            return
+        read = _file_read_by(node.value, opened, texts)
+        if read is not None:
+            texts[target.id] = read
+
+
+def _operands_run_in_process(
+    tree: ast.Module, modules: set[str], members: Mapping[str, str]
+) -> list[ast.expr | None]:
+    """The file operand of each in-process run in ``tree``, in source order.
+
+    ``<exec>(open(p).read())``, ``<exec>(h.read())``, ``<exec>(src)`` for a
+    ``src`` an earlier ``src = h.read()`` bound, and ``runpy.run_path(p)``. One
+    pass in source order tracks which names hold an opened file or its text,
+    so a name rebound to anything else (assigned, looped over, bound by a
+    ``with``) stops counting; an augmented assignment keeps the text it adds to.
+    ``None`` stands for a run whose operand is no file.
+    """
     opened: dict[str, ast.expr] = {}
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name)
-            and isinstance(node.value, ast.Call)
-            and _callee_name(node.value) in _FILE_OPENERS
-            and node.value.args
-        ):
-            opened[node.targets[0].id] = node.value.args[0]
-        elif isinstance(node, (ast.With, ast.AsyncWith)):
-            for item in node.items:
-                call = item.context_expr
-                if (
-                    isinstance(call, ast.Call)
-                    and _callee_name(call) in _FILE_OPENERS
-                    and call.args
-                    and isinstance(item.optional_vars, ast.Name)
-                ):
-                    opened[item.optional_vars.id] = call.args[0]
-    return opened
+    texts: dict[str, ast.expr] = {}
+    kept: set[int] = set()
+    operands: list[ast.expr | None] = []
+    # The names each open function or lambda shadows with a parameter, with what
+    # they held outside it, put back when the function ends.
+    shadowed: list[list[tuple[str, ast.expr | None, ast.expr | None]]] = []
+    stack: list[tuple[ast.AST, bool]] = [(tree, False)]
+    while stack:
+        node, finished = stack.pop()
+        if finished:
+            if isinstance(node, _SCOPES):
+                for name, was_opened, was_text in shadowed.pop():
+                    _put_file_name_back(opened, name, was_opened)
+                    _put_file_name_back(texts, name, was_text)
+            else:
+                _bind_file_names(node, opened, texts)
+            continue
+        if isinstance(node, ast.arg) and shadowed:
+            shadowed[-1].append((node.arg, opened.pop(node.arg, None), texts.pop(node.arg, None)))
+        elif isinstance(node, ast.AugAssign):
+            kept.add(id(node.target))
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            if id(node) not in kept:
+                opened.pop(node.id, None)
+                texts.pop(node.id, None)
+        elif isinstance(node, ast.Call) and node.args:
+            if _callee_name(node) == _EXEC_BUILTIN and isinstance(node.func, ast.Name):
+                operands.append(_file_read_by(node.args[0], opened, texts))
+            elif _is_run_path(node, modules, members):
+                operands.append(node.args[0])
+        if isinstance(node, _SCOPES):
+            shadowed.append([])
+        if isinstance(node, (ast.Assign, ast.withitem, *_SCOPES)):
+            stack.append((node, True))
+        stack.extend((child, False) for child in reversed(list(ast.iter_child_nodes(node))))
+    return operands
+
+
+#: Nodes whose parameters are names of their own inside their body.
+_SCOPES: Final[tuple[type[ast.AST], ...]] = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+
+
+def _put_file_name_back(names: dict[str, ast.expr], name: str, value: ast.expr | None) -> None:
+    """Put ``name`` back to ``value`` (absent when None)."""
+    if value is None:
+        names.pop(name, None)
+    else:
+        names[name] = value
 
 
 def _is_run_path(call: ast.Call, modules: set[str], members: Mapping[str, str]) -> bool:
@@ -4213,18 +4325,9 @@ def _files_run_in_process(code: str) -> list[str]:
         )
         return []
     names = _constant_names(tree)
-    opened = _opened_files(tree)
     modules, members = _imported_names(code, _RUNPY_MODULE)
     paths: list[str] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or not node.args:
-            continue
-        if _callee_name(node) == _EXEC_BUILTIN and isinstance(node.func, ast.Name):
-            operand = _file_read_by(node.args[0], opened)
-        elif _is_run_path(node, modules, members):
-            operand = node.args[0]
-        else:
-            continue
+    for operand in _operands_run_in_process(tree, modules, members):
         path = None if operand is None else _python_word(operand, names, strings_only=True)
         if path and _PYTHON_VALUE not in path:
             paths.append(path)
@@ -5080,6 +5183,9 @@ def _first_full_run(
 ) -> FullQaMatch | None:
     """The first full run among ``invocations``, following each ``cd`` in order.
 
+    A positive match wins over any unseen verdict, wherever it stands; the
+    first unseen one is returned only when no invocation is a positive match.
+
     ``source`` is the code they come from, searched for a program when a
     command word is a variable that code does not set. ``env -C``, ``pushd``
     and ``popd`` move the directory as one stack. ``files_deep`` counts code
@@ -5087,6 +5193,7 @@ def _first_full_run(
     shell is not read for ever.
     """
     directories: list[Path | None] = []
+    unseen: FullQaMatch | None = None
     for program, arguments, segment in invocations:
         found: FullQaMatch | None = None
         if program == _WRITES:
@@ -5111,9 +5218,13 @@ def _first_full_run(
         else:
             event.modes_may_change = event.modes_may_change or program in _MODE_CHANGERS
             found = _full_run_of(program, arguments, segment, event, here, source)
-        if found is not None:
+        if found is None:
+            continue
+        if not found.fail_closed:
             return found
-    return None
+        # An unseen verdict does not end the scan: a later positive match wins.
+        unseen = unseen or found
+    return unseen
 
 
 def _full_run_of(
