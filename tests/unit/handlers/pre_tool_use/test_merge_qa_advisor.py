@@ -148,6 +148,13 @@ class TestAdvises:
         text = _advice(handler, f"git merge --no-ff {_BRANCH}", repo)
         assert f"llm_qa.py changed --range {pre_merge[:12]}..HEAD" in text
 
+    def test_the_advice_says_a_bare_changed_on_main_refuses(
+        self, handler: MergeQaAdvisorHandler, repo: Path, head: str
+    ) -> None:
+        text = _advice(handler, f"git merge --no-ff {_BRANCH}", repo)
+        assert "refuses" in text
+        assert "selects nothing" not in text
+
     def test_an_agent_dispatch_branch_is_a_work_branch(
         self, handler: MergeQaAdvisorHandler, repo: Path, head: str
     ) -> None:

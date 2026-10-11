@@ -647,6 +647,16 @@ class TestPlanNumberHelperHandler:
         lower = guidance.lower()
         assert "fallback" in lower or "only need the number" in lower
 
+    def test_get_claude_md_number_only_fallback_takes_the_higher_of_counter_and_disk(
+        self,
+    ) -> None:
+        """Ledger 00474 N371: a counter that lags the disk must not be trusted alone."""
+        guidance = PlanNumberHelperHandler().get_claude_md()
+
+        assert guidance is not None
+        assert "higher of the counter and the highest plan" in guidance
+        assert "read the counter and add 1" not in guidance
+
     def test_get_claude_md_states_how_to_check_the_scouts_count(self) -> None:
         """The dedupe scout's count must be reconciled against the caller's.
 
