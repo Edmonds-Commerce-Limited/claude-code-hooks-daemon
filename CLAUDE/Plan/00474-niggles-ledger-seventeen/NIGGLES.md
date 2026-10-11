@@ -1515,7 +1515,7 @@ is denied.
 **Evidence**: real commit/PR messages and `grep`/`git log --grep` mentions behave; an `echo` of a closing keyword plus
 issue reference, or a heredoc fed to `python3`, is denied. Lower impact.
 
-**Status**: ✅ Fixed (branch agent-a2f6348f56d8df606-7aed436a, COMMIT_N406). The handler now matches the git/gh message
+**Status**: ✅ Fixed (branch agent-a2f6348f56d8df606-7aed436a, 25b9ae109). The handler now matches the git/gh message
 token only at command position and blanks heredoc bodies not owned by a git/gh message command, so an `echo` or a
 `python3 - <<'EOF'` that prints a keyword allows while real messages still deny.
 
@@ -1526,7 +1526,7 @@ token only at command position and blanks heredoc bodies not owned by a git/gh m
 **Evidence**: a commit message, `echo` or `grep` naming `git merge --squash`, `gh pr merge --squash` or `--rebase` is
 denied; `git log --grep=` already allows.
 
-**Status**: ✅ Fixed (branch agent-a2f6348f56d8df606-7aed436a, COMMIT_N405). The handler matches the three patterns per
+**Status**: ✅ Fixed (branch agent-a2f6348f56d8df606-7aed436a, 25b9ae109). The handler matches the three patterns per
 segment of `command_position_segments(strip_inert_spans(command))`, so mentions in a message, echo, grep or quoted
 heredoc allow while real merges still deny.
 
@@ -1539,7 +1539,7 @@ bt_sq_dq, reproduced on b8095b83d); bt7-bt9 allow (report as N409).
 body holds a Markdown backtick span; so is a `-m "…"` written inside a single-quoted message. Highest impact of
 N404-N409: it is the form agents are told to use.
 
-**Status**: ✅ Fixed (branch agent-a2f6348f56d8df606-7aed436a, COMMIT_N404). The scan runs over `strip_message_bodies(command)`, which
+**Status**: ✅ Fixed (branch agent-a2f6348f56d8df606-7aed436a, 25b9ae109). The scan runs over `strip_message_bodies(command)`, which
 blanks a single-quoted message and the quoted-delimiter `$(cat <<'EOF' …)` idiom, while a plain double-quoted or
 unquoted-heredoc backtick still denies; gate rows added.
 
