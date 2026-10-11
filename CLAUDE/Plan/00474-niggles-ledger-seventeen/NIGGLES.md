@@ -1489,13 +1489,26 @@ allowed because the tool binary is the readable file that gets judged. Without `
 allowed too. Pinned by `TestVariableToolUnderSteeringIsPinned` in
 `tests/unit/handlers/pre_tool_use/test_upgrade_approval_guard.py`, which asserts today's deny so that a fix flips it.
 
-**Status**: 🟢 Fixed. `_variable_program_is_upgrade` now takes the program word. When it ends in a literal tool name
+**Status**: ✅ Fixed by batch O (merged; review approved: every shape now allowed for `$V/X` was already allowed for `X`
+named directly). `_variable_program_is_upgrade` now takes the program word. When it ends in a literal tool name
 (`$V/ruff`; not a shell, wrapper or python, which `_program_is_literal_tool` excludes) and no argument carries an
 expansion, "cannot tell" no longer counts as the upgrade under a steering variable: upgrade-shaped arguments
 (`--project-root`, the daemon dir) still deny, and a readable script operand is still judged by content. A bare `$V`,
 `$V/python`, `$V/bash`, `$V/env` or an expanded operand keeps the old deny. Owner ruling B5 ("A guard denies only on a
 positive finding", OWNER-RULINGS-261006.md) is the basis for allowing an unreadable-operand tool with no finding
 against it. `TestVariableToolUnderSteering` (the former Pinned class) asserts the allow; corpus rows `n410-*`.
+
+Residual, from the batch O review (`untracked/agent-reports/auto/261011-052052-code-reviewer-a12043eb8bcf00a07.md`):
+
+- The handler docstring (`upgrade_approval_guard.py` ~877-886) does not describe the new `$V/<tool>` branch.
+- Only the FIRST operand is judged for the handoff signature, so `$V/tool run <sig>`, `$V/tool --flag val <sig>` and
+  `$V/tool < <sig>` pass; the test docstring (~1395-1405) says "a readable script operand". Narrow the wording, or
+  skip option values and redirect words.
+- `_SHELL_HEADS` (~265) omits `ash`, `mksh`, `yash`, `fish`, `tcsh`, `csh` and `busybox`.
+- No corpus/test row pins the decision for `$V/hooks-daemon upgrade`.
+- `CLAUDE/QA.md` says `merge_qa_advisor` prints the `--range` command "after every merge"; it does so only when the
+  merged head has no green record, and the advisor's own text (~246) says "selects nothing" where a bare `changed` on
+  main now refuses.
 
 ### N409 — `subagent_full_qa_blocker` denies an ordinary `python3 script.py` as a whole-suite run
 
