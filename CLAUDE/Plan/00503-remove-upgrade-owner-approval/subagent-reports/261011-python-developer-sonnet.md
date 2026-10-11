@@ -49,3 +49,10 @@ So an upgrade from an older install TO this release meets no approval stop. Only
   - `plan_qa`: two advisories not caused by this change (a stats recount, 52 vs 53, and a stale journal on plan 00495). The stats recount may be the new plan folder's own README row.
 - `tests/integration/test_upgrade_pre_deploy_phase_*.py` ran real upgrades end to end: 48 passed.
 - TDD: the gate tests, including `TestPhasingAdvice`, were rewritten before the implementation.
+
+## Round 2 (review round 1 fixes)
+
+- Stale "the guard denies" claims reworded in `scripts/lib/python_discovery.sh` (both messages), `CLAUDE/LLM-UPDATE.md` (`--uv`), `scripts/upgrade_version.sh` (the `-p /tmp` reason kept, guard claim dropped) and `scripts/qa/check_daemon_dir_cd_in_docs.py`. A test docstring in `test_upgrade_pre_deploy_phase_placement.py` had the same claim and was fixed too.
+- `phasing_advice`: a MAJOR jump now gives no advice when no release newer than the installed one is known in the current major, so `phasing_advice(empty, '3.70.0', '4.0.0')` is `[]`. Failing tests were written first; the old "generic advice" test now expects `[]`.
+- `upgrade_guides.guide_target_release()` is new and parses the target through `_GUIDE_DIR_RE`, padded to a full release. `crossed_guide_dirs` and the gate both use it, and the gate's `-to-v` split is gone. `v3.57-to-v3.58` is named `v3.58.0`.
+- QA: `llm_qa.py changed --base main --allow-unmapped`: 37/40 pass; `changed_tests` 9738 passed, 0 failed. The only failure is the same two `plan_qa` advisories as round 1. The first attempt failed on the host-wide QA lock and was re-run with a longer wait.
