@@ -147,7 +147,7 @@ Block sed command
 
 sed is dangerous
 EOF
-)"""},
+)\""""},
         }
         assert handler.matches(hook_input) is False
 
@@ -343,7 +343,7 @@ function update_file() {
         command = """git commit -m "$(cat <<'EOF'
 Block sed usage
 EOF
-)"""
+)\""""
         assert handler._is_git_command(command) is True
 
     def test_is_git_command_detects_add_and_commit_with_sed_in_message(self, handler):

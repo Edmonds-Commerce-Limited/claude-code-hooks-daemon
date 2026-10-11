@@ -72,6 +72,45 @@ class TestExpensiveProducerInsideShellDashC:
     def test_a_cheap_body_does_not_launder_a_pipe_after_the_quote(self) -> None:
         assert _matches(f"bash -c 'grep x f' | {_TAIL} -3") is True
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"echo bash -c 'pytest | {_TAIL} -1'",
+            f"printf '%s' sh -c 'pytest | {_TAIL}'",
+            f"grep -c 'sh -c ' f | {_TAIL} -3",
+        ],
+    )
+    def test_a_shell_word_that_is_only_an_argument_opens_no_program(self, command: str) -> None:
+        """Main judged these on `echo`/`printf` (allowed); that is unchanged."""
+        assert _matches(command) is False
+
+
+class TestShellAtACommandPosition:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"/bin/bash -c 'pytest | {_TAIL} -1'",
+            f"/usr/bin/env bash -c 'pytest | {_TAIL} -1'",
+            f"sudo -u u bash -c 'pytest | {_TAIL} -1'",
+            f"FOO=1 bash -c 'pytest | {_TAIL} -1'",
+            f"cd /w && bash -c 'pytest | {_TAIL} -1'",
+        ],
+    )
+    def test_expensive_producer_blocked(self, command: str) -> None:
+        assert _matches(command) is True
+        assert _producer(command) == "pytest"
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"/bin/bash -c 'grep x f | {_TAIL} -1'",
+            f"/usr/bin/env bash -c 'grep x f | {_TAIL} -1'",
+            f"FOO=1 bash -c 'grep x f | {_TAIL} -1'",
+        ],
+    )
+    def test_cheap_producer_allowed(self, command: str) -> None:
+        assert _matches(command) is False
+
     def test_double_quoted_body_is_unchanged(self) -> None:
         assert _matches(f'bash -c "grep x f | sort | {_TAIL} -n 2"') is False
         assert _matches(f'bash -c "pytest tests | {_TAIL} -3"') is True

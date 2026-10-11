@@ -47,6 +47,40 @@ class TestCommitMessageMentioningSedAfterGlobalOptions:
         assert _matches(command) is False
 
 
+_GIT_PREFIXES = [
+    "git commit",
+    "git -C /w commit",
+    "git -c a.b=c commit",
+    "git --git-dir=/w/.git commit",
+]
+
+
+class TestSedRunInsideTheMessageIsDenied:
+    """`$( )`, a backtick and `<( )` RUN sed while the message is built."""
+
+    @pytest.mark.parametrize("prefix", _GIT_PREFIXES)
+    @pytest.mark.parametrize(
+        "tail",
+        [
+            f'-m "$({_SED} -i s/a/b/ f)"',
+            f'-m "`{_SED} -i s/a/b/ f`"',
+            f"-m x -F <({_SED} -n 1p f)",
+            f'-m "note $(echo $({_SED} -i s/a/b/ f))"',
+        ],
+    )
+    def test_denied(self, prefix: str, tail: str) -> None:
+        assert _matches(f"{prefix} {tail}") is True
+
+    @pytest.mark.parametrize("prefix", _GIT_PREFIXES)
+    def test_a_quoted_heredoc_message_only_mentions(self, prefix: str) -> None:
+        command = f"{prefix} -m \"$(cat <<'EOF'\nuse {_SED} -i\nEOF\n)\""
+        assert _matches(command) is False
+
+    @pytest.mark.parametrize("prefix", _GIT_PREFIXES)
+    def test_a_literal_substitution_in_single_quotes_only_mentions(self, prefix: str) -> None:
+        assert _matches(f"{prefix} -m '$({_SED} -i x) is literal'") is False
+
+
 class TestRealSedStaysDenied:
     """The widened commit match never launders a sed that actually runs."""
 

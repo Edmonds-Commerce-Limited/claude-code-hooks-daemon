@@ -250,8 +250,14 @@ _BACKSLASH = "\\"
 # (`bash -c '`, `sh -lc '`, `zsh -l -c '`): the text before the quote ends with
 # the shell word, optional flags, and a flag cluster carrying `c`.
 _SHELL_STRING_OPENER = "'"
+#
+# The shell word must sit at a COMMAND position: the last command of the text
+# before the quote starts with optional assignments, wrappers (`sudo`, `env`)
+# and a path, then the shell. `echo bash -c '...'` passes the words to echo as
+# data, so it is not a shell program.
 _SHELL_C_BEFORE_QUOTE = re.compile(
-    r"(?:^|[\s;&|(])(?:ba|da|z|k)?sh\s+(?:-\S+\s+)*-[A-Za-z]*c\s+\Z",
+    r"\A(?:\w+=\S*\s+)*(?:(?:\S*/)?(?:sudo|env|exec|command|nohup|time)(?:\s+-\S+(?:\s+\w+)?)*\s+)*"
+    r"(?:\S*/)?(?:ba|da|z|k)?sh\s+(?:-\S+\s+)*-[A-Za-z]*c\s+\Z",
 )
 
 # Returned when the pipe is not inside any substitution: scan from the start
@@ -612,6 +618,17 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             text = text[: -len(_SUBSTITUTION_CLOSER)].rstrip()
         return text
 
+    @classmethod
+    def _is_shell_c_program(cls, before_quote: str) -> bool:
+        """Does the text before a single quote end in a shell run with `-c`,
+        with the shell at a command position (not an argument to `echo`)?"""
+        last_command = split_unquoted(before_quote, _CHAIN_SEPARATORS)[-1]
+        last_command = split_unquoted(last_command, _PIPE_SEPARATORS)[-1]
+        # Keep the trailing blank the pattern requires; strip only the front.
+        trailing = last_command[len(last_command.rstrip()) :]
+        head = cls._command_inside(last_command.strip()) + trailing
+        return _SHELL_C_BEFORE_QUOTE.search(head) is not None
+
     @staticmethod
     def _substitution_content_start(command: str, pipe_index: int) -> int:
         """Where the INNERMOST command substitution or quoted argument
@@ -667,7 +684,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
                     open_frames.pop()
                     index += 1
                     continue
-                if _SHELL_C_BEFORE_QUOTE.search(command, 0, index):
+                if PipeBlockerHandler._is_shell_c_program(command[:index]):
                     # `bash -c '...'`: the body is a shell program, so a pipe
                     # or `$(` inside it is real and belongs to the command
                     # inside the body, like a substitution (N363). The body

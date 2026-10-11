@@ -24,8 +24,10 @@ from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION, RESER
 from claude_code_hooks_daemon.utils.command_position import SEGMENT_SEPARATORS
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 from claude_code_hooks_daemon.utils.shell_segmentation import (
+    UnplaceableSubstitutionError,
     split_unquoted_spans,
     strip_quoted_heredoc_bodies,
+    substitution_inner_spans,
 )
 
 #: Acceptance subdirectory for this handler's acceptance-test fixtures.
@@ -254,6 +256,19 @@ class SedBlockerHandler(PreToolUseHandlerBase):
         if _GIT_COMMIT.search(text) is None:
             return False
         segments = split_unquoted_spans(text, SEGMENT_SEPARATORS)
+        # A sed inside `$( )`, backticks or `<( )` is RUN by bash while the
+        # message is built, so it is no mention. A span that cannot be placed
+        # relaxes nothing.
+        try:
+            executed_spans = substitution_inner_spans(text)
+        except UnplaceableSubstitutionError:
+            return False
+        # The span is a command of its own, so a quoted heredoc fed to a data
+        # sink inside it (the `-m "$(cat <<'EOF' ... EOF)"` idiom) is blanked
+        # there, where it is top level; a body bash RUNS is kept and found.
+        for start, end in executed_spans:
+            if self._sed_pattern.search(strip_quoted_heredoc_bodies(text[start:end])):
+                return False
         for sed_match in self._sed_pattern.finditer(text):
             sed_pos = sed_match.start()
             segment_start = next(start for start, end in segments if start <= sed_pos <= end)
