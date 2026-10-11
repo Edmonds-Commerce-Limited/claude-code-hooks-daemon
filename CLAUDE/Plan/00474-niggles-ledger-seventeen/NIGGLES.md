@@ -77,26 +77,30 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
-### N423 — completing an already-archived plan clears the whole `/goal`, live plans included
+### N423 — an unrequested `/goal clear`: the designed retraction, plus a latent plan-root bug
 
 **Origin**: owner report, 2026-10-11. A `/goal clear` the owner did not type appeared in the session.
 
 **Evidence**: the supervisor's `untracked/supervise/decision.log` records `would-goal-clear: goal clear trigger -> injected '/goal clear'` at 15:02:59 UTC. The goal ledger retired Plan 00500 (`terminal-status`) at 15:02:57, owned
-by this session. The live `/goal` named five plans (00470, 00474, 00479, 00484, 00500), so four were still live.
+by this session. The `/goal` named five plans (00470, 00474, 00479, 00484, 00500).
 
-**Cause** (read from code; not yet reproduced): the sheet-B sub-agent ran `git mv` on 00500 into `Completed/` and
-then flipped its Status in the moved file. `GoalInjectionHandler._maybe_refresh_on_retirement`
-(`handlers/post_tool_use/goal_injection.py` about lines 1339-1344) derives the plan root as
-`plan_md_path.parent.parent`. For an archived plan that is `CLAUDE/Plan/Completed`, so
-`GoalLedger.live_plan_refs(plan_dir)` finds no live plan there. With `refs` empty, it calls `clear_goal_signal` for
-every owner, and the supervisor types `/goal clear`. It should have re-rendered the goal naming the four live plans.
+**Cause** (batch AO, confirmed): the retraction was the designed behaviour. At 12:59 UTC, commit a17535d43 set all
+five plans to `Blocked`. The goal ledger counts only `In Progress` plans as live (`utils/goal_ledger.py`,
+`_STATE_IN_PROGRESS`). So when 00500 retired, no live plan remained, and the daemon retracted the goal through a
+`.goal-clear` trigger, which the supervisor typed as `/goal clear`. The coordinator's call is that this is correct: the
+goal's own condition was "until each is complete or totally blocked", which had been met, so the retraction stands.
+
+My first diagnosis, written into this entry before batch AO, was wrong. It blamed `plan_md_path.parent.parent`
+reading `Completed/` as the plan root. That bug is real in the code, but it is unreachable through `handle()`:
+`matched_plan_write_or_edit` skips any path under `/Completed/`. Batch AO fixed it anyway, as a latent defect, with
+`plan_root_for`/`archive_dirs_for` in `utils/plan_trigger.py`.
 
 **Related**: the owner also asked how to tell a supervisor `/goal clear` from a human one (GitHub Issue #106), because only a human clear
 should turn automated goals off. Today the supervisor's clear is the bare literal `/goal clear`, with nothing marking it as
 the supervisor's.
 
-**Status**: ⬜ Open, queued for batch AO. Reproduce it red: ledger a goal over two plans, archive one with the status flip
-inside `Completed/`, and assert the other stays in the signal. Resolve the plan root from config, not from the path depth.
+**Status**: 🔄 Latent plan-root bug fixed on branch `worktree-batch-ao` (cfb642cb6), in review. Telling a supervisor
+`/goal clear` from a human one is GitHub Issue #106.
 
 ### N422 — main is red: two `tests/unit/config` invariants fail on main
 
