@@ -66,7 +66,7 @@ minutes) every safety handler was inactive, and nothing showed the owner it
 was happening.
 
 - [ ] ⬜ **Task 3.1**: Acceptance test from a genuinely fresh clone, in BOTH install modes (self-install and a client project with `.claude/hooks-daemon/`): no venv anywhere, open a session, take no manual step. Assert the venv builds, the daemon starts, and the status line goes from "venv building" to normal. Record gaps found
-- [ ] ⬜ **Task 3.2**: Decide (owner input) how to treat the unprotected build window. Options: PreToolUse waits on the build lock up to a bound, or denies with "daemon still building" instead of failing open, or keep failing open but announce it every turn. Record the decision in the plan's owner-decisions file and implement it
+- [x] ✅ **Task 3.2**: Decide how to treat the unprotected build window (wait on the lock, deny, or keep failing open and announce). Implemented per RULING-3.2 (coordinator ruling, Fable-assisted): option C, PreToolUse keeps failing open, and the started/running remedy gains a behavioural line. See [RULING-3.2-build-window.md](RULING-3.2-build-window.md)
 - [x] ✅ **Task 3.3**: Plan counter drift on a new checkout. `hooksdaemon.latestPlanNumber` read 414 against 487 plans on disk, and `mkplan.bash` refused until it was reconciled by hand. The counter lives in `.git/config`, so a fresh clone or a second view drifts. When the on-disk maximum is ahead, reconcile it automatically (the counter can only move forward) instead of refusing
 
 ### Phase 4: Verify live
