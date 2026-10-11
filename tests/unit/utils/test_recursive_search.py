@@ -415,29 +415,3 @@ class TestRgValueTakingOptions:
         (read,) = rs.search_reads("grep -rE x sub", str(tree))
 
         assert read.root == str(tree / "sub")
-
-
-class TestFindRegexOperandIndexes:
-    """N124: the shared reader of a ``find`` command's regular-expression operands."""
-
-    @pytest.mark.parametrize(
-        ("words", "expected"),
-        [
-            (["find", ".", "-regex", ".*x"], [3]),
-            (["find", ".", "-iregex", ".*x"], [3]),
-            (["/usr/bin/find", ".", "-regex", "a", "-o", "-iregex", "b"], [3, 6]),
-            (["find", ".", "-name", "*.py"], []),
-            (["find", ".", "-path", "*/x/*", "-wholename", "*y"], []),
-            (["find", ".", "-regex"], []),
-            (["grep", "-regex", "x"], []),
-            ([], []),
-        ],
-    )
-    def test_the_word_after_each_regex_test(self, words: list[str], expected: list[int]) -> None:
-        assert rs.find_regex_operand_indexes(words) == expected
-
-    @pytest.mark.parametrize("action", sorted(rs.FIND_EXEC_ACTIONS))
-    def test_a_find_that_runs_a_command_has_none(self, action: str) -> None:
-        words = ["find", ".", "-regex", ".*x", action, "cat", "{}", ";"]
-
-        assert rs.find_regex_operand_indexes(words) == []

@@ -49,6 +49,7 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     strip_transparent_reserved_words,
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.find_expression import find_regex_operand_indexes
 from claude_code_hooks_daemon.utils.path_exclusion import (
     first_matching_glob,
     literal_screen,
@@ -1532,9 +1533,12 @@ _AWK_RUNNING_MARKERS: Final[tuple[str, ...]] = ("system", "getline", "|")
 _REGEX_PATTERN_HEADS: Final[frozenset[str]] = _GREP_HEADS | frozenset({_RG_HEAD})
 _GIT_HEAD: Final[str] = "git"
 _FIND_HEAD: Final[str] = "find"
-#: A ``find`` whose region also names ``xargs`` may hand the names it matches to
-#: a reader, so its regex is not inert.
-_XARGS_WORD: Final[re.Pattern[str]] = re.compile(r"\bxargs\b")
+#: The pipe stages that only read or count the names a ``find`` prints.
+_PIPE_TEXT_CONSUMERS: Final[frozenset[str]] = (
+    _GREP_HEADS
+    | _AWK_HEADS
+    | frozenset({_RG_HEAD, "wc", "sort", "head", "tail", "uniq", "cut", "tr"})
+)
 _GIT_GREP_SUBCOMMAND: Final[str] = "grep"
 #: The roles ``git_grep_word_roles`` gives a regex pattern word.
 _GIT_GREP_PATTERN_ROLES: Final[frozenset[GitGrepRole]] = frozenset(
@@ -1653,10 +1657,11 @@ def _text_operand_spans(text: str, offset: int, depth: int) -> set[tuple[int, in
     programs: list[tuple[int, int]] = []
     for region_start, region_end in [(0, len(text)), *inner_regions]:
         region = text[region_start:region_end]
-        for start, end in split_unquoted_spans(region, _SEGMENT_SEPARATORS):
+        segments = split_unquoted_spans(region, _SEGMENT_SEPARATORS)
+        for position, (start, end) in enumerate(segments):
             segment = region[start:end]
             head, spans = _segment_text_operands(segment, offset + region_start + start)
-            if head == _FIND_HEAD and _XARGS_WORD.search(region):
+            if head == _FIND_HEAD and not _only_text_consumers_follow(region, segments, position):
                 spans = []
             operands.update(dict.fromkeys(spans, head))
             program = _shell_dash_c_program_span(segment, head)
@@ -1733,16 +1738,33 @@ def _git_grep_pattern_spans(segment: str) -> list[tuple[int, int]]:
     ]
 
 
+def _only_text_consumers_follow(
+    region: str, segments: Sequence[tuple[int, int]], position: int
+) -> bool:
+    """Whether every pipe stage after ``segments[position]`` only reads the text
+    it is handed (ledger 00474 N124). A ``find`` whose names reach anything else
+    (``xargs``, a ``while read`` loop, ``parallel``, a shell) may open them, so
+    its regex is not inert. An ALLOWLIST: a stage not named here, or one whose
+    command word cannot be read, ends the answer at False."""
+    for later in range(position + 1, len(segments)):
+        separator = region[segments[later - 1][1] : segments[later][0]]
+        if "|" not in separator or "||" in separator:
+            return True
+        stage = region[segments[later][0] : segments[later][1]]
+        head = segment_command_word(stage)
+        if head not in _PIPE_TEXT_CONSUMERS:
+            return False
+        if head in _AWK_HEADS and any(marker in stage for marker in _AWK_RUNNING_MARKERS):
+            return False
+    return True
+
+
 def _find_regex_spans(segment: str) -> list[tuple[int, int]]:
     """``(start, end)`` within ``segment`` of each literal-quoted ``-regex`` /
     ``-iregex`` operand of a ``find`` that runs nothing on what it finds (ledger
     00474 N124). The operand is a regular expression matched against paths,
     like a grep pattern, never a path. ``-name`` / ``-path`` operands are
     globs and stay judged as such."""
-    # recursive_search -> protected_file_index -> git_repo imports this module
-    # at load time, so the shared find reader can only be imported lazily.
-    from claude_code_hooks_daemon.utils.recursive_search import find_regex_operand_indexes
-
     spans = shell_word_spans(segment)
     words = [segment[start:end] for start, end in spans]
     find_index = next(

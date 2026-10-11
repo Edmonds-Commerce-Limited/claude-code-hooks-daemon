@@ -36,7 +36,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import repository_root, scan_bash_write_targets
-from claude_code_hooks_daemon.utils.recursive_search import FIND_EXEC_ACTIONS
+from claude_code_hooks_daemon.utils.find_expression import FIND_EXEC_ACTIONS
 from claude_code_hooks_daemon.utils.shell_expansion import (
     TooManyToEnumerateError,
     iter_normalised_shell_words,
