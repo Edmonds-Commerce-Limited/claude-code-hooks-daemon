@@ -103,7 +103,14 @@ Residuals under N418: a parameter name that the script also assigns, defines, im
 never read as a callback (old may-run reading); a method (`obj.dispatch(...)`) or a callback hidden in `*args` is
 may-run; a lambda or an alias of a launcher handed as the callback is may-run, not a run; a helper that forwards its
 callback to unreadable code still ranks may-run; the forwarding call INSIDE a helper stays may-run for the literals in
-that body.
+that body. The batch AH reviewer adds one more: a callback chosen at run time (`f = subprocess.run if c else str`, a
+dict of handlers) is may-run, on main as well.
+
+🚫 Deliberate limit (coordinator's engineering judgement, not an owner ruling): every residual above errs toward
+may-run, the unseen verdict, which is an advisory under the default `unseen_policy` and a deny under `deny`. None lets
+a positive full run through, and none denies by default. Under B5 (deny only on a positive finding) a value the
+script only fixes at run time is exactly what the unseen verdict exists for; narrowing these further would need data
+flow the single-walk ranker does not keep.
 
 ### N417 — `subagent_full_qa_blocker` reads `pytest` text inside Python string data as a command
 
@@ -512,10 +519,11 @@ c55cb56e0):
   reverted to older bytes. That fits "older than main, repeated, pid unchanged". It does not
   clearly fit the preserved copy holding the old text.
 
-**Status**: ⬜ Open, cause not found. The working rule "never restart the daemon while a test
+**Status**: ⬜ Owner decision, cause not found. The working rule "never restart the daemon while a test
 run is in progress" already prevents the candidate sequence. Changing the fixture to skip the
 restore when the post-test bytes equal `HEAD` would weaken a guard, so it is left as a
-proposal rather than made.
+proposal rather than made. Agent work is exhausted: both leads investigated, three reproduction runs
+clean, no recurrence since; what is left is the owner's call on the fixture proposal (2026-10-11).
 
 ### N279 — `changed_tests` once selected 50 test files, ran 0 tests and did not fail
 

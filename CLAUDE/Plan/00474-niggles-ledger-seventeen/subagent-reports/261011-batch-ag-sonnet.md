@@ -39,7 +39,7 @@ receives".
   `probe_ae_lines.py`, `probe_ae_wrappers.py`: allow, unchanged.
 - Tests: `test_subagent_full_qa_blocker.py`, `test_ordinary_command_regression_gate.py`
   1888 passed; corpus and deadlock gate files 357 passed. New class
-  `TestStringsOnlyCountAtAProcess` (23 cases). black clean, ruff clean, pyright
+  `TestStringsOnlyCountAtAProcess` (23 cases at first writing; 29 after the round-2 fixes, per the fact-check). black clean, ruff clean, pyright
   clean on the changed source (the test file's `pytest` import is unresolved in
   this venv, as before).
 - Cost: call-graph pass is one walk plus a worklist (each rank rises at most

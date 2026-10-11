@@ -80,7 +80,7 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 | N283       | `secret_file_guard` misses a protected name in git `rev:path` syntax at the repository root (security)             | N253 analysis       | ✅ Fixed (caa8ff966)                |
 | N282       | The N264 cross-worktree guard judges an in-process teammate by the coordinator's working directory                 | Coordinator         | ✅ Fixed (8eeead3e5)                |
 | N281       | A hostile-input sweep failed on slow runners: the 100,000-character scan timed out and denied (fail-closed)        | Main CI             | ✅ Fixed (test only)                |
-| N280       | Something with pre-N271 code wrote an older `CLAUDE.md` guidance section into main during a test run               | Coordinator         | ⬜ Open                             |
+| N280       | Something with pre-N271 code wrote an older `CLAUDE.md` guidance section into main during a test run               | Coordinator         | ⬜ Owner decision (no repro)        |
 | N279       | `changed_tests` once selected 50 test files, ran 0 tests and still passed                                          | p477 agent          | 🟡 Detection fixed, cause not found |
 | N278       | A branch merged with its targeted QA never run; main took three static-check failures                              | Coordinator         | 🔄 Plan 00475 Task 4.2              |
 | N277       | `_resolve_python_cmd` in `init.sh` returns 0 after a failed resolve, with `PYTHON_CMD` empty                       | p477 agent          | ✅ Fixed (f794ae2d6)                |
