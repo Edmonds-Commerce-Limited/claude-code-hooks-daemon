@@ -231,7 +231,7 @@ class MergeQaAdvisorHandler(PreToolUseHandlerBase):
     def _advice(unrecorded: list[tuple[str, str]], pre_merge: str | None) -> str:
         heads = "\n".join(f"  - {branch} at {head}" for branch, head in unrecorded)
         checks = "\n".join(f"  {check}" for check in _STATIC_CHECKS)
-        # Ledger 00474 N380: a bare `changed` on a clean merged head selects nothing.
+        # Ledger 00474 N380: a bare `changed` on `main` refuses.
         start = pre_merge[:_SHORT_SHA] if pre_merge else "<the pre-merge head>"
         post_merge = f"./scripts/qa/llm_qa.py changed --range {start}..HEAD"
         return (
@@ -243,8 +243,8 @@ class MergeQaAdvisorHandler(PreToolUseHandlerBase):
             "'Before Merging: the Coordinator's Check'), from the project root:\n"
             f"{checks}\n\n"
             f"Then, after the merge, `{post_merge}`: it judges everything the merge "
-            "brought in, which a bare `changed` on the clean merged head does not (it "
-            "selects nothing). A passing run on a clean tree records its head, and this "
+            "brought in; a bare `changed` on `main` refuses (HEAD is the base, so there "
+            "is nothing to compare). A passing run on a clean tree records its head, and this "
             "advisory goes quiet for it.\n\n"
             "Advisory only - proceeding as requested."
         )

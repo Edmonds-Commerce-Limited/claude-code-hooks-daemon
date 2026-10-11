@@ -622,20 +622,26 @@ class TestSimpleCommandsKeepTheirFileRedirections:
     @pytest.mark.parametrize(
         ("command", "expected"),
         [
-            ("echo x > out", (("> ", "out"),)),
-            ("echo x >> log", ((">> ", "log"),)),
-            ("echo x 2> err", (("> ", "err"),)),
-            ("echo x &> all", (("&> ", "all"),)),
-            ("echo x >& all", ((">& ", "all"),)),
-            ("echo x >| out", ((">| ", "out"),)),
-            ('echo x > "a b"', (("> ", "a b"),)),
+            ("echo x > out", ((">", "out"),)),
+            ("echo x >> log", ((">>", "log"),)),
+            ("echo x 2> err", ((">", "err"),)),
+            ("echo x &> all", (("&>", "all"),)),
+            ("echo x >& all", ((">&", "all"),)),
+            ("echo x >| out", ((">|", "out"),)),
+            ('echo x > "a b"', ((">", "a b"),)),
         ],
     )
     def test_a_file_writing_redirection_is_kept(
         self, command: str, expected: tuple[tuple[str, str], ...]
     ) -> None:
         (step,) = simple_commands(command)
-        assert step.redirects == tuple((op.strip(), target) for op, target in expected)
+        assert step.redirects == expected
+
+    @pytest.mark.parametrize(
+        "command", ["echo hi > >(cat)", "echo hi > >(cat -n) && ls", "cat < <(ls)"]
+    )
+    def test_a_process_substitution_is_not_a_file_target(self, command: str) -> None:
+        assert all(step.redirects == () for step in simple_commands(command))
 
     @pytest.mark.parametrize(
         "command", ["echo x 2>&1", "echo x >&2", "echo x >&-", "echo x < in", "echo x"]

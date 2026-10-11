@@ -1500,13 +1500,18 @@ against it. `TestVariableToolUnderSteering` (the former Pinned class) asserts th
 
 Residual, from the batch O review (`untracked/agent-reports/auto/261011-052052-code-reviewer-a12043eb8bcf00a07.md`):
 
-- The handler docstring (`upgrade_approval_guard.py` ~877-886) does not describe the new `$V/<tool>` branch.
-- Only the FIRST operand is judged for the handoff signature, so `$V/tool run <sig>`, `$V/tool --flag val <sig>` and
-  `$V/tool < <sig>` pass; the test docstring (~1395-1405) says "a readable script operand". Narrow the wording, or
-  skip option values and redirect words.
-- `_SHELL_HEADS` (~265) omits `ash`, `mksh`, `yash`, `fish`, `tcsh`, `csh` and `busybox`.
-- No corpus/test row pins the decision for `$V/hooks-daemon upgrade`.
-- `CLAUDE/QA.md` says `merge_qa_advisor` prints the `--range` command "after every merge"; it does so only when the
+- ✅ cleared by batch P: The handler docstring (`upgrade_approval_guard.py` ~877-886) does not describe the new
+  `$V/<tool>` branch.
+- ✅ cleared by batch P: Only the FIRST operand is judged for the handoff signature, so `$V/tool run <sig>`,
+  `$V/tool --flag val <sig>` and `$V/tool < <sig>` pass; the test docstring (~1395-1405) says "a readable script
+  operand". Now every non-option operand (a leading `<` stripped) is judged by content.
+- ✅ cleared by batch P: `_SHELL_HEADS` (~265) omits `ash`, `mksh`, `yash`, `fish`, `tcsh`, `csh` and `busybox`
+  (added; `busybox sh x` is read as the applet `sh x`).
+- ✅ cleared by batch P: No corpus/test row pins the decision for `$V/hooks-daemon upgrade`. Pinned, but as ALLOW, not
+  deny: `upgrade` is the skill's name; the CLI has no `upgrade` subcommand (`bin/hooks-daemon upgrade` runs nothing), so
+  the entry points are the scripts, which `$V/upgrade.sh` under a steering variable still denies. Owner: say so if the
+  word should be denied anyway.
+- ✅ cleared by batch P: `CLAUDE/QA.md` says `merge_qa_advisor` prints the `--range` command "after every merge"; it does so only when the
   merged head has no green record, and the advisor's own text (~246) says "selects nothing" where a bare `changed` on
   main now refuses.
 
@@ -1642,12 +1647,13 @@ none a regression against main:
 - A redirect on a `{ … }` or `if … fi` group is judged from inside the group, so `{ cd /tmp && make; } > x` is denied
   though `x` lands in the repository (a false deny only). Remedy: give a group's redirects the directory in effect
   before it opened.
-- A process substitution target after a `cd` (`cd /tmp && echo hi > >(cat)`) is read as a file name and denied.
-  Remedy: skip `>(`/`<(` targets in `_write_redirects`.
-- `command cd /tmp` is not read as a move (`_after_directory_change` strips `builtin`, not `command`); the git gates
-  share the gap.
-- Test data at `test_git_commit_parsing.py` ~624-638 writes operators with a trailing space and strips it in the
-  assertion; write them plainly.
+- ✅ cleared by batch P: A process substitution target after a `cd` (`cd /tmp && echo hi > >(cat)`) is read as a file
+  name and denied. `>(`/`<(` targets are skipped in `_write_redirects`.
+- ✅ cleared by batch P: `command cd /tmp` is not read as a move (`_after_directory_change`, in
+  `utils/git_commit_parsing.py`, strips `builtin`, not `command`). `command [-p]` is now transparent (`command -v cd`
+  is not a move); the git gates read directories through the same function, pinned via `invocation_directory`.
+- ✅ cleared by batch P: Test data at `test_git_commit_parsing.py` ~624-638 writes operators with a trailing space and
+  strips it in the assertion; written plainly now.
 
 ### N402 — the conflict-marker commit gate denies `cd "$(git rev-parse --show-toplevel)" && git commit`
 
@@ -2394,12 +2400,14 @@ Residual, from the batch K review (none a regression):
   `*/*/` only, while the daemon's `highest_plan_number` searches every non-numbered subfolder at any depth, so a plan
   at `Completed/2025/00300-x` is counted by the daemon and missed by mkplan; the comment at ~187 claiming the scan
   "mirrors the daemon's" is wrong. Remedy: one scan, pinned by a shared fixture test.
-- The counter-only fallback advice (`plan_number_helper.py` ~767, and the CLAUDE.md block generated from it) still
+- ✅ cleared by batch P (CLAUDE.md block regenerates on the coordinator's daemon restart): The counter-only fallback
+  advice (`plan_number_helper.py` ~767, and the CLAUDE.md block generated from it) still
   says "read the counter and add 1", which reuses a number when the counter lags. Remedy: take the higher of the
   counter and the highest plan on disk, then add 1.
 - `CLAUDE/Routine/mkroutine.bash` (~226-229) still refuses when its own counter lags the disk. Remedy: the same
   advance, with a test.
-- No test asserts `CLAUDE/Plan/mkplan.bash` is byte-identical to the bundled template; a one-sided edit is caught only
+- ✅ cleared by batch P (`tests/unit/scripts/test_mkplan_template_parity.py`): No test asserts
+  `CLAUDE/Plan/mkplan.bash` is byte-identical to the bundled template; a one-sided edit is caught only
   by the session-start `deployed_artefact_drift` advisory. Remedy: a byte-parity unit test.
 
 ### N370 — the sed guard denies a `git -C <dir> commit -m` message that mentions an in-place sed edit

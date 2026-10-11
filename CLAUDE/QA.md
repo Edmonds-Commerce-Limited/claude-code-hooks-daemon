@@ -464,7 +464,8 @@ satisfy (the cross-cutting checks):
   QA lock; the hand-over then says the run is owed.
 - On `main` itself a bare `llm_qa.py changed` refuses (HEAD is the base), so
   the coordinator runs `llm_qa.py changed --range <pre-merge head>..HEAD`
-  after every merge onto `main`. `merge_qa_advisor` prints that exact command.
+  after a merge onto `main`. `merge_qa_advisor` prints that exact command only
+  when the merged head has no green record.
 
 ### The Targeted Tier in Detail
 

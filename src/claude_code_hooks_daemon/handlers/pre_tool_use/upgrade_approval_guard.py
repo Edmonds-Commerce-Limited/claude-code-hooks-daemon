@@ -262,7 +262,24 @@ _SCRIPT_READ_LIMIT: Final[int] = 4_194_304
 #: How deep `bash -c '...'` strings are followed before the scan stops.
 _MAX_INLINE_DEPTH: Final[int] = 4
 #: Shells that run a script file named as their first operand.
-_SHELL_HEADS: Final[frozenset[str]] = frozenset({"bash", "sh", "dash", "zsh", "ksh", "source", "."})
+_SHELL_HEADS: Final[frozenset[str]] = frozenset(
+    {
+        "bash",
+        "sh",
+        "dash",
+        "zsh",
+        "ksh",
+        "ash",
+        "mksh",
+        "yash",
+        "fish",
+        "tcsh",
+        "csh",
+        "busybox",
+        "source",
+        ".",
+    }
+)
 #: Words that run the rest of the segment as a command.
 _WRAPPER_HEADS: Final[frozenset[str]] = frozenset(
     {
@@ -825,6 +842,8 @@ def _segment_runs_upgrade(segment: str, cwd: str | None, depth: int, *, steered:
     if _UPGRADE_ONLY_ARG_RE.search(segment):
         return True
     words = _past_wrappers(_shell_words(segment))
+    if len(words) > 1 and command_word(words[0]) == "busybox":
+        words = words[1:]  # `busybox sh up.sh` runs the applet `sh up.sh`
     if not words:
         return False
     if _runs_upgrade_entry_point(words):
@@ -883,6 +902,14 @@ def _variable_program_is_upgrade(
     not being the daemon's own CLI). `-c`, no operand, stdin, a computed
     module or script, and the daemon's own `-m claude_code_hooks_daemon...`
     stay "cannot tell", which counts as the upgrade once something steers.
+
+    A program word ending in a literal tool name (`$V/ruff`, `$V/black`) that
+    is no shell, wrapper or python (`_program_is_literal_tool`), given no
+    argument carrying an expansion, is a tool with no finding against it
+    (ledger 00474 N410, owner ruling B5): upgrade-shaped arguments still deny,
+    EVERY operand that is a readable file (past option words and a leading
+    `<` redirect) is judged by its content, and "cannot tell" no longer
+    counts as the upgrade just because something steers.
     """
     index = 0
     while index < len(arguments) and arguments[index].startswith("-"):
@@ -908,7 +935,11 @@ def _variable_program_is_upgrade(
     ):
         if _UPGRADE_SHAPED_ARG_RE.search(" ".join(arguments)) is not None:
             return True
-        steered = False
+        return any(
+            _script_run_is_upgrade(operand, [], cwd, steered=False)
+            for operand in (word.lstrip("<") for word in arguments)
+            if operand and not operand.startswith("-")
+        )
     if index >= len(arguments):
         return _cannot_tell_script(arguments, steered=steered)
     return _script_run_is_upgrade(arguments[index], arguments[index + 1 :], cwd, steered=steered)
