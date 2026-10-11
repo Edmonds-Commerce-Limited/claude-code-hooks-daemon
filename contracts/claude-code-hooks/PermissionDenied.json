@@ -15,6 +15,9 @@
     "retry": {}
   },
   "discarded_fields": [],
+  "conditional_input_fields": {
+    "mcp_server": "Present only when the tool is an MCP tool: an object with the server's name and a source saying where its definition came from (see the PreToolUse mcp_server entry). Requires Claude Code v2.1.274 or later."
+  },
   "notes": "retry: true tells the model it may retry the denied tool call; Claude Code does not reverse the denial. No blocking: exit code and stderr are ignored because the denial already occurred. Claude Code IGNORES retry: true for no-verdict denials -- the classifier's response didn't parse, or a safety check separate from auto mode refused the classifier's own request; for those, Claude Code already tells the model in the rejection message whether to retry later or move on.",
   "input_example": {
     "session_id": "abc123",

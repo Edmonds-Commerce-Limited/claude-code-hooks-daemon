@@ -30,7 +30,8 @@
     "agent_type": "Present when the session uses --agent or the hook fires inside a subagent. For subagents the subagent's type takes precedence over the session's --agent value. Absent from the example for the same reason as agent_id.",
     "prompt_id": "In the example, but absent until the first user input of the session. Requires Claude Code v2.1.196 or later.",
     "scratchpad_dir": "In the example, but absent when the session has no scratchpad or the temp directory is unavailable. Requires Claude Code v2.1.257 or later.",
-    "effort": "In the example, but present only when the current model supports the effort parameter."
+    "effort": "In the example, but present only when the current model supports the effort parameter.",
+    "mcp_server": "Present only when the tool is an MCP tool: an object with the server's name and a source saying where the server's definition came from (plugin, sdk, or a configuration scope such as user or project). Upstream: 'Base trust decisions on source rather than on name or the mcp__<server>__ tool-name prefix'. Requires Claude Code v2.1.274 or later."
   },
   "notes": "Four outcomes: allow/deny/ask/defer, plus updatedInput to rewrite the tool's input before execution (replaces the ENTIRE input object). Precedence across hooks: deny > defer > ask > allow. For 'defer', permissionDecisionReason, updatedInput and additionalContext are ignored.",
   "input_example": {

@@ -13,6 +13,9 @@
   "top_level_decision_enum": null,
   "hook_specific_output_fields": null,
   "discarded_fields": [],
+  "conditional_input_fields": {
+    "agent_id": "The common agent_id field identifies the in-process teammate about to go idle. May be absent. Requires Claude Code v2.1.290 or later."
+  },
   "notes": "Exit 2 keeps the teammate working with stderr feedback; JSON {continue: false, stopReason} stops the teammate entirely.",
   "input_example": {
     "session_id": "abc123",
