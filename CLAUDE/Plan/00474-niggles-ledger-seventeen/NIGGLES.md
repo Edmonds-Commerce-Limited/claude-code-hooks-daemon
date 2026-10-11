@@ -1797,7 +1797,10 @@ none a regression against main:
   An operator deeper than the mark is inside a compound last stage and ends nothing, so `ls | { cd /tmp; cat > y; }`,
   `true | { cd /tmp && echo x > y; }`, `true | { cd /tmp\necho x > y\n}` and `true |(cd /tmp; echo x > y)` still deny;
   `echo hi | { cd sub && git commit -m x; }` still resolves to `('sub',)`, uncertain. A case pattern's `|` is not a
-  pipe and records no mark. This is the one deliberate loosening: `x | cd /tmp && echo > y` and `x | cd /tmp; echo > y`
+  pipe and records no mark. Round 2: a closer restores a pipeline start only from a mark at exactly the depth it
+  returns to (the closed group was the last stage); deeper marks, pipelines inside the closed subshell, are dropped
+  without restoring, so `(cd src && ls | cat)&& echo x > ../y` keeps the subshell's own restore and still denies.
+  This is the one deliberate loosening: `x | cd /tmp && echo > y` and `x | cd /tmp; echo > y`
   now place `y` at the pipeline's start directory.
 - Deliberate limit: a loop body that never runs (`while false; do cd /tmp; done; echo x > x`) is treated as one that
   did. Telling needs the loop condition evaluated, which a static walk cannot do. Left as it is. False denies only.

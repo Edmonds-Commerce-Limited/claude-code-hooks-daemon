@@ -27,6 +27,17 @@ The `/tmp` part of the earlier cd is kept in each; only the last stage's own cd 
 Newly denied: `f() { cd /tmp; }; "$@"; echo > x` and `…; g=f; $g; echo > x`. The required deny rows
 (`ls | { cd /tmp; cat > y; }` etc., `true |(cd /tmp; echo x > y)`) are deny on both.
 
+## Round 2 (bypass fix)
+
+`_pipeline_ended_by_closer` popped marks recorded inside the subshell being closed and returned the inner pipeline's
+start, replacing the subshell's own restore (`(cd src && ls | cat)&& echo x > ../y` allowed). It now drops marks deeper
+than the depth the closer returns to and restores only from a mark at exactly that depth. New tests cover every shape
+reported, with and without a space before `&&`, the two git-directory cases, a containment deny list and a corpus row.
+Probes (batch T set plus `probe_z`, `probe_z2`, `probe_z3`): the only rows allowing on the branch where main denies are
+last-stage rows (`x | cd …`, `x | y | cd …`, `true | while …; done; echo`, `true | if …; fi && echo`). Unit utils plus
+`pre_tool_use`, the corpus gate, containment and write-blindness integration: 18686 passed, 1 skipped. black, ruff,
+mypy, pyright clean.
+
 ## Tests
 
 - Utils plus all of `tests/unit/handlers/pre_tool_use`: 18075 passed, 3 failed first run. The three were pinned

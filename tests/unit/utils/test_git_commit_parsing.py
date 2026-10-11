@@ -788,6 +788,39 @@ class TestSimpleCommandsKeepTheirFileRedirections:
         step = [s for s in simple_commands(command) if s.redirects][-1]
         assert "/tmp" in step.directory
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "(cd src && ls | cat)&& echo x > ../y",
+            "(cd src && ls | cat) && echo x > ../y",
+            "(cd src; git status | cat); echo x > ../y",
+            "(cd src; git status | cat);echo x > ../y",
+            "echo $(cd src && ls | wc -l) > ../y",
+            "{ cd src && ls | cat; } > ../y",
+        ],
+    )
+    def test_a_pipeline_inside_a_subshell_does_not_replace_the_subshells_restore(
+        self, command: str
+    ) -> None:
+        step = [s for s in simple_commands(command) if s.redirects][-1]
+        assert step.directory == ()
+
+    def test_a_pipeline_inside_a_subshell_keeps_the_directory_before_it(self) -> None:
+        last = simple_commands("cd /tmp && (cd /workspace && git status | cat) && echo x > y")[-1]
+        assert last.directory == ("/tmp",)
+
+    def test_a_subshell_pipeline_leaves_the_commit_where_it_began(self) -> None:
+        assert [
+            i.directory for i in git_invocations("(cd sub && git log | cat)&& git commit -m x")
+        ][-1] == ()
+        assert [
+            i.directory for i in git_invocations("(cd sub && git log | cat) && git commit -m x")
+        ][-1] == ()
+
+    def test_a_subshell_pipeline_inside_a_cd_keeps_that_cd(self) -> None:
+        *_, commit = git_invocations("cd sub && (cd .. && git log | cat) && git commit -m x")
+        assert commit.directory == ("sub",)
+
     def test_a_pipeline_after_a_cd_restores_that_directory(self) -> None:
         last = simple_commands("cd sub && x | cd /tmp && echo x > y")[-1]
         assert last.directory == ("sub",)

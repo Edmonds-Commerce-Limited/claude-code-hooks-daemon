@@ -1109,15 +1109,18 @@ def _pipeline_ended_by_operator(marks: list[_PipelineMark], depth: int) -> _Stat
 
 
 def _pipeline_ended_by_closer(marks: list[_PipelineMark], depth: int) -> _State | None:
-    """Where the outermost pipeline began, when a closer returns the nesting to ``depth``.
+    """Where a pipeline began, when a closer returns the nesting to ``depth``.
 
-    A last stage that is a group or subshell ends with its closer, and so does a
-    pipeline inside a group the closer shuts.
+    Only a mark at exactly ``depth`` counts: the group or subshell just closed
+    was that pipeline's last stage. Marks deeper than that belong to pipelines
+    inside the closed group; they are dropped without restoring anything, so
+    they cannot replace the directory the closer itself restores.
     """
-    began: _State | None = None
-    while marks and marks[-1][0] >= depth:
-        began = marks.pop()[1]
-    return began
+    while marks and marks[-1][0] > depth:
+        marks.pop()  # a pipeline inside the closed group: it ended with the group
+    if marks and marks[-1][0] == depth:
+        return marks.pop()[1]  # the closed group or subshell was itself the last stage
+    return None
 
 
 #: How many levels of ``eval``/``sh -c`` strings are inlined. Each level re-lexes

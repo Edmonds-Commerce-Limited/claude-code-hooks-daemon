@@ -1643,6 +1643,9 @@ rows:
   - id: n403-last-stage-cd-does-not-carry-past-the-pipeline
     command: |-
       echo hi | cd /tmp && echo x > untracked/scratch/n403-last-stage.txt
+  - id: n403-subshell-pipeline-keeps-the-subshell-restore
+    command: |-
+      (cd tests && ls | cat) && echo x > untracked/scratch/n403-subshell-pipe.txt
   - id: n403-last-stage-cd-does-not-carry-past-the-pipeline-semicolon
     command: |-
       echo hi | cd /tmp; echo x > untracked/scratch/n403-last-stage-semi.txt
