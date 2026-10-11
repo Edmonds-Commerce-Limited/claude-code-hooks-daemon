@@ -78,8 +78,8 @@ from claude_code_hooks_daemon.utils.stand_in_cron import (
 from claude_code_hooks_daemon.utils.stop_hook_helpers import (
     get_transcript_reader,
     has_recent_stop_hook_block,
-    transcript_is_readable,
     is_stop_hook_active,
+    transcript_is_readable,
 )
 from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
 

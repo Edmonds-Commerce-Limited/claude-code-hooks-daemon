@@ -471,8 +471,8 @@ _REPHRASE: Final[str] = (
     "Name the repository literally and commit again: "
     "`git -C /absolute/path/to/repo commit ...`, with no `$`, `cd -`, "
     "`--git-dir`, `GIT_INDEX_FILE` or `--pathspec-from-file`. "
-    "To reach the project root, `cd \"$(git rev-parse --show-toplevel)\" && git commit ...` "
-    "is read and accepted; so are `cd \"$PWD\"` and `cd \"$(pwd)\"` (the current directory). "
+    'To reach the project root, `cd "$(git rev-parse --show-toplevel)" && git commit ...` '
+    'is read and accepted; so are `cd "$PWD"` and `cd "$(pwd)"` (the current directory). '
     "Any other variable (`cd $PROJ`) cannot be read and stays denied."
 )
 
