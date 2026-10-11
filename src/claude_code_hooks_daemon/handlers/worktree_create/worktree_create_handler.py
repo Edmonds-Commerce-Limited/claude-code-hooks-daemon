@@ -17,6 +17,7 @@ opaque ``wf_<hash>``.
 from __future__ import annotations
 
 import logging
+import os
 import subprocess  # nosec B404 — CalledProcessError typing only; run_git owns the spawn
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,16 @@ _KEY_NAME = "name"
 _KEY_PROMPT_ID = "prompt_id"
 
 
+#: ``run_git`` reports an unspawnable git as this status, and git itself exits
+#: with it when a hook it runs (e.g. ``post-checkout``) cannot find a command.
+_STATUS_COMMAND_NOT_FOUND = 127
+_NOT_FOUND_HINT = (
+    " [status 127 has two origins: git could not be spawned (searched PATH={path}), "
+    "or a git hook such as post-checkout ran a command that was not found - in that "
+    "case the worktree was still created and the hook's own stderr is quoted above]"
+)
+
+
 class _WorktreeAddError(subprocess.CalledProcessError):
     """``git worktree add`` failure whose message carries git's own reason.
 
@@ -58,7 +69,10 @@ class _WorktreeAddError(subprocess.CalledProcessError):
     def __str__(self) -> str:
         stderr = (self.stderr or "").strip()
         base = super().__str__()
-        return f"{base}: {stderr}" if stderr else base
+        message = f"{base}: {stderr}" if stderr else base
+        if self.returncode == _STATUS_COMMAND_NOT_FOUND:
+            message += _NOT_FOUND_HINT.format(path=os.environ.get("PATH", "<unset>"))
+        return message
 
 
 class WorktreeCreateHandler(WorktreeCreateHandlerBase):

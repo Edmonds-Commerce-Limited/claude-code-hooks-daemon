@@ -216,6 +216,50 @@ class TestFailureNamesTheReason:
         assert "No such file or directory: 'git'" in str(excinfo.value)
         assert "127" in str(excinfo.value)
 
+    def test_127_names_both_possible_origins_and_the_path_searched(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """127 is git's own status from a hook AND run_git's 'cannot spawn' code."""
+        monkeypatch.setenv("PATH", "/n53/marker/bin")
+        failed = subprocess.CompletedProcess(["git"], 127, "", "boom")
+        with patch(
+            "claude_code_hooks_daemon.handlers.worktree_create.worktree_create_handler.run_git",
+            return_value=failed,
+        ):
+            with pytest.raises(subprocess.CalledProcessError) as excinfo:
+                WorktreeCreateHandler._git_worktree_add(str(tmp_path), tmp_path / "w", "b")
+
+        message = str(excinfo.value)
+        assert "could not be spawned" in message
+        assert "hook" in message
+        assert "/n53/marker/bin" in message
+
+    def test_other_statuses_carry_no_127_hint(self, tmp_path: Path) -> None:
+        failed = subprocess.CompletedProcess(["git"], 128, "", "fatal: nope")
+        with patch(
+            "claude_code_hooks_daemon.handlers.worktree_create.worktree_create_handler.run_git",
+            return_value=failed,
+        ):
+            with pytest.raises(subprocess.CalledProcessError) as excinfo:
+                WorktreeCreateHandler._git_worktree_add(str(tmp_path), tmp_path / "w", "b")
+
+        assert "fatal: nope" in str(excinfo.value)
+        assert "could not be spawned" not in str(excinfo.value)
+
+    def test_post_checkout_hook_missing_command_reproduces_127(self, repo: Path) -> None:
+        """Reproduction: a hook naming a missing command makes git itself exit 127."""
+        hook = repo / ".git" / "hooks" / "post-checkout"
+        hook.write_text("#!/bin/sh\nn53-missing-command\n", encoding="utf-8")
+        hook.chmod(0o755)
+
+        handler = WorktreeCreateHandler()
+        with pytest.raises(subprocess.CalledProcessError) as excinfo:
+            handler.handle({"cwd": str(repo), "name": "n53", "session_id": "s"})
+
+        assert excinfo.value.returncode == 127
+        assert "n53-missing-command" in str(excinfo.value)
+        assert "hook" in str(excinfo.value)
+
 
 class TestSeedOptionPlumbing:
     """Plan 00267 Phase 2: the ``seed`` option is parsed LAZILY.

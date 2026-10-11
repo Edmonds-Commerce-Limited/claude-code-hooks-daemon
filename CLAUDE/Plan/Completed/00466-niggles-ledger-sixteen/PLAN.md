@@ -39,7 +39,7 @@ not-a-defect with the reasoning kept.
 
 Full write-ups are in [NIGGLES.md](NIGGLES.md). The one-line-per-niggle status table (157 rows) is in
 [STATUS-INDEX.md](STATUS-INDEX.md); evidence for the entries marked in October 2026 is in
-[STATUS-2026-10.md](STATUS-2026-10.md). Counted by the status column's emoji: 148 rows carry ✅, 1 is open (⬜, N53), 4 are
+[STATUS-2026-10.md](STATUS-2026-10.md). Counted by the status column's emoji: 148 rows carry ✅, 1 (N53) is 🟡 with its mechanism reproduced and its live cause awaiting a recurrence, 4 are
 in progress or graduated (🔄), 1 is deferred (⏸️), 1 records a deliberate limit (🚫), and two rows (N32, N92) have a
 broken status cell and are fixed on main.
 
