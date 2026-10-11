@@ -2360,8 +2360,12 @@ hard-coded `"completed"` and duplicated pattern compilation in `cli.py`, the lat
 about each root once per call; autonomy reads the runtime `ProjectContext` cached at startup (detecting only with no
 initialised context); the fallback-schema trap is real (Elicitation, ElicitationResult) and fixed, with a test that no
 event left on the fallback documents a top-level decision; `sensitive_content` caches the parsed registry keyed on the
-file's mtime and size. **Still open**: the `cli.py` pair (hard-coded `"completed"`, duplicated pattern compilation), because
-`daemon/cli.py` was off limits to that batch. Known residual of item 2:
+file's mtime and size. ~~**Still open**: the `cli.py` pair (hard-coded `"completed"`, duplicated pattern compilation), because
+`daemon/cli.py` was off limits to that batch.~~ ✅ cleared by batch Q
+([report](subagent-reports/261011-batch-q-sonnet.md)): `CiRunState.is_completed` (built on the existing
+`_CI_COMPLETED`) replaces the literal in `cli.py`; `_capture_value_swapper` now compiles through the guard's own
+`compiled_public_pattern` (made public), so a bad regex is dropped with the guard's warning instead of a traceback and a
+non-mapping entry refuses the capture with "nothing was written". Known residual of item 2:
 with a cold index, a glob carrying name text (`cat report-*.txt`) still gets no advisory, to keep
 `test_an_unrelated_star_bearing_token_stays_allowed` intact.
 
@@ -2454,7 +2458,10 @@ A counter ahead of the disk is still trusted. Tests: `tests/unit/scripts/test_mk
 
 Residual, from the batch K review (none a regression):
 
-- The two disk scans disagree below one level: `mkplan.bash` `filesystem_highest` (~191-206) looks at `*/` and
+- ✅ cleared by batch Q (`mkplan.bash` and the bundled template now apply the daemon's rule: a numbered folder holds
+  its number and is not searched, every other folder is searched at any depth, dot-folders included; pinned by
+  `tests/unit/scripts/test_mkplan_scan_depth_parity.py`, which runs both against one fixture tree and was red on four
+  of seven shapes first): The two disk scans disagree below one level: `mkplan.bash` `filesystem_highest` (~191-206) looks at `*/` and
   `*/*/` only, while the daemon's `highest_plan_number` searches every non-numbered subfolder at any depth, so a plan
   at `Completed/2025/00300-x` is counted by the daemon and missed by mkplan; the comment at ~187 claiming the scan
   "mirrors the daemon's" is wrong. Remedy: one scan, pinned by a shared fixture test.
@@ -2462,7 +2469,9 @@ Residual, from the batch K review (none a regression):
   advice (`plan_number_helper.py` ~767, and the CLAUDE.md block generated from it) still
   says "read the counter and add 1", which reuses a number when the counter lags. Remedy: take the higher of the
   counter and the highest plan on disk, then add 1.
-- `CLAUDE/Routine/mkroutine.bash` (~226-229) still refuses when its own counter lags the disk. Remedy: the same
+- ✅ cleared by batch Q (`mkroutine.bash` prints a note and advances to the disk high-water mark; there is no bundled
+  template copy of it; tests in `tests/unit/scripts/test_mkroutine_scaffolder.py` replace the two that asserted the
+  refusal): `CLAUDE/Routine/mkroutine.bash` (~226-229) still refuses when its own counter lags the disk. Remedy: the same
   advance, with a test.
 - ✅ cleared by batch P (`tests/unit/scripts/test_mkplan_template_parity.py`): No test asserts
   `CLAUDE/Plan/mkplan.bash` is byte-identical to the bundled template; a one-sided edit is caught only

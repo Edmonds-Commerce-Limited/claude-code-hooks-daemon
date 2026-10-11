@@ -659,8 +659,11 @@ def _pathspec_chunks(paths: list[str], *, narrowable: bool) -> Iterator[list[str
 _COMPILED_PATTERN_CACHE: dict[str, "re.Pattern[str] | None"] = {}
 
 
-def _compiled_public_pattern(pattern: str) -> "re.Pattern[str] | None":
+def compiled_public_pattern(pattern: str) -> "re.Pattern[str] | None":
     """Compile ``pattern`` (case-insensitive), caching by source string.
+
+    Public because the ``remote-docs`` capture swapper must judge a page with
+    the very regexes the guard will, so both go through this one function.
 
     A pattern that fails to compile is a documented no-match (never crashes
     the handler) — cached as ``None`` so a broken client config is not
@@ -776,7 +779,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             pattern = entry.get(_PATTERN_KEY_PATTERN, "")
             if not pattern:
                 continue
-            compiled = _compiled_public_pattern(pattern)
+            compiled = compiled_public_pattern(pattern)
             if compiled is None:
                 continue
             for match in compiled.finditer(content):

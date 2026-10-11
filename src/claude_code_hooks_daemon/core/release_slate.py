@@ -84,8 +84,13 @@ class CiRunState:
     run_id: int | None = None
 
     @property
+    def is_completed(self) -> bool:
+        """The run finished, whatever it concluded."""
+        return self.status == _CI_COMPLETED
+
+    @property
     def _succeeded(self) -> bool:
-        return self.status == _CI_COMPLETED and self.conclusion == _CI_SUCCESS
+        return self.is_completed and self.conclusion == _CI_SUCCESS
 
     @property
     def is_green(self) -> bool:

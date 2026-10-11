@@ -32,7 +32,7 @@
 #   4. Resolves the next number from the git-anchored counter
 #      (`hooksdaemon.latestRoutineNumber`) — its OWN key, never the plan
 #      counter — bootstrapping from a filesystem scan when it is unset.
-#   5. Refuses to proceed on counter drift or a number collision.
+#   5. Advances a counter that lags the disk; refuses on a number collision.
 #   6. Creates <routine-dir>/NNNNN-name/ with ROUTINE.md and an empty RUNS/.
 #   7. Advances the counter so the next routine reads counter + 1.
 
@@ -222,11 +222,14 @@ else
     counter="$fs_highest"
 fi
 
-# Drift guard: the git counter is authoritative, but if the filesystem already
-# holds a HIGHER number the counter is stale and counter+1 would collide or
-# mis-order. Refuse and state how to reconcile.
+# Drift guard: the counter is per clone, so a routine made in another clone
+# leaves it behind the disk, and counter+1 would collide. The disk is the truth
+# about which numbers are taken, so advance to it (the same rule mkplan.bash
+# applies) and allocate the number after it. The counter is written back below.
 if (( fs_highest > counter )); then
-    die "counter ($counter) is behind the highest routine on disk ($fs_highest). The counter is stale; reconcile with: git -C '$repo_root' config --local $COUNTER_KEY $fs_highest"
+    printf 'mkroutine: counter (%s) is behind the highest routine on disk (%s); advancing it\n' \
+        "$counter" "$fs_highest" >&2
+    counter="$fs_highest"
 fi
 
 next=$((counter + 1))

@@ -183,26 +183,41 @@ acquire_lock() {
     trap release_lock EXIT INT TERM
 }
 
-# Highest existing plan number on disk. Mirrors the daemon's scan:
-#   - direct numbered children of CLAUDE/Plan/      (NNNNN-name/)
-#   - one level inside non-numbered subdirs         (Completed/NNNNN-name/, archive/...)
-# Pattern requires a letter after the hyphen so date dirs (2026-06-19) are ignored.
-# Dotfiles (e.g. the .mkplan.lock dir) are not matched by the unquoted-* globs.
-filesystem_highest() {
-    local plan_dir="$1"
-    local highest=0 dir base num
-    shopt -s nullglob
-    for dir in "$plan_dir"/*/ "$plan_dir"/*/*/; do
-        base="$(basename "$dir")"
+# Walk one directory for scan_highest, recursing into every folder that is not
+# itself a plan. Sets the global `scan_highest_result`. Callers own the glob
+# options (nullglob, dotglob).
+scan_plan_tree() {
+    local dir="$1" entry base num
+    for entry in "$dir"/*/; do
+        entry="${entry%/}"
+        base="${entry##*/}"
         if [[ "$base" =~ ^([0-9]{1,5})-[a-zA-Z] ]]; then
+            # A numbered folder is a plan: it holds its number and is not searched.
             num=$((10#${BASH_REMATCH[1]}))
-            if (( num > highest )); then
-                highest=$num
+            if (( num > scan_highest_result )); then
+                scan_highest_result=$num
             fi
+        else
+            scan_plan_tree "$entry"
         fi
     done
-    shopt -u nullglob
-    printf '%d' "$highest"
+}
+
+# Highest existing plan number on disk. The same single rule as the daemon's
+# highest_plan_number (handlers/utils/plan_numbering.py), pinned by
+# tests/unit/scripts/test_mkplan_scan_depth_parity.py:
+#   - a folder named NNNNN-name holds that number and is NOT searched further
+#   - every other folder (Completed/, Completed/2025/, archive/, ...) is searched,
+#     at any depth, dot-prefixed folders included
+# Pattern requires a letter after the hyphen so date dirs (2026-06-19) are not
+# read as plan 2026; they are searched like any other organisational folder.
+filesystem_highest() {
+    local plan_dir="$1"
+    scan_highest_result=0
+    shopt -s nullglob dotglob
+    scan_plan_tree "$plan_dir"
+    shopt -u nullglob dotglob
+    printf '%d' "$scan_highest_result"
 }
 
 # Plan folders in the plan ROOT only -- the same set the dedupe scout is told

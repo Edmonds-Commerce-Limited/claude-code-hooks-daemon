@@ -130,6 +130,17 @@ class TestPlansAreClassifiedNotJustListed:
         assert reported.isdisjoint({4, 5, 6})
 
 
+class TestCiRunStateIsCompleted:
+    """The CLI asks the state, not the literal, whether a run finished (N374)."""
+
+    def test_a_completed_run_is_completed(self) -> None:
+        assert CiRunState(sha=_HEAD, status="completed", conclusion="failure").is_completed
+
+    def test_a_running_or_absent_status_is_not_completed(self) -> None:
+        assert not CiRunState(sha=_HEAD, status="in_progress", conclusion=None).is_completed
+        assert not CiRunState(sha=_HEAD, status=None, conclusion=None).is_completed
+
+
 class TestHeadMustBeGreenNotMerelyRecentlyGreen:
     def test_a_successful_completed_run_for_head_is_green(self, tmp_path: Path) -> None:
         report = _collect(tmp_path)

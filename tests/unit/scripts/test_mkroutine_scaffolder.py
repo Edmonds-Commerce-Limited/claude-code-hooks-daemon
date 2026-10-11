@@ -152,19 +152,22 @@ class TestNumbering:
 
         assert _git_config_or_none(routine_repo, _PLAN_COUNTER_KEY) == "412"
 
-    def test_refuses_when_the_counter_is_behind_disk(self, routine_repo: Path) -> None:
-        """A stale counter is refused, not silently worked around.
+    def test_advances_a_counter_that_is_behind_disk(self, routine_repo: Path) -> None:
+        """A stale counter is moved up to the disk, as ``mkplan.bash`` does (N371).
 
-        Proceeding would assign a number that already exists on disk, or
-        mis-order the tree. The script reports how to reconcile instead.
+        The counter is per clone, so a routine made in another clone leaves it
+        behind. The disk is the truth about which numbers are taken: take the
+        higher of the two and allocate the number after it.
         """
         (routine_repo / "CLAUDE" / "Routine" / "00009-already-here").mkdir()
         _git(routine_repo, "config", "--local", _ROUTINE_COUNTER_KEY, "3")
 
         result = _run(routine_repo, "dependency-audit")
 
-        assert result.returncode != 0
-        assert _ROUTINE_COUNTER_KEY in result.stderr
+        assert result.returncode == 0, result.stderr
+        assert (routine_repo / "CLAUDE" / "Routine" / "00010-dependency-audit").is_dir()
+        assert _git_config_or_none(routine_repo, _ROUTINE_COUNTER_KEY) == "10"
+        assert "behind" in result.stderr
 
     def test_counts_archived_routines_in_the_high_water_mark(self, routine_repo: Path) -> None:
         """A routine one level down (``Completed/``) still holds its number.
@@ -178,8 +181,19 @@ class TestNumbering:
 
         result = _run(routine_repo, "dependency-audit")
 
-        assert result.returncode != 0
-        assert "00012" in result.stderr or "12" in result.stderr
+        assert result.returncode == 0, result.stderr
+        assert (routine_repo / "CLAUDE" / "Routine" / "00013-dependency-audit").is_dir()
+
+    def test_a_counter_ahead_of_disk_is_still_trusted(self, routine_repo: Path) -> None:
+        """The advance is one-directional: a counter above the disk is untouched."""
+        (routine_repo / "CLAUDE" / "Routine" / "00002-old").mkdir()
+        _git(routine_repo, "config", "--local", _ROUTINE_COUNTER_KEY, "7")
+
+        result = _run(routine_repo, "dependency-audit")
+
+        assert result.returncode == 0, result.stderr
+        assert (routine_repo / "CLAUDE" / "Routine" / "00008-dependency-audit").is_dir()
+        assert "behind" not in result.stderr
 
 
 class TestScaffolding:

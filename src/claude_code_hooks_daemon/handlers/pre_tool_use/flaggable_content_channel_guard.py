@@ -117,7 +117,7 @@ logger = logging.getLogger(__name__)
 _CUSTOM_SHAPE_LABEL: Final[str] = "custom content-revealing pattern"
 
 # Process-lifetime cache, keyed by source string (sensitive_content.py's
-# ``_compiled_public_pattern`` precedent).
+# ``compiled_public_pattern`` precedent).
 _COMPILED_SHAPE_CACHE: dict[str, re.Pattern[str] | None] = {}
 
 
