@@ -17,8 +17,8 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from tests.support.git_fixtures import git_setup_timeout
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.remote_docs_commit_gate import (
     RemoteDocsCommitGateHandler,
@@ -169,7 +169,7 @@ class TestEachCommitFormJudgesWhatItRecords:
             ["git", "-C", str(repo), *args],
             check=True,
             capture_output=True,
-            timeout=Timeout.GIT_CONTEXT,
+            timeout=git_setup_timeout(),
         )
 
     @pytest.fixture

@@ -17,8 +17,8 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from tests.support.git_fixtures import git_setup_timeout
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content import (
@@ -37,7 +37,7 @@ def _git(repo: Path, *args: str) -> str:
         capture_output=True,
         check=True,
         text=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
     return result.stdout
 

@@ -29,6 +29,7 @@ import time
 from pathlib import Path
 
 import pytest
+from tests.load_scaling import scaled_seconds
 
 from claude_code_hooks_daemon.daemon.venv_lock import (
     DEFAULT_TIMEOUT_SECONDS,
@@ -238,5 +239,6 @@ class TestBackendSelection:
         finally:
             holder.kill()
             holder.wait()
-        assert elapsed < 10
+        # Scaled by host load, but never past the 30 s the lock is held for.
+        assert elapsed < min(scaled_seconds(10.0), 25.0)
         assert "1s" in str(excinfo.value)

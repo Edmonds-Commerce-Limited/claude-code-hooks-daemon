@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.plan_qa.checks.dormant_honesty import CHECK
 from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
 from claude_code_hooks_daemon.plan_qa.model import PlanTree
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, Level, Stage
+from tests.support.git_fixtures import git_setup_timeout
 
 _PLAN_DIR_REL = "CLAUDE/Plan"
 _TODAY = date(2026, 7, 1)
@@ -27,7 +27,7 @@ def _git(repo: Path, *args: str, commit_date: str | None = None) -> None:
         ["git", "-C", str(repo), *args],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
         env=env,
     )
 

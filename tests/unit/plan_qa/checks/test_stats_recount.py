@@ -5,12 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.plan_qa.checks.stats_recount import CHECKS
 from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
 from claude_code_hooks_daemon.plan_qa.model import PlanTree
 from claude_code_hooks_daemon.plan_qa.readme_index import ReadmeIndex
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, Level, Stage
+from tests.support.git_fixtures import git_setup_timeout
 
 _PLAN_DIR_REL = "CLAUDE/Plan"
 
@@ -46,7 +46,7 @@ def _git(repo: Path, *args: str) -> None:
         ["git", "-C", str(repo), *args],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
 
 

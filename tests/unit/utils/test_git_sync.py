@@ -20,8 +20,9 @@ import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils import git_sync
+from tests.support.git_fixtures import git_setup_timeout
 
-_TIMEOUT = Timeout.GIT_CONTEXT
+_TIMEOUT = git_setup_timeout()
 
 
 def _run(cwd: Path, *args: str) -> str:

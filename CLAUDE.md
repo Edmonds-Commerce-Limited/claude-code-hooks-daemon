@@ -97,7 +97,7 @@ IDs: R-PIPE-TO-TAIL, R-PIPE-TO-HEAD
 **The five exemptions, in the order they are applied**:
 
 1. **None of them apply if sed is EXECUTED.** sed at a command HEAD (start, or after `;`, `&&`, `||`), any flag cluster containing `i`, `e` or `n`, or sed via `xargs`, is blocked no matter what else is in the command. So `grep x f; sed -i 's/a/b/' f` is still denied — the `grep` does not rescue it. Note `sed -n '1,20p' file` prints to stdout and cannot write, and is blocked anyway — DELIBERATELY, and the deny message says so: `-n` and `-i` differ by one character. `Read` with `offset`/`limit` does the same job, as does `awk 'NR>=1 && NR<=20' file`.
-2. A `git commit` message mentioning sed (sed must follow `git commit` with no command separator between; git's own global options such as `git -C <dir> commit` are fine).
+2. A `git commit`, `git merge -m` or `git tag -m` message mentioning sed (sed must follow the git command with no command separator between; git's own global options such as `git -C <dir> commit` are fine).
 3. A `gh` issue/PR/release body mentioning sed (same separator rule).
 4. The command contains a `grep`, or an `echo` that does not itself carry a `sed 's/…'` substitution.
 5. A heredoc/redirect whose ONLY write target is a `.md` file, and whose sed text is never EXECUTED (`cat > NOTES.md <<'EOF'` mentioning sed in the body is allowed). Checked with the same `get_written_file_paths` accessor `lint_on_edit` uses to find what a Bash command AUTHORS, not a second regex over the raw text — so a command that also writes a non-`.md` target (`tee a.md b.sh`) or genuinely RUNS sed (`$(sed -i …)` in an UNQUOTED heredoc body, or a separate `; sed -i …` after the redirect) is NOT exempted and stays denied, whatever exemption 1 already covers.

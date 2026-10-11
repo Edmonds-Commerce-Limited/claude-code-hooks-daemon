@@ -5,12 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.docs_qa.checks.quote_drift import CHECK_ID, CHECKS
 from claude_code_hooks_daemon.docs_qa.context import edit_context, staged_context, sweep_context
 from claude_code_hooks_daemon.docs_qa.corpus import DocCorpus, build_and_save_corpus
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy, DocumentationQaPolicy
 from claude_code_hooks_daemon.docs_qa.types import CheckContext, CheckStage, Finding, Severity
+from tests.support.git_fixtures import git_setup_timeout
 
 _LONG_SENTENCE = (
     "This is a real sentence that is long enough to clear the minimum "
@@ -48,7 +48,7 @@ def _git(root: Path, *args: str) -> None:
         ["git", "-C", str(root), *args],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
 
 

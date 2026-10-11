@@ -19,6 +19,7 @@ import json
 import os
 from typing import TYPE_CHECKING
 
+from tests.load_scaling import scaled_seconds
 from tests.unit.supervise._load import load_supervisor_module
 
 if TYPE_CHECKING:
@@ -36,6 +37,9 @@ InputActivity = _mod.InputActivity
 TickFacts = _mod.TickFacts
 
 _ENTER = b"\r"
+
+#: How often the end-to-end child re-checks the decision log.
+_CHILD_POLL_SECONDS = 0.05
 
 
 def _write_sidecar(directory: Path, *, critical: bool = False, ts: float = 1000.0) -> None:
@@ -232,9 +236,25 @@ class TestSuperviseEndToEndAbandonedFlush:
         read_fd, write_fd = os.pipe()
         os.write(write_fd, b"forgot to hit enter")
         os.close(write_fd)
+        # The child stays alive until the supervisor has logged the compact
+        # (the event this test is about), not for a fixed half second that a
+        # loaded host can spend entirely before the second poll (N376). The
+        # cap is a hang guard scaled by host load and is never what ends a
+        # healthy run.
+        polls = int(scaled_seconds(30.0) / _CHILD_POLL_SECONDS)
+        # The supervisor logs its child's argv, i.e. this very script, into the
+        # file the script reads: bracket the first character so the log's copy
+        # of the pattern cannot match itself.
+        value = Decision.WOULD_COMPACT.value
+        pattern = f"[{value[0]}]{value[1:]}:"
+        wait_for_compact = (
+            f"for _ in $(seq {polls}); do "
+            f"grep -q '{pattern}' '{tmp_path / 'decision.log'}' && break; "
+            f"sleep {_CHILD_POLL_SECONDS}; done; exit 0"
+        )
         try:
             code = _mod.supervise(
-                ["bash", "-lc", "sleep 0.5; exit 0"],
+                ["bash", "-lc", wait_for_compact],
                 # Armed, not dry-run: Plan 00183's dry-run latch fires ONCE per
                 # session for ANY payload type, so a dry-run resubmit would
                 # itself suppress the compact that is meant to follow it --

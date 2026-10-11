@@ -15,10 +15,10 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.plan_qa.checks.plan_shrink_without_journal import CHECK, CHECK_ID
 from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, Level, Stage
+from tests.support.git_fixtures import git_setup_timeout
 
 _PLAN_DIR_REL = "CLAUDE/Plan"
 _HEADER = "# Plan 00200: Widget\n\n**Status**: In Progress\n\n"
@@ -37,7 +37,7 @@ def _git(repo: Path, *args: str) -> None:
         ["git", "-C", str(repo), *args],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
 
 

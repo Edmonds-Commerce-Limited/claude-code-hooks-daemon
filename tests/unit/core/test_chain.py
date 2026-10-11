@@ -41,6 +41,7 @@ from claude_code_hooks_daemon.core.chain import ChainExecutionResult, HandlerCha
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from tests.dispatch_timeouts import DispatchTestTimeout
+from tests.load_scaling import scaled_seconds
 
 # The deny reason only the whole-chain dispatch timeout produces: the caller
 # gave up waiting, so it names "chain", not a handler (Plan 00466 N40 m1).
@@ -768,7 +769,7 @@ class TestHandlerChain:
         result = chain.execute(hook_input)
 
         assert result.execution_time_ms > 0.0
-        assert result.execution_time_ms < 100.0  # Should be very fast
+        assert result.execution_time_ms < scaled_seconds(100.0)  # Should be very fast
 
     def test_execute_handles_handler_exception(self) -> None:
         """execute handles exceptions raised by handlers with FAIL FAST (strict mode)."""

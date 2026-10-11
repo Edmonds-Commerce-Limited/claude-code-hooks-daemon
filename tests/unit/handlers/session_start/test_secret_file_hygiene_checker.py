@@ -17,11 +17,11 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from tests.support.git_fixtures import git_setup_timeout
 from tests.vault_payloads import inline_vault_yaml, vault_file_bytes
 
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import HandlerID, Priority
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.session_start import (
     secret_file_hygiene_checker as hygiene_module,
@@ -36,7 +36,7 @@ def _git(repo: Path, *args: str) -> None:
         ["git", "-C", str(repo), *args],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
 
 

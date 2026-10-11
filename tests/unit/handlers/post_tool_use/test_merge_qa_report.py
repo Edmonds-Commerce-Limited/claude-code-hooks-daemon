@@ -19,9 +19,10 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from tests.support.git_fixtures import git_setup_timeout
+
 from claude_code_hooks_daemon.config.models import PlanWorkflowQaConfig
 from claude_code_hooks_daemon.constants import HandlerID, Priority
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.docs_qa.corpus import build_and_save_corpus
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
@@ -39,7 +40,7 @@ def _git(repo: Path, *args: str) -> None:
         ["git", "-C", str(repo), *args],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
 
 

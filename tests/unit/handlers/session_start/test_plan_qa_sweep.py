@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from tests.support.git_fixtures import git_setup_timeout
+
 from claude_code_hooks_daemon.config.models import PlanWorkflowQaConfig
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.session_start.plan_qa_sweep import PlanQaSweepHandler
 
@@ -37,7 +38,7 @@ def _scaffold(tmp_path: Path) -> Path:
         ["git", "init", str(root)],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
     return root
 

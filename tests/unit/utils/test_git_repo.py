@@ -29,6 +29,7 @@ from claude_code_hooks_daemon.utils.git_repo import (
     read_blobs,
     run_git,
 )
+from tests.support.git_fixtures import git_setup_timeout
 
 _KEY = "hooksdaemon.testValue"
 
@@ -44,7 +45,7 @@ def _nested_repo(outer: Path) -> Path:
         ["git", "init", str(inner)],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
     return inner
 
@@ -180,7 +181,7 @@ class TestWriteConfig:
             ["git", "-C", str(tmp_git_repo), "checkout", "-b", "feature"],
             capture_output=True,
             check=True,
-            timeout=Timeout.GIT_CONTEXT,
+            timeout=git_setup_timeout(),
         )
         assert repo.read_config(_KEY) == "110"
 
@@ -244,7 +245,7 @@ class TestReadOnlyGitDoesNotTakeTheIndexLock:
             ["git", "-C", str(tmp_git_repo), "status", "--porcelain"],
             capture_output=True,
             check=True,
-            timeout=Timeout.GIT_CONTEXT,
+            timeout=git_setup_timeout(),
         )
 
         assert _index_identity(tmp_git_repo) != before, (
@@ -502,7 +503,7 @@ class TestARelocatedRepositoryIsNotInherited:
             text=True,
             env=env,
             check=False,
-            timeout=Timeout.GIT_CONTEXT,
+            timeout=git_setup_timeout(),
         )
 
         assert Path(bare.stdout.strip()).resolve() == (other / ".git").resolve()
@@ -702,7 +703,7 @@ class TestReadBlobs:
             capture_output=True,
             check=True,
             text=True,
-            timeout=Timeout.GIT_CONTEXT,
+            timeout=git_setup_timeout(),
         )
         return result.stdout.strip()
 
@@ -743,7 +744,7 @@ class TestReadBlobs:
             capture_output=True,
             check=True,
             text=True,
-            timeout=Timeout.GIT_CONTEXT,
+            timeout=git_setup_timeout(),
             env={**os.environ, **scratch_env},
         )
         sha = written.stdout.strip()

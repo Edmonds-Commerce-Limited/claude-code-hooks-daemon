@@ -16,7 +16,6 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils import git_file_states
 from claude_code_hooks_daemon.utils.git_file_states import scan_git_file_states
 from claude_code_hooks_daemon.utils.protected_pathspecs import (
@@ -28,6 +27,7 @@ from claude_code_hooks_daemon.utils.secret_file_matching import (
     protected_among,
 )
 from claude_code_hooks_daemon.utils.vendor_paths import VENDOR_DIRS_TOKEN
+from tests.support.git_fixtures import git_setup_timeout
 
 EXT = "p" + "em"
 ENV = "." + "env"
@@ -44,7 +44,7 @@ def _git(repo: Path, *args: str) -> None:
         ["git", "-C", str(repo), *args],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
 
 
@@ -54,7 +54,7 @@ def _git_lines(repo: Path, *args: str) -> list[str]:
         capture_output=True,
         text=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     ).stdout.splitlines()
 
 

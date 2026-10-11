@@ -57,6 +57,7 @@ from claude_code_hooks_daemon.install.client_owned_assets import (
     resolve_sources,
 )
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
+from tests.load_scaling import scaled_seconds
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 
@@ -123,7 +124,9 @@ def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
         cwd=_REPO_ROOT,
         capture_output=True,
         text=True,
-        timeout=_LINT_TIMEOUT_SECONDS,
+        # A hang guard, not an assertion: scaled by host load so a gate running
+        # three legs at once does not time out a lint that would pass (N376).
+        timeout=scaled_seconds(_LINT_TIMEOUT_SECONDS),
         check=False,
         env=env,
     )

@@ -28,6 +28,7 @@ from claude_code_hooks_daemon.utils.protected_file_index import (
     remember,
     reset_index_cache,
 )
+from tests.support.git_fixtures import git_setup_timeout
 
 KEY = "id_" + "rsa"
 VAULT = "vault_" + "passwords.yml"
@@ -59,7 +60,7 @@ def _git(repo: Path, *args: str) -> None:
         ["git", "-C", str(repo), *args],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
 
 
@@ -435,7 +436,7 @@ class TestTheBuildUnderTheDaemon:
 
         real_run_git = git_file_states.run_git
 
-        def loaded_host(cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT) -> object:
+        def loaded_host(cwd: Path, *args: str, timeout: float = git_setup_timeout()) -> object:
             if timeout <= Timeout.GIT_CONTEXT:
                 return subprocess.CompletedProcess(["git", *args], 124, "", "timed out")
             return real_run_git(cwd, *args, timeout=timeout)

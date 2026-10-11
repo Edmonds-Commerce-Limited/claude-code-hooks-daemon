@@ -364,7 +364,7 @@ The rule is **deny-by-default on the word `sed`** in a Bash command, with four n
 **The four exemptions (Bash):**
 
 1. None apply when sed is executed (above). `sed -n '1,20p' file` prints to stdout and cannot write, and is denied anyway, deliberately: `-n` and `-i` differ by one character. The deny message for that shape says so and names the replacements -- the `Read` tool with `offset`/`limit`, or `awk 'NR>=1 && NR<=20' file`.
-2. A `git commit` message mentioning sed (sed must follow `git commit` with no command separator between; git's global options such as `git -C <dir> commit` are fine)
+2. A `git commit`, `git merge -m` or `git tag -m` message mentioning sed (sed must follow the git command with no command separator between; git's global options such as `git -C <dir> commit` are fine)
 3. A `gh` issue/PR/release body mentioning sed (same separator rule)
 4. The command contains a `grep`, or an `echo` that does not itself carry a `sed 's/…'` substitution -- this is why `cat file | sed 's/x/y/' | grep z` passes while the `wc -l` form above does not
 

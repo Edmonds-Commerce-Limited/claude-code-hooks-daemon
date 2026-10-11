@@ -39,6 +39,8 @@ from typing import Final
 
 import pytest
 
+from tests.load_scaling import scaled_seconds
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VENV_SH = REPO_ROOT / "scripts" / "install" / "venv.sh"
 FP_SH = REPO_ROOT / "scripts" / "install" / "python_fingerprint.sh"
@@ -293,7 +295,8 @@ class TestLockWaitIsBounded:
         assert TIMEOUT_FRAGMENT in err, f"timeout must be named; stderr:\n{err}"
         assert str(lock_file) in err, f"the lock file path must be named; stderr:\n{err}"
         assert "1s" in err, f"the bound waited must be stated; stderr:\n{err}"
-        assert elapsed < 15, f"a 1s bound must not wait {elapsed:.1f}s"
+        # Scaled by host load, but never past the 30 s the lock is held for.
+        assert elapsed < min(scaled_seconds(15.0), 25.0), f"a 1s bound must not wait {elapsed:.1f}s"
         assert _uv_calls(uv_log) == [], "no uv sync may run while the lock is held"
 
     def test_fast_path_does_not_need_the_lock(self, tmp_path: Path) -> None:

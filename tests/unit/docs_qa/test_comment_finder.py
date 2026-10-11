@@ -12,13 +12,13 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.docs_qa.comment_finder import (
     DEFAULT_MIN_BLOCK_LINES,
     CommentBlockFinding,
     find_long_comment_blocks,
 )
 from claude_code_hooks_daemon.utils.claude_config import CLAUDE_CONFIG_DIR_ENV
+from tests.support.git_fixtures import git_setup_timeout
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -26,7 +26,7 @@ def _git(repo: Path, *args: str) -> None:
         ["git", "-C", str(repo), *args],
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
 
 

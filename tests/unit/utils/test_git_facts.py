@@ -19,7 +19,6 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_commit_parsing import read_commit_form
 from claude_code_hooks_daemon.utils.git_facts import (
     GitFactsBase,
@@ -27,6 +26,7 @@ from claude_code_hooks_daemon.utils.git_facts import (
     commit_facts,
     project_relative_head_text,
 )
+from tests.support.git_fixtures import git_setup_timeout
 from tests.support.git_fixtures import run_git as _git
 
 
@@ -244,7 +244,7 @@ class TestIndexListing:
         def recording(
             cwd: Path,
             *args: str,
-            timeout: float = Timeout.GIT_CONTEXT,
+            timeout: float = git_setup_timeout(),
             env: Mapping[str, str] | None = None,
         ) -> subprocess.CompletedProcess[str]:
             calls.append(args)
