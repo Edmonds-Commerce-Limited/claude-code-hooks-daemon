@@ -12,7 +12,7 @@ reconcile to its status column). Of those, 14 are resolved in the sections below
 (N222, N95, N42 and N79 fixed; N45, N57, N68, N71, N72, N77, N78 and N89
 dismissed; N62 and N74 no change), leaving 42. They stay open, are not copied
 here, and are tracked from this ledger by reference to that
-[index](../Completed/00466-niggles-ledger-sixteen/PLAN.md). Its branches are all
+[index](../Completed/00466-niggles-ledger-sixteen/STATUS-INDEX.md). Its branches are all
 resolved: landed (n101, n211, lifecycle, d-00376) or dropped, their branch-only
 entries carried in the sections below. Plan 00483's dismissals and no-change
 rulings for these entries are recorded in the next section.
