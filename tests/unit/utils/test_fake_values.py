@@ -9,6 +9,7 @@ import pytest
 
 from claude_code_hooks_daemon.utils.fake_values import (
     REGISTRY_RELATIVE_PATH,
+    FakeKind,
     FakeValuesError,
     FakeValuesRegistry,
     ValueSwap,
@@ -177,3 +178,32 @@ class TestSwapUnlistedFakes:
                 {"session-uuid": _UUID_RE},
                 registry,
             )
+
+
+class TestNotVisiblyFake:
+    """N361 (owner ruling C7): every listed value must look obviously fake."""
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            _ALL_A,
+            "00000000-0000-0000-0000-000000000000",
+            "fakefakefake",
+            "FAKE-token-1234",
+            "xxxxxxxxxxxxxxxx",
+        ],
+    )
+    def test_obviously_fake_values_pass(self, value: str) -> None:
+        registry = FakeValuesRegistry(kinds={"k": FakeKind(name="k", values=(value,))})
+        assert registry.not_visibly_fake() == []
+
+    @pytest.mark.parametrize("value", [_REAL_LOOKING, "alice@example.org", "hunter2"])
+    def test_real_looking_values_are_reported_with_their_kind(self, value: str) -> None:
+        registry = FakeValuesRegistry(kinds={"k": FakeKind(name="k", values=(_ALL_A, value))})
+        assert registry.not_visibly_fake() == [("k", value)]
+
+    def test_the_shipped_registry_is_prefilled_and_entirely_visibly_fake(self) -> None:
+        root = Path(__file__).resolve().parents[3]
+        registry = load_fake_values(root)
+        assert len(registry.kind_names) >= 5
+        assert registry.not_visibly_fake() == []

@@ -15,9 +15,13 @@ other change.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Final, Literal
+
+import yaml
 
 from claude_code_hooks_daemon.handlers.registry import (
     handler_is_enabled,
@@ -68,9 +72,13 @@ def _absent_block_defers_to_default(version: str) -> bool:
     return _version(version) >= _ABSENT_BLOCK_DEFERS_SINCE
 
 
-def _event_block(config: Mapping[str, Any], event: str) -> Mapping[str, Any]:
+def _handlers_section(config: Mapping[str, Any]) -> Mapping[str, Any]:
     handlers = config.get(_HANDLERS_SECTION)
-    block = handlers.get(event) if isinstance(handlers, Mapping) else None
+    return handlers if isinstance(handlers, Mapping) else {}
+
+
+def _event_block(config: Mapping[str, Any], event: str) -> Mapping[str, Any]:
+    block = _handlers_section(config).get(event)
     return block if isinstance(block, Mapping) else {}
 
 
@@ -140,15 +148,168 @@ def restore_snippet(changes: list[HandlerChange]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def format_changes(changes: list[HandlerChange], from_version: str, to_version: str) -> str:
-    """The loud, human- and agent-readable report for an upgrade summary."""
+_UNIT_INDENT: Final[int] = 2
+#: ``handlers:`` on its own line, or with an empty inline mapping (what `init minimal` writes).
+_HANDLERS_LINE: Final[re.Pattern[str]] = re.compile(r"^handlers:[ \t]*(\{\}[ \t]*)?(#.*)?$")
+_EMPTY_INLINE_MAPPING: Final[re.Pattern[str]] = re.compile(r":[ \t]*\{\}")
+
+
+def _indent_of(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
+
+
+def _is_content(line: str) -> bool:
+    stripped = line.strip()
+    return bool(stripped) and not stripped.startswith("#")
+
+
+def _section_end(lines: list[str], start: int, parent_indent: int) -> int:
+    """Index of the first content line after ``start`` that is not nested under it."""
+    for index in range(start + 1, len(lines)):
+        if _is_content(lines[index]) and _indent_of(lines[index]) <= parent_indent:
+            return index
+    return len(lines)
+
+
+def _child_indent(lines: list[str], start: int, end: int, default: int) -> int:
+    for index in range(start + 1, end):
+        if _is_content(lines[index]):
+            return _indent_of(lines[index])
+    return default
+
+
+def _insert_block(lines: list[str], at: int, indent: int, rows: list[tuple[int, str]]) -> None:
+    lines[at:at] = [f"{' ' * (indent + offset)}{text}\n" for offset, text in rows]
+
+
+def _add_handler_text(lines: list[str], event: str, keys: list[str], event_declared: bool) -> bool:
+    """Insert ``enabled: true`` blocks for ``keys`` under ``handlers.<event>``; False if unsafe.
+
+    ``event_declared`` says the parsed config already has that event, so a text
+    search that fails to find it means a layout this editor does not handle.
+    """
+    handlers_at = next((i for i, ln in enumerate(lines) if _HANDLERS_LINE.match(ln.rstrip())), None)
+    if handlers_at is None:
+        return False
+    end = _section_end(lines, handlers_at, 0)
+    unit = _child_indent(lines, handlers_at, end, _UNIT_INDENT)
+    lines[handlers_at] = _EMPTY_INLINE_MAPPING.sub(":", lines[handlers_at], count=1)
+    event_line = re.compile(rf"^{' ' * unit}{re.escape(event)}:[ \t]*(\{{\}}[ \t]*)?(#.*)?$")
+    event_at = next((i for i in range(handlers_at + 1, end) if event_line.match(lines[i])), None)
+    block = [row for key in keys for row in ((0, f"{key}:"), (unit, f"{_ENABLED_KEY}: true"))]
+    if event_at is None:
+        if event_declared:
+            return False
+        nested = [(offset + unit, text) for offset, text in block]
+        _insert_block(lines, handlers_at + 1, unit, [(0, f"{event}:"), *nested])
+        return True
+    lines[event_at] = _EMPTY_INLINE_MAPPING.sub(":", lines[event_at], count=1)
+    event_end = _section_end(lines, event_at, unit)
+    child = _child_indent(lines, event_at, event_end, unit * 2)
+    _insert_block(lines, event_at + 1, child, block)
+    return True
+
+
+def apply_restore(config_path: Path, changes: list[HandlerChange]) -> bool:
+    """Write ``enabled: true`` into the config for every handler that STOPPED.
+
+    N360 (owner ruling C6): a project's real configuration carries across an
+    upgrade, so a handler that ran before keeps running. The edit is textual,
+    so comments and layout survive, and it is verified before anything is
+    written: the edited text must parse and every restored handler must resolve
+    as enabled.
+
+    Args:
+        config_path: The project's ``hooks-daemon.yaml``.
+        changes: The upgrade's handler changes; only ``stops`` entries are written.
+
+    Returns:
+        True when the config now keeps every stopped handler running (including
+        when nothing needed writing); False, with the file untouched, when the
+        file's shape (for example an inline ``handlers: {}``) is not one that
+        can be edited safely.
+    """
+    original = config_path.read_text(encoding="utf-8")
+    config = yaml.safe_load(original)
+    if not isinstance(config, Mapping):
+        return False
+    wanted: dict[str, list[str]] = {}
+    for change in changes:
+        if change.change == "stops" and change.config_key not in _event_block(config, change.event):
+            wanted.setdefault(change.event, []).append(change.config_key)
+    if not wanted:
+        return True
+
+    lines = original.splitlines(keepends=True)
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    if _HANDLERS_SECTION not in config:
+        if lines and lines[-1].strip():
+            lines.append("\n")
+        lines.append(f"{_HANDLERS_SECTION}:\n")
+    for event, keys in wanted.items():
+        declared = event in _handlers_section(config)
+        if not _add_handler_text(lines, event, keys, declared):
+            return False
+
+    edited = "".join(lines)
+    try:
+        reloaded = yaml.safe_load(edited)
+    except yaml.YAMLError:
+        return False
+    if not isinstance(reloaded, Mapping):
+        return False
+    for event, keys in wanted.items():
+        block = _event_block(reloaded, event)
+        if any(block.get(key) != {_ENABLED_KEY: True} for key in keys):
+            return False
+    config_path.write_text(edited, encoding="utf-8")
+    return True
+
+
+def format_changes(
+    changes: list[HandlerChange],
+    from_version: str,
+    to_version: str,
+    applied: bool | None = None,
+) -> str:
+    """The loud, human- and agent-readable report for an upgrade summary.
+
+    Args:
+        changes: The handlers that stop or start running.
+        from_version: Version upgraded from.
+        to_version: Version upgraded to.
+        applied: ``None`` when no write was attempted; ``True`` when the upgrade
+            wrote ``enabled: true`` for the stopped handlers; ``False`` when it
+            tried and could not.
+    """
     stopped = [c for c in changes if c.change == "stops"]
     started = [c for c in changes if c.change == "starts"]
     lines = [
         f"Effective handler set changes for THIS project's config "
         f"(v{from_version.lstrip('vV')} -> v{to_version.lstrip('vV')}).",
     ]
-    if stopped:
+    if stopped and applied:
+        lines.append(
+            f"{len(stopped)} handler(s) STOP running by default under the new rules: their "
+            "block is absent from your config."
+        )
+        lines.extend(f"  - {c.config_path}" for c in stopped)
+        lines.append(
+            "The upgrade wrote `enabled: true` for each of them in .claude/hooks-daemon.yaml, "
+            "so the handlers that ran before keep running and your real configuration can "
+            "carry across upgrades."
+        )
+        lines.append(
+            "To stop one, set its `enabled: false` or delete its block "
+            "(several are noisy and four deny tool calls)."
+        )
+    elif stopped:
+        if applied is False:
+            lines.append(
+                "The upgrade could not edit .claude/hooks-daemon.yaml automatically "
+                "(its layout is not one that can be changed safely)."
+            )
         lines.append(
             f"{len(stopped)} handler(s) STOP running: their block is absent from "
             "your config and they are now off unless named."
@@ -157,7 +318,7 @@ def format_changes(changes: list[HandlerChange], from_version: str, to_version: 
     if started:
         lines.append(f"{len(started)} handler(s) START running:")
         lines.extend(f"  - {c.config_path}" for c in started)
-    snippet = restore_snippet(changes)
+    snippet = "" if applied else restore_snippet(changes)
     if snippet:
         lines.append("")
         lines.append("To keep the ones you want, add them to .claude/hooks-daemon.yaml")

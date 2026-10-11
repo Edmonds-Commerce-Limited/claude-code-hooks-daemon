@@ -39,6 +39,10 @@ _KEY_VALUES: Final[str] = "values"
 _KIND_KEYS: Final[frozenset[str]] = frozenset({_KEY_DESCRIPTION, _KEY_FAKE_LOOKING, _KEY_VALUES})
 
 
+#: What "obviously fake" means: the word ``fake``, or one character repeated eight times.
+_VISIBLY_FAKE: Final[re.Pattern[str]] = re.compile(r"fake|(.)\1{7}", re.IGNORECASE)
+
+
 class FakeValuesError(ValueError):
     """The registry is malformed, or a swap cannot be completed."""
 
@@ -88,6 +92,19 @@ class FakeValuesRegistry:
         """Whether ``value`` is EXACTLY one of the approved fakes of ``kind``."""
         entry = self.kinds.get(kind)
         return entry is not None and value in entry.values
+
+    def not_visibly_fake(self) -> list[tuple[str, str]]:
+        """Listed values that do not look obviously fake, as ``(kind, value)``.
+
+        Owner ruling C7: a listed value must look fake without anyone knowing
+        it is one, so the registry is not a route for a real-looking value.
+        """
+        return [
+            (entry.name, value)
+            for entry in self.kinds.values()
+            for value in entry.values
+            if _VISIBLY_FAKE.search(value) is None
+        ]
 
     def unlisted_fake_looking(self, text: str) -> list[tuple[str, str]]:
         """Fake-looking values in ``text`` that are not on the registry, as ``(kind, value)``."""

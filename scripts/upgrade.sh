@@ -1161,7 +1161,8 @@ if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
         check-effective-handlers \
         --from "${FROM_VERSION#v}" \
         --to "${TARGET_SEMVER#v}" \
-        --config "$_metadata_config_file" 2>&1)"; then
+        --config "$_metadata_config_file" \
+        --apply 2>&1)"; then
         _eff_rc=0
     else
         _eff_rc=$?

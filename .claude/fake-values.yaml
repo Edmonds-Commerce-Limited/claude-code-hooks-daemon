@@ -1,3 +1,21 @@
+# ============================================================================
+# STOP. EVERY VALUE IN THIS FILE MUST BE OBVIOUSLY, VISIBLY FAKE.
+#
+# This file is a hole in the sensitive-content guard: a value listed here is
+# let through into docs, vendored pages and tests. Anyone who can edit it can
+# smuggle a value past the guard, so ANY CHANGE MUST BE A CLEAR FAKE:
+#
+#   - a long run of one repeated character (`aaaaaaaa`, `00000000`, `xxxxxxxx`),
+#   - or the word `fake`, repeated if you like (`fakefakefake`).
+#
+# A value must look fake to someone who has never been told it is one. Never
+# list anything that could occur in real life: no real addresses, hosts,
+# tokens, keys, ids or names, and nothing "similar to" one. The docs QA check
+# `unlisted-fake-value` reports any entry that does not look fake. This file
+# is pre-filled for every kind docs are likely to need (owner ruling C7), so
+# extend it only for a genuinely new kind.
+# ============================================================================
+#
 # The ONE list of approved FAKE values used in docs (Plan 00492, owner ruling D1).
 #
 # A value on this list may appear in docs, vendored pages and tests; the
@@ -30,3 +48,39 @@ kinds:
       - 'dddddddd-dddd-dddd-dddd-dddddddddddd'
       - 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'
       - 'ffffffff-ffff-ffff-ffff-ffffffffffff'
+  email-address:
+    description: Example email addresses; the local part and host both say they are fake.
+    values:
+      - 'fakefakefake@fakefakefake.example'
+      - 'fake-user-one@fakefakefake.example'
+      - 'fake-user-two@fakefakefake.example'
+  password:
+    description: Example passwords.
+    values:
+      - 'fakefakefakefake'
+      - 'fake-password-one'
+      - 'fake-password-two'
+  api-token:
+    description: Example API keys and bearer tokens.
+    values:
+      - 'fake-token-xxxxxxxxxxxxxxxxxxxxxxxx'
+      - 'fake-token-aaaaaaaaaaaaaaaaaaaaaaaa'
+      - 'fake-token-zzzzzzzzzzzzzzzzzzzzzzzz'
+  hostname:
+    description: Example server host names (the reserved `.example` suffix never resolves).
+    values:
+      - 'fakefakefake.example'
+      - 'fake-host-one.example'
+      - 'fake-host-two.example'
+  person-name:
+    description: Example people and account names.
+    values:
+      - 'Fakefake Fakefakefake'
+      - 'fakefakefake-user'
+      - 'fake-account-one'
+  home-path:
+    description: Example home-directory and project paths.
+    values:
+      - '/home/fakefakefake'
+      - '/home/fakefakefake/fake-project'
+      - '/Users/fakefakefake'
