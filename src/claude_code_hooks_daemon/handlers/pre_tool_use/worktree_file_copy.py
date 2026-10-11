@@ -187,6 +187,12 @@ def _effective_command(segment: str, depth: int = 0) -> str:
 # * `xargs` and `find -exec` take their source from another stage: a pipeline
 #   stage just before `xargs`, or the `find` starting path, must name a worktree.
 
+# The cwd the acceptance probes run their relative `src/` destination from. A
+# probe sent with the suite's own checkout as cwd reads `src/` as a path inside
+# whichever worktree the suite runs from, so its verdict would depend on where
+# QA runs. A cwd that is no worktree is the main checkout to this handler.
+_MAIN_CHECKOUT_CWD: dict[str, Any] = {HookInputField.CWD: "/"}
+
 _COPY_VERBS = frozenset({"cp", "mv", "rsync", "install"})
 _WORKTREE_PATH = re.compile(rf"(?:^|/)({_WORKTREE_RE}/)([^/]+)(?:/(.*))?$")
 _SCRATCH_ROOT = tempfile.gettempdir()
@@ -737,6 +743,7 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
                     "src/acceptance-probe-absent.py'"
                 ),
                 dispatch_as_bash=True,
+                extra_hook_input=_MAIN_CHECKOUT_CWD,
                 description="Blocks copying files from worktree to main repo (breaks isolation)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
@@ -759,6 +766,7 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
                     "untracked/worktrees/acceptance-probe-absent/src/ src/'"
                 ),
                 dispatch_as_bash=True,
+                extra_hook_input=_MAIN_CHECKOUT_CWD,
                 description="Blocks rsync from worktree to main repo",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
