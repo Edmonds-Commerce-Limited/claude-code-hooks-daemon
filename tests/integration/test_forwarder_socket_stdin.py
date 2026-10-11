@@ -26,6 +26,7 @@ the MAIN-scoped ``auto_continue_stop`` still judges the Stop probes.
 """
 
 import json
+import re
 import socket
 import subprocess
 from pathlib import Path
@@ -150,6 +151,36 @@ def test_forwarder_answers_when_stdin_is_a_socket(
 # ---------------------------------------------------------------------------
 
 
+_ROOT_DIR_LINE = re.compile(r'^HOOKS_DAEMON_ROOT_DIR="([^"]*)"', re.MULTILINE)
+
+
+def _env_file_pins_another_checkout() -> str | None:
+    """The absolute daemon root the checkout's env file pins, when it is not this checkout.
+
+    A harness worktree symlinks the main checkout's ``.claude/hooks-daemon.env``.
+    A file that bakes in a literal path (the bootstrap script wrote one before
+    N369) makes init.sh start, and wait on, the OTHER checkout's daemon, which a
+    test about this checkout's forwarder cannot judge. ``$PROJECT_PATH`` is
+    expanded per checkout, so it never pins another one.
+    """
+    env_file = REPO_ROOT / ".claude" / "hooks-daemon.env"
+    if not env_file.is_file():
+        return None
+    match = _ROOT_DIR_LINE.search(env_file.read_text(encoding="utf-8"))
+    if match is None or "$" in match.group(1):
+        return None
+    pinned = Path(match.group(1)).resolve()
+    return None if pinned == REPO_ROOT.resolve() else str(pinned)
+
+
+@pytest.mark.skipif(
+    _env_file_pins_another_checkout() is not None,
+    reason=(
+        "this checkout's .claude/hooks-daemon.env pins another checkout's daemon "
+        "(a literal HOOKS_DAEMON_ROOT_DIR); re-run scripts/bootstrap-self-install.sh "
+        "in that checkout to write the checkout-agnostic $PROJECT_PATH form (N369)"
+    ),
+)
 def test_stop_forwarder_exits_2_on_block_with_socket_stdin(tmp_path: Path) -> None:
     """Real payload, real socket stdin, real daemon: a genuinely-blockable
     Stop event (empty transcript, stop_hook_active=False — the

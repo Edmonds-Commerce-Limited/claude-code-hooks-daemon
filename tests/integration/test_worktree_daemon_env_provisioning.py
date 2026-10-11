@@ -109,6 +109,47 @@ class TestTheSetupScriptProvisionsIt:
         assert not offenders, f"the env file must be written fresh, not copied: {offenders}"
 
 
+class TestTheBootstrapScriptWritesTheSameCheckoutAgnosticFile:
+    """N369: a harness worktree SYMLINKS the main checkout's env file (seed).
+
+    The bootstrap script wrote the main checkout's absolute path into it, so
+    every harness worktree's hooks resolved the main checkout's daemon and the
+    forwarder tests failed there. The file must carry the unexpanded
+    `$PROJECT_PATH` the installer writes, which init.sh expands per checkout.
+    """
+
+    _BOOTSTRAP = _REPO_ROOT / "scripts" / "bootstrap-self-install.sh"
+
+    def _run_the_script_s_write(self, directory: Path) -> Path:
+        """Run the script's own `printf ... > .claude/hooks-daemon.env` line in `directory`."""
+        writes = [
+            line
+            for line in self._BOOTSTRAP.read_text().splitlines()
+            if "hooks-daemon.env" in line and line.lstrip().startswith("printf")
+        ]
+        assert len(writes) == 1, writes
+        (directory / ".claude").mkdir(parents=True)
+        subprocess.run(
+            ["bash", "-c", writes[0]],
+            cwd=directory,
+            env={"REPO_ROOT": str(directory), "PATH": "/usr/bin:/bin"},
+            check=True,
+        )
+        return directory / ".claude" / "hooks-daemon.env"
+
+    def test_it_writes_the_unexpanded_project_path(self, tmp_path: Path) -> None:
+        env_file = self._run_the_script_s_write(tmp_path / "main")
+
+        assert env_file.read_text(encoding="utf-8") == 'HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH"\n'
+
+    def test_the_file_it_writes_resolves_per_checkout(self, tmp_path: Path) -> None:
+        env_file = self._run_the_script_s_write(tmp_path / "main")
+        worktree = tmp_path / "worktree"
+
+        assert _sourced_root_dir(env_file, tmp_path / "main") == str(tmp_path / "main")
+        assert _sourced_root_dir(env_file, worktree) == str(worktree)
+
+
 class TestTheSetupScriptProvisionsADevVenv:
     """The worktree exists to run QA, so its venv must carry the dev extras.
 

@@ -25,6 +25,7 @@ import re
 import shlex
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.utils import linear_shlex
@@ -78,7 +79,12 @@ _MESSAGE_LETTER: Final[str] = "m"
 _PATHSPEC_SEPARATOR: Final[str] = "--"
 _GIT_TOKEN: Final[str] = "git"
 _COMMIT_TOKEN: Final[str] = "commit"
-_ADD_TOKEN: Final[str] = "add"
+ADD_TOKEN: Final[str] = "add"
+UPDATE_INDEX_TOKEN: Final[str] = "update-index"
+APPLY_TOKEN: Final[str] = "apply"
+_PIPE: Final[str] = "|"
+_INPUT_REDIRECT: Final[str] = "<"
+STAGING_SUBCOMMANDS: Final[frozenset[str]] = frozenset({ADD_TOKEN, UPDATE_INDEX_TOKEN, APPLY_TOKEN})
 
 #: The ``-a``/``--all`` flag, which makes a commit record the WORKING TREE
 #: rather than the index.
@@ -691,8 +697,9 @@ class CommitReading:
     #: (ledger 00474 N307). ``form`` and ``moves`` above describe the first of
     #: them, or all of them combined when there are several.
     runs: tuple[CommitRun, ...] = ()
-    #: The ``git add`` runs that come before the last commit (ledger 00474 N246):
-    #: what they stage is part of what that commit records.
+    #: The staging runs (``git add``, ``update-index``, ``apply``) that come before
+    #: the last commit (ledger 00474 N246): what they stage is part of what that
+    #: commit records.
     stagings: tuple[StagingRun, ...] = ()
 
     @property
@@ -717,13 +724,26 @@ class CommitRun:
 
 @dataclass(frozen=True)
 class StagingRun:
-    """One ``git add`` of a command, and where it runs (``optional_moves`` as in :class:`CommitRun`)."""
+    """One staging run (``git add``, ``update-index`` or ``apply``) of a command, and where it runs.
+
+    ``optional_moves`` is as in :class:`CommitRun`.
+    """
 
     arguments: tuple[str, ...]
     moves: tuple[str | None, ...]
     optional_moves: int
-    #: The :attr:`SimpleCommand.position` of the ``git add``.
+    #: The :attr:`SimpleCommand.position` of the staging run.
     position: int = 0
+    #: ``add``, ``update-index`` or ``apply``: the three commands that put a
+    #: path into the index, each followed with its own reading.
+    subcommand: str = ADD_TOKEN
+    #: True when the run's stdin is fed by a pipe, a redirect or a heredoc, so
+    #: input the reading cannot see (``update-index --index-info``) shapes it.
+    stdin_fed: bool = False
+    #: Base names of the files the command writes (``> p.patch``, ``tee``), kept
+    #: for ``apply`` runs: a patch file the command writes is read at the content
+    #: it has NOW, not the content the run will see.
+    written_names: frozenset[str] = frozenset()
 
 
 def _commit_moves(run: GitInvocation) -> tuple[str | None, ...]:
@@ -795,22 +815,41 @@ def _combined_form(runs: Sequence[CommitRun]) -> CommitForm:
     )
 
 
-def _staging_runs(invocations: Sequence[GitInvocation]) -> tuple[StagingRun, ...]:
-    """The ``git add`` runs that come before the last ``git commit``."""
+def _staging_runs(invocations: Sequence[GitInvocation], command: str) -> tuple[StagingRun, ...]:
+    """The staging runs (add, update-index, apply) that come before the last ``git commit``."""
     last_commit = max(
         (position for position, run in enumerate(invocations) if run.subcommand == _COMMIT_TOKEN),
         default=-1,
     )
+    staging = [run for run in invocations[:last_commit] if run.subcommand in STAGING_SUBCOMMANDS]
+    if not staging:
+        return ()
+    piped = {step.position for step in simple_commands(command) if step.operator == _PIPE}
+    written = _written_names(command) if any(r.subcommand == APPLY_TOKEN for r in staging) else ()
+    # A "<" anywhere (redirect, heredoc, here-string) may feed any run's stdin;
+    # reading which run it feeds is not worth the false negatives.
+    reads_input = _INPUT_REDIRECT in command
     return tuple(
         StagingRun(
             arguments=run.arguments,
             moves=_commit_moves(run),
             optional_moves=_optional_moves(run),
             position=run.position,
+            subcommand=run.subcommand,
+            stdin_fed=reads_input or run.position in piped,
+            written_names=frozenset(written),
         )
-        for run in invocations[:last_commit]
-        if run.subcommand == _ADD_TOKEN
+        for run in staging
     )
+
+
+def _written_names(command: str) -> list[str]:
+    """Base names of the files ``command`` plainly writes (redirects, ``tee``...)."""
+    # Imported here: core.utils imports this package's lexers at load time.
+    from claude_code_hooks_daemon.core.utils import get_written_file_paths
+
+    hook_input = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": "/"}
+    return [Path(path).name for path in get_written_file_paths(hook_input)]
 
 
 def read_commit_form(command: str) -> CommitReading:
@@ -819,7 +858,7 @@ def read_commit_form(command: str) -> CommitReading:
     commits = [run for run in invocations if run.subcommand == _COMMIT_TOKEN]
     first = extract_commit_form(command)
     runs = tuple(_commit_run(run, first if len(commits) == 1 else _form_of(run)) for run in commits)
-    stagings = _staging_runs(invocations)
+    stagings = _staging_runs(invocations, command)
     form = first if len(runs) <= 1 else _combined_form(runs)
     moves = _commit_moves(commits[0]) if len(commits) == 1 else ()
     moves_certain = commits[0].moves_certain if len(commits) == 1 else True

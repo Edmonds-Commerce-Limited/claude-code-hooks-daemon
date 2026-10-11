@@ -24,6 +24,7 @@ from pathlib import Path
 from claude_code_hooks_daemon.plan_qa.checks.common import plan_number_for_folder
 from claude_code_hooks_daemon.plan_qa.model import MKPLAN_SCRIPT_NAME
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
+    ADD_TOKEN,
     CommitReading,
     SimpleCommand,
     StagingRun,
@@ -91,6 +92,8 @@ def _names(where: Path, pathspecs: Sequence[str], journal_dir: Path) -> bool:
 
 def _add_covers(run: StagingRun, journal_dir: Path, start: Path) -> bool:
     """Whether the ``git add`` ``run`` stages ``journal_dir``'s new files."""
+    if run.subcommand != ADD_TOKEN:
+        return False
     where = _resolve(start, run.moves, run.optional_moves)
     if where is None:
         return False

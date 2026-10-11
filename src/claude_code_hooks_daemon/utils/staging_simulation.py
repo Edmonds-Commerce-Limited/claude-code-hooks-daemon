@@ -8,6 +8,17 @@ a scratch object directory, and hands back the environment that points git at
 them. A gate that asks git with that environment judges the tree the commit
 will record. The real index, object store and working tree are never written.
 
+``git update-index`` and ``git apply --cached``/``--index`` are run against the
+same copy, as the real commands would run. Both are atomic: a run that fails
+leaves the copy as it was, so a failure that git would share (a path that does
+not exist, a patch that does not apply) stages nothing, as for ``git add``. An
+``apply`` is run only when its patch file exists where the command runs and the
+command does not itself write a file of that name; otherwise (a patch an earlier
+step writes or overwrites, stdin) it is treated like an unreadable add, and
+all its patches go to one ``git apply`` as in git. ``update-index --index-info``
+reads its entries from stdin: fed by a pipe, a redirect or a heredoc they are
+unreadable (every change), and otherwise it stages nothing.
+
 An add whose scope cannot be read (a pathspec the shell builds, an interactive
 or file-driven option, a directory the command reaches by a move this reading
 cannot state) is applied as ``git add -A --ignore-errors``: every working-tree
@@ -34,6 +45,9 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
+    ADD_TOKEN,
+    APPLY_TOKEN,
+    UPDATE_INDEX_TOKEN,
     CommitReading,
     StagingRun,
     is_shell_resolved,
@@ -92,6 +106,44 @@ _LONG_FLAGS: Final[frozenset[str]] = frozenset(
     }
 )
 
+#: ``git update-index`` options that are safe to run against the scratch index:
+#: those that put a named path in or take it out, set a mode or a bit, or only
+#: refresh. ``--split-index``, ``--untracked-cache``, ``--fsmonitor``,
+#: ``--index-version`` and ``--stdin`` write shared state or read input this
+#: reading cannot see, so they are unreadable.
+_UPDATE_INDEX_SHORT_LETTERS: Final[frozenset[str]] = frozenset("q")
+_UPDATE_INDEX_LONG_FLAGS: Final[frozenset[str]] = frozenset(
+    {
+        "--add",
+        "--remove",
+        "--force-remove",
+        "--replace",
+        "--verbose",
+        "--chmod=+x",
+        "--chmod=-x",
+        "--refresh",
+        "--really-refresh",
+        "--assume-unchanged",
+        "--no-assume-unchanged",
+        "--skip-worktree",
+        "--no-skip-worktree",
+        "--ignore-missing",
+        "--unmerged",
+        "--ignore-submodules",
+        "--info-only",
+        "--cacheinfo",
+        "--index-info",
+    }
+)
+_INDEX_INFO_FLAG: Final[str] = "--index-info"
+
+#: ``git apply`` options that leave the patch's meaning alone; ``-p<n>``, ``-C``,
+#: ``--directory``, ``--include`` and ``--exclude`` change the paths, so are unreadable.
+_APPLY_TO_INDEX_FLAGS: Final[frozenset[str]] = frozenset({"--cached", "--index"})
+_APPLY_SHORT_LETTERS: Final[str] = "v"
+_APPLY_LONG_FLAGS: Final[frozenset[str]] = frozenset({*_APPLY_TO_INDEX_FLAGS, "--verbose"})
+_STDIN_OPERAND: Final[str] = "-"
+
 #: What git says when an add stages NOTHING because of the paths it was given,
 #: rather than because git could not run: the real add fails the same way.
 _NOTHING_STAGED_MESSAGES: Final[tuple[str, ...]] = (
@@ -99,9 +151,20 @@ _NOTHING_STAGED_MESSAGES: Final[tuple[str, ...]] = (
     "ignored by one of your .gitignore files",
 )
 
+#: The same for ``git update-index``, which is atomic: a path that does not exist
+#: leaves the index as it was.
+_UPDATE_INDEX_NOTHING_STAGED_MESSAGES: Final[tuple[str, ...]] = (
+    "does not exist and --remove not passed",
+    "Unable to process path",
+    "cannot add to the index",
+    "git update-index: --cacheinfo cannot add",
+    "is not a valid object",
+    "invalid object",
+)
+
 
 class SimulationIncompleteError(Exception):
-    """The copy of the index is not what the command's ``git add`` would leave.
+    """The copy of the index is not what the command's staging run would leave.
 
     The message is the reason to give the user; a gate denies with it.
     """
@@ -117,7 +180,7 @@ def simulated_staging(
 ) -> Iterator[dict[str, str] | None]:
     """Yield the environment of the index ``reading``'s ``git add`` runs leave, else ``None``.
 
-    ``None`` when no ``git add`` comes before the commit, or git could not set
+    ``None`` when no staging run (add, update-index, apply) comes before the commit, or git could not set
     the copy up; the caller then reads the real index, as it always did. The
     scratch copy is removed when the block ends.
 
@@ -179,31 +242,113 @@ def _apply(
     staging: StagingRun, cwd: str | Path | None, repo_root: Path, env: Mapping[str, str]
 ) -> None:
     """Run ``staging`` against the scratch index, in every directory it may run in."""
-    arguments = _readable_arguments(staging.arguments)
-    if arguments is None or any(move is None for move in staging.moves):
+    if staging.subcommand == APPLY_TOKEN and not _APPLY_TO_INDEX_FLAGS.intersection(
+        staging.arguments
+    ):
+        return  # without --cached/--index git apply only edits the working tree
+    flags = {
+        ADD_TOKEN: (_SHORT_FLAG_LETTERS, _LONG_FLAGS),
+        UPDATE_INDEX_TOKEN: (_UPDATE_INDEX_SHORT_LETTERS, _UPDATE_INDEX_LONG_FLAGS),
+        APPLY_TOKEN: (frozenset(_APPLY_SHORT_LETTERS), _APPLY_LONG_FLAGS),
+    }[staging.subcommand]
+    arguments = _readable_arguments(staging.arguments, *flags)
+    fed_index_info = (
+        staging.subcommand == UPDATE_INDEX_TOKEN
+        and staging.stdin_fed
+        and _INDEX_INFO_FLAG in staging.arguments
+    )
+    if arguments is None or fed_index_info or any(move is None for move in staging.moves):
         _add_everything(repo_root, env)
         return
     start = Path(cwd) if cwd else repo_root
     for directory in landing_directories(staging.moves, staging.optional_moves, start):
-        if _is_repository(directory, repo_root):
+        if not _is_repository(directory, repo_root):
+            continue
+        if staging.subcommand == ADD_TOKEN:
             _add(directory, arguments, repo_root, env)
+        elif staging.subcommand == UPDATE_INDEX_TOKEN:
+            _update_index(directory, arguments, repo_root, env)
+        else:
+            _apply_patches(directory, arguments, staging.written_names, repo_root, env)
 
 
-def _readable_arguments(arguments: Sequence[str]) -> list[str] | None:
-    """``arguments`` when every one is a flag or a literal pathspec, else ``None``."""
+def _readable_arguments(
+    arguments: Sequence[str], short_letters: frozenset[str], long_flags: frozenset[str]
+) -> list[str] | None:
+    """``arguments`` when every one is a known flag or a literal operand, else ``None``."""
     readable: list[str] = []
     for position, word in enumerate(arguments):
         if word == _END_OF_OPTIONS:
             readable.extend(arguments[position:])
             break
         if word.startswith("--"):
-            if word not in _LONG_FLAGS:
+            if word not in long_flags:
                 return None
         elif word.startswith("-") and len(word) > 1:
-            if not set(word[1:]) <= _SHORT_FLAG_LETTERS:
+            if not set(word[1:]) <= short_letters:
                 return None
         readable.append(word)
     return None if any(is_shell_resolved(word) for word in readable) else readable
+
+
+def _update_index(
+    directory: Path, arguments: Sequence[str], repo_root: Path, env: Mapping[str, str]
+) -> None:
+    """``git update-index <arguments>`` against the scratch index.
+
+    ``--index-info`` is dropped (its entries come from stdin, which this reading
+    cannot see). A failure git would share, a path that does not exist, is no
+    staging, as for ``git add``; any other failure takes every change.
+    """
+    run_arguments = [word for word in arguments if word != _INDEX_INFO_FLAG]
+    result = run_git(directory, *_NO_SPLIT_INDEX, UPDATE_INDEX_TOKEN, *run_arguments, env=env)
+    if result.returncode == 0:
+        return
+    if any(message in result.stderr for message in _UPDATE_INDEX_NOTHING_STAGED_MESSAGES):
+        return
+    logger.debug("staging simulation: update-index failed (%s); taking every change", result.stderr)
+    _add_everything(repo_root, env)
+
+
+def _patch_operands(arguments: Sequence[str]) -> list[str]:
+    """The patch files among the readable ``git apply`` arguments."""
+    operands: list[str] = []
+    options_ended = False
+    for word in arguments:
+        if not options_ended and word == _END_OF_OPTIONS:
+            options_ended = True
+        elif options_ended or not word.startswith("-") or word == _STDIN_OPERAND:
+            operands.append(word)
+    return operands
+
+
+def _apply_patches(
+    directory: Path,
+    arguments: Sequence[str],
+    written_names: frozenset[str],
+    repo_root: Path,
+    env: Mapping[str, str],
+) -> None:
+    """Apply the patch files to the scratch index in one ``git apply --cached``.
+
+    A patch that is not a file where the command runs (stdin, or missing), or
+    that the command itself writes (so the file on disk is not the one the run
+    will read), cannot be read, so it takes every change. ``git apply`` is
+    atomic across all its patches: if any does not apply the index is left as it
+    was and nothing is staged, exactly as the real command.
+    """
+    operands = _patch_operands(arguments)
+    if (
+        not operands
+        or _STDIN_OPERAND in operands
+        or any(Path(operand).name in written_names for operand in operands)
+        or not all((directory / operand).is_file() for operand in operands)
+    ):
+        _add_everything(repo_root, env)
+        return
+    applied = run_git(directory, *_NO_SPLIT_INDEX, APPLY_TOKEN, "--cached", *operands, env=env)
+    if applied.returncode != 0:
+        logger.debug("staging simulation: apply failed (%s); nothing staged", applied.stderr)
 
 
 def _is_repository(directory: Path, repo_root: Path) -> bool:
