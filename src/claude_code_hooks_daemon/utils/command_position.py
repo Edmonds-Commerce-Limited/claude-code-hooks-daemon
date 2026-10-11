@@ -262,6 +262,10 @@ def without_comment(segment: str) -> str:
     The segment splitter keeps comment text as a command on purpose (the
     conservative reading), so a guard that matches ONE command's own words
     cuts the comment off first: `true # sudo pip install x` runs `true`.
+
+    Only the guards that call this (pip_break_system, sudo_pip and the gh view
+    comment guards) cut comments; git_stash and destructive_git still judge
+    comment text as commands.
     """
     for start, _end in shell_word_spans(segment):
         if segment[start] == "#":
@@ -270,7 +274,11 @@ def without_comment(segment: str) -> str:
 
 
 def command_position_code_segments(command: str) -> list[str]:
-    """:func:`command_position_segments` with each segment's trailing comment removed."""
+    """:func:`command_position_segments` with each segment's trailing comment removed.
+
+    git_stash and destructive_git still judge comment text (they use
+    :func:`command_position_segments`); only the guards that opt in cut it.
+    """
     return [without_comment(segment) for segment in command_position_segments(command)]
 
 

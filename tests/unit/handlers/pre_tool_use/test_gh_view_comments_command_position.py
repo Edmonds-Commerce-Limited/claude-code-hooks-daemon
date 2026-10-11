@@ -75,6 +75,8 @@ def _denied(view: str) -> list[str]:
         f"bash <<'EOF'\n{view} 5\nEOF",
         f"{view} 5 --json title,body",
         f"{view} 5 --json=title,body",
+        f"{view} 5 --comments=false",
+        f"{view} 5 --comments=False",
         f'{view} 5 --json title --jq ".title | length"',
         f'echo "{view} 5"; {view} 5',
         f"{view} 5 && echo '--comments'",
@@ -94,6 +96,14 @@ def _allowed(view: str) -> list[str]:
         f'{view} 5 --json=comments --jq ".comments | map(.body)"',
         f"{view} 5 --jq '.comments | length' --json comments",
         f"{view} 5 --comments --jq '.a | .b'",
+        f"{view} 5 --comments=true",
+        f"{view} 5 --comments=TRUE",
+        f"{view} 5 -c",
+        f"{view} 5 --help",
+        f"{view} --help",
+        f"{view} 5 -h",
+        f"{view} 5 --web",
+        f"{view} 5 -w",
     ]
 
 

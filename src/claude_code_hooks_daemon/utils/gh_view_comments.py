@@ -20,6 +20,9 @@ from claude_code_hooks_daemon.utils.command_position import command_position_cod
 from claude_code_hooks_daemon.utils.shell_segmentation import resolve_shell_word, shell_word_spans
 
 _COMMENTS_FLAG = "--comments"
+_COMMENTS_SHORT_FLAG = "-c"
+#: Flags after which the view fetches no comments to miss: help text, or the browser.
+_NO_FETCH_FLAGS = frozenset({"--help", "-h", "--web", "-w"})
 _JSON_FLAG = "--json"
 _COMMENTS_FIELD = "comments"
 
@@ -34,8 +37,12 @@ def _asks_for_comments(view: str) -> bool:
     for index, word in enumerate(words):
         if word is None:
             continue
-        if word == _COMMENTS_FLAG:
+        if word in _NO_FETCH_FLAGS or word in (_COMMENTS_FLAG, _COMMENTS_SHORT_FLAG):
             return True
+        if word.startswith(_COMMENTS_FLAG + "="):
+            # A boolean flag: `--comments=false` is the one spelling that declines.
+            if word[len(_COMMENTS_FLAG) + 1 :].lower() != "false":
+                return True
         fields: str | None = None
         if word == _JSON_FLAG:
             fields = words[index + 1] if index + 1 < len(words) else None
