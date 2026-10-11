@@ -2,6 +2,7 @@
 
 import logging
 import os
+import posixpath
 import re
 from pathlib import Path
 from typing import Any, Final, NamedTuple, cast
@@ -1004,6 +1005,7 @@ def _write_target_tokens(
 #: ``git`` subcommands whose ``--output`` option writes the patch they make to a file.
 _GIT_OUTPUT_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"diff", "format-patch"})
 _OUTPUT_OPTION: Final[str] = "--output"
+_GIT_CHANGE_DIRECTORY: Final[str] = "-C"
 
 
 def _git_output_files(tokens: list[str], start: int) -> list[str]:
@@ -1018,7 +1020,14 @@ def _git_output_files(tokens: list[str], start: int) -> list[str]:
         end += 1
     words = tokens[start:end]
     position = 0
+    directory = ""
     while position < len(words) and words[position].startswith(_FLAG_PREFIX):
+        if words[position] == _GIT_CHANGE_DIRECTORY and position + 1 < len(words):
+            # Each -C is relative to the one before it; an absolute one starts over.
+            # Text the shell expands stays in the path, so the target is left unresolved.
+            directory = (
+                posixpath.join(directory, words[position + 1]) if directory else words[position + 1]
+            )
         position += 2 if words[position] in _GIT_VALUE_OPTIONS else 1
     if position >= len(words) or words[position] not in _GIT_OUTPUT_SUBCOMMANDS:
         return []
@@ -1031,7 +1040,7 @@ def _git_output_files(tokens: list[str], start: int) -> list[str]:
             outputs.append(word[len(_OUTPUT_OPTION) + 1 :])
         elif word == _OUTPUT_OPTION and offset + 1 < len(arguments):
             outputs.append(arguments[offset + 1])
-    return outputs
+    return [posixpath.join(directory, output) if directory else output for output in outputs]
 
 
 #: Tokens that end one simple command and start the next.

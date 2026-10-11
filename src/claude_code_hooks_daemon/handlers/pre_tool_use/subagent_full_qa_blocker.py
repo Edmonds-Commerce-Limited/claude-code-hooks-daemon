@@ -910,6 +910,24 @@ _INLINE_CODE_FLAG_TEXT_TOOLS: Final[frozenset[str]] = frozenset(
         "du",
         "pip",
         "pip3",
+        # Build, archive, transfer and database tools: `-c` compile or stdout,
+        # `-e` environment or a SQL statement, `-r` recursive.
+        "gcc",
+        "g++",
+        "cc",
+        "clang",
+        "clang++",
+        "make",
+        "zip",
+        "unzip",
+        "tar",
+        "gzip",
+        "scp",
+        "rsync",
+        "wget",
+        "less",
+        "mysql",
+        "psql",
     }
 )
 
@@ -4230,13 +4248,23 @@ def _operands_run_in_process(
     texts: dict[str, ast.expr] = {}
     kept: set[int] = set()
     operands: list[ast.expr | None] = []
+    # The names each open function or lambda shadows with a parameter, with what
+    # they held outside it, put back when the function ends.
+    shadowed: list[list[tuple[str, ast.expr | None, ast.expr | None]]] = []
     stack: list[tuple[ast.AST, bool]] = [(tree, False)]
     while stack:
         node, finished = stack.pop()
         if finished:
-            _bind_file_names(node, opened, texts)
+            if isinstance(node, _SCOPES):
+                for name, was_opened, was_text in shadowed.pop():
+                    _put_file_name_back(opened, name, was_opened)
+                    _put_file_name_back(texts, name, was_text)
+            else:
+                _bind_file_names(node, opened, texts)
             continue
-        if isinstance(node, ast.AugAssign):
+        if isinstance(node, ast.arg) and shadowed:
+            shadowed[-1].append((node.arg, opened.pop(node.arg, None), texts.pop(node.arg, None)))
+        elif isinstance(node, ast.AugAssign):
             kept.add(id(node.target))
         elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
             if id(node) not in kept:
@@ -4247,10 +4275,24 @@ def _operands_run_in_process(
                 operands.append(_file_read_by(node.args[0], opened, texts))
             elif _is_run_path(node, modules, members):
                 operands.append(node.args[0])
-        if isinstance(node, (ast.Assign, ast.withitem)):
+        if isinstance(node, _SCOPES):
+            shadowed.append([])
+        if isinstance(node, (ast.Assign, ast.withitem, *_SCOPES)):
             stack.append((node, True))
         stack.extend((child, False) for child in reversed(list(ast.iter_child_nodes(node))))
     return operands
+
+
+#: Nodes whose parameters are names of their own inside their body.
+_SCOPES: Final[tuple[type[ast.AST], ...]] = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+
+
+def _put_file_name_back(names: dict[str, ast.expr], name: str, value: ast.expr | None) -> None:
+    """Put ``name`` back to ``value`` (absent when None)."""
+    if value is None:
+        names.pop(name, None)
+    else:
+        names[name] = value
 
 
 def _is_run_path(call: ast.Call, modules: set[str], members: Mapping[str, str]) -> bool:
@@ -5141,6 +5183,9 @@ def _first_full_run(
 ) -> FullQaMatch | None:
     """The first full run among ``invocations``, following each ``cd`` in order.
 
+    A positive match wins over any unseen verdict, wherever it stands; the
+    first unseen one is returned only when no invocation is a positive match.
+
     ``source`` is the code they come from, searched for a program when a
     command word is a variable that code does not set. ``env -C``, ``pushd``
     and ``popd`` move the directory as one stack. ``files_deep`` counts code
@@ -5148,6 +5193,7 @@ def _first_full_run(
     shell is not read for ever.
     """
     directories: list[Path | None] = []
+    unseen: FullQaMatch | None = None
     for program, arguments, segment in invocations:
         found: FullQaMatch | None = None
         if program == _WRITES:
@@ -5172,9 +5218,13 @@ def _first_full_run(
         else:
             event.modes_may_change = event.modes_may_change or program in _MODE_CHANGERS
             found = _full_run_of(program, arguments, segment, event, here, source)
-        if found is not None:
+        if found is None:
+            continue
+        if not found.fail_closed:
             return found
-    return None
+        # An unseen verdict does not end the scan: a later positive match wins.
+        unseen = unseen or found
+    return unseen
 
 
 def _full_run_of(

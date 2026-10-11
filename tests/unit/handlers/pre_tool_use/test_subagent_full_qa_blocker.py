@@ -3257,6 +3257,14 @@ class TestInlineCodeFlagIsNotReadOnSearchAndTextTools:
             "readonly -p",
             "xargs -r ls",
             "pip install -r requirements.txt",
+            "gcc -c x.c",
+            "make -e all",
+            "zip -r a.zip d",
+            "scp -r a host:b",
+            "wget -r http://example.invalid/x",
+            "less -r f",
+            "unzip -c a.zip",
+            "mysql -e 'select 1'",
         ],
     )
     def test_a_search_or_text_tool_is_not_unseen(self, command: str) -> None:
@@ -3279,6 +3287,35 @@ class TestInlineCodeFlagIsNotReadOnSearchAndTextTools:
         match = find_full_qa_invocation(command, _patterns())
         assert match is not None, command
         assert match.fail_closed, command
+
+
+class TestAPositiveMatchBeatsAnEarlierUnseenVerdict:
+    """An unseen verdict for one segment must not hide a later positive full run."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "gcc -c x.c && pytest",
+            "docker run -e X=1 img ls; pytest",
+            "make -e all; ./scripts/qa/llm_qa.py all",
+            "perl -e 1; pytest",
+            "perl -e 1 && ./scripts/qa/llm_qa.py all",
+        ],
+    )
+    def test_the_later_full_run_is_reported(self, command: str) -> None:
+        match = find_full_qa_invocation(command, _patterns())
+        assert match is not None, command
+        assert not match.fail_closed, command
+
+    def test_an_unseen_verdict_is_still_reported_when_nothing_is_positive(self) -> None:
+        match = find_full_qa_invocation("perl -e 1; ls", _patterns())
+        assert match is not None
+        assert match.fail_closed
+
+    def test_the_first_unseen_verdict_is_the_one_reported(self) -> None:
+        match = find_full_qa_invocation("perl -e 1; ruby -e 2", _patterns())
+        assert match is not None
+        assert "perl" in match.segment
 
 
 class TestUnseenPolicyIsConfigurable:
@@ -3914,6 +3951,10 @@ _EDIT_AND_EXEC_FULL_RUNS: list[str] = [
     f"with open('{_RUN_PY}') as fh:\n    src = fh.read()\n{_EXEC}(src)",
     f"src = open('{_RUN_PY}').read()\n{_EXEC}(compile(src, 'x', 'ex' + 'ec'))",
     f"def go():\n    src = open('{_RUN_PY}').read()\n    {_EXEC}(src)\ngo()",
+    # A function with other parameter names leaves the text in scope, before and after it.
+    f"src = open('{_RUN_PY}').read()\ndef helper(x):\n    return x\n{_EXEC}(src)",
+    f"src = open('{_RUN_PY}').read()\ndef run(src):\n    pass\n{_EXEC}(src)",
+    f"src = open('{_RUN_PY}').read()\ndef run(x):\n    {_EXEC}(src)\nrun(1)",
     # Text added to the file's text is still the file's text.
     f"src = open('{_RUN_PY}').read()\nsrc += 'x = 1'\n{_EXEC}(src)",
 ]
@@ -3949,6 +3990,11 @@ _REBOUND_TEXT_ALLOWED: list[str] = [
     f"fh = open('{_RUN_PY}')\nfh = open('other.txt')\nsrc = fh.read()\n{_EXEC}(src)",
     f"src = open('{_RUN_PY}').read()\nfor src in ['print(1)']:\n    pass\n{_EXEC}(src)",
     f"src = open('{_RUN_PY}').read()\n{_EXEC}('print(1)')",
+    # A parameter of the same name shadows the read text inside the function.
+    f"src = open('{_RUN_PY}').read()\ndef run(src):\n    {_EXEC}(src)\nrun('print(1)')",
+    f"src = open('{_RUN_PY}').read()\nrun = lambda src: {_EXEC}(src)\nrun('print(1)')",
+    f"fh = open('{_RUN_PY}')\ndef run(fh):\n    {_EXEC}(fh.read())\nrun(open('other.txt'))",
+    f"src = open('{_RUN_PY}').read()\ndef run(*, src=None):\n    {_EXEC}(src)\nrun(src='print(1)')",
 ]
 
 

@@ -529,3 +529,34 @@ class TestGitDiffFamilyOutputOptions:
     )
     def test_anything_else_is_not_a_write(self, command: str) -> None:
         assert get_bash_write_targets(_bash(command)) == []
+
+
+class TestGitOutputIsResolvedAgainstItsDashCDirectories:
+    """``git -C sub diff --output=p.patch`` writes ``sub/p.patch``, not ``./p.patch``."""
+
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ("git -C sub diff --output=p.patch", ["/repo/sub/p.patch"]),
+            ("git -C sub -C deeper diff --output p.patch", ["/repo/sub/deeper/p.patch"]),
+            ("git -C sub -C /abs diff --output=p.patch", ["/abs/p.patch"]),
+            ("git -C /abs -C rel diff --output=p.patch", ["/abs/rel/p.patch"]),
+            ("git -C sub diff --output=/tmp/p.patch", ["/tmp/p.patch"]),
+            ("git -C .. diff --output=p.patch", ["/repo/../p.patch"]),
+            ("git -c core.x=y -C sub format-patch -1 --output=p.patch", ["/repo/sub/p.patch"]),
+            ("git diff --output=p.patch", ["/repo/p.patch"]),
+        ],
+    )
+    def test_every_dash_c_applies_in_order(self, command: str, expected: list[str]) -> None:
+        assert get_bash_write_targets(_bash(command, cwd="/repo")) == expected
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git -C $DIR diff --output=p.patch",
+            'git -C "$HOME/sub" diff --output=p.patch',
+            "git -C sub -C ${X} diff --output=p.patch",
+        ],
+    )
+    def test_a_directory_it_cannot_read_leaves_the_path_unresolved(self, command: str) -> None:
+        assert get_bash_write_targets(_bash(command, cwd="/repo")) == []

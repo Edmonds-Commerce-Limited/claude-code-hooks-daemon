@@ -92,6 +92,17 @@ builtin option; `sort f | uniq -c` fired on `uniq -c` (the coordinator's lead wa
 `_INLINE_CODE_FLAG_TEXT_TOOLS` (exact name, so `perl -e`, `foo -c` and `grepx -c` keep their verdict). Tests in
 `TestInlineCodeFlagIsNotReadOnSearchAndTextTools`.
 
+Review round: the same exemption now covers `gcc`/`g++`/`cc`/`clang`, `make`, `zip`/`unzip`/`tar`/`gzip`, `scp`/`rsync`/
+`wget`, `less`, `mysql`/`psql`. `docker run -e` is deliberately left out (its arguments can carry `sh -c`). Open design
+question for later, not addressed: the generic rule reads ANY unknown program's `-c`/`-e`/`-r` as inline code, so
+each new coreutil or build tool is a fresh false advisory; a rule keyed on known interpreters, or on the flag's
+position, would end the list-chasing.
+
+Also fixed, an existing bypass: `_first_full_run` returned the FIRST match, so an unseen verdict for an earlier segment
+hid a later positive deny (`gcc -c x.c && pytest`, `docker run -e X=1 img ls; pytest`,
+`make -e all; ./scripts/qa/llm_qa.py all`). A positive match now wins over any unseen verdict; the first unseen one is
+reported only when nothing is positive.
+
 ### N415 — `subagent_full_qa_blocker` misses `fh = open(p); src = fh.read(); exec(src)`
 
 **Found**: the batch AB reviewer (round 1, `test_probe_ab.py`, 41 of 42 shapes caught). The read result passes
@@ -104,6 +115,12 @@ linear) holding the names bound to an opened file and the names bound to a read 
 the file. A later store to the name (assignment, `for`, `with`) drops it; `src += ...` keeps it. Branches are not
 modelled: the latest textual binding wins, which can only miss a run, never invent one. Tests: `_EDIT_AND_EXEC_FULL_RUNS`,
 `_REBOUND_TEXT_ALLOWED`, a linearity test.
+
+Review round fix: a function's or lambda's parameter names shadow the tracked names inside its body and are put back
+when it ends (a parameter `src` no longer carries the file's text into `def run(src): exec(src)`). Residual, not
+fixed: a name rebound in only ONE branch of an `if` drops the file text, so `if c: src = open(F).read()` with
+`else: src = ''` is allowed. Merging branch states needs a copy of the tracked names per `if`, which is not linear on
+many branches; a conservative merge belongs with a real flow analysis.
 
 ### N414 — commit-gate staging simulation residuals after batch AC (N246)
 
@@ -129,7 +146,8 @@ modelled: the latest textual binding wins, which can only miss a run, never inve
    is the CONTENT accessor (`authored_only`), used by `lint_on_edit`, `validate_eslint_on_write`, `sed_blocker` and
    `sensitive_content`-style guards, and a patch is not authored code, so it stays out of it (a `--output=x.py` must not
    be linted). Location guards (`get_bash_write_targets`) now see the file, and the staging simulation's
-   `_written_names` uses that scan. `format-patch -o DIR` writes unnamed files in a directory and is not modelled.
+   `_written_names` uses that scan. A relative output path is joined with every `-C` of the git command in order (an
+   absolute `-C` starts over); a `-C` holding an unresolvable expansion leaves the target unresolved. `format-patch -o DIR` writes unnamed files in a directory and is not modelled.
 3. `SimpleCommand.reads_input` is true only when the command's own words carry an input redirection word
    (`<`, `<<`, `<<<`, `0<`, `<&`); `StagingRun.stdin_fed` is that or a pipe into the run. Quoted text and another
    command's redirect no longer count. Known limit: a lone quoted `'<'` word lexes like an operator.
