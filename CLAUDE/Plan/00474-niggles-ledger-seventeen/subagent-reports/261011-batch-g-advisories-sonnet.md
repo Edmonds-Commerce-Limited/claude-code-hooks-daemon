@@ -43,5 +43,9 @@ reproduce today.
 
 Targeted tests (dismissive, daemon-docs-guard): 61 passed. Red phase was written first but not separately run (no
 way to run the pre-change tree without stashing); the true-positive cases are kept as tests. black clean on all
-changed Python. `llm_qa.py changed --allow-unmapped`: see the coordinator note in the reply (the worktree has no venv
-of its own, so it was run with `HOOKS_DAEMON_VENV_PATH` pointing at main's venv).
+changed Python. `llm_qa.py changed --allow-unmapped` (run with `HOOKS_DAEMON_VENV_PATH` at main's venv, as the
+worktree has none): 36 of 40 passed. Not green, none caused by this batch:
+
+- `changed_tests`: tool error, `SourceTreeMismatch` (main's venv imports `/workspace/src`). The 61 handler tests and the
+  semgrep-remedy pin test were run directly with `PYTHONPATH` at this worktree's `src` instead, and passed.
+- `docs_qa` (12 advise) and `plan_qa` (6 advise): links to plan 00483, now archived. Zero block-level findings.
