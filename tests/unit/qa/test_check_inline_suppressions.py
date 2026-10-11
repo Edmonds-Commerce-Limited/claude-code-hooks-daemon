@@ -59,9 +59,9 @@ PROJECT_FORM_SAMPLES: Final[tuple[str, ...]] = (
 #: their own line. Each names a code of the directive, or a tool, or opens with SECURITY:.
 GENUINE_REASON_ABOVE: Final[tuple[tuple[str, int], ...]] = (
     (".claude/ccy/claude-supervise.py", 9289),
-    ("init.sh", 1215),
-    ("init.sh", 2566),
-    ("init.sh", 2676),
+    ("init.sh", 1228),
+    ("init.sh", 2653),
+    ("init.sh", 2763),
     ("scripts/install/venv.sh", 356),
     ("scripts/install/venv.sh", 532),
     ("src/claude_code_hooks_daemon/constants/paths.py", 91),
