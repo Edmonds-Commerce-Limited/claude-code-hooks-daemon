@@ -4181,7 +4181,6 @@ _TEXT_CHAIN_AND_LOOP_FULL_RUNS: list[str] = [
     f"src = open('{_RUN_PY}').read()\ncode = src.strip()\n{_EXEC}(code)",
     f"src = open('{_RUN_PY}').read()\n{_EXEC}(src.rstrip())",
     f"src = open('{_RUN_PY}').read()\n{_EXEC}(f'{{src}}')",
-    f"src = open('{_RUN_PY}').read()\n{_EXEC}('{{}}'.format(src))",
     f"for p in ['{_RUN_PY}']:\n    {_EXEC}(open(p).read())",
     f"for p in ('other.py', '{_RUN_PY}'):\n    {_EXEC}(open(p).read())",
     f"for p in ('a.py', '{_RUN_PY}'):\n    src = open(p).read()\n    print(1)\n    {_EXEC}(src)",
@@ -4202,6 +4201,10 @@ _TEXT_CHAIN_AND_LOOP_ALLOWED: list[str] = [
     f"src = open('{_RUN_PY}').read()\n{_EXEC}(f'{{src!r}}')",
     f"src = open('{_RUN_PY}').read()\n{_EXEC}(src.split()[0])",
     f"src = open('{_RUN_PY}').read()\n{_EXEC}('{{}}'.format(len(src)))",
+    # The file's text is an ARGUMENT of .format, never the receiver: only a string is assigned.
+    f"{_EXEC}('TEXT = {{!r}}'.format(open('{_RUN_PY}').read()))",
+    f"src = open('{_RUN_PY}').read()\n{_EXEC}('TEXT = {{!r}}'.format(src))",
+    f"src = open('{_RUN_PY}').read()\n{_EXEC}('{{}}'.format(src))",
     f"for p in ['other.txt', 'other2.txt']:\n    {_EXEC}(open(p).read())",
     f"for p in ('other.txt',):\n    {_EXEC}(open(p).read().strip())",
     f"for p in ['{_RUN_PY}']:\n    pass\n{_EXEC}('print(1)')",

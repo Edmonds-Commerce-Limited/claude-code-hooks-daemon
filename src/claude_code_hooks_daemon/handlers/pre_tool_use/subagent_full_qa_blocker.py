@@ -4799,10 +4799,9 @@ def _file_read_by(
                     if isinstance(reader, ast.Name) and reader.id in opened:
                         return opened[reader.id]
                 elif attribute in _TEXT_KEEPING_METHODS:
+                    # Only the receiver: the arguments of ``.format`` may be wrapped by
+                    # ``!r`` in the template, which makes the file's text a string, not code.
                     pending.append(reader)
-                    if attribute == _FORMAT_METHOD:
-                        pending.extend(current.args)
-                        pending.extend(keyword.value for keyword in current.keywords)
     return None
 
 

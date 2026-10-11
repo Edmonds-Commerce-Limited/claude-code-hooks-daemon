@@ -192,7 +192,8 @@ fixed: a name rebound in only ONE branch of an `if` drops the file text, so `if 
 many branches; a conservative merge belongs with a real flow analysis.
 
 Batch AK: two of the batch AE reviewer's residual shapes are fixed. (1) A text-preserving method chain keeps the
-file's text: `.strip()`, `.rstrip()`, `.lstrip()`, `.replace(a, b)`, `.format(...)`, `.encode()`, `.decode()`,
+file's text: `.strip()`, `.rstrip()`, `.lstrip()`, `.replace(a, b)`, `.format(...)` (receiver only, never its arguments: `'TEXT = {!r}'.format(open(F).read())` assigns a
+string and stays allowed), `.encode()`, `.decode()`,
 `str(...)` and a plain f-string field around the read all still judge the file, and so does a name bound to such a
 chain (`_file_read_by`, one iterative pass down the wrapping). `{x!r}` and a format spec are not the text and do not
 count. (2) A `for` over a literal list or tuple of string paths binds its variable to every one of them inside the
@@ -200,6 +201,9 @@ loop and each is judged (`for p in [F]: exec(open(p).read())`, `Path(p).read_tex
 read in the loop and run after it); a loop over any non-literal iterable, or a list held in a name, is unchanged.
 Linear: the walk holds one extra name-to-paths map. Tests: `_TEXT_CHAIN_AND_LOOP_FULL_RUNS`,
 `_TEXT_CHAIN_AND_LOOP_ALLOWED`, a timing test.
+
+**Accepted over-deny (coordinator)**: `exec(src.replace('subprocess.run', 'print'))` denies, because `.replace()` keeps
+the text. A careless agent does not rewrite the launcher away before an exec, so this is conservative by choice.
 
 **Deliberate limit (coordinator's engineering judgement, not an owner ruling)**: two shapes stay allowed because they
 need flow analysis beyond the single source-ordered walk. (a) A name rebound in only ONE branch of an `if`
