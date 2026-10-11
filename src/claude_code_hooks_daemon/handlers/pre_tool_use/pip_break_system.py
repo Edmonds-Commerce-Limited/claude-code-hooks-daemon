@@ -18,7 +18,9 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
-from claude_code_hooks_daemon.utils.command_position import command_position_code_segments
+from claude_code_hooks_daemon.utils.command_position import (
+    command_position_code_segments_with_separators,
+)
 
 # Full first-fire teaching content (Plan 00116): reuses the pre-migration
 # handler's rich prose verbatim, minus the invocation-specific `COMMAND:`
@@ -69,8 +71,14 @@ _ASSIGNMENT = re.compile(r"(\w+)=('[^']*'|\"[^\"]*\"|\S*)\s*")
 _EXPORT_HEAD = re.compile(r"(?:export|(?:declare|typeset)\s+-\w*x\w*)\s+")
 _ENV_HEAD = re.compile(r"env\s+(?:-\S+\s+)*")
 _SHELL_C_HEAD = re.compile(r"(?:\S*/)?(?:ba|da|z)?sh\s+-\w*c\s+['\"]?\s*")
+_PIPE_SEPARATORS = frozenset({"|", "|&"})
+# `unset VAR` / `export -n VAR` take the variable out of the environment again.
+_UNSET_HEAD = re.compile(rf"unset\s+(?:-\S+\s+)*(?:\S+\s+)*?{_ENV_VAR_NAME}\b")
+_EXPORT_UNMARK_HEAD = re.compile(rf"export\s+-\w*n\w*\s+(?:\S+\s+)*?{_ENV_VAR_NAME}\b")
+# `xargs` options may take a value (`-n 1`, `-I {}`); `command` takes none that matter.
 _PIP_INSTALL_HEAD = re.compile(
-    r"(?:(?:sudo|doas)\s+(?:-\S+\s+)*|uv\s+|nohup\s+|time\s+)*(?:\S*/)?"
+    r"(?:(?:sudo|doas)\s+(?:-\S+\s+)*|uv\s+|nohup\s+|time\s+|command\s+(?:-\S+\s+)*"
+    r"|xargs\s+(?:-\S+\s+(?:\d+\s+|\{\}\s+)?)*)*(?:\S*/)?"
     r"(?:pip3?(?:\.\d+)?|python3?(?:\.\d+)?\s+-m\s+pip)\s+(?:-\S+\s+)*install\b",
     re.IGNORECASE,
 )
@@ -104,18 +112,59 @@ def _leading_assignment(segment: str) -> tuple[bool, str | None, str]:
     return is_export, value, rest
 
 
-def _env_var_governs_pip_install(segments: list[str]) -> bool:
-    """Whether a truthy PIP_BREAK_SYSTEM_PACKAGES governs a pip install."""
+def _is_pipe(separator: str) -> bool:
+    """Whether ``separator`` joins two stages of one pipeline (`|` or `|&`)."""
+    return separator in _PIPE_SEPARATORS
+
+
+def _open_groups(text: str, stack: list[bool], exported: bool) -> str:
+    """Strip the `(` heading ``text``, saving ``exported`` once per group opened."""
+    while text.startswith("("):
+        stack.append(exported)
+        text = text[1:].lstrip()
+    return text
+
+
+def _strip_closes(text: str, open_groups: int) -> tuple[str, int]:
+    """Strip up to ``open_groups`` trailing `)` from ``text``; return it and how many."""
+    closes = 0
+    text = text.rstrip()
+    while closes < open_groups and text.endswith(")"):
+        text = text[:-1].rstrip()
+        closes += 1
+    return text, closes
+
+
+def _env_var_governs_pip_install(items: list[tuple[str, str]]) -> bool:
+    """Whether a truthy PIP_BREAK_SYSTEM_PACKAGES governs a pip install.
+
+    ``items`` are ``(separator before, segment)`` pairs. An export is undone by
+    ``unset`` / ``export -n``, is dropped when the `( ... )` group it was made
+    in closes, and is neither made nor undone by a stage of a pipeline (each
+    stage is a subshell) -- though a stage still inherits what was exported
+    before the pipeline.
+    """
     exported = False
-    for segment in segments:
-        is_export, value, rest = _leading_assignment(segment)
-        if is_export:
-            if value is not None:
+    groups: list[bool] = []
+    for index, (separator, segment) in enumerate(items):
+        next_separator = items[index + 1][0] if index + 1 < len(items) else ""
+        in_pipeline = _is_pipe(separator) or _is_pipe(next_separator)
+        text = _open_groups(segment.strip(), groups, exported)
+        text, closes = _strip_closes(text, len(groups))
+        is_export, value, rest = _leading_assignment(text)
+        stripped = strip_reserved_word_prefix(text)
+        if _UNSET_HEAD.match(stripped) or _EXPORT_UNMARK_HEAD.match(stripped):
+            if not in_pipeline:
+                exported = False
+        elif is_export:
+            if value is not None and not in_pipeline:
                 exported = _is_truthy(value)
-            continue
-        effective = _is_truthy(value) if value is not None else exported
-        if effective and _PIP_INSTALL_HEAD.match(rest):
-            return True
+        else:
+            effective = _is_truthy(value) if value is not None else exported
+            if effective and _PIP_INSTALL_HEAD.match(rest):
+                return True
+        for _ in range(closes):
+            exported = groups.pop()
     return False
 
 
@@ -180,10 +229,10 @@ class PipBreakSystemHandler(PreToolUseHandlerBase):
         # Judged per COMMAND-POSITION segment (ledger N407): the pattern's `.*`
         # used to cross `&&`, `;`, `#` and quotes, so an echo, a comment, a
         # grep pattern or a message that only NAMED the flag was denied.
-        segments = command_position_code_segments(command)
+        items = command_position_code_segments_with_separators(command)
         return any(
-            _PIP_BREAK_SYSTEM_FLAG_PATTERN.search(segment) for segment in segments
-        ) or _env_var_governs_pip_install(segments)
+            _PIP_BREAK_SYSTEM_FLAG_PATTERN.search(segment) for _, segment in items
+        ) or _env_var_governs_pip_install(items)
 
     def get_rules(self) -> list[Rule]:
         """Return the single Rule backing this handler's blocking behaviour."""

@@ -6,6 +6,7 @@ import pytest
 
 from claude_code_hooks_daemon.utils.command_position import (
     command_position_code_segments,
+    command_position_code_segments_with_separators,
     without_comment,
 )
 
@@ -34,3 +35,20 @@ class TestCommandPositionCodeSegments:
     def test_mention_in_echo_is_blanked(self) -> None:
         segments = command_position_code_segments("echo 'sudo pip install x'")
         assert not any("sudo" in s for s in segments)
+
+
+class TestCommandPositionCodeSegmentsWithSeparators:
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ("a; b && c", [("", "a"), (";", "b"), ("&&", "c")]),
+            ("a | b || c", [("", "a"), ("|", "b"), ("||", "c")]),
+            ("a |& b", [("", "a"), ("|&", "b")]),
+            ("a # note", [("", "a")]),
+        ],
+    )
+    def test_pairs_each_segment_with_the_operator_before_it(
+        self, command: str, expected: list[tuple[str, str]]
+    ) -> None:
+        got = command_position_code_segments_with_separators(command)
+        assert [(sep, seg.strip()) for sep, seg in got] == expected

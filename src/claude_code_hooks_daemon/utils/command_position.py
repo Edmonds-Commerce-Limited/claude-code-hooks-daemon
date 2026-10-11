@@ -289,6 +289,29 @@ def command_position_code_segments(command: str) -> list[str]:
     return [without_comment(segment) for segment in command_position_segments(command)]
 
 
+def command_position_code_segments_with_separators(command: str) -> list[tuple[str, str]]:
+    """:func:`command_position_code_segments` paired with the operator before each.
+
+    Each item is ``(separator, segment)``: the separator text that split this
+    segment from the one before (``;``, ``&&``, ``|``, ``|&``...), empty for
+    the first. A blank segment is dropped and its separator merged into the
+    next one, so `a |& b` reads as ``("", "a")`` then ``("|&", "b")``.
+    """
+    view = command_position_view(command)
+    result: list[tuple[str, str]] = []
+    previous_end = 0
+    pending = ""
+    for start, end in _segment_spans(view):
+        pending += view[previous_end:start].strip()
+        previous_end = end
+        segment = without_comment(view[start:end])
+        if not segment.strip():
+            continue
+        result.append((pending, segment))
+        pending = ""
+    return result
+
+
 #: Commands whose quoted multi-word arguments are search patterns, programs or
 #: format strings handed to THAT command, never a second command line:
 #: `git log --grep='git reset --hard'`, `awk '/git stash/ {print}'`.

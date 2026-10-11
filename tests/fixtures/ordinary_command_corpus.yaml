@@ -1477,6 +1477,18 @@ rows:
   - id: n407-quoted-falsy-env-var-prefix
     command: |-
       PIP_BREAK_SYSTEM_PACKAGES='0' ls
+  - id: n407-export-then-unset-then-pip
+    command: |-
+      export PIP_BREAK_SYSTEM_PACKAGES=1; unset PIP_BREAK_SYSTEM_PACKAGES; pip install x
+  - id: n407-export-then-export-n-then-pip
+    command: |-
+      export PIP_BREAK_SYSTEM_PACKAGES=1; export -n PIP_BREAK_SYSTEM_PACKAGES; pip install x
+  - id: n407-export-piped-into-pip
+    command: |-
+      export PIP_BREAK_SYSTEM_PACKAGES=1 | pip install x
+  - id: n407-export-in-group-then-pip
+    command: |-
+      (export PIP_BREAK_SYSTEM_PACKAGES=1); pip install x
   - id: n408-echo-names-issue-view
     command: |-
       echo 'gh issue view 5'

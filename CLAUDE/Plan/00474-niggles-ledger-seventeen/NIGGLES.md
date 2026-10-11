@@ -1667,13 +1667,13 @@ mention deny were flipped. The INVENTORY misses (`pip --break-system-packages in
 Residual, from the batch S review round 2 (`untracked/agent-reports/auto/261011-070240-code-reviewer-af5c29c2279c4fcad.md`,
 none blocking; the coordinator corrected the `sudo_pip.py` comment that claimed the single-quoted `sudo bash -c 'a; pip install'` form was caught):
 
-- `unset X` / `export -n X` after `export PIP_BREAK_SYSTEM_PACKAGES=1` do not cancel it, so `export X=1; unset X; pip install x` still denies (false deny; `_env_var_governs_pip_install`, `pip_break_system.py` ~107-118).
+- `unset X` / `export -n X` after `export PIP_BREAK_SYSTEM_PACKAGES=1` do not cancel it, so `export X=1; unset X; pip install x` still denies (false deny; `_env_var_governs_pip_install`, `pip_break_system.py` ~107-118). ✅ cleared by batch U
 - An export carries across a pipe: `export X=1 | pip install x` denies though each pipe side is its own subshell (the
-  segment list does not record which separator split it).
+  segment list does not record which separator split it). ✅ cleared by batch U
 - A leading `(` is not stripped, so `( PIP_BREAK_SYSTEM_PACKAGES=1 pip install x )`, `(export X=1; pip install x)` and
   `export X=1; (pip install x)` allow (`pip_break_system.py` ~90); `(export X=1); pip install` allows correctly, but by
-  the same accident.
-- `export X=1; command pip install x` and `export X=1; xargs pip install < r.txt` allow (`_PIP_INSTALL_HEAD` ~69-75).
+  the same accident. ✅ cleared by batch U
+- `export X=1; command pip install x` and `export X=1; xargs pip install < r.txt` allow (`_PIP_INSTALL_HEAD` ~69-75). ✅ cleared by batch U
 
 ### N406 — `github_auto_close_keywords` denies a quoted `echo` or a `python3 - <<'EOF'` that only prints a keyword
 
