@@ -1689,6 +1689,16 @@ class TestARedirectIsJudgedWhereTheChainsCdLandsIt:
             "cd /tmp && { true; } | cat > x",
             "f() { cd /tmp; }; f; echo x > x",
             "f() { cd /tmp; }; f && echo x > x",
+            "function f { cd /tmp; }; f && echo x > x",
+            "files=()\n{ cd /tmp; ls; }\necho x > out.txt",
+            "arr=()\n{ cd /tmp; }\necho x > x",
+            "arr=(); { cd /tmp; }; echo x > x",
+            "arr=(); { cd /tmp; }\necho x > x",
+            "case x in a) cd /tmp;& b) true;; esac; echo x > x",
+            "case x in a) cd /tmp;;& b) true;; esac; echo x > x",
+            "cd /tmp && case x in a|b) true;; esac; echo x > x",
+            "x=$(cd /tmp && case y in y) true;; esac; echo x > x)",
+            "cd /tmp && a |& b > x",
         ],
     )
     def test_a_move_the_shell_does_make_still_denies(

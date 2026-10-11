@@ -41,6 +41,23 @@ Results: 7570 passed, 1 skipped (`tests/unit/utils`, command_journal, ordinary-c
 pre_tool_use handler, out-of-root containment and write-blindness integration tests); final re-run of the touched tests
 plus the gate 964 passed. black (py311), ruff, mypy and pyright on the touched source: clean. No suppressions.
 
+## Round 2 (review verdict FIX FIRST)
+
+1. Bypass: `_defined_function` now accepts only `_FUNCTION_NAME` (`[A-Za-z_][A-Za-z0-9_.-]*`), so `arr=()` / `$f()` /
+   quoted words never make the next `{ … }` a definition; `defining` is already cleared after any segment. Deny tests
+   for both reported shapes and the `;` variants.
+2. `function f { if …`: the frames of inner openers are kept (`[name, *[None] * _group_openers(segment[3:])]`), with
+   an uncalled and a called test.
+3. The case-redirect test is parametrised with the exact expected directory.
+4. A pipeline's last stage no longer carries its `cd` (`in_pipeline` restores `stage_start` at the next non-pipe
+   operator). Side effect: `echo hi | cd sub && git commit` is now a certain, non-moving commit, so that command moved
+   from `_UNCERTAIN_MOVES` to `_CERTAIN_MOVES` in `tests/unit/utils/test_git_facts_command_directory.py`.
+5. Added tests: `;&`, `;;&`, `|&`, `case` in `$( )`, `function f { cd /tmp; }; f && echo > x` (deny), `|` in a case pattern.
+6. Residual recorded under N403 (a function called through `"$@"`/`$g`), not fixed.
+
+Results: 18129 selected tests passed (utils, command_journal, ordinary-command gate, out-of-root containment,
+write-blindness, all `pre_tool_use` unit tests) after the one expectation change above; black, ruff, mypy, pyright clean.
+
 ## Ledger
 
 N403 residual list in `NIGGLES.md`: the case, pipeline and function lines are marked "cleared by batch T"; the loop-body

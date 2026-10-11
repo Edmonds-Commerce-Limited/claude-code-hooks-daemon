@@ -1010,10 +1010,15 @@ _State = tuple[tuple[str | None, ...], bool]
 _Group = tuple[tuple[str | None, ...], bool, str | None]
 
 
+#: A plain function name. ``arr=`` (an array assignment), ``$f`` and quoted words
+#: are not names, so ``arr=()`` never makes the next ``{ … }`` a definition.
+_FUNCTION_NAME: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
+
+
 def _defined_function(segment: list[str]) -> str | None:
     """The name a ``()`` that follows ``segment`` defines (``f ()``, ``function f ()``)."""
     if len(segment) == 1 or (len(segment) == 2 and segment[0] == _FUNCTION):
-        return segment[-1]
+        return segment[-1] if _FUNCTION_NAME.fullmatch(segment[-1]) else None
     return None
 
 
@@ -1023,7 +1028,8 @@ def _opened_group_names(segment: list[str], defining: str | None) -> list[str | 
     if names and defining is not None and segment[0] == _BRACE_OPEN:
         names[0] = defining
     elif len(segment) > 2 and segment[0] == _FUNCTION and segment[2] == _BRACE_OPEN:
-        names = [segment[1]]  # `function f { …`: the segment carries the `{`
+        # `function f { …`: the segment carries the `{`, and may open more groups.
+        names = [segment[1], *([None] * _group_openers(segment[3:]))]
     return names
 
 
@@ -1091,6 +1097,7 @@ def _walk(
     last_segment: list[str] = []
     defining: str | None = None
     expecting_pattern = False
+    in_pipeline = False
     index = 0
     while index < len(words):
         if is_operator(words[index]) and not is_redirection(words[index]):
@@ -1110,11 +1117,14 @@ def _walk(
             previous_operator = "".join(
                 char for char in words[index] if char not in _SUBSHELL_CHARS
             )
-            if previous_operator in _PIPE_OPERATORS:
+            # Every stage of a pipeline, the last included, runs in a subshell:
+            # the shell is back where the pipeline began when it ends.
+            if previous_operator in _PIPE_OPERATORS or in_pipeline:
                 directory, uncertain = stage_start
             if directory and previous_operator != _AND_OPERATOR:
                 uncertain = True
-            if previous_operator not in _PIPE_OPERATORS:
+            in_pipeline = previous_operator in _PIPE_OPERATORS
+            if not in_pipeline:
                 stage_start = (directory, uncertain)
             if previous_operator.startswith(_CASE_CLAUSE_ENDS):
                 expecting_pattern = True

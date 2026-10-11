@@ -685,18 +685,69 @@ class TestSimpleCommandsKeepTheirFileRedirections:
         assert last.directory == ("/tmp",)
 
     @pytest.mark.parametrize(
-        "command",
+        ("command", "expected"),
         [
-            "case x in x) cd /tmp;; esac > x",
-            "case x in a|b) cd /tmp;; esac > x",
-            "( cd sub && case x in a) true;; esac > x )",
+            ("case x in x) cd /tmp;; esac > x", ()),
+            ("case x in a|b) cd /tmp;; esac > x", ()),
+            ("case x in a) cd /tmp;& b) true;; esac > x", ()),
+            ("case x in a) cd /tmp;;& b) true;; esac > x", ()),
+            ("( cd sub && case x in a) true;; esac > x )", ("sub",)),
+            ("x=$(case y in y) cd /tmp;; esac > z)", ()),
         ],
     )
-    def test_a_case_redirect_is_read_where_the_case_opened(self, command: str) -> None:
-        closer = simple_commands(command)[-1]
-        assert closer.redirects == ((">", "x"),)
-        assert closer.directory in ((), ("sub",))
-        assert "/tmp" not in closer.directory
+    def test_a_case_redirect_is_read_where_the_case_opened(
+        self, command: str, expected: tuple[str, ...]
+    ) -> None:
+        closer = [s for s in simple_commands(command) if s.redirects][-1]
+        assert closer.directory == expected
+
+    def test_a_case_in_a_command_substitution_keeps_the_directory_after_it(self) -> None:
+        last = simple_commands("cd sub && x=$(case y in y) true;; esac); echo x > y")[-1]
+        assert last.directory == ("sub",)
+
+    def test_a_pipe_in_a_case_pattern_does_not_lose_the_directory(self) -> None:
+        last = simple_commands("cd /tmp && case x in a|b) true;; esac; echo x > y")[-1]
+        assert last.directory == ("/tmp",)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "arr=()\n{ cd /tmp; ls; }\necho x > out.txt",
+            "arr=()\n{ cd /tmp; }\necho x > x",
+            "arr=(); { cd /tmp; }; echo x > x",
+            "arr=(); { cd /tmp; }\necho x > x",
+            "$f() { cd /tmp; }; echo x > x",
+            "'f=x'() { cd /tmp; }; echo x > x",
+        ],
+    )
+    def test_a_non_function_word_before_empty_parens_is_not_a_definition(
+        self, command: str
+    ) -> None:
+        assert simple_commands(command)[-1].directory == ("/tmp",)
+
+    def test_a_definition_does_not_leak_to_a_later_group(self) -> None:
+        last = simple_commands("f() { true; }; { cd /tmp; }; echo x > x")[-1]
+        assert last.directory == ("/tmp",)
+
+    def test_a_function_keyword_body_that_opens_a_group_keeps_its_frames(self) -> None:
+        last = simple_commands("function f { if true; then cd /tmp; fi; }; echo x > x")[-1]
+        assert last.directory == ()
+
+    def test_a_called_function_keyword_body_that_opens_a_group_still_moves(self) -> None:
+        last = simple_commands("function f { if true; then cd /tmp; fi; }; f; echo x > x")[-1]
+        assert last.directory == ("/tmp",)
+
+    def test_a_cd_in_the_last_stage_does_not_carry_past_the_pipeline(self) -> None:
+        last = simple_commands("x | cd /tmp && echo x > y")[-1]
+        assert last.directory == ()
+
+    def test_a_cd_in_the_last_stage_is_placed_at_the_pipelines_start(self) -> None:
+        last = simple_commands("cd sub && x |& cd /tmp && echo x > y")[-1]
+        assert last.directory == ("sub",)
+
+    def test_an_and_if_pipeline_keeps_the_directory_before_it(self) -> None:
+        last = simple_commands("cd sub && a |& b && echo x > y")[-1]
+        assert last.directory == ("sub",)
 
     def test_a_case_pattern_paren_does_not_close_the_enclosing_subshell(self) -> None:
         last = simple_commands("(cd /tmp && case x in a) true;; esac; echo x > y)")[-1]

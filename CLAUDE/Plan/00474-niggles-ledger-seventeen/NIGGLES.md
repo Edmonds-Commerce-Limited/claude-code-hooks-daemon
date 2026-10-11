@@ -1729,6 +1729,15 @@ none a regression against main:
 - ✅ cleared by batch T: a function definition (`f() { cd /tmp; }; echo x > x`, `f ()`, `function f {`, `function f() {`)
   does not apply its body's `cd` to what follows, unless the function's name appears as a word later in the command
   (`f() { cd /tmp; }; f; echo x > x` still moves, so a real move still denies).
+- Residual, from the batch T review: a function that is defined and then called without its name appearing as a word
+  (`"$@"`, `$g`, `eval "$name"`) counts as never called, so its body's `cd` is not carried to what follows. A write after
+  such a call is read from the directory before the definition: an allow where main denied. Accepted under the
+  careless-agent threat model (nothing hostile is assumed); closing it would mean treating any dynamic command word as a
+  possible call, which denies every ordinary `"$@"` after a definition.
+- Batch T round 2: a `name=()` array assignment is no longer taken for a function name (`_FUNCTION_NAME`), so
+  `arr=()` then `{ cd /tmp; }` keeps its move; a pipeline's last stage no longer carries its `cd` past the pipeline
+  (`x | cd /tmp && echo > y` is read from the pipeline's start); `function f { if …` keeps the frames of the groups it
+  opens.
 - `utils/git_commit_parsing.py` (`_walk`, via `_after_directory_change`): a loop body that never runs
   (`while false; do cd /tmp; done; echo x > x`) is treated as one that did. Needs evaluation; left as it is. False
   denies only.
