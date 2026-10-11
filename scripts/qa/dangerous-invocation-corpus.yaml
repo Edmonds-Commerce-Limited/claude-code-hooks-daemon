@@ -487,6 +487,36 @@ rows:
       heredoc reader; no ordinary work does it. A plain `git reset --hard` is
       denied.
 
+  # ------------------- text that looks like a quoted heredoc body but is not (N42)
+  #
+  # Bash runs the line after each of these, so a guard that blanked it as body
+  # text would allow a destructive command. The full set of shapes is run in
+  # bash and through the chain in
+  # tests/unit/handlers/pre_tool_use/test_heredoc_blanking_n42_shapes.py.
+  - id: heredoc-empty-body-runs-next-line
+    command: "cat > n <<'E'\nE\ngit reset --hard\nE"
+    axis: working-tree-destruction
+    verdict: COVERED
+    note: >-
+      Ledger 00466 N42: an EMPTY quoted body closes on the first delimiter line,
+      so the `git reset --hard` after it runs.
+
+  - id: heredoc-here-string-is-no-opener
+    command: "cat <<<'E'\ngit reset --hard\nE"
+    axis: working-tree-destruction
+    verdict: COVERED
+    note: >-
+      Ledger 00466 N42: `<<<'E'` is a here-string, not a heredoc opener, so the
+      next line runs.
+
+  - id: heredoc-opener-in-comment-is-no-opener
+    command: "# note <<'E'\ngit reset --hard\nE"
+    axis: working-tree-destruction
+    verdict: COVERED
+    note: >-
+      Ledger 00466 N42: an opener inside a `#` comment opens nothing, so the
+      next line runs.
+
   - id: no-change-n240-script-typescript-log
     command: "script -q /tmp/typescript.log -c ls"
     axis: project-containment

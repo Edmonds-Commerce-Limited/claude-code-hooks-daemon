@@ -20,7 +20,7 @@ from claude_code_hooks_daemon.core.utils import (
     get_file_path,
     scan_bash_write_destinations,
 )
-from claude_code_hooks_daemon.utils.command_evasion import RESERVED_WORD_PREFIX
+from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION, RESERVED_WORD_PREFIX
 from claude_code_hooks_daemon.utils.command_position import SEGMENT_SEPARATORS
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 from claude_code_hooks_daemon.utils.shell_segmentation import (
@@ -125,7 +125,9 @@ _SED_VIA_XARGS = re.compile(
     re.IGNORECASE,
 )
 
-_GIT_COMMIT = re.compile(r"\bgit\s+commit\b")
+# The commit subcommand after any run of git global options (`-C <dir>`,
+# `-c k=v`, `--git-dir=...`), by the shared invocation pattern.
+_GIT_COMMIT = re.compile(GIT_INVOCATION + r"commit\b")
 
 
 class SedBlockerHandler(PreToolUseHandlerBase):
@@ -480,7 +482,8 @@ class SedBlockerHandler(PreToolUseHandlerBase):
             "`-i` differ by one character. `Read` with `offset`/`limit` does the same "
             "job, as does `awk 'NR>=1 && NR<=20' file`.\n"
             "2. A `git commit` message mentioning sed (sed must follow `git commit` with "
-            "no command separator between).\n"
+            "no command separator between; git's own global options such as "
+            "`git -C <dir> commit` are fine).\n"
             "3. A `gh` issue/PR/release body mentioning sed (same separator rule).\n"
             "4. The command contains a `grep`, or an `echo` that does not itself carry a "
             "`sed 's/…'` substitution.\n"
