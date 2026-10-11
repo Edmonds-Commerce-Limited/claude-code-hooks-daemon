@@ -1,5 +1,7 @@
 """DaemonDocsGuardHandler - warns when reading from hooks-daemon internal docs directory."""
 
+import logging
+from collections.abc import Callable
 from typing import Any
 
 from claude_code_hooks_daemon.constants import (
@@ -11,8 +13,12 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_segments import matches_path_segment
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
+
+logger = logging.getLogger(__name__)
 
 # Pattern that identifies the daemon's internal docs directory.
 # In normal installs, the daemon is cloned to .claude/hooks-daemon/, which brings
@@ -55,6 +61,7 @@ class DaemonDocsGuardHandler(PreToolUseHandlerBase):
                 HandlerTag.NON_TERMINAL,
             ],
         )
+        self.self_install_reader: Callable[[], bool] = ProjectContext.self_install_mode
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if the tool is accessing the daemon's internal CLAUDE/ directory."""
@@ -66,7 +73,29 @@ class DaemonDocsGuardHandler(PreToolUseHandlerBase):
         if not file_path:
             return False
 
-        return matches_path_segment(file_path, (_DAEMON_CLAUDE_PATTERN,))
+        if not matches_path_segment(file_path, (_DAEMON_CLAUDE_PATTERN,)):
+            return False
+
+        # In self-install mode the project IS the daemon, so its CLAUDE/ tree is
+        # the authoritative copy and there is no second one to confuse it with.
+        return not self._is_self_install()
+
+    def _is_self_install(self) -> bool:
+        """Whether this checkout IS the daemon repository.
+
+        Fails CLOSED to "client install": an unresolvable project context keeps
+        the advisory, which costs one extra note rather than a missed warning.
+        """
+        try:
+            return self.self_install_reader()
+        except (RuntimeError, OSError) as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unresolvable install mode is taken to be a client install (False)",
+                level=logging.DEBUG,
+            )
+            return False
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Allow the operation but inject a warning about the wrong CLAUDE/ directory."""

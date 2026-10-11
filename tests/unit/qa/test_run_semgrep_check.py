@@ -78,6 +78,15 @@ def slow_target(tmp_path: Path) -> Path:
     return target
 
 
+class TestMissingSemgrepRemedyIsLockMatched:
+    """N367: the remedy for a missing dev tool must install from uv.lock, not pyproject."""
+
+    def test_the_remedy_syncs_from_the_lock(self) -> None:
+        text = _WRAPPER.read_text(encoding="utf-8")
+        assert "uv sync --frozen --all-extras" in text
+        assert "uv pip install -e '.[dev]'" not in text
+
+
 class TestSemgrepGateFailsClosed:
     def test_a_rule_timeout_fails_the_gate_naming_rule_and_file(
         self, tmp_path: Path, slow_target: Path

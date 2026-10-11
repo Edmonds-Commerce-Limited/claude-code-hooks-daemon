@@ -92,6 +92,24 @@ PREMATURE_STOP_PATTERNS: list[str] = [
     r"\bawait(?:ing)? (?:your|further) (?:instruction|direction|signal|cue|go-?ahead)\b",
 ]
 
+# A sentence naming one of these grounds its "out of scope" in a cited reason
+# (a threat model, a plan's Non-Goals, an owner ruling), which is a finding
+# about the scope rule rather than a deflection of work. Judged per sentence,
+# so a reason in one sentence never excuses a bare "out of scope" in another.
+_OUT_OF_SCOPE_CATEGORY = "out_of_scope"
+_CITED_REASON = re.compile(
+    r"\bthreat[- ]model\b|\bnon-?goals?\b|\bowner(?:'s)? (?:ruling|decision)\b"
+    r"|\bper (?:the )?(?:owner|ruling|plan)\b|\blimb[- ]?\d\b",
+    re.IGNORECASE,
+)
+_SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def _without_cited_reason_sentences(text: str) -> str:
+    """Drop sentences that cite a reason for their scope claim."""
+    return " ".join(s for s in _SENTENCE_BREAK.split(text) if not _CITED_REASON.search(s))
+
+
 # Category name -> pattern list
 _CATEGORY_PATTERNS: list[tuple[str, list[str]]] = [
     ("not_our_problem", NOT_OUR_PROBLEM_PATTERNS),
@@ -173,8 +191,10 @@ class DismissiveLanguageNitpickHandler(Handler):
             # patterns are unchanged; only the scanned text is normalised, so a
             # real trigger elsewhere in the same message is still found.
             scan_target = blank_quoted_spans(text)
+            ungrounded_target = _without_cited_reason_sentences(scan_target)
             for category, compiled in self._compiled:
-                if category not in found_categories and compiled.search(scan_target):
+                target = ungrounded_target if category == _OUT_OF_SCOPE_CATEGORY else scan_target
+                if category not in found_categories and compiled.search(target):
                     found_categories[category] = None
 
         context_lines = [

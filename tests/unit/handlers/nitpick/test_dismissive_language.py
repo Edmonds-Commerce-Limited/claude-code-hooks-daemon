@@ -92,6 +92,38 @@ class TestMentioningAPhraseIsNotDeflecting:
         assert result.context
 
 
+class TestOutOfScopeGroundedInACitedReason:
+    """N353: "out of scope" grounded in a cited reason is a finding, not a deflection."""
+
+    def _fires(self, text: str) -> bool:
+        handler = DismissiveLanguageNitpickHandler()
+        result = handler.handle(_make_hook_input([{"uuid": "u1", "content": text}]))
+        return bool(result.context)
+
+    def test_threat_model_citation_does_not_fire(self) -> None:
+        text = "The threat model already treats that kind of deliberate evasion as out of scope."
+        assert not self._fires(text)
+
+    def test_out_of_scope_under_the_threat_model_does_not_fire(self) -> None:
+        assert not self._fires("Deliberate evasion is out of scope under the threat model.")
+
+    def test_out_of_scope_per_owner_ruling_does_not_fire(self) -> None:
+        assert not self._fires("That case is out of scope per owner ruling A1.")
+
+    def test_out_of_scope_per_plan_non_goals_does_not_fire(self) -> None:
+        assert not self._fires("Renaming is out of scope per the plan's Non-Goals.")
+
+    def test_bare_out_of_scope_still_fires(self) -> None:
+        assert self._fires("That is out of scope for this change.")
+
+    def test_reason_in_another_sentence_does_not_launder_a_bare_deflection(self) -> None:
+        text = "The threat model is documented. That failing test is out of scope."
+        assert self._fires(text)
+
+    def test_other_categories_are_not_exempted_by_a_citation(self) -> None:
+        assert self._fires("Per the threat model, that was a pre-existing issue.")
+
+
 class TestDismissiveLanguageNitpickInit:
     """Test handler initialisation."""
 

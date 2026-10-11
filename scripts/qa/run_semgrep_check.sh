@@ -46,7 +46,9 @@ if [ ! -x "${SEMGREP}" ]; then
     # It reports green while examining nothing, which is the exact failure this
     # project's DBF standard exists to prevent.
     echo "ERROR: semgrep not found at ${SEMGREP}" >&2
-    echo "Install dev dependencies:  uv pip install -e '.[dev]' --python ${VENV_PYTHON}" >&2
+    # From the lock, never from pyproject: a bare resolve gives a newer pytest and
+    # ruff than uv.lock pins, and tests then fail for the toolchain, not the code.
+    echo "Install dev dependencies:  UV_PROJECT_ENVIRONMENT=\$(dirname \$(dirname ${VENV_PYTHON})) uv sync --frozen --all-extras" >&2
     printf '{"tool":"semgrep","summary":{"passed":false,"total_violations":0,"error":"semgrep not installed"},"violations":[]}\n' \
         > "${OUTPUT_FILE}"
     exit 1
