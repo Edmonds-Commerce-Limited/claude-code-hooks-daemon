@@ -77,6 +77,37 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N422 — main is red: two `tests/unit/config` invariants fail on main
+
+**Origin**: found while checking batch AM's QA, 2026-10-11. Both tests also fail on main at 582115bfb, so the
+batch did not cause them.
+
+**Evidence**: running `tests/unit/config/test_handler_options_accessor.py` and
+`tests/unit/config/test_scope_requires_agent_id_event.py` on main gives 2 failed, 44 passed:
+
+- `test_no_source_file_reads_handler_options_by_hand` names `install/effective_handlers.py:225`, which reads handler
+  options by hand rather than through `config.models.handler_options`. That file was last changed by batch M
+  (7029aca44, review 30cf086e9).
+- `test_every_contract_declaring_agent_id_is_in_the_set`: the shipped contracts for `TeammateIdle`, `TaskCreated` and
+  `TaskCompleted` declare `agent_id`, but `AGENT_ID_EVENTS` (`constants/events.py`) does not list them.
+
+**Status**: ⬜ Open, queued for batch AO. Fix the code, never the invariant. Check whether adding the three events to
+`AGENT_ID_EVENTS` changes any scope verdict.
+
+### N421 — the upgrade-approval guard denies a plain pytest run that sets `PYTHONPATH`
+
+**Origin**: coordinator, 2026-10-11.
+
+**Evidence**: R-UPGRADE-APPROVAL-ENV-BYPASS denied this command, in which nothing runs an upgrade:
+`W=<worktree>; PYTHONPATH=$W/src $(ls -d $W/untracked/venv-*/bin/python) -m pytest $W/tests/... -c $W/pyproject.toml --rootdir $W`.
+The same shape with a literal interpreter path ran unblocked. So the trigger looks like the command-substituted
+program word with a `PYTHON*` assignment: the guard appears to treat a program it cannot read as possibly the
+upgrade. That breaks owner ruling B5, under which a guard denies only on a positive finding.
+
+**Status**: ⬜ Open, queued for batch AO. Reproduce it red with `bin/hooks-daemon probe`, find the branch, and make the
+unreadable-program case need upgrade evidence (an upgrade argument or the clone path), as the deny text itself
+describes.
+
 ### N420 — ARCHITECTURE.md and README disagree on whether the hook layer fails open
 
 **Origin**: the fact-check of the 00484 conformance declaration
