@@ -36,13 +36,13 @@ defect and is closed with this plan.
 
 ### Phase 1: Fix
 
-- [ ] ⬜ **Task 1.1**: RED. Tests: a flat and a mirrored mapping, with the source
+- [x] ✅ **Task 1.1**: RED. Tests: a flat and a mirrored mapping, with the source
   and its test both inside a nested git worktree, allow the write; the deny's
   searched locations name the worktree's path; a source in the main checkout is
   unchanged.
-- [ ] ⬜ **Task 1.2**: GREEN. Anchor the declared candidates at the checkout
+- [x] ✅ **Task 1.2**: GREEN. Anchor the declared candidates at the checkout
   holding the source file.
-- [ ] ⬜ **Task 1.3**: Release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] ✅ **Task 1.3**: Release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
 ### Phase 2: Land
 

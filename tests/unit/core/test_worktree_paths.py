@@ -8,7 +8,50 @@ from claude_code_hooks_daemon.core.worktree_paths import (
     WORKTREE_DIR_PATTERNS,
     effective_project_relative_path,
     enclosing_checkout,
+    nested_git_checkout_root,
 )
+
+
+def test_nested_git_file_dir_is_the_checkout_whatever_its_name(tmp_path: Path) -> None:
+    wt = tmp_path / "untracked" / "scratch" / "wt"
+    (wt / "src" / "Foo").mkdir(parents=True)
+    (wt / ".git").write_text("gitdir: elsewhere\n")
+
+    found = nested_git_checkout_root(str(wt / "src" / "Foo" / "Bar.php"), tmp_path)
+
+    assert found == wt.resolve()
+
+
+def test_nested_git_directory_clone_is_a_checkout(tmp_path: Path) -> None:
+    clone = tmp_path / "vendor-clone"
+    (clone / ".git").mkdir(parents=True)
+
+    assert nested_git_checkout_root(str(clone / "a.php"), tmp_path) == clone.resolve()
+
+
+def test_nearest_nested_checkout_wins(tmp_path: Path) -> None:
+    outer = tmp_path / "outer"
+    inner = outer / "inner"
+    (outer / ".git").mkdir(parents=True)
+    (inner / ".git").mkdir(parents=True)
+
+    assert nested_git_checkout_root(str(inner / "a.php"), tmp_path) == inner.resolve()
+
+
+def test_project_root_git_entry_is_not_a_nested_checkout(tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "src").mkdir()
+
+    assert nested_git_checkout_root(str(tmp_path / "src" / "a.php"), tmp_path) is None
+
+
+def test_path_outside_the_project_has_no_nested_checkout(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    other = tmp_path / "other"
+    project.mkdir()
+    (other / ".git").mkdir(parents=True)
+
+    assert nested_git_checkout_root(str(other / "a.php"), project) is None
 
 
 def test_patterns_cover_both_worktree_locations() -> None:
