@@ -483,7 +483,7 @@ def _branch_delete_note(command: str, cwd: Path) -> str | None:
         return _unverified("no `git branch -D` / `git update-ref -d` invocation could be read")
     stranded: list[str] = []
     for run, names in deletions:
-        problem = placement_problem(run)
+        problem = placement_problem(run, cwd)
         if problem is not None:
             return _unverified(problem)
         directory = invocation_directory(run, cwd)
@@ -651,7 +651,7 @@ def _remote_delete_note(command: str, cwd: Path) -> str | None:
         return _unverified("no `git push --delete` / `git push <remote> :<name>` could be read")
     problems: list[str] = []
     for run, remote, refs in deletions:
-        problem = placement_problem(run)
+        problem = placement_problem(run, cwd)
         if problem is not None:
             return _unverified(problem)
         directory = invocation_directory(run, cwd)

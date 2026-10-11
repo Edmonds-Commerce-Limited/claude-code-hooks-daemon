@@ -193,7 +193,7 @@ class MergeQaAdvisorHandler(PreToolUseHandlerBase):
 
     def _unrecorded(self, run: GitInvocation, cwd: Path) -> list[tuple[str, str]]:
         """``(branch, head)`` for each merged work branch with no green record at its head."""
-        if placement_problem(run) is not None:
+        if placement_problem(run, cwd) is not None:
             return []
         directory = invocation_directory(run, cwd)
         unrecorded: list[tuple[str, str]] = []
