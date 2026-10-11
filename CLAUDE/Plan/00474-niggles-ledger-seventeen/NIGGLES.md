@@ -178,10 +178,18 @@ reported.
 known non-interpreters, grown one spelling at a time (N302, N416). The issue proposes the opposite: judge the shape
 only for known interpreters. The comment at lines 852-858 records the current fail-closed choice as deliberate.
 
-**Status**: ⬜ Owner decision.
+**Status**: ✅ Fixed (batch AL, merge 13f0b895c), as option B under the owner's clear-winner guidance:
+
+- `ps` and `file` join the exempt text tools.
+
+- docker/podman `run`/`exec`/`create` are judged only on the words after the image, so `-e A=1` before the image is
+  silent. `--entrypoint perl img -e x` and `sh -c` after the image stay unseen.
+
+- Release note 020. Addresses GitHub Issue #69.
 
 - **A**: invert the rule to an allow-list of interpreters (perl, ruby, node, php, and so on). This fixes the class. But an
   unlisted interpreter's inline code then passes silently, which loosens a QA gate.
+
 - **B**: keep the shape rule and extend the exempt list (`ps`, `file`, and `docker` for `-e` only). This fixes the
   spellings only.
 
@@ -1841,7 +1849,9 @@ unchanged. Full evidence with file:line:
   prior continuations the daemon cannot cause.
 - Decision for the owner: should auto-continue stand down (allow the stop) when `stop_hook_active` is set and it cannot
   read the transcript, or keep treating that stop as fresh? The first bounds the daemon at one block per chain in every
-  case; the second keeps blocking a stop whose earlier block it cannot confirm. Behaviour is unchanged until decided.
+  case; the second keeps blocking a stop whose earlier block it cannot confirm. ✅ Owner ruled A (2026-10-11), fixed in
+  batch AL (merge 13f0b895c): `transcript_is_readable` in `stop_hook_helpers.py`. A re-entry whose transcript path is
+  missing, empty, a directory or unopenable now allows the stop. A readable transcript keeps the old path. Release note 020.
 - Separate question, recommendation only: the measurements give no reason for the ccy supervisor to set
   `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`; a raised cap also widens what a non-daemon Stop hook can loop on.
 
@@ -2206,7 +2216,9 @@ that code: they read the commit through `read_commit_form`, where an unstatable 
 never denied as NOT checked, so there was nothing to share. Pinned in `test_git_invocation_directory.py`,
 `test_conflict_marker_commit_gate.py` and ordinary-corpus rows `a8-cd-*`. (b) Owner: whether a commit gate that cannot place the repository for
 any other expansion (`cd $PROJ`) should allow with an advisory, as owner ruling A1 (settling Q4-R3) did for the secret guards, or stay
-fail-closed. Until (b) is ruled, `cd $PROJ && git commit` stays denied.
+fail-closed. ✅ Owner ruled (b) B, fail-closed with guidance (2026-10-11). Fixed in batch AL (merge 13f0b895c): the deny
+now names the accepted forms `cd "$(git rev-parse --show-toplevel)"`, `cd "$PWD"` and `cd "$(pwd)"`, and no verdict
+changed. Release note 020.
 
 ### N401 — `destructive_git` reads a `git -c k=v commit -F - <<'EOF'` message body as a command
 
