@@ -90,7 +90,25 @@ targeted run of the same change had passed.
   that `CLAUDE.md` was rewritten, and the pid file changed during the test. This is the N280 symptom on a
   runner with no daemon of its own. It ran before batch AN's jail reached main.
 
-**Status**: 🔄 Sub-agent dispatched (worktree `worktree-ci-al-fix`). #69 stays open until CI is green.
+**Causes and fixes** (merge 939ff0d97; report `subagent-reports/261011-ci-al-fix-sonnet.md`; review APPROVE):
+
+1. **Docker case.** An absolute-path program is also tried as a script file, and a file over the 16 MiB
+   read budget was judged UNSEEN. The runner's real `/usr/bin/docker` is that large. An over-budget file
+   with a NUL byte in its head is now a binary, the same verdict a small file already got. Over-budget
+   text still fails closed. The tests no longer depend on what the host has installed.
+2. **Timing bounds.** The code did not get slower. CI runs under coverage tracing, which made the same
+   work 3–4x slower. `scaled_cpu_seconds` adds a tracing factor when `sys.gettrace()` is set.
+3. **Bare bounds.** Three bare 1.5 s bounds from batch AL now use `scaled_cpu_seconds`.
+4. **Teardown error.** `test_llm_qa_resume.py` stubbed `run_tool` but not `ensure_live_daemon`, so on a
+   host with no daemon running, `smoke_test` started a real one. That daemon rewrote `CLAUDE.md` and the
+   pid file. An autouse stub now prevents it. This is the strongest lead yet for N280.
+
+Non-blocking review follow-ups:
+
+- A separate "binary" readable state, instead of returning the head as TEXT.
+- A cap on the combined load × tracing factor.
+
+**Status**: ✅ Fixed (merge 939ff0d97); 🔄 CI on main to confirm, then #69 closes.
 
 ### N424 — the LSP symbol-lookup guard denies a grep over a CLI's piped output
 
@@ -725,7 +743,14 @@ behaves as before, apart from running its restore inside `doc_write_jail.allowed
 6. Write a refusal to stderr when recording it fails.
 7. Drop the test that only checks a file exists.
 
-**Status**: ✅ Guarded (cause unreproduced; the jail refuses the write). 🔄 Follow-ups 1–7 open.
+**Probable cause** (N425, merge 939ff0d97): `tests/unit/qa/test_llm_qa_resume.py` did not stub
+`ensure_live_daemon`. On a host with no daemon running, `smoke_test` started a real daemon for the
+checkout, and its start-up rewrote `CLAUDE.md` with the code of the tree it ran from, which also changed
+the pid file. That matches the CI teardown error exactly. It also matches the original report, where the
+pid file changed and older guidance appeared, if a worktree's run started a daemon. An autouse stub now
+stops it. Not reproduced in the original setting.
+
+**Status**: ✅ Guarded (the jail refuses the write); probable cause fixed by N425. 🔄 Follow-ups 1–7 open.
 
 ### N279 — `changed_tests` once selected 50 test files, ran 0 tests and did not fail
 
