@@ -4037,7 +4037,7 @@ def _gh_ci_lookup(sha: str) -> "CiRunState | None":
         state = CiRunState(
             sha=sha, status=run.get("status"), conclusion=run.get("conclusion"), run_id=run_id
         )
-        if state.status != "completed" or state.conclusion in _GH_NON_EVIDENCE_CONCLUSIONS:
+        if not state.is_completed or state.conclusion in _GH_NON_EVIDENCE_CONCLUSIONS:
             fallback = fallback or state
             continue
         jobs = _gh_run_jobs(run_id)
@@ -8052,6 +8052,9 @@ def _capture_value_swapper(project_root: Path) -> Any:
     import re
 
     from claude_code_hooks_daemon.constants import HandlerID
+    from claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content import (
+        compile_public_pattern,
+    )
     from claude_code_hooks_daemon.utils.fake_values import (
         FakeValuesError,
         load_fake_values,
@@ -8073,11 +8076,31 @@ def _capture_value_swapper(project_root: Path) -> Any:
     options = handler_options(
         config.handlers.pre_tool_use.get(HandlerID.SENSITIVE_CONTENT.config_key)
     )
-    patterns = {
-        str(entry["name"]): re.compile(str(entry["pattern"]), re.IGNORECASE)
-        for entry in options.get("public_patterns", [])
-        if entry.get("name") in registry.kinds and entry.get("pattern")
-    }
+    patterns: dict[str, list[re.Pattern[str]]] = {}
+    for entry in options.get("public_patterns", []):
+        if not isinstance(entry, dict):
+            raise _ContentGuardUnavailableError(
+                f"a sensitive_content public_patterns entry is not a mapping ({entry!r}); "
+                "nothing was written, because the page cannot be judged against a config "
+                "the guard itself would misread. Fix the entry and retry."
+            )
+        name = entry.get("name")
+        source = entry.get("pattern")
+        if name not in registry.kinds or not source:
+            continue
+        # The guard's own compiler, so the swapper and the guard cannot drift.
+        # The guard drops a pattern that does not compile; here that would let
+        # the real value into the vendored page, so the capture is refused.
+        try:
+            compiled = compile_public_pattern(str(source))
+        except re.error as exc:
+            raise _ContentGuardUnavailableError(
+                f"the public pattern for `{name}` does not compile ({exc}); nothing was "
+                "written, because a value of that kind cannot be found with a pattern "
+                "that cannot be read. Fix the pattern and retry."
+            ) from exc
+        # Every pattern configured for a kind applies, as in the guard.
+        patterns.setdefault(str(name), []).append(compiled)
     return lambda text: swap_unlisted_fakes(text, patterns, registry)
 
 

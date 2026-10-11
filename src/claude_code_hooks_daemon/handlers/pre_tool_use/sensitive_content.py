@@ -659,8 +659,26 @@ def _pathspec_chunks(paths: list[str], *, narrowable: bool) -> Iterator[list[str
 _COMPILED_PATTERN_CACHE: dict[str, "re.Pattern[str] | None"] = {}
 
 
-def _compiled_public_pattern(pattern: str) -> "re.Pattern[str] | None":
-    """Compile ``pattern`` (case-insensitive), caching by source string.
+def compile_public_pattern(pattern: str) -> "re.Pattern[str]":
+    """Compile ``pattern`` (case-insensitive), caching successes by source string.
+
+    The strict form: a pattern that does not compile raises ``re.error``.
+    Public because the ``remote-docs`` capture swapper must judge a page with
+    the very regexes the guard will, yet refuse (not drop) one it cannot read.
+
+    Raises:
+        re.error: ``pattern`` is not a valid regular expression.
+    """
+    cached = _COMPILED_PATTERN_CACHE.get(pattern)
+    if cached is not None:
+        return cached
+    compiled = re.compile(pattern, re.IGNORECASE)
+    _COMPILED_PATTERN_CACHE[pattern] = compiled
+    return compiled
+
+
+def compiled_public_pattern(pattern: str) -> "re.Pattern[str] | None":
+    """The guard's lenient form of :func:`compile_public_pattern`.
 
     A pattern that fails to compile is a documented no-match (never crashes
     the handler) — cached as ``None`` so a broken client config is not
@@ -670,7 +688,7 @@ def _compiled_public_pattern(pattern: str) -> "re.Pattern[str] | None":
     if pattern in _COMPILED_PATTERN_CACHE:
         return _COMPILED_PATTERN_CACHE[pattern]
     try:
-        compiled: re.Pattern[str] | None = re.compile(pattern, re.IGNORECASE)
+        compiled: re.Pattern[str] | None = compile_public_pattern(pattern)
     except re.error as exc:
         log_and_continue(
             _LOGGER,
@@ -772,11 +790,21 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         an exact, fixable deny reason.
         """
         fake_values: FakeValuesRegistry | None = None
-        for entry in self._public_patterns:
+        # Client YAML, so an entry can be any shape: skip what is not a mapping
+        # rather than crash the hook, and say so.
+        entries: list[object] = list(self._public_patterns)
+        for entry in entries:
+            if not isinstance(entry, dict):
+                _LOGGER.warning(
+                    "sensitive_content: a public_patterns entry is not a mapping and is "
+                    "skipped (%r)",
+                    entry,
+                )
+                continue
             pattern = entry.get(_PATTERN_KEY_PATTERN, "")
             if not pattern:
                 continue
-            compiled = _compiled_public_pattern(pattern)
+            compiled = compiled_public_pattern(pattern)
             if compiled is None:
                 continue
             for match in compiled.finditer(content):
