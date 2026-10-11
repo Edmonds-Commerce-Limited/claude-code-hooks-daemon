@@ -1432,6 +1432,51 @@ rows:
       cat > untracked/scratch/n407-notes.md <<'EOF'
       Never run sudo pip install x
       EOF
+  - id: n407-echo-sudo-user-pip
+    command: |-
+      echo 'never run sudo -u root pip install x'
+  - id: n407-grep-sudo-env-pip
+    command: |-
+      grep -rn 'sudo env pip install' docs/
+  - id: n407-commit-message-names-sudo-bash-pip
+    command: |-
+      git commit -m "docs: never sudo bash -c 'pip install x'"
+  - id: n407-comment-names-doas-pip
+    command: |-
+      ls # doas pip install x
+  - id: n407-echo-break-flag-before-subcommand
+    command: |-
+      echo 'never run pip --break-system-packages install x'
+  - id: n407-echo-break-env-var
+    command: |-
+      echo 'never run PIP_BREAK_SYSTEM_PACKAGES=1 pip install x'
+  - id: n407-grep-break-env-export
+    command: |-
+      grep -rn 'export PIP_BREAK_SYSTEM_PACKAGES=1' docs/
+  - id: n407-comment-names-versioned-pip
+    command: |-
+      ls # pip3.11 install --break-system-packages x
+  - id: n407-env-var-falsy-value
+    command: |-
+      PIP_BREAK_SYSTEM_PACKAGES=0 ls
+  - id: n407-git-grep-env-var
+    command: |-
+      git grep -n PIP_BREAK_SYSTEM_PACKAGES=1
+  - id: n407-find-name-env-var
+    command: |-
+      find . -name PIP_BREAK_SYSTEM_PACKAGES=1
+  - id: n407-ls-env-var-text
+    command: |-
+      ls PIP_BREAK_SYSTEM_PACKAGES=1
+  - id: n407-docker-run-env-var
+    command: |-
+      docker run -e PIP_BREAK_SYSTEM_PACKAGES=1 img
+  - id: n407-bare-export-env-var
+    command: |-
+      export PIP_BREAK_SYSTEM_PACKAGES=1
+  - id: n407-quoted-falsy-env-var-prefix
+    command: |-
+      PIP_BREAK_SYSTEM_PACKAGES='0' ls
   - id: n408-echo-names-issue-view
     command: |-
       echo 'gh issue view 5'

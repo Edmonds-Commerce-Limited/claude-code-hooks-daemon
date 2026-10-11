@@ -17,6 +17,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
 from claude_code_hooks_daemon.utils.command_position import command_position_code_segments
 
 # Full first-fire teaching content (Plan 00116): reuses the pre-migration
@@ -45,10 +46,77 @@ _PIP_BREAK_SYSTEM_VERBOSE_CONTENT = (
 # Any form of pip install with --break-system-packages in ONE command segment:
 # pip/pip3/python -m pip/python3 -m pip (also behind a path or `uv`) + install
 # + the flag.
-_PIP_BREAK_SYSTEM_PATTERN = re.compile(
-    r"\b(pip3?|python3?\s+-m\s+pip)\s+install\s+.*--break-system-packages",
+#
+# The flag may also sit BEFORE the subcommand (`pip --break-system-packages
+# install x`), and the interpreter may be versioned (`pip3.11`,
+# `python3.11 -m pip`), so both are asserted as lookaheads after the binary.
+_PIP_BREAK_SYSTEM_FLAG_PATTERN = re.compile(
+    r"\b(?:pip3?(?:\.\d+)?|python3?(?:\.\d+)?\s+-m\s+pip)\s+"
+    r"(?=.*\binstall\b)(?=.*--break-system-packages)",
     re.IGNORECASE,
 )
+
+# The same switch set through pip's environment. Only a REAL assignment counts
+# (a leading `VAR=value` prefix, after `env` and its options, or after
+# `export` / `declare -x`), never the text `PIP_BREAK_SYSTEM_PACKAGES=1` as an
+# argument of grep, find or docker. It is a finding only when it GOVERNS a pip
+# install: a prefix on that same command, or an `export` earlier in the command
+# line followed by one. A falsy value (0, false, no, off), quoted or not, or an
+# empty one switches nothing on.
+_ENV_VAR_NAME = "PIP_BREAK_SYSTEM_PACKAGES"
+_FALSY_VALUES = frozenset({"", "0", "false", "no", "off"})
+_ASSIGNMENT = re.compile(r"(\w+)=('[^']*'|\"[^\"]*\"|\S*)\s*")
+_EXPORT_HEAD = re.compile(r"(?:export|(?:declare|typeset)\s+-\w*x\w*)\s+")
+_ENV_HEAD = re.compile(r"env\s+(?:-\S+\s+)*")
+_SHELL_C_HEAD = re.compile(r"(?:\S*/)?(?:ba|da|z)?sh\s+-\w*c\s+['\"]?\s*")
+_PIP_INSTALL_HEAD = re.compile(
+    r"(?:(?:sudo|doas)\s+(?:-\S+\s+)*|uv\s+|nohup\s+|time\s+)*(?:\S*/)?"
+    r"(?:pip3?(?:\.\d+)?|python3?(?:\.\d+)?\s+-m\s+pip)\s+(?:-\S+\s+)*install\b",
+    re.IGNORECASE,
+)
+
+
+def _is_truthy(raw: str) -> bool:
+    """Whether an env value (quotes allowed) switches the variable on."""
+    return raw.strip("'\"").strip().lower() not in _FALSY_VALUES
+
+
+def _leading_assignment(segment: str) -> tuple[bool, str | None, str]:
+    """Read the assignments heading a command segment.
+
+    Returns (is_export, raw value of the pip variable or None, the rest of the
+    segment after the assignments).
+    """
+    rest = _SHELL_C_HEAD.sub("", strip_reserved_word_prefix(segment), count=1)
+    is_export = False
+    export_head = _EXPORT_HEAD.match(rest)
+    env_head = _ENV_HEAD.match(rest)
+    if export_head:
+        is_export = True
+        rest = rest[export_head.end() :]
+    elif env_head:
+        rest = rest[env_head.end() :]
+    value: str | None = None
+    while (assignment := _ASSIGNMENT.match(rest)) is not None and assignment.end() > 0:
+        if assignment.group(1) == _ENV_VAR_NAME:
+            value = assignment.group(2)
+        rest = rest[assignment.end() :]
+    return is_export, value, rest
+
+
+def _env_var_governs_pip_install(segments: list[str]) -> bool:
+    """Whether a truthy PIP_BREAK_SYSTEM_PACKAGES governs a pip install."""
+    exported = False
+    for segment in segments:
+        is_export, value, rest = _leading_assignment(segment)
+        if is_export:
+            if value is not None:
+                exported = _is_truthy(value)
+            continue
+        effective = _is_truthy(value) if value is not None else exported
+        if effective and _PIP_INSTALL_HEAD.match(rest):
+            return True
+    return False
 
 
 class PipBreakSystemHandler(PreToolUseHandlerBase):
@@ -112,10 +180,10 @@ class PipBreakSystemHandler(PreToolUseHandlerBase):
         # Judged per COMMAND-POSITION segment (ledger N407): the pattern's `.*`
         # used to cross `&&`, `;`, `#` and quotes, so an echo, a comment, a
         # grep pattern or a message that only NAMED the flag was denied.
+        segments = command_position_code_segments(command)
         return any(
-            _PIP_BREAK_SYSTEM_PATTERN.search(segment)
-            for segment in command_position_code_segments(command)
-        )
+            _PIP_BREAK_SYSTEM_FLAG_PATTERN.search(segment) for segment in segments
+        ) or _env_var_governs_pip_install(segments)
 
     def get_rules(self) -> list[Rule]:
         """Return the single Rule backing this handler's blocking behaviour."""
