@@ -75,7 +75,7 @@ hosts:
   StatusLine.md records the read and the URL; the vendoring needs an owner decision.
   **Owner ruling (2026-10-05):** unblocked by the fake-values registry plan `docs-fake-values-registry`: the page is vendored
   with unlisted fakes swapped for listed ones, recorded in its provenance — see
-  [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (D1). Unblocked: Plan 00492 landed the registry and vendored the page.
+  [OWNER-RULINGS-261005.md](../Completed/00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (D1). Unblocked: Plan 00492 landed the registry and vendored the page.
 - [x] ✅ **Task 1.2** (merged ee58adb7c): Capture real Status payloads into test fixtures: a main thread with
   data, before the first response (absent), a subagent or `--agent` thread, and integer and
   fractional percentages. Establish whether subagent threads carry `rate_limits`.
@@ -259,7 +259,7 @@ feedback loop.
   Verified through the daemon chain with a synthetic host
   (`tests/integration/test_usage_pause_daemon_chain.py`, Task 4.8). Still unobserved: a real
   session on a configured host making real `CronDelete`/`CronCreate` calls. Owner ruling D8
-  (2026-10-06, [OWNER-RULINGS-261006.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261006.md)):
+  (2026-10-06, [OWNER-RULINGS-261006.md](../Completed/00483-threat-model-conformance-audit/OWNER-RULINGS-261006.md)):
   dogfood it in this repository's own always-on session, on its datacentre VM, at 80%. This
   supersedes the earlier rule that this repository's config never carries a ceiling. The
   entry is keyed by the role alias `cchd-sdlc-runner` (owner, same day: a session's alias

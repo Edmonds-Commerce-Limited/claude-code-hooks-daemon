@@ -1,6 +1,6 @@
 # Inline suppression inventory (gap G1, owner ruling B2)
 
-Ruling B2 (`../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md`): no central
+Ruling B2 (`../Completed/00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md`): no central
 exceptions file or baseline; suppressions stay inline and co-located, each MUST carry its
 reasoning; delete as many as possible; review every kept one for need and why it exists.
 

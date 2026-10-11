@@ -17,7 +17,7 @@ rulings for these entries are recorded in the next section.
 ### Plan 00483 write-back for the 00466 entries (Task 2.3)
 
 Plan 00483 triaged the 67 entries open in archived ledger 00466
-([TRIAGE-ledger-466.md](../00483-threat-model-conformance-audit/TRIAGE-ledger-466.md)).
+([TRIAGE-ledger-466.md](../Completed/00483-threat-model-conformance-audit/TRIAGE-ledger-466.md)).
 Ledger 00466 is archived, so its dispositions are recorded here. The dismissals are
 verdicts of that triage (classified under the two-part test, checked by the
 coordinator); none is an owner ruling. The command-shaped ones have a
@@ -36,8 +36,8 @@ coordinator); none is an owner ruling. The command-shaped ones have a
 
 **No change:**
 
-- **N62** — subagent context and concurrency budgets stay with the harness knob `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` and the Plan 00479 usage ceiling. Source: a ruling the owner delegated to a Fable subagent, extended to N62 by the coordinator ([RULINGS-owner-delegated-fable.md](../00483-threat-model-conformance-audit/RULINGS-owner-delegated-fable.md)), confirmed by a coordinator call on 2026-10-05, which is not an owner ruling. Re-open trigger: if the 00479 pause fires routinely because of subagent context, build the concurrency cap first.
-- **N74** — `grep -r` over an ancestor of a protected path. Source: the same Fable ruling, "no change, accepted residual". The owner ruling A2 of 2026-10-05 ([OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md)) settled N74 through the cached protected-file index, merged as dc5c9263b. Corpus row `recursive-search-grep-r-whole-checkout` is `COVERED`, so there is no `UNCOVERED-accepted` row.
+- **N62** — subagent context and concurrency budgets stay with the harness knob `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` and the Plan 00479 usage ceiling. Source: a ruling the owner delegated to a Fable subagent, extended to N62 by the coordinator ([RULINGS-owner-delegated-fable.md](../Completed/00483-threat-model-conformance-audit/RULINGS-owner-delegated-fable.md)), confirmed by a coordinator call on 2026-10-05, which is not an owner ruling. Re-open trigger: if the 00479 pause fires routinely because of subagent context, build the concurrency cap first.
+- **N74** — `grep -r` over an ancestor of a protected path. Source: the same Fable ruling, "no change, accepted residual". The owner ruling A2 of 2026-10-05 ([OWNER-RULINGS-261005.md](../Completed/00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md)) settled N74 through the cached protected-file index, merged as dc5c9263b. Corpus row `recursive-search-grep-r-whole-checkout` is `COVERED`, so there is no `UNCOVERED-accepted` row.
 - **N240** (carried list) — the two `script` log shapes now have their corpus rows, `no-change-n240-script-typescript-log` and `no-change-n240-script-log-option`; they were promised by the Fable ruling but missing from the corpus.
 
 **Still open, residuals stated precisely (not dismissed):**
@@ -1058,7 +1058,7 @@ off.
 `untracked/scratch` (13 GB). Deleting them is the owner's call, since that is a bulk deletion
 of earlier runs' evidence.
 
-**Owner ruling (2026-10-05):** resolved: yes, clean up (keep anything a live worktree or an open report points at), and add a housekeeping step to the release process — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (D3).
+**Owner ruling (2026-10-05):** resolved: yes, clean up (keep anything a live worktree or an open report points at), and add a housekeeping step to the release process — see [OWNER-RULINGS-261005.md](../Completed/00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (D3).
 
 **Clean-up done (coordinator, 2026-10-06):** removed 3,247 stale entries (12.1 GB) from `untracked/scratch`,
 which went from 14 GB to 294 MB. Kept every entry modified in the last 48 hours and every entry a live (non-Completed)
@@ -1293,7 +1293,7 @@ recognised, reviewable marker, or a named helper that the audit allowlists. A he
 merely moves the call out of sight is neither. Changing the audit, or adding allowlist
 entries, needs the owner.
 
-**Owner ruling (2026-10-05):** resolved: one named helper with a required reason argument, and the audit widened to catch log-then-continue bodies — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (B4).
+**Owner ruling (2026-10-05):** resolved: one named helper with a required reason argument, and the audit widened to catch log-then-continue bodies — see [OWNER-RULINGS-261005.md](../Completed/00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (B4).
 
 **Status**: ✅ Fixed (d7ec3ff9b through e90cbd63c). The named helper
 `utils/deliberate_swallow.log_and_continue(logger, exc, *, reason, level=WARNING)` exists, and the
@@ -1475,7 +1475,7 @@ land in.
 
 **Source**: Plan 00483 Task 3.2 re-probe of the not-re-run guards (2026-10-11), proposal P9, probe fq1 and the
 INVENTORY fq_py_a/fq_py_b probes
-(`../00483-threat-model-conformance-audit/subagent-reports/261011-not-rerun-guards-sonnet.md`).
+(`../Completed/00483-threat-model-conformance-audit/subagent-reports/261011-not-rerun-guards-sonnet.md`).
 
 **Evidence**: a sub-agent's `python3 script.py`, where the script imports `subprocess`, runs `ruff check .` and only
 lists `"pytest"` in a constant, is denied as a full-suite run; the shell-script counterpart allows. Sub-agent role
@@ -1554,7 +1554,7 @@ closed only when that directory cannot be placed; gate row for `cd sub && cmd > 
 ### N402 — the conflict-marker commit gate denies `cd "$(git rev-parse --show-toplevel)" && git commit`
 
 **Source**: Plan 00483 Task 3.2 re-check (2026-10-11), proposal P3, probes d-h1 and d-h4
-(`../00483-threat-model-conformance-audit/subagent-reports/261011-task-3.2-recheck-sonnet.md`).
+(`../Completed/00483-threat-model-conformance-audit/subagent-reports/261011-task-3.2-recheck-sonnet.md`).
 
 **Evidence**: `cd "$(git rev-parse --show-toplevel)" && git commit ...` and `cd $PROJ && git commit ...` are denied
 with "this commit was NOT checked ... the directory needs an expansion the daemon cannot perform"; the control
@@ -2423,7 +2423,7 @@ producers blocked and named, a pipe after the closing quote still judged on the 
 ### N362 — deleting a MERGED remote branch is denied; only an unmerged delete should be human-only
 
 **Found**: owner ruling D11 of 2026-10-06
-([OWNER-RULINGS-261006.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261006.md)), amending A6. Deleting a
+([OWNER-RULINGS-261006.md](../Completed/00483-threat-model-conformance-audit/OWNER-RULINGS-261006.md)), amending A6. Deleting a
 branch whose tip is already contained in the default branch is lossless housekeeping, and any agent may do it.
 `R-GIT-PUSH-DELETE-REMOTE` (`destructive_git`) denies every `git push --delete` and `git push <remote> :<name>`.
 
@@ -2695,7 +2695,7 @@ holder", until the next acquirer overwrites it. The file is never unlinked.
 ### N350 — a `for … in dir/*` loop was denied on a lone `*` token
 
 **Source**: the N130/N348 design agent (Opus) on 2026-10-04, while it was measuring. This is side observation S2 in
-`CLAUDE/Plan/00483-threat-model-conformance-audit/subagent-reports/261004-n130-n348-capped-walk-design-opus.md`.
+`CLAUDE/Plan/Completed/00483-threat-model-conformance-audit/subagent-reports/261004-n130-n348-capped-walk-design-opus.md`.
 
 **Evidence**: secret_file_guard denied
 `cd untracked; for d in repos/* worktrees/* fd-worktrees/*; do … git -C "$d" ls-files …; done` as
@@ -2764,7 +2764,7 @@ entries or the deadline and is denied as `R-SECRET-SCAN-INCOMPLETE` (`R-QUARANTI
 guard); `rg`, `ag` and `git grep` read git's file lists, so ignored bulk is not counted. The "check each pattern against
 the glob" idea was analysed and rejected: an unanchored name pattern, which every shipped default is, can match in any
 directory, so no pattern-side check bounds the walk. Report:
-[261004-n130-n348-implementation-sonnet.md](../00483-threat-model-conformance-audit/subagent-reports/261004-n130-n348-implementation-sonnet.md).
+[261004-n130-n348-implementation-sonnet.md](../Completed/00483-threat-model-conformance-audit/subagent-reports/261004-n130-n348-implementation-sonnet.md).
 
 ### N347 — the plan-folder mkdir guard read `mkdir` inside a branch name as a command
 
@@ -3147,7 +3147,7 @@ the shared lint scope predicate, so `remote-docs/` pages never reach the post-co
 ### N314 — no QA check bounds a module's size, so a handler reached 5,301 lines unnoticed
 
 **Source**: owner-delegated Fable ruling on 00466 N96
-([RULINGS-owner-delegated-fable.md](../00483-threat-model-conformance-audit/RULINGS-owner-delegated-fable.md#n96--subagent_full_qa_blockerpy-is-one-5301-line-handler)).
+([RULINGS-owner-delegated-fable.md](../Completed/00483-threat-model-conformance-audit/RULINGS-owner-delegated-fable.md#n96--subagent_full_qa_blockerpy-is-one-5301-line-handler)).
 
 **Evidence**: `subagent_full_qa_blocker.py` grew to 5,301 lines (14 classes) through review rounds
 that never flagged the size, and the N302 misclassification sat inside it. Nothing in
@@ -3161,7 +3161,7 @@ exception list for today's outliers, which is an allowlist and needs owner appro
 wired into `llm_qa.py`: no report-only tool exists there, and a passing tool shows nothing, so the
 report would never be read. The split of the file itself is a separate, sequenced pure-refactor plan.
 
-**Owner ruling (2026-10-05):** resolved: not just a size gate; a new plan, `code-quality-and-architecture-review`, covers module size, DRY, architecture and code quality, and N314 folds into it — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (B5).
+**Owner ruling (2026-10-05):** resolved: not just a size gate; a new plan, `code-quality-and-architecture-review`, covers module size, DRY, architecture and code quality, and N314 folds into it — see [OWNER-RULINGS-261005.md](../Completed/00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (B5).
 
 ### N313 — `git_stash` denies a `grep` naming `git stash` when its output goes into `awk`
 
@@ -3275,7 +3275,7 @@ on the same pattern, even with `--verbatim`. The check runs before any capture e
 **Status**: ✅ Fixed by Plan 00492 (the owner's registry route; options (a) to (c) superseded). Both pages are now
 vendored, each with its one swap recorded in its provenance.
 
-**Owner ruling (2026-10-05):** resolved: a single registry of approved FAKE values; docs may use any listed fake, and an unlisted fake-looking value is swapped for a listed one or the list is extended. Work: plan `docs-fake-values-registry` — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (D1).
+**Owner ruling (2026-10-05):** resolved: a single registry of approved FAKE values; docs may use any listed fake, and an unlisted fake-looking value is swapped for a listed one or the list is extended. Work: plan `docs-fake-values-registry` — see [OWNER-RULINGS-261005.md](../Completed/00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (D1).
 
 ### N308 — unguarded `;` chaining is only advised against, not blocked
 
@@ -3294,7 +3294,7 @@ on by default - it should be harmless and provides a LOT of safety". Under it, t
 now enabled and blocking: a config-changes entry, release note 215, and templates updated. The
 acceptance tests follow the configured mode. Live once the daemon restarts.
 
-**Owner ruling (2026-10-05):** reverses the second ruling above for this repository's config: `bash_safe_mode` goes back to `only_with_mutator: true` (R6) — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (A3).
+**Owner ruling (2026-10-05):** reverses the second ruling above for this repository's config: `bash_safe_mode` goes back to `only_with_mutator: true` (R6) — see [OWNER-RULINGS-261005.md](../Completed/00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (A3).
 
 ### N307 — the second commit in one command has its pathspecs left unscanned
 

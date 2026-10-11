@@ -15,7 +15,7 @@ on a module that size miss defects: N302 (a generic inline-code flag list reachi
 it unnoticed.
 
 This plan carries out the owner-delegated Fable ruling on ledger 00466 N96
-([RULINGS-owner-delegated-fable.md](../00483-threat-model-conformance-audit/RULINGS-owner-delegated-fable.md#n96--subagent_full_qa_blockerpy-is-one-5301-line-handler)):
+([RULINGS-owner-delegated-fable.md](../Completed/00483-threat-model-conformance-audit/RULINGS-owner-delegated-fable.md#n96--subagent_full_qa_blockerpy-is-one-5301-line-handler)):
 split the module along the class seams it already has, as a pure refactor.
 
 The dedupe scout checked 46 live plans and 415 archived ones and found none covering this. Plan 00464

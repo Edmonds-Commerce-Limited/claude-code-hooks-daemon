@@ -10,7 +10,7 @@
 ## Overview
 
 The build that follows Plan 00494, the Claude Code mods review. The owner approved its proposal on 2026-10-06
-([OWNER-RULINGS-261006.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261006.md), A2 and the follow-up):
+([OWNER-RULINGS-261006.md](../Completed/00483-threat-model-conformance-audit/OWNER-RULINGS-261006.md), A2 and the follow-up):
 
 - the design, as proposed in
   [261006-hooks-daemon-mod-proposal-opus.md](../Completed/00494-claude-code-mods-review/subagent-reports/261006-hooks-daemon-mod-proposal-opus.md);

@@ -10,7 +10,7 @@
 ## Overview
 
 The project owner ruled on 2026-10-05 (B5, see
-[OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md)) that the module-size
+[OWNER-RULINGS-261005.md](../Completed/00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md)) that the module-size
 question in niggle N314 is not answered by a size gate alone. The owner asked for a general code-quality and
 architecture review covering module size, duplication (DRY), an architecture overview and code quality, perhaps followed
 by a refactoring effort.

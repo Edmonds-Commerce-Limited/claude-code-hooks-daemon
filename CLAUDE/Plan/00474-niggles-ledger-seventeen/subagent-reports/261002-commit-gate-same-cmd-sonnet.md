@@ -120,5 +120,5 @@ cd-or-cd-x           truth=RECORDED main=allow branch=DENY   (N306, fixed)
 ## Ledger
 
 N246, N306 and N307 in `CLAUDE/Plan/00474-niggles-ledger-seventeen/NIGGLES.md` and N61 in
-`CLAUDE/Plan/00483-threat-model-conformance-audit/TRIAGE-ledger-466.md` are marked Fixed on the branch, not
+`CLAUDE/Plan/Completed/00483-threat-model-conformance-audit/TRIAGE-ledger-466.md` are marked Fixed on the branch, not
 yet merged.

@@ -13,11 +13,11 @@ Every entry below was checked against current `main` under the two-part test in
 [ARCHITECTURE.md](../../ARCHITECTURE.md#threat-model-the-agent-is-careless-not-hostile).
 The "On main" line of each entry now carries its verdict; the entry text is unchanged.
 Reproductions and evidence are in the three triage files:
-[TRIAGE-carried-a.md](../00483-threat-model-conformance-audit/TRIAGE-carried-a.md)
+[TRIAGE-carried-a.md](../Completed/00483-threat-model-conformance-audit/TRIAGE-carried-a.md)
 (`worktree-upgrade-scripts`, `worktree-d-00421`, the 464 and N38 branches),
-[TRIAGE-carried-b.md](../00483-threat-model-conformance-audit/TRIAGE-carried-b.md)
+[TRIAGE-carried-b.md](../Completed/00483-threat-model-conformance-audit/TRIAGE-carried-b.md)
 (`worktree-n466-small-a`) and
-[TRIAGE-carried-c.md](../00483-threat-model-conformance-audit/TRIAGE-carried-c.md)
+[TRIAGE-carried-c.md](../Completed/00483-threat-model-conformance-audit/TRIAGE-carried-c.md)
 (`worktree-p422-close`).
 
 | Branch                               | Entries | Fixed on main | Dismissed | Folded | In-scope defect | Needs owner | Still open |
@@ -1543,7 +1543,7 @@ for every caller, over a corpus of comments, heredocs and ANSI-C spans),
 ### N240 — `bash_file_writes` does not report the typescript or the `-I`/`-O`/`-B`/`-T` log files `script` writes
 
 **Status on the branch**: ✅ Remedied. **On main**: ✅ No change (not a protected outcome). This is a ruling delegated by the owner to a Fable subagent,
-[RULINGS-owner-delegated-fable.md](../00483-threat-model-conformance-audit/RULINGS-owner-delegated-fable.md).
+[RULINGS-owner-delegated-fable.md](../Completed/00483-threat-model-conformance-audit/RULINGS-owner-delegated-fable.md).
 A `script` typescript only duplicates what the terminal already showed, and a path passed as a plain
 argument is containment's documented boundary. Both probe shapes are to be pinned as
 `UNCOVERED-accepted` corpus rows.
