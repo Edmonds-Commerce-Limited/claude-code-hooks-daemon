@@ -114,7 +114,12 @@ from claude_code_hooks_daemon.utils.plan_status_snapshot import (
     hash_plan_text,
     plan_status_snapshots,
 )
-from claude_code_hooks_daemon.utils.plan_trigger import PlanUnreadable, matched_plan_write_or_edit
+from claude_code_hooks_daemon.utils.plan_trigger import (
+    PlanUnreadable,
+    archive_dirs_for,
+    matched_plan_write_or_edit,
+    plan_root_for,
+)
 from claude_code_hooks_daemon.utils.plan_trigger import (
     plan_dir_for as _plan_trigger_plan_dir_for,
 )
@@ -1250,6 +1255,11 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         ledger_path = ProjectContext.daemon_untracked_dir() / LEDGER_FILENAME
         return GoalLedger(ledger_path)
 
+    def _plan_root(self, plan_md_path: Path) -> Path:
+        """The directory holding the plan folders, whether ``plan_md_path`` is
+        a live plan or one already archived under ``Completed/`` (N423)."""
+        return plan_root_for(plan_md_path, archive_dirs_for(self._project_layout))
+
     def _maybe_refresh_on_retirement(
         self,
         session_id: str,
@@ -1336,7 +1346,7 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         owners = ledger.owning_sessions(plan_number)
         if not owners:
             return
-        plan_dir = plan_md_path.parent.parent
+        plan_dir = self._plan_root(plan_md_path)
         refs = ledger.live_plan_refs(plan_dir)
         if not refs:
             for owner in owners:
@@ -1478,7 +1488,7 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
             logger.warning("goal_injection: combined signal skipped (no project context): %s", e)
             return self._write_fallback(session_id, fallback, fallback_plan_number)
 
-        plan_dir = plan_md_path.parent.parent
+        plan_dir = self._plan_root(plan_md_path)
         refs: list[LivePlanRef] = ledger.live_plan_refs(plan_dir)
         if not refs:
             return self._write_fallback(session_id, fallback, fallback_plan_number)
@@ -1568,7 +1578,7 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
                 reason="without a project context there is no goal ledger, so nothing is recorded and an empty result is returned",
             )
             return []
-        plan_dir = plan_md_path.parent.parent
+        plan_dir = self._plan_root(plan_md_path)
         return ledger.record_emission(session_id, plan_number, joined, plan_dir)
 
     @staticmethod

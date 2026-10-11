@@ -31,7 +31,8 @@ from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 logger = logging.getLogger(__name__)
 
 FALLBACK_PLAN_DIR: Final[str] = "CLAUDE/Plan"
-COMPLETED_SEGMENT: Final[str] = "/Completed/"
+COMPLETED_DIR_NAME: Final[str] = "Completed"
+COMPLETED_SEGMENT: Final[str] = f"/{COMPLETED_DIR_NAME}/"
 
 #: RV8-n4: a symlinked/aliased PLAN.md that resolves outside the trigger
 #: pattern logs a WARNING -- but `matched_plan_write_or_edit` runs once at
@@ -86,6 +87,27 @@ class PlanUnreadable(Exception):
 def plan_dir_for(project_layout: ProjectLayout | None) -> str:
     """Configured plan directory (facade, or the matching default)."""
     return project_layout.plan_dir if project_layout is not None else FALLBACK_PLAN_DIR
+
+
+def archive_dirs_for(project_layout: ProjectLayout | None) -> tuple[str, ...]:
+    """Configured plan archive directory names (facade, or the matching default)."""
+    if project_layout is not None:
+        return project_layout.plan_archive_dirs
+    return (COMPLETED_DIR_NAME,)
+
+
+def plan_root_for(plan_md_path: Path, archive_dirs: tuple[str, ...]) -> Path:
+    """The directory holding the plan folders, for a PLAN.md path.
+
+    A live plan sits at ``<root>/<folder>/PLAN.md``; an archived one at
+    ``<root>/<archive>/<folder>/PLAN.md``. Reading the grandparent alone
+    returns ``<root>/<archive>`` for the latter, where no plan is live, so
+    the archive directory names are stepped over.
+    """
+    root = plan_md_path.parent.parent
+    while root.name in archive_dirs:
+        root = root.parent
+    return root
 
 
 def plan_path_pattern(plan_dir: str) -> re.Pattern[str]:

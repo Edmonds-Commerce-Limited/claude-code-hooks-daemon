@@ -1548,3 +1548,61 @@ class TestVariableToolUnderSteering:
     ) -> None:
         command = f"V={self._BIN} && PYTHONPATH=/w/src $V/python -m pytest tests/x.py"
         assert handler.matches(_bash(command)) is False
+
+
+class TestSubstitutedProgramIsNotTheUpgrade:
+    """N421 (owner ruling B5): a command-substituted PROGRAM word is judged like
+    a variable one -- by what it is given to run -- not denied for being
+    unreadable.
+
+    `PYTHONPATH=<src> $(ls -d .../bin/python) -m pytest ...` runs a test
+    suite. Shlex split the substitution into `$(ls`, `-d`, `.../python)`, so the
+    guard took `.../python)` for the script operand, could not read it, and
+    counted "cannot tell" as the upgrade because `PYTHONPATH` steers.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "W=/w; PYTHONPATH=$W/src $(ls -d $W/untracked/venv-*/bin/python) -m pytest "
+            "$W/tests/unit/x.py -c $W/pyproject.toml --rootdir $W",
+            "PYTHONPATH=/x/src $(ls -d /v/bin/python) -m pytest tests/x",
+            "PYTHONPATH=/x/src $(ls -d /v/bin/python) -mpytest tests/x",
+            "PYTHONPATH=/x/src `ls -d /v/bin/python` -m pytest tests/x",
+            'PYTHONPATH=/x/src $(ls -d "/v w/bin/python") -m pytest tests/x',
+        ],
+    )
+    def test_substituted_python_running_a_test_module_is_allowed(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "PYTHONPATH=x bash scripts/upgrade.sh",
+            "U=upgrade.sh; PYTHONPATH=x bash $U",
+            "PYTHONPATH=x $(ls -d /v/bin/python) scripts/upgrade.py",
+            "PYTHONPATH=x $(ls -d /v/bin/python) $SCRIPT",
+            'PYTHONPATH=x $(ls -d /v/bin/python) -c "$CODE"',
+            "PYTHONPATH=x $(ls -d /v/bin/python) -m claude_code_hooks_daemon.x",
+            "PYTHONPATH=x $(ls -d /v/bin/python) -m pytest scripts/upgrade.sh",
+            "PYTHONPATH=x $(ls -d /v/bin/python) -m $MODULE",
+            "PYTHONPATH=x $(bash scripts/upgrade.sh) -m pytest t",
+            "PYTHONPATH=x $(ls -d /v/bin/python) -m pytest t; bash scripts/upgrade.sh",
+            "PYTHONPATH=x $(ls -d /v/bin/bash) up.sh",
+            "HOOKS_DAEMON_UPGRADE_HANDOFF=1 $(ls -d /v/bin/python) -m pytest t",
+        ],
+    )
+    def test_real_bypasses_stay_denied(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is True
+
+    def test_substitution_running_a_readable_upgrade_script_is_denied(
+        self, handler: UpgradeApprovalGuardHandler, tmp_path: Path
+    ) -> None:
+        script = tmp_path / "renamed.sh"
+        script.write_text("HOOKS_DAEMON_UPGRADE_HANDOFF=1\n")
+        command = f"PYTHONPATH=x $(bash {script}) -m pytest t"
+        assert handler.matches(_bash(command)) is True

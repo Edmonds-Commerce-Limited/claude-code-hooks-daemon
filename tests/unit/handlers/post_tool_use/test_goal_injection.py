@@ -1045,6 +1045,38 @@ class TestCombinedGoalSignal:
         assert signal_path.exists(), "a still-live plan must keep its signal"
         assert "00298" in self._signal()["rendered_lines"][0]
 
+    def test_retiring_an_archived_plan_keeps_the_other_live_plan(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """N423: a retirement refresh given a PLAN.md already under
+        ``Completed/`` must read the live plans from the plan ROOT, not from
+        ``Completed/`` (where no plan is live), or every owner is cleared."""
+        import shutil
+
+        clear_path = self._untracked / _SIGNAL_SUBDIR / f"{_SESSION}{_CLEAR_SUFFIX}"
+        first = self._write_plan("00296-first")
+        second = self._write_plan("00298-second")
+        handler.handle(self._hook_input(first))
+        handler.handle(self._hook_input(second))
+
+        plan_root = self._project / "CLAUDE" / "Plan"
+        (plan_root / "Completed").mkdir()
+        shutil.move(str(plan_root / "00296-first"), str(plan_root / "Completed" / "00296-first"))
+        archived = plan_root / "Completed" / "00296-first" / "PLAN.md"
+        archived.write_text("# Plan 00296: first\n\n**Status**: Complete\n", encoding="utf-8")
+
+        handler._maybe_refresh_on_retirement(
+            _SESSION,
+            "00296",
+            archived,
+            archived.read_text(encoding="utf-8"),
+            self._hook_input(archived),
+        )
+
+        assert not clear_path.exists(), "the live plan 00298 was cleared with the archived one"
+        assert "00298" in self._signal()["rendered_lines"][0]
+        assert "00296" not in self._signal()["rendered_lines"][0]
+
 
 class TestStatusFlipDetection:
     """N3 (ledger 00466): fire only on a REAL transition to In Progress.

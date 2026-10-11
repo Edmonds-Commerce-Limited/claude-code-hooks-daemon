@@ -826,7 +826,7 @@ def _runs_upgrade_entry_point(words: list[str]) -> bool:
         return _shell_script_operand_is_entry_point(words[1:])
     if _PYTHON_INTERPRETER_RE.fullmatch(head):
         return _python_runs_entry_point(words[1:])
-    if words[0].startswith("$"):
+    if words[0].startswith(("$", "`")):
         # An interpreter's (or an unexpanded program's) positional operands:
         # a word following a dash-word is a flag's value (`-k upgrade.sh`).
         return any(
@@ -837,11 +837,37 @@ def _runs_upgrade_entry_point(words: list[str]) -> bool:
     return False
 
 
+def _join_leading_substitution(words: list[str]) -> tuple[list[str], str | None]:
+    """``words`` with a leading command substitution (`$(ls -d p/python)`, or
+    its backtick form) joined back into the one program word it is, plus the
+    command inside it (ledger 00474 N421).
+
+    Shlex splits the substitution at its spaces, so `.../python)` would be
+    taken for the program's first operand. A substitution that never closes is
+    left as split: nothing says where the program word ends.
+    """
+    if not words or not words[0].startswith(("$(", "`")):
+        return words, None
+    opener = "`" if words[0].startswith("`") else "$("
+    for end in range(1, len(words) + 1):
+        joined = " ".join(words[:end])
+        closed = (
+            joined.count("`") % 2 == 0 if opener == "`" else joined.count(")") >= joined.count("(")
+        )
+        if closed and joined.endswith("`" if opener == "`" else ")"):
+            return [joined, *words[end:]], joined[len(opener) : -1]
+    return words, None
+
+
 def _segment_runs_upgrade(segment: str, cwd: str | None, depth: int, *, steered: bool) -> bool:
     """Whether ``segment`` runs the upgrade, by name, argument or content."""
     if _UPGRADE_ONLY_ARG_RE.search(segment):
         return True
-    words = _past_wrappers(_shell_words(segment))
+    words, substituted = _join_leading_substitution(_past_wrappers(_shell_words(segment)))
+    if substituted is not None and _command_runs_upgrade(
+        substituted, cwd, depth + 1, steered=steered
+    ):
+        return True
     if len(words) > 1 and command_word(words[0]) == "busybox":
         words = words[1:]  # `busybox sh up.sh` runs the applet `sh up.sh`
     if not words:
@@ -859,7 +885,7 @@ def _segment_runs_upgrade(segment: str, cwd: str | None, depth: int, *, steered:
             return True
     if head in _SHELL_HEADS:
         return _shell_run_is_upgrade(words[1:], cwd, depth, steered=steered)
-    if words[0].startswith("$"):
+    if words[0].startswith(("$", "`")):
         return _variable_program_is_upgrade(words[0], words[1:], cwd, steered=steered)
     if "/" in words[0]:
         if _PYTHON_INTERPRETER_RE.fullmatch(head):
@@ -918,8 +944,9 @@ def _variable_program_is_upgrade(
             return _inline_program_is_upgrade(arguments, index, steered=steered)
         if flag in ("-", "--"):
             return _cannot_tell_script(arguments, steered=steered)
-        if flag == "-m":
-            module = arguments[index + 1] if index + 1 < len(arguments) else ""
+        if flag.startswith("-m"):
+            attached = flag[2:]
+            module = attached or (arguments[index + 1] if index + 1 < len(arguments) else "")
             if not module or "$" in module or "`" in module:
                 return _cannot_tell_script(arguments, steered=steered)
             if module.startswith(_DAEMON_PACKAGE):
@@ -956,7 +983,7 @@ def _program_is_literal_tool(program: str) -> bool:
     another program (`_SHELL_HEADS`, `_WRAPPER_HEADS`, a python), is a tool.
     """
     _prefix, slash, name = program.rpartition("/")
-    if not slash or not name or "$" in name or "`" in name:
+    if not slash or not name or any(marker in name for marker in ("$", "`", ")")):
         return False
     return (
         name not in _SHELL_HEADS

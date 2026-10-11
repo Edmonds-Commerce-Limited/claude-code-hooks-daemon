@@ -26,6 +26,7 @@ from typing import Any, Final, Literal
 
 import yaml
 
+from claude_code_hooks_daemon.config.models import handler_options
 from claude_code_hooks_daemon.handlers.registry import (
     handler_is_enabled,
     iter_builtin_handler_classes,
@@ -222,8 +223,7 @@ def _is_write_protected(config: Mapping[str, Any], config_path: Path) -> bool:
     check, so a listing that merely MIGHT cover the file counts as protection.
     """
     handler = _event_block(config, "pre_tool_use").get(_WRITE_PROTECTED_KEY)
-    options = handler.get("options") if isinstance(handler, Mapping) else None
-    globs = options.get("paths") if isinstance(options, Mapping) else None
+    globs = handler_options(handler).get("paths")
     if not isinstance(globs, list):
         return False
     candidates = [config_path.name, f"{config_path.parent.name}/{config_path.name}"]
