@@ -1501,7 +1501,7 @@ allowed. So the quoted heredoc body is read as code only when a `-c` global opti
 
 **Status**: 🟢 Fixed on branch `agent-a8b2dfbb8ae318a8c-68c99312`. The heredoc-sink reader
 (`_git_data_subcommand_index`, the one place that skips git's global options for a body fed to `git`) now steps over a
-`-c key=value` (separate or attached) whose key runs nothing, so the decision is the one it makes without `-c`. A key
+`-c key=value` whose key runs nothing, so the decision is the one it makes without `-c`. A key
 git RUNS (`core.fsmonitor`, `core.pager`, `*.program`, `*.helper` and the like) or a value an expansion leaves
 unresolved keeps the body read as code. Pinned in `test_git_guards_heredoc_sinks.py`, ordinary-corpus row
 `a8-git-dash-c-commit-file-heredoc-mentions-reset-hard` and two dangerous-corpus COVERED rows.

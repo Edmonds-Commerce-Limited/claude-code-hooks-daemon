@@ -21,6 +21,7 @@ import pytest
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import DestructiveGitHandler
 from claude_code_hooks_daemon.handlers.pre_tool_use.git_stash import GitStashHandler
+from claude_code_hooks_daemon.utils.shell_segmentation import strip_message_bodies
 
 
 @pytest.fixture(autouse=True)
@@ -68,6 +69,42 @@ class TestHeredocBodyIsData:
         assert GitStashHandler().matches(_input(command)) is False
 
 
+#: Config keys whose value git runs as a command (matched case-insensitively).
+_COMMAND_RUNNING_KEYS = [
+    "core.fsmonitor",
+    "Core.SshCommand",
+    "core.gitProxy",
+    "core.alternateRefsCommand",
+    "include.path",
+    "includeIf.gitdir:/x/.path",
+    "gpg.ssh.defaultKeyCommand",
+    "merge.mine.driver",
+    "pager.log",
+    "interactive.diffFilter",
+    "remote.origin.receivepack",
+]
+
+
+class TestStripMessageBodiesBodyFlag:
+    """`-b`/`--body` is prose for gh only (direct assertions on the reader)."""
+
+    _HEREDOC = "\"$(cat <<'EOF'\ngit reset --hard\nEOF\n)\""
+
+    @pytest.mark.parametrize("flag", ["-b", "--body"])
+    def test_gh_value_is_blanked(self, flag: str) -> None:
+        out = strip_message_bodies(f"gh pr create {flag} {self._HEREDOC}")
+        assert "reset --hard" not in out
+        assert "<REDACTED>" in out
+
+    def test_git_value_is_left_alone(self) -> None:
+        command = f"git checkout -b {self._HEREDOC}"
+        assert strip_message_bodies(command) == command
+
+    def test_gh_group_outside_the_body_groups_is_left_alone(self) -> None:
+        command = f"gh alias set -b {self._HEREDOC}"
+        assert strip_message_bodies(command) == command
+
+
 #: Commands that really run the blocked command, which must keep being denied.
 _DESTRUCTIVE_STILL_DENIED = [
     # An UNQUOTED delimiter: bash expands the substitution inside the body.
@@ -90,10 +127,10 @@ _DESTRUCTIVE_STILL_DENIED = [
     "git -c gpg.program=sh commit -F - <<'EOF'\ngit reset --hard\nEOF",
     "git -c \"$SETTING\" commit -F - <<'EOF'\ngit reset --hard\nEOF",
     "git -c core.x commit -F - <<'EOF'\ngit reset --hard\nEOF",
-    # `-b` is a body flag only for gh; another command's `-b` value is not blanked.
-    "git checkout -b \"$(cat <<'EOF'\nx\nEOF\n)\" && git reset --hard",
-    # A gh group outside the body-bearing ones keeps its value judged.
-    "gh alias set -b \"$(cat <<'EOF'\ngit reset --hard\nEOF\n)\"",
+    *[
+        f"git -c {key}=sh commit -F - <<'EOF'\ngit reset --hard\nEOF"
+        for key in _COMMAND_RUNNING_KEYS
+    ],
     "bash <<'EOF'\ngit -c core.x=1 reset --hard\nEOF",
 ]
 

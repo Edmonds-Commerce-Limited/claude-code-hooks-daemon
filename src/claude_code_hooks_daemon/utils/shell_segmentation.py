@@ -409,11 +409,25 @@ _GIT_COMMAND_CONFIG_KEYS: frozenset[str] = frozenset(
         "core.askpass",
         "sequence.editor",
         "diff.external",
+        "include.path",
+        "core.gitproxy",
+        "core.alternaterefscommand",
+        "gpg.ssh.defaultkeycommand",
+        "interactive.difffilter",
     }
 )
+#: Config key prefixes whose every key names a command (`pager.log`), and the
+#: conditional include, whose `.path` is a config file that may set any key above.
+_GIT_COMMAND_CONFIG_PREFIXES: tuple[str, ...] = ("pager.",)
+_GIT_INCLUDE_IF_PREFIX = "includeif."
+_GIT_INCLUDE_PATH_SUFFIX = ".path"
 #: Config key suffixes that name a program git runs (`gpg.program`,
-#: `credential.helper`, `filter.x.clean`, `diff.x.textconv`).
+#: `credential.helper`, `filter.x.clean`, `diff.x.textconv`, `merge.x.driver`,
+#: `remote.x.receivepack`).
 _GIT_COMMAND_CONFIG_SUFFIXES: tuple[str, ...] = (
+    ".driver",
+    ".receivepack",
+    ".uploadpack",
     ".program",
     ".helper",
     ".command",
@@ -727,8 +741,8 @@ def reset_event_cwd(token: contextvars.Token[str | None]) -> None:
 _DUPLICATE_OPERATORS: frozenset[str] = frozenset({">&", "<&"})
 
 
-#: Matches a `-m`/`--message`/`-F`/`--file` flag immediately followed by its
-#: VALUE, so the value can be excluded from a command scan. Three value shapes,
+#: Matches a `-m`/`--message`/`-F`/`--file` flag (and `-b`/`--body`, which only
+#: `gh` honours as prose) immediately followed by its VALUE, so the value can be excluded from a command scan. Three value shapes,
 #: tried in order (DOTALL so `.` spans newlines, needed for the heredoc
 #: alternative's body):
 #:   1. The canonical heredoc-embedded message idiom: -m "$(cat <<'EOF' … EOF)"
@@ -764,7 +778,8 @@ _MESSAGE_BODY_PATTERN = re.compile(
 _MESSAGE_BODY_PLACEHOLDER = "<REDACTED>"
 
 #: Commands whose `-m`/`--message`/`-F`/`--file` argument is human-authored
-#: PROSE rather than an operand (Plan 00222). Scoping is required because the
+#: PROSE rather than an operand (Plan 00222); `-b`/`--body` is prose for `gh`
+#: only and is never a message flag of these. Scoping is required because the
 #: same spelling means something else elsewhere: `python -m <module>` names a
 #: MODULE, and blanking it reported the producer of `python -m pytest … | tail`
 #: as the redaction placeholder — a remediation the caller cannot run.
@@ -1237,7 +1252,8 @@ def _is_message_heredoc_idiom(value: str) -> bool:
 
 
 def strip_message_bodies(command: str) -> str:
-    """Blank every ``-m``/``--message``/``-F``/``--file`` VALUE bash cannot run.
+    """Blank every ``-m``/``--message``/``-F``/``--file`` VALUE bash cannot run,
+    and the ``-b``/``--body`` value of ``gh pr|issue|release|gist|api``.
 
     These flags carry human-authored prose — a commit/tag message, or a path to
     one — never shell syntax to execute. A guarded construct sitting in that
@@ -1958,7 +1974,13 @@ def _is_inert_config_setting(setting: str | None) -> bool:
     if setting is None or "=" not in setting:
         return False
     key = setting.partition("=")[0].lower()
-    return key not in _GIT_COMMAND_CONFIG_KEYS and not key.endswith(_GIT_COMMAND_CONFIG_SUFFIXES)
+    runs_a_command = (
+        key in _GIT_COMMAND_CONFIG_KEYS
+        or key.startswith(_GIT_COMMAND_CONFIG_PREFIXES)
+        or key.endswith(_GIT_COMMAND_CONFIG_SUFFIXES)
+        or (key.startswith(_GIT_INCLUDE_IF_PREFIX) and key.endswith(_GIT_INCLUDE_PATH_SUFFIX))
+    )
+    return not runs_a_command
 
 
 def _git_data_subcommand_index(arguments: list[_Word]) -> int | None:
@@ -1973,11 +1995,6 @@ def _git_data_subcommand_index(arguments: list[_Word]) -> int | None:
             ):
                 return None
             index += 2
-            continue
-        if argument is not None and argument.startswith(_GIT_CONFIG_FLAG):
-            if not _is_inert_config_setting(argument[2:]):
-                return None
-            index += 1
             continue
         if argument == _GIT_DIRECTORY_FLAG:
             if index + 1 < len(arguments) and _may_split(arguments[index + 1].raw):

@@ -1,5 +1,6 @@
 """Where a parsed ``git`` invocation runs, and when that cannot be stated."""
 
+import inspect
 from pathlib import Path
 
 import pytest
@@ -91,10 +92,6 @@ class TestCwdExpansionsAreSteps:
         assert placement_problem(run, checkout) is None
         assert invocation_directory(run, checkout) == checkout / "sub" / "inner"
 
-    def test_without_a_start_directory_it_is_still_reported(self, checkout: Path) -> None:
-        run = _only('cd "$(git rev-parse --show-toplevel)" && git commit -m x')
-        assert placement_problem(run) is not None
-
     def test_a_relative_start_directory_resolves_nothing(self) -> None:
         run = _only('cd "$PWD" && git commit -m x')
         assert placement_problem(run, Path("relative")) is not None
@@ -132,7 +129,7 @@ class TestPlacementProblem:
         ],
     )
     def test_placeable(self, command: str) -> None:
-        assert placement_problem(_only(command)) is None
+        assert placement_problem(_only(command), Path("/start")) is None
 
     @pytest.mark.parametrize(
         "command",
@@ -148,4 +145,30 @@ class TestPlacementProblem:
         ],
     )
     def test_unplaceable(self, command: str) -> None:
-        assert placement_problem(_only(command)) is not None
+        assert placement_problem(_only(command), Path("/start")) is not None
+
+
+class TestUnresolvableHomeSteps:
+    """A `~name` step is reported, never expanded (it raised RuntimeError for an unknown user)."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd ~nosuchuser-zz && git commit -m x",
+            "cd ~- && git commit -m x",
+            "cd ~+ && git commit -m x",
+            "cd ~nosuchuser-zz/sub && git commit -m x",
+        ],
+    )
+    def test_reported_not_raised(self, checkout: Path, command: str) -> None:
+        problem = placement_problem(_only(command), checkout)
+        assert problem is not None
+        assert "needs an expansion" in problem
+
+    def test_a_later_expansion_after_a_home_step_is_not_resolved(self, checkout: Path) -> None:
+        run = _only('cd ~nosuchuser-zz && cd "$PWD" && git commit -m x')
+        assert placement_problem(run, checkout) is not None
+
+    def test_the_cwd_is_required(self) -> None:
+        parameter = inspect.signature(placement_problem).parameters["cwd"]
+        assert parameter.default is inspect.Parameter.empty
