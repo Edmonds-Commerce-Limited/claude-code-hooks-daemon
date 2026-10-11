@@ -1522,3 +1522,13 @@ rows:
     cwd: tests
     command: |-
       cd "$(git rev-parse --show-toplevel)" && echo x > untracked/scratch/n403.txt
+  # --- Plan 00474 N410: a QA tool reached through a variable under a steering variable ---
+  - id: n410-variable-ruff-under-pythonpath
+    command: |-
+      V=/opt/venv/bin && PYTHONPATH=/w/src $V/ruff check src
+  - id: n410-variable-black-under-pythonpath
+    command: |-
+      V=/opt/venv/bin && PYTHONPATH=/w/src $V/black --check --target-version py311 src
+  - id: n410-variable-mypy-under-pythonpath
+    command: |-
+      V=/opt/venv/bin && PYTHONPATH=/w/src $V/mypy src
