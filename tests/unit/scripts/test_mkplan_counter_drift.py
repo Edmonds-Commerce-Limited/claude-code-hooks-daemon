@@ -88,6 +88,26 @@ class TestStaleCounterIsAdvanced:
         assert (repo / "CLAUDE" / "Plan" / "00251-after-archive").is_dir()
         assert _git(repo, "config", "--local", _COUNTER_KEY) == "251"
 
+    def test_a_fresh_clone_far_behind_the_disk_works_first_time(self, repo: Path) -> None:
+        """GitHub #72: counter 414 against 487 plans on disk, no hand reconcile."""
+        _git(repo, "config", "--local", _COUNTER_KEY, "414")
+        (repo / "CLAUDE" / "Plan" / "Completed" / "00487-latest").mkdir(parents=True)
+
+        first = _run(repo, "first-try")
+
+        assert first.returncode == 0, first.stderr
+        assert (repo / "CLAUDE" / "Plan" / "00488-first-try").is_dir()
+        assert _git(repo, "config", "--local", _COUNTER_KEY) == "488"
+
+    def test_the_counter_only_moves_forward(self, repo: Path) -> None:
+        (repo / "CLAUDE" / "Plan" / "00212-pulled-elsewhere").mkdir()
+        seen: list[int] = []
+        for name in ("one", "two", "three"):
+            assert _run(repo, name).returncode == 0
+            seen.append(int(_git(repo, "config", "--local", _COUNTER_KEY)))
+
+        assert seen == [213, 214, 215]
+
     def test_counter_ahead_of_disk_is_still_trusted(self, repo: Path) -> None:
         result = _run(repo, "counter-leads")
 

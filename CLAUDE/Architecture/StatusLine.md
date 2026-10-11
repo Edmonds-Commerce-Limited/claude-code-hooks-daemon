@@ -510,9 +510,25 @@ The daemon is still starting (a cold start can take 15-30 s under load). The sta
 answers at once with this baseline line while the start carries on in the background, and the real status line returns
 once the daemon answers. Only a start that has genuinely failed shows "DAEMON FAILED".
 
+### Status line names a daemon-down state (Plan 00488, GitHub #72)
+
+While the daemon cannot be reached, the status-line forwarder prints one line and exits 0. The exit code matters:
+Claude Code renders nothing for a status line command that exits non-zero, so the outage line is only visible because
+the exit is 0 (the catalogue's `daemon_down_exit_code`, next to `daemon_down_stdout`; a value event such as
+`WorktreeCreate` keeps exit 1). `init.sh` picks the text in `ensure_daemon`, most specific first:
+
+| Status line                                                        | State                                                                                                                     |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `⏳ hooks daemon loading…`                                         | The daemon is starting; nothing is wrong.                                                                                 |
+| `⏳ HOOKS DAEMON VENV BUILDING - wait, no action needed`           | The Plan 00456 self-heal is building this path's venv in the background.                                                  |
+| `⚠️ HOOKS DAEMON VENV MISSING - see the session notice`            | A clone or leftover venv exists but no venv resolves and no build is running (failed, refused, opted out, damaged clone). |
+| `⚠️ HOOKS DAEMON VERSION MISMATCH - upgrade needed`                | The clone and the tracked deployed assets name different versions.                                                        |
+| `⚠️ HOOKS DAEMON NOT PROVISIONED - run: bash .claude/provision.sh` | A fresh client checkout (Plan 00477).                                                                                     |
+| `⚠️ DAEMON FAILED`                                                 | Anything else: the start genuinely failed.                                                                                |
+
 ### Status line shows "DAEMON FAILED"
 
-The daemon is not running. Check:
+The daemon is not running and none of the states above applies. Check:
 
 ```bash
 ./bin/hooks-daemon status

@@ -40,6 +40,13 @@ _HOOKS_DAEMON_UNPROVISIONED_MODE="warn"
 _HOOKS_DAEMON_UNPROVISIONED_MODE_NOTE=""
 _HOOKS_DAEMON_STATUS_DOWN_TEXT=""
 
+# The status-line texts for the other daemon-down states ensure_daemon can name
+# (Plan 00488, GitHub #72). Each is one short line for a status bar; the
+# canonical list is CLAUDE/Architecture/StatusLine.md.
+_HOOKS_DAEMON_STATUS_TEXT_VENV_BUILDING="⏳ HOOKS DAEMON VENV BUILDING - wait, no action needed"
+_HOOKS_DAEMON_STATUS_TEXT_VENV_MISSING="⚠️ HOOKS DAEMON VENV MISSING - see the session notice"
+_HOOKS_DAEMON_STATUS_TEXT_VERSION_MISMATCH="⚠️ HOOKS DAEMON VERSION MISMATCH - upgrade needed"
+
 # Set by ensure_daemon when the installed clone and the project's TRACKED
 # deployed assets name different daemon versions (Plan 00386, GitHub issue #38).
 # The two version globals are only meaningful while the flag is true.
@@ -2731,8 +2738,13 @@ ensure_daemon() {
     # tries to heal itself (_venv_self_heal). A damaged clone or a lone
     # leftover venv never gets an automatic build, for the same reason it
     # never gets a version-pinned upgrade.
+    #
+    # Plan 00488 (GitHub #72): each state also names itself for the status
+    # line, whose forwarder prints _HOOKS_DAEMON_STATUS_DOWN_TEXT. Without
+    # this a normal, self-healing build would read as a generic failure.
     if _detect_stale_clone; then
         _HOOKS_DAEMON_VERSION_MISMATCH=true
+        _HOOKS_DAEMON_STATUS_DOWN_TEXT="$_HOOKS_DAEMON_STATUS_TEXT_VERSION_MISMATCH"
     elif ! _is_daemon_installed; then
         if _daemon_clone_present; then
             _HOOKS_DAEMON_VENV_MISSING=true
@@ -2742,9 +2754,18 @@ ensure_daemon() {
             if [[ -n "$_HOOKS_DAEMON_VENV_MISSING_VERSION" ]]; then
                 _venv_self_heal
             fi
+            case "$_HOOKS_DAEMON_BOOTSTRAP_STATE" in
+                started | running)
+                    _HOOKS_DAEMON_STATUS_DOWN_TEXT="$_HOOKS_DAEMON_STATUS_TEXT_VENV_BUILDING"
+                    ;;
+                *)
+                    _HOOKS_DAEMON_STATUS_DOWN_TEXT="$_HOOKS_DAEMON_STATUS_TEXT_VENV_MISSING"
+                    ;;
+            esac
         elif _daemon_orphan_venv_present; then
             _HOOKS_DAEMON_VENV_MISSING=true
             _HOOKS_DAEMON_VENV_MISSING_VERSION=""
+            _HOOKS_DAEMON_STATUS_DOWN_TEXT="$_HOOKS_DAEMON_STATUS_TEXT_VENV_MISSING"
         else
             _HOOKS_DAEMON_NOT_INSTALLED=true
             _detect_needs_provision

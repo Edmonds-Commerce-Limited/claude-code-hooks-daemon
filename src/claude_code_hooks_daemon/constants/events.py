@@ -141,7 +141,13 @@ class EventIDMeta:
             the daemon-down branch prints nothing; a visible marker for an
             event whose raw stdout is a DISPLAY line (StatusLine), where
             silence would hide the outage. Either way the diagnostic goes to
-            stderr and the exit is non-zero. Ignored for JSON-decision events.
+            stderr. Ignored for JSON-decision events.
+        daemon_down_exit_code: The exit code of a ``raw_stdout`` forwarder's
+            daemon-down branch. 1 (the default) for a parsed VALUE, where
+            non-zero means "not handled" (Plan 00189). 0 for a DISPLAY line:
+            Claude Code renders nothing for a status line command that exits
+            non-zero, so a non-zero exit would blank the very marker
+            ``daemon_down_stdout`` exists to show (GitHub #72).
         daemon_loading_stdout: What a DISPLAY-line forwarder prints, and
             exits 0 on, when the daemon is still STARTING rather than failed
             (Plan 00495 Task 2.7). The forwarder asks for a non-blocking
@@ -159,6 +165,7 @@ class EventIDMeta:
     raw_stdout: bool = False
     requires_client_translation: bool = False
     daemon_down_stdout: str = ""
+    daemon_down_exit_code: int = 1
     daemon_loading_stdout: str = ""
 
     @property
@@ -314,6 +321,8 @@ class EventID:
         raw_stdout=True,
         # A DISPLAY line, not a parsed value: keep the outage visible.
         daemon_down_stdout="⚠️ DAEMON FAILED",
+        # Claude Code renders nothing for a non-zero status line command.
+        daemon_down_exit_code=0,
         # A daemon still starting is not a failed one (Plan 00495 Task 2.7).
         daemon_loading_stdout="⏳ hooks daemon loading…",
     )

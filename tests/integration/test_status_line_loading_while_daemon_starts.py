@@ -122,7 +122,7 @@ def test_a_start_that_failed_is_not_shown_as_loading(sandbox: Path) -> None:
     out, code, _elapsed = _status_hook(project, env, failing)
 
     assert out == "⚠️ DAEMON FAILED"
-    assert code == 1
+    assert code == 0  # a failing status line command renders nothing (GitHub #72)
 
 
 def test_init_sh_can_name_the_loading_text(sandbox: Path) -> None:
