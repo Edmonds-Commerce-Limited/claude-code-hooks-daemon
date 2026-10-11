@@ -528,6 +528,18 @@ class TestUpdateIndexAdd:
         with simulated_staging(read_commit_form(command), repo, repo) as env:
             assert _staged(repo, env) == expected
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "printf '' | git update-index --index-info && git commit -m x",
+            "git update-index --index-info < entries.txt && git commit -m x",
+            "git update-index --index-info <<EOF\nEOF\ngit commit -m x",
+        ],
+    )
+    def test_index_info_fed_from_stdin_takes_the_whole_tree(self, repo: Path, command: str) -> None:
+        with simulated_staging(read_commit_form(command), repo, repo) as env:
+            assert _staged(repo, env) == {"leak.txt"}
+
     def test_cacheinfo_stages_the_named_object_under_the_named_path(self, repo: Path) -> None:
         blob = _git(repo, "rev-parse", "HEAD:a.txt").strip()
         reading = read_commit_form(
@@ -608,6 +620,46 @@ class TestApplyCached:
         _write(repo, "p.patch", _NEW_FILE_PATCH)
         with simulated_staging(read_commit_form(command), repo, repo) as env:
             assert "leak.txt" in _staged(repo, env)
+
+    @pytest.mark.parametrize("existing", [True, False])
+    def test_a_patch_the_command_overwrites_takes_the_whole_tree(
+        self, repo: Path, existing: bool
+    ) -> None:
+        """Example 1 (dirty tracked a.txt, old p.patch) and the not-yet-existing case."""
+        _write(repo, "a.txt", "edited\n")
+        if existing:
+            _write(repo, "stale.patch", _NEW_FILE_PATCH)
+        reading = read_commit_form(
+            "git diff > stale.patch && git apply --cached stale.patch && git commit -m x"
+        )
+
+        with simulated_staging(reading, repo, repo) as env:
+            assert {"a.txt", "leak.txt"} <= _staged(repo, env)
+
+    def test_a_patch_written_by_tee_takes_the_whole_tree(self, repo: Path) -> None:
+        _write(repo, "p.patch", _NEW_FILE_PATCH)
+        reading = read_commit_form(
+            "git diff | tee p.patch >/dev/null && git apply --cached p.patch && git commit -m x"
+        )
+
+        with simulated_staging(reading, repo, repo) as env:
+            assert "leak.txt" in _staged(repo, env)
+
+    def test_several_patches_are_applied_atomically_as_git_does(self, repo: Path) -> None:
+        _write(repo, "good.patch", _NEW_FILE_PATCH)
+        _write(repo, "p.patch", _STALE_PATCH)
+        reading = read_commit_form("git apply --cached good.patch p.patch; git commit -m x")
+
+        with simulated_staging(reading, repo, repo) as env:
+            assert _staged(repo, env) == set()
+
+    def test_several_good_patches_are_all_staged(self, repo: Path) -> None:
+        _write(repo, "p1.patch", _NEW_FILE_PATCH)
+        _write(repo, "p2.patch", _DELETE_PATCH)
+        reading = read_commit_form("git apply --cached p1.patch p2.patch && git commit -m x")
+
+        with simulated_staging(reading, repo, repo) as env:
+            assert _staged(repo, env) == {"patched.txt", "a.txt"}
 
     def test_a_file_that_is_not_a_patch_stages_nothing(self, repo: Path) -> None:
         _write(repo, "p.patch", "not a patch\n")

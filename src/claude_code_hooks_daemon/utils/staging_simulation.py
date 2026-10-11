@@ -12,10 +12,12 @@ will record. The real index, object store and working tree are never written.
 same copy, as the real commands would run. Both are atomic: a run that fails
 leaves the copy as it was, so a failure that git would share (a path that does
 not exist, a patch that does not apply) stages nothing, as for ``git add``. An
-``apply`` is run only when its patch file exists where the command runs;
-otherwise (a patch an earlier step writes, stdin) it is treated like an
-unreadable add. ``update-index --index-info`` reads its entries from stdin,
-which this reading cannot see, so that option stages nothing here.
+``apply`` is run only when its patch file exists where the command runs and the
+command does not itself write a file of that name; otherwise (a patch an earlier
+step writes or overwrites, stdin) it is treated like an unreadable add, and
+all its patches go to one ``git apply`` as in git. ``update-index --index-info``
+reads its entries from stdin: fed by a pipe, a redirect or a heredoc they are
+unreadable (every change), and otherwise it stages nothing.
 
 An add whose scope cannot be read (a pathspec the shell builds, an interactive
 or file-driven option, a directory the command reaches by a move this reading
@@ -250,7 +252,12 @@ def _apply(
         APPLY_TOKEN: (frozenset(_APPLY_SHORT_LETTERS), _APPLY_LONG_FLAGS),
     }[staging.subcommand]
     arguments = _readable_arguments(staging.arguments, *flags)
-    if arguments is None or any(move is None for move in staging.moves):
+    fed_index_info = (
+        staging.subcommand == UPDATE_INDEX_TOKEN
+        and staging.stdin_fed
+        and _INDEX_INFO_FLAG in staging.arguments
+    )
+    if arguments is None or fed_index_info or any(move is None for move in staging.moves):
         _add_everything(repo_root, env)
         return
     start = Path(cwd) if cwd else repo_root
@@ -262,7 +269,7 @@ def _apply(
         elif staging.subcommand == UPDATE_INDEX_TOKEN:
             _update_index(directory, arguments, repo_root, env)
         else:
-            _apply_patches(directory, arguments, repo_root, env)
+            _apply_patches(directory, arguments, staging.written_names, repo_root, env)
 
 
 def _readable_arguments(
@@ -316,27 +323,32 @@ def _patch_operands(arguments: Sequence[str]) -> list[str]:
 
 
 def _apply_patches(
-    directory: Path, arguments: Sequence[str], repo_root: Path, env: Mapping[str, str]
+    directory: Path,
+    arguments: Sequence[str],
+    written_names: frozenset[str],
+    repo_root: Path,
+    env: Mapping[str, str],
 ) -> None:
-    """Apply each patch file to the scratch index, as ``git apply --cached`` would.
+    """Apply the patch files to the scratch index in one ``git apply --cached``.
 
-    A patch that is not a file where the command runs (stdin, or one an earlier
-    step writes) cannot be read, so it takes every change. ``git apply`` is
-    atomic: a patch that does not apply leaves the index as it was, so it stages
-    nothing, exactly as the real command would.
+    A patch that is not a file where the command runs (stdin, or missing), or
+    that the command itself writes (so the file on disk is not the one the run
+    will read), cannot be read, so it takes every change. ``git apply`` is
+    atomic across all its patches: if any does not apply the index is left as it
+    was and nothing is staged, exactly as the real command.
     """
     operands = _patch_operands(arguments)
     if (
         not operands
         or _STDIN_OPERAND in operands
+        or any(Path(operand).name in written_names for operand in operands)
         or not all((directory / operand).is_file() for operand in operands)
     ):
         _add_everything(repo_root, env)
         return
-    for operand in operands:
-        applied = run_git(directory, *_NO_SPLIT_INDEX, APPLY_TOKEN, "--cached", operand, env=env)
-        if applied.returncode != 0:
-            logger.debug("staging simulation: apply failed (%s); nothing staged", applied.stderr)
+    applied = run_git(directory, *_NO_SPLIT_INDEX, APPLY_TOKEN, "--cached", *operands, env=env)
+    if applied.returncode != 0:
+        logger.debug("staging simulation: apply failed (%s); nothing staged", applied.stderr)
 
 
 def _is_repository(directory: Path, repo_root: Path) -> bool:
