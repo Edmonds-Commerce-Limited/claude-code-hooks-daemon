@@ -1489,10 +1489,13 @@ allowed because the tool binary is the readable file that gets judged. Without `
 allowed too. Pinned by `TestVariableToolUnderSteeringIsPinned` in
 `tests/unit/handlers/pre_tool_use/test_upgrade_approval_guard.py`, which asserts today's deny so that a fix flips it.
 
-**Status**: ⬜ Open. Remedy: in `_variable_program_is_upgrade`, when the program word is a variable and the command
-carries no upgrade entry point (`_UPGRADE_ENTRY_RE`) and no upgrade-shaped argument (`_UPGRADE_SHAPED_ARG_RE`), do not
-treat an unreadable first operand as "cannot tell"; keep the deny only when the program or the operand is itself
-unresolvable AND the command names the upgrade (the gate's own scripts). Not fixed in batch L.
+**Status**: 🟢 Fixed. `_variable_program_is_upgrade` now takes the program word. When it ends in a literal tool name
+(`$V/ruff`; not a shell, wrapper or python, which `_program_is_literal_tool` excludes) and no argument carries an
+expansion, "cannot tell" no longer counts as the upgrade under a steering variable: upgrade-shaped arguments
+(`--project-root`, the daemon dir) still deny, and a readable script operand is still judged by content. A bare `$V`,
+`$V/python`, `$V/bash`, `$V/env` or an expanded operand keeps the old deny. Owner ruling B5 ("A guard denies only on a
+positive finding", OWNER-RULINGS-261006.md) is the basis for allowing an unreadable-operand tool with no finding
+against it. `TestVariableToolUnderSteering` (the former Pinned class) asserts the allow; corpus rows `n410-*`.
 
 ### N409 — `subagent_full_qa_blocker` denies an ordinary `python3 script.py` as a whole-suite run
 
@@ -2148,13 +2151,16 @@ changed module, so a targeted run by name or import never selects them. Two more
   them off the host-wide QA lock while the full gate ran. That is why no branch carried a green `changed` record, and
   `changed` would have run these whole-repo checks.
 
-**Status**: 🔄 Fixing. The six regressions are on a worktree branch, after a fact-check refuted two of this entry's
-first-draft claims. The remedies:
+**Status**: 🟢 Fixed. The six regressions were fixed on a worktree branch, after a fact-check refuted two of this
+entry's first-draft claims. The remedies:
 
 1. Done in 8c9ac4cf4: `merge_qa_advisor` prints the exact `--range <pre-merge head>..HEAD` command.
 2. Agents run `llm_qa.py changed` on their own branch before handing off, except while the coordinator's full gate
    holds the lock.
 3. The coordinator runs `changed --range <pre-merge>..HEAD` after every merge onto main.
+
+Items 2 and 3 were the unchecked part: `CLAUDE/QA.md` carried the split table but not the lock exception nor the
+bare-`changed`-refuses-on-main consequence. Both are now stated under that table. No owner decision is involved.
 
 ### N379 — a branch merged after a green gate that never saw it
 

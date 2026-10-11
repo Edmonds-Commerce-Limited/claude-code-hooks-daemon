@@ -841,10 +841,10 @@ def _segment_runs_upgrade(segment: str, cwd: str | None, depth: int, *, steered:
     if head in _SHELL_HEADS:
         return _shell_run_is_upgrade(words[1:], cwd, depth, steered=steered)
     if words[0].startswith("$"):
-        return _variable_program_is_upgrade(words[1:], cwd, steered=steered)
+        return _variable_program_is_upgrade(words[0], words[1:], cwd, steered=steered)
     if "/" in words[0]:
         if _PYTHON_INTERPRETER_RE.fullmatch(head):
-            return _variable_program_is_upgrade(words[1:], cwd, steered=steered)
+            return _variable_program_is_upgrade(words[0], words[1:], cwd, steered=steered)
         return _script_run_is_upgrade(words[0], words[1:], cwd, steered=steered)
     return False
 
@@ -871,7 +871,9 @@ def _inline_program_is_upgrade(arguments: list[str], index: int, *, steered: boo
     )
 
 
-def _variable_program_is_upgrade(arguments: list[str], cwd: str | None, *, steered: bool) -> bool:
+def _variable_program_is_upgrade(
+    program: str, arguments: list[str], cwd: str | None, *, steered: bool
+) -> bool:
     """Whether a command whose program is a variable (`$PY`, `$PY/python`)
     runs the upgrade, judged by what its ARGUMENTS name (ledger 00474 N285).
 
@@ -897,9 +899,39 @@ def _variable_program_is_upgrade(arguments: list[str], cwd: str | None, *, steer
                 return _cannot_tell_script(arguments, steered=steered)
             return False
         index += 1
+    # A program word with a literal tool name (`$V/ruff`) that is no entry
+    # point, interpreter, shell or wrapper has no positive finding against it
+    # (owner ruling B5): its arguments and any readable script operand are
+    # judged, but "cannot tell" is not the upgrade just because something steers.
+    if _program_is_literal_tool(program) and not any(
+        "$" in word or "`" in word for word in arguments
+    ):
+        if _UPGRADE_SHAPED_ARG_RE.search(" ".join(arguments)) is not None:
+            return True
+        steered = False
     if index >= len(arguments):
         return _cannot_tell_script(arguments, steered=steered)
     return _script_run_is_upgrade(arguments[index], arguments[index + 1 :], cwd, steered=steered)
+
+
+def _program_is_literal_tool(program: str) -> bool:
+    """Whether the variable-led ``program`` word (`$V/ruff`) ends in a literal
+    tool name that cannot itself be the upgrade, an interpreter, a shell or a
+    wrapper (ledger 00474 N410).
+
+    The tool name is the part after the last ``/``: it must exist and carry no
+    expansion. The upgrade's entry points were judged by name before this is
+    reached, so a name that is none of them, and not something that runs
+    another program (`_SHELL_HEADS`, `_WRAPPER_HEADS`, a python), is a tool.
+    """
+    _prefix, slash, name = program.rpartition("/")
+    if not slash or not name or "$" in name or "`" in name:
+        return False
+    return (
+        name not in _SHELL_HEADS
+        and name not in _WRAPPER_HEADS
+        and _PYTHON_INTERPRETER_RE.fullmatch(name) is None
+    )
 
 
 def _command_runs_upgrade(
