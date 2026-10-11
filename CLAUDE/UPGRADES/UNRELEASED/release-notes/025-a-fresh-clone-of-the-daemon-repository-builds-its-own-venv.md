@@ -1,4 +1,4 @@
-# Fix: a raw clone of the daemon's repository builds its venv with no manual step, and the build's first moments read as building
+# Callout: a raw clone of the daemon's repository builds its venv with no manual step, and the build's first moments read as building
 
 **Plan**: 00488
 **Audience**: operators

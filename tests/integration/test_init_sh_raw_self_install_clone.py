@@ -42,6 +42,10 @@ def _make_self_install_clone(box: Sandbox) -> None:
     )
     script = box.project / "scripts" / "bootstrap-self-install.sh"
     shutil.copy2(REPO_ROOT / "scripts" / "bootstrap-self-install.sh", script)
+    install_dir = box.project / "scripts" / "install"
+    install_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("mode_guard.sh", "output.sh"):
+        shutil.copy2(REPO_ROOT / "scripts" / "install" / name, install_dir / name)
     git = shutil.which("git")
     assert git is not None
     (box.root / "tools" / "git").symlink_to(git)
