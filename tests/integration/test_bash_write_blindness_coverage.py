@@ -326,17 +326,6 @@ _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
         "harm the guard exists for. Its resident guidance names the three "
         "tools it judges and says a clean Bash write proves nothing",
     ),
-    "UpgradeApprovalGuardHandler": (
-        _PARTIAL,
-        "Plan 00376: reads handlers/utils/bash_file_writes.py's bash_file_writes "
-        "(redirect, tee, cp/mv/install/dd, ln/rsync, sed -i and interpreter "
-        "one-liners), plus its own touch/mkdir operand scan for the two shapes "
-        "that helper does not cover, so a Bash write reaching upgrade-approvals/ "
-        "or a venv .daemon-version stamp is judged the same as the "
-        "Write/Edit/NotebookEdit route. PARTIAL because a destination built by "
-        "shell expansion ($(...), a variable, a glob) cannot be resolved to a "
-        "literal path and is silently not followed",
-    ),
 }
 
 # Handlers whose resident guidance opened with an unqualified "Writing X is

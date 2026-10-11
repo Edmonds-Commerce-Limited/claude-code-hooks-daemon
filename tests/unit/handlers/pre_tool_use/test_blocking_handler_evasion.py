@@ -335,16 +335,6 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
             "LANG=C cat topic-opus-security-DETAIL.md",
         ),
     ),
-    "UpgradeApprovalGuardHandler": (
-        "bin/hooks-daemon approve-upgrade 4.0.0 --from 3.66.0",
-        (
-            ".claude/hooks-daemon/bin/hooks-daemon approve-upgrade 4.0.0 --from 3.66.0",
-            "/usr/local/bin/hooks-daemon approve-upgrade 4.0.0 --from 3.66.0",
-            "env bin/hooks-daemon approve-upgrade 4.0.0 --from 3.66.0",
-            "sudo bin/hooks-daemon approve-upgrade 4.0.0 --from 3.66.0",
-            "bin/hooks-daemon \\\n  approve-upgrade 4.0.0 --from 3.66.0",
-        ),
-    ),
 }
 
 # class name -> safe commands that must NOT match after the widening.
@@ -514,13 +504,6 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
         "ls topic-opus-security-DETAIL.md",
         "cat > topic-opus-security-DETAIL.md <<'EOF'\nraw\nEOF",
         "git add topic-opus-security-DETAIL.md && git commit -m 'Plan 00278: add detail'",
-    ),
-    "UpgradeApprovalGuardHandler": (
-        "bin/hooks-daemon status",
-        "bin/hooks-daemon restart",
-        "grep approve-upgrade docs/UPGRADING.md",
-        "echo 'run: bin/hooks-daemon approve-upgrade 4.0.0 --from 3.66.0'",
-        "git commit -m 'document bin/hooks-daemon approve-upgrade 4.0.0 --from 3.66.0'",
     ),
 }
 

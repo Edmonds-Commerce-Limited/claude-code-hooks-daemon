@@ -452,9 +452,9 @@ ls CLAUDE/UPGRADES/UNRELEASED/pre-upgrade-tasks/
 
 Populate `$TARGET/README.md`'s heading and task index (one row per task, with its `Detect` pattern). If only `README.md` was present, there is nothing to move and no `pre-upgrade-tasks/` directory goes into the guide.
 
-**A `critical` pre-upgrade task makes the release breaking for every project it detects**: the gate asks for the owner's approval on those projects. Say so in `RELEASES/vX.Y.Z.md`, in the same section as the breaking changes.
+**A `critical` pre-upgrade task makes the release breaking for every project it detects**: the gate lists it first, under `READ THIS FIRST`, on those projects. Say so in `RELEASES/vX.Y.Z.md`, in the same section as the breaking changes.
 
-**`breaking: true` in a config-changes manifest halts the fleet.** The gate stops EVERY upgrade that crosses that release with exit `4` until each project's owner approves it, whether or not the project uses the changed keys. Set it only when the release renames, removes or changes a config key in a way that breaks an existing config (so `renamed`, `removed` or `changed` is non-empty); a release that only adds keys is not breaking. Say which upgrades it stops, and that the stop prints the approval command, in `RELEASES/vX.Y.Z.md`.
+**`breaking: true` in a config-changes manifest halts the fleet.** The gate lists it under `READ THIS FIRST` on EVERY upgrade that crosses that release, whether or not the project uses the changed keys; the reading confirmation (exit `3`) is the only stop. Set it only when the release renames, removes or changes a config key in a way that breaks an existing config (so `renamed`, `removed` or `changed` is non-empty); a release that only adds keys is not breaking. Say which upgrades it lists it for in `RELEASES/vX.Y.Z.md`.
 
 **ABORT condition**: any `NN-*.md` file remains in `UNRELEASED/pre-upgrade-tasks/` when moving to the next step.
 

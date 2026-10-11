@@ -22,9 +22,10 @@ detects -- is upgraded with the working tree's Layer 1, and:
   anything is deployed, and the post-upgrade task list names the target's
   task, with the call site the post-upgrade task detects (Task 4.1);
 * a branch install lists the staged ``UNRELEASED/`` task in both lists;
-* a MAJOR upgrade also needs the owner's approval, written by the owner's own
-  route and bound to this upgrade; a hand-made marker does not count, and the
-  run the approval lets through removes it (Task 3.2).
+* a MAJOR upgrade lists why it is breaking first in that same reading and
+  stops for nothing else: confirming the reading is the whole gate, and a
+  stale approval marker from an older install is neither read nor removed
+  (Plan 00503).
 
 And the routes review-00376 found open (MAJOR 1, 2 and 4):
 
@@ -32,7 +33,7 @@ And the routes review-00376 found open (MAJOR 1, 2 and 4):
   newest commit) still reads the installed version from ``HOOKS-DAEMON.md``,
   stops, and is put back on it, so the re-run stops again;
 * LLM-UPDATE's manual route (the clone checked out to the target by hand)
-  still stops, and still needs the owner for a MAJOR target;
+  still stops for the reading, MAJOR target included;
 * no environment variable switches the gate off, and an inherited handoff is
   ignored;
 * a Layer 1 that predates the gate (v3.66.0's) cannot make a stop into a
@@ -55,13 +56,7 @@ import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon.install_layout import get_untracked_dir
-from claude_code_hooks_daemon.install.upgrade_gate import (
-    APPROVAL_SUBDIR,
-    SKIP_READING_FLAG,
-    GateVerdict,
-    write_approval,
-)
-from claude_code_hooks_daemon.utils.one_shot_approval import OneShotApprovalStore
+from claude_code_hooks_daemon.install.upgrade_gate import SKIP_READING_FLAG, GateVerdict
 from claude_code_hooks_daemon.version import __version__
 from tests.load_scaling import scaled_seconds
 
@@ -425,7 +420,6 @@ def test_branch_route_includes_the_staged_unreleased_task(
             "HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE": "end-to-end fixture",
         }
     )
-    untracked = get_untracked_dir(project)
     try:
         stopped = _upgrade(project, env)
         _assert_stopped_and_restored(stopped, GateVerdict.NEEDS_ACKNOWLEDGEMENT, project, current)
@@ -433,17 +427,8 @@ def test_branch_route_includes_the_staged_unreleased_task(
         # Plan 00376 review3 (review4 follow-up): the branch was cut off
         # v{current} with no version bump, so its release is the SAME as the
         # installed one -- an untrusted FROM (the doc marker) that has caught
-        # up to the target, review2 BLOCKER 1's unknown range. It needs the
-        # owner's approval too, not just the reading confirmed.
-        approval_needed = _upgrade(project, env, confirm)
-        _assert_stopped_and_restored(approval_needed, GateVerdict.NEEDS_APPROVAL, project, current)
-        write_approval(
-            untracked,
-            to_version=current,
-            from_version=current,
-            daemon_dir=_daemon_dir(project),
-            project_root=project,
-        )
+        # up to the target, review2 BLOCKER 1's unknown range. Confirming the
+        # reading is all it needs.
         result = _upgrade(project, env, confirm)
     finally:
         _stop_daemon(project, env)
@@ -458,46 +443,28 @@ def test_branch_route_includes_the_staged_unreleased_task(
     assert _STAGED_TASK in tasks, tasks
 
 
-def test_major_route_needs_the_owners_bound_approval(
+def test_major_route_lists_why_it_breaks_and_needs_only_the_reading_confirmed(
     project: Path, versions: tuple[str, str, str]
 ) -> None:
     current, _target, major = versions
     env = _env()
     untracked = get_untracked_dir(project)
-    marker = OneShotApprovalStore(APPROVAL_SUBDIR).path(untracked, major)
+    stale = untracked / "upgrade-approvals" / f"{major}.approved"
+    stale.parent.mkdir(parents=True, exist_ok=True)
+    stale.write_text("{}\n")
     try:
         unread = _upgrade(project, env, f"v{major}")
-        confirm = _confirm(unread.stdout)
-        stopped = _upgrade(project, env, f"v{major}", confirm)
         combined = _assert_stopped_and_restored(
-            stopped, GateVerdict.NEEDS_APPROVAL, project, current
+            unread, GateVerdict.NEEDS_ACKNOWLEDGEMENT, project, current
         )
         assert "MAJOR" in combined
-        assert f"approve-upgrade {major} --from {current}" in combined
-        assert "upgrade_gate_standalone.py" in combined, "the new code's own approval route"
-
-        # Review MAJOR 4: a marker nobody's approval wrote does not count.
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.touch()
-        touched = _upgrade(project, env, f"v{major}", confirm)
-        assert "not written by approve-upgrade" in _assert_stopped_and_restored(
-            touched, GateVerdict.NEEDS_APPROVAL, project, current
-        )
-
-        # The owner's step: what `approve-upgrade` writes once they have typed
-        # the phrase at their terminal.
-        write_approval(
-            untracked,
-            to_version=major,
-            from_version=current,
-            daemon_dir=_daemon_dir(project),
-            project_root=project,
-        )
-        result = _upgrade(project, env, f"v{major}", confirm)
+        assert "READ THIS FIRST" in combined
+        assert "approve-upgrade" not in combined
+        result = _upgrade(project, env, f"v{major}", _confirm(unread.stdout))
     finally:
         _stop_daemon(project, env)
     assert result.returncode == 0, f"upgrade failed ({result.returncode}):\n{result.stdout[-6000:]}"
-    assert not marker.exists(), "one approval, one upgrade: the run it let through removes it"
+    assert stale.exists(), "an old approval marker is neither read nor removed"
     assert _head(_daemon_dir(project)) == _commit_of(_daemon_dir(project), f"v{major}")
 
 
@@ -514,7 +481,7 @@ def test_a_fresh_clone_reads_the_installed_version_and_stops_again_on_rerun(
     _assert_stopped_and_restored(rerun, GateVerdict.NEEDS_ACKNOWLEDGEMENT, project, current)
 
 
-def test_the_manual_route_still_needs_the_reading_and_the_owner(
+def test_the_manual_route_still_needs_the_reading_confirmed(
     project: Path, versions: tuple[str, str, str]
 ) -> None:
     """Review MAJOR 1: LLM-UPDATE's manual checkout, then the local Layer 1."""
@@ -525,8 +492,11 @@ def test_the_manual_route_still_needs_the_reading_and_the_owner(
     _assert_stopped_and_restored(unread, GateVerdict.NEEDS_ACKNOWLEDGEMENT, project, current)
 
     _git(_daemon_dir(project), "checkout", "-q", f"v{major}")
-    unapproved = _upgrade(project, env, f"v{major}", _confirm(unread.stdout))
-    _assert_stopped_and_restored(unapproved, GateVerdict.NEEDS_APPROVAL, project, current)
+    try:
+        confirmed = _upgrade(project, env, f"v{major}", _confirm(unread.stdout))
+    finally:
+        _stop_daemon(project, env)
+    assert confirmed.returncode == 0, confirmed.stdout[-6000:]
 
 
 def test_no_environment_variable_switches_the_gate_off(
@@ -655,25 +625,14 @@ def test_code_planted_in_the_installed_venv_does_not_answer_for_the_gate(
     """
     current, _target, major = versions
     env = _env()
-    untracked = get_untracked_dir(project)
     try:
         # Plan 00376 review3 (review4 follow-up): review2 BLOCKER 1 made an
         # untrusted FROM (the doc marker, no venv stamp yet) that has caught
         # up to or passed the target an unknown range -- which this bootstrap
         # install (installing the currently-installed release, to build the
-        # first venv) now is. It needs the reading confirmed AND the owner's
-        # approval, exactly like `test_major_route_needs_the_owners_bound_approval`.
+        # first venv) now is. It needs the reading confirmed.
         unread = _upgrade(project, env, f"v{current}")
         confirm = _confirm(unread.stdout)
-        stopped = _upgrade(project, env, f"v{current}", confirm)
-        _assert_stopped_and_restored(stopped, GateVerdict.NEEDS_APPROVAL, project, current)
-        write_approval(
-            untracked,
-            to_version=current,
-            from_version=current,
-            daemon_dir=_daemon_dir(project),
-            project_root=project,
-        )
         installed = _upgrade(project, env, f"v{current}", confirm)
         assert installed.returncode == 0, installed.stdout[-6000:]
         site_packages = sorted(

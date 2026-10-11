@@ -132,11 +132,10 @@ less untracked/scratch/upgrade.sh
 # Run it with --project-root pointing to your project directory (REQUIRED)
 bash untracked/scratch/upgrade.sh --project-root /path/to/your/project
 
-# Exit 3 or 4 is the pre-deploy gate stopping before anything was deployed
-# (see "The pre-deploy gate" below). Do NOT delete the script yet: after
-# exit 3, read what it listed and carry out each listed task, then re-run it
-# with the digest the stop printed. After exit 4, report the reasons to the
-# user and stop; the re-run follows the owner's approval.
+# Exit 3 is the pre-deploy gate stopping before anything was deployed (see
+# "The pre-deploy gate" below). Do NOT delete the script yet: read what it
+# listed, starting with anything under "READ THIS FIRST", carry out each
+# listed task, then re-run it with the digest the stop printed.
 #   bash untracked/scratch/upgrade.sh --project-root /path/to/your/project \
 #       --skip-reading-confirmation=<digest>
 
@@ -152,7 +151,7 @@ This works for **any version** (including pre-v2.5.0 installations) and is the s
 # Fetch and run with version argument (from your project root)
 mkdir -p untracked/scratch
 curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh -o untracked/scratch/upgrade.sh
-# The script is removed only when the upgrade completes: after an exit 3 or 4
+# The script is removed only when the upgrade completes: after an exit 3
 # stop it is needed for the re-run (see the block above).
 bash untracked/scratch/upgrade.sh --project-root /path/to/your/project v2.9.0 \
     && rm untracked/scratch/upgrade.sh
@@ -201,9 +200,11 @@ It prints `REQUIRED READING`, which lists:
 - every **pre-upgrade task** (`CLAUDE/UPGRADES/.../pre-upgrade-tasks/`) whose
   `**Detect**` pattern finds a call site in your project, at `file:line`. A
   task that finds nothing is not shown;
-- any reason the upgrade needs the project owner: a MAJOR version, a crossed
-  config-changes manifest declaring `breaking: true`, a `critical`
-  pre-upgrade task with hits, or an installed version the gate cannot read.
+- any reason the upgrade is likely to break the project, listed first under
+  `READ THIS FIRST`: a MAJOR version, a crossed config-changes manifest
+  declaring `breaking: true`, a `critical` pre-upgrade task with hits, or an
+  installed version the gate cannot read. These stop nothing beyond the
+  reading: confirming it is the whole gate.
 
 The gate's FROM side is the version this project has INSTALLED, never the
 daemon checkout: the venv's `.daemon-version` stamp, else the version in the
@@ -212,11 +213,11 @@ checkout and a re-run therefore all see the real range -- but only the venv
 stamp counts as verified. `.claude/HOOKS-DAEMON.md` is an ordinary tracked
 file an agent edits routinely, so a FROM read from it that has caught up to
 or passed the target is never taken as "nothing to install": the gate treats
-that range as unknown and needs the owner, the same answer it gives a venv
-stamp equal to the target with no matching gated-install receipt. With
-neither a stamp nor a usable marker, the gate cannot rule anything out
-either: it lists every pre-upgrade task up to the target that applies to the
-project and needs the owner.
+that range as unknown and lists it as a reason to read carefully, the same
+answer it gives a venv stamp equal to the target with no matching
+gated-install receipt. With neither a stamp nor a usable marker, the gate
+cannot rule anything out either: it lists every upgrade guide and every
+pre-upgrade task up to the target that applies to the project.
 
 Nothing in the caller's environment steers the GATE PROCESS ITSELF, or speaks
 for it:
@@ -323,65 +324,18 @@ Layer 1's `env -i`, so there only the in-script sanitisation above applies. It
 is a fixed, named list of variable FAMILIES known to steer execution, not a
 default-deny allowlist, so anything not on it -- including a variable this
 list has not anticipated -- still reaches Layer 2, and `BASH_ENV` has already
-run by the time it gets a say. So the approval gate is a
-procedural control against an agent following the documented upgrade route,
-backed by a best-effort guard (`upgrade_approval_guard`) that recognises that
-route's shape. It is not a boundary against a same-user process determined to
-install by hand instead -- no in-process check can be that, because the same
-user can always run the daemon's own code directly.
-
-`upgrade_approval_guard` also denies an agent that steers the rest of the
-upgrade. It recognises an upgrade by what the command is, not by the file's
-name:
-
-- `upgrade.sh`, `upgrade_version.sh` or `upgrade_gate_standalone.py` by name;
-- Layer 1's `--skip-reading-confirmation`;
-- a script whose content carries `HOOKS_DAEMON_UPGRADE_HANDOFF`, which every
-  copy of Layer 1 and Layer 2 does;
-- a script it cannot read (`bash untracked/scratch/target-upgrade.sh`, or a script on stdin) run with
-  `--project-root`, or with the `.claude/hooks-daemon` clone as an argument.
-
-On such a command, the guard denies setting any of these variables:
-
-- `PATH`, `HOME`, `TMPDIR` or `HOSTNAME`;
-- `HOOKS_DAEMON_PYTHON`, `HOOKS_DAEMON_VENV_PATH`, `UPGRADE_FLAGS` or the
-  `HOOKS_DAEMON_UPGRADE_*`/`HOOKS_DAEMON_CLONE_URL` variables;
-- `GIT_*`, `BASH_ENV`, `ENV`, `BASH_FUNC_*`, `SHELLOPTS` or `BASHOPTS`;
-- `LD_*`, `DYLD_*` or `PYTHON*`;
-- `HOOKS_DAEMON_OLD_DEFAULT_*` (Layer 1's baseline handover);
-- the `uv` index, find-links, config-file and Python variables
-  (`UV_INDEX*`, `UV_DEFAULT_INDEX`, `UV_EXTRA_INDEX_URL`, `UV_FIND_LINKS`,
-  `UV_CONFIG_FILE`, `UV_PYTHON*`), `PIPX_BIN_DIR`, CA bundles and proxies.
-
-It also denies passing `--uv <path>` (or `--uv=<path>`) to the upgrade, for the
-same reason: the `uv` that builds the venv decides what code the daemon runs.
-
-Any spelling counts, not only `NAME=value`: naming one of those variables
-other than to read it (`read -r NAME`, `printf -v NAME`, `n=NAME`),
-`declare`/`typeset`/`local` with an `x` flag, and `export` with a flag or a
-computed name. On a command recognised as the upgrade, `set -a`, `eval` and
-sourcing another file count too. It also denies exporting a shell function
-(`export -f`), and writing into the clone's `.git/` (its config, hooks or
-refs decide what the next fetch and checkout install). If the upgrade
-genuinely needs one of these (a Python 3.11+ outside the system locations, say),
-ask the user to run it.
-
-Moving the clone by hand is the other way around the gate. `checkout`,
-`switch`, `pull`, `merge`, `rebase`, `reset`, `cherry-pick`, `am` or `revert`
-on `.claude/hooks-daemon` installs a version the gate never read, so the same
-guard denies it. `fetch`, `show`, `log` and `describe` are allowed. So is
-reading the clone's remote and config; writing them is not -- `git remote set-url`/`add`/`rename`/`remove` and a `git config` write on that clone are
-denied too, because Layer 1's `fetch --tags --force` trusts whatever `origin`
-names next.
+run by the time it gets a say. The gate is a procedural control against a
+careless agent following the documented upgrade route. It is not a boundary
+against a same-user process determined to install by hand instead -- no
+in-process check can be that, because the same user can always run the
+daemon's own code directly.
 
 A venv stamp that already says the target is not taken on trust. `hooks-daemon repair` after a manual checkout writes the same stamp. The installed == target
 shortcut therefore counts only when the gate itself recorded letting that exact
-version through (`.claude/hooks-daemon/untracked/upgrade-approvals/gated-install.json`,
+version through (`.claude/hooks-daemon/untracked/upgrade-gate/gated-install.json`,
 written when it proceeds). Otherwise the version installed before it cannot be told, and the
-owner decides. That record is unsigned JSON, protected only by the same
-write-guard as every other marker under `upgrade-approvals/` -- it is a
-procedural record, not a cryptographic one, and no stronger a defence than
-the approval marker it sits beside.
+reading is listed as an unknown range. That record is unsigned JSON that nothing
+protects: it is a procedural record, not a cryptographic one.
 
 With nothing to list, the upgrade continues without comment, as it does when
 the gate itself installed the target already. Otherwise it never infers consent
@@ -402,26 +356,33 @@ are two cases where the restore does not happen:
 Layer 2 never runs in self-install mode. It refuses before the gate, and the
 developer's own checkout is left where Layer 1 put it.
 
-| Exit | Meaning                 | What to do                                                                                                                                                                                                                                                                                        |
-| ---- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `3`  | Reading not confirmed   | Read every listed document. Carry out each listed pre-upgrade task in the project, as its file says. Then re-run with `--skip-reading-confirmation=<digest>`, the digest the stop printed. A bare flag, or a digest from another listing, stops again                                             |
-| `4`  | Owner's approval needed | Report the printed reasons and stop. The project owner approves ONE upgrade in their own terminal with the command the stop printed. An agent cannot record it (see below). Then re-run with the same `--skip-reading-confirmation=<digest>`; the approval is removed once that upgrade completes |
+| Exit | Meaning               | What to do                                                                                                                                                                                                                                                                                            |
+| ---- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `3`  | Reading not confirmed | Read every listed document, starting with anything under `READ THIS FIRST`. Carry out each listed pre-upgrade task in the project, as its file says. Then re-run with `--skip-reading-confirmation=<digest>`, the digest the stop printed. A bare flag, or a digest from another listing, stops again |
 
-The owner's approval needs a terminal and a typed phrase naming both versions
-(`approve upgrade from v<installed> to v<target>`, or
-`approve upgrade from an unknown version to v<target>` when the installed
-version cannot be told). The marker it writes is bound to those versions and
-this install's paths. So an agent's shell, which has no terminal, cannot run
-it, and a marker made any other way does not count. The stop prints two
-commands for it:
+There is no owner approval and no exit `4` (removed in v3.70.0): a MAJOR bump, a
+crossed `breaking: true` manifest, a `critical` pre-upgrade task and an
+unreadable installed version are all listed under `READ THIS FIRST` in the same
+reading. A project config that still names `upgrade_approval_guard` keeps
+validating; delete the key when convenient.
 
-- `.claude/hooks-daemon/bin/hooks-daemon approve-upgrade <target> --from <installed>`,
-  for an installed daemon that has the command;
-- a command that runs the approval from the TARGET's own code in the clone
-  (`git archive` of the target's `src`, then `upgrade_gate_standalone.py approve`
-  run by the gate's own Python 3.11+, named by absolute path), which works from
-  any installed version. On the first gated upgrade the installed daemon
-  predates `approve-upgrade`, so this is the one to use.
+**Which code runs the gate.** The gate that runs is always the TARGET release's,
+never the installed daemon's. Layer 1 (`scripts/upgrade.sh`, fetched fresh from
+`main`) fetches the tags and checks the target out in `.claude/hooks-daemon`
+FIRST, then runs the checked-out target's own `scripts/upgrade_version.sh`,
+which runs the target's own `upgrade_gate_standalone.py` on a system Python
+3.11+ before any venv is built. So upgrading from an older install TO a release
+that has no approval tier (v3.70.0 or later) meets no approval stop and needs
+no `approve-upgrade`, which an older installed daemon does not have anyway. The
+only upgrade that still prints the old approval stop is one whose TARGET is
+v3.68.0 or v3.69.0: move the target to v3.70.0 or later instead of approving.
+
+**Large jumps are better made in phases.** When the listing crosses a MAJOR
+boundary, or spans more than 10 minor releases, the gate also prints an
+`ADVICE:` line recommending the upgrade go through an intermediate release (it
+names one, for example the last release of the current major), check that the
+project works, and then continue. It is advice only: it never stops the
+upgrade, changes the digest or sets an exit code.
 
 Exit `1` also means the upgrade stopped with nothing deployed. The printed
 error says which cause it was, and who acts depends on the cause:
@@ -1269,8 +1230,8 @@ curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-cod
 bash untracked/scratch/upgrade.sh --project-root /path/to/your/project
 
 # 2. If Python discovery still fails, the USER points it at a known-good interpreter
-#    (3.11+). An agent does not set this: upgrade_approval_guard denies it on an
-#    upgrade command, so ask the user to run this line. It picks the interpreter
+#    (3.11+). An agent does not choose the interpreter on its own, so ask the
+#    user to run this line. It picks the interpreter
 #    the venv is built with; the pre-deploy gate never runs on it.
 HOOKS_DAEMON_PYTHON=/usr/bin/python3 bash untracked/scratch/upgrade.sh --project-root /path/to/your/project
 

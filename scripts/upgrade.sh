@@ -811,10 +811,10 @@ if [ -f "$_ENV_SANITISE_SH" ]; then
         # code runs or which tools answer for it. Only what is explicitly
         # listed here survives `env -i`; everything else, including
         # BASH_ENV/ENV and any BASH_FUNC_*, does not. Each group says why it
-        # is kept; the approval guard denies an agent setting the steering
-        # members (HOOKS_DAEMON_PYTHON, HOOKS_DAEMON_VENV_PATH, HOME, TMPDIR,
-        # HOSTNAME, the handover names, UV index/config, proxies, CA bundles)
-        # on the command that runs the upgrade.
+        # is kept. The steering members (HOOKS_DAEMON_PYTHON,
+        # HOOKS_DAEMON_VENV_PATH, HOME, TMPDIR, HOSTNAME, the handover names,
+        # UV index/config, proxies, CA bundles) are the human's to set per
+        # run, never an agent's.
         _LAYER2_ENV_ALLOWLIST=(
             "PATH=$(_gate_trusted_path)"
             "HOOKS_DAEMON_UPGRADE_HANDOFF=$HOOKS_DAEMON_UPGRADE_HANDOFF"

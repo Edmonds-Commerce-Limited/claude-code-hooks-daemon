@@ -356,7 +356,7 @@ class TestTrustedDirs:
 
 
 class TestShippedPlanQaTask:
-    """The shipped 00375 task is critical, so a false positive costs an owner approval."""
+    """The shipped 00375 task is critical, so a false positive puts a false reason under READ THIS FIRST."""
 
     _PATH = (
         Path(__file__).resolve().parents[3]

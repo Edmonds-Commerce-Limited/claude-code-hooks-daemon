@@ -317,16 +317,6 @@ class HandlerID:
         config_key="merge_to_main_approval",
         display_name="merge-to-main-approval",
     )
-    # Upgrade approval guard (Plan 00376, review finding MAJOR 4): the owner's
-    # one-shot `approve-upgrade` marker must be written by the owner's own
-    # `hooks-daemon approve-upgrade` run (TTY + typed phrase), never by an
-    # agent forging the marker, invoking the approval command itself, or
-    # exporting the env vars the upgrade script uses to skip the pre-deploy gate.
-    UPGRADE_APPROVAL_GUARD = HandlerIDMeta(
-        class_name="UpgradeApprovalGuardHandler",
-        config_key="upgrade_approval_guard",
-        display_name="upgrade-approval-guard",
-    )
     # Backtick substitution in a git message (Plan 00219): backticks inside a
     # DOUBLE-quoted -m are executed by bash, not quoted, so the span is
     # replaced by the command's stdout and the text is silently lost.
@@ -1525,6 +1515,15 @@ RETIRED_HANDLERS: dict[str, str] = {
         "behaviour with no relevance-scoring bandage needed. Safe to delete "
         "this key from your config; it never mattered outside that one "
         "repository."
+    ),
+    "upgrade_approval_guard": (
+        "removed in Plan 00503 — owner ruling: an upgrade no longer waits for "
+        "the project owner's approval, so there is no `approve-upgrade` "
+        "command, marker or exit code left for this guard to protect. What "
+        "used to need that approval (a MAJOR bump, a `breaking: true` "
+        "manifest, a critical pre-upgrade task, an unreadable installed "
+        "version) is now listed first in the reading the upgrade already "
+        "stops on. Safe to delete this key from your config."
     ),
 }
 

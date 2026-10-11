@@ -61,3 +61,22 @@ config_changes:
         On by default and inert unless `persistent_crons` is enabled and a
         session opens a second thread. Set `false` to keep the previous
         behaviour of asking every thread for the declared crons.
+  renamed: []
+  removed:
+    - key: handlers.pre_tool_use.upgrade_approval_guard
+      description: >-
+        REMOVED (Plan 00503, GitHub #112). An upgrade no longer waits for the
+        project owner's approval, so the `approve-upgrade` command, the
+        `upgrade-approvals/` markers and exit code 4 are gone, and this
+        handler (and its rules `R-UPGRADE-APPROVAL-AGENT` and
+        `R-UPGRADE-APPROVAL-ENV-BYPASS`) has nothing left to protect. The key
+        is registered in `RETIRED_HANDLERS`, so a leftover
+        `upgrade_approval_guard:` entry in your config validates cleanly
+        (accepted silently) rather than degrading the daemon.
+      migration_note: >-
+        Safe to delete this key from your config. A MAJOR bump, a
+        `breaking: true` manifest, a critical pre-upgrade task or an
+        unreadable installed version is now listed first in the reading the
+        upgrade already stops on; confirm it with
+        `--skip-reading-confirmation=<digest>` and the upgrade proceeds.
+  changed: []
