@@ -2294,7 +2294,14 @@ too. The daemon's `counter + 1` path (`plan_numbering.py:180`) does not look at 
 daemon keeps it correct across branches"; nothing says across clones. Remedy: `mkplan.bash` advances the counter to
 the highest plan number on disk instead of dying on that drift, and the daemon's path checks the disk the same way.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed (batch K branch `agent-aae597d16acf27198-5da7ea18`, merge pending). Reproduced first: with the
+counter at 208 and `00212-…` or `Completed/00250-…` on disk, `mkplan.bash` died "counter (208) is behind the highest
+plan on disk", and `next_plan_number_for_target` returned `00006` for counter 5 with `Completed/00020-…` on disk
+(3 mkplan tests and 1 daemon test red). Now `mkplan.bash` (the CLAUDE/Plan copy and the bundled template) prints a
+note and advances the counter to the disk high-water mark, and the daemon path returns `max(counter, disk) + 1`.
+A counter ahead of the disk is still trusted. Tests: `tests/unit/scripts/test_mkplan_counter_drift.py`,
+`test_counter_behind_disk_is_overtaken_by_the_disk`. `mkroutine.bash` keeps its own refusal (separate counter, not
+reported).
 
 ### N370 — the sed guard denies a `git -C <dir> commit -m` message that mentions an in-place sed edit
 
@@ -2934,8 +2941,18 @@ reproduction before it is fixed.
 | N338 | `project_containment` follows only the first `cd`: `cd <in-repo clone> && … && cd extensions && npm ci > ../untracked/scratch/x.txt` was denied as a write to `<repo>/../untracked/scratch/x.txt`, resolved from the root after the first `cd` instead of from `extensions/`.                                                                             | ⬜ Open                                                                                                                                                                                                                                      |
 | N339 | `bash_safe_mode` denies a fully gated group: `cd X && mkdir -p d && { ./qa.bash > d/o.txt 2>&1 && echo "exit=0" \|\| echo "exit=$?"; }`. The `;` that closes the `{ }` group is read as unguarded sequencing.                                                                                                                                             | ✅ Fixed on worktree-n339-compound                                                                                                                                                                                                           |
 | N340 | The "WRONG CLAUDE/ DIRECTORY" advisory fires on every Read of this repository's own `CLAUDE/Plan/...` files. In self-install mode the project's `CLAUDE/` is the authoritative copy, not "the daemon's internal docs copy".                                                                                                                               | ✅ Fixed (agent-a5313785be3bc54d9-56f41b13, c213595a8): `daemon_docs_guard.matches` now stands down when `ProjectContext.self_install_mode` is true and still fires for a client install.                                                    |
-| N342 | `setup_worktree.sh` cannot create ANY worktree from a host checkout at `/home/<user>/Projects/EC/claude-code-hooks-daemon`: the socket path up to the branch name is already 103 bytes against the 104-byte AF_UNIX limit, so even the mandatory `worktree-` prefix does not fit. The merge rule "work happens in worktrees" is unsatisfiable from there. | ⬜ Open                                                                                                                                                                                                                                      |
+| N342 | `setup_worktree.sh` cannot create ANY worktree from a host checkout at `/home/<user>/Projects/EC/claude-code-hooks-daemon`: the socket path up to the branch name is already 103 bytes against the 104-byte AF_UNIX limit, so even the mandatory `worktree-` prefix does not fit. The merge rule "work happens in worktrees" is unsatisfiable from there. | ⬜ Open — OWNER question (batch K, see below)                                                                                                                                                                                                |
 | N341 | `sensitive_content` denied `cd /home/<user>/... && git worktree remove … && git branch -d <name>`. The secret term was in the `cd` path, not in the branch name the branch-name surface exists to check; the matched text was redacted as part of the home path.                                                                                          | ✅ Fixed with N364 (batch B branch `agent-a4230a7966c0680b6-a3d7ec3b`): reproduced on main, the term is now judged only in the command that records metadata, and `git branch -d/-D/--delete` and `git tag -d/--delete` are no longer writes |
+
+**N342, owner question (batch K)**: `scripts/setup_worktree.sh` already pre-flights the socket path and refuses with
+"shorten the branch name", which cannot help when the host root alone leaves no room (the worktree socket is
+`<root>/untracked/worktrees/<branch>/untracked/daemon.sock`, 43 bytes of fixed layout plus the branch). The daemon
+itself starts fine (its socket falls back to `/tmp`); the refusal exists because the acceptance gates look for the
+socket under `untracked/`. Every fix changes a convention, so it is the owner's call. Which of: (a) let the worktrees
+live at a short path outside the repo (a `WORKTREES_DIR` override), which `project_containment` and the
+worktree-isolation guards currently treat as outside the project; (b) teach the acceptance gates to follow the
+socket discovery file and drop the refusal for an over-length path; or (c) declare a maximum host-checkout path
+length and document it?
 
 **N339, second reproduction** (coordinator, this container, 2026-10-03): `… && for b in a b c; do git -C x/$b rev-parse HEAD || exit 1; done` was denied as having no safety prelude. Every step in it is gated, but the `;` inside the loop syntax (`do … ; done`) was read as unguarded sequencing. This is the same class as the `{ …; }` group above. A fix should parse compound-command syntax (`{ }`, `for/while … do … done`, `if … fi`) rather than treat each `;` as a separator.
 

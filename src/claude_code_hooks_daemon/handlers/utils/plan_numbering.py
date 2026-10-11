@@ -179,7 +179,10 @@ def next_plan_number_for_target(
 
     counter = read_plan_counter(repo_root)
     if counter is not None:
-        return f"{counter + 1:0{PLAN_NUMBER_WIDTH}d}"
+        # The counter is per clone, so it can lag plan folders pulled from
+        # elsewhere; the disk says which numbers are taken (N371).
+        highest = max(counter, highest_plan_number(repo_root / plan_subdir))
+        return f"{highest + 1:0{PLAN_NUMBER_WIDTH}d}"
 
     # Bootstrap: no counter yet — seed it from the filesystem high-water mark.
     highest = highest_plan_number(repo_root / plan_subdir)

@@ -394,6 +394,21 @@ class TestNextPlanNumberForTarget:
 
         assert result == "00111"
 
+    def test_counter_behind_disk_is_overtaken_by_the_disk(self, tmp_path: Path) -> None:
+        """A second clone's counter can lag the plan folders on disk (N371).
+
+        The counter says 5 but 00012 and an archived 00020 exist, so counter + 1
+        would reuse a taken number; the answer follows the disk.
+        """
+        repo = _git_init(tmp_path / "proj")
+        plan_dir = repo / "CLAUDE" / "Plan"
+        (plan_dir / "Completed" / "00020-archived").mkdir(parents=True)
+        (plan_dir / "00012-active").mkdir()
+        write_plan_counter(repo, 5)
+        target = plan_dir / "x" / "PLAN.md"
+
+        assert next_plan_number_for_target(target, "CLAUDE/Plan", repo) == "00021"
+
     def test_bootstraps_from_scan_when_counter_absent(self, tmp_path: Path) -> None:
         """No counter yet → scan the folder, return scan_max + 1, and SEED the
         counter so subsequent reads are counter-driven.
