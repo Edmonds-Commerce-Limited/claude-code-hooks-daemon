@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
@@ -12,6 +11,12 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils.gh_view_comments import (
+    suggest_with_comments,
+    uncommented_view_segment,
+)
+
+_NOUN = "issue"
 
 
 class GhIssueCommentsHandler(PreToolUseHandlerBase):
@@ -26,12 +31,6 @@ class GhIssueCommentsHandler(PreToolUseHandlerBase):
             handler_id=HandlerID.GH_ISSUE_COMMENTS,
             priority=Priority.GH_ISSUE_COMMENTS,
             tags=[HandlerTag.WORKFLOW, HandlerTag.GITHUB, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
-        )
-        # Match: gh issue view [number] [--repo owner/repo] [other flags]
-        # But NOT already containing --comments
-        self._gh_issue_view_pattern = re.compile(
-            r"\bgh\s+issue\s+view\b",
-            re.IGNORECASE,
         )
         self._rule = Rule(
             rule_id=RuleID.GH_ISSUE_VIEW_NO_COMMENTS,
@@ -52,63 +51,25 @@ class GhIssueCommentsHandler(PreToolUseHandlerBase):
         """Return the single Rule backing this handler's deny path."""
         return [self._rule]
 
-    def _gh_issue_view_segment(self, command: str) -> str | None:
-        """Return the 'gh issue view ...' sub-command segment, or None if absent.
-
-        The segment runs from 'gh issue view' up to the next shell command separator
-        (;, &&, ||, |). Anchoring the --comments / --json checks to THIS segment stops
-        a flag in an unrelated chained command (e.g. `gh issue view 5 && echo
-        "--comments"`) from spuriously exempting the view.
-        """
-        view_match = self._gh_issue_view_pattern.search(command)
-        if not view_match:
-            return None
-
-        rest = command[view_match.start() :]
-        # End the segment at the first command separator.
-        separator_match = re.search(r"(?:;|&&|\|\||\|)", rest)
-        if separator_match:
-            return rest[: separator_match.start()]
-        return rest
-
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Check if this is a gh issue view command without --comments."""
+        """Check if this runs a gh issue view command without --comments."""
         command = get_bash_command(hook_input)
         if not command:
             return False
 
-        # Must be a gh issue view command; scope all flag checks to its segment so
-        # flags in chained commands cannot bypass the block.
-        segment = self._gh_issue_view_segment(command)
-        if segment is None:
-            return False
-
-        # Already has --comments flag in the view segment? Allow it through.
-        if "--comments" in segment:
-            return False
-
-        # Using --json with comments field in the view segment? Equivalent to --comments.
-        if "--json" in segment:
-            # Pattern: --json <fields> where fields might be quoted or unquoted
-            json_match = re.search(r"--json\s+([^\s|]+)", segment)
-            if json_match:
-                fields = json_match.group(1)
-                # Check if 'comments' is one of the comma-separated fields
-                if re.search(r"\bcomments\b", fields):
-                    return False
-
-        # No --comments flag and no --json with comments field in the view segment.
-        return True
+        # Only a view the command RUNS counts (ledger N408): a mention in an
+        # echo, a message or a grep pattern is not one, and the flags are read
+        # from that view's own segment, so a flag in a chained command cannot
+        # satisfy it.
+        return uncommented_view_segment(command, _NOUN) is not None
 
     def _compute_suggested_command(self, command: str) -> str:
         """Compute the suggested corrected command string.
 
-        Scoped to the `gh issue view` SEGMENT (matching `matches()`'s own
-        scoping), not the whole command: a naive whole-command append put
-        `--comments` after a chained command's own trailing arguments
-        (`gh issue view 123 && echo done` -> `... && echo done --comments`,
-        fixing nothing) and a whole-command `--json` search could pick up
-        an unrelated chained command's own `--json` flag.
+        Scoped to the `gh issue view` segment that lacks the request, not the
+        whole command: a whole-command append put `--comments` after a chained
+        command's own trailing arguments (`gh issue view 123 && echo done` ->
+        `... && echo done --comments`, fixing nothing).
 
         Args:
             command: Original bash command
@@ -116,27 +77,10 @@ class GhIssueCommentsHandler(PreToolUseHandlerBase):
         Returns:
             Corrected command string with --comments added
         """
-        segment = self._gh_issue_view_segment(command)
-        if segment is None:  # pragma: no cover - handle() only calls this after a match
+        view = uncommented_view_segment(command, _NOUN)
+        if view is None:  # pragma: no cover - handle() only calls this after a match
             return f"{command} --comments"
-
-        start = command.index(segment)
-        end = start + len(segment)
-
-        json_match = re.search(r"(--json\s+)([^\s|]+)", segment)
-        if json_match:
-            prefix = json_match.group(1)
-            fields = json_match.group(2)
-            new_segment = segment.replace(f"{prefix}{fields}", f"{prefix}{fields},comments", 1)
-        else:
-            # Insert before any trailing whitespace the segment carries (the
-            # gap before a chained "&&"/"||"/";"), so that gap survives the
-            # splice instead of being swallowed by an unconditional rstrip.
-            trimmed = segment.rstrip()
-            trailing_ws = segment[len(trimmed) :]
-            new_segment = f"{trimmed} --comments{trailing_ws}"
-
-        return command[:start] + new_segment + command[end:]
+        return suggest_with_comments(command, view)
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Block and suggest adding --comments flag."""
@@ -184,12 +128,12 @@ class GhIssueCommentsHandler(PreToolUseHandlerBase):
         return [
             AcceptanceTest(
                 title="gh issue view without --comments is blocked",
-                command='echo "gh issue view 123"',
+                command="bash -n -c 'gh issue view 999999999'",
                 dispatch_as_bash=True,
                 description="Blocks gh issue view without --comments flag",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED", r"--comments"],
-                safety_notes="Uses echo - safe to test",
+                safety_notes="bash -n -c only parses the command, never executes it",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
