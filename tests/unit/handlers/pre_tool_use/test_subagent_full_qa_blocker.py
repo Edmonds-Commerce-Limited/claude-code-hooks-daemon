@@ -3721,6 +3721,96 @@ class TestPythonHoldingAProgramNameIsNotRunningIt:
         assert find_full_qa_invocation(_python_heredoc(code), _patterns()) is not None
 
 
+_BESIDE_A_PROCESS = "import subprocess\nsubprocess.run(['ruff', 'check', '.'])\n"
+
+#: N417: a command held as DATA, handed to calls that reshape, print, compare or
+#: look text up, or to a function of the script that never calls out. Allowed.
+_PYTHON_DATA_CALLS: list[str] = [
+    _BESIDE_A_PROCESS + "CASES = ['pytest', 'pytest tests/']\nfor c in CASES:\n    print(len(c))",
+    _BESIDE_A_PROCESS + "T = {'a': 'pytest'}\nx = T.get('a').split()\nassert x",
+    _BESIDE_A_PROCESS + "def check(c):\n    return c in ('a', 'b')\ncheck('pytest')",
+    _BESIDE_A_PROCESS + "def check(c):\n    return c.strip()\nfor c in ['pytest']:\n    check(c)",
+    _BESIDE_A_PROCESS + "import re\nre.compile('pytest')",
+    _BESIDE_A_PROCESS + "import os\nos.path.join('pytest', 'x')",
+    _BESIDE_A_PROCESS
+    + "class Table:\n    def row(self, c):\n        return [c]\nTable().row('pytest')",
+    _BESIDE_A_PROCESS + "check = lambda c: c.lower()\ncheck('pytest')",
+]
+
+#: N417: the same command reaching a process through a function of the script, a
+#: name that stands for a process-starting call, or a process's stdin. Denied.
+_PYTHON_ROUTES_TO_A_PROCESS: list[str] = [
+    "import subprocess\ndef go(c):\n    subprocess.run([c])\ngo('pytest')",
+    "import subprocess\ndef go(c):\n    helper(c)\ndef helper(c):\n    subprocess.run([c])\ngo('pytest')",
+    "import subprocess\nclass R:\n    def go(self, c):\n        subprocess.run([c])\nR().go('pytest')",
+    "from subprocess import run as r\nr(['pytest'])",
+    "import subprocess\nr = subprocess.run\nr(['pytest'])",
+    "import subprocess, functools\nfunctools.partial(subprocess.run, ['pytest'])",
+    "import subprocess\ngo = lambda c: subprocess.run([c])\ngo(['pytest'])",
+    "import subprocess\np = subprocess.Popen('sh', stdin=subprocess.PIPE)\np.stdin.write('pytest -q\\n')",
+]
+
+
+class TestStringsOnlyCountAtAProcess:
+    """N417: a string handed to a call that cannot launch anything is data.
+
+    A string counts as a command when it reaches a process-launching or
+    code-running call, directly or through the names tracked. When it reaches
+    only a call to code this cannot read, that call may run it, which is judged
+    as unseen (allowed with an advisory) rather than denied; B5 denies only on
+    a positive finding.
+    """
+
+    @pytest.mark.parametrize("code", _PYTHON_DATA_CALLS)
+    def test_a_command_handed_to_a_data_call_is_not_a_run(self, code: str) -> None:
+        assert find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=_REPO_ROOT) is None
+
+    @pytest.mark.parametrize("code", _PYTHON_ROUTES_TO_A_PROCESS)
+    def test_a_command_routed_to_a_process_is_denied(self, code: str) -> None:
+        match = find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=_REPO_ROOT)
+        assert match is not None, code
+        assert not match.fail_closed, code
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            _BESIDE_A_PROCESS + "from lib import record\nrecord('pytest')",
+            _BESIDE_A_PROCESS + "import lib\nlib.record('pytest tests/')",
+            _BESIDE_A_PROCESS + "def check(c):\n    lib.record(c)\ncheck('pytest')",
+            _BESIDE_A_PROCESS + "with open('f.sh', 'w') as f:\n    f.write('pytest')",
+        ],
+    )
+    def test_a_command_handed_to_unreadable_code_is_judged_unseen(self, code: str) -> None:
+        match = find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=_REPO_ROOT)
+        assert match is not None, code
+        assert match.fail_closed, code
+
+    def test_a_positive_run_beside_an_unreadable_call_is_still_denied(self) -> None:
+        code = "import subprocess\nfrom lib import record\nrecord('pytest')\nsubprocess.run(['pytest'])"
+        match = find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=_REPO_ROOT)
+        assert match is not None
+        assert not match.fail_closed
+
+    def test_a_script_file_is_judged_like_the_same_code_on_stdin(self, tmp_path: Path) -> None:
+        script = tmp_path / "tool.py"
+        script.write_text(
+            _BESIDE_A_PROCESS + "from lib import record\nrecord('pytest')\n", encoding="utf-8"
+        )
+        match = find_full_qa_invocation(f"python3 {script}", _patterns(), cwd=_REPO_ROOT)
+        assert match is not None
+        assert match.fail_closed
+
+    def test_a_test_table_of_commands_run_through_the_finder_is_not_denied(self) -> None:
+        """The batch AE probe shape: commands in a table, passed to a function under test."""
+        code = (
+            "import subprocess\nfrom finder import find\n"
+            "CMDS = ['pytest', 'gcc -c x.c && pytest']\n"
+            "for c in CMDS:\n    print(find(c))\n"
+        )
+        match = find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=_REPO_ROOT)
+        assert match is None or match.fail_closed
+
+
 _RUN_PY = "ru" + "nner.py"
 _EXEC = "ex" + "ec"
 _PROGRAM = "./scripts/qa/llm_qa.py"

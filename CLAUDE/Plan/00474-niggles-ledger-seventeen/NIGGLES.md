@@ -87,9 +87,28 @@ real masking bypass (`gcc -c x.c && pytest`) and also exposes this false positiv
 identical script when nothing earlier in the command hides it, so the cause predates batch AE: the N409 rule that a
 string handed to a call may be a command.
 
-**Status**: ⬜ Open. Triage first: whether a string passed to a call with no process-launching sink (`subprocess.*`,
-`os.system`, `os.exec*`, `pty.spawn`, `create_subprocess_*`) should count at all under B5 (deny only on a positive
-finding). Probe scripts: `untracked/scratch/review-batch-x/run_ae_shell2.sh`, `ae_cmds2.txt`.
+**Status**: ✅ Fixed (batch AG). Reproduced: `python3 - <<'EOF'` with `import subprocess` beside a table of commands
+handed to `check(c)` / `record('...')` denied, and `probe_ae_shell2.py` / `probe_ae_shell.py` denied on main. Cause:
+`_process_arguments` (N409) seeded the reach walk from the arguments and receiver of EVERY call except the text sinks
+and list changers, so any call counted as one that could run its argument. No deliberate "an unknown call may run it"
+ruling was found (`git log -S_TEXT_SINKS` is f2ada97ec, N409, which only widened what the walk skips). The handler now
+ranks each call (`_CallRanker`): a process or code-running call (`subprocess.*`, `os.system`/`popen`/`exec*`/`spawn*`,
+`pty.spawn`, `asyncio.create_subprocess_*`, the string-to-code builtins, `runpy`, a process's `stdin.write`/`communicate`,
+a name or `import ... as` alias bound to one, `partial(subprocess.run, ...)`, and a function, method, class or lambda of the
+script that leads to one, to a fixed point over the call graph) RUNS its argument and is denied as before; a call that only
+reshapes, prints, compares or looks up text (`len`, `.split`, `.get`, `re.compile`, `os.path.*`, the text sinks) or a
+script function that never calls out CARRIES NOTHING, so a string it receives is data; any other call, to code this cannot
+read (an imported function, a variable), MAY run it, and a full run found only there is judged unseen
+(`fail_closed`, allowed with the advisory by default, denied under `unseen_policy: deny`) via the `_MAY_BE_RUN` marker.
+A positive run elsewhere still wins over it. `probe_ae_shell*.py` now allow with the advisory. Cost stays linear (one
+walk for the call graph, a worklist where each function rank rises at most twice, the existing reach walk shared between
+the two ranks). Pinned by `TestStringsOnlyCountAtAProcess` and the 1888 targeted tests plus the ordinary-command corpus
+gate passing unchanged. Report: `subagent-reports/261011-batch-ag-sonnet.md`.
+
+Residuals under N417: a name-only match, so a script function called `run` is treated as the sink `run`
+(over-denies, never under-denies); a string handed to an UNKNOWN imported function is an advisory, not silent, by
+design; `f.write(text)` to a non-stdin file is unseen; a single bare `'pytest\n'` with whitespace is not the one-word
+program (as on main).
 
 ### N416 — `subagent_full_qa_blocker` raises `unrecognised-interpreter-inline-code` on a plain `set -e; …` command
 

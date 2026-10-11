@@ -753,6 +753,10 @@ _TOO_DEEP: Final[str] = "<code nested deeper than is followed>"
 #: What it yields for the paths a command writes (``>``, ``>>``, ``tee``):
 #: code read from one of them is not what is on disk now.
 _WRITES: Final[str] = "<paths this command writes>"
+#: What it yields for an invocation Python code hands only to a call this
+#: cannot read (N417): the first argument is the program, the rest its
+#: arguments, and a full run found there is judged unseen, never denied.
+_MAY_BE_RUN: Final[str] = "<handed to code that cannot be read>"
 #: Programs that can give a file an execute bit, or put an executable file
 #: at its path: once one has run, a file without the bit may yet run.
 _MODE_CHANGERS: Final[frozenset[str]] = frozenset(
@@ -777,6 +781,11 @@ _OPAQUE_REASON: Final[str] = (
     "part of this command is only built at run time (a program named by a variable or a "
     "substitution, or a module imported by a computed name), and the run it makes may be the "
     "whole suite, so it is judged as one. Spell the program and its test paths out literally."
+)
+_HANDED_ON_REASON: Final[str] = (
+    "this Python hands a full-suite command to a function this handler cannot read, which may "
+    "run it, so it is judged as the full run it may be. Run it with `subprocess` directly, "
+    "or name the test paths."
 )
 _OVERSIZED_REASON: Final[str] = (
     "this command is too long to parse, and it names a full-suite program, so it is judged "
@@ -1388,6 +1397,9 @@ _HOME: Final[str] = "~"
 #: ``cd`` moves the directory later words are looked up in; a target that
 #: starts with an expansion goes somewhere this cannot see.
 _CD: Final[str] = "cd"
+#: Invocations that only change where later ones run or what they read: a
+#: string handed to unreadable code does not do that.
+_STATE_PROGRAMS: Final[frozenset[str]] = frozenset({_WRITES, _CD, _CD_PUSH, _CD_POP, _PUSHD, _POPD})
 #: A path operand that lands above where the command started runs all of it.
 _ABOVE_START: Final[str] = "<above the starting directory>"
 _UNSEEN_CD_PREFIXES: Final[tuple[str, ...]] = ("$", "~", "`")
@@ -3210,7 +3222,9 @@ def _starts_a_process(code: str) -> bool:
     )
 
 
-def _python_strings_of(code: str, argv: Sequence[str]) -> tuple[list[str], list[list[str]]]:
+def _python_strings_of(
+    code: str, argv: Sequence[str]
+) -> tuple[list[str], list[list[str]], list[str], list[list[str]]]:
     """The strings and argv lists of Python code (:func:`_python_strings`).
 
     Code Python cannot parse, or whose expressions nest too deep to walk (a
@@ -3218,11 +3232,11 @@ def _python_strings_of(code: str, argv: Sequence[str]) -> tuple[list[str], list[
     it holds instead, with no argv list read from it.
     """
     try:
-        tree, reached = _parsed_reach(code)
-        return _python_strings(tree, reached, argv)
+        tree, runs, maybe = _parsed_reach(code)
+        return _python_strings(tree, runs, maybe, argv)
     except (SyntaxError, ValueError, RecursionError) as error:
         logger.debug("Python judged by its quoted literals, unparsable (%s)", error)
-        return _string_literals(code), []
+        return _string_literals(code), [], [], []
 
 
 def _constant_names(tree: ast.Module) -> dict[str, list[str]]:
@@ -3972,8 +3986,294 @@ def _bindings(nodes: Iterable[ast.AST]) -> dict[str, list[ast.expr]]:
     return bound
 
 
-def _process_arguments(tree: ast.Module) -> set[int]:
-    """The ids of every expression that can reach a call as an argument (N409).
+#: The builtin that runs a string as code; spelled so this module does not read as a use of it.
+_EXEC_BUILTIN: Final[str] = "ex" + "ec"
+_COMPILE: Final[str] = "compile"
+#: How far a call carries a string it is handed (N417).
+_CARRIES_NOTHING: Final[int] = 0
+_MAY_RUN_IT: Final[int] = 1
+_RUNS_IT: Final[int] = 2
+
+#: The ``os`` calls that replace or spawn a process, spelled out so a
+#: function of the script's own called ``execute_tests`` is not one of them.
+_OS_LAUNCHERS: Final[frozenset[str]] = frozenset(
+    {
+        f"{family}{suffix}"
+        for family in ("exec", "spawn")
+        for suffix in ("l", "le", "lp", "lpe", "v", "ve", "vp", "vpe")
+    }
+    | {"system", "popen", "startfile", "posix_spawn", "posix_spawnp"}
+)
+#: Calls that START a process or run code: the ``subprocess`` functions,
+#: ``os`` and ``pty``'s, ``asyncio``'s, the builtins that run a string as
+#: code, ``runpy``'s, and what feeds a process's stdin. A string handed to
+#: one of these is run.
+_PROCESS_SINKS: Final[frozenset[str]] = (
+    _ARGV_SINKS
+    | _OS_LAUNCHERS
+    | frozenset(
+        {
+            "getoutput",
+            "getstatusoutput",
+            "create_subprocess_exec",
+            "create_subprocess_shell",
+            "subprocess_exec",
+            "subprocess_shell",
+            _EXEC_BUILTIN,
+            "ev" + "al",
+            "compile",
+            "run_path",
+            "run_module",
+            "communicate",
+            "sendline",
+        }
+    )
+)
+#: ``f.write(text)`` and ``f.send(text)`` run it only when ``f`` is a
+#: process's stdin; to any other file or socket they hand it on, to be run
+#: or not (a script written then run), which is not seen.
+_STDIN_FEEDERS: Final[frozenset[str]] = frozenset({"write", "writelines", "send"})
+_STDIN: Final[str] = "stdin"
+#: Calls that only look at, reshape or compare text and hand nothing to a
+#: process: the string and container builtins and methods, path and JSON
+#: helpers. A name the script defines or imports under one of these is not it.
+_DATA_CALLS: Final[frozenset[str]] = frozenset(
+    {
+        "len",
+        "str",
+        "repr",
+        "int",
+        "float",
+        "bool",
+        "bytes",
+        "bytearray",
+        "list",
+        "tuple",
+        "set",
+        "frozenset",
+        "dict",
+        "sorted",
+        "reversed",
+        "enumerate",
+        "zip",
+        "range",
+        "min",
+        "max",
+        "sum",
+        "any",
+        "all",
+        "isinstance",
+        "issubclass",
+        "type",
+        "id",
+        "hash",
+        "format",
+        "join",
+        "split",
+        "rsplit",
+        "splitlines",
+        "strip",
+        "lstrip",
+        "rstrip",
+        "lower",
+        "upper",
+        "title",
+        "casefold",
+        "startswith",
+        "endswith",
+        "replace",
+        "encode",
+        "decode",
+        "partition",
+        "rpartition",
+        "find",
+        "rfind",
+        "index",
+        "count",
+        "get",
+        "items",
+        "keys",
+        "values",
+        "setdefault",
+        "copy",
+        "update",
+        "add",
+        "discard",
+        "remove",
+        "clear",
+        "dumps",
+        "loads",
+        "exists",
+        "is_file",
+        "is_dir",
+        "basename",
+        "dirname",
+        "abspath",
+        "realpath",
+        "expanduser",
+        "normpath",
+        "splitext",
+        "Path",
+        "PurePath",
+        "open",
+        "read_text",
+        "read",
+        "readlines",
+        "quote",
+        "fullmatch",
+        "match",
+        "search",
+        "sub",
+        "findall",
+        "finditer",
+        "contains",
+        "assertIn",
+        "assertEqual",
+        "assertTrue",
+    }
+)
+
+
+def _launcher_named(expr: ast.AST, aliases: Mapping[str, str]) -> bool:
+    """Whether ``expr`` names (not calls) a process-starting function or holds its name."""
+    for part in ast.walk(expr):
+        word = (
+            part.id
+            if isinstance(part, ast.Name)
+            else (
+                part.attr
+                if isinstance(part, ast.Attribute)
+                else part.value if isinstance(part, ast.Constant) else None
+            )
+        )
+        if isinstance(word, str) and aliases.get(word, word) in _PROCESS_SINKS - _STDIN_FEEDERS:
+            return True
+    return False
+
+
+def _receives_stdin(call: ast.Call) -> bool:
+    """Whether a method call is made on something named ``stdin`` (``p.stdin.write``)."""
+    return (
+        isinstance(call.func, ast.Attribute)
+        and isinstance(call.func.value, ast.Attribute)
+        and call.func.value.attr == _STDIN
+    )
+
+
+class _CallRanker:
+    """How far each call of a script carries a string it is handed (N417).
+
+    A call runs it (:data:`_RUNS_IT`) when it is a process-starting call, a
+    function of the script that leads to one, or a name the script binds to
+    one; it carries nothing (:data:`_CARRIES_NOTHING`) when it only reshapes
+    or prints text, or is a function of the script that never calls on to
+    anything else; any other call, to code this cannot read, MAY run it
+    (:data:`_MAY_RUN_IT`). The script's own functions are ranked by what
+    they call, to a fixed point, so the cost is linear in the calls.
+    """
+
+    def __init__(self, tree: ast.Module, bound: Mapping[str, list[ast.expr]]) -> None:
+        self._bound = bound
+        self._aliases: dict[str, str] = {}
+        self._imported: set[str] = set()
+        self._functions: set[str] = set()
+        self._launcher_values: dict[str, bool] = {}
+        calls: list[tuple[str | None, ast.Call]] = []
+        members: dict[str, set[str]] = {}
+        stack: list[tuple[ast.AST, str | None, str | None]] = [(tree, None, None)]
+        while stack:
+            node, owner, klass = stack.pop()
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                for alias in node.names:
+                    self._imported.add(alias.asname or alias.name)
+                    if isinstance(node, ast.ImportFrom) and alias.asname:
+                        self._aliases[alias.asname] = alias.name
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                self._functions.add(node.name)
+                if klass is not None and not isinstance(node, ast.ClassDef):
+                    members.setdefault(klass, set()).add(node.name)
+                owner = node.name
+                klass = node.name if isinstance(node, ast.ClassDef) else None
+            elif (
+                isinstance(node, ast.Assign)
+                and isinstance(node.value, ast.Lambda)
+                and all(isinstance(target, ast.Name) for target in node.targets)
+            ):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        self._functions.add(target.id)
+                        owner = target.id
+            elif isinstance(node, ast.Call):
+                calls.append((owner, node))
+            stack.extend((child, owner, klass) for child in ast.iter_child_nodes(node))
+        self._rank: dict[str, int] = {}
+        callers: dict[str, set[str]] = {}
+        for owner, call in calls:
+            leaf = self._leaf(call)
+            if owner is None:
+                continue
+            if leaf is None:
+                callers.setdefault(_callee_name(call), set()).add(owner)
+            elif leaf > self._rank.get(owner, _CARRIES_NOTHING):
+                self._rank[owner] = leaf
+        for klass_name, methods in members.items():
+            for method in methods:
+                callers.setdefault(method, set()).add(klass_name)
+        work = [name for name, rank in self._rank.items() if rank > _CARRIES_NOTHING]
+        while work:
+            name = work.pop()
+            for caller in callers.get(name, ()):
+                if self._rank.get(caller, _CARRIES_NOTHING) < self._rank[name]:
+                    self._rank[caller] = self._rank[name]
+                    work.append(caller)
+
+    def _leaf(self, call: ast.Call) -> int | None:
+        """The rank a call has on its own, or None when it depends on a function of the script."""
+        name = _callee_name(call)
+        real = self._aliases.get(name, name)
+        if real == _COMPILE and not isinstance(call.func, ast.Name):
+            return _CARRIES_NOTHING  # `re.compile(pattern)`
+        if real in _STDIN_FEEDERS:
+            return _RUNS_IT if _receives_stdin(call) else _MAY_RUN_IT
+        if real in _PROCESS_SINKS:
+            return _RUNS_IT
+        if name in self._functions:
+            return None
+        local = name in self._bound or name in self._imported
+        if not local and (
+            name in _TEXT_SINKS
+            or name in _DATA_CALLS
+            or (name in _LIST_CHANGERS and _changed_list(call) is not None)
+        ):
+            return _CARRIES_NOTHING
+        if not name:
+            return _RUNS_IT if _launcher_named(call.func, self._aliases) else _MAY_RUN_IT
+        if name in self._bound and self._names_a_launcher(name):
+            return _RUNS_IT
+        if any(
+            isinstance(argument, (ast.Name, ast.Attribute))
+            and _launcher_named(argument, self._aliases)
+            for argument in call.args
+        ):
+            return _RUNS_IT  # `partial(subprocess.run, ...)`
+        return _MAY_RUN_IT
+
+    def _names_a_launcher(self, name: str) -> bool:
+        """Whether a variable is bound to a process-starting function (`run = subprocess.run`)."""
+        if name not in self._launcher_values:
+            self._launcher_values[name] = any(
+                _launcher_named(value, self._aliases) for value in self._bound[name]
+            )
+        return self._launcher_values[name]
+
+    def rank(self, call: ast.Call) -> int:
+        """How far ``call`` carries a string it is handed."""
+        leaf = self._leaf(call)
+        return self._rank.get(_callee_name(call), _CARRIES_NOTHING) if leaf is None else leaf
+
+
+def _process_arguments(tree: ast.Module) -> tuple[set[int], set[int]]:
+    """The ids of the expressions a call can receive: those run, and those only maybe run.
 
     A string is a command only when something is handed it. This follows
     each call's arguments (and the receiver of a method call, so
@@ -3981,90 +4281,101 @@ def _process_arguments(tree: ast.Module) -> set[int]:
     to everything it is bound to, a call to the returns of the function it
     names, an attribute to what that attribute is bound to. A literal that
     no call receives (a constant in a table, a log line, a help string) is
-    data and is never reached. Calls to a text sink (:data:`_TEXT_SINKS`)
-    are not followed, so ``print("pytest")`` passes nothing on.
+    data and is never reached.
+
+    What a call does with its arguments is ranked by :class:`_CallRanker`
+    (N417): a literal handed to a process-starting call, directly or through
+    those names, is in the first set; one that only a call to unreadable code
+    receives is in the second, which is judged as unseen rather than run; one
+    that only a call that reshapes or prints text receives is in neither.
 
     Iterative, so a deeply nested expression costs its size once.
     """
     nodes = list(ast.walk(tree))
     bound = _bindings(nodes)
-    # A sink name the code defines, binds or imports under is not the sink.
-    defined = set(bound)
-    for node in nodes:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            defined.add(node.name)
-        elif isinstance(node, (ast.Import, ast.ImportFrom)):
-            defined.update(alias.asname or alias.name for alias in node.names)
-    pending: list[ast.AST] = []
+    ranker = _CallRanker(tree, bound)
+    seeds: dict[int, list[ast.AST]] = {_MAY_RUN_IT: [], _RUNS_IT: []}
     for node in nodes:
         if not isinstance(node, ast.Call):
             continue
-        name = _callee_name(node)
-        if name in _TEXT_SINKS and name not in defined:
+        rank = ranker.rank(node)
+        if rank == _CARRIES_NOTHING:
+            # Printing, reshaping or listing text hands nothing to a process;
+            # what a list holds is reached when the list itself is (see
+            # :func:`_bindings`).
             continue
-        if name in _LIST_CHANGERS and name not in defined and _changed_list(node) is not None:
-            # Changing a list hands nothing to a process: what it holds is
-            # reached when the list itself is (see :func:`_bindings`).
-            continue
-        pending.extend(node.args)
-        pending.extend(keyword.value for keyword in node.keywords)
+        seeds[rank].extend(node.args)
+        seeds[rank].extend(keyword.value for keyword in node.keywords)
         if isinstance(node.func, ast.Attribute):
-            pending.append(node.func.value)
-    reached: set[int] = set()
+            seeds[rank].append(node.func.value)
+    runs: set[int] = set()
+    maybe: set[int] = set()
     followed: set[str] = set()
-    while pending:
-        current = pending.pop()
-        if id(current) in reached:
-            continue
-        reached.add(id(current))
-        pending.extend(ast.iter_child_nodes(current))
-        key = (
-            current.id
-            if isinstance(current, ast.Name)
-            else (
-                current.attr
-                if isinstance(current, ast.Attribute)
-                else _callee_name(current) if isinstance(current, ast.Call) else ""
+    # What a run reaches is closed under the walk, so the second pass skips it.
+    for pending, reached in ((seeds[_RUNS_IT], runs), (seeds[_MAY_RUN_IT], maybe)):
+        while pending:
+            current = pending.pop()
+            if id(current) in runs or id(current) in maybe:
+                continue
+            reached.add(id(current))
+            pending.extend(ast.iter_child_nodes(current))
+            key = (
+                current.id
+                if isinstance(current, ast.Name)
+                else (
+                    current.attr
+                    if isinstance(current, ast.Attribute)
+                    else _callee_name(current) if isinstance(current, ast.Call) else ""
+                )
             )
-        )
-        if key and key not in followed:
-            followed.add(key)
-            pending.extend(bound.get(key, []))
-    return reached
+            if key and key not in followed:
+                followed.add(key)
+                pending.extend(bound.get(key, []))
+    return runs, maybe
 
 
 @lru_cache(maxsize=4)
-def _parsed_reach(code: str) -> tuple[ast.Module, frozenset[int]]:
+def _parsed_reach(code: str) -> tuple[ast.Module, frozenset[int], frozenset[int]]:
     """The parse of ``code`` and the ids of the expressions a call can receive.
 
+    The first set is what a process-starting call receives, the second what
+    only a call to unreadable code receives (:func:`_process_arguments`).
     Cached so one script is parsed and walked once however many judgements
     read it. Raises what :func:`ast.parse` raises for code it cannot parse.
     """
     tree = ast.parse(code)
-    return tree, frozenset(_process_arguments(tree))
+    runs, maybe = _process_arguments(tree)
+    return tree, frozenset(runs), frozenset(maybe)
 
 
-def _passed_literals(code: str) -> list[str]:
-    """The string literals of Python code that some call can receive (N409).
+def _passed_literals(code: str) -> tuple[list[str], list[str]]:
+    """The string literals a process-starting call receives, and those only unreadable code does.
+
+    The second list holds the literals only a call to code this cannot read
+    receives (N409, N417).
 
     Code that cannot be parsed has no calls to read, so every quoted literal
-    stands, as it does for :func:`_python_strings_of`.
+    stands as run, as it does for :func:`_python_strings_of`.
     """
     try:
-        tree, reached = _parsed_reach(code)
+        tree, runs, maybe = _parsed_reach(code)
     except (SyntaxError, ValueError, RecursionError) as error:
         logger.debug("Python judged by its quoted literals, unparsable (%s)", error)
-        return _string_literals(code)
-    return [
-        node.value
+        return _string_literals(code), []
+    literals = [
+        node
         for node in ast.walk(tree)
-        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) in reached
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
     ]
+    return (
+        [str(node.value) for node in literals if id(node) in runs],
+        [str(node.value) for node in literals if id(node) in maybe],
+    )
 
 
 def _python_strings(
-    tree: ast.Module, reached: frozenset[int], argv: Sequence[str]
-) -> tuple[list[str], list[list[str]]]:
+    tree: ast.Module, runs: frozenset[int], maybe: frozenset[int], argv: Sequence[str]
+) -> tuple[list[str], list[list[str]], list[str], list[list[str]]]:
     """Every string a call can receive, and every argv list it can receive (review 8 M1).
 
     A string literal counts wherever it sits as long as a call can be handed
@@ -4074,6 +4385,10 @@ def _python_strings(
     argv, BUILT by an expression is judged whole, from the root of its
     expression only, never once per link of a ``+`` chain (see
     :func:`_python_argvs`).
+
+    The first two lists are what a process-starting call receives; the last
+    two, what only a call to unreadable code receives (N417), which may run
+    them and is judged as unseen.
     """
     nodes = list(ast.walk(tree))
     links = {
@@ -4084,23 +4399,29 @@ def _python_strings(
     }
     names = _constant_names(tree)
     texts: list[str] = []
+    unsure_texts: list[str] = []
     argvs, replaced = _grown_argvs(tree, names, argv)
+    unsure_argvs: list[list[str]] = []
     for node in nodes:
-        if id(node) not in reached:
+        if id(node) in runs:
+            text_bucket, argv_bucket = texts, argvs
+        elif id(node) in maybe:
+            text_bucket, argv_bucket = unsure_texts, unsure_argvs
+        else:
             continue
         if isinstance(node, ast.Constant) or (
             isinstance(node, (ast.JoinedStr, ast.BinOp, ast.Call)) and id(node) not in links
         ):
             text = _python_text(node, names)
             if text is not None:
-                texts.append(text)
+                text_bucket.append(text)
         if (
             isinstance(node, (ast.List, ast.Tuple, ast.BinOp))
             and id(node) not in links
             and id(node) not in replaced
         ):
-            argvs.extend(_python_argvs(node, names, argv))
-    return texts, argvs
+            argv_bucket.extend(_python_argvs(node, names, argv))
+    return texts, argvs, unsure_texts, unsure_argvs
 
 
 def _open_quote(text: str) -> str:
@@ -4155,22 +4476,32 @@ def _python_commands(
     code: str, argv: Sequence[str], segment: str, depth: int
 ) -> Iterator[tuple[str, list[str], str]]:
     """What the strings and argv lists of process-starting Python code run."""
-    texts, argvs = _python_strings_of(code, argv)
+    texts, argvs, unsure_texts, unsure_argvs = _python_strings_of(code, argv)
     for text in texts:
         yield from _python_command(text, segment, depth)
     for argv in argvs:
         yield from _resolve(argv, segment, depth)
+    # Handed only to code this cannot read: what it runs is not seen (N417).
+    for text in unsure_texts:
+        yield from _unsure(_python_command(text, segment, depth))
+    for argv in unsure_argvs:
+        yield from _unsure(_resolve(argv, segment, depth))
 
 
-#: The builtin that runs a string as code; spelled so this module does not read as a use of it.
-_EXEC_BUILTIN: Final[str] = "ex" + "ec"
+def _unsure(
+    invocations: Iterable[tuple[str, list[str], str]],
+) -> Iterator[tuple[str, list[str], str]]:
+    """Mark invocations a call to unreadable code MAY run, so a match is judged unseen."""
+    for program, arguments, segment in invocations:
+        yield _MAY_BE_RUN, [program, *arguments], segment
+
+
 _RUN_PATH: Final[str] = "run_path"
 _FILE_READERS: Final[frozenset[str]] = frozenset({"read", "read_text"})
 _FILE_OPENERS: Final[frozenset[str]] = frozenset({"open", "Path"})
 
 
 _RUNPY_MODULE: Final[re.Pattern[str]] = re.compile("runpy")
-_COMPILE: Final[str] = "compile"
 
 
 def _file_read_by(
@@ -4315,7 +4646,7 @@ def _files_run_in_process(code: str) -> list[str]:
     Code that cannot be parsed names none.
     """
     try:
-        tree, _ = _parsed_reach(code)
+        tree = _parsed_reach(code)[0]
     except (SyntaxError, ValueError, RecursionError) as error:
         log_and_continue(
             logger,
@@ -4334,8 +4665,12 @@ def _files_run_in_process(code: str) -> list[str]:
     return paths
 
 
-def _pytest_in_code(code: str, argv: Sequence[str] = ()) -> list[str] | None:
+def _pytest_in_code(code: str, argv: Sequence[str] = ()) -> tuple[list[str] | None, bool]:
     """The operands of the pytest run Python code makes, or None when it makes none.
+
+    The flag says whether the run is certain: a ``"pytest"`` literal that
+    only a call to code this cannot read receives (N417) may start pytest,
+    and is not certain.
 
     Code runs pytest when it CALLS it (review 5 m1): ``pytest.main(...)``,
     ``from pytest import main`` then ``main(...)``, an import of the literal
@@ -4353,9 +4688,11 @@ def _pytest_in_code(code: str, argv: Sequence[str] = ()) -> list[str] | None:
     calls = _calls_pytest(code)
     # Only a "pytest" some call is handed starts it (N409): a tool list that
     # names it, beside a process call for something else, runs nothing.
-    starts_pytest = _PYTEST in _passed_literals(code) and _starts_a_process(code)
-    if not calls and not starts_pytest:
-        return None
+    run_literals, unsure_literals = _passed_literals(code)
+    process = _starts_a_process(code) if _PYTEST in run_literals + unsure_literals else False
+    certain = calls or (process and _PYTEST in run_literals)
+    if not certain and not (process and _PYTEST in unsure_literals):
+        return None, True
     operands: list[str] = []
     for literal in literals:
         if literal == _PYTEST:
@@ -4365,7 +4702,7 @@ def _pytest_in_code(code: str, argv: Sequence[str] = ()) -> list[str] | None:
         operands.append(literal)
     if _SYS_ARGV.search(code) is not None:
         operands.extend(argv)
-    return operands
+    return operands, certain
 
 
 def _python_code_runs(
@@ -4388,9 +4725,12 @@ def _python_code_runs(
         yield from _python_commands(code, argv, segment, depth)
     for path in _files_run_in_process(code):
         yield _CODE_FILE, [_PYTHON_CODE, path, *argv], segment
-    operands = _pytest_in_code(code, argv)
+    operands, certain = _pytest_in_code(code, argv)
     if operands is not None:
-        yield _PYTEST_IN_CODE, operands, segment
+        if certain:
+            yield _PYTEST_IN_CODE, operands, segment
+        else:
+            yield from _unsure([(_PYTEST_IN_CODE, operands, segment)])
     elif any(pattern.search(code) for pattern in _DYNAMIC_EXECUTION):
         yield _OPAQUE, [_PYTEST_IN_CODE, *_string_literals(code), *argv], segment
 
@@ -5196,6 +5536,11 @@ def _first_full_run(
     unseen: FullQaMatch | None = None
     for program, arguments, segment in invocations:
         found: FullQaMatch | None = None
+        unsure = program == _MAY_BE_RUN
+        if unsure:
+            program, arguments = arguments[0], arguments[1:]
+            if program in _STATE_PROGRAMS:
+                continue
         if program == _WRITES:
             event.written.update(arguments)
         elif program == _CD:
@@ -5220,6 +5565,8 @@ def _first_full_run(
             found = _full_run_of(program, arguments, segment, event, here, source)
         if found is None:
             continue
+        if unsure and not found.fail_closed:
+            found = FullQaMatch(found.pattern_id, found.segment, fail_closed=_HANDED_ON_REASON)
         if not found.fail_closed:
             return found
         # An unseen verdict does not end the scan: a later positive match wins.
