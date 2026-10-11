@@ -16,6 +16,8 @@ be wrong:
   quotes and blanking such a value CONCEALS a live command.
 """
 
+import pytest
+
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     strip_inert_spans,
     strip_message_bodies,
@@ -23,6 +25,49 @@ from claude_code_hooks_daemon.utils.shell_segmentation import (
 
 _FORCE = "--" + "force"
 _HARD = "--" + "hard"
+
+
+class TestGhBodyScope:
+    """``-b``/``--body`` is blanked only for the ``gh`` verbs that publish it as prose."""
+
+    @pytest.mark.parametrize(
+        "head",
+        [
+            "gh issue create",
+            "gh issue comment 1",
+            "gh issue edit 1",
+            "gh pr create",
+            "gh pr comment 1",
+            "gh pr edit 1",
+            "gh pr review 1",
+            "gh pr merge 1",
+        ],
+    )
+    @pytest.mark.parametrize("flag", ["--body", "-b"])
+    def test_prose_verbs_are_blanked(self, head: str, flag: str) -> None:
+        assert _HARD not in strip_message_bodies(f"{head} {flag} 'git reset {_HARD}'")
+
+    def test_the_attached_form_is_blanked(self) -> None:
+        assert _HARD not in strip_message_bodies(f"gh issue comment 1 --body='git reset {_HARD}'")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"gh api repos/o/r --body 'git reset {_HARD}'",
+            f"gh alias set x -b 'git reset {_HARD}'",
+            f"gh release create v1 --body 'git reset {_HARD}'",
+            f"gh gist create -b 'git reset {_HARD}'",
+            f"gh issue list -b 'git reset {_HARD}'",
+            f"gh pr view 1 --body 'git reset {_HARD}'",
+            f"gh issue --body 'git reset {_HARD}'",
+        ],
+    )
+    def test_everything_else_keeps_its_value(self, command: str) -> None:
+        assert _HARD in strip_message_bodies(command)
+
+    def test_a_chained_gh_api_after_a_comment_is_judged_on_its_own_segment(self) -> None:
+        command = f"gh issue comment 1 --body ok && gh api x --body 'git reset {_HARD}'"
+        assert _HARD in strip_message_bodies(command)
 
 
 class TestStripMessageBodies:
