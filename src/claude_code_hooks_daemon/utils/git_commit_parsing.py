@@ -909,6 +909,10 @@ class SimpleCommand:
     operator: str
     position: int
     git: GitInvocation | None = None
+    #: The redirections that write a file, as ``(operator, target)``. ``words``
+    #: carries no redirection, so this is the only place a command's ``> file``
+    #: is kept with the ``directory`` it runs in.
+    redirects: tuple[tuple[str, str], ...] = ()
 
 
 def simple_commands(command: str) -> list[SimpleCommand]:
@@ -921,8 +925,9 @@ def simple_commands(command: str) -> list[SimpleCommand]:
             operator=operator,
             position=position,
             git=_git_run(segment, directory, uncertain, position),
+            redirects=redirects,
         )
-        for position, (segment, directory, uncertain, operator) in enumerate(
+        for position, (segment, directory, uncertain, operator, redirects) in enumerate(
             _walk(command_words(command), ())
         )
     ]
@@ -948,7 +953,32 @@ _AND_OPERATOR: Final[str] = "&&"
 _SUBSHELL_CHARS: Final[str] = "()"
 
 
-_Step = tuple[list[str], tuple[str | None, ...], bool, str]
+_Step = tuple[list[str], tuple[str | None, ...], bool, str, tuple[tuple[str, str], ...]]
+
+#: A redirection operator that names a file it writes. ``>&`` is not one of
+#: them unless its target is a name rather than a descriptor (``2>&1``, ``>&-``).
+_FILE_WRITING_REDIRECTIONS: Final[frozenset[str]] = frozenset({">", ">>", ">|", "&>", "&>>", ">&"})
+_DESCRIPTOR_TARGET: Final[re.Pattern[str]] = re.compile(r"\d+-?|-")
+
+
+def _write_redirects(words: list[str], start: int, end: int) -> tuple[tuple[str, str], ...]:
+    """The file-writing redirections among ``words[start:end]``, as ``(operator, target)``."""
+    found: list[tuple[str, str]] = []
+    index = start
+    while index < min(end, len(words)):
+        if not is_redirection(words[index]):
+            index += 1
+            continue
+        operator = words[index]
+        target = words[index + 1] if index + 1 < len(words) else ""
+        index += 2
+        if operator not in _FILE_WRITING_REDIRECTIONS or not target:
+            continue
+        if operator == ">&" and _DESCRIPTOR_TARGET.fullmatch(target):
+            continue
+        found.append((operator, target))
+    return tuple(found)
+
 
 #: How many levels of ``eval``/``sh -c`` strings are inlined. Each level re-lexes
 #: the whole remaining text, so unbounded nesting costs quadratic time; past the
@@ -1001,7 +1031,15 @@ def _walk(
         if body is not None:
             found.extend(_walk(command_words(body), directory, uncertain, depth + 1))
         else:
-            found.append((segment, directory, uncertain, previous_operator))
+            found.append(
+                (
+                    segment,
+                    directory,
+                    uncertain,
+                    previous_operator,
+                    _write_redirects(words, index, end),
+                )
+            )
         index = end
     return found
 

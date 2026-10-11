@@ -9,6 +9,7 @@ from claude_code_hooks_daemon.utils.git_commit_parsing import GitInvocation, git
 from claude_code_hooks_daemon.utils.git_invocation_directory import (
     dash_c_values,
     invocation_directory,
+    placed_moves,
     placement_problem,
 )
 
@@ -172,3 +173,35 @@ class TestUnresolvableHomeSteps:
     def test_the_cwd_is_required(self) -> None:
         parameter = inspect.signature(placement_problem).parameters["cwd"]
         assert parameter.default is inspect.Parameter.empty
+
+
+class TestPlacedMoves:
+    """The ``cd`` chain read as the shell reads it, for a caller with no git run (ledger N403)."""
+
+    def test_a_plain_chain_is_returned_as_written(self) -> None:
+        assert placed_moves(("sub", "..", "x"), Path("/start")) == (("sub", "..", "x"), None)
+
+    def test_a_pwd_spelling_is_read_in_the_directory_reached_so_far(self) -> None:
+        placed, problem = placed_moves(("sub", "$PWD/inner"), Path("/start"))
+        assert problem is None
+        assert placed == ("sub", "/start/sub/inner")
+
+    def test_a_home_step_is_made_absolute(self) -> None:
+        placed, problem = placed_moves(("~/work",), Path("/start"))
+        assert problem is None
+        assert placed == (str(Path("~/work").expanduser()),)
+
+    @pytest.mark.parametrize("step", ["$UNKNOWN", "dir/*", "~nosuchuser-zz"])
+    def test_an_unplaceable_step_is_reported(self, step: str) -> None:
+        _placed, problem = placed_moves(("sub", step), Path("/start"))
+        assert problem is not None
+        assert "needs an expansion" in problem
+
+    def test_a_step_that_names_no_directory_is_reported(self) -> None:
+        _placed, problem = placed_moves(("sub", None), Path("/start"))
+        assert problem is not None
+        assert "names no directory" in problem
+
+    def test_a_relative_cwd_resolves_nothing(self) -> None:
+        _placed, problem = placed_moves(("$PWD/x",), Path("rel"))
+        assert problem is not None

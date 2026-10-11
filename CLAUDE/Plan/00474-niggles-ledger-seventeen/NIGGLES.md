@@ -1553,8 +1553,18 @@ an absolute path instead). The code joins every target against the payload `cwd`
 also corrects N338's "follows only the first `cd`"; same root cause as N28. Path judgement elsewhere
 (`landing_directories`, N299) already follows `cd`.
 
-**Status**: ⬜ Open. Remedy: resolve redirect targets from the directory the chain's `cd` moves land in, failing
-closed only when that directory cannot be placed; gate row for `cd sub && cmd > ../x`.
+**Status**: 🟢 Fixed on branch `agent-ad9ffaba8e0cf3c94-0ef7ac7a`. `simple_commands` now keeps each command's
+file-writing redirections beside the `cd` chain it runs in; `project_containment` reads every step of a command that
+contains a `cd`/`pushd` from the directories `landing_directories` gives it (a chain that may not have taken effect
+is read both ways, a subshell's `cd` ends with it), after `placed_moves` (new, in `git_invocation_directory`, sharing
+`expand_cwd_references` with the commit gates) reads `$PWD`, `$(pwd)` and `$(git rev-parse --show-toplevel)` in the
+directory reached so far. A chain that cannot be placed (`cd "$UNKNOWN"`) leaves that step's relative targets
+unresolved: under Plan 00483 A1 that is an ALLOW with an advisory, not a deny, as every other unknown target. A
+command with no `cd`, or no absolute hook cwd, is read as before. Pinned by
+`TestARedirectIsJudgedWhereTheChainsCdLandsIt` (`test_project_containment.py`), `TestPlacedMoves`
+(`test_git_invocation_directory.py`), `TestSimpleCommandsKeepTheirFileRedirections` (`test_git_commit_parsing.py`) and
+gate rows `n403-*`. Settles N338 once merged. Note: `cd sub; cmd > ../x` (`;`, not `&&`) is still denied, because the
+`cd` may fail and leave the command where it started.
 
 ### N402 — the conflict-marker commit gate denies `cd "$(git rev-parse --show-toplevel)" && git commit`
 
@@ -2926,6 +2936,8 @@ reproduction before it is fixed.
 | N340 | The "WRONG CLAUDE/ DIRECTORY" advisory fires on every Read of this repository's own `CLAUDE/Plan/...` files. In self-install mode the project's `CLAUDE/` is the authoritative copy, not "the daemon's internal docs copy".                                                                                                                               | ✅ Fixed (agent-a5313785be3bc54d9-56f41b13, c213595a8): `daemon_docs_guard.matches` now stands down when `ProjectContext.self_install_mode` is true and still fires for a client install.                                                    |
 | N342 | `setup_worktree.sh` cannot create ANY worktree from a host checkout at `/home/<user>/Projects/EC/claude-code-hooks-daemon`: the socket path up to the branch name is already 103 bytes against the 104-byte AF_UNIX limit, so even the mandatory `worktree-` prefix does not fit. The merge rule "work happens in worktrees" is unsatisfiable from there. | ⬜ Open                                                                                                                                                                                                                                      |
 | N341 | `sensitive_content` denied `cd /home/<user>/... && git worktree remove … && git branch -d <name>`. The secret term was in the `cd` path, not in the branch name the branch-name surface exists to check; the matched text was redacted as part of the home path.                                                                                          | ✅ Fixed with N364 (batch B branch `agent-a4230a7966c0680b6-a3d7ec3b`): reproduced on main, the term is now judged only in the command that records metadata, and `git branch -d/-D/--delete` and `git tag -d/--delete` are no longer writes |
+
+**N338 pointer**: N403's fix (branch `agent-ad9ffaba8e0cf3c94-0ef7ac7a`) reads every redirect from the directory the whole `cd` chain reaches, so `cd <clone> && … && cd extensions && npm ci > ../untracked/scratch/x.txt` is judged from `<clone>/extensions`; the row stays ⬜ until that branch merges.
 
 **N339, second reproduction** (coordinator, this container, 2026-10-03): `… && for b in a b c; do git -C x/$b rev-parse HEAD || exit 1; done` was denied as having no safety prelude. Every step in it is gated, but the `;` inside the loop syntax (`do … ; done`) was read as unguarded sequencing. This is the same class as the `{ …; }` group above. A fix should parse compound-command syntax (`{ }`, `for/while … do … done`, `if … fi`) rather than treat each `;` as a separator.
 
