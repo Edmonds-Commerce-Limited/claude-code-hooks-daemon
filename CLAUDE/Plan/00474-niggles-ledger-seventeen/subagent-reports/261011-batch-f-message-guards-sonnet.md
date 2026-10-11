@@ -25,3 +25,11 @@ Branch agent-a2f6348f56d8df606-7aed436a. Fix commit 25b9ae109; ledger status com
 Red-before-green was not demonstrated against a pre-fix tree (the worktree venv guard blocked running tests against a HEAD copy); the old behaviour is the ledger evidence.
 `llm_qa.py changed --allow-unmapped`: "QA: 36/40 PASSED, 2/40 FAILED, 2/40 NOT MEANINGFUL (detector failed: docs_qa, plan_qa)". format, lint, type_check, pyright, magic_values, error_hiding all 0; changed_tests 2644 passed, 0 failed, 5 skipped; project_handlers 238 passed. docs_qa (12 findings) and plan_qa (6) are advise-only (0 block) pointer-resolves findings on links to the archived plan 00483, in files this batch did not touch except NIGGLES.md's existing links; they are what mark the two test rows NOT MEANINGFUL.
 Also: ordinary_command_regression_gate n404/n405/n406 rows: 7 passed.
+
+## Review round 1 follow-up (commit 59a0b11dd)
+
+- N406: command positions now come from the shared `segment_spans` (utils/command_position). Heredoc bodies are blanked only when quoted and no receiving stage is a git/gh message command or a shell. A body is held with its message command only when that command is the heredoc's own receiver. The new deny shapes (if/then, while/do, `!`, `bash <<'EOF'`, `| bash`, bash -c, eval, nohup, timeout, /usr/bin/git, `&`, backticks, newline) were red first (16 failed), then green.
+- Acceptance DENY and warn commands for ancestry, N404 and N406 are wrapped as `bash -n -c '...'` with non-existent branch and PR names.
+- N405 deny tests gained bash -c, `| bash`, sudo, git -C, if/then, eval. The placeholder constant was renamed.
+- Not taken: `-m"..."` without a space (a pre-existing gap on main, non-blocking).
+- Targeted QA: 36/40 passed, with only the same advise-level docs_qa/plan_qa archived-link findings; changed_tests 2832 passed, 0 failed.
