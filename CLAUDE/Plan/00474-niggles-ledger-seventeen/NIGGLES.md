@@ -1461,6 +1461,24 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N397 — copy-flag parsing and the `find -exec` action list are re-implemented per handler
+
+**Source**: the N385 worktree_file_copy round 1 review (2026-10-10).
+
+**Evidence**: two things exist more than once.
+
+- Copy-operand parsing: `_split_copy_operands` and `_VALUE_OPTIONS` in `handlers/pre_tool_use/worktree_file_copy.py`
+  repeat the flag grammar (`-t`/`--target-directory`, value flags, `--`) that `handlers/utils/bash_file_writes.py`
+  already holds (`_FlagSyntax`, `_TARGET_DIRECTORY_FLAGS`), and that module also tracks `cd`, as the handler's
+  `_next_cwd` does.
+- The `-exec`/`-execdir`/`-ok`/`-okdir` list: `_FIND_EXEC` in `worktree_file_copy.py`, `_FIND_EXEC_FLAGS` in
+  `write_protected_paths.py` and `utils/recursive_search.py`, `_FIND_ACTIONS` in `root_recursion_guard.py`, and
+  `_FIND_EXEC_ACTIONS` in `subagent_full_qa_blocker.py`.
+
+**Status**: ⬜ Open. Remedy: one shared helper for each (a copy-operand reader built on `bash_file_writes`' flag
+syntax, and one `FIND_EXEC_ACTIONS` constant with the `;`/`+` terminator reader), then delete the copies. Left alone
+in N385 so the fix stayed one guard wide.
+
 ### N396 — the ccy supervisor's copy of the self-install rule still uses `.exists()`
 
 **Source**: the N391 parity test (`tests/unit/qa/test_check_install_mode_marker.py`), 2026-10-10.
@@ -1730,7 +1748,7 @@ the evidence is in `untracked/scratch/batchc-review/`. None of these came from b
 
 Each is a spelling a careless agent writes, so all are in scope under the 00483 threat model. Out of scope (hostile, by the reviewer's call, which the coordinator accepts): a local program whose only job is to run stdin, such as `python3 -c 'exec(sys.stdin.read())'`.
 
-**Status**: ⬜ Open (one branch per guard; each shape a red test first and a must-deny gate row). The shared wrapper and `-c`-body readers that batch (b) and (c) reuse should cover most of the wrapper cases.
+**Status**: ✅ Fixed, all three guards, one branch each, merged to main on 2026-10-10/11 (each shape a red test first and a must-deny gate row). The shapes left open are recorded under each guard below as decisions, each needing data flow the segment view does not have.
 
 - **curl_pipe_shell**: ✅ Fixed on branch agent-a220a4cbce194b561-7e5be5a9, except one shape. The pipe stage is now read word by word through `peel_command_wrappers` (so `| env python3`, `| sudo -u bob python3`, `| env FOO=1 bash` are seen, and `sudo tee /etc/apt/python.list` is not mistaken for an interpreter), `node` is an interpreter, and a downloading `$(...)`, backtick or `<(...)` is denied when it is the program: `sh -c "$(curl ...)"`, `bash -c`, `python3 -c`, `eval`, `bash <(curl ...)`, `source <(curl ...)`. Tests: `tests/unit/handlers/pre_tool_use/test_curl_pipe_shell_careless.py` (written red first, 28 failing, then green; allow rows for `curl -o x.tar.gz && tar x`, `curl | jq`, `diff <(curl a) <(curl b)`, `sh -c "echo $(curl ...)"`). Gate rows: `remote-code-*` in `scripts/qa/dangerous-invocation-corpus.yaml`.
   - **Left open, by decision**: `curl url -o x.sh && bash x.sh`. A same-command download-then-run is not reliably detectable. `curl -o x.sh U && sha256sum -c sums && bash x.sh` is the verified form the guard's own advice points at, and `bash -n x.sh` does not run the file, so a deny refuses the careful spelling; `curl -O`, `cd dir &&` and variable names lose the file name, so it would still miss the careless one. Recorded as `UNCOVERED-open` row `remote-code-download-then-run`.
@@ -1740,7 +1758,11 @@ Each is a spelling a careless agent writes, so all are in scope under the 00483 
   - **Scope extended deliberately** to `du` and `ls -R`/`--recursive`: the guard's text named search tools, but the harm it prevents is the whole-disk walk, and these walk the same tree at the same cost (`du`'s depth option limits printing, not the walk). The rule text, verbose message and guidance now say so.
   - **`rg x /home/user`**: `rg` was already a walker; the gap was the root list (`/home` exact, a directory below it is a project root by design). The current user's `HOME` value is now the home tree, exactly as `~` and `$HOME` are. **Left open, by decision**: `/home/<another user>` and any other spelling that is not this user's HOME, because a directory below `/home` is indistinguishable from a project root.
   - **Round 1 review fixes**: the spelled-out HOME is no scan root only when it equals the project root or lies inside it (`resolve_project_root`), so a container with HOME=/workspace can still `grep -r x /workspace`; when HOME is a PARENT of the project (`/home/user` over `/home/user/proj`, the usual layout) it stays denied, like `~` and `$HOME` (the first wording of this fix wrongly exempted that case); a dangerous root followed by `/*` is that root (`du -sh /*`, `ls -R /*`, `grep -r x /*`, `find /*`, `~/*`); `ionice` joined the shared `COMMAND_WRAPPERS` table; options and `--` between `-c` and the command string are stepped over. DRY: `utils/recursive_search.py` and `utils/git_commit_parsing.py` had their own `_SHELLS` sets; both held exactly {bash, sh, dash, zsh, ksh}, the same members as `SHELL_NAMES`, so they now import it with no behaviour change. Tests written red first (15 failing).
-- **worktree_file_copy**: ⬜ Open (another agent's).
+- **worktree_file_copy**: ✅ Fixed on branch agent-a6b15aeb31a90918a-939edbf5. The copy is now read from its operands (source, destination, `-t DIR`, recursion), not only by the code-dir text patterns: `cp -r <wt>/src .`, `rsync -a <wt>/ ./`, `cd /workspace; cp ...`, `(cp ...)`, `command cp`, `nice cp`, `cp -t src/ <wt>/...`, `xargs cp` and `find -exec cp` are denied. Wrappers go through the shared `peel_command_wrappers` (`_effective_command` no longer keeps its own wrapper list), segments through `command_position_segments`. Tests: `tests/unit/handlers/test_worktree_file_copy_careless.py` (written red first, 46 failing; allow rows for main-to-worktree, within one worktree, worktree to `untracked/scratch/`, `git -C <wt> ...`, `cd <wt>` then `.`). Gate rows: `worktree-copy-*` in `scripts/qa/dangerous-invocation-corpus.yaml`.
+  - **How the destination is decided**: an explicit destination is main-repo code when its first component (any component, if absolute) is a code dir. A bare `.` is the cwd, tracked only from a LITERAL `cd`/`pushd` earlier in the same command and the hook's `cwd` field: inside a worktree it is that worktree (allowed); a relative `cd` into a code dir makes it that code dir (denied); any other absolute `cd` is the main checkout, except `/tmp`, `/var/tmp`, `/dev/shm`. A `cd` that cannot be resolved (`$VAR`, `$(...)`, `-`, `~`, no argument, `..`) leaves it UNKNOWN and a bare `.` is not denied (an explicit code-dir destination still is). A `cd` inside a subshell is not tracked. A bare `.` into main is denied only for a whole-tree copy (`-r`/`-a`, `mv`, a worktree root) or a source under a code dir; `cp <wt>/notes.txt .` is allowed.
+  - **Left open, by decision**: `xargs` takes its source from the pipeline stage just before it, so `ls <wt>/src; xargs cp -t src/ < list` (source from a file) is not seen; a `cd` into a variable then `.`; a `cd` inside a subshell followed by a copy in the same subshell; `find -exec sh -c 'cp "$1" src/' _ {} \;`. Each needs data flow the segment view does not have.
+  - Round 1 review fixes: an absolute destination is read after the main checkout root it sits under and only its first component counts (`<root>/untracked/scratch/src` and `/tmp/src/` are allowed, `<root>/src` is denied); a relative source is resolved against a cwd inside a worktree, so `cp src/x.py /workspace/src/` run from a worktree is denied (copying within the worktree stays allowed). Duplicated flag parsing is filed as N397.
+  - A copy into ANOTHER worktree still goes through the older text patterns (an existing test pins that), and `dd of=` is still read only by them.
 
 ### N384 — `/hooks-daemon optimise` recommends the `daemon_stats` health line to every project
 
