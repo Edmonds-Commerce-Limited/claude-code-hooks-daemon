@@ -62,7 +62,16 @@ AGENT_ID_FIELD: Final[str] = "agent_id"
 #: is drift, so ``tests/unit/config/test_scope_requires_agent_id_event.py``
 #: reads the real contracts and fails if this set stops matching them.
 AGENT_ID_EVENTS: Final[frozenset[str]] = frozenset(
-    {"PreToolUse", "PostToolUse", "Stop", "SubagentStop", "SubagentStart"}
+    {
+        "PreToolUse",
+        "PostToolUse",
+        "Stop",
+        "SubagentStop",
+        "SubagentStart",
+        "TeammateIdle",
+        "TaskCreated",
+        "TaskCompleted",
+    }
 )
 
 
