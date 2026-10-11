@@ -1482,7 +1482,9 @@ rather than on `name` or the `mcp__<server>__` tool-name prefix". Nothing in `sr
 [report](subagent-reports/261011-fact-check-batch-n-sonnet.md)): the gap is latent until a handler wants to. The field is now in the vendored contract
 (`conditional_input_fields`), so this is a recorded gap, not an unknown.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Closed, no consumer. The listing the remedy asked for is empty: the batch N fact-check found no
+reference to `mcp_server` or `mcp__` anywhere in `src/`, so no handler makes a trust decision about an MCP tool. A
+future handler that does must read `mcp_server.source`, which the vendored contract now records.
 
 **Remedy**: list the daemon handlers that decide anything by MCP tool name; for each, decide whether to read
 `mcp_server.source`. Likely none today, in which case close this as "no consumer".
