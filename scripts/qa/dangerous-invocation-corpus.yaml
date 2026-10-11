@@ -517,6 +517,40 @@ rows:
       Ledger 00466 N42: an opener inside a `#` comment opens nothing, so the
       next line runs.
 
+  # -------- gh --body heredoc and git -c commit -F heredoc stay narrow (ledger N400, N401)
+  - id: gh-body-unquoted-heredoc-runs-substitution
+    command: "gh pr create --title x --body \"$(cat <<EOF\n$(git reset --hard)\nEOF\n)\""
+    axis: working-tree-destruction
+    verdict: COVERED
+    note: >-
+      Ledger 00474 N400: only a QUOTED-delimiter heredoc in a `--body` value is
+      data. An unquoted `<<EOF` body is expanded by bash, so the substitution in
+      it runs.
+
+  - id: gh-body-substitution-runs-the-command
+    command: "gh pr create --title x --body \"$(git reset --hard)\""
+    axis: working-tree-destruction
+    verdict: COVERED
+    note: >-
+      Ledger 00474 N400: a `--body` value that is a substitution of the command
+      itself, not a heredoc fed to `cat`, really runs it.
+
+  - id: git-dash-c-commit-unquoted-heredoc-runs-substitution
+    command: "git -c core.x=1 commit -F - <<EOF\n$(git reset --hard)\nEOF"
+    axis: working-tree-destruction
+    verdict: COVERED
+    note: >-
+      Ledger 00474 N401: a `-c k=v` global option makes the quoted heredoc a
+      message, as it already was without it; an UNQUOTED body still expands.
+
+  - id: git-dash-c-command-key-runs-the-body
+    command: "git -c core.fsmonitor=sh commit -F - <<'EOF'\ngit reset --hard\nEOF"
+    axis: working-tree-destruction
+    verdict: COVERED
+    note: >-
+      Ledger 00474 N401: a `-c` that sets a key git RUNS (`core.fsmonitor`) is
+      not an inert global option, so the body keeps being read as code.
+
   - id: no-change-n240-script-typescript-log
     command: "script -q /tmp/typescript.log -c ls"
     axis: project-containment

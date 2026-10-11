@@ -394,6 +394,35 @@ _SINK_OUTPUT_OPERANDS: frozenset[str] = frozenset({"tee"})
 #: `git` options before the subcommand that change nothing about what runs.
 _GIT_INERT_GLOBAL_FLAGS: frozenset[str] = frozenset({"--no-pager", "-P", "--no-optional-locks"})
 _GIT_DIRECTORY_FLAG = "-C"
+_GIT_CONFIG_FLAG = "-c"
+
+#: Config keys whose value is a command git runs, so `-c <key>=...` can run a
+#: shell on the body. Every other `-c k=v` (`user.email`, `core.autocrlf`,
+#: `commit.gpgsign`) only sets a value and changes nothing about what runs.
+_GIT_COMMAND_CONFIG_KEYS: frozenset[str] = frozenset(
+    {
+        "core.fsmonitor",
+        "core.sshcommand",
+        "core.pager",
+        "core.editor",
+        "core.hookspath",
+        "core.askpass",
+        "sequence.editor",
+        "diff.external",
+    }
+)
+#: Config key suffixes that name a program git runs (`gpg.program`,
+#: `credential.helper`, `filter.x.clean`, `diff.x.textconv`).
+_GIT_COMMAND_CONFIG_SUFFIXES: tuple[str, ...] = (
+    ".program",
+    ".helper",
+    ".command",
+    ".cmd",
+    ".clean",
+    ".smudge",
+    ".process",
+    ".textconv",
+)
 
 #: The git subcommands that read a heredoc body as data. Anything else may be
 #: an alias, and a `!` alias runs a shell on the body.
@@ -720,7 +749,7 @@ _DUPLICATE_OPERATORS: frozenset[str] = frozenset({">&", "<&"})
 #: Quoting the value was enough to avoid it, which is why the bypass survived
 #: the suite -- every test quoted.
 _MESSAGE_BODY_PATTERN = re.compile(
-    r"(?P<flag>(?<![\w-])(?:-m|--message|-F|--file))"
+    r"(?P<flag>(?<![\w-])(?:-m|--message|-F|--file|-b|--body))"
     r"(?P<sep>=|\s+)"
     r"(?P<value>"
     r"\"\$\(cat\s+<<-?\s*(?P<dq>['\"]?)(?P<delim>[^\s'\"\\;&|<>()]+)(?P=dq)"
@@ -1239,11 +1268,17 @@ def strip_message_bodies(command: str) -> str:
 
     def _blank_if_inert(match: re.Match[str]) -> str:
         binary, subcommand = tracker.binary_and_subcommand(match.start())
-        if binary not in _MESSAGE_TAKING_COMMANDS:
+        if binary == _GH_COMMAND:
+            # `gh pr|issue|release ... --body|-b` is the body flag; the sink rule
+            # for a `gh` heredoc (`_gh_reads_body_as_data`) names the same groups.
+            if match.group("flag") not in _GH_BODY_FLAGS or subcommand not in _GH_DATA_SUBCOMMANDS:
+                return match.group(0)
+        elif binary not in _MESSAGE_TAKING_COMMANDS or match.group("flag") in _GH_BODY_FLAGS:
             return match.group(0)
-        allowed = _MESSAGE_TAKING_SUBCOMMANDS.get(binary)
-        if allowed is not None and subcommand not in allowed:
-            return match.group(0)
+        else:
+            allowed = _MESSAGE_TAKING_SUBCOMMANDS.get(binary)
+            if allowed is not None and subcommand not in allowed:
+                return match.group(0)
         if value_can_substitute(match.group("value")):
             return match.group(0)
         return f"{match.group('flag')}{match.group('sep')}{_MESSAGE_BODY_PLACEHOLDER}"
@@ -1687,6 +1722,9 @@ def _stage_is_inert_sink(stage: str, fds_may_run: bool, text_readers_only: bool 
 
 _GH_COMMAND = "gh"
 
+#: The `gh` flags whose value is the human-authored body of a PR, issue or comment.
+_GH_BODY_FLAGS: frozenset[str] = frozenset({"-b", "--body"})
+
 #: The `gh` command groups that read a heredoc as a body, comment, notes or
 #: JSON input (`--body-file -`, `-F -`, `--input -`). Built-in names, which a
 #: user alias cannot shadow, so none of them can be a `!` alias running a shell.
@@ -1905,11 +1943,22 @@ _VALUE_LETTERS: frozenset[str] = frozenset().union(*_SINK_VALUE_OPTIONS.values()
 
 def _git_reads_body_as_data(arguments: list[_Word]) -> bool:
     """``git`` with only inert global options, running a subcommand that
-    reads stdin as data. ``-c``, ``--config-env`` and an alias can each run a
-    shell on the body. The ``-C`` directory may be unresolved, but not
-    unquoted, where bash may split it into options; the subcommand may
-    not."""
+    reads stdin as data. ``--config-env`` and an alias can each run a shell
+    on the body, and so can a ``-c`` that sets a command-running key
+    (:func:`_is_inert_config_setting`); a plain ``-c k=v`` cannot. The ``-C``
+    directory may be unresolved, but not unquoted, where bash may split it
+    into options; the subcommand may not."""
     return _git_data_subcommand_index(arguments) is not None
+
+
+def _is_inert_config_setting(setting: str | None) -> bool:
+    """Whether a ``-c`` operand is ``key=value`` for a key that runs nothing.
+
+    ``None`` is a word an expansion leaves unresolved, which may be any key."""
+    if setting is None or "=" not in setting:
+        return False
+    key = setting.partition("=")[0].lower()
+    return key not in _GIT_COMMAND_CONFIG_KEYS and not key.endswith(_GIT_COMMAND_CONFIG_SUFFIXES)
 
 
 def _git_data_subcommand_index(arguments: list[_Word]) -> int | None:
@@ -1918,6 +1967,18 @@ def _git_data_subcommand_index(arguments: list[_Word]) -> int | None:
     index = 0
     while index < len(arguments):
         argument = arguments[index].value
+        if argument == _GIT_CONFIG_FLAG:
+            if index + 1 >= len(arguments) or not _is_inert_config_setting(
+                arguments[index + 1].value
+            ):
+                return None
+            index += 2
+            continue
+        if argument is not None and argument.startswith(_GIT_CONFIG_FLAG):
+            if not _is_inert_config_setting(argument[2:]):
+                return None
+            index += 1
+            continue
         if argument == _GIT_DIRECTORY_FLAG:
             if index + 1 < len(arguments) and _may_split(arguments[index + 1].raw):
                 return None

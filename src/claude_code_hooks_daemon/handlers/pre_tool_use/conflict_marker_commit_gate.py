@@ -225,13 +225,13 @@ def _commit_sources(subcommand: str, options: list[str]) -> tuple[_Source, ...] 
     return (named,)
 
 
-def _unplaceable_reason(run: GitInvocation) -> str | None:
+def _unplaceable_reason(run: GitInvocation, cwd: Path) -> str | None:
     """Why this commit's repository or recorded tree cannot be stated, else None."""
     if run.subcommand == _AM and not _AM_RESUMES.intersection(run.arguments):
         return "`git am` records patch content that is not in any tree yet"
     if any(option.startswith(_PATHSPEC_FROM_FILE) for option in run.arguments):
         return "`--pathspec-from-file` names the committed paths in a file"
-    return placement_problem(run)
+    return placement_problem(run, cwd)
 
 
 def _commits(command: str, cwd: Path) -> Iterator[_Commit | _Unplaceable]:
@@ -247,7 +247,7 @@ def _commits(command: str, cwd: Path) -> Iterator[_Commit | _Unplaceable]:
         sources = _commit_sources(run.subcommand, list(run.arguments))
         if sources is None and run.subcommand != _AM:
             continue
-        reason = _unplaceable_reason(run)
+        reason = _unplaceable_reason(run, cwd)
         if reason is not None:
             yield _Unplaceable(reason)
         elif sources is not None:

@@ -74,7 +74,7 @@ def _merge_directory(command: str, cwd: str) -> Path:
     """
     start = Path(cwd)
     run = next((r for r in git_invocations(command) if r.subcommand in _MERGE_SUBCOMMANDS), None)
-    if run is None or placement_problem(run) is not None:
+    if run is None or placement_problem(run, start) is not None:
         return start
     return invocation_directory(run, start)
 

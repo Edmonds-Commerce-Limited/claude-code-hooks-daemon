@@ -1329,6 +1329,30 @@ rows:
       git reset --hard
       git stash
       EOF
+  # --- Plan 00474 N400-N402: bodies and placements the git guards read as data ---
+  - id: a8-gh-pr-create-body-heredoc-mentions-reset-hard
+    command: |-
+      gh pr create --title x --body "$(cat <<'EOF'
+      Blocks git reset --hard.
+      EOF
+      )"
+  - id: a8-gh-issue-comment-body-heredoc-mentions-stash
+    command: |-
+      gh issue comment 5 --body "$(cat <<'EOF'
+      Never run git stash here.
+      EOF
+      )"
+  - id: a8-git-dash-c-commit-file-heredoc-mentions-reset-hard
+    command: |-
+      git -c user.email=a@b.c commit -F - <<'EOF'
+      Document that git reset --hard is blocked.
+      EOF
+  - id: a8-cd-show-toplevel-then-commit
+    command: |-
+      set -euo pipefail; cd "$(git rev-parse --show-toplevel)" && git commit -m 'x'
+  - id: a8-cd-pwd-then-commit
+    command: |-
+      set -euo pipefail; cd "$PWD" && git commit -m 'x'
   # --- Plan 00483 Task 3.2 batch (c): raw-text guards ----------------------------
   - id: a9-curl-json-tool
     command: |-

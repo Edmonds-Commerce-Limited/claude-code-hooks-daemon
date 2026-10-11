@@ -40,6 +40,87 @@ class TestInvocationDirectory:
         assert invocation_directory(run, Path("/start")) == Path("/elsewhere")
 
 
+@pytest.fixture()
+def checkout(tmp_path: Path) -> Path:
+    """A directory holding a ``.git`` entry, with a subdirectory the hook starts in."""
+    root = tmp_path / "repo"
+    (root / ".git").mkdir(parents=True)
+    (root / "sub" / "inner").mkdir(parents=True)
+    return root
+
+
+class TestCwdExpansionsAreSteps:
+    """A ``cd`` operand spelled as a cwd expansion is placed, as path judgement places it."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'cd "$(git rev-parse --show-toplevel)" && git commit -m x',
+            'cd "$(git  rev-parse --show-toplevel )"; git commit -m x',
+        ],
+    )
+    def test_show_toplevel_is_the_repository_root(self, checkout: Path, command: str) -> None:
+        run = _only(command)
+        start = checkout / "sub"
+        assert placement_problem(run, start) is None
+        assert invocation_directory(run, start) == checkout
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'cd "$PWD" && git commit -m x',
+            'cd "${PWD}" && git commit -m x',
+            'cd "$(pwd)" && git commit -m x',
+        ],
+    )
+    def test_pwd_spellings_are_the_start_directory(self, checkout: Path, command: str) -> None:
+        run = _only(command)
+        start = checkout / "sub"
+        assert placement_problem(run, start) is None
+        assert invocation_directory(run, start) == start
+
+    def test_a_later_step_is_read_in_the_directory_the_earlier_cd_reached(
+        self, checkout: Path
+    ) -> None:
+        run = _only('cd sub && cd "$PWD/inner" && git commit -m x')
+        assert placement_problem(run, checkout) is None
+        assert invocation_directory(run, checkout) == checkout / "sub" / "inner"
+
+    def test_dash_c_is_read_in_the_directory_the_cd_chain_reached(self, checkout: Path) -> None:
+        run = _only('cd sub && git -C "$(pwd)/inner" commit -m x')
+        assert placement_problem(run, checkout) is None
+        assert invocation_directory(run, checkout) == checkout / "sub" / "inner"
+
+    def test_without_a_start_directory_it_is_still_reported(self, checkout: Path) -> None:
+        run = _only('cd "$(git rev-parse --show-toplevel)" && git commit -m x')
+        assert placement_problem(run) is not None
+
+    def test_a_relative_start_directory_resolves_nothing(self) -> None:
+        run = _only('cd "$PWD" && git commit -m x')
+        assert placement_problem(run, Path("relative")) is not None
+
+    def test_no_repository_leaves_the_toplevel_expansion_reported(self, tmp_path: Path) -> None:
+        run = _only('cd "$(git rev-parse --show-toplevel)" && git commit -m x')
+        assert "needs an expansion" in (placement_problem(run, tmp_path / "nowhere") or "")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd $PROJ && git commit -m x",
+            'cd "$PROJ" && git commit -m x',
+            'cd "$PWD/$SUB" && git commit -m x',
+            'cd "$(dirname "$PWD")" && git commit -m x',
+            "cd - && git commit -m x",
+        ],
+    )
+    def test_any_other_expansion_stays_reported(self, checkout: Path, command: str) -> None:
+        assert placement_problem(_only(command), checkout / "sub") is not None
+
+    def test_an_unplaced_cd_leaves_the_next_expansion_unplaced(self, checkout: Path) -> None:
+        run = _only('cd "$PROJ" && cd "$PWD" && git commit -m x')
+        assert placement_problem(run, checkout) is not None
+
+
 class TestPlacementProblem:
     @pytest.mark.parametrize(
         "command",

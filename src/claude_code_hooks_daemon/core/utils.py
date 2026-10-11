@@ -495,6 +495,17 @@ def substitute_cwd_expansions(token: str, command: str, cwd: Any) -> str:
         return token
     if _CHANGES_DIRECTORY_RE.search(command):
         return token
+    return expand_cwd_references(token, cwd)
+
+
+def expand_cwd_references(token: str, cwd: str) -> str:
+    """``token`` with the working-directory expansions read as ``cwd``.
+
+    The spellings and the one level of depth are :func:`substitute_cwd_expansions`'
+    own. It decides WHETHER ``cwd`` is what the shell sees; this does the
+    reading, for a caller that has already established that (a ``cd`` operand is
+    expanded in the directory the shell is in before the ``cd`` runs).
+    """
     token = _PWD_EXPANSION_RE.sub(lambda _match: cwd, token)
     if _TOPLEVEL_EXPANSION_RE.search(token):
         root = repository_root(cwd)

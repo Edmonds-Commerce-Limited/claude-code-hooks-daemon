@@ -642,6 +642,55 @@ class TestAnUncheckableCommitIsDenied:
         assert _verdict(handler, "git am --continue", repo).decision == Decision.DENY
 
 
+_CWD_EXPANSION_COMMANDS = (
+    'cd "$(git rev-parse --show-toplevel)" && git commit -m x',
+    'cd "$PWD" && git commit -m x',
+    'cd "${PWD}" && git commit -m x',
+    'cd "$(pwd)" && git commit -m x',
+    'cd "$(git rev-parse --show-toplevel)"; git commit -m x',
+)
+
+
+class TestCwdExpansionsInTheCdAreChecked:
+    """Ledger 00474 N402 (a): the repository root and the working directory are placeable."""
+
+    @pytest.mark.parametrize("command", _CWD_EXPANSION_COMMANDS)
+    def test_a_clean_commit_is_allowed(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path, command: str
+    ) -> None:
+        _stage(repo, "doc.md", "# Doc\n\nsecond\n")
+        assert _verdict(handler, command, repo).decision == Decision.ALLOW
+
+    @pytest.mark.parametrize("command", _CWD_EXPANSION_COMMANDS)
+    def test_a_marker_is_still_found(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path, command: str
+    ) -> None:
+        _stage(repo, "doc.md", f"# Doc\n\nfirst\n{CLOSE} main\n")
+        result = _verdict(handler, command, repo)
+        assert result.decision == Decision.DENY
+        assert "doc.md:4" in result.reason
+
+    def test_the_root_is_read_from_a_subdirectory(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        (repo / "sub").mkdir()
+        _stage(repo, "doc.md", f"# Doc\n\nfirst\n{CLOSE} main\n")
+        command = 'cd "$(git rev-parse --show-toplevel)" && git commit -m x'
+        result = _verdict(handler, command, repo / "sub")
+        assert result.decision == Decision.DENY
+        assert "doc.md:4" in result.reason
+
+    @pytest.mark.parametrize(
+        "command", ["cd $PROJ && git commit -m x", 'cd "$PWD/$SUB" && git commit -m x']
+    )
+    def test_any_other_expansion_stays_denied_as_unchecked(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path, command: str
+    ) -> None:
+        result = _verdict(handler, command, repo)
+        assert result.decision == Decision.DENY
+        assert "NOT checked" in result.reason
+
+
 class TestRoutineIdiomsStillCommit:
     """Review 1 M4: fail-closed placement must not refuse the everyday shapes."""
 
