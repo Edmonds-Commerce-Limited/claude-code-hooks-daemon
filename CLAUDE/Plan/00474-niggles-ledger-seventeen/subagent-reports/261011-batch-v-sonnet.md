@@ -52,6 +52,32 @@ comment text on a line is now one segment with its command, instead of several. 
   test file).
 - Full suite not run, per instruction.
 
+## Round 2 (review: FIX FIRST)
+
+The review found that `_starts_comment` trusts any `#` after a comment preceder, so with the new mode an escaped
+word-break (`grep -rn issue\ #42 docs/ && git reset --hard`) or a `#` after a closed substitution swallowed the real
+command, and six guards flipped from deny to allow.
+
+Fix, all inside `split_unquoted_spans` and only in `comments_end_at_newline` mode (default mode untouched):
+
+- `escaped_end` records where the last backslash escape ended; a `#` there continues a word (covers `\ #`, `\;#`,
+  `\|#`, `\&#`, `\(#`, `\>#`, backslash-tab and backslash-newline).
+- New `_Nesting` tracker: unquoted/double-quoted `$(`, `<(`, `>(`, `${`, and backtick bodies. A `#` is a swallowing
+  comment only at depth zero, and not directly after a closer (`$(x)#`, `${x}#`, a closing backtick).
+- Bias: openers always count and closers count only when unquoted, so a miscount keeps nesting (keeps splitting, the old
+  behaviour). A doubtful `#` splits exactly as on main.
+
+Tests: `TestDoubtfulHashIsNeverAComment` runs 16 doubtful prefixes x 6 real commands x 2 separators through
+destructive_git, sudo_pip, pip_break_system, gh_issue_comments, github_auto_close_keywords and git_stash `matches()`,
+plus per-guard deny, split-position and "real comment after a closed substitution still swallows" checks.
+
+Probes (`/workspace/untracked/scratch/review-batch-v/`): `probe.py` output on this branch is byte-identical to the
+reviewer's `main.json` (no row weaker than main, 0 diff). `probe2.py` and `probe3.py`: every row denies by its intended
+guard (the data-head `\ #` rows that allowed in round 1 now deny).
+
+Round 2 results: `tests/unit/utils` + `tests/unit/handlers/pre_tool_use` + corpus gate: 18489 passed, 1 skipped, 0
+failed. black, ruff, mypy and pyright clean on the touched source files.
+
 ## Ledger
 
 NIGGLES.md N407: both comment-splitting residual lines marked "cleared by batch V". The unrelated `git grep` quoted

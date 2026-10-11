@@ -14,6 +14,12 @@ import pytest
 import yaml
 
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import DestructiveGitHandler
+from claude_code_hooks_daemon.handlers.pre_tool_use.gh_issue_comments import GhIssueCommentsHandler
+from claude_code_hooks_daemon.handlers.pre_tool_use.git_stash import GitStashHandler
+from claude_code_hooks_daemon.handlers.pre_tool_use.github_auto_close_keywords import (
+    GithubAutoCloseKeywordsHandler,
+)
 from claude_code_hooks_daemon.handlers.pre_tool_use.pip_break_system import PipBreakSystemHandler
 from claude_code_hooks_daemon.handlers.pre_tool_use.sudo_pip import SudoPipHandler
 from claude_code_hooks_daemon.utils.command_position import (
@@ -132,6 +138,80 @@ class TestNotAComment:
     def test_a_hash_in_a_heredoc_body_does_not_hide_the_next_command_on_its_line(self) -> None:
         command = "bash <<EOF\nls a#b && sudo pip install x\nEOF"
         assert _denied_by_either(command)
+
+
+_DOUBTFUL_PREFIXES = [
+    "grep -rn issue\\ #42 docs/",
+    "grep -n TODO\\ #12 src/x.py",
+    "rg Fixes\\ #7",
+    "printf 'x' a\\ #",
+    "echo a\\;#",
+    "echo a\\|#",
+    "echo a\\&#",
+    "echo a\\(#",
+    "echo a\\>#",
+    "echo a\\\t#",
+    "echo a\\\n#",
+    "echo $(echo a)#",
+    "cat <(echo a)#",
+    "echo $((1))#",
+    "echo ${x:-a #b}",
+    "echo `echo #`",
+]
+_REAL_COMMANDS = [
+    "git reset --hard",
+    "sudo pip install x",
+    "pip install --break-system-packages x",
+    "gh issue view 5",
+    "git commit -m 'Fixes #12'",
+    "git stash",
+]
+
+
+def _any_guard_denies(command: str) -> bool:
+    event = _bash(command)
+    guards = (
+        DestructiveGitHandler(),
+        SudoPipHandler(),
+        PipBreakSystemHandler(),
+        GhIssueCommentsHandler(),
+        GithubAutoCloseKeywordsHandler(),
+        GitStashHandler(),
+    )
+    return any(guard.matches(event) for guard in guards)
+
+
+class TestDoubtfulHashIsNeverAComment:
+    """A `#` that bash reads as part of a word (escaped, after a substitution, inside
+    `${}` or backticks) must not swallow the real command after it."""
+
+    @pytest.mark.parametrize("prefix", _DOUBTFUL_PREFIXES)
+    @pytest.mark.parametrize("real", _REAL_COMMANDS)
+    @pytest.mark.parametrize("sep", ["; ", " && "])
+    def test_the_real_command_after_it_still_denies(self, prefix: str, real: str, sep: str) -> None:
+        assert _any_guard_denies(prefix + sep + real)
+
+    @pytest.mark.parametrize("prefix", _DOUBTFUL_PREFIXES)
+    def test_each_named_guard_denies_its_own_command(self, prefix: str) -> None:
+        guarded = [
+            (DestructiveGitHandler(), "git reset --hard"),
+            (SudoPipHandler(), "sudo pip install x"),
+            (PipBreakSystemHandler(), "pip install --break-system-packages x"),
+        ]
+        for guard, real in guarded:
+            assert guard.matches(_bash(prefix + "; " + real)), (prefix, real)
+
+    @pytest.mark.parametrize("prefix", _DOUBTFUL_PREFIXES)
+    def test_the_line_is_split_after_the_doubtful_hash(self, prefix: str) -> None:
+        assert len(segment_spans(prefix + "; git reset --hard")) >= 2
+
+    def test_a_backslash_newline_before_hash_continues_the_word(self) -> None:
+        assert len(segment_spans("echo a\\\n#; git reset --hard")) == 2
+
+    def test_a_real_comment_after_a_closed_substitution_still_swallows(self) -> None:
+        assert len(segment_spans("x=$(date) # note | y && z")) == 1
+        assert len(segment_spans("echo ${x:-a} # note | y")) == 1
+        assert len(segment_spans("echo `date` # note | y")) == 1
 
 
 class TestNoChangeForCommandsWithoutAComment:
