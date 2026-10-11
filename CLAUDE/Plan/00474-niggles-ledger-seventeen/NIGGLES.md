@@ -667,6 +667,35 @@ restore when the post-test bytes equal `HEAD` would weaken a guard, so it is lef
 proposal rather than made. Agent work is exhausted: both leads investigated, three reproduction runs
 clean; what is left is the owner's call on the fixture proposal (2026-10-11).
 
+**Ruling and fix** (batch AN, merge de99129fe; report `subagent-reports/261011-batch-an-n280-sonnet.md`,
+review `subagent-reports/261011-batch-an-review-r1.md`, APPROVE): the owner ruled that a test run must
+never change the main project. The cause was still not reproduced. About 40,000 tests were run with the
+working directory set to a clone standing in for main, and none wrote its docs. Instead
+`tests/jail_site/doc_write_jail.py` installs a Python audit hook that refuses a write, rename or delete
+of `CLAUDE.md` or `.claude/HOOKS-DAEMON.md` at the root of every checkout `git worktree list` names, so a
+run in a worktree also protects main. Child Pythons get it through `PYTHONPATH` and a `sitecustomize`. An
+autouse fixture fails the test even when the writer swallows the refusal. The existing restore fixture
+is unchanged. The jail cannot see:
+
+- `python -I`/`-S` children;
+- a test that clears the environment;
+- non-Python writers;
+- `os.truncate`;
+- the five tests that ship their own `sitecustomize`.
+
+**Non-blocking review follow-ups:**
+
+1. A relative `os.open(..., dir_fd=...)` write is falsely refused when the working directory is a
+   checkout root. No current test does this.
+2. The module docstring's list of limits is incomplete.
+3. Check the file name before resolving the path, to cut the extra cost on each write-open.
+4. Document the `PYTHONPATH`/`sitecustomize` change in `CLAUDE/QA.md`.
+5. Name the child's pid when a refusal fails a later test.
+6. Write a refusal to stderr when recording it fails.
+7. Drop the test that only checks a file exists.
+
+**Status**: ✅ Guarded (cause unreproduced; the jail refuses the write). 🔄 Follow-ups 1–7 open.
+
 ### N279 — `changed_tests` once selected 50 test files, ran 0 tests and did not fail
 
 **Found**: by the Plan 00477 provision agent. One `llm_qa.py changed --base main --allow-unmapped` run reported `changed_tests` as 0 passed, 0 failed, 0 skipped
