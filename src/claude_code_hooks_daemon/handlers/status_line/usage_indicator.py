@@ -18,6 +18,11 @@ every other consumer: a window past its ``resets_at`` is gone.
 before its first response, and a plan without usage windows have nothing
 honest to show, and ``0%`` would be a claim rather than an absence.
 
+**Spend limit.** Behind a Claude apps gateway the snapshot also carries
+``rate_limits.spend_limit``; it is a third chip, labelled ``$`` (``$5%``,
+``$ 62% 3h 0m``), coloured by the same bands and hidden when absent. The
+percentage is not capped at 100, so an exceeded limit reads ``$ 140%`` on red.
+
 **Background colour** follows the context-usage chip bands (``model_context``):
 green, yellow, orange and red, each window coloured by its own percentage. The
 ``|`` between chips carries no background. Percentages display rounded DOWN,
@@ -97,6 +102,8 @@ _FAILURE_LABELS: Final[dict[str, str]] = {
     "authentication_failed": "auth failed",
     "cloud_credential_error": "cloud credential",
 }
+#: Chip label of the gateway spend limit (``rate_limits.spend_limit``).
+_SPEND_LABEL: Final[str] = "$"
 _SEPARATOR: Final[str] = "|"
 _SECONDS_PER_MINUTE: Final[int] = 60
 _SECONDS_PER_HOUR: Final[int] = 3600
@@ -162,6 +169,8 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
             chips.append(self._chip("5h", snapshot.five_hour, now))
         if snapshot.seven_day is not None:
             chips.append(self._chip("7d", snapshot.seven_day, now))
+        if snapshot.spend_limit is not None:
+            chips.append(self._chip(_SPEND_LABEL, snapshot.spend_limit, now))
         text = f"{_ICON} {_SEPARATOR.join(chips)}"
         return f"{text} {ceiling}" if ceiling else text
 
@@ -309,7 +318,7 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
         else:
             current_value = f"Currently shows: {_ANSI.sub('', self._render(snapshot, now))}"
         return SegmentExplanation(
-            glyphs=(_ICON, "5h", "7d", _PAUSE_ICON, _CEILING_ICON, _FAILURE_ICON),
+            glyphs=(_ICON, "5h", "7d", _SPEND_LABEL, _PAUSE_ICON, _CEILING_ICON, _FAILURE_ICON),
             name="Subscription Usage",
             what_it_is=(
                 "How much of the claude.ai subscription's 5-hour and weekly usage windows "
@@ -322,7 +331,8 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
                 f"{self._critical_pct:g}%. A green window is its label and percentage "
                 f"run together (`5h10%`); from {self._warn_pct:g}% it is spaced out and "
                 "adds the reset countdown, e.g. "
-                "`5h 67% 3h 20m`. Percentages are rounded down. A window past "
+                "`5h 67% 3h 20m`. Behind a Claude apps gateway a `$` chip (`$5%`) is the spend "
+                "limit used, coloured the same way and not capped at 100%. Percentages are rounded down. A window past "
                 "its reset is dropped; nothing is shown when no usage data exists (API-key "
                 "sessions, or before the first response). `⏸ usage 14:35` in red means the "
                 "session is paused on its host's usage ceiling and resumes at that local time. "
