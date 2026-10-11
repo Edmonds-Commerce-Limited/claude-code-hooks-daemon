@@ -684,6 +684,65 @@ class TestSimpleCommandsKeepTheirFileRedirections:
         last = simple_commands("{ cd /tmp; }; echo x > y")[-1]
         assert last.directory == ("/tmp",)
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "case x in x) cd /tmp;; esac > x",
+            "case x in a|b) cd /tmp;; esac > x",
+            "( cd sub && case x in a) true;; esac > x )",
+        ],
+    )
+    def test_a_case_redirect_is_read_where_the_case_opened(self, command: str) -> None:
+        closer = simple_commands(command)[-1]
+        assert closer.redirects == ((">", "x"),)
+        assert closer.directory in ((), ("sub",))
+        assert "/tmp" not in closer.directory
+
+    def test_a_case_pattern_paren_does_not_close_the_enclosing_subshell(self) -> None:
+        last = simple_commands("(cd /tmp && case x in a) true;; esac; echo x > y)")[-1]
+        assert last.directory == ("/tmp",)
+
+    def test_the_cd_a_case_reached_still_carries_on(self) -> None:
+        last = simple_commands("case x in x) cd /tmp;; esac; echo x > y")[-1]
+        assert last.directory == ("/tmp",)
+
+    @pytest.mark.parametrize(
+        "command",
+        ["{ cd /tmp; } | cat > x", "( cd /tmp ) | cat > x", "cd /tmp | cat > x"],
+    )
+    def test_a_pipeline_stage_does_not_carry_its_cd_to_the_next(self, command: str) -> None:
+        last = simple_commands(command)[-1]
+        assert last.redirects == ((">", "x"),)
+        assert last.directory == ()
+
+    def test_a_pipeline_stage_keeps_the_directory_it_started_in(self) -> None:
+        last = simple_commands("cd /tmp && { cd sub; } | cat > x")[-1]
+        assert last.directory == ("/tmp",)
+
+    def test_a_pipeline_does_not_carry_a_cd_past_its_end(self) -> None:
+        last = simple_commands("{ cd /tmp; } | cat; echo x > y")[-1]
+        assert last.directory == ()
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "f() { cd /tmp; }; echo x > x",
+            "f () { cd /tmp; }; echo x > x",
+            "function f { cd /tmp; }; echo x > x",
+            "function f() { cd /tmp; }; echo x > x",
+        ],
+    )
+    def test_a_function_definition_does_not_run_its_cd(self, command: str) -> None:
+        last = simple_commands(command)[-1]
+        assert last.redirects == ((">", "x"),)
+        assert last.directory == ()
+
+    @pytest.mark.parametrize(
+        "command", ["f() { cd /tmp; }; f; echo x > x", "f() { cd /tmp; }; g && f; echo x > x"]
+    )
+    def test_a_function_that_is_called_keeps_its_cd(self, command: str) -> None:
+        assert simple_commands(command)[-1].directory == ("/tmp",)
+
     def test_each_command_keeps_its_own(self) -> None:
         first, second = simple_commands("cd sub && echo x > ../x")
         assert first.redirects == ()

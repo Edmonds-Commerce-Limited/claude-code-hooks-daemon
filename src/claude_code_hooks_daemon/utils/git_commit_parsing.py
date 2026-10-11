@@ -957,8 +957,29 @@ _SUBSHELL_CHARS: Final[str] = "()"
 
 
 #: Words that open a compound command whose redirect follows its closer.
-_GROUP_OPENERS: Final[frozenset[str]] = frozenset({"{", "if", "while", "until", "for", "select"})
-_GROUP_CLOSERS: Final[frozenset[str]] = frozenset({"}", "fi", "done"})
+_GROUP_OPENERS: Final[frozenset[str]] = frozenset(
+    {"{", "if", "while", "until", "for", "select", "case"}
+)
+_GROUP_CLOSERS: Final[frozenset[str]] = frozenset({"}", "fi", "done", "esac"})
+_CASE: Final[str] = "case"
+_ESAC: Final[str] = "esac"
+_FUNCTION: Final[str] = "function"
+_BRACE_OPEN: Final[str] = "{"
+_EMPTY_PARENS: Final[str] = "()"
+#: Pipeline operators: each stage runs in a subshell, so a ``cd`` in it ends there.
+_PIPE_OPERATORS: Final[frozenset[str]] = frozenset({"|", "|&"})
+#: Operators that end a ``case`` clause; the next pattern's ``)`` follows.
+_CASE_CLAUSE_ENDS: Final[tuple[str, ...]] = (";;", ";&")
+
+
+def _opens_case(segment: list[str]) -> bool:
+    """Whether ``segment`` starts a ``case`` (``then case …`` does too)."""
+    for word in segment:
+        if word == _CASE:
+            return True
+        if word not in SHELL_RESERVED_COMMAND_PREFIXES:
+            return False
+    return False
 
 
 def _group_openers(segment: list[str]) -> int:
@@ -983,6 +1004,35 @@ def _leading_closers(segment: list[str]) -> int:
 
 
 _Step = tuple[list[str], tuple[str | None, ...], bool, str, tuple[tuple[str, str], ...]]
+#: The directory chain and whether it is uncertain, at one point of a walk.
+_State = tuple[tuple[str | None, ...], bool]
+#: A group's opening state, and the function name when the group is its body.
+_Group = tuple[tuple[str | None, ...], bool, str | None]
+
+
+def _defined_function(segment: list[str]) -> str | None:
+    """The name a ``()`` that follows ``segment`` defines (``f ()``, ``function f ()``)."""
+    if len(segment) == 1 or (len(segment) == 2 and segment[0] == _FUNCTION):
+        return segment[-1]
+    return None
+
+
+def _opened_group_names(segment: list[str], defining: str | None) -> list[str | None]:
+    """One entry per compound command ``segment`` opens: the function it is the body of."""
+    names: list[str | None] = [None] * _group_openers(segment)
+    if names and defining is not None and segment[0] == _BRACE_OPEN:
+        names[0] = defining
+    elif len(segment) > 2 and segment[0] == _FUNCTION and segment[2] == _BRACE_OPEN:
+        names = [segment[1]]  # `function f { …`: the segment carries the `{`
+    return names
+
+
+def _body_of_function_keyword(segment: list[str]) -> list[str]:
+    """``segment`` less a leading ``function name {``, which is a definition, not a command."""
+    if len(segment) > 2 and segment[0] == _FUNCTION and segment[2] == _BRACE_OPEN:
+        return segment[3:]
+    return segment
+
 
 #: A redirection operator that names a file it writes. ``>&`` is not one of
 #: them unless its target is a name rather than a descriptor (``2>&1``, ``>&-``).
@@ -1032,23 +1082,42 @@ def _walk(
     leave git running where it started, which ``uncertain`` records.
     """
     found: list[_Step] = []
-    stack: list[tuple[tuple[str | None, ...], bool]] = []
-    groups: list[tuple[tuple[str | None, ...], bool]] = []
+    stack: list[_State] = []
+    groups: list[_Group] = []
     previous_operator = ""
+    # Where the current pipeline stage began: a stage runs in a subshell, so a
+    # `cd` in it is gone when the next stage starts.
+    stage_start: _State = (directory, uncertain)
+    last_segment: list[str] = []
+    defining: str | None = None
+    expecting_pattern = False
     index = 0
     while index < len(words):
         if is_operator(words[index]) and not is_redirection(words[index]):
+            if words[index] == _EMPTY_PARENS:
+                defining = _defined_function(last_segment)
             # The lexer joins adjacent operators (`);`), so each is read in turn.
             for char in words[index]:
-                if char == _SUBSHELL_OPEN:
+                if expecting_pattern and char in _SUBSHELL_CHARS:
+                    # A `case` pattern's `)` (and an optional leading `(`) is
+                    # not a subshell boundary.
+                    expecting_pattern = char == _SUBSHELL_OPEN
+                elif char == _SUBSHELL_OPEN:
                     stack.append((directory, uncertain))
                 elif char == _SUBSHELL_CLOSE:
                     directory, uncertain = stack.pop() if stack else (directory, uncertain)
+                    stage_start = (directory, uncertain)
             previous_operator = "".join(
                 char for char in words[index] if char not in _SUBSHELL_CHARS
             )
+            if previous_operator in _PIPE_OPERATORS:
+                directory, uncertain = stage_start
             if directory and previous_operator != _AND_OPERATOR:
                 uncertain = True
+            if previous_operator not in _PIPE_OPERATORS:
+                stage_start = (directory, uncertain)
+            if previous_operator.startswith(_CASE_CLAUSE_ENDS):
+                expecting_pattern = True
             index += 1
             continue
         end = index
@@ -1059,18 +1128,33 @@ def _walk(
         # shell BEFORE the group runs, so it is read where the group began.
         # The directory the group's own `cd` reached still carries on after it.
         closers = _leading_closers(segment)
-        opened_in: tuple[tuple[str | None, ...], bool] | None = None
+        opened_in: _State | None = None
+        forgotten: _State | None = None
         if closers and groups:
             # `} done` closes two groups on one segment: the redirect belongs
             # to the outermost, so each closer word pops its own frame.
             for _ in range(min(closers, len(groups))):
-                opened_in = groups.pop()
+                frame = groups.pop()
+                opened_in = frame[:2]
+                if frame[2] is not None and frame[2] not in words[end:]:
+                    forgotten = opened_in  # a function body that nothing calls never ran
+            stage_start = opened_in if opened_in is not None else stage_start
         else:
-            groups.extend((directory, uncertain) for _ in range(_group_openers(segment)))
-        moved = _after_directory_change(segment, directory)
+            groups.extend(
+                (directory, uncertain, name) for name in _opened_group_names(segment, defining)
+            )
+        if segment[:1] == [_ESAC]:
+            expecting_pattern = False
+        elif _opens_case(segment):
+            expecting_pattern = True
+        defining = None
+        last_segment = segment
+        moved = _after_directory_change(_body_of_function_keyword(segment), directory)
         if moved != directory and previous_operator in _MOVE_DOUBTING_PRECEDING_OPERATORS:
             uncertain = True
         directory = moved
+        if forgotten is not None:
+            directory, uncertain = forgotten
         body = _evaluated_string(segment) if depth < MAX_EVAL_NESTING else None
         if body is not None:
             found.extend(_walk(command_words(body), directory, uncertain, depth + 1))

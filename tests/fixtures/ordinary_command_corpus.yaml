@@ -1531,6 +1531,18 @@ rows:
   - id: n403-cd-through-literal-assignment-stays-inside
     command: |-
       D=tests; cd $D && echo x > ../untracked/scratch/n403.txt
+  - id: n403-case-redirect-read-before-the-case-cds
+    command: |-
+      case x in x) cd /tmp;; esac > untracked/scratch/n403-case.txt
+  - id: n403-pipeline-group-cd-does-not-carry-to-the-next-stage
+    command: |-
+      { cd /tmp; } | cat > untracked/scratch/n403-pipe.txt
+  - id: n403-subshell-pipeline-cd-does-not-carry-to-the-next-stage
+    command: |-
+      ( cd /tmp ) | cat > untracked/scratch/n403-pipe-sub.txt
+  - id: n403-function-definition-cd-is-not-run
+    command: |-
+      f() { cd /tmp; }; echo x > untracked/scratch/n403-func.txt
   # --- Plan 00474 N410: a QA tool reached through a variable under a steering variable ---
   - id: n410-variable-ruff-under-pythonpath
     command: |-
