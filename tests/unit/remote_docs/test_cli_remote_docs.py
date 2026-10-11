@@ -291,6 +291,161 @@ class TestRefresh:
         assert cmd_remote_docs(_args(tmp_path, "refresh")) == 2
 
 
+class TestRefreshKeepsRecordedFidelity:
+    """GitHub #73: refresh picks each target's fetcher from its recorded fidelity.
+
+    No test touches the network: `resolve_fetcher` is replaced by a fake that
+    returns a verbatim fetcher for `verbatim=True` and a converting fetcher
+    otherwise, each with a body that says which one produced it.
+    """
+
+    _VERBATIM_URL = "https://example.com/raw"
+    _CONVERTED_URL = "https://example.com/conv"
+
+    @staticmethod
+    def _fake_resolver(calls: list[bool]):
+        from claude_code_hooks_daemon.remote_docs.fetchers import ResolvedFetcher
+        from claude_code_hooks_daemon.remote_docs.provenance import Fidelity
+
+        def resolve(*, verbatim: bool = False, **_: object) -> ResolvedFetcher:
+            calls.append(verbatim)
+            if verbatim:
+                return ResolvedFetcher(
+                    fetch_fn=_fetch(b"# Doc\n\nverbatim body\n"),
+                    fidelity=Fidelity.VERBATIM,
+                    method="https",
+                )
+            return ResolvedFetcher(
+                fetch_fn=_fetch(b"# Doc\n\nconverted body\n"),
+                fidelity=Fidelity.CONVERTED,
+                method="agent-browser",
+            )
+
+        return resolve
+
+    def _seed_mixed_corpus(self, root: Path) -> tuple[Path, Path]:
+        """One verbatim and one converted document, captured through the CLI."""
+        from claude_code_hooks_daemon.remote_docs.fetchers import ResolvedFetcher
+        from claude_code_hooks_daemon.remote_docs.provenance import Fidelity
+
+        for url, fidelity in (
+            (self._VERBATIM_URL, Fidelity.VERBATIM),
+            (self._CONVERTED_URL, Fidelity.CONVERTED),
+        ):
+            cmd_remote_docs(
+                _args(
+                    root,
+                    "add",
+                    url=url,
+                    fetch_fn=None,
+                    fetcher=ResolvedFetcher(fetch_fn=_fetch(), fidelity=fidelity, method="seed"),
+                )
+            )
+        return (
+            _tree(root) / "example.com" / "raw.md",
+            _tree(root) / "example.com" / "conv.md",
+        )
+
+    @staticmethod
+    def _fidelity_and_text(path: Path):
+        from claude_code_hooks_daemon.remote_docs.store import read_document
+
+        document = read_document(path)
+        assert document.provenance is not None
+        return document.provenance.fidelity, path.read_text()
+
+    def _refresh(self, root: Path, calls: list[bool], **overrides: object) -> int:
+        with patch(
+            "claude_code_hooks_daemon.remote_docs.fetchers.resolve_fetcher",
+            self._fake_resolver(calls),
+        ):
+            return cmd_remote_docs(_args(root, "refresh", fetch_fn=None, **overrides))
+
+    def test_refresh_all_keeps_each_documents_recorded_fidelity(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.remote_docs.provenance import Fidelity
+
+        raw, conv = self._seed_mixed_corpus(tmp_path)
+        calls: list[bool] = []
+
+        assert self._refresh(tmp_path, calls, all_docs=True) == 0
+
+        raw_fidelity, raw_text = self._fidelity_and_text(raw)
+        conv_fidelity, conv_text = self._fidelity_and_text(conv)
+        assert raw_fidelity is Fidelity.VERBATIM
+        assert "verbatim body" in raw_text
+        assert conv_fidelity is Fidelity.CONVERTED
+        assert "converted body" in conv_text
+
+    def test_refresh_path_of_a_verbatim_document_fetches_verbatim_with_no_flag(
+        self, tmp_path: Path
+    ) -> None:
+        from claude_code_hooks_daemon.remote_docs.provenance import Fidelity
+
+        raw, _ = self._seed_mixed_corpus(tmp_path)
+        calls: list[bool] = []
+
+        assert self._refresh(tmp_path, calls, path=raw) == 0
+
+        assert calls == [True]
+        fidelity, text = self._fidelity_and_text(raw)
+        assert fidelity is Fidelity.VERBATIM
+        assert "verbatim body" in text
+
+    def test_refresh_path_of_a_converted_document_is_not_forced_verbatim(
+        self, tmp_path: Path
+    ) -> None:
+        _, conv = self._seed_mixed_corpus(tmp_path)
+        calls: list[bool] = []
+
+        assert self._refresh(tmp_path, calls, path=conv) == 0
+
+        assert calls == [False]
+
+    def test_explicit_verbatim_forces_verbatim_for_every_target(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.remote_docs.provenance import Fidelity
+
+        raw, conv = self._seed_mixed_corpus(tmp_path)
+        calls: list[bool] = []
+
+        assert self._refresh(tmp_path, calls, all_docs=True, verbatim=True) == 0
+
+        assert set(calls) == {True}
+        for path in (raw, conv):
+            fidelity, text = self._fidelity_and_text(path)
+            assert fidelity is Fidelity.VERBATIM
+            assert "verbatim body" in text
+
+    def test_a_document_with_unreadable_fidelity_behaves_as_before(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        """No readable provenance means no recorded fidelity to honour.
+
+        The document is reported UNREADABLE and nothing is fetched or written
+        (as it always was), and the fetcher resolved for it is the one the
+        command line asks for -- the default one without `--verbatim`.
+        """
+        broken = _tree(tmp_path) / "example.com" / "broken.md"
+        broken.parent.mkdir(parents=True)
+        broken.write_text("no frontmatter here\n")
+        calls: list[bool] = []
+
+        assert self._refresh(tmp_path, calls, path=broken) == 1
+
+        assert "unreadable" in capsys.readouterr().out.lower()
+        assert calls == [False]
+        assert broken.read_text() == "no frontmatter here\n"
+
+    def test_a_fetcher_is_resolved_once_per_mode_not_once_per_document(
+        self, tmp_path: Path
+    ) -> None:
+        self._seed_mixed_corpus(tmp_path)
+        calls: list[bool] = []
+
+        self._refresh(tmp_path, calls, all_docs=True)
+
+        assert sorted(calls) == [False, True]
+
+
 class TestRemotePolicy:
     """`documentation.remote` moves two judgements from per-file to per-project."""
 
