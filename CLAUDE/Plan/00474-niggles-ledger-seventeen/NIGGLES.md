@@ -1471,6 +1471,29 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N410 — `upgrade_approval_guard` denies a QA tool reached through a variable once `PYTHONPATH` is set
+
+**Source**: the Plan 00474 coordinator's check-script call (2026-10-11), denied with R-UPGRADE-APPROVAL-ENV-BYPASS
+although it ran no upgrade
+([subagent-reports/261011-batch-l-gh-body-scope-sonnet.md](subagent-reports/261011-batch-l-gh-body-scope-sonnet.md)).
+
+**Evidence**: the command set `V=/workspace/untracked/venv-…/bin`, then ran `$V/python -m pytest …`,
+`$V/black --check …`, `$V/ruff check …` and `$V/mypy …` chained with `&&`; it named no hooks-daemon and no upgrade verb,
+and the same commands with literal interpreter paths were allowed. Reproduced against `matches()`: the trigger is the
+conjunction of (a) a steering variable anywhere in the command, here `PYTHONPATH=…` matching the `PYTHON*` entry of
+`_UPGRADE_STEERING_VARS`, and (b) a program word that is a variable (`$V/black`, `$V/ruff`, `$V/mypy`) whose first
+positional operand is not a readable file (`src`, `check`). `_variable_program_is_upgrade` falls through to
+`_script_run_is_upgrade("src", …)`, which cannot read it and returns "cannot tell", and a steered command counts "cannot
+tell" as the upgrade. `$V/python -m pytest` is allowed (the `-m` branch returns False), and the literal-path forms are
+allowed because the tool binary is the readable file that gets judged. Without `PYTHONPATH` the variable forms are
+allowed too. Pinned by `TestVariableToolUnderSteeringIsPinned` in
+`tests/unit/handlers/pre_tool_use/test_upgrade_approval_guard.py`, which asserts today's deny so that a fix flips it.
+
+**Status**: ⬜ Open. Remedy: in `_variable_program_is_upgrade`, when the program word is a variable and the command
+carries no upgrade entry point (`_UPGRADE_ENTRY_RE`) and no upgrade-shaped argument (`_UPGRADE_SHAPED_ARG_RE`), do not
+treat an unreadable first operand as "cannot tell"; keep the deny only when the program or the operand is itself
+unresolvable AND the command names the upgrade (the gate's own scripts). Not fixed in batch L.
+
 ### N409 — `subagent_full_qa_blocker` denies an ordinary `python3 script.py` as a whole-suite run
 
 **Source**: Plan 00483 Task 3.2 re-probe of the not-re-run guards (2026-10-11), proposal P9, probe fq1 and the
@@ -1504,8 +1527,16 @@ N409).
 does request comments as `--json=comments` (ghc5), or whose quoted `--jq` holds a `|` before `--json comments` (ghc8),
 is also denied.
 
-**Status**: ⬜ Open. Remedy: one shared helper for both handlers: command-position match, quote-aware segment end,
-and `--json=comments` plus the `--json` field list accepted.
+**Status**: 🟢 Fixed on branch `agent-ad9dc30f1ec7d2976-bb392d4f` (batch H). New shared helper
+`utils/gh_view_comments.py` (`uncommented_view_segment`, `suggest_with_comments`) reads the command per
+`command_position_code_segments`, so a mention (echo, grep, message, quoted heredoc, comment) no longer matches; flags
+are read as shell words, so `--json=comments`, `--json=a,comments` and a `|` inside a quoted `--jq` value are
+handled; the suggested fix is spliced into the real view segment (also `--json=` field lists). Both handlers use it
+and their acceptance commands are now `bash -n -c '...'` with a nonexistent number. Pinned by
+`tests/unit/handlers/pre_tool_use/test_gh_view_comments_command_position.py`, `tests/unit/utils/test_gh_view_comments.py`
+and corpus rows `n408-*`; two older tests that asserted the mention deny were flipped. Review r1: `--comments=<v>`
+(any value but `false`), `-c`, `--help`/`-h` and `--web`/`-w` are accepted. Residual, pre-existing on main and not
+fixed here: none specific to N408.
 
 ### N407 — `pip_break_system` and `sudo_pip` deny commands that only mention the flag or `sudo pip install`
 
@@ -1515,8 +1546,18 @@ and `--json=comments` plus the `--json` field list accepted.
 **Evidence**: the patterns' `.*` crosses `&&`, `;`, `#` and quotes, so an `echo`, a comment or a grep naming the flag
 is denied.
 
-**Status**: ⬜ Open. Remedy: `command_position_segments` with the install tokens read in the same segment (as
-`dangerous_permissions` does) and heredoc bodies read as data. The INVENTORY misses (`pip --break-system-packages install`, the env var, `sudo -u USER pip install`) are separate and not part of this entry.
+**Status**: 🟢 Fixed on branch `agent-ad9dc30f1ec7d2976-bb392d4f` (batch H). Both handlers now match their pattern per
+`command_position_code_segments` (new in `utils/command_position.py`: `command_position_segments` with a trailing
+shell comment cut, since the splitter deliberately keeps comment text as a command), so echo, grep, messages, gh bodies,
+comments and quoted heredoc bodies no longer deny, while `if...then`, `bash -c`, `eval`, `env`, `nohup`, `timeout`,
+subshells, `$(...)`, backticks, `&`, `!`, `cat <<'EOF' | bash` and `bash <<'EOF'` still do. Acceptance commands are
+`bash -n -c '...'` with a nonexistent package. Pinned by
+`tests/unit/handlers/pre_tool_use/test_pip_guards_command_position.py`,
+`tests/unit/utils/test_command_position_comments.py` and corpus rows `n407-*`; two older tests that asserted the
+mention deny were flipped. The INVENTORY misses (`pip --break-system-packages install`, the env var, `sudo -u USER pip install`) are separate and not part of this entry. Residual gaps, pre-existing on main and not fixed here (batch H review r1):
+`sudo_pip` misses `sudo -u root pip install`, `sudo -iu root ...`, `sudo env pip install`,
+`sudo bash -c 'pip install ...'` and `doas pip install`; `pip_break_system` misses
+`PIP_BREAK_SYSTEM_PACKAGES=1 pip install` and a versioned `pip3.11`.
 
 ### N406 — `github_auto_close_keywords` denies a quoted `echo` or a `python3 - <<'EOF'` that only prints a keyword
 

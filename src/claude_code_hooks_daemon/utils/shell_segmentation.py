@@ -857,7 +857,7 @@ class _SegmentTracker:
     00466 N40 review 2 MA4).
     """
 
-    __slots__ = ("_binary", "_command", "_scanned_to", "_segment_start", "_subcommand")
+    __slots__ = ("_action", "_binary", "_command", "_scanned_to", "_segment_start", "_subcommand")
 
     def __init__(self, command: str) -> None:
         self._command = command
@@ -865,7 +865,17 @@ class _SegmentTracker:
         self._segment_start = _SEGMENT_START
         self._binary = ""
         self._subcommand = ""
+        self._action = ""
         self._resolve(_SEGMENT_START)
+
+    @property
+    def action(self) -> str:
+        """The word after the subcommand (``comment`` in ``gh issue comment``).
+
+        Empty when absent or when it is a flag. Valid for the segment last
+        queried through :meth:`binary_and_subcommand`.
+        """
+        return self._action
 
     def _resolve(self, start: int) -> None:
         """(Re)compute the binary/subcommand for the segment beginning at ``start``."""
@@ -876,6 +886,8 @@ class _SegmentTracker:
         self._binary = window[0].rpartition(_PATH_SEPARATOR)[2] if window else ""
         position = git_subcommand_index(window, 0) if window else None
         self._subcommand = window[position] if position is not None else ""
+        following = window[position + 1 : position + 2] if position is not None else []
+        self._action = following[0] if following and not following[0].startswith("-") else ""
 
     def binary_and_subcommand(self, index: int) -> tuple[str, str]:
         """``(binary, subcommand)`` of the segment owning the flag at ``index``."""
@@ -1285,9 +1297,15 @@ def strip_message_bodies(command: str) -> str:
     def _blank_if_inert(match: re.Match[str]) -> str:
         binary, subcommand = tracker.binary_and_subcommand(match.start())
         if binary == _GH_COMMAND:
-            # `gh pr|issue|release ... --body|-b` is the body flag; the sink rule
-            # for a `gh` heredoc (`_gh_reads_body_as_data`) names the same groups.
-            if match.group("flag") not in _GH_BODY_FLAGS or subcommand not in _GH_DATA_SUBCOMMANDS:
+            # Only the `gh` verbs whose `-b/--body` is prose; `gh api`, `gh alias`
+            # and the rest keep the value visible. (The heredoc sink rule,
+            # `_gh_reads_body_as_data`, is a different question and uses the
+            # wider `_GH_DATA_SUBCOMMANDS`.)
+            if match.group(
+                "flag"
+            ) not in _GH_BODY_FLAGS or tracker.action not in _GH_BODY_PROSE_ACTIONS.get(
+                subcommand, frozenset()
+            ):
                 return match.group(0)
         elif binary not in _MESSAGE_TAKING_COMMANDS or match.group("flag") in _GH_BODY_FLAGS:
             return match.group(0)
@@ -1745,6 +1763,15 @@ _GH_BODY_FLAGS: frozenset[str] = frozenset({"-b", "--body"})
 #: JSON input (`--body-file -`, `-F -`, `--input -`). Built-in names, which a
 #: user alias cannot shadow, so none of them can be a `!` alias running a shell.
 _GH_DATA_SUBCOMMANDS: frozenset[str] = frozenset({"pr", "issue", "release", "gist", "api"})
+
+#: The `gh` verbs whose `-b/--body` is prose published to GitHub, checked
+#: against `gh <cmd> --help`. `pr merge -b` is the merge commit's body, the
+#: same prose as `git commit -m`, which is blanked. `release create|edit` and
+#: `gist` have no `-b/--body` flag (release uses `--notes`), so they are absent.
+_GH_BODY_PROSE_ACTIONS: dict[str, frozenset[str]] = {
+    "issue": frozenset({"create", "comment", "edit"}),
+    "pr": frozenset({"create", "comment", "edit", "review", "merge"}),
+}
 
 
 def _gh_reads_body_as_data(stage: str, fds_may_run: bool) -> bool:

@@ -255,9 +255,8 @@ class TestPipBreakSystemHandler:
             "tool_name": "Bash",
             "tool_input": {"command": "echo 'Do not use pip install --break-system-packages'"},
         }
-        # This will actually match because the pattern exists
-        # This is acceptable - better safe than sorry
-        assert handler.matches(hook_input) is True
+        # An echo only prints the flag; nothing runs (ledger N407).
+        assert handler.matches(hook_input) is False
 
     # handle() Tests - Return value and message structure
     def test_handle_returns_deny_decision(self, handler):

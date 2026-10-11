@@ -99,6 +99,37 @@ class TestGhProse:
     def test_other_gh_subcommands_keep_their_arguments(self) -> None:
         assert "reset" in command_position_view("gh api --body 'git reset --hard'")
 
+    @pytest.mark.parametrize(
+        "head",
+        [
+            "gh issue create",
+            "gh issue comment 1",
+            "gh issue edit 1",
+            "gh pr create",
+            "gh pr comment 1",
+            "gh pr edit 1",
+            "gh pr review 1",
+            "gh pr merge 1",
+        ],
+    )
+    @pytest.mark.parametrize("flag", ["--body", "-b"])
+    def test_prose_publishing_subcommands_blank_the_body(self, head: str, flag: str) -> None:
+        assert "reset" not in command_position_view(f"{head} {flag} 'git reset --hard'")
+
+    def test_issue_comment_body_is_blanked_whatever_the_flag_spelling(self) -> None:
+        assert "reset" not in command_position_view("gh issue comment 1 --body 'git reset --hard'")
+        assert "reset" not in command_position_view("gh issue comment 1 --body='git reset --hard'")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "gh api repos/o/r --body 'git reset --hard'",
+            "gh alias set x -b 'git reset --hard'",
+        ],
+    )
+    def test_everything_else_keeps_its_arguments(self, command: str) -> None:
+        assert "reset" in command_position_view(command)
+
 
 class TestSegments:
     def test_segments_split_on_every_separator(self) -> None:

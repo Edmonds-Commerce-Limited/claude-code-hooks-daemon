@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, SUDO_INVOCATION
+from claude_code_hooks_daemon.utils.command_position import command_position_code_segments
 
 # Full first-fire teaching content (Plan 00116): reuses the pre-migration
 # handler's rich prose verbatim, minus the invocation-specific `COMMAND:`
@@ -111,7 +112,13 @@ class SudoPipHandler(PreToolUseHandlerBase):
         if not command:
             return False
 
-        return bool(re.search(_SUDO_PIP_PATTERN, command, re.IGNORECASE))
+        # Judged per COMMAND-POSITION segment (ledger N407): text that only
+        # names `sudo pip install` in an echo, grep pattern, comment or message
+        # is not an invocation.
+        return any(
+            re.search(_SUDO_PIP_PATTERN, segment, re.IGNORECASE)
+            for segment in command_position_code_segments(command)
+        )
 
     def get_rules(self) -> list[Rule]:
         """Return the single Rule backing this handler's blocking behaviour."""
@@ -179,7 +186,7 @@ class SudoPipHandler(PreToolUseHandlerBase):
         return [
             AcceptanceTest(
                 title="sudo pip install",
-                command='echo "sudo pip install requests"',
+                command="bash -n -c 'sudo pip install nonexistent-pkg-zz-safe-test'",
                 dispatch_as_bash=True,
                 description="Blocks sudo pip install (system-wide corruption risk)",
                 expected_decision=Decision.DENY,
@@ -195,7 +202,7 @@ class SudoPipHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="sudo python3 -m pip install",
-                command='echo "sudo python3 -m pip install numpy"',
+                command="bash -n -c 'sudo python3 -m pip install nonexistent-pkg-zz-safe-test'",
                 dispatch_as_bash=True,
                 description="Blocks sudo python3 -m pip install",
                 expected_decision=Decision.DENY,

@@ -17,6 +17,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils.command_position import command_position_code_segments
 
 # Full first-fire teaching content (Plan 00116): reuses the pre-migration
 # handler's rich prose verbatim, minus the invocation-specific `COMMAND:`
@@ -39,6 +40,14 @@ _PIP_BREAK_SYSTEM_VERBOSE_CONTENT = (
     "  3. If in a container/isolated environment, ask the human user\n"
     "     whether it's safe to proceed (they can override if truly needed)\n\n"
     "NEVER use --break-system-packages as default behavior."
+)
+
+# Any form of pip install with --break-system-packages in ONE command segment:
+# pip/pip3/python -m pip/python3 -m pip (also behind a path or `uv`) + install
+# + the flag.
+_PIP_BREAK_SYSTEM_PATTERN = re.compile(
+    r"\b(pip3?|python3?\s+-m\s+pip)\s+install\s+.*--break-system-packages",
+    re.IGNORECASE,
 )
 
 
@@ -100,11 +109,13 @@ class PipBreakSystemHandler(PreToolUseHandlerBase):
         if not command:
             return False
 
-        # Pattern: Any form of pip install with --break-system-packages
-        # Matches: pip/pip3/python -m pip/python3 -m pip + install + --break-system-packages
-        pattern = r"\b(pip3?|python3?\s+-m\s+pip)\s+install\s+.*--break-system-packages"
-
-        return bool(re.search(pattern, command, re.IGNORECASE))
+        # Judged per COMMAND-POSITION segment (ledger N407): the pattern's `.*`
+        # used to cross `&&`, `;`, `#` and quotes, so an echo, a comment, a
+        # grep pattern or a message that only NAMED the flag was denied.
+        return any(
+            _PIP_BREAK_SYSTEM_PATTERN.search(segment)
+            for segment in command_position_code_segments(command)
+        )
 
     def get_rules(self) -> list[Rule]:
         """Return the single Rule backing this handler's blocking behaviour."""
@@ -175,7 +186,9 @@ class PipBreakSystemHandler(PreToolUseHandlerBase):
         return [
             AcceptanceTest(
                 title="pip install --break-system-packages",
-                command='echo "pip install --break-system-packages requests"',
+                command=(
+                    "bash -n -c 'pip install --break-system-packages nonexistent-pkg-zz-safe-test'"
+                ),
                 dispatch_as_bash=True,
                 description="Blocks pip --break-system-packages flag (system corruption risk)",
                 expected_decision=Decision.DENY,
@@ -191,7 +204,10 @@ class PipBreakSystemHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="python3 -m pip install --break-system-packages",
-                command='echo "python3 -m pip install --break-system-packages numpy"',
+                command=(
+                    "bash -n -c 'python3 -m pip install --break-system-packages "
+                    "nonexistent-pkg-zz-safe-test'"
+                ),
                 dispatch_as_bash=True,
                 description="Blocks python3 -m pip with --break-system-packages",
                 expected_decision=Decision.DENY,
