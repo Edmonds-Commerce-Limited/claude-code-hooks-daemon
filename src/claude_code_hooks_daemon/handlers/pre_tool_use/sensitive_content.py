@@ -501,9 +501,7 @@ def _records_nothing(subcommand: str, arguments: list[str]) -> bool:
     message is part of that message and exempts nothing.
     """
     if subcommand in _GIT_LISTING_SUBCOMMANDS:
-        return any(
-            flag in arguments for flag in (*_GIT_READ_ONLY_FLAGS, *_GIT_REF_DELETE_FLAGS)
-        )
+        return any(flag in arguments for flag in (*_GIT_READ_ONLY_FLAGS, *_GIT_REF_DELETE_FLAGS))
     if subcommand != _GIT_CONFIG_SUBCOMMAND:
         return False
     if any(flag in arguments for flag in _GIT_CONFIG_ASSIGNING_FLAGS):
