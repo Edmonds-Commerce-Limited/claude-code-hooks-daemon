@@ -37,6 +37,17 @@ Results: targeted run of the ordinary-command gate, `test_commit_location`, `tes
 `test_git_invocation_directory`, `test_git_commit_parsing`, `test_project_containment`, `test_command_journal` and the whole
 `tests/unit/handlers/pre_tool_use` directory: 11327 passed.
 
+### Red on main (round 3)
+
+`PYTHONPATH=/workspace/src` is refused by the suite's source-tree guard, so the base commit (`96401a58e`, the branch
+point) was checked out in a throwaway worktree, this branch's two test files were copied over it and the new tests were
+run against its code. Result: 17 failed, 6 passed. Failing on main: all 4 `test_a_cd_through_a_literal_assignment_is_placed_and_denied`
+cases, both `test_a_variable_move_is_denied_as_the_literal_move_is` cases, `test_a_combined_closer_reads_the_outer_loop_redirect_before_the_loop`,
+all 5 `test_a_redirect_on_a_group_is_read_before_the_group_opened` cases, the 3 `test_a_group_redirect_keeps_the_directory_before_the_group`
+cases and both `test_a_combined_closer_pops_one_group_per_closer_word` cases. Passing on main (guards, not proofs):
+the unpinned-variable advisory test, `test_the_stack_stays_balanced_after_a_combined_closer`, and the group tests that
+still deny. Pyright on the four touched `.py` files: 0 errors.
+
 ## Part 2: N411, the Stop continuation cap
 
 Claude Code ends the turn after 8 consecutive Stop-hook continuations with no tool call between. Question: can any

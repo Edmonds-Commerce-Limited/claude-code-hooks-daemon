@@ -1059,13 +1059,13 @@ def _walk(
         # shell BEFORE the group runs, so it is read where the group began.
         # The directory the group's own `cd` reached still carries on after it.
         closers = _leading_closers(segment)
+        opened_in: tuple[tuple[str | None, ...], bool] | None = None
         if closers and groups:
             # `} done` closes two groups on one segment: the redirect belongs
             # to the outermost, so each closer word pops its own frame.
             for _ in range(min(closers, len(groups))):
                 opened_in = groups.pop()
         else:
-            opened_in = None
             groups.extend((directory, uncertain) for _ in range(_group_openers(segment)))
         moved = _after_directory_change(segment, directory)
         if moved != directory and previous_operator in _MOVE_DOUBTING_PRECEDING_OPERATORS:
