@@ -1595,9 +1595,22 @@ shell-level mention and real-run shape (wrappers, `if/then`, `eval`, `bash -c`, 
 direct `bash` heredocs) already judged correctly through this handler's own parser, and is now pinned. Pinned by
 `TestPythonHoldingAProgramNameIsNotRunningIt` and `TestMentionsAndRealRunsAtTheShellLevel` in
 `tests/unit/handlers/pre_tool_use/test_subagent_full_qa_blocker.py` (red count 10 before the fix) and the `n409-` rows of
-`tests/fixtures/ordinary_command_corpus.yaml`. Residual, pre-existing and unfixed: a list built by `.append`/`+=` then
-passed to `Popen`, `asyncio.create_subprocess_exec`, and `exec(open(...).read())` are not seen as runs. Report:
+`tests/fixtures/ordinary_command_corpus.yaml`. Residual, pre-existing: a list built by `.append`/`+=` then
+passed to `Popen`, `asyncio.create_subprocess_exec`, and `exec(open(...).read())` were not seen as runs. Report:
 `subagent-reports/261011-batch-i-n409-sonnet.md`.
+
+✅ Residual cleared by batch X: a list grown by `.append`/`.extend`/`+=` and then handed to `Popen`/`run`/`call`/
+`check_call`/`check_output` (also via `args=` and a `b = a` alias) is judged as the argv it held at the call
+(`_grown_argvs`); `.append`/`.extend` pass nothing on by themselves (`_bindings`), so a grown list that is never run is
+data and `['pytest']` then `.append('tests/unit/x.py')` is a targeted run; `asyncio.create_subprocess_exec(...)`
+(awaited or not, `*a` spread of a named list) is judged as an argv and `create_subprocess_shell` as shell text; and
+`exec(open('f').read())` / `exec(Path('f').read_text())` / `runpy.run_path('f')` judge the named file as `python3 f` does
+(`_files_run_in_process`). Left: a file that does not exist is allowed, as `python3 absent.py` is (nothing can run),
+so the probe case `exec_open` (`runner.py` absent from the repo root) still allows; a path Python computes at run time is
+not named and keeps the pre-existing fail-closed `exec` handling; only the five `subprocess` sinks follow a mutated
+list, so `os.execv*`/`pty.spawn` of a grown list and `list.insert`/`a = a + [...]` are not tracked. Pinned by
+`TestResidualPythonRoutesToAFullRun` and the `n409-python-heredoc-mutated-*`/`asyncio-targeted` corpus rows. Report:
+`subagent-reports/261011-batch-x-sonnet.md`.
 
 ### N408 — `gh_issue_comments`/`gh_pr_comments` deny mentions and miss `--json=comments`
 

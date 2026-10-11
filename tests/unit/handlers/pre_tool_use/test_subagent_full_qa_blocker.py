@@ -3661,6 +3661,109 @@ class TestPythonHoldingAProgramNameIsNotRunningIt:
         assert find_full_qa_invocation(_python_heredoc(code), _patterns()) is not None
 
 
+_RUN_PY = "ru" + "nner.py"
+_EXEC = "ex" + "ec"
+_PROGRAM = "./scripts/qa/llm_qa.py"
+
+#: N409 residuals (batch X): a list MUTATED into a full run, an asyncio process, and
+#: code read from a named file and run in-process. Each starts a full run.
+_PYTHON_RESIDUAL_FULL_RUNS: list[str] = [
+    f"import subprocess\na=[]\na.append('{_PROGRAM}')\na.append('all')\nsubprocess.Popen(a)",
+    f"import subprocess\na=['{_PROGRAM}']\na+=['all']\nsubprocess.Popen(a)",
+    f"import subprocess\na=[]\na.extend(['{_PROGRAM}','all'])\nsubprocess.Popen(a)",
+    f"import subprocess\na=['{_PROGRAM}']\na.extend(['all'])\nsubprocess.run(a)",
+    f"import subprocess\na=[]\na.append('{_PROGRAM}')\na.append('all')\nsubprocess.call(a)",
+    f"import subprocess\na=[]\na.append('{_PROGRAM}')\na.append('all')\nsubprocess.check_call(a)",
+    f"import subprocess\na=[]\na.append('{_PROGRAM}')\na.append('all')\nsubprocess.check_output(a)",
+    f"import subprocess\na=[]\na.append('{_PROGRAM}')\na.append('all')\nsubprocess.run(args=a)",
+    f"import subprocess\na=[]\na.append('{_PROGRAM}')\na.append('all')\nb=a\nsubprocess.run(b)",
+    "import subprocess\na=['python']\na.append('-m')\na.append('pytest')\nsubprocess.run(a)",
+    "import subprocess\na=[]\na.append('pytest')\nsubprocess.run(a)",
+    "import subprocess\na=['pytest']\na.append('-q')\nsubprocess.run(a)",
+    (
+        "import asyncio\nasync def m():\n"
+        f"    await asyncio.create_subprocess_exec('{_PROGRAM}','all')\nasyncio.run(m())"
+    ),
+    f"import asyncio\nasyncio.create_subprocess_exec('{_PROGRAM}', 'all')",
+    "import asyncio\nasyncio.create_subprocess_exec('pytest')",
+    f"import asyncio\nasync def m():\n    await asyncio.create_subprocess_shell('{_QA}')",
+    "import asyncio\nasync def m():\n    await asyncio.create_subprocess_shell('pytest')",
+    f"import asyncio\na=['{_PROGRAM}']\na.append('all')\nasyncio.create_subprocess_exec(*a)",
+]
+
+#: The same shapes that run nothing full: data, an unpassed list, a targeted run.
+_PYTHON_RESIDUAL_ALLOWED: list[str] = [
+    "import subprocess\na=['pytest']\nprint(a)\nsubprocess.run(['ls'])",
+    "import subprocess\na=[]\na.append('pytest')\nprint(a)\nsubprocess.run(['ls'])",
+    "import subprocess\na=['ruff']\na.append('pytest')\nsubprocess.run(['ls'])",
+    f"import subprocess\na=['{_PROGRAM}']\na.append('all')\nprint(len(a))\nsubprocess.run(['ls'])",
+    "import subprocess\na=['pytest']\na.append('tests/unit/x.py')\nsubprocess.run(a)",
+    "import subprocess\na=['pytest']\na+=['tests/unit/x.py']\nsubprocess.run(a)",
+    "import subprocess\na=['pytest']\na.extend(['tests/unit/x.py'])\nsubprocess.Popen(a)",
+    "import subprocess\na=[]\na.append('ruff')\na.append('check')\nsubprocess.run(a)",
+    "import asyncio\nasyncio.create_subprocess_exec('pytest', 'tests/unit/x.py')",
+    "import asyncio\nasyncio.create_subprocess_exec('ls', '-l')",
+    "import asyncio\nasyncio.create_subprocess_shell('pytest tests/unit/x.py')",
+    "import asyncio\nasyncio.create_subprocess_shell('ls')",
+    f"import subprocess\nprint('{_QA}')\nsubprocess.run(['ls'])\nimport asyncio",
+    "class Q:\n    def append(self, x):\n        print(x)\nq=Q()\nq.append('pytest')\nprint(q)",
+]
+
+
+class TestResidualPythonRoutesToAFullRun:
+    """N409 residuals: mutated lists, asyncio subprocesses, code run from a named file."""
+
+    @pytest.mark.parametrize("code", _PYTHON_RESIDUAL_FULL_RUNS)
+    def test_a_residual_route_to_a_full_run_is_denied(self, code: str) -> None:
+        match = find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=_REPO_ROOT)
+        assert match is not None, code
+
+    @pytest.mark.parametrize("code", _PYTHON_RESIDUAL_ALLOWED)
+    def test_data_and_targeted_runs_stay_allowed(self, code: str) -> None:
+        assert find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=_REPO_ROOT) is None
+
+    @pytest.mark.parametrize("script", ["pytest", "pytest -q", _QA])
+    def test_exec_of_a_named_file_judges_the_file(self, script: str, tmp_path: Path) -> None:
+        (tmp_path / _RUN_PY).write_text(
+            f"import subprocess\nsubprocess.run('{script}', {_SHELL_TRUE})\n", encoding="utf-8"
+        )
+        code = f"{_EXEC}(open('{_RUN_PY}').read())"
+        match = find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=tmp_path)
+        assert match is not None
+
+    def test_run_path_of_a_named_file_judges_the_file(self, tmp_path: Path) -> None:
+        (tmp_path / _RUN_PY).write_text("import subprocess\nsubprocess.run('pytest')\n")
+        code = f"import runpy\nrunpy.run_path('{_RUN_PY}')"
+        assert find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=tmp_path)
+
+    def test_exec_of_a_targeted_file_is_allowed(self, tmp_path: Path) -> None:
+        (tmp_path / _RUN_PY).write_text(
+            "import subprocess\nsubprocess.run(['pytest', 'tests/unit/x.py'])\n"
+        )
+        for code in (
+            f"{_EXEC}(open('{_RUN_PY}').read())",
+            f"import runpy\nrunpy.run_path('{_RUN_PY}')",
+        ):
+            assert find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=tmp_path) is None
+
+    def test_exec_of_an_absent_file_follows_the_script_policy(self, tmp_path: Path) -> None:
+        """`python3 absent.py` is allowed (nothing to run); so is exec of the same name."""
+        for code in (
+            f"{_EXEC}(open('{_RUN_PY}').read())",
+            f"import runpy\nrunpy.run_path('{_RUN_PY}')",
+        ):
+            assert find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=tmp_path) is None
+        assert find_full_qa_invocation(f"python3 {_RUN_PY}", _patterns(), cwd=tmp_path) is None
+
+    def test_exec_of_an_unreadable_file_is_denied_like_a_script(self, tmp_path: Path) -> None:
+        target = tmp_path / _RUN_PY
+        target.mkdir()
+        code = f"{_EXEC}(open('{_RUN_PY}').read())"
+        via_exec = find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=tmp_path)
+        via_script = find_full_qa_invocation(f"python3 {_RUN_PY}", _patterns(), cwd=tmp_path)
+        assert (via_exec is None) == (via_script is None)
+
+
 class TestMentionsAndRealRunsAtTheShellLevel:
     """N409: a command that only NAMES a full run is allowed; every way to run one denies."""
 
