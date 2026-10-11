@@ -38,6 +38,10 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                            | Origin              | Status                              |
 | ---------- | ------------------------------------------------------------------------------------------------------------------ | ------------------- | ----------------------------------- |
+| N416       | `subagent_full_qa_blocker` advisory on a plain `set -e; …` command (not yet reproduced)                            | Batch AB review     | ⬜ Open                             |
+| N415       | `subagent_full_qa_blocker` misses `fh = open(p); src = fh.read(); exec(src)`                                       | Batch AB review     | ⬜ Open                             |
+| N414       | Staging simulation residuals: `--refresh` without `-q`, `git diff --output=`, the blunt `<` test                   | Batch AC review     | ⬜ Open                             |
+| N413       | `PipBreakSystemHandler` quadratic on a long nested-substitution word                                               | Batch AB            | ✅ Fixed (batch AD)                 |
 | N412       | The daemon reads neither `mcp_server.source` nor the `mcp__<server>__` tool-name prefix                            | Write-up            | ✅ Closed, no consumer              |
 | N411       | The Stop hook's 8-continuation cap may defeat the Stop handlers; one open question                                 | Write-up            | ⬜ Owner decision                   |
 | N410       | `upgrade_approval_guard` denies a QA tool reached through a variable once `PYTHONPATH` is set                      | Write-up            | ✅ Fixed (batch O)                  |
@@ -62,7 +66,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N374       | v3.69.0 release code review; defects fixed, one cold-index glob advisory residual is a decided limit               | Write-up            | ✅ Fixed; 🚫 residual               |
 | N373       | An invalid `stand_in_delay_hours` unregisters the Stop handler; `bash_safe_mode` setters are an open ruling        | Write-up            | ✅ Fixed; ⬜ Owner decision         |
 | N372–N370  | Daemon-docs guard on the repo folder name, per-clone plan counter, sed guard on a `git -C` message                 | Write-up            | ✅ Fixed                            |
-| N369       | A forwarder integration test fails inside every harness worktree and passes on main                                | Write-up            | ⬜ Open                             |
+| N369       | A forwarder integration test fails inside every harness worktree and passes on main                                | Write-up            | ✅ Fixed (batch AC)                 |
 | N368–N362  | Fact-checker evidence, QA venv recipe, `git config` read, fenced token, `bash -c` pipe, merged-branch delete       | Write-up            | ✅ Fixed                            |
 | N361       | The fake-values registry is not pre-filled; a commit-time BLOCK for a bad entry names no severity                  | Write-up            | ✅ Fixed; ⬜ Owner decision         |
 | N360–N355  | Opt-in handlers across an upgrade, fact-check feed and records, protected-file index, nested-eval cost             | Write-up            | ✅ Fixed                            |

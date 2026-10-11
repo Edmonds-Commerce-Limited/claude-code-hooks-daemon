@@ -77,14 +77,60 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N416 — `subagent_full_qa_blocker` raises `unrecognised-interpreter-inline-code` on a plain `set -e; …` command
+
+**Found**: the batch AB reviewer, as a side observation: the live blocker attached the
+`unrecognised-interpreter-inline-code` advisory to an ordinary `set -e; …` command that runs no interpreter. Advisory
+only (nothing denied), but a false positive on the most ordinary shell shape. Not yet reproduced by the coordinator;
+the reviewer's command text was not kept.
+
+**Status**: ⬜ Open. Reproduce first; then find which token read as an interpreter.
+
+### N415 — `subagent_full_qa_blocker` misses `fh = open(p); src = fh.read(); exec(src)`
+
+**Found**: the batch AB reviewer (round 1, `test_probe_ab.py`, 41 of 42 shapes caught). The read result passes
+through a second name before `exec`, so the batch AB `f = open(p); exec(f.read())` tracking does not see it. Allowed
+on main and on the batch AB branch alike (no regression).
+
+**Status**: ⬜ Open. Agent-workable: carry a name bound to `<handle>.read()` / `<path>.read_text()` to the `exec`
+that consumes it, as the list tracking already carries names.
+
+### N414 — commit-gate staging simulation residuals after batch AC (N246)
+
+**Found**: the batch AC reviewer, round 3 (`untracked/scratch/review-ac/probe_dirty.py`). Batch AC merged
+(ae7edb02c) with these three filed rather than fixed:
+
+1. `git update-index --refresh` / `--really-refresh` WITHOUT `-q` in a dirty tree exits 1 ("needs update"), which is
+   not in the nothing-staged message list, so the simulation takes the whole tree: a B5 false deny main did not
+   have. Rare, and with `&&` the commit never runs. Fix: treat "needs update" / "needs merge" as nothing staged, with a
+   dirty-tree test.
+2. `git diff --output=p.patch` over an existing `p.patch`, then `git apply --cached p.patch`, simulates the stale
+   patch: `get_written_file_paths` does not see `--output`. Fix: teach it the `--output` option of `git diff` and
+   `git format-patch`.
+3. `StagingRun.stdin_fed` is a plain substring test for `<`, so a `-m 'a < b'` or a `<<<` also counts. It only affects
+   `--index-info` runs (whole tree instead of nothing). Narrow it to a real redirect if that code is touched again.
+
+**Status**: ⬜ Open. All three agent-workable.
+
 ### N413 — `PipBreakSystemHandler` fails the hostile-input linearity test on `main`
 
 **Found**: Plan 00474 batch AB, running `tests/unit/handlers` in full. `tests/unit/handlers/test_safety_handlers_hostile_input_performance.py::TestBashCommandShapesStayLinear::test_every_safety_handler_stays_linear[nesting]`
-fails: `PipBreakSystemHandler cost grew 41x for 8x input on shape='nesting'`. It fails the same way on the main checkout
-(41x) and on this branch (45x to 46x), alone and in the full run, so batch AB did not cause it. The handler's matching
-was last changed by N407 (batch Y, per-segment matching inside `$( )` and backticks), which is the likely source.
+fails: `PipBreakSystemHandler cost grew 41x for 8x input on shape='nesting'`. It failed the same way on main at
+24d3f67e8 (41x to 43x) and on the batch AB branch (45x to 46x), so batch AB did not cause it. The test was not mapped
+from the handler sources, so no targeted run caught the regression (N357, batch AC, maps it now).
 
-**Status**: ⬜ Open. Not fixed in batch AB (outside its scope).
+**Cause**: `_SHELL_C_HEAD` in `pip_break_system.py`, applied with `.sub(..., count=1)` in `_leading_assignment`. Its
+unanchored `(?:\S*/)?` path prefix was retried from every offset inside one long whitespace-free word such as
+`$($($(...`, which is quadratic. Not the batch Y segment matching first suspected.
+
+**Status**: ✅ Fixed by batch AD (merge a90c0e310). The prefix now starts only at a word start (`(?<!\S)`), which
+leaves the leftmost match unchanged. `tests/unit/handlers/pre_tool_use/test_pip_break_system_shell_head_linear.py`
+pins both the stripped span and the linear cost.
+
+**Residual**: in the full `tests/unit/handlers` + `tests/unit/core` run on a90c0e310, under concurrent agent load,
+`[nesting]` failed once more on `IssueFilingGateHandler cost grew 24x for 8x input`. The same case passed three times
+in a row run alone (about 16 s each), so that reading was the load, not the handler. The ratio test is
+wall-clock and can flake on a loaded host; recorded here, not changed.
 
 ### N285 — a sub-agent reports `PYTHONPATH=… pytest` denied as an upgrade-approval bypass
 
@@ -1672,7 +1718,8 @@ attribute list, a `list(a)` copy / slice / tuple, `**kw`, `os.spawn*`, an asynci
 
 ✅ Protected paths, cleared by batch AB: `_read_new` now treats a file `secret_file_matching.path_is_protected(target, resolve_configured_patterns())` names (the accessor `lint_on_edit` and the other readers use; it resolves symlinks) as
 unseen, without opening it, so `python3 <path>`, `exec(open(p).read())`, `runpy.run_path(p)` and the `f = open(p)` form
-all follow the handler's `unseen_policy` for an unreadable script (deny with the unread-code id by default). Pinned by
+all follow the handler's `unseen_policy` for an unreadable script (allowed with an advisory by default; denied with the
+unread-code id under `unseen_policy: deny`). Pinned by
 `TestAProtectedFileIsNeverRead` (a configured glob, a symlink to a protected file, the shipped defaults; `Path.open`
 fails the test if the protected file is opened). Report: `subagent-reports/261011-batch-ab-sonnet.md`.
 
