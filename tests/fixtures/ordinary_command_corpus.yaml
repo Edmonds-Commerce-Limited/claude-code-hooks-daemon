@@ -1529,6 +1529,32 @@ rows:
   - id: n407-grep-names-sudo-sh-program
     command: |-
       grep -rn "sudo sh -c 'echo hi && pip install x'" docs/
+  - id: n407-export-then-pip-version-substitution
+    command: |-
+      export PIP_BREAK_SYSTEM_PACKAGES=1; v=$(pip --version)
+  - id: n407-export-then-single-quoted-substitution-text
+    command: |-
+      export PIP_BREAK_SYSTEM_PACKAGES=1; echo '$(pip install x)'
+  - id: n407-export-then-xargs-value-option-echo
+    command: |-
+      export PIP_BREAK_SYSTEM_PACKAGES=1; xargs -a r.txt echo
+  - id: n407-sudo-login-shell-alone
+    command: |-
+      sudo -i
+  - id: n407-sudo-s-runs-ls
+    command: |-
+      sudo -s ls
+  - id: n407-sudo-login-shell-heredoc-echoes-pip
+    command: |-
+      sudo -i <<'EOF'
+      echo pip install x
+      EOF
+  - id: n407-quoted-heredoc-to-file-names-pip
+    command: |-
+      cat <<'EOF' > untracked/scratch/n407-pip-notes.md
+      pip install x
+      sudo pip install x
+      EOF
   - id: n408-echo-names-issue-view
     command: |-
       echo 'gh issue view 5'

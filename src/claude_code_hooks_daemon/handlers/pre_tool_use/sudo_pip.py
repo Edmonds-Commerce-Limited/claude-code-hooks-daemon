@@ -17,8 +17,14 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
-from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH
-from claude_code_hooks_daemon.utils.command_position import command_position_code_segments
+from claude_code_hooks_daemon.utils.command_evasion import (
+    OPTIONAL_PATH,
+    strip_reserved_word_prefix,
+)
+from claude_code_hooks_daemon.utils.command_position import (
+    command_position_code_segments,
+    is_shell_command_option,
+)
 
 # Full first-fire teaching content (Plan 00116): reuses the pre-migration
 # handler's rich prose verbatim, minus the invocation-specific `COMMAND:`
@@ -86,6 +92,76 @@ _SUDO_PIP_PATTERN = (
 )
 
 
+# A heredoc opened on a line: head text, quote, delimiter (`<<-` strips tabs).
+_HEREDOC_OPEN = re.compile(r"^(?P<head>.*?)<<(?P<dash>-?)\s*(?P<q>['\"]?)(?P<tag>\w+)(?P=q)")
+_COMMAND_SEPARATORS = re.compile(r"&&|\|\||[;|&]")
+# A sudo option that takes the next word as its value (`-u root`, `-iu root`).
+_VALUE_OPTION_CLUSTER = re.compile(r"-[A-Za-z]*[ugCDhpRTU]")
+_SHELL_BINARIES = frozenset({"bash", "sh", "zsh", "dash", "ksh"})
+
+
+def _feeds_elevated_shell(head: str) -> bool:
+    """Whether ``head`` (the text before a `<<`) runs a shell as root on stdin.
+
+    `sudo -i` / `sudo -s` (no command after the options) and `sudo bash`
+    (`sh -s`, a path) read their script from the heredoc. A shell given `-c`
+    reads its program from that string instead, and any other command just
+    consumes the text as data.
+    """
+    words = strip_reserved_word_prefix(_COMMAND_SEPARATORS.split(head)[-1]).split()
+    if not words or words[0].rsplit("/", 1)[-1] not in ("sudo", "doas"):
+        return False
+    login_shell = False
+    index = 1
+    while index < len(words) and words[index].startswith("-") and words[index] != "--":
+        option = words[index]
+        index += 1
+        if not option.startswith("--"):
+            login_shell = login_shell or any(flag in option[1:] for flag in "is")
+            if _VALUE_OPTION_CLUSTER.fullmatch(option):
+                index += 1
+    if index >= len(words):
+        return login_shell
+    if words[index].rsplit("/", 1)[-1] not in _SHELL_BINARIES:
+        return False
+    return not any(is_shell_command_option(option) for option in words[index + 1 :])
+
+
+def _elevated_heredoc_bodies(command: str) -> list[str]:
+    """The bodies of the heredocs ``command`` feeds to an elevated shell."""
+    bodies: list[str] = []
+    lines = command.split("\n")
+    line_no = 0
+    while line_no < len(lines):
+        opened = _HEREDOC_OPEN.match(lines[line_no])
+        line_no += 1
+        if opened is None:
+            continue
+        body: list[str] = []
+        while line_no < len(lines):
+            line = lines[line_no]
+            line_no += 1
+            if (line.lstrip("\t") if opened["dash"] else line) == opened["tag"]:
+                break
+            body.append(line)
+        if _feeds_elevated_shell(opened["head"]):
+            bodies.append("\n".join(body))
+    return bodies
+
+
+def _elevated_body_runs_pip(command: str) -> bool:
+    """Whether a heredoc body run by an elevated shell installs with pip."""
+    return any(
+        re.search(
+            _SUDO_PIP_PATTERN,
+            f"sudo {strip_reserved_word_prefix(segment).lstrip('( ')}",
+            re.IGNORECASE,
+        )
+        for body in _elevated_heredoc_bodies(command)
+        for segment in command_position_code_segments(body)
+    )
+
+
 class SudoPipHandler(PreToolUseHandlerBase):
     """Block sudo pip install commands.
 
@@ -150,7 +226,7 @@ class SudoPipHandler(PreToolUseHandlerBase):
         return any(
             re.search(_SUDO_PIP_PATTERN, segment, re.IGNORECASE)
             for segment in command_position_code_segments(command)
-        )
+        ) or _elevated_body_runs_pip(command)
 
     def get_rules(self) -> list[Rule]:
         """Return the single Rule backing this handler's blocking behaviour."""
