@@ -4742,6 +4742,11 @@ def _unsure(
 _RUN_PATH: Final[str] = "run_path"
 _FILE_READERS: Final[frozenset[str]] = frozenset({"read", "read_text"})
 _FILE_OPENERS: Final[frozenset[str]] = frozenset({"open", "Path"})
+_STR_BUILTIN: Final[str] = "str"
+#: String methods whose result is still the receiver's text (N415).
+_TEXT_KEEPING_METHODS: Final[frozenset[str]] = frozenset(
+    {"strip", "rstrip", "lstrip", "replace", _FORMAT_METHOD, "encode", "decode"}
+)
 
 
 _RUNPY_MODULE: Final[re.Pattern[str]] = re.compile("runpy")
@@ -4754,22 +4759,49 @@ def _file_read_by(
 
     ``open(path).read()``, ``Path(path).read_text()``, ``h.read()`` for an
     ``h`` that ``with open(path) as h`` bound (``opened``), a name that an
-    earlier read bound (``texts``), each also inside ``compile(..., ...)``.
+    earlier read bound (``texts``), each also inside ``compile(..., ...)``,
+    ``str(...)``, a plain f-string field, and a method that keeps the text
+    (``.strip()``, ``.replace(a, b)``, ``.format(...)``, ``.encode().decode()``).
+    The text still reaches the run, so it is the file's. One pass down the
+    wrapping, no recursion.
     """
-    if isinstance(node, ast.Name):
-        return texts.get(node.id)
-    if isinstance(node, ast.Call) and _callee_name(node) == _COMPILE and node.args:
-        return _file_read_by(node.args[0], opened, texts)
-    if (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr in _FILE_READERS
-    ):
-        reader = node.func.value
-        if isinstance(reader, ast.Call) and _callee_name(reader) in _FILE_OPENERS and reader.args:
-            return reader.args[0]
-        if isinstance(reader, ast.Name):
-            return opened.get(reader.id)
+    pending = [node]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, ast.Name):
+            found = texts.get(current.id)
+            if found is not None:
+                return found
+        elif isinstance(current, ast.JoinedStr):
+            pending.extend(
+                part.value
+                for part in current.values
+                if isinstance(part, ast.FormattedValue)
+                and part.conversion == -1
+                and part.format_spec is None
+            )
+        elif isinstance(current, ast.Call):
+            if current.args and (
+                _callee_name(current) == _COMPILE
+                or (isinstance(current.func, ast.Name) and current.func.id == _STR_BUILTIN)
+            ):
+                pending.append(current.args[0])
+            elif isinstance(current.func, ast.Attribute):
+                attribute = current.func.attr
+                reader = current.func.value
+                if attribute in _FILE_READERS:
+                    if (
+                        isinstance(reader, ast.Call)
+                        and _callee_name(reader) in _FILE_OPENERS
+                        and reader.args
+                    ):
+                        return reader.args[0]
+                    if isinstance(reader, ast.Name) and reader.id in opened:
+                        return opened[reader.id]
+                elif attribute in _TEXT_KEEPING_METHODS:
+                    # Only the receiver: the arguments of ``.format`` may be wrapped by
+                    # ``!r`` in the template, which makes the file's text a string, not code.
+                    pending.append(reader)
     return None
 
 
@@ -4781,29 +4813,33 @@ def _opener_path(call: ast.expr) -> ast.expr | None:
 
 
 def _bind_file_names(
-    node: ast.AST, opened: dict[str, ast.expr], texts: dict[str, ast.expr]
+    node: ast.AST,
+    opened: dict[str, ast.expr],
+    texts: dict[str, ast.expr],
+    loops: Mapping[str, ast.expr],
 ) -> None:
     """Record what a finished ``name = ...`` or ``with ... as name`` binds.
 
     A file opened (``name = open(path)``, ``with open(path) as name``) goes to
     ``opened``; the text of a file read (``name = open(path).read()``,
-    ``name = handle.read()``) goes to ``texts``.
+    ``name = handle.read()``) goes to ``texts``. A path that is a loop variable
+    over literal paths is kept as all of them (``loops``).
     """
     if isinstance(node, ast.withitem):
         path = _opener_path(node.context_expr)
         if path is not None and isinstance(node.optional_vars, ast.Name):
-            opened[node.optional_vars.id] = path
+            opened[node.optional_vars.id] = _loop_valued(path, loops)
     elif isinstance(node, ast.Assign) and len(node.targets) == 1:
         target = node.targets[0]
         if not isinstance(target, ast.Name):
             return
         path = _opener_path(node.value)
         if path is not None:
-            opened[target.id] = path
+            opened[target.id] = _loop_valued(path, loops)
             return
         read = _file_read_by(node.value, opened, texts)
         if read is not None:
-            texts[target.id] = read
+            texts[target.id] = _loop_valued(read, loops)
 
 
 def _operands_run_in_process(
@@ -4817,44 +4853,104 @@ def _operands_run_in_process(
     so a name rebound to anything else (assigned, looped over, bound by a
     ``with``) stops counting; an augmented assignment keeps the text it adds to.
     ``None`` stands for a run whose operand is no file.
+
+    A ``for`` over a literal list or tuple of string paths binds its variable
+    to every one of them inside the loop, and each is judged. Which branch of
+    an ``if`` ran, and where a function defined earlier is called, are not
+    modelled (N415): that needs flow analysis beyond this one walk.
     """
     opened: dict[str, ast.expr] = {}
     texts: dict[str, ast.expr] = {}
+    loops: dict[str, ast.expr] = {}
     kept: set[int] = set()
+    loop_targets: set[int] = set()
     operands: list[ast.expr | None] = []
     # The names each open function or lambda shadows with a parameter, with what
     # they held outside it, put back when the function ends.
-    shadowed: list[list[tuple[str, ast.expr | None, ast.expr | None]]] = []
+    shadowed: list[list[tuple[str, ast.expr | None, ast.expr | None, ast.expr | None]]] = []
+    # The loop variable each open literal ``for`` bound, with what it held before.
+    looping: list[tuple[str, ast.expr | None]] = []
     stack: list[tuple[ast.AST, bool]] = [(tree, False)]
     while stack:
         node, finished = stack.pop()
         if finished:
             if isinstance(node, _SCOPES):
-                for name, was_opened, was_text in shadowed.pop():
+                for name, was_opened, was_text, was_loop in shadowed.pop():
                     _put_file_name_back(opened, name, was_opened)
                     _put_file_name_back(texts, name, was_text)
+                    _put_file_name_back(loops, name, was_loop)
+            elif isinstance(node, ast.For):
+                name, was_loop = looping.pop()
+                _put_file_name_back(loops, name, was_loop)
             else:
-                _bind_file_names(node, opened, texts)
+                _bind_file_names(node, opened, texts, loops)
             continue
         if isinstance(node, ast.arg) and shadowed:
-            shadowed[-1].append((node.arg, opened.pop(node.arg, None), texts.pop(node.arg, None)))
+            shadowed[-1].append(
+                (
+                    node.arg,
+                    opened.pop(node.arg, None),
+                    texts.pop(node.arg, None),
+                    loops.pop(node.arg, None),
+                )
+            )
         elif isinstance(node, ast.AugAssign):
             kept.add(id(node.target))
         elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
             if id(node) not in kept:
                 opened.pop(node.id, None)
                 texts.pop(node.id, None)
+            if id(node) not in loop_targets:
+                loops.pop(node.id, None)
         elif isinstance(node, ast.Call) and node.args:
             if _callee_name(node) == _EXEC_BUILTIN and isinstance(node.func, ast.Name):
-                operands.append(_file_read_by(node.args[0], opened, texts))
+                operands.extend(_alternatives(_file_read_by(node.args[0], opened, texts), loops))
             elif _is_run_path(node, modules, members):
-                operands.append(node.args[0])
+                operands.extend(_alternatives(node.args[0], loops))
         if isinstance(node, _SCOPES):
             shadowed.append([])
-        if isinstance(node, (ast.Assign, ast.withitem, *_SCOPES)):
+        if isinstance(node, ast.For):
+            paths = _literal_paths(node.iter)
+            if paths is not None and isinstance(node.target, ast.Name):
+                loop_targets.add(id(node.target))
+                # The loop variable is bound once its target is visited, after the old value goes.
+                looping.append((node.target.id, loops.get(node.target.id)))
+                loops[node.target.id] = ast.Tuple(elts=paths)
+            else:
+                looping.append(("", None))
+        if isinstance(node, (ast.Assign, ast.withitem, ast.For, *_SCOPES)):
             stack.append((node, True))
         stack.extend((child, False) for child in reversed(list(ast.iter_child_nodes(node))))
     return operands
+
+
+def _literal_paths(iterable: ast.expr) -> list[ast.expr] | None:
+    """The string constants of a literal list or tuple, None unless it holds only those."""
+    if not isinstance(iterable, (ast.List, ast.Tuple)) or not iterable.elts:
+        return None
+    if all(
+        isinstance(item, ast.Constant) and isinstance(item.value, str) for item in iterable.elts
+    ):
+        return list(iterable.elts)
+    return None
+
+
+def _loop_valued(path: ast.expr, loops: Mapping[str, ast.expr]) -> ast.expr:
+    """``path`` as all the literal paths its loop variable takes, else itself.
+
+    The several paths ride in a synthetic ``ast.Tuple``; no real file operand is one.
+    """
+    if isinstance(path, ast.Name):
+        return loops.get(path.id, path)
+    return path
+
+
+def _alternatives(path: ast.expr | None, loops: Mapping[str, ast.expr]) -> list[ast.expr | None]:
+    """The file operands a run of ``path`` stands for: one per literal path of a loop."""
+    path = path if path is None else _loop_valued(path, loops)
+    if isinstance(path, ast.Tuple):
+        return list(path.elts)
+    return [path]
 
 
 #: Nodes whose parameters are names of their own inside their body.

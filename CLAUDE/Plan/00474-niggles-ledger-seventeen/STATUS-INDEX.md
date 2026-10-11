@@ -4,10 +4,10 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 
 | #          | Verdict                                                                                                                      | Origin              | Status                              |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------------------- |
-| N418       | A helper that calls its own parameter ranks every call through it as may-run, whatever the call site passes                  | Batch AG review     | ✅ Fixed (batch AH); residuals      |
+| N418       | A helper that calls its own parameter ranks every call through it as may-run, whatever the call site passes                  | Batch AG review     | ✅ Fixed (batch AH); 🚫 limits      |
 | N417       | `subagent_full_qa_blocker` reads `pytest` text inside Python string data as a command (unmasked by N416's fix)               | Batch AE review     | ✅ Fixed (batch AG); residuals      |
 | N416       | `subagent_full_qa_blocker` advisory on `set -e`, `uniq -c` and other non-interpreter `-c`/`-e`/`-r` commands                 | Batch AB review     | ✅ Fixed (batch AE)                 |
-| N415       | `subagent_full_qa_blocker` misses `fh = open(p); src = fh.read(); exec(src)`                                                 | Batch AB review     | ✅ Fixed (batch AE); residuals      |
+| N415       | `subagent_full_qa_blocker` misses `fh = open(p); src = fh.read(); exec(src)`                                                 | Batch AB review     | ✅ Fixed (batch AE, AK); 🚫 limits  |
 | N414       | Staging simulation residuals: `--refresh` without `-q`, `git diff --output=`, the blunt `<` test                             | Batch AC review     | ✅ Fixed (batch AE)                 |
 | N413       | `PipBreakSystemHandler` quadratic on a long nested-substitution word                                                         | Batch AB            | ✅ Fixed (batch AD)                 |
 | N412       | The daemon reads neither `mcp_server.source` nor the `mcp__<server>__` tool-name prefix                                      | Write-up            | ✅ Closed, no consumer              |

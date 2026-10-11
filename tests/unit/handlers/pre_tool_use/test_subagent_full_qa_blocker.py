@@ -4161,6 +4161,66 @@ _REBOUND_TEXT_ALLOWED: list[str] = [
     f"src = open('{_RUN_PY}').read()\ndef run(*, src=None):\n    {_EXEC}(src)\nrun(src='print(1)')",
 ]
 
+#: N415 batch AK: a method chain that keeps the file's text, and a loop over literal paths.
+_TEXT_CHAIN_AND_LOOP_FULL_RUNS: list[str] = [
+    f"{_EXEC}(open('{_RUN_PY}').read().strip())",
+    f"{_EXEC}(open('{_RUN_PY}').read().rstrip())",
+    f"{_EXEC}(open('{_RUN_PY}').read().lstrip())",
+    f"{_EXEC}(open('{_RUN_PY}').read().replace('a', 'b'))",
+    f"{_EXEC}(open('{_RUN_PY}').read().format(1))",
+    f"{_EXEC}(open('{_RUN_PY}', 'rb').read().decode())",
+    f"{_EXEC}(open('{_RUN_PY}').read().encode().decode())",
+    f"{_EXEC}(str(open('{_RUN_PY}').read()))",
+    f"{_EXEC}(f\"{{open('{_RUN_PY}').read()}}\")",
+    f"from pathlib import Path\n{_EXEC}(Path('{_RUN_PY}').read_text().strip())",
+    f"{_EXEC}(compile(open('{_RUN_PY}').read().strip(), 'x', 'ex' + 'ec'))",
+    f"fh = open('{_RUN_PY}')\n{_EXEC}(fh.read().strip())",
+    f"src = open('{_RUN_PY}').read().strip()\n{_EXEC}(src)",
+    f"src = open('{_RUN_PY}').read().strip().replace('a', 'b')\n{_EXEC}(src)",
+    f"src = str(open('{_RUN_PY}').read())\n{_EXEC}(src)",
+    f"src = open('{_RUN_PY}').read()\ncode = src.strip()\n{_EXEC}(code)",
+    f"src = open('{_RUN_PY}').read()\n{_EXEC}(src.rstrip())",
+    f"src = open('{_RUN_PY}').read()\n{_EXEC}(f'{{src}}')",
+    f"for p in ['{_RUN_PY}']:\n    {_EXEC}(open(p).read())",
+    f"for p in ('other.py', '{_RUN_PY}'):\n    {_EXEC}(open(p).read())",
+    f"for p in ('a.py', '{_RUN_PY}'):\n    src = open(p).read()\n    print(1)\n    {_EXEC}(src)",
+    f"from pathlib import Path\nfor p in ['{_RUN_PY}']:\n    {_EXEC}(Path(p).read_text())",
+    f"for p in ['other.py', '{_RUN_PY}']:\n    fh = open(p)\n    {_EXEC}(fh.read())",
+    f"for p in ['{_RUN_PY}']:\n    src = open(p).read()\n{_EXEC}(src)",
+    f"import runpy\nfor p in ['other.py', '{_RUN_PY}']:\n    runpy.run_path(p)",
+]
+
+#: The same chains and loops over a file that runs nothing, a rebound name, a loop over
+#: something that is not a literal list of paths, and a string that is not the file's text.
+_TEXT_CHAIN_AND_LOOP_ALLOWED: list[str] = [
+    f"src = open('other.txt').read().strip()\n{_EXEC}(src)",
+    f"{_EXEC}(open('other.txt').read().strip())",
+    f"{_EXEC}(open('other.txt').read().replace('a', 'b'))",
+    f"{_EXEC}(str(open('other.txt').read()))",
+    f"src = open('{_RUN_PY}').read().strip()\nsrc = 'print(1)'\n{_EXEC}(src)",
+    f"src = open('{_RUN_PY}').read()\n{_EXEC}(f'{{src!r}}')",
+    f"src = open('{_RUN_PY}').read()\n{_EXEC}(src.split()[0])",
+    f"src = open('{_RUN_PY}').read()\n{_EXEC}('{{}}'.format(len(src)))",
+    # The file's text is an ARGUMENT of .format, never the receiver: only a string is assigned.
+    f"{_EXEC}('TEXT = {{!r}}'.format(open('{_RUN_PY}').read()))",
+    f"src = open('{_RUN_PY}').read()\n{_EXEC}('TEXT = {{!r}}'.format(src))",
+    f"src = open('{_RUN_PY}').read()\n{_EXEC}('{{}}'.format(src))",
+    f"for p in ['other.txt', 'other2.txt']:\n    {_EXEC}(open(p).read())",
+    f"for p in ('other.txt',):\n    {_EXEC}(open(p).read().strip())",
+    f"for p in ['{_RUN_PY}']:\n    pass\n{_EXEC}('print(1)')",
+    f"for p in ['{_RUN_PY}']:\n    p = 'other.txt'\n    {_EXEC}(open(p).read())",
+    f"for p in ['{_RUN_PY}']:\n    def run(p):\n        {_EXEC}(open(p).read())\n    run('other.txt')",
+    f"for p in ['{_RUN_PY}']:\n    pass\n{_EXEC}(open('other.txt').read())",
+    f"for p in ['{_RUN_PY}']:\n    src = open(p).read()\nsrc = 'print(1)'\n{_EXEC}(src)",
+]
+
+#: Coordinator's engineering judgement (N415), not an owner ruling: these need flow analysis
+#: beyond the single source-ordered walk, so they stay allowed.
+_TEXT_FLOW_LIMITS_ALLOWED: list[str] = [
+    f"import sys\nif sys.argv[1:]:\n    src = open('{_RUN_PY}').read()\nelse:\n    src = ''\n{_EXEC}(src)",
+    f"def go():\n    {_EXEC}(src)\nsrc = open('{_RUN_PY}').read()\ngo()",
+]
+
 
 class TestListEditsAndExecRoutesReachAFullRun:
     """N409 batch AB: insert/pop/``a = a + [...]``, ``os.exec*`` and ``pty.spawn`` are judged."""
@@ -4197,6 +4257,41 @@ class TestListEditsAndExecRoutesReachAFullRun:
         (root / "other.txt").write_text("print('data')\n")
         assert self._judge(code, root) is None, code
 
+    @staticmethod
+    def _harmless_files(root: Path) -> None:
+        for name in ("other.txt", "other2.txt", "other.py", "a.py"):
+            (root / name).write_text("print('data')\n")
+
+    @pytest.mark.parametrize("code", _TEXT_CHAIN_AND_LOOP_FULL_RUNS)
+    def test_a_text_preserving_chain_or_literal_loop_is_judged_as_the_file(
+        self, code: str, root: Path
+    ) -> None:
+        self._harmless_files(root)
+        assert self._judge(code, root) is not None, code
+
+    @pytest.mark.parametrize("code", _TEXT_CHAIN_AND_LOOP_ALLOWED)
+    def test_a_chain_or_loop_over_a_harmless_file_stays_allowed(
+        self, code: str, root: Path
+    ) -> None:
+        self._harmless_files(root)
+        assert self._judge(code, root) is None, code
+
+    @pytest.mark.parametrize("code", _TEXT_FLOW_LIMITS_ALLOWED)
+    def test_the_flow_limits_are_deliberate(self, code: str, root: Path) -> None:
+        """Coordinator's engineering judgement, not an owner ruling (N415)."""
+        assert self._judge(code, root) is None, code
+
+    def test_a_loop_over_a_non_literal_iterable_is_unchanged(self, root: Path) -> None:
+        literal = f"for p in ['{_RUN_PY}']:\n    {_EXEC}(open(p).read())"
+        computed = f"import sys\nfor p in sys.argv[1:]:\n    {_EXEC}(open(p).read())"
+        named = f"files = ['{_RUN_PY}']\nfor p in files:\n    {_EXEC}(open(p).read())"
+        assert self._judge(literal, root) is not None
+        # The computed one stays on the unread-path handling (judged as the full run it may be);
+        # a list held in a name is not a literal iterable and stays allowed, as before.
+        found = self._judge(computed, root)
+        assert found is not None and found.fail_closed != ""
+        assert self._judge(named, root) is None
+
     def test_the_text_tracking_is_linear(self, tmp_path: Path) -> None:
         body = "".join(f"s{i} = open('{_RUN_PY}').read()\ns{i} = 'x'\n" for i in range(3000))
         script = tmp_path / "many_reads.py"
@@ -4204,6 +4299,15 @@ class TestListEditsAndExecRoutesReachAFullRun:
         start = time.perf_counter()
         find_full_qa_invocation(f"python3 {script}", _patterns(), cwd=tmp_path)
         assert time.perf_counter() - start < 1.5
+
+    def test_many_chains_and_literal_loops_are_judged_quickly(self, tmp_path: Path) -> None:
+        body = "".join(
+            f"for p{i} in ['f{i}.py', 'g{i}.py']:\n"
+            f"    s{i} = open(p{i}).read().strip().replace('a', 'b')\n"
+            f"    {_EXEC}(s{i})\n"
+            for i in range(1500)
+        )
+        assert self._timed(tmp_path, body) < 1.5
 
     def test_a_restart_in_place_is_judged_like_the_subprocess_form(self, root: Path) -> None:
         code = "import os, sys\nos.execv(sys.executable, [sys.executable] + sys.argv)"

@@ -44,7 +44,7 @@ Counted by the status column's emoji:
   [the 00466 evidence](../Completed/00466-niggles-ledger-sixteen/STATUS-2026-10.md).
 - 15 rows carry an owner decision (⬜ Owner decision, including three fixed or part-fixed rows with a decision left).
 - 100 rows are fixed, dismissed, remedied or closed (✅; some of them also count in the lines above and below).
-- 5 rows record a deliberate limit (🚫); 8 are in progress or graduated (4 🔄, 3 🟡, 1 ↩️).
+- 7 rows record a deliberate limit (🚫); 8 are in progress or graduated (4 🔄, 3 🟡, 1 ↩️).
 
 ## Tasks
 
