@@ -35,12 +35,12 @@ not-a-defect with the reasoning kept.
 ## Niggles
 
 Full write-ups are in [NIGGLES.md](NIGGLES.md). The one-line-per-niggle status
-table (121 rows) is in [STATUS-INDEX.md](STATUS-INDEX.md).
+table (122 rows) is in [STATUS-INDEX.md](STATUS-INDEX.md).
 Counted by the status column's emoji:
 
-- 3 rows are open (⬜ Open): N417, N280 and the 42 entries still open in 00466.
+- 3 rows are open (⬜ Open): N418, N280 and the 42 entries still open in 00466.
 - 14 rows carry an owner decision (⬜ Owner decision, including three fixed or part-fixed rows with a decision left).
-- 98 more rows are fixed, dismissed, remedied or closed (✅; 100 carry ✅, two of them already counted above).
+- 99 more rows are fixed, dismissed, remedied or closed (✅; 100 carry ✅, two of them already counted above).
 - 5 rows record a deliberate limit (🚫); the rest are in progress or graduated (🔄, 🟡, ↩️).
 
 ## Tasks

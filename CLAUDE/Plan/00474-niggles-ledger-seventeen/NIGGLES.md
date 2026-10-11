@@ -77,6 +77,18 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N418 — a generic helper handed both a launcher and a data function ranks every call through it as may-run
+
+**Found**: the batch AG reviewer (round 3, `untracked/scratch/review-batch-x/run_b5_ag.sh`, `b5_ag_cases.txt`). The
+`_CallRanker` (N417) ranks a script function by EVERY function value it is ever handed, so a helper that receives
+`subprocess.run` at one call site and `str.upper` at another ranks as may-run at both. `dispatch(str.upper, 'pytest')`
+and `label = wrap(str); label('pytest')` get the unseen verdict (an advisory under the default `unseen_policy`; a deny
+under `unseen_policy: deny`) though the `pytest` string only ever reaches a data function. Main denied those shapes
+outright, so batch AG already softened them; this is what is left.
+
+**Status**: ⬜ Open. Agent-workable: rank each call site by the function value it actually passes, not the helper by
+the union of all of them, keeping the cost linear.
+
 ### N417 — `subagent_full_qa_blocker` reads `pytest` text inside Python string data as a command
 
 **Found**: the batch AE reviewer (round 2). A probe wrapper script runs Python whose string literals hold `pytest`
