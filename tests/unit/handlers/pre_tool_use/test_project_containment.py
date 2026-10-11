@@ -1491,3 +1491,95 @@ class TestUnreadableCommandText:
         assert result.decision == Decision.ALLOW
         assert result.context
         assert "unbalanced quote or heredoc" in result.context[0]
+
+
+class TestARedirectIsJudgedWhereTheChainsCdLandsIt:
+    """Ledger N403: a relative target is joined to the directory the chain's
+    ``cd`` moves reach, not to the hook cwd. Every DENY command below is only
+    parsed here, never run."""
+
+    @pytest.fixture()
+    def repo(self, tmp_path: Path, _project_root: Any) -> Path:
+        root = tmp_path / "repo"
+        (root / "sub").mkdir(parents=True)
+        (root / ".git").mkdir()
+        _project_root.return_value = root
+        return root
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd sub && echo x > ../x",
+            "cd sub && echo x | tee y",
+            "cd sub && curl -o ../z https://example.com",
+            "cd sub && cd .. && echo x > out",
+            "cd $PWD/sub && echo x > out",
+            'cd "$PWD/sub" && echo x > out',
+            'cd "$(git rev-parse --show-toplevel)" && echo x > untracked/scratch/x',
+            "(cd /tmp) && echo x > x",
+            "echo x > x && cd /tmp",
+            "cd sub; echo x > y",
+            "OUT=../x; cd sub && echo x > $OUT",
+        ],
+    )
+    def test_a_target_that_lands_inside_the_repository_is_allowed(
+        self, handler: ProjectContainmentHandler, repo: Path, command: str
+    ) -> None:
+        assert handler.matches(_bash(command, cwd=str(repo))) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd /tmp && echo x > x",
+            "cd .. && cd .. && echo x > x",
+            "cd .. && echo x > x",
+            "cd sub && echo x > ../../x",
+            "pushd /tmp && echo x > x",
+            "(cd /tmp && echo x > x)",
+            "cd /tmp; echo x > x",
+            "cd /tmp && echo x | tee y",
+            "cd /tmp && curl -o y https://example.com",
+            "cd ~ && echo x > x",
+            "cd sub && echo x > /tmp/x",
+            "echo x > /tmp/x",
+            'cd "$(git rev-parse --show-toplevel)" && echo x > ../x',
+            "cd /tmp || cd sub; echo x > x",
+            # `cd sub;` may fail and leave the command where it started, so
+            # `../x` is also read from there.
+            "cd sub; echo x > ../x",
+            "cd sub && echo x | tee ../y",
+        ],
+    )
+    def test_a_target_that_lands_outside_the_repository_is_denied(
+        self, handler: ProjectContainmentHandler, repo: Path, command: str
+    ) -> None:
+        hook_input = _bash(command, cwd=str(repo))
+        assert handler.matches(hook_input) is True
+        assert handler.handle(hook_input).decision == Decision.DENY
+
+    @pytest.mark.parametrize("command", ['cd "$UNKNOWN" && echo x > x', "cd dir/* && echo x > x"])
+    def test_a_directory_that_cannot_be_placed_is_not_judged_and_says_so(
+        self, handler: ProjectContainmentHandler, repo: Path, command: str
+    ) -> None:
+        hook_input = _bash(command, cwd=str(repo))
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+        assert result.context
+        assert "cd" in result.context[0]
+
+    def test_a_cd_that_cannot_be_placed_costs_nothing_when_the_command_writes_nothing(
+        self, handler: ProjectContainmentHandler, repo: Path
+    ) -> None:
+        assert handler.matches(_bash('cd "$UNKNOWN" && ls', cwd=str(repo))) is False
+
+    def test_a_cd_that_cannot_be_placed_costs_nothing_for_an_absolute_target(
+        self, handler: ProjectContainmentHandler, repo: Path
+    ) -> None:
+        command = f'cd "$UNKNOWN" && echo x > {repo}/untracked/scratch/x'
+        assert handler.matches(_bash(command, cwd=str(repo))) is False
+
+    def test_with_no_cwd_nothing_is_joined(
+        self, handler: ProjectContainmentHandler, repo: Path
+    ) -> None:
+        assert handler.matches(_bash("cd /tmp && echo x > x")) is False

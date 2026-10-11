@@ -614,3 +614,38 @@ class TestEvalNestingIsCapped:
         lexed = 0
         simple_commands("eval " * 160 + "true")
         assert lexed < shallow * 10
+
+
+class TestSimpleCommandsKeepTheirFileRedirections:
+    """A command's `> file` is kept with the directory it runs in (ledger N403)."""
+
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ("echo x > out", (("> ", "out"),)),
+            ("echo x >> log", ((">> ", "log"),)),
+            ("echo x 2> err", (("> ", "err"),)),
+            ("echo x &> all", (("&> ", "all"),)),
+            ("echo x >& all", ((">& ", "all"),)),
+            ("echo x >| out", ((">| ", "out"),)),
+            ('echo x > "a b"', (("> ", "a b"),)),
+        ],
+    )
+    def test_a_file_writing_redirection_is_kept(
+        self, command: str, expected: tuple[tuple[str, str], ...]
+    ) -> None:
+        (step,) = simple_commands(command)
+        assert step.redirects == tuple((op.strip(), target) for op, target in expected)
+
+    @pytest.mark.parametrize(
+        "command", ["echo x 2>&1", "echo x >&2", "echo x >&-", "echo x < in", "echo x"]
+    )
+    def test_anything_else_is_not(self, command: str) -> None:
+        (step,) = simple_commands(command)
+        assert step.redirects == ()
+
+    def test_each_command_keeps_its_own(self) -> None:
+        first, second = simple_commands("cd sub && echo x > ../x")
+        assert first.redirects == ()
+        assert second.redirects == ((">", "../x"),)
+        assert second.directory == ("sub",)

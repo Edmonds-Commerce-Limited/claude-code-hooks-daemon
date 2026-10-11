@@ -1465,3 +1465,15 @@ rows:
       KNOWN = ['run_all.sh']
       subprocess.run(['git', 'status'])
       PY
+  # --- Plan 00474 N403: a redirect is judged where the chain's cd lands it ---------
+  - id: n403-cd-sub-redirect-to-parent
+    cwd: tests
+    command: |-
+      cd unit && echo x > ../../untracked/scratch/n403.txt
+  - id: n403-cd-sub-redirect-up-within-repo
+    command: |-
+      cd tests && echo x > ../untracked/scratch/n403.txt
+  - id: n403-cd-toplevel-then-redirect-relative
+    cwd: tests
+    command: |-
+      cd "$(git rev-parse --show-toplevel)" && echo x > untracked/scratch/n403.txt
