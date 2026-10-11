@@ -1470,6 +1470,45 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N402 — the conflict-marker commit gate denies `cd "$(git rev-parse --show-toplevel)" && git commit`
+
+**Source**: Plan 00483 Task 3.2 re-check (2026-10-11), proposal P3, probes d-h1 and d-h4
+(`../00483-threat-model-conformance-audit/subagent-reports/261011-task-3.2-recheck-sonnet.md`).
+
+**Evidence**: `cd "$(git rev-parse --show-toplevel)" && git commit ...` and `cd $PROJ && git commit ...` are denied
+with "this commit was NOT checked ... the directory needs an expansion the daemon cannot perform"; the control
+without `cd` allows. Path judgement has resolved the one-level `$(git rev-parse --show-toplevel)` since FP batch 2;
+the commit gates do not.
+
+**Status**: ⬜ Open, in two parts. (a) Agent: resolve `$(git rev-parse --show-toplevel)` (and `$PWD`/`$(pwd)`) in
+the commit gates the way path judgement does. (b) Owner: whether a commit gate that cannot place the repository for
+any other expansion (`cd $PROJ`) should allow with an advisory, as owner ruling R3 did for the secret guards, or stay
+fail-closed. Until (b) is ruled, `cd $PROJ && git commit` stays denied.
+
+### N401 — `destructive_git` reads a `git -c k=v commit -F - <<'EOF'` message body as a command
+
+**Source**: Plan 00483 Task 3.2 re-check (2026-10-11), proposal P2, probes d-j1, j1a and j1b.
+
+**Evidence**: `git commit -F - <<'EOF'` with `git reset --hard` in the body is allowed, but the same command with a
+`-c core.x=1` or `-c user.email=…` global option before `commit` is denied. `-m "$(cat <<'EOF'…)"` with `-c` is
+allowed. So the quoted heredoc body is read as code only when a `-c` global option precedes `commit`.
+
+**Status**: ⬜ Open. Remedy: the git global-option reader (`GIT_INVOCATION`) hands the heredoc-sink decision the same
+segment it uses without `-c`; add the `-c` form as a gate row.
+
+### N400 — `destructive_git` and `git_stash` read a quoted heredoc in `gh … --body "$(cat <<'EOF' … EOF)"` as a command
+
+**Source**: Plan 00483 Task 3.2 re-check (2026-10-11), proposal P1, probes d-j2, j2a and j2b.
+
+**Evidence**: `gh pr create --title x --body "$(cat <<'EOF'` / `blocks git reset --hard` / `EOF` / `)"` and the same
+shape under `gh issue comment` are denied (`destructive_git` for `reset --hard`, `git_stash` for `stash`).
+`--body-file - <<'EOF'`, plain-text bodies and `git commit -m "$(cat <<'EOF'…)"` are allowed. This is the standard
+PR-body idiom, and the ordinary shape of any PR or comment that describes a blocked command.
+
+**Status**: ⬜ Open. Remedy: treat the quoted-delimiter heredoc body of a `$(cat <<'EOF' …)` substitution as data
+when it is the value of a `gh` `--body`/`-b` option (the sink rule batch (b) added for the `gh` body heredoc); gate
+row `a8-*`.
+
 ### N398 — two `WorktreeFileCopyHandler` acceptance probes fail when the suite runs from a worktree
 
 **Source**: the coordinator (2026-10-11), seen in the N397 agent's QA.
