@@ -1249,7 +1249,13 @@ fi
 _is_raw_self_install_clone() {
     [[ ! -f "$PROJECT_PATH/.claude/hooks-daemon.env" ]] || return 1
     [[ ! -f "$PROJECT_PATH/.claude/hooks-daemon/pyproject.toml" ]] || return 1
-    [[ -d "$PROJECT_PATH/src/claude_code_hooks_daemon" ]] || return 1
+    # The one shell self-install test lives in mode_guard.sh. A client project
+    # has no such file, so its absence is itself a "no".
+    local guard="$PROJECT_PATH/scripts/install/mode_guard.sh"
+    [[ -f "$guard" ]] || return 1
+    # shellcheck source=scripts/install/mode_guard.sh
+    source "$guard"
+    is_self_install_checkout "$PROJECT_PATH" || return 1
     [[ -f "$PROJECT_PATH/install.py" ]] || return 1
     [[ -f "$PROJECT_PATH/scripts/bootstrap-self-install.sh" ]] || return 1
     [[ -f "$PROJECT_PATH/scripts/venv_bootstrap.sh" ]] || return 1
