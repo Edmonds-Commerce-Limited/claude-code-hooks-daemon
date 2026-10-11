@@ -167,7 +167,7 @@ Evidence, with verified facts marked apart from inferences, is in
 - [x] ❌ **Task 4.3**: A/B the orchestrator: Sonnet main loop vs Opus, Opus sub-agents with pinned `model:` and structured verdict files; compare cost per tick, guard denies, and triage/verdict errors. **DECLINED** (decision 1 of
   [OWNER-QUESTIONS-261011-B.md](../00474-niggles-ledger-seventeen/OWNER-QUESTIONS-261011-B.md), a coordinator decision
   under the "clear winner" guidance, not an owner ruling). A fair comparison needs days of matched running on a quiet
-  host with usage headroom; the dev host is too loaded and the account hit its hard limit on 2026-10-08, so the record
+  host with usage headroom; the dev host is too loaded and the account hit its hard limit on 2026-10-09, so the record
   would be noise. Model choice also lives in Claude Code's settings and the per-agent `model:` pins. Reopens only if
   quiet capacity appears.
 
