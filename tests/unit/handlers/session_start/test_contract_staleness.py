@@ -151,12 +151,17 @@ class TestVendoredMetaIsCurrent:
     itself cleared it.
     """
 
-    def test_new_session_on_the_audited_version_is_silent(self) -> None:
+    def test_new_session_on_the_audited_version_is_silent(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # This pins the CONTRACT half only. The review-drift half depends on how far the
+        # changelog review has got, which moves independently of a contract refresh.
+        monkeypatch.setattr(ContractStalenessHandler, "_newest_reviewed_version", lambda self: None)
         h = ContractStalenessHandler()
         assert h.meta_path.is_file(), "vendored META.json must ship with the repository"
         meta = json.loads(h.meta_path.read_text(encoding="utf-8"))
         audited = meta["last_audited_claude_code_version"]
-        assert audited == "2.1.272"
+        assert audited == "2.1.296"
         h.installed_version_reader = lambda: audited
         h.self_install_reader = lambda: True
         assert h.matches(_hook_input()) is True

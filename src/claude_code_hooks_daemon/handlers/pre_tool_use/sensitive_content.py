@@ -63,6 +63,7 @@ from claude_code_hooks_daemon.utils.command_evasion import (
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.fake_values import (
+    REGISTRY_RELATIVE_PATH,
     FakeValuesError,
     FakeValuesRegistry,
     load_fake_values,
@@ -729,6 +730,12 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         # Anchor for the word list when no ProjectContext is initialised: a CLI
         # that builds this handler itself (``remote-docs add``) names its root.
         self._project_root_override: Path | None = None
+        # The parsed approved-fakes registry with the file stamp it was parsed at,
+        # so a matching write does not re-read an unchanged file. One attribute
+        # (stamp and value together) so a concurrent write never pairs them wrongly.
+        self._fake_values_cache: tuple[tuple[Path, tuple[int, int]], FakeValuesRegistry] | None = (
+            None
+        )
         # Per-dispatch bridge: matches() and handle() see the same call, so
         # the staged diff costs ONE subprocess and a body file ONE read. Key
         # and value live in a SINGLE attribute so a concurrent dispatch can
@@ -794,11 +801,36 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         )
         if project_root is None:
             return FakeValuesRegistry()
+        stamp = (project_root, self._registry_stamp(project_root))
+        cached = self._fake_values_cache
+        if cached is not None and cached[0] == stamp:
+            return cached[1]
         try:
-            return load_fake_values(project_root)
+            registry = load_fake_values(project_root)
         except FakeValuesError as error:
             _LOGGER.warning("sensitive_content: fake-values registry ignored: %s", error)
-            return FakeValuesRegistry()
+            registry = FakeValuesRegistry()
+        self._fake_values_cache = (stamp, registry)
+        return registry
+
+    @staticmethod
+    def _registry_stamp(project_root: Path) -> tuple[int, int]:
+        """(mtime_ns, size) of the registry file; ``(0, 0)`` when it cannot be stat'd.
+
+        Known limit: a rewrite of the same size within the filesystem's timestamp
+        resolution keeps the previous parse until the file next changes.
+        """
+        try:
+            stat = (project_root / REGISTRY_RELATIVE_PATH).stat()
+        except OSError as exc:
+            log_and_continue(
+                _LOGGER,
+                exc,
+                reason="a registry file that cannot be stat'd (usually: absent) gets the (0, 0) stamp, so it is loaded and an absent or unreadable file allows nothing",
+                level=logging.DEBUG,
+            )
+            return (0, 0)
+        return (stat.st_mtime_ns, stat.st_size)
 
     def scan_text(self, content: str) -> str | None:
         """Reason ``content`` must not be written, or None when it is clean.

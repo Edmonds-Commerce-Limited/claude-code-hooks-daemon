@@ -88,15 +88,24 @@ class TestRecordShape:
 
 
 class TestAgreesWithContractMeta:
-    """META.json's audited version is the record's newest known version."""
+    """No release is recorded as tested on a Claude Code newer than the audited contract."""
 
-    def test_newest_known_version_matches_meta(self, releases: dict[str, dict[str, Any]]) -> None:
+    def test_newest_known_version_is_not_ahead_of_meta(
+        self, releases: dict[str, dict[str, Any]]
+    ) -> None:
         # The existing reader, with a stub fetch so nothing touches the network.
         audited = compare_contract(META_PATH, lambda _url: b"").audited_version
+        assert audited is not None
+
+        def as_tuple(v: str) -> tuple[int, ...]:
+            return tuple(int(p) for p in v.split("."))
+
         known = [e["claude_code_version"] for e in releases.values()]
         known = [v for v in known if v != UNKNOWN]
-        newest = max(known, key=lambda v: tuple(int(p) for p in v.split(".")))
-        assert newest == audited
+        newest = max(known, key=as_tuple)
+        # A contract refresh between releases leaves META ahead of the newest record
+        # until the next release records its own tested version.
+        assert as_tuple(newest) <= as_tuple(audited)
 
 
 class TestReviewerAgent:

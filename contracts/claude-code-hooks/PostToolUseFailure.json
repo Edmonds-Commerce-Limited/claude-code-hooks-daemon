@@ -19,6 +19,9 @@
     "additionalContext": {}
   },
   "discarded_fields": [],
+  "conditional_input_fields": {
+    "mcp_server": "Present only when the tool is an MCP tool: an object with the server's name and a source saying where its definition came from (see the PreToolUse mcp_server entry). Requires Claude Code v2.1.274 or later."
+  },
   "notes": "In the docs' top-level decision: 'block' group.",
   "input_example": {
     "session_id": "abc123",

@@ -19,6 +19,9 @@
   "discarded_fields": [
     "continue"
   ],
+  "conditional_input_fields": {
+    "agent_id": "The common agent_id field identifies the subagent or in-process teammate creating the task. May be absent. Requires Claude Code v2.1.290 or later."
+  },
   "notes": "Exit 2 or decision: 'block' cancels the task. continue: false is ignored.",
   "input_example": {
     "session_id": "abc123",
