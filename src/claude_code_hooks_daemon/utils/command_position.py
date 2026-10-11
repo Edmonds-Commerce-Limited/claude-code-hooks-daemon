@@ -103,7 +103,7 @@ def _segment_spans(text: str) -> list[tuple[int, int]]:
     commands joined by a background operator.
     """
     masked = _REDIRECT_AMPERSAND.sub(lambda match: match.group().replace("&", "_"), text)
-    return split_unquoted_spans(masked, SEGMENT_SEPARATORS)
+    return split_unquoted_spans(masked, SEGMENT_SEPARATORS, comments_end_at_newline=True)
 
 
 def segment_spans(text: str) -> list[tuple[int, int]]:

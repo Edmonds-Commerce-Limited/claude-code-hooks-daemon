@@ -2839,14 +2839,75 @@ def split_unquoted(text: str, separators: Sequence[str]) -> list[str]:
     return [text[start:end] for start, end in split_unquoted_spans(text, separators)]
 
 
-def split_unquoted_spans(text: str, separators: Sequence[str]) -> list[tuple[int, int]]:
+@dataclass
+class _Nesting:
+    """How deep the scan is inside a substitution, a `${}` or a backtick body.
+
+    A `#` there is not a comment bash ends at the newline, so a caller that lets
+    a comment swallow separators asks :attr:`at_top_level` first. Counting is
+    biased towards "still nested": an opener always counts, a closer counts only
+    when unquoted, so a miscount keeps splitting (the safe direction).
+    """
+
+    parens: int = 0
+    braces: int = 0
+    in_backtick: bool = False
+    #: Offset just past the last closer; a `#` there continues the word (`$(x)#b`).
+    closed_at: int = -1
+
+    @property
+    def at_top_level(self) -> bool:
+        return self.parens == 0 and self.braces == 0 and not self.in_backtick
+
+    def observe(self, text: str, index: int, unquoted: bool) -> int:
+        """Update for the character at ``index``; return how many characters it consumed
+        (0 when the main scan should handle it as usual)."""
+        char = text[index]
+        following = text[index + 1 : index + 2]
+        if char == "$" and following in ("(", "{"):
+            if following == "(":
+                self.parens += 1
+            else:
+                self.braces += 1
+            return 2
+        if char in "<>" and following == "(":
+            self.parens += 1
+            return 2
+        if char == "`":
+            self.in_backtick = not self.in_backtick
+            self.closed_at = index + 1
+            return 1
+        if unquoted:
+            if char == "(":
+                self.parens += 1
+            elif char == ")" and self.parens:
+                self.parens -= 1
+                self.closed_at = index + 1
+            elif char == "}" and self.braces:
+                self.braces -= 1
+                self.closed_at = index + 1
+        return 0
+
+
+def split_unquoted_spans(
+    text: str, separators: Sequence[str], *, comments_end_at_newline: bool = False
+) -> list[tuple[int, int]]:
     """:func:`split_unquoted` as ``(start, end)`` offsets into ``text``, for a
-    caller that must map a segment back to where it sits."""
+    caller that must map a segment back to where it sits.
+
+    By default a comment's separators still split (the conservative reading for
+    a caller that judges comment text). With ``comments_end_at_newline`` a
+    comment runs to the end of its line and only the newline splits there.
+    """
     spans: list[tuple[int, int]] = []
     start = 0
     in_single = False
     in_double = False
     in_comment = False
+    swallows = False
+    nesting = _Nesting()
+    # Where the last escape ended: a `#` right there continues a word (`a\ #b`).
+    escaped_end = -1
     index = 0
     # A separator can only start at one of these characters, so the per-
     # character scan of `separators` is skipped everywhere else (N265). An
@@ -2862,11 +2923,23 @@ def split_unquoted_spans(text: str, separators: Sequence[str]) -> list[tuple[int
         # A comment runs to the newline and its quotes are characters, but its
         # separators still split: judging comment text as commands is the
         # conservative reading, and a quote in it must not swallow later lines.
+        #
+        # With ``comments_end_at_newline`` the comment swallows its separators
+        # only when it is certain: bash reads `a\ #b` and `$(x)#b` as one word,
+        # and `${x:-a #b}` and a backtick body have no comment of their own. In
+        # any doubt the comment splits as before, so doubt never widens what a
+        # comment hides.
         if in_comment or (unquoted and _starts_comment(text, index)):
+            if not in_comment:
+                swallows = (
+                    comments_end_at_newline
+                    and index not in (escaped_end, nesting.closed_at)
+                    and nesting.at_top_level
+                )
             in_comment = char != _NEWLINE
             matched = (
                 next((sep for sep in separators if text.startswith(sep, index)), None)
-                if may_separate
+                if may_separate and (char == _NEWLINE or not swallows)
                 else None
             )
             if matched is not None:
@@ -2890,7 +2963,14 @@ def split_unquoted_spans(text: str, separators: Sequence[str]) -> list[tuple[int
         # handling is skipped entirely and only the closing quote matters.
         if char == _ESCAPE_CHAR and not in_single:
             index = min(index + 2, len(text))
+            escaped_end = index
             continue
+
+        if comments_end_at_newline and not in_single:
+            consumed = nesting.observe(text, index, unquoted)
+            if consumed:
+                index += consumed
+                continue
 
         if char == _SINGLE_QUOTE and not in_double:
             in_single = not in_single
