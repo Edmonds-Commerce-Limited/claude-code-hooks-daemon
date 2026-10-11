@@ -6,6 +6,7 @@
 **Priority**: Medium
 **Recommended Executor**: Sonnet
 **Execution Strategy**: Direct
+**GitHub Issue**: #59 (the mkplan.bash worktree lock, fixed in this ledger and released in v3.68.0; closed 2026-10-11)
 
 ## Overview
 
