@@ -8084,17 +8084,19 @@ def cmd_remote_docs(args: argparse.Namespace) -> int:
         return 0
 
     # Only the fetching actions resolve a fetcher, so `list`/`check`/`index`
-    # never warn about a browser they were never going to use.
-    fetcher = _resolve_remote_docs_fetcher(args)
-    if fetcher.warning:
-        print(fetcher.warning, file=sys.stderr)
-
+    # never warn about a browser they were never going to use. `refresh`
+    # resolves its own, per target, from each document's recorded fidelity.
     if action == "add":
         code = _remote_docs_add(
-            args, resolved_root, tree, fetcher, now, _remote_docs_policy(resolved_root)
+            args,
+            resolved_root,
+            tree,
+            _resolve_and_announce_fetcher(args),
+            now,
+            _remote_docs_policy(resolved_root),
         )
     else:
-        code = _remote_docs_refresh(args, resolved_root, tree, fetcher, now)
+        code = _remote_docs_refresh(args, resolved_root, tree, now)
 
     # Regenerated on every capture and refresh, never on demand: an index
     # that silently goes stale answers "we don't have that" confidently and
@@ -8122,12 +8124,23 @@ def _remote_docs_policy(project_root: Path) -> Any:
     return config.documentation.remote
 
 
-def _resolve_remote_docs_fetcher(args: argparse.Namespace) -> Any:
+def _resolve_and_announce_fetcher(args: argparse.Namespace, *, verbatim: bool | None = None) -> Any:
+    """Resolve a fetcher and print its fallback warning, if it has one."""
+    fetcher = _resolve_remote_docs_fetcher(args, verbatim=verbatim)
+    if fetcher.warning:
+        print(fetcher.warning, file=sys.stderr)
+    return fetcher
+
+
+def _resolve_remote_docs_fetcher(args: argparse.Namespace, *, verbatim: bool | None = None) -> Any:
     """The fetcher for this invocation: injected for tests, resolved otherwise.
 
     ``agent-browser read`` is preferred because it is documentation-aware --
     it negotiates markdown, retries with ``.md`` and consults ``llms.txt``
     -- where a plain GET stores whatever a server hands an anonymous client.
+
+    ``verbatim`` overrides the command line's ``--verbatim`` flag; ``refresh``
+    passes it per target.
     """
     from claude_code_hooks_daemon.remote_docs.fetchers import (
         HTTPS_METHOD,
@@ -8148,7 +8161,9 @@ def _resolve_remote_docs_fetcher(args: argparse.Namespace) -> Any:
             method=HTTPS_METHOD,
         )
 
-    return resolve_fetcher(verbatim=bool(getattr(args, "verbatim", False)))
+    if verbatim is None:
+        verbatim = bool(getattr(args, "verbatim", False))
+    return resolve_fetcher(verbatim=verbatim)
 
 
 def _remote_docs_add(
@@ -8341,12 +8356,21 @@ def _remote_docs_check(
     return 1
 
 
-def _remote_docs_refresh(
-    args: argparse.Namespace, project_root: Path, tree: Path, fetcher: Any, now: Any
-) -> int:
+def _remote_docs_refresh(args: argparse.Namespace, project_root: Path, tree: Path, now: Any) -> int:
+    """Refresh each target with the fetcher its own recorded fidelity calls for.
+
+    A document stored as ``verbatim`` is re-fetched verbatim; any other
+    fidelity gets the default fetcher. An explicit ``--verbatim`` overrides
+    that for every target. A document whose provenance cannot be read has no
+    recorded fidelity: it falls back to what the command line asks for (the
+    default fetcher without ``--verbatim``), and ``refresh_document`` reports
+    it UNREADABLE without fetching or writing anything.
+    """
+    from claude_code_hooks_daemon.remote_docs.provenance import Fidelity
     from claude_code_hooks_daemon.remote_docs.store import (
         RefreshOutcome,
         list_documents,
+        read_document,
         refresh_document,
     )
 
@@ -8367,8 +8391,18 @@ def _remote_docs_refresh(
         print(f"remote-docs refresh failed: {exc}", file=sys.stderr)
         return 1
 
+    forced_verbatim = bool(getattr(args, "verbatim", False))
+    fetchers: dict[bool, Any] = {}
     failed = 0
     for target in targets:
+        provenance = read_document(target).provenance
+        verbatim = forced_verbatim or (
+            provenance is not None and provenance.fidelity is Fidelity.VERBATIM
+        )
+        # One resolution (and one fallback warning) per mode, not per document.
+        if verbatim not in fetchers:
+            fetchers[verbatim] = _resolve_and_announce_fetcher(args, verbatim=verbatim)
+        fetcher = fetchers[verbatim]
         outcome = refresh_document(
             target,
             fetch_fn=fetcher.fetch_fn,
@@ -11319,7 +11353,9 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Store the raw response body instead of an extraction of it "
             "(records fidelity: verbatim). Use when the capture must be "
-            "quotable exactly, e.g. a contract or specification"
+            "quotable exactly, e.g. a contract or specification. "
+            "refresh: without this flag each document is re-fetched in the "
+            "fidelity it recorded; with it, every target is re-fetched verbatim"
         ),
     )
     parser_remote_docs.add_argument(

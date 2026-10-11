@@ -36,14 +36,14 @@ a document captured with `add --verbatim` becomes an extraction after a plain
 
 ### Phase 1: Fix
 
-- [ ] 🔄 **Task 1.1**: RED. Tests: `refresh --all` over a corpus with one verbatim
+- [x] ✅ **Task 1.1**: RED. Tests: `refresh --all` over a corpus with one verbatim
   and one converted document keeps each one's fidelity; `refresh --path` on a
   verbatim document fetches verbatim with no flag; `--verbatim` still forces
   verbatim; a document with no readable fidelity behaves as today (say which,
   in the test).
-- [ ] 🔄 **Task 1.2**: GREEN. Resolve the fetcher per target from its recorded
+- [x] ✅ **Task 1.2**: GREEN. Resolve the fetcher per target from its recorded
   fidelity.
-- [ ] 🔄 **Task 1.3**: Update the `refresh` help text, `CLAUDE/RemoteDocs.md`,
+- [x] ✅ **Task 1.3**: Update the `refresh` help text, `CLAUDE/RemoteDocs.md`,
   and add a release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
 ### Phase 2: Land

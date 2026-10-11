@@ -106,6 +106,17 @@ fetch plus extraction. A client-side-rendered page still captures thinly.
 across, and no-ops when `source_sha256` is unchanged — only `fetched_at` and
 the recomputed window move.
 
+`refresh` keeps each document's recorded `fidelity`. Every target is re-fetched
+with the fetcher its own frontmatter calls for: a `verbatim` document is
+re-fetched verbatim (the raw GET), and any other fidelity gets the default
+fetcher, so a mixed corpus refreshes in one `refresh --all` with every document
+still recording the mode it was captured in. An explicit `--verbatim` overrides
+this and re-fetches **every** target verbatim, knowingly turning converted
+documents into verbatim ones. A document whose provenance cannot be read has no
+fidelity to honour: it is reported `unreadable` with nothing fetched or written,
+exactly as before, and the fetcher resolved for it is the one the command line
+asks for.
+
 **Hand-editing a vendored document is blocked**, because rewording it silently
 falsifies its recorded `fidelity`.
 
