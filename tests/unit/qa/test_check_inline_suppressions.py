@@ -26,6 +26,7 @@ from types import ModuleType
 from typing import Final
 
 import pytest
+import yaml
 
 from claude_code_hooks_daemon.strategies.qa_suppression.python_strategy import (
     PythonQaSuppressionStrategy,
@@ -33,6 +34,7 @@ from claude_code_hooks_daemon.strategies.qa_suppression.python_strategy import (
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _CHECKER = _REPO_ROOT / "scripts" / "qa" / "check_inline_suppressions.py"
+_CHANGED_TESTS_MAP = _REPO_ROOT / "scripts" / "qa" / "changed_tests_map.yaml"
 
 NOQA: Final[str] = "# no" + "qa"
 NOSEC: Final[str] = "# no" + "sec"
@@ -57,18 +59,37 @@ PROJECT_FORM_SAMPLES: Final[tuple[str, ...]] = (
 
 #: The ten suppressions in the tree whose reason is the comment block above them, not
 #: their own line. Each names a code of the directive, or a tool, or opens with SECURITY:.
-GENUINE_REASON_ABOVE: Final[tuple[tuple[str, int], ...]] = (
-    (".claude/ccy/claude-supervise.py", 9289),
-    ("init.sh", 1228),
-    ("init.sh", 2653),
-    ("init.sh", 2763),
-    ("scripts/install/venv.sh", 356),
-    ("scripts/install/venv.sh", 532),
-    ("src/claude_code_hooks_daemon/constants/paths.py", 91),
-    ("src/claude_code_hooks_daemon/install/transport_toggle.py", 31),
-    ("src/claude_code_hooks_daemon/install/transport_verify.py", 37),
-    ("src/claude_code_hooks_daemon/install/transport_verify.py", 158),
+#: A row is (path, the directive comment stripped, which occurrence of that comment in the
+#: file, counting from 0): an edit above a suppression moves its line number but not its
+#: anchor, so the test is not tied to a line (N426).
+GENUINE_REASON_ABOVE: Final[tuple[tuple[str, str, int], ...]] = (
+    (".claude/ccy/claude-supervise.py", f"{NOSEC} B606", 0),
+    ("init.sh", f"{SHELLCHECK}=SC1091", 0),
+    ("init.sh", f"{SHELLCHECK}=SC2317", 0),
+    ("init.sh", f"{SHELLCHECK}=SC2317", 1),
+    ("scripts/install/venv.sh", f"{SHELLCHECK}=SC1090", 0),
+    ("scripts/install/venv.sh", f"{SHELLCHECK}=SC1090", 1),
+    ("src/claude_code_hooks_daemon/constants/paths.py", f"{NOSEC} B108", 0),
+    ("src/claude_code_hooks_daemon/install/transport_toggle.py", f"{NOSEC} B404", 0),
+    ("src/claude_code_hooks_daemon/install/transport_verify.py", f"{NOSEC} B404", 0),
+    ("src/claude_code_hooks_daemon/install/transport_verify.py", f"{NOSEC} B603 B607", 0),
 )
+
+
+def _anchored_line(texts: dict[int, str], anchor: str, occurrence: int, where: str) -> int:
+    """The 1-indexed line of the ``occurrence``-th comment equal to ``anchor``.
+
+    ``texts`` maps a line to its comment's text after the ``#``.
+
+    Raises:
+        AssertionError: no such occurrence, so the anchor has drifted from the tree.
+    """
+    lines = [number for number, text in sorted(texts.items()) if ("#" + text).strip() == anchor]
+    assert len(lines) > occurrence, (
+        f"{where}: anchor {anchor!r} occurrence {occurrence} not found "
+        f"({len(lines)} comment(s) match); update GENUINE_REASON_ABOVE"
+    )
+    return lines[occurrence]
 
 
 def _load_checker() -> ModuleType:
@@ -307,18 +328,53 @@ class TestTheBlockAboveMustBeAboutTheSuppression:
         _write(tmp_path, "mod.py", f"{above}\nx = 1  {directive}\n")
         assert _findings(tmp_path) == []
 
-    @pytest.mark.parametrize(("relative", "line"), GENUINE_REASON_ABOVE)
+    @pytest.mark.parametrize(("relative", "anchor", "occurrence"), GENUINE_REASON_ABOVE)
     def test_the_genuine_reason_above_in_this_tree_still_passes(
-        self, relative: str, line: int
+        self, relative: str, anchor: str, occurrence: int
     ) -> None:
         path = _REPO_ROOT / relative
         text = path.read_text(encoding="utf-8")
         shell = checker._is_shell(path, text.split("\n", 1)[0])
         comments = checker._shell_comments(text) if shell else checker._python_comments(text)
+        line = _anchored_line(
+            {number: comment.text for number, comment in comments.items()},
+            anchor,
+            occurrence,
+            relative,
+        )
         parsed = checker.parse_comment(comments[line].text)
         assert parsed.directives, f"{relative}:{line} is not a suppression"
         assert not checker.is_acceptable_reason(parsed.reason_text), "reason is on the line itself"
         assert checker.judge_comments(comments)[1] == []
+
+    def test_an_anchor_that_drifted_from_the_tree_fails_loudly(self) -> None:
+        texts = {3: " nosec B404", 9: " nosec B404"}
+        assert _anchored_line(texts, NOSEC + " B404", 1, "mod.py") == 9
+        with pytest.raises(AssertionError, match="occurrence 2 not found"):
+            _anchored_line(texts, NOSEC + " B404", 2, "mod.py")
+        with pytest.raises(AssertionError, match="0 comment"):
+            _anchored_line(texts, NOSEC + " B999", 0, "mod.py")
+
+    def test_the_anchors_resolve_to_the_lines_they_replaced(self) -> None:
+        """Each anchor pointed at a known line when it replaced a line number."""
+        resolved = []
+        for relative, anchor, occurrence in GENUINE_REASON_ABOVE:
+            path = _REPO_ROOT / relative
+            text = path.read_text(encoding="utf-8")
+            shell = checker._is_shell(path, text.split("\n", 1)[0])
+            comments = checker._shell_comments(text) if shell else checker._python_comments(text)
+            texts = {number: comment.text for number, comment in comments.items()}
+            resolved.append(_anchored_line(texts, anchor, occurrence, relative))
+        assert len(resolved) == 10
+        assert len(set(zip((row[0] for row in GENUINE_REASON_ABOVE), resolved, strict=True))) == 10
+
+    def test_a_change_to_any_anchored_file_selects_this_test(self) -> None:
+        """Targeted QA maps no import or name to these files, so the map must (N426)."""
+        rules = yaml.safe_load(_CHANGED_TESTS_MAP.read_text(encoding="utf-8"))["rules"]
+        this_test = Path(__file__).resolve().relative_to(_REPO_ROOT).as_posix()
+        selecting = {rule["glob"] for rule in rules if this_test in rule.get("tests", [])}
+        named = {relative for relative, _anchor, _occurrence in GENUINE_REASON_ABOVE}
+        assert named <= selecting, f"not mapped to this test: {sorted(named - selecting)}"
 
     def test_an_unrelated_comment_above_a_python_directive_is_a_finding(
         self, tmp_path: Path

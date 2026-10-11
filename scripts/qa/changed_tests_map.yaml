@@ -230,3 +230,23 @@ rules:
       - tests/unit/test_conftest_docs_guard_culprit.py
     why: it arms the jail and owns the tracked-doc guard those three pin; every
       test imports it, so inference alone maps it to nothing useful
+  # GENUINE_REASON_ABOVE in test_check_inline_suppressions.py reads these files by
+  # path, so no import or name links them to it (N426). Keep one rule per file it names.
+  - glob: ".claude/ccy/claude-supervise.py"
+    tests: [tests/unit/qa/test_check_inline_suppressions.py]
+    why: GENUINE_REASON_ABOVE reads this file for a suppression whose reason sits above it
+  - glob: "init.sh"
+    tests: [tests/unit/qa/test_check_inline_suppressions.py]
+    why: GENUINE_REASON_ABOVE reads this file for suppressions whose reason sits above them
+  - glob: "scripts/install/venv.sh"
+    tests: [tests/unit/qa/test_check_inline_suppressions.py]
+    why: GENUINE_REASON_ABOVE reads this file for suppressions whose reason sits above them
+  - glob: "src/claude_code_hooks_daemon/constants/paths.py"
+    tests: [tests/unit/qa/test_check_inline_suppressions.py]
+    why: GENUINE_REASON_ABOVE reads this file for a suppression whose reason sits above it
+  - glob: "src/claude_code_hooks_daemon/install/transport_toggle.py"
+    tests: [tests/unit/qa/test_check_inline_suppressions.py]
+    why: GENUINE_REASON_ABOVE reads this file for a suppression whose reason sits above it
+  - glob: "src/claude_code_hooks_daemon/install/transport_verify.py"
+    tests: [tests/unit/qa/test_check_inline_suppressions.py]
+    why: GENUINE_REASON_ABOVE reads this file for suppressions whose reason sits above them
