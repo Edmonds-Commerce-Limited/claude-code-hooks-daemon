@@ -2320,14 +2320,27 @@ too. The daemon's `counter + 1` path (`plan_numbering.py:180`) does not look at 
 daemon keeps it correct across branches"; nothing says across clones. Remedy: `mkplan.bash` advances the counter to
 the highest plan number on disk instead of dying on that drift, and the daemon's path checks the disk the same way.
 
-**Status**: ✅ Fixed (batch K branch `agent-aae597d16acf27198-5da7ea18`, merge pending). Reproduced first: with the
+**Status**: ✅ Fixed by batch K (merged in 3c2efc835). Reproduced first: with the
 counter at 208 and `00212-…` or `Completed/00250-…` on disk, `mkplan.bash` died "counter (208) is behind the highest
 plan on disk", and `next_plan_number_for_target` returned `00006` for counter 5 with `Completed/00020-…` on disk
 (3 mkplan tests and 1 daemon test red). Now `mkplan.bash` (the CLAUDE/Plan copy and the bundled template) prints a
 note and advances the counter to the disk high-water mark, and the daemon path returns `max(counter, disk) + 1`.
 A counter ahead of the disk is still trusted. Tests: `tests/unit/scripts/test_mkplan_counter_drift.py`,
-`test_counter_behind_disk_is_overtaken_by_the_disk`. `mkroutine.bash` keeps its own refusal (separate counter, not
-reported).
+`test_counter_behind_disk_is_overtaken_by_the_disk`. This also delivers Plan 00488 Task 3.3.
+
+Residual, from the batch K review (none a regression):
+
+- The two disk scans disagree below one level: `mkplan.bash` `filesystem_highest` (~191-206) looks at `*/` and
+  `*/*/` only, while the daemon's `highest_plan_number` searches every non-numbered subfolder at any depth, so a plan
+  at `Completed/2025/00300-x` is counted by the daemon and missed by mkplan; the comment at ~187 claiming the scan
+  "mirrors the daemon's" is wrong. Remedy: one scan, pinned by a shared fixture test.
+- The counter-only fallback advice (`plan_number_helper.py` ~767, and the CLAUDE.md block generated from it) still
+  says "read the counter and add 1", which reuses a number when the counter lags. Remedy: take the higher of the
+  counter and the highest plan on disk, then add 1.
+- `CLAUDE/Routine/mkroutine.bash` (~226-229) still refuses when its own counter lags the disk. Remedy: the same
+  advance, with a test.
+- No test asserts `CLAUDE/Plan/mkplan.bash` is byte-identical to the bundled template; a one-sided edit is caught only
+  by the session-start `deployed_artefact_drift` advisory. Remedy: a byte-parity unit test.
 
 ### N370 — the sed guard denies a `git -C <dir> commit -m` message that mentions an in-place sed edit
 
