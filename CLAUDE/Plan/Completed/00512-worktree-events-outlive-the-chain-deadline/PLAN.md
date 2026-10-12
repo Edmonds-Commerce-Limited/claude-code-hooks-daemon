@@ -1,6 +1,6 @@
 # Plan 00512: worktree events outlive the chain deadline
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-12
 **Owner**: dev
 **Priority**: Medium
@@ -56,12 +56,12 @@ budgets.
 
 ### Phase 1: Fix
 
-- [ ] ⬜ **Task 1.1**: RED. Write failing tests:
+- [x] ✅ **Task 1.1**: RED. Write failing tests:
   - the budget-ordering invariant for the worktree events;
   - a slow add (a stub git, or a post-checkout hook in a temporary repository)
     still yields its path through the chain and the client transport;
   - a git add that fails or times out leaves no worktree and no branch.
-- [ ] ⬜ **Task 1.2**: GREEN. Implement the event-specific budget in the daemon
+- [x] ✅ **Task 1.2**: GREEN. Implement the event-specific budget in the daemon
   chain and in the client transport (`init.sh`, and the Python client where it
   applies), and the cleanup in the handler. Update the handler guidance and
   the config docs, and add a release note in
@@ -69,16 +69,19 @@ budgets.
 
 ### Phase 2: Land
 
-- [ ] ⬜ **Task 2.1**: Review, coordinator checks, merge; comment on and close #82.
+- [x] ✅ **Task 2.1**: Review, coordinator checks, merge; comment on and close #82.
+  Merged `5d1b83d00` with no rework. All 31 deployed forwarders match the
+  generator's output.
 
 ## Success Criteria
 
-- [ ] The issue's slow-add scenario yields the path, and a failed add leaves no
-  orphan.
-- [ ] The release-bound consequence, the worktree events' longer budget, is in
-  the pending-release holding area as a release note in
+- [x] The issue's slow-add scenario yields the path, and a failed add leaves no
+  orphan; both are pinned by tests that were red first.
+- [x] The release-bound consequence, the worktree events' longer budget, is in
+  the pending-release holding area as release note 035 in
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
 ## Delivery & Milestones
 
 - Issue #82 triaged and claimed; confirmed on `main` by reading the code.
+- Merged `5d1b83d00`; the range QA was green in substance (3444 passed).
