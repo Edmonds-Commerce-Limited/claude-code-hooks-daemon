@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00511: deny suffix batched calls not cancelled](00511-deny-suffix-batched-calls-not-cancelled/PLAN.md) - In Progress, Medium (#81; the PreToolUse DENY suffix says batched sibling calls were CANCELLED, false since Claude Code 2.1.161; reword it, and the same claim in two handlers' guidance and HANDLER_DEVELOPMENT.md)
+
 - [00501: session modes](00501-session-modes/PLAN.md) - Not Started, Medium (#91; first-class per-session modes shown in the status line: focus (`hooks-daemon focus <task>`), BLOCKED (awaiting-human, goal-blocked loop breaker), usage-paused; per-session awaiting-human storage; guards never gated)
 
 - [00496: upstream feature requests and issue kinds](00496-upstream-feature-requests-and-issue-kinds/PLAN.md) - Not Started (owner request: a formal process for project agents to file feature requests and other non-defect issues, mirroring the defect generator, guard and forms; security reports routed privately)
@@ -302,11 +304,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 510 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 511 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 436 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 51 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 52 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
