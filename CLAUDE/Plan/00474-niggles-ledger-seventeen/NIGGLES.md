@@ -77,6 +77,24 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N438 — issue_filing_gate reads gh flags from raw text, so a quoted --title can refuse a valid report or switch the gate off
+
+**Found**: GitHub #86 (approved author, daemon 3.68.0). A `-F` inside a quoted `--title` was taken as gh's body-file flag,
+and a valid generated report was refused (R-UPSTREAM-ISSUE-UNVERIFIED-BODY, "the body is being piped in on stdin").
+
+**On main (5268f2ab3)**: confirmed. `_BODY_FILE` (`issue_filing_gate.py:105`) is used with `finditer` over the raw
+segment, and yields `-` then `r.md` for `--title 'git merge -F - reads stdin' --body-file r.md`. Triage found the same
+defect in the other direction. `_REPO_FLAG` (line 93) uses `.search()`, so for
+`gh issue create --title 'see -R someone/else' --repo <this tracker> --body-file r.md` it picks `someone/else'`, and
+`_filing_segments` returns `[]`: the gate stands down for a real upstream filing. With a plain title the same command
+is judged. That direction fails open on a public tracker.
+
+**Remedy**: read gh's flags from the segment's shell words, not from regexes over raw text. Tests come red first for
+both directions and both flag orders. Coordinator ruling (triage on #86). Plan 00264 (comment size cap, Not Started)
+plans its own shlex parse of `gh` flags, so if it is built it should reuse this parser.
+
+**Status**: 🔄 In progress.
+
 ### N437 — `git merge` is not a heredoc data receiver, so an apostrophe in its heredoc body draws a "report it" advisory
 
 **Found**: GitHub #85 (approved author, daemon 3.68.0). The report said project_containment DENIED
