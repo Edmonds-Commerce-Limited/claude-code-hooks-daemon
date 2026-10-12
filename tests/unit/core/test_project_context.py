@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from claude_code_hooks_daemon.core.project_context import (
+    GitContextError,
     ProjectContext,
     _ensure_self_install_lsp_venv_symlink,
 )
@@ -129,10 +130,13 @@ class TestProjectContextInitialization:
 
         # Mock git command failure (not a git repo)
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=128, stdout="", stderr="not a git repo")
+            mock_run.return_value = MagicMock(returncode=128, stdout="", stderr="not a git repo\n")
 
-            with pytest.raises(ValueError, match="FAIL FAST.*not a git repository"):
+            with pytest.raises(GitContextError, match="FAIL FAST.*git rev-parse.*128") as excinfo:
                 ProjectContext.initialize(config_path)
+
+        assert isinstance(excinfo.value, ValueError)
+        assert "exit 128: not a git repo)" in str(excinfo.value)
 
     def test_initialize_fails_if_no_git_remote(self, tmp_path: Path) -> None:
         """FAIL FAST: Initialize fails if git repo has no remote origin."""
@@ -149,7 +153,7 @@ class TestProjectContextInitialization:
                 MagicMock(returncode=128, stdout="", stderr="no remote"),  # git remote (no origin)
             ]
 
-            with pytest.raises(ValueError, match="FAIL FAST.*not a git repository"):
+            with pytest.raises(GitContextError, match="FAIL FAST.*no remote 'origin'"):
                 ProjectContext.initialize(config_path)
 
     def test_initialize_fails_if_called_twice(self, tmp_path: Path) -> None:
@@ -297,25 +301,19 @@ class TestGitRepoNameParsing:
 
         assert ProjectContext.git_repo_name() == "no-extension"
 
-    def test_get_git_repo_name_handles_empty_url(self, tmp_path: Path) -> None:
-        """_get_git_repo_name returns None for empty remote URL."""
+    def test_get_git_repo_name_raises_for_empty_url(self, tmp_path: Path) -> None:
+        """_get_git_repo_name raises GitContextError naming the empty remote URL."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
                 MagicMock(returncode=0, stdout="/tmp/project\n"),  # git rev-parse
                 MagicMock(returncode=0, stdout="\n"),  # git remote (empty URL)
             ]
 
-            result = ProjectContext._get_git_repo_name(tmp_path)
+            with pytest.raises(GitContextError, match="empty URL"):
+                ProjectContext._get_git_repo_name(tmp_path)
 
-        assert result is None
-
-    def test_get_git_repo_name_handles_timeout(self, tmp_path: Path) -> None:
-        """_get_git_repo_name returns None on timeout.
-
-        The timeout is caught inside run_git (Plan 00246), which reports it as
-        a non-zero returncode rather than raising — so this still exercises
-        the same outward behaviour: a git failure never propagates.
-        """
+    def test_get_git_repo_name_raises_on_timeout(self, tmp_path: Path) -> None:
+        """A timeout (reported by run_git as a non-zero returncode) raises GitContextError."""
         import subprocess
 
         from claude_code_hooks_daemon.constants import Timeout
@@ -323,9 +321,29 @@ class TestGitRepoNameParsing:
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired(cmd="git", timeout=Timeout.GIT_CONTEXT)
 
-            result = ProjectContext._get_git_repo_name(tmp_path)
+            with pytest.raises(GitContextError, match="FAIL FAST.*git rev-parse"):
+                ProjectContext._get_git_repo_name(tmp_path)
 
-        assert result is None
+    def test_git_failure_without_stderr_still_names_the_exit_code(self, tmp_path: Path) -> None:
+        """A failing git with empty stderr raises a message that says so."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=2, stdout="", stderr="")
+
+            with pytest.raises(GitContextError, match="exit 2.*no error output"):
+                ProjectContext._get_git_repo_name(tmp_path)
+
+    def test_get_git_repo_name_logs_git_stderr_at_warning(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The rev-parse failure is logged at WARNING with git's stderr."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=128, stdout="", stderr="fatal: boom\n")
+
+            with caplog.at_level("WARNING"), pytest.raises(GitContextError):
+                ProjectContext._get_git_repo_name(tmp_path)
+
+        warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+        assert any("fatal: boom" in r.getMessage() for r in warnings)
 
     def test_get_git_repo_name_handles_unparseable_url(self, tmp_path: Path) -> None:
         """_get_git_repo_name returns None for unparseable URL."""
@@ -339,8 +357,8 @@ class TestGitRepoNameParsing:
 
         assert result is None
 
-    def test_get_git_toplevel_handles_timeout(self, tmp_path: Path) -> None:
-        """_get_git_toplevel returns None on timeout (caught inside run_git)."""
+    def test_get_git_toplevel_raises_on_timeout(self, tmp_path: Path) -> None:
+        """_get_git_toplevel raises GitContextError on timeout (reported by run_git)."""
         import subprocess
 
         from claude_code_hooks_daemon.constants import Timeout
@@ -348,18 +366,16 @@ class TestGitRepoNameParsing:
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired(cmd="git", timeout=Timeout.GIT_CONTEXT)
 
-            result = ProjectContext._get_git_toplevel(tmp_path)
+            with pytest.raises(GitContextError, match="toplevel"):
+                ProjectContext._get_git_toplevel(tmp_path)
 
-        assert result is None
-
-    def test_get_git_toplevel_handles_unexpected_error(self, tmp_path: Path) -> None:
-        """_get_git_toplevel returns None on unexpected errors (caught inside run_git)."""
+    def test_get_git_toplevel_raises_on_unexpected_error(self, tmp_path: Path) -> None:
+        """_get_git_toplevel raises GitContextError when git cannot be run at all."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = OSError("Unexpected filesystem error")
 
-            result = ProjectContext._get_git_toplevel(tmp_path)
-
-        assert result is None
+            with pytest.raises(GitContextError, match="Unexpected filesystem error"):
+                ProjectContext._get_git_toplevel(tmp_path)
 
 
 class TestSelfInstallCliSymlink:

@@ -57,7 +57,7 @@ from claude_code_hooks_daemon.constants.modes import DaemonMode
 from claude_code_hooks_daemon.constants.permissions import FileMode
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler_bases import StatusLineSegmentHandler
-from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.project_context import GitContextError, ProjectContext
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.daemon.enforcement import enforce_single_daemon
 
@@ -375,6 +375,16 @@ def _validate_installation(project_root: Path) -> Path:
             print(
                 f"ERROR: Invalid configuration in {config_file}:\n\n{friendly_msg}\n\n"
                 "Fix the configuration file and try again.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        except GitContextError as e:
+            # A git failure is not a configuration error: no edit of the config fixes it.
+            print(
+                f"ERROR: Git failure for project at {project_root}:\n\n{e}\n\n"
+                "Check that the repository is readable by this git "
+                "(run `git -C <project> status`) and that the installed git version "
+                "supports the repository's format.",
                 file=sys.stderr,
             )
             sys.exit(1)
