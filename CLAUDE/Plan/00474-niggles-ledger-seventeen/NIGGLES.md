@@ -98,7 +98,16 @@ with the restored handlers on. Layer 1 keeps reporting what was restored, but no
 older target without `--apply` keeps today's behaviour. Option (b), stopping the pre-deploy gate, is not taken: the
 restore removes the loss the stop would have warned about.
 
-**Status**: 🔄 In progress.
+**Fix**: merged as ac317fbb7 (branch commit 68f47c9c8). `scripts/upgrade_version.sh` gains
+`run_effective_handler_restore`, called after `run_config_compatibility_check` and before deploy and restart on both
+paths; it runs `check-effective-handlers --apply` with the target venv. Under a genuine Layer 1 it leaves its report in
+the handoff directory as `restored-handlers`, which `scripts/upgrade.sh` merges into its summary. Layer 1 asks for a
+restart only when its own call restored something. Exit 2 (an older target without `--apply`) and any failure leave the
+upgrade running and Layer 1's own call as the fallback. 14 tests in
+`tests/integration/test_upgrade_restores_handlers_before_restart.py` (12 red first). Release note 046. Range QA over the
+merge: 40/40 passed.
+
+**Status**: ✅ Fixed.
 
 ### N444 — the plan fact-check feed tells client projects to dispatch an agent the daemon never ships to them
 
