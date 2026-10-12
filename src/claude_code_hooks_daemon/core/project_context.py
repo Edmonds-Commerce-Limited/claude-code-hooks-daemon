@@ -137,6 +137,20 @@ def _ensure_self_install_lsp_venv_symlink(project_root: Path) -> None:
         )
 
 
+class GitContextError(ValueError):
+    """Git could not provide the repository facts the daemon needs at startup.
+
+    A ``ValueError`` so every existing ``except ValueError`` / ``except Exception``
+    caller keeps working. It exists so a caller can tell a git failure (nothing in
+    the configuration can fix it) from a configuration error.
+    """
+
+
+def _describe_git_failure(returncode: int, stderr: str | None) -> str:
+    """Exit code and stripped stderr of a failed git command, for an error message."""
+    return f"exit {returncode}: {(stderr or '').strip() or 'no error output'}"
+
+
 @dataclass(frozen=True)
 class _ProjectContextData:
     """Immutable data class holding calculated project constants.
@@ -259,14 +273,14 @@ class ProjectContext:
         # Calculate git values (FAIL FAST - must be in git repo)
         git_repo_name = cls._get_git_repo_name(project_root)
         if git_repo_name is None:
-            raise ValueError(
-                f"FAIL FAST: Project at {project_root} is not a git repository or has no remote origin. "
-                "All projects must be in git repositories."
+            raise GitContextError(
+                f"FAIL FAST: Cannot derive a repository name from the git remote 'origin' "
+                f"of {project_root}. All projects must be in git repositories."
             )
 
         git_toplevel = cls._get_git_toplevel(project_root)
         if git_toplevel is None:
-            raise ValueError(
+            raise GitContextError(
                 f"FAIL FAST: Cannot determine git toplevel for {project_root}. "
                 "All projects must be in git repositories."
             )
@@ -311,13 +325,15 @@ class ProjectContext:
     def _get_git_repo_name(cls, project_root: Path) -> str | None:
         """Get repository name from git remote URL.
 
-        Non-fatal: Returns None if not in git repo or if git operations fail.
-
         Args:
             project_root: Project root directory to check
 
         Returns:
-            Repository name or None
+            Repository name, or None if the remote URL yields no usable name
+
+        Raises:
+            GitContextError: If ``git rev-parse`` fails, or ``origin`` is missing
+                or has an empty URL
         """
         # Deferred import: avoids a circular import. This module is imported by
         # claude_code_hooks_daemon.core's package init, and utils' package init
@@ -328,19 +344,32 @@ class ProjectContext:
         # Check if in git repo
         result = run_git(project_root, "rev-parse", "--show-toplevel", timeout=Timeout.GIT_CONTEXT)
         if result.returncode != 0:
-            logger.info("ProjectContext: Not a git repository")
-            return None
+            detail = _describe_git_failure(result.returncode, result.stderr)
+            logger.warning("ProjectContext: git rev-parse failed (%s)", detail)
+            raise GitContextError(
+                f"FAIL FAST: git failed for project at {project_root} "
+                f"(git rev-parse --show-toplevel, {detail}). "
+                "All projects must be in git repositories."
+            )
 
         # Get remote origin URL
         result = run_git(project_root, "remote", "get-url", "origin", timeout=Timeout.GIT_CONTEXT)
         if result.returncode != 0:
-            logger.warning("ProjectContext: No git remote 'origin' configured")
-            return None
+            detail = _describe_git_failure(result.returncode, result.stderr)
+            logger.warning("ProjectContext: No git remote 'origin' configured (%s)", detail)
+            raise GitContextError(
+                f"FAIL FAST: git reports no remote 'origin' for project at {project_root} "
+                f"(git remote get-url origin, {detail}). "
+                "All projects must be in git repositories."
+            )
 
         remote_url = result.stdout.strip()
         if not remote_url:
             logger.warning("ProjectContext: Empty git remote URL")
-            return None
+            raise GitContextError(
+                f"FAIL FAST: git remote 'origin' of project at {project_root} has an empty URL. "
+                "All projects must be in git repositories."
+            )
 
         # Parse repo name from URL
         # SSH: git@github.com:user/repo.git -> repo
@@ -361,20 +390,27 @@ class ProjectContext:
     def _get_git_toplevel(cls, project_root: Path) -> Path | None:
         """Get git repository root path.
 
-        Non-fatal: Returns None if not in git repo.
-
         Args:
             project_root: Project root directory to check
 
         Returns:
-            Git toplevel path or None
+            Git toplevel path, or None if git printed an empty toplevel
+
+        Raises:
+            GitContextError: If ``git rev-parse --show-toplevel`` fails
         """
         # Deferred import: see the matching comment in _get_git_repo_name.
         from claude_code_hooks_daemon.utils.git_repo import run_git
 
         result = run_git(project_root, "rev-parse", "--show-toplevel", timeout=Timeout.GIT_CONTEXT)
         if result.returncode != 0:
-            return None
+            detail = _describe_git_failure(result.returncode, result.stderr)
+            logger.warning("ProjectContext: git toplevel lookup failed (%s)", detail)
+            raise GitContextError(
+                f"FAIL FAST: Cannot determine git toplevel for {project_root} "
+                f"(git rev-parse --show-toplevel, {detail}). "
+                "All projects must be in git repositories."
+            )
 
         toplevel = result.stdout.strip()
         return Path(toplevel) if toplevel else None
