@@ -14,12 +14,15 @@ from __future__ import annotations
 
 import sys
 import threading
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Final
 
 import pytest
 
 from tests import thread_contention
 from tests.thread_contention import hammer
+
+#: How long a released worker may take to finish once the barrier is aborted.
+_RELEASED_WORKER_JOIN_SECONDS: Final[float] = 5.0
 
 
 class _RecordingThread(threading.Thread):
@@ -105,7 +108,7 @@ class TestHammerFailsFastWhenAWorkerNeverRuns:
             hammer(lambda worker, index: None, workers=4, calls_per_worker=1)
 
         parked = _SecondWorkerStillborn.first[0]
-        parked.join(timeout=5)
+        parked.join(timeout=_RELEASED_WORKER_JOIN_SECONDS)
         assert not parked.is_alive()
 
     def test_a_worker_exception_is_still_collected(self) -> None:
