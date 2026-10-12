@@ -109,7 +109,20 @@ the configuration can fix.
 3. Behaviour is otherwise unchanged: still FAIL FAST, the same exit code, and other callers are untouched beyond the
    better message.
 
-**Status**: 🔄 In progress.
+**Fix**: merged as 9240e6fd3 (branch commit a3e6293b0).
+
+- `core/project_context.py` gains `GitContextError(ValueError)`. `_get_git_repo_name` and `_get_git_toplevel` raise it
+  when `rev-parse` fails, when `origin` is missing, or when its URL is empty. The message carries the git command, the
+  exit code and git's stripped stderr, and the failure is logged at WARNING.
+- `cli.py` `_validate_installation` catches it before the generic branch. It prints "ERROR: Git failure for project at
+  <root>" with git's message and exits 1.
+- New tests are in `tests/unit/daemon/test_cli_git_failure_labelling.py`; six pinned tests in `test_project_context.py`
+  were updated. Red first: 2 of the 4 CLI tests failed, and `test_project_context.py` failed at collection.
+- Release note 047.
+- Range QA over the merge: 39/40. The red check was `changed_tests`: 100 tests passed, but 2 changed files are unmapped
+  (too broad). As a substitute, `tests/unit/core` and `tests/unit/daemon` were run in full: 5755 passed.
+
+**Status**: ✅ Fixed.
 
 ### N445 — the upgrade restores dropped opt-in handlers only after the daemon has restarted without them
 
