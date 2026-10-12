@@ -4,6 +4,7 @@ import tempfile
 from functools import lru_cache
 
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
+from claude_code_hooks_daemon.strategies.lint.protocol import ProvidesCommandValues
 from claude_code_hooks_daemon.utils.path_segments import matches_path_segment
 
 #: Prefix for the per-process compiler-output directory, so a leftover is
@@ -22,6 +23,39 @@ _LINT_EXTRA_SKIP_PATH_NAMES: tuple[str, ...] = ("__pycache__", ".git")
 COMMON_SKIP_PATHS: tuple[str, ...] = tuple(
     f"{name}/" for name in (*sorted(CORE_VENDORED_BUILD_DIR_NAMES), *_LINT_EXTRA_SKIP_PATH_NAMES)
 )
+
+
+FILE_PLACEHOLDER = "{file}"
+
+
+def build_lint_argv(
+    template: str,
+    file_path: str,
+    strategy: object,
+    *,
+    effective_path: str | None = None,
+) -> list[str]:
+    """Turn a lint command template into an argv list. The ONE place this is done.
+
+    The template is split on whitespace FIRST and each placeholder is then
+    replaced only where it is a whole element, so a substituted value is always
+    exactly one argument: a path with a space is not re-tokenised, and a path or
+    manifest value carrying a flag cannot append that flag to the linter's own
+    command line (Plan 00412 class 7). Substituting into the string and
+    splitting afterwards would do both.
+
+    ``{file}`` becomes ``effective_path`` (default ``file_path``; Go lints the
+    package directory rather than the file). A strategy implementing
+    :class:`ProvidesCommandValues` also fills its own placeholders (Rust's
+    ``{edition}``), so every caller that runs a strategy template gets them
+    filled. A template that does not mention a placeholder is unaffected.
+    """
+    placeholders = {FILE_PLACEHOLDER: effective_path if effective_path is not None else file_path}
+    if isinstance(strategy, ProvidesCommandValues):
+        placeholders.update(
+            {f"{{{name}}}": value for name, value in strategy.command_values(file_path).items()}
+        )
+    return [placeholders.get(part, part) for part in template.split()]
 
 
 @lru_cache(maxsize=1)

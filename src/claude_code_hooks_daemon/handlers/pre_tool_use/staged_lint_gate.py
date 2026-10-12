@@ -50,8 +50,11 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
-from claude_code_hooks_daemon.strategies.lint.common import matches_skip_path
-from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy
+from claude_code_hooks_daemon.strategies.lint.common import build_lint_argv, matches_skip_path
+from claude_code_hooks_daemon.strategies.lint.protocol import (
+    ClassifiesToolUnavailable,
+    LintStrategy,
+)
 from claude_code_hooks_daemon.strategies.lint.registry import LintStrategyRegistry
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.command_evasion import (
@@ -329,10 +332,7 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         # appends that flag to the linter's own command line. The path here
         # comes from the git index rather than a fresh Write, which narrows who
         # can choose it but not what a chosen one does (Plan 00412 class 7).
-        parts = [
-            file_path if part == "{file}" else part
-            for part in strategy.default_lint_command.split()
-        ]
+        parts = build_lint_argv(strategy.default_lint_command, file_path, strategy)
 
         resolved = self._resolve_executable(parts[0])
         if resolved is None:
@@ -374,6 +374,20 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         output = result.stdout
         if result.stderr:
             output = f"{output}\n{result.stderr}" if output else result.stderr
+        if isinstance(strategy, ClassifiesToolUnavailable) and (
+            strategy.is_tool_unavailable_output(output)
+        ):
+            # The tool ran but says it could not analyse the file (a launcher
+            # shim whose component is missing, or a module that only resolves
+            # inside its crate). That is not a finding, so it never blocks a
+            # commit -- the same classification lint_on_edit applies.
+            logger.warning(
+                "staged_lint_gate: %s was NOT checked: %s could not analyse it, "
+                "which is not a finding about the file",
+                file_path,
+                parts[0],
+            )
+            return None
         return output.strip() or f"exit code {result.returncode}"
 
     def _resolve_executable(self, executable: str) -> str | None:

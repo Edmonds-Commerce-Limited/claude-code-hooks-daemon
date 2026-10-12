@@ -11,6 +11,16 @@
 
 The handler already splits the template on whitespace and substitutes `{file}` as one argv element. The edition is per file, but `default_lint_command` is a file-independent property, so I added an optional capability (`ProvidesCommandValues`, same shape as `NarrowsByPath` and `ClassifiesToolUnavailable`) rather than a new parameter on the whole `LintStrategy` protocol, which would force a stub on eight other strategies. Substitution happens only where a placeholder is a whole element, and the only value the Rust strategy can return is a member of the known-edition set, so manifest text never reaches argv (a test pins a hostile edition string). A user override that omits `{edition}` runs exactly as written; one that includes it is filled (both tested).
 
+## Coordinator fix: the staged lint gate (second commit)
+
+`staged_lint_gate._syntax_check` substituted only `{file}`, so rustc would have received a literal `{edition}` and R-STAGED-LINT-FAILURE would have denied every commit staging a `.rs` file.
+
+- One shared helper, `build_lint_argv(template, file_path, strategy, *, effective_path=None)` in `strategies/lint/common.py`, does the whole-element substitution of `{file}` plus any `ProvidesCommandValues` values. `lint_on_edit._run_lint_command` and `staged_lint_gate._syntax_check` both call it; the handler's own copy and its `_FILE_PLACEHOLDER` constant are gone.
+- The gate did not consult `ClassifiesToolUnavailable`. It now does: a non-zero exit whose output is classified could-not-analyse (E0432/E0433/E0463/E0583, the clippy shim message) returns no finding and logs a warning that the file was not checked. Syntax errors still produce a finding.
+- Working directory: the gate runs with no `cwd` (the daemon's own). That is fine for a syntax check on an absolute path, since `rustc` resolves `mod x;` relative to the file, not the cwd, and the edition comes from the file's path.
+- Other places that run or print a strategy template: `lint_on_edit.get_enforcement_status` uses only the first word of the extended command (the executable); `strategies/lint/__init__.py` only mentions `default_lint_command` in a docstring; acceptance tests (`get_acceptance_tests`) build Write payloads and never run a template; no script under `scripts/` runs one. The only `--edition` text in docs is the HANDLER_REFERENCE paragraph, which describes behaviour. None executes an unfilled `{edition}`.
+- Tests: `tests/unit/strategies/lint/test_build_lint_argv.py` (helper fills `{edition}`, leaves an override without it unchanged, keeps hostile paths as one element); `tests/unit/handlers/pre_tool_use/test_staged_lint_gate_rust.py` (edition filled before rustc runs, could-not-analyse output is not a finding, a syntax error still is; live rustc: a staged edition-2024 crate is not denied in block mode, a staged syntax error is). Targeted run: 1149 passed across the lint strategies, post_tool_use handlers, staged gate and handler-reference check; black, ruff and mypy clean.
+
 ## Behaviour notes
 
 - The error-code match is `error\[E....\]`, so a code mentioned in prose does not match. An output containing both a crate-context code and an unrelated error is allowed (the ruling's "any of"). E0433 also covers a typo such as an undeclared type, so those are allowed unchecked too; that is inherent to the ruling.

@@ -27,11 +27,10 @@ from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_written_file_paths
 from claude_code_hooks_daemon.core.workspace import Workspace, resolve_workspace
-from claude_code_hooks_daemon.strategies.lint.common import matches_skip_path
+from claude_code_hooks_daemon.strategies.lint.common import build_lint_argv, matches_skip_path
 from claude_code_hooks_daemon.strategies.lint.protocol import (
     ClassifiesToolUnavailable,
     LintStrategy,
-    ProvidesCommandValues,
 )
 from claude_code_hooks_daemon.strategies.lint.registry import LintStrategyRegistry
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
@@ -42,9 +41,6 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 
 logger = logging.getLogger(__name__)
-
-# Placeholder for file path in lint commands
-_FILE_PLACEHOLDER = "{file}"
 
 # Directory holding the console scripts of the environment running the daemon.
 # ``sys.executable`` is the project venv's interpreter, and a venv's ``ruff`` /
@@ -477,26 +473,12 @@ class LintOnEditHandler(PostToolUseHandlerBase):
             if pkg_dir.startswith(working_dir):
                 effective_path = "./" + pkg_dir[len(working_dir) :].lstrip("/") + "/"
 
-        # Split the TEMPLATE, then substitute the path as ONE element.
-        #
-        # SECURITY: the tools are trusted strategy constants, but the PATH is
-        # not — it is whatever the agent just wrote. Substituting into the
-        # string and splitting afterwards re-tokenises the path: `my file.py`
-        # becomes two arguments that lint two files which do not exist, and a
-        # file named `x.py --config /tmp/evil.toml` appends a flag to the
-        # linter's own command line. No shell is involved, so the injection is
-        # into argv and no `shell=True` rule can see it (Plan 00412 class 7).
-        #
-        # A strategy that provides per-file values (Rust's edition) has them
-        # substituted the same way: a placeholder is replaced only where it is
-        # a whole element, so a value the strategy returns can never add or
-        # split an argument.
-        placeholders = {_FILE_PLACEHOLDER: effective_path}
-        if isinstance(strategy, ProvidesCommandValues):
-            placeholders.update(
-                {f"{{{name}}}": value for name, value in strategy.command_values(file_path).items()}
-            )
-        command_parts = [placeholders.get(part, part) for part in command_template.split()]
+        # SECURITY: the PATH is whatever the agent just wrote, so the template
+        # is split first and the path substituted as ONE element -- see
+        # build_lint_argv, which every strategy template goes through.
+        command_parts = build_lint_argv(
+            command_template, file_path, strategy, effective_path=effective_path
+        )
         # Display only — never re-parsed. `shlex.join` quotes a path containing
         # a space, so the reported command is one someone could actually paste.
         command = shlex.join(command_parts)
