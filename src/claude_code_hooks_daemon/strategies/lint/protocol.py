@@ -95,6 +95,31 @@ class NarrowsByPath(Protocol):
 
 
 @runtime_checkable
+class ProvidesCommandValues(Protocol):
+    """Optional capability: a strategy whose command depends on the file linted.
+
+    A command template normally carries only ``{file}``. Rust also needs the
+    edition declared by the crate that OWNS the file, which differs per file
+    and cannot be a constant on the strategy. A strategy implementing this
+    returns a value per placeholder name (``{"edition": "2024"}`` fills
+    ``{edition}``).
+
+    The handler substitutes a placeholder only where it is a WHOLE whitespace-
+    separated element of the template, as one argv element, exactly as it does
+    ``{file}`` -- so a value can never add or split an argument. The strategy
+    owns validating what it returns. A template that does not mention a
+    placeholder (a user ``command_overrides`` entry) is unaffected.
+
+    Separate from :class:`LintStrategy` for the same Interface Segregation
+    reason as :class:`NarrowsByPath`.
+    """
+
+    def command_values(self, file_path: str) -> dict[str, str]:
+        """Placeholder values for linting ``file_path``, keyed by placeholder name."""
+        ...
+
+
+@runtime_checkable
 class ClassifiesToolUnavailable(Protocol):
     """Optional capability: a strategy that can recognise its own tool as absent.
 

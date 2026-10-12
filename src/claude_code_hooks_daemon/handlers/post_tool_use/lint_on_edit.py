@@ -31,6 +31,7 @@ from claude_code_hooks_daemon.strategies.lint.common import matches_skip_path
 from claude_code_hooks_daemon.strategies.lint.protocol import (
     ClassifiesToolUnavailable,
     LintStrategy,
+    ProvidesCommandValues,
 )
 from claude_code_hooks_daemon.strategies.lint.registry import LintStrategyRegistry
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
@@ -360,9 +361,13 @@ class LintOnEditHandler(PostToolUseHandlerBase):
     # project with ``.ansible-lint`` but no ``ansible.cfg`` resolves no root and
     # runs from the daemon's cwd, where ``--syntax-check`` on an absolute path
     # still works and only role/collection resolution degrades.
+    #
+    # Rust runs from the crate that owns the file, so a relative path in the
+    # compiler's output and the crate's own context line up with Cargo.toml.
     _MODULE_ROOT_MARKERS: ClassVar[dict[str, str]] = {
         "Go": "go.mod",
         "Ansible": "ansible.cfg",
+        "Rust": "Cargo.toml",
     }
 
     def _workspace_for(self, file_path: str) -> Workspace:
@@ -481,10 +486,17 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         # file named `x.py --config /tmp/evil.toml` appends a flag to the
         # linter's own command line. No shell is involved, so the injection is
         # into argv and no `shell=True` rule can see it (Plan 00412 class 7).
-        command_parts = [
-            effective_path if part == _FILE_PLACEHOLDER else part
-            for part in command_template.split()
-        ]
+        #
+        # A strategy that provides per-file values (Rust's edition) has them
+        # substituted the same way: a placeholder is replaced only where it is
+        # a whole element, so a value the strategy returns can never add or
+        # split an argument.
+        placeholders = {_FILE_PLACEHOLDER: effective_path}
+        if isinstance(strategy, ProvidesCommandValues):
+            placeholders.update(
+                {f"{{{name}}}": value for name, value in strategy.command_values(file_path).items()}
+            )
+        command_parts = [placeholders.get(part, part) for part in command_template.split()]
         # Display only — never re-parsed. `shlex.join` quotes a path containing
         # a space, so the reported command is one someone could actually paste.
         command = shlex.join(command_parts)
@@ -656,6 +668,16 @@ play that will not LOAD: an unbalanced quote inside a `shell:` block aborts the
 whole play at parse time, before `#` means comment. Full `ansible-lint` runs at
 the `extended` tier. The linter runs from the nearest directory containing
 `ansible.cfg`, because roles and collections resolve relative to it.
+
+**Rust is checked as a module of its crate, without building the crate.** `rustc`
+runs from the directory of the nearest `Cargo.toml`, with that crate's edition
+(`package.edition`, the workspace's `[workspace.package].edition` when the package
+inherits it, or `2015` when none is set; a file with no `Cargo.toml` keeps
+edition 2021). Each file is still compiled alone, so an error that only means it
+cannot be resolved outside its crate (`E0432`, `E0433`, `E0463`, `E0583`: a
+sibling `use crate::…`, a dependency, the crate imported by an integration test)
+is NOT a finding: the write is ALLOWED with an advisory that the file was not
+checked. Syntax errors and other compiler errors still DENY.
 
 **Bash-authored files are linted too.** A file a command writes with `>`, `>>`,
 `tee` or a `cat <<EOF` heredoc gets the same treatment — so the heredoc route is
