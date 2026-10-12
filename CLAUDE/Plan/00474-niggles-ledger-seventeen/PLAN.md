@@ -36,7 +36,7 @@ not-a-defect with the reasoning kept.
 ## Niggles
 
 Full write-ups are in [NIGGLES.md](NIGGLES.md). The one-line-per-niggle status
-table (133 rows) is in [STATUS-INDEX.md](STATUS-INDEX.md).
+table (134 rows) is in [STATUS-INDEX.md](STATUS-INDEX.md).
 Counted by the status column's emoji:
 
 - 2 rows are open (⬜): N424, the LSP guard denying a grep over piped output, and N427, the provision sync tests leaving stub daemon processes behind. N53 of archived ledger 00466 is 🟡: batch AJ reproduced
@@ -50,11 +50,11 @@ Counted by the status column's emoji:
   - 12 of the 15 went into progress: batches AL, AM and AN, the supervisor items, or a GitHub issue (rows since fixed are counted below);
   - 1 stays part-fixed (🟡, N376), with its remainder tracked in #107;
   - the new work the owner asked for is filed as GitHub Issues #106 to #110. #104, the usage-aware sub-agent cutoff, came from a separate owner request the same day, not from this sheet.
-- 115 rows carry ✅ (fixed, dismissed, remedied, guarded or closed); 6 of them also carry a 🚫 limit, and
-  2 also carry 🔄: N280 (guarded by batch AN) for its review follow-ups, and N425 (fixed) until CI
-  confirms it.
-- 7 rows record a deliberate limit (🚫); 17 are in progress or graduated (13 🔄, 3 🟡, 1 ↩️), N280
-  and N425 (main CI red after batch AL) among the 12.
+- 116 rows carry ✅ (fixed, dismissed, remedied, guarded or closed); 6 of them also carry a 🚫 limit, and
+  3 also carry 🔄: N280 (guarded by batch AN) for its review follow-ups, and N425 and N428 (fixed) until
+  CI confirms them.
+- 7 rows record a deliberate limit (🚫); 18 are in progress or graduated (14 🔄, 3 🟡, 1 ↩️), N280,
+  N425 (main CI red after batch AL) and N428 (the Python 3.11 CI hang) among the 14.
 
 ## Tasks
 

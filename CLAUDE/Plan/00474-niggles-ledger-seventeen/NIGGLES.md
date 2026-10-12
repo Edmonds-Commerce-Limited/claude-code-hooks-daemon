@@ -77,6 +77,27 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N429 — targeted QA never runs the example-config completeness tests for a new handler
+
+**Found**: by the coordinator on 2026-10-12. Main CI run 38204671323 (Python 3.13) failed 2 tests after the Plan
+00508 merge (a948217b4): `tests/integration/test_example_config.py::test_example_config_includes_all_library_handlers`
+and `tests/unit/install/test_reference_config_completeness.py::test_every_registered_handler_is_listed_for_its_event`.
+The new handler `operator_signal_notice` was in `init_config.py` and `.claude/hooks-daemon.yaml`, but not in
+`.claude/hooks-daemon.yaml.example`. The range QA for 00508 passed with 7554 tests, because `changed_tests` maps
+neither a new handler module nor `constants/handlers.py` (reported `[too-broad]`) to those two tests. The developer
+brief named the template-consistency tests, but not these two.
+
+**Fix applied** (69a9ab2f5): the entry was added to the example config.
+
+**Candidate remedies**:
+
+1. Map `src/claude_code_hooks_daemon/handlers/**` additions and `constants/handlers.py` to the two completeness tests
+   in `scripts/qa/changed_tests_map.yaml`. They are cheap.
+2. Name the example config in the handler-creation checklist (HANDLER_DEVELOPMENT.md), next to the template and the
+   dogfood config.
+
+**Status**: 🔄 Fix applied; the remedy is open.
+
 ### N428 — the Python 3.11 CI job hangs at the same point every run until its 150-minute timeout
 
 **Found**: by the coordinator on 2026-10-12, waiting for CI to confirm #69. Two consecutive main runs had their

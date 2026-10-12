@@ -4,7 +4,8 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 
 | #          | Verdict                                                                                                                                 | Origin              | Status                                 |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | -------------------------------------- |
-| N428       | The Python 3.11 CI job hangs at the same point (`test_eviction_sites.py`, after `test_destructive_git.py`) until its 150-minute timeout | Coordinator         | ✅ Fixed (branch); 🔄 CI to confirm    |
+| N429       | Targeted QA never runs the example-config completeness tests for a new handler; Plan 00508 reached main without its example entry       | Coordinator         | 🔄 Fixed (69a9ab2f5); remedy open      |
+| N428       | The Python 3.11 CI job hangs at the same point (`test_eviction_sites.py`, after `test_destructive_git.py`) until its 150-minute timeout | Coordinator         | ✅ Fixed (04e157643); 🔄 CI to confirm |
 | N427       | The provision sync tests leave 60 s stub daemon processes running past the test, which a `pgrep -f pytest` restart check misreads       | Coordinator         | ⬜ Open                                |
 | N426       | A test pins three `init.sh` suppressions by line number; Plan 00488 moved them and targeted QA never ran it, so CI went red             | Coordinator         | ✅ Fixed (6b300656d)                   |
 | N425       | Main CI red after batch AL: absolute-path docker case, three timing bounds, one bare wall-clock bound, a CLAUDE.md rewrite at teardown  | Coordinator         | ✅ Fixed (939ff0d97); 🔄 CI to confirm |
