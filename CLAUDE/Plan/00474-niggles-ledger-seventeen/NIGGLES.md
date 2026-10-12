@@ -93,8 +93,9 @@ brief named the template-consistency tests, but not these two.
 
 1. Map `src/claude_code_hooks_daemon/handlers/**` additions and `constants/handlers.py` to the two completeness tests
    in `scripts/qa/changed_tests_map.yaml`. They are cheap.
-2. Name the example config in the handler-creation checklist (HANDLER_DEVELOPMENT.md), next to the template and the
-   dogfood config.
+2. Name `.claude/hooks-daemon.yaml.example` in the steps a new handler must complete. HANDLER_DEVELOPMENT.md's
+   checklist names none of the config files, and the dogfood steps are in `CLAUDE/CodeLifecycle/Features.md`
+   (fact-check `subagent-reports/fact-check-n428-n429.md`).
 
 **Status**: 🔄 Fix applied; the remedy is open.
 
@@ -145,7 +146,7 @@ release of parked workers). The same unsafe shape (interval lowered before the t
 `test_session_advice_counter.py` and `test_config_cache.py`; both now use `hammer`. Per-test timeouts were not
 added: `pytest-timeout` is not a dependency and the cause is fixed at the source.
 
-**Status**: ✅ Fixed on branch `worktree-n428-py311-hang`; 🔄 the Python 3.11 CI job must pass after merge to confirm.
+**Status**: ✅ Fixed (merge 04e157643, plus 422912ebb); 🔄 a Python 3.11 CI job on main must pass to confirm.
 
 ### N427 — the provision sync tests leave stub daemon processes running after they finish
 
