@@ -10,6 +10,10 @@ Branch: worktree-issue-84-venv-scan-order. Ruling implemented as written; I foun
 - Bash has no slug-eligibility check (it never had one), and I did not add one. "Legacy" there means a name matching `^venv-py[0-9]+-[a-f0-9]+(-.+)?$`.
 - Release note: `CLAUDE/UPGRADES/UNRELEASED/release-notes/037-the-venv-scan-prefers-the-venv-built-for-this-source.md`.
 
+## Decision on the bash side (coordinator correction)
+
+`_rv_pick_python` has no fingerprint step and no slug check. It only picks the interpreter that then runs `paths.py resolve-venv` (`resolve_venv.sh` lines ~488-529); it does not choose the final venv. I kept the ranking there anyway, because `python_venv_fingerprint` hashes `sys.version` of whichever interpreter runs `paths.py`. A stale legacy `venv-py311-*` interpreter picked first computes a py311 fingerprint, so `paths.py` resolves against the wrong interpreter and the upgrade gate runs under it. Ranking the interpreter choice by lock_hash match, then slugged, then legacy therefore changes the final venv. The run-probe is kept and no Python spawn is added.
+
 ## Tests (RED first)
 
 - Python, `tests/unit/daemon/test_paths_resolve_existing_venv.py`, new class `TestScanFallbackRanking` (7 cases). On unchanged code 4 failed, 21 passed (the 3 passing new cases are guards: legacy alone, legacy-with-match beats stale slugged, slug-ineligible stays skipped). The failures were AssertionError on the returned path: the legacy `venv-py311-00000001/bin/python` came back instead of the slugged one:
