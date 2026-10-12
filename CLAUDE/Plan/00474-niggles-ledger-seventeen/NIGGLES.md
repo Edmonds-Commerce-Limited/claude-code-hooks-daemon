@@ -77,6 +77,26 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N427 — the provision sync tests leave stub daemon processes running after they finish
+
+**Found**: by the coordinator on 2026-10-12, in the `pgrep -af '[p]ytest'` check before a daemon restart, after
+the Plan 00477 Task 5.2a merge (57295f89c). No pytest process was running. Eight processes from the
+`tests/integration/test_provision_sh.py` sync cases were still alive, each
+`<worktree venv>/bin/python -c 'import time; time.sleep(60)' -m claude_code_hooks_daemon.daemon.cli --project-root /tmp/pytest-of-root/…/project start`.
+That is the stub "daemon" from `tests/venv_bootstrap_sandbox.py`, which the merge taught to treat `restart`
+like `start`. They expire on their own after 60 s, but they outlive their test and its `tmp_path`.
+
+**Why it matters**: these processes match `pgrep -f pytest` through their `pytest-of-root` path, so the
+"no test run in progress" check before a daemon restart reads a live run for up to a minute after the suite
+ends. A run that loops these tests can also accumulate them.
+
+**Candidate remedies**:
+
+1. Have the sandbox stub record each pid it spawns, and have a fixture finaliser reap them.
+2. Make the stub exit at once instead of sleeping, if no assertion needs it alive.
+
+**Status**: ⬜ Open.
+
 ### N426 — a test pins `init.sh` suppressions by line number, and targeted QA never runs it for an `init.sh` change
 
 **Found**: by the coordinator on 2026-10-11, while checking CI before closing #69. Run 38170565811 on
