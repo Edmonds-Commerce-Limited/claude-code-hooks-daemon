@@ -4,6 +4,7 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 
 | #          | Verdict                                                                                                                                 | Origin              | Status                                 |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | -------------------------------------- |
+| N430       | The conflict-marker commit gate denies a commit into a repository that an earlier step of the same command creates (not yet on disk)    | Coordinator         | ⬜ Open                                |
 | N429       | Targeted QA never runs the example-config completeness tests for a new handler; Plan 00508 reached main without its example entry       | Coordinator         | 🔄 Fixed (69a9ab2f5); remedy open      |
 | N428       | The Python 3.11 CI job hangs at the same point (`test_eviction_sites.py`, after `test_destructive_git.py`) until its 150-minute timeout | Coordinator         | ✅ Fixed (04e157643); 🔄 CI to confirm |
 | N427       | The provision sync tests leave 60 s stub daemon processes running past the test, which a `pgrep -f pytest` restart check misreads       | Coordinator         | ⬜ Open                                |

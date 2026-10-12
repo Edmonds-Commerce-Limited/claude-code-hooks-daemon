@@ -77,6 +77,28 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N430 — the conflict-marker commit gate denies a commit into a repository the same command creates
+
+**Found**: by the coordinator on 2026-10-12, building a throwaway repository to reproduce issue #82. One Bash call ran
+`git init <dir>`, staged a file and then `git -C <dir> commit`. `conflict_marker_commit_gate` denied it, first with
+"the directory `$R` needs an expansion" (a variable path), and then with the path written out: "`<dir>` is not a directory
+inside a repository". At judgement time the repository did not exist yet, because the `git init` earlier in the same
+command had not run. Running the commit as its own call, after the init, was allowed.
+
+**Why**: the gate cannot scan a repository that is not there, and it treats "not checked" as a denial
+(R-CONFLICT-MARKER-COMMIT). That is a denial without a positive finding, which the B5 rule does not allow, although
+the cost is one split call.
+
+**Candidate remedies**:
+
+1. Allow, with an advisory, when the `-C` directory does not exist yet. If the commit then runs, the repository was
+   created earlier in this command and has no history, so no merge state can have left markers behind. If it never
+   exists, git itself fails.
+2. Name the split in the deny reason: "if an earlier step of this command creates the repository, run the commit as
+   its own call".
+
+**Status**: ⬜ Open.
+
 ### N429 — targeted QA never runs the example-config completeness tests for a new handler
 
 **Found**: by the coordinator on 2026-10-12. Main CI run 38204671323 (Python 3.13) failed 2 tests after the Plan
