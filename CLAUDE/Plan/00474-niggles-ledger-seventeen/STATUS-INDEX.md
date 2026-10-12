@@ -4,6 +4,7 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 
 | #          | Verdict                                                                                                                                                        | Origin              | Status                                 |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | -------------------------------------- |
+| N434       | The venv resolvers' scan fallback returns the lexically-first venv (often a stale legacy one), so daemon_upgrade_detector reports a false downgrade (#84)      | GitHub #84          | 🔄 In progress                         |
 | N433       | A quiet plan journal (journal-freshness, advise) fails `llm_qa.py changed` and main CI's targeted step; the coordinator had been reading it as an expected red | Coordinator         | 🔄 Journals updated; remedies open     |
 | N432       | The conflict-marker gate greps the whole tree before filtering to the commit's paths, so a clean commit times out on a large repository under load (#83)       | GitHub #83          | ✅ Fixed (9ef4d5055)                   |
 | N431       | The docs-or-code-tier CI job's full-suite fallback runs after its daemon idled out (600s), so 10 release-gate tests error                                      | Coordinator         | 🔄 Fixed in CI script; CI to confirm   |

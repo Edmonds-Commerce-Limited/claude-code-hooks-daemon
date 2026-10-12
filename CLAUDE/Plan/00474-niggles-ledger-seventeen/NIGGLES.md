@@ -77,6 +77,33 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N434 — the venv resolvers' scan fallback picks the lexically-first venv, so the upgrade detector reports a false downgrade
+
+**Source**: GitHub issue #84 (triaged 2026-10-12).
+
+**Evidence**:
+
+- **Python resolver:** `daemon/paths.py` `resolve_existing_venv_python` tries the venv keyed by the current
+  interpreter's fingerprint, then returns the first slug-eligible `venv-*` with an executable `bin/python`, in
+  sorted order.
+- **When it goes wrong:** after an interpreter patch update moves the fingerprint, a legacy un-slugged
+  `venv-py311-…` sorts first and is always eligible. `daemon_upgrade_detector` then reads that venv's stale
+  `.daemon-metadata.json` and reports "installed v3.18.3" on every turn.
+- **Bash resolver:** `scripts/lib/resolve_venv.sh` scans the same way, so the upgrade's gate step ran under the
+  legacy interpreter.
+- **The rule that works:** `resolve_existing_venv_python_with_diagnostics` already takes the venv whose metadata
+  `lock_hash` matches the current source.
+
+**Remedy (coordinator ruling)**: both scan fallbacks prefer a slug-eligible venv whose metadata `lock_hash` matches
+the current source. Other eligible candidates come next, and the legacy un-slugged directories come last.
+
+- **No new subprocess:** the Python resolver runs on every turn, so it uses stdlib hashing and a JSON read only.
+- **Parity:** a test pins that the Python and bash resolvers pick the same venv for the issue's layout.
+- **Tracking:** the fix is tracked here, not in Plan 00100. That plan's goal is to remove the scan fallback; its
+  residue awaits scheduling, and this stopgap would go when the scan does. A pointer is in 00100's journal.
+
+**Status**: 🔄 In progress (#84, worktree `worktree-issue-84-venv-scan-order`).
+
 ### N433 — a quiet plan journal turns main CI red, and the coordinator had been reading it as an expected red
 
 **Found**: by the coordinator on 2026-10-12, reading main run 38218883524 (20f309048). Its full-suite fallback
