@@ -24,5 +24,11 @@ jq -r '.unmapped_reasons | to_entries[] | "  \(.key): \(.value)"' "${selection}"
 git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
 exec {lock_fd}>> "${git_common_dir}/hooksdaemon-full-qa.lock"
 flock "${lock_fd}"
+# The daemon the job started earlier shuts itself down after
+# daemon.idle_timeout_seconds (600s) without a hook call, and the static and
+# targeted steps before this one can outlast that; the release-gate tests then
+# error on a missing socket (Plan 00474 N431). Start it again just before use.
+./bin/hooks-daemon restart
+./bin/hooks-daemon status
 pytest tests/ -rs
 pytest .claude/project-handlers --import-mode=importlib

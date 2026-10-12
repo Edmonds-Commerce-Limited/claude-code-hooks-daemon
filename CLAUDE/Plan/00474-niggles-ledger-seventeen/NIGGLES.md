@@ -77,6 +77,36 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N431 — the docs-or-code-tier CI job runs its full-suite fallback against a daemon that has already idled out
+
+**Found**: by the coordinator on 2026-10-12, reading main run 38210220837 (2950df451). The job "QA (docs or code
+tier)" ended with 1 failed and 13 errors in its "Full suite fallback" step:
+
+- **10 errors are release-gate refusals.** `test_playbook_harness.py`, `test_stop_hook_hard_block.py` and
+  `test_tool_use_error_recovery.py` escalate a skip to an error under `HOOKS_DAEMON_RELEASE_GATE`, and they skipped
+  with "Daemon not running".
+- **1 error is a doc-write jail refusal** at the teardown of
+  `test_forwarder_answers_when_stdin_is_a_socket[pre-tool-use-…]`: something wrote the checkout's `CLAUDE.md`.
+  Probably a daemon the forwarder started itself, because none was running; that is not verified.
+- **2 errors are `IndexError: pop from empty list`** at the teardown of two `tests/unit/supervise/test_supervisor.py`
+  forward-io tests. The fake `os.read` ran out of scripted reads, which suggests a reader thread still running after
+  the test. Not seen in the matrix jobs.
+- **1 failure is a timing bound**: `test_subagent_full_qa_blocker.py::…test_many_edits_each_run_are_judged_quickly`
+  measured 1.53s against `scaled_cpu_seconds(1.5)`.
+
+**Why (the release-gate errors)**: the job's log shows the daemon started at 06:31:52. The static gates and
+`llm_qa.py changed` then ran, and the fallback step began at 06:54:53. The daemon shuts itself down once
+`daemon.idle_timeout_seconds` (600 in this repository's config) passes without a hook call. The matrix jobs start the
+daemon directly before their tests, so they do not hit this.
+
+**Fix applied (release-gate errors)**: `scripts/ci/full_suite_if_unmapped.bash` restarts the daemon and checks its
+status immediately before `pytest tests/`.
+
+**Still open**: the supervisor teardown errors and the timing bound, if either recurs on a run that had a live daemon.
+Also whether the jail refusal goes away once the daemon is up.
+
+**Status**: 🔄 Fix applied for the idle-out; CI to confirm, and the two other symptoms to watch.
+
 ### N430 — the conflict-marker commit gate denies a commit into a repository the same command creates
 
 **Found**: by the coordinator on 2026-10-12, building a throwaway repository to reproduce issue #82. One Bash call ran
@@ -169,7 +199,9 @@ release of parked workers). The same unsafe shape (interval lowered before the t
 `test_session_advice_counter.py` and `test_config_cache.py`; both now use `hammer`. Per-test timeouts were not
 added: `pytest-timeout` is not a dependency and the cause is fixed at the source.
 
-**Status**: ✅ Fixed (merge 04e157643, plus 422912ebb); 🔄 a Python 3.11 CI job on main must pass to confirm.
+**Status**: ✅ Fixed (merge 04e157643, plus 422912ebb) and confirmed on CI. Main run 38204671323 (422912ebb): the
+Python 3.11 job completed in 96 minutes, not at the 150-minute timeout, with 47959 passed. Its only 2 failures were
+N429's example-config tests, as on 3.12 and 3.13.
 
 ### N427 — the provision sync tests leave stub daemon processes running after they finish
 
