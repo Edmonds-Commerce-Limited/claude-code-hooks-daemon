@@ -27,7 +27,7 @@ from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_written_file_paths
 from claude_code_hooks_daemon.core.workspace import Workspace, resolve_workspace
-from claude_code_hooks_daemon.strategies.lint.common import matches_skip_path
+from claude_code_hooks_daemon.strategies.lint.common import build_lint_argv, matches_skip_path
 from claude_code_hooks_daemon.strategies.lint.protocol import (
     ClassifiesToolUnavailable,
     LintStrategy,
@@ -41,9 +41,6 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 
 logger = logging.getLogger(__name__)
-
-# Placeholder for file path in lint commands
-_FILE_PLACEHOLDER = "{file}"
 
 # Directory holding the console scripts of the environment running the daemon.
 # ``sys.executable`` is the project venv's interpreter, and a venv's ``ruff`` /
@@ -360,9 +357,13 @@ class LintOnEditHandler(PostToolUseHandlerBase):
     # project with ``.ansible-lint`` but no ``ansible.cfg`` resolves no root and
     # runs from the daemon's cwd, where ``--syntax-check`` on an absolute path
     # still works and only role/collection resolution degrades.
+    #
+    # Rust runs from the crate that owns the file, so a relative path in the
+    # compiler's output and the crate's own context line up with Cargo.toml.
     _MODULE_ROOT_MARKERS: ClassVar[dict[str, str]] = {
         "Go": "go.mod",
         "Ansible": "ansible.cfg",
+        "Rust": "Cargo.toml",
     }
 
     def _workspace_for(self, file_path: str) -> Workspace:
@@ -472,19 +473,12 @@ class LintOnEditHandler(PostToolUseHandlerBase):
             if pkg_dir.startswith(working_dir):
                 effective_path = "./" + pkg_dir[len(working_dir) :].lstrip("/") + "/"
 
-        # Split the TEMPLATE, then substitute the path as ONE element.
-        #
-        # SECURITY: the tools are trusted strategy constants, but the PATH is
-        # not — it is whatever the agent just wrote. Substituting into the
-        # string and splitting afterwards re-tokenises the path: `my file.py`
-        # becomes two arguments that lint two files which do not exist, and a
-        # file named `x.py --config /tmp/evil.toml` appends a flag to the
-        # linter's own command line. No shell is involved, so the injection is
-        # into argv and no `shell=True` rule can see it (Plan 00412 class 7).
-        command_parts = [
-            effective_path if part == _FILE_PLACEHOLDER else part
-            for part in command_template.split()
-        ]
+        # SECURITY: the PATH is whatever the agent just wrote, so the template
+        # is split first and the path substituted as ONE element -- see
+        # build_lint_argv, which every strategy template goes through.
+        command_parts = build_lint_argv(
+            command_template, file_path, strategy, effective_path=effective_path
+        )
         # Display only — never re-parsed. `shlex.join` quotes a path containing
         # a space, so the reported command is one someone could actually paste.
         command = shlex.join(command_parts)
@@ -656,6 +650,16 @@ play that will not LOAD: an unbalanced quote inside a `shell:` block aborts the
 whole play at parse time, before `#` means comment. Full `ansible-lint` runs at
 the `extended` tier. The linter runs from the nearest directory containing
 `ansible.cfg`, because roles and collections resolve relative to it.
+
+**Rust is checked as a module of its crate, without building the crate.** `rustc`
+runs from the directory of the nearest `Cargo.toml`, with that crate's edition
+(`package.edition`, the workspace's `[workspace.package].edition` when the package
+inherits it, or `2015` when none is set; a file with no `Cargo.toml` keeps
+edition 2021). Each file is still compiled alone, so an error that only means it
+cannot be resolved outside its crate (`E0432`, `E0433`, `E0463`, `E0583`: a
+sibling `use crate::…`, a dependency, the crate imported by an integration test)
+is NOT a finding: the write is ALLOWED with an advisory that the file was not
+checked. Syntax errors and other compiler errors still DENY.
 
 **Bash-authored files are linted too.** A file a command writes with `>`, `>>`,
 `tee` or a `cat <<EOF` heredoc gets the same treatment — so the heredoc route is

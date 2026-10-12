@@ -71,7 +71,7 @@ absent; rustup ships a shim that refuses.
 
 ### Phase 1: Fix
 
-- [ ] ⬜ **Task 1.1**: RED. Tests with live `rustc` where it is installed, skipped
+- [x] ✅ **Task 1.1**: RED. Tests with live `rustc` where it is installed, skipped
   with a stated reason where it is not. Mirror how existing Rust lint tests
   handle tool absence. Cover:
   - the edition read for a package, for a workspace-inherited edition, and for
@@ -81,10 +81,10 @@ absent; rustup ships a shim that refuses.
     a type error unrelated to resolution still deny;
   - the report's reproduction end to end through the handler;
   - a loose file unchanged.
-- [ ] ⬜ **Task 1.2**: GREEN. Implement in `rust_strategy.py` and `lint_on_edit.py`.
+- [x] ✅ **Task 1.2**: GREEN. Implement in `rust_strategy.py` and `lint_on_edit.py`.
   Edition parsing uses `tomllib` and must not raise on a malformed manifest: it
   falls back, logged.
-- [ ] ⬜ **Task 1.3**: Document the Rust behaviour in the handler's user-facing
+- [x] ✅ **Task 1.3**: Document the Rust behaviour in the handler's user-facing
   guidance and its HANDLER_REFERENCE entry. Add a release note in
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 

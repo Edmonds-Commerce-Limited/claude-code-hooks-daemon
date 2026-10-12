@@ -3541,6 +3541,15 @@ inventories, vault files — never read). The cheap tier is
 at the `extended` tier. The linter runs from the nearest directory containing
 `ansible.cfg`, because roles and collections resolve relative to it.
 
+**Rust** (GitHub #76): `rustc` runs from the nearest `Cargo.toml` with that
+crate's edition (`package.edition`, or `[workspace.package].edition` when the
+package inherits it, or `2015` when none is set); a file with no `Cargo.toml`
+keeps edition 2021. Each file is still compiled on its own, so an error that only
+means it cannot be resolved outside its crate (`E0432`, `E0433`, `E0463`,
+`E0583`) is not a finding: the write is ALLOWED with an advisory that it was not
+checked. Syntax errors and other compiler errors still DENY. A `command_overrides`
+template may use `{edition}` as a whole argument; one without it is run as written.
+
 | Option              | Values         | Default | Effect                                                                                          |
 | ------------------- | -------------- | ------- | ----------------------------------------------------------------------------------------------- |
 | `lint_bash_writes`  | `true`/`false` | `true`  | Lint files authored by a Bash command. `false` restricts the handler to `Write`/`Edit` only.    |

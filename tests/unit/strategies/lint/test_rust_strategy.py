@@ -41,7 +41,7 @@ class TestProperties:
         # stable toolchain (acceptance Test 128). `--emit=metadata --out-dir`
         # performs the same syntax/type check and works on stable rustc.
         assert strategy.default_lint_command == (
-            "rustc --edition 2021 --crate-type lib --emit=metadata "
+            "rustc --edition {edition} --crate-type lib --emit=metadata "
             f"--out-dir {lint_output_dir()} {{file}}"
         )
 
@@ -61,7 +61,7 @@ class TestProperties:
 
     def test_extended_lint_command(self, strategy: RustLintStrategy) -> None:
         assert strategy.extended_lint_command == (
-            "clippy-driver --edition 2021 --crate-type lib --emit=metadata "
+            "clippy-driver --edition {edition} --crate-type lib --emit=metadata "
             f"--out-dir {lint_output_dir()} {{file}}"
         )
 
@@ -129,7 +129,9 @@ class TestRealRustcIntegration:
         with tempfile.TemporaryDirectory() as tmp_dir:
             rs_file = Path(tmp_dir) / filename
             rs_file.write_text(source)
-            command = strategy.default_lint_command.replace("{file}", str(rs_file))
+            command = strategy.default_lint_command.replace("{file}", str(rs_file)).replace(
+                "{edition}", "2021"
+            )
             return subprocess.run(
                 command.split(),
                 capture_output=True,
@@ -167,7 +169,9 @@ class TestRealClippyDriverIntegration:
         with tempfile.TemporaryDirectory() as tmp_dir:
             rs_file = Path(tmp_dir) / filename
             rs_file.write_text(source)
-            command = strategy.extended_lint_command.replace("{file}", str(rs_file))
+            command = strategy.extended_lint_command.replace("{file}", str(rs_file)).replace(
+                "{edition}", "2021"
+            )
             return subprocess.run(
                 command.split(),
                 capture_output=True,
