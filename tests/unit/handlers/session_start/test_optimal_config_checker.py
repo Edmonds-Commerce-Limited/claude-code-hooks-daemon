@@ -226,7 +226,9 @@ class TestEffortSourceCheck:
         assert effort["passed"] is True
         assert "effortLevel='high'" in effort["current"]
         assert "~/.claude/settings.json" in effort["current"]
-        assert "own default" not in effort["current"]
+        assert "Opus 5, Fable 5.1 and earlier" in effort["current"]
+        assert "Opus 5.5 and later run at their own default" in effort["current"]
+        assert "every model" not in effort["current"]
 
     def test_user_top_level_level_is_named_beside_model_levels(
         self, handler: Any, tmp_path: Path
@@ -241,6 +243,8 @@ class TestEffortSourceCheck:
 
         assert "claude-fable-5-1" in effort["current"]
         assert "effortLevel='high'" in effort["current"]
+        assert "Opus 5.5 and later run at their own default" in effort["current"]
+        assert "every model" not in effort["current"]
 
     def test_a_non_pinning_top_level_value_is_not_a_level(
         self, handler: Any, tmp_path: Path

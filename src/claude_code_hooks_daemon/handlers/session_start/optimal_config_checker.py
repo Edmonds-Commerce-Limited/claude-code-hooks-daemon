@@ -267,20 +267,25 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
                             json.loads(path.read_text(encoding="utf-8")), f".claude/{name}"
                         )
                     )
-            # A user-file top-level effortLevel is not a pin, but it is the
-            # default for every model without a modelSettings entry.
+            # A user-file top-level effortLevel is the legacy form: not a pin, and
+            # it applies only to Opus 5, Fable 5.1 and earlier (remote-docs
+            # code.claude.com settings-reference.md, model-config.md).
             top_level = user_data.get("effortLevel")
             top_applies = (
                 top_level is not None
                 and str(top_level).strip().lower() not in _EFFORT_ENV_NON_PINNING_VALUES
             )
-            top_desc = f"top-level effortLevel={top_level!r} from ~/.claude/settings.json"
+            top_desc = (
+                f"top-level effortLevel={top_level!r} in ~/.claude/settings.json applies to "
+                "models without an entry only if they are Opus 5, Fable 5.1 and earlier; "
+                "Opus 5.5 and later run at their own default"
+            )
             if leveled:
                 current = "per-model effort levels set in modelSettings: " + ", ".join(leveled)
                 if top_applies:
-                    current += f"; other models use the {top_desc}"
+                    current += f"; {top_desc}"
             elif top_applies:
-                current = f"no modelSettings effort levels; every model uses the {top_desc}"
+                current = f"no modelSettings effort levels; {top_desc}"
             else:
                 current = "no model has an explicit effort level, so each runs at its own default"
             return {
