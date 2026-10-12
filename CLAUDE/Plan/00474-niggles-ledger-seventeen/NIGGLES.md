@@ -91,7 +91,7 @@ is judged. That direction fails open on a public tracker.
 
 **Remedy**: read gh's flags from the segment's shell words, not from regexes over raw text. Tests come red first for
 both directions and both flag orders. Coordinator ruling (triage on #86). Plan 00264 (comment size cap, Not Started)
-plans its own shlex parse of `gh` flags, so if it is built it should reuse this parser.
+gates `gh` comment bodies and will need the same body-flag reading, so if it is built it should reuse this parser.
 
 **Status**: 🔄 In progress.
 
