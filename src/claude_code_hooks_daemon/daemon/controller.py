@@ -1107,7 +1107,7 @@ class DaemonController:
                 hook_input_dict,
                 strict_mode=strict_mode,
                 collect_all=self._chain_config.collect_all_violations,
-                deadline_seconds=self._chain_config.deadline_seconds,
+                deadline_seconds=self._chain_config.deadline_for(event.event_type),
                 max_safety_input_bytes=self._chain_config.max_safety_input_bytes,
                 arrival_time=arrival_time,
             )

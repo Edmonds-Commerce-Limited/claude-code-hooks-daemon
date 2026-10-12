@@ -2921,6 +2921,18 @@ send_request_stdin() {
     # baked value — an operator's own override always wins.
     local events_dir_override="${4:-}"
 
+    # Plan 00512: how long this client waits for the daemon when
+    # CLAUDE_HOOKS_SOCKET_TIMEOUT is unset. The worktree events run git and
+    # report a path, so their chain deadline is longer than a guard's and this
+    # wait must outlast it. Mirrors Timeout.EVENT_CLIENT_WAIT in
+    # constants/timeout.py (pinned equal by tests/unit/constants/test_event_budgets.py).
+    local _event_socket_wait
+    case "$event_name" in
+        WorktreeCreate) _event_socket_wait=60;;
+        WorktreeRemove) _event_socket_wait=70;;
+        *) _event_socket_wait=30;;
+    esac
+
     # nc rung (rung 2): only for the plain passthrough shape (no response_mode
     # translation needed — "status"/"worktree" always go through the python3
     # rung's render_status/print_worktree, so that logic is never duplicated
@@ -2953,7 +2965,7 @@ send_request_stdin() {
             # observed as a ~30s hang on every nc-rung call (Plan 00290
             # Phase 6 measurement). With -N, -w's "final net reads" role
             # becomes the correct overall response-wait budget.
-            nc -U -N -w "${CLAUDE_HOOKS_SOCKET_TIMEOUT:-30}" "$_nc_sock" \
+            nc -U -N -w "${CLAUDE_HOOKS_SOCKET_TIMEOUT:-$_event_socket_wait}" "$_nc_sock" \
                 < "$_nc_payload" > "$_nc_response" 2> "$_nc_stderr" || _nc_rc=$?
             if [[ "$_nc_rc" -eq 0 && -s "$_nc_response" ]]; then
                 cat "$_nc_response"
@@ -3010,20 +3022,24 @@ context_events = '$_HOOKS_DAEMON_CONTEXT_EVENTS'.split()
 # The status line's baseline while the daemon is starting (_HOOKS_DAEMON_STATUS_LOADING_TEXT).
 status_loading_text = '$_HOOKS_DAEMON_STATUS_LOADING_TEXT'
 
-# Socket budget for the whole connect+send+recv exchange. Default 30s; operators
-# can raise it via CLAUDE_HOOKS_SOCKET_TIMEOUT (also lets tests drive the timeout
-# path fast). A non-numeric or non-positive value falls back to the default.
+# Socket budget for the whole connect+send+recv exchange. Default 30s, or the
+# event's own wait (_event_socket_wait, set above: the worktree events outlast a
+# guard's chain deadline); operators can raise it via CLAUDE_HOOKS_SOCKET_TIMEOUT
+# (also lets tests drive the timeout path fast). A non-numeric or non-positive
+# value falls back to the default.
 # Defined up-front (not inside the try) so emit_error_json can name it even when
 # a failure fires before the socket is opened (Plan 00177).
+DEFAULT_SOCKET_TIMEOUT = float('$_event_socket_wait')
+
 def _resolve_socket_timeout():
     raw = os.environ.get('CLAUDE_HOOKS_SOCKET_TIMEOUT', '').strip()
     if not raw:
-        return 30.0
+        return DEFAULT_SOCKET_TIMEOUT
     try:
         value = float(raw)
     except ValueError:
-        return 30.0
-    return value if value > 0 else 30.0
+        return DEFAULT_SOCKET_TIMEOUT
+    return value if value > 0 else DEFAULT_SOCKET_TIMEOUT
 
 SOCKET_TIMEOUT_SECONDS = _resolve_socket_timeout()
 

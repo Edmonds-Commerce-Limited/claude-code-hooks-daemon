@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.core.worktree_seed import (
@@ -426,3 +428,88 @@ class TestSeedingGuidance:
         handler._seed = {"entries": [".env.local"]}
 
         assert "check-worktree-seed" in (handler.get_claude_md() or "")
+
+
+class TestFailedAddLeavesNoOrphan:
+    """Plan 00512: a failed or timed-out ``git worktree add`` is undone."""
+
+    _INPUT: ClassVar[dict[str, str]] = {"name": "orphan", "prompt_id": "p", "session_id": "s"}
+
+    @staticmethod
+    def _branches(repo: Path) -> list[str]:
+        out = subprocess.run(
+            ["git", "-C", str(repo), "branch", "--format=%(refname:short)"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        return sorted(out.split())
+
+    @staticmethod
+    def _worktrees(repo: Path) -> list[str]:
+        out = subprocess.run(
+            ["git", "-C", str(repo), "worktree", "list", "--porcelain"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        return [line for line in out.splitlines() if line.startswith("worktree ")]
+
+    @staticmethod
+    def _hook(repo: Path, body: str) -> None:
+        hook = repo / ".git" / "hooks" / "post-checkout"
+        hook.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+        hook.chmod(0o755)
+
+    def test_failing_add_removes_the_worktree_and_its_branch(self, repo: Path) -> None:
+        before_branches = self._branches(repo)
+        before_worktrees = self._worktrees(repo)
+        self._hook(repo, "exit 1")
+
+        with pytest.raises(subprocess.CalledProcessError):
+            WorktreeCreateHandler().handle({"cwd": str(repo), **self._INPUT})
+
+        assert self._branches(repo) == before_branches
+        assert self._worktrees(repo) == before_worktrees
+        assert not (repo / ".claude" / "worktrees").exists() or not any(
+            (repo / ".claude" / "worktrees").iterdir()
+        )
+
+    def test_timed_out_add_removes_the_worktree_and_its_branch(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        before_branches = self._branches(repo)
+        before_worktrees = self._worktrees(repo)
+        self._hook(repo, "sleep 2")
+        monkeypatch.setattr(Timeout, "GIT_WORKTREE", 0.5)
+
+        with pytest.raises(subprocess.CalledProcessError):
+            WorktreeCreateHandler().handle({"cwd": str(repo), **self._INPUT})
+
+        assert self._branches(repo) == before_branches
+        assert self._worktrees(repo) == before_worktrees
+
+    def test_a_branch_the_call_did_not_create_survives_the_failure(self, repo: Path) -> None:
+        """``add -b`` refuses an existing branch; that branch is not this call's to delete."""
+        from claude_code_hooks_daemon.core.worktree_naming import worktree_dir_name
+
+        branch = worktree_dir_name("orphan", "p", "s")
+        subprocess.run(["git", "-C", str(repo), "branch", branch], check=True)
+        before = self._branches(repo)
+
+        with pytest.raises(subprocess.CalledProcessError):
+            WorktreeCreateHandler().handle({"cwd": str(repo), **self._INPUT})
+
+        assert self._branches(repo) == before
+        assert branch in before
+
+    def test_a_cleanup_failure_does_not_mask_the_add_error(self, tmp_path: Path) -> None:
+        failed = subprocess.CompletedProcess(["git"], 128, "", "fatal: the add failed")
+        with patch(
+            "claude_code_hooks_daemon.handlers.worktree_create.worktree_create_handler.run_git",
+            return_value=failed,
+        ):
+            with pytest.raises(subprocess.CalledProcessError) as excinfo:
+                WorktreeCreateHandler._git_worktree_add(str(tmp_path), tmp_path / "w", "b")
+
+        assert "fatal: the add failed" in str(excinfo.value)

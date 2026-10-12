@@ -764,6 +764,8 @@ With `daemon.strict_mode: true`, a handler that raises an exception denies the c
 
 The hook client gives the daemon a socket timeout (30s) and treats an expired one as an ALLOW for the whole PreToolUse chain — so a single slow handler used to bypass every guard behind it, not just itself. `daemon.chain.deadline_seconds` (default `20`, comfortably under that 30s budget) bounds how long the daemon itself spends on one event: once it is exceeded, a handler tagged both `SAFETY` and `BLOCKING` that has not run yet is denied ("not judged in time"), and any other not-yet-run handler is skipped with a note. Setting it to `null` disables enforcement — not recommended, since that reopens the original bypass.
 
+The two worktree events are the exception: `WorktreeCreate` and `WorktreeRemove` run git rather than judge a call, and their git budget (30s per call) is longer than this deadline, so they get their own: a 55s chain deadline for create and 65s for remove, and a client wait of 60s and 70s. `deadline_seconds` can raise those but never lower them below that floor, and `null` still disables enforcement. Every other event uses `deadline_seconds` unchanged.
+
 ---
 
 ## Applying Config Changes
