@@ -2720,6 +2720,51 @@ def _cli_check_venv_fresh(args: argparse.Namespace) -> int:
     return 1
 
 
+def classify_venv_for_cleanup(
+    venv_dir: Path,
+    current_slug: str,
+    current_hash: str | None,
+) -> tuple[bool, str]:
+    """Decide whether a non-current ``venv-*`` directory is positively stale.
+
+    Returns ``(remove, reason)``. ``remove`` is True only when the venv's slug
+    is eligible for this view (:func:`_venv_slug_eligible`), its metadata is
+    readable, and its ``lock_hash`` differs from ``current_hash``. Every other
+    case keeps the venv and ``reason`` says why.
+    """
+    if current_hash is None:
+        return False, "cannot compute the current lock_hash"
+    eligible, skip_reason = _venv_slug_eligible(venv_dir, current_slug)
+    if not eligible:
+        return False, skip_reason or "slug belongs to another view"
+    metadata = _read_venv_metadata_stdlib(venv_dir)
+    if metadata is None:
+        return False, f"no usable {_DAEMON_METADATA_FILENAME}"
+    if metadata["lock_hash"] == current_hash:
+        return False, "lock_hash matches the current source"
+    return True, "lock_hash differs from the current source"
+
+
+def _cli_list_stale_venvs(args: argparse.Namespace) -> int:
+    """CLI handler for ``list-stale-venvs``.
+
+    Prints one tab-separated line per ``untracked/venv-*`` directory other
+    than ``--current-venv``: ``remove|keep``, the absolute path, the reason.
+    The caller deletes only the ``remove`` lines.
+    """
+    daemon_dir = Path(args.daemon_dir)
+    current_venv = Path(args.current_venv).resolve()
+    untracked = daemon_dir / "untracked"
+    current_slug = project_path_slug(daemon_dir)
+    current_hash = _compute_project_lock_hash_stdlib(daemon_dir)
+    for candidate in sorted(untracked.glob("venv-*")):
+        if not candidate.is_dir() or candidate.resolve() == current_venv:
+            continue
+        remove, reason = classify_venv_for_cleanup(candidate, current_slug, current_hash)
+        print(f"{'remove' if remove else 'keep'}\t{candidate.resolve()}\t{reason}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Dispatcher for ``python -m claude_code_hooks_daemon.daemon.paths``.
 
@@ -2728,6 +2773,7 @@ def main(argv: list[str] | None = None) -> int:
     - ``resolve-venv`` (Plan 00100 Phase 2) — SSOT venv resolver
     - ``check-venv-fresh`` (Plan 00100 Task 3.7) — lock_hash freshness gate
     - ``bootstrap-decision`` (Plan 00456) — the venv-less auto-build gate
+    - ``list-stale-venvs`` — which non-current venvs are positively stale
     """
     parser = argparse.ArgumentParser(
         description="Hooks-daemon path utilities (SSOT for bash wrappers).",
@@ -2792,6 +2838,17 @@ def main(argv: list[str] | None = None) -> int:
         help="Daemon installation directory whose untracked/ would hold the venv.",
     )
     bootstrap_parser.set_defaults(func=_cli_bootstrap_decision)
+
+    list_stale_parser = subparsers.add_parser(
+        "list-stale-venvs",
+        help=(
+            "List each untracked/venv-* other than the current one as "
+            "remove|keep <path> <reason>; remove marks a positively stale venv."
+        ),
+    )
+    list_stale_parser.add_argument("--daemon-dir", required=True, help="Daemon installation dir.")
+    list_stale_parser.add_argument("--current-venv", required=True, help="The live venv path.")
+    list_stale_parser.set_defaults(func=_cli_list_stale_venvs)
 
     args = parser.parse_args(argv)
     return int(args.func(args))

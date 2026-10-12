@@ -1011,6 +1011,9 @@ FASTPATH_RELAY_PY
         fail_fast "Post-install verification failed after idempotent upgrade"
     fi
 
+    # Stale venvs are removed only once the restart and checks above passed.
+    eager_cleanup_stale_venvs "$DAEMON_DIR" "$VENV_PATH"
+
     # Plan 00336 Phase 3: regenerate .claude/HOOKS-DAEMON.md. The restart above
     # already refreshed the CLAUDE.md <hooksdaemon> block (DaemonController
     # .initialise runs the ClaudeMdInjector), but nothing regenerated this
