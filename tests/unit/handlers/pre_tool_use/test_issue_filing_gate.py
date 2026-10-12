@@ -534,13 +534,42 @@ class TestFlagsAreReadFromShellWords:
             _bash("gh issue create --title 'a -R b/c' --body y", cwd=str(checkout))
         )
 
+    @pytest.mark.parametrize(
+        "repos",
+        [
+            ("other/x", _UPSTREAM),
+            (_UPSTREAM, "other/x"),
+            ("-R other/x", f"--repo {_UPSTREAM}"),
+        ],
+    )
+    def test_a_repeated_repo_flag_engages_whichever_order_names_us(
+        self, repos: tuple[str, str]
+    ) -> None:
+        """gh uses the LAST value, so judging only the first stands down."""
+        first, second = (r if r.startswith("-") else f"--repo {r}" for r in repos)
+
+        assert _handler().matches(_bash(f"gh issue create {first} {second} --body-file r.md"))
+
+    def test_an_unparseable_segment_with_a_decoy_repo_still_engages(self) -> None:
+        command = f"gh issue create --title 'x -R other/x --repo {_UPSTREAM} --body-file r.md"
+
+        assert _handler().matches(_bash(command))
+
+    def test_an_unparseable_segment_with_web_only_in_its_text_is_still_judged(self) -> None:
+        for title in ("'x --web", '"$(echo x) --web"'):
+            result = _handler().handle(
+                _bash(f"gh issue create --repo {_UPSTREAM} --title {title} --body hi")
+            )
+
+            assert result.decision == Decision.DENY, title
+
     def test_an_unparseable_segment_keeps_the_conservative_reading(self, tmp_path: Path) -> None:
         """An unbalanced quote leaves the words unknowable, so the flags are
         read from the raw text as they always were: the gate still engages and
         still judges the file, rather than standing down."""
         bad = tmp_path / "notes.md"
         bad.write_text("whatever I felt like writing")
-        command = f"gh issue create --repo {_UPSTREAM} --title 'it's broken --body-file {bad}"
+        command = f"gh issue create --repo {_UPSTREAM} --title 'x broken --body-file {bad}"
 
         assert _handler().matches(_bash(command))
         assert _handler().handle(_bash(command)).decision == Decision.DENY

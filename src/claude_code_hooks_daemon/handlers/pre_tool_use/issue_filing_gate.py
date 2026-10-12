@@ -137,7 +137,6 @@ _STDIN_BODY: Final[str] = "-"
 #: all except working around the gate. A gate whose only escape is evasion
 #: teaches evasion, which is the same reason `reference_repo_freshness` never
 #: intercepts `git`.
-_WEB_FLAG: Final[re.Pattern[str]] = re.compile(r"(?:\A|\s)--web(?=\s|\Z)")
 _WEB_FLAG_NAME: Final[str] = "--web"
 
 #: A generated report is a few KiB. Past this bound the file is not one, and
@@ -256,9 +255,10 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
 
         Spellings read: ``--flag x``, ``--flag=x`` and the short forms, quoted
         or not. When the segment cannot be split into words, ``fallback`` reads
-        the raw text exactly as this handler always did: the conservative
-        reading, because a flag it over-finds is judged rather than skipped and
-        the gate never stands down on a segment it could not read.
+        the raw text exactly as this handler always did. That can over-find a
+        flag, which is the safe direction for the callers that use it: an extra
+        repo value can only add a chance to engage the gate (callers must test
+        ANY value, not the first), and an extra body file is judged too.
         """
         words = cls._shell_words(segment)
         if words is None:
@@ -355,7 +355,10 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
         """
         repos = cls._flag_values(segment, _REPO_FLAGS, _REPO_FLAG)
         if repos:
-            return cls._repo_slug(repos[0]) == UPSTREAM_REPO_SLUG
+            # ``gh`` honours the LAST of a repeated ``--repo``, and a decoy can
+            # sit anywhere in a segment that could not be split into words, so
+            # any value naming us engages the gate: over-judging is safe.
+            return any(cls._repo_slug(repo) == UPSTREAM_REPO_SLUG for repo in repos)
         env = _GH_REPO_ENV.search(command)
         if env is not None:
             return cls._repo_slug(cls._flag_value(env)) == UPSTREAM_REPO_SLUG
@@ -430,13 +433,12 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
     def _has_web_flag(cls, segment: str) -> bool:
         """Whether ``--web`` is a flag of this segment rather than text in one.
 
-        Unparseable segments use the raw-text pattern, which can only over-find
-        the flag; see :meth:`_flag_values` for why that direction is accepted.
+        ``--web`` grants an exemption, so over-finding it is the UNSAFE
+        direction: a segment that cannot be split into words is never taken to
+        carry it, and is judged like any other filing.
         """
         words = cls._shell_words(segment)
-        if words is None:
-            return _WEB_FLAG.search(segment) is not None
-        return _WEB_FLAG_NAME in words
+        return words is not None and _WEB_FLAG_NAME in words
 
     def _segment_problems(self, segment: str, hook_input: dict[str, Any]) -> list[str]:
         """Why this filing cannot go ahead, or an empty list when it may."""
