@@ -115,7 +115,10 @@ Neither finding has been assessed against the daemon yet.
 Today Step 1c only records the gap, and v3.69.0 shipped with it. A gate would keep every release current, at the
 cost of a refresh before every release.
 
-**Status**: 🔄 In progress.
+**Status**: ✅ Fixed (merge e745dc3cf, branch head e950f4357; #95). `contract-status` reports unchanged
+(268811 bytes, sha256 31754d5a…), still audited at 2.1.296, the installed Claude Code. `hook_contract` and
+`input_contract` report 0 violations, and no allowlist entry was added. Range QA over the merge: 40/40. Release note
+044\. The refresh's two findings with possible daemon impact are N443. The release-gate question stays with the owner.
 
 ### N441 — a normal upgrade never removes stale venvs, and the cleanup it would call is not safe on a shared checkout
 
