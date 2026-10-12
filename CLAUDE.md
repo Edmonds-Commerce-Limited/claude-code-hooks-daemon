@@ -277,7 +277,7 @@ A `Write`/`Edit` of code that silently swallows errors is blocked. All errors mu
 
 **Blocked patterns (examples)**:
 
-- Python: bare `except` clauses with an empty body, catching and discarding all exceptions
+- Python: bare `except` clauses with an empty body, catching and discarding all exceptions, and `suppress(...)` naming `Exception` or `BaseException` (also in a tuple); a narrow `suppress(OSError)` is allowed
 - Shell: redirecting stderr to `/dev/null` to silence failures, `|| true` to suppress non-zero exit codes
 - JavaScript/TypeScript: empty `catch` blocks that swallow exceptions
 - Go: `if err != nil {}` (empty error check), and a blank in the LAST tuple position — `result, _ := riskyCall()` — which is where Go returns the error. The idiomatic `_, err :=` CAPTURES it and is not blocked; a bare `_ = err` is not matched either.
