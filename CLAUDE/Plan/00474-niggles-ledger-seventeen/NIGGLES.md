@@ -77,6 +77,28 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N442 — the upstream hooks doc changed again after the 2.1.296 contract refresh
+
+**Source**: GitHub issue #95 (triaged 2026-10-12). The issue reports that v3.69.0 shipped a contract audited at
+2.1.272, so every client on a newer Claude Code gets the `contract_staleness` advisory on every session.
+
+**Evidence**:
+
+- **Reported state fixed on main:** N375 refreshed `contracts/claude-code-hooks/META.json` to 2.1.296 in 4ebd40273
+  (2026-10-11), after v3.69.0 was tagged (2026-10-08). v3.69.0's own `claude-code-versions.yaml` entry records that
+  it shipped knowing the audit was at 2.1.272.
+- **Stale again:** `hooks-daemon contract-status` on main reports `CHANGED`. The recorded doc is 266649 bytes,
+  sha256 3a1f9445…, audited at v2.1.296; upstream is now 268811 bytes, sha256 31754d5a…. The next release would ship
+  a contract one upstream change behind.
+
+**Remedy**: run `docs/guides/HOOK-CONTRACT-REFRESH.md` from step 0 against the RAW text, in a worktree.
+
+**Owner question (not ruled)**: should the release process refuse to tag while `contract-status` reports `CHANGED`?
+Today Step 1c only records the gap, and v3.69.0 shipped with it. A gate would keep every release current, at the
+cost of a refresh before every release.
+
+**Status**: 🔄 In progress.
+
 ### N441 — a normal upgrade never removes stale venvs, and the cleanup it would call is not safe on a shared checkout
 
 **Source**: GitHub issue #94, the remainder after N434 (triaged 2026-10-12). The issue's headline false downgrade is
