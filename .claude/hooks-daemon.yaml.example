@@ -571,6 +571,10 @@ handlers:
       # options:
       #   quiet_seconds: 5.0  # quiet period after the last edit to a plan before it fires
 
+    operator_signal_notice:  # A pending host reboot/shutdown warning reaches a busy agent at its next tool call (Plan 00508)
+      enabled: true   # On by default; adds the warning as context once per signal in each agent thread, never touches the signal file, never blocks
+      priority: 38
+
     validate_eslint_on_write:  # Runs ESLint after file writes
       enabled: false           # Enable for automatic ESLint validation
       priority: 20
