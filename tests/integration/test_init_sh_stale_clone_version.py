@@ -200,7 +200,7 @@ class TestTheMessage:
 
     def test_it_names_the_upgrade_command_when_the_clone_is_behind(self, tmp_path: Path) -> None:
         context = self._context(tmp_path, clone=_STALE_CLONE, tracked=_TRACKED)
-        assert "upgrade" in context.lower()
+        assert "bash .claude/provision.sh" in context
         assert _TRACKED in context, "the command must target the tracked version"
 
     def test_it_says_a_restart_cannot_fix_this(self, tmp_path: Path) -> None:

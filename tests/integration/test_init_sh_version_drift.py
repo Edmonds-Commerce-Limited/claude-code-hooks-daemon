@@ -126,16 +126,26 @@ class TestTheMessage:
         assert "daemon.expected_version" in context
         assert "UPGRADE" in context
         assert "DOWNGRADE" not in context
-        assert f"args=upgrade {_NEWER}" in context
-        assert "Use the hooks-daemon skill to upgrade" in context
+        assert "bash .claude/provision.sh" in context
+        assert f"args=upgrade {_NEWER}" not in context, "a sync is provision, not an upgrade"
         assert "/hooks-daemon upgrade" not in context
+
+    def test_it_tells_a_sync_from_moving_the_project_to_a_new_version(self, tmp_path: Path) -> None:
+        context = _context(_drifted(tmp_path, clone=_CLONE, expected=_NEWER))
+
+        assert "pre-deploy gate" in context
+        assert "refuses a clone with local changes" in context
+        assert f"puts v{_CLONE} back" in context
+        assert "args=upgrade <version>" in context
+        assert "PROJECT" in context
 
     def test_a_downgrade_is_named_as_one(self, tmp_path: Path) -> None:
         context = _context(_drifted(tmp_path, clone="3.68.0", expected=_OLDER))
 
         assert "DOWNGRADE" in context
         assert "3.68.0" in context and _OLDER in context
-        assert f"args=upgrade {_OLDER}" in context
+        assert "bash .claude/provision.sh" in context
+        assert f"args=upgrade {_OLDER}" not in context
         assert "intended" in context.lower()
 
     def test_it_says_a_restart_cannot_fix_it_and_nothing_was_changed(self, tmp_path: Path) -> None:

@@ -30,6 +30,7 @@ Plan 00386's half of the same defect.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Final
 
@@ -44,6 +45,8 @@ from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.install.expected_version import read_expected_version
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.deployed_version import (
     TRACKED_VERSION_DOC_REL_PATH,
     read_tracked_deployed_version,
@@ -60,6 +63,8 @@ from claude_code_hooks_daemon.utils.merge_scope import (
     is_git_merge_pull_rebase_command,
 )
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
+
+logger = logging.getLogger(__name__)
 
 _MERGE_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"merge", "pull", "rebase"})
 
@@ -163,7 +168,15 @@ class DaemonSyncAfterMergeHandler(PostToolUseHandlerBase):
         conflating them would advise upgrading to the version already installed.
         A version difference this operation did NOT introduce belongs to the
         startup check (Plan 00386), not here.
+
+        A pull that changed ``daemon.expected_version`` is a SYNC (Plan 00477
+        Task 5.2a): the project was upgraded where it was committed, so only this
+        checkout's clone is behind, and the remedy is ``provision``. Without that
+        change the marker-doc mismatch keeps its upgrade advice.
         """
+        expected = self._changed_expected_version(project_root, changed)
+        if expected is not None and expected != _running_version():
+            return self._sync_section(expected, _running_version())
         if not changed_path_is_or_is_under(TRACKED_VERSION_DOC_REL_PATH, changed):
             return []
         tracked = read_tracked_deployed_version(project_root)
@@ -190,6 +203,44 @@ class DaemonSyncAfterMergeHandler(PostToolUseHandlerBase):
             "artefacts, so re-check `git status` and commit that diff. Left "
             "uncommitted, the repository keeps describing a daemon it no longer "
             "has. Nothing here is upgraded, regenerated or committed for you.",
+        ]
+
+    def _changed_expected_version(self, project_root: Path, changed: frozenset[str]) -> str | None:
+        """``daemon.expected_version`` when this operation touched the config, else None."""
+        config_rel = self._config_path_rel(project_root)
+        if config_rel is None or not changed_path_is_or_is_under(config_rel, changed):
+            return None
+        try:
+            return read_expected_version(ProjectContext.config_path())
+        except (OSError, ValueError) as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    "A config that cannot be read or parsed is reported by config validation, "
+                    "and this advisory must not guess at what it said, so the pull is not "
+                    "reported as changing daemon.expected_version"
+                ),
+            )
+            return None
+
+    @staticmethod
+    def _sync_section(expected: str, running: str) -> list[str]:
+        """The advice for a pull that moved ``daemon.expected_version`` off the running version."""
+        return [
+            f"DAEMON VERSION DRIFT: this pull changed daemon.expected_version to "
+            f"v{expected}, but the daemon running here is v{running}. "
+            "`.claude/hooks-daemon/` is gitignored, so the clone is per-checkout and a "
+            "pull cannot update it.",
+            "TO SYNC (this is a sync of the clone, not a project upgrade), a person or an "
+            "agent runs, from the project root: bash .claude/provision.sh -- it checks out "
+            f"exactly v{expected}, runs that release's pre-deploy gate, rebuilds the venv "
+            "and restarts the daemon, refuses a clone with local changes, and puts "
+            f"v{running} back if the sync fails. It writes no tracked file.",
+            "To move the PROJECT to another version instead (and change "
+            "daemon.expected_version), use the hooks-daemon skill to upgrade "
+            "(Skill tool: skill=hooks-daemon, args=upgrade <version>). Nothing is synced "
+            "for you here.",
         ]
 
     def _stale_making_paths(self, project_root: Path, changed: frozenset[str]) -> list[str]:
@@ -276,6 +327,12 @@ class DaemonSyncAfterMergeHandler(PostToolUseHandlerBase):
             "start with every safety handler inactive. The version the tracked "
             "assets came from is read from `.claude/HOOKS-DAEMON.md`'s generated "
             "header; both versions are named so the upgrade range is honest.\n"
+            "\n"
+            "When the pull changed `daemon.expected_version` the clone only needs "
+            "SYNCING to it, and the advice is `bash .claude/provision.sh` (it runs "
+            "the target release's pre-deploy gate, refuses a modified clone, and "
+            "restores the previous version on failure). Upgrade stays the route for "
+            "moving the PROJECT to a new version.\n"
             "\n"
             "That mismatch runs BOTH ways, so the advisory asks for two things: "
             "upgrade the clone, then commit the tracked artefacts the upgrade "

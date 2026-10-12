@@ -102,9 +102,21 @@ class TestAnUpgradeIsNamed:
         with _patched(config):
             text = _text(handler.handle(new_session_input))
 
-        assert "args=upgrade 3.68.0" in text
-        assert "the hooks-daemon skill to upgrade" in text
+        assert "bash .claude/provision.sh" in text
+        assert "args=upgrade 3.68.0" not in text, "a sync is provision, not an upgrade"
         assert "/hooks-daemon upgrade" not in text
+
+    def test_tells_a_sync_apart_from_moving_the_project(
+        self, handler: VersionCheckHandler, new_session_input: dict[str, Any], tmp_path: Path
+    ) -> None:
+        config = _config(tmp_path, '  expected_version: "3.68.0"\n')
+        with _patched(config):
+            text = _text(handler.handle(new_session_input))
+
+        assert "pre-deploy gate" in text
+        assert "refuses a clone with local changes" in text
+        assert f"puts v{_RUNNING} back" in text
+        assert "args=upgrade <version>" in text
 
     def test_says_it_changes_nothing_itself(
         self, handler: VersionCheckHandler, new_session_input: dict[str, Any], tmp_path: Path
@@ -127,7 +139,8 @@ class TestADowngradeIsNamedAsOne:
         assert "DOWNGRADE" in text
         assert "UPGRADE" not in text.replace("DOWNGRADE", "")
         assert "3.50.0" in text and "3.60.0" in text
-        assert "args=upgrade 3.50.0" in text
+        assert "bash .claude/provision.sh" in text
+        assert "args=upgrade 3.50.0" not in text
 
     def test_a_downgrade_asks_for_confirmation_that_it_is_intended(
         self, handler: VersionCheckHandler, new_session_input: dict[str, Any], tmp_path: Path

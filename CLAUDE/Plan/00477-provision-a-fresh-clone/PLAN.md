@@ -119,7 +119,7 @@ stale: the clone's checked-out tag, the venv and the running daemon.
   hook pays nothing), and at SessionStart for a running daemon in the
   `version_check` handler. Both name the versions, the source, UPGRADE or
   DOWNGRADE, and the command a human runs; neither moves the daemon.
-- [ ] 🔄 **Task 5.2a** (#78): `provision` syncs an existing clone at the wrong
+- [x] ✅ **Task 5.2a** (#78): `provision` syncs an existing clone at the wrong
   version to the expected one, by the steps Task 5.2 names and through the target
   release's pre-deploy gate (Task 5.3). It refuses a modified clone or one with a
   foreign origin. A failure restores the previous version and restarts the old

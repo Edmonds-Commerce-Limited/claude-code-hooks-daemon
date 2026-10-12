@@ -905,24 +905,33 @@ $_hd_venv_missing_remedy")
         # daemon.expected_version config key (a pull changed it), a clone ahead
         # of it is a DOWNGRADE the project asked for, not a stale header, and the
         # message says so; the regenerate remedy stays for the header source.
+        #
+        # Plan 00477 Task 5.2a: the clone being at another version than the one
+        # the repository expects is a SYNC, and the remedy is provision, which
+        # checks out exactly the expected tag, runs that release's pre-deploy
+        # gate, rebuilds the venv and restarts. Upgrade stays the route for
+        # moving the PROJECT itself to a new version, so the message says which
+        # case this is.
         local _hd_remedy_1 _hd_remedy_2 _hd_headline _hd_expected_from
-        local _hd_upgrade_cmd="  Use the hooks-daemon skill to upgrade (Skill tool: skill=hooks-daemon, args=upgrade $_HOOKS_DAEMON_TRACKED_VERSION)"
+        local _hd_sync_cmd="  bash .claude/provision.sh
+It checks out exactly v$_HOOKS_DAEMON_TRACKED_VERSION, runs that release's pre-deploy gate, rebuilds the venv and restarts the daemon. It refuses a clone with local changes, writes no tracked file, and a failed sync puts v$_HOOKS_DAEMON_CLONE_VERSION back.
+To move the PROJECT to another version instead (and change daemon.expected_version), use the hooks-daemon skill to upgrade (Skill tool: skill=hooks-daemon, args=upgrade <version>)."
         if [[ "${_HOOKS_DAEMON_EXPECTED_VERSION_SOURCE:-}" == "config" ]]; then
             _hd_headline="HOOKS DAEMON: version drift — installed clone v$_HOOKS_DAEMON_CLONE_VERSION, this project expects v$_HOOKS_DAEMON_TRACKED_VERSION"
             _hd_expected_from="Expected version: v$_HOOKS_DAEMON_TRACKED_VERSION (daemon.expected_version in .claude/hooks-daemon.yaml)"
             if _version_lt "$_HOOKS_DAEMON_CLONE_VERSION" "$_HOOKS_DAEMON_TRACKED_VERSION"; then
-                _hd_remedy_1="TO SYNC, this is an UPGRADE — a human runs:"
+                _hd_remedy_1="TO SYNC, this is an UPGRADE of the clone — a person or an agent runs, from the project root:"
             else
-                _hd_remedy_1="TO SYNC, this is a DOWNGRADE — v$_HOOKS_DAEMON_TRACKED_VERSION is OLDER than the installed v$_HOOKS_DAEMON_CLONE_VERSION. Confirm it is intended (the commit may have come from an older checkout; if not, correct daemon.expected_version). A human runs:"
+                _hd_remedy_1="TO SYNC, this is a DOWNGRADE — v$_HOOKS_DAEMON_TRACKED_VERSION is OLDER than the installed v$_HOOKS_DAEMON_CLONE_VERSION. Confirm it is intended (the commit may have come from an older checkout; if not, correct daemon.expected_version). A person or an agent runs, from the project root:"
             fi
-            _hd_remedy_2="$_hd_upgrade_cmd
+            _hd_remedy_2="$_hd_sync_cmd
 Nothing has been changed: hooks never move the daemon to another version themselves."
         else
             _hd_headline="HOOKS DAEMON: version mismatch — installed clone v$_HOOKS_DAEMON_CLONE_VERSION, tracked assets v$_HOOKS_DAEMON_TRACKED_VERSION"
             _hd_expected_from="Expected version: v$_HOOKS_DAEMON_TRACKED_VERSION (the .claude/HOOKS-DAEMON.md header)"
             if _version_lt "$_HOOKS_DAEMON_CLONE_VERSION" "$_HOOKS_DAEMON_TRACKED_VERSION"; then
-                _hd_remedy_1="TO FIX — upgrade the clone to the version this repository expects:"
-                _hd_remedy_2="$_hd_upgrade_cmd"
+                _hd_remedy_1="TO FIX — sync the clone to the version this repository expects, from the project root:"
+                _hd_remedy_2="$_hd_sync_cmd"
             else
                 _hd_remedy_1="TO FIX — the TRACKED assets are the stale half here; regenerate and commit them:"
                 _hd_remedy_2="  Run generate-docs from the installed clone, then commit the resulting diff."

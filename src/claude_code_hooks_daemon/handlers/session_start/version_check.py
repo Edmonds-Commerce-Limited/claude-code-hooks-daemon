@@ -320,10 +320,6 @@ class VersionCheckHandler(SessionStartHandlerBase):
 
         is_upgrade = self._compare_versions(__version__, expected)
         direction = "UPGRADE" if is_upgrade else "DOWNGRADE"
-        command = (
-            "the hooks-daemon skill to upgrade "
-            f"(Skill tool: skill=hooks-daemon, args=upgrade {expected})"
-        )
         lines = [
             f"⚠️  HOOKS DAEMON VERSION DRIFT: running v{__version__}, "
             f"this project expects v{expected} ({direction})",
@@ -343,9 +339,16 @@ class VersionCheckHandler(SessionStartHandlerBase):
         lines += [
             "",
             "A restart cannot fix this: it runs the same installed version.",
-            f"TO SYNC, a human runs: {command}",
-            "An upgrade stops first to have its upgrade guides read. Nothing has been changed: "
-            "this notice never moves the daemon to another version by itself.",
+            "TO SYNC, a person or an agent runs, from the project root: "
+            "bash .claude/provision.sh",
+            f"Provision checks out exactly v{expected}, runs that release's pre-deploy gate "
+            "(which stops first to have the upgrade guides read), rebuilds the venv and "
+            "restarts the daemon. It refuses a clone with local changes, and a failed sync "
+            f"puts v{__version__} back. Nothing has been changed: this notice never moves "
+            "the daemon to another version by itself.",
+            "To move the PROJECT to another version instead (and change "
+            "daemon.expected_version), use the hooks-daemon skill to upgrade "
+            "(Skill tool: skill=hooks-daemon, args=upgrade <version>).",
         ]
         return lines
 

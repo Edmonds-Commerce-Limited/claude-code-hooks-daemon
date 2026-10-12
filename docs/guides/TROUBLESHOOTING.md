@@ -631,6 +631,18 @@ bash .claude/provision.sh
 
 ## or `/hooks-daemon provision` in Claude Code. Do not run `install` here: it is for a project that does not use the daemon yet. By default the hooks only warn; set `daemon.unprovisioned_mode: block` in `.claude/hooks-daemon.yaml` to make them deny tool calls (except provision itself) until it is done.
 
+### "HOOKS DAEMON: version drift" (the clone is not the version the project expects)
+
+**Cause:** A pull changed `daemon.expected_version` in `.claude/hooks-daemon.yaml` (or the `.claude/HOOKS-DAEMON.md` header). The project was upgraded where it was committed, but the daemon clone under the gitignored `.claude/hooks-daemon/` is per-checkout, so it is still at the old version. A restart cannot fix this: it runs the same installed version.
+
+**Fix:** Sync the clone from the project root. It fetches the expected tag, runs that release's pre-deploy gate (read the listing and re-run with the `--skip-reading-confirmation=<digest>` it prints, if asked), rebuilds the venv and restarts the daemon. It refuses a modified clone, a foreign `origin` or a non-git directory without changing anything, restores the previous version if it fails, and writes no tracked file:
+
+```bash
+bash .claude/provision.sh
+```
+
+To move the whole project to another version instead, use `/hooks-daemon upgrade`.
+
 ### "ERROR: hooks-daemon not installed at: /path/to/project"
 
 **Cause:** The `.claude/hooks-daemon/` directory does not exist. The daemon has not been installed for this project. If the project already uses the daemon (a fresh clone), provision it as above instead of installing.

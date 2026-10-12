@@ -247,3 +247,83 @@ class TestNeverActsOnItsOwn:
         with patch("subprocess.run") as run:
             _handle(_handler(), {".claude/hooks-daemon.yaml"})
         run.assert_not_called()
+
+
+_EXPECTED_VERSION_TARGET = (
+    "claude_code_hooks_daemon.handlers.post_tool_use."
+    "daemon_sync_after_merge.read_expected_version"
+)
+_CONFIG_REL = ".claude/hooks-daemon.yaml"
+
+
+def _handle_expected(
+    changed: set[str],
+    expected: str | None,
+    running: str,
+    tracked: str | None = None,
+) -> Any:
+    with (
+        patch(_PROJECT_ROOT_TARGET, return_value=_ROOT),
+        patch(_CONFIG_PATH_TARGET, return_value=_CONFIG),
+        patch(_CHANGED_PATHS_TARGET, return_value=frozenset(changed)),
+        patch(_EXPECTED_VERSION_TARGET, return_value=expected),
+        patch(_TRACKED_VERSION_TARGET, return_value=tracked),
+        patch(_RUNNING_VERSION_TARGET, return_value=running),
+    ):
+        return _handler().handle(_pull())
+
+
+class TestAPulledExpectedVersionIsASyncNotAnUpgrade:
+    def test_a_changed_expected_version_names_provision_and_both_versions(self) -> None:
+        result = _handle_expected({_CONFIG_REL}, expected="3.68.0", running="3.60.0")
+        context = "\n".join(result.context or [])
+
+        assert "bash .claude/provision.sh" in context
+        assert "3.68.0" in context and "3.60.0" in context
+        assert "daemon.expected_version" in context
+        assert "args=upgrade 3.68.0" not in context
+
+    def test_it_says_which_case_each_route_is_for(self) -> None:
+        result = _handle_expected({_CONFIG_REL}, expected="3.68.0", running="3.60.0")
+        context = "\n".join(result.context or [])
+
+        assert "pre-deploy gate" in context
+        assert "refuses a clone with local changes" in context
+        assert "move the PROJECT" in context
+        assert "args=upgrade <version>" in context
+
+    def test_an_expected_version_equal_to_the_running_one_adds_no_version_advice(self) -> None:
+        result = _handle_expected({_CONFIG_REL}, expected="3.60.0", running="3.60.0")
+        context = "\n".join(result.context or [])
+
+        assert "provision.sh" not in context
+
+    def test_a_pull_that_did_not_touch_the_config_leaves_the_marker_advice_alone(self) -> None:
+        result = _handle_expected(
+            {_MARKER_DOC}, expected="3.68.0", running="3.60.0", tracked="3.63.0"
+        )
+        context = "\n".join(result.context or [])
+
+        assert "provision.sh" not in context
+        assert "upgrade" in context.lower()
+
+    def test_a_config_without_the_key_keeps_the_marker_advice(self) -> None:
+        result = _handle_expected(
+            {_CONFIG_REL, _MARKER_DOC}, expected=None, running="3.60.0", tracked="3.63.0"
+        )
+        context = "\n".join(result.context or [])
+
+        assert "provision.sh" not in context
+        assert "3.63.0" in context
+
+    def test_an_unreadable_config_is_not_reported_as_a_version_change(self) -> None:
+        with (
+            patch(_PROJECT_ROOT_TARGET, return_value=_ROOT),
+            patch(_CONFIG_PATH_TARGET, return_value=_CONFIG),
+            patch(_CHANGED_PATHS_TARGET, return_value=frozenset({_CONFIG_REL})),
+            patch(_EXPECTED_VERSION_TARGET, side_effect=ValueError("Invalid YAML")),
+            patch(_RUNNING_VERSION_TARGET, return_value="3.60.0"),
+        ):
+            result = _handler().handle(_pull())
+
+        assert "provision.sh" not in "\n".join(result.context or [])
