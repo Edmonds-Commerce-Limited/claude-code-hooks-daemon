@@ -101,7 +101,30 @@ confirmed. Each run also holds a runner for 2.5 hours.
    coverage on. Find the deadlock and fix the test or the code under test.
 2. Give the suite a per-test timeout, so a hang fails one named test in seconds instead of eating the job.
 
-**Status**: 🔄 Investigating.
+**Cause** (reproduced, not inferred): the stalled test was the third in `test_eviction_sites.py`
+(`TestFlaggableWorkAdvisorKeys::test_concurrent_recording_never_raises`), and the hang is in the test helper,
+not in `BoundedFifoMap` or any handler. `tests/thread_contention.py::hammer` started 32 threads back to back at a
+1e-9 switch interval, each waiting on a `Barrier(32)`. Under coverage (pytest-cov installs a trace function on every
+new thread) Python 3.11 raises `RuntimeError: Cannot install a trace function while another trace function is being installed` from `Thread._bootstrap_inner` when two new threads call `sys.settrace` at once. That exception
+escapes outside `Thread.run`, so the worker dies before its first line, never reaches the barrier, and the other
+workers (non-daemon, no timeout) wait for it for ever while the main thread sits in `join()`. It needs coverage,
+Python 3.11 and a CPU shortage so that threads really interleave: it reproduced with `taskset -c 0,1` and
+`--cov=src` (5 of 6 runs of the whole file, about half of runs of the single test) and never without `--cov`,
+nor on one CPU. The faulthandler dump showed 31 of 32 workers parked in `Barrier.wait`; a spy on
+`Thread._bootstrap_inner` printed the `RuntimeError` for the missing one. Python 3.12 and 3.13 passed because
+their `settrace` has no such check.
+
+**Fix**: `hammer` now starts the workers one at a time, each confirmed running before the next is created, at the
+default interval, parks them on a `Barrier(workers + 1)`, and only then drops the interval to its floor and
+releases them from the main thread. No two threads are ever inside `settrace` together. Every wait is bounded by
+`_ARRIVAL_TIMEOUT`; a worker that never starts fails the call with its number (`worker N never started running`)
+and the parked ones are released, so a recurrence fails one named test instead of the job. Regression tests are in
+`tests/unit/test_thread_contention.py` (serial start at the default interval, fail-fast on a stillborn worker,
+release of parked workers). The same unsafe shape (interval lowered before the threads exist, full barrier) was in
+`test_session_advice_counter.py` and `test_config_cache.py`; both now use `hammer`. Per-test timeouts were not
+added: `pytest-timeout` is not a dependency and the cause is fixed at the source.
+
+**Status**: ✅ Fixed on branch `worktree-n428-py311-hang`; 🔄 the Python 3.11 CI job must pass after merge to confirm.
 
 ### N427 — the provision sync tests leave stub daemon processes running after they finish
 
