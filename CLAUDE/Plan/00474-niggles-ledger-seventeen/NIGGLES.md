@@ -77,6 +77,24 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N432 — the conflict-marker gate greps the whole tree, so a clean commit times out on a large repository under load
+
+**Source**: GitHub issue #83 (triaged 2026-10-12). The successor to N346, which made the timeout a distinct, honest
+deny but left both the bound and the scan size unchanged.
+
+**Evidence**: `_candidate_lines` in `conflict_marker_commit_gate.py` runs two `git grep` passes (`-I`, then
+`--text -l`) over the WHOLE recorded tree, each under `run_git`'s default `Timeout.GIT_CONTEXT` (5 s). Only
+afterwards does `_findings` drop every path the commit does not record. The reporter's repository has about 5,800
+tracked files; at a load average near 25 on 8 cores each pass took 4 to 7 s, and four attempts at the same clean
+commit were denied as `R-CONFLICT-MARKER-SCAN-TIMED-OUT`.
+
+**Remedy (coordinator ruling)**: pass the recorded paths, which `_findings` already computes, to both `git grep`
+passes as literal pathspecs, chunked like the existing `check-attr` call. It finds the same markers, at a cost that
+follows the commit's size, not the repository's. A scan that still times out keeps failing closed under its own rule;
+that policy is out of scope here.
+
+**Status**: 🔄 In progress (#83, worktree `worktree-issue-83-scoped-grep`).
+
 ### N431 — the docs-or-code-tier CI job runs its full-suite fallback against a daemon that has already idled out
 
 **Found**: by the coordinator on 2026-10-12, reading main run 38210220837 (2950df451). The job "QA (docs or code
