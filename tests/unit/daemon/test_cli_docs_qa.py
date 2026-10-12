@@ -177,6 +177,53 @@ class TestLint:
         assert relative_exit == absolute_exit
 
 
+class TestLintScope:
+    """Issue #80: --lint refuses what the sweep and the EDIT handler skip."""
+
+    # Far over any module-doc budget, so a lint that ran would exit 1.
+    _OVERSIZE = "# Module\n\n" + "A line of module documentation.\n" * 5000
+
+    def _oversize_doc(self, directory: Path) -> Path:
+        directory.mkdir(parents=True, exist_ok=True)
+        doc = directory / "CLAUDE.md"
+        doc.write_text(self._OVERSIZE)
+        return doc
+
+    def test_a_module_doc_in_a_nested_clone_is_refused(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = _scaffold(tmp_path)
+        _init_repo(root)
+        clone = root / "vendor" / "other"
+        _git(root, "init", str(clone))
+
+        doc = self._oversize_doc(clone / "pkg")
+
+        assert cmd_docs_qa(_args(root, lint=doc)) == 2
+        assert "not a documentation file" in capsys.readouterr().err.lower()
+
+    def test_a_module_doc_in_a_gitignored_directory_is_refused(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = _scaffold(tmp_path)
+        _init_repo(root)
+        (root / ".gitignore").write_text("ignored/\n")
+
+        doc = self._oversize_doc(root / "ignored" / "pkg")
+
+        assert cmd_docs_qa(_args(root, lint=doc)) == 2
+        assert "not a documentation file" in capsys.readouterr().err.lower()
+
+    def test_an_ordinary_module_doc_is_still_linted(self, tmp_path: Path) -> None:
+        root = _scaffold(tmp_path)
+        _init_repo(root)
+        (root / ".gitignore").write_text("ignored/\n")
+
+        doc = self._oversize_doc(root / "src" / "pkg")
+
+        assert cmd_docs_qa(_args(root, lint=doc)) != 2
+
+
 class TestCheckStaged:
     def test_clean_staged_tree_exits_zero(self, tmp_path: Path) -> None:
         root = _scaffold(tmp_path)

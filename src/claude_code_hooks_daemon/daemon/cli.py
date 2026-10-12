@@ -7871,7 +7871,9 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
                 f"       Expected a markdown file under one of the configured "
                 f"documentation trees, .claude/rules, .claude/skills, "
                 f".claude/agents, the project root, a sub-folder CLAUDE.md, "
-                f"or the generated-docs manifest.",
+                f"or the generated-docs manifest, and not excluded by "
+                f"daemon.exclude_paths, gitignored, or inside another "
+                f"repository's checkout.",
                 file=sys.stderr,
             )
             return 2

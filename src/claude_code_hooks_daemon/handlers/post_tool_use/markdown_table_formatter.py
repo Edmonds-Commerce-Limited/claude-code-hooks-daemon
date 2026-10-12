@@ -31,10 +31,8 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_file_path
-from claude_code_hooks_daemon.core.worktree_paths import nested_git_checkout_root
 from claude_code_hooks_daemon.plan_qa.paths import is_journal_file
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
-from claude_code_hooks_daemon.utils.git_repo import is_worktree_of_repo
 from claude_code_hooks_daemon.utils.markdown_format import (
     UnresolvedConflictError,
     format_markdown_document,
@@ -44,6 +42,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     resolve_project_root,
 )
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
+from claude_code_hooks_daemon.utils.repository_scope import outside_this_repository
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 # Extensions treated as markdown (lowercase match).
@@ -306,8 +305,7 @@ class MarkdownTableFormatterHandler(PostToolUseHandlerBase):
         project_root = resolve_project_root()
         if project_root is None:
             return True
-        nested = nested_git_checkout_root(file_path, Path(project_root))
-        return nested is None or is_worktree_of_repo(nested, Path(project_root))
+        return not outside_this_repository(file_path, Path(project_root))
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Match Write/Edit of existing .md/.markdown files."""
