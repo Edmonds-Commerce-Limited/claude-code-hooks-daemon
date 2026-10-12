@@ -28,7 +28,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00478: unknown guard verdicts warn](00478-unknown-guard-verdicts-warn/PLAN.md) - Not Started (owner ruling "warn dont block": a safety guard that cannot decide allows with an advisory; a positive match still denies)
 
-- [00477: provision a fresh clone](00477-provision-a-fresh-clone/PLAN.md) - Not Started (owner ruling: a fresh clone is brought up by a new `provision` verb that installs the daemon version the config names, and the hooks say loudly, to the human, when a checkout needs it)
+- [00477: provision a fresh clone](00477-provision-a-fresh-clone/PLAN.md) - In Progress (#78 Task 5.2a: provision syncs an existing clone; owner ruling: a fresh clone is brought up by a new `provision` verb that installs the daemon version the config names, and the hooks say loudly, to the human, when a checkout needs it)
 
 - [00476: release through a pr with ci tagging](00476-release-through-a-pr-with-ci-tagging/PLAN.md) - Not Started (owner direction: a release branch and pull request exist for QA, running the whole suite in CI; acceptance tests, tagging and publishing stay local in `/release`; follows 00475's first batch)
 
