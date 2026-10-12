@@ -703,6 +703,7 @@ class TestNestedCheckouts:
     def test_linked_worktree_is_still_formatted(
         self, handler: MarkdownTableFormatterHandler, project: Path
     ) -> None:
+        (project / ".git").mkdir()
         worktree = project / "untracked" / "worktrees" / "wt"
         worktree.mkdir(parents=True)
         (worktree / ".git").write_text(f"gitdir: {project}/.git/worktrees/wt\n")
@@ -713,6 +714,23 @@ class TestNestedCheckouts:
             handler.handle(_write_event(doc))
 
         assert doc.read_text() == _ALIGNED_TABLE
+
+    def test_linked_worktree_of_another_repository_is_untouched(
+        self, handler: MarkdownTableFormatterHandler, project: Path, tmp_path: Path
+    ) -> None:
+        (project / ".git").mkdir()
+        other = tmp_path / "other"
+        (other / ".git" / "worktrees").mkdir(parents=True)
+        worktree = project / "untracked" / "scratch" / "foreign"
+        worktree.mkdir(parents=True)
+        (worktree / ".git").write_text(f"gitdir: {other}/.git/worktrees/foreign\n")
+        doc = self._doc_in(worktree)
+
+        with patch(f"{_MODULE}.resolve_project_root", return_value=str(project)):
+            assert handler.matches(_write_event(doc)) is False
+            handler.handle(_write_event(doc))
+
+        assert doc.read_text() == _UNALIGNED_TABLE
 
     def test_file_in_the_project_itself_is_still_formatted(
         self, handler: MarkdownTableFormatterHandler, project: Path

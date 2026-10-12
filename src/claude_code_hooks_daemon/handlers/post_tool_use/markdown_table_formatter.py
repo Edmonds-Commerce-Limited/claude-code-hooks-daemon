@@ -34,7 +34,7 @@ from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.core.worktree_paths import nested_git_checkout_root
 from claude_code_hooks_daemon.plan_qa.paths import is_journal_file
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
-from claude_code_hooks_daemon.utils.git_repo import is_linked_worktree
+from claude_code_hooks_daemon.utils.git_repo import is_worktree_of_repo
 from claude_code_hooks_daemon.utils.markdown_format import (
     UnresolvedConflictError,
     format_markdown_document,
@@ -293,7 +293,8 @@ class MarkdownTableFormatterHandler(PostToolUseHandlerBase):
         Out of scope: a path the project excluded (handler option or
         ``daemon.exclude_paths``), and a file inside a nested separate git
         checkout, which belongs to another repository. A linked worktree of
-        this repository is not separate, so its files are still formatted.
+        THIS repository (same common git dir) is not separate, so its files are
+        still formatted; a worktree of any other repository is skipped.
         """
         if handler_excludes_path(
             file_path,
@@ -306,7 +307,7 @@ class MarkdownTableFormatterHandler(PostToolUseHandlerBase):
         if project_root is None:
             return True
         nested = nested_git_checkout_root(file_path, Path(project_root))
-        return nested is None or is_linked_worktree(nested)
+        return nested is None or is_worktree_of_repo(nested, Path(project_root))
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Match Write/Edit of existing .md/.markdown files."""
