@@ -114,6 +114,54 @@ class TestUnindexedFolder:
         assert "no README index row" in findings[0].message
         assert findings[0].level == Level.BLOCK
 
+    def test_remediation_states_both_accepted_row_forms(
+        self, plan_root: Path, tmp_path: Path
+    ) -> None:
+        _make_folder(plan_root, "00001-alpha")
+        context = _context(tmp_path, "## Active Plans\n")
+        commit_spec, _sweep_spec = CHECKS
+        remediation = commit_spec.run(context)[0].remediation
+        assert "- [NNNNN: Title](NNNNN-name/PLAN.md) - status" in remediation
+        assert "- **NNNNN** - status" in remediation
+        assert "`##` section" in remediation
+
+    def test_plain_finding_does_not_mention_tables(self, plan_root: Path, tmp_path: Path) -> None:
+        _make_folder(plan_root, "00001-alpha")
+        context = _context(tmp_path, "## Active Plans\n\n- [00002: Other](00002-o/PLAN.md) - x\n")
+        commit_spec, _sweep_spec = CHECKS
+        finding = commit_spec.run(context)[0]
+        assert "table" not in (finding.message + finding.remediation).lower()
+
+    @pytest.mark.parametrize(
+        "row",
+        [
+            "| [00001](00001-alpha/PLAN.md) | Alpha | In Progress |",
+            "| 00001 | Alpha | In Progress |",
+        ],
+    )
+    def test_table_row_is_named_and_still_blocks(
+        self, plan_root: Path, tmp_path: Path, row: str
+    ) -> None:
+        _make_folder(plan_root, "00001-alpha")
+        readme = f"## Active Plans\n\n| Plan | Title | Status |\n| --- | --- | --- |\n{row}\n"
+        context = _context(tmp_path, readme)
+        commit_spec, _sweep_spec = CHECKS
+        findings = commit_spec.run(context)
+        assert len(findings) == 1
+        text = findings[0].message + " " + findings[0].remediation
+        assert "table row" in text.lower()
+        assert "not read as index rows" in text
+        assert "- [NNNNN: Title](NNNNN-name/PLAN.md) - status" in text
+        assert findings[0].level == Level.BLOCK
+
+    def test_table_row_for_another_plan_is_not_named(self, plan_root: Path, tmp_path: Path) -> None:
+        _make_folder(plan_root, "00001-alpha")
+        readme = "## Active Plans\n\n| [00002](00002-b/PLAN.md) | B | x |\n"
+        context = _context(tmp_path, readme)
+        commit_spec, _sweep_spec = CHECKS
+        finding = commit_spec.run(context)[0]
+        assert "table" not in (finding.message + finding.remediation).lower()
+
     def test_legacy_allowlist_downgrades_unindexed(self, plan_root: Path, tmp_path: Path) -> None:
         _make_folder(plan_root, "00001-alpha")
         context = _context(tmp_path, "## Active Plans\n", legacy_plan_allowlist=frozenset({1}))
