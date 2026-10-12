@@ -77,6 +77,28 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N437 — `git merge` is not a heredoc data receiver, so an apostrophe in its heredoc body draws a "report it" advisory
+
+**Found**: GitHub #85 (approved author, daemon 3.68.0). The report said project_containment DENIED
+`git merge --no-ff -q topic -F - <<'EOF'` with `it's a merge` in the body (R-PROJECT-CONTAINMENT-EVALUATION-ERROR).
+
+**On main (931dc859f)**: the deny no longer reproduces. `hooks-daemon probe` on the reporter's JSON gives
+`decision: allow`, because an evaluation error now allows (B5). The guard still prints "could NOT fully judge this call
+... the daemon's tokeniser is at fault: report it". The same body on `git commit -q -F -` is read as data, and
+without the apostrophe the merge probe is clean.
+
+**Why**: `_GIT_DATA_SUBCOMMANDS` in `src/claude_code_hooks_daemon/utils/shell_segmentation.py` (line 443) lacks `merge`,
+although `_MESSAGE_TAKING_SUBCOMMANDS` has it. So the body is tokenised as shell, and the apostrophe ends the read.
+`merge` is a builtin, which a `!` alias cannot shadow, and it never runs its stdin, so the body is data.
+
+**Correction to the report's premise**: on git 2.39.5 (this container), `git merge ... -F -` exits 129 with
+`could not read file '-'`, because `merge -F` takes a path. The reported command fails at git whatever the guard says.
+The guard fix stands either way.
+
+**Remedy**: add `merge` to `_GIT_DATA_SUBCOMMANDS`, with tests written red first. Coordinator ruling (triage on #85).
+
+**Status**: 🔄 In progress.
+
 ### N436 — the supervisor counts Ctrl+O as typed content, so a human who opens the compact summary blocks the post-compact resume
 
 **Found**: by the owner on 2026-10-12. After the supervisor's 09:52:00 `/compact`, no resume line was injected, and the owner
