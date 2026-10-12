@@ -14,10 +14,12 @@ denies it when an ADDED line carries a marker in either spelling. Only added
 lines count: a marker already in history must not block an unrelated edit,
 and removing one is never blocked.
 
-Cost: one ``git diff --name-only`` and one ``git grep`` per recorded source,
-whatever the commit's size, plus one ``git diff -U0`` per file that actually
-holds a marker-shaped line. ``git grep`` does the search in C and returns
-only candidate lines.
+Cost: one ``git diff --name-only`` per recorded source, then two ``git grep``
+passes per chunk of the recorded paths, plus one ``git diff -U0`` per file that
+actually holds a marker-shaped line. The grep is scoped to the paths the commit
+records (literal pathspecs), so its cost follows the commit, not the size of
+the repository. ``git grep`` does the search in C and returns only candidate
+lines.
 """
 
 from __future__ import annotations
@@ -97,7 +99,7 @@ _NUL: Final[str] = "\0"
 # git's own binary sniff: a NUL in the first this-many bytes.
 _BINARY_SNIFF_LENGTH: Final[int] = 8000
 _MARKER_SIZE_ATTR: Final[str] = "conflict-marker-size"
-# Paths per `git check-attr` call, keeping each argv well inside ARG_MAX.
+# Paths per `git check-attr` or `git grep` call, keeping each argv well inside ARG_MAX.
 _ATTR_CHUNK: Final[int] = 256
 _NEWLINE: Final[str] = "\n"
 # `git grep` exits 1 when nothing matched: an answer, not a failure.
@@ -309,15 +311,33 @@ def _marker_sizes(root: Path, source: _Source, paths: list[str]) -> dict[str, in
     return sizes
 
 
-def _grep(root: Path, source: _Source, prefilter: str, *flags: str) -> str:
-    """``git grep`` over the tree ``source`` records; empty when nothing matched."""
+def _grep(root: Path, source: _Source, paths: list[str], prefilter: str, *flags: str) -> str:
+    """``git grep`` over ``paths`` in the tree ``source`` records; empty when nothing matched.
+
+    The paths are repository-relative and read literally, so a name holding
+    ``*``, ``?``, ``[`` or a leading ``:`` is that file and nothing wider.
+    """
     tree = () if source.working_tree else (_INDEX_TARGET,)
-    result = run_git(root, "grep", *tree, *flags, *_GREP_FLAGS, "-e", prefilter)
-    if result.returncode == _GREP_NO_MATCH:
-        return ""
-    if result.returncode != 0:
-        _raise_unreadable(result.returncode, result.stderr, "git grep")
-    return result.stdout
+    output: list[str] = []
+    for start in range(0, len(paths), _ATTR_CHUNK):
+        result = run_git(
+            root,
+            "--literal-pathspecs",
+            "grep",
+            *tree,
+            *flags,
+            *_GREP_FLAGS,
+            "-e",
+            prefilter,
+            _PATHSPEC_SEPARATOR,
+            *paths[start : start + _ATTR_CHUNK],
+        )
+        if result.returncode == _GREP_NO_MATCH:
+            continue
+        if result.returncode != 0:
+            _raise_unreadable(result.returncode, result.stderr, "git grep")
+        output.append(result.stdout)
+    return "".join(output)
 
 
 def _whole_text(root: Path, source: _Source, path: str) -> str:
@@ -331,9 +351,9 @@ def _whole_text(root: Path, source: _Source, path: str) -> str:
 
 
 def _candidate_lines(
-    root: Path, source: _Source, prefilter: str
+    root: Path, source: _Source, paths: list[str], prefilter: str
 ) -> dict[str, list[tuple[int, str]]]:
-    """Marker-shaped lines by path, from the tree ``source`` records.
+    """Marker-shaped lines by path, from ``paths`` in the tree ``source`` records.
 
     ``-I`` skips a file git calls binary, which covers a TEXT file whose
     attributes say ``-diff`` or ``binary``. A merge writes markers into such a
@@ -341,8 +361,8 @@ def _candidate_lines(
     file whose content really is binary (a NUL in git's first 8000 bytes) is
     skipped, because git never merges one line by line.
     """
-    found = _parse_grep_stream(_grep(root, source, prefilter, "-I"))
-    matched = _nul_separated(_grep(root, source, prefilter, "--text", "-l"))
+    found = _parse_grep_stream(_grep(root, source, paths, prefilter, "-I"))
+    matched = _nul_separated(_grep(root, source, paths, prefilter, "--text", "-l"))
     for path in matched:
         if path in found:
             continue
@@ -421,12 +441,13 @@ def _findings(
         recorded = _recorded_paths(directory, source, has_head)
     if not recorded:
         return []
-    sizes = _marker_sizes(root, source, sorted(recorded))
+    paths = sorted(recorded)
+    sizes = _marker_sizes(root, source, paths)
     prefilter = git_grep_prefilter(min(sizes.values(), default=DEFAULT_MARKER_SIZE))
     protected_patterns = sfm.resolve_configured_patterns()
     findings: list[_Finding] = []
-    for path, lines in sorted(_candidate_lines(root, source, prefilter).items()):
-        if path not in recorded or excluded(root, path):
+    for path, lines in sorted(_candidate_lines(root, source, paths, prefilter).items()):
+        if excluded(root, path):
             continue
         markers = find_conflict_markers(lines, sizes.get(path, DEFAULT_MARKER_SIZE))
         if not markers:
