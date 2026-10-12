@@ -222,7 +222,7 @@ class DaemonSyncAfterMergeHandler(PostToolUseHandlerBase):
                     "reported as changing daemon.expected_version"
                 ),
             )
-            return None
+        return None
 
     @staticmethod
     def _sync_section(expected: str, running: str) -> list[str]:
