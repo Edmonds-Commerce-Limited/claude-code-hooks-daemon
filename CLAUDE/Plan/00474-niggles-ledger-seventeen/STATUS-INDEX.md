@@ -4,7 +4,7 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 
 | #          | Verdict                                                                                                                                                  | Origin              | Status                                 |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | -------------------------------------- |
-| N432       | The conflict-marker gate greps the whole tree before filtering to the commit's paths, so a clean commit times out on a large repository under load (#83) | GitHub #83          | 🔄 In progress                         |
+| N432       | The conflict-marker gate greps the whole tree before filtering to the commit's paths, so a clean commit times out on a large repository under load (#83) | GitHub #83          | ✅ Fixed (9ef4d5055)                   |
 | N431       | The docs-or-code-tier CI job's full-suite fallback runs after its daemon idled out (600s), so 10 release-gate tests error                                | Coordinator         | 🔄 Fixed in CI script; CI to confirm   |
 | N430       | The conflict-marker commit gate denies a commit into a repository that an earlier step of the same command creates (not yet on disk)                     | Coordinator         | ⬜ Open                                |
 | N429       | Targeted QA never runs the example-config completeness tests for a new handler; Plan 00508 reached main without its example entry                        | Coordinator         | 🔄 Fixed (69a9ab2f5); remedy open      |

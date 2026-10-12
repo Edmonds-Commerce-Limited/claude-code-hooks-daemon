@@ -93,7 +93,10 @@ passes as literal pathspecs, chunked like the existing `check-attr` call. It fin
 follows the commit's size, not the repository's. A scan that still times out keeps failing closed under its own rule;
 that policy is out of scope here.
 
-**Status**: 🔄 In progress (#83, worktree `worktree-issue-83-scoped-grep`).
+**Status**: ✅ Fixed (merge 9ef4d5055, branch head 0f846534d). Both `git grep` passes run as
+`git --literal-pathspecs grep … -- <recorded paths>` in chunks of `_ATTR_CHUNK` (256). The post-grep
+`path not in recorded` filter is gone, because the grep can no longer return an unrecorded path. Nine tests were
+written red first. Range QA: 2765 passed, 0 unmapped. #83 is closed.
 
 ### N431 — the docs-or-code-tier CI job runs its full-suite fallback against a daemon that has already idled out
 
