@@ -104,6 +104,66 @@ class TestPythonStrategyPatternMatching:
         assert not re.search(pattern.regex, content, re.MULTILINE)
 
 
+# Built by concatenation so this file does not itself contain the blocked form.
+_BROAD = "Exce" + "ption"
+_BASE = "Base" + _BROAD
+_SUPPRESS_NAME = "broad suppress()"
+
+
+def _suppress_pattern(strategy: PythonErrorHidingStrategy) -> str:
+    return next(p.regex for p in strategy.patterns if p.name == _SUPPRESS_NAME)
+
+
+class TestPythonStrategyBroadSuppress:
+    """A broad ``suppress()`` discards every error exactly as ``except Exception: pass`` does."""
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            f"with contextlib.suppress({_BROAD}):\n    risky()\n",
+            f"with suppress({_BROAD}):\n    risky()\n",
+            f"with suppress({_BASE}):\n    risky()\n",
+            f"with contextlib.suppress(builtins.{_BROAD}):\n    risky()\n",
+            f"with suppress(OSError, {_BROAD}):\n    risky()\n",
+            f"with suppress({_BROAD}, OSError):\n    risky()\n",
+            f"with suppress( {_BROAD} ):\n    risky()\n",
+            f"with suppress({_BROAD},):\n    risky()\n",
+            f"with suppress(\n    OSError,\n    {_BROAD},\n):\n    risky()\n",
+            f"async with contextlib.suppress({_BROAD}):\n    await risky()\n",
+            f"with suppress(({_BROAD}, OSError)):\n    risky()\n",
+        ],
+    )
+    def test_broad_form_matches(self, strategy: PythonErrorHidingStrategy, source: str) -> None:
+        assert re.search(_suppress_pattern(strategy), source, re.MULTILINE)
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "with contextlib.suppress(OSError):\n    risky()\n",
+            "with suppress(OSError, ValueError):\n    risky()\n",
+            f"with suppress({_BROAD}Group):\n    risky()\n",
+            f"with suppress(My{_BROAD}):\n    risky()\n",
+            f"with suppress(OSError, My{_BROAD}):\n    risky()\n",
+            "with suppress(asyncio.CancelledError):\n    risky()\n",
+            "with suppress(KeyboardInterrupt):\n    risky()\n",
+            f"with suppress(errors.{_BROAD}):\n    risky()\n",
+            f"# suppress({_BROAD}) is banned\nrisky()\n",
+            f"x = 1  # never suppress({_BROAD})\n",
+            f"def suppress_{_BROAD.lower()}():\n    return 1\n",
+        ],
+    )
+    def test_narrow_or_unrelated_form_does_not_match(
+        self, strategy: PythonErrorHidingStrategy, source: str
+    ) -> None:
+        assert not re.search(_suppress_pattern(strategy), source, re.MULTILINE)
+
+    def test_suggestion_tells_the_author_to_name_the_exception(
+        self, strategy: PythonErrorHidingStrategy
+    ) -> None:
+        pattern = next(p for p in strategy.patterns if p.name == _SUPPRESS_NAME)
+        assert "specific exception" in pattern.suggestion
+
+
 class TestPythonStrategyAcceptanceTests:
     def test_returns_list(self, strategy: PythonErrorHidingStrategy) -> None:
         assert isinstance(strategy.get_acceptance_tests(), list)

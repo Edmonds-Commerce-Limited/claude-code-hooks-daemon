@@ -9,6 +9,8 @@ This script uses AST analysis to detect patterns like:
 - Empty except blocks with just logging
 - A single-statement handler that assigns a fallback value with no logging
   and no re-raise ("silent-fallback")
+- A ``with`` block whose ``suppress()`` names Exception or BaseException, also in a
+  tuple ("broad-suppress")
 
 Scope (Plan 00200 Phase 5): this auditor originally scanned ``src/`` only,
 commented "production code only" — which left the QA scripts that IMPLEMENT
@@ -64,6 +66,10 @@ VIOLATION_TYPES = {
     "silent-fallback": (
         "Exception handler assigns a fallback value with no logging or "
         "re-raise - failure becomes indistinguishable from success"
+    ),
+    "broad-suppress": (
+        "suppress() names Exception or BaseException - every error in the block "
+        "is discarded, exactly as with except Exception: pass"
     ),
     "unauditable-file": (
         "The file could not be opened or decoded, so it was never checked "
@@ -624,6 +630,34 @@ def _carries_the_exception(expr: ast.expr, exc_name: str) -> bool:
     return False
 
 
+#: Exceptions whose suppression discards every ordinary error.
+_BROAD_EXCEPTION_NAMES: frozenset[str] = frozenset({"Exception", "BaseException"})
+
+
+def _is_broad_exception_name(expr: ast.expr) -> bool:
+    """``Exception``, ``BaseException`` or the same through ``builtins.``, or a tuple holding one."""
+    if isinstance(expr, ast.Name):
+        return expr.id in _BROAD_EXCEPTION_NAMES
+    if isinstance(expr, ast.Attribute):
+        return (
+            expr.attr in _BROAD_EXCEPTION_NAMES
+            and isinstance(expr.value, ast.Name)
+            and expr.value.id == "builtins"
+        )
+    if isinstance(expr, ast.Tuple):
+        return any(_is_broad_exception_name(elt) for elt in expr.elts)
+    return False
+
+
+def _is_broad_suppress(expr: ast.expr) -> bool:
+    """A ``suppress(...)`` / ``contextlib.suppress(...)`` call naming a broad exception."""
+    return (
+        isinstance(expr, ast.Call)
+        and _call_name(expr.func) == "suppress"
+        and any(_is_broad_exception_name(arg) for arg in expr.args)
+    )
+
+
 class ErrorHidingVisitor(ast.NodeVisitor):
     """AST visitor to detect error hiding patterns."""
 
@@ -689,6 +723,25 @@ class ErrorHidingVisitor(ast.NodeVisitor):
                 )
 
         self.generic_visit(node)
+
+    def visit_With(self, node: ast.With) -> None:
+        """Check ``with`` blocks whose ``suppress()`` names a broad exception."""
+        self._check_broad_suppress(node)
+        self.generic_visit(node)
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+        """An ``async with`` hides errors the same way a plain one does."""
+        self._check_broad_suppress(node)
+        self.generic_visit(node)
+
+    def _check_broad_suppress(self, node: ast.With | ast.AsyncWith) -> None:
+        if any(_is_broad_suppress(item.context_expr) for item in node.items):
+            self._add_violation(
+                node,
+                "broad-suppress",
+                "suppress() names Exception or BaseException - catch only the "
+                "specific exception expected, or handle it",
+            )
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         """Check function definitions for return-none-on-error pattern."""

@@ -1256,3 +1256,68 @@ class TestTheTextReportSurvivesAStaleExclusion:
         )
         assert "stale-exclusion" in report
         assert "matches no finding" in report
+
+
+# Built by concatenation so this file does not itself contain the blocked form.
+_BROAD = "Exce" + "ption"
+_BASE = "Base" + _BROAD
+
+
+class TestBroadSuppressRule:
+    """N448: a broad ``suppress()`` discards every error like ``except Exception: pass``."""
+
+    @pytest.mark.parametrize(
+        "header",
+        [
+            f"contextlib.suppress({_BROAD})",
+            f"suppress({_BROAD})",
+            f"suppress({_BASE})",
+            f"contextlib.suppress(OSError, {_BROAD})",
+            f"suppress({_BROAD}, OSError)",
+            f"contextlib.suppress(builtins.{_BROAD})",
+            f"suppress(({_BROAD}, OSError))",
+        ],
+    )
+    def test_broad_suppress_is_flagged(self, header: str) -> None:
+        violations = _audit_source(f"def f():\n    with {header}:\n        risky()\n")
+        assert _rules(violations) == ["broad-suppress"]
+        assert violations[0]["line"] == 2
+        assert violations[0]["function"] == "f"
+
+    def test_async_with_is_flagged(self) -> None:
+        source = f"async def f():\n    async with suppress({_BROAD}):\n        await risky()\n"
+        assert _rules(_audit_source(source)) == ["broad-suppress"]
+
+    def test_second_item_of_a_with_is_flagged(self) -> None:
+        source = f"def f():\n    with open('x') as fh, suppress({_BROAD}):\n        fh.read()\n"
+        assert _rules(_audit_source(source)) == ["broad-suppress"]
+
+    def test_module_level_with_is_flagged(self) -> None:
+        assert _rules(_audit_source(f"with suppress({_BROAD}):\n    risky()\n")) == [
+            "broad-suppress"
+        ]
+
+    @pytest.mark.parametrize(
+        "header",
+        [
+            "contextlib.suppress(OSError)",
+            "suppress(OSError, ValueError)",
+            "suppress(asyncio.CancelledError)",
+            "suppress(KeyboardInterrupt)",
+            f"suppress({_BROAD}Group)",
+            f"suppress(My{_BROAD})",
+            f"suppress(errors.{_BROAD})",
+            f"other({_BROAD})",
+            "suppress()",
+        ],
+    )
+    def test_narrow_or_unrelated_form_is_not_flagged(self, header: str) -> None:
+        source = f"def f():\n    with {header}:\n        risky()\n"
+        assert "broad-suppress" not in _rules(_audit_source(source))
+
+    def test_a_with_that_is_not_a_call_is_not_flagged(self) -> None:
+        assert _rules(_audit_source("def f():\n    with lock:\n        risky()\n")) == []
+
+    def test_rule_has_a_description(self) -> None:
+        source = f"with suppress({_BROAD}):\n    risky()\n"
+        assert _audit_source(source)[0]["description"] != "Unknown violation"

@@ -35,6 +35,19 @@ _PATTERNS: tuple[ErrorHidingPattern, ...] = (
         example="except Exception:\n    ...",
         suggestion="Catch specific exceptions and handle or re-raise them",
     ),
+    # ``suppress(...)`` with ``Exception``/``BaseException`` as a whole name among
+    # its arguments (also after other members, or in a parenthesised tuple). The
+    # leading ``[^#\n]*?`` keeps a trailing comment that merely mentions it clear.
+    ErrorHidingPattern(
+        name="broad suppress()",
+        regex=(
+            r"^[^#\n]*?\bsuppress\s*\(\s*\(?\s*(?:[\w.]+\s*,\s*)*"
+            r"(?:builtins\.)?(?:Base)?Exception\s*[,)]"
+        ),
+        # Split so this file does not itself contain the form it blocks.
+        example="with contextlib.suppress(" + "Exception):\n    risky()",
+        suggestion="Suppress only the specific exception you expect, or handle it",
+    ),
 )
 
 
