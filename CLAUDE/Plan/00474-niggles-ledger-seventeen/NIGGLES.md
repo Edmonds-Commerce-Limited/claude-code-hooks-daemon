@@ -144,7 +144,9 @@ the current source. Other eligible candidates come next, and the legacy un-slugg
 - **Tracking:** the fix is tracked here, not in Plan 00100. That plan's goal is to remove the scan fallback; its
   residue awaits scheduling, and this stopgap would go when the scan does. A pointer is in 00100's journal.
 
-**Status**: 🔄 In progress (#84, worktree `worktree-issue-84-venv-scan-order`).
+**Status**: ✅ Fixed (merge 9c0bbf7d6, branch head 173e91bde; #84). Range QA over the merge: 39/40. Its one red is
+`changed_tests` naming `paths.py` and `resolve_venv.sh` as unmapped (too-broad), which CI's full-suite fallback covers;
+520 passed, 0 failed.
 
 ### N433 — a quiet plan journal turns main CI red, and the coordinator had been reading it as an expected red
 
