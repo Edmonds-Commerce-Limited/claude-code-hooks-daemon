@@ -443,6 +443,7 @@ _GIT_COMMAND_CONFIG_SUFFIXES: tuple[str, ...] = (
 _GIT_DATA_SUBCOMMANDS: frozenset[str] = frozenset(
     {
         "commit",
+        "merge",
         "tag",
         "notes",
         "apply",

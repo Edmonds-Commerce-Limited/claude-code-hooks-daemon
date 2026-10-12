@@ -764,6 +764,25 @@ class TestEvaluationErrorIsAnAdvisory:
         assert "must never be echoed" not in " ".join(result.context or [])
         assert "must never be echoed" not in (result.guidance or "")
 
+    @pytest.mark.parametrize(
+        ("command", "judged"),
+        [
+            ("git merge --no-ff -q topic -F - <<'EOF'\nit's a merge\nEOF", True),
+            ("git commit -q -F - <<'EOF'\nit's a merge\nEOF", True),
+            ("git mymerge --no-ff -q topic -F - <<'EOF'\nit's a merge\nEOF", False),
+        ],
+    )
+    def test_an_apostrophe_in_a_git_data_heredoc_is_not_an_evaluation_error(
+        self, handler: ProjectContainmentHandler, command: str, judged: bool
+    ) -> None:
+        """N437 (#85): `git merge` reads its heredoc as data, so the tokeniser
+        is not asked to read an apostrophe body as shell; an unknown subcommand
+        still is."""
+        result = handler.handle(_bash(command))
+
+        assert result.decision == Decision.ALLOW
+        assert ("could NOT fully judge" not in " ".join(result.context or [])) is judged
+
     def test_only_the_finding_rule_is_declared(self, handler: ProjectContainmentHandler) -> None:
         assert {rule.rule_id for rule in handler.get_rules()} == {RuleID.WRITE_OUTSIDE_PROJECT_ROOT}
 
