@@ -156,6 +156,9 @@ _resolve_install_stamp() {
 # UPGRADE_FLAGS and the handed-over ref count.
 UPGRADE_CALLER="direct"
 HANDOFF_PREVIOUS_REF=""
+# The private directory a genuine Layer 1 created; where run_effective_handler_restore
+# leaves its report for Layer 1 to read.
+HANDOFF_DIR=""
 
 # _read_handoff() - Validate and consume Layer 1's handoff file. Returns 1
 # when there is none or it is not genuine.
@@ -181,6 +184,7 @@ _read_handoff() {
         return 1
     fi
     HANDOFF_PREVIOUS_REF="$previous_ref"
+    HANDOFF_DIR="$(dirname "$path")"
     return 0
 }
 
@@ -602,6 +606,55 @@ COMPAT_CHECK_PY
     export HOOKS_DAEMON_COMPAT_CHECK_DONE=1
 }
 
+# run_effective_handler_restore() - Keep the opt-in handlers that ran before
+# this upgrade running after it (N360 / N445). `check-effective-handlers
+# --apply` writes `enabled: true` for each handler the new rules would switch
+# off. It runs with the target's venv, after verify_venv and BEFORE the hooks
+# are deployed and the daemon restarted, so the restarted daemon loads the
+# restored set. Never stops the upgrade: exit 2 is a target without --apply,
+# any other failure is reported, and Layer 1 falls back to its own call.
+#
+# A report that restored handlers goes to stdout and, under a genuine Layer 1,
+# to $HANDOFF_DIR/restored-handlers, which Layer 1 reads for its summary.
+run_effective_handler_restore() {
+    if [ "$CURRENT_VERSION" = "unknown" ]; then
+        print_info "Previous version unknown: skipping the opt-in handler restore"
+        return 0
+    fi
+    if [ ! -f "$TARGET_CONFIG" ]; then
+        return 0
+    fi
+
+    local target_semver restore_out="" restore_exit=0
+    target_semver="$(_target_release)"
+    restore_out="$("$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli \
+        check-effective-handlers \
+        --from "${CURRENT_VERSION#v}" \
+        --to "${target_semver#v}" \
+        --config "$TARGET_CONFIG" --apply 2>&1)" || restore_exit=$?
+
+    case "$restore_exit" in
+        0) ;;
+        1)
+            echo "$restore_out"
+            if [ "$UPGRADE_CALLER" = "layer1" ] && [ -n "$HANDOFF_DIR" ]; then
+                case "$restore_out" in
+                    *"handler(s) RESTORED"*)
+                        printf '%s\n' "$restore_out" > "$HANDOFF_DIR/restored-handlers"
+                        ;;
+                esac
+            fi
+            ;;
+        2)
+            print_info "This version cannot restore opt-in handlers before the restart (check-effective-handlers --apply exit 2)"
+            ;;
+        *)
+            echo "$restore_out"
+            print_warning "Opt-in handler restore failed (exit $restore_exit); the upgrade continues. Layer 1 reports the effective handler set afterwards."
+            ;;
+    esac
+}
+
 # Derived paths
 # v3.7.0+ venvs are fingerprint-keyed; v3.8.1 added a scan-fallback for the
 # fingerprint-mismatch case (installer used python3.13, resolver's python3
@@ -875,6 +928,10 @@ if [ "$ROLLBACK_REF" = "$TARGET_VERSION" ] || { [ -n "$TARGET_COMMIT" ] && [ "$T
     # The target's own compatibility check needs its venv, and runs before the
     # first deploy.
     run_config_compatibility_check
+
+    # N445: the opt-in handlers that ran before stay on, in the config the
+    # restart below loads.
+    run_effective_handler_restore
 
     # Plan 00099: clean up pre-v3.7.0 legacy venv on idempotent re-runs too.
     # The full upgrade path (Step 7) already does this, but multi-host projects
@@ -1259,6 +1316,9 @@ fi
 # The target's venv is verified and nothing has been deployed into the project
 # yet.
 run_config_compatibility_check
+
+# N445: restore the opt-in handlers before the Step 15 restart loads the config.
+run_effective_handler_restore
 
 # Plan 00099: clean up pre-v3.7.0 legacy venv to avoid confusion. Only remove
 # the legacy path if we successfully provisioned a fingerprint-keyed venv at a
