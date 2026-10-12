@@ -77,6 +77,32 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N428 — the Python 3.11 CI job hangs at the same point every run until its 150-minute timeout
+
+**Found**: by the coordinator on 2026-10-12, waiting for CI to confirm #69. Two consecutive main runs had their
+`QA (Python3.11)` job cancelled at the job's `timeout-minutes: 150`:
+
+- 38181126409: last output 23:30:31, cancelled 01:09:31;
+- 38190780905: last output 01:52:27, cancelled 03:39:59.
+
+Both logs stop at the same place, at 59%, right after the final line of
+`tests/unit/handlers/test_destructive_git.py`, whose 137 tests are all printed. The same runs' Python 3.12 and
+3.13 jobs passed (about 98 and 80 minutes). GitHub shows only completed lines, so the stalled test is most
+likely in the next file, `tests/unit/handlers/test_eviction_sites.py` (the concurrency tests behind
+`BoundedFifoMap`), whose output line never finished. Run alone locally on Python 3.11, it passes: 28 tests in
+17 s.
+
+**Why it matters**: main CI never goes green on Python 3.11, so a fix that waits on CI (#69) cannot be
+confirmed. Each run also holds a runner for 2.5 hours.
+
+**Candidate remedies**:
+
+1. Reproduce under CI conditions: Python 3.11, the full suite order up to that file, a 2-core runner and
+   coverage on. Find the deadlock and fix the test or the code under test.
+2. Give the suite a per-test timeout, so a hang fails one named test in seconds instead of eating the job.
+
+**Status**: 🔄 Investigating.
+
 ### N427 — the provision sync tests leave stub daemon processes running after they finish
 
 **Found**: by the coordinator on 2026-10-12, in the `pgrep -af '[p]ytest'` check before a daemon restart, after

@@ -36,7 +36,7 @@ not-a-defect with the reasoning kept.
 ## Niggles
 
 Full write-ups are in [NIGGLES.md](NIGGLES.md). The one-line-per-niggle status
-table (132 rows) is in [STATUS-INDEX.md](STATUS-INDEX.md).
+table (133 rows) is in [STATUS-INDEX.md](STATUS-INDEX.md).
 Counted by the status column's emoji:
 
 - 2 rows are open (⬜): N424, the LSP guard denying a grep over piped output, and N427, the provision sync tests leaving stub daemon processes behind. N53 of archived ledger 00466 is 🟡: batch AJ reproduced
@@ -53,7 +53,7 @@ Counted by the status column's emoji:
 - 115 rows carry ✅ (fixed, dismissed, remedied, guarded or closed); 6 of them also carry a 🚫 limit, and
   2 also carry 🔄: N280 (guarded by batch AN) for its review follow-ups, and N425 (fixed) until CI
   confirms it.
-- 7 rows record a deliberate limit (🚫); 16 are in progress or graduated (12 🔄, 3 🟡, 1 ↩️), N280
+- 7 rows record a deliberate limit (🚫); 17 are in progress or graduated (13 🔄, 3 🟡, 1 ↩️), N280
   and N425 (main CI red after batch AL) among the 12.
 
 ## Tasks
