@@ -18,7 +18,7 @@ Re-render the index: `bin/hooks-daemon remote-docs index`
 | -------- | ------ | -------- | ----------- |
 | `code.claude.com/docs/en/changelog.md` | https://code.claude.com/docs/en/changelog | 2026-10-08 | 2027-01-06 |
 | `code.claude.com/docs/en/discover-plugins.md` | https://code.claude.com/docs/en/discover-plugins.md | 2026-10-08 | 2027-01-06 |
-| `code.claude.com/docs/en/hooks.md` | https://code.claude.com/docs/en/hooks.md | 2026-10-08 | 2027-01-06 |
+| `code.claude.com/docs/en/hooks.md` | https://code.claude.com/docs/en/hooks.md | 2026-10-12 | 2027-01-10 |
 | `code.claude.com/docs/en/interactive-mode.md` | https://code.claude.com/docs/en/interactive-mode.md | 2026-10-08 | 2027-01-06 |
 | `code.claude.com/docs/en/managed-settings.md` | https://code.claude.com/docs/en/managed-settings | 2026-10-08 | 2027-01-06 |
 | `code.claude.com/docs/en/permissions.md` | https://code.claude.com/docs/en/permissions | 2026-10-08 | 2027-01-06 |

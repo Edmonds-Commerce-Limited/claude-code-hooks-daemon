@@ -30,7 +30,7 @@
     "continue",
     "reason"
   ],
-  "notes": "Overrides the user's response before it returns to the MCP server. Claude Code ignored a top-level decision on this event from v2.1.105 until the fix in v2.1.284. A top-level decision: 'block' (like exit code 2) also blocks the response; upstream: 'Exit code 2 and a top-level \"decision\": \"block\" also block the response'.",
+  "notes": "Overrides the user's response before it returns to the MCP server. Claude Code ignored a top-level decision on this event from v2.1.105 until the fix in v2.1.284. A top-level decision: 'block' (like exit code 2) also blocks the response; upstream: 'Exit code 2 and a top-level \"decision\": \"block\" also block the response'. The hook can let the response through (no output, exit 0), change the values ('Your `content` replaces the user's whole `content` object'), block it (action decline) or cancel it. 'Claude Code ignores a `hookSpecificOutput` that has no `action`'. The input lists an optional elicitation_id, but the input example no longer carries it. When an Elicitation hook answers a request, Claude Code sends that answer to the server without running ElicitationResult hooks.",
   "input_example": {
     "session_id": "abc123",
     "transcript_path": "/Users/.../.claude/projects/.../00000000-0000-0000-0000-000000000000.jsonl",
@@ -41,7 +41,6 @@
     "content": {
       "username": "alice"
     },
-    "mode": "form",
-    "elicitation_id": "elicit-123"
+    "mode": "form"
   }
 }
