@@ -446,17 +446,18 @@ def _common_git_dir(checkout: Path) -> Path | None:
     names. Anything else (a submodule, no ``.git``) has none.
     """
     git_path = checkout / _GIT_DIR_ENTRY
+    is_git_dir = False
     try:
-        if git_path.is_dir():
-            return git_path.resolve()
+        is_git_dir = git_path.is_dir()
     except OSError as exc:
         log_and_continue(
             logger,
             exc,
-            reason=f"a checkout {checkout!r} whose .git entry cannot be stat'd has no common git dir (None)",
+            reason=f"a checkout {checkout!r} whose .git entry cannot be stat'd is read as having no .git directory",
             level=logging.DEBUG,
         )
-        return None
+    if is_git_dir:
+        return git_path.resolve()
     target = _gitdir_target(checkout)
     if target is None or target.parent.name != "worktrees":
         return None
