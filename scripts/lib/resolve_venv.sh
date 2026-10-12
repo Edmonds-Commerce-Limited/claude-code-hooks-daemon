@@ -33,7 +33,9 @@
 # imports succeed even when host python3 is RHEL/CentOS 3.9):
 #   1. $HOOKS_DAEMON_PYTHON (explicit override; validated by paths.py)
 #   2. $HOOKS_DAEMON_VENV_PATH/bin/python (explicit override)
-#   3. ${daemon_dir}/untracked/venv-*/bin/python (first executable hit)
+#   3. ${daemon_dir}/untracked/venv-*/bin/python (first runnable hit, ranked:
+#      metadata lock_hash matches this source, then slugged, then legacy
+#      un-slugged venv-py{MM}-{hex})
 #   4. python3 — ONLY when --fallback-target is passed (fresh-clone
 #      bootstrap; paths.py module-load needs 3.11+ stdlib only).
 #
@@ -253,6 +255,84 @@ _rv_candidate_runs() {
     return "$rc"
 }
 
+# _rv_current_lock_hash <daemon_dir>
+#
+# Echoes ``sha256:<hex>`` of pyproject.toml followed by uv.lock (or the
+# absence marker), the same bytes `paths.py::_compute_project_lock_hash_stdlib`
+# hashes. Echoes nothing when pyproject.toml is missing or no sha256 tool is
+# installed. A hash tool, not a Python spawn: this runs on a hook hot path.
+_rv_current_lock_hash() {
+    local root="$1" tool digest
+    [ -f "${root}/pyproject.toml" ] || return 0
+    if command -v sha256sum > /dev/null; then
+        tool="sha256sum"
+    elif command -v shasum > /dev/null; then
+        tool="shasum -a 256"
+    else
+        return 0
+    fi
+    digest="$(
+        {
+            cat "${root}/pyproject.toml"
+            if [ -f "${root}/uv.lock" ]; then
+                cat "${root}/uv.lock"
+            else
+                printf '\000no-uv-lock\000'
+            fi
+        } | $tool
+    )" || return 0
+    printf 'sha256:%s\n' "${digest%% *}"
+}
+
+# _rv_rank_scan_candidate <venv_dir> <current_lock_hash>
+#
+# Sets _RV_SCAN_RANK (no subshell, no fork): 0 when the venv's
+# .daemon-metadata.json lock_hash equals <current_lock_hash>, 2 for a legacy
+# un-slugged name (venv-py{MM}-{hex}), else 1. Mirrors paths.py's
+# `_best_ranked_scan_candidate`.
+_rv_rank_scan_candidate() {
+    local venv_dir="$1" current_hash="$2" metadata
+    local lock_re='"lock_hash"[[:space:]]*:[[:space:]]*"([^"]*)"'
+    _RV_SCAN_RANK=1
+    if [ -n "$current_hash" ] && [ -f "${venv_dir}/.daemon-metadata.json" ]; then
+        metadata="$(< "${venv_dir}/.daemon-metadata.json")" || metadata=""
+        if [[ "$metadata" =~ $lock_re ]] && [ "${BASH_REMATCH[1]}" = "$current_hash" ]; then
+            _RV_SCAN_RANK=0
+            return 0
+        fi
+    fi
+    if [[ "${venv_dir##*/}" =~ ^venv-py[0-9]+-[a-f0-9]+(-.+)?$ ]]; then
+        _RV_SCAN_RANK=2
+    fi
+}
+
+# _rv_pick_ranked_scan <daemon_dir> <python|python3>
+#
+# Echoes the first runnable untracked/venv-*/bin/<name> in rank order:
+# lock_hash match, then other slugged venvs, then legacy un-slugged venvs
+# (ties keep glob order). Every candidate still goes through the run-probe.
+# `_RV_PROBE_OUTPUT` is read here, in the same shell that set it --
+# `_rv_pick_python` itself normally runs inside a caller's `$(...)`
+# subshell, so nothing downstream could read it back.
+_rv_pick_ranked_scan() {
+    local daemon_dir="$1" name="$2" rank candidate current_hash
+    current_hash="$(_rv_current_lock_hash "$daemon_dir")"
+    for rank in 0 1 2; do
+        for candidate in "${daemon_dir}"/untracked/venv-*/bin/"$name"; do
+            [ -x "$candidate" ] || continue
+            _rv_rank_scan_candidate "${candidate%/bin/*}" "$current_hash"
+            [ "$_RV_SCAN_RANK" = "$rank" ] || continue
+            if _rv_candidate_runs "$candidate"; then
+                echo "$candidate"
+                return 0
+            fi
+            echo "resolve_venv: candidate $candidate is executable but failed to run" \
+                "(${_RV_PROBE_OUTPUT:-no output}) -- skipping" >&2
+        done
+    done
+    return 1
+}
+
 # Echoes ONE usable interpreter to invoke paths.py with, following the
 # precedence above. Returns 0 on success, 1 on miss (caller decides
 # whether to error or use --fallback-target's bare-python3 path).
@@ -284,29 +364,13 @@ _rv_pick_python() {
     # probes it; a candidate that fails is reported (not silently dropped)
     # and skipped, so the caller falls through to the next candidate and
     # ultimately to the venv-free path instead of crashing on a raw exec
-    # error. `_RV_PROBE_OUTPUT` is read here, in the same shell that set it
-    # -- `_rv_pick_python` itself normally runs inside a caller's `$(...)`
-    # subshell, so nothing downstream of this function could read it back.
-    for candidate in "${daemon_dir}"/untracked/venv-*/bin/python; do
-        if [ -x "$candidate" ]; then
-            if _rv_candidate_runs "$candidate"; then
-                echo "$candidate"
-                return 0
-            fi
-            echo "resolve_venv: candidate $candidate is executable but failed to run" \
-                "(${_RV_PROBE_OUTPUT:-no output}) -- skipping" >&2
-        fi
-    done
-    for candidate in "${daemon_dir}"/untracked/venv-*/bin/python3; do
-        if [ -x "$candidate" ]; then
-            if _rv_candidate_runs "$candidate"; then
-                echo "$candidate"
-                return 0
-            fi
-            echo "resolve_venv: candidate $candidate is executable but failed to run" \
-                "(${_RV_PROBE_OUTPUT:-no output}) -- skipping" >&2
-        fi
-    done
+    # error. The scan (`_rv_pick_ranked_scan`) does that probing and is
+    # ranked, not lexical (Plan 00474 N434): the venv whose metadata
+    # lock_hash matches this source, then slugged venvs, then legacy
+    # un-slugged ones, so a stale legacy venv that sorts first cannot shadow
+    # the venv built for this source.
+    _rv_pick_ranked_scan "$daemon_dir" python && return 0
+    _rv_pick_ranked_scan "$daemon_dir" python3 && return 0
     # Fresh-clone bootstrap: no venv exists yet, but paths.py only needs
     # the stdlib (incl. tomllib for 3.11+) to compute the creation target.
     # Caller MUST be passing --fallback-target. Plan 00110 Task 4.5:
