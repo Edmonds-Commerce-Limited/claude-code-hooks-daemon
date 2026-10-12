@@ -1,6 +1,6 @@
 # Plan 00507: rust lint uses the owning crate context
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-12
 **Owner**: dev
 **Priority**: Medium
@@ -90,16 +90,17 @@ absent; rustup ships a shim that refuses.
 
 ### Phase 2: Land
 
-- [ ] ⬜ **Task 2.1**: Review, coordinator checks, merge; comment on and close
-  #76 and #89.
+- [x] ✅ **Task 2.1**: Review, coordinator checks, merge; comment on and close
+  #76 and #89. Merged `601ba02f9`, range-QA fix `b7552acfb`.
 
 ## Success Criteria
 
-- [ ] Valid modules of an edition-2024 Cargo crate are not denied, and a syntax
+- [x] Valid modules of an edition-2024 Cargo crate are not denied, and a syntax
   error still is.
-- [ ] The behaviour is stated in the user-facing guidance.
-- [ ] The release-bound consequence, a behaviour change in Rust linting, is in the
-  pending-release holding area as a release note.
+- [x] The behaviour is stated in the user-facing guidance.
+- [x] The release-bound consequence, a behaviour change in Rust linting, is in the
+  pending-release holding area as release note 029 in
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
 ## Delivery & Milestones
 

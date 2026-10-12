@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00449: unlocked eviction race survives in other handlers](00449-unlocked-eviction-race-survives-in-other-handlers/PLAN.md) - Complete at `5e3e784f`…`28abcf6e` + the archiving commit (the v3.66.0 review found six more unlocked-eviction sites beyond Plan 00437's two; a `BoundedFifoMap` fixed 12 instances across 10 handlers, plus a per-thread `SideEffectJournal`; a semgrep gate holds the class at 0)
+
 - [00446: subagent report path claim is verified](00446-subagent-report-path-claim-is-verified/PLAN.md) - Complete at `10b6d6f7` + the archiving commit (from 00422 N15: a false `Report written to:` path — closed by neither remedy the entry listed, since one was costed against a call rather than its coverage and the other named a field SubagentStop does not carry)
 
 - [00445: acceptance harness honours the socket override](00445-acceptance-harness-honours-the-socket-override/PLAN.md) - Complete at `c4eeebdf` + the archiving commit (from 00422 N6 fault 2, which was not the worktree fault that entry assumed: the autouse env-isolation fixture strips the documented `CLAUDE_HOOKS_SOCKET_PATH` workaround from every wrapper subprocess)
