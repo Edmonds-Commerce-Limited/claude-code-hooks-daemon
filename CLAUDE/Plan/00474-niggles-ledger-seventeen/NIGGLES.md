@@ -77,6 +77,25 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N447 — the conflict-marker gate still greps an excluded path, and a recorded large binary, before it filters
+
+**Source**: GitHub issue #99 (triaged 2026-10-12), which reports a whole-index `git grep` timing out in a
+repository that tracks a 31 MB binary. The whole-index part is the same defect as #83. That was fixed on main by N432
+(merge 9ef4d5055, not yet in any release tag): both `git grep` passes now take the paths the commit records as
+literal pathspecs, so an unchanged binary is no longer read. #99 is closed as fixed by it.
+
+**Residual (open, not yet ruled)**:
+
+- **Excluded paths are still scanned.** `_findings` applies `excluded()` only after `_candidate_lines` has grepped
+  every recorded path, so `exclude_paths` cannot shorten a scan. The issue names exactly this.
+- **A commit that records the large binary still reads it whole.** It is scanned in the `--text -l` pass, which
+  exists to catch text files that attributes mark `binary`/`-diff`.
+
+Candidate remedy: filter `excluded()` before the grep. For the second point, consider an `-I` sniff or a size bound,
+but only if a real occurrence turns up; the first point covers the configurable case.
+
+**Status**: ⬜ Open.
+
 ### N446 — daemon start calls a git failure "Invalid configuration" and drops git's own error
 
 **Source**: GitHub issue #98 (triaged 2026-10-12). Under a git too old for the repository's

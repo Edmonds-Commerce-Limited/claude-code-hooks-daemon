@@ -4,6 +4,7 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 
 | #          | Verdict                                                                                                                                                            | Origin              | Status                                 |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------- | -------------------------------------- |
+| N447       | Conflict-marker gate greps excluded paths (and a recorded large binary) before filtering; the whole-index half of #99 was fixed by N432                            | GitHub #99          | ⬜ Open                                |
 | N446       | Daemon start reports a git failure (e.g. an unknown repository extension) as "Invalid configuration" and drops git's stderr (#98)                                  | GitHub #98          | ✅ Fixed (9240e6fd3)                   |
 | N445       | The upgrade restores dropped opt-in handlers (N360) only after Layer 2 has restarted the daemon, so deny guards stay off until a manual restart (#97)              | GitHub #97          | ✅ Fixed (ac317fbb7)                   |
 | N444       | The plan fact-check feed tells client projects to dispatch `plan-fact-checker`, which the daemon never ships to them (#96)                                         | GitHub #96          | ✅ Fixed (2240ef95e)                   |
