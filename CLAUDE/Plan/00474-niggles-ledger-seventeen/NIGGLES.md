@@ -108,8 +108,11 @@ otherwise onto the root. The coordinator's briefs tell worktree agents to use ab
 - **When it goes wrong:** after an interpreter patch update moves the fingerprint, a legacy un-slugged
   `venv-py311-…` sorts first and is always eligible. `daemon_upgrade_detector` then reads that venv's stale
   `.daemon-metadata.json` and reports "installed v3.18.3" on every turn.
-- **Bash resolver:** `scripts/lib/resolve_venv.sh` scans the same way, so the upgrade's gate step ran under the
-  legacy interpreter.
+- **Bash resolver:** `scripts/lib/resolve_venv.sh` (`_rv_pick_python`) differs. It has no fingerprint step and no
+  slug check, and it takes the first `venv-*/bin/python` (then `python3`) that is executable and passes its run
+  probe. That picks only the interpreter which then runs `paths.py resolve-venv`, not the final venv. A legacy venv
+  that sorts first can still supply that interpreter, which fits the report's gate step running under it
+  (fact-check `subagent-reports/fact-check-n434.md`).
 - **The rule that works:** `resolve_existing_venv_python_with_diagnostics` already takes the venv whose metadata
   `lock_hash` matches the current source.
 
