@@ -734,6 +734,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - nitpick.hedging_language — the guessing is the defect, not the wording
 
+<!-- handler: operator-signal-notice -->
+
+- operator_signal_notice — a host reboot or shutdown warning reaches you mid-turn
+
 <!-- handler: persistent-cron-assertor -->
 
 - persistent_cron_assertor — declared crons are re-established each session
