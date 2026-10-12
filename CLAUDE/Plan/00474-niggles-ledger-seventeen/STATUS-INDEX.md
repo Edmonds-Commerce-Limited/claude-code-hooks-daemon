@@ -4,6 +4,7 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 
 | #          | Verdict                                                                                                                                                            | Origin              | Status                                 |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------- | -------------------------------------- |
+| N441       | A Layer 1 upgrade never reaches the stale-venv cleanup, and that cleanup is slug- and lock-hash-unaware (unsafe on a shared checkout) (#94)                        | GitHub #94          | 🔄 In progress                         |
 | N440       | Plan QA silently ignores markdown table rows in a README index, and the unindexed finding never states the accepted row grammar (#90)                              | GitHub #90          | ✅ Fixed (ac50fc353)                   |
 | N439       | The Effort Source check reports "per-model levels come from settings.json modelSettings" without reading modelSettings, false when no entries exist (#87)          | GitHub #87          | ✅ Fixed (98a0b80cc)                   |
 | N438       | issue_filing_gate reads gh's -F/--repo flags by regex over raw text, so a quoted --title refuses a valid report, or (with -R) switches the gate off (#86)          | GitHub #86          | ✅ Fixed (a81153d5c)                   |

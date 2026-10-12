@@ -77,6 +77,36 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N441 — a normal upgrade never removes stale venvs, and the cleanup it would call is not safe on a shared checkout
+
+**Source**: GitHub issue #94, the remainder after N434 (triaged 2026-10-12). The issue's headline false downgrade is
+#84's defect, which N434 fixed.
+
+**Evidence**:
+
+- **Never reached:** `scripts/upgrade_version.sh` has one call to `eager_cleanup_stale_venvs` (Plan 00100 Task 3.9),
+  on the slow path after the verified restart. A Layer 1 upgrade (`scripts/upgrade.sh`) checks the target out first,
+  so it always takes the already-at-target branch. That branch starts at `if [ "$ROLLBACK_REF" = ...` and ends in
+  `exit 0`. It removes only the pre-v3.7.0 `untracked/venv`. One install reported in #94 kept venvs from v3.8.2 to
+  v3.38.0 across about ten upgrades.
+- **Unsafe as written:** `eager_cleanup_stale_venvs` (`scripts/install/venv.sh`) removes every `venv` and `venv-*`
+  except the current one, with no slug or `lock_hash` check. On a checkout shared between a host and a container,
+  that is the other view's live venv (Plan 00313's slug rule exists to keep the views apart).
+- **Docs:** `cmd_prune_venvs`'s docstring says the upgrade "leaves exactly one `venv-*/` survivor". That is false on
+  the path every client upgrade takes.
+
+**Remedy (coordinator ruling)**: remove a venv only on a positive finding that it is stale. That means it is not the
+current venv, its `.daemon-metadata.json` `lock_hash` is readable and differs from the current source's, AND its
+name carries this view's path slug or is a legacy un-slugged name. Another view's venv, a venv whose lock hash
+matches, and one whose metadata cannot be read are all kept. The already-at-target branch then calls it after
+`restart_daemon_verified`. Tests are written red first, including the Layer 1 shape (HEAD already at the target).
+
+**Not in this entry**: `python_venv_fingerprint` hashes `sys.version`, build string included, so an OS update of
+the system Python orphans the current venv's name. Plan 00100 owns the fingerprint ("Not revisiting the fingerprint
+*content*"), so this is recorded in its journal.
+
+**Status**: 🔄 In progress.
+
 ### N440 — plan QA ignores README table rows silently, and the unindexed finding never states the accepted row grammar
 
 **Found**: GitHub #90 (approved author, daemon 3.68.0). A client README index written as markdown table rows had every
