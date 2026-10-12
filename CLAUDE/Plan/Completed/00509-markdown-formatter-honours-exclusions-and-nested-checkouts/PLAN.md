@@ -1,6 +1,6 @@
 # Plan 00509: markdown formatter honours exclusions and nested checkouts
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-12
 **Owner**: dev
 **Priority**: Medium
@@ -67,16 +67,20 @@ Coordinator ruling (the triage is in #79):
 
 ### Phase 2: Land
 
-- [ ] ⬜ **Task 2.1**: Review, coordinator checks and merge; then comment on
-  and close #79.
+- [x] ✅ **Task 2.1**: Review, coordinator checks and merge; then comment on
+  and close #79. Merged `52fd716f4` after one review round, in which a linked
+  worktree of an unrelated repository was found to be still formatted. The
+  range-QA fix is `4c30051d8`.
 
 ## Success Criteria
 
-- [ ] The issue's reproduction is fixed for nested checkouts and for excluded
+- [x] The issue's reproduction is fixed for nested checkouts and for excluded
   paths, and its advisory is accurate.
-- [ ] The release-bound consequence, a new option and a changed boundary, is in
-  the pending-release holding area as a release note.
+- [x] The release-bound consequence, a new option and a changed boundary, is in
+  the pending-release holding area as release note 032 in
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
 ## Delivery & Milestones
 
 - Issue #79 triaged and claimed.
+- Merged `52fd716f4` and `4c30051d8`; the range QA was green in substance.

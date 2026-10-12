@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00455: self install exposes the conventional cli path](00455-self-install-exposes-the-conventional-cli-path/PLAN.md) - Complete at `e6a11e19` + the archiving commit (from #54: the self-install daemon generates the conventional CLI link under the gitignored directory, because a tracked one would reach every client clone as a nested install; install-mode checks now require a real clone. Review reverted a copied exemption, filed as 00422 N19)
+
 - [00454: not installed message steers to destructive reinstall](00454-not-installed-message-steers-to-destructive-reinstall/PLAN.md) - Complete at `f299681f` + the archiving commit (first slice of #53: a clone with no venv for this path now gets its own diagnosis naming a version-pinned upgrade, not the install advice that `rm -rf`s the other view's venv; #53 stays open)
 
 - [00449: unlocked eviction race survives in other handlers](00449-unlocked-eviction-race-survives-in-other-handlers/PLAN.md) - Complete at `5e3e784f`…`28abcf6e` + the archiving commit (the v3.66.0 review found six more unlocked-eviction sites beyond Plan 00437's two; a `BoundedFifoMap` fixed 12 instances across 10 handlers, plus a per-thread `SideEffectJournal`; a semgrep gate holds the class at 0)
