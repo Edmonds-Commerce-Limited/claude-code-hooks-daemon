@@ -77,6 +77,38 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N446 — daemon start calls a git failure "Invalid configuration" and drops git's own error
+
+**Source**: GitHub issue #98 (triaged 2026-10-12). Under a git too old for the repository's
+`extensions.relativeWorktrees`, `rev-parse` exits 128, and the daemon reports a configuration error that no edit of
+the configuration can fix.
+
+**Evidence** (main at ebbe498f5):
+
+- `core/project_context.py` `_get_git_repo_name` logs only "Not a git repository" at INFO when
+  `rev-parse --show-toplevel` fails, and returns `None`. Git's stderr and exit code are logged nowhere. A missing
+  `origin` is a separate WARNING, but both cases end in the same message: "not a git repository or has no remote
+  origin".
+- `initialize` raises a plain `ValueError` with that message.
+- `daemon/cli.py` `_validate_installation` (lines 381 to 388) catches every `Exception` raised by
+  `ProjectContext.initialize` or the config load, and prints "ERROR: Invalid configuration in <config>" with "Fix the
+  configuration file and try again."
+- `initialize` is called from about 15 other CLI sites, `controller.py` and `work_queue_cli.py`. Each of them shows only
+  the exception's own message.
+
+**Remedy (coordinator ruling)**: fix at the source and at the mislabelling catch, nothing wider.
+
+1. The git probe keeps git's exit code and stderr. A failing `rev-parse` and a missing or empty `origin` raise a
+   dedicated exception (a `ValueError` subclass, so existing callers still catch it). Its message names git as the
+   failing component, says which of the two cases it is, and quotes git's stderr. It is logged at WARNING with that
+   stderr.
+2. `_validate_installation` catches that exception before the generic branch and prints a git-repository error. It
+   carries git's message, does not say "Invalid configuration" or "Fix the configuration file", and still exits 1.
+3. Behaviour is otherwise unchanged: still FAIL FAST, the same exit code, and other callers are untouched beyond the
+   better message.
+
+**Status**: 🔄 In progress.
+
 ### N445 — the upgrade restores dropped opt-in handlers only after the daemon has restarted without them
 
 **Source**: GitHub issue #97 (triaged 2026-10-12). A v3.67.0 to v3.69.0 upgrade of a config with no block for 16
