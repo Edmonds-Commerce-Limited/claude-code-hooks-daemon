@@ -81,12 +81,12 @@ is the count at that date.
 
 **Found**: by the owner on 2026-10-12. After the supervisor's 09:52:00 `/compact`, no resume line was injected, and the owner
 typed `continue` by hand. `untracked/supervise/decision.log` shows the compaction was detected. From the first idle tick
-(09:53:14) to the owner's message (09:54:14), every tick then logged `injection deferred: input box not empty (compaction detected but session busy -> awaiting idle to resume)`.
+(09:53:14) to the log's last line before the owner's message (09:54:14), the supervisor repeatedly logged `injection deferred: input box not empty (compaction detected but session busy -> awaiting idle to resume)`, with gaps at 09:53:16 to 09:53:22 and 09:54:00 to 09:54:12. The log records no human input, so the time of the owner's message is not on disk.
 
 **Why**: `HumanInputLine._consume_ground` in `.claude/ccy/claude-supervise.py` appends any byte that is not in one of its named
 sets (`_LINE_CLEAR_BYTES`, `_LINE_BACKSPACE_BYTES`, `_LINE_WORD_DELETE_BYTES`, `_LINE_KILL_TO_END_BYTES`, ESC) to the box
-buffer. Ctrl+O (0x0F) is in none of them, so it counts as content. Claude Code prints `ctrl+o to see full summary` straight
-after a compact, so pressing that key is the natural thing to do, and it leaves the model non-empty until Enter, Ctrl-U or
+buffer. Ctrl+O (0x0F) is in none of them, so it counts as content. Claude Code prints `Compacted (ctrl+o to see full summary)` straight
+after a compact (seen in this session's 09:52 compact output), so pressing that key is the natural thing to do, and it leaves the model non-empty until Enter, Ctrl-U or
 Ctrl-C. Other view-toggle keys behave the same way, Ctrl+T (todo list) among them. Which key the owner actually pressed
 this time is not recorded, because the supervisor logs no keystrokes. The owner may simply have started typing at
 09:53:14. The defect stands either way: a single Ctrl+O suppresses every gated injection.
