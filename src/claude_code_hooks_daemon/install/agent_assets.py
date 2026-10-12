@@ -53,6 +53,12 @@ _AGENT_FILE_MODE: Final[int] = 0o644
 DEDUPE_AGENT_NAME: Final[str] = "hooks-daemon-plan-dedupe-scout"
 OPUS_SECURITY_AGENT_NAME: Final[str] = "hooks-daemon-opus-security"
 DOCS_QA_AGENT_NAME: Final[str] = "hooks-daemon-docs-qa"
+FACT_CHECKER_AGENT_NAME: Final[str] = "hooks-daemon-plan-fact-checker"
+
+#: Handler whose ``enabled`` flag gates the fact-checker agent: the feed is what
+#: asks the session to dispatch it.
+_FACT_CHECK_FEED_EVENT: Final[str] = "post_tool_use"
+_FACT_CHECK_FEED_HANDLER: Final[str] = "plan_fact_check_feed"
 
 _MD_SUFFIX: Final[str] = ".md"
 
@@ -155,6 +161,14 @@ def _docs_qa_agent_enabled(config: Config) -> bool:
     return config.agents.docs_qa.enabled
 
 
+def _fact_check_feed_enabled(config: Config) -> bool:
+    # The feed ships disabled, but an absent entry resolves to HandlerConfig's
+    # default of enabled, so the entry must be present to count as opted in.
+    if _FACT_CHECK_FEED_HANDLER not in getattr(config.handlers, _FACT_CHECK_FEED_EVENT):
+        return False
+    return config.get_handler_config(_FACT_CHECK_FEED_EVENT, _FACT_CHECK_FEED_HANDLER).enabled
+
+
 # Historic dedupe-scout revisions, harvested from this repository's git
 # history (every blob the template ever shipped as, including the pre-marker
 # content current at the time this subsystem was introduced). Without these,
@@ -204,6 +218,7 @@ _DOCS_QA_HISTORIC_VERSIONS: Final[tuple[tuple[str, str], ...]] = (
 _DEDUPE_MD5: Final[str] = "3b732f40fe276a8d6ac65ebba2d3f615"
 _OPUS_SECURITY_MD5: Final[str] = "63f8d6aac7a46a6bbbf2fab643d9df6e"
 _DOCS_QA_MD5: Final[str] = "30a36b6ce0ce8bbe856dd3f4966a2b5d"
+_FACT_CHECKER_MD5: Final[str] = "67f6a215896282d743f7bc1c937ee5a5"
 
 SHIPPED_AGENTS: Final[tuple[AgentAssetSpec, ...]] = (
     AgentAssetSpec(
@@ -229,6 +244,13 @@ SHIPPED_AGENTS: Final[tuple[AgentAssetSpec, ...]] = (
         gating_config_key="agents.docs_qa.enabled",
         is_enabled=_docs_qa_agent_enabled,
         historic_versions=_DOCS_QA_HISTORIC_VERSIONS,
+    ),
+    AgentAssetSpec(
+        name=FACT_CHECKER_AGENT_NAME,
+        version="1.0.0",
+        md5=_FACT_CHECKER_MD5,
+        gating_config_key="handlers.post_tool_use.plan_fact_check_feed.enabled",
+        is_enabled=_fact_check_feed_enabled,
     ),
 )
 

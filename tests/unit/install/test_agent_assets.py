@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.install.agent_assets import (
     AGENTS_DIR_PARTS,
     DEDUPE_AGENT_NAME,
     DOCS_QA_AGENT_NAME,
+    FACT_CHECKER_AGENT_NAME,
     OPUS_SECURITY_AGENT_NAME,
     SHIPPED_AGENTS,
     AgentAction,
@@ -45,10 +46,11 @@ def _spec(name: str) -> AgentAssetSpec:
 
 
 def _enabled_config(**kwargs: object) -> Config:
-    """Config with plan_workflow + opus-security + docs-qa agents enabled."""
+    """Config with plan_workflow + opus-security + docs-qa agents + fact-check feed enabled."""
     return Config.model_validate(
         {
             "plan_workflow": {"enabled": True},
+            "handlers": {"post_tool_use": {"plan_fact_check_feed": {"enabled": True}}},
             "agents": {"opus_security": {"enabled": True}, "docs_qa": {"enabled": True}},
         }
     )
@@ -95,6 +97,38 @@ class TestRegistry:
         assert spec.gating_config_key == "agents.docs_qa.enabled"
         assert not spec.is_enabled(Config())
         assert spec.is_enabled(_enabled_config())
+
+    def test_fact_checker_registered_with_declared_md5(self) -> None:
+        spec = _spec(FACT_CHECKER_AGENT_NAME)
+        assert FACT_CHECKER_AGENT_NAME == "hooks-daemon-plan-fact-checker"
+        assert spec_source_path(spec).is_file()
+        assert spec.md5 == content_md5(spec_source_path(spec).read_text())
+
+    def test_fact_checker_gated_on_the_feed_flag(self) -> None:
+        spec = _spec(FACT_CHECKER_AGENT_NAME)
+        assert spec.gating_config_key == "handlers.post_tool_use.plan_fact_check_feed.enabled"
+        on = Config.model_validate(
+            {"handlers": {"post_tool_use": {"plan_fact_check_feed": {"enabled": True}}}}
+        )
+        off = Config.model_validate(
+            {"handlers": {"post_tool_use": {"plan_fact_check_feed": {"enabled": False}}}}
+        )
+        assert spec.is_enabled(on)
+        assert not spec.is_enabled(off)
+        # The feed ships disabled, so an absent entry must not deploy the agent.
+        assert not spec.is_enabled(Config())
+
+    def test_fact_checker_deployed_only_when_the_feed_is_on(self, tmp_path: Path) -> None:
+        spec = _spec(FACT_CHECKER_AGENT_NAME)
+        off = tmp_path / "off"
+        sync_agents(off, Config())
+        assert not deployed_agent_path(spec, off).exists()
+        on = tmp_path / "on"
+        config = Config.model_validate(
+            {"handlers": {"post_tool_use": {"plan_fact_check_feed": {"enabled": True}}}}
+        )
+        sync_agents(on, config)
+        assert deployed_agent_path(spec, on).is_file()
 
 
 class TestLedger:

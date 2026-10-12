@@ -14,13 +14,13 @@ diff since the plan's last fact-checked content as a *pending fact-check*
 record, via
 :func:`~claude_code_hooks_daemon.utils.plan_fact_check.process_quiet_plan`.
 The next PostToolUse event of the MAIN thread, whatever the tool, delivers it as
-``additionalContext`` telling the session to dispatch the ``plan-fact-checker``
+``additionalContext`` telling the session to dispatch the ``hooks-daemon-plan-fact-checker``
 agent with the diff, and to treat REFUTED claims as work to fix. A subagent's
 event (one carrying ``agent_id``) feeds the debouncer but never takes the record.
 Each record is handed over once per offer (claimed by an atomic rename, so two
 events at once cannot both deliver it). The daemon cannot see whether the text
 arrived, so the content counts as checked only when the session is then seen
-dispatching ``plan-fact-checker`` with the diff path in its prompt; an offer
+dispatching ``hooks-daemon-plan-fact-checker`` with the diff path in its prompt; an offer
 nobody acts on is re-offered after a wait, a few times.
 
 A plan's first sighting records a baseline and owes nothing; a small edit soon
@@ -211,7 +211,7 @@ class PlanFactCheckFeedHandler(PostToolUseHandlerBase):
                 command=(
                     "After the plan edit above has gone quiet, run any tool call "
                     "(for example Read a small file) and verify the tool result "
-                    "carries an instruction to dispatch the 'plan-fact-checker' "
+                    "carries an instruction to dispatch the 'hooks-daemon-plan-fact-checker' "
                     "agent with a '<plan folder>.diff' path, and that a second "
                     "tool call carries no such instruction."
                 ),
@@ -227,7 +227,7 @@ class PlanFactCheckFeedHandler(PostToolUseHandlerBase):
                     "fact-check as additionalContext, once, and never blocks."
                 ),
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"plan-fact-checker", r"REFUTED"],
+                expected_message_patterns=[r"hooks-daemon-plan-fact-checker", r"REFUTED"],
                 safety_notes="Opt-in handler; advisory only, never blocks.",
                 test_type=TestType.CONTEXT,
                 recommended_model=RecommendedModel.SONNET,

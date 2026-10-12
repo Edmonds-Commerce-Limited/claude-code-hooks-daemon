@@ -335,7 +335,7 @@ class TestDelivery:
         result = handler.handle(unrelated)
         assert result.decision == Decision.ALLOW
         text = "\n".join(result.context)
-        assert "plan-fact-checker" in text
+        assert "hooks-daemon-plan-fact-checker" in text
         assert "00001-a" in text
         assert "REFUTED" in text
         diff_file = state_dir / "plan-fact-check" / "00001-a.diff"
@@ -388,7 +388,7 @@ class TestDelivery:
         dispatch = {
             "tool_name": tool_name,
             "tool_input": {
-                "subagent_type": "plan-fact-checker",
+                "subagent_type": "hooks-daemon-plan-fact-checker",
                 "prompt": f"check {state.diff_path('00001-a')}",
             },
         }
@@ -433,7 +433,7 @@ class TestDelivery:
             "tool_name": "Task",
             "agent_id": "a1b2c3d4e5f6a7b8c",
             "tool_input": {
-                "subagent_type": "plan-fact-checker",
+                "subagent_type": "hooks-daemon-plan-fact-checker",
                 "prompt": str(state.diff_path("00001-a")),
             },
         }
