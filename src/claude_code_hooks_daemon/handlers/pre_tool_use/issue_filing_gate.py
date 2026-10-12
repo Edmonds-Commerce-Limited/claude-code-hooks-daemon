@@ -77,7 +77,11 @@ from claude_code_hooks_daemon.issue_report.upstream import (
 from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import GitRepo
-from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
+from claude_code_hooks_daemon.utils.shell_segmentation import (
+    iter_shell_words,
+    resolve_shell_word,
+    split_unquoted,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +98,8 @@ _REPO_FLAG: Final[re.Pattern[str]] = re.compile(
     r"(?:\A|\s)(?:--repo|-R)(?:\s+|=)(?:\"([^\"]+)\"|'([^']+)'|(\S+))"
 )
 
+_REPO_FLAGS: Final[tuple[str, ...]] = ("--repo", "-R")
+
 #: ``gh`` honours this when no flag is given, so it selects the target just as
 #: surely as ``--repo`` does.
 _GH_REPO_ENV: Final[re.Pattern[str]] = re.compile(
@@ -105,6 +111,8 @@ _GH_REPO_ENV: Final[re.Pattern[str]] = re.compile(
 _BODY_FILE: Final[re.Pattern[str]] = re.compile(
     r"(?:\A|\s)(?:--body-file|-F)(?:\s+|=)(?:\"([^\"]+)\"|'([^']+)'|(\S+))"
 )
+
+_BODY_FILE_FLAGS: Final[tuple[str, ...]] = ("--body-file", "-F")
 
 #: Everything ``gh`` strips before the owner/name pair, across the spellings it
 #: accepts for ``--repo``: an https URL, an ssh URL, and the scp-like form.
@@ -129,7 +137,7 @@ _STDIN_BODY: Final[str] = "-"
 #: all except working around the gate. A gate whose only escape is evasion
 #: teaches evasion, which is the same reason `reference_repo_freshness` never
 #: intercepts `git`.
-_WEB_FLAG: Final[re.Pattern[str]] = re.compile(r"(?:\A|\s)--web(?=\s|\Z)")
+_WEB_FLAG_NAME: Final[str] = "--web"
 
 #: A generated report is a few KiB. Past this bound the file is not one, and
 #: reading it into a hook would cost the dispatch budget to reach the same
@@ -219,6 +227,61 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
         """The value of a flag, whichever quoting alternative captured it."""
         return next(group for group in match.groups() if group)
 
+    @staticmethod
+    def _shell_words(segment: str) -> list[str] | None:
+        """The segment's shell words with quoting removed, or ``None``.
+
+        A flag is a WORD, so ``--title 'see -R x/y'`` carries one word, not a
+        ``-R``. ``None`` when any word's extent is hidden (an unterminated
+        quote, ``$(...)``, a backtick); a word that is a plain expansion such
+        as ``$FILE`` is kept as written, which is what the regexes saw.
+        """
+        words: list[str] = []
+        for word in iter_shell_words(segment):
+            if word is None:
+                return None
+            resolved = resolve_shell_word(word)
+            words.append(word if resolved is None else resolved)
+        return words
+
+    @classmethod
+    def _flag_values(
+        cls,
+        segment: str,
+        flags: tuple[str, ...],
+        fallback: re.Pattern[str],
+    ) -> list[str]:
+        """Every value given to one of ``flags``, in command order.
+
+        Spellings read: ``--flag x``, ``--flag=x`` and the short forms, quoted
+        or not. When the segment cannot be split into words, ``fallback`` reads
+        the raw text exactly as this handler always did. That can over-find a
+        flag, which is the safe direction for the callers that use it: an extra
+        repo value can only add a chance to engage the gate (callers must test
+        ANY value, not the first), and an extra body file is judged too.
+        """
+        words = cls._shell_words(segment)
+        if words is None:
+            return [cls._flag_value(match) for match in fallback.finditer(segment)]
+        values: list[str] = []
+        index = 0
+        while index < len(words):
+            word = words[index]
+            index += 1
+            name, joined, attached = word.partition("=")
+            if name not in flags:
+                continue
+            if joined:
+                value = attached
+            elif index < len(words):
+                value = words[index]
+                index += 1
+            else:
+                continue
+            if value:
+                values.append(value)
+        return values
+
     @classmethod
     def _repo_slug(cls, value: str) -> str:
         """Normalise every spelling ``gh`` accepts down to ``owner/name``.
@@ -290,9 +353,12 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
         The working directory answers last, for the same reason: it is what
         ``gh`` itself falls back to when nothing else names a repository.
         """
-        flag = _REPO_FLAG.search(segment)
-        if flag is not None:
-            return cls._repo_slug(cls._flag_value(flag)) == UPSTREAM_REPO_SLUG
+        repos = cls._flag_values(segment, _REPO_FLAGS, _REPO_FLAG)
+        if repos:
+            # ``gh`` honours the LAST of a repeated ``--repo``, and a decoy can
+            # sit anywhere in a segment that could not be split into words, so
+            # any value naming us engages the gate: over-judging is safe.
+            return any(cls._repo_slug(repo) == UPSTREAM_REPO_SLUG for repo in repos)
         env = _GH_REPO_ENV.search(command)
         if env is not None:
             return cls._repo_slug(cls._flag_value(env)) == UPSTREAM_REPO_SLUG
@@ -363,17 +429,28 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
             return None, f"`{path}` could not be read ({exc.strerror})"
         return raw.decode(_BODY_ENCODING, errors=_BODY_DECODE_ERRORS), ""
 
+    @classmethod
+    def _has_web_flag(cls, segment: str) -> bool:
+        """Whether ``--web`` is a flag of this segment rather than text in one.
+
+        ``--web`` grants an exemption, so over-finding it is the UNSAFE
+        direction: a segment that cannot be split into words is never taken to
+        carry it, and is judged like any other filing.
+        """
+        words = cls._shell_words(segment)
+        return words is not None and _WEB_FLAG_NAME in words
+
     def _segment_problems(self, segment: str, hook_input: dict[str, Any]) -> list[str]:
         """Why this filing cannot go ahead, or an empty list when it may."""
-        if _WEB_FLAG.search(segment):
+        if self._has_web_flag(segment):
             # Files nothing: it opens GitHub's own forms, where a human meets
-            # the rule before anything is published. See _WEB_FLAG for why this
+            # the rule before anything is published. See _WEB_FLAG_NAME for why this
             # hole is the one that keeps the gate honest rather than the one
             # that defeats it.
             return []
 
-        matches = list(_BODY_FILE.finditer(segment))
-        if not matches:
+        body_files = self._flag_values(segment, _BODY_FILE_FLAGS, _BODY_FILE)
+        if not body_files:
             return [
                 "this `gh issue create` carries no `--body-file`, so its body was either "
                 "typed inline or composed in an editor. Neither has been through any "
@@ -381,8 +458,7 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
             ]
 
         problems: list[str] = []
-        for match in matches:
-            raw = self._flag_value(match)
+        for raw in body_files:
             if raw == _STDIN_BODY:
                 problems.append(
                     "the body is being piped in on stdin, which cannot be read before the "
