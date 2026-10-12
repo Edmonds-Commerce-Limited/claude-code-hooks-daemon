@@ -77,6 +77,23 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N439 — the Effort Source check claims modelSettings provides per-model levels without reading modelSettings
+
+**Found**: in triage of GitHub #87 (approved author, daemon 3.68.0). #87 is mainly a feature proposal, filed as
+Plan 00513 and awaiting owner decisions. This entry is the part of it that is a verifiable defect.
+
+**On main (7e3081c11)**: `_check_effort_source` in
+`src/claude_code_hooks_daemon/handlers/session_start/optimal_config_checker.py` looks only for PINS
+(`CLAUDE_CODE_EFFORT_LEVEL`, or a top-level `effortLevel` in the project or local settings file). With none, it
+returns `passed` with `current: "per-model levels come from settings.json modelSettings"` (line 250). It never reads
+`modelSettings`, so with no entries anywhere that text is false: every model runs at its own default effort.
+
+**Remedy**: the OK text reports what is actually there. With entries, it names the model IDs that have a level. With
+none, it says no model has an explicit level, so each runs at its default. The verdict stays `passed`, because no pin is
+present and the check's job is pins. Presence-only, never recommending a level. Coordinator ruling (triage on #87).
+
+**Status**: 🔄 In progress.
+
 ### N438 — issue_filing_gate reads gh flags from raw text, so a quoted --title can refuse a valid report or switch the gate off
 
 **Found**: GitHub #86 (approved author, daemon 3.68.0). A `-F` inside a quoted `--title` was taken as gh's body-file flag,
