@@ -183,6 +183,10 @@ otherwise onto the root. The coordinator's briefs tell worktree agents to use ab
 2. The verifier also tries the claim under the dispatch's worktree when the work queue (or the agent's isolation
    record) names one. A claim that exists in the agent's own worktree counts as written.
 
+**Prior art**: 00466 N64 (fixed in 31ffeaabf) is the same symptom. Its fix resolves a relative claim against the event's
+`cwd` and then the project root, which covers an agent that `cd`s into its worktree. N435 is the residual case that
+fix cannot see: an agent that never `cd`s, so its `cwd` is the main checkout. This is not a regression of N64.
+
 **Status**: ⬜ Open (remedy 1 applied to future briefs).
 
 ### N434 — the venv resolvers' scan fallback picks the lexically-first venv, so the upgrade detector reports a false downgrade
