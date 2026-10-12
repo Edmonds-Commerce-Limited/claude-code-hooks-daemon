@@ -953,3 +953,89 @@ class TestTheAcceptanceTestsCanFail:
         result = _verdict(handler, judged, repo)
         assert result.decision == Decision.DENY
         assert "NOT checked" in (result.reason or "")
+
+
+class TestTheGrepIsScopedToTheRecordedPaths:
+    """Ledger 00474 N432: a whole-tree grep timed out a clean commit on a large repository."""
+
+    @staticmethod
+    def _grep_calls(
+        handler: ConflictMarkerCommitGateHandler, command: str, cwd: Path
+    ) -> tuple[Any, list[tuple[str, ...]]]:
+        """The verdict, and the argv of every ``git grep`` the gate ran."""
+        calls: list[tuple[str, ...]] = []
+
+        def _spy(root: Path, *args: str, **kwargs: Any) -> Any:
+            if "grep" in args:
+                calls.append(args)
+            return run_git(root, *args, **kwargs)
+
+        with patch(f"{_MODULE}.run_git", side_effect=_spy):
+            result = _verdict(handler, command, cwd)
+        return result, calls
+
+    @staticmethod
+    def _pathspecs(call: tuple[str, ...]) -> list[str]:
+        return list(call[call.index("--") + 1 :])
+
+    def test_both_passes_carry_only_the_recorded_paths(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        _stage(repo, "doc.md", "# Doc\n\nfirst\nmore\n")
+        (repo / "unrecorded.md").write_text("not staged\n")
+        result, calls = self._grep_calls(handler, "git commit -m x", repo)
+        assert result.decision == Decision.ALLOW
+        assert len(calls) == 2
+        for call in calls:
+            assert "--literal-pathspecs" in call
+            assert self._pathspecs(call) == ["doc.md"]
+
+    def test_a_marker_in_an_unrecorded_file_never_denies(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        _stage(repo, "doc.md", "# Doc\n\nfirst\nmore\n")
+        (repo / "unrecorded.md").write_text(f"{CLOSE} main\n")
+        assert _verdict(handler, "git commit -m x", repo).decision == Decision.ALLOW
+
+    @pytest.mark.parametrize("name", ["a[1].txt", "*.md", "q?.txt"])
+    def test_a_name_holding_glob_characters_is_read_literally(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path, name: str
+    ) -> None:
+        _stage(repo, name, f"{CLOSE} main\n")
+        result = _verdict(handler, "git commit -m x", repo)
+        assert result.decision == Decision.DENY
+        assert f"{name}:1" in result.reason
+
+    def test_a_glob_named_file_does_not_widen_the_scan(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        """A recorded `*.md` is that file only, not every markdown file."""
+        _stage(repo, "*.md", "clean\n")
+        (repo / "doc.md").write_text(f"{CLOSE} main\n")
+        result, calls = self._grep_calls(handler, "git commit -m x", repo)
+        assert result.decision == Decision.ALLOW
+        assert all(self._pathspecs(call) == ["*.md"] for call in calls)
+
+    def test_a_list_longer_than_one_chunk_is_scanned_to_its_end(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        for number in range(5):
+            _stage(repo, f"f{number}.md", "clean\n")
+        _stage(repo, "f9.md", f"{CLOSE} main\n")
+        with patch(f"{_MODULE}._ATTR_CHUNK", 2):
+            result, calls = self._grep_calls(handler, "git commit -m x", repo)
+        assert result.decision == Decision.DENY
+        assert "f9.md:1" in result.reason
+        assert len(calls) == 6
+        assert all(len(self._pathspecs(call)) <= 2 for call in calls)
+
+    def test_a_binary_attributed_file_in_a_later_chunk_is_still_read(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        _stage(repo, ".gitattributes", "z.dat -diff\n")
+        _stage(repo, "a.md", "clean\n")
+        _stage(repo, "z.dat", f"{CLOSE} main\n")
+        with patch(f"{_MODULE}._ATTR_CHUNK", 1):
+            result = _verdict(handler, "git commit -m x", repo)
+        assert result.decision == Decision.DENY
+        assert "z.dat:1" in result.reason
