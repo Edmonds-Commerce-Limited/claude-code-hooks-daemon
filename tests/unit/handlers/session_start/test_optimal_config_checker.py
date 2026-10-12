@@ -215,6 +215,42 @@ class TestEffortSourceCheck:
         assert "~/.claude/settings.json" in effort["current"]
         assert "no model has an explicit effort level" not in effort["current"]
 
+    def test_user_top_level_level_is_named_instead_of_own_default(
+        self, handler: Any, tmp_path: Path
+    ) -> None:
+        user = {"effortLevel": "high"}
+        with patch.object(handler, "_read_global_settings", return_value=user):
+            checks = handler._run_checks(tmp_path)
+        effort = next(c for c in checks if c["name"] == "Effort Source")
+
+        assert effort["passed"] is True
+        assert "effortLevel='high'" in effort["current"]
+        assert "~/.claude/settings.json" in effort["current"]
+        assert "own default" not in effort["current"]
+
+    def test_user_top_level_level_is_named_beside_model_levels(
+        self, handler: Any, tmp_path: Path
+    ) -> None:
+        user = {
+            "effortLevel": "high",
+            "modelSettings": {"claude-fable-5-1": {"effortLevel": "low"}},
+        }
+        with patch.object(handler, "_read_global_settings", return_value=user):
+            checks = handler._run_checks(tmp_path)
+        effort = next(c for c in checks if c["name"] == "Effort Source")
+
+        assert "claude-fable-5-1" in effort["current"]
+        assert "effortLevel='high'" in effort["current"]
+
+    def test_a_non_pinning_top_level_value_is_not_a_level(
+        self, handler: Any, tmp_path: Path
+    ) -> None:
+        with patch.object(handler, "_read_global_settings", return_value={"effortLevel": "auto"}):
+            checks = handler._run_checks(tmp_path)
+        effort = next(c for c in checks if c["name"] == "Effort Source")
+
+        assert "own default" in effort["current"]
+
     def test_a_model_entry_without_a_level_does_not_count(
         self, handler: Any, tmp_path: Path
     ) -> None:

@@ -267,11 +267,22 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
                             json.loads(path.read_text(encoding="utf-8")), f".claude/{name}"
                         )
                     )
-            current = (
-                "per-model effort levels set in modelSettings: " + ", ".join(leveled)
-                if leveled
-                else "no model has an explicit effort level, so each runs at its own default"
+            # A user-file top-level effortLevel is not a pin, but it is the
+            # default for every model without a modelSettings entry.
+            top_level = user_data.get("effortLevel")
+            top_applies = (
+                top_level is not None
+                and str(top_level).strip().lower() not in _EFFORT_ENV_NON_PINNING_VALUES
             )
+            top_desc = f"top-level effortLevel={top_level!r} from ~/.claude/settings.json"
+            if leveled:
+                current = "per-model effort levels set in modelSettings: " + ", ".join(leveled)
+                if top_applies:
+                    current += f"; other models use the {top_desc}"
+            elif top_applies:
+                current = f"no modelSettings effort levels; every model uses the {top_desc}"
+            else:
+                current = "no model has an explicit effort level, so each runs at its own default"
             return {
                 "name": _EFFORT_CHECK_NAME,
                 "passed": True,
