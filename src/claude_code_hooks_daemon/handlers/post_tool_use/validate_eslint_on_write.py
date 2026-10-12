@@ -103,8 +103,8 @@ _ESLINT_ERRORS_RULE = Rule(
         "The write has ALREADY landed on disk. The denial is a failure report, "
         "not a rollback — the file exists with your content in it. Fix the "
         "reported problems with Edit (`npx eslint <file> --fix` clears most of "
-        "them), and re-issue any sibling tool calls that were cancelled "
-        "alongside the denied one."
+        "them). Sibling tool calls batched with the denied one may already "
+        "have run, so check their results before re-issuing them."
     ),
 )
 _ESLINT_TIMEOUT_RULE = Rule(
@@ -452,8 +452,9 @@ false`, which leaves `Write`/`Edit` checking untouched.
 
 **The write has ALREADY landed on disk.** The denial is a failure report, not
 a rollback — the file exists with your content in it. Fix the reported problems
-with `Edit` (`npx eslint <file> --fix` clears most of them), and re-issue any
-sibling tool calls that were cancelled alongside the denied one.
+with `Edit` (`npx eslint <file> --fix` clears most of them). Sibling tool
+calls batched with the denied one may already have run, so check their
+results before re-issuing them.
 
 **This is STRICTER than `lint_on_edit`, which covers the other languages.**
 That handler ALLOWs when its linter is missing or when the check times out;

@@ -49,8 +49,9 @@ DecisionT = TypeVar("DecisionT", bound=Decision, default=Any)
 # Agents sometimes interpret a blocked tool as a signal to stop working.
 # This suffix makes the expected behaviour explicit: adapt and continue.
 _DENY_CONTINUATION_SUFFIX = (
-    "\n\n⚠️ Any tool calls batched with this one were CANCELLED — re-issue any Edit/Write/commit "
-    "separately, and don't batch them with blockable commands. Then adapt and continue."
+    "\n\n⚠️ Tool calls batched with this one may ALREADY HAVE RUN — check their results before "
+    "re-issuing anything, and don't batch dependent calls with blockable ones. "
+    "Then adapt and continue."
 )
 
 # Separator between top-level status-line segments. Each segment historically

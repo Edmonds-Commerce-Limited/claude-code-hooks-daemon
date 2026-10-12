@@ -39,6 +39,7 @@ def mock_llm_commands_detection():
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write import (
+    _ESLINT_ERRORS_RULE,
     ValidateEslintOnWriteHandler,
 )
 
@@ -94,6 +95,11 @@ class TestResidentGuidance:
 
         assert "llm:" in guidance
         assert "package.json" in guidance
+
+    def test_makes_no_claim_that_sibling_calls_were_cancelled(self, tmp_path: Path) -> None:
+        """Issue #81: Claude Code answers each parallel call independently."""
+        assert "cancel" not in self._guidance(tmp_path).lower()
+        assert "cancel" not in _ESLINT_ERRORS_RULE.verbose.lower()
 
 
 class TestValidateEslintOnWriteHandler:

@@ -8,7 +8,10 @@ import pytest
 from tests.conftest import layout_declaring_vendor_dirs
 
 from claude_code_hooks_daemon.constants import HandlerIDMeta, Timeout
-from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import LintOnEditHandler
+from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import (
+    _LINT_FAILURE_RULE,
+    LintOnEditHandler,
+)
 
 
 @pytest.fixture()
@@ -87,6 +90,13 @@ class TestResidentGuidance:
 
         assert "languages" in guidance
         assert "command_overrides" in guidance
+
+    def test_makes_no_claim_that_sibling_calls_were_cancelled(
+        self, handler: LintOnEditHandler
+    ) -> None:
+        """Issue #81: Claude Code answers each parallel call independently."""
+        assert "cancel" not in (handler.get_claude_md() or "").lower()
+        assert "cancel" not in _LINT_FAILURE_RULE.verbose.lower()
 
 
 class TestMatches:
