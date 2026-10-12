@@ -32,6 +32,7 @@ from claude_code_hooks_daemon.utils.heredoc_operators import scan_heredocs
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     COMMAND_WRAPPERS,
     _SubstitutionDepthTracker,
+    body_may_run,
     heredoc_consumers,
     known_variables,
     peel_command_wrappers,
@@ -940,6 +941,32 @@ class TestHeredocConsumerNamedByAnAndJoinedAssignment:
     def test_the_variable_command_word(self, join: str, word: str | None) -> None:
         command = f"C=python3{join} $C <<'EOF'\nprose\nEOF"
         assert heredoc_consumers(command, scan_heredocs(command).heredocs) == [(word,)]
+
+
+class TestGitMergeReadsItsHeredocAsData:
+    """N437 (#85): `merge` is a git builtin no alias can shadow, and it never
+    runs its stdin, so a quoted heredoc fed to it is data like `commit`'s."""
+
+    _BODY = "it's a merge"
+
+    @staticmethod
+    def _may_run(command: str) -> bool:
+        return body_may_run(heredoc_consumers(command, scan_heredocs(command).heredocs)[0])
+
+    @pytest.mark.parametrize(
+        "head",
+        [
+            "git merge --no-ff -q topic -F -",
+            "git -C /repo merge topic -F -",
+        ],
+    )
+    def test_the_body_may_not_run(self, head: str) -> None:
+        assert self._may_run(f"{head} <<'EOF'\n{self._BODY}\nEOF") is False
+
+    @pytest.mark.parametrize("subcommand", ["mymerge", "merge-alias", "frobnicate"])
+    def test_an_unknown_subcommand_is_still_scanned(self, subcommand: str) -> None:
+        """Only a built-in name is exempt; any other may be a `!` alias."""
+        assert self._may_run(f"git {subcommand} topic -F - <<'EOF'\n{self._BODY}\nEOF") is True
 
 
 class TestKnownVariables:
