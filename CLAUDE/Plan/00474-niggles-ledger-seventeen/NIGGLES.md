@@ -106,7 +106,15 @@ handler description at v3.68.0, written into that project's own config. The curr
 
 This repository's own `plan-fact-checker` is retired in favour of the deployed copy, and its references are updated.
 
-**Status**: 🔄 In progress.
+**Status**: ✅ Fixed (merge 2240ef95e, branch heads f6fb96d0c and 41a669457; #96). Tests red first (4, plus an
+import error). Range QA over the merge: 39/40. Its one red is `changed_tests` naming `init_config.py` and
+`agent_assets.py` as unmapped (too-broad), which CI's full-suite fallback covers; 2725 passed, 0 failed. Release note
+045\. The daemon restart's agent sync deployed `.claude/agents/hooks-daemon-plan-fact-checker.md` here. Developer
+report: `subagent-reports/261012-dev-n444-sonnet.md`.
+
+**Follow-up (open, small)**: in this session the new agent type became available as soon as the sync wrote the file,
+without a new session. That contradicts the delivered instruction's "becomes dispatchable only from a later session".
+The reporter on #96 saw the opposite. The wording should say it MAY not be dispatchable until a later session.
 
 ### N443 — upstream now documents `agent_id` as also identifying an in-process teammate, and escapes reminder tags in `additionalContext`
 
