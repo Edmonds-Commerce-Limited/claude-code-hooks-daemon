@@ -93,8 +93,10 @@ the configuration can fix.
 - `daemon/cli.py` `_validate_installation` (lines 381 to 388) catches every `Exception` raised by
   `ProjectContext.initialize` or the config load, and prints "ERROR: Invalid configuration in <config>" with "Fix the
   configuration file and try again."
-- `initialize` is called from about 15 other CLI sites, `controller.py` and `work_queue_cli.py`. Each of them shows only
-  the exception's own message.
+- `initialize` has 12 other call sites in `cli.py`, plus `controller.py:320` and `work_queue_cli.py:44`. Several of the
+  `cli.py` sites catch `ValueError` and print a "could not initialise project context" warning. Four do not catch at
+  all: `cli.py` lines 4834, 5659 and 7078, and `controller.py:320`. None of them shows git's own error, because the
+  exception does not carry it.
 
 **Remedy (coordinator ruling)**: fix at the source and at the mislabelling catch, nothing wider.
 
