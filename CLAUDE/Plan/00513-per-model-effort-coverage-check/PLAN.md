@@ -11,8 +11,8 @@
 ## Overview
 
 Claude Code sets effort per model in `settings.json` under `modelSettings`. An entry names ONE canonical model ID; there
-is no family, prefix or wildcard key. A model with no entry therefore runs at its own default effort, and those defaults
-differ between releases. This was established as the effort mechanism in ledger 00466 N47 and the v3.67.0 truth-change,
+is no family, prefix or wildcard key. A model with no entry therefore takes the top-level `effortLevel` if one applies, and otherwise runs at its own default
+effort, and those defaults differ between releases. This was established as the effort mechanism in ledger 00466 N47 and the v3.67.0 truth-change,
 which supersede the older statement in Plan 00278's Decision 4 that no per-model effort setting exists.
 
 The `Effort Source` check in `optimal_config_checker` looks only for PINS (`CLAUDE_CODE_EFFORT_LEVEL`, or a top-level

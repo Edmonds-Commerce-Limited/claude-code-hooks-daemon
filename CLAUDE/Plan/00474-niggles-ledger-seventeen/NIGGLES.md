@@ -86,10 +86,12 @@ Plan 00513 and awaiting owner decisions. This entry is the part of it that is a 
 `src/claude_code_hooks_daemon/handlers/session_start/optimal_config_checker.py` looks only for PINS
 (`CLAUDE_CODE_EFFORT_LEVEL`, or a top-level `effortLevel` in the project or local settings file). With none, it
 returns `passed` with `current: "per-model levels come from settings.json modelSettings"` (line 250). It never reads
-`modelSettings`, so with no entries anywhere that text is false: every model runs at its own default effort.
+`modelSettings`, so with no entries anywhere that text is false. Every model then takes a top-level `effortLevel` if one
+applies (the user file's is not a pin to this check), and otherwise runs at its own default effort.
 
 **Remedy**: the OK text reports what is actually there. With entries, it names the model IDs that have a level. With
-none, it says no model has an explicit level, so each runs at its default. The verdict stays `passed`, because no pin is
+none, it says no model has a `modelSettings` level, and names the top-level `effortLevel` that applies instead, or says
+each model runs at its own default when there is none. The verdict stays `passed`, because no pin is
 present and the check's job is pins. Presence-only, never recommending a level. Coordinator ruling (triage on #87).
 
 **Status**: 🔄 In progress.
