@@ -51,7 +51,7 @@ Coordinator ruling (the triage is in #79):
 
 ### Phase 1: Fix
 
-- [ ] ⬜ **Task 1.1**: RED. Tests cover:
+- [x] ✅ **Task 1.1**: RED. Tests cover:
   - a path excluded by the handler option is left alone;
   - a path excluded by `daemon.exclude_paths` is left alone;
   - a file in a nested `git init` directory below the root is untouched;
@@ -59,9 +59,9 @@ Coordinator ruling (the triage is in #79):
   - the advisory names bullet, blank-line and escape changes, or says the
     whole file was reformatted, never only "aligned table pipes";
   - the existing behaviour is unchanged otherwise.
-- [ ] ⬜ **Task 1.2**: GREEN. Implement, reusing the shared exclude-path
+- [x] ✅ **Task 1.2**: GREEN. Implement, reusing the shared exclude-path
   matcher and the nested-checkout boundary that already exist.
-- [ ] ⬜ **Task 1.3**: Update the handler's `get_claude_md` guidance and its
+- [x] ✅ **Task 1.3**: Update the handler's `get_claude_md` guidance and its
   HANDLER_REFERENCE entry. Add a release note in
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 

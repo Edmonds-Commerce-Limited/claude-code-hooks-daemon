@@ -3483,6 +3483,38 @@ handlers:
 
 ---
 
+#### markdown_table_formatter
+
+| Property       | Value                      |
+| -------------- | -------------------------- |
+| **Config key** | `markdown_table_formatter` |
+| **Priority**   | 31                         |
+| **Type**       | Advisory                   |
+| **Event**      | PostToolUse                |
+
+**Description:** Formats a `.md`/`.markdown` file in place with `mdformat` + `mdformat-gfm` after `Write`/`Edit`. The WHOLE file is formatted, not just its tables (the same policy as `format-markdown`): table pipes are aligned, and bullet markers, blank lines, escaping and wrapping are normalised too. Ordered lists keep consecutive numbering, `---` thematic breaks are kept, and YAML frontmatter is preserved byte-for-byte. The advisory never claims a narrower change than the one made: it names the known transformations when they account for the whole diff, and otherwise says `Reformatted the whole file (mdformat): ...`. Never blocks.
+
+**Never reformatted:** anything under a plan's `JOURNAL/`; a file holding merge-conflict markers (the markers are named instead); a path matched by `exclude_paths`; and a file in a nested separate git checkout (a directory below the project root with its own `.git`, such as a vendored clone or a submodule). A linked worktree of this repository is still formatted.
+
+| Option          | Values    | Default | Effect                                                                                      |
+| --------------- | --------- | ------- | ------------------------------------------------------------------------------------------- |
+| `exclude_paths` | glob list | none    | Exempt paths from formatting entirely; unions with the project-wide `daemon.exclude_paths`. |
+
+**Config example:**
+
+```yaml
+handlers:
+  post_tool_use:
+    markdown_table_formatter:
+      enabled: true
+      priority: 31
+      options:
+        exclude_paths:
+          - "docs/generated/**"
+```
+
+---
+
 #### validate_eslint_on_write
 
 | Property       | Value                      |

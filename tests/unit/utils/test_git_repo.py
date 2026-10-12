@@ -780,3 +780,70 @@ class TestReadBlobs:
         done = subprocess.CompletedProcess([], 0, reply, b"")
         with mock.patch("subprocess.run", return_value=done):
             assert read_blobs(tmp_path, ["a" * 40]) is None
+
+
+class TestIsWorktreeOfRepo:
+    """``is_worktree_of_repo``: a linked worktree that belongs to THIS repository."""
+
+    @staticmethod
+    def _main_repo(path: Path) -> Path:
+        (path / ".git" / "worktrees").mkdir(parents=True)
+        return path
+
+    @staticmethod
+    def _worktree(path: Path, gitdir: str) -> Path:
+        path.mkdir(parents=True)
+        (path / ".git").write_text(f"gitdir: {gitdir}\n")
+        return path
+
+    def test_worktree_of_the_same_repository(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.utils.git_repo import is_worktree_of_repo
+
+        project = self._main_repo(tmp_path / "project")
+        worktree = self._worktree(project / "untracked" / "wt", f"{project}/.git/worktrees/wt")
+        assert is_worktree_of_repo(worktree, project) is True
+
+    def test_relative_gitdir_is_resolved_against_the_checkout(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.utils.git_repo import is_worktree_of_repo
+
+        project = self._main_repo(tmp_path / "project")
+        worktree = self._worktree(project / "wt", "../.git/worktrees/wt")
+        assert is_worktree_of_repo(worktree, project) is True
+
+    def test_worktree_of_a_different_repository(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.utils.git_repo import is_worktree_of_repo
+
+        project = self._main_repo(tmp_path / "project")
+        other = self._main_repo(tmp_path / "other")
+        worktree = self._worktree(project / "wt", f"{other}/.git/worktrees/wt")
+        assert is_worktree_of_repo(worktree, project) is False
+
+    def test_project_that_is_itself_a_linked_worktree(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.utils.git_repo import is_worktree_of_repo
+
+        main = self._main_repo(tmp_path / "main")
+        project = self._worktree(tmp_path / "project", f"{main}/.git/worktrees/project")
+        sibling = self._worktree(project / "wt", f"{main}/.git/worktrees/wt")
+        assert is_worktree_of_repo(sibling, project) is True
+
+    def test_plain_clone_is_not_a_worktree(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.utils.git_repo import is_worktree_of_repo
+
+        project = self._main_repo(tmp_path / "project")
+        clone = self._main_repo(project / "vendor" / "clone")
+        assert is_worktree_of_repo(clone, project) is False
+
+    def test_submodule_is_not_a_worktree(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.utils.git_repo import is_worktree_of_repo
+
+        project = self._main_repo(tmp_path / "project")
+        sub = self._worktree(project / "sub", f"{project}/.git/modules/sub")
+        assert is_worktree_of_repo(sub, project) is False
+
+    def test_unreadable_project_git_entry_is_not_a_match(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.utils.git_repo import is_worktree_of_repo
+
+        project = tmp_path / "project"
+        project.mkdir()
+        worktree = self._worktree(project / "wt", f"{project}/.git/worktrees/wt")
+        assert is_worktree_of_repo(worktree, project) is False

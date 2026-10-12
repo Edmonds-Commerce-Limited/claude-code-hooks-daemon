@@ -416,6 +416,67 @@ def is_linked_worktree(checkout: Path) -> bool:
     return False
 
 
+def _gitdir_target(checkout: Path) -> Path | None:
+    """The ``gitdir:`` target of ``checkout``'s ``.git`` FILE, resolved; else None."""
+    git_path = checkout / _GIT_DIR_ENTRY
+    try:
+        if not git_path.is_file():
+            return None
+        content = git_path.read_text(encoding="utf-8", errors="replace")
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith(_GIT_FILE_GITDIR_PREFIX):
+                raw = stripped[len(_GIT_FILE_GITDIR_PREFIX) :].strip()
+                return (checkout / raw).resolve()
+    except (OSError, ValueError) as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a checkout {checkout!r} whose .git entry cannot be read has no gitdir target (None); callers then treat it as not belonging to a repository",
+            level=logging.DEBUG,
+        )
+    return None
+
+
+def _common_git_dir(checkout: Path) -> Path | None:
+    """The common git directory a checkout belongs to, by path reads only.
+
+    A main checkout's is its ``.git`` directory; a linked worktree's is the
+    ``<main>/.git`` that holds the ``worktrees/<name>`` its ``.git`` file
+    names. Anything else (a submodule, no ``.git``) has none.
+    """
+    git_path = checkout / _GIT_DIR_ENTRY
+    try:
+        if git_path.is_dir():
+            return git_path.resolve()
+    except OSError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a checkout {checkout!r} whose .git entry cannot be stat'd has no common git dir (None)",
+            level=logging.DEBUG,
+        )
+        return None
+    target = _gitdir_target(checkout)
+    if target is None or target.parent.name != "worktrees":
+        return None
+    return target.parent.parent
+
+
+def is_worktree_of_repo(checkout: Path, project_root: Path) -> bool:
+    """Return True when ``checkout`` is a linked worktree of ``project_root``'s repository.
+
+    Both must resolve to the SAME common git directory, so a linked worktree of
+    an unrelated repository, a submodule and a plain nested clone are all
+    ``False``. ``project_root`` may itself be a linked worktree. A filesystem
+    probe only, never a subprocess; anything unreadable is ``False``.
+    """
+    if not (checkout / _GIT_DIR_ENTRY).is_file():
+        return False
+    checkout_common = _common_git_dir(checkout)
+    return checkout_common is not None and checkout_common == _common_git_dir(project_root)
+
+
 def _git_output(cwd: Path, *args: str) -> str | None:
     """Run git and return stripped stdout, else ``None``.
 

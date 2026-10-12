@@ -13,6 +13,8 @@ from claude_code_hooks_daemon.handlers.post_tool_use.markdown_table_formatter im
     _LABEL_ORDERED_LISTS,
     _LABEL_TABLE_PIPES,
     _LABEL_THEMATIC_BREAKS,
+    _OTHER_CHANGES,
+    _WHOLE_FILE_HEADLINE,
     MarkdownTableFormatterHandler,
     _build_reformat_message,
     classify_markdown_changes,
@@ -286,7 +288,7 @@ class TestHandle:
             "tool_input": {"file_path": str(test_file)},
         }
         result = handler.handle(hook_input)
-        assert result.context == ["Reformatted markdown in doc.md"]
+        assert result.context == [f"{_WHOLE_FILE_HEADLINE} doc.md: {_OTHER_CHANGES}"]
 
     def test_skips_missing_file_race_condition(
         self, handler: MarkdownTableFormatterHandler, tmp_path: Path
@@ -486,9 +488,15 @@ class TestBuildReformatMessage:
             "Reformatted markdown in doc.md: aligned table pipes, renumbered ordered lists"
         )
 
-    def test_generic_fallback_when_no_labels(self) -> None:
-        message = _build_reformat_message("doc.md", [])
-        assert message == "Reformatted markdown in doc.md"
+    def test_whole_file_message_when_no_labels(self) -> None:
+        message = _build_reformat_message("doc.md", [], fully_named=False)
+        assert message == f"{_WHOLE_FILE_HEADLINE} doc.md: {_OTHER_CHANGES}"
+
+    def test_whole_file_message_keeps_the_labels_that_did_fire(self) -> None:
+        message = _build_reformat_message("doc.md", [_LABEL_TABLE_PIPES], fully_named=False)
+        assert message == (
+            f"{_WHOLE_FILE_HEADLINE} doc.md: aligned table pipes, plus {_OTHER_CHANGES}"
+        )
 
 
 class TestGuidance:
@@ -594,3 +602,206 @@ class TestAConflictedFileIsNeverReformatted:
 
         assert path.read_text(encoding="utf-8") == disguised
         assert "line 3" in "\n".join(result.context)
+
+
+_MODULE = "claude_code_hooks_daemon.handlers.post_tool_use.markdown_table_formatter"
+
+
+def _write_event(path: Path) -> dict[str, Any]:
+    return {"tool_name": "Write", "tool_input": {"file_path": str(path)}}
+
+
+class TestExcludePaths:
+    """Issue #79: the handler honours its own and the project-wide exclusions."""
+
+    def test_handler_option_excludes_a_path(
+        self, handler: MarkdownTableFormatterHandler, tmp_path: Path
+    ) -> None:
+        generated = tmp_path / "generated" / "doc.md"
+        generated.parent.mkdir()
+        generated.write_text(_UNALIGNED_TABLE)
+        handler._exclude_paths = ["**/generated/**"]
+
+        assert handler.matches(_write_event(generated)) is False
+        handler.handle(_write_event(generated))
+        assert generated.read_text() == _UNALIGNED_TABLE
+
+    def test_project_wide_exclusion_excludes_a_path(
+        self, handler: MarkdownTableFormatterHandler, tmp_path: Path
+    ) -> None:
+        generated = tmp_path / "generated" / "doc.md"
+        generated.parent.mkdir()
+        generated.write_text(_UNALIGNED_TABLE)
+        handler._project_exclude_paths = ["**/generated/**"]
+
+        assert handler.matches(_write_event(generated)) is False
+        handler.handle(_write_event(generated))
+        assert generated.read_text() == _UNALIGNED_TABLE
+
+    def test_a_path_outside_the_exclusions_is_still_formatted(
+        self, handler: MarkdownTableFormatterHandler, tmp_path: Path
+    ) -> None:
+        kept = tmp_path / "docs" / "doc.md"
+        kept.parent.mkdir()
+        kept.write_text(_UNALIGNED_TABLE)
+        handler._exclude_paths = ["**/generated/**"]
+        handler._project_exclude_paths = ["vendor/**"]
+
+        assert handler.matches(_write_event(kept)) is True
+        handler.handle(_write_event(kept))
+        assert kept.read_text() == _ALIGNED_TABLE
+
+    def test_exclude_paths_is_a_settable_handler_option(
+        self, handler: MarkdownTableFormatterHandler
+    ) -> None:
+        # Options are injected by setattr after construction; the attribute
+        # must exist on the instance for config validation to accept the key.
+        assert handler._exclude_paths is None
+
+
+class TestNestedCheckouts:
+    """Issue #79: a file in another repository's checkout is not rewritten."""
+
+    @pytest.fixture()
+    def project(self, tmp_path: Path) -> Path:
+        project = tmp_path / "project"
+        project.mkdir()
+        return project
+
+    def _doc_in(self, directory: Path) -> Path:
+        directory.mkdir(parents=True, exist_ok=True)
+        doc = directory / "doc.md"
+        doc.write_text(_UNALIGNED_TABLE)
+        return doc
+
+    def test_nested_git_clone_is_untouched(
+        self, handler: MarkdownTableFormatterHandler, project: Path
+    ) -> None:
+        clone = project / "vendor" / "other"
+        (clone / ".git").mkdir(parents=True)
+        doc = self._doc_in(clone / "docs")
+
+        with patch(f"{_MODULE}.resolve_project_root", return_value=str(project)):
+            assert handler.matches(_write_event(doc)) is False
+            handler.handle(_write_event(doc))
+
+        assert doc.read_text() == _UNALIGNED_TABLE
+
+    def test_submodule_checkout_is_untouched(
+        self, handler: MarkdownTableFormatterHandler, project: Path
+    ) -> None:
+        submodule = project / "sub"
+        submodule.mkdir()
+        (submodule / ".git").write_text("gitdir: ../.git/modules/sub\n")
+        doc = self._doc_in(submodule)
+
+        with patch(f"{_MODULE}.resolve_project_root", return_value=str(project)):
+            assert handler.matches(_write_event(doc)) is False
+
+        assert doc.read_text() == _UNALIGNED_TABLE
+
+    def test_linked_worktree_is_still_formatted(
+        self, handler: MarkdownTableFormatterHandler, project: Path
+    ) -> None:
+        (project / ".git").mkdir()
+        worktree = project / "untracked" / "worktrees" / "wt"
+        worktree.mkdir(parents=True)
+        (worktree / ".git").write_text(f"gitdir: {project}/.git/worktrees/wt\n")
+        doc = self._doc_in(worktree / "docs")
+
+        with patch(f"{_MODULE}.resolve_project_root", return_value=str(project)):
+            assert handler.matches(_write_event(doc)) is True
+            handler.handle(_write_event(doc))
+
+        assert doc.read_text() == _ALIGNED_TABLE
+
+    def test_linked_worktree_of_another_repository_is_untouched(
+        self, handler: MarkdownTableFormatterHandler, project: Path, tmp_path: Path
+    ) -> None:
+        (project / ".git").mkdir()
+        other = tmp_path / "other"
+        (other / ".git" / "worktrees").mkdir(parents=True)
+        worktree = project / "untracked" / "scratch" / "foreign"
+        worktree.mkdir(parents=True)
+        (worktree / ".git").write_text(f"gitdir: {other}/.git/worktrees/foreign\n")
+        doc = self._doc_in(worktree)
+
+        with patch(f"{_MODULE}.resolve_project_root", return_value=str(project)):
+            assert handler.matches(_write_event(doc)) is False
+            handler.handle(_write_event(doc))
+
+        assert doc.read_text() == _UNALIGNED_TABLE
+
+    def test_file_in_the_project_itself_is_still_formatted(
+        self, handler: MarkdownTableFormatterHandler, project: Path
+    ) -> None:
+        (project / ".git").mkdir()
+        doc = self._doc_in(project / "docs")
+
+        with patch(f"{_MODULE}.resolve_project_root", return_value=str(project)):
+            assert handler.matches(_write_event(doc)) is True
+
+    def test_without_a_project_root_the_boundary_is_not_applied(
+        self, handler: MarkdownTableFormatterHandler, project: Path
+    ) -> None:
+        clone = project / "other"
+        (clone / ".git").mkdir(parents=True)
+        doc = self._doc_in(clone)
+
+        with patch(f"{_MODULE}.resolve_project_root", return_value=None):
+            assert handler.matches(_write_event(doc)) is True
+
+
+class TestAdvisoryNamesEveryChange:
+    """Issue #79: the advisory never claims a narrower change than the one made."""
+
+    @staticmethod
+    def _advisory(handler: MarkdownTableFormatterHandler, path: Path, text: str) -> str:
+        path.write_text(text)
+        result = handler.handle(_write_event(path))
+        assert len(result.context) == 1
+        return result.context[0]
+
+    def test_bullet_marker_change_says_whole_file(
+        self, handler: MarkdownTableFormatterHandler, tmp_path: Path
+    ) -> None:
+        message = self._advisory(handler, tmp_path / "doc.md", "* one\n* two\n")
+        assert message.startswith(_WHOLE_FILE_HEADLINE)
+        assert "aligned table pipes" not in message
+
+    def test_blank_line_change_says_whole_file(
+        self, handler: MarkdownTableFormatterHandler, tmp_path: Path
+    ) -> None:
+        message = self._advisory(handler, tmp_path / "doc.md", "One.\n\n\n\nTwo.\n")
+        assert message.startswith(_WHOLE_FILE_HEADLINE)
+
+    def test_table_plus_bullets_never_claims_only_table_pipes(
+        self, handler: MarkdownTableFormatterHandler, tmp_path: Path
+    ) -> None:
+        message = self._advisory(
+            handler, tmp_path / "doc.md", "* one\n* two\n\n" + _UNALIGNED_TABLE
+        )
+        assert message.startswith(_WHOLE_FILE_HEADLINE)
+        assert "aligned table pipes" in message
+        assert _OTHER_CHANGES in message
+
+    def test_table_row_with_another_change_is_not_called_table_pipes(self) -> None:
+        # Trailing text after the closing pipe changes beyond whitespace.
+        before = "| a | b |\n|---|---|\n| 1 | 2 |  \n"
+        formatted = "| a   | b   |\n| --- | --- |\n| 1   | 2   |\n"
+        assert classify_markdown_changes(before, formatted) == [_LABEL_TABLE_PIPES]
+        changed = "| a   | b   |\n| --- | --- |\n| 1   | 3   |\n"
+        assert classify_markdown_changes(before, changed) == []
+
+    def test_a_fully_named_change_keeps_the_narrow_message(
+        self, handler: MarkdownTableFormatterHandler, tmp_path: Path
+    ) -> None:
+        message = self._advisory(handler, tmp_path / "doc.md", _UNALIGNED_TABLE)
+        assert message == "Reformatted markdown in doc.md: aligned table pipes"
+
+    def test_renumbered_list_with_a_bullet_change_is_not_fully_named(
+        self, handler: MarkdownTableFormatterHandler, tmp_path: Path
+    ) -> None:
+        message = self._advisory(handler, tmp_path / "doc.md", "1. a\n1. b\n\n* x\n* y\n")
+        assert message.startswith(_WHOLE_FILE_HEADLINE)
+        assert "renumbered ordered lists" in message
