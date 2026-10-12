@@ -898,7 +898,9 @@ async def _probe_socket_liveness(path: Path) -> _SocketLiveness:
         return _SocketLiveness.INDETERMINATE
     else:
         writer.close()
-        with contextlib.suppress(Exception):
+        # The connect already proved a listener; a peer that resets or breaks the
+        # pipe while we close (an OSError) does not change that verdict.
+        with contextlib.suppress(OSError):
             await writer.wait_closed()
         return _SocketLiveness.LIVE
 

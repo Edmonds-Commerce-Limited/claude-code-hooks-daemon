@@ -664,7 +664,9 @@ async def test_concurrent_starts_yield_single_daemon(tmp_path: Path) -> None:
         for daemon in winners:
             await daemon.shutdown()
         for task in (task_a, task_b):
-            with contextlib.suppress(Exception):
+            # The loser ends with DaemonAlreadyRunningError; the winner's start
+            # task can still be serving when the timeout cancels it.
+            with contextlib.suppress(DaemonAlreadyRunningError, TimeoutError):
                 await asyncio.wait_for(task, timeout=Timeout.SOCKET_CONNECT)
 
 

@@ -34,6 +34,11 @@
       "fix": "Anchor to a value derived from PROJECT_ROOT or DAEMON_DIR, or add `# shell-audit: allow -- <reason>` inline or on the line above if the reference genuinely predates the re-exec.",
       "checks": ["audit_shell.py"]
     },
+    "broad-suppress": {
+      "statement": "`with suppress(Exception):` (or `BaseException`, alone or in a tuple) discards every error in the block, exactly as `except Exception: pass` does.",
+      "fix": "Suppress only the specific exception the block can raise, for example `suppress(OSError)`, or handle the error.",
+      "checks": ["audit_error_hiding.py"]
+    },
     "capability-table-drift": {
       "statement": "`constants/events.py` says an event can or cannot block, and the vendored Claude Code contract says otherwise.",
       "fix": "Correct `can_block` for the event in `constants/events.py`, or refresh the vendored contract if it is stale.",

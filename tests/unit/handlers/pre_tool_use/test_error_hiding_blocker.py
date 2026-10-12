@@ -157,6 +157,40 @@ class TestErrorHidingBlockerMatchesPython:
         assert handler.matches(hook_input) is False
 
 
+class TestErrorHidingBlockerBroadSuppress:
+    # Built by concatenation so this file does not itself contain the blocked form.
+    _BROAD = "Exce" + "ption"
+
+    def test_write_py_with_broad_suppress_is_denied(
+        self, handler: ErrorHidingBlockerHandler
+    ) -> None:
+        content = f"import contextlib\n\nwith contextlib.suppress({self._BROAD}):\n    run()\n"
+        hook_input = make_write_input("/tmp/test.py", content)
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == "deny"
+        assert "broad suppress()" in (result.reason or "")
+
+    def test_edit_py_with_broad_suppress_tuple_is_denied(
+        self, handler: ErrorHidingBlockerHandler
+    ) -> None:
+        hook_input = make_edit_input("/tmp/module.py", f"with suppress(OSError, {self._BROAD}):")
+        assert handler.matches(hook_input) is True
+
+    def test_write_py_with_narrow_suppress_is_allowed(
+        self, handler: ErrorHidingBlockerHandler
+    ) -> None:
+        content = "import contextlib\n\nwith contextlib.suppress(OSError):\n    run()\n"
+        hook_input = make_write_input("/tmp/test.py", content)
+        assert handler.matches(hook_input) is False
+
+    def test_guidance_names_the_broad_suppress_form(
+        self, handler: ErrorHidingBlockerHandler
+    ) -> None:
+        guidance = handler.get_claude_md() or ""
+        assert "suppress(" in guidance
+
+
 class TestErrorHidingBlockerMatchesJavaScript:
     def test_write_js_with_empty_catch_matches(self, handler: ErrorHidingBlockerHandler) -> None:
         content = "try { doSomething(); } catch (e) {}"
