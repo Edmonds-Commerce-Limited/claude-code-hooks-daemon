@@ -77,6 +77,24 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N443 — upstream now documents `agent_id` as also identifying an in-process teammate, and escapes reminder tags in `additionalContext`
+
+**Found**: by the N442 contract refresh (audit record `subagent-reports/261012-contract-refresh-n442-sonnet.md`).
+Neither finding has been assessed against the daemon yet.
+
+**Evidence**:
+
+- **`agent_id`:** upstream now reads "Unique identifier for the subagent or in-process teammate the hook fires in". It
+  no longer says in words that a main-thread call omits it. Handlers that read a present `agent_id` as "inside a
+  subagent" will now also apply to an in-process teammate. The refresh named `subagent_cron_delete_blocker`,
+  `subagent_full_qa_blocker`, `subagent_worktree_write_guard` and `cron_subagent_stop_enforcer`. In this session a
+  teammate (dev-n441) was held by the worktree-write guard, which is the behaviour a delegated worker should get. The
+  question is handler by handler: does each one want teammates included?
+- **`additionalContext`:** upstream now escapes reminder-tag markup in `additionalContext` to `&lt;`. Whether any
+  handler injects such tags has not been checked.
+
+**Status**: ⬜ Open. Assess both, then fix or dismiss each with reasoning.
+
 ### N442 — the upstream hooks doc changed again after the 2.1.296 contract refresh
 
 **Source**: GitHub issue #95 (triaged 2026-10-12). The issue reports that v3.69.0 shipped a contract audited at
