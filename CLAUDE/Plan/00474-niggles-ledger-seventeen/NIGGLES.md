@@ -85,6 +85,9 @@ the Plan 00477 Task 5.2a merge (57295f89c). No pytest process was running. Eight
 `<worktree venv>/bin/python -c 'import time; time.sleep(60)' -m claude_code_hooks_daemon.daemon.cli --project-root /tmp/pytest-of-root/…/project start`.
 That is the stub "daemon" from `tests/venv_bootstrap_sandbox.py`, which the merge taught to treat `restart`
 like `start`. They expire on their own after 60 s, but they outlive their test and its `tmp_path`.
+The mechanism was confirmed by fact-check (`subagent-reports/fact-check-n427.md`): the sandbox `cleanup()`
+terminates only the one pid in the PID file, and a `restart` overwrites that file, so the stand-in from
+the first `start` is orphaned.
 
 **Why it matters**: these processes match `pgrep -f pytest` through their `pytest-of-root` path, so the
 "no test run in progress" check before a daemon restart reads a live run for up to a minute after the suite
@@ -92,7 +95,8 @@ ends. A run that loops these tests can also accumulate them.
 
 **Candidate remedies**:
 
-1. Have the sandbox stub record each pid it spawns, and have a fixture finaliser reap them.
+1. Have the stub's `restart` terminate the pid already in the PID file before it writes its own, as a real
+   restart would. Or have the stub record each pid it spawns, and have a fixture finaliser reap them.
 2. Make the stub exit at once instead of sleeping, if no assertion needs it alive.
 
 **Status**: ⬜ Open.
