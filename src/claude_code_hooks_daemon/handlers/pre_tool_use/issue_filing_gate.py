@@ -444,7 +444,7 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
         """Why this filing cannot go ahead, or an empty list when it may."""
         if self._has_web_flag(segment):
             # Files nothing: it opens GitHub's own forms, where a human meets
-            # the rule before anything is published. See _WEB_FLAG for why this
+            # the rule before anything is published. See _WEB_FLAG_NAME for why this
             # hole is the one that keeps the gate honest rather than the one
             # that defeats it.
             return []
