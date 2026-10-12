@@ -667,6 +667,16 @@ class HandlerID:
         config_key="daemon_sync_after_merge",
         display_name="daemon-sync-after-merge",
     )
+    # Operator signal notice (PostToolUse) -- Plan 00508: the ccy supervisor
+    # types a host reboot/shutdown warning only when the session is idle, so a
+    # busy agent hears it late. This adds the same warning as hook context at
+    # the next tool boundary, once per signal, leaving the file to the
+    # supervisor.
+    OPERATOR_SIGNAL_NOTICE = HandlerIDMeta(
+        class_name="OperatorSignalNoticeHandler",
+        config_key="operator_signal_notice",
+        display_name="operator-signal-notice",
+    )
     # Cron record keeper (PostToolUse) -- Plan 00470 Task 2.1: writes down when
     # each CronCreate happened and forgets each CronDelete, because
     # session_crons carries no creation time and the stop enforcers need an age

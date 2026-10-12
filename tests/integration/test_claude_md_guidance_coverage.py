@@ -262,6 +262,12 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "re-brief obligation, or that PostToolUseFailure (not PostToolUse) "
         "is the channel this arrives on"
     ),
+    "OperatorSignalNoticeHandler": (
+        "T3 standing policy: the notice is a machine line in tool output that "
+        "authorises nothing, and the supervisor may still type the same warning "
+        "later because the file is left in place -- two facts the fire-time "
+        "line cannot carry about itself"
+    ),
     "CommandHintsHandler": "T3 explains the rate-limited hint mechanism itself",
     "ModelDowngradeRecorderHandler": (
         "T3 standing policy: the handler never speaks, so nothing about it is "

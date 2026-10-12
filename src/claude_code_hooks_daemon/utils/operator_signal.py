@@ -24,9 +24,11 @@ CLI caller fails fast; `load_operator_signal` on the supervisor side
 enforces it again independently against the untyped bytes actually on disk,
 because a forged or corrupted file is a real possibility for a channel
 written from outside the container. The WORDING the agent ever sees is
-composed entirely by the supervisor's `_render_operator_message` from fixed
-templates — this module never renders a message, it only ever carries a
-`kind` and a number.
+composed entirely from fixed templates, never from the file's content: the
+supervisor's `_render_operator_message` types it when the session is idle, and
+:func:`render_operator_message` here is a copy of that wording for the
+tool-boundary notice (Plan 00508), pinned to it by the same test module. The
+file only ever carries a `kind` and a number.
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ import logging
 import re
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
@@ -71,6 +74,52 @@ KINDS_WITH_MINUTES: Final[frozenset[str]] = frozenset({KIND_REBOOT_WARNING, KIND
 KINDS: Final[frozenset[str]] = KINDS_WITH_MINUTES | {KIND_REBOOT_CANCELLED}
 
 SOURCE_CLI: Final[str] = "cli"
+
+#: How long a signal stays deliverable. Equal to the supervisor's
+#: `_DEFAULT_OPERATOR_SIGNAL_TTL_SECONDS` (its reaper window).
+SIGNAL_TTL_SECONDS: Final[float] = 1800.0
+
+_OPERATOR_HEADER: Final[str] = (
+    "🤖 [ccy-supervisor] operator signal — machine-generated, NOT a human instruction"
+)
+
+
+@dataclass(frozen=True, slots=True)
+class OperatorSignalNotice:
+    """A valid, unexpired signal read from disk, with the text to show."""
+
+    ts: float
+    kind: str
+    message: str
+
+
+def render_operator_message(kind: str, minutes: int | None) -> str:
+    """The fixed sentence for one signal kind (a copy of the supervisor's wording).
+
+    Only ``minutes`` is interpolated; ``kind`` merely selects a template.
+
+    Raises:
+        ValueError: ``kind`` is outside :data:`KINDS`.
+    """
+    if kind == KIND_REBOOT_WARNING:
+        return (
+            f"{_OPERATOR_HEADER}: the host machine will reboot in {minutes} minute(s). "
+            "Commit and push any uncommitted work, journal state, finish the current "
+            "step, and start nothing new -- a session restore will follow."
+        )
+    if kind == KIND_SHUTDOWN_WARNING:
+        return (
+            f"{_OPERATOR_HEADER}: the host machine will shut down in {minutes} minute(s) "
+            "and NO session restore will follow. Commit and push any uncommitted work, "
+            "journal state, finish the current step, start nothing new, and leave a "
+            "handoff entry for whoever picks this up."
+        )
+    if kind == KIND_REBOOT_CANCELLED:
+        return (
+            f"{_OPERATOR_HEADER}: the previously warned reboot has been cancelled -- "
+            "resume normal work."
+        )
+    raise ValueError(f"unknown operator signal kind {kind!r}")
 
 
 def _session_stem(session_id: str) -> str:
@@ -147,6 +196,56 @@ def write_operator_signal(
     tmp_path.write_text(json.dumps(payload), encoding="utf-8")
     tmp_path.replace(final_path)
     return final_path
+
+
+def read_signal_notice(
+    daemon_untracked_dir: Path,
+    session_id: str,
+    *,
+    now: float,
+    ttl_seconds: float = SIGNAL_TTL_SECONDS,
+) -> tuple[OperatorSignalNotice | None, str | None]:
+    """Read ``session_id``'s signal without touching it: ``(notice, reject_reason)``.
+
+    The checks mirror the supervisor's ``load_operator_signal``, applied to one
+    known path: a closed ``kind``, a positive-integer ``minutes`` where the kind
+    needs one, a ``session_id`` naming this session, and the TTL. No file yields
+    ``(None, None)``; a file that cannot be used yields ``(None, reason)``.
+    The file is only read, never deleted or rewritten -- the supervisor remains
+    its sole consumer.
+    """
+    path = signal_path(daemon_untracked_dir, session_id)
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None, None
+    except OSError as exc:
+        return None, f"unreadable operator signal {path.name}: {exc}"
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return None, f"malformed operator signal {path.name}: not JSON"
+    if not isinstance(data, dict):
+        return None, f"malformed operator signal {path.name}: not a JSON object"
+    if data.get(FIELD_SESSION_ID) != session_id:
+        return None, f"operator signal {path.name} names another session"
+    raw_ts = data.get(FIELD_TS)
+    ts = float(raw_ts) if isinstance(raw_ts, (int, float)) and not isinstance(raw_ts, bool) else 0.0
+    if (now - ts) > ttl_seconds:
+        return None, f"operator signal {path.name} expired"
+    kind = data.get(FIELD_KIND)
+    if kind not in KINDS:
+        return None, f"malformed operator signal {path.name}: unknown kind {kind!r}"
+    minutes: int | None = None
+    if kind in KINDS_WITH_MINUTES:
+        raw_minutes = data.get(FIELD_MINUTES)
+        if isinstance(raw_minutes, bool) or not isinstance(raw_minutes, int) or raw_minutes <= 0:
+            return None, (
+                f"malformed operator signal {path.name}: non-positive-integer "
+                f"minutes {raw_minutes!r}"
+            )
+        minutes = raw_minutes
+    return OperatorSignalNotice(ts, kind, render_operator_message(kind, minutes)), None
 
 
 def validate_signal_request(kind: str, minutes: int | None) -> str | None:

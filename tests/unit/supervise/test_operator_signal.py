@@ -22,6 +22,8 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+import pytest
+
 from claude_code_hooks_daemon.utils import operator_signal
 from tests.unit.supervise._load import load_supervisor_module
 
@@ -160,6 +162,26 @@ class TestRenderOperatorMessage:
             # second render with a different number.
             other = _mod._render_operator_message(kind, 1)
             assert text.replace("999", "N") == other.replace("1", "N")
+
+
+class TestRendererAgreesWithTheDaemonCopy:
+    """The daemon's tool-boundary notice (Plan 00508) must read like what the supervisor types."""
+
+    @pytest.mark.parametrize(
+        ("kind", "minutes"),
+        [
+            (operator_signal.KIND_REBOOT_WARNING, 10),
+            (operator_signal.KIND_SHUTDOWN_WARNING, 5),
+            (operator_signal.KIND_REBOOT_CANCELLED, None),
+        ],
+    )
+    def test_wording_is_identical_for_every_kind(self, kind: str, minutes: int | None) -> None:
+        assert operator_signal.render_operator_message(
+            kind, minutes
+        ) == _mod._render_operator_message(kind, minutes)
+
+    def test_ttl_is_identical(self) -> None:
+        assert operator_signal.SIGNAL_TTL_SECONDS == _mod._DEFAULT_OPERATOR_SIGNAL_TTL_SECONDS
 
 
 # ── load_operator_signal: validate-then-render, fail-closed ────────────────

@@ -314,6 +314,12 @@ class Priority:
     # is not load-bearing)
     PLAN_FACT_CHECK_FEED = 37
 
+    # Operator signal notice (Priority: 38 - PostToolUse advisory; Plan 00508,
+    # the next free slot in the PostToolUse band after PLAN_FACT_CHECK_FEED.
+    # Reads a per-session file and adds context; no other PostToolUse handler
+    # depends on its order.)
+    OPERATOR_SIGNAL_NOTICE = 38
+
     # QA enforcement handlers (Priority: 30-35)
     QA_SUPPRESSION = 30
     PLAN_NUMBER_HELPER = 30

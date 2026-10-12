@@ -3610,6 +3610,29 @@ handlers:
 
 ---
 
+#### operator_signal_notice
+
+| Property       | Value                    |
+| -------------- | ------------------------ |
+| **Config key** | `operator_signal_notice` |
+| **Priority**   | 38                       |
+| **Type**       | Advisory                 |
+| **Event**      | PostToolUse              |
+
+**Description:** `hooks-daemon signal` writes a per-session `.operator-signal` file warning that the host will reboot or shut down, or that a warned reboot is cancelled. The ccy supervisor types that warning into the session only when it is idle with an empty input box, so an agent in a long turn hears it late, possibly after the stated minutes have run out. This handler adds the same rendered text as hook context at the next tool call, once per signal (session, `ts`, kind). It reads one known path per event, ignores a malformed, expired, unknown-kind or other-session file (logging the reason once), and never deletes or rewrites the file: the supervisor's idle-time injection is unchanged and remains its only consumer. Advisory only — it never blocks.
+
+**Config example:**
+
+```yaml
+handlers:
+  post_tool_use:
+    operator_signal_notice:
+      enabled: true
+      priority: 38
+```
+
+---
+
 #### agent_terminated_early_failure_detector
 
 | Property       | Value                                     |
