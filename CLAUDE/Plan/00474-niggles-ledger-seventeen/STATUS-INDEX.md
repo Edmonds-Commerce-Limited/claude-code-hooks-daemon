@@ -4,7 +4,7 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 
 | #          | Verdict                                                                                                                                                        | Origin              | Status                                 |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | -------------------------------------- |
-| N436       | The ccy supervisor's input-line model counts Ctrl+O (and other view-toggle keys) as box content, so opening the compact summary defers the post-compact resume | Owner               | 🔄 In progress                         |
+| N436       | The ccy supervisor's input-line model counts Ctrl+O (and other view-toggle keys) as box content, so opening the compact summary defers the post-compact resume | Owner               | ✅ Fixed (78c24fb62)                   |
 | N435       | The report-path verifier resolves a worktree agent's relative report path against the main checkout (the agent's cwd), so a committed report reads as missing  | Coordinator         | ⬜ Open                                |
 | N434       | The venv resolvers' scan fallback returns the lexically-first venv (often a stale legacy one), so daemon_upgrade_detector reports a false downgrade (#84)      | GitHub #84          | ✅ Fixed (9c0bbf7d6)                   |
 | N433       | A quiet plan journal (journal-freshness, advise) fails `llm_qa.py changed` and main CI's targeted step; the coordinator had been reading it as an expected red | Coordinator         | 🔄 Journals updated; remedies open     |

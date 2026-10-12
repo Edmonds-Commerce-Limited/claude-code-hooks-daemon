@@ -95,7 +95,10 @@ this time is not recorded, because the supervisor logs no keystrokes. The owner 
 non-content. Unrecognised control bytes stay conservative (counted), as the class docstring requires. Tests come red first in
 `tests/unit/supervise/test_input_line_guard.py`.
 
-**Status**: 🔄 In progress.
+**Status**: ✅ Fixed (merge 78c24fb62, branch head 9c482c111). Ctrl+O and Ctrl+T are consumed as no-ops; Ctrl+V and Ctrl+R
+stay content. Range QA over the merge: 39/40. Its one red is `changed_tests` naming `claude-supervise.py` as unmapped
+(too-broad); `tests/unit/supervise/` on merged main gave 1333 passed, 1 skipped. The live `--worker` respawned at 10:12:51,
+two seconds after the merge, so the fix is running.
 
 ### N435 — the report-path verifier resolves a worktree agent's relative report path against the main checkout
 
