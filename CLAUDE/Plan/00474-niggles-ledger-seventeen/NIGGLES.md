@@ -84,7 +84,7 @@ opt-in handlers turned them off, four deny guards among them. It deployed and re
 
 **Evidence**:
 
-- **Already on main, unreleased:** N360 (owner ruling C6, 30cf086e9) makes `scripts/upgrade.sh` run
+- **Already on main, unreleased:** N360 (owner ruling C6, batch M; its review round 1 is 30cf086e9) makes `scripts/upgrade.sh` run
   `check-effective-handlers --apply`. That writes `enabled: true` for each handler that would stop, which is the
   issue's option (a).
 - **Still wrong:** that step runs in Layer 1 AFTER Layer 2 (`scripts/upgrade_version.sh`) has deployed and restarted
