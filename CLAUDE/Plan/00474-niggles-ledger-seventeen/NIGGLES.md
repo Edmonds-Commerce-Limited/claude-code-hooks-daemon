@@ -77,6 +77,31 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N448 — error_hiding_blocker and the error-hiding audit miss `contextlib.suppress(Exception)`
+
+**Source**: GitHub issue #100 (triaged 2026-10-12).
+
+**Evidence** (main at 10e835ee0):
+
+- `strategies/error_hiding/python_strategy.py` has four patterns, all of them `except` clauses whose body is `pass`
+  or `...`. `with contextlib.suppress(Exception):` discards every exception exactly as `except Exception: pass` does,
+  yet a Write of it is allowed with no advisory.
+- `scripts/qa/audit_error_hiding.py` (the issue's account: it visits `try` statements only) misses the same form.
+- The tree holds two broad instances: `src/claude_code_hooks_daemon/daemon/server.py:901` and
+  `tests/unit/daemon/test_server_liveness_reuse.py:667`. It also holds about a dozen narrow ones (`OSError`,
+  `asyncio.CancelledError`, `KeyboardInterrupt`, ...).
+
+**Remedy (coordinator ruling)**: catch the broad form only.
+
+- Block `suppress(...)` whose arguments include `Exception` or `BaseException`, also as a tuple member, through
+  `contextlib.suppress` or a bare imported `suppress`. Do this in both the handler's Python strategy and the QA audit.
+- Fix the two in-tree instances by narrowing the exception or handling it; do not exempt them.
+- A narrow `suppress(OSError)` names the exception it accepts, and it stays allowed. That leaves it inconsistent with
+  `except OSError: pass`, which is blocked today. Which way to resolve that is a product call, deliberately not taken
+  here.
+
+**Status**: 🔄 In progress.
+
 ### N447 — the conflict-marker gate still greps an excluded path, and a recorded large binary, before it filters
 
 **Source**: GitHub issue #99 (triaged 2026-10-12), which reports a whole-index `git grep` timing out in a
