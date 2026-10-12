@@ -91,9 +91,10 @@ the cost is one split call.
 
 **Candidate remedies**:
 
-1. Allow, with an advisory, when the `-C` directory does not exist yet. If the commit then runs, the repository was
-   created earlier in this command and has no history, so no merge state can have left markers behind. If it never
-   exists, git itself fails.
+1. Allow, with an advisory, when the `-C` directory does not exist yet AND an earlier `git init` of that directory
+   in the same command creates it. A fresh `init` has no history, so no merge can have left markers behind. A
+   `git clone` or a copy creates a repository that can have history, so it does not qualify (fact-check
+   `subagent-reports/fact-check-n430.md`).
 2. Name the split in the deny reason: "if an earlier step of this command creates the repository, run the commit as
    its own call".
 
