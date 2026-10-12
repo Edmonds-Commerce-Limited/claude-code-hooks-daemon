@@ -4,6 +4,7 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 
 | #          | Verdict                                                                                                                                                            | Origin              | Status                                 |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------- | -------------------------------------- |
+| N444       | The plan fact-check feed tells client projects to dispatch `plan-fact-checker`, which the daemon never ships to them (#96)                                         | GitHub #96          | 🔄 In progress                         |
 | N443       | Upstream `agent_id` now also identifies in-process teammates (subagent-scoped guards may fire for them), and `additionalContext` reminder tags are escaped         | N442 refresh        | ⬜ Open                                |
 | N442       | The upstream hooks doc changed again after the 2.1.296 contract refresh, so the next release would ship a stale audit (#95)                                        | GitHub #95          | ✅ Fixed (e745dc3cf)                   |
 | N441       | A Layer 1 upgrade never reaches the stale-venv cleanup, and that cleanup is slug- and lock-hash-unaware (unsafe on a shared checkout) (#94)                        | GitHub #94          | ✅ Fixed (494909b5b)                   |

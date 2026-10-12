@@ -77,6 +77,37 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N444 — the plan fact-check feed tells client projects to dispatch an agent the daemon never ships to them
+
+**Source**: GitHub issue #96 (triaged 2026-10-12).
+
+**Evidence**:
+
+- **The instruction names it:** `plan_fact_check_feed` delivers "Dispatch the `plan-fact-checker` agent now on …". The
+  name is the constant `FACT_CHECKER_AGENT` in `utils/plan_fact_check.py`, and nothing checks the agent exists.
+- **Nothing ships it:** `SHIPPED_AGENTS` in `install/agent_assets.py` lists three agents (plan dedupe scout, opus
+  security, docs QA), matching the three templates under `install/templates/agents/`. The only `plan-fact-checker`
+  definition is this repository's own `.claude/agents/plan-fact-checker.md`. That file is not a template, carries no
+  `hooks-daemon-` prefix, and is never deployed.
+- **The reporter's comments:** an agent file created after the instruction arrived was not dispatchable in the session
+  that created it. It resolved later, so the agent has to exist at session start.
+
+**Already fixed, not in this entry**: the reporter's point that delivery records the plan as checked. Since N359
+(6005b1bec), the checked content advances only in `confirm_dispatch`. The stale "never speaks" comment was the
+handler description at v3.68.0, written into that project's own config. The current source does not carry it.
+
+**Remedy (coordinator ruling)**:
+
+- Ship a project-neutral `hooks-daemon-plan-fact-checker` agent template through `SHIPPED_AGENTS`. It is version- and
+  md5-ledgered like the other three, and gated on `handlers.post_tool_use.plan_fact_check_feed.enabled`.
+- `FACT_CHECKER_AGENT` names it, and dispatch confirmation keeps working for it.
+- The delivered instruction says what to do when the agent type is not available in the session: deploy it with the
+  `agents` CLI, and note that it becomes dispatchable only from a later session.
+
+This repository's own `plan-fact-checker` is retired in favour of the deployed copy, and its references are updated.
+
+**Status**: 🔄 In progress.
+
 ### N443 — upstream now documents `agent_id` as also identifying an in-process teammate, and escapes reminder tags in `additionalContext`
 
 **Found**: by the N442 contract refresh (audit record `subagent-reports/261012-contract-refresh-n442-sonnet.md`).
