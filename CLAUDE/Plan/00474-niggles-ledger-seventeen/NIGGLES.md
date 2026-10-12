@@ -191,7 +191,8 @@ otherwise onto the root. The coordinator's briefs tell worktree agents to use ab
 2. The verifier also tries the claim under the dispatch's worktree when the work queue (or the agent's isolation
    record) names one. A claim that exists in the agent's own worktree counts as written.
 
-**Prior art**: 00466 N64 (fixed in 31ffeaabf) is the same symptom. Its fix resolves a relative claim against the event's
+**Prior art**: 00466 N64 is the same symptom. The cwd-then-root resolution came in with Plan 00446 (10b6d6f77). 00466's
+STATUS-2026-10.md cites 31ffeaabf, but that commit only renames the field to `HookInputField.CWD`. Its fix resolves a relative claim against the event's
 `cwd` and then the project root, which covers an agent that `cd`s into its worktree. N435 is the residual case that
 fix cannot see: an agent that never `cd`s, so its `cwd` is the main checkout. This is not a regression of N64.
 
