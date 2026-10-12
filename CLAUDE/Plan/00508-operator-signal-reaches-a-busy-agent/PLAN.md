@@ -51,14 +51,14 @@ signal's identity: session, `ts` and kind.
 
 ### Phase 1: Fix
 
-- [ ] ⬜ **Task 1.1**: RED. Tests for the new handler cover:
+- [x] ✅ **Task 1.1**: RED. Tests for the new handler cover:
   - the handler's own session's signal is surfaced, with the text and minutes;
   - a second event for the same signal is silent;
   - a newer signal is surfaced again;
   - another session's signal, an expired signal and a malformed file are each
     ignored (logged), and the handler never raises;
   - the signal file is left in place.
-- [ ] ⬜ **Task 1.2**: GREEN. Implement the handler.
+- [x] ✅ **Task 1.2**: GREEN. Implement the handler.
   - Reuse the existing renderer and validation, so the text matches what the
     supervisor would type. Where that code lives only in the supervisor, put
     the shared part in `utils/operator_signal.py`. Do not import the
@@ -67,7 +67,7 @@ signal's identity: session, `ts` and kind.
     enabled by default.
   - Add `get_claude_md` guidance, a HANDLER_REFERENCE entry and acceptance
     tests.
-- [ ] ⬜ **Task 1.3**: Add a release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] ✅ **Task 1.3**: Add a release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
 ### Phase 2: Land
 

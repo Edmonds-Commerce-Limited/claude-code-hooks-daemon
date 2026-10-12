@@ -940,6 +940,10 @@ handlers:
       enabled: true  # An unreadable pending record is set aside with a WARNING; delivery goes on.
       priority: 37
 
+    operator_signal_notice:  # Dogfood: a host reboot/shutdown warning reaches a busy agent at the next tool boundary (Plan 00508)
+      enabled: true  # On by default (opt-out); advisory-only, silent unless a signal is pending, never touches the signal file.
+      priority: 38
+
   # PostToolUseFailure handlers (run after a tool call FAILS)
   post_tool_use_failure:
     agent_terminated_early_failure_detector:  # Dogfood: a foreground Agent/Task dispatch killed by a usage limit surfaces here, not PostToolUse (Plan 00466 N46 review 2)
