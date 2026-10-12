@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS, lint_output_dir
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file, read_text_or_reason
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
@@ -74,8 +75,12 @@ def _load_manifest(manifest: Path) -> dict[str, Any] | None:
     try:
         return tomllib.loads(loaded.text)
     except tomllib.TOMLDecodeError as exc:
-        logger.warning("rust lint: %s is not valid TOML (%s)", manifest, exc)
-        return None
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"rust lint: {manifest} is not valid TOML, so the edition falls back to the standalone framing rather than failing the write",
+        )
+    return None
 
 
 def _inherits_workspace_edition(edition: object) -> bool:
