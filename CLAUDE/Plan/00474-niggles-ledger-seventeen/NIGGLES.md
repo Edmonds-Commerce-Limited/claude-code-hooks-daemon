@@ -96,8 +96,12 @@ although `_MESSAGE_TAKING_SUBCOMMANDS` has it. So the body is tokenised as shell
 The guard fix stands either way.
 
 **Remedy**: add `merge` to `_GIT_DATA_SUBCOMMANDS`, with tests written red first. Coordinator ruling (triage on #85).
+`_GIT_MESSAGE_SUBCOMMANDS` is left unchanged: it decides which `-F -` bodies the secret-path guard may blank as text,
+and `git merge -F -` does not read stdin here.
 
-**Status**: 🔄 In progress.
+**Status**: ✅ Fixed (merge e10dc32af, branch head 637661e81; #85). Range QA over the merge: 39/40. Its one red is
+`shell_segmentation.py` unmapped (too-broad), which CI's full-suite fallback covers; 2673 passed, 0 failed. The reporter's
+probe on the restarted daemon gives `decision: allow` with no could-not-judge advisory.
 
 ### N436 — the supervisor counts Ctrl+O as typed content, so a human who opens the compact summary blocks the post-compact resume
 
