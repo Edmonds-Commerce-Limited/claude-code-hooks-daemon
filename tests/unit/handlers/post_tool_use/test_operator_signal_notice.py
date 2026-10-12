@@ -153,6 +153,34 @@ class TestSurfacing:
         _signal(untracked, kind=KIND_REBOOT_CANCELLED, age=1.0)
         assert handler.handle(_event()).context
 
+    def test_main_thread_and_sub_agent_each_get_the_notice_once(
+        self, handler: OperatorSignalNoticeHandler, untracked: Path
+    ) -> None:
+        _signal(untracked)
+        sub_event = {**_event(), "agent_id": "agent-1"}
+        assert handler.handle(sub_event).context
+        assert handler.handle(_event()).context
+        assert not handler.handle(sub_event).context
+        assert not handler.handle(_event()).context
+
+    def test_two_sub_agents_each_get_the_notice_once(
+        self, handler: OperatorSignalNoticeHandler, untracked: Path
+    ) -> None:
+        _signal(untracked)
+        first = {**_event(), "agent_id": "agent-1"}
+        second = {**_event(), "agent_id": "agent-2"}
+        assert handler.handle(first).context
+        assert handler.handle(second).context
+        assert not handler.handle(first).context
+        assert not handler.handle(second).context
+
+    def test_empty_agent_id_is_the_main_thread(
+        self, handler: OperatorSignalNoticeHandler, untracked: Path
+    ) -> None:
+        _signal(untracked)
+        assert handler.handle({**_event(), "agent_id": ""}).context
+        assert not handler.handle(_event()).context
+
     def test_signal_is_surfaced_once_per_session(
         self, handler: OperatorSignalNoticeHandler, untracked: Path
     ) -> None:
