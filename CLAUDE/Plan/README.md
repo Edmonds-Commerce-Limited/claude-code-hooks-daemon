@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00510: docs qa edit stage skips nested and ignored checkouts](00510-docs-qa-edit-stage-skips-nested-and-ignored-checkouts/PLAN.md) - In Progress (#80: the docs QA edit stage lints a CLAUDE.md in a nested or gitignored checkout as the outer project's module doc)
-
 - [00501: session modes](00501-session-modes/PLAN.md) - Not Started, Medium (#91; first-class per-session modes shown in the status line: focus (`hooks-daemon focus <task>`), BLOCKED (awaiting-human, goal-blocked loop breaker), usage-paused; per-session awaiting-human storage; guards never gated)
 
 - [00496: upstream feature requests and issue kinds](00496-upstream-feature-requests-and-issue-kinds/PLAN.md) - Not Started (owner request: a formal process for project agents to file feature requests and other non-defect issues, mirroring the defect generator, guard and forms; security reports routed privately)
@@ -193,6 +191,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00510: docs qa edit stage skips nested and ignored checkouts](Completed/00510-docs-qa-edit-stage-skips-nested-and-ignored-checkouts/PLAN.md) - Complete at merge `5a963a367` + the archiving commit (#80: the docs QA edit stage drops nested separate checkouts and gitignored paths, matching the sweep; one shared `owning_checkout` rule; release note 033 in UNRELEASED)
+
 - [00509: markdown formatter honours exclusions and nested checkouts](Completed/00509-markdown-formatter-honours-exclusions-and-nested-checkouts/PLAN.md) - Complete at merge `52fd716f4` + `4c30051d8` + the archiving commit (#79: `exclude_paths` and `daemon.exclude_paths` honoured, nested separate checkouts skipped, and the advisory never narrower than the change; release note 032 in UNRELEASED)
 
 - [00508: operator signal reaches a busy agent](Completed/00508-operator-signal-reaches-a-busy-agent/PLAN.md) - Complete at merge `a948217b4` + the archiving commit (#77: a pending reboot/shutdown warning reaches a busy agent as hook context at its next tool call, once per agent thread; the supervisor stays the signal's only consumer; release note 030 in UNRELEASED)
@@ -244,8 +244,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00460: report size blocker gives read only agents a way out](Completed/00460-report-size-blocker-gives-read-only-agents-a-way-out/PLAN.md) - Complete at `ca2b1ba5` + the archiving commit (owner report: the size blocker told every agent to write its report to a file, which a read-only type cannot do; the daemon now saves every stopping sub-agent's reply to a pruned file and the blocker points at it)
 
 - [00462: php lsp advice keeps composer dependencies indexed](Completed/00462-php-lsp-advice-keeps-composer-dependencies-indexed/PLAN.md) - Complete at `830363e5` + the archiving commit (from #56: the PHP advice asked intelephense to exclude all of `**/vendor`, which drops every Composer dependency from its index; the strategy now keeps dependency roots indexed and asks only for intelephense's nested excludes, and flags an override that excludes the whole tree)
-
-- [00456: missing venv self heals and repair runs without one](Completed/00456-missing-venv-self-heals-and-repair-runs-without-one/PLAN.md) - Complete at `9e2f74cd` + the archiving commit (the rest of #53: a hook with no venv starts one detached, locked build; `repair` runs without a venv; the skill never auto-forces and a `--force` keeps other environments' venvs; carries Plan 00100 Phase 3.5)
 
 - [00459: encrypted vault files are tracked not hidden](Completed/00459-encrypted-vault-files-are-tracked-not-hidden/PLAN.md) - Complete at `2a6a9b84` + the archiving commit (owner report: secret-file globs select by NAME, so Ansible Vault ciphertext was told to be untracked; a whole-file content check at each use, failing closed, now separates it from the plaintext password file)
 
@@ -306,9 +304,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 510 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 435 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 436 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 52 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 51 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

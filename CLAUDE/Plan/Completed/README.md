@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00456: missing venv self heals and repair runs without one](00456-missing-venv-self-heals-and-repair-runs-without-one/PLAN.md) - Complete at `9e2f74cd` + the archiving commit (the rest of #53: a hook with no venv starts one detached, locked build; `repair` runs without a venv; the skill never auto-forces and a `--force` keeps other environments' venvs; carries Plan 00100 Phase 3.5)
+
 - [00455: self install exposes the conventional cli path](00455-self-install-exposes-the-conventional-cli-path/PLAN.md) - Complete at `e6a11e19` + the archiving commit (from #54: the self-install daemon generates the conventional CLI link under the gitignored directory, because a tracked one would reach every client clone as a nested install; install-mode checks now require a real clone. Review reverted a copied exemption, filed as 00422 N19)
 
 - [00454: not installed message steers to destructive reinstall](00454-not-installed-message-steers-to-destructive-reinstall/PLAN.md) - Complete at `f299681f` + the archiving commit (first slice of #53: a clone with no venv for this path now gets its own diagnosis naming a version-pinned upgrade, not the install advice that `rm -rf`s the other view's venv; #53 stays open)

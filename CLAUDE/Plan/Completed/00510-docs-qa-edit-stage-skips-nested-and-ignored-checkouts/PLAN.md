@@ -1,6 +1,6 @@
 # Plan 00510: docs qa edit stage skips nested and ignored checkouts
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-12
 **Owner**: dev
 **Priority**: Medium
@@ -62,14 +62,19 @@ Coordinator ruling (the triage is in #80):
 
 ### Phase 2: Land
 
-- [ ] ⬜ **Task 2.1**: Review, coordinator checks, merge; comment on and close #80.
+- [x] ✅ **Task 2.1**: Review, coordinator checks, merge; comment on and close #80.
+  Merged `5a963a367` with no rework. The boundary applies to every admitting
+  arm, not only module docs, so the edit stage matches the sweep (a
+  coordinator ruling).
 
 ## Success Criteria
 
-- [ ] The edit stage and the sweep agree on nested and ignored paths.
-- [ ] The release-bound consequence (a narrower edit scope) is in the
-  pending-release holding area as a release note.
+- [x] The edit stage and the sweep agree on nested and ignored paths.
+- [x] The release-bound consequence, a narrower edit scope, is in the
+  pending-release holding area as release note 033 in
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
 ## Delivery & Milestones
 
 - Issue #80 triaged and claimed.
+- Merged `5a963a367`; the range QA was green in substance.
