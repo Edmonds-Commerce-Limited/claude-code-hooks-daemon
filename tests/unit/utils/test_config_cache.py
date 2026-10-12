@@ -14,12 +14,9 @@ measured on a different daemon-lifetime singleton.
 
 from __future__ import annotations
 
-import concurrent.futures
 import copy
 import os
 import pickle
-import sys
-import threading
 from pathlib import Path
 from typing import Final
 from unittest.mock import patch
@@ -32,6 +29,7 @@ from claude_code_hooks_daemon.utils.config_cache import (
     load_config_cached,
     reset_config_cache,
 )
+from tests.thread_contention import hammer
 
 _YAML: Final[str] = "daemon:\n  strict_mode: true\n"
 _OTHER_YAML: Final[str] = "daemon:\n  strict_mode: false\n"
@@ -336,23 +334,18 @@ class TestConcurrentCallersShareOneEntry:
         config_file = tmp_path / "hooks-daemon.yaml"
         _write(config_file, _YAML)
 
-        original_interval = sys.getswitchinterval()
         # An unlocked cache survives the default 5 ms interval untouched: the
         # GIL simply does not preempt inside the read-modify-write. Plan 00437
         # had to drive the interval to its floor before the failure appeared at
         # all, and a concurrency test that has never been seen failing is not
-        # evidence of anything.
-        sys.setswitchinterval(1e-9)
-        barrier = threading.Barrier(16)
-        try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+        # evidence of anything. ``hammer`` does that, and starts its workers
+        # in a way that survives coverage's per-thread ``settrace`` (N428).
+        seen: set[int] = set()
+        errors = hammer(
+            lambda worker, call: seen.add(id(load_config_cached(config_file))),
+            workers=16,
+            calls_per_worker=1,
+        )
 
-                def hammer() -> int:
-                    barrier.wait()
-                    return id(load_config_cached(config_file))
-
-                seen = {future.result() for future in [pool.submit(hammer) for _ in range(16)]}
-        finally:
-            sys.setswitchinterval(original_interval)
-
+        assert not errors, f"concurrent callers raised: {errors[:3]}"
         assert len(seen) == 1

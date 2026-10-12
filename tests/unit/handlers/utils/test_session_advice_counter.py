@@ -19,12 +19,10 @@ threads.
 
 from __future__ import annotations
 
-import sys
-import threading
-from collections.abc import Iterator
 from typing import Final
 
 import pytest
+from tests.thread_contention import hammer
 
 from claude_code_hooks_daemon.handlers.utils.session_advice_counter import (
     SessionAdviceCounter,
@@ -104,29 +102,6 @@ class TestBounding:
         assert counter.should_advise("s0") is True
 
 
-#: Worker/call counts and the switch interval below are not arbitrary: at
-#: CPython's DEFAULT 5ms interval the unlocked version survived 16 threads of
-#: 200 calls with zero errors, because the whole read-modify-write is a handful
-#: of bytecodes and preemption almost never lands inside it. Driving the
-#: interval to the floor reproduced 26 ``KeyError``s on the first round. A
-#: concurrency test that cannot be observed failing is not evidence of
-#: anything, so these are the numbers that made the RED real.
-_WORKERS: Final[int] = 32
-_CALLS_PER_WORKER: Final[int] = 2000
-_AGGRESSIVE_SWITCH_INTERVAL: Final[float] = 1e-9
-
-
-@pytest.fixture
-def aggressive_preemption() -> Iterator[None]:
-    """Make the interpreter switch threads as often as it is allowed to."""
-    previous = sys.getswitchinterval()
-    sys.setswitchinterval(_AGGRESSIVE_SWITCH_INTERVAL)
-    try:
-        yield
-    finally:
-        sys.setswitchinterval(previous)
-
-
 class TestConcurrentCallersNeverRaise:
     """The defect: an unlocked read-modify-write on a shared singleton.
 
@@ -135,32 +110,13 @@ class TestConcurrentCallersNeverRaise:
     same victim key.
     """
 
-    def test_no_exception_escapes_under_concurrent_eviction(
-        self, aggressive_preemption: None
-    ) -> None:
+    def test_no_exception_escapes_under_concurrent_eviction(self) -> None:
         cap = 8
         counter = SessionAdviceCounter(interval=_INTERVAL, max_sessions=cap)
         for index in range(cap):
             counter.should_advise(f"seed{index}")
 
-        errors: list[BaseException] = []
-        start = threading.Barrier(_WORKERS)
-
-        def hammer(worker: int) -> None:
-            start.wait()
-            try:
-                for call in range(_CALLS_PER_WORKER):
-                    counter.should_advise(f"w{worker}-{call}")
-            except (KeyError, RuntimeError) as exc:
-                # Collected rather than raised: an exception on a worker thread
-                # is invisible to pytest, so the assertion below IS the report.
-                errors.append(exc)
-
-        threads = [threading.Thread(target=hammer, args=(worker,)) for worker in range(_WORKERS)]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join()
+        errors = hammer(lambda worker, call: counter.should_advise(f"w{worker}-{call}"))
 
         assert not errors, f"concurrent callers raised: {errors[:3]}"
         assert counter.tracked_sessions() <= cap
