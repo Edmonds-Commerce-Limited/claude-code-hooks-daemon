@@ -1,8 +1,8 @@
 {
   "docs_url": "https://code.claude.com/docs/en/hooks.md",
-  "fetch_date": "2026-10-11",
-  "docs_bytes": 266649,
-  "docs_sha256": "3a1f944503d05a61fdc0fac62add9ba3d877ccb03dd4ef9c3c79881c973938ef",
+  "fetch_date": "2026-10-12",
+  "docs_bytes": 268811,
+  "docs_sha256": "31754d5adce5052af35acf85dc2ed207bb082b7dbf87f25218047b10a024a073",
   "last_audited_claude_code_version": "2.1.296",
   "refresh_procedure": "docs/guides/HOOK-CONTRACT-REFRESH.md",
   "event_count": 33

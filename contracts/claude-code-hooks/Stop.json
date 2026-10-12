@@ -20,7 +20,7 @@
   },
   "discarded_fields": [],
   "conditional_input_fields": {
-    "agent_id": "Present ONLY when the hook fires inside a subagent call. A main-thread Stop carries no agent identity, which is what makes its ABSENCE the usable signal.",
+    "agent_id": "Identifies the agent the hook fires in: upstream, 'Unique identifier for the subagent or in-process teammate the hook fires in'. The Stop example carries none. Upstream no longer says in words that a main-thread Stop omits it; that reading rests on the example, and an in-process teammate now also carries an agent_id.",
     "agent_type": "Present when the session uses --agent or the hook fires inside a subagent. Note a session-wide --agent makes this present on a MAIN-THREAD stop too, so agent_type alone does not mean 'in a subagent' -- agent_id does.",
     "effort": "In the example, but present only when the current model supports the effort parameter.",
     "session_crons": "In the example, but conditional in practice -- an ABSENT list is not the same fact as an EMPTY one. One entry per session-scoped wakeup sourced from CronCreate, ScheduleWakeup and /loop, each with id, schedule, recurring and prompt. Note `prompt` is CAPPED at 1000 characters with an in-string '... [+N chars]' marker, so exact-equality matching against a declared prompt longer than that never succeeds.",
