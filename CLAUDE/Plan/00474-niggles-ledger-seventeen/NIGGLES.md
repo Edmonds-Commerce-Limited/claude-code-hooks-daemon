@@ -77,6 +77,25 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N435 — the report-path verifier resolves a worktree agent's relative report path against the main checkout
+
+**Found**: by the coordinator on 2026-10-12. dev-83 (issue #83) committed its report inside its worktree, then
+quoted the path as plan-relative in its final message. `subagent_report_path_verifier` reported the file missing,
+because it looked for it under `/workspace`, and the agent's brief forbade writing a copy there.
+
+**Why**: the verifier joins a relative claim onto the event's `cwd` when that `cwd` is inside the project root, and
+otherwise onto the root. The coordinator's briefs tell worktree agents to use absolute paths and never `cd`, so their
+`cwd` stays at the main checkout. A worktree-relative claim then resolves against the wrong checkout.
+
+**Candidate remedies**:
+
+1. Coordinator briefs ask for the report path to be quoted ABSOLUTE in the final message. This costs nothing and
+   takes effect at once.
+2. The verifier also tries the claim under the dispatch's worktree when the work queue (or the agent's isolation
+   record) names one. A claim that exists in the agent's own worktree counts as written.
+
+**Status**: ⬜ Open (remedy 1 applied to future briefs).
+
 ### N434 — the venv resolvers' scan fallback picks the lexically-first venv, so the upgrade detector reports a false downgrade
 
 **Source**: GitHub issue #84 (triaged 2026-10-12).
