@@ -97,7 +97,11 @@ Tests come red first.
 plan-QA check shares, so it belongs to Plan 00144 (Plan QA, dormant, the superset the dedupe scout named) and is
 recorded in its journal.
 
-**Status**: 🔄 In progress.
+**Status**: ✅ Fixed (merge ac50fc353, branch head acabc5f97; #90). The unindexed remediation states both accepted forms
+under a `##` section. When the README names the plan in a markdown table row (`ReadmeIndex.table_numbers`, used only for
+the message), the remediation says table rows are not read. Table rows still never satisfy the check, and the level is
+unchanged. `docs/guides/HANDLER_REFERENCE.md`, the only doc naming `row-folder-bijection`, states the row forms. Range
+QA over the merge: 40/40 (3380 passed).
 
 ### N439 — the Effort Source check claims modelSettings provides per-model levels without reading modelSettings
 
