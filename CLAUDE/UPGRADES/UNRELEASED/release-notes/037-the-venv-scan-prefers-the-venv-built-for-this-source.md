@@ -1,0 +1,6 @@
+# Callout: the venv scan prefers the venv built for this source
+
+**Plan**: 00474
+**Audience**: everyone
+
+After an interpreter patch update the current interpreter fingerprint matches no venv, and both venv resolvers fell back to a scan that returned the lexically-first `untracked/venv-*`. A legacy un-slugged `venv-py311-<hex>` sorts ahead of a slugged `venv-<slug>-py313-<hex>`, so a stale legacy venv with old metadata won: `daemon_upgrade_detector` reported a false downgrade on every turn, and the shell side ran the upgrade gate under the legacy interpreter. Both scans (`resolve_existing_venv_python` in `paths.py` and `_rv_pick_python` in `scripts/lib/resolve_venv.sh`) now rank the candidates: a venv whose `.daemon-metadata.json` `lock_hash` matches the current `pyproject.toml` and `uv.lock` first, other slugged venvs next, legacy un-slugged venvs last, with ties kept in name order. The ranking uses stdlib hashing (a `sha256sum` or `shasum` call on the shell side) and one JSON read per candidate, with no Python spawn, so the per-turn hot path costs what it did. The override and the exact-fingerprint steps, the slug rule and the shell run-probe are unchanged, and an install with only a legacy venv still resolves it (reported as issue #84).

@@ -955,6 +955,51 @@ def _venv_interpreter_runs(candidate: Path) -> bool:
     return result.returncode == 0
 
 
+_SCAN_RANK_LOCK_HASH_MATCH = 0
+_SCAN_RANK_SLUGGED = 1
+_SCAN_RANK_LEGACY = 2
+
+
+def _best_ranked_scan_candidate(daemon_path: Path, untracked: Path) -> Path | None:
+    """Return the best usable ``venv-*/bin/python`` under ``untracked``, or ``None``.
+
+    Candidates must be slug-eligible (:func:`_venv_slug_eligible`) with an
+    executable ``bin/python``. They are ranked, best first:
+
+    1. metadata ``lock_hash`` equal to the current source's lock hash
+       (:func:`_compute_project_lock_hash_stdlib`) — the venv built for THIS source;
+    2. other slugged candidates;
+    3. legacy un-slugged candidates (``venv-py{MM}-{hex}``).
+
+    Ties keep the sorted-name order. Stdlib hashing and one JSON read per
+    candidate only: no subprocess, because the caller is on the per-turn hot path.
+    """
+    current_slug = project_path_slug(daemon_path)
+    current_hash = _compute_project_lock_hash_stdlib(daemon_path)
+    best: tuple[int, Path] | None = None
+    for candidate_dir in sorted(untracked.glob("venv-*")):
+        eligible, _skip_reason = _venv_slug_eligible(candidate_dir, current_slug)
+        if not eligible:
+            continue
+        candidate = candidate_dir / "bin" / "python"
+        if not (candidate.is_file() and os.access(candidate, os.X_OK)):
+            continue
+        metadata = _read_venv_metadata_stdlib(candidate_dir)
+        if (
+            current_hash is not None
+            and metadata is not None
+            and (metadata["lock_hash"] == current_hash)
+        ):
+            rank = _SCAN_RANK_LOCK_HASH_MATCH
+        elif _parse_venv_dir_slug(candidate_dir.name) is not None:
+            rank = _SCAN_RANK_SLUGGED
+        else:
+            rank = _SCAN_RANK_LEGACY
+        if best is None or rank < best[0]:
+            best = (rank, candidate)
+    return best[1] if best is not None else None
+
+
 def resolve_existing_venv_python(daemon_dir: Path | str) -> Path:
     """Resolve the bin/python of an already-installed venv under ``daemon_dir``.
 
@@ -964,7 +1009,10 @@ def resolve_existing_venv_python(daemon_dir: Path | str) -> Path:
 
     1. ``$HOOKS_DAEMON_VENV_PATH/bin/python`` — explicit override
     2. ``{daemon_dir}/untracked/venv-{current-fingerprint}/bin/python`` — fingerprint match
-    3. First executable ``{daemon_dir}/untracked/venv-*/bin/python`` — scan fallback
+    3. Best-ranked executable ``{daemon_dir}/untracked/venv-*/bin/python`` — scan
+       fallback (see :func:`_best_ranked_scan_candidate`): a venv whose metadata
+       ``lock_hash`` matches the current source first, other slugged venvs next,
+       legacy un-slugged ``venv-py{MM}-{hex}`` venvs last
     4. ``{daemon_dir}/untracked/venv/bin/python`` — legacy (pre-v3.7.0)
 
     The scan fallback (step 3) handles the case where the installer built
@@ -1024,14 +1072,9 @@ def resolve_existing_venv_python(daemon_dir: Path | str) -> Path:
         return keyed
 
     if untracked.is_dir():
-        current_slug = project_path_slug(daemon_path)
-        for candidate_dir in sorted(untracked.glob("venv-*")):
-            eligible, _skip_reason = _venv_slug_eligible(candidate_dir, current_slug)
-            if not eligible:
-                continue
-            candidate = candidate_dir / "bin" / "python"
-            if candidate.is_file() and os.access(candidate, os.X_OK):
-                return candidate
+        scanned = _best_ranked_scan_candidate(daemon_path, untracked)
+        if scanned is not None:
+            return scanned
 
     # TODO Plan 00100 Phase 2: once this Python entry point becomes the single
     # SSOT (bash resolvers shell out here), remove the scan fallback above and

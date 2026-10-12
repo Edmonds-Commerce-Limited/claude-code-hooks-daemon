@@ -20,12 +20,14 @@ useful "venv missing" error messages that still mention the legacy path.
 
 from __future__ import annotations
 
+import json
 import stat
 from pathlib import Path
 
 import pytest
 
 from claude_code_hooks_daemon.daemon.paths import (
+    _compute_project_lock_hash_stdlib,
     project_path_slug,
     python_venv_fingerprint,
     resolve_existing_venv_python,
@@ -262,6 +264,132 @@ class TestScanFallbackSlugEligibility:
 
         result = resolve_existing_venv_python(tmp_path)
         assert result == expected
+
+
+def _stamp_metadata(venv_dir: Path, lock_hash: str, daemon_version: str) -> None:
+    """Write the ``.daemon-metadata.json`` the stdlib reader accepts."""
+    (venv_dir / ".daemon-metadata.json").write_text(
+        json.dumps(
+            {
+                "python_path": str(venv_dir / "bin" / "python"),
+                "lock_hash": lock_hash,
+                "daemon_version": daemon_version,
+            }
+        )
+    )
+
+
+def _write_project_sources(root: Path) -> str:
+    """Create a pyproject.toml under ``root`` and return its stdlib lock hash."""
+    (root / "pyproject.toml").write_text('[project]\nname = "demo"\n')
+    lock_hash = _compute_project_lock_hash_stdlib(root)
+    assert lock_hash is not None
+    return lock_hash
+
+
+class TestScanFallbackRanking:
+    """Plan 00474 N434: the scan prefers the venv built for THIS source.
+
+    After an interpreter patch update no venv matches the fingerprint. The
+    lexically-first legacy un-slugged venv must not win over a slugged venv
+    whose metadata lock_hash matches the current source.
+    """
+
+    def test_lock_hash_match_beats_lexically_first_legacy_venv(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The issue's layout: legacy v1.0.0 venv sorts first, slugged v2.0.0 matches."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        current_hash = _write_project_sources(tmp_path)
+        untracked = tmp_path / "untracked"
+        legacy = _make_fake_venv(untracked / "venv-py311-00000001")
+        _stamp_metadata(legacy.parent.parent, "sha256:stale", "v1.0.0")
+        slug = project_path_slug(tmp_path)
+        slugged_dir = untracked / f"venv-{slug}-py313-00000002"
+        slugged = _make_fake_venv(slugged_dir)
+        _stamp_metadata(slugged_dir, current_hash, "v2.0.0")
+        assert sorted(untracked.glob("venv-*"))[0].name == "venv-py311-00000001"
+
+        assert resolve_existing_venv_python(tmp_path) == slugged
+
+    def test_lock_hash_match_beats_other_slugged_venv(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        current_hash = _write_project_sources(tmp_path)
+        untracked = tmp_path / "untracked"
+        slug = project_path_slug(tmp_path)
+        stale_dir = untracked / f"venv-{slug}-py311-00000001"
+        _make_fake_venv(stale_dir)
+        _stamp_metadata(stale_dir, "sha256:stale", "v1.0.0")
+        fresh_dir = untracked / f"venv-{slug}-py313-00000002"
+        fresh = _make_fake_venv(fresh_dir)
+        _stamp_metadata(fresh_dir, current_hash, "v2.0.0")
+
+        assert resolve_existing_venv_python(tmp_path) == fresh
+
+    def test_slugged_venv_beats_legacy_when_no_lock_hash_matches(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        _write_project_sources(tmp_path)
+        untracked = tmp_path / "untracked"
+        _make_fake_venv(untracked / "venv-py311-00000001")
+        slug = project_path_slug(tmp_path)
+        slugged = _make_fake_venv(untracked / f"venv-{slug}-py313-00000002")
+
+        assert resolve_existing_venv_python(tmp_path) == slugged
+
+    def test_slugged_venv_beats_legacy_without_project_sources(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No pyproject.toml means no current hash; legacy still ranks last."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        untracked = tmp_path / "untracked"
+        _make_fake_venv(untracked / "venv-py311-00000001")
+        slug = project_path_slug(tmp_path)
+        slugged = _make_fake_venv(untracked / f"venv-{slug}-py313-00000002")
+
+        assert resolve_existing_venv_python(tmp_path) == slugged
+
+    def test_legacy_venv_alone_is_still_returned(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        _write_project_sources(tmp_path)
+        legacy = _make_fake_venv(tmp_path / "untracked" / "venv-py311-00000001")
+
+        assert resolve_existing_venv_python(tmp_path) == legacy
+
+    def test_lock_hash_matching_legacy_beats_stale_slugged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The metadata match is the first rank, whatever the name shape."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        current_hash = _write_project_sources(tmp_path)
+        untracked = tmp_path / "untracked"
+        legacy_dir = untracked / "venv-py311-00000001"
+        legacy = _make_fake_venv(legacy_dir)
+        _stamp_metadata(legacy_dir, current_hash, "v2.0.0")
+        slug = project_path_slug(tmp_path)
+        stale_dir = untracked / f"venv-{slug}-py313-00000002"
+        _make_fake_venv(stale_dir)
+        _stamp_metadata(stale_dir, "sha256:stale", "v1.0.0")
+
+        assert resolve_existing_venv_python(tmp_path) == legacy
+
+    def test_lock_hash_match_does_not_override_slug_ineligibility(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        current_hash = _write_project_sources(tmp_path)
+        foreign_dir = tmp_path / "untracked" / "venv-workspace-py311-81c29529"
+        _make_fake_venv(foreign_dir)
+        _stamp_metadata(foreign_dir, current_hash, "v2.0.0")
+
+        assert resolve_existing_venv_python(tmp_path) == (
+            tmp_path / "untracked" / "venv" / "bin" / "python"
+        )
 
 
 class TestStringArgumentAccepted:
