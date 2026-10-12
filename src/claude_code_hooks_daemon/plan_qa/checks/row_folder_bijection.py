@@ -29,7 +29,12 @@ _LOCATION_SECTIONS: Final[dict[PlanLocation, frozenset[ReadmeSection]]] = {
 }
 
 _UNINDEXED_REMEDIATION: Final[str] = (
-    "Add an index row linking to this plan in the appropriate README section."
+    "Add an index row for this plan under the matching `##` section of the README, in one of "
+    "the two accepted forms: the linked row `- [NNNNN: Title](NNNNN-name/PLAN.md) - status` "
+    "or the bold row `- **NNNNN** - status`."
+)
+_TABLE_ROW_NOTE: Final[str] = (
+    "The README has a table row for this plan, but table rows are not read as index rows. "
 )
 _WRONG_SECTION_REMEDIATION: Final[str] = (
     "Move the README row to the matching section (or move the folder to match its row)."
@@ -69,12 +74,16 @@ def _folder_findings(context: CheckContext, folder: PlanFolder) -> list[Finding]
     rows = context.readme.rows_for(folder.number) if context.readme is not None else ()
 
     if not rows:
+        in_table = context.readme is not None and folder.number in context.readme.table_numbers
+        remediation = (
+            _TABLE_ROW_NOTE + _UNINDEXED_REMEDIATION if in_table else _UNINDEXED_REMEDIATION
+        )
         return [
             Finding(
                 check_id=CHECK_ID,
                 level=_folder_level(context, folder),
                 message=f"Plan folder {folder.name} has no README index row",
-                remediation=_UNINDEXED_REMEDIATION,
+                remediation=remediation,
                 path=folder.name,
             )
         ]

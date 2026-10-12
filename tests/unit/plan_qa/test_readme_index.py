@@ -136,6 +136,28 @@ class TestReadmeRows:
         assert isinstance(row, ReadmeRow)
 
 
+class TestTableRows:
+    _TABLE = (
+        "## Active Plans\n\n"
+        "| Plan | Title | Status |\n| --- | --- | --- |\n"
+        "| [00001](00001-x/PLAN.md) | One | Not Started |\n"
+        "| 00002 | Two | Not Started |\n"
+        "| Header only | 00003 mentioned later | x |\n"
+    )
+
+    def test_table_rows_are_recorded_but_not_rows(self) -> None:
+        index = ReadmeIndex.parse(self._TABLE)
+        assert index.rows == ()
+        assert index.table_numbers == frozenset({1, 2})
+
+    def test_table_rows_in_fences_are_ignored(self) -> None:
+        text = "## Active Plans\n\n```\n| 00006 | x | y |\n```\n"
+        assert ReadmeIndex.parse(text).table_numbers == frozenset()
+
+    def test_no_table_gives_empty_set(self) -> None:
+        assert ReadmeIndex.parse(REALISTIC_README).table_numbers == frozenset()
+
+
 class TestReadmeStats:
     def test_parses_leading_integers(self) -> None:
         index = ReadmeIndex.parse(REALISTIC_README)

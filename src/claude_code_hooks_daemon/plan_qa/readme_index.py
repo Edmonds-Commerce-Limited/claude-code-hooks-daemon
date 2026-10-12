@@ -74,6 +74,9 @@ _NUMBER_RE: Final[re.Pattern[str]] = re.compile(r"\b(\d{1,5})\b")
 
 _TITLE_LEADING_COLON_RE: Final[re.Pattern[str]] = re.compile(r"^\s*:?\s*")
 
+# A markdown table row; never an index row, but recorded so a finding can say so.
+_TABLE_LINK_NUMBER_RE: Final[re.Pattern[str]] = re.compile(r"\]\((?:[^)]*/)?(\d{5})-[^)]*\)")
+
 
 @dataclass(frozen=True)
 class ReadmeRow:
@@ -117,12 +120,17 @@ class ReadmeIndex:
     rows: tuple[ReadmeRow, ...]
     stats: dict[str, int]
     lines: tuple[str, ...] = ()
+    # Plan numbers named by markdown TABLE rows. Tables are not an index grammar,
+    # so these never enter ``rows``; they exist so a check can tell "no row" from
+    # "a row in a form that is not read".
+    table_numbers: frozenset[int] = frozenset()
 
     @classmethod
     def parse(cls, text: str) -> "ReadmeIndex":
         """Parse ``text`` (full README.md content) into a :class:`ReadmeIndex`."""
         rows: list[ReadmeRow] = []
         stats: dict[str, int] = {}
+        table_numbers: set[int] = set()
         section = ReadmeSection.OTHER
 
         for line in lines_outside_fences(text):
@@ -140,8 +148,15 @@ class ReadmeIndex:
             row = _parse_row(line, section)
             if row is not None:
                 rows.append(row)
+            else:
+                table_numbers.update(_table_row_numbers(line))
 
-        return cls(rows=tuple(rows), stats=stats, lines=tuple(text.split("\n")))
+        return cls(
+            rows=tuple(rows),
+            stats=stats,
+            lines=tuple(text.split("\n")),
+            table_numbers=frozenset(table_numbers),
+        )
 
     def rows_for(self, number: int) -> tuple[ReadmeRow, ...]:
         """Every row that references plan ``number``."""
@@ -159,6 +174,19 @@ def _classify_section(heading: str) -> ReadmeSection:
         if keyword in lowered:
             return section
     return ReadmeSection.OTHER
+
+
+def _table_row_numbers(line: str) -> set[int]:
+    """Plan numbers a table row names: a link to ``NNNNN-...`` or its first cell."""
+    if not line.startswith("|"):
+        return set()
+    numbers = {int(value) for value in _TABLE_LINK_NUMBER_RE.findall(line)}
+    cells = line.split("|")
+    if len(cells) > 1:
+        first = _NUMBER_RE.search(cells[1])
+        if first:
+            numbers.add(int(first.group(1)))
+    return numbers
 
 
 def _parse_row(line: str, section: ReadmeSection) -> ReadmeRow | None:
