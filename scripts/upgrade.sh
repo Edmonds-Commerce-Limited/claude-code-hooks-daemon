@@ -1180,6 +1180,28 @@ if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
         fi
     fi
 
+    # N445: a Layer 2 that has the restore step ran it before it deployed and
+    # restarted, and left its report in the handoff directory. The call above
+    # then finds only what that restore left, so the report is merged in and
+    # the restore is not counted as an edit made after the restart.
+    _eff_restored_here=0
+    if [ "$_eff_rc" -eq 1 ] && printf '%s\n' "$_eff_out" | grep -q 'handler(s) RESTORED'; then
+        _eff_restored_here=1
+    fi
+    _eff_early=""
+    _eff_early_file="${_HANDOFF_DIR:-}/restored-handlers"
+    if [ -n "${_HANDOFF_DIR:-}" ] && [ -f "$_eff_early_file" ] && [ ! -L "$_eff_early_file" ] && [ -O "$_eff_early_file" ]; then
+        _eff_early="$(cat "$_eff_early_file")"
+    fi
+    if [ -n "$_eff_early" ] && { [ "$_eff_rc" -eq 0 ] || [ "$_eff_rc" -eq 1 ]; }; then
+        if [ "$_eff_rc" -eq 1 ]; then
+            _eff_out="${_eff_early}"$'\n'"${_eff_out}"
+        else
+            _eff_out="$_eff_early"
+        fi
+        _eff_rc=1
+    fi
+
     if [ "$_eff_rc" -eq 1 ]; then
         echo ""
         _warn "${_BOLD}HANDLERS THAT CHANGE STATE WITH THIS UPGRADE${_NC}"
@@ -1190,12 +1212,19 @@ if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
             /handler\(s\) START/ {kind = "starts"}
             /^  - handlers\./ {printf "%s%s:%s", sep, kind, $2; sep = ","}')"
         _info "Commit message: hooks daemon ${FROM_VERSION#v} -> ${TARGET_SEMVER#v}, and name the handlers above that were restored, stop or start running."
-        if printf '%s\n' "$_eff_out" | grep -q 'handler(s) RESTORED'; then
+        if [ "$_eff_restored_here" -eq 1 ]; then
             _warn "${_BOLD}RESTART THE DAEMON${_NC} for the restored handlers to take effect: this step edited ${_metadata_config_file} after the daemon was restarted, so the running daemon and its generated guidance still have them off."
             if [ "$_metadata_config_summary" = "no config changes" ]; then
                 _metadata_config_summary="config file edited by the upgrade: opt-in handlers restored with enabled: true; restart the daemon to apply"
             else
                 _metadata_config_summary="${_metadata_config_summary}; opt-in handlers restored with enabled: true (restart the daemon to apply)"
+            fi
+        elif [ -n "$_eff_early" ]; then
+            _info "The restored handlers were written to ${_metadata_config_file} before the daemon was restarted, so the running daemon already has them on."
+            if [ "$_metadata_config_summary" = "no config changes" ]; then
+                _metadata_config_summary="config file edited by the upgrade: opt-in handlers restored with enabled: true before the daemon restarted"
+            else
+                _metadata_config_summary="${_metadata_config_summary}; opt-in handlers restored with enabled: true before the daemon restarted"
             fi
         elif [ "$_metadata_config_summary" = "no config changes" ]; then
             _metadata_config_summary="config file unchanged, but the effective handler set changed"
