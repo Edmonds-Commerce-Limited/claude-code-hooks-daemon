@@ -11,6 +11,10 @@ Usage:
     result = execute_command(timeout=Timeout.BASH_DEFAULT)
 """
 
+from typing import ClassVar
+
+from claude_code_hooks_daemon.constants.events import EventType
+
 
 class Timeout:
     """Timeout constants in various units.
@@ -132,6 +136,43 @@ class Timeout:
     GIT_FETCH_SESSION = 30  # 30 seconds (full fetch --all --prune on session start)
     GIT_PULL_SESSION = 30  # 30 seconds (git pull --ff-only in auto-pull mode)
     GIT_WORKTREE = 30  # 30 seconds (git worktree add/remove for WorktreeCreate/Remove)
+    # Plan 00512: one short git call around a `worktree add` -- the branch
+    # pre-check before it, and on failure the three that undo it (remove the
+    # worktree, prune its registration, delete its branch).
+    GIT_WORKTREE_CLEANUP = GIT_CONTEXT
+    GIT_WORKTREE_CLEANUP_CALLS = 4
+
+    # Plan 00512 (issue #82): WorktreeCreate and WorktreeRemove are not guards.
+    # They run git and report a path, and their git call (GIT_WORKTREE) is longer
+    # than the guard chain deadline, so a slow `git worktree add` finished after
+    # the hook had already answered with no path. These events get their own
+    # budget, in three nested layers per event: the handler's worst-case git
+    # time < the chain deadline < the client's socket wait. The chain deadline
+    # leaves CHAIN_DEADLINE_HANDLER_MARGIN_SECONDS over the handler, the client
+    # wait leaves CHAIN_DEADLINE_SOCKET_MARGIN_SECONDS over the chain deadline.
+    # Every event absent from these tables keeps CHAIN_DEADLINE_DEFAULT and
+    # SOCKET_DISPATCH_ROUNDTRIP. `.claude/init.sh` (`_event_socket_wait`) mirrors
+    # EVENT_CLIENT_WAIT because that stdlib-only client cannot import this module;
+    # test_event_budgets.py pins the two equal.
+    CHAIN_DEADLINE_HANDLER_MARGIN_SECONDS = 5
+    EVENT_HANDLER_BUDGET: ClassVar[dict[EventType, int]] = {
+        # The add plus its short pre-check and cleanup calls, all failing.
+        EventType.WORKTREE_CREATE: GIT_WORKTREE + GIT_WORKTREE_CLEANUP * GIT_WORKTREE_CLEANUP_CALLS,
+        # `worktree remove --force` and then `worktree prune`.
+        EventType.WORKTREE_REMOVE: 2 * GIT_WORKTREE,
+    }
+    EVENT_CHAIN_DEADLINE: ClassVar[dict[EventType, int]] = {
+        EventType.WORKTREE_CREATE: EVENT_HANDLER_BUDGET[EventType.WORKTREE_CREATE]
+        + CHAIN_DEADLINE_HANDLER_MARGIN_SECONDS,
+        EventType.WORKTREE_REMOVE: EVENT_HANDLER_BUDGET[EventType.WORKTREE_REMOVE]
+        + CHAIN_DEADLINE_HANDLER_MARGIN_SECONDS,
+    }
+    EVENT_CLIENT_WAIT: ClassVar[dict[EventType, int]] = {
+        EventType.WORKTREE_CREATE: EVENT_CHAIN_DEADLINE[EventType.WORKTREE_CREATE]
+        + CHAIN_DEADLINE_SOCKET_MARGIN_SECONDS,
+        EventType.WORKTREE_REMOVE: EVENT_CHAIN_DEADLINE[EventType.WORKTREE_REMOVE]
+        + CHAIN_DEADLINE_SOCKET_MARGIN_SECONDS,
+    }
     # 30 seconds (CLAUDE.md auto-commit). Deliberately generous rather than
     # tight: a commit runs the repo's pre-commit hooks, and subprocess kills the
     # child when a timeout expires — killing git mid-commit is itself how

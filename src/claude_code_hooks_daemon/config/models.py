@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.config.exception_entries import (
     unreasoned_entries,
 )
 from claude_code_hooks_daemon.constants import ConfigKey, EventKey, Timeout, wired_event_metas
+from claude_code_hooks_daemon.constants.events import EventType
 from claude_code_hooks_daemon.core.handler_scope import (
     SCOPE_CONFIG_KEY,
     HandlerScope,
@@ -1838,6 +1839,22 @@ class ChainConfig(BaseModel):
             "out short of a manual restart. None disables self-restart."
         ),
     )
+
+    def deadline_for(self, event: EventType) -> float | None:
+        """Return the chain deadline that applies to ``event`` (Plan 00512).
+
+        WorktreeCreate and WorktreeRemove are not guards: they run git, whose
+        budget is longer than ``deadline_seconds``, so they get the larger of
+        the configured deadline and their own ``Timeout.EVENT_CHAIN_DEADLINE``.
+        Every other event gets ``deadline_seconds`` unchanged, and ``None``
+        (enforcement disabled) stays ``None`` for all of them.
+        """
+        if self.deadline_seconds is None:
+            return None
+        floor = Timeout.EVENT_CHAIN_DEADLINE.get(event)
+        if floor is None:
+            return self.deadline_seconds
+        return max(self.deadline_seconds, floor)
 
     def deadline_problem(self, client_budget_seconds: float, budget_name: str) -> str | None:
         """Say why ``deadline_seconds`` cannot beat a client budget, if it cannot.

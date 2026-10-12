@@ -2154,9 +2154,9 @@ class TestAStartNeverRunsTheHookPastItsTimeout:
         started daemon then answers. The launcher's bounds are not on this
         path, which the test below proves."""
         start_deadline = int(_init_sh_value(r"^_HOOKS_DAEMON_START_DEADLINE=(\d+)$"))
-        request = float(
-            _init_sh_value(r"^def _resolve_socket_timeout\(\):\n.*\n.*\n\s+return (\d+\.\d+)$")
-        )
+        # The guard events' default wait: the worktree events (Plan 00512) wait
+        # longer, but they carry no registered hook timeout to fit under.
+        request = float(_init_sh_value(r"^\s+\*\) _event_socket_wait=(\d+);;$"))
 
         path = start_deadline + Timeout.FILE_LOCK + request
 

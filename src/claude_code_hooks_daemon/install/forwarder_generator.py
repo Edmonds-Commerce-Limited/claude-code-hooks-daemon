@@ -29,7 +29,7 @@ from typing import Final
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config, TransportConfig
-from claude_code_hooks_daemon.constants import DaemonPath
+from claude_code_hooks_daemon.constants import DaemonPath, Timeout
 from claude_code_hooks_daemon.constants.events import (
     EventIDMeta,
     raw_stdout_bash_keys,
@@ -281,7 +281,12 @@ def build_relay_guard_block(
     just not host-isolated in that narrow combination).
     """
     relay_binary = transport.relay_binary or _default_relay_binary_path(untracked_dir)
-    timeout_ms = transport.timeout_seconds * 1000
+    # An event with its own budget (Plan 00512: the worktree events) waits for
+    # it, whatever the transport timeout says; every other event waits for
+    # `transport.timeout_seconds`.
+    json_key = _METAS_BY_BASH_KEY[event_file_name].json_key
+    event_wait = {str(e): wait for e, wait in Timeout.EVENT_CLIENT_WAIT.items()}.get(json_key, 0)
+    timeout_ms = max(transport.timeout_seconds, event_wait) * 1000
     # Escaped for the same reason `_escape_for_double_quotes` exists, and with
     # more force: its docstring notes the CATALOGUE is an internal constant and
     # escapes it anyway, because the failure is silent and remote -- a value

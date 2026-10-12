@@ -174,12 +174,52 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
         :func:`run_git` never raises, so the ``returncode`` is checked
         explicitly and translated into the same ``CalledProcessError`` a
         ``check=True`` spawn would have raised.
+
+        A failed or timed-out add is undone before it raises (Plan 00512): git
+        can leave the worktree and the new branch behind, and the caller gets no
+        path to find them by.
         """
+        branch_preexisted = (
+            run_git(
+                Path(cwd),
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                f"refs/heads/{branch}",
+                timeout=Timeout.GIT_WORKTREE_CLEANUP,
+            ).returncode
+            == 0
+        )
         result = run_git(
             Path(cwd), "worktree", "add", "-b", branch, str(path), timeout=Timeout.GIT_WORKTREE
         )
         if result.returncode != 0:
+            WorktreeCreateHandler._undo_failed_add(cwd, path, branch, branch_preexisted)
             raise _WorktreeAddError(result.returncode, result.args, result.stdout, result.stderr)
+
+    @staticmethod
+    def _undo_failed_add(cwd: str, path: Path, branch: str, branch_preexisted: bool) -> None:
+        """Remove what a failed ``git worktree add`` may have left behind.
+
+        Only what this call created: the worktree at ``path`` (the caller proved
+        it did not exist) and ``branch`` unless it already existed, in which case
+        ``add -b`` refused it and it is not ours to delete. A cleanup failure is
+        logged and never masks the add error the caller is about to raise.
+        """
+        steps: list[tuple[str, ...]] = [
+            ("worktree", "remove", "--force", str(path)),
+            ("worktree", "prune"),
+        ]
+        if not branch_preexisted:
+            steps.append(("branch", "-D", branch))
+        for args in steps:
+            result = run_git(Path(cwd), *args, timeout=Timeout.GIT_WORKTREE_CLEANUP)
+            if result.returncode != 0:
+                logger.warning(
+                    "worktree_create: cleanup `git %s` failed: %s",
+                    " ".join(args),
+                    result.stderr.strip(),
+                )
 
     def get_claude_md(self) -> str | None:
         """Guidance injected into the project CLAUDE.md.
