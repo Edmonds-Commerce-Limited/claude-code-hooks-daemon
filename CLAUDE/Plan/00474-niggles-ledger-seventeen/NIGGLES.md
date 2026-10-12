@@ -93,7 +93,12 @@ is judged. That direction fails open on a public tracker.
 both directions and both flag orders. Coordinator ruling (triage on #86). Plan 00264 (comment size cap, Not Started)
 gates `gh` comment bodies and will need the same body-flag reading, so if it is built it should reuse this parser.
 
-**Status**: 🔄 In progress.
+**Status**: ✅ Fixed (merge a81153d5c, branch head 4316615a7; #86). Flags are read from shell words
+(`iter_shell_words`/`resolve_shell_word`). Any `--repo` value naming the tracker engages the gate, because gh honours the
+last of a repeated flag. An unparseable segment keeps the raw-text read for repo and body-file and never takes the
+`--web` exemption. Review took 3 rounds: round 1 found the first-value repo pick and the `--web` fallback, both fail-open.
+Range QA over the merge: 40/40 (1993 passed). On merged main, the decoy `-R` title and the repeated `--repo` are both
+judged, and the `-F` title yields only the real body file.
 
 ### N437 — `git merge` is not a heredoc data receiver, so an apostrophe in its heredoc body draws a "report it" advisory
 
