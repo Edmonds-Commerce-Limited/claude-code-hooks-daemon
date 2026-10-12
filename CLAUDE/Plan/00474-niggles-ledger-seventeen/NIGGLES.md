@@ -94,7 +94,13 @@ none, it says no model has a `modelSettings` level, and names the top-level `eff
 each model runs at its own default when there is none. The verdict stays `passed`, because no pin is
 present and the check's job is pins. Presence-only, never recommending a level. Coordinator ruling (triage on #87).
 
-**Status**: 🔄 In progress.
+**Status**: ✅ Fixed (merge 98a0b80cc, branch head d108d68b5; #87, whose feature half stays with Plan 00513). The OK text names
+the `modelSettings` model IDs that carry an `effortLevel`, with their file. A user-file top-level `effortLevel` is named
+with its documented reach: Opus 5, Fable 5.1 and earlier, while Opus 5.5 and later run at their own default (vendored
+`settings-reference.md` and `model-config.md`). Otherwise each model runs at its own default. Review took 3 rounds. Round 1
+carried a coordinator error ("applies to every model"), which a fact-check against the vendored docs caught and round 2
+corrected. Range QA over the merge: 39/40. Its one red is `optimal_config_checker.py` unmapped (too-broad); 1910 passed,
+0 failed.
 
 ### N438 — issue_filing_gate reads gh flags from raw text, so a quoted --title can refuse a valid report or switch the gate off
 
