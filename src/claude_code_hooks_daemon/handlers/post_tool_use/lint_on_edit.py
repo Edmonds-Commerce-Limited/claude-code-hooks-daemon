@@ -64,8 +64,8 @@ _LINT_FAILURE_RULE = Rule(
         "problems with Edit. Do NOT re-Write the file from scratch: that rewrites "
         "content already on disk from memory, and loses anything you no longer "
         "have in hand.\n\n"
-        "A denial also cancels every sibling tool call batched in the same turn, "
-        "so re-issue those separately."
+        "Sibling tool calls batched in the same turn are answered independently "
+        "and may already have run, so check their results before re-issuing them."
     ),
 )
 
@@ -682,8 +682,8 @@ reported problems with `Edit`. Do NOT re-`Write` the file from scratch: that
 rewrites content already on disk from memory, and loses anything you no longer
 have in hand.
 
-A denial also cancels every sibling tool call batched in the same turn, so
-re-issue those separately.
+Sibling tool calls batched in the same turn are answered independently and
+may already have run, so check their results before re-issuing them.
 
 Each language runs a cheap syntax check first (`python -m py_compile`, `bash
 -n`, `go vet`, `php -l`, …) and then an optional deeper linter (`ruff`,

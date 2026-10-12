@@ -1164,8 +1164,8 @@ is the expensive answer; returning `None` is not the lazy one.
 Apply these four tests in order. First YES earns a section; reaching the end
 means `None`.
 
-1. **Can the handler DENY a tool call?** A denial burns a turn, and Claude
-   Code cancels every sibling tool call batched with the denied one. Guidance
+1. **Can the handler DENY a tool call?** A denial burns a turn, and the
+   agent must then work out which batched sibling calls already ran. Guidance
    that prevents one denial has already paid for itself. → YES earns.
 
 2. **Is the advice too late for the call it fires on?** If the choice being
