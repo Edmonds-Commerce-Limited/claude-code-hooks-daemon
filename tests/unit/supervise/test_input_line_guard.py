@@ -43,6 +43,8 @@ _DEL = b"\x7f"
 _BACKSPACE = b"\x08"
 _CTRL_W = b"\x17"
 _CTRL_K = b"\x0b"
+_CTRL_O = b"\x0f"
+_CTRL_T = b"\x14"
 
 
 class TestHumanInputLine:
@@ -238,6 +240,41 @@ class TestHumanInputLineClearByteGaps:
         line = HumanInputLine()
         line.feed(b"still typing")
         line.feed(_CTRL_K)
+        assert line.is_empty is False
+
+    def test_ctrl_o_on_an_empty_line_stays_empty(self) -> None:
+        # Claude Code prints "ctrl+o to see full summary" after a compact; the
+        # view toggle adds nothing to the box.
+        line = HumanInputLine()
+        line.feed(_CTRL_O)
+        assert line.is_empty is True
+
+    def test_ctrl_o_does_not_change_existing_content(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"/compact" + _CTRL_O)
+        assert line.is_empty is False
+        line.feed(_ENTER)
+        assert line.take_compact_submitted() is True
+
+    def test_ctrl_o_on_an_empty_line_does_not_start_the_abandoned_clock(self) -> None:
+        line = HumanInputLine()
+        line.feed(_CTRL_O, now=1000.0)
+        assert line.is_abandoned(now=1000.0 + 10_000.0, threshold_seconds=1.0) is False
+
+    def test_ctrl_t_behaves_like_ctrl_o(self) -> None:
+        line = HumanInputLine()
+        line.feed(_CTRL_T)
+        assert line.is_empty is True
+        line.feed(b"abc" + _CTRL_T)
+        line.feed(_ENTER)
+        assert line.is_empty is True
+        line.feed(b"/compact" + _CTRL_T + _ENTER)
+        assert line.take_compact_submitted() is True
+
+    def test_unrecognised_control_byte_still_counts_as_content(self) -> None:
+        # Ctrl-V can paste an image into the box, so it stays conservative.
+        line = HumanInputLine()
+        line.feed(b"\x16")
         assert line.is_empty is False
 
     def test_unterminated_bracketed_paste_does_not_swallow_a_later_enter(self) -> None:
