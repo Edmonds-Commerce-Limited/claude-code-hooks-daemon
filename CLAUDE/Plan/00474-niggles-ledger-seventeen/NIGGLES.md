@@ -105,7 +105,9 @@ matches, and one whose metadata cannot be read are all kept. The already-at-targ
 the system Python orphans the current venv's name. Plan 00100 owns the fingerprint ("Not revisiting the fingerprint
 *content*"), so this is recorded in its journal.
 
-**Status**: 🔄 In progress.
+**Status**: ✅ Fixed (merge 494909b5b, branch head 14122f0c5; #94). Tests red first (8). Range QA over the merge:
+39/40. Its one red is `changed_tests` naming `paths.py` and `cli.py` as unmapped (too-broad), which CI's full-suite
+fallback covers; 876 passed, 0 failed. Release note 043.
 
 ### N440 — plan QA ignores README table rows silently, and the unindexed finding never states the accepted row grammar
 
