@@ -3274,11 +3274,14 @@ def cmd_prune_venvs(args: argparse.Namespace) -> int:
     The current Python-env's fingerprint-keyed venv is NEVER deleted.
 
     Plan 00100 Task 3.9: ``scripts/upgrade_version.sh`` invokes
-    ``eager_cleanup_stale_venvs`` automatically after a verified daemon
-    restart, so ``hooks-daemon upgrade`` leaves exactly one ``venv-*/``
-    survivor with no manual intervention. ``prune-venvs --all-except-current``
-    remains available for manual eager cleanup outside the upgrade flow
-    (e.g. recovery after an interrupted upgrade).
+    ``eager_cleanup_stale_venvs`` after a verified daemon restart, on both the
+    full upgrade path and the already-at-target path. It removes only venvs
+    positively known to be stale: a readable ``lock_hash`` that differs from
+    the current source's, on a name carrying this view's path slug or no slug.
+    Another view's venv, a venv with a matching ``lock_hash`` and a venv with
+    missing or unreadable metadata are kept, so several ``venv-*/`` directories
+    can remain. ``prune-venvs --all-except-current`` removes those too, for
+    manual cleanup outside the upgrade flow.
     """
     project_root = Path(get_project_path(getattr(args, "project_root", None)))
     entries = _enumerate_venvs(project_root)

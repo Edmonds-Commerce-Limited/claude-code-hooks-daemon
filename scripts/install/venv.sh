@@ -1596,9 +1596,15 @@ install_package_editable() {
 #
 # eager_cleanup_stale_venvs() - Plan 00100 Task 3.9
 #
-# Remove every `{daemon_dir}/untracked/venv*` entry whose absolute path
-# differs from the current venv. Emits one log line per deletion:
-#   "Removed stale venv: <path> (reason: <legacy-name|fingerprint-mismatch>)"
+# Remove the pre-v3.7.0 `{daemon_dir}/untracked/venv` directory, and every
+# `venv-*` entry that is positively stale: not the current venv, readable
+# `.daemon-metadata.json` whose lock_hash differs from the current source's,
+# and a name carrying this view's path slug or no slug (paths.py
+# `list-stale-venvs`). Another view's slugged venv, a venv whose lock_hash
+# matches, a venv with missing or unreadable metadata, and every venv when the
+# current lock_hash cannot be computed are kept. Emits one log line per entry:
+#   "Removed stale venv: <path> (reason: <reason>)"
+#   "Kept venv: <path> (reason: <reason>)"
 #
 # Called by upgrade_version.sh AFTER restart_daemon_verified confirms the
 # new daemon is RUNNING on the current venv — so a failed upgrade preserves
@@ -1633,22 +1639,39 @@ eager_cleanup_stale_venvs() {
         current_abs="$current_venv"
     fi
 
-    local entry entry_abs reason
-    for entry in "$untracked_dir"/venv "$untracked_dir"/venv-*; do
-        [ -d "$entry" ] || continue
-        entry_abs="$(cd "$entry" && pwd)"
-        if [ "$entry_abs" = "$current_abs" ]; then
-            continue
-        fi
+    local legacy_bare="$untracked_dir/venv"
+    if [ -d "$legacy_bare" ] && [ "$(cd "$legacy_bare" && pwd)" != "$current_abs" ]; then
+        echo "Removed stale venv: $legacy_bare (reason: legacy-name)"
+        rm -rf "$legacy_bare"
+    fi
 
-        case "$(basename "$entry_abs")" in
-            venv) reason="legacy-name" ;;
-            *) reason="fingerprint-mismatch" ;;
+    # The slug and lock_hash rules live in paths.py (stdlib-only, run as a
+    # direct script); bash only deletes what it reports as `remove`.
+    local paths_script="$daemon_dir/src/claude_code_hooks_daemon/daemon/paths.py"
+    if [ ! -f "$paths_script" ] || [ -z "$(command -v python3)" ]; then
+        echo "Kept venv-* entries: cannot classify them (no paths.py or python3)"
+        return 0
+    fi
+
+    local verdicts
+    if ! verdicts="$(python3 "$paths_script" list-stale-venvs \
+        --daemon-dir "$daemon_dir" --current-venv "$current_abs")"; then
+        echo "Kept venv-* entries: list-stale-venvs failed"
+        return 0
+    fi
+
+    local verdict entry_path reason
+    while IFS=$'\t' read -r verdict entry_path reason; do
+        case "$verdict" in
+            remove)
+                echo "Removed stale venv: $entry_path (reason: $reason)"
+                rm -rf "$entry_path"
+                ;;
+            keep)
+                echo "Kept venv: $entry_path (reason: $reason)"
+                ;;
         esac
-
-        echo "Removed stale venv: $entry_abs (reason: $reason)"
-        rm -rf "$entry_abs"
-    done
+    done <<< "$verdicts"
 
     return 0
 }
