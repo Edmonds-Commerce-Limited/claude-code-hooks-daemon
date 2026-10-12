@@ -77,6 +77,26 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N436 — the supervisor counts Ctrl+O as typed content, so a human who opens the compact summary blocks the post-compact resume
+
+**Found**: by the owner on 2026-10-12. After the supervisor's 09:52:00 `/compact`, no resume line was injected, and the owner
+typed `continue` by hand. `untracked/supervise/decision.log` shows the compaction was detected. From the first idle tick
+(09:53:14) to the owner's message (09:54:14), every tick then logged `injection deferred: input box not empty (compaction detected but session busy -> awaiting idle to resume)`.
+
+**Why**: `HumanInputLine._consume_ground` in `.claude/ccy/claude-supervise.py` appends any byte that is not in one of its named
+sets (`_LINE_CLEAR_BYTES`, `_LINE_BACKSPACE_BYTES`, `_LINE_WORD_DELETE_BYTES`, `_LINE_KILL_TO_END_BYTES`, ESC) to the box
+buffer. Ctrl+O (0x0F) is in none of them, so it counts as content. Claude Code prints `ctrl+o to see full summary` straight
+after a compact, so pressing that key is the natural thing to do, and it leaves the model non-empty until Enter, Ctrl-U or
+Ctrl-C. Other view-toggle keys behave the same way, Ctrl+T (todo list) among them. Which key the owner actually pressed
+this time is not recorded, because the supervisor logs no keystrokes. The owner may simply have started typing at
+09:53:14. The defect stands either way: a single Ctrl+O suppresses every gated injection.
+
+**Remedy**: a named set of control bytes that change the view or move the cursor without adding box content, consumed as
+non-content. Unrecognised control bytes stay conservative (counted), as the class docstring requires. Tests come red first in
+`tests/unit/supervise/test_input_line_guard.py`.
+
+**Status**: 🔄 In progress.
+
 ### N435 — the report-path verifier resolves a worktree agent's relative report path against the main checkout
 
 **Found**: by the coordinator on 2026-10-12. dev-83 (issue #83) committed its report inside its worktree, then
