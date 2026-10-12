@@ -77,6 +77,28 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N440 — plan QA ignores README table rows silently, and the unindexed finding never states the accepted row grammar
+
+**Found**: GitHub #90 (approved author, daemon 3.68.0). A client README index written as markdown table rows had every
+plan reported "has no README index row" at block severity, which blocks the commit, with nothing saying what format is
+read.
+
+**On main (1fd6c3f84)**: confirmed by reading. `_LINKED_ROW_RE` (`plan_qa/readme_index.py:61`) and `_BOLD_ROW_RE`
+(line 66) both require a line starting `- `, so a `| ... |` row is never a row. `_UNINDEXED_REMEDIATION`
+(`plan_qa/checks/row_folder_bijection.py:31`) says only "Add an index row linking to this plan in the appropriate README
+section."
+
+**Remedy (coordinator ruling, triage on #90)**: (1) the remediation states both accepted forms, the linked row
+`- [NNNNN: Title](NNNNN-name/PLAN.md) - status` and the bold row `- **NNNNN** - status`, under a `##` heading; (2) when
+the README holds a table row that links to the folder, the finding says that row was found and table rows are not read.
+Tests come red first.
+
+**Open question, not ruled**: whether plan QA should READ table rows as index rows. That changes the index format every
+plan-QA check shares, so it belongs to Plan 00144 (Plan QA, dormant, the superset the dedupe scout named) and is
+recorded in its journal.
+
+**Status**: 🔄 In progress.
+
 ### N439 — the Effort Source check claims modelSettings provides per-model levels without reading modelSettings
 
 **Found**: in triage of GitHub #87 (approved author, daemon 3.68.0). #87 is mainly a feature proposal, filed as

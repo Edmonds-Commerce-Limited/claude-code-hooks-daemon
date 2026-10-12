@@ -4,6 +4,7 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 
 | #          | Verdict                                                                                                                                                            | Origin              | Status                                 |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------- | -------------------------------------- |
+| N440       | Plan QA silently ignores markdown table rows in a README index, and the unindexed finding never states the accepted row grammar (#90)                              | GitHub #90          | 🔄 In progress                         |
 | N439       | The Effort Source check reports "per-model levels come from settings.json modelSettings" without reading modelSettings, false when no entries exist (#87)          | GitHub #87          | ✅ Fixed (98a0b80cc)                   |
 | N438       | issue_filing_gate reads gh's -F/--repo flags by regex over raw text, so a quoted --title refuses a valid report, or (with -R) switches the gate off (#86)          | GitHub #86          | ✅ Fixed (a81153d5c)                   |
 | N437       | `git merge` is missing from the heredoc data-receiver set, so an apostrophe in its quoted heredoc body makes project_containment emit a "report it" advisory (#85) | GitHub #85          | ✅ Fixed (e10dc32af)                   |
