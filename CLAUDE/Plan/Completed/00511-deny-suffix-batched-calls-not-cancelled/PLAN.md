@@ -1,6 +1,6 @@
 # Plan 00511: deny suffix batched calls not cancelled
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-12
 **Owner**: dev
 **Priority**: Medium
@@ -47,28 +47,30 @@ siblings. The same claim appears in three more places:
 
 ### Phase 1: Fix
 
-- [ ] ⬜ **Task 1.1**: RED. Write tests that fail on the current text:
+- [x] ✅ **Task 1.1**: RED. Write tests that fail on the current text:
   - the DENY suffix must not claim cancellation;
   - the suffix must say siblings may have run;
   - the `lint_on_edit` and `validate_eslint_on_write` guidance must make no
     cancellation claim.
-- [ ] ⬜ **Task 1.2**: GREEN. Rewrite the suffix and the two handlers' guidance,
+- [x] ✅ **Task 1.2**: GREEN. Rewrite the suffix and the two handlers' guidance,
   keeping the suffix under the existing 250-character bound. Correct
   `CLAUDE/HANDLER_DEVELOPMENT.md`, regenerate the generated docs, and add a
   release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
 ### Phase 2: Land
 
-- [ ] ⬜ **Task 2.1**: Review, coordinator checks, merge; comment on and close #81.
+- [x] ✅ **Task 2.1**: Review, coordinator checks, merge; comment on and close #81.
+  Merged `2704ef5bd` with no rework.
 
 ## Success Criteria
 
-- [ ] The issue's reproduction yields a deny reason that does not claim
-  cancellation.
-- [ ] The release-bound consequence, the changed deny text, is in the
-  pending-release holding area as a release note in
+- [x] The issue's reproduction yields a deny reason that does not claim
+  cancellation. A live denial after the daemon restart carried the new wording.
+- [x] The release-bound consequence, the changed deny text, is in the
+  pending-release holding area as release note 034 in
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
 ## Delivery & Milestones
 
 - Issue #81 triaged and claimed; reproduced on `main`.
+- Merged `2704ef5bd`; the range QA was green in substance (2461 passed).

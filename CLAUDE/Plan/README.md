@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00511: deny suffix batched calls not cancelled](00511-deny-suffix-batched-calls-not-cancelled/PLAN.md) - In Progress, Medium (#81; the PreToolUse DENY suffix says batched sibling calls were CANCELLED, false since Claude Code 2.1.161; reword it, and the same claim in two handlers' guidance and HANDLER_DEVELOPMENT.md)
-
 - [00501: session modes](00501-session-modes/PLAN.md) - Not Started, Medium (#91; first-class per-session modes shown in the status line: focus (`hooks-daemon focus <task>`), BLOCKED (awaiting-human, goal-blocked loop breaker), usage-paused; per-session awaiting-human storage; guards never gated)
 
 - [00496: upstream feature requests and issue kinds](00496-upstream-feature-requests-and-issue-kinds/PLAN.md) - Not Started (owner request: a formal process for project agents to file feature requests and other non-defect issues, mirroring the defect generator, guard and forms; security reports routed privately)
@@ -193,6 +191,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00511: deny suffix batched calls not cancelled](Completed/00511-deny-suffix-batched-calls-not-cancelled/PLAN.md) - Complete at merge `2704ef5bd` + the archiving commit (#81: the PreToolUse DENY suffix says batched calls may already have run, not that they were cancelled, which is false since Claude Code 2.1.161; same fix in two linters' guidance; release note 034 in UNRELEASED)
+
 - [00510: docs qa edit stage skips nested and ignored checkouts](Completed/00510-docs-qa-edit-stage-skips-nested-and-ignored-checkouts/PLAN.md) - Complete at merge `5a963a367` + the archiving commit (#80: the docs QA edit stage drops nested separate checkouts and gitignored paths, matching the sweep; one shared `owning_checkout` rule; release note 033 in UNRELEASED)
 
 - [00509: markdown formatter honours exclusions and nested checkouts](Completed/00509-markdown-formatter-honours-exclusions-and-nested-checkouts/PLAN.md) - Complete at merge `52fd716f4` + `4c30051d8` + the archiving commit (#79: `exclude_paths` and `daemon.exclude_paths` honoured, nested separate checkouts skipped, and the advisory never narrower than the change; release note 032 in UNRELEASED)
@@ -251,8 +251,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00458: skip lists match path segments relative to the project](Completed/00458-skip-lists-match-path-segments-relative-to-the-project/PLAN.md) - Complete at `b8ce4b49`…`47999859` + the archiving commit (from 00422 N20: six guards matched skip lists as a bare substring, so a worktree named `…-venv` switched them off; they now match project-relative segments, and a QA detector keeps the class out)
 
-- [00457: signal runs without a venv](Completed/00457-signal-runs-without-a-venv/PLAN.md) - Complete at `6eb51575` + the archiving commit (from #55: `signal` is dispatched before venv resolution through a standard-library-only entry point, so the host-side reboot warning works where the only venv was built in a container)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -306,9 +304,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 511 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 436 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 437 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 52 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 51 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

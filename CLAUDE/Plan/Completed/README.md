@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00457: signal runs without a venv](00457-signal-runs-without-a-venv/PLAN.md) - Complete at `6eb51575` + the archiving commit (from #55: `signal` is dispatched before venv resolution through a standard-library-only entry point, so the host-side reboot warning works where the only venv was built in a container)
+
 - [00456: missing venv self heals and repair runs without one](00456-missing-venv-self-heals-and-repair-runs-without-one/PLAN.md) - Complete at `9e2f74cd` + the archiving commit (the rest of #53: a hook with no venv starts one detached, locked build; `repair` runs without a venv; the skill never auto-forces and a `--force` keeps other environments' venvs; carries Plan 00100 Phase 3.5)
 
 - [00455: self install exposes the conventional cli path](00455-self-install-exposes-the-conventional-cli-path/PLAN.md) - Complete at `e6a11e19` + the archiving commit (from #54: the self-install daemon generates the conventional CLI link under the gitignored directory, because a tracked one would reach every client clone as a nested install; install-mode checks now require a real clone. Review reverted a copied exemption, filed as 00422 N19)
