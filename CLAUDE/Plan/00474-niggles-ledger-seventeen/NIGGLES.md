@@ -77,6 +77,29 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N445 — the upgrade restores dropped opt-in handlers only after the daemon has restarted without them
+
+**Source**: GitHub issue #97 (triaged 2026-10-12). A v3.67.0 to v3.69.0 upgrade of a config with no block for 16
+opt-in handlers turned them off, four deny guards among them. It deployed and restarted, and only then listed them.
+
+**Evidence**:
+
+- **Already on main, unreleased:** N360 (owner ruling C6, 30cf086e9) makes `scripts/upgrade.sh` run
+  `check-effective-handlers --apply`. That writes `enabled: true` for each handler that would stop, which is the
+  issue's option (a).
+- **Still wrong:** that step runs in Layer 1 AFTER Layer 2 (`scripts/upgrade_version.sh`) has deployed and restarted
+  the daemon. N360's own write-up says so ("the write happens after Layer 2's restart"), and `upgrade.sh` then prints
+  "RESTART THE DAEMON". Until someone restarts, every session runs without the restored handlers, deny guards
+  included.
+
+**Remedy (coordinator ruling)**: perform the restore inside Layer 2, after the target venv exists and before the hooks
+are deployed and the daemon is restarted, on both the already-at-target path and the full path. The daemon then starts
+with the restored handlers on. Layer 1 keeps reporting what was restored, but no longer asks for a restart for it. An
+older target without `--apply` keeps today's behaviour. Option (b), stopping the pre-deploy gate, is not taken: the
+restore removes the loss the stop would have warned about.
+
+**Status**: 🔄 In progress.
+
 ### N444 — the plan fact-check feed tells client projects to dispatch an agent the daemon never ships to them
 
 **Source**: GitHub issue #96 (triaged 2026-10-12).

@@ -4,6 +4,7 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 
 | #          | Verdict                                                                                                                                                            | Origin              | Status                                 |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------- | -------------------------------------- |
+| N445       | The upgrade restores dropped opt-in handlers (N360) only after Layer 2 has restarted the daemon, so deny guards stay off until a manual restart (#97)              | GitHub #97          | 🔄 In progress                         |
 | N444       | The plan fact-check feed tells client projects to dispatch `plan-fact-checker`, which the daemon never ships to them (#96)                                         | GitHub #96          | ✅ Fixed (2240ef95e)                   |
 | N443       | Upstream `agent_id` now also identifies in-process teammates (subagent-scoped guards may fire for them), and `additionalContext` reminder tags are escaped         | N442 refresh        | ⬜ Open                                |
 | N442       | The upstream hooks doc changed again after the 2.1.296 contract refresh, so the next release would ship a stale audit (#95)                                        | GitHub #95          | ✅ Fixed (e745dc3cf)                   |
