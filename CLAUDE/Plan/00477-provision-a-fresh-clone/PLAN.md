@@ -152,3 +152,5 @@ stale: the clone's checked-out tag, the venv and the running daemon.
 ## Delivery & Milestones
 
 - Plan filed from the owner's ruling on the verb and on deliberate provisioning.
+- Task 5.2a (#78): merged `57295f89c`, plus the range-QA fix `bebed359c`;
+  release note 031 is in UNRELEASED.
