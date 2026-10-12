@@ -191,7 +191,96 @@ class TestEffortSourceCheck:
         effort = self._effort(handler, tmp_path)
 
         assert effort["passed"] is True
-        assert "modelSettings" in effort["current"]
+        assert "modelSettings" not in effort["current"]
+        assert "no model has an explicit effort level" in effort["current"]
+        assert "own default" in effort["current"]
+
+    def test_model_ids_with_a_level_are_named_with_their_file(
+        self, handler: Any, tmp_path: Path
+    ) -> None:
+        self._write(
+            tmp_path,
+            "settings.local.json",
+            json.dumps({"modelSettings": {"claude-opus-5": {"effortLevel": "xhigh"}}}),
+        )
+        user = {"modelSettings": {"claude-fable-5-1": {"effortLevel": "low"}}}
+        with patch.object(handler, "_read_global_settings", return_value=user):
+            checks = handler._run_checks(tmp_path)
+        effort = next(c for c in checks if c["name"] == "Effort Source")
+
+        assert effort["passed"] is True
+        assert "claude-opus-5" in effort["current"]
+        assert ".claude/settings.local.json" in effort["current"]
+        assert "claude-fable-5-1" in effort["current"]
+        assert "~/.claude/settings.json" in effort["current"]
+        assert "no model has an explicit effort level" not in effort["current"]
+
+    def test_user_top_level_level_is_named_instead_of_own_default(
+        self, handler: Any, tmp_path: Path
+    ) -> None:
+        user = {"effortLevel": "high"}
+        with patch.object(handler, "_read_global_settings", return_value=user):
+            checks = handler._run_checks(tmp_path)
+        effort = next(c for c in checks if c["name"] == "Effort Source")
+
+        assert effort["passed"] is True
+        assert "effortLevel='high'" in effort["current"]
+        assert "~/.claude/settings.json" in effort["current"]
+        assert "Opus 5, Fable 5.1 and earlier" in effort["current"]
+        assert "Opus 5.5 and later run at their own default" in effort["current"]
+        assert "every model" not in effort["current"]
+
+    def test_user_top_level_level_is_named_beside_model_levels(
+        self, handler: Any, tmp_path: Path
+    ) -> None:
+        user = {
+            "effortLevel": "high",
+            "modelSettings": {"claude-fable-5-1": {"effortLevel": "low"}},
+        }
+        with patch.object(handler, "_read_global_settings", return_value=user):
+            checks = handler._run_checks(tmp_path)
+        effort = next(c for c in checks if c["name"] == "Effort Source")
+
+        assert "claude-fable-5-1" in effort["current"]
+        assert "effortLevel='high'" in effort["current"]
+        assert "Opus 5.5 and later run at their own default" in effort["current"]
+        assert "every model" not in effort["current"]
+
+    def test_a_non_pinning_top_level_value_is_not_a_level(
+        self, handler: Any, tmp_path: Path
+    ) -> None:
+        with patch.object(handler, "_read_global_settings", return_value={"effortLevel": "auto"}):
+            checks = handler._run_checks(tmp_path)
+        effort = next(c for c in checks if c["name"] == "Effort Source")
+
+        assert "own default" in effort["current"]
+
+    def test_a_model_entry_without_a_level_does_not_count(
+        self, handler: Any, tmp_path: Path
+    ) -> None:
+        self._write(
+            tmp_path,
+            "settings.json",
+            json.dumps({"modelSettings": {"claude-opus-5": {"other": 1}, "bad": "x"}}),
+        )
+
+        effort = self._effort(handler, tmp_path)
+
+        assert effort["passed"] is True
+        assert "claude-opus-5" not in effort["current"]
+        assert "no model has an explicit effort level" in effort["current"]
+
+    def test_unreadable_project_settings_still_warn_with_model_settings_present(
+        self, handler: Any, tmp_path: Path
+    ) -> None:
+        self._write(tmp_path, "settings.json", "{not json")
+        user = {"modelSettings": {"claude-fable-5-1": {"effortLevel": "low"}}}
+        with patch.object(handler, "_read_global_settings", return_value=user):
+            checks = handler._run_checks(tmp_path)
+        effort = next(c for c in checks if c["name"] == "Effort Source")
+
+        assert effort["passed"] is False
+        assert ".claude/settings.json" in effort["current"]
 
     def test_user_settings_levels_are_not_a_pin(self, handler: Any, tmp_path: Path) -> None:
         user = {

@@ -83,6 +83,20 @@ def _read_env_effort_pin(data: dict[str, Any], location: str) -> str | None:
     return f"{location} env.{_EFFORT_ENV_VAR}={value!r}"
 
 
+def _models_with_effort_level(data: dict[str, Any], location: str) -> list[str]:
+    """Return ``"<model id> (<location>)"`` for each ``modelSettings`` entry in ``data``
+    that carries an ``effortLevel`` key; an entry without one is not a level.
+    """
+    model_settings = data.get("modelSettings")
+    if not isinstance(model_settings, dict):
+        return []
+    return [
+        f"{model_id} ({location})"
+        for model_id, entry in model_settings.items()
+        if isinstance(entry, dict) and "effortLevel" in entry
+    ]
+
+
 class OptimalConfigCheckerHandler(SessionStartHandlerBase):
     """Check Claude Code environment for optimal configuration on session start.
 
@@ -244,10 +258,40 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
                 pins.append(env_pin)
 
         if not pins:
+            leveled = _models_with_effort_level(user_data, "~/.claude/settings.json")
+            for name in _PROJECT_SETTINGS_FILES:
+                path = project_root / ".claude" / name
+                if path.exists():
+                    leveled.extend(
+                        _models_with_effort_level(
+                            json.loads(path.read_text(encoding="utf-8")), f".claude/{name}"
+                        )
+                    )
+            # A user-file top-level effortLevel is the legacy form: not a pin, and
+            # it applies only to Opus 5, Fable 5.1 and earlier (remote-docs
+            # code.claude.com settings-reference.md, model-config.md).
+            top_level = user_data.get("effortLevel")
+            top_applies = (
+                top_level is not None
+                and str(top_level).strip().lower() not in _EFFORT_ENV_NON_PINNING_VALUES
+            )
+            top_desc = (
+                f"top-level effortLevel={top_level!r} in ~/.claude/settings.json applies to "
+                "models without an entry only if they are Opus 5, Fable 5.1 and earlier; "
+                "Opus 5.5 and later run at their own default"
+            )
+            if leveled:
+                current = "per-model effort levels set in modelSettings: " + ", ".join(leveled)
+                if top_applies:
+                    current += f"; {top_desc}"
+            elif top_applies:
+                current = f"no modelSettings effort levels; {top_desc}"
+            else:
+                current = "no model has an explicit effort level, so each runs at its own default"
             return {
                 "name": _EFFORT_CHECK_NAME,
                 "passed": True,
-                "current": "per-model levels come from settings.json modelSettings",
+                "current": current,
                 "why": _EFFORT_CHECK_WHY,
                 "fix": _EFFORT_CHECK_FIX,
                 "where": _EFFORT_CHECK_WHERE,
