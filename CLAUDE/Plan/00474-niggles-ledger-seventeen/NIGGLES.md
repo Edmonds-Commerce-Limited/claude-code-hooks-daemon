@@ -77,6 +77,29 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N433 — a quiet plan journal turns main CI red, and the coordinator had been reading it as an expected red
+
+**Found**: by the coordinator on 2026-10-12, reading main run 38218883524 (20f309048). Its full-suite fallback
+passed cleanly (47991 passed), but the job failed at "Targeted QA (code tier)". The only finding was plan QA's
+`journal-freshness` advisory on plans 00495, 00471 and 00472.
+
+**Why**: `scripts/qa/run_corpus_qa.py` fails on ANY finding, at either severity. That is deliberate: its docstring
+says a finding left standing is a decision. The coordinator had read the advisory as an expected local red for
+several merges, together with the `too-broad` unmapped files. It is not expected: it reaches CI and fails main once
+any active plan's journal goes quiet.
+
+**Fix applied**: a truthful status entry in each quiet plan's journal (`mkplan.bash --journal`). `plan-qa --sweep`
+now reports 0 findings.
+
+**Candidate remedies**:
+
+1. Tell the range QA reader to treat any plan_qa finding as a red to fix before merging, never as background. The
+   `too-broad` unmapped files are different: CI's full-suite fallback covers them.
+2. Have the failsafe or the issue loop journal a one-line status check for an active plan that nothing is moving,
+   before the freshness window closes.
+
+**Status**: 🔄 Fixed for now (journals updated); the remedies are open.
+
 ### N432 — the conflict-marker gate greps the whole tree, so a clean commit times out on a large repository under load
 
 **Source**: GitHub issue #83 (triaged 2026-10-12). The successor to N346, which made the timeout a distinct, honest
@@ -95,8 +118,9 @@ that policy is out of scope here.
 
 **Status**: ✅ Fixed (merge 9ef4d5055, branch head 0f846534d). Both `git grep` passes run as
 `git --literal-pathspecs grep … -- <recorded paths>` in chunks of `_ATTR_CHUNK` (256). The post-grep
-`path not in recorded` filter is gone, because the grep can no longer return an unrecorded path. Nine tests were
-written red first. Range QA: 2765 passed, 0 unmapped. #83 is closed.
+`path not in recorded` filter is gone, because the grep can no longer return an unrecorded path. Eight new test
+cases (six functions, one parametrised over three names) were written first; three failed on the old source.
+The merge message and the #83 closing comment said nine (fact-check `subagent-reports/fact-check-n432-fixed.md`). Range QA: 2765 passed, 0 unmapped. #83 is closed.
 
 ### N431 — the docs-or-code-tier CI job runs its full-suite fallback against a daemon that has already idled out
 

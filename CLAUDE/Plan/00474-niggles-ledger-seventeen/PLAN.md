@@ -36,7 +36,7 @@ not-a-defect with the reasoning kept.
 ## Niggles
 
 Full write-ups are in [NIGGLES.md](NIGGLES.md). The one-line-per-niggle status
-table (137 rows) is in [STATUS-INDEX.md](STATUS-INDEX.md).
+table (138 rows) is in [STATUS-INDEX.md](STATUS-INDEX.md).
 Counted by the status column's emoji:
 
 - 3 rows are open (⬜): N424, the LSP guard denying a grep over piped output; N427, the provision sync tests leaving stub daemon processes behind; and N430, the conflict-marker gate denying a commit into a repository the same command creates. N53 of archived ledger 00466 is 🟡: batch AJ reproduced
@@ -53,8 +53,9 @@ Counted by the status column's emoji:
 - 117 rows carry ✅ (fixed, dismissed, remedied, guarded or closed); 6 of them also carry a 🚫 limit, and
   2 also carry 🔄: N280 (guarded by batch AN) for its review follow-ups, and N425 (fixed) until CI confirms
   it. N428 (the Python 3.11 CI hang) is confirmed by main run 38204671323.
-- 7 rows record a deliberate limit (🚫); 18 are in progress or graduated (14 🔄, 3 🟡, 1 ↩️), N280,
-  N425 (main CI red after batch AL) and N431 (the CI fallback's daemon idles out) among the 14.
+- 7 rows record a deliberate limit (🚫); 19 are in progress or graduated (15 🔄, 3 🟡, 1 ↩️), N280,
+  N425 (main CI red after batch AL), N431 (the CI fallback's daemon idles out) and N433 (a quiet journal
+  fails CI) among the 15.
 
 ## Tasks
 
