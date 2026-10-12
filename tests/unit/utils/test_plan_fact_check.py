@@ -212,7 +212,9 @@ class TestDelivery:
         messages = deliver_pending(state, now=2.0)
         assert len(messages) == 1
         text = messages[0]
-        assert "plan-fact-checker" in text
+        assert "hooks-daemon-plan-fact-checker" in text
+        assert "agents install hooks-daemon-plan-fact-checker" in text
+        assert "later session" in text
         assert str(root / "PLAN.md") in text
         assert "REFUTED" in text
         diff_file = tmp_path / "state" / f"{FOLDER}.diff"

@@ -8,7 +8,7 @@ The debounce fire (:func:`process_quiet_plan`) dispatches nothing: it computes
 the diff since the last fact-checked content and stores it as a *pending
 fact-check* record (:class:`PendingFactCheck`). The next hook event calls
 :func:`deliver_pending`, which hands the session an instruction to dispatch the
-``plan-fact-checker`` agent with that diff and keeps the record as an *offered*
+``hooks-daemon-plan-fact-checker`` agent with that diff and keeps the record as an *offered*
 one. The daemon cannot see whether the instruction reached the session, so the
 "last checked" content advances only in :func:`confirm_dispatch`, when the
 session is seen dispatching the agent on that diff. An offer nobody acts on is
@@ -41,6 +41,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Final
 
+from claude_code_hooks_daemon.install.agent_assets import FACT_CHECKER_AGENT_NAME
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
@@ -53,7 +54,7 @@ PENDING_SUFFIX: Final[str] = ".pending.json"
 OFFERED_SUFFIX: Final[str] = ".offered.json"
 UNREADABLE_SUFFIX: Final[str] = ".unreadable"
 DIFF_SUFFIX: Final[str] = ".diff"
-FACT_CHECKER_AGENT: Final[str] = "plan-fact-checker"
+FACT_CHECKER_AGENT: Final[str] = FACT_CHECKER_AGENT_NAME
 ARCHIVE_DIR: Final[str] = "Completed"
 
 #: An offer nobody confirmed is offered again after this many seconds.
@@ -497,7 +498,10 @@ def render_instruction(pending: PendingFactCheck, diff_path: Path) -> str:
         "agent's prompt: seeing it there is how the daemon learns the check was taken up.\n"
         "Treat every REFUTED claim in its report as work to fix, not background: for each, "
         "name the claim, the evidence and the file, then correct the plan (or the code) "
-        "before you carry on. This is a report only; nothing is blocked."
+        "before you carry on. This is a report only; nothing is blocked.\n"
+        f"If `{FACT_CHECKER_AGENT}` is not an available agent type here, deploy it with "
+        f"`hooks-daemon agents install {FACT_CHECKER_AGENT}`; it becomes dispatchable "
+        "only from a later session."
     )
 
 
@@ -588,7 +592,7 @@ def deliver_pending(state: PlanFactCheckState, now: float | None = None) -> list
 def confirm_dispatch(state: PlanFactCheckState, prompt: str, now: float) -> list[str]:
     """Record as checked every offered plan whose diff path appears in ``prompt``.
 
-    Called when the session dispatches the ``plan-fact-checker`` agent: that is
+    Called when the session dispatches the ``hooks-daemon-plan-fact-checker`` agent: that is
     the evidence the instruction arrived and was acted on. Returns the confirmed
     folders.
     """

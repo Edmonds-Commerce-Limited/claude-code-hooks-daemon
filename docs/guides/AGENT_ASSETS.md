@@ -7,10 +7,11 @@ The daemon ships sub-agent definitions into your project's flat
 
 ## Shipped agents
 
-| Agent                            | Gating config key              | Default  | Purpose                                                                                                                                       |
-| -------------------------------- | ------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hooks-daemon-plan-dedupe-scout` | `plan_workflow.enabled`        | disabled | Reads still-live plans and reports ones already covering proposed work, before a duplicate plan is filed                                      |
-| `hooks-daemon-opus-security`     | `agents.opus_security.enabled` | disabled | Quarantine executor for safeguard-flaggable security work; the caller delegates before reading the sensitive content and gets a clean summary |
+| Agent                            | Gating config key                                     | Default  | Purpose                                                                                                                                            |
+| -------------------------------- | ----------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hooks-daemon-plan-dedupe-scout` | `plan_workflow.enabled`                               | disabled | Reads still-live plans and reports ones already covering proposed work, before a duplicate plan is filed                                           |
+| `hooks-daemon-plan-fact-checker` | `handlers.post_tool_use.plan_fact_check_feed.enabled` | disabled | Checks a plan's (or plan diff's) claims about the repository and reports VERIFIED / REFUTED / UNVERIFIABLE-HERE; dispatched by the fact-check feed |
+| `hooks-daemon-opus-security`     | `agents.opus_security.enabled`                        | disabled | Quarantine executor for safeguard-flaggable security work; the caller delegates before reading the sensitive content and gets a clean summary      |
 
 ## Lifecycle
 
