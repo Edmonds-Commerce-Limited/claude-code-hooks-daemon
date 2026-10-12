@@ -33,6 +33,23 @@ INSTALL_SH = REPO_ROOT / "install.sh"
 MAIN_VERSION = "9.9.9"
 #: A tag whose commit's version.py names some OTHER version.
 LYING_TAG_VERSION = "3.70.0"
+#: A release that carries the pre-deploy gate and an upgrade guide for 3.61.0 -> 3.62.0.
+GATED_VERSION = "3.62.0"
+GUIDE_NAME = f"v{CLONE_VERSION}-to-v{GATED_VERSION}"
+#: What a release needs for ``upgrade_gate_standalone.py`` to run from its own tree.
+GATE_FILES = (
+    "scripts/install/env_sanitise.sh",
+    "src/claude_code_hooks_daemon/install/upgrade_gate_standalone.py",
+    "src/claude_code_hooks_daemon/install/upgrade_gate.py",
+    "src/claude_code_hooks_daemon/install/upgrade_guides.py",
+    "src/claude_code_hooks_daemon/install/upgrade_tasks.py",
+    "src/claude_code_hooks_daemon/install/version_parse.py",
+    "src/claude_code_hooks_daemon/install/install_stamp.py",
+    "src/claude_code_hooks_daemon/utils/path_containment.py",
+    "src/claude_code_hooks_daemon/utils/path_predicates.py",
+    "src/claude_code_hooks_daemon/utils/escape_hatch.py",
+    "src/claude_code_hooks_daemon/utils/deliberate_swallow.py",
+)
 
 HEADER = f"> Generated on 2026-09-01 (v{CLONE_VERSION}) by the hooks daemon\n"
 
@@ -76,16 +93,37 @@ class Provisioning:
         source = tmp_path / "origin-src"
         shutil.copytree(self.box.clone, source)
         shutil.rmtree(self.box.clone)
+        (source / ".gitignore").write_text("untracked/\n__pycache__/\n")
         _git(source, "init", "-q", "-b", "main")
         _git(source, "add", "-A")
         _git(source, "commit", "-q", "-m", f"release {CLONE_VERSION}")
         _git(source, "tag", f"v{CLONE_VERSION}")
         _git(source, "tag", f"v{LYING_TAG_VERSION}")
+        self._commit_gated_release(source)
         version_py = source / "src" / "claude_code_hooks_daemon" / "version.py"
         version_py.write_text(f'__version__ = "{MAIN_VERSION}"\n')
+        (source / "uv.lock").write_text("# lock v2\n")
         _git(source, "commit", "-q", "-am", "main moves on")
         _git(source, "tag", f"v{MAIN_VERSION}")
         _git(tmp_path, "clone", "-q", "--bare", str(source), str(self.origin))
+
+    @staticmethod
+    def _commit_gated_release(source: Path) -> None:
+        """Tag a release that carries the pre-deploy gate and a guide for 3.61.0 -> 3.62.0."""
+        _git(source, "checkout", "-q", "-b", "gated")
+        for rel in GATE_FILES:
+            dest = source / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(REPO_ROOT / rel, dest)
+        guide = source / "CLAUDE" / "UPGRADES" / "v3" / GUIDE_NAME / f"{GUIDE_NAME}.md"
+        guide.parent.mkdir(parents=True)
+        guide.write_text("# 3.61.0 to 3.62.0\n\nRead this before upgrading.\n")
+        version_py = source / "src" / "claude_code_hooks_daemon" / "version.py"
+        version_py.write_text(f'__version__ = "{GATED_VERSION}"\n')
+        _git(source, "add", "-A")
+        _git(source, "commit", "-q", "-m", f"release {GATED_VERSION}")
+        _git(source, "tag", f"v{GATED_VERSION}")
+        _git(source, "checkout", "-q", "main")
 
     def _build_project(self, config: str | None, header: str | None) -> None:
         claude = self.project / ".claude"
@@ -117,13 +155,32 @@ class Provisioning:
         return self.box.clone
 
     def provision(
-        self, extra_env: dict[str, str] | None = None
+        self,
+        extra_env: dict[str, str] | None = None,
+        *,
+        args: tuple[str, ...] = (),
+        uv_fails: bool = False,
     ) -> subprocess.CompletedProcess[str]:
-        self.box.stub_uv()
+        self.box.stub_uv(fail=uv_fails)
         return self.box.run(
-            ["bash", str(self.project / ".claude" / "provision.sh")],
+            ["bash", str(self.project / ".claude" / "provision.sh"), *args],
             extra_env={**self.git_env, **(extra_env or {})},
         )
+
+    def expect(self, version: str) -> None:
+        """Change the version the project's config names, as a pull would."""
+        (self.project / ".claude" / "hooks-daemon.yaml").write_text(_configured(version))
+        _git(self.project, "commit", "-q", "--allow-empty", "-am", f"expect {version}")
+
+    def head(self) -> str:
+        return _git(self.clone, "rev-parse", "HEAD").strip()
+
+    def clone_tracked_state(self) -> str:
+        """HEAD and the clone's own status: what a refused or rolled-back sync leaves."""
+        return self.head() + _git(self.clone, "status", "--porcelain", "--", ".", ":!untracked")
+
+    def starts(self) -> int:
+        return len(self.box.start_log.read_text().splitlines())
 
     def tracked_changes(self) -> str:
         return _git(self.project, "status", "--porcelain")
@@ -272,19 +329,6 @@ class TestRefusals:
         finally:
             p.box.cleanup()
 
-    def test_refuses_and_points_at_upgrade_when_a_provisioned_clone_exists(
-        self, fresh: Provisioning
-    ) -> None:
-        assert fresh.provision().returncode == 0
-        before = snapshot(fresh.clone)
-
-        result = fresh.provision()
-
-        out = result.stdout + result.stderr
-        assert result.returncode != 0
-        assert "upgrade" in out
-        assert snapshot(fresh.clone) == before
-
     def test_refuses_and_points_at_repair_when_a_clone_has_no_venv_for_this_path(
         self, fresh: Provisioning
     ) -> None:
@@ -360,3 +404,274 @@ class TestRefusals:
         assert (fresh.clone / ".git").exists()
         assert "repair" in out
         assert fresh.tracked_changes() == ""
+
+
+def _provisioned_at(p: Provisioning, version: str) -> None:
+    p.expect(version)
+    result = p.provision()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert p.clone_version() == version
+
+
+def _out(result: subprocess.CompletedProcess[str]) -> str:
+    return result.stdout + result.stderr
+
+
+class TestAnExistingCloneAtTheExpectedVersion:
+    def test_says_so_and_exits_zero_without_touching_the_clone(self, fresh: Provisioning) -> None:
+        assert fresh.provision().returncode == 0
+        before = snapshot(fresh.clone)
+
+        result = fresh.provision()
+
+        assert result.returncode == 0, _out(result)
+        assert f"already at v{CLONE_VERSION}" in _out(result)
+        assert snapshot(fresh.clone) == before
+        assert fresh.starts() == 1, "an equal version must not restart the daemon"
+
+
+class TestSyncingAnExistingClone:
+    def test_a_clean_clone_syncs_to_a_newer_tag(self, fresh: Provisioning) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        before = fresh.head()
+        fresh.expect(MAIN_VERSION)
+
+        result = fresh.provision()
+
+        out = _out(result)
+        assert result.returncode == 0, out
+        assert fresh.clone_version() == MAIN_VERSION
+        assert fresh.head() != before
+        described = _git(fresh.clone, "describe", "--tags", "--exact-match").strip()
+        assert described == f"v{MAIN_VERSION}"
+        assert fresh.box.resolves()
+        assert fresh.starts() == 2, "the daemon was restarted exactly once by the sync"
+        assert fresh.tracked_changes() == ""
+        assert list((fresh.clone / "untracked").glob(".sync-backup-*")) == []
+        assert f"v{CLONE_VERSION}" in out and f"v{MAIN_VERSION}" in out
+
+    def test_a_clean_clone_syncs_to_an_older_tag(self, fresh: Provisioning) -> None:
+        _provisioned_at(fresh, MAIN_VERSION)
+        fresh.expect(CLONE_VERSION)
+
+        result = fresh.provision()
+
+        assert result.returncode == 0, _out(result)
+        assert fresh.clone_version() == CLONE_VERSION
+        described = _git(fresh.clone, "describe", "--tags", "--exact-match").strip()
+        assert described == f"v{CLONE_VERSION}"
+        assert fresh.tracked_changes() == ""
+
+    def test_gitignored_files_do_not_block_a_sync(self, fresh: Provisioning) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        cache = fresh.clone / "src" / "__pycache__"
+        cache.mkdir(parents=True)
+        (cache / "x.pyc").write_bytes(b"\0")
+        fresh.expect(MAIN_VERSION)
+
+        result = fresh.provision()
+
+        assert result.returncode == 0, _out(result)
+        assert fresh.clone_version() == MAIN_VERSION
+
+    def test_the_url_is_still_the_fixed_one_whatever_the_environment_says(
+        self, fresh: Provisioning
+    ) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(MAIN_VERSION)
+
+        result = fresh.provision(
+            {
+                "DAEMON_REPO": "file:///nonexistent/evil.git",
+                "HOOKS_DAEMON_CLONE_URL": "file:///nonexistent/evil.git",
+            }
+        )
+
+        assert result.returncode == 0, _out(result)
+        assert fresh.clone_version() == MAIN_VERSION
+
+    def test_a_bare_tag_ref_is_fetched_and_nothing_else(self, fresh: Provisioning) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(MAIN_VERSION)
+        assert fresh.provision().returncode == 0
+
+        branches = _git(fresh.clone, "branch", "--list", "--all").strip()
+        assert "main" not in branches and "gated" not in branches
+
+
+class TestASyncRefusesAndChangesNothing:
+    @pytest.mark.parametrize("damage", ["tracked-edit", "untracked-file"])
+    def test_a_modified_clone_is_refused(self, fresh: Provisioning, damage: str) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        if damage == "tracked-edit":
+            (fresh.clone / "pyproject.toml").write_text("# local edit\n")
+        else:
+            (fresh.clone / "stray.txt").write_text("mine\n")
+        fresh.expect(MAIN_VERSION)
+        before = fresh.clone_tracked_state()
+        starts = fresh.starts()
+
+        result = fresh.provision()
+
+        out = _out(result)
+        assert result.returncode != 0
+        assert "local changes" in out
+        assert "upgrade" in out, "the refusal names the manual route"
+        assert fresh.clone_tracked_state() == before
+        assert fresh.clone_version() == CLONE_VERSION
+        assert fresh.starts() == starts
+
+    def test_a_foreign_origin_is_refused(self, fresh: Provisioning) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        _git(fresh.clone, "remote", "set-url", "origin", "https://example.invalid/evil.git")
+        fresh.expect(MAIN_VERSION)
+        before = fresh.head()
+
+        result = fresh.provision()
+
+        out = _out(result)
+        assert result.returncode != 0
+        assert "origin" in out and "example.invalid" in out
+        assert fresh.head() == before
+        assert fresh.clone_version() == CLONE_VERSION
+
+    def test_a_clone_that_is_not_a_git_checkout_is_refused(self, fresh: Provisioning) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        shutil.rmtree(fresh.clone / ".git")
+        fresh.expect(MAIN_VERSION)
+
+        result = fresh.provision()
+
+        assert result.returncode != 0
+        assert "not a git checkout" in _out(result)
+        assert fresh.clone_version() == CLONE_VERSION
+        assert not (fresh.clone / ".git").exists()
+
+    def test_a_tag_whose_version_py_disagrees_aborts_before_checkout(
+        self, fresh: Provisioning
+    ) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(LYING_TAG_VERSION)
+        before = fresh.clone_tracked_state()
+        tags_before = _git(fresh.clone, "tag", "--list")
+        starts = fresh.starts()
+
+        result = fresh.provision()
+
+        out = _out(result)
+        assert result.returncode != 0
+        assert LYING_TAG_VERSION in out and CLONE_VERSION in out
+        assert fresh.clone_tracked_state() == before
+        assert fresh.starts() == starts
+        assert _git(fresh.clone, "tag", "--list") == tags_before
+
+    def test_an_unreleased_tag_leaves_the_clone_as_it_was(self, fresh: Provisioning) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect("3.99.99")
+        before = fresh.clone_tracked_state()
+
+        result = fresh.provision()
+
+        assert result.returncode != 0
+        assert "v3.99.99" in _out(result)
+        assert fresh.clone_tracked_state() == before
+
+    def test_an_unknown_argument_is_refused(self, fresh: Provisioning) -> None:
+        result = fresh.provision(args=("--force",))
+
+        assert result.returncode != 0
+        assert "--force" in _out(result)
+        assert not (fresh.clone / ".git").exists()
+
+
+DIGEST = re.compile(r"--skip-reading-confirmation=(\S+)")
+
+
+class TestTheTargetsPreDeployGate:
+    def test_a_target_that_needs_reading_stops_with_nothing_changed(
+        self, fresh: Provisioning
+    ) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(GATED_VERSION)
+        before = fresh.clone_tracked_state()
+        starts = fresh.starts()
+        uv_calls = len(fresh.box.uv_calls())
+
+        result = fresh.provision()
+
+        out = _out(result)
+        assert result.returncode != 0
+        assert GUIDE_NAME in out, "the gate's listing is printed"
+        assert DIGEST.search(out) is not None
+        assert "bash .claude/provision.sh --skip-reading-confirmation=" in out
+        assert fresh.clone_tracked_state() == before
+        assert fresh.clone_version() == CLONE_VERSION
+        assert fresh.starts() == starts
+        assert len(fresh.box.uv_calls()) == uv_calls
+
+    def test_the_digest_flag_lets_the_sync_proceed(self, fresh: Provisioning) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(GATED_VERSION)
+        stopped = fresh.provision()
+        match = DIGEST.search(_out(stopped))
+        assert match is not None, _out(stopped)
+
+        result = fresh.provision(args=(f"--skip-reading-confirmation={match.group(1)}",))
+
+        assert result.returncode == 0, _out(result)
+        assert fresh.clone_version() == GATED_VERSION
+        assert fresh.starts() == 2
+
+    def test_a_wrong_digest_does_not_proceed(self, fresh: Provisioning) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(GATED_VERSION)
+
+        result = fresh.provision(args=("--skip-reading-confirmation=0000",))
+
+        assert result.returncode != 0
+        assert fresh.clone_version() == CLONE_VERSION
+
+    def test_a_target_that_predates_the_gate_syncs_and_says_so(self, fresh: Provisioning) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(MAIN_VERSION)
+
+        result = fresh.provision()
+
+        assert result.returncode == 0, _out(result)
+        assert "predates the pre-deploy gate" in _out(result)
+
+
+class TestAFailedSyncRestoresThePreviousVersion:
+    def test_a_venv_build_failure_after_checkout_puts_the_old_commit_back(
+        self, fresh: Provisioning
+    ) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        before = fresh.head()
+        fresh.expect(MAIN_VERSION)
+
+        result = fresh.provision(uv_fails=True)
+
+        out = _out(result)
+        assert result.returncode != 0
+        assert "venv" in out
+        assert f"previous version v{CLONE_VERSION}" in out
+        assert fresh.head() == before
+        assert fresh.clone_version() == CLONE_VERSION
+        assert fresh.clone_tracked_state() == before
+        assert fresh.box.resolves(), "the previous venv still resolves"
+        assert fresh.starts() == 2, "the old daemon was restarted"
+        assert fresh.tracked_changes() == ""
+        assert list((fresh.clone / "untracked").glob(".sync-backup-*")) == []
+
+
+class TestTheGateConstantsAreUpgradesOwn:
+    @pytest.mark.parametrize(
+        "name", ["GATE_PYTHON_FLOOR", "GATE_TIMEOUT_SECONDS", "GATE_NEEDS_ACKNOWLEDGEMENT"]
+    )
+    def test_provision_runs_the_gate_with_the_values_upgrade_does(self, name: str) -> None:
+        pattern = re.compile(rf'^(?:readonly )?{name}="?([^"\n]+)"?$', re.MULTILINE)
+        upgrade = pattern.search((REPO_ROOT / "scripts" / "upgrade_version.sh").read_text())
+        provision = pattern.search(PROVISION_SH.read_text())
+
+        assert upgrade is not None and provision is not None
+        assert provision.group(1) == upgrade.group(1)

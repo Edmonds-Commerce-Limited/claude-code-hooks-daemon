@@ -168,8 +168,10 @@ class Sandbox:
         venv_python = textwrap.dedent(f"""\
             #!/bin/bash
             if [ "${{1:-}}" = "-m" ] && [ "${{2:-}}" = "claude_code_hooks_daemon.daemon.cli" ] \\
-                    && [ "${{!#}}" = "start" ]; then
+                    && {{ [ "${{!#}}" = "start" ] || [ "${{!#}}" = "restart" ]; }}; then
                 echo "$0" >> "{self.start_log}"
+                # A restart replaces the stand-in: the old one's socket is stale.
+                if [ "${{!#}}" = "restart" ]; then rm -f "$CLAUDE_HOOKS_SOCKET_PATH"; fi
                 # The stand-in carries the daemon's own arguments: init.sh
                 # counts a live pid as the daemon only when its command line
                 # proves it (Plan 00466 round 5, Sh-D).
