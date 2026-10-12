@@ -1,6 +1,6 @@
 # Plan 00508: operator signal reaches a busy agent
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-12
 **Owner**: dev
 **Priority**: Medium
@@ -71,18 +71,21 @@ signal's identity: session, `ts` and kind.
 
 ### Phase 2: Land
 
-- [ ] ⬜ **Task 2.1**: Review, coordinator checks and merge; then comment on
-  and close #77.
+- [x] ✅ **Task 2.1**: Review, coordinator checks and merge; then comment on
+  and close #77. Merged `a948217b4` after one review round, in which the
+  once-per-signal key gained the agent thread.
 
 ## Success Criteria
 
-- [ ] A pending operator signal reaches the agent mid-turn as hook context,
-  once.
-- [ ] The supervisor's idle-time injection and its consumption of the signal
+- [x] A pending operator signal reaches the agent mid-turn as hook context,
+  once in each agent thread.
+- [x] The supervisor's idle-time injection and its consumption of the signal
   are unchanged.
-- [ ] The release-bound consequence, a new default-enabled handler, is in the
-  pending-release holding area as a release note.
+- [x] The release-bound consequence, a new default-enabled handler, is in the
+  pending-release holding area as release note 030 in
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
 ## Delivery & Milestones
 
 - Issue #77 triaged and claimed.
+- Merged `a948217b4`; the range QA was green in substance.
