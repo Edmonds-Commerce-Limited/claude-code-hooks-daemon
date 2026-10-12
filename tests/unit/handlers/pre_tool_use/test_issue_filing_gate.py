@@ -410,6 +410,142 @@ class TestABodyItDidNot:
         assert result.decision == Decision.DENY
 
 
+class TestFlagsAreReadFromShellWords:
+    """Plan 00474 N438 (#86): a flag-looking string inside a quoted argument is
+    text, not a flag. Reading flags by regex over the raw segment let a title
+    refuse a valid report, and let a title switch the gate off for a real
+    upstream filing."""
+
+    def test_a_body_file_flag_inside_a_quoted_title_is_not_a_flag(self, tmp_path: Path) -> None:
+        path = _generated(tmp_path)
+
+        result = _handler().handle(
+            _bash(
+                f"gh issue create --repo {_UPSTREAM} --title 'git merge -F - reads stdin' "
+                f"--body-file {path}"
+            )
+        )
+
+        assert result.decision == Decision.ALLOW
+
+    def test_a_double_quoted_long_body_file_in_a_title_is_not_a_flag(self, tmp_path: Path) -> None:
+        path = _generated(tmp_path)
+
+        result = _handler().handle(
+            _bash(
+                f'gh issue create --repo {_UPSTREAM} --title "x --body-file=/etc/passwd" '
+                f"-F {path}"
+            )
+        )
+
+        assert result.decision == Decision.ALLOW
+
+    def test_the_real_body_file_is_still_judged_beside_a_decoy_title(self, tmp_path: Path) -> None:
+        bad = tmp_path / "notes.md"
+        bad.write_text("whatever I felt like writing")
+
+        result = _handler().handle(
+            _bash(f"gh issue create --repo {_UPSTREAM} --title 'see -F ok.md' --body-file {bad}")
+        )
+
+        assert result.decision == Decision.DENY
+        assert GENERATOR_COMMAND in str(result.reason)
+
+    def test_a_real_stdin_body_file_is_still_refused_beside_a_decoy_title(self) -> None:
+        result = _handler().handle(
+            _bash(f"gh issue create --repo {_UPSTREAM} --title 'a -F b' --body-file -")
+        )
+
+        assert result.decision == Decision.DENY
+        assert "stdin" in str(result.reason)
+
+    def test_a_repo_flag_inside_a_quoted_title_does_not_change_the_target(self) -> None:
+        command = (
+            f"gh issue create --title 'see -R someone/else' --repo {_UPSTREAM} --body-file r.md"
+        )
+
+        assert _handler().matches(_bash(command))
+
+    def test_the_decoy_title_filing_is_still_denied_when_the_body_is_hand_written(
+        self, tmp_path: Path
+    ) -> None:
+        bad = tmp_path / "notes.md"
+        bad.write_text("whatever I felt like writing")
+
+        result = _handler().handle(
+            _bash(f"gh issue create --title 'see -R someone/else' --repo {_UPSTREAM} -F {bad}")
+        )
+
+        assert result.decision == Decision.DENY
+
+    def test_a_repo_flag_inside_a_title_after_the_real_one_changes_nothing(self) -> None:
+        assert _handler().matches(
+            _bash(f"gh issue create --repo {_UPSTREAM} --title 'see --repo=someone/else' --web")
+        )
+
+    def test_a_decoy_title_does_not_pull_a_client_filing_into_the_gate(self) -> None:
+        command = (
+            f"gh issue create --repo {_CLIENT_REPO} --title 'see -R {_UPSTREAM}' --body-file r.md"
+        )
+
+        assert not _handler().matches(_bash(command))
+
+    def test_a_web_flag_inside_a_quoted_title_does_not_open_the_hole(self) -> None:
+        result = _handler().handle(
+            _bash(f"gh issue create --repo {_UPSTREAM} --title 'try --web instead' --body hi")
+        )
+
+        assert result.decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "flag_text",
+        ["--body-file {p}", "--body-file={p}", "-F {p}", "-F={p}", "--body-file '{p}'", '-F "{p}"'],
+    )
+    def test_every_body_file_spelling_is_still_read(self, tmp_path: Path, flag_text: str) -> None:
+        path = _generated(tmp_path)
+
+        result = _handler().handle(
+            _bash(f"gh issue create --repo {_UPSTREAM} {flag_text.format(p=path)}")
+        )
+
+        assert result.decision == Decision.ALLOW
+
+    @pytest.mark.parametrize(
+        "flag_text",
+        [
+            f"--repo {_UPSTREAM}",
+            f"--repo={_UPSTREAM}",
+            f"-R {_UPSTREAM}",
+            f"-R={_UPSTREAM}",
+            f"--repo '{_UPSTREAM}'",
+            f'-R "{_UPSTREAM}"',
+        ],
+    )
+    def test_every_repo_spelling_is_still_read(self, flag_text: str) -> None:
+        assert _handler().matches(_bash(f"gh issue create {flag_text} --title x"))
+
+    def test_gh_repo_still_selects_the_target_when_no_flag_does(self) -> None:
+        assert _handler().matches(_bash(f"GH_REPO={_UPSTREAM} gh issue create --title 'a -R b'"))
+
+    def test_the_cwd_still_answers_when_nothing_else_does(self, tmp_path: Path) -> None:
+        checkout = _git_checkout_with_origin(tmp_path, f"git@github.com:{_UPSTREAM}.git")
+
+        assert _handler().matches(
+            _bash("gh issue create --title 'a -R b/c' --body y", cwd=str(checkout))
+        )
+
+    def test_an_unparseable_segment_keeps_the_conservative_reading(self, tmp_path: Path) -> None:
+        """An unbalanced quote leaves the words unknowable, so the flags are
+        read from the raw text as they always were: the gate still engages and
+        still judges the file, rather than standing down."""
+        bad = tmp_path / "notes.md"
+        bad.write_text("whatever I felt like writing")
+        command = f"gh issue create --repo {_UPSTREAM} --title 'it's broken --body-file {bad}"
+
+        assert _handler().matches(_bash(command))
+        assert _handler().handle(_bash(command)).decision == Decision.DENY
+
+
 class TestTheDenyMessage:
     def test_it_names_the_command_that_produces_a_valid_body(self) -> None:
         result = _handler().handle(_bash(f"gh issue create --repo {_UPSTREAM} --title x"))
