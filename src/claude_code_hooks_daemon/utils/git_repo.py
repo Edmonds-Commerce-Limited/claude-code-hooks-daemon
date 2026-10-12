@@ -34,6 +34,8 @@ from typing import Final
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
+from claude_code_hooks_daemon.utils.realpath import realpath
 from claude_code_hooks_daemon.utils.secret_file_matching import (
     path_is_protected,
     resolve_configured_patterns,
@@ -372,6 +374,44 @@ def git_visible_ancestor_dirs(rel_paths: frozenset[str]) -> frozenset[str]:
         for depth in range(1, len(parts)):
             dirs.add("/".join(parts[:depth]))
     return frozenset(dirs)
+
+
+#: ``git check-ignore -q`` exits 0 when the path is ignored and 1 when it is
+#: not; any other status means git could not answer.
+_CHECK_IGNORE_IGNORED: Final[int] = 0
+_CHECK_IGNORE_NOT_IGNORED: Final[int] = 1
+
+
+def path_is_git_ignored(checkout: Path, abs_path: Path) -> bool:
+    """Whether ``checkout``'s ``.gitignore`` rules exclude ``abs_path``.
+
+    The per-path counterpart of :func:`git_visible_paths`, for a caller judging
+    ONE file (an edit hook) where listing the whole tree would cost far more
+    than the answer is worth. One ``git check-ignore -q`` spawn. A tracked file
+    is never reported ignored, which agrees with the listing: git does not
+    ignore what it already tracks.
+
+    FAILS OPEN: ``False`` when ``checkout`` is not a repository, git is
+    unavailable or times out, or ``abs_path`` is not below ``checkout``. Not
+    knowing is not a reason to drop a file from a check, so the caller keeps
+    its existing behaviour.
+    """
+    root = checkout.resolve()
+    absolute = Path(realpath(abs_path))
+    if not path_is_relative_to(absolute, root):
+        return False
+    rel_path = path_relative_to(absolute, root).as_posix()
+    result = run_git(root, "check-ignore", "-q", "--", rel_path)
+    if result.returncode == _CHECK_IGNORE_IGNORED:
+        return True
+    if result.returncode != _CHECK_IGNORE_NOT_IGNORED:
+        logger.debug(
+            "git check-ignore could not judge %s (status %s): %s",
+            rel_path,
+            result.returncode,
+            result.stderr.strip(),
+        )
+    return False
 
 
 _GIT_DIR_ENTRY: Final[str] = ".git"

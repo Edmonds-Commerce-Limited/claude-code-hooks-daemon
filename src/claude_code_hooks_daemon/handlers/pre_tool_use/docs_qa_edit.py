@@ -23,6 +23,10 @@ corpus tracks, yet is exactly what ``module-doc-budget`` exists to police
 unreachable at EDIT time for the very files it targets, catching drift
 only retrospectively at the next SWEEP.
 
+Whichever arm admits a path, :func:`docs_qa.corpus.is_lintable_path` then
+drops one inside a nested separate git checkout and one the project's
+``.gitignore`` excludes, matching the SWEEP (Issue #80).
+
 Deliberately hot-path cheap: the primary checks (``pointer-resolves``,
 ``generated-doc-hand-edit``, ``rules-file-shape``, ``quote-drift``) need no
 corpus and no git subprocess — single-file invariants only. Two checks,
@@ -271,6 +275,13 @@ class DocsQaEditHandler(PreToolUseHandlerBase):
             "like `src/CLAUDE.md` sits outside every tracked tree yet is\n"
             "exactly what `module-doc-budget` polices) is checked against the\n"
             "docs QA EDIT-stage catalogue on the content the file WOULD have.\n"
+            "\n"
+            "**Out of scope, whichever arm would admit it**: a file in a nested\n"
+            "separate git checkout (a vendored clone, a submodule, another\n"
+            "repository's linked worktree), and a gitignored file, as the\n"
+            "sweep already skips. This repository's own worktrees stay in\n"
+            "scope. A file git cannot judge (not a repository, git\n"
+            "unavailable) stays in scope.\n"
             "\n"
             "**Checks**: `pointer-resolves` (a plain markdown link whose target\n"
             "file does not exist — block-eligible only for a link NEW in this\n"

@@ -57,11 +57,13 @@ from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
     git_visible_ancestor_dirs,
     git_visible_paths,
+    path_is_git_ignored,
     project_path_is_protected,
 )
 from claude_code_hooks_daemon.utils.markdown_links import extract_link_targets
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.path_exclusion import is_path_excluded
+from claude_code_hooks_daemon.utils.repository_scope import owning_checkout
 from claude_code_hooks_daemon.utils.vendor_paths import (
     VendorScope,
     is_vendored_path_in_scopes,
@@ -469,6 +471,16 @@ def is_lintable_path(
     deliberately wider than the corpus scope). The project-wide
     ``daemon.exclude_paths`` is judged FIRST, because the two wider arms
     bypass :func:`is_in_scope` and would otherwise re-admit an excluded path.
+
+    Whatever those arms admit is then held to the boundary the SWEEP applies
+    (Issue #80). A file in a nested clone, a submodule or another repository's
+    linked worktree is not this project's document, so it is not judged against
+    this project's budgets; this repository's OWN worktrees stay in scope. A
+    gitignored file is out, as in :func:`iter_corpus_paths`, except the one
+    deliberate inclusion :data:`_GITIGNORED_MARKDOWN_INCLUDES`. The ignore test
+    is one ``git check-ignore`` for the one path (never a whole-tree listing,
+    which would run on every Write), and fails open: if git cannot answer, the
+    file stays in scope.
     """
     # Deferred: docs_qa.checks/__init__ imports checks.duplicate_block, which
     # imports DocCorpus from this module -- a module-level import here would
@@ -479,11 +491,19 @@ def is_lintable_path(
 
     if is_project_excluded(rel_path.replace("\\", "/"), policy):
         return False
-    return (
+    admitted = (
         is_in_scope(path, project_root, policy)
         or matched_manifest_entry(rel_path, policy.qa.generated_docs) is not None
         or is_module_doc_path(rel_path, policy.trees.agent)
     )
+    if not admitted:
+        return False
+    checkout = owning_checkout(str(path), project_root)
+    if checkout is None:
+        return False
+    if rel_path in _GITIGNORED_MARKDOWN_INCLUDES:
+        return True
+    return not path_is_git_ignored(checkout, path)
 
 
 def iter_corpus_paths(project_root: Path, policy: DocumentationPolicy) -> list[Path]:

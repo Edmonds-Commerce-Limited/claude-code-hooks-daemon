@@ -45,7 +45,7 @@ Coordinator ruling (the triage is in #80):
 
 ### Phase 1: Fix
 
-- [ ] ⬜ **Task 1.1**: RED. Write tests for `is_lintable_path` and for the
+- [x] ✅ **Task 1.1**: RED. Write tests for `is_lintable_path` and for the
   `docs-qa --lint` CLI covering:
   - a nested clone;
   - a submodule-style `.git` file;
@@ -53,10 +53,10 @@ Coordinator ruling (the triage is in #80):
   - this repository's own worktree, which stays linted;
   - a gitignored directory;
   - an ordinary module doc, which stays linted.
-- [ ] ⬜ **Task 1.2**: GREEN. Implement in `is_lintable_path`, reusing the
+- [x] ✅ **Task 1.2**: GREEN. Implement in `is_lintable_path`, reusing the
   Plan 00509 helpers and an existing cheap ignore check if one exists. Measure
   the per-call cost.
-- [ ] ⬜ **Task 1.3**: Update the handler guidance or the docs that state the
+- [x] ✅ **Task 1.3**: Update the handler guidance or the docs that state the
   edit-stage scope, and add a release note in
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
