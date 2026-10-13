@@ -1,6 +1,6 @@
 # Plan 00518: full qa blocker exempt agent types
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-13
 **Owner**: dev
 **Priority**: High
@@ -45,21 +45,30 @@ once do not. So the exemption comes with a one-at-a-time lock (owner: "yes for t
 
 ### Phase 0: Facts
 
-- [ ] ⬜ **Task 0.1**: Record the `agent_type` value a Bash call carries from an Agent-tool sub-agent of a custom
-  `.claude/agents/` type, from a built-in type, and from an in-process teammate (ledger N443: upstream `agent_id` now
-  also identifies teammates). Use the daemon's payload capture or a probe; the exemption keys on what is observed.
-  If PreToolUse `agent_type` is unreliable, stop and report before Phase 1: the design then needs another key.
+- [x] ✅ **Task 0.1**: Measured from the daemon's DEBUG payload log (2026-10-13). A Bash call's PreToolUse `agent_type`
+  is the agent DEFINITION type for an unnamed Agent-tool dispatch (`subagent_type: qa-runner`, no name: `agent_id`
+  `a57801934993f0485`, `agent_type` `qa-runner`), and the dispatch NAME for a named one, an in-process teammate
+  (`subagent_type: qa-runner`, `name: probe-named-518`: `agent_id` `aprobe-named-518-…`, `agent_type`
+  `probe-named-518`; likewise `dev-518` for a `python-developer`). No field of a teammate's tool payload carries its
+  definition type. The Agent tool call that dispatches it does: its `tool_input` holds both `name` and `subagent_type`.
+  Developer report: `subagent-reports/261013-dev-518-sonnet.md` on the plan's branch.
 
 ### Phase 1: Exemption and lock (TDD)
 
-- [ ] ⬜ **Task 1.1**: `exempt_agent_types` option, config validation, the PreToolUse input schema gaining
-  `agent_type`, and the allow-with-advisory path. Tests: a listed type is allowed; an unlisted type, a missing or empty
-  `agent_type`, and a near-miss name are denied as today.
-- [ ] ⬜ **Task 1.2**: The one-at-a-time rule reuses the existing host-wide full-QA lock (`qa/full_qa_lock.py`,
+- [ ] ⬜ **Task 1.1**: Resolve the EFFECTIVE definition type of the calling sub-agent. Unnamed: the payload
+  `agent_type`. Named: a name-to-type record written when the daemon sees the Agent tool dispatch (PreToolUse,
+  `tool_input.name` and `tool_input.subagent_type`, keyed by session and name), read back for the teammate's
+  `agent_type`. A named teammate with no record resolves to no type (deny), so naming an agent `qa-full-runner` never
+  exempts it.
+- [ ] ⬜ **Task 1.2**: `exempt_agent_types` option, config validation, the PreToolUse input schema gaining
+  `agent_type`, and the allow-with-advisory path, matched against Task 1.1's effective type. Tests: an unnamed and a
+  named dispatch of a listed type are allowed; an unlisted type, a missing or empty `agent_type`, a named teammate of
+  another type whose NAME is a listed type, and a near-miss name are denied as today.
+- [ ] ⬜ **Task 1.3**: The one-at-a-time rule reuses the existing host-wide full-QA lock (`qa/full_qa_lock.py`,
   enforced from `tests/conftest.py`) rather than adding a second lock: the handler denies an exempt full run while that
   lock is held by a live run, naming the holder, and a dead holder never blocks. Read the lock's semantics first; tests
   over a live holder, a dead holder and a second claimant.
-- [ ] ⬜ **Task 1.3**: Handler guidance (`get_claude_md`), `explain-handler` text, and the deny text name the option.
+- [ ] ⬜ **Task 1.4**: Handler guidance (`get_claude_md`), `explain-handler` text, and the deny text name the option.
 
 ### Phase 2: optimise
 
