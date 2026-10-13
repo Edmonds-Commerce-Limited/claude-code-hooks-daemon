@@ -14,6 +14,7 @@ from claude_code_hooks_daemon.utils.merge_scope import (
     changed_path_is_or_is_under,
     changed_paths,
     is_git_merge_pull_rebase_command,
+    merge_directory,
 )
 
 _RUN_GIT_TARGET = "claude_code_hooks_daemon.utils.merge_scope.run_git"
@@ -93,3 +94,33 @@ class TestChangedPathIsOrIsUnder:
 
     def test_no_changed_paths_is_false(self) -> None:
         assert not changed_path_is_or_is_under(".claude/hooks-daemon.yaml", frozenset())
+
+
+class TestMergeDirectory:
+    """The directory the first merge/pull/rebase runs in, shared by both merge handlers."""
+
+    def test_a_plain_merge_runs_in_the_session_directory(self, tmp_path: Path) -> None:
+        assert merge_directory("git merge feature", str(tmp_path)) == tmp_path
+
+    def test_a_cd_before_the_merge_moves_it(self, tmp_path: Path) -> None:
+        other = tmp_path / "other"
+        other.mkdir()
+        assert merge_directory(f"cd {other} && git merge feature", str(tmp_path)) == other
+
+    def test_git_dash_c_moves_it(self, tmp_path: Path) -> None:
+        other = tmp_path / "other"
+        other.mkdir()
+        assert merge_directory(f"git -C {other} pull", str(tmp_path)) == other
+
+    def test_a_cd_after_the_merge_does_not_move_it(self, tmp_path: Path) -> None:
+        other = tmp_path / "other"
+        other.mkdir()
+        assert merge_directory(f"git merge feature && cd {other}", str(tmp_path)) == tmp_path
+
+    def test_a_computed_cd_target_falls_back_to_the_session_directory(self, tmp_path: Path) -> None:
+        assert merge_directory("cd $DIR && git merge feature", str(tmp_path)) == tmp_path
+
+    def test_a_command_without_a_merge_stays_in_the_session_directory(self, tmp_path: Path) -> None:
+        other = tmp_path / "other"
+        other.mkdir()
+        assert merge_directory(f"cd {other} && git status", str(tmp_path)) == tmp_path

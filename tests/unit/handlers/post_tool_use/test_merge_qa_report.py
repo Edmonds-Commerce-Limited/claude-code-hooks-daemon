@@ -234,6 +234,37 @@ class TestForeignRepoExempt:
         assert result.context == []
 
 
+class TestForeignRepoByMergeDirectory:
+    """A merge is placed by the directory it runs in, not by the session's directory."""
+
+    @staticmethod
+    def _repo(path: Path) -> Path:
+        path.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(path)], check=True, timeout=git_setup_timeout())
+        return path
+
+    def _foreign(self, project: Path, command: str) -> bool:
+        return MergeQaReportHandler._is_foreign_repo(_bash(command, cwd=str(project)), project)
+
+    def test_cd_into_a_nested_repo_is_foreign(self, tmp_path: Path) -> None:
+        project = self._repo(tmp_path / "project")
+        nested = self._repo(project / "vendor" / "nested")
+        assert self._foreign(project, f"cd {nested} && git merge feature")
+
+    def test_git_dash_c_into_a_nested_repo_is_foreign(self, tmp_path: Path) -> None:
+        project = self._repo(tmp_path / "project")
+        nested = self._repo(project / "vendor" / "nested")
+        assert self._foreign(project, f"git -C {nested} merge feature")
+
+    def test_a_plain_merge_at_the_project_root_is_the_projects_own(self, tmp_path: Path) -> None:
+        project = self._repo(tmp_path / "project")
+        assert not self._foreign(project, "git merge feature")
+
+    def test_an_unplaceable_cd_falls_back_to_the_session_directory(self, tmp_path: Path) -> None:
+        project = self._repo(tmp_path / "project")
+        assert not self._foreign(project, "cd $DIR && git merge feature")
+
+
 class TestPlanAttribution:
     """Replays the Plan 00373 scenario: a merge resurrects an unindexed folder."""
 

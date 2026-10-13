@@ -25,8 +25,15 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     GIT_INVOCATION,
     normalise_line_continuations,
 )
+from claude_code_hooks_daemon.utils.git_commit_parsing import git_invocations
+from claude_code_hooks_daemon.utils.git_invocation_directory import (
+    invocation_directory,
+    placement_problem,
+)
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
+
+_MERGE_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"merge", "pull", "rebase"})
 
 # A newline separates commands exactly as `;` does (the same lesson
 # `staged_lint_gate`/`verification_result_gate` already encode), and
@@ -50,6 +57,21 @@ def is_git_merge_pull_rebase_command(command: str) -> bool:
         if _GIT_MERGE_PULL_REBASE_PATTERN.search(segment.strip()):
             return True
     return False
+
+
+def merge_directory(command: str, cwd: str) -> Path:
+    """The directory the command's first merge/pull/rebase runs in.
+
+    That is ``cwd`` moved by the ``cd``/``pushd`` and ``git -C`` in effect AT
+    that invocation: a ``cd`` after it does not move it, and one before it that
+    returns to an earlier directory does (ledger 00483 N35). Where the directory
+    cannot be placed statically (``cd $DIR``) the session directory stands in.
+    """
+    start = Path(cwd)
+    run = next((r for r in git_invocations(command) if r.subcommand in _MERGE_SUBCOMMANDS), None)
+    if run is None or placement_problem(run, start) is not None:
+        return start
+    return invocation_directory(run, start)
 
 
 def changed_paths(project_root: Path) -> frozenset[str]:
