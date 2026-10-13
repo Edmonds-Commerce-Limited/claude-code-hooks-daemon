@@ -75,6 +75,7 @@ from claude_code_hooks_daemon.utils.merge_scope import changed_paths as _changed
 from claude_code_hooks_daemon.utils.merge_scope import (
     is_git_merge_pull_rebase_command as _is_git_merge_pull_rebase_command,
 )
+from claude_code_hooks_daemon.utils.merge_scope import merge_directory
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 
 logger = logging.getLogger(__name__)
@@ -279,13 +280,14 @@ class MergeQaReportHandler(PostToolUseHandlerBase):
     def _is_foreign_repo(hook_input: dict[str, Any], project_root: Path) -> bool:
         """True when the command runs inside a repo other than the project's.
 
-        Mirrors `staged_lint_gate._is_foreign_repo`: nested/vendor repos and
-        other worktrees own their own history.
+        Nested/vendor repos and other worktrees own their own history. The merge
+        is placed by `utils.merge_scope.merge_directory` (a `cd`/`git -C` in
+        effect at the merge moves it), not by the session's directory alone.
         """
         cwd_raw = hook_input.get(HookInputField.CWD)
         if not cwd_raw:
             return False
-        repo = GitRepo.resolve_for(Path(cwd_raw))
+        repo = GitRepo.resolve_for(merge_directory(get_bash_command(hook_input) or "", cwd_raw))
         return repo is not None and repo.root != project_root
 
     def get_claude_md(self) -> str | None:
