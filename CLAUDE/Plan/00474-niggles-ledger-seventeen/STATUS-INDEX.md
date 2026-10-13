@@ -4,6 +4,7 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 
 | #          | Verdict                                                                                                                                                            | Origin              | Status                                 |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------- | -------------------------------------- |
+| N449       | merge_qa_report places a `cd <other> && git merge` by the session cwd, so it reports the outer project's findings for a merge in another repository (#101)         | GitHub #101         | 🔄 In progress                         |
 | N448       | error_hiding_blocker and the error-hiding QA audit miss `contextlib.suppress(Exception)`, the context-manager form of `except Exception: pass` (#100)              | GitHub #100         | ✅ Fixed (0fea4b8be)                   |
 | N447       | Conflict-marker gate greps excluded paths (and a recorded large binary) before filtering; the whole-index half of #99 was fixed by N432                            | GitHub #99          | ⬜ Open                                |
 | N446       | Daemon start reports a git failure (e.g. an unknown repository extension) as "Invalid configuration" and drops git's stderr (#98)                                  | GitHub #98          | ✅ Fixed (9240e6fd3)                   |

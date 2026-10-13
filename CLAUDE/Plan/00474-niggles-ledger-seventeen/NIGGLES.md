@@ -77,6 +77,31 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N449 — merge_qa_report judges a `cd <other> && git merge` by the session's directory, not the merge's
+
+**Source**: GitHub issue #101 (triaged 2026-10-13).
+
+**Evidence** (main at 39443bf14):
+
+- `handlers/post_tool_use/merge_qa_report.py` `_is_foreign_repo` (line 279) resolves the repository from the hook's
+  `cwd` alone. A merge run as `cd <nested clone> && git merge ...` or `git -C <dir> merge ...` from the project root is
+  therefore treated as the project's own. The handler then diffs the project's `ORIG_HEAD..HEAD`, left over from an
+  earlier operation, and reports plan and docs findings for files the merge never touched.
+- Its sibling `daemon_sync_after_merge` already gets this right. Its `_merge_directory` places the first
+  merge/pull/rebase invocation with `git_invocations`, `placement_problem` and `invocation_directory`, the shared
+  walker the commit gates use since N400 to N402, and falls back to the session `cwd` only when the placement cannot
+  be stated (`cd $DIR`). Its docstring says it "mirrors `merge_qa_report._is_foreign_repo`", which is now the wrong
+  way round.
+
+**Remedy (coordinator ruling)**:
+
+- Move `_merge_directory` into `utils/merge_scope.py`, which both handlers already import, and use it from both.
+  `merge_qa_report` then resolves the repository from the merge's own directory.
+- Keep the fallback unchanged: no placeable invocation means the session `cwd`, as today.
+- Fix the two docstrings so they no longer point at each other as the model.
+
+**Status**: 🔄 In progress.
+
 ### N448 — error_hiding_blocker and the error-hiding audit miss `contextlib.suppress(Exception)`
 
 **Source**: GitHub issue #100 (triaged 2026-10-12).
