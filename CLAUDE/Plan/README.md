@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00517: daemon version ssot and no stale venvs](00517-daemon-version-ssot-and-no-stale-venvs/PLAN.md) - Not Started, High (owner direction: the installed daemon version comes from the installed `version.py` only, never a venv's metadata copy; one staleness rule for every venv cleanup; a venv with missing or unreadable metadata is investigated by the running agent and removed once confirmed safe; cleanup also on restart, provision and session start)
+
 - [00516: journal in place redaction](00516-journal-in-place-redaction/PLAN.md) - Not Started, Medium (#108; awaiting owner decisions: a bounded `mkplan.bash --journal-redact` to remove a leaked value from a past journal entry with an appended correction entry, since `journal-dayfile-is-today` blocks any past-day edit; ledger 00474 N389)
 
 - [00515: per host handler overrides](00515-per-host-handler-overrides/PLAN.md) - Not Started, Medium (#93; awaiting owner decisions: per-host or per-role `handlers:` overlays in Plan 00479's top-level `hosts:` block, including whether an overlay may disable a guard)
@@ -310,11 +312,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 516 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 517 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 438 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 55 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 56 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

@@ -1,0 +1,102 @@
+# Plan 00517: daemon version ssot and no stale venvs
+
+**Status**: Not Started
+**Created**: 2026-10-13
+**Owner**: dev
+**Priority**: High
+**Recommended Executor**: Sonnet
+**Execution Strategy**: Sub-Agent Orchestration
+
+## Overview
+
+The owner, 2026-10-13: stale venvs misreporting the daemon version are "a total failure of SSoT", venvs "must be
+cleaned up", and "we need to not have crap floating around". Venvs with missing or unreadable metadata are to be
+investigated by the running agent and removed once confirmed safe.
+
+What main does today:
+
+- **The installed version has two sources.** `daemon_upgrade_detector` (`handlers/user_prompt_submit/ daemon_upgrade_detector.py`, `_resolve_installed_daemon_version`) reads the INSTALLED version from the selected
+  venv's `.daemon-metadata.json` `daemon_version`, a copy written when the venv was built, and compares it with the
+  running `version.__version__`. A venv whose metadata disagrees with the source it serves reports a version that is
+  not installed. Release note 037 (#84) made the scan prefer the venv whose `lock_hash` matches, which narrows the
+  window but leaves the copy as the source.
+- **"Stale" has three definitions.** `prune-venvs --stale` removes venvs whose stamped daemon version differs;
+  `prune-venvs --all-except-current` removes every venv whose interpreter fingerprint differs from the current one
+  (in this repository the only venv, the one in use, is `workspace-py311-81c29529` while `list-venvs` reports the
+  current fingerprint as `workspace-py311-2a519198`); the upgrade cleanup (release note 043,
+  `paths.py list-stale-venvs`) removes a venv only when its `lock_hash` is readable and differs.
+- **Cleanup runs only on upgrade**, and keeps a venv with missing or unreadable metadata, or another checkout view's
+  slug, logging `Kept venv:`. Nothing removes those later, and nothing runs at restart, provision or session start.
+
+## Goals
+
+- One source for the installed daemon version: the installed source tree's `version.py`. Venv metadata keeps what
+  tells venvs apart (`lock_hash`, `python_path`) and is never read as the version.
+- One definition of a stale venv, used by the upgrade cleanup, `prune-venvs`, `disk-usage` and any session-start
+  report. Never removes the venv the running daemon uses.
+- No unexplained venv stays on disk. A venv the code cannot prove stale (missing or unreadable metadata) is surfaced
+  to the running agent with the facts needed to judge it (what process, if any, uses it; its interpreter; its age; its
+  slug), and the agent removes it once it has confirmed it is safe.
+- The check runs where stale venvs appear: after upgrade, on daemon restart, on `provision`, and as a SessionStart
+  advisory, not only on upgrade.
+
+## Non-Goals
+
+- Changing the venv naming scheme (slug and fingerprint), Plan 00099/00124 territory.
+- Removing another checkout view's venv (a host and a container sharing one checkout) without the same safety proof:
+  it is reported, and the agent confirms it is unused before removing it.
+- Plan 00100's residue (Phase 5 upgrade-cycle test, Phase 6 docs). Coordinate with it, do not absorb it.
+
+## Tasks
+
+### Phase 1: Inventory
+
+- [ ] ⬜ **Task 1.1**: List every reader of a daemon version (the venv metadata `daemon_version`, `version.__version__`,
+  the generated-doc header in `utils/deployed_version.py`, shell readers in `scripts/`), and every staleness test
+  (`prune-venvs` flags, `list-stale-venvs`, `eager_cleanup_stale_venvs`, `disk-usage`). Record which should read
+  `version.py` and which define stale, in a supporting doc `INVENTORY.md`.
+
+### Phase 2: Version SSoT (TDD)
+
+- [ ] ⬜ **Task 2.1**: `daemon_upgrade_detector` reads the installed version from the installed source tree's
+  `version.py` (the clone under `.claude/hooks-daemon/`), not from venv metadata. Test: a venv whose metadata names a
+  different version than the source reports nothing; a source upgraded underneath a running daemon still reports.
+- [ ] ⬜ **Task 2.2**: Every other reader from Task 1.1 that takes a version from venv metadata moves to the same
+  reader. Metadata's `daemon_version` stays only as a build record, if anything still needs it.
+
+### Phase 3: One staleness rule (TDD)
+
+- [ ] ⬜ **Task 3.1**: One function decides stale (current `lock_hash` and this view's slug, never the venv the
+  running daemon or the resolver currently selects), shared by the upgrade cleanup and `prune-venvs`; the flags that
+  test fingerprint or stamped version are removed or made to call it.
+- [ ] ⬜ **Task 3.2**: A venv with missing or unreadable metadata, or another view's slug, is classed UNPROVEN, not
+  kept silently. `list-venvs`/`prune-venvs --dry-run` show each UNPROVEN venv with the evidence: processes whose
+  executable lives in it, interpreter and version, last-modified time, slug and the view it belongs to.
+- [ ] ⬜ **Task 3.3**: `prune-venvs --unproven <path> --force` removes one named UNPROVEN venv, refusing when a live
+  process uses it or it is the resolver's current choice.
+
+### Phase 4: Where it runs
+
+- [ ] ⬜ **Task 4.1**: Daemon restart and `provision` run the stale cleanup (proven-stale only, never UNPROVEN).
+  Coordinate with Plan 00477 Task 2.2 (provision) and Plan 00100 Phase 4's venv lock.
+- [ ] ⬜ **Task 4.2**: A SessionStart advisory lists UNPROVEN venvs with the evidence and the exact removal command,
+  telling the agent to investigate and remove each once confirmed safe; silent when there are none.
+
+### Phase 5: Release
+
+- [ ] ⬜ **Task 5.1**: Release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`, and a post-upgrade task telling
+  the upgrading agent to clear any UNPROVEN venvs the new advisory lists.
+- [ ] ⬜ **Task 5.2**: This repository's own `untracked/` and every worktree's venvs checked with the new tool.
+
+## Success Criteria
+
+- [ ] No code path reads the installed daemon version from venv metadata (grep and test).
+- [ ] One staleness function; `prune-venvs` and the upgrade cleanup both call it; the running venv is never removed.
+- [ ] An UNPROVEN venv is surfaced at session start with evidence and a removal command, and removed once confirmed.
+- [ ] After upgrade, restart or provision, `untracked/` holds no proven-stale venv.
+- [ ] Release-bound consequences recorded in `CLAUDE/UPGRADES/UNRELEASED/` (release note and post-upgrade task).
+
+## Delivery & Milestones
+
+- Filed from the owner's direction of 2026-10-13. Related: Plan 00100 (venv SSoT history, Phase 4 lock), Plan 00477
+  (provision), release notes 037 and 043.
