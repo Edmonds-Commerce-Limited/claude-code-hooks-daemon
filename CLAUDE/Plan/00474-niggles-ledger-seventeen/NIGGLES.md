@@ -110,7 +110,8 @@ integration head.
 
 - **Change:** `FullQaPattern` gains `judges_operand_paths`, which is false for an entry with `full_words` and no
   `full_args`. `_add_path_operand` calls `_operand_is_full` only when it is true. The `frozenset()` coercion stays, so
-  the `full_words: []` never-full return (line 5665) and the `full_args is None` rule are untouched.
+  the `full_words: []` never-full early return in the run-verdict function and the `full_args is None` rule are
+  untouched.
 - **Tests:** a regression test pins the `run-changed-tests` shape. Red first: 4 of 12 new tests failed (`.`, `..`,
   the nested repository root, and `--verbose .`). The docstring, handler guidance and release note 050 are updated.
 - **QA on the integration head:** 39 of 40 checks passed. The red one, `changed_tests`, ran 4142 tests with 0 failed;
