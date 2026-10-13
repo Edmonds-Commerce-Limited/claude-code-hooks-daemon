@@ -30,7 +30,8 @@ Tick an item here when it lands, with the commit.
 
 ## Owner-directed for this release (2026-10-13)
 
-- [ ] **Plan 00517 Phase 2**: the installed daemon version comes only from the installed `version.py`.
+- [x] **Plan 00517 Phase 2**: the installed daemon version comes only from the installed `version.py`. Merged
+  dbecffaea (with Task 1.1's `INVENTORY.md`); release note 054.
 - [ ] **Plan 00517 Phases 3-4**: one staleness rule; venvs with missing or unreadable metadata surfaced to the running
   agent with evidence and removed once confirmed safe; cleanup on restart, provision and session start.
 - [ ] **Plan 00517 Phase 5**: release note and post-upgrade task.
