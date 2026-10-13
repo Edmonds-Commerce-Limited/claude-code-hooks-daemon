@@ -95,6 +95,8 @@ from claude_code_hooks_daemon.daemon.paths import (
     read_pid_record,
     read_socket_discovery_file,
     resolve_hostname,
+    sweep_dead_runtime_sets,
+    unproven_report_lines,
     write_cleanup_status,
 )
 from claude_code_hooks_daemon.daemon.permission_audit import (
@@ -608,6 +610,23 @@ def _reap_stale_runtime_files(project_path: Path, config: Config) -> None:
     write_cleanup_status(project_path, stale_total)
     if stale_total > 0:
         _say_before_fork(f"Cleaned up {stale_total} stale file(s) older than {stale_days} days")
+
+    # Plan 00517 Task 4.3: other hosts' dead per-host runtime sets (a container
+    # restart leaves its predecessor's behind). A set goes only when every socket
+    # in it refuses a connection and its pid is not a live daemon, so a host
+    # sharing this checkout is never touched. Fail-open, like the venv cleanup.
+    try:
+        dead_files = sweep_dead_runtime_sets(project_path)
+    except Exception as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="a dead-runtime-set sweep that fails is retried by the next start, and a start must not depend on it",
+            level=logging.ERROR,
+        )
+    else:
+        if dead_files:
+            _say_before_fork(f"Removed {len(dead_files)} file(s) of dead per-host runtime sets")
 
     # Plan 00517 Task 4.1: venvs (~187 MB each, the biggest disk offender) PROVEN
     # stale by the one staleness rule are removed on every start, restart and
@@ -3337,21 +3356,14 @@ def _unproven_evidence(project_root: Path, entries: list[dict[str, Any]]) -> lis
 
 def _print_unproven_report(evidence: list[VenvEvidence]) -> None:
     """Print each UNPROVEN venv with its evidence and the exact removal command."""
-    if not evidence:
-        return
-    print()
-    print(
-        f"{len(evidence)} UNPROVEN venv(s): the code cannot prove them stale (missing or "
-        "unreadable metadata, or another checkout view's slug), so nothing removes them "
-        "automatically. Investigate each; once you have confirmed it is unused and safe, "
-        "remove it with the command shown."
+    lines = unproven_report_lines(
+        evidence,
+        lambda venv: daemon_cli_command("prune-venvs", "--unproven", str(venv), "--force"),
     )
-    for item in evidence:
+    if lines:
         print()
-        for line in item.describe():
+        for line in lines:
             print(line)
-        removal = daemon_cli_command("prune-venvs", "--unproven", str(item.path), "--force")
-        print(f"    remove: {removal}")
 
 
 def _remove_venv_dirs(entries: list[dict[str, Any]]) -> int:

@@ -22,6 +22,7 @@ from .routine_qa_sweep import RoutineQaSweepHandler
 from .skill_opportunity_detector import SkillOpportunityDetectorHandler
 from .suggest_statusline import SuggestStatusLineHandler
 from .tool_disable_advisor import ToolDisableAdvisorHandler
+from .unproven_venv_advisor import UnprovenVenvAdvisorHandler
 from .version_check import VersionCheckHandler
 
 SecretFileHygieneCheckerHandler = (
@@ -51,5 +52,6 @@ __all__ = [
     "SkillOpportunityDetectorHandler",
     "SuggestStatusLineHandler",
     "ToolDisableAdvisorHandler",
+    "UnprovenVenvAdvisorHandler",
     "VersionCheckHandler",
 ]

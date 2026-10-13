@@ -732,6 +732,10 @@ handlers:
       enabled: false  # Enable via top-level documentation.enabled: true; also builds/refreshes the corpus index
       priority: 64
 
+    unproven_venv_advisor:  # List venvs the code cannot prove stale, with evidence and the removal command (Plan 00517)
+      enabled: true  # Advisory only, never removes; silent when there are none
+      priority: 72
+
     tool_disable_advisor:  # Check tool_policy.never_want tools against project settings (Plan 00293)
       enabled: false  # Opt-in; advisory only, never edits settings; inert without tool_policy.never_want entries
       priority: 65

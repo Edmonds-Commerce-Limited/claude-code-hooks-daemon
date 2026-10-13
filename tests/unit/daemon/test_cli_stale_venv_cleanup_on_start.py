@@ -153,3 +153,44 @@ class TestReapRunsTheCleanupFailOpen:
             f"{cli.__name__}._cleanup_proven_stale_venvs", MagicMock(side_effect=RuntimeError("x"))
         ):
             self._reap(project)  # must not raise
+
+
+class TestReapSweepsDeadRuntimeSets:
+    """Task 4.3: the same start-time hook sweeps other hosts' dead runtime sets, fail-open."""
+
+    def _reap(self, project: Path) -> None:
+        with (
+            patch(f"{cli.__name__}.cleanup_stale_daemon_files", return_value=0),
+            patch(f"{cli.__name__}.cleanup_stale_session_dirs", return_value=0),
+            patch(f"{cli.__name__}.write_cleanup_status"),
+        ):
+            cli._reap_stale_runtime_files(project, Config())
+
+    def test_start_announces_what_the_sweep_removed(
+        self, project: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        removed = [project / "untracked" / "daemon-gone.pid", project / "untracked" / "events-gone"]
+
+        with patch(f"{cli.__name__}.sweep_dead_runtime_sets", return_value=removed) as sweep:
+            self._reap(project)
+
+        sweep.assert_called_once_with(project)
+        assert "Removed 2 file(s) of dead per-host runtime sets" in capsys.readouterr().out
+
+    def test_start_is_silent_when_nothing_was_swept(
+        self, project: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with patch(f"{cli.__name__}.sweep_dead_runtime_sets", return_value=[]):
+            self._reap(project)
+
+        assert "dead per-host" not in capsys.readouterr().out
+
+    def test_a_sweep_error_never_stops_the_start_or_the_venv_cleanup(self, project: Path) -> None:
+        stale = _venv(project / "untracked" / _name(project, "py310-aaaaaaaa"), STALE_HASH)
+
+        with patch(
+            f"{cli.__name__}.sweep_dead_runtime_sets", MagicMock(side_effect=RuntimeError("x"))
+        ):
+            self._reap(project)  # must not raise
+
+        assert not stale.exists()

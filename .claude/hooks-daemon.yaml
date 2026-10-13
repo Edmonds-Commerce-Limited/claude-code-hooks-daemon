@@ -1086,6 +1086,10 @@ handlers:
       enabled: true  # Policy under top-level documentation.qa; also builds/refreshes the corpus index
       priority: 64
 
+    unproven_venv_advisor:  # List venvs the code cannot prove stale, with evidence and the removal command (Plan 00517)
+      enabled: true  # Advisory only, never removes; silent when there are none
+      priority: 72
+
     tool_disable_advisor:  # Plan 00293 dogfood: check tool_policy.never_want against project settings
       enabled: true  # Opt-in (ships disabled); advisory only, never edits settings
       priority: 65

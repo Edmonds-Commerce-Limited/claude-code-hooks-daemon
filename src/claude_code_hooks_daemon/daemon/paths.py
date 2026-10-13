@@ -23,6 +23,7 @@ import shutil
 import socket
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
@@ -2426,6 +2427,134 @@ def cleanup_stale_daemon_files(project_dir: Path | str, max_age_days: int = 7) -
     return removed
 
 
+# Plan 00517 Task 4.3: a per-host runtime set is ``daemon-<id>.{sock,pid,
+# sock.start.lock,socket-path}`` plus ``events-<id>/``, ``<id>`` being the
+# sanitised hostname (a container id, in a container). The non-greedy id
+# anchors on the longest known suffix, so a dotted hostname stays one id.
+_RUNTIME_SET_FILE = re.compile(
+    r"^daemon-(?P<id>.+?)\.(?:sock\.start\.lock|socket-path|sock|pid)$"
+)
+_EVENTS_DIR_PREFIX = "events-"
+_SOCKET_PROBE_TIMEOUT_SECONDS = 1.0
+# A peer's start writes its start lock, then its pid and sockets; a set with any
+# member written inside this window may be mid-start, and is left for later.
+_RUNTIME_SET_GRACE_SECONDS = 60.0
+
+
+def _socket_is_dead(path: Path) -> bool:
+    """True only when a connection to ``path`` is refused or the file is gone.
+
+    Anything else (a connect that succeeds, times out, is denied, or whose path
+    is unusable) is NOT proof the socket is dead, so the caller keeps its set.
+    """
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    probe.settimeout(_SOCKET_PROBE_TIMEOUT_SECONDS)
+    try:
+        probe.connect(str(path))
+    except (ConnectionRefusedError, FileNotFoundError):
+        return True
+    except OSError:
+        return False
+    finally:
+        probe.close()
+    return False
+
+
+def _runtime_set_members(untracked_dir: Path) -> dict[str, list[Path]]:
+    """Group the per-host runtime files and ``events-<id>/`` dirs by host id."""
+    sets: dict[str, list[Path]] = {}
+    for entry in sorted(untracked_dir.iterdir()):
+        if entry.is_dir():
+            if entry.name.startswith(_EVENTS_DIR_PREFIX) and entry.name != _EVENTS_DIR_PREFIX:
+                sets.setdefault(entry.name[len(_EVENTS_DIR_PREFIX) :], []).append(entry)
+            continue
+        match = _RUNTIME_SET_FILE.match(entry.name)
+        if match:
+            sets.setdefault(match.group("id"), []).append(entry)
+    return sets
+
+
+def _newest_mtime(members: list[Path]) -> float:
+    """The latest modification time among the members and any events-dir contents."""
+    newest = 0.0
+    for member in members:
+        newest = max(newest, member.lstat().st_mtime)
+        if member.is_dir():
+            for inner in member.iterdir():
+                newest = max(newest, inner.lstat().st_mtime)
+    return newest
+
+
+def _set_sockets(untracked_dir: Path, ident: str, members: list[Path]) -> list[Path]:
+    """Every socket a set could be serving: its own, its events dir's, its discovery file's."""
+    sockets = [m for m in members if not m.is_dir() and m.name.endswith(".sock")]
+    for member in members:
+        if member.is_dir():
+            sockets.extend(sorted(member.glob("*.sock")))
+    discovery = untracked_dir / f"daemon-{ident}.socket-path"
+    if discovery in members:
+        try:
+            named = discovery.read_text().strip()
+        except OSError:
+            # An unreadable discovery file may name a live socket this probe
+            # cannot see, so the set is not provably dead.
+            return [discovery]
+        if named and Path(named) not in sockets:
+            sockets.append(Path(named))
+    return sockets
+
+
+def sweep_dead_runtime_sets(
+    project_dir: Path | str,
+    min_age_seconds: float = _RUNTIME_SET_GRACE_SECONDS,
+) -> list[Path]:
+    """Remove other hosts' dead runtime sets from the daemon's untracked dir.
+
+    Plan 00517 Task 4.3. Socket and pid paths are keyed by hostname, so every
+    container restart leaves the previous host's set behind. A set (anything but
+    this host's own) is removed only when EVERY socket it holds refuses a
+    connection and its pid file does not name a live daemon. A listening
+    socket, which a host view sharing the checkout keeps, spares the whole set,
+    as does any member written within ``min_age_seconds`` (a start in progress).
+    Each removal is logged; one that fails is skipped and retried next start.
+
+    Returns:
+        The paths removed.
+    """
+    untracked_dir = _get_untracked_dir(Path(project_dir).resolve())
+    if not untracked_dir.is_dir():
+        return []
+    own_id = _get_hostname_suffix().removeprefix("-")
+    now = time.time()
+    removed: list[Path] = []
+    for ident, members in _runtime_set_members(untracked_dir).items():
+        if ident == own_id:
+            continue
+        if now - _newest_mtime(members) < min_age_seconds:
+            continue
+        if not all(_socket_is_dead(s) for s in _set_sockets(untracked_dir, ident, members)):
+            continue
+        pid_file = untracked_dir / f"daemon-{ident}.pid"
+        if pid_file in members and read_pid_file(pid_file, verify_daemon=True) is not None:
+            continue
+        for member in members:
+            try:
+                if member.is_dir():
+                    shutil.rmtree(member)
+                else:
+                    member.unlink()
+            except OSError as e:
+                log_and_continue(
+                    logger,
+                    e,
+                    reason=f"a dead runtime file {member} that cannot be removed is retried by the next start's sweep, and the sweep carries on with the rest of the set",
+                )
+                continue
+            logger.info("Removed dead runtime file of host %s: %s", ident, member)
+            removed.append(member)
+    return removed
+
+
 # Per-session runtime subdirectories under the daemon untracked dir. Each
 # accumulates one file per session id (thread-registry, context-sidecar,
 # downgrade-indicator) or per hook event (payload-capture); the writers never
@@ -3015,6 +3144,31 @@ def gather_venv_evidence(
             )
         )
     return evidence
+
+
+def unproven_report_lines(
+    evidence: list[VenvEvidence],
+    removal_command: Callable[[Path], str],
+) -> list[str]:
+    """The report shown for UNPROVEN venvs, by ``list-venvs`` and the SessionStart advisory.
+
+    One text, so the two surfaces cannot drift: what the code could not prove,
+    the evidence per venv, and the exact command that removes each once the
+    reader has confirmed it is safe. Empty when there are none.
+    """
+    if not evidence:
+        return []
+    lines = [
+        f"{len(evidence)} UNPROVEN venv(s): the code cannot prove them stale (missing or "
+        "unreadable metadata, or another checkout view's slug), so nothing removes them "
+        "automatically. Investigate each; once you have confirmed it is unused and safe, "
+        "remove it with the command shown."
+    ]
+    for item in evidence:
+        lines.append("")
+        lines.extend(item.describe())
+        lines.append(f"    remove: {removal_command(item.path)}")
+    return lines
 
 
 def _cli_list_stale_venvs(args: argparse.Namespace) -> int:

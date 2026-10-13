@@ -93,11 +93,12 @@ What main does today:
   provision (`init.sh` start, `bin/hooks-daemon restart`) and plain start all reach `cmd_start`, so the cleanup lives
   in `_reap_stale_runtime_files`; it holds the venv build lock, skips a venv a process uses, and is fail-open.
 
-- [ ] ⬜ **Task 4.2**: The existing daemon-start `_stale_venv_advisory` is rebuilt on Task 3.1's rule (no second
+- [x] ✅ **Task 4.2**: The existing daemon-start `_stale_venv_advisory` is rebuilt on Task 3.1's rule (no second
   advisory), and a SessionStart advisory lists UNPROVEN venvs with the evidence and the exact removal command,
-  telling the agent to investigate and remove each once confirmed safe; silent when there are none.
+  telling the agent to investigate and remove each once confirmed safe; silent when there are none. (New handler
+  `unproven_venv_advisor`, priority 72; its text is `paths.unproven_report_lines`, shared with `list-venvs`.)
 
-- [ ] ⬜ **Task 4.3**: The same rule for the daemon's per-host runtime files. Socket and pid paths are hostname-keyed
+- [x] ✅ **Task 4.3**: The same rule for the daemon's per-host runtime files. Socket and pid paths are hostname-keyed
   (`untracked/daemon-<hash>.{sock,pid,sock.start.lock,socket-path}` and `untracked/events-<hash>/`), so every container
   restart leaves the previous host's set behind; on 2026-10-13 this repository held 24 dead sets beside the live one,
   removed by hand after a connect probe refused every dead socket. Daemon start sweeps a set only when its socket
