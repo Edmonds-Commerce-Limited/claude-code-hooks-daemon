@@ -18,13 +18,10 @@ import pytest
 from claude_code_hooks_daemon.daemon import cli
 from claude_code_hooks_daemon.daemon.paths import python_venv_fingerprint
 
-
 STALE_HASH = "sha256:" + "0" * 64
 
 
-def _make_venv(
-    path: Path, stamp_version: str | None = None, lock_hash: str | None = None
-) -> None:
+def _make_venv(path: Path, stamp_version: str | None = None, lock_hash: str | None = None) -> None:
     """Materialise a fake venv on disk that looks healthy enough for listing.
 
     ``lock_hash`` writes readable metadata; one that differs from the project's

@@ -87,9 +87,7 @@ This file's lower half should list the tasks currently in this directory, so an 
 
 <!-- BEGIN TASK INDEX — regenerate when adding/removing tasks -->
 
-_No tasks are queued for the next release._ Add a row here when you add a task
-file beside this README; the release moves both out into the versioned upgrade
-guide and empties this table again.
+- `01-clear-unproven-venvs.md` — recommended: list venvs with `list-venvs`, investigate each UNPROVEN one, remove it with `prune-venvs --unproven` once confirmed safe.
 
 <!-- END TASK INDEX -->
 

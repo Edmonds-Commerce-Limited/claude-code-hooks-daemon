@@ -213,7 +213,7 @@ class TestSweepDeadRuntimeSets:
     ) -> None:
         _dead_set(untracked, "deadhost")
 
-        with patch.object(paths.shutil, "rmtree", side_effect=PermissionError("denied")):
+        with patch("shutil.rmtree", side_effect=PermissionError("denied")):
             removed = _sweep()
 
         assert untracked / "events-deadhost" not in removed

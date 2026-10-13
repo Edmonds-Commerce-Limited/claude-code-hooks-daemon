@@ -73,6 +73,7 @@ from claude_code_hooks_daemon.daemon.metadata import (
     write_daemon_metadata,
 )
 from claude_code_hooks_daemon.daemon.paths import (
+    VENV_KEEP,
     VENV_STALE,
     VENV_UNPROVEN,
     VenvEvidence,
@@ -3007,7 +3008,7 @@ def _enumerate_venvs(project_root: Path, include_size: bool = True) -> list[dict
         real_path = child.resolve()
         is_symlink = child.is_symlink()
         verdict = verdicts.get(str(child))
-        is_current =((not is_legacy) and (fingerprint == current_fp)) or (
+        is_current = ((not is_legacy) and (fingerprint == current_fp)) or (
             real_path in live_realpaths
         )
 
@@ -3507,7 +3508,9 @@ def cmd_prune_venvs(args: argparse.Namespace) -> int:
 
     current_fp = python_venv_fingerprint(project_root)
     entries = _enumerate_venvs(project_root)
-    to_remove = [entry for entry in _stale_venv_entries(entries) if select_stale or entry["is_legacy"]]
+    to_remove = [
+        entry for entry in _stale_venv_entries(entries) if select_stale or entry["is_legacy"]
+    ]
     evidence = _unproven_evidence(project_root, entries)
 
     if not to_remove:

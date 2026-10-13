@@ -178,7 +178,9 @@ class TestGatherVenvEvidence:
         assert evidence.python_version == "unknown"
 
     def test_describe_lists_every_fact_and_the_removal_command(self, tmp_path: Path) -> None:
-        venv = _venv(tmp_path, "venv-them-py311-aaaaaaaa", cfg="home = /usr/bin\nversion = 3.11.2\n")
+        venv = _venv(
+            tmp_path, "venv-them-py311-aaaaaaaa", cfg="home = /usr/bin\nversion = 3.11.2\n"
+        )
         proc_root = tmp_path / "proc"
         _fake_process(proc_root, 5, argv=[str(venv / "bin" / "python")])
 

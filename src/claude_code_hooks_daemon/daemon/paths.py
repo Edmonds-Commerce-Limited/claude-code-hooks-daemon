@@ -2431,9 +2431,7 @@ def cleanup_stale_daemon_files(project_dir: Path | str, max_age_days: int = 7) -
 # sock.start.lock,socket-path}`` plus ``events-<id>/``, ``<id>`` being the
 # sanitised hostname (a container id, in a container). The non-greedy id
 # anchors on the longest known suffix, so a dotted hostname stays one id.
-_RUNTIME_SET_FILE = re.compile(
-    r"^daemon-(?P<id>.+?)\.(?:sock\.start\.lock|socket-path|sock|pid)$"
-)
+_RUNTIME_SET_FILE = re.compile(r"^daemon-(?P<id>.+?)\.(?:sock\.start\.lock|socket-path|sock|pid)$")
 _EVENTS_DIR_PREFIX = "events-"
 _SOCKET_PROBE_TIMEOUT_SECONDS = 1.0
 # A peer's start writes its start lock, then its pid and sockets; a set with any
@@ -2992,7 +2990,7 @@ def _is_inside(candidate: str, venv_prefixes: tuple[str, ...]) -> bool:
 def _read_link(path: Path) -> str | None:
     """The target of a ``/proc`` link, or None when it is unreadable."""
     try:
-        target = os.readlink(path)
+        target = str(path.readlink())
     except OSError:
         return None
     return target.removesuffix(" (deleted)")
@@ -3018,9 +3016,7 @@ def processes_using_venvs(venv_dirs: list[Path], proc_root: Path = Path("/proc")
     <path>``) names the venv too. A process whose links and command line are all
     unreadable (another user's) is counted in ``unreadable``, not guessed at.
     """
-    prefixes = {
-        venv: tuple(dict.fromkeys((str(venv), str(venv.resolve())))) for venv in venv_dirs
-    }
+    prefixes = {venv: tuple(dict.fromkeys((str(venv), str(venv.resolve())))) for venv in venv_dirs}
     users: dict[Path, list[VenvProcess]] = {venv: [] for venv in venv_dirs}
     unreadable = 0
     if not proc_root.is_dir():
@@ -3087,9 +3083,7 @@ class VenvEvidence:
             "interpreter": self.interpreter,
             "python_version": self.python_version,
             "modified": self.modified,
-            "processes": [
-                {"pid": p.pid, "via": p.via, "detail": p.detail} for p in self.processes
-            ],
+            "processes": [{"pid": p.pid, "via": p.via, "detail": p.detail} for p in self.processes],
             "unreadable_processes": self.unreadable_processes,
         }
 
@@ -3128,9 +3122,9 @@ def gather_venv_evidence(
     for venv in venv_dirs:
         cfg = _read_pyvenv_cfg(venv)
         slug = _parse_venv_dir_slug(venv.name)
-        modified = datetime.datetime.fromtimestamp(
-            venv.stat().st_mtime, tz=datetime.timezone.utc
-        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        modified = datetime.datetime.fromtimestamp(venv.stat().st_mtime, tz=datetime.UTC).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
         evidence.append(
             VenvEvidence(
                 path=venv,

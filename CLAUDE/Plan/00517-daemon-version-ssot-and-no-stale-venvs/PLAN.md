@@ -107,8 +107,8 @@ What main does today:
 
 ### Phase 5: Release
 
-- [ ] ⬜ **Task 5.1**: Release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`, and a post-upgrade task telling
-  the upgrading agent to clear any UNPROVEN venvs the new advisory lists.
+- [x] ✅ **Task 5.1**: Release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`, and a post-upgrade task telling
+  the upgrading agent to clear any UNPROVEN venvs the new advisory lists. (Release note 055; post-upgrade task 01.)
 - [ ] ⬜ **Task 5.2**: This repository's own `untracked/` and every worktree's venvs checked with the new tool.
 
 ## Success Criteria

@@ -77,9 +77,7 @@ def project(tmp_path: Path) -> Iterator[Path]:
         yield tmp_path
 
 
-def _run(
-    func: Callable[[argparse.Namespace], int], project: Path, **overrides: object
-) -> int:
+def _run(func: Callable[[argparse.Namespace], int], project: Path, **overrides: object) -> int:
     with patch(f"{_CLI}.get_project_path", return_value=project):
         return func(_args(project, **overrides))
 
@@ -215,9 +213,7 @@ class TestPruneUnproven:
         assert orphan.exists()
         assert str(child.pid) in capsys.readouterr().err
 
-    def test_refuses_the_live_venv(
-        self, project: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_refuses_the_live_venv(self, project: Path, capsys: pytest.CaptureFixture[str]) -> None:
         live = _orphan(project)
 
         with patch(_RESOLVER, return_value=live / "bin" / "python"):
