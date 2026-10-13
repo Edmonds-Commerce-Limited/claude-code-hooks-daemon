@@ -85,9 +85,10 @@ asked whether specialist agents can be allowed.
 
 **Evidence**: `handlers/pre_tool_use/subagent_full_qa_blocker.py` reads no `agent_type`, and its options
 (`explain-handler subagent_full_qa_blocker`: `full_qa_patterns`, `unseen_policy`, `unseen_sink_description`,
-`targeted_qa_commands`, `scope`) have no per-agent exemption. The PreToolUse payload of a sub-agent's tool call does
-carry `agent_type` (`core/input_schemas.py`, line 252), and other handlers already read it (`dispatch_declaration`,
-`agent_isolation_advisor`).
+`targeted_qa_commands`, `scope`) have no per-agent exemption. The vendored upstream PreToolUse contract says a
+sub-agent's tool events carry `agent_type`; the daemon's PreToolUse schema does not declare it and no PreToolUse
+handler reads it yet (corrected by the Plan 00518 fact-check: `core/input_schemas.py` line 252 is the SubagentStop
+schema, and `dispatch_declaration`/`agent_isolation_advisor` read a dispatch's `tool_input.subagent_type`).
 
 **Fix direction**: an `exempt_agent_types` option (exact names, default empty): a full run inside a listed agent type
 is allowed, and the advisory on allow says which entry exempted it. The handler's reason for existing is concurrent
