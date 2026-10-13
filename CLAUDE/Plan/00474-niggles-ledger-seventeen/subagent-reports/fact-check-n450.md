@@ -1,0 +1,32 @@
+# Fact-check: N450 (plan 00474), checked against main HEAD 99ab4b8f9
+
+Source file: `src/claude_code_hooks_daemon/handlers/pre_tool_use/subagent_full_qa_blocker.py` (unchanged between da5c4725b and HEAD, so the NIGGLES "main at da5c4725b" wording does not matter).
+
+## REFUTED
+
+1. "The only shipped words-only entry is this repository's `llm_qa.py` (`full_words: [all, tests]`)" (NIGGLES N450 evidence). There are TWO.
+   `.claude/hooks-daemon.yaml:538-540` declares `id: run-changed-tests`, `command: run_changed_tests.py`, `full_words: []` and no `full_args`.
+   `_parse_entry` (lines 465-476) turns `[]` into `frozenset()`, not None, and lines 494-495 then make `full_args` an empty set. So it is words-only and is subject to the same bug.
+   The second entry has an empty word list and takes no path operands, so `php probe.php .`-style denial would hit `run_changed_tests.py .`.
+   `git grep full_words -- '*.yaml' '*.yml'` outside cyber-flag finds only `.claude/hooks-daemon.yaml` lines 519 and 540. The `.example` and `examples/` configs have none.
+   Change to the plan: reword to "this repository's `.claude/hooks-daemon.yaml` has two words-only entries: `llm_qa.py` (`full_words: [all, tests]`) and `run_changed_tests.py` (`full_words: []`)". The remedy also changes the second entry: with an empty `full_words`, `run_changed_tests.py .` would stop being denied as a full run.
+
+## Table
+
+| #   | Claim                                                                                                          | Verdict                                | Evidence                                                                                                                                                                  |
+| --- | -------------------------------------------------------------------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `_parse_entry` lines 494-495 turn absent `full_args` into an empty set when `full_words` is given              | VERIFIED                               | 494 `if full_args is None and full_words is not None:`, 495 `full_args = frozenset()`                                                                                     |
+| 2   | `_add_path_operand` runs every operand through `_operand_is_full` at line 5762 because `full_args is not None` | VERIFIED                               | 5762 `if pattern.full_args is not None and _operand_is_full(`. Words in `full_words` return earlier at 5750.                                                              |
+| 3   | `_operand_is_full` returns True for an operand at or above the start (line 5439)                               | VERIFIED                               | 5439 `if placed == _ABOVE_START:`, 5440 `return True`                                                                                                                     |
+| 4   | Via `_names_the_suite` it returns True at a repository root, `relative == "."` (line 5415)                     | VERIFIED                               | 5415 `relative == _CURRENT_DIR`; called at 5445. `_CURRENT_DIR` is assumed to be "." (not opened).                                                                        |
+| 5   | Neither rule consults `full_args`                                                                              | REFUTED in part, minor                 | The above-start rule (5439) does not. `_names_the_suite` does consult `full_args` (5416-5417) but its root test (5415) does not. The claim holds for the two rules named. |
+| 6   | Class docstring says `full_words` are "matched literally, never as paths"                                      | VERIFIED                               | line 377: "(`llm_qa.py all`): matched literally, never as paths." Also `_operand_is_full` docstring 5436.                                                                 |
+| 7   | `{command: php, full_words: [bin/qa]}` denies `php probe.php .`, `..` and a worktree root                      | VERIFIED by code reading only, not run | The path follows from claims 1-4. `..` is above start, which is True at 5439.                                                                                             |
+| 8   | The only shipped words-only entry is `llm_qa.py` with `full_words: [all, tests]`                               | REFUTED                                | See above. The `llm_qa.py` entry itself is at `.claude/hooks-daemon.yaml:517-521`.                                                                                        |
+| 9   | STATUS-INDEX has 155 rows                                                                                      | VERIFIED                               | 157 lines starting \`                                                                                                                                                     |
+| 10  | 151 N rows                                                                                                     | VERIFIED                               | \`grep -c "^                                                                                                                                                              |
+| 11  | 16 🔄 rows                                                                                                     | VERIFIED                               | 16 table rows contain 🔄                                                                                                                                                  |
+| 12  | PLAN.md "126 of the 151 N rows" carry ✅ (unchanged 126)                                                       | UNVERIFIABLE-HERE (not recounted)      | The diff only changes the denominator, and N450 is not ✅.                                                                                                                |
+| 13  | Existing STATUS-INDEX rows quoted in the diff context (N449 `6d3084d3d`, etc.)                                 | VERIFIED from the diff                 | Recent commit log shows 6d3084d3d for N449.                                                                                                                               |
+
+Tally: 13 claims: 10 verified, 2 refuted (claim 8 fully; claim 5 only in a minor sense), 1 unverifiable.

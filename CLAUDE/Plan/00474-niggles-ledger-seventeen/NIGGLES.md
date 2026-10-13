@@ -87,12 +87,15 @@ is the count at that date.
 - `_add_path_operand` then runs every operand through `_operand_is_full` (line 5762), because `full_args is not None`.
 - `_operand_is_full` returns True for an operand at or above the starting directory (line 5439). Through
   `_names_the_suite` it also returns True for an operand at a repository root (`relative == "."`, line 5415). Neither
-  rule consults `full_args`.
+  of those two rules consults `full_args`; the rest of `_names_the_suite` does (lines 5416-5417).
 - So `{command: php, full_words: [bin/qa]}` denies `php probe.php .`, `php probe.php ..` and
   `php probe.php <a worktree root>` as full runs, though no full word is present. The class docstring says
   `full_words` are "matched literally, never as paths".
-- The only shipped words-only entry is this repository's `llm_qa.py` (`full_words: [all, tests]`), which takes
-  subcommands, not paths.
+- This repository's config has two words-only entries.
+  - `llm_qa.py` (`full_words: [all, tests]`) takes subcommands, not paths.
+  - `run-changed-tests` (`run_changed_tests.py`, `full_words: []`) is never full only because the coercion makes its
+    `full_args` empty, which triggers the early never-full return (line 5665). Dropping the coercion without care
+    would send it to line 5700 (`full_args is None` means every run is full), so the fix must keep it never-full.
 
 **Remedy (coordinator ruling)**:
 
