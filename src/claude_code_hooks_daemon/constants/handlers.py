@@ -443,6 +443,13 @@ class HandlerID:
         config_key="agent_isolation_advisor",
         display_name="agent-isolation-advisor",
     )
+    # Plan 00518: records name -> subagent_type of a NAMED Agent dispatch, so
+    # the full-QA blocker's exempt_agent_types can resolve a teammate's type.
+    AGENT_DISPATCH_RECORDER = HandlerIDMeta(
+        class_name="AgentDispatchRecorderHandler",
+        config_key="agent_dispatch_recorder",
+        display_name="agent-dispatch-recorder",
+    )
     # Plan 00468 G16: a write into an installed Claude Code plugin's files.
     INSTALLED_PLUGIN_EDIT_ADVISOR = HandlerIDMeta(
         class_name="InstalledPluginEditAdvisorHandler",

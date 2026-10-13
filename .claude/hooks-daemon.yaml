@@ -553,6 +553,12 @@ handlers:
           - "./scripts/qa/llm_qa.py changed"
           - "./scripts/qa/llm_qa.py <tool> [<tool> ...]   (e.g. lint type_check pyright)"
           - "pytest <explicit test files or directories narrower than tests/unit>"
+        # Plan 00518: the dedicated agent that runs the full gate on a named
+        # worktree (.claude/agents/qa-full-runner.md). Exact definition-type
+        # names; one exempt run at a time (the host-wide full-QA lock). Needs
+        # agent_dispatch_recorder enabled to resolve a NAMED dispatch's type.
+        exempt_agent_types:
+          - qa-full-runner
         # Round 10 M1: an accurate, honest description of this project's OWN
         # backstop -- best-effort, not a guarantee (review 10 B1/B2 found and
         # fixed real gaps, and `--noconftest` remains an owner-referred
@@ -663,6 +669,10 @@ handlers:
       priority: 31
 
     agent_isolation_advisor:  # Advises worktree isolation for concurrent agents
+      enabled: true
+      priority: 46
+
+    agent_dispatch_recorder:  # Records name -> subagent_type of a named Agent dispatch (Plan 00518); silent, never blocks
       enabled: true
       priority: 46
 

@@ -1,10 +1,10 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-10-12 (v3.69.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-10-13 (v3.69.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (74 handlers)
+### PreToolUse (75 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -67,6 +67,7 @@
 | 44 | plan_qa_commit_gate | ADVISORY | Warn-first cross-file plan QA gate on git commit |
 | 44 | plan_qa_edit | BLOCKING | Blocking/advisory edit-time lint for plan documents |
 | 45 | plan_time_estimates | BLOCKING | Block time estimates in plan documents |
+| 46 | agent_dispatch_recorder | NON-TERMINAL | Record ``name -> subagent_type`` for every NAMED Agent/Task dispatch |
 | 46 | agent_isolation_advisor | ADVISORY | Advise ``isolation: worktree`` when peers are already active in this checkout |
 | 46 | plan_workflow | ADVISORY | Provide guidance when creating plan files |
 | 47 | docs_qa_commit_gate | ADVISORY | Warn-first STAGED docs QA gate on git commit |
