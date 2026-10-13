@@ -17,7 +17,7 @@ Prepare release files including version updates, changelog generation, and relea
 
 ## Capabilities
 
-- Update version across all files (pyproject.toml, version.py, README.md, CLAUDE.md)
+- Update version across all files listed in RELEASING.md Step 3 "Version Update"
 - Generate comprehensive changelogs from git commits
 - Create release notes with categorized changes
 - Prepare all files for Opus review
@@ -58,7 +58,7 @@ Run these checks in order:
 
 3. **Version consistency**: All version strings in files match current version
 
-   - pyproject.toml, version.py, README.md, CLAUDE.md
+   - every file listed in RELEASING.md Step 3 "Version Update"
    - **ABORT if inconsistent**: User must manually fix version mismatches
 
 4. **Tag existence**: Target version tag must NOT exist
@@ -103,13 +103,10 @@ Analyse commits since last tag to determine version bump:
 
 ### 3. Version Update
 
-Update version string in these files:
-
-1. `pyproject.toml` - line 7: `version = "X.Y.Z"`
-2. `src/claude_code_hooks_daemon/version.py` - `__version__ = "X.Y.Z"`
-3. `README.md` - line 3: Badge `![Version](https://img.shields.io/badge/version-X.Y.Z-blue)`
-4. `CLAUDE.md` - "Current Version" section (search for "Version:")
-5. Any upgrade docs that reference version numbers
+Update the version string in EVERY file listed in `CLAUDE/development/RELEASING.md`
+Step 3 "Version Update" (the single list of version-carrying files; do not work
+from a list copied here), including the regenerate and re-lock steps it names,
+plus any upgrade docs that reference version numbers.
 
 **Also update README.md stats** (these go stale between releases):
 
@@ -553,10 +550,7 @@ This agent's job ends here. Output a comprehensive summary:
 📋 Release Preparation Complete for vX.Y.Z
 
 **Files Modified:**
-- pyproject.toml (version: X.Y.Z)
-- src/claude_code_hooks_daemon/version.py (version: X.Y.Z)
-- README.md (badge: X.Y.Z)
-- CLAUDE.md (version section: X.Y.Z)
+- each version-carrying file from RELEASING.md Step 3 (version: X.Y.Z)
 - CHANGELOG.md (added vX.Y.Z entry, lines XX-YY)
 - RELEASES/vX.Y.Z.md (created, ZZ lines)
 

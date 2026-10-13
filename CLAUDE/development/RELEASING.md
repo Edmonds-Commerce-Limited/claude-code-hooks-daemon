@@ -289,7 +289,7 @@ blindness.
 [Housekeeping Phase](#housekeeping-phase-every-release). Its commits land before 1b, so the full QA run and every
 later gate cover them.
 
-**1b. Full QA on this HEAD, then agent validation.** The release agent is a sub-agent, and the full suite is the main thread's gate (Plan 00463), so main Claude runs `./scripts/qa/llm_qa.py all` on the clean HEAD first. Then the agent verifies: clean git state, all QA passes (`llm_qa.py --read-only all`, which fails any result recorded for a tree other than this HEAD as `STALE`), version consistency across files (pyproject.toml, version.py, README.md), no existing tag, gh CLI authenticated. (`CLAUDE.md` carries no version string — it is a daemon-regenerated doc, not a version-bump target.)
+**1b. Full QA on this HEAD, then agent validation.** The release agent is a sub-agent, and the full suite is the main thread's gate (Plan 00463), so main Claude runs `./scripts/qa/llm_qa.py all` on the clean HEAD first. Then the agent verifies: clean git state, all QA passes (`llm_qa.py --read-only all`, which fails any result recorded for a tree other than this HEAD as `STALE`), version consistency across the files listed in Step 3 "Version Update", no existing tag, gh CLI authenticated. (`CLAUDE.md` carries no version string — it is a daemon-regenerated doc, not a version-bump target.)
 
 **ANY failure = IMMEDIATE ABORT. NO auto-fixing.**
 
@@ -327,7 +327,13 @@ Agent proposes bump with justification. Manual override accepted.
 
 ### 3. Version Update
 
-Updates version in: `pyproject.toml`, `version.py`, `README.md` (badge), and `.claude/ccy/claude-supervise.py` (the standalone supervisor's hardcoded `__version__`, kept in lockstep — enforced by `tests/unit/supervise/test_compaction_gap_repro.py::TestSupervisorVersionMatchesDaemon`, which FAILS the QA gate if the supervisor version drifts from `version.py`).
+**The version-carrying files (the single list; other documents point here):**
+`pyproject.toml`, `src/claude_code_hooks_daemon/version.py`, `README.md` (badge),
+`.claude/ccy/claude-supervise.py` (the standalone supervisor's hardcoded
+`__version__`, kept in lockstep — enforced by
+`tests/unit/supervise/test_compaction_gap_repro.py::TestSupervisorVersionMatchesDaemon`,
+which FAILS the QA gate if the supervisor version drifts from `version.py`),
+`.claude/HOOKS-DAEMON.md` (regenerated, below) and `uv.lock` (re-locked, below).
 
 Also check README.md's stats still hold. Both the badge and the body state a
 deliberately ROUNDED test figure ("12,000+"), which stays true across many

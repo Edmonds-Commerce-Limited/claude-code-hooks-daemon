@@ -1,6 +1,6 @@
 # Plan 00450: release skill mandates forbidden subagent acceptance gate
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-21
 **Owner**: dev
 **Priority**: Medium
@@ -66,7 +66,7 @@ resolution is not durable — the next agent re-derives it, or does not.
 
 ### Phase 1: Establish the true state
 
-- [ ] ⬜ **Task 1.1**: Read both `invoke.sh` files and both `SKILL.md` files in
+- [x] ✅ **Task 1.1**: Read both `invoke.sh` files and both `SKILL.md` files in
   full and record every place either describes HOW the acceptance gate
   runs, including `CLAUDE/development/RELEASING.md` Step 12, which both
   skills defer to as the source of truth. The contradiction may be
@@ -77,13 +77,13 @@ resolution is not durable — the next agent re-derives it, or does not.
 
 ### Phase 2: Make the documents agree
 
-- [ ] ⬜ **Task 2.1**: RED — a test asserting that no skill `invoke.sh`
+- [x] ✅ **Task 2.1**: RED — a test asserting that no skill `invoke.sh`
   instructs sub-agent or parallel-Haiku execution of acceptance tests.
   It must fail against the current tree on `release/invoke.sh:169`.
-- [ ] ⬜ **Task 2.2**: GREEN — replace the batching/parallel-Haiku procedure in
+- [x] ✅ **Task 2.2**: GREEN — replace the batching/parallel-Haiku procedure in
   `release/invoke.sh` with a pointer to the acceptance-test skill, so one
   document owns the method.
-- [ ] ⬜ **Task 2.3**: Confirm `RELEASING.md` Step 12 names the same method,
+- [x] ✅ **Task 2.3**: Confirm `RELEASING.md` Step 12 names the same method,
   and fix it if not.
 
 ## Success Criteria
