@@ -42,9 +42,11 @@ the main tree. So the handler binds each ``agent_id`` to the LINKED worktree of
 its first write and judges later writes against that binding:
 
 * No binding, and the cwd rule above does not deny the write, and the target is
-  in a linked worktree of the cwd's repository: bind ``agent_id`` to it. A
+  in a linked worktree: bind ``agent_id`` to it. That includes a cwd outside any
+  checkout or in another repository (ledger 00474 N452), where the cwd rule has
+  nothing to judge but the first write still names the agent's worktree. A
   first write the cwd rule DENIES binds nothing (a retry from another cwd must
-  not launder a crossing), and a write into the main working tree binds nothing.
+  not launder a crossing), and a write into a main working tree binds nothing.
 * Bound to W: a write into W is allowed whatever the cwd says; a write into any
   other checkout of the same repository (another worktree, or the main tree) is
   denied, even when the cwd is the main tree. A target outside the repository is
@@ -199,7 +201,8 @@ class SubagentWorktreeWriteGuardHandler(PreToolUseHandlerBase):
 
         Side effect: a call that is not a crossing, from an agent with an
         ``agent_id`` and no binding yet, whose target is in a linked worktree,
-        binds the agent to that worktree.
+        binds the agent to that worktree, whatever the cwd is (a checkout of
+        the same repository, another repository, or no checkout at all).
 
         Raises:
             CheckoutUndecidableError: A git marker on the cwd or target side
@@ -227,12 +230,10 @@ class SubagentWorktreeWriteGuardHandler(PreToolUseHandlerBase):
                     "subagent_worktree_write_guard: cwd %s is not inside a git checkout; allowing",
                     cwd,
                 )
-                return None
-            if there is None or there.common_dir != own.common_dir:
-                return None
-            if own.linked and there.root != own.root:
-                return own, there, False
-            if key is not None and there.linked:
+            elif there is not None and there.common_dir == own.common_dir:
+                if own.linked and there.root != own.root:
+                    return own, there, False
+            if key is not None and there is not None and there.linked:
                 self._bind(key, there)
             return None
 

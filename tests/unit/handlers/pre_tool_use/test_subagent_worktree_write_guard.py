@@ -472,6 +472,68 @@ class TestFirstWriteBindsTheAgentToItsWorktree:
         assert handler.handle(event).decision is Decision.ALLOW
 
 
+class TestFirstWriteBindsWhenTheCwdGivesNoSameRepositoryCheckout:
+    """Ledger 00474 N452: a first write allowed because the cwd is in another
+    repository, or in no checkout, still binds the agent to the target worktree;
+    otherwise a later write is judged by whatever cwd the shared session has."""
+
+    @pytest.fixture
+    def other_repo(self, tmp_path: Path) -> Path:
+        root = tmp_path / "other-repo"
+        root.mkdir()
+        _git(root, "init", "-q", "-b", "main")
+        _git(root, "commit", "-q", "--allow-empty", "-m", "init")
+        return root.resolve()
+
+    @pytest.fixture
+    def nowhere(self, tmp_path: Path) -> Path:
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        return plain.resolve()
+
+    @pytest.mark.parametrize("cwd_kind", ["other_repo", "nowhere"])
+    def test_the_binding_survives_a_later_cwd_in_a_sibling_worktree(
+        self,
+        handler: SubagentWorktreeWriteGuardHandler,
+        wt_a: Path,
+        wt_b: Path,
+        other_repo: Path,
+        nowhere: Path,
+        cwd_kind: str,
+    ) -> None:
+        first_cwd = other_repo if cwd_kind == "other_repo" else nowhere
+        assert handler.matches(_event(wt_a / "src" / "mod.py", cwd=first_cwd)) is False
+        assert handler.binding_count() == 1
+        # the agent's own worktree, whatever the shared cwd now says
+        assert handler.matches(_event(wt_a / "src" / "mod.py", cwd=wt_b)) is False
+        # a crossing out of the bound worktree is denied, naming it as bound
+        event = _event(wt_b / "src" / "mod.py", cwd=wt_b)
+        assert handler.matches(event) is True
+        reason = handler.handle(event).reason or ""
+        assert str(wt_a) in reason
+        assert "first write" in reason
+
+    def test_a_first_write_into_the_main_tree_from_elsewhere_binds_nothing(
+        self, handler: SubagentWorktreeWriteGuardHandler, repo: Path, other_repo: Path
+    ) -> None:
+        assert handler.matches(_event(repo / "src" / "mod.py", cwd=other_repo)) is False
+        assert handler.binding_count() == 0
+
+    def test_no_agent_id_binds_nothing_from_elsewhere(
+        self, handler: SubagentWorktreeWriteGuardHandler, wt_a: Path, nowhere: Path
+    ) -> None:
+        event = _event(wt_a / "src" / "mod.py", cwd=nowhere)
+        del event["agent_id"]
+        assert handler.matches(event) is False
+        assert handler.binding_count() == 0
+
+    def test_a_target_outside_any_checkout_binds_nothing(
+        self, handler: SubagentWorktreeWriteGuardHandler, nowhere: Path, other_repo: Path
+    ) -> None:
+        assert handler.matches(_event(nowhere / "f.txt", cwd=other_repo)) is False
+        assert handler.binding_count() == 0
+
+
 class TestBindingsAreBounded:
     def test_the_oldest_binding_is_evicted_past_the_cap(
         self,
