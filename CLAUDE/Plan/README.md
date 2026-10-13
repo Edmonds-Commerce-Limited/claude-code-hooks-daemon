@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00516: journal in place redaction](00516-journal-in-place-redaction/PLAN.md) - Not Started, Medium (#108; awaiting owner decisions: whether an agent may redact a leaked value in a past journal line in place, as an audited procedure; the guard already allows a same-line Edit, so the gap is policy; ledger 00474 N389)
+- [00516: journal in place redaction](00516-journal-in-place-redaction/PLAN.md) - Not Started, Medium (#108; awaiting owner decisions: a bounded `mkplan.bash --journal-redact` to remove a leaked value from a past journal entry with an appended correction entry, since `journal-dayfile-is-today` blocks any past-day edit; ledger 00474 N389)
 
 - [00515: per host handler overrides](00515-per-host-handler-overrides/PLAN.md) - Not Started, Medium (#93; awaiting owner decisions: per-host or per-role `handlers:` overlays in Plan 00479's top-level `hosts:` block, including whether an overlay may disable a guard)
 

@@ -3375,8 +3375,8 @@ it.
 
 **Status**: ⬜ Open, for the owner. To decide: whether the two journal lines may be edited in place, whether to add
 the host name to the secret word list, and whether history matters for this name. The journal half became GitHub
-#108, filed as Plan 00516: `plan_journal_guard` already lets a same-line Edit through, so the question is the policy
-for an audited in-place redaction.
+#108, filed as Plan 00516: a bounded `mkplan.bash --journal-redact`, since `journal-dayfile-is-today` blocks any
+edit to a past day-file.
 
 ### N388 — the host segment does not show the session's role override
 

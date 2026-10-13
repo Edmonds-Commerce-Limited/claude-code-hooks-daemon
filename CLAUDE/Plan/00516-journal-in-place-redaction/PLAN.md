@@ -10,50 +10,50 @@
 
 ## Overview
 
-The owner filed #108 after ledger 00474 N389: two committed journal lines (in archived Plan 00413's journal) held the
-development host's real name, and the coordinator left them for a human because "journal entries are not
-hand-edited". The issue proposes a controlled correction tool.
+The owner filed #108 after ledger 00474 N389: two committed journal lines (in archived Plan 00413's 26-09-15
+day-file) held the development host's real name, and no agent could replace it with a placeholder.
 
-What the code allows today (verified on main):
+What blocks it today (verified on main):
 
-- `plan_journal_guard` (R-JOURNAL-HAND-WRITTEN-ENTRY, Plan 00461) denies a `Write`/`Edit` into a day-file only when
-  it adds a non-blank line or an entry heading, and denies any `Bash` write into one. Its docstring names "a
-  same-line redaction" as an Edit that passes. So an Edit-tool redaction of a past line is not blocked.
-- `journal-append-only` (plan QA, Plan 00163) flags any non-append edit, but is advisory forever: "a same-day typo
-  fix is a legitimate non-append", and `mode: block` never escalates it. Its remediation text says corrections are
-  new entries, never rewrites.
-- `mkplan.bash --journal <plan> correction <body> --ref [YY-MM-DD/]HH:MM` appends a stamped `correction` entry naming
-  the entry it corrects, and refuses a `--ref` that names no entry. That fixes a wrong fact while keeping the
-  original visible, but cannot remove a leaked value.
+- `journal-dayfile-is-today` (plan QA, `today_only_mode`, Plan 00197) denies an Edit/Write to any day-file not dated
+  today. This repository leaves it at the `block` default with `legacy_plan_allowlist: []`. The config comment beside
+  it records that the Plan 00201 redaction pass hit exactly this (a real session UUID in an old entry), flipped the
+  mode to `advise` for four edits and back, and named the fix if it recurred: a first-class escape hatch, not a
+  standing relaxation.
+- `plan_journal_guard` (R-JOURNAL-HAND-WRITTEN-ENTRY, Plan 00461) denies a Write/Edit that adds a line or heading, and
+  any Bash write into a day-file. A same-line Edit passes this guard, but not the check above.
+- `journal-append-only` only advises, and `mkplan.bash --journal <plan> correction <body> --ref [YY-MM-DD/]HH:MM`
+  appends a stamped correction naming an earlier entry. That fixes a wrong fact but cannot remove a leaked value.
+- `CLAUDE/PlanJournalling.md` says never to edit earlier entries, and also that the guard allows "redacting within a
+  line"; no procedure reconciles the two.
 
-So the gap is policy, not mechanism: nothing documents when an agent may change a past line in place. This plan
-proposes a narrow, documented redaction procedure using the tools that exist, and builds new tooling only if the
-owner wants it.
+An Edit call cannot carry a `MUST_..._BECAUSE` declaration, so the escape hatch belongs in the stamping tool, which is
+already the one sanctioned writer of day-files: `mkplan.bash --journal-redact`, as #108 proposes.
 
 ## Goals
 
-- A documented redaction procedure in `CLAUDE/PlanJournalling.md`: replace a leaked value with a placeholder in the
-  past line using the Edit tool (same line count, no heading touched), then append a `correction` entry with `--ref`
-  naming that entry, recording the reason and the placeholder, never the removed value.
-- The `journal-append-only` remediation text names that procedure for a redaction, so an agent that hits the
-  advisory is pointed at the audited route rather than told it may never change a past line.
-- N389's two lines redacted by that procedure once the owner approves it.
+- `mkplan.bash --journal-redact <plan> <YY-MM-DD/HH:MM> --from <text> --to <placeholder> --reason <text>` replaces
+  `<text>` in the body of the one named entry, in any day-file, and appends a stamped `correction` entry to today's
+  day-file (with `--ref` set to that entry) recording the reason and the placeholder, never the removed text.
+- Bounded: body only, never a `## HH:MM · category · REF` heading; at most a set length per call; refuses when `<text>`
+  does not occur in that entry.
+- Every other write to a past day-file stays denied by `journal-dayfile-is-today` and `plan_journal_guard`.
+- `PlanJournalling.md` (and its install template) describes the redaction route and resolves the "never edit" /
+  "redacting within a line" tension.
 
 ## Non-Goals
 
-- Rewriting git history. The value stays in earlier commits; purging it is a history rewrite, which is a human's
-  action.
-- Loosening `plan_journal_guard`: added lines and Bash writes stay denied.
-- Rewording past entries for any reason other than redaction. A wrong fact gets an appended `correction`.
+- Rewriting git history: the value stays in earlier commits; purging it is a human's action.
+- Relaxing `today_only_mode` or `plan_journal_guard`.
+- Rewording past entries for any reason other than redaction; a wrong fact gets an appended `correction`.
 
 ## Open questions for the owner
 
-1. **Policy:** may an agent redact a leaked value in a past journal line in place, using the Edit tool, provided it
-   appends a `correction` entry? Recommended: yes, for redaction only.
-2. **Tooling:** is the documented procedure enough, or should `mkplan.bash` gain a `--journal-redact` mode that
-   performs the replacement and appends the correction entry in one step (as #108 proposes)? Recommended: the
-   procedure first; a tool only if the procedure is used often or gets misapplied.
-3. **N389's two lines:** redact them now, under the procedure? And add the host name to the secret word list (a
+1. **Scope:** redaction only, or a general `--from`/`--to` replacement for any wording, as #108 proposes?
+   Recommended: redaction only. A wrong fact is fixed by an append-only `correction`, which keeps the original
+   visible; rewording would make the journal's past say something it never said.
+2. **Size limit:** recommended one run of up to 200 characters per call.
+3. **N389:** redact its two lines with the new mode once it lands, and add the name to the secret word list (a
    human-only edit) so it cannot recur?
 
 ## Tasks
@@ -62,23 +62,26 @@ owner wants it.
 
 - [ ] ⬜ **Task 1.1**: Owner answers the questions above.
 
-### Phase 2: Procedure (if question 1 is yes)
+### Phase 2: Build (TDD)
 
-- [ ] ⬜ **Task 2.1**: Document the redaction procedure in `CLAUDE/PlanJournalling.md` (and its install template
-  `src/claude_code_hooks_daemon/install/templates/PlanJournalling.md`).
-- [ ] ⬜ **Task 2.2**: TDD the `journal-append-only` remediation text naming the procedure for a redaction.
-- [ ] ⬜ **Task 2.3**: Redact N389's two lines by the procedure; close N389's journal half.
-- [ ] ⬜ **Task 2.4**: Only if question 2 asks for it: `mkplan.bash --journal-redact`, TDD. The existing `--ref`
-  check only confirms an entry exists, so it needs entry-body extraction added.
+- [ ] ⬜ **Task 2.1**: `mkplan.bash --journal-redact`: argument checks, entry lookup (the existing `--ref` check only
+  confirms an entry exists, so entry-body extraction is new), body-only replacement, the appended `correction` entry,
+  refusals (no such entry, text not found, heading touched, over the limit).
+- [ ] ⬜ **Task 2.2**: Tests that `journal-dayfile-is-today` and `plan_journal_guard` still deny a hand edit of the same
+  line, and that the tool's own write is not judged by them.
+- [ ] ⬜ **Task 2.3**: Docs in `CLAUDE/PlanJournalling.md` and `src/claude_code_hooks_daemon/install/templates/PlanJournalling.md`;
+  update the `today_only_mode` config comment to point at the new mode; release note in
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [ ] ⬜ **Task 2.4**: Redact N389's two lines with it (per question 3).
 
 ## Success Criteria
 
-- [ ] An agent can remove a leaked value from a past journal entry by a documented, audited route, leaving an
-  appended `correction` entry that names the entry, the reason and the placeholder.
-- [ ] Added lines and Bash writes into a day-file are still denied.
-- [ ] Release-bound consequences (a docs change shipped in the install template; a `mkplan.bash` mode if built) are
-  recorded in the UNRELEASED release notes, or the plan records that there are none.
+- [ ] An agent can replace a leaked value in a past journal entry with a placeholder, and today's day-file then
+  carries an appended `correction` entry naming the entry, the reason and the placeholder.
+- [ ] A hand edit of a past day-file is still denied.
+- [ ] The new `mkplan.bash` mode is recorded in the UNRELEASED release notes.
 
 ## Delivery & Milestones
 
-- Plan filed from #108 (ledger 00474 N389). Related: Plan 00163 (journalling), Plan 00461 (stamping-tool guard).
+- Plan filed from #108 (ledger 00474 N389). Related: Plan 00163 (journalling), Plan 00197 (today-only), Plan 00461
+  (stamping-tool guard).
