@@ -2504,11 +2504,8 @@ def _set_sockets(untracked_dir: Path, ident: str, members: list[Path]) -> list[P
 
 def _is_under(path: Path, directory: Path) -> bool:
     """True when ``path`` lies inside ``directory`` (lexically, after resolving both)."""
-    try:
-        path.resolve().relative_to(directory.resolve())
-    except ValueError:
-        return False
-    return True
+    resolved, root = str(path.resolve()), str(directory.resolve())
+    return resolved == root or resolved.startswith(root + os.sep)
 
 
 def _runtime_set_is_dead(

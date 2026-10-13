@@ -78,3 +78,12 @@ changed_tests: 5367 passed, 1 failed (that test), 5 skipped. Eight files are unm
 and failed on them by rule. Before the last commit the same run found four magic timeouts, two error-hiding returns, one
 repo-hygiene index row and one unclassified handler; all fixed. Also run clean on the touched files: black, ruff, mypy,
 `tests/unit/daemon`, `tests/unit/handlers/session_start` (3689 passed).
+
+## Review round 1 (see 261013-review-517-r1-sonnet.md)
+
+Fixed: dead runtime sets are PROVEN dead only (in-tree sockets refused or absent, pid not a verified daemon; a socket
+outside the untracked dir keeps the set); the automatic venv cleanup skips while a peer set is not proven dead or the /proc
+scan has unreadable processes (decision journalled); `prune-venvs --stale` / `--legacy` skip venvs a process uses; the
+housekeeping label, the v3.6 guide note, and one fail-open path around the cleanup and the advisory.
+
+Accepted, not changed: the bare-python-from-an-activated-venv NIT and the advisor scan-cost NIT.
