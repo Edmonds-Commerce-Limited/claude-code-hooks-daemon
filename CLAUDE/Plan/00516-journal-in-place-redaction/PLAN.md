@@ -28,7 +28,8 @@ What blocks it today (verified on main):
   line"; no procedure reconciles the two.
 
 An Edit call cannot carry a `MUST_..._BECAUSE` declaration, so the escape hatch belongs in the stamping tool, which is
-already the one sanctioned writer of day-files: `mkplan.bash --journal-redact`, as #108 proposes.
+already the one sanctioned writer of day-files. #108 proposes `mkplan.bash --journal-correct <plan> <day-file> --line N --from <text> --to <text> --reason <text>`, a general replacement addressed by line; this plan narrows it to
+`--journal-redact`, addressed by entry (`YY-MM-DD/HH:MM`) and limited to redaction (owner question 1).
 
 ## Goals
 
@@ -68,7 +69,8 @@ already the one sanctioned writer of day-files: `mkplan.bash --journal-redact`, 
   confirms an entry exists, so entry-body extraction is new), body-only replacement, the appended `correction` entry,
   refusals (no such entry, text not found, heading touched, over the limit).
 - [ ] ⬜ **Task 2.2**: Tests that `journal-dayfile-is-today` and `plan_journal_guard` still deny a hand edit of the same
-  line, and that the tool's own write is not judged by them.
+  line, and that the tool's own run is not denied, including when `--from` or `--reason` text contains `JOURNAL` or
+  `-Journal-` (the guard's Bash prefilter and fail-closed path).
 - [ ] ⬜ **Task 2.3**: Docs in `CLAUDE/PlanJournalling.md` and `src/claude_code_hooks_daemon/install/templates/PlanJournalling.md`;
   update the `today_only_mode` config comment to point at the new mode; release note in
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
