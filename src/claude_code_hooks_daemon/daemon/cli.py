@@ -73,6 +73,9 @@ from claude_code_hooks_daemon.daemon.metadata import (
     write_daemon_metadata,
 )
 from claude_code_hooks_daemon.daemon.paths import (
+    VENV_STALE,
+    VENV_UNPROVEN,
+    classify_untracked_venvs,
     cleanup_pid_file,
     cleanup_socket,
     cleanup_stale_daemon_files,
@@ -80,13 +83,13 @@ from claude_code_hooks_daemon.daemon.paths import (
     find_uv,
     get_pid_path,
     get_socket_path,
+    live_venv_realpaths,
     parse_pid_text,
     python_venv_fingerprint,
     read_pid_file,
     read_pid_file_text,
     read_pid_record,
     read_socket_discovery_file,
-    resolve_existing_venv_python,
     resolve_hostname,
     write_cleanup_status,
 )
@@ -2897,27 +2900,12 @@ def _format_project_handler_health_lines(
 def _live_venv_realpaths(project_root: Path) -> frozenset[Path]:
     """Return the real directories of the venvs that are live right now.
 
-    Two sources, both identified by the venv DIRECTORY: the venv the bootstrap
-    resolver (``resolve_existing_venv_python``, Plan 00184) selects, and the
-    venv of the running interpreter (``sys.prefix``). A venv's ``bin/python``
-    is a symlink to the system interpreter, so resolving THAT yields the
-    interpreter's prefix (``/usr``) and never matches the venv (Plan 00517
-    Task 3.0): the directory is taken from the unresolved path
-    (``bin/python`` -> ``bin`` -> venv dir) and only the directory itself is
-    resolved, which still follows a stale-named symlinked venv directory.
-
-    Returns an empty set when nothing is live (e.g. a brand-new project with
-    no venv provisioned yet and an interpreter outside any venv).
+    The rule lives in ``paths.live_venv_realpaths`` (Plan 00517 Tasks 3.0, 3.1),
+    shared with the stdlib-only ``list-stale-venvs`` script. It is keyed on the
+    DAEMON dir, the directory the resolver and bash ``ensure_venv`` key venvs
+    on, which differs from ``project_root`` in a client install.
     """
-    live: set[Path] = {Path(sys.prefix).resolve()}
-    # ``resolve_existing_venv_python`` never raises: it returns a best-effort
-    # path, and its override/legacy branches are returned WITHOUT an existence
-    # check. So a non-existent result IS the "no venv provisioned yet" signal --
-    # there is no exception to catch and no error being hidden.
-    python_path = resolve_existing_venv_python(project_root)
-    if python_path.exists():
-        live.add(python_path.parent.parent.resolve())
-    return frozenset(live)
+    return live_venv_realpaths(_daemon_untracked_dir(project_root).parent)
 
 
 def _enumerate_venvs(project_root: Path, include_size: bool = True) -> list[dict[str, Any]]:
@@ -2925,7 +2913,9 @@ def _enumerate_venvs(project_root: Path, include_size: bool = True) -> list[dict
 
     Detects both fingerprint-keyed ``venv-<fp>/`` and legacy ``venv/`` paths.
     Each entry: fingerprint, path, real_path, is_symlink, stamped_version,
-    size_bytes, is_current, is_legacy.
+    size_bytes, is_current, is_legacy, verdict (``stale`` / ``unproven`` /
+    ``keep``, from ``paths.classify_venv``, the one staleness rule) and
+    verdict_reason.
 
     ``include_size=False`` skips the (potentially expensive, ~187 MB) recursive
     directory walk and reports ``size_bytes=0`` — used on the hot daemon-start
@@ -2949,6 +2939,7 @@ def _enumerate_venvs(project_root: Path, include_size: bool = True) -> list[dict
 
     current_fp = python_venv_fingerprint(project_root)
     live_realpaths = _live_venv_realpaths(project_root)
+    verdicts = {str(v.path): v for v in classify_untracked_venvs(untracked.parent)}
     raw_entries: list[dict[str, Any]] = []
 
     for child in sorted(untracked.iterdir()):
@@ -2972,7 +2963,8 @@ def _enumerate_venvs(project_root: Path, include_size: bool = True) -> list[dict
 
         real_path = child.resolve()
         is_symlink = child.is_symlink()
-        is_current = ((not is_legacy) and (fingerprint == current_fp)) or (
+        verdict = verdicts.get(str(child))
+        is_current =((not is_legacy) and (fingerprint == current_fp)) or (
             real_path in live_realpaths
         )
 
@@ -2986,6 +2978,8 @@ def _enumerate_venvs(project_root: Path, include_size: bool = True) -> list[dict
                 "size_bytes": _directory_size_bytes(child) if include_size else 0,
                 "is_current": is_current,
                 "is_legacy": is_legacy,
+                "verdict": verdict.verdict if verdict else VENV_KEEP,
+                "verdict_reason": verdict.reason if verdict else "",
             }
         )
 
@@ -3007,71 +3001,53 @@ def _enumerate_venvs(project_root: Path, include_size: bool = True) -> list[dict
     return list(deduped.values())
 
 
-def _reclaimable_venv_entries(
-    entries: list[dict[str, Any]], current_stamp: str
-) -> list[dict[str, Any]]:
-    """Select venvs that are safe to FLAG as reclaimable (never the current one).
+def _entries_with_verdict(entries: list[dict[str, Any]], verdict: str) -> list[dict[str, Any]]:
+    """Select the venvs the one staleness rule (``paths.classify_venv``) gave ``verdict``.
 
-    A venv is reclaimable if it is the legacy ``venv/`` (pre-v3.7.0 layout,
-    always superseded) or a non-current fingerprint venv whose stamped daemon
-    version differs from the current env's stamp. Mirrors the ``prune-venvs
-    --legacy`` / ``--stale`` predicates so the advisory and the destructive
-    command agree on what "stale" means. The current-fingerprint venv is never
-    included. This only FLAGS — deletion stays the operator's explicit,
-    guarded ``prune-venvs`` action (Plan 00181 Decision 1).
+    Never the current venv (the fingerprint match or the live venv), and never a
+    symlink venv name: its target is either the deduped real entry or a foreign
+    path outside this accounting (Plan 00184).
     """
-    reclaimable: list[dict[str, Any]] = []
-    for entry in entries:
-        if entry["is_current"]:
-            continue
-        if entry["is_symlink"]:
-            # A symlink venv name is never itself deletable content — its
-            # target is either the deduped real entry (already excluded when
-            # current) or a foreign path outside this accounting (Plan 00184).
-            continue
-        if entry["is_legacy"]:
-            reclaimable.append(entry)
-            continue
-        if current_stamp and entry["stamped_version"] and entry["stamped_version"] != current_stamp:
-            reclaimable.append(entry)
-    return reclaimable
+    return [
+        entry
+        for entry in entries
+        if entry["verdict"] == verdict and not entry["is_current"] and not entry["is_symlink"]
+    ]
+
+
+def _stale_venv_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Venvs proven stale: the only ones any automatic or bulk cleanup may remove."""
+    return _entries_with_verdict(entries, VENV_STALE)
+
+
+def _unproven_venv_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Venvs the code cannot prove stale: surfaced with evidence, never bulk-removed."""
+    return _entries_with_verdict(entries, VENV_UNPROVEN)
 
 
 def _stale_venv_advisory(project_root: Path) -> str | None:
-    """Build a daemon-start advisory about reclaimable stale/legacy venvs.
+    """Build a daemon-start advisory about proven-stale venvs still on disk.
 
-    SURFACE, don't delete (Plan 00181 Decision 1): auto-deleting venvs is unsafe
-    in the multi-container shared-``untracked/`` model — no filesystem signal
-    proves a peer is not using a given-fingerprint venv — so the daemon only
-    reports the reclaimable space and points at the guarded ``prune-venvs``
-    command. Sizing is lazy: the cheap ``include_size=False`` enumeration
-    SELECTS candidates first, then only the reclaimable venvs are walked for
-    their size, so the common "nothing to reclaim" case does zero disk walks on
-    the hot start path.
+    Rebuilt on the single staleness rule (Plan 00517 Task 4.2). The start-time
+    cleanup removes proven-stale venvs first; whatever is still here is reported
+    with the guarded ``prune-venvs`` command. Sizing is lazy: the cheap
+    ``include_size=False`` enumeration SELECTS candidates first, then only the
+    stale venvs are walked for their size, so the common "nothing to reclaim"
+    case does zero disk walks on the hot start path.
 
     Returns the advisory string, or ``None`` when there is nothing to reclaim.
     """
     entries = _enumerate_venvs(project_root, include_size=False)
-    if not entries:
+    stale = _stale_venv_entries(entries)
+    if not stale:
         return None
 
-    current_stamp = ""
-    for entry in entries:
-        if entry["is_current"]:
-            current_stamp = entry["stamped_version"]
-            break
-
-    reclaimable = _reclaimable_venv_entries(entries, current_stamp)
-    if not reclaimable:
-        return None
-
-    total_bytes = sum(_directory_size_bytes(Path(entry["path"])) for entry in reclaimable)
-    count = len(reclaimable)
+    total_bytes = sum(_directory_size_bytes(Path(entry["path"])) for entry in stale)
+    count = len(stale)
     plural = "s" if count != 1 else ""
     return (
-        f"💿 {count} stale/legacy venv{plural} ({_human_bytes(total_bytes)}) can be "
-        f"reclaimed. Run `prune-venvs --stale --force` (legacy: `--legacy`) to remove "
-        f"them — the daemon never deletes venvs automatically."
+        f"💿 {count} stale venv{plural} ({_human_bytes(total_bytes)}) can be "
+        f"reclaimed. Run `prune-venvs --stale --force` to remove them."
     )
 
 
@@ -3131,12 +3107,7 @@ def _collect_disk_usage(project_root: Path) -> list[dict[str, Any]]:
     # Venvs: total footprint plus what `prune-venvs` would reclaim (stale/legacy,
     # never the current fingerprint). This is the biggest single number.
     entries = _enumerate_venvs(project_root)
-    current_stamp = ""
-    for entry in entries:
-        if entry["is_current"]:
-            current_stamp = entry["stamped_version"]
-            break
-    reclaimable = _reclaimable_venv_entries(entries, current_stamp)
+    reclaimable = _stale_venv_entries(entries)
     rows.append(
         {
             "name": "venvs",
@@ -3182,8 +3153,8 @@ def cmd_disk_usage(args: argparse.Namespace) -> int:
         "decision.log is capped at 4 MiB by the supervisor itself, at write time."
     )
     print(
-        "Reclaim venvs with `prune-venvs --stale --force` (legacy: `--legacy`) — "
-        "the daemon never deletes venvs automatically."
+        "Reclaim proven-stale venvs with `prune-venvs --stale --force`; venvs the "
+        "code cannot prove stale are listed by `list-venvs`."
     )
     return 0
 
@@ -3269,45 +3240,61 @@ def cmd_list_venvs(args: argparse.Namespace) -> int:
     return 0
 
 
+def _remove_venv_dirs(entries: list[dict[str, Any]]) -> int:
+    """Delete each entry's venv directory; return how many removals failed."""
+    failures = 0
+    for entry in entries:
+        try:
+            shutil.rmtree(entry["path"])
+        except OSError as exc:
+            print(f"ERROR removing {entry['path']}: {exc}", file=sys.stderr)
+            failures += 1
+    return failures
+
+
 def cmd_prune_venvs(args: argparse.Namespace) -> int:
-    """Delete stale / legacy Plan 00099 venvs.
+    """Delete proven-stale Plan 00099 venvs.
 
     Selection flags (at least one required):
       --legacy                 remove untracked/venv/ (pre-v3.7.0 layout)
-      --all-except-current     remove every venv-<fp>/ whose fp != current
-      --stale                  remove venvs whose stamped daemon version
-                               differs from the current env's stamp
+      --stale                  remove every venv the one staleness rule proves
+                               stale (``paths.classify_venv``)
 
     Safety flags:
       --dry-run   print the removal plan without touching the filesystem
       --force     required for actual deletion (plus at least one selection flag)
 
-    The current Python-env's fingerprint-keyed venv is NEVER deleted.
+    Plan 00517 Task 3.1: "stale" has ONE definition, shared with the upgrade
+    cleanup (``scripts/install/venv.sh`` ``eager_cleanup_stale_venvs``), the
+    daemon-start cleanup and ``disk-usage``: the legacy bare ``venv/``, or a
+    venv with this view's slug (or none) whose readable ``lock_hash`` differs
+    from the current source's. The venv the running daemon or the resolver
+    uses, and the current fingerprint's venv, are NEVER selected. A venv with
+    missing or unreadable metadata, or another view's slug, is not proven
+    stale and is never selected here.
 
-    Plan 00100 Task 3.9: ``scripts/upgrade_version.sh`` invokes
-    ``eager_cleanup_stale_venvs`` after a verified daemon restart, on both the
-    full upgrade path and the already-at-target path. It removes only venvs
-    positively known to be stale: a readable ``lock_hash`` that differs from
-    the current source's, on a name carrying this view's path slug or no slug.
-    Another view's venv, a venv with a matching ``lock_hash`` and a venv with
-    missing or unreadable metadata are kept, so several ``venv-*/`` directories
-    can remain. ``prune-venvs --all-except-current`` removes those too, for
-    manual cleanup outside the upgrade flow.
+    ``--all-except-current`` is removed: it called any venv stale whose
+    interpreter fingerprint differed from the current one, a test the daemon
+    no longer uses to decide staleness.
     """
     project_root = Path(get_project_path(getattr(args, "project_root", None)))
-    entries = _enumerate_venvs(project_root)
 
     select_legacy = getattr(args, "legacy", False)
-    select_all_except_current = getattr(args, "all_except_current", False)
     select_stale = getattr(args, "stale", False)
     dry_run = getattr(args, "dry_run", False)
     force = getattr(args, "force", False)
 
-    if not (select_legacy or select_all_except_current or select_stale):
+    if getattr(args, "all_except_current", False):
         print(
-            "ERROR: pass at least one of --legacy, --all-except-current, --stale",
+            "ERROR: --all-except-current was removed (Plan 00517): it judged a venv stale by "
+            "interpreter fingerprint, which is not the staleness rule. Use --stale for venvs "
+            "proven stale; `list-venvs` shows any venv the code cannot prove stale.",
             file=sys.stderr,
         )
+        return 1
+
+    if not (select_legacy or select_stale):
+        print("ERROR: pass at least one of --legacy, --stale", file=sys.stderr)
         return 1
 
     if not force and not dry_run:
@@ -3318,39 +3305,8 @@ def cmd_prune_venvs(args: argparse.Namespace) -> int:
         return 1
 
     current_fp = python_venv_fingerprint(project_root)
-    current_stamp = ""
-    for entry in entries:
-        if entry["is_current"]:
-            current_stamp = entry["stamped_version"]
-            break
-
-    live_realpaths = _live_venv_realpaths(project_root)
-
-    to_remove: list[dict[str, Any]] = []
-    for entry in entries:
-        if entry["is_current"]:
-            continue  # never touch current fingerprint
-        if entry["is_symlink"]:
-            print(f"Skipping {entry['path']}: symlink", file=sys.stderr)
-            continue
-        if Path(entry["real_path"]) in live_realpaths:
-            print(f"Skipping {entry['path']}: live venv", file=sys.stderr)
-            continue
-        chosen = False
-        if select_legacy and entry["is_legacy"]:
-            chosen = True
-        if select_all_except_current and not entry["is_legacy"]:
-            chosen = True
-        if (
-            select_stale
-            and not entry["is_legacy"]
-            and current_stamp
-            and entry["stamped_version"]
-            and entry["stamped_version"] != current_stamp
-        ):
-            chosen = True
-        if chosen:
-            to_remove.append(entry)
+    stale = _stale_venv_entries(_enumerate_venvs(project_root))
+    to_remove = [entry for entry in stale if select_stale or entry["is_legacy"]]
 
     if not to_remove:
         print("Nothing to prune. Current venv:", current_fp)
@@ -3365,14 +3321,7 @@ def cmd_prune_venvs(args: argparse.Namespace) -> int:
         print("(dry-run) No changes made.")
         return 0
 
-    failures = 0
-    for entry in to_remove:
-        try:
-            shutil.rmtree(entry["path"])
-        except OSError as exc:
-            print(f"ERROR removing {entry['path']}: {exc}", file=sys.stderr)
-            failures += 1
-    if failures:
+    if _remove_venv_dirs(to_remove):
         return 1
     print(f"Removed {len(to_remove)} venv(s). Current venv preserved: {current_fp}")
     return 0
@@ -10398,12 +10347,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser_prune_venvs.add_argument(
         "--all-except-current",
         action="store_true",
-        help="Remove every fingerprint-keyed venv whose fingerprint != current env",
+        help=argparse.SUPPRESS,  # removed (Plan 00517); still parsed so it explains itself
     )
     parser_prune_venvs.add_argument(
         "--stale",
         action="store_true",
-        help="Remove venvs whose stamped daemon version differs from the current env's",
+        help="Remove every venv proven stale (readable lock_hash that differs, or legacy)",
     )
     parser_prune_venvs.add_argument(
         "--dry-run",

@@ -1670,6 +1670,9 @@ eager_cleanup_stale_venvs() {
             keep)
                 echo "Kept venv: $entry_path (reason: $reason)"
                 ;;
+            unproven)
+                echo "Kept venv: $entry_path (UNPROVEN, not removed: $reason; see: bin/hooks-daemon list-venvs)"
+                ;;
         esac
     done <<< "$verdicts"
 

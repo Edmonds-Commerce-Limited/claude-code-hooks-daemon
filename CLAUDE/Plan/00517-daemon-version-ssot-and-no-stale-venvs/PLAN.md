@@ -75,9 +75,10 @@ What main does today:
   directory itself (the running interpreter's `sys.prefix`, and the venv path without resolving `bin/python`'s
   symlink), so no `prune-venvs` mode can remove it. Test over a real venv whose `bin/python` is a symlink to a system
   interpreter and whose fingerprint differs from the current one. Ledger 00474 N456.
-- [ ] ⬜ **Task 3.1**: One function decides stale (current `lock_hash` and this view's slug, never the venv the
+- [x] ✅ **Task 3.1**: One function decides stale (current `lock_hash` and this view's slug, never the venv the
   running daemon or the resolver currently selects), shared by the upgrade cleanup and `prune-venvs`; the flags that
-  test fingerprint or stamped version are removed or made to call it.
+  test fingerprint or stamped version are removed or made to call it. `paths.classify_venv` is the function;
+  `--all-except-current` is removed with a message, `--stale` calls the rule.
 - [ ] ⬜ **Task 3.2**: A venv with missing or unreadable metadata, or another view's slug, is classed UNPROVEN, not
   kept silently. `list-venvs`/`prune-venvs --dry-run` show each UNPROVEN venv with the evidence: processes whose
   executable lives in it, interpreter and version, last-modified time, slug and the view it belongs to.

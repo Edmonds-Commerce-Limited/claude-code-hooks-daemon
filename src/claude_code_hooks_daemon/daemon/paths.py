@@ -2718,48 +2718,132 @@ def _cli_check_venv_fresh(args: argparse.Namespace) -> int:
     return 1
 
 
-def classify_venv_for_cleanup(
+# Plan 00517 Task 3.1: the ONE definition of a stale venv. Every caller (the
+# upgrade cleanup, restart and provision cleanup, ``prune-venvs``, ``disk-usage``,
+# the daemon-start advisory, the SessionStart advisory) asks ``classify_venv``.
+VENV_STALE = "stale"  # positively proven stale: safe to remove
+VENV_UNPROVEN = "unproven"  # cannot be proven stale: surfaced, removed once confirmed safe
+VENV_KEEP = "keep"  # live, current, or not decidable: left alone
+
+_LEGACY_BARE_VENV_DIR_NAME = "venv"
+
+
+def live_venv_realpaths(daemon_dir: Path | str) -> frozenset[Path]:
+    """Return the real directories of the venvs that are live right now.
+
+    Two sources, both identified by the venv DIRECTORY: the venv the resolver
+    (:func:`resolve_existing_venv_python`, Plan 00184) selects, and the venv of
+    the running interpreter (``sys.prefix``). A venv's ``bin/python`` is a
+    symlink to the system interpreter, so resolving THAT yields the
+    interpreter's prefix (``/usr``) and never matches the venv (Plan 00517
+    Task 3.0): the directory is taken from the unresolved path
+    (``bin/python`` -> ``bin`` -> venv dir) and only the directory itself is
+    resolved.
+
+    ``resolve_existing_venv_python`` never raises and returns a best-effort
+    path without an existence check on its override and legacy branches, so a
+    non-existent result IS the "no venv provisioned yet" signal.
+    """
+    live: set[Path] = {Path(sys.prefix).resolve()}
+    python_path = resolve_existing_venv_python(daemon_dir)
+    if python_path.exists():
+        live.add(python_path.parent.parent.resolve())
+    return frozenset(live)
+
+
+def classify_venv(
     venv_dir: Path,
     current_slug: str,
     current_hash: str | None,
-) -> tuple[bool, str]:
-    """Decide whether a non-current ``venv-*`` directory is positively stale.
+    live: frozenset[Path],
+) -> tuple[str, str]:
+    """Classify one ``venv`` / ``venv-*`` directory: ``(verdict, reason)``.
 
-    Returns ``(remove, reason)``. ``remove`` is True only when the venv's slug
-    is eligible for this view (:func:`_venv_slug_eligible`), its metadata is
-    readable, and its ``lock_hash`` differs from ``current_hash``. Every other
-    case keeps the venv and ``reason`` says why.
+    - ``keep``: the venv is live (``live`` holds real directories), or its
+      ``lock_hash`` matches the current source, or the current ``lock_hash``
+      cannot be computed so nothing can be judged.
+    - ``stale``: the legacy bare ``venv/`` directory, or a venv whose slug is
+      this view's (or absent), whose metadata is readable and whose
+      ``lock_hash`` differs from ``current_hash``.
+    - ``unproven``: the code cannot prove it stale, because its slug belongs to
+      another view or its metadata is missing or unreadable. It is surfaced
+      with evidence for the running agent to judge, never removed silently.
     """
+    if venv_dir.resolve() in live:
+        return VENV_KEEP, "live: the running daemon or the resolver uses it"
+    if venv_dir.name == _LEGACY_BARE_VENV_DIR_NAME:
+        return VENV_STALE, "legacy-name: the pre-v3.7.0 untracked/venv layout"
     if current_hash is None:
-        return False, "cannot compute the current lock_hash"
+        return VENV_KEEP, "cannot compute the current lock_hash"
     eligible, skip_reason = _venv_slug_eligible(venv_dir, current_slug)
     if not eligible:
-        return False, skip_reason or "slug belongs to another view"
+        return VENV_UNPROVEN, skip_reason or "slug belongs to another view"
     metadata = _read_venv_metadata_stdlib(venv_dir)
     if metadata is None:
-        return False, f"no usable {_DAEMON_METADATA_FILENAME}"
+        return VENV_UNPROVEN, f"no usable {_DAEMON_METADATA_FILENAME}"
     if metadata["lock_hash"] == current_hash:
-        return False, "lock_hash matches the current source"
-    return True, "lock_hash differs from the current source"
+        return VENV_KEEP, "lock_hash matches the current source"
+    return VENV_STALE, "lock_hash differs from the current source"
+
+
+@dataclass(frozen=True)
+class VenvVerdict:
+    """One scanned venv directory and its :func:`classify_venv` result."""
+
+    path: Path
+    real_path: Path
+    verdict: str
+    reason: str
+
+
+def classify_untracked_venvs(
+    daemon_dir: Path,
+    extra_live: list[Path] | None = None,
+) -> list[VenvVerdict]:
+    """Classify every ``untracked/venv`` and ``untracked/venv-*`` directory.
+
+    ``extra_live`` names venvs the caller knows are in use (the upgrade passes
+    the one it just verified) on top of :func:`live_venv_realpaths`. A symlink
+    name is kept and never judged by its target: the target is judged under
+    its own name, and removing through a link could leave the untracked tree.
+    """
+    untracked = daemon_dir / "untracked"
+    if not untracked.is_dir():
+        return []
+    live = live_venv_realpaths(daemon_dir) | {p.resolve() for p in extra_live or []}
+    current_slug = project_path_slug(daemon_dir)
+    current_hash = _compute_project_lock_hash_stdlib(daemon_dir)
+    verdicts: list[VenvVerdict] = []
+    names = [untracked / _LEGACY_BARE_VENV_DIR_NAME, *sorted(untracked.glob("venv-*"))]
+    for candidate in names:
+        if not candidate.is_dir():
+            continue
+        real_path = candidate.resolve()
+        if candidate.is_symlink():
+            verdicts.append(
+                VenvVerdict(candidate, real_path, VENV_KEEP, "symlink: judged under its target")
+            )
+            continue
+        verdict, reason = classify_venv(candidate, current_slug, current_hash, live)
+        verdicts.append(VenvVerdict(candidate, real_path, verdict, reason))
+    return verdicts
 
 
 def _cli_list_stale_venvs(args: argparse.Namespace) -> int:
     """CLI handler for ``list-stale-venvs``.
 
     Prints one tab-separated line per ``untracked/venv-*`` directory other
-    than ``--current-venv``: ``remove|keep``, the absolute path, the reason.
-    The caller deletes only the ``remove`` lines.
+    than ``--current-venv``: ``remove|keep|unproven``, the absolute path, the
+    reason. The caller deletes only the ``remove`` lines (a ``stale``
+    verdict); ``unproven`` lines are for the running agent to investigate.
     """
     daemon_dir = Path(args.daemon_dir)
     current_venv = Path(args.current_venv).resolve()
-    untracked = daemon_dir / "untracked"
-    current_slug = project_path_slug(daemon_dir)
-    current_hash = _compute_project_lock_hash_stdlib(daemon_dir)
-    for candidate in sorted(untracked.glob("venv-*")):
-        if not candidate.is_dir() or candidate.resolve() == current_venv:
+    for entry in classify_untracked_venvs(daemon_dir, extra_live=[current_venv]):
+        if entry.real_path == current_venv:
             continue
-        remove, reason = classify_venv_for_cleanup(candidate, current_slug, current_hash)
-        print(f"{'remove' if remove else 'keep'}\t{candidate.resolve()}\t{reason}")
+        label = "remove" if entry.verdict == VENV_STALE else entry.verdict
+        print(f"{label}\t{entry.real_path}\t{entry.reason}")
     return 0
 
 
