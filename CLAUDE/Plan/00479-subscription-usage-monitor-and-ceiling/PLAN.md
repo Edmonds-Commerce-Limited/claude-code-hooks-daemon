@@ -6,6 +6,7 @@
 **Priority**: Medium
 **Recommended Executor**: Sonnet
 **Execution Strategy**: Sub-Agent Orchestration
+**GitHub Issue**: #104 (the single-thread cutoff, Phase 7)
 
 ## Overview
 
@@ -213,6 +214,12 @@ feedback loop.
   And an unreadable override marker: it counts as an override with no end, so it never expires while the file stays
   unreadable (existing behaviour on main; Task 6.1 makes it visible but does not change it).
 
+### Phase 7: A single-thread cutoff below the pause (#104)
+
+- [ ] ⬜ **Task 7.1**: Deny new sub-agent and background spawns at a usage threshold below the pause, and tell
+  the main thread to wind up. Blocked on owner question 6. Proposal, relations and questions:
+  [SINGLE-THREAD-CUTOFF.md](SINGLE-THREAD-CUTOFF.md).
+
 ## Open questions for the owner
 
 1. **Resolved (owner)**: pause, then resume through a scheduled cron at the predicted reset,
@@ -241,6 +248,10 @@ feedback loop.
    A related open fact: the live seven-day reset (2026-10-11 08:02) differed from the reset the override trusted
    (2026-10-09 23:00). Whether the provider's window moves, and so whether the override should re-read `resets_at`, is
    unconfirmed.
+
+6. **Open (owner)**: the single-thread cutoff (#104): default on or opt-in, the window and threshold, which
+   spawns count, its interaction with the override (decide with question 5), and a status-line marker. Listed in
+   [SINGLE-THREAD-CUTOFF.md](SINGLE-THREAD-CUTOFF.md).
 
 ## Success Criteria
 
