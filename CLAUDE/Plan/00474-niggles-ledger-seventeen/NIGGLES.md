@@ -100,7 +100,23 @@ is the count at that date.
   `except OSError: pass`, which is blocked today. Which way to resolve that is a product call, deliberately not taken
   here.
 
-**Status**: 🔄 In progress.
+**Fix**: merged as 0fea4b8be (branch commit 78a90416f). The restart then committed the regenerated CLAUDE.md
+guidance as b8bff393e.
+
+- `python_strategy.py` gains a `broad suppress()` pattern: `Exception` or `BaseException` as a whole name among
+  `suppress(...)`'s arguments, including tuple members, `builtins.` forms, and whitespace or newlines inside the
+  parentheses. A trailing comment that mentions it is not matched; a string literal is.
+- `audit_error_hiding.py` gains `visit_With`/`visit_AsyncWith` and a `broad-suppress` rule, registered in
+  `scripts/qa/qa-rules.json`.
+- `server.py`'s liveness probe narrowed to `suppress(OSError)`; the test teardown narrowed to
+  `DaemonAlreadyRunningError`/`TimeoutError`.
+- The handler guidance names the form.
+- 37 tests red first. Release note 048.
+- Range QA over `1fb6e326a..b8bff393e`: 39/40, the red being `changed_tests` with 3564 passed and 0 failed but 3
+  unmapped files. A first run over `HEAD^1..HEAD` covered only the regenerated CLAUDE.md commit and is not evidence.
+  The server, error-hiding handler, strategy and audit tests were run directly: 588 passed.
+
+**Status**: ✅ Fixed.
 
 ### N447 — the conflict-marker gate still greps an excluded path, and a recorded large binary, before it filters
 
