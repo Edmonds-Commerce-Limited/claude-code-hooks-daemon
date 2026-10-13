@@ -3374,7 +3374,9 @@ runs could remove. Nothing stops it recurring: the secret word list is the mecha
 it.
 
 **Status**: ⬜ Open, for the owner. To decide: whether the two journal lines may be edited in place, whether to add
-the host name to the secret word list, and whether history matters for this name.
+the host name to the secret word list, and whether history matters for this name. The journal half became GitHub
+#108, filed as Plan 00516: `plan_journal_guard` already lets a same-line Edit through, so the question is the policy
+for an audited in-place redaction.
 
 ### N388 — the host segment does not show the session's role override
 
