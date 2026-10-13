@@ -64,6 +64,15 @@ _STATUS_DEFAULT_TEXT = "Claude"
 _STATUS_JOIN = f" {_STATUS_SEGMENT_SEPARATOR} "
 # One terminal row per newline: Claude Code renders multi-line statusLine output.
 _STATUS_ROW_SEPARATOR = "\n"
+# Columns held back from the forwarded COLUMNS when packing rows (N459). COLUMNS
+# is the whole terminal, but Claude Code draws the status line inside its own
+# spacing plus the user's `padding`, and shares the row with right-hand
+# notifications that "may truncate your status line output" on narrow terminals
+# (remote-docs/code.claude.com/docs/en/statusline.md). A row packed to COLUMNS is
+# cut with an ellipsis, and the context figure ends its segment, so it is what
+# disappears. The docs give no figure; 8 is a conservative allowance, not a
+# measured one.
+STATUS_WRAP_MARGIN = 8
 # WorktreeCreate raw-path response (Plan 00188). The daemon→forwarder envelope
 # key carrying the created worktree path; the forwarder extracts it and prints
 # the raw path (Claude Code parses the WorktreeCreate hook's stdout as a path).
@@ -612,7 +621,8 @@ class HookResult(BaseModel, Generic[DecisionT]):
             # no segment runs off a narrow screen. No/invalid width -> the
             # single-line join (backwards-compatible with older clients).
             if isinstance(terminal_columns, int) and terminal_columns > 0:
-                return {"text": _wrap_status_parts(parts, terminal_columns)}
+                usable = max(1, terminal_columns - STATUS_WRAP_MARGIN)
+                return {"text": _wrap_status_parts(parts, usable)}
             return {"text": _STATUS_JOIN.join(parts)}
 
         # Special case: WorktreeCreate returns the created worktree path. Claude

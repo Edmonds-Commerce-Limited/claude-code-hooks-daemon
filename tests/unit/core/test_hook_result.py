@@ -2,10 +2,14 @@
 
 from typing import Any, cast
 
+import pytest
+
 from claude_code_hooks_daemon.core.hook_result import (
     _DENY_CONTINUATION_SUFFIX,
+    STATUS_WRAP_MARGIN,
     Decision,
     HookResult,
+    _display_width,
 )
 
 
@@ -952,13 +956,13 @@ class TestHookResultStatusWrapping:
         # Full line "AAA | BBB | CCC" is 15 cols. At width 9, "AAA | BBB" (9)
         # fits; adding " | CCC" would overflow -> CCC drops to its own row.
         result = HookResult(decision=Decision.ALLOW, context=["AAA", "BBB", "CCC"])
-        out = result.to_json("Status", terminal_columns=9)
+        out = result.to_json("Status", terminal_columns=9 + STATUS_WRAP_MARGIN)
         assert out["text"] == "AAA | BBB\nCCC"
 
     def test_each_row_within_width(self):
         parts = ["seg1", "seg2", "seg3", "seg4", "seg5"]
         result = HookResult(decision=Decision.ALLOW, context=parts)
-        out = result.to_json("Status", terminal_columns=12)
+        out = result.to_json("Status", terminal_columns=12 + STATUS_WRAP_MARGIN)
         for row in out["text"].split("\n"):
             assert len(row) <= 12
 
@@ -967,7 +971,7 @@ class TestHookResultStatusWrapping:
         result = HookResult(
             decision=Decision.ALLOW, context=["short", "AVERYLONGSEGMENTXX", "tail"]
         )
-        out = result.to_json("Status", terminal_columns=8)
+        out = result.to_json("Status", terminal_columns=8 + STATUS_WRAP_MARGIN)
         rows = out["text"].split("\n")
         assert "AVERYLONGSEGMENTXX" in rows
 
@@ -978,7 +982,7 @@ class TestHookResultStatusWrapping:
         # reconstruct the single-line join.
         parts = ["📁 repo", "🤖 Opus | ◔ 5%", "👤 user", "🌳 main"]
         result = HookResult(decision=Decision.ALLOW, context=parts)
-        out = result.to_json("Status", terminal_columns=15)
+        out = result.to_json("Status", terminal_columns=15 + STATUS_WRAP_MARGIN)
         assert "\n" in out["text"]  # it actually wrapped at this width
         assert out["text"].replace("\n", " | ") == " | ".join(parts)
 
@@ -988,7 +992,7 @@ class TestHookResultStatusWrapping:
         coloured = "\x1b[42m ok \x1b[0m"  # visible width 4, raw len 13
         result = HookResult(decision=Decision.ALLOW, context=[coloured, "BBB"])
         # Visible "ok" segment (4) + ' | ' (3) + "BBB" (3) = 10 <= 12: one line.
-        out = result.to_json("Status", terminal_columns=12)
+        out = result.to_json("Status", terminal_columns=12 + STATUS_WRAP_MARGIN)
         assert "\n" not in out["text"]
 
     def test_empty_context_returns_default_even_with_width(self):
@@ -1004,6 +1008,37 @@ class TestHookResultStatusWrapping:
         out = result.to_json("Status", terminal_columns=200)
         assert "\n" not in out["text"]
         assert out["text"] == "👨‍💻 dev | BBB | CCC"
+
+
+class TestHookResultStatusWrapMargin:
+    """N459: rows must leave room for Claude Code's own spacing and notifications.
+
+    COLUMNS is the full terminal width, but Claude Code renders the status line
+    inside built-in spacing and shares the row with right-hand notifications, so
+    a row packed to COLUMNS is truncated with an ellipsis and the trailing
+    context segment is lost.
+    """
+
+    CONTEXT_SEGMENT = "🤖 Opus 4.7 ▌▌▌░░ | ◔ 12%"
+
+    def _rows(self, columns: int) -> list[str]:
+        parts = ["📁 hooks-daemon", "🌿 main", self.CONTEXT_SEGMENT, "👤 dev@host", "🕐 14:02"]
+        result = HookResult(decision=Decision.ALLOW, context=parts)
+        return result.to_json("Status", terminal_columns=columns)["text"].split("\n")
+
+    @pytest.mark.parametrize("columns", [40, 60, 80, 100, 120, 200])
+    def test_no_row_reaches_the_terminal_edge(self, columns: int) -> None:
+        for row in self._rows(columns):
+            assert _display_width(row) <= columns - STATUS_WRAP_MARGIN
+
+    @pytest.mark.parametrize("columns", [40, 60, 80, 100, 120, 200])
+    def test_context_segment_survives_intact(self, columns: int) -> None:
+        assert self.CONTEXT_SEGMENT in "\n".join(self._rows(columns))
+
+    def test_margin_larger_than_terminal_still_emits_every_segment(self) -> None:
+        result = HookResult(decision=Decision.ALLOW, context=["AAA", "BBB"])
+        out = result.to_json("Status", terminal_columns=STATUS_WRAP_MARGIN)
+        assert out["text"] == "AAA\nBBB"
 
 
 class TestHookResultToResponseDict:
