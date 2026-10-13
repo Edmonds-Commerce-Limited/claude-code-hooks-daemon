@@ -1544,6 +1544,19 @@ class TestAWordsOnlyEntryJudgesOperandsAsWords:
         assert not problems, problems
         assert find_full_qa_invocation("php probe.php .", patterns, cwd=tmp_path)
 
+    @pytest.mark.parametrize(
+        "command",
+        ["run_changed_tests.py", "run_changed_tests.py .", "run_changed_tests.py {root}"],
+    )
+    def test_an_empty_full_words_entry_is_never_full(self, tmp_path: Path, command: str) -> None:
+        self._tree(tmp_path)
+        patterns, problems = parse_full_qa_patterns(
+            [{"id": "run-changed-tests", "command": "run_changed_tests.py", "full_words": []}]
+        )
+        assert not problems, problems
+        found = find_full_qa_invocation(command.format(root=tmp_path), patterns, cwd=tmp_path)
+        assert found is None, command
+
     @pytest.mark.parametrize(("command", "full"), [("all", True), ("changed", False)])
     def test_the_shipped_llm_qa_entry(self, tmp_path: Path, command: str, full: bool) -> None:
         self._tree(tmp_path)

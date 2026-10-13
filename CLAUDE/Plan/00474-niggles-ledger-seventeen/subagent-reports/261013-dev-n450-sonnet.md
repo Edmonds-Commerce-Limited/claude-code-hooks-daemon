@@ -20,6 +20,7 @@ Added in `tests/unit/handlers/pre_tool_use/test_subagent_full_qa_blocker.py` (no
 - `php bin/qa` is still full.
 - Regression: the pytest whole-suite shape (`full_args: [tests, .]`, `bare_is_full`) still treats `.`, a repo root and bare as full.
 - Regression: `full_args: []` with `full_words` keeps the path rules (`php probe.php .` full).
+- Regression (follow-up commit, at the coordinator's request): the shipped `run-changed-tests` shape `{command: run_changed_tests.py, full_words: []}` is never full for no operand, `.` or a repo root. Kept safe by retaining the `frozenset()` coercion.
 - Shipped `llm_qa.py all` is full, `llm_qa.py changed` is not.
 
 ## QA
