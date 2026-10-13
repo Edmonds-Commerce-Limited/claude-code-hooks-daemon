@@ -104,7 +104,13 @@ is the count at that date.
   `utils/commit_location.commit_runs_in_foreign_repo`, so it names a method that no longer exists. Each should
   point at the shared function instead.
 
-**Status**: 🔄 In progress.
+**Fix**: merged as 6d3084d3d (branch commit ee2d690c6), fast-forwarded onto main after targeted QA passed 40/40 on
+the integration head (2064 passed, 0 unmapped, recorded green). `utils/merge_scope.merge_directory` holds the
+placement, moved unchanged from `daemon_sync_after_merge`. Both handlers call it, and both docstrings now point at
+it. Tests red first: 2 of the 4 new `merge_qa_report` tests failed (the `cd` and `-C` cases), and the 6
+`merge_directory` tests failed at import. Release note 049.
+
+**Status**: ✅ Fixed.
 
 ### N448 — error_hiding_blocker and the error-hiding audit miss `contextlib.suppress(Exception)`
 
