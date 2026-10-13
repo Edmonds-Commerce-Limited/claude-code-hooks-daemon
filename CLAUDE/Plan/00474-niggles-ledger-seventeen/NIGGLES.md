@@ -88,17 +88,20 @@ is the count at that date.
   therefore treated as the project's own. The handler then diffs the project's `ORIG_HEAD..HEAD`, left over from an
   earlier operation, and reports plan and docs findings for files the merge never touched.
 - Its sibling `daemon_sync_after_merge` already gets this right. Its `_merge_directory` places the first
-  merge/pull/rebase invocation with `git_invocations`, `placement_problem` and `invocation_directory`, the shared
-  walker the commit gates use since N400 to N402, and falls back to the session `cwd` only when the placement cannot
-  be stated (`cd $DIR`). Its docstring says it "mirrors `merge_qa_report._is_foreign_repo`", which is now the wrong
-  way round.
+  merge/pull/rebase invocation with `git_invocations`, `placement_problem` and `invocation_directory`. That is the
+  shared walker `conflict_marker_commit_gate` (N402 (a)), `destructive_git` and `merge_qa_advisor` also use. It falls
+  back to the session `cwd` only when the placement cannot be stated (`cd $DIR`). Its `_is_foreign_repo` docstring
+  says it "mirrors `merge_qa_report._is_foreign_repo`", which is now the wrong way round; `merge_qa_report`'s own
+  says it mirrors `staged_lint_gate._is_foreign_repo`.
 
 **Remedy (coordinator ruling)**:
 
 - Move `_merge_directory` into `utils/merge_scope.py`, which both handlers already import, and use it from both.
   `merge_qa_report` then resolves the repository from the merge's own directory.
 - Keep the fallback unchanged: no placeable invocation means the session `cwd`, as today.
-- Fix the two docstrings so they no longer point at each other as the model.
+- Fix the two `_is_foreign_repo` docstrings: `daemon_sync_after_merge`'s cites `merge_qa_report` as its model, and
+  `merge_qa_report`'s cites `staged_lint_gate`, which places by `cwd` alone. Each should point at the shared
+  function instead.
 
 **Status**: 🔄 In progress.
 
