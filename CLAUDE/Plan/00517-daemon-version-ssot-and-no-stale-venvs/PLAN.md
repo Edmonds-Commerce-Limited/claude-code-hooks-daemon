@@ -79,10 +79,11 @@ What main does today:
   running daemon or the resolver currently selects), shared by the upgrade cleanup and `prune-venvs`; the flags that
   test fingerprint or stamped version are removed or made to call it. `paths.classify_venv` is the function;
   `--all-except-current` is removed with a message, `--stale` calls the rule.
-- [ ] ⬜ **Task 3.2**: A venv with missing or unreadable metadata, or another view's slug, is classed UNPROVEN, not
+- [x] ✅ **Task 3.2**: A venv with missing or unreadable metadata, or another view's slug, is classed UNPROVEN, not
   kept silently. `list-venvs`/`prune-venvs --dry-run` show each UNPROVEN venv with the evidence: processes whose
   executable lives in it, interpreter and version, last-modified time, slug and the view it belongs to.
-- [ ] ⬜ **Task 3.3**: `prune-venvs --unproven <path> --force` removes one named UNPROVEN venv, refusing when a live
+  (`/proc` scan reads `exe`, `cwd` and `argv[0]`: a venv's `bin/python` is a symlink, so `exe` alone misses it.)
+- [x] ✅ **Task 3.3**: `prune-venvs --unproven <path> --force` removes one named UNPROVEN venv, refusing when a live
   process uses it or it is the resolver's current choice.
 
 ### Phase 4: Where it runs

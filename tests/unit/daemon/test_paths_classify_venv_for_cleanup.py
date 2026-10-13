@@ -20,6 +20,7 @@ from claude_code_hooks_daemon.daemon.paths import (
     classify_venv,
     main,
     project_path_slug,
+    python_venv_fingerprint,
 )
 
 CURRENT_HASH = "sha256:" + "a" * 64
@@ -124,6 +125,15 @@ class TestClassifyUntrackedVenvs:
         verdicts = classify_untracked_venvs(daemon_dir, extra_live=[current])
 
         assert [(v.path, v.verdict) for v in verdicts] == [(current, VENV_KEEP)]
+
+    def test_current_fingerprints_venv_is_never_judged(self, tmp_path: Path) -> None:
+        daemon_dir, untracked, _ = self._project(tmp_path)
+        current = _venv(untracked, f"venv-{python_venv_fingerprint(daemon_dir)}", None)
+
+        (verdict,) = classify_untracked_venvs(daemon_dir)
+
+        assert (verdict.path, verdict.verdict) == (current, VENV_KEEP)
+        assert "current fingerprint" in verdict.reason
 
     def test_no_untracked_directory_yields_nothing(self, tmp_path: Path) -> None:
         assert classify_untracked_venvs(tmp_path / "nowhere") == []

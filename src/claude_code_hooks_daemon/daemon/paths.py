@@ -10,6 +10,7 @@ not /tmp, to prevent security vulnerabilities.
 
 import argparse
 import contextlib
+import datetime
 import functools
 import hashlib
 import importlib.util
@@ -2813,6 +2814,7 @@ def classify_untracked_venvs(
     live = live_venv_realpaths(daemon_dir) | {p.resolve() for p in extra_live or []}
     current_slug = project_path_slug(daemon_dir)
     current_hash = _compute_project_lock_hash_stdlib(daemon_dir)
+    current_name = f"venv-{python_venv_fingerprint(daemon_dir)}"
     verdicts: list[VenvVerdict] = []
     names = [untracked / _LEGACY_BARE_VENV_DIR_NAME, *sorted(untracked.glob("venv-*"))]
     for candidate in names:
@@ -2824,9 +2826,195 @@ def classify_untracked_venvs(
                 VenvVerdict(candidate, real_path, VENV_KEEP, "symlink: judged under its target")
             )
             continue
+        if candidate.name == current_name:
+            # The venv this interpreter builds and serves: it may be mid-build
+            # (metadata is written after the sync), so it is never judged here.
+            verdicts.append(
+                VenvVerdict(candidate, real_path, VENV_KEEP, "current fingerprint's venv")
+            )
+            continue
         verdict, reason = classify_venv(candidate, current_slug, current_hash, live)
         verdicts.append(VenvVerdict(candidate, real_path, verdict, reason))
     return verdicts
+
+
+@dataclass(frozen=True)
+class VenvProcess:
+    """A process found using a venv, and how it was found."""
+
+    pid: int
+    via: str  # "exe", "cwd" or "argv0"
+    detail: str
+
+
+@dataclass(frozen=True)
+class ProcessScan:
+    """Result of one ``/proc`` scan: users per venv, and pids it could not read."""
+
+    users: dict[Path, list[VenvProcess]]
+    unreadable: int
+
+
+def _is_inside(candidate: str, venv_prefixes: tuple[str, ...]) -> bool:
+    """True when ``candidate`` is a path inside one of the venv directories."""
+    return any(candidate.startswith(prefix + os.sep) for prefix in venv_prefixes)
+
+
+def _read_link(path: Path) -> str | None:
+    """The target of a ``/proc`` link, or None when it is unreadable."""
+    try:
+        target = os.readlink(path)
+    except OSError:
+        return None
+    return target.removesuffix(" (deleted)")
+
+
+def _read_argv0(path: Path) -> str | None:
+    """The first argument of a ``/proc/<pid>/cmdline``, or None when unreadable."""
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None
+    return raw.split(b"\0", 1)[0].decode(errors="replace")
+
+
+def processes_using_venvs(venv_dirs: list[Path], proc_root: Path = Path("/proc")) -> ProcessScan:
+    """Find processes using each venv, read-only, from ``proc_root`` (``/proc``).
+
+    A process uses a venv when its executable (``exe``) or working directory
+    (``cwd``) is inside it, or its ``argv[0]`` names a path inside it: a venv's
+    ``bin/python`` is a symlink, so ``exe`` shows the system interpreter and only
+    ``argv[0]`` shows which venv started it. Later arguments are deliberately not
+    read, because the command that asks the question (``prune-venvs --unproven
+    <path>``) names the venv too. A process whose links and command line are all
+    unreadable (another user's) is counted in ``unreadable``, not guessed at.
+    """
+    prefixes = {
+        venv: tuple(dict.fromkeys((str(venv), str(venv.resolve())))) for venv in venv_dirs
+    }
+    users: dict[Path, list[VenvProcess]] = {venv: [] for venv in venv_dirs}
+    unreadable = 0
+    if not proc_root.is_dir():
+        return ProcessScan(users, unreadable)
+    for entry in sorted(proc_root.iterdir(), key=lambda p: p.name):
+        if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        found = {
+            "exe": _read_link(entry / "exe"),
+            "cwd": _read_link(entry / "cwd"),
+            "argv0": _read_argv0(entry / "cmdline"),
+        }
+        if all(value is None for value in found.values()):
+            unreadable += 1
+            continue
+        for venv, venv_prefixes in prefixes.items():
+            for via, value in found.items():
+                if value is not None and _is_inside(value, venv_prefixes):
+                    users[venv].append(VenvProcess(pid=pid, via=via, detail=value))
+                    break
+    return ProcessScan(users, unreadable)
+
+
+@dataclass(frozen=True)
+class VenvEvidence:
+    """What the running agent needs to decide whether an UNPROVEN venv is safe to remove."""
+
+    path: Path
+    slug: str | None
+    view: str
+    interpreter: str
+    python_version: str
+    modified: str
+    processes: tuple[VenvProcess, ...]
+    unreadable_processes: int
+
+    def describe(self) -> list[str]:
+        """Human-readable evidence lines for this venv."""
+        lines = [
+            f"{self.path}",
+            f"    belongs to: {self.view}",
+            f"    interpreter: {self.interpreter} (python {self.python_version})",
+            f"    last modified: {self.modified}",
+        ]
+        if self.processes:
+            for proc in self.processes:
+                lines.append(f"    IN USE: pid {proc.pid} ({proc.via}: {proc.detail})")
+        else:
+            lines.append("    no process found using it")
+        if self.unreadable_processes:
+            lines.append(
+                f"    {self.unreadable_processes} process(es) could not be read "
+                "(another user's), so 'no process' is not certain"
+            )
+        return lines
+
+    def to_dict(self) -> dict[str, Any]:
+        """JSON-ready form of the evidence."""
+        return {
+            "path": str(self.path),
+            "slug": self.slug,
+            "view": self.view,
+            "interpreter": self.interpreter,
+            "python_version": self.python_version,
+            "modified": self.modified,
+            "processes": [
+                {"pid": p.pid, "via": p.via, "detail": p.detail} for p in self.processes
+            ],
+            "unreadable_processes": self.unreadable_processes,
+        }
+
+
+def _read_pyvenv_cfg(venv_dir: Path) -> dict[str, str]:
+    """The ``key = value`` pairs of a venv's ``pyvenv.cfg``; empty when unreadable."""
+    try:
+        text = (venv_dir / "pyvenv.cfg").read_text()
+    except OSError:
+        return {}
+    pairs: dict[str, str] = {}
+    for line in text.splitlines():
+        key, separator, value = line.partition("=")
+        if separator:
+            pairs[key.strip()] = value.strip()
+    return pairs
+
+
+def _view_of(slug: str | None, current_slug: str) -> str:
+    """Which checkout view a venv belongs to, in words."""
+    if slug is None:
+        return "this view (name carries no slug)"
+    if slug == current_slug:
+        return "this view"
+    return f"another view (slug '{slug}'; this view is '{current_slug}')"
+
+
+def gather_venv_evidence(
+    venv_dirs: list[Path],
+    current_slug: str,
+    proc_root: Path = Path("/proc"),
+) -> list[VenvEvidence]:
+    """Collect the :class:`VenvEvidence` for each venv with ONE ``/proc`` scan."""
+    scan = processes_using_venvs(venv_dirs, proc_root)
+    evidence: list[VenvEvidence] = []
+    for venv in venv_dirs:
+        cfg = _read_pyvenv_cfg(venv)
+        slug = _parse_venv_dir_slug(venv.name)
+        modified = datetime.datetime.fromtimestamp(
+            venv.stat().st_mtime, tz=datetime.timezone.utc
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        evidence.append(
+            VenvEvidence(
+                path=venv,
+                slug=slug,
+                view=_view_of(slug, current_slug),
+                interpreter=cfg.get("home") or "unknown (no readable pyvenv.cfg)",
+                python_version=cfg.get("version") or cfg.get("version_info") or "unknown",
+                modified=modified,
+                processes=tuple(scan.users[venv]),
+                unreadable_processes=scan.unreadable,
+            )
+        )
+    return evidence
 
 
 def _cli_list_stale_venvs(args: argparse.Namespace) -> int:

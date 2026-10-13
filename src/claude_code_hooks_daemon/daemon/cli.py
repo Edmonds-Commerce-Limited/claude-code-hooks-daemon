@@ -75,16 +75,19 @@ from claude_code_hooks_daemon.daemon.metadata import (
 from claude_code_hooks_daemon.daemon.paths import (
     VENV_STALE,
     VENV_UNPROVEN,
+    VenvEvidence,
     classify_untracked_venvs,
     cleanup_pid_file,
     cleanup_socket,
     cleanup_stale_daemon_files,
     cleanup_stale_session_dirs,
     find_uv,
+    gather_venv_evidence,
     get_pid_path,
     get_socket_path,
     live_venv_realpaths,
     parse_pid_text,
+    project_path_slug,
     python_venv_fingerprint,
     read_pid_file,
     read_pid_file_text,
@@ -3216,8 +3219,13 @@ def cmd_list_venvs(args: argparse.Namespace) -> int:
     project_root = Path(get_project_path(getattr(args, "project_root", None)))
     entries = _enumerate_venvs(project_root)
     as_json = getattr(args, "json", False)
+    evidence = _unproven_evidence(project_root, entries)
 
     if as_json:
+        by_path = {str(item.path): item.to_dict() for item in evidence}
+        for entry in entries:
+            if entry["path"] in by_path:
+                entry["evidence"] = by_path[entry["path"]]
         print(json.dumps(entries, indent=2))
         return 0
 
@@ -3230,14 +3238,55 @@ def cmd_list_venvs(args: argparse.Namespace) -> int:
     print()
     print(f"{'Fingerprint':<20} {'Stamp':<10} {'Size':>10}  {'Marker':<8} Path")
     print("-" * 80)
+    unproven_paths = {str(item.path) for item in evidence}
     for entry in entries:
-        marker = "← current" if entry["is_current"] else ("legacy" if entry["is_legacy"] else "")
+        marker = _venv_marker(entry, unproven_paths)
         fp_display = entry["fingerprint"] or "(legacy)"
         print(
             f"{fp_display:<20} {entry['stamped_version'] or '-':<10} "
             f"{_human_bytes(entry['size_bytes']):>10}  {marker:<8} {entry['path']}"
         )
+    _print_unproven_report(evidence)
     return 0
+
+
+def _venv_marker(entry: dict[str, Any], unproven_paths: set[str]) -> str:
+    """The ``list-venvs`` marker column: why this venv is or is not removable."""
+    if entry["is_current"]:
+        return "← current"
+    if entry["path"] in unproven_paths:
+        return "UNPROVEN"
+    if entry["verdict"] == VENV_STALE and not entry["is_symlink"]:
+        return "stale"
+    return "legacy" if entry["is_legacy"] else ""
+
+
+def _unproven_evidence(project_root: Path, entries: list[dict[str, Any]]) -> list[VenvEvidence]:
+    """Evidence for each venv the code cannot prove stale (Plan 00517 Task 3.2)."""
+    unproven = _unproven_venv_entries(entries)
+    if not unproven:
+        return []
+    daemon_dir = _daemon_untracked_dir(project_root).parent
+    return gather_venv_evidence([Path(e["path"]) for e in unproven], project_path_slug(daemon_dir))
+
+
+def _print_unproven_report(evidence: list[VenvEvidence]) -> None:
+    """Print each UNPROVEN venv with its evidence and the exact removal command."""
+    if not evidence:
+        return
+    print()
+    print(
+        f"{len(evidence)} UNPROVEN venv(s): the code cannot prove them stale (missing or "
+        "unreadable metadata, or another checkout view's slug), so nothing removes them "
+        "automatically. Investigate each; once you have confirmed it is unused and safe, "
+        "remove it with the command shown."
+    )
+    for item in evidence:
+        print()
+        for line in item.describe():
+            print(line)
+        removal = daemon_cli_command("prune-venvs", "--unproven", str(item.path), "--force")
+        print(f"    remove: {removal}")
 
 
 def _remove_venv_dirs(entries: list[dict[str, Any]]) -> int:
@@ -3252,13 +3301,79 @@ def _remove_venv_dirs(entries: list[dict[str, Any]]) -> int:
     return failures
 
 
+def _prune_one_unproven(project_root: Path, requested: str, dry_run: bool) -> int:
+    """Remove the ONE named UNPROVEN venv once nothing shows it is in use.
+
+    Plan 00517 Task 3.3. Only a venv ``_enumerate_venvs`` lists can be removed,
+    so an arbitrary path is never deleted. Refused, with the reason: a path that
+    is no venv here, a symlink name, the current or live venv (the one the
+    running daemon or the resolver uses), a venv the rule does not class
+    UNPROVEN (a proven-stale one goes through ``--stale``), and one with a live
+    process using it.
+    """
+    entries = _enumerate_venvs(project_root)
+    target = Path(requested)
+    if target.is_symlink():
+        print(f"ERROR: {requested} is a symlink; name the venv it points to.", file=sys.stderr)
+        return 1
+    entry = next(
+        (e for e in entries if e["path"] == str(target) or e["real_path"] == str(target.resolve())),
+        None,
+    )
+    if entry is None:
+        print(
+            f"ERROR: {requested} is not a venv under {_daemon_untracked_dir(project_root)}/; "
+            "`list-venvs` shows the venvs and which are UNPROVEN.",
+            file=sys.stderr,
+        )
+        return 1
+    if entry["is_symlink"]:
+        print(f"ERROR: {entry['path']} is a symlink; name its target instead.", file=sys.stderr)
+        return 1
+    if entry["is_current"]:
+        print(
+            f"ERROR: refusing {entry['path']}: it is the current or live venv "
+            "(the running daemon or the resolver uses it).",
+            file=sys.stderr,
+        )
+        return 1
+    if entry["verdict"] != VENV_UNPROVEN:
+        print(
+            f"ERROR: {entry['path']} is not UNPROVEN ({entry['verdict']}: "
+            f"{entry['verdict_reason']}). Proven-stale venvs go through `prune-venvs --stale`.",
+            file=sys.stderr,
+        )
+        return 1
+
+    (evidence,) = _unproven_evidence(project_root, [entry])
+    if evidence.processes:
+        pids = ", ".join(str(proc.pid) for proc in evidence.processes)
+        print(
+            f"ERROR: refusing {entry['path']}: process(es) {pids} use it. Stop them first.",
+            file=sys.stderr,
+        )
+        return 1
+
+    for line in evidence.describe():
+        print(line)
+    if dry_run:
+        print("(dry-run) No changes made.")
+        return 0
+    if _remove_venv_dirs([entry]):
+        return 1
+    print(f"Removed UNPROVEN venv {entry['path']}.")
+    return 0
+
+
 def cmd_prune_venvs(args: argparse.Namespace) -> int:
-    """Delete proven-stale Plan 00099 venvs.
+    """Delete proven-stale Plan 00099 venvs, or one named UNPROVEN venv.
 
     Selection flags (at least one required):
       --legacy                 remove untracked/venv/ (pre-v3.7.0 layout)
       --stale                  remove every venv the one staleness rule proves
                                stale (``paths.classify_venv``)
+      --unproven <path>        remove that ONE venv the rule cannot prove stale,
+                               once no process uses it (use on its own)
 
     Safety flags:
       --dry-run   print the removal plan without touching the filesystem
@@ -3270,8 +3385,9 @@ def cmd_prune_venvs(args: argparse.Namespace) -> int:
     venv with this view's slug (or none) whose readable ``lock_hash`` differs
     from the current source's. The venv the running daemon or the resolver
     uses, and the current fingerprint's venv, are NEVER selected. A venv with
-    missing or unreadable metadata, or another view's slug, is not proven
-    stale and is never selected here.
+    missing or unreadable metadata, or another view's slug, is UNPROVEN: it is
+    never selected by ``--legacy`` / ``--stale``, and ``list-venvs`` and the
+    dry run show it with evidence (Task 3.2).
 
     ``--all-except-current`` is removed: it called any venv stale whose
     interpreter fingerprint differed from the current one, a test the daemon
@@ -3281,6 +3397,7 @@ def cmd_prune_venvs(args: argparse.Namespace) -> int:
 
     select_legacy = getattr(args, "legacy", False)
     select_stale = getattr(args, "stale", False)
+    unproven = getattr(args, "unproven", None)
     dry_run = getattr(args, "dry_run", False)
     force = getattr(args, "force", False)
 
@@ -3293,8 +3410,12 @@ def cmd_prune_venvs(args: argparse.Namespace) -> int:
         )
         return 1
 
-    if not (select_legacy or select_stale):
-        print("ERROR: pass at least one of --legacy, --stale", file=sys.stderr)
+    if unproven and (select_legacy or select_stale):
+        print("ERROR: --unproven removes one named venv; pass it on its own.", file=sys.stderr)
+        return 1
+
+    if not (select_legacy or select_stale or unproven):
+        print("ERROR: pass at least one of --legacy, --stale, --unproven <path>", file=sys.stderr)
         return 1
 
     if not force and not dry_run:
@@ -3304,12 +3425,17 @@ def cmd_prune_venvs(args: argparse.Namespace) -> int:
         )
         return 1
 
+    if unproven:
+        return _prune_one_unproven(project_root, unproven, dry_run)
+
     current_fp = python_venv_fingerprint(project_root)
-    stale = _stale_venv_entries(_enumerate_venvs(project_root))
-    to_remove = [entry for entry in stale if select_stale or entry["is_legacy"]]
+    entries = _enumerate_venvs(project_root)
+    to_remove = [entry for entry in _stale_venv_entries(entries) if select_stale or entry["is_legacy"]]
+    evidence = _unproven_evidence(project_root, entries)
 
     if not to_remove:
         print("Nothing to prune. Current venv:", current_fp)
+        _print_unproven_report(evidence)
         return 0
 
     print(f"{'(dry-run) ' if dry_run else ''}Pruning {len(to_remove)} venv(s):")
@@ -3319,11 +3445,13 @@ def cmd_prune_venvs(args: argparse.Namespace) -> int:
 
     if dry_run:
         print("(dry-run) No changes made.")
+        _print_unproven_report(evidence)
         return 0
 
     if _remove_venv_dirs(to_remove):
         return 1
     print(f"Removed {len(to_remove)} venv(s). Current venv preserved: {current_fp}")
+    _print_unproven_report(evidence)
     return 0
 
 
@@ -10353,6 +10481,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--stale",
         action="store_true",
         help="Remove every venv proven stale (readable lock_hash that differs, or legacy)",
+    )
+    parser_prune_venvs.add_argument(
+        "--unproven",
+        metavar="PATH",
+        help=(
+            "Remove ONE venv the code cannot prove stale (missing or unreadable metadata, or "
+            "another view's slug), after confirming no process uses it; see list-venvs"
+        ),
     )
     parser_prune_venvs.add_argument(
         "--dry-run",
