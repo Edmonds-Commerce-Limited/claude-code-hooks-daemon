@@ -6,6 +6,7 @@
 **Priority**: Medium
 **Recommended Executor**: Sonnet
 **Execution Strategy**: Sub-Agent Orchestration
+**GitHub Issue**: #107 (the owner's restatement, folded in as Design items 5 to 7)
 
 ## Overview
 
@@ -46,6 +47,19 @@ Starts after Plan 00475's first batch finishes (small-batches rule).
 4. **The tagged commit is the gated commit:** merges to `main` are frozen while
    a release pull request is open. If `main` moves anyway, the release branch is
    updated and CI re-runs before tagging.
+5. **Parallel jobs (#107):** the release pull request's gate runs one job per
+   supported Python, sharded where a job is long, so wall-clock time stays close
+   to today's local run. Measured in Task 1.1 against the local timing report.
+6. **Performance sweeps in their own job (#107, ledger 00474 N376):** the sweeps
+   that fail under the full gate's own load run in a CI job with nothing else on
+   the runner. Their thresholds are never loosened.
+7. **The CI run is the recorded QA result (#107):** `untracked/release-state.json`
+   records the pull request's CI run (id and head commit) as the release's QA
+   result, and resuming `/release` checks that the head commit is the one CI
+   passed.
+
+Routine work is already targeted-only (Plan 00475); #107 restates that rule and
+it needs no new task here.
 
 **Not included:** whole-codebase mutation testing. The repository has no
 mutation-testing tooling, and across the whole suite it would far exceed any
@@ -74,7 +88,11 @@ modules only.
 
 ### Phase 2: Workflows
 
-- [ ] ⬜ **Task 2.1**: A release pull request workflow that runs the whole gate.
+- [ ] ⬜ **Task 2.1**: A release pull request workflow that runs the whole gate,
+  one job per Python, sharded where measured to need it (Design 5).
+- [ ] ⬜ **Task 2.2**: A separate performance-sweep job (Design 6).
+- [ ] ⬜ **Task 2.3**: The release state file records the CI run and `/release`
+  checks it on resume (Design 7).
 
 ### Phase 3: Procedure
 
