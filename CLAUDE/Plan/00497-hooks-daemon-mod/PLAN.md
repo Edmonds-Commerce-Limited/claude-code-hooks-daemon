@@ -63,8 +63,11 @@ The owner's constraints:
 - [ ] ⬜ **Task 3.1**: The smallest mod: a sidebar pane, the version handshake (`hooks-daemon mod hello`), the feature
   registry, and deployment by `install` and `upgrade`. The daemon warns when a same-named copy shadows it, and tells
   the user to run `/reload-plugins` or start a new session after an upgrade.
+
 - [ ] ⬜ **Task 3.2**: The human queue in the pane: the human ticks tasks and answers questions.
+
 - [ ] ⬜ **Task 3.3**: Suggested prompts (owner, 2026-10-06), mainly at session start:
+
   - **What a prompt has:** a short title shown to the user, and a verbose prompt they need not see (for example
     "Upgrade the hooks daemon", "Fix the plan QA issues").
   - **Choosing:** the user ticks any number, all or some, and presses submit.
@@ -75,8 +78,13 @@ The owner's constraints:
     chose it.
   - **Where suggestions come from:** daemon-side, such as an upgrade being available or plan QA findings, so they also
     work as plain text without the mod.
+
 - [ ] ⬜ **Task 3.4**: SessionStart messages in the mod, alongside today's hook output at first. They leave the agent's
   context only once this session's mod is confirmed. Anything the agent must act on stays in hooks.
+
+- [ ] ⬜ **Task 3.5**: A control-panel section showing the active session modes in full (#106), later carrying
+  session-scoped config overrides. Depends on Plan 00501's mode state; scope is that plan's owner question 11
+  ([MANUAL-GOALS.md](../00501-session-modes/MANUAL-GOALS.md)).
 
 ### Phase 4: Session resilience (last; probes first)
 
