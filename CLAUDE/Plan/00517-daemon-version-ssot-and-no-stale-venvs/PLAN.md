@@ -1,6 +1,6 @@
 # Plan 00517: daemon version ssot and no stale venvs
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-13
 **Owner**: dev
 **Priority**: High
@@ -71,7 +71,7 @@ What main does today:
 
 ### Phase 3: One staleness rule (TDD)
 
-- [ ] ⬜ **Task 3.0** (first, and releasable alone): the running-venv guard identifies the live venv by the venv
+- [x] ✅ **Task 3.0** (first, and releasable alone): the running-venv guard identifies the live venv by the venv
   directory itself (the running interpreter's `sys.prefix`, and the venv path without resolving `bin/python`'s
   symlink), so no `prune-venvs` mode can remove it. Test over a real venv whose `bin/python` is a symlink to a system
   interpreter and whose fingerprint differs from the current one. Ledger 00474 N456.

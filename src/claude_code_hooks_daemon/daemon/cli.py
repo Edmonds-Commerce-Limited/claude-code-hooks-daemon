@@ -2894,29 +2894,30 @@ def _format_project_handler_health_lines(
     return lines
 
 
-def _resolver_active_venv_realpath(project_root: Path) -> Path | None:
-    """Return the realpath of the venv the bootstrap resolver would actually use.
+def _live_venv_realpaths(project_root: Path) -> frozenset[Path]:
+    """Return the real directories of the venvs that are live right now.
 
-    ``resolve_existing_venv_python`` is the SAME resolver the daemon and the
-    bash hook forwarders call to pick a venv at runtime (Plan 00184). It can
-    disagree with ``python_venv_fingerprint``-based accounting when the
-    fingerprint scheme has migrated and a stale-named symlink is left
-    pointing at the venv still actually in use. Resolving to the realpath
-    (following any symlink) lets venv-accounting protect whichever directory
-    is truly live, regardless of which name currently points at it.
+    Two sources, both identified by the venv DIRECTORY: the venv the bootstrap
+    resolver (``resolve_existing_venv_python``, Plan 00184) selects, and the
+    venv of the running interpreter (``sys.prefix``). A venv's ``bin/python``
+    is a symlink to the system interpreter, so resolving THAT yields the
+    interpreter's prefix (``/usr``) and never matches the venv (Plan 00517
+    Task 3.0): the directory is taken from the unresolved path
+    (``bin/python`` -> ``bin`` -> venv dir) and only the directory itself is
+    resolved, which still follows a stale-named symlinked venv directory.
 
-    Returns ``None`` when the resolver has nothing usable (e.g. brand-new
-    project with no venv provisioned yet) — accounting callers should treat
-    that as "nothing is currently active".
+    Returns an empty set when nothing is live (e.g. a brand-new project with
+    no venv provisioned yet and an interpreter outside any venv).
     """
+    live: set[Path] = {Path(sys.prefix).resolve()}
     # ``resolve_existing_venv_python`` never raises: it returns a best-effort
     # path, and its override/legacy branches are returned WITHOUT an existence
     # check. So a non-existent result IS the "no venv provisioned yet" signal --
     # there is no exception to catch and no error being hidden.
     python_path = resolve_existing_venv_python(project_root)
-    if not python_path.exists():
-        return None
-    return python_path.resolve().parent.parent
+    if python_path.exists():
+        live.add(python_path.parent.parent.resolve())
+    return frozenset(live)
 
 
 def _enumerate_venvs(project_root: Path, include_size: bool = True) -> list[dict[str, Any]]:
@@ -2947,7 +2948,7 @@ def _enumerate_venvs(project_root: Path, include_size: bool = True) -> list[dict
         return []
 
     current_fp = python_venv_fingerprint(project_root)
-    resolver_active_realpath = _resolver_active_venv_realpath(project_root)
+    live_realpaths = _live_venv_realpaths(project_root)
     raw_entries: list[dict[str, Any]] = []
 
     for child in sorted(untracked.iterdir()):
@@ -2972,7 +2973,7 @@ def _enumerate_venvs(project_root: Path, include_size: bool = True) -> list[dict
         real_path = child.resolve()
         is_symlink = child.is_symlink()
         is_current = ((not is_legacy) and (fingerprint == current_fp)) or (
-            resolver_active_realpath is not None and real_path == resolver_active_realpath
+            real_path in live_realpaths
         )
 
         raw_entries.append(
@@ -3323,7 +3324,7 @@ def cmd_prune_venvs(args: argparse.Namespace) -> int:
             current_stamp = entry["stamped_version"]
             break
 
-    resolver_active_realpath = _resolver_active_venv_realpath(project_root)
+    live_realpaths = _live_venv_realpaths(project_root)
 
     to_remove: list[dict[str, Any]] = []
     for entry in entries:
@@ -3332,11 +3333,8 @@ def cmd_prune_venvs(args: argparse.Namespace) -> int:
         if entry["is_symlink"]:
             print(f"Skipping {entry['path']}: symlink", file=sys.stderr)
             continue
-        if (
-            resolver_active_realpath is not None
-            and Path(entry["real_path"]) == resolver_active_realpath
-        ):
-            print(f"Skipping {entry['path']}: resolver-active venv", file=sys.stderr)
+        if Path(entry["real_path"]) in live_realpaths:
+            print(f"Skipping {entry['path']}: live venv", file=sys.stderr)
             continue
         chosen = False
         if select_legacy and entry["is_legacy"]:
