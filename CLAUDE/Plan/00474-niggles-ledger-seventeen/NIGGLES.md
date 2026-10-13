@@ -140,8 +140,8 @@ full runs exhausting the host, so a dedicated runner fits its intent; two runner
 with a one-at-a-time lock (a second exempt full run while one is live is denied, naming the live one). The `optimise`
 review then recommends the exemption, rather than "leave it off", when it finds a dedicated QA-runner agent.
 
-**Status**: 🔄 Graduated to [Plan 00518](../00518-full-qa-blocker-exempt-agent-types/PLAN.md) on the owner's ruling
-(2026-10-13): build the exemption and dogfood it with a QA-runner agent here.
+**Status**: ✅ Fixed by [Plan 00518](../Completed/00518-full-qa-blocker-exempt-agent-types/PLAN.md), Complete
+2026-10-13: `exempt_agent_types` with a one-at-a-time lock, dogfooded with `qa-full-runner`; all four live trials pass.
 
 ### N456 — `prune-venvs --all-except-current` lists the venv the running daemon uses for removal
 
@@ -182,6 +182,15 @@ prune. Release note 052.
 **Fix direction**: a lint timeout is an environment fact, not the handler's verdict, so a probe whose linter timed out
 must not be scored as the handler's decision (skip with the reason, or raise the CI Swift timeout); the timing bound
 follows N376's serial-phase design. Never loosen a bound to make CI green.
+
+**More evidence (2026-10-13, local full gate on main db085f919, a host shared with other sessions' QA, six hours of
+runtime)**: 6 of 145541 tests failed, all in the py3.12/py3.13 unit legs and none in py3.11 full or either `rest` leg:
+`test_every_safety_handler_stays_linear[nesting]` (both legs), `test_write_file_path[double_star_glob]`, a pip
+`long_substitution_word_is_not_quadratic` bound, and two asyncio concurrency tests
+(`test_a_path_length_skip_degrades_health_and_names_the_event`, `test_concurrent_starts_yield_single_daemon`). Each
+passed in another leg of the same run and all pass re-run in isolation (179 passed). The earlier interrupted run also
+missed `write_protected_paths`' 10 KB hostile-input bound (8.6s against 7.96s) and passes alone. Same class: load,
+not code.
 
 **Status**: ⬜ Open.
 
