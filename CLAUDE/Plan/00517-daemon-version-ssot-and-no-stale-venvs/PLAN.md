@@ -88,9 +88,17 @@ What main does today:
 
 - [ ] ⬜ **Task 4.1**: Daemon restart and `provision` run the stale cleanup (proven-stale only, never UNPROVEN).
   Coordinate with Plan 00477 Task 2.2 (provision) and Plan 00100 Phase 4's venv lock.
+
 - [ ] ⬜ **Task 4.2**: The existing daemon-start `_stale_venv_advisory` is rebuilt on Task 3.1's rule (no second
   advisory), and a SessionStart advisory lists UNPROVEN venvs with the evidence and the exact removal command,
   telling the agent to investigate and remove each once confirmed safe; silent when there are none.
+
+- [ ] ⬜ **Task 4.3**: The same rule for the daemon's per-host runtime files. Socket and pid paths are hostname-keyed
+  (`untracked/daemon-<hash>.{sock,pid,sock.start.lock,socket-path}` and `untracked/events-<hash>/`), so every container
+  restart leaves the previous host's set behind; on 2026-10-13 this repository held 24 dead sets beside the live one,
+  removed by hand after a connect probe refused every dead socket. Daemon start sweeps a set only when its socket
+  refuses a connection and its pid is not a live process here (a host sharing the checkout keeps a listening socket,
+  so it is never swept), logging each removal.
 
 ### Phase 5: Release
 

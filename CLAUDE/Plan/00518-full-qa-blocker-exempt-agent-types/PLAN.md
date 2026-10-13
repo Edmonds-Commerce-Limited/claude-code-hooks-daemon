@@ -23,8 +23,7 @@ and `agent_isolation_advisor` read a dispatch call's `tool_input.subagent_type`,
 anything keys on it (Task 0.1).
 
 The handler exists because concurrent full runs exhaust the host. A single dedicated runner fits that purpose; two at
-once do not. So the exemption comes with a one-at-a-time lock (the coordinator's choice where the owner's ruling was
-silent; the owner can drop it).
+once do not. So the exemption comes with a one-at-a-time lock (owner: "yes for the lock", 2026-10-13).
 
 ## Goals
 
