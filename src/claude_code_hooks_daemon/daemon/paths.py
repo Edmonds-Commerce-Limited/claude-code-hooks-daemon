@@ -2502,6 +2502,62 @@ def _set_sockets(untracked_dir: Path, ident: str, members: list[Path]) -> list[P
     return sockets
 
 
+def _is_under(path: Path, directory: Path) -> bool:
+    """True when ``path`` lies inside ``directory`` (lexically, after resolving both)."""
+    try:
+        path.resolve().relative_to(directory.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _runtime_set_is_dead(
+    untracked_dir: Path,
+    ident: str,
+    members: list[Path],
+    min_age_seconds: float,
+    now: float,
+) -> bool:
+    """True only when the set is PROVEN dead from here; every doubt keeps it.
+
+    Proven dead means: nothing in it was written inside the grace window, EVERY
+    socket it holds lies under ``untracked_dir`` and is refused or absent there,
+    and its pid file does not name a verified daemon. A socket or discovery path
+    OUTSIDE ``untracked_dir`` (a fallback runtime dir, ``/run/user/N``, ``/tmp``)
+    lives in a namespace this container may not share, so a refused connect to it
+    proves nothing and the set is kept (fail closed).
+    """
+    if now - _newest_mtime(members) < min_age_seconds:
+        return False
+    for sock in _set_sockets(untracked_dir, ident, members):
+        if not _is_under(sock, untracked_dir) or not _socket_is_dead(sock):
+            return False
+    pid_file = untracked_dir / f"daemon-{ident}.pid"
+    return not (pid_file in members and read_pid_file(pid_file, verify_daemon=True) is not None)
+
+
+def peer_runtime_sets_not_proven_dead(
+    project_dir: Path | str,
+    min_age_seconds: float = _RUNTIME_SET_GRACE_SECONDS,
+) -> list[str]:
+    """Host ids of OTHER hosts' runtime sets that are not proven dead.
+
+    A non-empty answer means a peer may share this checkout (a container on the
+    same bind mount), whose processes ``/proc`` here cannot see.
+    """
+    untracked_dir = _get_untracked_dir(Path(project_dir).resolve())
+    if not untracked_dir.is_dir():
+        return []
+    own_id = _get_hostname_suffix().removeprefix("-")
+    now = time.time()
+    return [
+        ident
+        for ident, members in _runtime_set_members(untracked_dir).items()
+        if ident != own_id
+        and not _runtime_set_is_dead(untracked_dir, ident, members, min_age_seconds, now)
+    ]
+
+
 def sweep_dead_runtime_sets(
     project_dir: Path | str,
     min_age_seconds: float = _RUNTIME_SET_GRACE_SECONDS,
@@ -2510,11 +2566,13 @@ def sweep_dead_runtime_sets(
 
     Plan 00517 Task 4.3. Socket and pid paths are keyed by hostname, so every
     container restart leaves the previous host's set behind. A set (anything but
-    this host's own) is removed only when EVERY socket it holds refuses a
-    connection and its pid file does not name a live daemon. A listening
-    socket, which a host view sharing the checkout keeps, spares the whole set,
-    as does any member written within ``min_age_seconds`` (a start in progress).
-    Each removal is logged; one that fails is skipped and retried next start.
+    this host's own) is removed only when it is PROVEN dead
+    (:func:`_runtime_set_is_dead`): every socket in it is under the untracked dir
+    and refuses a connection, and its pid file does not name a live daemon. A
+    listening socket, which a host view sharing the checkout keeps, spares the
+    whole set, as does any socket outside the tree and any member written within
+    ``min_age_seconds`` (a start in progress). Each removal is logged; one that
+    fails is skipped and retried next start.
 
     Returns:
         The paths removed.
@@ -2528,12 +2586,7 @@ def sweep_dead_runtime_sets(
     for ident, members in _runtime_set_members(untracked_dir).items():
         if ident == own_id:
             continue
-        if now - _newest_mtime(members) < min_age_seconds:
-            continue
-        if not all(_socket_is_dead(s) for s in _set_sockets(untracked_dir, ident, members)):
-            continue
-        pid_file = untracked_dir / f"daemon-{ident}.pid"
-        if pid_file in members and read_pid_file(pid_file, verify_daemon=True) is not None:
+        if not _runtime_set_is_dead(untracked_dir, ident, members, min_age_seconds, now):
             continue
         for member in members:
             try:

@@ -136,7 +136,7 @@ HOUSEKEEPING_STEPS: Final[tuple[HousekeepingStep, ...]] = (
         "reconcile-settings",
     ),
     _mutating("remote-docs-refresh", "Re-fetch stale vendored documents", "remote-docs", "refresh"),
-    _mutating("prune-venvs", "Delete stale fingerprint-keyed venvs", "prune-venvs"),
+    _mutating("prune-venvs", "Delete venvs proven stale", "prune-venvs"),
     _mutating(
         "check-permissions-fix",
         "Strip group/other bits from the artefacts check-permissions reported",

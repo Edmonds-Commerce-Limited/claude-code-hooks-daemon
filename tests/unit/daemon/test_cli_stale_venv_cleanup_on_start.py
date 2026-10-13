@@ -7,6 +7,7 @@ never stops the start.
 
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 import sys
@@ -19,7 +20,7 @@ import pytest
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon import cli
-from claude_code_hooks_daemon.daemon.paths import project_path_slug
+from claude_code_hooks_daemon.daemon.paths import ProcessScan, project_path_slug
 from claude_code_hooks_daemon.daemon.venv_lock import VenvLockTimeout
 
 STALE_HASH = "sha256:" + "0" * 64
@@ -195,3 +196,79 @@ class TestReapSweepsDeadRuntimeSets:
             self._reap(project)  # must not raise
 
         assert not stale.exists()
+
+
+class TestAutomaticRemovalFailsClosed:
+    """/proc here cannot see a peer container sharing the checkout, so doubt keeps the venv."""
+
+    def test_a_peer_set_not_proven_dead_stops_the_automatic_removal(self, project: Path) -> None:
+        stale = _venv(project / "untracked" / _name(project, "py310-aaaaaaaa"), STALE_HASH)
+
+        with patch(f"{cli.__name__}.peer_runtime_sets_not_proven_dead", return_value=["peer"]):
+            assert cli._cleanup_proven_stale_venvs(project) == []
+
+        assert stale.exists()
+
+    def test_unreadable_processes_stop_the_automatic_removal(self, project: Path) -> None:
+        stale = _venv(project / "untracked" / _name(project, "py310-aaaaaaaa"), STALE_HASH)
+        scan = ProcessScan(users={stale: []}, unreadable=1)
+
+        with patch(f"{cli.__name__}.processes_using_venvs", return_value=scan):
+            assert cli._cleanup_proven_stale_venvs(project) == []
+
+        assert stale.exists()
+
+
+class TestManualPruneChecksProcesses:
+    def _prune(self, project: Path, **flags: bool) -> int:
+        args = argparse.Namespace(
+            project_root=project,
+            legacy=False,
+            stale=False,
+            unproven=None,
+            all_except_current=False,
+            dry_run=False,
+            force=True,
+        )
+        for name, value in flags.items():
+            setattr(args, name, value)
+        with patch(f"{cli.__name__}.get_project_path", return_value=project):
+            return cli.cmd_prune_venvs(args)
+
+    @staticmethod
+    def _sleeper(venv: Path) -> subprocess.Popen[bytes]:
+        return subprocess.Popen(
+            [str(venv / "bin" / "python"), "-c", "import time; time.sleep(60)"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    def test_stale_skips_a_venv_a_process_uses(
+        self, project: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        busy = _venv(project / "untracked" / _name(project, "py310-aaaaaaaa"), STALE_HASH)
+        idle = _venv(project / "untracked" / _name(project, "py310-bbbbbbbb"), STALE_HASH)
+        child = self._sleeper(busy)
+        try:
+            rc = self._prune(project, stale=True)
+        finally:
+            child.terminate()
+            child.wait(timeout=Timeout.DAEMON_SHUTDOWN)
+
+        assert rc == 0
+        assert busy.exists()
+        assert not idle.exists()
+        assert str(child.pid) in capsys.readouterr().err
+
+    def test_legacy_skips_a_venv_a_process_uses(self, project: Path) -> None:
+        legacy = _venv(project / "untracked" / "venv")
+        child = self._sleeper(legacy)
+        try:
+            rc = self._prune(project, legacy=True)
+        finally:
+            child.terminate()
+            child.wait(timeout=Timeout.DAEMON_SHUTDOWN)
+
+        assert rc == 0
+        assert legacy.exists()
