@@ -3798,7 +3798,9 @@ The scaling sweep now takes the minimum of CPU-time samples and the chain deadli
 (`UpgradeApprovalGuardHandler` 25x for 8x input in-suite, 3 of 3 passes alone on py3.12), the `[.md]` deep-path
 sweep (`RemoteDocsProvenanceHandler` 73x for 8x) and `test_client_owned_asset_lint`'s 120-second shellcheck timeout.
 
-**Status**: 🟡 Partly fixed (batch D, branch `agent-aeccce8de2ff73867-3d7478ce`); ⬜ Owner decision for the sweep half (serial phase).
+**Status**: 🟡 Partly fixed (batch D, branch `agent-aeccce8de2ff73867-3d7478ce`). The sweep half: the owner's answer on
+the 2026-10-11 sheet was filed as GitHub #107 (sweeps in their own CI job, thresholds never loosened), which is folded
+into Plan 00476 as Design 6 and Task 2.2.
 
 Fixed: the supervisor end-to-end test (`test_abandoned_input_flush.py`) now keeps its child alive until the decision
 log holds the compact, with a load-scaled hang cap, instead of `sleep 0.5` (the supervisor logs its child's argv into

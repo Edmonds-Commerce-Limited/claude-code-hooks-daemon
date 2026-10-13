@@ -49,7 +49,7 @@ Starts after Plan 00475's first batch finishes (small-batches rule).
    updated and CI re-runs before tagging.
 5. **Parallel jobs (#107):** the release pull request's gate runs one job per
    supported Python, sharded where a job is long, so wall-clock time stays close
-   to today's local run. Measured in Task 1.1 against the local timing report.
+   to today's local run. Measured in Task 1.2 against the local timing report.
 6. **Performance sweeps in their own job (#107, ledger 00474 N376):** the sweeps
    that fail under the full gate's own load run in a CI job with nothing else on
    the runner. Their thresholds are never loosened.
@@ -85,6 +85,9 @@ modules only.
 
 - [ ] ⬜ **Task 1.1**: Run each of the 40 `llm_qa.py` checks on a CI runner in a
   trial workflow. List the ones that need changes to run there.
+- [ ] ⬜ **Task 1.2**: Time each check's job on the runner against the local
+  `llm_qa.py` timing summary, and choose the per-Python jobs and shards from it
+  (Design 5).
 
 ### Phase 2: Workflows
 
