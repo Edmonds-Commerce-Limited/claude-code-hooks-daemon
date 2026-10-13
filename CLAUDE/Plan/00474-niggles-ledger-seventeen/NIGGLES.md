@@ -85,8 +85,8 @@ is the count at that date.
 
 - The first-write binding (`self._bind(key, there)`, line 236) is reached only after `own = enclosing_checkout(cwd)` is a
   checkout (line 224) sharing the target's `common_dir` (line 231).
-- When the cwd is outside any git checkout (return at line 230), or in a different repository from the target (return
-  at line 231), the write is allowed and nothing is bound.
+- When the cwd is outside any git checkout (return at line 230), or in a different repository from the target (the
+  check at line 231, returning at line 232), the write is allowed and nothing is bound.
 - A later write by the same agent into the same worktree A is then judged by the cwd alone: with the coordinator's cwd
   in sibling worktree B of the same repository, `own` is B and the write is denied with R-SUBAGENT-CROSS-WORKTREE-WRITE
   naming B as the agent's worktree, without the "bound from your agent's first write" line. An identical retry is
@@ -95,7 +95,7 @@ is the count at that date.
   directory says".
 
 **Fix direction**: bind on the first allowed write into a linked worktree whatever the cwd's repository, so the two
-allow paths at lines 230 and 231 bind too. Tests first, over real `git worktree` checkouts, following the issue's
+allow paths returning at lines 230 and 232 bind too. Tests first, over real `git worktree` checkouts, following the issue's
 six-step reproduction.
 
 **Status**: 🔄 In progress.
