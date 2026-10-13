@@ -77,6 +77,26 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N457 — subagent_full_qa_blocker cannot exempt a dedicated QA-runner agent, so a project whose full QA is delegated to one must leave it off
+
+**Source**: the owner, 2026-10-13: a client project's optimise review reported that enabling the handler would deny
+the full-suite run its `qa-tool-runner` skill delegates to php-qa-ci's `php-qa-ci_full-pipeline-runner` agent, and
+asked whether specialist agents can be allowed.
+
+**Evidence**: `handlers/pre_tool_use/subagent_full_qa_blocker.py` reads no `agent_type`, and its options
+(`explain-handler subagent_full_qa_blocker`: `full_qa_patterns`, `unseen_policy`, `unseen_sink_description`,
+`targeted_qa_commands`, `scope`) have no per-agent exemption. The PreToolUse payload of a sub-agent's tool call does
+carry `agent_type` (`core/input_schemas.py`, line 252), and other handlers already read it (`dispatch_declaration`,
+`agent_isolation_advisor`).
+
+**Fix direction**: an `exempt_agent_types` option (exact names, default empty): a full run inside a listed agent type
+is allowed, and the advisory on allow says which entry exempted it. The handler's reason for existing is concurrent
+full runs exhausting the host, so a dedicated runner fits its intent; two runners at once do not, so pair the exemption
+with a one-at-a-time lock (a second exempt full run while one is live is denied, naming the live one). The `optimise`
+review then recommends the exemption, rather than "leave it off", when it finds a dedicated QA-runner agent.
+
+**Status**: ⬜ Open (design proposed to the owner 2026-10-13).
+
 ### N456 — `prune-venvs --all-except-current` lists the venv the running daemon uses for removal
 
 **Source**: the Plan 00517 filing fact-check (2026-10-13,
