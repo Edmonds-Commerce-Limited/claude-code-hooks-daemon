@@ -172,7 +172,10 @@ merge passed locally.
 
 **Fix direction**: bring the source page to N439's text (the source is the one edited), then confirm the test.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed (merge 190af5059, branch commit 526dfdf7f). The deployed text was the correct one
+(`optimal_config_checker.py` line 290 prints it), so only the source page changed. The test went red (1 failed) then
+green (5 passed), and passes on main after the merge; targeted QA 40/40.
+[Developer report](subagent-reports/261013-dev-n453-sonnet.md).
 
 ### N452 — subagent_worktree_write_guard never binds an agent whose session cwd is outside the target's repository
 

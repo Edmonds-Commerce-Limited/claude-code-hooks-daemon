@@ -9,8 +9,8 @@ Tick an item here when it lands, with the commit.
 
 ## Must land before `/release`
 
-- [ ] **N453**: the source `check.md` skill page catches up with N439, which turns main's full CI run green again (red
-  on every full run since 2026-10-12). In progress on `worktree-n453-check-md-source`.
+- [x] **N453**: the source `check.md` skill page catches up with N439, which turns main's full CI run green again (red
+  on every full run since 2026-10-12). Merged 190af5059.
 - [ ] **One green full CI run on main** after N453. N455's two CI-load failures can still redden it: a Swift lint
   timeout scored as an allow (probe #214), and a timing bound (N376 class). Fix N455's scoring if it recurs; never
   loosen a bound.
