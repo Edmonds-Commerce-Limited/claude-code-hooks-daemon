@@ -7,6 +7,8 @@ Task 0.1). A guard keying on the definition type must therefore translate: the
 daemon records ``name -> subagent_type`` when it sees the dispatch, and
 :func:`effective_agent_type` reads it back for the teammate's own events.
 
+The payload ``agent_id`` tells the two apart: an unnamed agent's id has a fixed
+shape, and only an agent whose id does not have it is looked up as a name.
 Residual limit: an UNNAMED agent's ``agent_type`` is trusted as its type; the
 payload offers nothing to check it against.
 
@@ -30,6 +32,11 @@ logger = logging.getLogger(__name__)
 
 #: Subdirectory of the daemon untracked dir holding the records.
 REGISTRY_SUBDIR = "agent-dispatch-registry"
+
+#: Shape of an UNNAMED sub-agent's ``agent_id``: ``a`` + 16 lowercase hex
+#: (measured live, Plan 00518 Task 0.1: ``a57801934993f0485``). A named teammate's
+#: id is ``a`` + name + ``-`` + suffix, which this does not match.
+UNNAMED_AGENT_ID = re.compile(r"a[0-9a-f]{16}")
 
 _UNSAFE_CHARS = re.compile(r"[^A-Za-z0-9_.-]")
 _NAME_DIGEST_LENGTH = 16
@@ -64,18 +71,27 @@ def record_dispatch(
     tmp_path.replace(path)
 
 
-def effective_agent_type(untracked_dir: Path, session_id: str, agent_type: str) -> str:
+def effective_agent_type(
+    untracked_dir: Path, session_id: str, agent_type: str, agent_id: str = ""
+) -> str:
     """The definition type of the agent whose payload carried ``agent_type``.
 
-    A name with a record resolves to the recorded type (possibly empty);
-    anything else is an unnamed agent and ``agent_type`` is its type. A record
-    that exists but cannot be read resolves to empty: fail closed.
+    ``agent_id`` tells named from unnamed. An unnamed-shape id means
+    ``agent_type`` is the definition type and no record is consulted (a stale
+    record of an earlier teammate named like that type must not override it).
+    Any other non-empty id is a named teammate: its type is the recorded one,
+    and no record resolves to empty, so an unknown id format fails closed. With
+    no id at all the payload is not a sub-agent's; a record is honoured and
+    otherwise ``agent_type`` stands. A record that exists but cannot be read
+    resolves to empty: fail closed.
     """
+    if UNNAMED_AGENT_ID.fullmatch(agent_id):
+        return agent_type
     path = _record_path(untracked_dir, session_id, agent_type)
     try:
         entry = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return agent_type
+        return agent_type if not agent_id else ""
     except (OSError, ValueError) as exc:
         log_and_continue(
             logger,
