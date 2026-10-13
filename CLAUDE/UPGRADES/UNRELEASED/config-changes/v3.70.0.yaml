@@ -40,6 +40,45 @@ config_changes:
               options:
                 paths:
                   - .claude/ccy/ccy.env.local
+    - key: handlers.pre_tool_use.subagent_full_qa_blocker.options.exempt_agent_types
+      recommended: false
+      dormant: true
+      description: >-
+        NEW (Plan 00518). Exact agent definition-type names whose sub-agents may
+        run a declared full-suite QA command, one run at a time (the host-wide
+        full-QA lock; a second concurrent exempt run is denied and a dead
+        holder never blocks). The allow carries an advisory naming the matching
+        entry. Default empty, which exempts nobody.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            subagent_full_qa_blocker:
+              options:
+                exempt_agent_types:
+                  - qa-full-runner
+      migration_note: >-
+        Opt in if a dedicated agent runs your full QA gate, instead of leaving
+        the handler off. Needs `agent_dispatch_recorder` enabled for agents
+        dispatched with a `name`.
+    - key: handlers.pre_tool_use.agent_dispatch_recorder
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00518). A silent PreToolUse handler that records
+        `name -> subagent_type` for every named Agent/Task dispatch under the
+        daemon untracked dir, so `exempt_agent_types` can tell a named
+        teammate's definition type (its payload `agent_type` is the name).
+        Never blocks and emits nothing.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            agent_dispatch_recorder:
+              enabled: true
+              priority: 46
+      migration_note: >-
+        Enabled by the shipped config; keep it on if you set
+        `exempt_agent_types`. Without it a named agent's type cannot be read
+        and it is not exempt.
     - key: persistent_crons.initial_thread_only
       recommended: false
       dormant: false

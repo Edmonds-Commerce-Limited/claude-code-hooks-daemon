@@ -91,7 +91,7 @@ from claude_code_hooks_daemon.constants import (
     Priority,
 )
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core import Decision, GatingResult, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
@@ -100,6 +100,14 @@ from claude_code_hooks_daemon.utils import linear_shlex, secret_file_matching
 from claude_code_hooks_daemon.utils.command_evasion import normalise_line_continuations
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.find_expression import FIND_EXEC_ACTIONS, find_exec_end
+from claude_code_hooks_daemon.utils.full_qa_exemption import (
+    declared_exempt_types,
+    exempt_types_problem,
+    exempting_entry,
+    full_qa_lock_is_free,
+    lock_holder_text,
+    lock_path_text,
+)
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     END_OF_OPTIONS,
@@ -6736,7 +6744,10 @@ _RULE: Final[Rule] = Rule(
         "whole-suite run. A command it could not fully resolve is judged by\n"
         "`unseen_policy` (default: allowed, with an advisory) -- see that\n"
         "option's own docs for whether and how this project backstops what\n"
-        "this handler could not see."
+        "this handler could not see.\n\n"
+        "A project that runs its full gate through a dedicated agent lists that\n"
+        "agent's type in `exempt_agent_types`; such an agent is allowed, one run\n"
+        "at a time."
     ),
 )
 
@@ -6758,6 +6769,7 @@ _KNOWN_UNSEEN_POLICIES: Final[frozenset[str]] = frozenset(
 )
 _OPTION_UNSEEN_POLICY: Final[str] = "unseen_policy"
 _OPTION_UNSEEN_SINK_DESCRIPTION: Final[str] = "unseen_sink_description"
+_OPTION_EXEMPT_AGENT_TYPES: Final[str] = "exempt_agent_types"
 
 
 class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
@@ -6785,6 +6797,15 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
             nothing at all). Included verbatim in the advisory so it never
             claims a backstop a client project does not have. Default
             ``None``, which states plainly that none is declared.
+        exempt_agent_types: list of exact agent DEFINITION type names (the
+            ``name`` in ``.claude/agents/<name>.md``) whose sub-agents may run
+            a full suite, one at a time (the host-wide full-QA lock). Default
+            empty. A named agent's payload ``agent_type`` is its dispatch
+            name; it is resolved to its type through the record the
+            ``agent_dispatch_recorder`` handler writes, which must therefore
+            be enabled. An UNNAMED agent's ``agent_type`` is trusted as its
+            type (the payload offers nothing to check it against); a missing
+            or empty one is never exempt.
     """
 
     # Opt-in: a client's full-QA commands cannot be known from here.
@@ -6811,6 +6832,7 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
         self._targeted_qa_commands: object = None
         self._unseen_policy: object = None
         self._unseen_sink_description: object = None
+        self._exempt_agent_types: object = None
         self._reported_problems: frozenset[str] = frozenset()
 
     def _patterns(self) -> list[FullQaPattern]:
@@ -6852,6 +6874,65 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
         if isinstance(raw, str) and raw.strip():
             return raw.strip()
         return None
+
+    @staticmethod
+    def _untracked_dir() -> Path:
+        return ProjectContext.daemon_untracked_dir()
+
+    def _exempting_entry(self, hook_input: dict[str, Any]) -> str | None:
+        """The ``exempt_agent_types`` entry covering this caller, or None.
+
+        A registry that cannot be reached (no project context) exempts nobody.
+        """
+        declared = declared_exempt_types(self._exempt_agent_types)
+        if not declared:
+            return None
+        try:
+            untracked_dir = self._untracked_dir()
+        except RuntimeError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="without a project context no dispatch record can be read, so no agent is exempt and the deny stands",
+                level=logging.WARNING,
+            )
+            return None
+        return exempting_entry(
+            declared,
+            untracked_dir,
+            hook_input.get(HookInputField.SESSION_ID),
+            hook_input.get(HookInputField.AGENT_TYPE),
+        )
+
+    def _exempt_run(self, hook_input: dict[str, Any], entry: str) -> GatingResult:
+        """Judge a full run by an exempt agent: allowed unless another holds the lock."""
+        cwd = hook_input.get(HookInputField.CWD)
+        root = Path(cwd) if isinstance(cwd, str) and cwd else None
+        free = None if root is None else full_qa_lock_is_free(root)
+        if free is False and root is not None:
+            return GatingResult.deny(
+                "BLOCKED [R-SUBAGENT-FULL-QA]: your agent type is exempt "
+                f"(`{_OPTION_EXEMPT_AGENT_TYPES}` entry `{entry}`), but the full QA gate runs "
+                "one at a time and another full run holds the host-wide full-QA lock "
+                f"({lock_path_text(root)}): {lock_holder_text(root)}.\n\n"
+                "The lock is released when that run ends or dies. Wait, then run this "
+                "command again; do not start a second full run beside it."
+            )
+        lock_note = (
+            "The host-wide full-QA lock is free."
+            if free
+            else "The host-wide full-QA lock could not be checked here (no usable git "
+            "checkout in the command's directory); the pytest sink still enforces it."
+        )
+        return GatingResult(
+            decision=Decision.ALLOW,
+            context=[
+                f"{RuleFormatter().advisory(_RULE)}\n\n"
+                f"EXEMPT: this full run is allowed because your agent type matches the "
+                f"`{_OPTION_EXEMPT_AGENT_TYPES}` entry `{entry}`. Full runs by exempt "
+                f"agents go one at a time. {lock_note}"
+            ],
+        )
 
     def _targeted_forms(self) -> list[str]:
         raw = self._targeted_qa_commands
@@ -6902,6 +6983,10 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
         match = self._find(hook_input)
         if match is None:
             return GatingResult(decision=Decision.ALLOW)
+
+        exempt_entry = self._exempting_entry(hook_input)
+        if exempt_entry is not None:
+            return self._exempt_run(hook_input, exempt_entry)
 
         if match.fail_closed:
             if self._unseen_denies():
@@ -6963,6 +7048,11 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
                 f"subagent_full_qa_blocker runs with scope {self.scope.value}, but it must be "
                 f"{HandlerScope.SUB.value}: any other scope denies the coordinator's own full "
                 "QA gate, and then nobody can run it. Remove the `scope:` override."
+            )
+        exempt_problem = exempt_types_problem(self._exempt_agent_types)
+        if exempt_problem:
+            lines.append(
+                f"subagent_full_qa_blocker: `{_OPTION_EXEMPT_AGENT_TYPES}` {exempt_problem}"
             )
         if not patterns:
             lines.append(
@@ -7047,6 +7137,15 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
             "changed), commit, and hand the commit hash to the coordinator. The deny "
             "lists the targeted commands this project declares "
             "(`targeted_qa_commands`).\n\n"
+            "**Exempt agent types** (`exempt_agent_types`, exact definition-type names, "
+            "default none): a sub-agent of a listed type may run the full gate, ONE AT A "
+            "TIME -- while another full run holds the host-wide full-QA lock the call is "
+            "denied, and a dead holder never blocks. The allow carries an advisory naming "
+            "the entry. A named agent's payload `agent_type` is its dispatch NAME, so the "
+            "type is read from the record the `agent_dispatch_recorder` handler writes "
+            "(keep it enabled); a teammate named like a listed type is not exempt, and a "
+            "missing or empty `agent_type` never is. An unnamed agent's `agent_type` is "
+            "trusted as its type.\n\n"
             "**Commands are parsed, not substring-matched.** A commit message, `grep` or "
             "`echo` that mentions a full-QA command runs nothing and is never denied; a "
             "read-only form such as a `--read-only` summary is allowed if the project "

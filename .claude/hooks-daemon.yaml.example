@@ -253,6 +253,8 @@ handlers:
       #       bare_is_full: true        # a run naming no path is the whole suite too
       #       option_grammar: pytest    # pytest's full option set: a value is never a path
       #       read_only_flags: [--collect-only]
+      #   exempt_agent_types:           # agent DEFINITION types that may run the full gate, one at a time
+      #     - my-qa-runner              # exact names; needs agent_dispatch_recorder enabled for named dispatches
       #   targeted_qa_commands:         # named in the deny as what to run instead
       #     - pytest <explicit test files>
 
@@ -333,6 +335,10 @@ handlers:
 
     agent_isolation_advisor:  # Advises worktree isolation when agents share a checkout
       enabled: false          # Enable if you dispatch concurrent agents
+      priority: 46
+
+    agent_dispatch_recorder:  # Records name -> subagent_type of a named Agent dispatch; silent, never blocks
+      enabled: true           # Needed by subagent_full_qa_blocker's exempt_agent_types for named agents
       priority: 46
 
     installed_plugin_edit_advisor:  # Advises when a write lands in an installed Claude Code plugin's files

@@ -434,6 +434,9 @@ class Priority:
     PLAN_QA_COMMIT_GATE = 44
     PLAN_WORKFLOW = 45
     AGENT_ISOLATION_ADVISOR = 46
+    # Plan 00518: a silent sensor that never decides; its slot only orders it
+    # among the workflow handlers that see the same dispatch.
+    AGENT_DISPATCH_RECORDER = 46
     # Plan 00284: sibling gate at the same edit-time layer as plan_qa_edit,
     # deliberately a different check id/domain so priority collision with 44
     # is avoided while staying in the same workflow band.

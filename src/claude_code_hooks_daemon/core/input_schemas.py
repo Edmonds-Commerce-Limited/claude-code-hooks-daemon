@@ -51,6 +51,11 @@ PRE_TOOL_USE_INPUT_SCHEMA: Final[dict[str, Any]] = {
             "description": "Tool-specific input (command, file_path, etc.)",
         },
         "tool_use_id": {"type": "string"},
+        # Present when the hook fires inside a subagent or the session was
+        # launched with --agent. For a NAMED agent the value is its dispatch
+        # name, not its definition type (Plan 00518 Task 0.1).
+        "agent_id": {"type": "string"},
+        "agent_type": {"type": "string"},
     },
     "additionalProperties": True,  # Forward compatibility with new fields
 }

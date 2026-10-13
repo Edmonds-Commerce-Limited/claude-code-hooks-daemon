@@ -55,20 +55,20 @@ once do not. So the exemption comes with a one-at-a-time lock (owner: "yes for t
 
 ### Phase 1: Exemption and lock (TDD)
 
-- [ ] ⬜ **Task 1.1**: Resolve the EFFECTIVE definition type of the calling sub-agent. Unnamed: the payload
+- [x] ✅ **Task 1.1**: Resolve the EFFECTIVE definition type of the calling sub-agent. Unnamed: the payload
   `agent_type`. Named: a name-to-type record written when the daemon sees the Agent tool dispatch (PreToolUse,
   `tool_input.name` and `tool_input.subagent_type`, keyed by session and name), read back for the teammate's
   `agent_type`. A named teammate with no record resolves to no type (deny), so naming an agent `qa-full-runner` never
   exempts it.
-- [ ] ⬜ **Task 1.2**: `exempt_agent_types` option, config validation, the PreToolUse input schema gaining
+- [x] ✅ **Task 1.2**: `exempt_agent_types` option, config validation, the PreToolUse input schema gaining
   `agent_type`, and the allow-with-advisory path, matched against Task 1.1's effective type. Tests: an unnamed and a
   named dispatch of a listed type are allowed; an unlisted type, a missing or empty `agent_type`, a named teammate of
   another type whose NAME is a listed type, and a near-miss name are denied as today.
-- [ ] ⬜ **Task 1.3**: The one-at-a-time rule reuses the existing host-wide full-QA lock (`qa/full_qa_lock.py`,
+- [x] ✅ **Task 1.3**: The one-at-a-time rule reuses the existing host-wide full-QA lock (`qa/full_qa_lock.py`,
   enforced from `tests/conftest.py`) rather than adding a second lock: the handler denies an exempt full run while that
   lock is held by a live run, naming the holder, and a dead holder never blocks. Read the lock's semantics first; tests
   over a live holder, a dead holder and a second claimant.
-- [ ] ⬜ **Task 1.4**: Handler guidance (`get_claude_md`), `explain-handler` text, and the deny text name the option.
+- [x] ✅ **Task 1.4**: Handler guidance (`get_claude_md`), `explain-handler` text, and the deny text name the option.
 
 ### Phase 2: optimise
 
@@ -77,10 +77,10 @@ once do not. So the exemption comes with a one-at-a-time lock (owner: "yes for t
 
 ### Phase 3: Dogfood
 
-- [ ] ⬜ **Task 3.1**: `.claude/agents/qa-full-runner.md`, this repository only (shipped agents are the
+- [x] ✅ **Task 3.1**: `.claude/agents/qa-full-runner.md`, this repository only (shipped agents are the
   `hooks-daemon-`-prefixed files in `install/templates/agents/`; this one is not shipped): runs
   `./scripts/qa/llm_qa.py all` in the worktree it is given, never fixes, reports VERDICT and failures to a file.
-- [ ] ⬜ **Task 3.2**: `.claude/hooks-daemon.yaml` lists `qa-full-runner` under `exempt_agent_types`; daemon restart.
+- [x] ✅ **Task 3.2**: `.claude/hooks-daemon.yaml` lists `qa-full-runner` under `exempt_agent_types`; daemon restart.
 - [ ] ⬜ **Task 3.3**: Live trial: dispatch `qa-full-runner` on an integration worktree and observe the allow with its
   advisory; dispatch `qa-runner` with a full command and observe the deny; dispatch a second `qa-full-runner` while
   the first runs and observe the lock deny. Record the observations in the journal.
@@ -89,7 +89,7 @@ once do not. So the exemption comes with a one-at-a-time lock (owner: "yes for t
 
 ### Phase 4: Release
 
-- [ ] ⬜ **Task 4.1**: Release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` and a `config-changes` entry for the
+- [x] ✅ **Task 4.1**: Release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` and a `config-changes` entry for the
   new option.
 
 ## Success Criteria
