@@ -50,12 +50,12 @@ Counted by the status column's emoji:
   - 12 of the 15 went into progress: batches AL, AM and AN, the supervisor items, or a GitHub issue (rows since fixed are counted below);
   - 1 stays part-fixed (🟡, N376), with its remainder tracked in #107;
   - the new work the owner asked for is filed as GitHub Issues #106 to #110. #104, the usage-aware sub-agent cutoff, came from a separate owner request the same day, not from this sheet.
-- 130 rows carry ✅ (126 of the 151 N rows, plus 4 "carried from dropped branch" summary rows) (fixed, dismissed, remedied, guarded or closed); 6 of them also carry a 🚫 limit, and
+- 131 rows carry ✅ (127 of the 151 N rows, plus 4 "carried from dropped branch" summary rows) (fixed, dismissed, remedied, guarded or closed); 6 of them also carry a 🚫 limit, and
   2 also carry 🔄: N280 (guarded by batch AN) for its review follow-ups, and N425 (fixed) until CI confirms
   it. N428 (the Python 3.11 CI hang) is confirmed by main run 38204671323.
-- 7 rows record a deliberate limit (🚫); 20 are in progress or graduated (16 🔄, 3 🟡, 1 ↩️), N280,
-  N425 (main CI red after batch AL), N431 (the CI fallback's daemon idles out), N433 (a quiet journal
-  fails CI) and N450 (a words-only full-QA pattern applies path rules, #103) among the 16.
+- 7 rows record a deliberate limit (🚫); 19 are in progress or graduated (15 🔄, 3 🟡, 1 ↩️), N280,
+  N425 (main CI red after batch AL), N431 (the CI fallback's daemon idles out) and N433 (a quiet journal
+  fails CI) among the 15.
 
 ## Tasks
 

@@ -105,7 +105,21 @@ is the count at that date.
 - Bare-run handling (`bare_is_full`) is unchanged.
 - `php bin/qa` must still deny.
 
-**Status**: 🔄 In progress.
+**Fix**: merged as 6ae406932 (branch commits ec0992a32 and e76c030cc). Main was fast-forwarded to it after QA on the
+integration head.
+
+- **Change:** `FullQaPattern` gains `judges_operand_paths`, which is false for an entry with `full_words` and no
+  `full_args`. `_add_path_operand` calls `_operand_is_full` only when it is true. The `frozenset()` coercion stays, so
+  the `full_words: []` never-full return (line 5665) and the `full_args is None` rule are untouched.
+- **Tests:** a regression test pins the `run-changed-tests` shape. Red first: 4 of 12 new tests failed (`.`, `..`,
+  the nested repository root, and `--verbose .`). The docstring, handler guidance and release note 050 are updated.
+- **QA on the integration head:** 39 of 40 checks passed. The red one, `changed_tests`, ran 4142 tests with 0 failed;
+  the handler source is unmapped as too broad. The developer's 4 timing failures in
+  `test_safety_handlers_hostile_input_performance.py` did not recur, and that file does not reference this handler.
+- **Importers:** the tests of the handler's importers passed (507). `cli.py`, also an importer, was not separately
+  exercised.
+
+**Status**: ✅ Fixed.
 
 ### N449 — merge_qa_report judges a `cd <other> && git merge` by the session's directory, not the merge's
 
