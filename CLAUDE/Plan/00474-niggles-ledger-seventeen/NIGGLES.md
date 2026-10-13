@@ -93,7 +93,8 @@ is the count at that date.
 
 **Not decided here**: the patterns are closed to EXTENSION (Plan 00337 Task 3.4); a trailing `\b` NARROWS, which that
 rule does not cover, but would stop a plural wording that arms today. The docstring of `_declares_human_blocked`
-records that unquoted prose about someone else's decision is a known limit. Options: add `\b` (narrow), or leave it and
+records the related limit that an unquoted description still arms, because it cannot be told apart lexically from
+a real declaration. The suppressor is `handlers/user_prompt_submit/failsafe_cron_blockage_suppressor.py`. Options: add `\b` (narrow), or leave it and
 rely on the sentinel. Either is a coordinator call at fix time.
 
 **Status**: ⬜ Open.

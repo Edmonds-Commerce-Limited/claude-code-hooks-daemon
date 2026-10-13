@@ -39,7 +39,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). The one-line-per-niggle status
 table (156 rows) is in [STATUS-INDEX.md](STATUS-INDEX.md).
 Counted by the status column's emoji:
 
-- 7 rows are open (⬜): N424, the LSP guard denying a grep over piped output; N427, the provision sync tests leaving stub daemon processes behind; N430, the conflict-marker gate denying a commit into a repository the same command creates; N435, the report-path verifier resolving a worktree agent's relative path against the main checkout; N443, upstream's `agent_id` now also identifying in-process teammates; and N447, the conflict-marker gate grepping excluded paths before filtering (#99); and N451, a stop-hook prose pattern arming the human-blocked marker on a plural. N53 of archived ledger 00466 is 🟡: batch AJ reproduced
+- 7 rows are open (⬜): N424, the LSP guard denying a grep over piped output; N427, the provision sync tests leaving stub daemon processes behind; N430, the conflict-marker gate denying a commit into a repository the same command creates; N435, the report-path verifier resolving a worktree agent's relative path against the main checkout; N443, upstream's `agent_id` now also identifying in-process teammates; N447, the conflict-marker gate grepping excluded paths before filtering (#99); and N451, a stop-hook prose pattern arming the human-blocked marker on a plural. N53 of archived ledger 00466 is 🟡: batch AJ reproduced
   the mechanism of an exit 127 and extended the diagnostic, but the live cause awaits a recurrence. The other 41 of the
   "42 still open in 00466" were fixed on main (39), fixed by batch AI (N33) or graduated to Plan 00485 (N96); see
   [the 00466 evidence](../Completed/00466-niggles-ledger-sixteen/STATUS-2026-10.md).
