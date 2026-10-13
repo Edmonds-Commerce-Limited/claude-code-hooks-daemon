@@ -410,6 +410,12 @@ default branch, `git merge --ff-only <that head's sha>` (the SHA, never the
 branch name), restart the daemon and check `bin/hooks-daemon status`, then
 `git push`. If the daemon fails after the fast-forward, do not push.
 
+A restart can add a commit of its own on top: when the merge changed a handler's
+guidance, the daemon commits the regenerated CLAUDE.md block ("Auto: hooks daemon
+regenerated CLAUDE.md handler guidance"). Push it along with the merge. After that
+commit, `HEAD^1..HEAD` names only the regenerated block, so any range check after
+the merge must start from the pre-merge `main` sha.
+
 If `--ff-only` refuses, `main` moved after Step 5: merge `main` into the
 integration branch, run `./scripts/qa/llm_qa.py changed` again, and repeat.
 CI on the pushed head is the second line, in the tier the change needs
