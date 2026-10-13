@@ -14,13 +14,15 @@ Tick an item here when it lands, with the commit.
 - [ ] **One green full CI run on main** after N453. N455's two CI-load failures can still redden it: a Swift lint
   timeout scored as an allow (probe #214), and a timing bound (N376 class). Fix N455's scoring if it recurs; never
   loosen a bound.
-- [ ] **Plan 00450**: `.claude/skills/release/invoke.sh` (lines 170-176) still tells the agent the acceptance gate spawns
-  parallel Haiku agents, which `acceptance-test/invoke.sh` forbids. The next `/release` reads it.
+- [x] **Plan 00450**: `.claude/skills/release/invoke.sh` (lines 170-176) still tells the agent the acceptance gate spawns
+  parallel Haiku agents, which `acceptance-test/invoke.sh` forbids. The next `/release` reads it. Merged eb2213d6b:
+  the skill now defers to RELEASING.md Step 12's routing (N458 remains for the skill-versus-Step-12 conflict).
 - [ ] **N458**: the acceptance-test skill and RELEASING.md Step 12 give opposite instructions on sub-agent execution;
   `/release` reads both, so one canonical method before the next release.
-- [ ] **Plan 00451**: `.claude/agents/release-agent.md` lists 3 of the 6 version-carrying files (missing
+- [x] **Plan 00451**: `.claude/agents/release-agent.md` lists 3 of the 6 version-carrying files (missing
   `.claude/HOOKS-DAEMON.md`, `.claude/ccy/claude-supervise.py`, `uv.lock`; `RELEASING.md` has all six), which costs up
-  to three red QA cycles mid-release.
+  to three red QA cycles mid-release. Merged eb2213d6b: RELEASING.md Step 3 holds the one list, and the agent points
+  there. Plan 00451's completeness test and its stale `dependencies.json` part remain open, not release-blocking.
 - [x] **Plan 00517 Task 3.0 (N456)**: `prune-venvs --all-except-current --force` would delete the live daemon's venv.
   Merged 03e504661; release note 052.
 
