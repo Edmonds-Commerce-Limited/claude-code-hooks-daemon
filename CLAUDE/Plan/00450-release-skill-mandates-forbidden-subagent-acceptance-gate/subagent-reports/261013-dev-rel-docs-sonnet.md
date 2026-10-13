@@ -2,6 +2,10 @@
 
 Branch worktree-release-doc-fixes-450-451. `llm_qa.py changed`: QA: 40/40 PASSED.
 
+## Review round 1 (supersedes the Plan 00450 section below where they differ)
+
+RELEASING.md Step 12 is restored to main's routing paragraph (the newer design). release/invoke.sh now defers to Step 12's `Requires Main Thread` routing and says never one parallel batch of all tests. The test pins only the "Spawns parallel Haiku agents ... ALL batches" phrase (it matches main's old line; 5 cases pass). acceptance-test skill untouched. `llm_qa.py changed`: QA: 40/40 PASSED.
+
 ## Plan 00450
 
 - `.claude/skills/release/invoke.sh`: the parallel-Haiku batching lines now say the main thread runs every test sequentially and the acceptance-test skill owns the method. There is no src/ source copy: only docs-qa and hooks-daemon are bundled skills, so `.claude/skills/release` is itself the source.

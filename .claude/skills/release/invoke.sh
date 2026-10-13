@@ -170,7 +170,7 @@ This is MANDATORY. You MUST invoke the skill, not just mention it or suggest it 
 **What this does**:
 - Restarts daemon with latest code
 - Generates complete test playbook from ALL handler definitions (no filtering)
-- The MAIN THREAD runs every test sequentially with real tool calls (sub-agents are forbidden; the acceptance-test skill owns the method)
+- Runs every test by the routing in RELEASING.md Step 12 (each test's \`Requires Main Thread\` field in the playbook): main-thread tests run sequentially in the main thread; never one parallel batch of all tests
 - Executes EVERY test (blocking, advisory, context types)
 - Reports comprehensive pass/fail/skip results
 
