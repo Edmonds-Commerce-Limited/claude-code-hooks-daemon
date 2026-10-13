@@ -21,8 +21,9 @@ mode (Plan 00418, which runs in record-only simulated mode in this repository).
 ## How it relates to work already on file
 
 - **Open question 5 of this plan** (a backstop the override cannot suppress) has option (b), a hard
-  backstop at about 95%. A cutoff that applies under an override is one answer to question 5, so the two
-  should be decided together.
+  backstop at about 95% that pauses the session even under an override. A cutoff that holds under an
+  override would be a softer variant (deny spawns, not pause). That is the coordinator's reading, not the
+  owner's; either way both questions turn on what the override suppresses, so decide them together.
 - **Plan 00471** (sub-agent token budget protection) bounds how much context each sub-agent spends, by
   forcing a handoff. The cutoff bounds how many start. Different levers on the same incident class (work
   lost to the 5-hour limit); they stay separate plans.
@@ -42,5 +43,5 @@ mode (Plan 00418, which runs in record-only simulated mode in this repository).
    5 option (b))? And does the cutoff have its own override for the rest of the window?
 5. **Status line:** a marker while the cutoff is active?
 
-Settled by existing rules, not questions: a stale or absent snapshot never fires the cutoff (Task 4.7's
-rule), and sub-agents already running are never killed.
+Settled by existing rules, not questions: a stale or absent snapshot never fires the cutoff (this plan's Goals
+rule, built by Tasks 4.6 and 4.7), and sub-agents already running are never killed.
