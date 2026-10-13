@@ -678,15 +678,12 @@ behind it.
 
 ## Step 12: Acceptance Testing Gate (BLOCKING)
 
-**Delegation is governed by each test's `Requires Main Thread` field in the
-generated playbook** (see the playbook's "Execution Routing" section). A test
-marked `yes` must NEVER be delegated — lifecycle events and this session's
-system-reminders genuinely cannot be observed from a sub-agent, which is the
-enduring lesson of the v2.9.0 incident (async sub-agent testing created race
-conditions). Tests marked `no` may be delegated to parallel sub-agents —
-verified experimentally: sub-agents ARE blocked by PreToolUse hooks and DO see
-PostToolUse system-reminders in their own context. Batch delegable tests by
-the playbook's `Recommended Model` field for speed.
+**The acceptance method lives in
+[`.claude/skills/acceptance-test/SKILL.md`](../../.claude/skills/acceptance-test/SKILL.md)
+("Execution Routing"); this step does not restate it.** In one sentence: each
+test's `Requires Main Thread` field in the generated playbook decides — `yes`
+runs in the main thread and is never delegated, `no` may be delegated to
+sub-agents batched by `Recommended Model`.
 
 ### Scope
 

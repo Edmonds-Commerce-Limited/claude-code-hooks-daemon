@@ -21,17 +21,22 @@ Follow its output exactly; what is written here is orientation.
 
 Execute acceptance tests for hooks daemon handlers via **real Claude Code tool calls in the main thread**. Tests verify real-world handler behaviour by invoking actual tools (Bash, Write, Edit, Read) and observing hook responses in system-reminders.
 
-## CRITICAL: Main Thread Only
+## Execution Routing (the canonical home of the acceptance method)
 
-**Acceptance tests MUST be executed in the main Claude Code session.** Sub-agent strategies (parallel Haiku batches) are unreliable and forbidden:
+**Each test's `Requires Main Thread` field in the generated playbook decides where it runs.** This skill owns the
+method; `CLAUDE/development/RELEASING.md` Step 12 points here.
 
-- Sub-agents run out of context on large test suites
-- Sub-agents cannot use Write/Edit tools (PreToolUse:Write tests fail)
-- Lifecycle events (SessionStart, SessionEnd) only fire in the main session
-- Advisory messages in system-reminders are only visible to the main session
-- The v2.9.0 incident proved async agents create race conditions with release gates
+- **`Requires Main Thread: yes`** — run in the main session, sequentially, and NEVER delegate. Lifecycle events
+  (SessionStart, SessionEnd, UserPromptSubmit) and this session's system-reminders cannot be observed from a
+  sub-agent. The v2.9.0 incident (async agents created race conditions with release gates) is why these stay in the
+  main thread.
+- **`Requires Main Thread: no`** — may be delegated to parallel sub-agents, batched by the playbook's
+  `Recommended Model` field (haiku for blocking tests, sonnet for advisory). Verified experimentally: sub-agents ARE
+  blocked by PreToolUse hooks (Write and Edit included) and DO see PostToolUse system-reminders in their own context.
 
-**The ONLY valid acceptance test is a real tool call in the main thread with the hook response observed directly.**
+The measured hook-visibility table and per-test-type model rules are in `CLAUDE/AcceptanceTests/GENERATING.md`
+("SUB-AGENT EXECUTION"). Whoever delegates still owns the result: every delegated test is a real tool call whose hook response was observed, and
+the main thread tallies the results before the gate passes.
 
 ## Usage
 
@@ -67,7 +72,7 @@ Execute acceptance tests for hooks daemon handlers via **real Claude Code tool c
 
 1. **Restarts daemon** to ensure latest code loaded
 2. **Generates test playbook** from handler code via `generate-playbook`
-3. **Executes each test sequentially** in the main thread using real tool calls
+3. **Executes each test** as a real tool call, routed by `Requires Main Thread` (see Execution Routing)
 4. **Observes hook responses** in system-reminders and tool output
 5. **Records pass/fail** for each test based on observed behaviour
 6. **Reports summary** with pass/fail/skip counts
@@ -189,7 +194,7 @@ Sequential execution is slower than parallel but **100% reliable**.
 ## Requirements
 
 - **Daemon running**: Must have hooks daemon active
-- **Main thread**: Tests MUST run in the main Claude Code session (NOT sub-agents)
+- **Main thread**: Tests marked `Requires Main Thread: yes` MUST run in the main Claude Code session
 - **Real tool calls**: Each test must use actual Bash/Write/Edit/Read tools
 
 ## Integration with Release Process
@@ -200,7 +205,7 @@ This skill is used during the release workflow:
 /release
   -> Stage 4: Acceptance Testing Gate (BLOCKING)
      -> Main Claude executes /acceptance-test all
-     -> Tests run sequentially in main thread
+     -> Main-thread tests run sequentially; others may be delegated (see Execution Routing)
      -> Each test is a real tool call with observed response
      -> If ANY test fails -> ABORT release, enter FAIL-FAST cycle
 ```
@@ -217,3 +222,4 @@ This skill is used during the release workflow:
 
 Introduced in: v2.9.0 (Plan 00044)
 Updated in: v2.10.0 - Switched from parallel sub-agent to main-thread sequential execution
+Updated: routing by the playbook's `Requires Main Thread` field (Plan 00474 N458)

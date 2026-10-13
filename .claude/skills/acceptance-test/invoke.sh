@@ -10,8 +10,12 @@ cat <<PROMPT
 
 Execute acceptance tests for hooks daemon handlers via **real Claude Code tool calls in the main thread**.
 
-**CRITICAL**: All tests MUST be executed as real tool calls (Bash, Write, Edit, Read) in this main session.
-Sub-agent testing is FORBIDDEN - agents cannot reliably test hooks (context limits, no Write tool, lifecycle events don't fire).
+**CRITICAL**: Every test is executed as a real tool call (Bash, Write, Edit, Read), routed by the playbook's
+\`Requires Main Thread\` field (method home: SKILL.md "Execution Routing"):
+
+- \`Requires Main Thread: yes\` - run here in the main session, sequentially, NEVER delegated (lifecycle events and this
+  session's system-reminders cannot be observed from a sub-agent; v2.9.0 async-agent race conditions).
+- \`Requires Main Thread: no\` - may be delegated to parallel sub-agents, batched by \`Recommended Model\`.
 
 ## Step 1: Restart Daemon
 
@@ -71,9 +75,9 @@ echo "Total tests: \$TOTAL_TESTS"
 
 **If TOTAL_TESTS = 0**: Report "No tests match filter: ${FILTER}" and STOP.
 
-## Step 3: Execute Tests Sequentially in Main Thread
+## Step 3: Execute Tests
 
-**For EACH test** in the playbook, execute it as a REAL tool call:
+**For EACH test** in the playbook, execute it as a REAL tool call (main-thread tests sequentially, here):
 
 ### Read the playbook
 \`\`\`bash
