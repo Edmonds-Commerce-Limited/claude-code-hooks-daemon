@@ -2987,21 +2987,33 @@ def _is_inside(candidate: str, venv_prefixes: tuple[str, ...]) -> bool:
     return any(candidate.startswith(prefix + os.sep) for prefix in venv_prefixes)
 
 
-def _read_link(path: Path) -> str | None:
-    """The target of a ``/proc`` link, or None when it is unreadable."""
+def _read_link(path: Path) -> str:
+    """The target of a ``/proc`` link, or ``""`` when it is unreadable."""
     try:
         target = str(path.readlink())
-    except OSError:
-        return None
+    except OSError as e:
+        log_and_continue(
+            logger,
+            e,
+            reason=f"an unreadable {path} (another user's process) is counted by the scan as unreadable, never guessed at",
+            level=logging.DEBUG,
+        )
+        return ""
     return target.removesuffix(" (deleted)")
 
 
-def _read_argv0(path: Path) -> str | None:
-    """The first argument of a ``/proc/<pid>/cmdline``, or None when unreadable."""
+def _read_argv0(path: Path) -> str:
+    """The first argument of a ``/proc/<pid>/cmdline``, or ``""`` when unreadable."""
     try:
         raw = path.read_bytes()
-    except OSError:
-        return None
+    except OSError as e:
+        log_and_continue(
+            logger,
+            e,
+            reason=f"an unreadable {path} (another user's process) is counted by the scan as unreadable, never guessed at",
+            level=logging.DEBUG,
+        )
+        return ""
     return raw.split(b"\0", 1)[0].decode(errors="replace")
 
 
@@ -3030,12 +3042,12 @@ def processes_using_venvs(venv_dirs: list[Path], proc_root: Path = Path("/proc")
             "cwd": _read_link(entry / "cwd"),
             "argv0": _read_argv0(entry / "cmdline"),
         }
-        if all(value is None for value in found.values()):
+        if not any(found.values()):
             unreadable += 1
             continue
         for venv, venv_prefixes in prefixes.items():
             for via, value in found.items():
-                if value is not None and _is_inside(value, venv_prefixes):
+                if value and _is_inside(value, venv_prefixes):
                     users[venv].append(VenvProcess(pid=pid, via=via, detail=value))
                     break
     return ProcessScan(users, unreadable)

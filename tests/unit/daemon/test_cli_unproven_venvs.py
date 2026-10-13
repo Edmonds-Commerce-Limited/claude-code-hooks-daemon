@@ -18,6 +18,7 @@ from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon import cli
 from claude_code_hooks_daemon.daemon.paths import project_path_slug, python_venv_fingerprint
 
@@ -121,7 +122,7 @@ class TestListVenvsShowsEvidence:
             _run(cli.cmd_list_venvs, project)
         finally:
             child.terminate()
-            child.wait(timeout=10)
+            child.wait(timeout=Timeout.DAEMON_SHUTDOWN)
 
         assert f"IN USE: pid {child.pid}" in capsys.readouterr().out
 
@@ -207,7 +208,7 @@ class TestPruneUnproven:
             rc = _run(cli.cmd_prune_venvs, project, unproven=str(orphan), force=True)
         finally:
             child.terminate()
-            child.wait(timeout=10)
+            child.wait(timeout=Timeout.DAEMON_SHUTDOWN)
 
         assert rc == 1
         assert orphan.exists()

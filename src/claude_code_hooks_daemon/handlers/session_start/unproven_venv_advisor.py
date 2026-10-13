@@ -109,14 +109,5 @@ class UnprovenVenvAdvisorHandler(SessionStartHandlerBase):
         ]
 
     def get_claude_md(self) -> str | None:
-        """Resident guidance for the active-handler block."""
-        return (
-            "## unproven_venv_advisor — venvs the code cannot prove stale\n\n"
-            "At session start, lists each `untracked/venv-*` the code cannot prove "
-            "stale (missing or unreadable `.daemon-metadata.json`, or another "
-            "checkout view's slug) with the processes using it, its interpreter, "
-            "age and view, and the exact removal command. Investigate each and "
-            "remove it with `prune-venvs --unproven <path> --force` only once you "
-            "have confirmed it is unused and safe; the daemon never removes one "
-            "automatically. Silent when there are none."
-        )
+        """No resident guidance: the report carries its own instructions when it fires."""
+        return None

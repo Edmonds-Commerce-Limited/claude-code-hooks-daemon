@@ -87,7 +87,9 @@ This file's lower half should list the tasks currently in this directory, so an 
 
 <!-- BEGIN TASK INDEX — regenerate when adding/removing tasks -->
 
-- `01-clear-unproven-venvs.md` — recommended: list venvs with `list-venvs`, investigate each UNPROVEN one, remove it with `prune-venvs --unproven` once confirmed safe.
+| File | Type | Severity | Applies to | One-line summary |
+| --- | --- | --- | --- | --- |
+| `01-clear-unproven-venvs.md` | other | recommended | all | List venvs with `list-venvs`, investigate each UNPROVEN one, remove it with `prune-venvs --unproven` once confirmed safe. |
 
 <!-- END TASK INDEX -->
 

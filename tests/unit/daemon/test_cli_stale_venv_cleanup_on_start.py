@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from claude_code_hooks_daemon.config.models import Config
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon import cli
 from claude_code_hooks_daemon.daemon.paths import project_path_slug
 from claude_code_hooks_daemon.daemon.venv_lock import VenvLockTimeout
@@ -86,7 +87,7 @@ class TestCleanupProvenStaleVenvs:
             removed = cli._cleanup_proven_stale_venvs(project)
         finally:
             child.terminate()
-            child.wait(timeout=10)
+            child.wait(timeout=Timeout.DAEMON_SHUTDOWN)
 
         assert removed == []
         assert stale.exists()

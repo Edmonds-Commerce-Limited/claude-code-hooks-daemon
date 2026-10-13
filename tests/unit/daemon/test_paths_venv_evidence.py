@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon.paths import (
     VenvEvidence,
     VenvProcess,
@@ -130,7 +131,7 @@ class TestProcessesUsingVenvs:
             scan = processes_using_venvs([venv])
         finally:
             child.terminate()
-            child.wait(timeout=10)
+            child.wait(timeout=Timeout.DAEMON_SHUTDOWN)
 
         assert child.pid in {p.pid for p in scan.users[venv]}
 
