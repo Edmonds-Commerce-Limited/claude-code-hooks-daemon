@@ -48,11 +48,16 @@ def exempt_types_problem(raw: object) -> str | None:
 
 
 def exempting_entry(
-    declared: list[str], untracked_dir: Path, session_id: object, agent_type: object
+    declared: list[str],
+    untracked_dir: Path,
+    session_id: object,
+    agent_type: object,
+    agent_id: object = None,
 ) -> str | None:
     """The ``declared`` entry that exempts this caller, or None.
 
-    Matching is exact: no stripping, no case folding, no globs.
+    Matching is exact: no stripping, no case folding, no globs. ``agent_id``
+    decides whether ``agent_type`` is a definition type or a dispatch name.
     """
     if not declared:
         return None
@@ -60,7 +65,9 @@ def exempting_entry(
         return None
     if not isinstance(session_id, str) or not session_id:
         return None
-    resolved = effective_agent_type(untracked_dir, session_id, agent_type)
+    resolved = effective_agent_type(
+        untracked_dir, session_id, agent_type, agent_id if isinstance(agent_id, str) else ""
+    )
     return resolved if resolved in declared else None
 
 

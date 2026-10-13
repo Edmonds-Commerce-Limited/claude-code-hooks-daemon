@@ -9,6 +9,26 @@ from claude_code_hooks_daemon.utils.agent_dispatch_registry import (
     record_dispatch,
 )
 
+_UNNAMED = "a57801934993f0485"
+_NAMED = "aprobe-named-518-0123456789abcdef"
+
+
+class TestAgentIdShape:
+    def test_unnamed_id_ignores_a_stale_record(self, tmp_path: Path) -> None:
+        record_dispatch(tmp_path, "s1", "qa-full-runner", "general-purpose")
+        assert effective_agent_type(tmp_path, "s1", "qa-full-runner", _UNNAMED) == "qa-full-runner"
+
+    def test_named_id_with_record_resolves_to_recorded_type(self, tmp_path: Path) -> None:
+        record_dispatch(tmp_path, "s1", "probe-named", "qa-runner")
+        assert effective_agent_type(tmp_path, "s1", "probe-named", _NAMED) == "qa-runner"
+
+    def test_named_id_without_record_resolves_to_empty(self, tmp_path: Path) -> None:
+        assert effective_agent_type(tmp_path, "s1", "qa-full-runner", _NAMED) == ""
+
+    def test_unknown_id_format_fails_closed(self, tmp_path: Path) -> None:
+        assert effective_agent_type(tmp_path, "s1", "qa-full-runner", "A57801934993F0485") == ""
+        assert effective_agent_type(tmp_path, "s1", "qa-full-runner", "a1") == ""
+
 
 class TestEffectiveAgentType:
     def test_unnamed_agent_type_is_trusted_as_its_type(self, tmp_path: Path) -> None:

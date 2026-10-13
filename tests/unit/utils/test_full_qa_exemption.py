@@ -63,6 +63,13 @@ class TestExemptingEntry:
         record_dispatch(tmp_path, "s", "w", "a")
         assert exempting_entry(["a"], tmp_path, "s", "w") == "a"
 
+    def test_unnamed_id_beats_a_stale_name_record(self, tmp_path: Path) -> None:
+        record_dispatch(tmp_path, "s", "a", "other")
+        assert exempting_entry(["a"], tmp_path, "s", "a", "a57801934993f0485") == "a"
+
+    def test_named_id_without_record_is_not_exempt(self, tmp_path: Path) -> None:
+        assert exempting_entry(["a"], tmp_path, "s", "a", "aw-0123456789abcdef") is None
+
     def test_name_of_another_type_is_not_exempt(self, tmp_path: Path) -> None:
         record_dispatch(tmp_path, "s", "a", "other")
         assert exempting_entry(["a"], tmp_path, "s", "a") is None

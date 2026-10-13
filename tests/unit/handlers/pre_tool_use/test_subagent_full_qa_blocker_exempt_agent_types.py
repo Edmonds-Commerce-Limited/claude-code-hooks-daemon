@@ -27,6 +27,8 @@ from claude_code_hooks_daemon.utils.agent_dispatch_registry import record_dispat
 
 _PATTERNS: list[dict[str, Any]] = [{"id": "pytest", "command": "pytest", "bare_is_full": True}]
 _LISTED = "qa-full-runner"
+_UNNAMED_ID = "a57801934993f0485"  # measured unnamed shape: `a` + 16 hex
+_NAMED_ID = "aprobe-named-518-0123456789abcdef"  # measured named shape
 
 
 @pytest.fixture
@@ -58,7 +60,7 @@ def _payload(repo: Path, agent_type: Any = _LISTED, **extra: Any) -> dict[str, A
         "tool_name": "Bash",
         "tool_input": {"command": "pytest"},
         "session_id": "s1",
-        "agent_id": "a1",
+        "agent_id": _UNNAMED_ID,
         "cwd": str(repo),
         **extra,
     }
@@ -79,7 +81,7 @@ class TestTheExemption:
 
     def test_named_dispatch_of_a_listed_type_is_allowed(self, repo: Path, untracked: Path) -> None:
         record_dispatch(untracked, "s1", "runner-1", _LISTED)
-        result = _handler().handle(_payload(repo, agent_type="runner-1"))
+        result = _handler().handle(_payload(repo, agent_type="runner-1", agent_id=_NAMED_ID))
         assert result.decision == Decision.ALLOW
 
     def test_unlisted_type_is_denied(self, repo: Path, untracked: Path) -> None:
@@ -98,8 +100,20 @@ class TestTheExemption:
         assert _handler().handle(_payload(repo, agent_type=near_miss)).decision == Decision.DENY
 
     def test_teammate_named_like_a_listed_type_is_denied(self, repo: Path, untracked: Path) -> None:
-        record_dispatch(untracked, "s1", _LISTED, "python-developer")
-        assert _handler().handle(_payload(repo)).decision == Decision.DENY
+        record_dispatch(untracked, "s1", _LISTED, "general-purpose")
+        result = _handler().handle(_payload(repo, agent_id=f"a{_LISTED}-0123456789abcdef"))
+        assert result.decision == Decision.DENY
+
+    def test_unnamed_listed_type_is_allowed_despite_a_stale_name_record(
+        self, repo: Path, untracked: Path
+    ) -> None:
+        """The live repro: an earlier teammate NAMED like the type left a record."""
+        record_dispatch(untracked, "s1", _LISTED, "general-purpose")
+        assert _handler().handle(_payload(repo)).decision == Decision.ALLOW
+
+    def test_named_shape_id_without_a_record_is_denied(self, repo: Path, untracked: Path) -> None:
+        result = _handler().handle(_payload(repo, agent_id=_NAMED_ID))
+        assert result.decision == Decision.DENY
 
     def test_no_list_denies_as_before(self, repo: Path, untracked: Path) -> None:
         assert _handler(exempt=None).handle(_payload(repo)).decision == Decision.DENY

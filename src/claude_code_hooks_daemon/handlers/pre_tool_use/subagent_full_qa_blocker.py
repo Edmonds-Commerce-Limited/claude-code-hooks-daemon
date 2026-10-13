@@ -6905,6 +6905,7 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
             untracked_dir,
             hook_input.get(HookInputField.SESSION_ID),
             hook_input.get(HookInputField.AGENT_TYPE),
+            hook_input.get(HookInputField.AGENT_ID),
         )
 
     def _exempt_run(self, hook_input: dict[str, Any], entry: str) -> GatingResult:
@@ -7147,8 +7148,10 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
             "the entry. A named agent's payload `agent_type` is its dispatch NAME, so the "
             "type is read from the record the `agent_dispatch_recorder` handler writes "
             "(keep it enabled); a teammate named like a listed type is not exempt, and a "
-            "missing or empty `agent_type` never is. An unnamed agent's `agent_type` is "
-            "trusted as its type.\n\n"
+            "missing or empty `agent_type` never is. The payload `agent_id` tells named "
+            "from unnamed: an id of the unnamed shape (`a` + 16 hex) means `agent_type` is "
+            "trusted as the type and no record is read; any other id is a named teammate "
+            "and, with no record, is not exempt.\n\n"
             "**Commands are parsed, not substring-matched.** A commit message, `grep` or "
             "`echo` that mentions a full-QA command runs nothing and is never denied; a "
             "read-only form such as a `--read-only` summary is allowed if the project "
