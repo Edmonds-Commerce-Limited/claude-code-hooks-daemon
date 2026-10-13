@@ -77,6 +77,63 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N455 — two CI-load failures on main's full run: the Swift lint timeout turns an acceptance deny into an allow, and a timing bound misses
+
+**Source**: coordinator, release-readiness check of main CI (2026-10-13).
+
+**Evidence** (`gh run view --log-failed` for main pushes since 2026-10-12):
+
+- Run for 998dea51d: `test_playbook_harness.py:311` reported probe #214 LintOnEditHandler "expected deny, observed no
+  decision at all", the observed text being "Swift lint check timed out after 15s for invalid.swift - the write was
+  ALLOWED"; `test_acceptance_contract.py:530` failed on the same Swift case ("expected decision 'deny', got 'allow'").
+- Run for b8669ac16: the targeted tier failed `TestTheDeclaredProbesBehaveAsDeclared`; the log carries only the summary
+  line, so the probe is not named. The same test passes locally on main (1 passed, 32.5s) and passed in the full run
+  for 6ae406932.
+- Run for 6ae406932: `test_subagent_full_qa_blocker.py:4501` (`test_many_edits_each_run_are_judged_quickly[a=['y']+a]`)
+  measured 1.615s against `scaled_cpu_seconds(1.5)`. This is the N376 class (tracked in #107, Plan 00476 Design 6).
+
+**Fix direction**: a lint timeout is an environment fact, not the handler's verdict, so a probe whose linter timed out
+must not be scored as the handler's decision (skip with the reason, or raise the CI Swift timeout); the timing bound
+follows N376's serial-phase design. Never loosen a bound to make CI green.
+
+**Status**: ⬜ Open.
+
+### N454 — write_protected_paths denies a read-only grep loop as a write to `.claude/ccy/ccy.env.local`, a path the command never names
+
+**Source**: dogfood, the coordinator's CI-log scan (2026-10-13).
+
+**Evidence**: this command, run from `/workspace`, is denied with R-WRITE-PROTECTED-PATH naming
+`.claude/ccy/ccy.env.local`, reproduced twice:
+
+```bash
+for f in 6ae406932; do echo "== $f"; grep -E "^tests/.*: [A-Za-z]*Error$|_{5,} .* _{5,}" untracked/scratch/ci-fail-$f.log >/dev/null; grep -oE "(tests/[^ :]+\.py:[0-9]+: [A-Za-z]+Error|_{3,} [A-Za-z_]+(\.[A-Za-z_\[\]-]+)* _{3,})" untracked/scratch/ci-fail-$f.log | sort -u; done
+```
+
+Each part on its own is allowed: the first grep with `$f` and `>/dev/null`, the second grep piped to `sort -u`, and the
+grouped regex alone. Every command in it only reads (`grep`, `sort`, `echo`), and the only redirect is to `/dev/null`.
+The likely shape is a quoted regex operand containing `.*` or `.[...]` being read as a glob that matches dot-paths,
+the same class as #70 in `secret_file_guard`; not yet bisected.
+
+**Fix direction**: TDD from the command above; bisect inside the `for` body, then judge the real write targets only.
+
+**Status**: ⬜ Open.
+
+### N453 — main's full CI run has been red since N439: the deployed `check.md` skill page and its source differ
+
+**Source**: coordinator, release-readiness check of main CI (2026-10-13).
+
+**Evidence**: every full-suite run on main since 8e40f5df8 (N439, 2026-10-12) fails
+`tests/integration/test_deployed_skill_trees.py:177` with `hooks-daemon/check.md (contents differ)` (runs for 494909b5b,
+998dea51d, 2240ef95e, 9240e6fd3, b8bff393e and 6ae406932). `diff` shows line 46: the deployed
+`.claude/skills/hooks-daemon/check.md` carries N439's new OK text ("no model has an explicit effort level, so each runs
+at its own default") and the source `src/claude_code_hooks_daemon/skills/hooks-daemon/check.md` still has the old
+"per-model levels come from settings.json modelSettings". Local targeted QA did not run that integration test, so the
+merge passed locally.
+
+**Fix direction**: bring the source page to N439's text (the source is the one edited), then confirm the test.
+
+**Status**: ⬜ Open.
+
 ### N452 — subagent_worktree_write_guard never binds an agent whose session cwd is outside the target's repository
 
 **Source**: GitHub issue #105 (triaged 2026-10-13).
