@@ -77,6 +77,22 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N459 — a wrapped status line shows the context segment as "..." instead of its number
+
+**Source**: the owner, 2026-10-13: "status line when wrapping will not display context as number and instead displays
+... - wrong - it should wrap and then display full info - ... is clearly useless".
+
+**Evidence**: no status-line handler under `handlers/status_line/` writes "..." for context (the only ellipses are
+`git_branch`'s untracked icon and `host_hostname`'s role clip). Wrapping is `_wrap_status_parts` (Plan 00167,
+`CLAUDE/Architecture/StatusLine.md`), sized from the `terminal_columns` the wrapper forwards from `COLUMNS`. Leading
+hypothesis, unproven: a row the daemon packs to `COLUMNS` is wider than the area Claude Code actually renders, so Claude
+Code truncates that row with an ellipsis, and the context segment is what falls past the edge.
+
+**Fix direction**: reproduce with a real render first; then the context segment's information must survive at any width
+(wrap earlier or reserve a margin, never truncate a segment).
+
+**Status**: ⬜ Open, dispatched.
+
 ### N458 — the acceptance-test skill forbids sub-agent execution, while RELEASING.md Step 12 routes tests the playbook marks `Requires Main Thread: no` to sub-agents
 
 **Source**: coordinator review of the Plans 00450/00451 branch (2026-10-13).
