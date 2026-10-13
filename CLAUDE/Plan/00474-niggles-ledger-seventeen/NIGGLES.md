@@ -100,8 +100,9 @@ is the count at that date.
   `merge_qa_report` then resolves the repository from the merge's own directory.
 - Keep the fallback unchanged: no placeable invocation means the session `cwd`, as today.
 - Fix the two `_is_foreign_repo` docstrings: `daemon_sync_after_merge`'s cites `merge_qa_report` as its model, and
-  `merge_qa_report`'s cites `staged_lint_gate`, which places by `cwd` alone. Each should point at the shared
-  function instead.
+  `merge_qa_report`'s cites `staged_lint_gate._is_foreign_repo`, which N305 replaced with the command-aware
+  `utils/commit_location.commit_runs_in_foreign_repo`, so it names a method that no longer exists. Each should
+  point at the shared function instead.
 
 **Status**: 🔄 In progress.
 
