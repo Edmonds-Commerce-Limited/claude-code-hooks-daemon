@@ -98,7 +98,11 @@ is the count at that date.
 allow paths returning at lines 230 and 232 bind too. Tests first, over real `git worktree` checkouts, following the issue's
 six-step reproduction.
 
-**Status**: 🔄 In progress.
+**Status**: ✅ Fixed (merge b8669ac16, branch commit 83a459fa0). Both allow paths now fall through to the bind; a
+same-repository crossing still returns a deny and binds nothing. New test class
+`TestFirstWriteBindsWhenTheCwdGivesNoSameRepositoryCheckout`, red first on its two parametrised cases. Targeted QA on
+the integration head: 40/40, changed_tests 1874 passed, 0 failed, 0 unmapped. Release note 051.
+[Developer report](subagent-reports/261013-dev-n452-sonnet.md).
 
 ### N451 — the frozen prose pattern 4 armed the human-blocked marker on "waiting on owner decisions" (a plural, describing an issue)
 
