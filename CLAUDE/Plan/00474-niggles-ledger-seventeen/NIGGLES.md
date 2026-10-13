@@ -77,6 +77,24 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N456 — `prune-venvs --all-except-current` lists the venv the running daemon uses for removal
+
+**Source**: the Plan 00517 filing fact-check (2026-10-13,
+[report](../00517-daemon-version-ssot-and-no-stale-venvs/subagent-reports/261013-fact-check-00517.md)).
+
+**Evidence**: in this repository the only venv is `untracked/venv-workspace-py311-81c29529`, and the running daemon
+(pid 110597) runs from it; `list-venvs` reports the current fingerprint as `workspace-py311-2a519198`.
+`prune-venvs --all-except-current --dry-run` lists that venv for removal. The Plan 00184 guard
+`_resolver_active_venv_realpath` (`daemon/cli.py`) calls `.resolve()` on the venv's `bin/python`, which is a symlink to
+the system interpreter, so it yields `/usr` and never matches the venv; the protection then rests on the fingerprint
+alone, and the fingerprint differs. With `--force`, the command would delete the live daemon's venv.
+
+**Fix direction**: Plan 00517 Task 3.0: identify the live venv by its directory (the running interpreter's
+`sys.prefix`, the venv path unresolved), tested over a real venv whose `bin/python` is a symlink and whose fingerprint
+differs.
+
+**Status**: ⬜ Open, graduated to Plan 00517 Task 3.0.
+
 ### N455 — two CI-load failures on main's full run: the Swift lint timeout turns an acceptance deny into an allow, and a timing bound misses
 
 **Source**: coordinator, release-readiness check of main CI (2026-10-13).
@@ -111,8 +129,9 @@ for f in 6ae406932; do echo "== $f"; grep -E "^tests/.*: [A-Za-z]*Error$|_{5,} .
 
 Each part on its own is allowed: the first grep with `$f` and `>/dev/null`, the second grep piped to `sort -u`, and the
 grouped regex alone. Every command in it only reads (`grep`, `sort`, `echo`), and the only redirect is to `/dev/null`.
-The likely shape is a quoted regex operand containing `.*` or `.[...]` being read as a glob that matches dot-paths,
-the same class as #70 in `secret_file_guard`; not yet bisected.
+Not yet bisected. The command is a `for` loop over `$f`, which is N350's shape: an unresolved `$VAR` read as a lone
+`*` and expanded against the cwd. Plan 00483 fixed that in the guards it covered; whether `write_protected_paths`
+still has that route is the first thing to test.
 
 **Fix direction**: TDD from the command above; bisect inside the `for` body, then judge the real write targets only.
 

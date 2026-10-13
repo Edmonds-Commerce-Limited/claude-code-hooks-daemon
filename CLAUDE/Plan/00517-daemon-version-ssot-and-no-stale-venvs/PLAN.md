@@ -15,18 +15,23 @@ investigated by the running agent and removed once confirmed safe.
 
 What main does today:
 
-- **The installed version has two sources.** `daemon_upgrade_detector` (`handlers/user_prompt_submit/ daemon_upgrade_detector.py`, `_resolve_installed_daemon_version`) reads the INSTALLED version from the selected
+- **The installed version has two sources.** `daemon_upgrade_detector` (`handlers/user_prompt_submit/daemon_upgrade_detector.py`, `_resolve_installed_daemon_version`) reads the INSTALLED version from the selected
   venv's `.daemon-metadata.json` `daemon_version`, a copy written when the venv was built, and compares it with the
   running `version.__version__`. A venv whose metadata disagrees with the source it serves reports a version that is
   not installed. Release note 037 (#84) made the scan prefer the venv whose `lock_hash` matches, which narrows the
   window but leaves the copy as the source.
-- **"Stale" has three definitions.** `prune-venvs --stale` removes venvs whose stamped daemon version differs;
-  `prune-venvs --all-except-current` removes every venv whose interpreter fingerprint differs from the current one
-  (in this repository the only venv, the one in use, is `workspace-py311-81c29529` while `list-venvs` reports the
-  current fingerprint as `workspace-py311-2a519198`); the upgrade cleanup (release note 043,
-  `paths.py list-stale-venvs`) removes a venv only when its `lock_hash` is readable and differs.
-- **Cleanup runs only on upgrade**, and keeps a venv with missing or unreadable metadata, or another checkout view's
-  slug, logging `Kept venv:`. Nothing removes those later, and nothing runs at restart, provision or session start.
+- **"Stale" has four definitions.** `prune-venvs --stale` removes venvs whose stamped daemon version differs;
+  `prune-venvs --all-except-current` removes every venv whose interpreter fingerprint differs from the current one;
+  the upgrade cleanup (release note 043, `paths.py list-stale-venvs`, called through `eager_cleanup_stale_venvs` in
+  `scripts/install/venv.sh`) removes a venv only when its `lock_hash` is readable and differs; and daemon start's
+  `_stale_venv_advisory` (`cli.py`) counts `_reclaimable_venv_entries` and deletes nothing.
+- **The running venv is not protected (ledger 00474 N456).** In this repository the only venv, the one the running
+  daemon uses, is `workspace-py311-81c29529` while `list-venvs` reports the current fingerprint as
+  `workspace-py311-2a519198`, and `prune-venvs --all-except-current --dry-run` lists it for removal. The Plan 00184
+  guard `_resolver_active_venv_realpath` calls `.resolve()` on the venv's `bin/python`, a symlink to the system
+  interpreter, so it resolves to `/usr` and never matches the venv.
+- **Removal runs only on upgrade**, and keeps a venv with missing or unreadable metadata, or another checkout view's
+  slug, logging `Kept venv:`. Nothing removes those later; restart, provision and session start remove nothing.
 
 ## Goals
 
@@ -66,6 +71,10 @@ What main does today:
 
 ### Phase 3: One staleness rule (TDD)
 
+- [ ] ⬜ **Task 3.0** (first, and releasable alone): the running-venv guard identifies the live venv by the venv
+  directory itself (the running interpreter's `sys.prefix`, and the venv path without resolving `bin/python`'s
+  symlink), so no `prune-venvs` mode can remove it. Test over a real venv whose `bin/python` is a symlink to a system
+  interpreter and whose fingerprint differs from the current one. Ledger 00474 N456.
 - [ ] ⬜ **Task 3.1**: One function decides stale (current `lock_hash` and this view's slug, never the venv the
   running daemon or the resolver currently selects), shared by the upgrade cleanup and `prune-venvs`; the flags that
   test fingerprint or stamped version are removed or made to call it.
@@ -79,7 +88,8 @@ What main does today:
 
 - [ ] ⬜ **Task 4.1**: Daemon restart and `provision` run the stale cleanup (proven-stale only, never UNPROVEN).
   Coordinate with Plan 00477 Task 2.2 (provision) and Plan 00100 Phase 4's venv lock.
-- [ ] ⬜ **Task 4.2**: A SessionStart advisory lists UNPROVEN venvs with the evidence and the exact removal command,
+- [ ] ⬜ **Task 4.2**: The existing daemon-start `_stale_venv_advisory` is rebuilt on Task 3.1's rule (no second
+  advisory), and a SessionStart advisory lists UNPROVEN venvs with the evidence and the exact removal command,
   telling the agent to investigate and remove each once confirmed safe; silent when there are none.
 
 ### Phase 5: Release
