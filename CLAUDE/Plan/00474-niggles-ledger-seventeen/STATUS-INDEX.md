@@ -4,6 +4,7 @@ One line per niggle with its verdict, origin and status; [NIGGLES.md](NIGGLES.md
 
 | #          | Verdict                                                                                                                                                            | Origin              | Status                                 |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------- | -------------------------------------- |
+| N451       | auto_continue_stop prose pattern 4 has no trailing word boundary, so "waiting on owner decisions" (about an issue) armed the human-blocked marker                  | Dogfood             | ⬜ Open                                |
 | N450       | subagent_full_qa_blocker: a `full_words`-only pattern also applies the path rules, so `php probe.php .` (a repository root or `.`/`..` operand) is denied (#103)   | GitHub #103         | ✅ Fixed (6ae406932)                   |
 | N449       | merge_qa_report places a `cd <other> && git merge` by the session cwd, so it reports the outer project's findings for a merge in another repository (#101)         | GitHub #101         | ✅ Fixed (6d3084d3d)                   |
 | N448       | error_hiding_blocker and the error-hiding QA audit miss `contextlib.suppress(Exception)`, the context-manager form of `except Exception: pass` (#100)              | GitHub #100         | ✅ Fixed (0fea4b8be)                   |

@@ -77,6 +77,27 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N451 — the frozen prose pattern 4 armed the human-blocked marker on "waiting on owner decisions" (a plural, describing an issue)
+
+**Source**: dogfood, the coordinator's own stop after triaging #104 (2026-10-13).
+
+**Evidence** (`handlers/stop/auto_continue_stop.py`, `_HUMAN_BLOCKED_PATTERNS` pattern 4, lines 187-191):
+
+- The stop read "STOPPING BECAUSE: #104 is triaged and waiting on owner decisions, and the issue loop handles one issue
+  per tick. #105 is next." The session was not blocked: #105 was the next eligible issue.
+- Pattern 4, `waiting (?:on|for) (?:the )?(?:owner|user|human)(?:'s)? (?:decision|input|response|answer)`, has no
+  trailing word boundary, so `decision` matched inside `decisions`. The stop armed
+  `untracked/human-input-blockage-marker.json` and was then denied with R-STOP-STAND-IN-MISSING.
+- Left alone, the marker would have dropped the next `issue-sdlc` tick with #105 waiting. The coordinator removed the
+  file by hand; a genuine prompt clears it anyway (`failsafe_cron_blockage_suppressor`, line 327).
+
+**Not decided here**: the patterns are closed to EXTENSION (Plan 00337 Task 3.4); a trailing `\b` NARROWS, which that
+rule does not cover, but would stop a plural wording that arms today. The docstring of `_declares_human_blocked`
+records that unquoted prose about someone else's decision is a known limit. Options: add `\b` (narrow), or leave it and
+rely on the sentinel. Either is a coordinator call at fix time.
+
+**Status**: ⬜ Open.
+
 ### N450 — a `full_words`-only pattern in subagent_full_qa_blocker also applies the PATH rules to every operand
 
 **Source**: GitHub issue #103 (triaged 2026-10-13).
