@@ -11,12 +11,13 @@ import pytest
 from claude_code_hooks_daemon.qa.full_qa_lock import acquire_full_qa_lock, host_lock_path
 from claude_code_hooks_daemon.utils.agent_dispatch_registry import record_dispatch
 from claude_code_hooks_daemon.utils.full_qa_exemption import (
+    LockState,
     declared_exempt_types,
     exempt_types_problem,
     exempting_entry,
-    full_qa_lock_is_free,
     lock_holder_text,
     lock_path_text,
+    probe_full_qa_lock,
 )
 
 
@@ -69,13 +70,13 @@ class TestExemptingEntry:
 
 class TestLockProbe:
     def test_free_then_held_then_free(self, repo: Path) -> None:
-        assert full_qa_lock_is_free(repo) is True
+        assert probe_full_qa_lock(repo) is LockState.FREE
         with acquire_full_qa_lock(repo):
-            assert full_qa_lock_is_free(repo) is False
-        assert full_qa_lock_is_free(repo) is True
+            assert probe_full_qa_lock(repo) is LockState.HELD
+        assert probe_full_qa_lock(repo) is LockState.FREE
 
     def test_not_a_repository_is_unknown(self, tmp_path: Path) -> None:
-        assert full_qa_lock_is_free(tmp_path / "nowhere") is None
+        assert probe_full_qa_lock(tmp_path / "nowhere") is LockState.UNKNOWN
 
     def test_holder_is_named_from_a_live_stamp(self, repo: Path) -> None:
         with acquire_full_qa_lock(repo):

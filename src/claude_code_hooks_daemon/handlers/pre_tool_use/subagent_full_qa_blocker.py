@@ -101,12 +101,13 @@ from claude_code_hooks_daemon.utils.command_evasion import normalise_line_contin
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.find_expression import FIND_EXEC_ACTIONS, find_exec_end
 from claude_code_hooks_daemon.utils.full_qa_exemption import (
+    LockState,
     declared_exempt_types,
     exempt_types_problem,
     exempting_entry,
-    full_qa_lock_is_free,
     lock_holder_text,
     lock_path_text,
+    probe_full_qa_lock,
 )
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.shell_segmentation import (
@@ -6887,6 +6888,7 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
         declared = declared_exempt_types(self._exempt_agent_types)
         if not declared:
             return None
+        untracked_dir: Path | None = None
         try:
             untracked_dir = self._untracked_dir()
         except RuntimeError as exc:
@@ -6896,6 +6898,7 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
                 reason="without a project context no dispatch record can be read, so no agent is exempt and the deny stands",
                 level=logging.WARNING,
             )
+        if untracked_dir is None:
             return None
         return exempting_entry(
             declared,
@@ -6908,8 +6911,8 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
         """Judge a full run by an exempt agent: allowed unless another holds the lock."""
         cwd = hook_input.get(HookInputField.CWD)
         root = Path(cwd) if isinstance(cwd, str) and cwd else None
-        free = None if root is None else full_qa_lock_is_free(root)
-        if free is False and root is not None:
+        state = LockState.UNKNOWN if root is None else probe_full_qa_lock(root)
+        if state is LockState.HELD and root is not None:
             return GatingResult.deny(
                 "BLOCKED [R-SUBAGENT-FULL-QA]: your agent type is exempt "
                 f"(`{_OPTION_EXEMPT_AGENT_TYPES}` entry `{entry}`), but the full QA gate runs "
@@ -6920,7 +6923,7 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
             )
         lock_note = (
             "The host-wide full-QA lock is free."
-            if free
+            if state is LockState.FREE
             else "The host-wide full-QA lock could not be checked here (no usable git "
             "checkout in the command's directory); the pytest sink still enforces it."
         )

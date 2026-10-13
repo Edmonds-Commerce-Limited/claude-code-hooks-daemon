@@ -8,7 +8,7 @@ Two questions the full-QA blocker asks once a full run is seen:
    (:mod:`agent_dispatch_registry`). Anything that cannot be placed -- no
    ``agent_type``, an empty one, no session to look a name up in -- is not
    exempt: a guard that cannot tell who is asking must keep denying.
-2. :func:`full_qa_lock_is_free` -- the exemption comes with one run at a time,
+2. :func:`probe_full_qa_lock` -- the exemption comes with one run at a time,
    which is the host-wide full-QA lock the pytest sink already enforces. The
    probe takes the lock without waiting and lets go at once; flock is released
    by the kernel when a holder dies, so a dead holder can never block.
@@ -17,6 +17,7 @@ Two questions the full-QA blocker asks once a full run is seen:
 from __future__ import annotations
 
 import os
+from enum import Enum
 from pathlib import Path
 
 from claude_code_hooks_daemon.qa.full_qa_lock import acquire_full_qa_lock, host_lock_path
@@ -63,15 +64,23 @@ def exempting_entry(
     return resolved if resolved in declared else None
 
 
-def full_qa_lock_is_free(cwd: Path) -> bool | None:
-    """Whether the host-wide full-QA lock is free; None when it cannot be located."""
+class LockState(Enum):
+    """What a non-blocking probe of the host-wide full-QA lock found."""
+
+    FREE = "free"
+    HELD = "held"
+    UNKNOWN = "unknown"  # git could not locate the lock, so nothing can be said
+
+
+def probe_full_qa_lock(cwd: Path) -> LockState:
+    """Take the host-wide full-QA lock without waiting, and let go at once."""
     try:
         with acquire_full_qa_lock(cwd, blocking=False):
-            return True
+            return LockState.FREE
     except BlockingIOError:
-        return False
+        return LockState.HELD
     except OSError:
-        return None
+        return LockState.UNKNOWN
 
 
 def lock_path_text(cwd: Path) -> str:
