@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00518: full qa blocker exempt agent types](00518-full-qa-blocker-exempt-agent-types/PLAN.md) - In Progress, High (owner ruling on ledger 00474 N457: `subagent_full_qa_blocker` gets `exempt_agent_types` with a one-at-a-time lock, `optimise` recommends it for a dedicated QA-runner agent, dogfooded here with a `qa-full-runner` agent)
-
 - [00517: daemon version ssot and no stale venvs](00517-daemon-version-ssot-and-no-stale-venvs/PLAN.md) - In Progress, High (owner direction: the installed daemon version comes from the installed `version.py` only, never a venv's metadata copy; one staleness rule for every venv cleanup; a venv with missing or unreadable metadata is investigated by the running agent and removed once confirmed safe; cleanup also on restart, provision and session start)
 
 - [00516: journal in place redaction](00516-journal-in-place-redaction/PLAN.md) - Not Started, Medium (#108; awaiting owner decisions: a bounded `mkplan.bash --journal-redact` to remove a leaked value from a past journal entry with an appended correction entry, since `journal-dayfile-is-today` blocks any past-day edit; ledger 00474 N389)
@@ -203,6 +201,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00518: full qa blocker exempt agent types](Completed/00518-full-qa-blocker-exempt-agent-types/PLAN.md) - Complete at merges `980d4fb67`, `7ff8cdcf1`, `7cb84135a` + the archiving commit (ledger 00474 N457: `exempt_agent_types` with a one-at-a-time lock, dogfooded with `qa-full-runner`; release note 053)
+
 - [00512: worktree events outlive the chain deadline](Completed/00512-worktree-events-outlive-the-chain-deadline/PLAN.md) - Complete at merge `5d1b83d00` + the archiving commit (#82: WorktreeCreate and WorktreeRemove get their own budget, longer than their git call, so a slow add yields its path; a failed add leaves no orphan; guard events keep 20s; release note 035 in UNRELEASED)
 
 - [00511: deny suffix batched calls not cancelled](Completed/00511-deny-suffix-batched-calls-not-cancelled/PLAN.md) - Complete at merge `2704ef5bd` + the archiving commit (#81: the PreToolUse DENY suffix says batched calls may already have run, not that they were cancelled, which is false since Claude Code 2.1.161; same fix in two linters' guidance; release note 034 in UNRELEASED)
@@ -261,8 +261,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00462: php lsp advice keeps composer dependencies indexed](Completed/00462-php-lsp-advice-keeps-composer-dependencies-indexed/PLAN.md) - Complete at `830363e5` + the archiving commit (from #56: the PHP advice asked intelephense to exclude all of `**/vendor`, which drops every Composer dependency from its index; the strategy now keeps dependency roots indexed and asks only for intelephense's nested excludes, and flags an override that excludes the whole tree)
 
-- [00459: encrypted vault files are tracked not hidden](Completed/00459-encrypted-vault-files-are-tracked-not-hidden/PLAN.md) - Complete at `2a6a9b84` + the archiving commit (owner report: secret-file globs select by NAME, so Ansible Vault ciphertext was told to be untracked; a whole-file content check at each use, failing closed, now separates it from the plaintext password file)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -316,9 +314,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 518 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 438 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 439 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 57 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 56 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

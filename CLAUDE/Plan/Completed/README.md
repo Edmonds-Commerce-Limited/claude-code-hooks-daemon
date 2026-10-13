@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00459: encrypted vault files are tracked not hidden](00459-encrypted-vault-files-are-tracked-not-hidden/PLAN.md) - Complete at `2a6a9b84` + the archiving commit (owner report: secret-file globs select by NAME, so Ansible Vault ciphertext was told to be untracked; a whole-file content check at each use, failing closed, now separates it from the plaintext password file)
+
 - [00458: skip lists match path segments relative to the project](00458-skip-lists-match-path-segments-relative-to-the-project/PLAN.md) - Complete at `b8ce4b49`…`47999859` + the archiving commit (from 00422 N20: six guards matched skip lists as a bare substring, so a worktree named `…-venv` switched them off; they now match project-relative segments, and a QA detector keeps the class out)
 
 - [00457: signal runs without a venv](00457-signal-runs-without-a-venv/PLAN.md) - Complete at `6eb51575` + the archiving commit (from #55: `signal` is dispatched before venv resolution through a standard-library-only entry point, so the host-side reboot warning works where the only venv was built in a container)

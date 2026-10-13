@@ -1,6 +1,6 @@
 # Plan 00518: full qa blocker exempt agent types
 
-**Status**: In Progress
+**Status**: Complete (2026-10-13)
 **Created**: 2026-10-13
 **Owner**: dev
 **Priority**: High
@@ -81,9 +81,10 @@ once do not. So the exemption comes with a one-at-a-time lock (owner: "yes for t
   `hooks-daemon-`-prefixed files in `install/templates/agents/`; this one is not shipped): runs
   `./scripts/qa/llm_qa.py all` in the worktree it is given, never fixes, reports VERDICT and failures to a file.
 - [x] ✅ **Task 3.2**: `.claude/hooks-daemon.yaml` lists `qa-full-runner` under `exempt_agent_types`; daemon restart.
-- [ ] ⬜ **Task 3.3**: Live trial: dispatch `qa-full-runner` on an integration worktree and observe the allow with its
+- [x] ✅ **Task 3.3**: Live trial: dispatch `qa-full-runner` on an integration worktree and observe the allow with its
   advisory; dispatch `qa-runner` with a full command and observe the deny; dispatch a second `qa-full-runner` while
-  the first runs and observe the lock deny. Record the observations in the journal.
+  the first runs and observe the lock deny. Record the observations in the journal. All four trials pass (journal
+  2026-10-13); trial C first exposed a stale-name-record defect, fixed by keying on the `agent_id` shape (7cb84135a).
 - [x] ✅ **Task 3.4**: `CLAUDE/development/IssueSdlc.md` (and `CLAUDE/QA.md`) say when the coordinator may hand the full
   gate to `qa-full-runner`.
 
@@ -94,10 +95,12 @@ once do not. So the exemption comes with a one-at-a-time lock (owner: "yes for t
 
 ## Success Criteria
 
-- [ ] A listed agent type's full run is allowed with an advisory; every other sub-agent's is denied as before.
-- [ ] A second concurrent exempt full run is denied; a dead holder never blocks.
-- [ ] `qa-full-runner` ran the full gate in this repository through the exemption (journalled trial).
-- [ ] Release-bound consequences recorded in `CLAUDE/UPGRADES/UNRELEASED/` (release note, config-changes entry).
+- [x] A listed agent type's full run is allowed with an advisory; every other sub-agent's is denied as before (trials A,
+  B, D).
+- [x] A second concurrent exempt full run is denied (trial C); a dead holder never blocks (Task 1.3 tests).
+- [x] `qa-full-runner` ran the full gate in this repository through the exemption (trial A, journalled).
+- [x] Release-bound consequences recorded in `CLAUDE/UPGRADES/UNRELEASED/` (release note 053, config-changes v3.70.0
+  entries for `exempt_agent_types` and `agent_dispatch_recorder`).
 
 ## Delivery & Milestones
 
