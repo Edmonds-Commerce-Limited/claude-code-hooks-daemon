@@ -1039,12 +1039,10 @@ def resolve_existing_venv_python(daemon_dir: Path | str) -> Path:
 
     **Deliberately does not run-probe its candidates** (unlike
     :func:`resolve_existing_venv_python_with_diagnostics`, Plan 00466 N1).
-    This function is called fresh on every user turn by
-    ``daemon_upgrade_detector`` (see its docstring), so a subprocess spawn
-    here would land on the hot path the diagnostics resolver is kept off
-    of. Its current callers never execute the returned interpreter --
-    ``daemon_upgrade_detector`` only reads ``.daemon-metadata.json`` next
-    to it, and ``client_validator.validate_daemon_can_start`` runs its own
+    This function is called on hot paths, so a subprocess spawn here would
+    land where the diagnostics resolver is kept off. Its current callers
+    never execute the returned interpreter --
+    ``client_validator.validate_daemon_can_start`` runs its own
     explicit ``subprocess.run(..., timeout=...)`` probe before invoking
     whatever this returns. If a future caller of this function DOES need
     to execute the result, it must probe before doing so -- do not add a
