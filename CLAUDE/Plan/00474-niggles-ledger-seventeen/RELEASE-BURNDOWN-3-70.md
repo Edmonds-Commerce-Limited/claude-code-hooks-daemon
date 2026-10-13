@@ -21,8 +21,8 @@ Tick an item here when it lands, with the commit.
 - [ ] **Plan 00451**: `.claude/agents/release-agent.md` lists 3 of the 6 version-carrying files (missing
   `.claude/HOOKS-DAEMON.md`, `.claude/ccy/claude-supervise.py`, `uv.lock`; `RELEASING.md` has all six), which costs up
   to three red QA cycles mid-release.
-- [ ] **Plan 00517 Task 3.0 (N456)**: `prune-venvs --all-except-current --force` would delete the live daemon's venv.
-  Ships a destructive command in a release otherwise.
+- [x] **Plan 00517 Task 3.0 (N456)**: `prune-venvs --all-except-current --force` would delete the live daemon's venv.
+  Merged 03e504661; release note 052.
 
 ## Owner-directed for this release (2026-10-13)
 

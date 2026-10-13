@@ -131,7 +131,10 @@ alone, and the fingerprint differs. With `--force`, the command would delete the
 `sys.prefix`, the venv path unresolved), tested over a real venv whose `bin/python` is a symlink and whose fingerprint
 differs.
 
-**Status**: ⬜ Open, graduated to Plan 00517 Task 3.0.
+**Status**: ✅ Fixed by Plan 00517 Task 3.0 (merge 03e504661): `_live_venv_realpaths` identifies live venvs by
+directory, the resolver's choice unresolved plus `sys.prefix`. Red first (5 of 7, including `--force` deleting the
+live venv in a tmp layout), green after; on main `prune-venvs --all-except-current --dry-run` now reports nothing to
+prune. Release note 052.
 
 ### N455 — two CI-load failures on main's full run: the Swift lint timeout turns an acceptance deny into an allow, and a timing bound misses
 
