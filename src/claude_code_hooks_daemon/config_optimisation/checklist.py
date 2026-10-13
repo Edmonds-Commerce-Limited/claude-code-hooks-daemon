@@ -26,7 +26,11 @@ from enum import StrEnum
 from typing import Any, Final
 
 from claude_code_hooks_daemon.config_optimisation.areas import AREA_ORDER, Area, area_for
+from claude_code_hooks_daemon.config_optimisation.qa_runner_agents import (
+    find_full_qa_runner_agents,
+)
 from claude_code_hooks_daemon.constants.config import ConfigKey
+from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.handlers.registry import (
@@ -75,6 +79,10 @@ class ChecklistItem:
     #: means every other field on this item is a placeholder: the handler's
     #: own constructor or verdict raised, so nothing here was measured.
     construction_error: str = ""
+    #: Dedicated full-QA runner agent types found in the project, proposed as
+    #: this handler's ``exempt_agent_types``. Only ever set on the full-QA
+    #: blocker; empty everywhere else.
+    exempt_agent_types: tuple[str, ...] = ()
 
     @property
     def status(self) -> ItemStatus:
@@ -177,6 +185,7 @@ def build_checklist(
     """
     handlers_config = _block(config, _HANDLERS_SECTION)
     items: list[ChecklistItem] = []
+    qa_runner_agents = find_full_qa_runner_agents(context.project_root)
 
     for ref in iter_builtin_handler_classes():
         probe = _probe(ref.handler_cls, context)
@@ -198,6 +207,11 @@ def build_checklist(
                 relevance=probe.relevance,
                 summary=_summarise(ref.handler_cls),
                 construction_error=probe.error,
+                exempt_agent_types=(
+                    qa_runner_agents
+                    if ref.config_key == HandlerID.SUBAGENT_FULL_QA_BLOCKER.config_key
+                    else ()
+                ),
             )
         )
 
@@ -322,6 +336,8 @@ def render_report(items: list[ChecklistItem]) -> str:
     lines.append(f"Recommendations ({len(recommendations)} improvements available):")
     for number, item in enumerate(recommendations, start=1):
         lines.append(f"  [{number}] {item.area}: enable {item.config_path} — {item.summary}")
+        if item.exempt_agent_types:
+            lines.append(f"      with exempt_agent_types: [{', '.join(item.exempt_agent_types)}]")
     return "\n".join(lines) + "\n"
 
 
@@ -353,6 +369,7 @@ def report_as_json(items: list[ChecklistItem]) -> dict[str, Any]:
                 "status": str(item.status),
                 "summary": item.summary,
                 "construction_error": item.construction_error,
+                "exempt_agent_types": list(item.exempt_agent_types),
             }
             for item in items
         ],

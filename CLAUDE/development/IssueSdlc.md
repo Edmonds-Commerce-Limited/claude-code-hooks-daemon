@@ -389,6 +389,11 @@ the exit status of the last command in the chain, which has silently reported a
 red tree as green in this repo before. Echo `QA_EXIT=$?` on its own line
 immediately after the run and read that.
 
+Where a full gate is genuinely wanted for the combined head, the coordinator may
+hand it to the `qa-full-runner` agent rather than run it inline; see "The one
+exemption: `qa-full-runner`" in [../QA.md](../QA.md). It reports and never
+fixes, and only one runs at a time.
+
 Red QA ends the tick: report, leave `agent-working` on, do not merge.
 
 ## Step 6 — review before merging

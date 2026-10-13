@@ -139,6 +139,20 @@ Agent-tool sub-agents (Plan 00423) and in-process teammates (Plan 00463). A
 Workflow-tool agent's payload is UNMEASURED, so no deny is promised there. The
 split below applies to every kind of sub-agent all the same.
 
+**The one exemption: `qa-full-runner`.** When the coordinator is entitled to run
+the full gate (release preparation, or a batch it has decided to certify in full),
+it may hand the run to the `qa-full-runner` agent (`.claude/agents/qa-full-runner.md`)
+instead of holding its own context for 15-20 minutes. Dispatch it with the
+worktree path and a report file path, UNNAMED or by its type: a dispatch NAME is
+not the type, and `exempt_agent_types: [qa-full-runner]` in
+`.claude/hooks-daemon.yaml` matches the definition type only. It runs
+`llm_qa.py all` and reports; it never fixes (`qa-fixer` does). The host-wide
+full-QA lock means one such run at a time, so a second is denied naming the
+holder. No other agent type is exempt, and `qa-runner` stays targeted-only. The
+option, its lock and its limits are in the `subagent_full_qa_blocker` guidance
+(`bin/hooks-daemon explain-handler subagent_full_qa_blocker`), the canonical
+description; this paragraph does not restate them.
+
 **Why.** When the rule was made, five full runs were executing at once, one
 per worktree, each about 25,700 tests over 15-20 minutes on eight cores. Each
 agent re-ran the suite after every fix round, and the coordinator ran it again
