@@ -72,7 +72,7 @@ once do not. So the exemption comes with a one-at-a-time lock (owner: "yes for t
 
 ### Phase 2: optimise
 
-- [ ] ⬜ **Task 2.1**: The `optimise` checklist detects a dedicated QA-runner agent and recommends
+- [x] ✅ **Task 2.1**: The `optimise` checklist detects a dedicated QA-runner agent and recommends
   `exempt_agent_types` for it.
 
 ### Phase 3: Dogfood
@@ -84,7 +84,7 @@ once do not. So the exemption comes with a one-at-a-time lock (owner: "yes for t
 - [ ] ⬜ **Task 3.3**: Live trial: dispatch `qa-full-runner` on an integration worktree and observe the allow with its
   advisory; dispatch `qa-runner` with a full command and observe the deny; dispatch a second `qa-full-runner` while
   the first runs and observe the lock deny. Record the observations in the journal.
-- [ ] ⬜ **Task 3.4**: `CLAUDE/development/IssueSdlc.md` (and `CLAUDE/QA.md`) say when the coordinator may hand the full
+- [x] ✅ **Task 3.4**: `CLAUDE/development/IssueSdlc.md` (and `CLAUDE/QA.md`) say when the coordinator may hand the full
   gate to `qa-full-runner`.
 
 ### Phase 4: Release
