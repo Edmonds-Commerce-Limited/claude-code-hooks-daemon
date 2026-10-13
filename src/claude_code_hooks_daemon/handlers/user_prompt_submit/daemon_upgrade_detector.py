@@ -8,19 +8,18 @@ before this handler existed.
 
 **The signal needs no startup bookkeeping.** The version this process loaded
 is already in memory (``claude_code_hooks_daemon.version.__version__``); the
-version currently INSTALLED lives in the venv's ``.daemon-metadata.json``,
-read through the existing public reader (``daemon.metadata.read_daemon_metadata``)
-rather than a second one. Comparing the two on every UserPromptSubmit is
-cheap enough to need no gate, and it is the moment an agent actually reads
-what the daemon says.
+version currently INSTALLED is the ``__version__`` literal in the installed
+source tree's ``version.py`` (Plan 00517), read through
+``utils.deployed_version.read_installed_source_version``. It is parsed as
+text, never imported: this process already holds its own ``__version__``.
+A venv's ``.daemon-metadata.json`` ``daemon_version`` records which daemon
+BUILT the venv, which is not the installed version, so it is not consulted.
+Comparing the two on every UserPromptSubmit is cheap enough to need no gate,
+and it is the moment an agent actually reads what the daemon says.
 
-**Re-resolve, never remember.** The venv is fingerprint-keyed
-(``untracked/venv-{slug}-py{MM}-{fingerprint}/``), so an upgrade that changes
-the fingerprint inputs creates a NEW venv directory rather than rewriting the
-old one — a check that cached ``sys.prefix``, or a path resolved once at
-construction, would keep reading the OLD venv's untouched metadata and report
-"fresh" forever. ``resolve_existing_venv_python()`` is called fresh on every
-``handle()``, exactly as the rest of the daemon's own startup resolution does.
+**Re-read, never remember.** ``version.py`` is read fresh on every
+``handle()``, so a source upgraded underneath this process is seen on the next
+prompt.
 
 **Silent when nothing changed.** An advisory on every turn for a fact that
 changes at most once per upgrade would be worse than the defect it reports.
@@ -59,14 +58,12 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
-from claude_code_hooks_daemon.daemon.metadata import read_daemon_metadata
-from claude_code_hooks_daemon.daemon.paths import resolve_existing_venv_python
-from claude_code_hooks_daemon.install.install_stamp import parse_install_stamp
 from claude_code_hooks_daemon.utils.cli_command import (
     daemon_cli_command,
     daemon_cli_command_for_docs,
     daemon_root,
 )
+from claude_code_hooks_daemon.utils.deployed_version import read_installed_source_version
 from claude_code_hooks_daemon.version import __version__
 
 
@@ -122,29 +119,16 @@ class DaemonUpgradeDetectorHandler(UserPromptSubmitHandlerBase):
     def _resolve_installed_daemon_version(self) -> str | None:
         """Return the CURRENTLY INSTALLED daemon's bare ``X.Y.Z`` version.
 
-        None covers every "cannot tell" case — no project context yet, no
-        venv resolvable, no metadata file, malformed metadata, an
-        unparseable version string — and every one of them means fail-open,
-        never a block.
+        None covers every "cannot tell" case — no project context yet, a
+        missing or unreadable ``version.py``, no version literal in it — and
+        every one of them means fail-open, never a block.
         """
         try:
             daemon_dir = self.daemon_root_reader()
         except RuntimeError:
             return None
 
-        python_path = resolve_existing_venv_python(daemon_dir)
-        if not python_path.is_file():
-            return None
-
-        venv_dir = python_path.parent.parent
-        metadata = read_daemon_metadata(venv_dir)
-        if metadata is None:
-            return None
-
-        try:
-            return parse_install_stamp(metadata.daemon_version).version
-        except ValueError:
-            return None
+        return read_installed_source_version(daemon_dir)
 
     @staticmethod
     def _advisory(*, running: str, installed: str) -> str:
@@ -173,11 +157,11 @@ class DaemonUpgradeDetectorHandler(UserPromptSubmitHandlerBase):
             "process is still the OLD version.\n"
             "\n"
             "Checked on every user turn: the version this process loaded "
-            "against the CURRENTLY INSTALLED version on disk (the venv's "
-            "`.daemon-metadata.json`), re-resolved fresh each time — never a "
-            "value remembered from startup, because an upgrade that changes "
-            "the venv's fingerprint creates a NEW venv directory rather than "
-            "rewriting the old one. **Silent when they match** — an advisory "
+            "against the CURRENTLY INSTALLED version on disk (the installed "
+            "source tree's `version.py`), re-read each time — never a value "
+            "remembered from startup, and never a venv's "
+            "`.daemon-metadata.json`, which records what built the venv. "
+            "**Silent when they match** — an advisory "
             "on every turn for a fact that changes at most once per upgrade "
             "would be worse than the defect.\n"
             "\n"
@@ -205,21 +189,19 @@ class DaemonUpgradeDetectorHandler(UserPromptSubmitHandlerBase):
             AcceptanceTest(
                 title="daemon-upgrade-detector — reports a version changed underneath it",
                 command=(
-                    "Submit a prompt while the running daemon's installed "
-                    "venv metadata records a different daemon_version than "
+                    "Submit a prompt while the installed source tree's "
+                    "version.py names a different version than "
                     "claude_code_hooks_daemon.version.__version__"
                 ),
                 harness_cannot_produce=(
-                    "This handler compares against the REAL installed venv's "
-                    ".daemon-metadata.json, resolved fresh through "
-                    "resolve_existing_venv_python() -- the harness has no way "
-                    "to make a live daemon's own installation disagree with "
-                    "itself without actually running a second install "
-                    "underneath it. Covered by "
+                    "This handler compares against the REAL installed source "
+                    "tree's version.py, read fresh on every prompt -- the "
+                    "harness has no way to make a live daemon's own "
+                    "installation disagree with itself without actually "
+                    "running a second install underneath it. Covered by "
                     "tests/unit/handlers/user_prompt_submit/"
-                    "test_daemon_upgrade_detector.py, which drives a real "
-                    "fingerprint-keyed venv layout on disk and asserts both "
-                    "the in-place-rewrite and new-venv-directory cases."
+                    "test_daemon_upgrade_detector.py, which writes a "
+                    "version.py on disk and rewrites it between calls."
                 ),
                 description=(
                     "The UserPromptSubmit context contains a 'DAEMON VERSION "

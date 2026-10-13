@@ -49,6 +49,37 @@ VERSION_MARKER_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 
+#: Location of the daemon's own version literal, relative to a daemon root.
+INSTALLED_SOURCE_VERSION_REL_PATH: Final[str] = "src/claude_code_hooks_daemon/version.py"
+
+_SOURCE_VERSION_RE: Final[re.Pattern[str]] = re.compile(
+    r"""^__version__\s*=\s*["'](\d+\.\d+\.\d+)["']""", re.MULTILINE
+)
+
+
+def read_installed_source_version(daemon_root: Path) -> str | None:
+    """The version of the daemon source installed under ``daemon_root``.
+
+    The source tree's ``version.py`` is the single source of the installed
+    version. It is parsed as text, never imported: the running process already
+    holds its own ``__version__``, so an import could only return that. ``None``
+    when the file is absent, unreadable or carries no ``X.Y.Z`` literal.
+    """
+    version_file = daemon_root / INSTALLED_SOURCE_VERSION_REL_PATH
+    text = ""
+    try:
+        text = version_file.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        log_and_continue(
+            logger,
+            e,
+            reason=f"an unreadable {version_file} leaves the text empty, so no version literal matches and callers say nothing",
+            level=logging.DEBUG,
+        )
+    match = _SOURCE_VERSION_RE.search(text)
+    return match.group(1) if match else None
+
+
 def version_marker_in(text: str) -> str | None:
     """The version recorded in ``text``'s generated-doc header, if present."""
     match = VERSION_MARKER_RE.search(text)

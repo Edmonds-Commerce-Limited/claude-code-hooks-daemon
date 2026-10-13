@@ -56,17 +56,17 @@ What main does today:
 
 ### Phase 1: Inventory
 
-- [ ] ⬜ **Task 1.1**: List every reader of a daemon version (the venv metadata `daemon_version`, `version.__version__`,
+- [x] ✅ **Task 1.1**: List every reader of a daemon version (the venv metadata `daemon_version`, `version.__version__`,
   the generated-doc header in `utils/deployed_version.py`, shell readers in `scripts/`), and every staleness test
   (`prune-venvs` flags, `list-stale-venvs`, `eager_cleanup_stale_venvs`, `disk-usage`). Record which should read
   `version.py` and which define stale, in a supporting doc `INVENTORY.md`.
 
 ### Phase 2: Version SSoT (TDD)
 
-- [ ] ⬜ **Task 2.1**: `daemon_upgrade_detector` reads the installed version from the installed source tree's
+- [x] ✅ **Task 2.1**: `daemon_upgrade_detector` reads the installed version from the installed source tree's
   `version.py` (the clone under `.claude/hooks-daemon/`), not from venv metadata. Test: a venv whose metadata names a
   different version than the source reports nothing; a source upgraded underneath a running daemon still reports.
-- [ ] ⬜ **Task 2.2**: Every other reader from Task 1.1 that takes a version from venv metadata moves to the same
+- [x] ✅ **Task 2.2**: Every other reader from Task 1.1 that takes a version from venv metadata moves to the same
   reader. Metadata's `daemon_version` stays only as a build record, if anything still needs it.
 
 ### Phase 3: One staleness rule (TDD)

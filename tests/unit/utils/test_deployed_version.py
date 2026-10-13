@@ -15,7 +15,9 @@ one nobody notices.
 from pathlib import Path
 
 from claude_code_hooks_daemon.utils.deployed_version import (
+    INSTALLED_SOURCE_VERSION_REL_PATH,
     TRACKED_VERSION_DOC_REL_PATH,
+    read_installed_source_version,
     read_tracked_deployed_version,
     version_marker_in,
 )
@@ -75,3 +77,44 @@ class TestSharedWithTheDocsQaCheck:
         from claude_code_hooks_daemon.utils.deployed_version import VERSION_MARKER_RE
 
         assert generated_doc_hand_edit._VERSION_MARKER_RE is VERSION_MARKER_RE
+
+
+class TestReadInstalledSourceVersion:
+    """Plan 00517 Task 2.1: the installed version is the source tree's version.py.
+
+    Parsed as text, never imported: the running process already holds its own
+    ``__version__``, and an import would only ever return that.
+    """
+
+    @staticmethod
+    def _write_version_py(root: Path, body: str) -> None:
+        target = root / INSTALLED_SOURCE_VERSION_REL_PATH
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+
+    def test_reads_the_version_literal(self, tmp_path: Path) -> None:
+        self._write_version_py(tmp_path, '"""Version."""\n\n__version__ = "3.69.0"\n')
+        assert read_installed_source_version(tmp_path) == "3.69.0"
+
+    def test_sees_a_rewrite_on_disk(self, tmp_path: Path) -> None:
+        self._write_version_py(tmp_path, '__version__ = "3.69.0"\n')
+        assert read_installed_source_version(tmp_path) == "3.69.0"
+        self._write_version_py(tmp_path, '__version__ = "3.70.0"\n')
+        assert read_installed_source_version(tmp_path) == "3.70.0"
+
+    def test_missing_file_is_none(self, tmp_path: Path) -> None:
+        assert read_installed_source_version(tmp_path) is None
+
+    def test_no_version_literal_is_none(self, tmp_path: Path) -> None:
+        self._write_version_py(tmp_path, '"""No version here."""\n')
+        assert read_installed_source_version(tmp_path) is None
+
+    def test_non_semver_literal_is_none(self, tmp_path: Path) -> None:
+        self._write_version_py(tmp_path, '__version__ = "3.69"\n')
+        assert read_installed_source_version(tmp_path) is None
+
+    def test_undecodable_bytes_are_none(self, tmp_path: Path) -> None:
+        target = tmp_path / INSTALLED_SOURCE_VERSION_REL_PATH
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"\xff\xfe __version__ \xff")
+        assert read_installed_source_version(tmp_path) is None
