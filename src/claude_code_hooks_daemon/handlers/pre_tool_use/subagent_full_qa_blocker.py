@@ -375,6 +375,11 @@ class FullQaPattern:
             ``cd`` before it). Under a grammar every operand is a target.
         full_words: WORDS that make the program run the whole suite wherever
             it runs (``llm_qa.py all``): matched literally, never as paths.
+            Operands are judged as words only when ``full_args`` is absent.
+        judges_operand_paths: False for an entry that declares ``full_words``
+            and no ``full_args``: no operand is then judged by the path rules
+            (repository root, at or above the start directory). It may still
+            count as a target.
         bare_is_full: With ``full_args`` or ``full_words`` set, a run naming
             no operand at all is full too (``pytest`` with no path collects the
             whole suite).
@@ -397,6 +402,7 @@ class FullQaPattern:
     value_flags: frozenset[str]
     flag_options: frozenset[str] | None = None
     full_words: frozenset[str] = frozenset()
+    judges_operand_paths: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -491,6 +497,7 @@ def _parse_entry(position: int, entry: object) -> tuple[FullQaPattern | None, st
 
     full_args = word_lists[_KEY_FULL_ARGS]
     full_words = word_lists[_KEY_FULL_WORDS]
+    judges_operand_paths = full_args is not None or full_words is None
     if full_args is None and full_words is not None:
         full_args = frozenset()
     declared_value_flags = word_lists[_KEY_VALUE_FLAGS] or frozenset()
@@ -506,6 +513,7 @@ def _parse_entry(position: int, entry: object) -> tuple[FullQaPattern | None, st
             value_flags=declared_value_flags | (grammar.value_options if grammar else frozenset()),
             flag_options=grammar.flag_options if grammar else None,
             full_words=full_words or frozenset(),
+            judges_operand_paths=judges_operand_paths,
         ),
         None,
     )
@@ -5759,8 +5767,10 @@ def _add_path_operand(
     # Brackets after `::` select a parametrised test; they are no glob.
     reach = _glob_reach(word.split(_NODE_ID_SEPARATOR, 1)[0])
     operand = _normalise_operand(word if reach is None else reach)
-    if pattern.full_args is not None and _operand_is_full(
-        operand, pattern.full_args, cwd, start, operands.marked
+    if (
+        pattern.full_args is not None
+        and pattern.judges_operand_paths
+        and _operand_is_full(operand, pattern.full_args, cwd, start, operands.marked)
     ):
         operands.seen_full = True
     elif operands.every_word_targets or reach is not None or _is_path_like(operand, cwd):
@@ -7054,7 +7064,8 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
             "bare_is_full?, read_only_flags?, value_flags?, option_grammar?}`, where "
             "`command` is the program's basename, `full_args` are the PATHS that make it "
             "run the whole suite and `full_words` the WORDS that do from anywhere (omit "
-            "both and every run is full). Any other operand narrows the run only if it "
+            "both and every run is full). An entry with `full_words` and no `full_args` "
+            "judges operands as words only. Any other operand narrows the run only if it "
             "is path-like, looked up in the directory the command `cd`s to. "
             "`option_grammar: pytest` supplies pytest's complete option set, so a "
             "flag's value is never read as a path and every other word is a target, "

@@ -1479,6 +1479,93 @@ class TestFullWordsAreAlwaysLiteral:
         assert find_full_qa_invocation("y lint", patterns) is None
 
 
+class TestAWordsOnlyEntryJudgesOperandsAsWords:
+    """N450: ``full_words`` without ``full_args`` also ran the PATH rules on every operand.
+
+    ``php probe.php .`` was denied as a full run although no full word is in
+    it: ``.`` is at the start directory. An entry that declares ``full_args``,
+    even empty, keeps the path rules.
+    """
+
+    _PHP: Final[dict[str, Any]] = {
+        "id": "via-php",
+        "command": "php",
+        "full_words": ["bin/qa"],
+        "read_only_flags": ["-t"],
+    }
+
+    @staticmethod
+    def _tree(tmp_path: Path) -> Path:
+        nested = tmp_path / "vendor" / "tool"
+        (nested / "lib").mkdir(parents=True)
+        (nested / ".git").mkdir()
+        (tmp_path / ".git").mkdir()
+        return nested
+
+    def _find(self, command: str, cwd: Path) -> object:
+        patterns, problems = parse_full_qa_patterns([self._PHP])
+        assert not problems, problems
+        return find_full_qa_invocation(command, patterns, cwd=cwd)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "php probe.php .",
+            "php probe.php ..",
+            "php probe.php {nested}",
+            "php probe.php --verbose .",
+            "php probe.php {nested}/lib",
+            "php probe.php",
+            "php bin/qa -t stan",
+        ],
+    )
+    def test_no_full_word_means_not_full(self, tmp_path: Path, command: str) -> None:
+        nested = self._tree(tmp_path)
+        assert self._find(command.format(nested=nested), tmp_path) is None, command
+
+    def test_a_full_word_is_still_full(self, tmp_path: Path) -> None:
+        self._tree(tmp_path)
+        assert self._find("php bin/qa", tmp_path) is not None
+
+    def test_a_declared_full_args_keeps_the_path_rules(self, tmp_path: Path) -> None:
+        nested = self._tree(tmp_path)
+        patterns, problems = parse_full_qa_patterns(
+            [{"id": "p", "command": "pytest", "full_args": ["tests", "."], "bare_is_full": True}]
+        )
+        assert not problems, problems
+        for command in ("pytest .", f"pytest {nested}", "pytest"):
+            assert find_full_qa_invocation(command, patterns, cwd=tmp_path), command
+
+    def test_an_empty_declared_full_args_keeps_the_path_rules(self, tmp_path: Path) -> None:
+        self._tree(tmp_path)
+        patterns, problems = parse_full_qa_patterns(
+            [{"id": "p", "command": "php", "full_args": [], "full_words": ["bin/qa"]}]
+        )
+        assert not problems, problems
+        assert find_full_qa_invocation("php probe.php .", patterns, cwd=tmp_path)
+
+    @pytest.mark.parametrize(
+        "command",
+        ["run_changed_tests.py", "run_changed_tests.py .", "run_changed_tests.py {root}"],
+    )
+    def test_an_empty_full_words_entry_is_never_full(self, tmp_path: Path, command: str) -> None:
+        self._tree(tmp_path)
+        patterns, problems = parse_full_qa_patterns(
+            [{"id": "run-changed-tests", "command": "run_changed_tests.py", "full_words": []}]
+        )
+        assert not problems, problems
+        found = find_full_qa_invocation(command.format(root=tmp_path), patterns, cwd=tmp_path)
+        assert found is None, command
+
+    @pytest.mark.parametrize(("command", "full"), [("all", True), ("changed", False)])
+    def test_the_shipped_llm_qa_entry(self, tmp_path: Path, command: str, full: bool) -> None:
+        self._tree(tmp_path)
+        found = find_full_qa_invocation(
+            f"./scripts/qa/llm_qa.py {command}", _patterns(), cwd=tmp_path
+        )
+        assert (found is not None) is full
+
+
 class TestTheDirectoryStackIsFollowed:
     """Review 6 m6 and n5: ``pushd``/``popd`` and nested ``env -C`` move the directory."""
 
