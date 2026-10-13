@@ -33,9 +33,11 @@ Tick an item here when it lands, with the commit.
 
 - [x] **Plan 00517 Phase 2**: the installed daemon version comes only from the installed `version.py`. Merged
   dbecffaea (with Task 1.1's `INVENTORY.md`); release note 054.
-- [ ] **Plan 00517 Phases 3-4**: one staleness rule; venvs with missing or unreadable metadata surfaced to the running
-  agent with evidence and removed once confirmed safe; cleanup on restart, provision and session start.
-- [ ] **Plan 00517 Phase 5**: release note and post-upgrade task.
+- [x] **Plan 00517 Phases 3-4**: one staleness rule; venvs with missing or unreadable metadata surfaced to the running
+  agent with evidence and removed once confirmed safe; cleanup on restart, provision and session start. Merged
+  91070f1a6 after one review round (dead runtime sets and automatic venv removal now fail closed while a peer container
+  may share the checkout).
+- [x] **Plan 00517 Phase 5**: release note 055 and post-upgrade task 01. Merged 91070f1a6 (Task 5.2 still open).
 
 ## Already in good order
 
