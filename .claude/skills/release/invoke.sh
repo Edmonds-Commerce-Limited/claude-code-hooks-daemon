@@ -170,8 +170,7 @@ This is MANDATORY. You MUST invoke the skill, not just mention it or suggest it 
 **What this does**:
 - Restarts daemon with latest code
 - Generates complete test playbook from ALL handler definitions (no filtering)
-- Groups tests into batches (3-5 tests each)
-- Spawns parallel Haiku agents to execute ALL batches concurrently
+- The MAIN THREAD runs every test sequentially with real tool calls (sub-agents are forbidden; the acceptance-test skill owns the method)
 - Executes EVERY test (blocking, advisory, context types)
 - Reports comprehensive pass/fail/skip results
 

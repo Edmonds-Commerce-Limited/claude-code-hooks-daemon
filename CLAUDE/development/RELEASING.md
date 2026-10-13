@@ -289,7 +289,7 @@ blindness.
 [Housekeeping Phase](#housekeeping-phase-every-release). Its commits land before 1b, so the full QA run and every
 later gate cover them.
 
-**1b. Full QA on this HEAD, then agent validation.** The release agent is a sub-agent, and the full suite is the main thread's gate (Plan 00463), so main Claude runs `./scripts/qa/llm_qa.py all` on the clean HEAD first. Then the agent verifies: clean git state, all QA passes (`llm_qa.py --read-only all`, which fails any result recorded for a tree other than this HEAD as `STALE`), version consistency across files (pyproject.toml, version.py, README.md), no existing tag, gh CLI authenticated. (`CLAUDE.md` carries no version string — it is a daemon-regenerated doc, not a version-bump target.)
+**1b. Full QA on this HEAD, then agent validation.** The release agent is a sub-agent, and the full suite is the main thread's gate (Plan 00463), so main Claude runs `./scripts/qa/llm_qa.py all` on the clean HEAD first. Then the agent verifies: clean git state, all QA passes (`llm_qa.py --read-only all`, which fails any result recorded for a tree other than this HEAD as `STALE`), version consistency across the files listed in Step 3 "Version Update", no existing tag, gh CLI authenticated. (`CLAUDE.md` carries no version string — it is a daemon-regenerated doc, not a version-bump target.)
 
 **ANY failure = IMMEDIATE ABORT. NO auto-fixing.**
 
@@ -327,7 +327,13 @@ Agent proposes bump with justification. Manual override accepted.
 
 ### 3. Version Update
 
-Updates version in: `pyproject.toml`, `version.py`, `README.md` (badge), and `.claude/ccy/claude-supervise.py` (the standalone supervisor's hardcoded `__version__`, kept in lockstep — enforced by `tests/unit/supervise/test_compaction_gap_repro.py::TestSupervisorVersionMatchesDaemon`, which FAILS the QA gate if the supervisor version drifts from `version.py`).
+**The version-carrying files (the single list; other documents point here):**
+`pyproject.toml`, `src/claude_code_hooks_daemon/version.py`, `README.md` (badge),
+`.claude/ccy/claude-supervise.py` (the standalone supervisor's hardcoded
+`__version__`, kept in lockstep — enforced by
+`tests/unit/supervise/test_compaction_gap_repro.py::TestSupervisorVersionMatchesDaemon`,
+which FAILS the QA gate if the supervisor version drifts from `version.py`),
+`.claude/HOOKS-DAEMON.md` (regenerated, below) and `uv.lock` (re-locked, below).
 
 Also check README.md's stats still hold. Both the badge and the body state a
 deliberately ROUNDED test figure ("12,000+"), which stays true across many
@@ -672,15 +678,12 @@ behind it.
 
 ## Step 12: Acceptance Testing Gate (BLOCKING)
 
-**Delegation is governed by each test's `Requires Main Thread` field in the
-generated playbook** (see the playbook's "Execution Routing" section). A test
-marked `yes` must NEVER be delegated — lifecycle events and this session's
-system-reminders genuinely cannot be observed from a sub-agent, which is the
-enduring lesson of the v2.9.0 incident (async sub-agent testing created race
-conditions). Tests marked `no` may be delegated to parallel sub-agents —
-verified experimentally: sub-agents ARE blocked by PreToolUse hooks and DO see
-PostToolUse system-reminders in their own context. Batch delegable tests by
-the playbook's `Recommended Model` field for speed.
+**The main thread runs the whole gate, sequentially, via `/acceptance-test`.**
+Sub-agent execution is forbidden: sub-agents have no Write tool, lifecycle
+events and this session's system-reminders cannot be observed from one, and the
+v2.9.0 incident showed async sub-agent testing creating race conditions. The
+method is owned by `.claude/skills/acceptance-test/SKILL.md`; this step does
+not restate it.
 
 ### Scope
 
