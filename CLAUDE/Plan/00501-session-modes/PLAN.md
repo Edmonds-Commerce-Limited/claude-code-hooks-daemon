@@ -96,7 +96,7 @@ plan does not repeat them. The earlier code fact-check is in `subagent-reports/2
     awaiting-human), 30 minute window, similarity 0.75, repo unchanged excluding journal files, 4 hour timer.
 09. **Use a Stop `continue:false` halt if the spike shows it works?** Default: yes, once per entry, logged.
 10. **Rename the plan to "session modes"?** Approved by the owner; done.
-11. **Manual goals (#106):** what exits the mode, whether it also stops post-compaction goal re-injection, and how
+11. **Manual goals (#106):** what exits the mode, whether it also suppresses the post-compaction `continue`, and how
     small the first mod section may be. Listed in [MANUAL-GOALS.md](MANUAL-GOALS.md).
 
 ## Tasks
@@ -168,7 +168,8 @@ plan does not repeat them. The earlier code fact-check is in `subagent-reports/2
 - [ ] ⬜ **Task 8.1**: Spike: does `UserPromptSubmit` fire for a typed `/goal clear` and its aliases?
 - [ ] ⬜ **Task 8.2**: TDD the supervisor's side-channel record before a clearing `/goal`, and the daemon's
   attribution (fresh matching record = supervisor, none = human, unreadable = supervisor).
-- [ ] ⬜ **Task 8.3**: TDD the `manual-goals` mode: goal injection suppressed, status-line label, exit per question 11.
+- [ ] ⬜ **Task 8.3**: TDD the `manual-goals` mode: no goal-intent signal written, added to the precedence list,
+  status-line label, exit per question 11.
   Design and questions: [MANUAL-GOALS.md](MANUAL-GOALS.md). The control-panel mod section is Plan 00497's.
 
 ## Success Criteria

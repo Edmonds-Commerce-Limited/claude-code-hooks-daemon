@@ -34,20 +34,30 @@ depends on this plan's mode state. No work is scheduled until the owner answers 
   no mode. With no record, it is a human's: enter `manual-goals`.
 - **Fail safe.** An unreadable record counts as the supervisor's, so no mode changes. A human can repeat the clear; a
   spurious "human" clear would silently switch automation off.
+- **Trade-off (coordinator note):** the record would be the first file the supervisor writes into the sidecar
+  directory, which today only the daemon writes. Anything that can write there can forge a record and hide a human
+  clear, and the fail-safe rule leans the same way. Under the careless-not-hostile threat model that is acceptable,
+  but it is a new write path to review.
 
 ## How it fits this plan
 
 - `manual-goals` suppresses goal injection only. Unlike `focus`, it does not drop cron ticks or work-driving
-  advisories. It sits in the precedence list between `awaiting-human` and `focus` unless the owner says otherwise.
+  advisories. Task 8.3 adds it to the precedence list (PLAN.md Goals), between `awaiting-human` and `focus` unless
+  the owner says otherwise.
 - The supervisor already reads modes from the per-session file (Task 5.1), so it needs no second channel to learn
   that goals are off. The side-channel record is the new supervisor change.
-- Phase 0 gains a spike: does `UserPromptSubmit` fire for `/goal clear`?
+- Task 8.1 is a spike: does `UserPromptSubmit` fire for `/goal clear`?
+- After a compaction the supervisor injects only `continue`; it types `/goal` only from a `*.goal-intent` signal the
+  daemon writes (`claude-supervise.py`). So "suppress goal injection" means the daemon writes no goal-intent signal
+  while the mode is on; there is no separate post-compaction `/goal` to stop.
 
 ## Questions for the owner (question 11 in PLAN.md)
 
 1. **Exit:** what switches `manual-goals` off: a `/goal <condition>` the human types, a `hooks-daemon goals on`
    prompt, a new session, or all three?
-2. **Post-compaction re-injection:** does `manual-goals` also stop the supervisor re-injecting the goal after a
-   compaction? Recommended: yes, since that is the same automated injection.
+2. **Post-compaction `continue`:** the issue asks whether the mode should stop a post-compaction goal
+   re-injection. The supervisor does not re-inject a goal then (see above); it types `continue`. Should
+   `manual-goals` also suppress that `continue`? Recommended: no. The mode is about goals; suppressing `continue` is
+   what `BLOCKED` does (question 7).
 3. **Scope of the mod section:** is a read-only mode display enough for the first mod section, with session-scoped
    config overrides (and persisting them) a later step? Recommended: yes, to "break the ice" with the smallest mod.
