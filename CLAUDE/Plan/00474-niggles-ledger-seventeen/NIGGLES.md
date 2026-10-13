@@ -77,6 +77,33 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N450 — a `full_words`-only pattern in subagent_full_qa_blocker also applies the PATH rules to every operand
+
+**Source**: GitHub issue #103 (triaged 2026-10-13).
+
+**Evidence** (main at da5c4725b, `handlers/pre_tool_use/subagent_full_qa_blocker.py`):
+
+- `_parse_entry` (lines 494-495) turns an absent `full_args` into an EMPTY set whenever `full_words` is given.
+- `_add_path_operand` then runs every operand through `_operand_is_full` (line 5762), because `full_args is not None`.
+- `_operand_is_full` returns True for an operand at or above the starting directory (line 5439). Through
+  `_names_the_suite` it also returns True for an operand at a repository root (`relative == "."`, line 5415). Neither
+  rule consults `full_args`.
+- So `{command: php, full_words: [bin/qa]}` denies `php probe.php .`, `php probe.php ..` and
+  `php probe.php <a worktree root>` as full runs, though no full word is present. The class docstring says
+  `full_words` are "matched literally, never as paths".
+- The only shipped words-only entry is this repository's `llm_qa.py` (`full_words: [all, tests]`), which takes
+  subcommands, not paths.
+
+**Remedy (coordinator ruling)**:
+
+- An entry that declares `full_words` and no `full_args` judges operands as words only: no repository-root rule, no
+  at-or-above-start rule, no `full_args` comparison.
+- An entry that declares `full_args`, even an empty list, keeps today's path rules unchanged.
+- Bare-run handling (`bare_is_full`) is unchanged.
+- `php bin/qa` must still deny.
+
+**Status**: 🔄 In progress.
+
 ### N449 — merge_qa_report judges a `cd <other> && git merge` by the session's directory, not the merge's
 
 **Source**: GitHub issue #101 (triaged 2026-10-13).
