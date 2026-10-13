@@ -77,6 +77,22 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N458 — the acceptance-test skill forbids sub-agent execution, while RELEASING.md Step 12 routes tests the playbook marks `Requires Main Thread: no` to sub-agents
+
+**Source**: coordinator review of the Plans 00450/00451 branch (2026-10-13).
+
+**Evidence**: `.claude/skills/acceptance-test/SKILL.md` ("Main Thread Only": sub-agent strategies "are unreliable and
+forbidden") dates from v2.10.0 (1b8ac68d4, 2026-02-11). The playbook's per-test `requires_main_thread` field was
+added afterwards (7afae004d, 2026-02-19, `core/acceptance_test.py`, `daemon/playbook_generator.py`), and RELEASING.md
+Step 12 routes by it ("Tests marked `no` may be delegated to parallel sub-agents — verified experimentally"; Plan 00256,
+4e064e153, 2026-08-18). The two documents a `/release` run reads give opposite instructions. A first fix on the
+00450 branch took the older side and was sent back.
+
+**Fix direction**: one canonical home for the acceptance method. The newer, measured design is Step 12's routing; the
+skill would then state it and RELEASING.md point at it, unless a new measurement shows delegation unreliable.
+
+**Status**: ⬜ Open.
+
 ### N457 — subagent_full_qa_blocker cannot exempt a dedicated QA-runner agent, so a project whose full QA is delegated to one must leave it off
 
 **Source**: the owner, 2026-10-13: a client project's optimise review reported that enabling the handler would deny

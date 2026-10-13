@@ -16,6 +16,8 @@ Tick an item here when it lands, with the commit.
   loosen a bound.
 - [ ] **Plan 00450**: `.claude/skills/release/invoke.sh` (lines 170-176) still tells the agent the acceptance gate spawns
   parallel Haiku agents, which `acceptance-test/invoke.sh` forbids. The next `/release` reads it.
+- [ ] **N458**: the acceptance-test skill and RELEASING.md Step 12 give opposite instructions on sub-agent execution;
+  `/release` reads both, so one canonical method before the next release.
 - [ ] **Plan 00451**: `.claude/agents/release-agent.md` lists 3 of the 6 version-carrying files (missing
   `.claude/HOOKS-DAEMON.md`, `.claude/ccy/claude-supervise.py`, `uv.lock`; `RELEASING.md` has all six), which costs up
   to three red QA cycles mid-release.
