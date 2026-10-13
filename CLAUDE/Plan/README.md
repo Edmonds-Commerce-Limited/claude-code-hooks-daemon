@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00516: journal in place redaction](00516-journal-in-place-redaction/PLAN.md) - Not Started, Medium (#108; awaiting owner decisions: a bounded, audited in-place redaction of a past journal entry, since append-only corrections cannot remove a leaked value; ledger 00474 N389)
+
 - [00515: per host handler overrides](00515-per-host-handler-overrides/PLAN.md) - Not Started, Medium (#93; awaiting owner decisions: per-host or per-role `handlers:` overlays in Plan 00479's top-level `hosts:` block, including whether an overlay may disable a guard)
 
 - [00514: sensitive content withheld match text](00514-sensitive-content-withheld-match-text/PLAN.md) - Not Started, Medium (#92; awaiting owner decisions: a way to declare a structural pattern whose Write/Edit deny reason never repeats the matched text, against Plan 00201's safe-to-name design)
@@ -308,11 +310,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 515 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 516 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 438 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 54 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 55 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
