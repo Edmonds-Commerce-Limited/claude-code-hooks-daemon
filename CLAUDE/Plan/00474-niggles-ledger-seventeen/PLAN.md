@@ -35,6 +35,8 @@ not-a-defect with the reasoning kept.
 
 ## Niggles
 
+What stands between `main` and the next release is in [RELEASE-BURNDOWN-3-70.md](RELEASE-BURNDOWN-3-70.md).
+
 Full write-ups are in [NIGGLES.md](NIGGLES.md). The one-line-per-niggle status
 table (162 rows) is in [STATUS-INDEX.md](STATUS-INDEX.md).
 Counted by the status column's emoji:
