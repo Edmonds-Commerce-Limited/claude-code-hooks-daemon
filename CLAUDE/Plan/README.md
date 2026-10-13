@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00517: daemon version ssot and no stale venvs](00517-daemon-version-ssot-and-no-stale-venvs/PLAN.md) - Not Started, High (owner direction: the installed daemon version comes from the installed `version.py` only, never a venv's metadata copy; one staleness rule for every venv cleanup; a venv with missing or unreadable metadata is investigated by the running agent and removed once confirmed safe; cleanup also on restart, provision and session start)
+- [00517: daemon version ssot and no stale venvs](00517-daemon-version-ssot-and-no-stale-venvs/PLAN.md) - In Progress, High (owner direction: the installed daemon version comes from the installed `version.py` only, never a venv's metadata copy; one staleness rule for every venv cleanup; a venv with missing or unreadable metadata is investigated by the running agent and removed once confirmed safe; cleanup also on restart, provision and session start)
 
 - [00516: journal in place redaction](00516-journal-in-place-redaction/PLAN.md) - Not Started, Medium (#108; awaiting owner decisions: a bounded `mkplan.bash --journal-redact` to remove a leaked value from a past journal entry with an appended correction entry, since `journal-dayfile-is-today` blocks any past-day edit; ledger 00474 N389)
 
