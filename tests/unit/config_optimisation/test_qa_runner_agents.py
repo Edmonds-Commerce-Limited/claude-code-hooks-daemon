@@ -73,6 +73,16 @@ class TestFindFullQaRunnerAgents:
         _agent(tmp_path, "other-file", "x", name="a-full-qa-runner")
         assert find_full_qa_runner_agents(tmp_path) == ("a-full-qa-runner", "z-full-qa-runner")
 
+    def test_undecodable_agent_file_is_skipped_not_fatal(self, tmp_path: Path) -> None:
+        _agent(tmp_path, "qa-full-runner", "x")
+        (tmp_path / ".claude" / "agents" / "broken.md").write_bytes(b"\xff\xfe\x00bad")
+        assert find_full_qa_runner_agents(tmp_path) == ("qa-full-runner",)
+
+    def test_unreadable_agent_path_is_skipped_not_fatal(self, tmp_path: Path) -> None:
+        _agent(tmp_path, "qa-full-runner", "x")
+        (tmp_path / ".claude" / "agents" / "a-directory.md").mkdir()
+        assert find_full_qa_runner_agents(tmp_path) == ("qa-full-runner",)
+
     def test_full_runner_without_a_qa_scope_is_not_proposed(self, tmp_path: Path) -> None:
         _agent(tmp_path, "full-runner", "x")
         assert find_full_qa_runner_agents(tmp_path) == ()
