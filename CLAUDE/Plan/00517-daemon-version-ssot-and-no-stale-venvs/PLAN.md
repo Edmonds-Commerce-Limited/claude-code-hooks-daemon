@@ -88,8 +88,10 @@ What main does today:
 
 ### Phase 4: Where it runs
 
-- [ ] ⬜ **Task 4.1**: Daemon restart and `provision` run the stale cleanup (proven-stale only, never UNPROVEN).
-  Coordinate with Plan 00477 Task 2.2 (provision) and Plan 00100 Phase 4's venv lock.
+- [x] ✅ **Task 4.1**: Daemon restart and `provision` run the stale cleanup (proven-stale only, never UNPROVEN).
+  Coordinate with Plan 00477 Task 2.2 (provision) and Plan 00100 Phase 4's venv lock. Restart (`cmd_restart`),
+  provision (`init.sh` start, `bin/hooks-daemon restart`) and plain start all reach `cmd_start`, so the cleanup lives
+  in `_reap_stale_runtime_files`; it holds the venv build lock, skips a venv a process uses, and is fail-open.
 
 - [ ] ⬜ **Task 4.2**: The existing daemon-start `_stale_venv_advisory` is rebuilt on Task 3.1's rule (no second
   advisory), and a SessionStart advisory lists UNPROVEN venvs with the evidence and the exact removal command,

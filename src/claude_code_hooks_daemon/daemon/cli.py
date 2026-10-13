@@ -87,6 +87,7 @@ from claude_code_hooks_daemon.daemon.paths import (
     get_socket_path,
     live_venv_realpaths,
     parse_pid_text,
+    processes_using_venvs,
     project_path_slug,
     python_venv_fingerprint,
     read_pid_file,
@@ -608,10 +609,30 @@ def _reap_stale_runtime_files(project_path: Path, config: Config) -> None:
     if stale_total > 0:
         _say_before_fork(f"Cleaned up {stale_total} stale file(s) older than {stale_days} days")
 
-    # Plan 00181 Task 4.2 (Decision 1): SURFACE reclaimable stale/legacy venvs
-    # (~187 MB each) — the biggest disk offender — but never auto-delete them
-    # (unsafe in the multi-container shared-untracked model). Deletion stays the
-    # operator's guarded `prune-venvs` call.
+    # Plan 00517 Task 4.1: venvs (~187 MB each, the biggest disk offender) PROVEN
+    # stale by the one staleness rule are removed on every start, restart and
+    # provision. Fail-open: a cleanup error never stops a start. A venv the code
+    # cannot prove stale is never removed here; the SessionStart advisory
+    # surfaces it with evidence.
+    try:
+        for removed_venv in _cleanup_proven_stale_venvs(project_path):
+            _say_before_fork(f"Removed stale venv: {removed_venv}")
+    except (OSError, ValueError, VenvLockTimeout) as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="a venv cleanup that fails or waits on the build lock is retried by the next start, and a start must not depend on it",
+        )
+    except Exception as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="an unexpected venv cleanup error must not stop a daemon start; the next start retries it",
+            level=logging.ERROR,
+        )
+
+    # Anything the cleanup could not remove is still reported, with the guarded
+    # `prune-venvs` command.
     venv_advisory = _stale_venv_advisory(project_path)
     if venv_advisory is not None:
         _say_before_fork(venv_advisory)
@@ -3026,6 +3047,50 @@ def _stale_venv_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _unproven_venv_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Venvs the code cannot prove stale: surfaced with evidence, never bulk-removed."""
     return _entries_with_verdict(entries, VENV_UNPROVEN)
+
+
+# How long the start-time venv cleanup waits for the venv build lock. A build
+# holding it means a venv is in flux, so the cleanup skips this start and the
+# next one retries; it must never delay a start.
+_VENV_CLEANUP_LOCK_SECONDS = 5.0
+
+
+def _cleanup_proven_stale_venvs(project_root: Path) -> list[Path]:
+    """Remove every venv proven stale; return the paths removed (Plan 00517 Task 4.1).
+
+    Runs from daemon start, which restart and provision both go through. Only
+    the one staleness rule's ``stale`` verdict is removed, never an UNPROVEN
+    venv, the live venv or the current fingerprint's. A stale venv a process is
+    still using (a peer started before the lock changed) is left for a later
+    start. Removal holds the venv build lock, so it cannot race
+    ``ensure_venv``; the common nothing-to-remove case takes no lock and walks
+    no directory.
+    """
+    entries = _enumerate_venvs(project_root, include_size=False)
+    if not _stale_venv_entries(entries):
+        return []
+    daemon_dir = _daemon_untracked_dir(project_root).parent
+    removed: list[Path] = []
+    with venv_lock(daemon_dir, _VENV_CLEANUP_LOCK_SECONDS):
+        stale = _stale_venv_entries(_enumerate_venvs(project_root, include_size=False))
+        in_use = processes_using_venvs([Path(entry["path"]) for entry in stale]).users
+        for entry in stale:
+            venv = Path(entry["path"])
+            if in_use[venv]:
+                logger.info("Kept stale venv %s: process %d uses it", venv, in_use[venv][0].pid)
+                continue
+            try:
+                shutil.rmtree(venv)
+            except OSError as exc:
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason=f"a stale venv {venv} that cannot be removed is retried by the next start",
+                )
+                continue
+            logger.info("Removed stale venv: %s (%s)", venv, entry["verdict_reason"])
+            removed.append(venv)
+    return removed
 
 
 def _stale_venv_advisory(project_root: Path) -> str | None:
