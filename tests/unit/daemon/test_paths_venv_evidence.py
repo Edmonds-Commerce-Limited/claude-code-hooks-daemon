@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -233,4 +234,19 @@ def test_non_pid_entries_are_ignored(tmp_path: Path, pid_name: str) -> None:
     scan = processes_using_venvs([venv], proc_root)
 
     assert scan.users[venv] == []
+    assert scan.unreadable == 0
+
+
+def test_a_process_that_exits_mid_scan_is_not_counted_unreadable(tmp_path: Path) -> None:
+    venv = _venv(tmp_path, "venv-me-py311-aaaaaaaa")
+    proc_root = tmp_path / "proc"
+    (proc_root / "99").mkdir(parents=True)
+    real_exists = Path.exists
+
+    def vanished(self: Path) -> bool:
+        return False if self.name == "99" else real_exists(self)
+
+    with patch.object(Path, "exists", vanished):
+        scan = processes_using_venvs([venv], proc_root)
+
     assert scan.unreadable == 0

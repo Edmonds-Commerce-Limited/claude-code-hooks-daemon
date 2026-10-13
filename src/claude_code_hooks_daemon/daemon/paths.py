@@ -3093,7 +3093,9 @@ def processes_using_venvs(venv_dirs: list[Path], proc_root: Path = Path("/proc")
             "argv0": _read_argv0(entry / "cmdline"),
         }
         if not any(found.values()):
-            unreadable += 1
+            # A process that exited mid-scan is gone, not unreadable.
+            if entry.exists():
+                unreadable += 1
             continue
         for venv, venv_prefixes in prefixes.items():
             for via, value in found.items():
