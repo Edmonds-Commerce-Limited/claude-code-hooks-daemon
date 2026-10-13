@@ -95,7 +95,8 @@ full runs exhausting the host, so a dedicated runner fits its intent; two runner
 with a one-at-a-time lock (a second exempt full run while one is live is denied, naming the live one). The `optimise`
 review then recommends the exemption, rather than "leave it off", when it finds a dedicated QA-runner agent.
 
-**Status**: ⬜ Open (design proposed to the owner 2026-10-13).
+**Status**: 🔄 Graduated to [Plan 00518](../00518-full-qa-blocker-exempt-agent-types/PLAN.md) on the owner's ruling
+(2026-10-13): build the exemption and dogfood it with a QA-runner agent here.
 
 ### N456 — `prune-venvs --all-except-current` lists the venv the running daemon uses for removal
 

@@ -41,7 +41,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). The one-line-per-niggle status
 table (162 rows) is in [STATUS-INDEX.md](STATUS-INDEX.md).
 Counted by the status column's emoji:
 
-- 12 rows are open (⬜): N457, subagent_full_qa_blocker having no exemption for a dedicated QA-runner agent; N456, `prune-venvs --all-except-current` listing the running daemon's venv for removal (Plan 00517 Task 3.0); N453, main's full CI run red on a deployed skill page that differs from its source; N454, the protected-path guard denying a read-only grep loop; N455, CI-load failures (a Swift lint timeout scored as an allow, a timing bound); N424, the LSP guard denying a grep over piped output; N427, the provision sync tests leaving stub daemon processes behind; N430, the conflict-marker gate denying a commit into a repository the same command creates; N435, the report-path verifier resolving a worktree agent's relative path against the main checkout; N443, upstream's `agent_id` now also identifying in-process teammates; N447, the conflict-marker gate grepping excluded paths before filtering (#99); and N451, a stop-hook prose pattern arming the human-blocked marker on a plural. N53 of archived ledger 00466 is 🟡: batch AJ reproduced
+- 11 rows are open (⬜): N456, `prune-venvs --all-except-current` listing the running daemon's venv for removal (Plan 00517 Task 3.0); N453, main's full CI run red on a deployed skill page that differs from its source; N454, the protected-path guard denying a read-only grep loop; N455, CI-load failures (a Swift lint timeout scored as an allow, a timing bound); N424, the LSP guard denying a grep over piped output; N427, the provision sync tests leaving stub daemon processes behind; N430, the conflict-marker gate denying a commit into a repository the same command creates; N435, the report-path verifier resolving a worktree agent's relative path against the main checkout; N443, upstream's `agent_id` now also identifying in-process teammates; N447, the conflict-marker gate grepping excluded paths before filtering (#99); and N451, a stop-hook prose pattern arming the human-blocked marker on a plural. N53 of archived ledger 00466 is 🟡: batch AJ reproduced
   the mechanism of an exit 127 and extended the diagnostic, but the live cause awaits a recurrence. The other 41 of the
   "42 still open in 00466" were fixed on main (39), fixed by batch AI (N33) or graduated to Plan 00485 (N96); see
   [the 00466 evidence](../Completed/00466-niggles-ledger-sixteen/STATUS-2026-10.md).
@@ -55,9 +55,9 @@ Counted by the status column's emoji:
 - 132 rows carry ✅ (128 of the 153 N rows, plus 4 "carried from dropped branch" summary rows) (fixed, dismissed, remedied, guarded or closed); 6 of them also carry a 🚫 limit, and
   2 also carry 🔄: N280 (guarded by batch AN) for its review follow-ups, and N425 (fixed) until CI confirms
   it. N428 (the Python 3.11 CI hang) is confirmed by main run 38204671323.
-- 7 rows record a deliberate limit (🚫); 19 are in progress or graduated (15 🔄, 3 🟡, 1 ↩️), N280,
-  N425 (main CI red after batch AL), N431 (the CI fallback's daemon idles out) and N433 (a quiet journal
-  fails CI) among the 15.
+- 7 rows record a deliberate limit (🚫); 20 are in progress or graduated (16 🔄, 3 🟡, 1 ↩️), N280,
+  N425 (main CI red after batch AL), N431 (the CI fallback's daemon idles out), N433 (a quiet journal
+  fails CI) and N457 (graduated to Plan 00518) among the 16.
 
 ## Tasks
 
