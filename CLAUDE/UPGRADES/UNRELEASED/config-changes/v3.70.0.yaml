@@ -79,6 +79,26 @@ config_changes:
         Enabled by the shipped config; keep it on if you set
         `exempt_agent_types`. Without it a named agent's type cannot be read
         and it is not exempt.
+    - key: handlers.session_start.unproven_venv_advisor
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00517 Task 4.2). At session start, lists each
+        `untracked/venv-*` the code cannot prove stale (missing or unreadable
+        `.daemon-metadata.json`, or another checkout view's slug) with the
+        processes using it, its interpreter and version, its age, its slug and
+        the view it belongs to, plus the exact `prune-venvs --unproven <path>
+        --force` command. Advisory only: it never removes a venv. Silent when
+        there are none.
+      example_yaml: |
+        handlers:
+          session_start:
+            unproven_venv_advisor:
+              enabled: true
+              priority: 72
+      migration_note: >-
+        On by default. Investigate each venv it lists and remove it only once
+        you have confirmed it is unused; set `enabled: false` to silence it.
     - key: persistent_crons.initial_thread_only
       recommended: false
       dormant: false

@@ -104,7 +104,7 @@
 | 37 | plan_fact_check_feed | ADVISORY | Feed plan edits to the debouncer so a burst yields one pending fact-check |
 | 38 | operator_signal_notice | ADVISORY | Surface a pending operator signal as hook context, once per signal per agent thread |
 
-### SessionStart (33 handlers)
+### SessionStart (34 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -140,6 +140,7 @@
 | 70 | persistent_cron_assertor | ADVISORY | State the project's declared crons and instruct a CronList reconcile |
 | 71 | reference_repo_sweep | ADVISORY | Fetch, safely fast-forward and record every governed reference repo |
 | 72 | routine_qa_sweep | ADVISORY | Advisory SessionStart sweep over the Routine tree (silent when clean) |
+| 72 | unproven_venv_advisor | ADVISORY | List venvs the code cannot prove stale, with evidence and the removal command |
 | 73 | session_actions_directive | ADVISORY | Signal the ccy supervisor when a session starts with must-do items |
 
 ### PreCompact (2 handlers)

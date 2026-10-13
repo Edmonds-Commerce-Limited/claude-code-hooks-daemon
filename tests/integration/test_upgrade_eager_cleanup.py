@@ -184,7 +184,8 @@ class TestEagerCleanupKeepsEverythingElse:
         assert sibling.exists(), "a venv built for the current source must survive"
         combined = result.stdout + result.stderr
         assert f"Kept venv: {sibling}" in combined
-        assert "lock_hash matches" in combined
+        # The resolver serves a venv built for the current source, so it is live too.
+        assert "live" in combined
 
     def test_keeps_missing_metadata(self, tmp_path: Path) -> None:
         daemon_dir = _make_daemon_dir(tmp_path)
@@ -227,7 +228,7 @@ class TestEagerCleanupKeepsEverythingElse:
         assert stale.exists()
         combined = result.stdout + result.stderr
         assert "Removed stale venv:" not in combined
-        assert "cannot compute" in combined
+        assert f"Kept venv: {stale}" in combined
 
     def test_keeps_when_python_helper_unavailable(self, tmp_path: Path) -> None:
         daemon_dir = _make_daemon_dir(tmp_path)

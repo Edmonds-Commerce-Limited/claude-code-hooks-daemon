@@ -82,7 +82,7 @@ class TestEnumerateVenvsDedup:
         project_root, real_venv, symlink_venv = symlinked_project
 
         with patch(
-            "claude_code_hooks_daemon.daemon.cli.resolve_existing_venv_python",
+            "claude_code_hooks_daemon.daemon.paths.resolve_existing_venv_python",
             return_value=symlink_venv / "bin" / "python",
         ):
             entries = cli._enumerate_venvs(project_root)
@@ -96,7 +96,7 @@ class TestEnumerateVenvsDedup:
         project_root, real_venv, symlink_venv = symlinked_project
 
         with patch(
-            "claude_code_hooks_daemon.daemon.cli.resolve_existing_venv_python",
+            "claude_code_hooks_daemon.daemon.paths.resolve_existing_venv_python",
             return_value=symlink_venv / "bin" / "python",
         ):
             entries = cli._enumerate_venvs(project_root)
@@ -113,11 +113,11 @@ class TestReclaimableExcludesActive:
         project_root, real_venv, symlink_venv = symlinked_project
 
         with patch(
-            "claude_code_hooks_daemon.daemon.cli.resolve_existing_venv_python",
+            "claude_code_hooks_daemon.daemon.paths.resolve_existing_venv_python",
             return_value=symlink_venv / "bin" / "python",
         ):
             entries = cli._enumerate_venvs(project_root)
-            reclaimable = cli._reclaimable_venv_entries(entries, current_stamp="")
+            reclaimable = cli._stale_venv_entries(entries)
 
         reclaimable_realpaths = {Path(e["real_path"]) for e in reclaimable}
         assert real_venv.resolve() not in reclaimable_realpaths
@@ -131,7 +131,7 @@ class TestPruneVenvsNeverDeletesActive:
 
         with (
             patch(
-                "claude_code_hooks_daemon.daemon.cli.resolve_existing_venv_python",
+                "claude_code_hooks_daemon.daemon.paths.resolve_existing_venv_python",
                 return_value=symlink_venv / "bin" / "python",
             ),
             patch(
@@ -152,7 +152,7 @@ class TestPruneVenvsNeverDeletesActive:
 
         with (
             patch(
-                "claude_code_hooks_daemon.daemon.cli.resolve_existing_venv_python",
+                "claude_code_hooks_daemon.daemon.paths.resolve_existing_venv_python",
                 return_value=symlink_venv / "bin" / "python",
             ),
             patch(
@@ -174,7 +174,7 @@ class TestDiskUsageNoDoubleCount:
 
         with (
             patch(
-                "claude_code_hooks_daemon.daemon.cli.resolve_existing_venv_python",
+                "claude_code_hooks_daemon.daemon.paths.resolve_existing_venv_python",
                 return_value=symlink_venv / "bin" / "python",
             ),
             patch(

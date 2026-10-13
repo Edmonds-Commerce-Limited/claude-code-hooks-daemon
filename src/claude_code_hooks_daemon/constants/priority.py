@@ -543,6 +543,10 @@ class Priority:
     # moves up a number: see its note below for why last is load-bearing
     # there and merely conventional here.
     ROUTINE_QA_SWEEP = 72
+    # Plan 00517 Task 4.2: unproven-venv report. Shares the slot above: both are
+    # cheap and silent when clean, and the band is full up to
+    # session_actions_directive, which must stay last.
+    UNPROVEN_VENV_ADVISOR = 72
     # Plan 00416 Task 2.3: the supervisor directive sensor -- so ADVISORY_MAX
     # widens by one again. Last is REQUIRED here, not merely tidy: it counts
     # what is still ACTION_REQUIRED after every other handler has run, and

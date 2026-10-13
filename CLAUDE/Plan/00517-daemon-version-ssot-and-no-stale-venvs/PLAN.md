@@ -75,25 +75,30 @@ What main does today:
   directory itself (the running interpreter's `sys.prefix`, and the venv path without resolving `bin/python`'s
   symlink), so no `prune-venvs` mode can remove it. Test over a real venv whose `bin/python` is a symlink to a system
   interpreter and whose fingerprint differs from the current one. Ledger 00474 N456.
-- [ ] ⬜ **Task 3.1**: One function decides stale (current `lock_hash` and this view's slug, never the venv the
+- [x] ✅ **Task 3.1**: One function decides stale (current `lock_hash` and this view's slug, never the venv the
   running daemon or the resolver currently selects), shared by the upgrade cleanup and `prune-venvs`; the flags that
-  test fingerprint or stamped version are removed or made to call it.
-- [ ] ⬜ **Task 3.2**: A venv with missing or unreadable metadata, or another view's slug, is classed UNPROVEN, not
+  test fingerprint or stamped version are removed or made to call it. `paths.classify_venv` is the function;
+  `--all-except-current` is removed with a message, `--stale` calls the rule.
+- [x] ✅ **Task 3.2**: A venv with missing or unreadable metadata, or another view's slug, is classed UNPROVEN, not
   kept silently. `list-venvs`/`prune-venvs --dry-run` show each UNPROVEN venv with the evidence: processes whose
   executable lives in it, interpreter and version, last-modified time, slug and the view it belongs to.
-- [ ] ⬜ **Task 3.3**: `prune-venvs --unproven <path> --force` removes one named UNPROVEN venv, refusing when a live
+  (`/proc` scan reads `exe`, `cwd` and `argv[0]`: a venv's `bin/python` is a symlink, so `exe` alone misses it.)
+- [x] ✅ **Task 3.3**: `prune-venvs --unproven <path> --force` removes one named UNPROVEN venv, refusing when a live
   process uses it or it is the resolver's current choice.
 
 ### Phase 4: Where it runs
 
-- [ ] ⬜ **Task 4.1**: Daemon restart and `provision` run the stale cleanup (proven-stale only, never UNPROVEN).
-  Coordinate with Plan 00477 Task 2.2 (provision) and Plan 00100 Phase 4's venv lock.
+- [x] ✅ **Task 4.1**: Daemon restart and `provision` run the stale cleanup (proven-stale only, never UNPROVEN).
+  Coordinate with Plan 00477 Task 2.2 (provision) and Plan 00100 Phase 4's venv lock. Restart (`cmd_restart`),
+  provision (`init.sh` start, `bin/hooks-daemon restart`) and plain start all reach `cmd_start`, so the cleanup lives
+  in `_reap_stale_runtime_files`; it holds the venv build lock, skips a venv a process uses, and is fail-open.
 
-- [ ] ⬜ **Task 4.2**: The existing daemon-start `_stale_venv_advisory` is rebuilt on Task 3.1's rule (no second
+- [x] ✅ **Task 4.2**: The existing daemon-start `_stale_venv_advisory` is rebuilt on Task 3.1's rule (no second
   advisory), and a SessionStart advisory lists UNPROVEN venvs with the evidence and the exact removal command,
-  telling the agent to investigate and remove each once confirmed safe; silent when there are none.
+  telling the agent to investigate and remove each once confirmed safe; silent when there are none. (New handler
+  `unproven_venv_advisor`, priority 72; its text is `paths.unproven_report_lines`, shared with `list-venvs`.)
 
-- [ ] ⬜ **Task 4.3**: The same rule for the daemon's per-host runtime files. Socket and pid paths are hostname-keyed
+- [x] ✅ **Task 4.3**: The same rule for the daemon's per-host runtime files. Socket and pid paths are hostname-keyed
   (`untracked/daemon-<hash>.{sock,pid,sock.start.lock,socket-path}` and `untracked/events-<hash>/`), so every container
   restart leaves the previous host's set behind; on 2026-10-13 this repository held 24 dead sets beside the live one,
   removed by hand after a connect probe refused every dead socket. Daemon start sweeps a set only when its socket
@@ -102,8 +107,8 @@ What main does today:
 
 ### Phase 5: Release
 
-- [ ] ⬜ **Task 5.1**: Release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`, and a post-upgrade task telling
-  the upgrading agent to clear any UNPROVEN venvs the new advisory lists.
+- [x] ✅ **Task 5.1**: Release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`, and a post-upgrade task telling
+  the upgrading agent to clear any UNPROVEN venvs the new advisory lists. (Release note 055; post-upgrade task 01.)
 - [ ] ⬜ **Task 5.2**: This repository's own `untracked/` and every worktree's venvs checked with the new tool.
 
 ## Success Criteria

@@ -1,0 +1,6 @@
+# Callout: venvs are judged by one staleness rule, and the ones it cannot prove are surfaced
+
+**Plan**: 00517
+**Audience**: operators
+
+`prune-venvs`, `disk-usage`, the upgrade cleanup and the daemon-start advisory now share one definition of a stale venv: the legacy `untracked/venv/`, or a venv of this checkout view whose readable `lock_hash` differs from the current source's. The venv the running daemon or the resolver uses is never selected, and `prune-venvs --all-except-current` is removed with a message (`--stale` is the replacement). Daemon start, restart and `provision` now remove every venv proven stale. A venv the code cannot prove stale (missing or unreadable metadata, or another view's slug) is never removed automatically: `list-venvs`, `prune-venvs --dry-run` and the new `unproven_venv_advisor` SessionStart handler list each with the processes using it, its interpreter and version, its age and its view, and `prune-venvs --unproven <path> --force` removes one once you have confirmed it is unused. Daemon start also removes other hosts' dead per-host runtime sets (`daemon-<id>.{sock,pid,sock.start.lock,socket-path}` and `events-<id>/`) when every socket in the set refuses a connection and its pid is not a live daemon.

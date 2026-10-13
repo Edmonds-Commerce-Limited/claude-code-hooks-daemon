@@ -18,14 +18,24 @@ import pytest
 from claude_code_hooks_daemon.daemon import cli
 from claude_code_hooks_daemon.daemon.paths import python_venv_fingerprint
 
+STALE_HASH = "sha256:" + "0" * 64
 
-def _make_venv(path: Path, stamp_version: str | None = None) -> None:
-    """Materialise a fake venv on disk that looks healthy enough for listing."""
+
+def _make_venv(path: Path, stamp_version: str | None = None, lock_hash: str | None = None) -> None:
+    """Materialise a fake venv on disk that looks healthy enough for listing.
+
+    ``lock_hash`` writes readable metadata; one that differs from the project's
+    makes the venv proven stale, none leaves it UNPROVEN.
+    """
     (path / "bin").mkdir(parents=True)
     (path / "bin" / "python").write_text('#!/bin/sh\nexec /usr/bin/python3 "$@"\n')
     (path / "bin" / "python").chmod(0o755)
     if stamp_version is not None:
         (path / ".daemon-version").write_text(stamp_version)
+    if lock_hash is not None:
+        (path / ".daemon-metadata.json").write_text(
+            json.dumps({"python_path": str(path / "bin" / "python"), "lock_hash": lock_hash})
+        )
 
 
 def _mark_self_install(project_root: Path) -> None:
@@ -36,6 +46,7 @@ def _mark_self_install(project_root: Path) -> None:
     ``.claude/hooks-daemon/untracked/``.
     """
     (project_root / "src" / "claude_code_hooks_daemon").mkdir(parents=True, exist_ok=True)
+    (project_root / "pyproject.toml").write_text("[project]\nname = 'x'\n")
 
 
 def _args(
@@ -131,12 +142,10 @@ class TestPruneVenvs:
         fp = python_venv_fingerprint(tmp_path)
         _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
         stale = untracked / "venv-py310-deadbeef"
-        _make_venv(stale, stamp_version="v3.6.0")
+        _make_venv(stale, stamp_version="v3.6.0", lock_hash=STALE_HASH)
 
         with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
-            rc = cli.cmd_prune_venvs(
-                _args(tmp_path, all_except_current=True, dry_run=True, force=True)
-            )
+            rc = cli.cmd_prune_venvs(_args(tmp_path, stale=True, dry_run=True, force=True))
 
         assert rc == 0
         assert stale.exists()  # not deleted
@@ -160,7 +169,9 @@ class TestPruneVenvs:
         assert not legacy.exists()
         assert (untracked / f"venv-{fp}").exists()  # current preserved
 
-    def test_prune_all_except_current_keeps_current_fp_venv(self, tmp_path: Path) -> None:
+    def test_prune_stale_keeps_current_fp_venv_and_removes_proven_stale(
+        self, tmp_path: Path
+    ) -> None:
         _mark_self_install(tmp_path)
         untracked = tmp_path / "untracked"
         untracked.mkdir()
@@ -169,11 +180,11 @@ class TestPruneVenvs:
         _make_venv(current, stamp_version="v3.7.0")
         other1 = untracked / "venv-py310-deadbeef"
         other2 = untracked / "venv-py312-12345678"
-        _make_venv(other1, stamp_version="v3.6.0")
-        _make_venv(other2, stamp_version="v3.5.0")
+        _make_venv(other1, stamp_version="v3.6.0", lock_hash=STALE_HASH)
+        _make_venv(other2, stamp_version="v3.5.0", lock_hash=STALE_HASH)
 
         with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
-            rc = cli.cmd_prune_venvs(_args(tmp_path, all_except_current=True, force=True))
+            rc = cli.cmd_prune_venvs(_args(tmp_path, stale=True, force=True))
 
         assert rc == 0
         assert current.exists()
@@ -190,10 +201,10 @@ class TestPruneVenvs:
         fp = python_venv_fingerprint(tmp_path)
         _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
         stale = untracked / "venv-py310-deadbeef"
-        _make_venv(stale, stamp_version="v3.6.0")
+        _make_venv(stale, stamp_version="v3.6.0", lock_hash=STALE_HASH)
 
         with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
-            rc = cli.cmd_prune_venvs(_args(tmp_path, all_except_current=True))
+            rc = cli.cmd_prune_venvs(_args(tmp_path, stale=True))
 
         assert rc == 1
         assert stale.exists()
@@ -202,7 +213,7 @@ class TestPruneVenvs:
         assert "force" in combined or "dry-run" in combined
 
     def test_prune_refuses_to_delete_current_fingerprint(self, tmp_path: Path) -> None:
-        """Even with --all-except-current + --force, never touch current-env venv."""
+        """Even with --stale + --force, never touch current-env venv."""
         _mark_self_install(tmp_path)
         untracked = tmp_path / "untracked"
         untracked.mkdir()
@@ -211,10 +222,43 @@ class TestPruneVenvs:
         _make_venv(current, stamp_version="v3.7.0")
 
         with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
-            rc = cli.cmd_prune_venvs(_args(tmp_path, all_except_current=True, force=True))
+            rc = cli.cmd_prune_venvs(_args(tmp_path, stale=True, force=True))
 
         assert rc == 0
         assert current.exists()
+
+    def test_prune_stale_never_selects_an_unproven_venv(self, tmp_path: Path) -> None:
+        """Missing metadata and another view's slug are not proof of staleness."""
+        _mark_self_install(tmp_path)
+        untracked = tmp_path / "untracked"
+        untracked.mkdir()
+        no_metadata = untracked / "venv-py310-nometada"
+        other_view = untracked / "venv-someoneelse-py310-deadbeef"
+        _make_venv(no_metadata, stamp_version="v3.6.0")
+        _make_venv(other_view, stamp_version="v3.6.0", lock_hash=STALE_HASH)
+
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
+            rc = cli.cmd_prune_venvs(_args(tmp_path, stale=True, force=True))
+
+        assert rc == 0
+        assert no_metadata.exists()
+        assert other_view.exists()
+
+    def test_all_except_current_is_removed_with_a_clear_message(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _mark_self_install(tmp_path)
+        untracked = tmp_path / "untracked"
+        untracked.mkdir()
+        victim = untracked / "venv-py310-deadbeef"
+        _make_venv(victim, stamp_version="v3.6.0", lock_hash=STALE_HASH)
+
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
+            rc = cli.cmd_prune_venvs(_args(tmp_path, all_except_current=True, force=True))
+
+        assert rc == 1
+        assert victim.exists()
+        assert "--all-except-current was removed" in capsys.readouterr().err
 
 
 class TestEnumerateAndHelpers:
@@ -285,9 +329,12 @@ class TestEnumerateVenvsInstallModes:
         self, tmp_path: Path, with_legacy: bool = True
     ) -> tuple[Path, Path]:
         """Build a fake normal-install project tree; return (untracked_dir, legacy)."""
-        untracked = tmp_path / ".claude" / "hooks-daemon" / "untracked"
+        daemon_dir = tmp_path / ".claude" / "hooks-daemon"
+        untracked = daemon_dir / "untracked"
         untracked.mkdir(parents=True)
-        fp = python_venv_fingerprint(tmp_path)
+        # A client install keys its venv on the DAEMON dir (Plan 00456), so the
+        # resolver serves this one and the legacy venv/ is not live.
+        fp = python_venv_fingerprint(daemon_dir)
         _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
         legacy = untracked / "venv"
         if with_legacy:
@@ -396,32 +443,31 @@ class TestStaleVenvAdvisory:
         untracked.mkdir()
         return untracked
 
-    def test_reclaimable_selector_includes_legacy_and_version_stale(self, tmp_path: Path) -> None:
+    def test_stale_selector_includes_legacy_and_lock_hash_stale(self, tmp_path: Path) -> None:
         untracked = self._setup(tmp_path)
         fp = python_venv_fingerprint(tmp_path)
         _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
-        _make_venv(untracked / "venv-py310-deadbeef", stamp_version="v3.6.0")  # version-stale
+        _make_venv(untracked / "venv-py310-deadbeef", lock_hash=STALE_HASH)  # lock-hash-stale
         _make_venv(untracked / "venv", stamp_version="v3.5.0")  # legacy
 
-        entries = cli._enumerate_venvs(tmp_path)
-        current_stamp = next(e["stamped_version"] for e in entries if e["is_current"])
-        reclaimable = cli._reclaimable_venv_entries(entries, current_stamp)
+        reclaimable = cli._stale_venv_entries(cli._enumerate_venvs(tmp_path))
 
         paths = {Path(e["path"]).name for e in reclaimable}
         assert paths == {"venv-py310-deadbeef", "venv"}
 
-    def test_reclaimable_selector_excludes_current_and_same_version(self, tmp_path: Path) -> None:
+    def test_stale_selector_excludes_current_and_unproven(self, tmp_path: Path) -> None:
         untracked = self._setup(tmp_path)
         fp = python_venv_fingerprint(tmp_path)
         _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
-        # Same stamped version as current, different fingerprint → NOT flagged.
-        _make_venv(untracked / "venv-py310-deadbeef", stamp_version="v3.7.0")
+        # A differing stamp is not staleness; no readable metadata is UNPROVEN.
+        _make_venv(untracked / "venv-py310-deadbeef", stamp_version="v3.6.0")
 
         entries = cli._enumerate_venvs(tmp_path)
-        current_stamp = next(e["stamped_version"] for e in entries if e["is_current"])
-        reclaimable = cli._reclaimable_venv_entries(entries, current_stamp)
 
-        assert reclaimable == []
+        assert cli._stale_venv_entries(entries) == []
+        assert [Path(e["path"]).name for e in cli._unproven_venv_entries(entries)] == [
+            "venv-py310-deadbeef"
+        ]
 
     def test_enumerate_include_size_false_skips_walk(self, tmp_path: Path) -> None:
         untracked = self._setup(tmp_path)
@@ -448,7 +494,7 @@ class TestStaleVenvAdvisory:
         untracked = self._setup(tmp_path)
         fp = python_venv_fingerprint(tmp_path)
         _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
-        _make_venv(untracked / "venv-py310-deadbeef", stamp_version="v3.6.0")
+        _make_venv(untracked / "venv-py310-deadbeef", stamp_version="v3.6.0", lock_hash=STALE_HASH)
 
         advisory = cli._stale_venv_advisory(tmp_path)
 

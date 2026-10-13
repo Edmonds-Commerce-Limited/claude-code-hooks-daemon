@@ -55,6 +55,24 @@ readers (A6-A9) read a build record on purpose and stay; A6 stops being a stalen
 Four definitions of stale in use today: stamp differs (B1/B4-B6), fingerprint differs (B2), `lock_hash` differs with slug
 (B7/B8), and legacy name (B3, B8). Phase 3 keeps B7's and retires the other two as definitions.
 
+## B-outcome. What the staleness tests became (Phases 3 and 4)
+
+`paths.classify_venv` (stdlib, shared) is the one rule. Verdicts: `stale` (legacy `venv/`, or this view's slug or none
+with a readable `lock_hash` that differs), `unproven` (missing or unreadable metadata, another view's slug), `keep`
+(live, the current fingerprint's venv, a matching `lock_hash`, a symlink name, or an uncomputable current hash).
+
+| #   | Became                                                                                                           |
+| --- | ---------------------------------------------------------------------------------------------------------------- |
+| B1  | `prune-venvs --stale` selects the `stale` verdict                                                                |
+| B2  | `--all-except-current` removed; the flag prints a message pointing at `--stale` and `list-venvs`                 |
+| B3  | `--legacy` selects the legacy `stale` entry                                                                      |
+| B4  | `_stale_venv_entries` / `_unproven_venv_entries` read the verdict (`_reclaimable_venv_entries` is gone)          |
+| B5  | `_stale_venv_advisory` reports the `stale` entries that survive the start-time cleanup (no second advisory)      |
+| B6  | `disk-usage` counts the `stale` entries as reclaimable                                                           |
+| B7  | `classify_venv` (was `classify_venv_for_cleanup`); `list-stale-venvs` prints `remove`, `keep` or `unproven`      |
+| B8  | `eager_cleanup_stale_venvs` removes `remove` lines and logs `unproven` ones as kept, with a `list-venvs` pointer |
+| B10 | `paths.live_venv_realpaths` (moved from `cli.py`), keyed on the daemon dir, also read by `classify_venv`         |
+
 ## C. Which side each belongs on
 
 - Read `version.py` (installed version): A2 and its callers (A3 now). Shell scripts already do (A10-A14).

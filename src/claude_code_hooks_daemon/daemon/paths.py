@@ -10,6 +10,7 @@ not /tmp, to prevent security vulnerabilities.
 
 import argparse
 import contextlib
+import datetime
 import functools
 import hashlib
 import importlib.util
@@ -22,6 +23,7 @@ import shutil
 import socket
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
@@ -2425,6 +2427,182 @@ def cleanup_stale_daemon_files(project_dir: Path | str, max_age_days: int = 7) -
     return removed
 
 
+# Plan 00517 Task 4.3: a per-host runtime set is ``daemon-<id>.{sock,pid,
+# sock.start.lock,socket-path}`` plus ``events-<id>/``, ``<id>`` being the
+# sanitised hostname (a container id, in a container). The non-greedy id
+# anchors on the longest known suffix, so a dotted hostname stays one id.
+_RUNTIME_SET_FILE = re.compile(r"^daemon-(?P<id>.+?)\.(?:sock\.start\.lock|socket-path|sock|pid)$")
+_EVENTS_DIR_PREFIX = "events-"
+_SOCKET_PROBE_TIMEOUT_SECONDS = 1.0
+# A peer's start writes its start lock, then its pid and sockets; a set with any
+# member written inside this window may be mid-start, and is left for later.
+_RUNTIME_SET_GRACE_SECONDS = 60.0
+
+
+def _socket_is_dead(path: Path) -> bool:
+    """True only when a connection to ``path`` is refused or the file is gone.
+
+    Anything else (a connect that succeeds, times out, is denied, or whose path
+    is unusable) is NOT proof the socket is dead, so the caller keeps its set.
+    """
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    probe.settimeout(_SOCKET_PROBE_TIMEOUT_SECONDS)
+    try:
+        probe.connect(str(path))
+    except (ConnectionRefusedError, FileNotFoundError):
+        return True
+    except OSError:
+        return False
+    finally:
+        probe.close()
+    return False
+
+
+def _runtime_set_members(untracked_dir: Path) -> dict[str, list[Path]]:
+    """Group the per-host runtime files and ``events-<id>/`` dirs by host id."""
+    sets: dict[str, list[Path]] = {}
+    for entry in sorted(untracked_dir.iterdir()):
+        if entry.is_dir():
+            if entry.name.startswith(_EVENTS_DIR_PREFIX) and entry.name != _EVENTS_DIR_PREFIX:
+                sets.setdefault(entry.name[len(_EVENTS_DIR_PREFIX) :], []).append(entry)
+            continue
+        match = _RUNTIME_SET_FILE.match(entry.name)
+        if match:
+            sets.setdefault(match.group("id"), []).append(entry)
+    return sets
+
+
+def _newest_mtime(members: list[Path]) -> float:
+    """The latest modification time among the members and any events-dir contents."""
+    newest = 0.0
+    for member in members:
+        newest = max(newest, member.lstat().st_mtime)
+        if member.is_dir():
+            for inner in member.iterdir():
+                newest = max(newest, inner.lstat().st_mtime)
+    return newest
+
+
+def _set_sockets(untracked_dir: Path, ident: str, members: list[Path]) -> list[Path]:
+    """Every socket a set could be serving: its own, its events dir's, its discovery file's."""
+    sockets = [m for m in members if not m.is_dir() and m.name.endswith(".sock")]
+    for member in members:
+        if member.is_dir():
+            sockets.extend(sorted(member.glob("*.sock")))
+    discovery = untracked_dir / f"daemon-{ident}.socket-path"
+    if discovery in members:
+        try:
+            named = discovery.read_text().strip()
+        except OSError:
+            # An unreadable discovery file may name a live socket this probe
+            # cannot see, so the set is not provably dead.
+            return [discovery]
+        if named and Path(named) not in sockets:
+            sockets.append(Path(named))
+    return sockets
+
+
+def _is_under(path: Path, directory: Path) -> bool:
+    """True when ``path`` lies inside ``directory`` (lexically, after resolving both)."""
+    resolved, root = str(path.resolve()), str(directory.resolve())
+    return resolved == root or resolved.startswith(root + os.sep)
+
+
+def _runtime_set_is_dead(
+    untracked_dir: Path,
+    ident: str,
+    members: list[Path],
+    min_age_seconds: float,
+    now: float,
+) -> bool:
+    """True only when the set is PROVEN dead from here; every doubt keeps it.
+
+    Proven dead means: nothing in it was written inside the grace window, EVERY
+    socket it holds lies under ``untracked_dir`` and is refused or absent there,
+    and its pid file does not name a verified daemon. A socket or discovery path
+    OUTSIDE ``untracked_dir`` (a fallback runtime dir, ``/run/user/N``, ``/tmp``)
+    lives in a namespace this container may not share, so a refused connect to it
+    proves nothing and the set is kept (fail closed).
+    """
+    if now - _newest_mtime(members) < min_age_seconds:
+        return False
+    for sock in _set_sockets(untracked_dir, ident, members):
+        if not _is_under(sock, untracked_dir) or not _socket_is_dead(sock):
+            return False
+    pid_file = untracked_dir / f"daemon-{ident}.pid"
+    return not (pid_file in members and read_pid_file(pid_file, verify_daemon=True) is not None)
+
+
+def peer_runtime_sets_not_proven_dead(
+    project_dir: Path | str,
+    min_age_seconds: float = _RUNTIME_SET_GRACE_SECONDS,
+) -> list[str]:
+    """Host ids of OTHER hosts' runtime sets that are not proven dead.
+
+    A non-empty answer means a peer may share this checkout (a container on the
+    same bind mount), whose processes ``/proc`` here cannot see.
+    """
+    untracked_dir = _get_untracked_dir(Path(project_dir).resolve())
+    if not untracked_dir.is_dir():
+        return []
+    own_id = _get_hostname_suffix().removeprefix("-")
+    now = time.time()
+    return [
+        ident
+        for ident, members in _runtime_set_members(untracked_dir).items()
+        if ident != own_id
+        and not _runtime_set_is_dead(untracked_dir, ident, members, min_age_seconds, now)
+    ]
+
+
+def sweep_dead_runtime_sets(
+    project_dir: Path | str,
+    min_age_seconds: float = _RUNTIME_SET_GRACE_SECONDS,
+) -> list[Path]:
+    """Remove other hosts' dead runtime sets from the daemon's untracked dir.
+
+    Plan 00517 Task 4.3. Socket and pid paths are keyed by hostname, so every
+    container restart leaves the previous host's set behind. A set (anything but
+    this host's own) is removed only when it is PROVEN dead
+    (:func:`_runtime_set_is_dead`): every socket in it is under the untracked dir
+    and refuses a connection, and its pid file does not name a live daemon. A
+    listening socket, which a host view sharing the checkout keeps, spares the
+    whole set, as does any socket outside the tree and any member written within
+    ``min_age_seconds`` (a start in progress). Each removal is logged; one that
+    fails is skipped and retried next start.
+
+    Returns:
+        The paths removed.
+    """
+    untracked_dir = _get_untracked_dir(Path(project_dir).resolve())
+    if not untracked_dir.is_dir():
+        return []
+    own_id = _get_hostname_suffix().removeprefix("-")
+    now = time.time()
+    removed: list[Path] = []
+    for ident, members in _runtime_set_members(untracked_dir).items():
+        if ident == own_id:
+            continue
+        if not _runtime_set_is_dead(untracked_dir, ident, members, min_age_seconds, now):
+            continue
+        for member in members:
+            try:
+                if member.is_dir():
+                    shutil.rmtree(member)
+                else:
+                    member.unlink()
+            except OSError as e:
+                log_and_continue(
+                    logger,
+                    e,
+                    reason=f"a dead runtime file {member} that cannot be removed is retried by the next start's sweep, and the sweep carries on with the rest of the set",
+                )
+                continue
+            logger.info("Removed dead runtime file of host %s: %s", ident, member)
+            removed.append(member)
+    return removed
+
+
 # Per-session runtime subdirectories under the daemon untracked dir. Each
 # accumulates one file per session id (thread-registry, context-sidecar,
 # downgrade-indicator) or per hook event (payload-capture); the writers never
@@ -2718,48 +2896,354 @@ def _cli_check_venv_fresh(args: argparse.Namespace) -> int:
     return 1
 
 
-def classify_venv_for_cleanup(
+# Plan 00517 Task 3.1: the ONE definition of a stale venv. Every caller (the
+# upgrade cleanup, restart and provision cleanup, ``prune-venvs``, ``disk-usage``,
+# the daemon-start advisory, the SessionStart advisory) asks ``classify_venv``.
+VENV_STALE = "stale"  # positively proven stale: safe to remove
+VENV_UNPROVEN = "unproven"  # cannot be proven stale: surfaced, removed once confirmed safe
+VENV_KEEP = "keep"  # live, current, or not decidable: left alone
+
+_LEGACY_BARE_VENV_DIR_NAME = "venv"
+
+
+def live_venv_realpaths(daemon_dir: Path | str) -> frozenset[Path]:
+    """Return the real directories of the venvs that are live right now.
+
+    Two sources, both identified by the venv DIRECTORY: the venv the resolver
+    (:func:`resolve_existing_venv_python`, Plan 00184) selects, and the venv of
+    the running interpreter (``sys.prefix``). A venv's ``bin/python`` is a
+    symlink to the system interpreter, so resolving THAT yields the
+    interpreter's prefix (``/usr``) and never matches the venv (Plan 00517
+    Task 3.0): the directory is taken from the unresolved path
+    (``bin/python`` -> ``bin`` -> venv dir) and only the directory itself is
+    resolved.
+
+    ``resolve_existing_venv_python`` never raises and returns a best-effort
+    path without an existence check on its override and legacy branches, so a
+    non-existent result IS the "no venv provisioned yet" signal.
+    """
+    live: set[Path] = {Path(sys.prefix).resolve()}
+    python_path = resolve_existing_venv_python(daemon_dir)
+    if python_path.exists():
+        live.add(python_path.parent.parent.resolve())
+    return frozenset(live)
+
+
+def classify_venv(
     venv_dir: Path,
     current_slug: str,
     current_hash: str | None,
-) -> tuple[bool, str]:
-    """Decide whether a non-current ``venv-*`` directory is positively stale.
+    live: frozenset[Path],
+) -> tuple[str, str]:
+    """Classify one ``venv`` / ``venv-*`` directory: ``(verdict, reason)``.
 
-    Returns ``(remove, reason)``. ``remove`` is True only when the venv's slug
-    is eligible for this view (:func:`_venv_slug_eligible`), its metadata is
-    readable, and its ``lock_hash`` differs from ``current_hash``. Every other
-    case keeps the venv and ``reason`` says why.
+    - ``keep``: the venv is live (``live`` holds real directories), or its
+      ``lock_hash`` matches the current source, or the current ``lock_hash``
+      cannot be computed so nothing can be judged.
+    - ``stale``: the legacy bare ``venv/`` directory, or a venv whose slug is
+      this view's (or absent), whose metadata is readable and whose
+      ``lock_hash`` differs from ``current_hash``.
+    - ``unproven``: the code cannot prove it stale, because its slug belongs to
+      another view or its metadata is missing or unreadable. It is surfaced
+      with evidence for the running agent to judge, never removed silently.
     """
+    if venv_dir.resolve() in live:
+        return VENV_KEEP, "live: the running daemon or the resolver uses it"
+    if venv_dir.name == _LEGACY_BARE_VENV_DIR_NAME:
+        return VENV_STALE, "legacy-name: the pre-v3.7.0 untracked/venv layout"
     if current_hash is None:
-        return False, "cannot compute the current lock_hash"
+        return VENV_KEEP, "cannot compute the current lock_hash"
     eligible, skip_reason = _venv_slug_eligible(venv_dir, current_slug)
     if not eligible:
-        return False, skip_reason or "slug belongs to another view"
+        return VENV_UNPROVEN, skip_reason or "slug belongs to another view"
     metadata = _read_venv_metadata_stdlib(venv_dir)
     if metadata is None:
-        return False, f"no usable {_DAEMON_METADATA_FILENAME}"
+        return VENV_UNPROVEN, f"no usable {_DAEMON_METADATA_FILENAME}"
     if metadata["lock_hash"] == current_hash:
-        return False, "lock_hash matches the current source"
-    return True, "lock_hash differs from the current source"
+        return VENV_KEEP, "lock_hash matches the current source"
+    return VENV_STALE, "lock_hash differs from the current source"
+
+
+@dataclass(frozen=True)
+class VenvVerdict:
+    """One scanned venv directory and its :func:`classify_venv` result."""
+
+    path: Path
+    real_path: Path
+    verdict: str
+    reason: str
+
+
+def classify_untracked_venvs(
+    daemon_dir: Path,
+    extra_live: list[Path] | None = None,
+) -> list[VenvVerdict]:
+    """Classify every ``untracked/venv`` and ``untracked/venv-*`` directory.
+
+    ``extra_live`` names venvs the caller knows are in use (the upgrade passes
+    the one it just verified) on top of :func:`live_venv_realpaths`. A symlink
+    name is kept and never judged by its target: the target is judged under
+    its own name, and removing through a link could leave the untracked tree.
+    """
+    untracked = daemon_dir / "untracked"
+    if not untracked.is_dir():
+        return []
+    live = live_venv_realpaths(daemon_dir) | {p.resolve() for p in extra_live or []}
+    current_slug = project_path_slug(daemon_dir)
+    current_hash = _compute_project_lock_hash_stdlib(daemon_dir)
+    current_name = f"venv-{python_venv_fingerprint(daemon_dir)}"
+    verdicts: list[VenvVerdict] = []
+    names = [untracked / _LEGACY_BARE_VENV_DIR_NAME, *sorted(untracked.glob("venv-*"))]
+    for candidate in names:
+        if not candidate.is_dir():
+            continue
+        real_path = candidate.resolve()
+        if candidate.is_symlink():
+            verdicts.append(
+                VenvVerdict(candidate, real_path, VENV_KEEP, "symlink: judged under its target")
+            )
+            continue
+        if candidate.name == current_name:
+            # The venv this interpreter builds and serves: it may be mid-build
+            # (metadata is written after the sync), so it is never judged here.
+            verdicts.append(
+                VenvVerdict(candidate, real_path, VENV_KEEP, "current fingerprint's venv")
+            )
+            continue
+        verdict, reason = classify_venv(candidate, current_slug, current_hash, live)
+        verdicts.append(VenvVerdict(candidate, real_path, verdict, reason))
+    return verdicts
+
+
+@dataclass(frozen=True)
+class VenvProcess:
+    """A process found using a venv, and how it was found."""
+
+    pid: int
+    via: str  # "exe", "cwd" or "argv0"
+    detail: str
+
+
+@dataclass(frozen=True)
+class ProcessScan:
+    """Result of one ``/proc`` scan: users per venv, and pids it could not read."""
+
+    users: dict[Path, list[VenvProcess]]
+    unreadable: int
+
+
+def _is_inside(candidate: str, venv_prefixes: tuple[str, ...]) -> bool:
+    """True when ``candidate`` is a path inside one of the venv directories."""
+    return any(candidate.startswith(prefix + os.sep) for prefix in venv_prefixes)
+
+
+def _read_link(path: Path) -> str:
+    """The target of a ``/proc`` link, or ``""`` when it is unreadable."""
+    try:
+        target = str(path.readlink())
+    except OSError as e:
+        log_and_continue(
+            logger,
+            e,
+            reason=f"an unreadable {path} (another user's process) is counted by the scan as unreadable, never guessed at",
+            level=logging.DEBUG,
+        )
+        return ""
+    return target.removesuffix(" (deleted)")
+
+
+def _read_argv0(path: Path) -> str:
+    """The first argument of a ``/proc/<pid>/cmdline``, or ``""`` when unreadable."""
+    try:
+        raw = path.read_bytes()
+    except OSError as e:
+        log_and_continue(
+            logger,
+            e,
+            reason=f"an unreadable {path} (another user's process) is counted by the scan as unreadable, never guessed at",
+            level=logging.DEBUG,
+        )
+        return ""
+    return raw.split(b"\0", 1)[0].decode(errors="replace")
+
+
+def processes_using_venvs(venv_dirs: list[Path], proc_root: Path = Path("/proc")) -> ProcessScan:
+    """Find processes using each venv, read-only, from ``proc_root`` (``/proc``).
+
+    A process uses a venv when its executable (``exe``) or working directory
+    (``cwd``) is inside it, or its ``argv[0]`` names a path inside it: a venv's
+    ``bin/python`` is a symlink, so ``exe`` shows the system interpreter and only
+    ``argv[0]`` shows which venv started it. Later arguments are deliberately not
+    read, because the command that asks the question (``prune-venvs --unproven
+    <path>``) names the venv too. A process whose links and command line are all
+    unreadable (another user's) is counted in ``unreadable``, not guessed at.
+    """
+    prefixes = {venv: tuple(dict.fromkeys((str(venv), str(venv.resolve())))) for venv in venv_dirs}
+    users: dict[Path, list[VenvProcess]] = {venv: [] for venv in venv_dirs}
+    unreadable = 0
+    if not proc_root.is_dir():
+        return ProcessScan(users, unreadable)
+    for entry in sorted(proc_root.iterdir(), key=lambda p: p.name):
+        if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        found = {
+            "exe": _read_link(entry / "exe"),
+            "cwd": _read_link(entry / "cwd"),
+            "argv0": _read_argv0(entry / "cmdline"),
+        }
+        if not any(found.values()):
+            # A process that exited mid-scan is gone, not unreadable.
+            if entry.exists():
+                unreadable += 1
+            continue
+        for venv, venv_prefixes in prefixes.items():
+            for via, value in found.items():
+                if value and _is_inside(value, venv_prefixes):
+                    users[venv].append(VenvProcess(pid=pid, via=via, detail=value))
+                    break
+    return ProcessScan(users, unreadable)
+
+
+@dataclass(frozen=True)
+class VenvEvidence:
+    """What the running agent needs to decide whether an UNPROVEN venv is safe to remove."""
+
+    path: Path
+    slug: str | None
+    view: str
+    interpreter: str
+    python_version: str
+    modified: str
+    processes: tuple[VenvProcess, ...]
+    unreadable_processes: int
+
+    def describe(self) -> list[str]:
+        """Human-readable evidence lines for this venv."""
+        lines = [
+            f"{self.path}",
+            f"    belongs to: {self.view}",
+            f"    interpreter: {self.interpreter} (python {self.python_version})",
+            f"    last modified: {self.modified}",
+        ]
+        if self.processes:
+            for proc in self.processes:
+                lines.append(f"    IN USE: pid {proc.pid} ({proc.via}: {proc.detail})")
+        else:
+            lines.append("    no process found using it")
+        if self.unreadable_processes:
+            lines.append(
+                f"    {self.unreadable_processes} process(es) could not be read "
+                "(another user's), so 'no process' is not certain"
+            )
+        return lines
+
+    def to_dict(self) -> dict[str, Any]:
+        """JSON-ready form of the evidence."""
+        return {
+            "path": str(self.path),
+            "slug": self.slug,
+            "view": self.view,
+            "interpreter": self.interpreter,
+            "python_version": self.python_version,
+            "modified": self.modified,
+            "processes": [{"pid": p.pid, "via": p.via, "detail": p.detail} for p in self.processes],
+            "unreadable_processes": self.unreadable_processes,
+        }
+
+
+def _read_pyvenv_cfg(venv_dir: Path) -> dict[str, str]:
+    """The ``key = value`` pairs of a venv's ``pyvenv.cfg``; empty when unreadable."""
+    try:
+        text = (venv_dir / "pyvenv.cfg").read_text()
+    except OSError:
+        return {}
+    pairs: dict[str, str] = {}
+    for line in text.splitlines():
+        key, separator, value = line.partition("=")
+        if separator:
+            pairs[key.strip()] = value.strip()
+    return pairs
+
+
+def _view_of(slug: str | None, current_slug: str) -> str:
+    """Which checkout view a venv belongs to, in words."""
+    if slug is None:
+        return "this view (name carries no slug)"
+    if slug == current_slug:
+        return "this view"
+    return f"another view (slug '{slug}'; this view is '{current_slug}')"
+
+
+def gather_venv_evidence(
+    venv_dirs: list[Path],
+    current_slug: str,
+    proc_root: Path = Path("/proc"),
+) -> list[VenvEvidence]:
+    """Collect the :class:`VenvEvidence` for each venv with ONE ``/proc`` scan."""
+    scan = processes_using_venvs(venv_dirs, proc_root)
+    evidence: list[VenvEvidence] = []
+    for venv in venv_dirs:
+        cfg = _read_pyvenv_cfg(venv)
+        slug = _parse_venv_dir_slug(venv.name)
+        modified = datetime.datetime.fromtimestamp(venv.stat().st_mtime, tz=datetime.UTC).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        evidence.append(
+            VenvEvidence(
+                path=venv,
+                slug=slug,
+                view=_view_of(slug, current_slug),
+                interpreter=cfg.get("home") or "unknown (no readable pyvenv.cfg)",
+                python_version=cfg.get("version") or cfg.get("version_info") or "unknown",
+                modified=modified,
+                processes=tuple(scan.users[venv]),
+                unreadable_processes=scan.unreadable,
+            )
+        )
+    return evidence
+
+
+def unproven_report_lines(
+    evidence: list[VenvEvidence],
+    removal_command: Callable[[Path], str],
+) -> list[str]:
+    """The report shown for UNPROVEN venvs, by ``list-venvs`` and the SessionStart advisory.
+
+    One text, so the two surfaces cannot drift: what the code could not prove,
+    the evidence per venv, and the exact command that removes each once the
+    reader has confirmed it is safe. Empty when there are none.
+    """
+    if not evidence:
+        return []
+    lines = [
+        f"{len(evidence)} UNPROVEN venv(s): the code cannot prove them stale (missing or "
+        "unreadable metadata, or another checkout view's slug), so nothing removes them "
+        "automatically. Investigate each; once you have confirmed it is unused and safe, "
+        "remove it with the command shown."
+    ]
+    for item in evidence:
+        lines.append("")
+        lines.extend(item.describe())
+        lines.append(f"    remove: {removal_command(item.path)}")
+    return lines
 
 
 def _cli_list_stale_venvs(args: argparse.Namespace) -> int:
     """CLI handler for ``list-stale-venvs``.
 
     Prints one tab-separated line per ``untracked/venv-*`` directory other
-    than ``--current-venv``: ``remove|keep``, the absolute path, the reason.
-    The caller deletes only the ``remove`` lines.
+    than ``--current-venv``: ``remove|keep|unproven``, the absolute path, the
+    reason. The caller deletes only the ``remove`` lines (a ``stale``
+    verdict); ``unproven`` lines are for the running agent to investigate.
     """
     daemon_dir = Path(args.daemon_dir)
     current_venv = Path(args.current_venv).resolve()
-    untracked = daemon_dir / "untracked"
-    current_slug = project_path_slug(daemon_dir)
-    current_hash = _compute_project_lock_hash_stdlib(daemon_dir)
-    for candidate in sorted(untracked.glob("venv-*")):
-        if not candidate.is_dir() or candidate.resolve() == current_venv:
+    for entry in classify_untracked_venvs(daemon_dir, extra_live=[current_venv]):
+        if entry.real_path == current_venv:
             continue
-        remove, reason = classify_venv_for_cleanup(candidate, current_slug, current_hash)
-        print(f"{'remove' if remove else 'keep'}\t{candidate.resolve()}\t{reason}")
+        label = "remove" if entry.verdict == VENV_STALE else entry.verdict
+        print(f"{label}\t{entry.real_path}\t{entry.reason}")
     return 0
 
 

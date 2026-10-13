@@ -85,11 +85,12 @@ Manage venvs with:
 
 ```bash
 ./bin/hooks-daemon list-venvs
-./bin/hooks-daemon prune-venvs --legacy --dry-run
-./bin/hooks-daemon prune-venvs --all-except-current --force
+./bin/hooks-daemon prune-venvs --stale --dry-run
+./bin/hooks-daemon prune-venvs --stale --force
+./bin/hooks-daemon prune-venvs --unproven <path> --force
 ```
 
-The current-environment venv is never deleted, even with `--force`.
+`--stale` removes only venvs proven stale: the legacy `untracked/venv/`, or a venv with this checkout view's slug whose readable `lock_hash` differs from the current source's. The venv the running daemon or the resolver uses is never deleted, even with `--force`. A venv with missing or unreadable metadata, or another view's slug, is UNPROVEN: `list-venvs` shows it with evidence (processes using it, interpreter, age, slug), and `--unproven <path> --force` removes that one venv once you have confirmed it is unused. The daemon removes proven-stale venvs on every start, restart and provision; it never removes an UNPROVEN one.
 
 ## Critical Paths
 

@@ -1002,6 +1002,14 @@ class HandlerID:
         config_key="tool_disable_advisor",
         display_name="tool-disable-advisor",
     )
+    # Unproven-venv advisor (SessionStart handler) -- Plan 00517 Task 4.2: a venv
+    # the code cannot prove stale (missing or unreadable metadata, another view's
+    # slug) is shown to the running agent with evidence and the removal command.
+    UNPROVEN_VENV_ADVISOR = HandlerIDMeta(
+        class_name="UnprovenVenvAdvisorHandler",
+        config_key="unproven_venv_advisor",
+        display_name="unproven-venv-advisor",
+    )
     # Persistent-cron assertor (SessionStart handler) -- Plan 00384: Claude
     # Code crons are session-only (durable has no effect, recurring jobs expire
     # after 7 days), so a cron a project wants ALWAYS present has to be

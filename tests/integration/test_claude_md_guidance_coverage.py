@@ -531,6 +531,12 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
         "T4 fires once at session start naming each plugin, its hook events and "
         "how to acknowledge it; nothing to hold across later decisions"
     ),
+    "UnprovenVenvAdvisorHandler": (
+        "T4 fires at session start naming each venv the code cannot prove stale, "
+        "its evidence and the exact removal command; the finding carries its own "
+        "instructions and the agent clears it in one command per venv, so nothing "
+        "needs to stay resident once it has been read"
+    ),
     "GuardConfigDriftHandler": (
         "T4 fires once at session start naming each weakened guard and both "
         "remedies. Deliberately NOT grouped with ProjectHandlerLoadCheckerHandler, "

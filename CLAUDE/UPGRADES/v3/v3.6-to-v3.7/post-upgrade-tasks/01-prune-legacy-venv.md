@@ -64,6 +64,8 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli prune-venvs --all-except-current 
 $PYTHON -m claude_code_hooks_daemon.daemon.cli prune-venvs --all-except-current --force
 ```
 
+> Note: `--all-except-current` was removed in 3.70.0. Use `prune-venvs --stale` (venvs proven stale) or `prune-venvs --unproven <path> --force` (one named venv).
+
 The non-current environments will auto-rebuild their venvs lazily the next time the daemon starts under those environments (stamp mismatch triggers a rebuild).
 
 ## How to confirm

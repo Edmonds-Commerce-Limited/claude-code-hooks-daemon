@@ -71,9 +71,14 @@ class TestCollectDiskUsage:
         from claude_code_hooks_daemon.daemon.paths import python_venv_fingerprint
 
         untracked = self._untracked(tmp_path)
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n")
         fp = python_venv_fingerprint(tmp_path)
         _make_venv(untracked / f"venv-{fp}", "v3.7.0")  # current
-        _make_venv(untracked / "venv-py310-deadbeef", "v3.6.0")  # reclaimable
+        stale = untracked / "venv-py310-deadbeef"  # reclaimable: readable, differing lock_hash
+        _make_venv(stale, "v3.6.0")
+        (stale / ".daemon-metadata.json").write_text(
+            json.dumps({"python_path": "/x/bin/python", "lock_hash": "sha256:" + "0" * 64})
+        )
 
         rows = cli._collect_disk_usage(tmp_path)
         venv_row = next(r for r in rows if r["name"] == "venvs")

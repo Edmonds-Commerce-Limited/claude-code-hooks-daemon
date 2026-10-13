@@ -10,6 +10,7 @@ its fingerprint differs from the current one.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -17,8 +18,10 @@ from unittest.mock import patch
 import pytest
 
 from claude_code_hooks_daemon.daemon import cli
+from claude_code_hooks_daemon.daemon.paths import project_path_slug
 
 _CLI = "claude_code_hooks_daemon.daemon.cli"
+_RESOLVER = "claude_code_hooks_daemon.daemon.paths.resolve_existing_venv_python"
 
 
 def _make_real_layout_venv(path: Path) -> None:
@@ -26,6 +29,10 @@ def _make_real_layout_venv(path: Path) -> None:
     (path / "bin").mkdir(parents=True)
     (path / "bin" / "python").symlink_to(Path(sys.executable).resolve())
     (path / ".daemon-version").write_text("v3.5.0")
+    # Readable metadata whose lock_hash differs from the project's: proven stale.
+    (path / ".daemon-metadata.json").write_text(
+        json.dumps({"python_path": str(path / "bin" / "python"), "lock_hash": "sha256:" + "0" * 64})
+    )
 
 
 def _args(project_root: Path, **overrides: bool) -> argparse.Namespace:
@@ -46,9 +53,11 @@ def _args(project_root: Path, **overrides: bool) -> argparse.Namespace:
 def project(tmp_path: Path) -> tuple[Path, Path, Path]:
     """Project with a live venv (non-current fingerprint) and an unrelated stale one."""
     (tmp_path / "src" / "claude_code_hooks_daemon").mkdir(parents=True)
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n")
     untracked = tmp_path / "untracked"
-    live = untracked / "venv-workspace-py311-81c29529"
-    other = untracked / "venv-workspace-py311-00000000"
+    slug = project_path_slug(tmp_path)
+    live = untracked / f"venv-{slug}-py311-81c29529"
+    other = untracked / f"venv-{slug}-py311-00000000"
     _make_real_layout_venv(live)
     _make_real_layout_venv(other)
     return tmp_path, live, other
@@ -60,7 +69,7 @@ class TestLiveVenvIdentifiedByDirectory:
     ) -> None:
         project_root, live, _ = project
 
-        with patch(f"{_CLI}.resolve_existing_venv_python", return_value=live / "bin" / "python"):
+        with patch(_RESOLVER, return_value=live / "bin" / "python"):
             live_dirs = cli._live_venv_realpaths(project_root)
 
         assert live.resolve() in live_dirs
@@ -69,7 +78,7 @@ class TestLiveVenvIdentifiedByDirectory:
         project_root, live, _ = project
 
         with (
-            patch(f"{_CLI}.resolve_existing_venv_python", return_value=project_root / "missing"),
+            patch(_RESOLVER, return_value=project_root / "missing"),
             patch(f"{_CLI}.sys.prefix", str(live)),
         ):
             live_dirs = cli._live_venv_realpaths(project_root)
@@ -79,7 +88,7 @@ class TestLiveVenvIdentifiedByDirectory:
     def test_enumerate_marks_live_venv_current(self, project: tuple[Path, Path, Path]) -> None:
         project_root, live, other = project
 
-        with patch(f"{_CLI}.resolve_existing_venv_python", return_value=live / "bin" / "python"):
+        with patch(_RESOLVER, return_value=live / "bin" / "python"):
             entries = {e["path"]: e for e in cli._enumerate_venvs(project_root)}
 
         assert entries[str(live)]["is_current"] is True
@@ -87,7 +96,7 @@ class TestLiveVenvIdentifiedByDirectory:
 
 
 class TestPruneNeverSelectsLiveVenv:
-    @pytest.mark.parametrize("mode", ["all_except_current", "stale", "legacy"])
+    @pytest.mark.parametrize("mode", ["stale", "legacy"])
     def test_dry_run_never_lists_live_venv(
         self,
         project: tuple[Path, Path, Path],
@@ -97,7 +106,7 @@ class TestPruneNeverSelectsLiveVenv:
         project_root, live, _ = project
 
         with (
-            patch(f"{_CLI}.resolve_existing_venv_python", return_value=live / "bin" / "python"),
+            patch(_RESOLVER, return_value=live / "bin" / "python"),
             patch(f"{_CLI}.get_project_path", return_value=project_root),
         ):
             rc = cli.cmd_prune_venvs(_args(project_root, dry_run=True, **{mode: True}))
@@ -105,16 +114,16 @@ class TestPruneNeverSelectsLiveVenv:
         assert rc == 0
         assert str(live) not in capsys.readouterr().out
 
-    def test_force_all_except_current_removes_only_the_other_venv(
+    def test_force_stale_removes_only_the_other_venv(
         self, project: tuple[Path, Path, Path]
     ) -> None:
         project_root, live, other = project
 
         with (
-            patch(f"{_CLI}.resolve_existing_venv_python", return_value=live / "bin" / "python"),
+            patch(_RESOLVER, return_value=live / "bin" / "python"),
             patch(f"{_CLI}.get_project_path", return_value=project_root),
         ):
-            rc = cli.cmd_prune_venvs(_args(project_root, all_except_current=True, force=True))
+            rc = cli.cmd_prune_venvs(_args(project_root, stale=True, force=True))
 
         assert rc == 0
         assert live.is_dir(), "the live venv was deleted"
