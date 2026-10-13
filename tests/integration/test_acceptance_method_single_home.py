@@ -61,9 +61,16 @@ def test_skill_keeps_the_v290_race_condition_lesson() -> None:
     assert "v2.9.0" in _SKILL_MD.read_text(encoding="utf-8")
 
 
-def test_releasing_step_12_points_at_the_skill() -> None:
-    """RELEASING.md Step 12 names the acceptance-test skill as the method's home."""
+def test_releasing_step_12_points_at_generating_md() -> None:
+    """RELEASING.md Step 12 names GENERATING.md as the method's home."""
     text = _RELEASING.read_text(encoding="utf-8")
     step = text.split("## Step 12:", 1)[1].split("### Scope", 1)[0]
-    assert ".claude/skills/acceptance-test/SKILL.md" in step
+    assert "CLAUDE/AcceptanceTests/GENERATING.md" in step
     assert "Requires Main Thread" in step
+
+
+def test_skill_points_at_generating_md_as_the_home() -> None:
+    """A skill is a pointer (DocumentationStrategy R7b): it names GENERATING.md as canonical."""
+    text = _SKILL_MD.read_text(encoding="utf-8")
+    assert "CLAUDE/AcceptanceTests/GENERATING.md" in text
+    assert "canonical home of the acceptance method" not in text

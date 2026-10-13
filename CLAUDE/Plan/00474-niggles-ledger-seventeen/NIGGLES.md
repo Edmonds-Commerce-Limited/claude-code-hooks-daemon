@@ -91,11 +91,13 @@ Step 12 routes by it ("Tests marked `no` may be delegated to parallel sub-agents
 **Fix direction**: one canonical home for the acceptance method. The newer, measured design is Step 12's routing; the
 skill would then state it and RELEASING.md point at it, unless a new measurement shows delegation unreliable.
 
-**Status**: ✅ Fixed. The skill's "Execution Routing" section is the one home (`yes` = main thread, never delegated;
-`no` = may be delegated, batched by `Recommended Model`); RELEASING.md Step 12 points at it; guard test
-`tests/integration/test_acceptance_method_single_home.py`. Report:
-[261013-dev-n458-sonnet.md](subagent-reports/261013-dev-n458-sonnet.md). Left alone: `.claude/skills/CLAUDE.md` still
-names GENERATING.md as the canonical acceptance source.
+**Status**: ✅ Fixed. The method's one home is `CLAUDE/AcceptanceTests/GENERATING.md` ("SUB-AGENT EXECUTION", which
+already held the measured table and routing rules): `yes` = main thread, never delegated; `no` = may be delegated,
+batched by `Recommended Model`. The skill's "Execution Routing" now summarises and points there, and RELEASING.md
+Step 12 points there; guard test `tests/integration/test_acceptance_method_single_home.py`. Report:
+[261013-dev-n458-sonnet.md](subagent-reports/261013-dev-n458-sonnet.md). The branch first made SKILL.md the home; the
+coordinator moved it to GENERATING.md after merge, because `.claude/skills/CLAUDE.md` and DocumentationStrategy R7b
+make a skill a pointer and already route the acceptance process to GENERATING.md.
 
 ### N457 — subagent_full_qa_blocker cannot exempt a dedicated QA-runner agent, so a project whose full QA is delegated to one must leave it off
 

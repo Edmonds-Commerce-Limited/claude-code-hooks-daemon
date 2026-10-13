@@ -21,10 +21,11 @@ Follow its output exactly; what is written here is orientation.
 
 Execute acceptance tests for hooks daemon handlers via **real Claude Code tool calls in the main thread**. Tests verify real-world handler behaviour by invoking actual tools (Bash, Write, Edit, Read) and observing hook responses in system-reminders.
 
-## Execution Routing (the canonical home of the acceptance method)
+## Execution Routing
 
-**Each test's `Requires Main Thread` field in the generated playbook decides where it runs.** This skill owns the
-method; `CLAUDE/development/RELEASING.md` Step 12 points here.
+**Each test's `Requires Main Thread` field in the generated playbook decides where it runs.** The method's canonical
+home is `CLAUDE/AcceptanceTests/GENERATING.md` ("SUB-AGENT EXECUTION"); `CLAUDE/development/RELEASING.md` Step 12
+points there too. In short:
 
 - **`Requires Main Thread: yes`** — run in the main session, sequentially, and NEVER delegate. Lifecycle events
   (SessionStart, SessionEnd, UserPromptSubmit) and this session's system-reminders cannot be observed from a

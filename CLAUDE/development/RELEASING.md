@@ -679,8 +679,9 @@ behind it.
 ## Step 12: Acceptance Testing Gate (BLOCKING)
 
 **The acceptance method lives in
-[`.claude/skills/acceptance-test/SKILL.md`](../../.claude/skills/acceptance-test/SKILL.md)
-("Execution Routing"); this step does not restate it.** In one sentence: each
+[`CLAUDE/AcceptanceTests/GENERATING.md`](../AcceptanceTests/GENERATING.md)
+("SUB-AGENT EXECUTION"), and `/acceptance-test` runs it; this step does not
+restate it.** In one sentence: each
 test's `Requires Main Thread` field in the generated playbook decides — `yes`
 runs in the main thread and is never delegated, `no` may be delegated to
 sub-agents batched by `Recommended Model`.

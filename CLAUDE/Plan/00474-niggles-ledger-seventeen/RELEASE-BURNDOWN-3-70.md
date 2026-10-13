@@ -20,8 +20,8 @@ Tick an item here when it lands, with the commit.
   parallel Haiku agents, which `acceptance-test/invoke.sh` forbids. The next `/release` reads it. Merged eb2213d6b:
   the skill now defers to RELEASING.md Step 12's routing (N458 remains for the skill-versus-Step-12 conflict).
 - [x] **N458**: the acceptance-test skill and RELEASING.md Step 12 give opposite instructions on sub-agent execution;
-  `/release` reads both, so one canonical method before the next release. Fixed: the skill's "Execution Routing" is
-  the one home and Step 12 points at it.
+  `/release` reads both, so one canonical method before the next release. Fixed: GENERATING.md ("SUB-AGENT
+  EXECUTION") is the one home; the skill and Step 12 point at it.
 - [x] **Plan 00451**: `.claude/agents/release-agent.md` lists 3 of the 6 version-carrying files (missing
   `.claude/HOOKS-DAEMON.md`, `.claude/ccy/claude-supervise.py`, `uv.lock`; `RELEASING.md` has all six), which costs up
   to three red QA cycles mid-release. Merged eb2213d6b: RELEASING.md Step 3 holds the one list, and the agent points
