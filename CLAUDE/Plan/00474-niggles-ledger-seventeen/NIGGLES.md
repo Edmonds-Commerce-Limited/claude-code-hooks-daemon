@@ -91,7 +91,13 @@ Code truncates that row with an ellipsis, and the context segment is what falls 
 **Fix direction**: reproduce with a real render first; then the context segment's information must survive at any width
 (wrap earlier or reserve a margin, never truncate a segment).
 
-**Status**: ⬜ Open, dispatched.
+**Status**: ✅ Fixed (pending the owner's eye on a real terminal). Rows were packed to the full `COLUMNS` (measured 78
+of 80 and 99 of 100), with no room for Claude Code's own spacing, the `padding` setting or right-hand notifications,
+which the vendored statusline doc says "may truncate your status line output"; the context figure ends its segment, so
+a cut row loses it first. Ruled out: glyph width miscount (◔◑◕● measure 1) and an oversize segment (about 25 columns).
+`to_json` now packs to `terminal_columns - STATUS_WRAP_MARGIN` (8, an allowance, not a measured figure) in
+`core/hook_result.py`, so the line wraps a segment earlier and nothing is cut. Not proven against a live Claude Code
+render. Release note 056. Report: [261013-dev-n459-sonnet.md](subagent-reports/261013-dev-n459-sonnet.md).
 
 ### N458 — the acceptance-test skill forbids sub-agent execution, while RELEASING.md Step 12 routes tests the playbook marks `Requires Main Thread: no` to sub-agents
 
