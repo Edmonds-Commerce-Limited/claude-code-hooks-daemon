@@ -242,6 +242,9 @@ class RuleID:
     #: Stop attempted while a goal-ledger entry is still live/unexplained.
     STOP_GOAL_LEDGER: str = "R-STOP-GOAL-LEDGER"
 
+    #: A main-thread stop that leaves workable issues for the next cron tick.
+    STOP_IDLE_WITH_WORKABLE_ISSUE: str = "R-STOP-IDLE-WITH-WORKABLE-ISSUE"
+
     #: Stop attempted right after a QA tool's own output indicated failure.
     STOP_QA_FAILURE: str = "R-STOP-QA-FAILURE"
 

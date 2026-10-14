@@ -1060,6 +1060,13 @@ class HandlerID:
         config_key="cron_subagent_stop_enforcer",
         display_name="cron-subagent-stop-enforcer",
     )
+    # Plan 00470 Phase 7: an idle stop that defers workable issues to the next
+    # cron tick is refused on facts (work queue, cached workable issues).
+    IDLE_WORKABLE_ISSUE_STOP_GATE = HandlerIDMeta(
+        class_name="IdleWorkableIssueStopGateHandler",
+        config_key="idle_workable_issue_stop_gate",
+        display_name="idle-workable-issue-stop-gate",
+    )
     # Usage pause gates (Plan 00479 Phase 4). A session whose host usage
     # ceiling is reached is PAUSED, not ended: the prompt gate records the pause
     # and directs the model to replace its crons with one resume cron; the tool

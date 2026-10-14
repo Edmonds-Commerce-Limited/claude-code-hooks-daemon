@@ -8,19 +8,64 @@ from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
 
 from claude_code_hooks_daemon.daemon import cli
+from claude_code_hooks_daemon.utils.github_issue_validity import GhError, IssueValidityService
 from claude_code_hooks_daemon.utils.work_queue import (
     STATUS_DONE,
     STATUS_RUNNING,
     WORK_QUEUE_FILENAME,
     read_queue,
 )
+from claude_code_hooks_daemon.utils.workable_issues import (
+    WORKABLE_ISSUES_FILENAME,
+    read_workable,
+    write_workable,
+)
+
+_SERVICE_FACTORY = "claude_code_hooks_daemon.daemon.work_queue_cli._issue_service"
+
+
+class _Listing:
+    """A ``gh`` runner answering ``issue list`` with a fixed listing, or failing."""
+
+    def __init__(self, listing: list[dict[str, Any]] | Exception) -> None:
+        self.listing = listing
+        self.calls = 0
+
+    def __call__(self, args: Sequence[str]) -> str:
+        self.calls += 1
+        if isinstance(self.listing, Exception):
+            raise self.listing
+        return json.dumps(self.listing)
+
+
+def _issue(number: int, *labels: str) -> dict[str, Any]:
+    return {
+        "number": number,
+        "assignees": [],
+        "author": {"login": "lts-bob"},
+        "state": "OPEN",
+        "labels": [{"name": name} for name in labels],
+    }
+
+
+def _use_listing(listing: _Listing, approved: tuple[str, ...] | None = ("lts-bob",)) -> Any:
+    return patch(_SERVICE_FACTORY, return_value=(IssueValidityService(listing), approved))
+
+
+@pytest.fixture(autouse=True)
+def _no_real_github() -> Iterator[None]:
+    """``done`` looks up the next issue; no test may reach the real ``gh``."""
+    offline = _Listing(GhError("offline in tests"))
+    with patch(_SERVICE_FACTORY, return_value=(IssueValidityService(offline), ("lts-bob",))):
+        yield
 
 
 @pytest.fixture(autouse=True)
@@ -186,6 +231,89 @@ class TestUpdateAndDone:
     ) -> None:
         assert _run(project, "done", "ghost") == 1
         assert "ghost" in capsys.readouterr().err
+
+
+class TestDoneNamesTheNextWorkableIssue:
+    """Plan 00470 Phase 7 Task 7.2: closing is the moment "wait for the tick" is chosen."""
+
+    def _seed(self, project: Path, worktree: Path) -> None:
+        _run(project, "add", "a", "--worktree", str(worktree), "--branch", "b", "--brief", "x")
+
+    def _cache(self, project: Path) -> Path:
+        return project / "untracked" / WORKABLE_ISSUES_FILENAME
+
+    def test_it_names_the_first_workable_issue_and_records_the_cache(
+        self, project: Path, worktree: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._seed(project, worktree)
+        listing = _Listing([_issue(7, "agent-needs-human"), _issue(9), _issue(12)])
+        capsys.readouterr()
+        with _use_listing(listing):
+            assert _run(project, "done", "a") == 0
+        out = capsys.readouterr().out
+        assert "next workable issue: #9 - start it now" in out
+        cache = read_workable(self._cache(project))
+        assert cache is not None and cache.numbers == (9, 12)
+        assert listing.calls == 1
+
+    def test_it_says_so_when_nothing_is_workable(
+        self, project: Path, worktree: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._seed(project, worktree)
+        capsys.readouterr()
+        with _use_listing(_Listing([_issue(7, "agent-needs-human")])):
+            assert _run(project, "done", "a") == 0
+        assert "no workable issue" in capsys.readouterr().out
+        cache = read_workable(self._cache(project))
+        assert cache is not None and cache.numbers == ()
+
+    def test_a_gh_failure_never_fails_done_and_leaves_the_cache_alone(
+        self, project: Path, worktree: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._seed(project, worktree)
+        write_workable(self._cache(project), [3], now=1.0)
+        capsys.readouterr()
+        with _use_listing(_Listing(GhError("rate limited"))):
+            assert _run(project, "done", "a") == 0
+        out = capsys.readouterr().out
+        assert "Closed 'a' (done)" in out
+        assert "next issue is unknown" in out
+        assert "rate limited" in out
+        cache = read_workable(self._cache(project))
+        assert cache is not None and cache.numbers == (3,) and cache.recorded_at == 1.0
+
+    def test_an_unconfigured_author_list_is_unknown_not_a_crash(
+        self, project: Path, worktree: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._seed(project, worktree)
+        listing = _Listing([_issue(9)])
+        capsys.readouterr()
+        with _use_listing(listing, approved=None):
+            assert _run(project, "done", "a") == 0
+        assert "next issue is unknown" in capsys.readouterr().out
+        assert listing.calls == 0
+
+    def test_a_bad_config_is_unknown_not_a_crash(
+        self, project: Path, worktree: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._seed(project, worktree)
+        capsys.readouterr()
+        with patch(_SERVICE_FACTORY, side_effect=ValueError("bad approved_issue_authors")):
+            assert _run(project, "done", "a") == 0
+        assert "next issue is unknown" in capsys.readouterr().out
+
+    def test_an_unknown_name_does_not_ask_github(self, project: Path) -> None:
+        listing = _Listing([_issue(9)])
+        with _use_listing(listing):
+            assert _run(project, "done", "ghost") == 1
+        assert listing.calls == 0
+
+    def test_update_does_not_ask_github(self, project: Path, worktree: Path) -> None:
+        self._seed(project, worktree)
+        listing = _Listing([_issue(9)])
+        with _use_listing(listing):
+            assert _run(project, "update", "a", "--sha", "abc") == 0
+        assert listing.calls == 0
 
 
 class TestList:

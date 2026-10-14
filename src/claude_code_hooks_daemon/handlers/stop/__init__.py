@@ -17,10 +17,12 @@ Before adding a Stop handler, read that test module.
 
 from .auto_continue_stop import AutoContinueStopHandler
 from .cron_stop_enforcer import CronStopEnforcerHandler
+from .idle_workable_issue_stop_gate import IdleWorkableIssueStopGateHandler
 from .teammate_reap_advisor import TeammateReapAdvisorHandler
 
 __all__ = [
     "AutoContinueStopHandler",
     "CronStopEnforcerHandler",
+    "IdleWorkableIssueStopGateHandler",
     "TeammateReapAdvisorHandler",
 ]

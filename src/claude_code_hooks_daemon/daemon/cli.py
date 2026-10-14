@@ -6983,6 +6983,16 @@ def cmd_issue_validity(args: argparse.Namespace) -> int:
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_USAGE
+    workable_cache: Path | None = None
+    if args.list_eligible:
+        # The Stop gate reads this file instead of calling GitHub (Plan 00470 Phase 7).
+        from claude_code_hooks_daemon.daemon.work_queue_cli import untracked_dir_for
+        from claude_code_hooks_daemon.utils.workable_issues import WORKABLE_ISSUES_FILENAME
+
+        try:
+            workable_cache = untracked_dir_for(project_root) / WORKABLE_ISSUES_FILENAME
+        except RuntimeError as exc:
+            print(f"warning: no workable-issues cache will be written: {exc}", file=sys.stderr)
     return run_issue_validity(
         number=args.number,
         claim=args.claim,
@@ -6992,6 +7002,7 @@ def cmd_issue_validity(args: argparse.Namespace) -> int:
         service=IssueValidityService(make_gh_runner(cwd=project_root)),
         stdout=sys.stdout,
         stderr=sys.stderr,
+        workable_cache=workable_cache,
     )
 
 

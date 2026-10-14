@@ -1256,6 +1256,10 @@ handlers:
   # cannot shadow auto_continue_stop in turn. See
   # tests/integration/test_stop_chain_terminal_shadowing.py.
   stop:
+    idle_workable_issue_stop_gate:  # Refuses an idle stop while a workable issue is cached and nothing is in flight (Plan 00470 Phase 7)
+      enabled: true  # Inert unless the project declares an `issue-sdlc` persistent cron job; never terminal
+      priority: 4
+
     usage_pause_stop_gate:  # A usage-paused session stops only once its crons are exactly the one resume cron (Plan 00479)
       enabled: true  # Inert unless a usage pause is recorded for the session; never terminal
       priority: 6

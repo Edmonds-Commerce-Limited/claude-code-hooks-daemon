@@ -230,7 +230,7 @@ An idle stop that defers eligible issues to the next tick must be refused on
 facts, because prose ("waiting for the cron is an own goal") was ignored. The
 incident is in this plan's journal.
 
-- [ ] ⬜ **Task 7.1**: Stop gate keyed on facts, not wording. On a main-thread
+- [x] ✅ **Task 7.1**: Stop gate keyed on facts, not wording. On a main-thread
   Stop where `issue-sdlc` is a declared job: if the work queue has no running
   entry, the tree is clean, and the cached eligible-issue count is above zero,
   deny the stop. The deny names the next eligible issue and says to start it
@@ -240,7 +240,7 @@ incident is in this plan's journal.
   `issue-validity`'s author, assignee and label rules. The count is cached and
   refreshed by `work-queue done` and by each tick, so the Stop hook never
   calls GitHub. TDD.
-- [ ] ⬜ **Task 7.2**: `work-queue done` prints the next eligible issue ("#N is
+- [x] ✅ **Task 7.2**: `work-queue done` prints the next eligible issue ("#N is
   next: start it now"), because that is the moment the wait-for-the-tick
   choice is made. TDD.
 - [x] ✅ **Task 7.3**: `CLAUDE/development/IssueSdlc.md` (plus the cron prompt

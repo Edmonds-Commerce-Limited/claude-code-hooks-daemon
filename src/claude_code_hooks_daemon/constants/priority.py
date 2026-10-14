@@ -153,6 +153,11 @@ class Priority:
     USAGE_PAUSE_TOOL_GATE = 9
     USAGE_PAUSE_STOP_GATE = 6
 
+    # Plan 00470 Phase 7: judged before the usage pause gate (6) and the cron
+    # enforcers (7); it stands down on a usage pause itself, and is
+    # non-terminal so auto_continue_stop still runs behind it.
+    IDLE_WORKABLE_ISSUE_STOP_GATE = 4
+
     # Stop failure pair (Plan 00470 Task 3.1). The recorder is alone on
     # StopFailure, so 50 is free. The resolver is a UserPromptSubmit handler
     # and runs after usage_pause_gate (9), whose terminal deny ends the chain:
