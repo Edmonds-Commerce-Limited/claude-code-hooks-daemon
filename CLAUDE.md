@@ -229,7 +229,7 @@ IDs: R-SEC-CODE-INJECTION, R-SEC-CMD-INJECTION, R-SEC-DESERIALISATION, R-SEC-XSS
 
 ## tdd_enforcement — test file must exist before source file
 
-Creating a production source file with `Write` is blocked until a corresponding test file exists.
+A `Write` that creates a production source file (a path that does not exist yet) is blocked until a corresponding test file exists. A `Write` that overwrites an existing file is treated like an `Edit` and is not gated.
 
 **TDD workflow (required)**:
 
