@@ -72,6 +72,25 @@ writing the keystroke.
   clears only when the menu leaves the screen. Each press is logged to the
   decision log, and dry-run mode logs it without sending.
 
+### Phase 2b: Hold every injection until a hard limit resets (owner report)
+
+The owner saw a session at its weekly limit get `/compact` and `continue`
+typed by the supervisor every 5 minutes. Each failed with "You've hit your
+weekly limit · resets <time>", and the supervisor retried regardless.
+
+- [ ] ⬜ **Task 2b.1**: Turn a hard limit into a pause the supervisor already
+  honours. When the daemon records a `rate_limit` StopFailure
+  (`stop_failure_recorder`, Plan 00470 Task 3.1), it writes the session's
+  `.usage-paused` record. Its `resume_at` is the reset time from the latest
+  status payload's `rate_limits` (Plan 00479), or the reset time this plan's
+  screen recogniser reads, whichever is available. TDD.
+- [ ] ⬜ **Task 2b.2**: A pause caused by a hard limit injects nothing, not even
+  the single usage-pause `/compact` (`_usage_pause_outcome`), because every
+  request fails until the reset. A ceiling pause keeps its `/compact`. TDD in
+  the supervisor suite.
+- [ ] ⬜ **Task 2b.3**: With no reset time known, back off rather than retrying
+  every tick: double the interval after each identical failure, up to a cap.
+
 ### Phase 3: Verify and ship
 
 - [ ] ⬜ **Task 3.1**: Verify on a real session that hits a limit. The menu is
