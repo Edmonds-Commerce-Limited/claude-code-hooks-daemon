@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00522: the pytest text report reads pytest's final summary line](00522-pytest-text-report-reads-the-final-summary-line/PLAN.md) - In Progress (#115: a nested pytest summary in a failure message replaces the real totals)
+
 - [00519: minimum tool versions and relative worktrees](00519-minimum-tool-versions-and-relative-worktrees/PLAN.md) - Blocked on owner input (#110: relative worktrees need git 2.48, and this container runs 2.39.5; Phase 1, the declared minimum-version check, is not blocked)
 
 - [00516: journal in place redaction](00516-journal-in-place-redaction/PLAN.md) - Not Started, Medium (#108; awaiting owner decisions: a bounded `mkplan.bash --journal-redact` to remove a leaked value from a past journal entry with an appended correction entry, since `journal-dayfile-is-today` blocks any past-day edit; ledger 00474 N389)
@@ -308,11 +310,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 521 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 522 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 444 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 54 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 55 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
