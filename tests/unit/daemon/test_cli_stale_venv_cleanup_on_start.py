@@ -20,11 +20,26 @@ import pytest
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon import cli
-from claude_code_hooks_daemon.daemon.paths import ProcessScan, project_path_slug
+from claude_code_hooks_daemon.daemon.paths import (
+    ProcessScan,
+    processes_using_venvs,
+    project_path_slug,
+)
 from claude_code_hooks_daemon.daemon.venv_lock import VenvLockTimeout
 
 STALE_HASH = "sha256:" + "0" * 64
 _RESOLVER = "claude_code_hooks_daemon.daemon.paths.resolve_existing_venv_python"
+
+
+def _scan_without_foreign_processes(venv_dirs: list[Path]) -> ProcessScan:
+    """The real scan, minus the processes this test cannot read.
+
+    A non-root CI runner cannot read other users' ``/proc/<pid>/exe``, and the
+    cleanup rightly keeps every venv on that doubt, so a test asserting a
+    removal would depend on who runs it. This test's own child processes are
+    still read, so the "a process is using it" cases stay real.
+    """
+    return ProcessScan(processes_using_venvs(venv_dirs).users, unreadable=0)
 
 
 def _venv(path: Path, lock_hash: str | None = None) -> Path:
@@ -42,7 +57,10 @@ def project(tmp_path: Path) -> Iterator[Path]:
     (tmp_path / "src" / "claude_code_hooks_daemon").mkdir(parents=True)
     (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n")
     (tmp_path / "untracked").mkdir()
-    with patch(_RESOLVER, return_value=tmp_path / "no-venv" / "bin" / "python"):
+    with (
+        patch(_RESOLVER, return_value=tmp_path / "no-venv" / "bin" / "python"),
+        patch(f"{cli.__name__}.processes_using_venvs", _scan_without_foreign_processes),
+    ):
         yield tmp_path
 
 
