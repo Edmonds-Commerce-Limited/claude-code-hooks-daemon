@@ -82,20 +82,22 @@ class TestRoundTrip:
         [
             "not json",
             "[]",
+            "\xff\xfe",
             '{"numbers": "x", "recorded_at": 1}',
             '{"numbers": [1, true], "recorded_at": 1}',
             '{"numbers": [1]}',
             '{"numbers": [1], "recorded_at": true}',
         ],
     )
-    def test_a_corrupt_file_reads_as_none(self, tmp_path: Path, body: str) -> None:
+    def test_a_corrupt_file_reads_as_nothing_known_to_be_workable(
+        self, tmp_path: Path, body: str
+    ) -> None:
         path = tmp_path / WORKABLE_ISSUES_FILENAME
         path.write_text(body, encoding="utf-8")
-        assert read_workable(path) is None
+        cache = read_workable(path)
+        assert cache is not None and cache.numbers == ()
 
-    def test_an_unwritable_destination_raises_oserror_free_of_a_partial_file(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_missing_directory_is_created(self, tmp_path: Path) -> None:
         path = tmp_path / "missing-dir" / WORKABLE_ISSUES_FILENAME
         write_workable(path, [1], now=1.0)
         assert read_workable(path) is not None

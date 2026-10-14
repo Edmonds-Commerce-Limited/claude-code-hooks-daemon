@@ -150,16 +150,10 @@ class IdleWorkableIssueStopGateHandler(InitialThreadExemption, StopHandlerBase):
 
     def _untracked_dir(self) -> Path | None:
         """The daemon's state directory, or None without a project context."""
-        try:
-            return ProjectContext.daemon_untracked_dir()
-        except RuntimeError as exc:
-            log_and_continue(
-                logger,
-                exc,
-                reason="without a project context there is no cache or work queue to read, so the gate stands aside (None)",
-                level=logging.DEBUG,
-            )
+        if not ProjectContext.is_initialized():
+            logger.debug("idle_workable_issue_stop_gate: no project context, so no state")
             return None
+        return ProjectContext.daemon_untracked_dir()
 
     def _declared_job(self, hook_input: dict[str, Any]) -> PersistentCronConfig | None:
         """The watched job when this session must hold it, else None."""
@@ -191,24 +185,28 @@ class IdleWorkableIssueStopGateHandler(InitialThreadExemption, StopHandlerBase):
             )
         ):
             return BlockingResult(decision=Decision.ALLOW)
-        if self._work_in_flight(state) is not False:
+        if self._queue_holds_the_gate_back(state):
             return BlockingResult(decision=Decision.ALLOW)
         if self._awaiting_human(hook_input, state, now):
             return BlockingResult(decision=Decision.ALLOW)
         return BlockingResult.deny(self._render(cache.numbers)).under_rule(_RULE)
 
     @staticmethod
-    def _work_in_flight(state: Path) -> bool | None:
-        """Whether the work queue has a running entry; None when it cannot be read."""
+    def _queue_holds_the_gate_back(state: Path) -> bool:
+        """True when a queue entry is running, or the queue cannot be read.
+
+        An unreadable queue cannot show that nothing is in flight, so the gate
+        stands aside rather than deny a session that may be running work.
+        """
         try:
             return bool(active_records(read_queue(state / WORK_QUEUE_FILENAME)))
         except WorkQueueError as exc:
             log_and_continue(
                 logger,
                 exc,
-                reason="an unreadable work queue cannot show that nothing is in flight, so the gate stands aside (None) rather than deny a session that may be running work",
+                reason="an unreadable work queue cannot show that nothing is in flight, so the gate stands aside (True) rather than deny a session that may be running work",
             )
-            return None
+            return True
 
     def _awaiting_human(self, hook_input: dict[str, Any], state: Path, now: float) -> bool:
         """Whether this session is blocked only on a human: a live marker, or this stop says so."""

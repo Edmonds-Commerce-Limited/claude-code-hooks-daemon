@@ -98,21 +98,43 @@ def _parse(raw: object) -> WorkableIssues | None:
     return WorkableIssues(numbers=tuple(numbers), recorded_at=float(recorded_at))
 
 
-def read_workable(path: Path) -> WorkableIssues | None:
-    """The cache, or None when it is missing, unreadable or malformed."""
+class WorkableCacheUnreadable(Exception):
+    """The cache file exists but could not be read or decoded."""
+
+
+#: What an unreadable cache reads as: nothing known to be workable, and so never fresh.
+_NOTHING_KNOWN: Final[WorkableIssues] = WorkableIssues(numbers=(), recorded_at=0.0)
+
+
+def _load_raw(path: Path) -> object:
+    """The decoded file; ``None`` when it does not exist.
+
+    Raises:
+        WorkableCacheUnreadable: The file exists but cannot be read or decoded.
+    """
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return None
+        if not path.is_file():
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
+        raise WorkableCacheUnreadable(f"cannot read {path}: {exc}") from exc
+
+
+def read_workable(path: Path) -> WorkableIssues | None:
+    """The cache; None when there is none, empty-and-stale when it is unreadable or malformed."""
+    try:
+        raw = _load_raw(path)
+    except WorkableCacheUnreadable as exc:
         log_and_continue(
             logger,
             exc,
-            reason=f"an unreadable workable-issues cache {path} reads as no cache (None), which makes the Stop gate stand aside",
+            reason="an unreadable workable-issues cache reads as nothing known to be workable, which makes the Stop gate stand aside",
             level=logging.DEBUG,
         )
+        return _NOTHING_KNOWN
+    if raw is None:
         return None
-    return _parse(raw)
+    return _parse(raw) or _NOTHING_KNOWN
 
 
 def refresh_workable_cache(

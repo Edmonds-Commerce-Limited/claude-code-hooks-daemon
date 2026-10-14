@@ -328,6 +328,10 @@ class TestRealSeams:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
+            "claude_code_hooks_daemon.core.project_context.ProjectContext.is_initialized",
+            lambda: True,
+        )
+        monkeypatch.setattr(
             "claude_code_hooks_daemon.core.project_context.ProjectContext.daemon_untracked_dir",
             lambda: tmp_path,
         )

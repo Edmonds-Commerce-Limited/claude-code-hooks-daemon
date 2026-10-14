@@ -613,24 +613,6 @@
       "reason": "Plan 00298: standard tolerant-JSON-record pattern (same shape as goal_ledger._parse_entry). A missing, unreadable, or corrupt marker file all map to None -- the documented fail-open outcome consumed by failsafe_cron_blockage_suppressor as 'do not suppress', never a reason to raise out of a UserPromptSubmit handler."
     },
     {
-      "file": "utils/workable_issues.py",
-      "function": "read_workable",
-      "rule": "return-none-on-error",
-      "reason": "Plan 00470 Phase 7: same tolerant-JSON-record shape as blockage_marker.read_marker. A missing or unreadable cache reads as 'no cache', which the idle-stop gate treats as 'stand aside' -- a Stop hook must never raise, and an unreadable cache must never deny a stop. The unreadable band is logged through log_and_continue with a specific reason."
-    },
-    {
-      "file": "handlers/stop/idle_workable_issue_stop_gate.py",
-      "function": "_untracked_dir",
-      "rule": "return-none-on-error",
-      "reason": "Plan 00470 Phase 7: no project context (unit tests, or a non-daemon caller) means there is no cache or work queue to read, so the gate stands aside. The failure direction is fail-open by design: a Stop gate that raised would take every Stop handler behind it down. Logged through log_and_continue."
-    },
-    {
-      "file": "handlers/stop/idle_workable_issue_stop_gate.py",
-      "function": "_work_in_flight",
-      "rule": "return-none-on-error",
-      "reason": "Plan 00470 Phase 7: an unreadable work queue cannot show that nothing is in flight, so the idle-stop gate stands aside (None is three-valued here: True running, False idle, None unknown) rather than deny a session that may be running work. Logged at warning through log_and_continue; the caller treats anything but a clean False as 'allow'."
-    },
-    {
       "file": "utils/blockage_marker.py",
       "function": "clear_marker",
       "rule": "return-none-on-error",

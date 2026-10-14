@@ -26,6 +26,14 @@ Red output captured before implementation: `tests/unit/utils/test_workable_issue
 
 ## QA
 
-`./scripts/qa/llm_qa.py changed --allow-unmapped` (13 files reported too-broad unmapped, as the brief allows): `QA: 39/40 PASSED, 1/40 FAILED`, exit status 1. The single failure is `tests/acceptance/test_playbook_harness.py::...test_every_executable_probe_matches_its_expected_decision_and_reason`, probe `#116 WorktreeFileCopyHandler`, which is denied by `R-WRITE-OUTSIDE-PROJECT-ROOT` instead of the expected worktree-copy reason. It concerns a PreToolUse worktree handler and the location of this worktree; it is unrelated to this change, but I did not prove it fails on an untouched tree. Earlier runs in this session also fixed: pyright (test subclass instead of attribute assignment), error_hiding (`log_and_continue` plus three exclusion entries in `scripts/qa/error_hiding_exclusions.json`, matching `read_marker`'s precedent), generated_doc_drift (regenerated), quote-drift (CONTRIBUTING.md), and four integration tests (guidance verdict, scope list, release-note audience, priority band row).
+Final run after review round 1: `./scripts/qa/llm_qa.py changed --allow-unmapped` (13 files reported too-broad unmapped): `QA: 40/40 PASSED`, exit status 0. An earlier run failed only the playbook-harness probe `#116 WorktreeFileCopyHandler` (denied by `R-WRITE-OUTSIDE-PROJECT-ROOT`); it passed in the final run, I did not touch it and cannot say why it differed. Other fixes made along the way: pyright (test subclass), generated_doc_drift (regenerated), quote-drift (CONTRIBUTING.md), four integration tests (guidance verdict, scope list, release-note audience, priority band row).
+
+## Review round 1: exclusions removed
+
+The three `scripts/qa/error_hiding_exclusions.json` entries added in the first commit are gone (the file is identical to its state before this work) and error_hiding passes without them. **No exclusion remains.**
+
+- `_untracked_dir`: now `if not ProjectContext.is_initialized(): return None`, the check `default_queue_path()` and `default_pauses_path()` use. No try/except.
+- `_work_in_flight` became `_queue_holds_the_gate_back() -> bool`: True when an entry is running OR the queue is unreadable. The except logs through `log_and_continue` and returns True ("stand aside"), a real value, not None. This is a semantic change, not a rename. No tolerant non-raising queue reader exists (`queue_briefing` renders text), so one `except WorkQueueError` remains, returning a bool.
+- `read_workable`: follows `goal_ledger`'s shape. `_load_raw` raises `WorkableCacheUnreadable` from its try body; `read_workable` logs via `log_and_continue` and returns an empty `WorkableIssues` (nothing workable). A missing file still returns None. Behaviour change: corrupt or malformed now reads as empty rather than None; tests updated.
 
 Daemon restarted in the worktree; status RUNNING, 31/31 listeners. The restart made the daemon auto-commit the CLAUDE.md handler marker (`3f9693db3`), which sits under this work.
