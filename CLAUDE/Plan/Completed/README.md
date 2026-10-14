@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00462: php lsp advice keeps composer dependencies indexed](00462-php-lsp-advice-keeps-composer-dependencies-indexed/PLAN.md) - Complete at `830363e5` + the archiving commit (from #56: the PHP advice asked intelephense to exclude all of `**/vendor`, which drops every Composer dependency from its index; the strategy now keeps dependency roots indexed and asks only for intelephense's nested excludes, and flags an override that excludes the whole tree)
+
 - [00461: journal entries only through the stamping tool](00461-journal-entries-only-through-the-stamping-tool/PLAN.md) - Complete at `e3f03f3e` + the archiving commit (owner directive after a session of hand-stamped entries, one 40 minutes in the future: an Edit/Write/Bash append to a plan `JOURNAL/` day-file, in the main checkout or a worktree, is DENIED and pointed at `mkplan.bash --journal`; remedies 00422 N21)
 
 - [00460: report size blocker gives read only agents a way out](00460-report-size-blocker-gives-read-only-agents-a-way-out/PLAN.md) - Complete at `ca2b1ba5` + the archiving commit (owner report: the size blocker told every agent to write its report to a file, which a read-only type cannot do; the daemon now saves every stopping sub-agent's reply to a pruned file and the blocker points at it)

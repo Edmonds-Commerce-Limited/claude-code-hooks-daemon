@@ -1,6 +1,6 @@
 # Plan 00521: tdd_enforcement treats a Write over an existing file as an edit
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-14
 **Owner**: dev
 **Priority**: Medium
@@ -48,10 +48,16 @@ separate guard. It still applies to an overwrite and is unaffected.
 
 ## Success Criteria
 
-- [ ] An overwrite is allowed and a creation is denied, both proven by tests
-  that failed first.
-- [ ] The release-bound consequence (a narrower gate) is recorded as a release
-  note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] An overwrite is allowed and a creation is denied, both proven by tests
+  that failed first (`tests/unit/handlers/test_tdd_enforcement.py`, red output
+  in [the sub-agent report](subagent-reports/261014-python-developer-sonnet.md)).
+- [x] The release-bound consequence (a narrower gate) is recorded as a release
+  note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`:
+  `058-tdd-enforcement-no-longer-gates-a-write-over-an-existing-file.md`.
+- [x] QA green: targeted `changed` passed 39 of 40 checks. The one red was the
+  flaky performance test, which fails on unchanged `main` too and names
+  handlers this change does not touch (ledger 00474 N462). CI run 38543055218 on
+  1de88710a then ran the whole suite and passed.
 
 ## Delivery & Milestones
 
@@ -60,3 +66,4 @@ separate guard. It still applies to an overwrite and is unaffected.
      JOURNAL/00521-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Filed by the issue-sdlc loop from #114.
+- Delivered in 1ea736173, merged at 113a1705a; #114 closed.

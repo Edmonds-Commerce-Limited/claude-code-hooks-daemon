@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00521: tdd_enforcement treats a Write over an existing file as an edit](00521-tdd-write-overwrite-is-not-creation/PLAN.md) - In Progress (#114: the gate covers creating a file, but denies a `Write` that overwrites an existing one)
-
 - [00519: minimum tool versions and relative worktrees](00519-minimum-tool-versions-and-relative-worktrees/PLAN.md) - Blocked on owner input (#110: relative worktrees need git 2.48, and this container runs 2.39.5; Phase 1, the declared minimum-version check, is not blocked)
 
 - [00516: journal in place redaction](00516-journal-in-place-redaction/PLAN.md) - Not Started, Medium (#108; awaiting owner decisions: a bounded `mkplan.bash --journal-redact` to remove a leaked value from a past journal entry with an appended correction entry, since `journal-dayfile-is-today` blocks any past-day edit; ledger 00474 N389)
@@ -199,6 +197,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00521: tdd_enforcement treats a Write over an existing file as an edit](Completed/00521-tdd-write-overwrite-is-not-creation/PLAN.md) - Complete at merge `113a1705a` + the archiving commit (#114: a `Write` over an existing regular file is not gated, like an `Edit`; a creating `Write` is judged as before; release note 058)
+
 - [00520: tdd_enforcement infers the Maven/Gradle source-set layout](Completed/00520-tdd-maven-gradle-source-set-layout/PLAN.md) - Complete at merge `da9fff6af` + the archiving commit (#111: Java and Kotlin sources under `src/main/<lang>/` are satisfied by a test in the sibling `src/test/<lang>/`; release note 057)
 
 - [00517: daemon version ssot and no stale venvs](Completed/00517-daemon-version-ssot-and-no-stale-venvs/PLAN.md) - Complete at `42f6de85a` (green full CI run 38491817681) + the archiving commit (owner direction: one source for the installed version and one staleness rule for every venv cleanup; UNPROVEN venvs surfaced at session start; release note 055)
@@ -257,8 +257,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00463: full qa is a main thread gate](Completed/00463-full-qa-is-a-main-thread-gate/PLAN.md) - Complete at `5156a81f`, merged as `83e75879`, CI fix `fd78edce` + the archiving commit (owner request after five worktree agents ran the ~18-minute full suite at once: a guard denies configured full-QA commands in sub-agents, and a pytest sink plus a host-wide lock refuse a whole-suite run not made under the coordinator's gate; live dogfood Task 2.2 carried)
 
-- [00462: php lsp advice keeps composer dependencies indexed](Completed/00462-php-lsp-advice-keeps-composer-dependencies-indexed/PLAN.md) - Complete at `830363e5` + the archiving commit (from #56: the PHP advice asked intelephense to exclude all of `**/vendor`, which drops every Composer dependency from its index; the strategy now keeps dependency roots indexed and asks only for intelephense's nested excludes, and flags an override that excludes the whole tree)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -312,9 +310,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 521 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 443 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 444 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 55 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 54 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
