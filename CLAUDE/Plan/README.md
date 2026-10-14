@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00525: staged lint gate runs go vet from the module root](00525-staged-lint-gate-runs-go-vet-from-the-module-root/PLAN.md) - In Progress (#118: the commit gate vets a nested-module Go file from the daemon cwd, so a correct package is denied)
+
 - [00524: foreground blocking wait goes to the background](00524-foreground-blocking-wait-goes-to-the-background/PLAN.md) - Not Started (#117, agent-needs-human: deny or advise a foreground wait-only Bash call; the existing liveness-loop fix text recommends one)
 
 - [00523: supervisor answers the rate limit menu](00523-supervisor-answers-the-rate-limit-menu/PLAN.md) - Not Started (owner request: press Enter on Claude Code's rate-limit menu so an unattended session waits for the reset)
@@ -311,11 +313,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 524 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 525 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 445 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 56 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 57 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
