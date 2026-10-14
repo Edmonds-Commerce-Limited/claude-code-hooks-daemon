@@ -36,14 +36,14 @@ separate guard. It still applies to an overwrite and is unaffected.
 
 ### Phase 1: Fix
 
-- [ ] ⬜ **Task 1.1**: RED: a test that a `Write` over an existing production
+- [x] ✅ **Task 1.1**: RED: a test that a `Write` over an existing production
   file with no test is allowed, and that a `Write` creating the same path is
   still denied. A symlink, a directory or a dangling path at the target counts
   as not existing.
-- [ ] ⬜ **Task 1.2**: GREEN: the existence check, resolved the same way as
-  the handler's other path handling (relative to the payload's working
-  directory when the path is relative).
-- [ ] ⬜ **Task 1.3**: Guidance (`get_claude_md`, the rule summary) says a
+- [x] ✅ **Task 1.2**: GREEN: the existence check, resolved the same way as
+  the handler's other path handling (the path is judged as given; the handler
+  never consulted the payload's working directory).
+- [x] ✅ **Task 1.3**: Guidance (`get_claude_md`, the rule summary) says a
   `Write` that creates a file; add a release note.
 
 ## Success Criteria

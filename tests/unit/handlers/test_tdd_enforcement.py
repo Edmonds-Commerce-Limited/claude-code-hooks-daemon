@@ -2937,3 +2937,58 @@ class TestMavenGradleSourceSetLayout:
         candidates = handler._get_test_file_paths(str(source), JavaTddStrategy())
 
         assert tmp_path / "src" / "test" / "lib" / "ATest.java" not in candidates
+
+
+class TestWriteOverExistingFileIsNotCreation:
+    """A Write over an existing regular file is an edit, not a creation (issue #114)."""
+
+    @staticmethod
+    def _write_input(path: Path) -> dict[str, Any]:
+        return {"tool_name": "Write", "tool_input": {"file_path": str(path), "content": "x = 1\n"}}
+
+    @staticmethod
+    def _source_path(tmp_path: Path) -> Path:
+        return tmp_path / "controller" / "src" / "handlers" / "pre_tool_use" / "my_handler.py"
+
+    def test_creating_a_missing_file_is_still_gated(self, tmp_path: Path) -> None:
+        source = self._source_path(tmp_path)
+        assert TddEnforcementHandler().matches(self._write_input(source)) is True
+
+    def test_overwriting_an_existing_regular_file_is_outside_the_gate(self, tmp_path: Path) -> None:
+        source = self._source_path(tmp_path)
+        source.parent.mkdir(parents=True)
+        source.write_text("old = 1\n")
+        assert TddEnforcementHandler().matches(self._write_input(source)) is False
+
+    def test_symlink_target_counts_as_not_existing(self, tmp_path: Path) -> None:
+        source = self._source_path(tmp_path)
+        source.parent.mkdir(parents=True)
+        real = tmp_path / "real.txt"
+        real.write_text("old\n")
+        source.symlink_to(real)
+        assert TddEnforcementHandler().matches(self._write_input(source)) is True
+
+    def test_dangling_symlink_counts_as_not_existing(self, tmp_path: Path) -> None:
+        source = self._source_path(tmp_path)
+        source.parent.mkdir(parents=True)
+        source.symlink_to(tmp_path / "missing.txt")
+        assert TddEnforcementHandler().matches(self._write_input(source)) is True
+
+    def test_directory_target_counts_as_not_existing(self, tmp_path: Path) -> None:
+        source = self._source_path(tmp_path)
+        source.mkdir(parents=True)
+        assert TddEnforcementHandler().matches(self._write_input(source)) is True
+
+    def test_unreadable_stat_counts_as_not_existing(self, tmp_path: Path) -> None:
+        source = self._source_path(tmp_path)
+        with patch.object(Path, "is_symlink", side_effect=PermissionError("denied")):
+            assert TddEnforcementHandler().matches(self._write_input(source)) is True
+
+    def test_guidance_says_write_that_creates_a_file(self) -> None:
+        text = TddEnforcementHandler().get_claude_md() or ""
+        assert "does not exist yet" in text
+        assert "overwrite" in text.lower()
+
+    def test_rule_summary_names_a_write_that_creates(self) -> None:
+        (rule,) = TddEnforcementHandler().get_rules()
+        assert "does not exist yet" in rule.blocked

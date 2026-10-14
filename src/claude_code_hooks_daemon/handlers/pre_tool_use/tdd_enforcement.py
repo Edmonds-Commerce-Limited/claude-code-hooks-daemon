@@ -36,7 +36,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     path_matches_globs,
     resolve_project_root,
 )
-from claude_code_hooks_daemon.utils.path_predicates import path_exists
+from claude_code_hooks_daemon.utils.path_predicates import path_exists, path_is_file
 from claude_code_hooks_daemon.utils.realpath import realpath
 
 logger = logging.getLogger(__name__)
@@ -77,7 +77,10 @@ _GLOB_METACHARACTERS = frozenset("*?[")
 # violation is the same concept, "TDD test-first".
 _TDD_RULE = Rule(
     rule_id=RuleID.TDD_TEST_FIRST,
-    blocked="creating a production source file without its test file",
+    blocked=(
+        "a Write that creates a production source file (a path that does not exist "
+        "yet) without its test file"
+    ),
     why="TDD requires the test file to exist before the source file",
     fix="Create the test file first (RED), then the source file (GREEN)",
     verbose=(
@@ -250,6 +253,21 @@ def _is_nested_literal_dir(entry: str) -> bool:
     return "/" in entry.strip("/") and not _GLOB_METACHARACTERS.intersection(entry)
 
 
+def _is_existing_regular_file(file_path: str) -> bool:
+    """True only for a real regular file; a symlink, directory or dangling path is not.
+
+    A target that cannot be inspected counts as not existing, so the gate still
+    applies (fail closed).
+    """
+    path = Path(file_path)
+    try:
+        if path.is_symlink():
+            return False
+    except OSError:
+        return False
+    return path_is_file(path, unreadable_means=False)
+
+
 class TddEnforcementHandler(PreToolUseHandlerBase):
     """Enforce TDD by blocking production file creation without corresponding test file.
 
@@ -367,6 +385,13 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
         strategy = self._registry.get_strategy(file_path)
         if strategy is None:
             return False  # Unknown language — allow through
+
+        # The contract is CREATING a file. A Write over an existing regular file
+        # is an overwrite, which an Edit can already do wholesale, so gating it
+        # protects nothing (issue #114). The path is judged as given, like every
+        # other path in this handler.
+        if _is_existing_regular_file(file_path):
+            return False
 
         # Delegate all decisions to strategy (zero language logic here)
         content = get_file_content(hook_input) or ""
@@ -859,8 +884,9 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
     def get_claude_md(self) -> str | None:
         return (
             "## tdd_enforcement — test file must exist before source file\n\n"
-            "Creating a production source file with `Write` is blocked until a "
-            "corresponding test file exists.\n\n"
+            "A `Write` that creates a production source file (a path that does not exist "
+            "yet) is blocked until a corresponding test file exists. A `Write` that "
+            "overwrites an existing file is treated like an `Edit` and is not gated.\n\n"
             "**TDD workflow (required)**:\n"
             "1. Create the **test file first** (e.g. `tests/unit/handlers/test_my_handler.py`)\n"
             "2. Write failing tests — RED phase\n"
