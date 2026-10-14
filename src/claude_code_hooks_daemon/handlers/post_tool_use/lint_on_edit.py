@@ -28,6 +28,7 @@ from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_written_file_paths
 from claude_code_hooks_daemon.core.workspace import Workspace, resolve_workspace
 from claude_code_hooks_daemon.strategies.lint.common import build_lint_argv, matches_skip_path
+from claude_code_hooks_daemon.strategies.lint.module_context import resolve_module_context
 from claude_code_hooks_daemon.strategies.lint.protocol import (
     ClassifiesToolUnavailable,
     LintStrategy,
@@ -327,45 +328,6 @@ class LintOnEditHandler(PostToolUseHandlerBase):
 
         return default_cmd, extended_cmd
 
-    @staticmethod
-    def _find_module_root(file_path: str, marker_file: str) -> str | None:
-        """Find the nearest parent directory containing a marker file (e.g., go.mod).
-
-        Walks up from the file's directory to find the module/project root.
-        Returns the directory path if found, None otherwise.
-        """
-        current = Path(file_path).parent
-        while current != current.parent:
-            # An ancestor the daemon cannot stat is not a module root it can
-            # claim to have FOUND. Answering True would name that directory and
-            # run the linter from the wrong place, which fails for the wrong
-            # reason -- a denial the author cannot act on. Keep walking up.
-            if path_exists(current / marker_file, unreadable_means=False):
-                return str(current)
-            current = current.parent
-        return None
-
-    # Map of language names to their module root marker files.
-    #
-    # Ansible needs this for the same reason Go does, but the failure is
-    # sneakier: ``ansible.cfg``, ``.ansible-lint``, ``roles/`` and vendored
-    # collections all resolve relative to the working directory, so running
-    # from the wrong one makes the linter fail for the WRONG REASON — a denial
-    # the author cannot act on, which is worse than not running it at all.
-    #
-    # One marker per language is a known limit (Plan 00268 DESIGN §4): a
-    # project with ``.ansible-lint`` but no ``ansible.cfg`` resolves no root and
-    # runs from the daemon's cwd, where ``--syntax-check`` on an absolute path
-    # still works and only role/collection resolution degrades.
-    #
-    # Rust runs from the crate that owns the file, so a relative path in the
-    # compiler's output and the crate's own context line up with Cargo.toml.
-    _MODULE_ROOT_MARKERS: ClassVar[dict[str, str]] = {
-        "Go": "go.mod",
-        "Ansible": "ansible.cfg",
-        "Rust": "Cargo.toml",
-    }
-
     def _workspace_for(self, file_path: str) -> Workspace:
         """The declared project containing ``file_path``.
 
@@ -444,34 +406,12 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         # is NOT a manifest, so the workspace resolver cannot find it -- going
         # resolver-only here would silently drop Ansible's working directory
         # and make the linter fail for the WRONG reason (see the comment on
-        # _MODULE_ROOT_MARKERS). Every other language falls through to the
+        # MODULE_ROOT_MARKERS). Every other language falls through to the
         # file's own workspace, which is where its config actually lives.
         workspace = self._workspace_for(file_path)
-        working_dir: str | None = None
-        marker = self._MODULE_ROOT_MARKERS.get(language_name)
-        module_root_found = False
-        if marker:
-            working_dir = self._find_module_root(file_path, marker)
-            module_root_found = working_dir is not None
-        if working_dir is None:
-            working_dir = str(workspace.root)
-
-        # For Go, vet the package directory (not single file) since Go packages span
-        # multiple files and single-file vetting can't resolve cross-file references.
-        #
-        # ONLY when a `go.mod` was actually found, though. `go vet` resolves
-        # packages, so the directory form REQUIRES a module: pointed at a
-        # directory in a repo that merely CONTAINS Go, it exits non-zero with
-        # "cannot find main module" without ever reading the file, and a valid
-        # file was denied for it. The single-file form needs no module and
-        # still reports real findings, so it is the right fallback -- narrower
-        # (no cross-file resolution) but correct, which beats broad and wrong.
-        effective_path = file_path
-        if language_name == "Go" and module_root_found:
-            pkg_dir = str(Path(file_path).parent)
-            # Convert absolute path to module-relative package path for go vet
-            if pkg_dir.startswith(working_dir):
-                effective_path = "./" + pkg_dir[len(working_dir) :].lstrip("/") + "/"
+        module_context = resolve_module_context(file_path, language_name)
+        working_dir = module_context.module_root or str(workspace.root)
+        effective_path = module_context.effective_path
 
         # SECURITY: the PATH is whatever the agent just wrote, so the template
         # is split first and the path substituted as ONE element -- see

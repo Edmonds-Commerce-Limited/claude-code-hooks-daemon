@@ -221,8 +221,6 @@ class TestWorkingDirectoryResolution:
     """Task 1.2: ansible.cfg decides where the linter runs."""
 
     def test_ansible_maps_to_the_ansible_cfg_marker(self) -> None:
-        from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import (
-            LintOnEditHandler,
-        )
+        from claude_code_hooks_daemon.strategies.lint.module_context import MODULE_ROOT_MARKERS
 
-        assert LintOnEditHandler._MODULE_ROOT_MARKERS["Ansible"] == "ansible.cfg"
+        assert MODULE_ROOT_MARKERS["Ansible"] == "ansible.cfg"
