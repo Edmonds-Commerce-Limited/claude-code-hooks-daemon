@@ -50,6 +50,10 @@ writing the keystroke.
   for both the five-hour and the weekly limit if they differ, with the
   highlighted default recorded. Commit the capture as a test fixture. If
   Enter does not select waiting, record the key sequence that does.
+- [ ] ⬜ **Task 1.2**: Record whether Claude Code fires a `Notification` hook
+  (or any other hook event the daemon receives) while the menu is shown. If it
+  does, that event is the preferred trigger for Task 2.2's closer look, ahead
+  of the idle heuristic.
 
 ### Phase 2: Recogniser (TDD)
 
@@ -57,8 +61,13 @@ writing the keystroke.
   recognised. Ordinary output that quotes the menu's wording is not
   recognised. Output split across chunks is handled.
 - [ ] ⬜ **Task 2.2**: GREEN: a bounded tail of child output, kept as a ring
-  buffer like `RawInputTap`, plus the recogniser. Put it in a plugin if Plan
-  00487's API fits; otherwise say why it does not.
+  buffer like `RawInputTap`, plus the recogniser. The tail is inspected only
+  when a closer look is triggered (owner's suggestion): output has been quiet
+  past a threshold, as the existing `OutputActivity` settle logic measures it,
+  or by the hook event from Task 1.2. It is rendered to plain screen text
+  (Claude Code redraws menus with cursor movement) before matching, never
+  matched as raw bytes. Put it in a plugin if Plan 00487's API fits;
+  otherwise say why it does not.
 - [ ] ⬜ **Task 2.3**: The keystroke is sent once per menu occurrence. A latch
   clears only when the menu leaves the screen. Each press is logged to the
   decision log, and dry-run mode logs it without sending.
