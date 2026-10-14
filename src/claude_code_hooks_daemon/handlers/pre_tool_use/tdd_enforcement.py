@@ -550,6 +550,12 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
                 )
                 self._append_unique(candidates, fallback_path)
 
+            # Maven/Gradle source set: src/main/<lang>/... -> src/test/<lang>/...
+            # `src/test` is a fixed name, so it is searched once, not per casing.
+            source_set_path = self._map_source_set_test_path(path_parts, test_filename)
+            if source_set_path is not None:
+                self._append_unique(candidates, source_set_path)
+
         # Collocated: test file next to source file
         if _TEST_LOCATION_COLLOCATED in effective_locations:
             self._append_unique(
@@ -732,14 +738,32 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
         return [anchor / root / mirrored / test_filename for root in roots]
 
     @staticmethod
+    def _map_source_set_test_path(path_parts: tuple[str, ...], test_filename: str) -> Path | None:
+        """Map <root>/src/main/<rest>/File to <root>/src/test/<rest>/test_file.
+
+        The Maven/Gradle source-set layout (JVM projects), e.g.
+        ``mod/src/main/kotlin/pkg/A.kt -> mod/src/test/kotlin/pkg/ATest.kt``.
+        Language-neutral: ``test_filename`` comes from the strategy. Like the
+        mirror resolvers it anchors on the FIRST ``src`` segment, so a deeper
+        ``src`` directory stays part of ``<rest>``. Returns None when ``src`` is
+        not immediately followed by ``main``.
+        """
+        src_idx = path_parts.index(_SRC_DIR) if _SRC_DIR in path_parts else -1
+        if src_idx < 0 or path_parts[src_idx + 1 : src_idx + 2] != ("main",):
+            return None
+        root = Path(*path_parts[:src_idx]) if src_idx else Path.cwd()
+        return root.joinpath(_SRC_DIR, "test", *path_parts[src_idx + 2 : -1], test_filename)
+
+    @staticmethod
     def _map_src_to_tests_mirror(
         path_parts: tuple[str, ...], test_filename: str, test_dir: str = _TEST_DIR
     ) -> Path | None:
         """Map src/{package}/{subdir}/.../file to <test_dir>/{package}/{subdir}/.../test_file.
 
         Mirrors the FULL src/ structure under the test directory (no package
-        stripping). Handles PHP PSR-4, Java standard layout, and other
-        full-mirror conventions. ``test_dir`` is the conventional name in one
+        stripping). Handles PHP PSR-4 and other
+        full-mirror conventions (NOT the Maven/Gradle layout, which
+        _map_source_set_test_path handles). ``test_dir`` is the conventional name in one
         of the casings the caller searches (_INFERRED_TEST_DIRS).
 
         Example:
@@ -846,6 +870,8 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
             "C#, Kotlin, Ruby, Swift, Dart\n\n"
             "**Test file locations checked** (any satisfies the block):\n"
             "- Separate mirror: `tests/unit/{subdir}/test_{module}.py`\n"
+            "- Maven/Gradle source set: `src/main/<lang>/<pkg>/Foo.kt` -> "
+            "`src/test/<lang>/<pkg>/FooTest.kt` (Java/Kotlin)\n"
             "- Collocated: `{source_dir}/{module}.test.ts` (JS/TS projects)\n"
             "- Test subdirectory: `{source_dir}/__tests__/{module}.test.ts`\n\n"
             "**The separate-directory forms are searched in BOTH casings** — `tests/` and "

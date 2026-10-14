@@ -2875,3 +2875,65 @@ class TestMirrorMappingScalesLinearlyWithDepth:
         assert TddEnforcementHandler._map_src_to_test_path(parts, "test_module.py") == Path(
             "/proj/tests/unit/sub/deeper/test_module.py"
         )
+
+
+class TestMavenGradleSourceSetLayout:
+    """`src/main/<lang>/<pkg>/X` is satisfied by `src/test/<lang>/<pkg>/XTest`."""
+
+    @staticmethod
+    def _write(path: Path) -> dict[str, Any]:
+        return {"tool_name": "Write", "tool_input": {"file_path": str(path), "content": "x"}}
+
+    @pytest.mark.parametrize(
+        ("lang", "ext"),
+        [pytest.param("kotlin", "kt", id="kotlin"), pytest.param("java", "java", id="java")],
+    )
+    def test_sibling_test_source_set_satisfies_the_gate(
+        self, tmp_path: Path, lang: str, ext: str
+    ) -> None:
+        source = tmp_path / "mod" / "src" / "main" / lang / "com" / "app" / f"WavWriter.{ext}"
+        test = tmp_path / "mod" / "src" / "test" / lang / "com" / "app" / f"WavWriterTest.{ext}"
+        test.parent.mkdir(parents=True)
+        test.write_text("class WavWriterTest\n")
+
+        result = TddEnforcementHandler().handle(self._write(source))
+
+        assert result.decision == "allow"
+
+    @pytest.mark.parametrize(
+        ("lang", "ext"),
+        [pytest.param("kotlin", "kt", id="kotlin"), pytest.param("java", "java", id="java")],
+    )
+    def test_missing_test_is_still_denied_and_the_location_is_listed(
+        self, tmp_path: Path, lang: str, ext: str
+    ) -> None:
+        source = tmp_path / "mod" / "src" / "main" / lang / "com" / "app" / f"WavWriter.{ext}"
+
+        result = TddEnforcementHandler().handle(self._write(source))
+
+        assert result.decision == "deny"
+        expected = tmp_path / "mod" / "src" / "test" / lang / "com" / "app" / f"WavWriterTest.{ext}"
+        assert str(expected) in (result.reason or "")
+
+    def test_new_candidate_is_listed_once(self, tmp_path: Path) -> None:
+        handler = TddEnforcementHandler()
+        source = tmp_path / "mod" / "src" / "main" / "java" / "com" / "A.java"
+        candidates = handler._get_test_file_paths(str(source), JavaTddStrategy())
+        wanted = tmp_path / "mod" / "src" / "test" / "java" / "com" / "ATest.java"
+
+        assert wanted in candidates
+        assert len(candidates) == len(set(candidates))
+
+    def test_only_the_first_src_segment_is_used(self, tmp_path: Path) -> None:
+        handler = TddEnforcementHandler()
+        source = tmp_path / "src" / "main" / "src" / "main" / "java" / "A.java"
+        candidates = handler._get_test_file_paths(str(source), JavaTddStrategy())
+
+        assert tmp_path / "src" / "test" / "src" / "main" / "java" / "ATest.java" in candidates
+
+    def test_src_not_followed_by_main_adds_nothing(self, tmp_path: Path) -> None:
+        handler = TddEnforcementHandler()
+        source = tmp_path / "src" / "lib" / "A.java"
+        candidates = handler._get_test_file_paths(str(source), JavaTddStrategy())
+
+        assert tmp_path / "src" / "test" / "lib" / "ATest.java" not in candidates
