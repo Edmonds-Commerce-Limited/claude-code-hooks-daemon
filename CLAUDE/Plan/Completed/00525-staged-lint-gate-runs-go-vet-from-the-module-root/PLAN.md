@@ -1,6 +1,6 @@
 # Plan 00525: staged lint gate runs go vet from the module root
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-14
 **Owner**: dev
 **Priority**: Medium
@@ -55,10 +55,10 @@ the file passes unchecked rather than being vetted.
 
 ## Success Criteria
 
-- [ ] A correct nested-module Go commit is allowed and a real vet finding is
+- [x] A correct nested-module Go commit is allowed and a real vet finding is
   denied, proven by tests that failed first.
-- [ ] Release-bound consequences recorded in
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] Release-bound consequences recorded in
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (note 059).
 
 ## Delivery & Milestones
 
@@ -68,3 +68,5 @@ the file passes unchecked rather than being vetted.
 
 - Filed by the issue-sdlc loop from #118. Prior art: Plan 00507 (the Rust
   owning-crate context and could-not-analyse handling).
+- Fix `253a34433`, merged at `132ca087e`; targeted QA over the merge 40/40;
+  CI run 38603478432 (on `f8545b3ab`, which contains the merge) green.

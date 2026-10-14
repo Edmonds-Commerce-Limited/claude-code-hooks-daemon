@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00466: niggles ledger sixteen](00466-niggles-ledger-sixteen/PLAN.md) - Superseded by [00474](../00474-niggles-ledger-seventeen/PLAN.md) (the ledger for N1-N261; its 65 entries still open in the index are tracked from 00474, and every branch was landed or dropped with its branch-only entries carried into 00474. Opened when 00422 passed its size warning with N29, with N1: the venv fallback accepts an interpreter that cannot run on this host)
+
 - [00463: full qa is a main thread gate](00463-full-qa-is-a-main-thread-gate/PLAN.md) - Complete at `5156a81f`, merged as `83e75879`, CI fix `fd78edce` + the archiving commit (owner request after five worktree agents ran the ~18-minute full suite at once: a guard denies configured full-QA commands in sub-agents, and a pytest sink plus a host-wide lock refuse a whole-suite run not made under the coordinator's gate; live dogfood Task 2.2 carried)
 
 - [00462: php lsp advice keeps composer dependencies indexed](00462-php-lsp-advice-keeps-composer-dependencies-indexed/PLAN.md) - Complete at `830363e5` + the archiving commit (from #56: the PHP advice asked intelephense to exclude all of `**/vendor`, which drops every Composer dependency from its index; the strategy now keeps dependency roots indexed and asks only for intelephense's nested excludes, and flags an override that excludes the whole tree)
