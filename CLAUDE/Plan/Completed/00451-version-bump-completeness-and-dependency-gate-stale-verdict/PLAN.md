@@ -1,6 +1,6 @@
 # Plan 00451: version bump completeness and dependency gate stale verdict
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-21
 **Owner**: dev
 **Priority**: Medium
@@ -100,7 +100,13 @@ stale `uv.lock` instead pointed somewhere else.
   as the cause, and the gate's reported reason matches its exit code.
 - [x] Neither check can pass vacuously — each has a test proving it fails when
   the defect is present.
-- [ ] Full QA green.
+- [x] Full QA green: targeted `llm_qa.py changed` on the combined head
+  da9fff6af passed 40/40, and CI run 38523118851 on 24af008e9 passed with a
+  whole-suite run.
+- [x] This plan has no release-bound consequences: it changes
+  `scripts/qa/run_dependency_check.sh`, two tests and
+  `CLAUDE/development/RELEASING.md`, all daemon-repository development tooling
+  that client installs do not run.
 
 ## Delivery & Milestones
 
@@ -109,3 +115,5 @@ stale `uv.lock` instead pointed somewhere else.
      JOURNAL/00451-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Found during the v3.66.0 release, filed after the tag.
+- Delivered in 5007e9ef6 (RELEASING.md list) and 82f35e77a, merged at
+  da9fff6af.

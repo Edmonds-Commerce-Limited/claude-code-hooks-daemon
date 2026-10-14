@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00461: journal entries only through the stamping tool](00461-journal-entries-only-through-the-stamping-tool/PLAN.md) - Complete at `e3f03f3e` + the archiving commit (owner directive after a session of hand-stamped entries, one 40 minutes in the future: an Edit/Write/Bash append to a plan `JOURNAL/` day-file, in the main checkout or a worktree, is DENIED and pointed at `mkplan.bash --journal`; remedies 00422 N21)
+
 - [00460: report size blocker gives read only agents a way out](00460-report-size-blocker-gives-read-only-agents-a-way-out/PLAN.md) - Complete at `ca2b1ba5` + the archiving commit (owner report: the size blocker told every agent to write its report to a file, which a read-only type cannot do; the daemon now saves every stopping sub-agent's reply to a pruned file and the blocker points at it)
 
 - [00459: encrypted vault files are tracked not hidden](00459-encrypted-vault-files-are-tracked-not-hidden/PLAN.md) - Complete at `2a6a9b84` + the archiving commit (owner report: secret-file globs select by NAME, so Ansible Vault ciphertext was told to be untracked; a whole-file content check at each use, failing closed, now separates it from the plaintext password file)
@@ -17,6 +19,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 - [00455: self install exposes the conventional cli path](00455-self-install-exposes-the-conventional-cli-path/PLAN.md) - Complete at `e6a11e19` + the archiving commit (from #54: the self-install daemon generates the conventional CLI link under the gitignored directory, because a tracked one would reach every client clone as a nested install; install-mode checks now require a real clone. Review reverted a copied exemption, filed as 00422 N19)
 
 - [00454: not installed message steers to destructive reinstall](00454-not-installed-message-steers-to-destructive-reinstall/PLAN.md) - Complete at `f299681f` + the archiving commit (first slice of #53: a clone with no venv for this path now gets its own diagnosis naming a version-pinned upgrade, not the install advice that `rm -rf`s the other view's venv; #53 stays open)
+
+- [00451: version bump completeness and dependency gate stale verdict](00451-version-bump-completeness-and-dependency-gate-stale-verdict/PLAN.md) - Complete at `5007e9ef6` + `82f35e77a`, merged `da9fff6af` + the archiving commit (found in the v3.66.0 release: one registered list of version-carrying files, enforced by a test that also catches an unregistered one; the dependencies gate writes a pending verdict first and names a stale `uv.lock`)
 
 - [00450: release skill mandates forbidden subagent acceptance gate](00450-release-skill-mandates-forbidden-subagent-acceptance-gate/PLAN.md) - Complete at `5007e9ef6` + `211d9a878` + the archiving commit (found in the v3.66.0 release: `release/invoke.sh` told the agent to run the acceptance gate in parallel Haiku agents, which `acceptance-test` forbids by name; RELEASING.md Step 12 now owns the method and a test holds every skill `invoke.sh` to it. Plan 00324's contract test only checked that a script is referenced, so content drift was outside it)
 

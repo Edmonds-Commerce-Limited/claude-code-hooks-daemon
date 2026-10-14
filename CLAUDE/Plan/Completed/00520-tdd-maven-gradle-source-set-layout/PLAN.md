@@ -1,6 +1,6 @@
 # Plan 00520: tdd_enforcement infers the Maven/Gradle source-set layout
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-14
 **Owner**: dev
 **Priority**: Medium
@@ -41,23 +41,30 @@ should infer the standard layout, as it does for the other conventions.
 
 ### Phase 1: Resolver
 
-- [ ] ⬜ **Task 1.1**: Write a failing test reproducing the denial for Kotlin and
+- [x] ✅ **Task 1.1**: Write a failing test reproducing the denial for Kotlin and
   Java under `src/main/<lang>/<pkg>/`, with the test at `src/test/<lang>/<pkg>/`.
-- [ ] ⬜ **Task 1.2**: Add the source-set resolver, anchored like the other
+- [x] ✅ **Task 1.2**: Add the source-set resolver, anchored like the other
   inferred resolvers (everything before `src`). Search both casings only if
   the existing separate-directory convention does. Cover the edge cases:
   `main` not directly after `src`, and a path with several `src` segments.
-- [ ] ⬜ **Task 1.3**: Fix the docstring and `get_claude_md` guidance, and add
+- [x] ✅ **Task 1.3**: Fix the docstring and `get_claude_md` guidance, and add
   a release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
 ## Success Criteria
 
-- [ ] A Kotlin or Java production Write under `src/main/<lang>/<pkg>/` is
+- [x] A Kotlin or Java production Write under `src/main/<lang>/<pkg>/` is
   allowed when the matching test exists under `src/test/<lang>/<pkg>/`, and
-  denied when it does not; both cases are proven by tests that failed first.
-- [ ] Every candidate path listed before this change is still listed.
-- [ ] The release-bound consequence (a newly inferred layout) is recorded as a
-  release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+  denied when it does not; both cases are proven by tests that failed first
+  (`tests/unit/handlers/test_tdd_enforcement.py`, red output in
+  [the sub-agent report](subagent-reports/261014-python-developer-sonnet.md)).
+- [x] Every candidate path listed before this change is still listed: the new
+  resolver only appends, through `_append_unique`.
+- [x] The release-bound consequence (a newly inferred layout) is recorded as a
+  release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`:
+  `057-tdd-enforcement-finds-the-maven-gradle-test-source-set.md`.
+- [x] QA green: targeted `llm_qa.py changed` on the combined head da9fff6af
+  passed 40/40; `tdd_enforcement.py` is too broad for mapped tests, so CI run
+  38523118851 on 24af008e9 ran the whole suite and passed.
 
 ## Delivery & Milestones
 
@@ -66,3 +73,4 @@ should infer the standard layout, as it does for the other conventions.
      JOURNAL/00520-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Filed by the issue-sdlc loop from #111.
+- Delivered in 1e39a1bcc, merged at da9fff6af; #111 closed.
