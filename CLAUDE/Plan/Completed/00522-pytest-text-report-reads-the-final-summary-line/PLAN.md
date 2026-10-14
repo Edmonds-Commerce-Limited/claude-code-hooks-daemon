@@ -1,6 +1,6 @@
 # Plan 00522: the pytest text report reads pytest's final summary line
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-14
 **Owner**: dev
 **Priority**: Medium
@@ -46,10 +46,12 @@ Reproduced on `main`: for `"E 1 failed, 3 passed in 2.00s\n===== 6 failed, 100 p
 
 ## Success Criteria
 
-- [ ] A nested summary earlier in the output never changes any count, proven
+- [x] A nested summary earlier in the output never changes any count, proven
   by tests that failed first.
-- [ ] Release-bound consequences recorded in `CLAUDE/UPGRADES/UNRELEASED/`, or
-  the plan states it has none and why.
+- [x] Release-bound consequences recorded in `CLAUDE/UPGRADES/UNRELEASED/`, or
+  the plan states it has none and why: no release-bound consequences: the
+  parser is imported only by this repository's own QA scripts under
+  `scripts/qa/`, which client installs do not run.
 
 ## Delivery & Milestones
 
@@ -58,3 +60,4 @@ Reproduced on `main`: for `"E 1 failed, 3 passed in 2.00s\n===== 6 failed, 100 p
      JOURNAL/00522-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Filed by the issue-sdlc loop from #115.
+- Fix `c6f634a48`, merged at `413432043`; CI run 38590003660 green.
