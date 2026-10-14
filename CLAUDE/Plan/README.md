@@ -8,8 +8,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00519: minimum tool versions and relative worktrees](00519-minimum-tool-versions-and-relative-worktrees/PLAN.md) - Blocked on owner input (#110: relative worktrees need git 2.48, and this container runs 2.39.5; Phase 1, the declared minimum-version check, is not blocked)
 
-- [00517: daemon version ssot and no stale venvs](00517-daemon-version-ssot-and-no-stale-venvs/PLAN.md) - In Progress, High (owner direction: the installed daemon version comes from the installed `version.py` only, never a venv's metadata copy; one staleness rule for every venv cleanup; a venv with missing or unreadable metadata is investigated by the running agent and removed once confirmed safe; cleanup also on restart, provision and session start)
-
 - [00516: journal in place redaction](00516-journal-in-place-redaction/PLAN.md) - Not Started, Medium (#108; awaiting owner decisions: a bounded `mkplan.bash --journal-redact` to remove a leaked value from a past journal entry with an appended correction entry, since `journal-dayfile-is-today` blocks any past-day edit; ledger 00474 N389)
 
 - [00515: per host handler overrides](00515-per-host-handler-overrides/PLAN.md) - Not Started, Medium (#93; awaiting owner decisions: per-host or per-role `handlers:` overlays in Plan 00479's top-level `hosts:` block, including whether an overlay may disable a guard)
@@ -67,8 +65,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00452: prompt cache observability and invalidation protection](00452-prompt-cache-observability-and-invalidation-protection/PLAN.md) - Blocked on owner input (status segment shipped as main, sub and token-weighted total; what remains needs `/usage` run in-session and a gap profile from a human-paced project, Task 2.4)
 
 - [00451: version bump completeness and dependency gate stale verdict](00451-version-bump-completeness-and-dependency-gate-stale-verdict/PLAN.md) - Not Started (three of six version-carrying files are found only when a gate goes red, and the `dependencies` gate leaves a stale `passed: true` on disk when `uv lock --check` aborts it)
-
-- [00450: release skill mandates forbidden subagent acceptance gate](00450-release-skill-mandates-forbidden-subagent-acceptance-gate/PLAN.md) - Not Started (`release/invoke.sh` tells the agent to spawn parallel Haiku agents for Step 12; `acceptance-test/invoke.sh` forbids exactly that by name)
 
 - [00448: plan completion gate has no commit time backstop](00448-plan-completion-gate-has-no-commit-time-backstop/PLAN.md) - Not Started (the Complete-flip gate keys on Write/Edit only, so a `PLAN.md` written through Bash escapes it — as Plan 00437 did)
 
@@ -205,6 +201,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00517: daemon version ssot and no stale venvs](Completed/00517-daemon-version-ssot-and-no-stale-venvs/PLAN.md) - Complete at `42f6de85a` (green full CI run 38491817681) + the archiving commit (owner direction: one source for the installed version and one staleness rule for every venv cleanup; UNPROVEN venvs surfaced at session start; release note 055)
+
 - [00518: full qa blocker exempt agent types](Completed/00518-full-qa-blocker-exempt-agent-types/PLAN.md) - Complete at merges `980d4fb67`, `7ff8cdcf1`, `7cb84135a` + the archiving commit (ledger 00474 N457: `exempt_agent_types` with a one-at-a-time lock, dogfooded with `qa-full-runner`; release note 053)
 
 - [00512: worktree events outlive the chain deadline](Completed/00512-worktree-events-outlive-the-chain-deadline/PLAN.md) - Complete at merge `5d1b83d00` + the archiving commit (#82: WorktreeCreate and WorktreeRemove get their own budget, longer than their git call, so a slow add yields its path; a failed add leaves no orphan; guard events keep 20s; release note 035 in UNRELEASED)
@@ -261,8 +259,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00461: journal entries only through the stamping tool](Completed/00461-journal-entries-only-through-the-stamping-tool/PLAN.md) - Complete at `e3f03f3e` + the archiving commit (owner directive after a session of hand-stamped entries, one 40 minutes in the future: an Edit/Write/Bash append to a plan `JOURNAL/` day-file, in the main checkout or a worktree, is DENIED and pointed at `mkplan.bash --journal`; remedies 00422 N21)
 
-- [00460: report size blocker gives read only agents a way out](Completed/00460-report-size-blocker-gives-read-only-agents-a-way-out/PLAN.md) - Complete at `ca2b1ba5` + the archiving commit (owner report: the size blocker told every agent to write its report to a file, which a read-only type cannot do; the daemon now saves every stopping sub-agent's reply to a pruned file and the blocker points at it)
-
 - [00462: php lsp advice keeps composer dependencies indexed](Completed/00462-php-lsp-advice-keeps-composer-dependencies-indexed/PLAN.md) - Complete at `830363e5` + the archiving commit (from #56: the PHP advice asked intelephense to exclude all of `**/vendor`, which drops every Composer dependency from its index; the strategy now keeps dependency roots indexed and asks only for intelephense's nested excludes, and flags an override that excludes the whole tree)
 
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
@@ -318,9 +314,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 520 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 439 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 441 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 58 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 56 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

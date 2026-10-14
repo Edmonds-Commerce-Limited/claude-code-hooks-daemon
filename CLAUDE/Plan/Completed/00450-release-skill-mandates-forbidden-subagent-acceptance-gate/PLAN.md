@@ -1,6 +1,6 @@
 # Plan 00450: release skill mandates forbidden subagent acceptance gate
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-21
 **Owner**: dev
 **Priority**: Medium
@@ -71,9 +71,16 @@ resolution is not durable — the next agent re-derives it, or does not.
   runs, including `CLAUDE/development/RELEASING.md` Step 12, which both
   skills defer to as the source of truth. The contradiction may be
   three-way rather than two-way.
-- [ ] ⬜ **Task 1.2**: Read Plan 00324's contract test and determine whether
+- [x] ✅ **Task 1.2**: Read Plan 00324's contract test and determine whether
   these two skills are excluded from it, and if so why. That exclusion is
-  the reason the drift survived, and is the thing to fix.
+  the reason the drift survived, and is the thing to fix. **Finding:** neither
+  skill was excluded. `tests/unit/scripts/test_skill_scripts_are_referenced.py`
+  names both of them in its docstring, but it only checks that a skill's
+  markdown REFERENCES its `invoke.sh` (and passes it arguments). It never
+  compares what the two documents SAY, so content drift between them was
+  outside its contract. The content check is Task 2.1's
+  `tests/integration/test_release_acceptance_gate_method.py`, which runs over
+  every skill's `invoke.sh`.
 
 ### Phase 2: Make the documents agree
 
@@ -88,13 +95,21 @@ resolution is not durable — the next agent re-derives it, or does not.
 
 ## Success Criteria
 
-- [ ] `grep -niE "haiku|parallel" .claude/skills/release/invoke.sh` returns no
-  instruction to execute acceptance tests that way.
-- [ ] The new test fails when the forbidden procedure is reintroduced into any
-  skill's `invoke.sh`.
-- [ ] Exactly one document describes how the Step 12 gate executes; the others
-  link to it.
-- [ ] Full QA green.
+- [x] `grep -niE "haiku|parallel" .claude/skills/release/invoke.sh` returns no
+  instruction to execute acceptance tests that way. Its one hit (line 173)
+  defers to Step 12's routing and says "never one parallel batch".
+- [x] The new test fails when the forbidden procedure is reintroduced into any
+  skill's `invoke.sh` (`tests/integration/test_release_acceptance_gate_method.py`
+  globs `*/invoke.sh`).
+- [x] Exactly one document describes how the Step 12 gate executes; the others
+  link to it. `RELEASING.md` Step 12 owns the routing, and `release/invoke.sh`
+  and `release-agent.md` defer to it (5007e9ef6, review 211d9a878).
+- [x] Full QA green: full CI run 38491817681 on 42f6de85a, which contains both
+  commits, passed on Python 3.11, 3.12 and 3.13.
+- [x] This plan has no release-bound consequences: everything it changed is
+  this repository's own release tooling (`.claude/skills/release/`,
+  `.claude/agents/release-agent.md`, `CLAUDE/development/RELEASING.md` and a
+  test), none of which ships to client installs.
 
 ## Delivery & Milestones
 
@@ -103,3 +118,4 @@ resolution is not durable — the next agent re-derives it, or does not.
      JOURNAL/00450-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Found during the v3.66.0 release, filed after the tag.
+- Delivered in 5007e9ef6 and 211d9a878; closed by Task 1.2's finding.

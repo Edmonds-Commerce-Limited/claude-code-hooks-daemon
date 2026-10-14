@@ -77,6 +77,35 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N461 — `plan_number_helper` reads a listing of one plan's own folder as a next-number scan
+
+**Source**: the coordinator, 2026-10-14, while looking up the newest entry in this ledger.
+`ls CLAUDE/Plan/00474-niggles-ledger-seventeen/ && grep -on '<pattern>' <that plan>/NIGGLES.md | tail -3` was denied
+with R-PLAN-NUMBER-DISCOVERY, which named the next plan number. The command lists ONE existing plan's files and tails a
+grep inside it; nothing in it enumerates plan folders.
+
+**Fix direction**: a listing whose operand is a single plan folder (`<plan-dir>/NNNNN-name/`) is not a scan of the plan
+root. Reproduce with a red test on that exact shape first.
+
+**Status**: ⬜ Open.
+
+### N460 — `list-venvs` names one fingerprint as current in its header and marks a different venv current
+
+**Source**: the coordinator, 2026-10-14, running Plan 00517 Task 5.2 after a host reboot. `bin/hooks-daemon list-venvs`
+printed `Current Python-env fingerprint: workspace-py311-2a519198`. Its table listed one main venv,
+`venv-workspace-py311-81c29529`, marked `← current`. `prune-venvs --stale --dry-run` reported nothing to prune and
+`Current venv: workspace-py311-2a519198`, a venv that does not exist. A worktree created minutes later got a `2a519198`
+venv. The same two fingerprints were already on record on 2026-10-13 in N456 (Plan 00517's overview). The reboot did
+not cause this. N456's fix (Plan 00517 Task 3.0) stopped `prune-venvs` from removing the running venv, but it left the
+contradictory output in place.
+
+**Fix direction**: establish what the fingerprint hashes, and why the venv in use carries a different one. Then make
+the header and the marker agree. The marker probably means "the venv in use", which is a different fact from "the
+fingerprint a new venv would get", and the output should say so. Check also whether the next hook rebuilds a
+`2a519198` venv beside the one in use.
+
+**Status**: ⬜ Open.
+
 ### N459 — a wrapped status line shows the context segment as "..." instead of its number
 
 **Source**: the owner, 2026-10-13: "status line when wrapping will not display context as number and instead displays
@@ -146,7 +175,7 @@ review then recommends the exemption, rather than "leave it off", when it finds 
 ### N456 — `prune-venvs --all-except-current` lists the venv the running daemon uses for removal
 
 **Source**: the Plan 00517 filing fact-check (2026-10-13,
-[report](../00517-daemon-version-ssot-and-no-stale-venvs/subagent-reports/261013-fact-check-00517.md)).
+[report](../Completed/00517-daemon-version-ssot-and-no-stale-venvs/subagent-reports/261013-fact-check-00517.md)).
 
 **Evidence**: in this repository the only venv is `untracked/venv-workspace-py311-81c29529`, and the running daemon
 (pid 110597) runs from it; `list-venvs` reports the current fingerprint as `workspace-py311-2a519198`.

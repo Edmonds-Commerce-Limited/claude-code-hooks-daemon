@@ -1,6 +1,6 @@
 # Plan 00517: daemon version ssot and no stale venvs
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-13
 **Owner**: dev
 **Priority**: High
@@ -109,15 +109,27 @@ What main does today:
 
 - [x] ✅ **Task 5.1**: Release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`, and a post-upgrade task telling
   the upgrading agent to clear any UNPROVEN venvs the new advisory lists. (Release note 055; post-upgrade task 01.)
-- [ ] ⬜ **Task 5.2**: This repository's own `untracked/` and every worktree's venvs checked with the new tool.
+- [x] ✅ **Task 5.2**: This repository's own `untracked/` and every worktree's venvs checked with the new tool. On
+  2026-10-14 there were two venvs: the main venv the daemon uses (`81c29529`, marked current) and one worktree venv
+  (`2a519198`, created that day). `prune-venvs --stale --dry-run` found nothing to prune and nothing UNPROVEN was
+  listed. The header and marker still disagree on which fingerprint is current; that is filed as ledger 00474 N460.
 
 ## Success Criteria
 
-- [ ] No code path reads the installed daemon version from venv metadata (grep and test).
-- [ ] One staleness function; `prune-venvs` and the upgrade cleanup both call it; the running venv is never removed.
-- [ ] An UNPROVEN venv is surfaced at session start with evidence and a removal command, and removed once confirmed.
-- [ ] After upgrade, restart or provision, `untracked/` holds no proven-stale venv.
-- [ ] Release-bound consequences recorded in `CLAUDE/UPGRADES/UNRELEASED/` (release note and post-upgrade task).
+- [x] No code path reads the installed daemon version from venv metadata (grep and test). A grep of `src/` and
+  `scripts/` for `daemon_version` finds only the metadata model's validator, the metadata writer and the issue-report
+  fields; Task 2.1's tests pin the detector.
+- [x] One staleness function; `prune-venvs` and the upgrade cleanup both call it; the running venv is never removed.
+  The function is `paths.classify_venv`. `scripts/install/venv.sh` reaches it through `paths.py list-stale-venvs`,
+  and Task 3.0 guards the running venv.
+- [x] An UNPROVEN venv is surfaced at session start with evidence and a removal command, and removed once confirmed
+  (`unproven_venv_advisor`; `prune-venvs --unproven <path> --force`).
+- [x] After upgrade, restart or provision, `untracked/` holds no proven-stale venv. Task 5.2 on 2026-10-14, after a
+  host reboot and daemon restart: `prune-venvs --stale --dry-run` found nothing to prune.
+- [x] Release-bound consequences recorded in `CLAUDE/UPGRADES/UNRELEASED/` (release note and post-upgrade task):
+  `release-notes/055-venvs-are-judged-by-one-staleness-rule-and-unproven-ones-are-surfaced.md` and
+  `post-upgrade-tasks/01-clear-unproven-venvs.md`.
+- [x] Full QA green: full CI run 38491817681 on 42f6de85a passed on Python 3.11, 3.12 and 3.13.
 
 ## Delivery & Milestones
 
