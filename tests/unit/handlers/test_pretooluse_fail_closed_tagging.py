@@ -169,6 +169,11 @@ _AUDITED_BLOCKING_ONLY_REASONS: dict[str, str] = {
         "not a dangerous-action guard."
     ),
     "dispatch_declaration": "Workflow gate: a subagent must declare where its report goes.",
+    "idle_workable_issue_stop_gate": (
+        "Workflow Stop gate (Plan 00470 Phase 7): refuses an idle stop that leaves a workable "
+        "issue to the cron. Fails open by design -- on a daemon fault a Stop must never trap "
+        "the session, and the cron is the backstop. Not a dangerous-action guard."
+    ),
     "gh_issue_comments": "Workflow completeness gate: forces --comments on gh issue view.",
     "github_issue_assignment_guard": (
         "Plan 00490: an ownership workflow gate (claim the issue, do not work "
