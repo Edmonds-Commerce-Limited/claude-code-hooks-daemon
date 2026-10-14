@@ -37,11 +37,11 @@ Reproduced on `main`: for `"E 1 failed, 3 passed in 2.00s\n===== 6 failed, 100 p
 
 ### Phase 1: Fix
 
-- [ ] ⬜ **Task 1.1**: RED: tests for the reported shape, for a nested summary
+- [x] ✅ **Task 1.1**: RED: tests for the reported shape, for a nested summary
   that carries only some of the counts, for `error`/`errors` and `xfailed`
   wording on the final line, and for an output with no final line.
-- [ ] ⬜ **Task 1.2**: GREEN: read the final summary line, all counts from it.
-- [ ] ⬜ **Task 1.3**: Release note if the parser ships to client installs;
+- [x] ✅ **Task 1.2**: GREEN: read the final summary line, all counts from it.
+- [x] ✅ **Task 1.3**: Release note if the parser ships to client installs;
   otherwise state why none is needed.
 
 ## Success Criteria

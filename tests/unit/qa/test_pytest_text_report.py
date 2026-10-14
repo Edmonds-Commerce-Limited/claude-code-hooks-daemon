@@ -373,3 +373,66 @@ class TestFindUnnamedFailureReason:
             "29642 passed, 20 skipped in 1.0s\n", failed=0, errors=0, total=29662, exit_code=1
         )
         assert reason == "pytest exited 1 but reported no failed or errored tests"
+
+
+class TestCountsComeFromTheFinalSummaryLine:
+    """GitHub #115: a nested pytest summary quoted earlier supplied counts."""
+
+    _FINAL = "===== 6 failed, 100 passed, 5 skipped in 60.00s =====\n"
+
+    def test_a_nested_summary_with_every_count_is_ignored(self) -> None:
+        report = parse_pytest_text_output("E     1 failed, 3 passed in 2.00s\n" + self._FINAL)
+        assert (report["total"], report["passed"], report["failed"], report["skipped"]) == (
+            111,
+            100,
+            6,
+            5,
+        )
+
+    def test_a_nested_line_carrying_only_some_counts_is_ignored(self) -> None:
+        report = parse_pytest_text_output("E     assert 3 passed\n" + self._FINAL)
+        assert (report["passed"], report["failed"], report["skipped"]) == (100, 6, 5)
+
+    def test_a_count_missing_from_the_final_line_is_zero_not_borrowed(self) -> None:
+        report = parse_pytest_text_output(
+            "E     2 failed, 1 skipped, 9 errors\n===== 7 passed in 1.00s =====\n"
+        )
+        assert (report["passed"], report["failed"], report["skipped"], report["errors"]) == (
+            7,
+            0,
+            0,
+            0,
+        )
+
+    def test_a_nested_summary_after_a_bare_final_line_is_not_the_final_line(self) -> None:
+        report = parse_pytest_text_output("5 passed in 1.00s\nE   1 failed in 2.00s\n")
+        assert (report["passed"], report["failed"]) == (5, 0)
+
+    def test_error_wording_and_the_other_outcomes_on_the_final_line(self) -> None:
+        report = parse_pytest_text_output(
+            "E   9 passed in 1s\n"
+            "= 1 failed, 2 passed, 3 skipped, 2 errors, 4 xfailed, 1 xpassed, "
+            "7 warnings, 8 deselected in 3.21s (0:00:03) =\n"
+        )
+        assert (report["passed"], report["failed"], report["skipped"], report["errors"]) == (
+            2,
+            1,
+            3,
+            2,
+        )
+        assert report["total"] == 8
+
+    def test_singular_error_and_warning(self) -> None:
+        report = parse_pytest_text_output(
+            "E   4 failed in 1s\n= 10 passed, 1 error, 1 warning in 1.00s =\n"
+        )
+        assert (report["passed"], report["failed"], report["errors"]) == (10, 0, 1)
+
+    def test_no_tests_ran_final_line(self) -> None:
+        report = parse_pytest_text_output("E   3 passed in 1s\n= no tests ran in 0.01s =\n")
+        assert report["total"] == 0
+        assert report["passed_all"] is False
+
+    def test_no_delimited_final_line_keeps_the_first_match_behaviour(self) -> None:
+        report = parse_pytest_text_output("collecting ...\n3 passed somewhere, 1 failed\n")
+        assert (report["passed"], report["failed"]) == (3, 1)
