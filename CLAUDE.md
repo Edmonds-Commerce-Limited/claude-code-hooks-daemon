@@ -243,6 +243,7 @@ Creating a production source file with `Write` is blocked until a corresponding 
 **Test file locations checked** (any satisfies the block):
 
 - Separate mirror: `tests/unit/{subdir}/test_{module}.py`
+- Maven/Gradle source set: `src/main/<lang>/<pkg>/Foo.kt` -> `src/test/<lang>/<pkg>/FooTest.kt` (Java/Kotlin)
 - Collocated: `{source_dir}/{module}.test.ts` (JS/TS projects)
 - Test subdirectory: `{source_dir}/__tests__/{module}.test.ts`
 
