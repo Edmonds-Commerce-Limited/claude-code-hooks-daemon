@@ -123,7 +123,7 @@ rules:
     tests: [tests/unit/handlers/test_safety_handlers_hostile_input_performance.py]
     why: a lexer every Bash guard calls; the hostile-input performance test pins its cost (N357)
   - glob: "src/claude_code_hooks_daemon/handlers/*"
-    tests:
+    tests: &handler_invariants
       - tests/integration/test_acceptance_contract.py
       - tests/integration/test_acceptance_negative_case_requirement.py
       - tests/integration/test_acceptance_test_coverage.py
@@ -141,8 +141,11 @@ rules:
       - tests/integration/test_out_of_root_write_containment.py
       - tests/integration/test_project_handler_priority_collisions.py
       - tests/integration/test_pseudo_event_handler_visibility.py
+      - tests/integration/test_skill_surface_coherence.py
       - tests/integration/test_template_priorities_match_the_constants.py
       - tests/daemon/test_init_config.py
+      - tests/unit/handlers/test_config_key_consistency.py
+      - tests/unit/handlers/test_pretooluse_fail_closed_tagging.py
       - tests/unit/daemon/test_default_enabled_template_consistency.py
       - tests/unit/handlers/test_autonomy_drivers.py
       - tests/unit/qa/test_measure_instruction_footprint.py
@@ -151,6 +154,18 @@ rules:
       HandlerRegistry.discover()), so they reach a changed handler through no
       import or path; tests/unit/qa/test_handler_enumerating_tests_are_selected.py
       checks each listed file still enumerates and that none is missing
+  # Adding a handler edits its id, priority and rule-id constants, and a
+  # constants edit alone must reach the same registry-wide tests (N463). The
+  # alias keeps the list above the single source of truth.
+  - glob: "src/claude_code_hooks_daemon/constants/handlers.py"
+    tests: *handler_invariants
+    why: the handler ids the registry-wide tests enumerate (list pinned above)
+  - glob: "src/claude_code_hooks_daemon/constants/priority.py"
+    tests: *handler_invariants
+    why: the handler priorities the registry-wide tests check (list pinned above)
+  - glob: "src/claude_code_hooks_daemon/constants/rule_ids.py"
+    tests: *handler_invariants
+    why: the rule ids the registry-wide tests check (list pinned above)
   - glob: "src/claude_code_hooks_daemon/utils/secret_file_matching.py"
     tests: [tests/integration/test_ordinary_command_regression_gate.py]
     why: the matcher behind secret_file_guard, which the ordinary-command gate drives

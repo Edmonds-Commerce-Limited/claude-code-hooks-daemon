@@ -111,7 +111,9 @@ file. The 13 files the run reported as unmapped were left for CI's full-suite fa
 also runs the registry-wide handler invariant tests (tagging, scope defaults, guidance coverage, declared
 behaviour). They are fast, and they are exactly the tests a new handler is most likely to break.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed at `91d5a43f1`. The N382 rule in `scripts/qa/changed_tests_map.yaml` already selected a pinned list on
+any `handlers/` change; the list lacked the failing test (its guard regex missed `iter_builtin_handler_classes`), and
+nothing selected it on a constants edit. The list now holds three more tests, and the constants files alias it.
 
 ### N461 — `plan_number_helper` reads a listing of one plan's own folder as a next-number scan
 

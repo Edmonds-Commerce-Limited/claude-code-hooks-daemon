@@ -28,7 +28,9 @@ WALKS_HANDLERS = re.compile(
 #: A test that asks the registry for every built-in handler. Only counted as
 #: whole-repo under tests/integration: a unit test's ``discover()`` exercises
 #: the registry itself, which its own mirror tests already select.
-DISCOVERS_HANDLERS = re.compile(r"HandlerRegistry\b[\s\S]*\bregistry\.discover\(\)")
+DISCOVERS_HANDLERS = re.compile(
+    r"HandlerRegistry\b[\s\S]*\bregistry\.discover\(\)|\biter_builtin_handler_classes\(\)"
+)
 
 
 def _load_runner() -> Any:
@@ -75,6 +77,57 @@ class TestAHandlerChangeSelectsTheEnumeratingTests:
             [changed], runner.build_corpus(tmp_path, tree), tmp_path, rules
         )
         assert set(pinned) <= set(selection.selected)
+
+
+#: Adding a handler also edits these: its id, priority and audit-reason
+#: constants. Each is read by the registry-wide tests, so a change to one must
+#: select them even though no handler file changed (N463).
+HANDLER_CONSTANTS = (
+    "src/claude_code_hooks_daemon/constants/handlers.py",
+    "src/claude_code_hooks_daemon/constants/priority.py",
+    "src/claude_code_hooks_daemon/constants/rule_ids.py",
+)
+#: Registry-wide unit tests that no regex below can tell from a test of the
+#: registry itself. N463: CI caught the one the targeted run missed.
+KNOWN_UNIT_INVARIANTS = (
+    "tests/unit/handlers/test_pretooluse_fail_closed_tagging.py",
+    "tests/unit/handlers/test_config_key_consistency.py",
+)
+
+
+def _select(tmp_path: Path, changed: str, wanted: tuple[str, ...]) -> set[str]:
+    for relative in (changed, *wanted):
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("x = 1\n", encoding="utf-8")
+    tree = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file())
+    rules, _ = runner.load_declared_rules(RULES_PATH)
+    selection = runner.select_tests([changed], runner.build_corpus(tmp_path, tree), tmp_path, rules)
+    return set(selection.selected)
+
+
+class TestAddingAHandlerSelectsTheRegistryWideInvariants:
+    @pytest.mark.parametrize("changed", HANDLER_CONSTANTS)
+    def test_a_handler_constants_change_selects_the_pinned_tests(
+        self, tmp_path: Path, changed: str
+    ) -> None:
+        pinned = _pinned_tests()
+        assert set(pinned) <= _select(tmp_path, changed, pinned)
+
+    def test_a_new_stop_handler_selects_the_fail_closed_tagging_test(self, tmp_path: Path) -> None:
+        changed = "src/claude_code_hooks_daemon/handlers/stop/brand_new_gate.py"
+        selected = _select(tmp_path, changed, KNOWN_UNIT_INVARIANTS)
+        assert set(KNOWN_UNIT_INVARIANTS) <= selected
+
+    def test_an_unrelated_constants_file_does_not_select_them(self, tmp_path: Path) -> None:
+        changed = "src/claude_code_hooks_daemon/constants/timeout.py"
+        selected = _select(tmp_path, changed, KNOWN_UNIT_INVARIANTS)
+        assert not set(KNOWN_UNIT_INVARIANTS) & selected
+
+    def test_the_known_invariants_are_pinned_and_exist(self) -> None:
+        assert set(KNOWN_UNIT_INVARIANTS) <= set(_pinned_tests())
+        for relative in KNOWN_UNIT_INVARIANTS:
+            assert (PROJECT_ROOT / relative).is_file()
 
 
 class TestThePinnedListCannotRotSilently:
