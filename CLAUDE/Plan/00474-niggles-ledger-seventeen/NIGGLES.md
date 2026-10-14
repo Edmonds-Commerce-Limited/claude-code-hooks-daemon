@@ -77,6 +77,25 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N462 — the combinatorial-growth performance test flakes under load and names a different handler each time
+
+**Source**: the coordinator, 2026-10-14, during issue #114's targeted QA run.
+`tests/unit/handlers/test_safety_handlers_hostile_input_performance.py::TestCombinatorialSmallInputShapesStayLinear`
+failed once in the full `changed` run on the #114 branch. Re-run three times in isolation on that branch, it failed,
+failed and passed. Each failure named a different handler and shape: `enforce-project-containment` 1069x on
+`deep_bash_c_nesting`, `github_auto_close_keywords` 126x and `host-command-guard` 39x on `deep_eval_nesting`, and one on
+`digit_sequences`. Three runs on unchanged `main` gave fail, pass, pass, the failure naming `block-curl-pipe-shell`
+176x on `bracket_classes`. None of those handlers was touched by the change.
+
+**Why it happens (hypothesis)**: the test compares the cost of an 8x larger input against a small one. On inputs
+that small, one scheduler or GC pause dominates the measurement, so the ratio swings by orders of magnitude.
+
+**Fix direction**: measure each size several times and compare minimums (or medians), or put a floor under the
+small-input timing, so one pause cannot read as superlinear growth. Prove the fix by running the class repeatedly
+under load.
+
+**Status**: ⬜ Open.
+
 ### N461 — `plan_number_helper` reads a listing of one plan's own folder as a next-number scan
 
 **Source**: the coordinator, 2026-10-14, while looking up the newest entry in this ledger.
