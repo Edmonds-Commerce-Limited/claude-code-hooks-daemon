@@ -140,6 +140,25 @@ def parse_slowest_durations(content: str) -> list[dict[str, Any]]:
     return records
 
 
+# pytest's final line: "===== 6 failed, 100 passed, 2 warnings in 60.00s (0:01:00) =====",
+# its bare "-q" form without the "=" rules, or "no tests ran in 0.01s". Anchored
+# to the whole line so a summary quoted inside an assertion message (pytest
+# prefixes those lines with "E ") is never mistaken for it.
+_FINAL_SUMMARY_LINE_PATTERN = re.compile(
+    r"^=*\s*(?:\d+ [a-z]+(?:, \d+ [a-z]+)*|no tests ran(?:, \d+ [a-z]+)*)"
+    r" in \d+(?:\.\d+)?s(?: \(\d+:\d{2}:\d{2}\))?\s*=*$"
+)
+
+
+def _final_summary_line(plain: str) -> str | None:
+    """The LAST line shaped like pytest's own totals line, or None."""
+    found: str | None = None
+    for line in plain.splitlines():
+        if _FINAL_SUMMARY_LINE_PATTERN.match(line.rstrip()):
+            found = line
+    return found
+
+
 def _count(pattern: re.Pattern[str], text: str) -> int:
     match = pattern.search(text)
     return int(match.group(1)) if match else 0
@@ -158,10 +177,14 @@ def parse_pytest_text_output(content: str) -> dict[str, Any]:
     """
     plain = strip_ansi(content)
 
-    passed = _count(_PASSED_COUNT_PATTERN, plain)
-    failed = _count(_FAILED_COUNT_PATTERN, plain)
-    skipped = _count(_SKIPPED_COUNT_PATTERN, plain)
-    errors = _count(_ERROR_COUNT_PATTERN, plain)
+    # Every count comes from pytest's final totals line alone (GitHub #115): a
+    # nested run's summary quoted in a failure message precedes it and must
+    # supply nothing. Without such a line, scan the whole text as before.
+    counts_text = _final_summary_line(plain) or plain
+    passed = _count(_PASSED_COUNT_PATTERN, counts_text)
+    failed = _count(_FAILED_COUNT_PATTERN, counts_text)
+    skipped = _count(_SKIPPED_COUNT_PATTERN, counts_text)
+    errors = _count(_ERROR_COUNT_PATTERN, counts_text)
 
     # De-duplicated while preserving order: a node id can appear both in the
     # short summary and in a rerun/verbose section of the same output.
