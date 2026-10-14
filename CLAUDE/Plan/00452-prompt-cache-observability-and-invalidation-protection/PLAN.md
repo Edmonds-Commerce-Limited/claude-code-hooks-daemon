@@ -6,6 +6,7 @@
 **Priority**: Medium
 **Recommended Executor**: Sonnet
 **Execution Strategy**: Single Agent
+**GitHub Issue**: #109 (idle-session economics: compact before the cache goes cold; Tasks 4.5 and 4.6)
 
 ## Overview
 
@@ -193,6 +194,19 @@ success criteria explicitly forbid.
   `/compact` or a restart. **Shipping this advisory would have warned every
   project about a cost that does not exist.** Nested `CLAUDE.md` files and
   `paths:`-scoped rules are the one exception, and only before first load.
+- [ ] ⬜ **Task 4.5** (#109): Add a third option to the 4.1 inequality: compact
+  while the cache is still warm, so the session resumes on a small context
+  rather than resending a large one uncached. Skip it when the session is
+  expected to end rather than resume. Inputs from #109's research comment: a
+  warm compaction reads at about 0.1x input, and compaction requests use the
+  5-minute bucket. Claude Code has no idle-compaction setting to defer to; the
+  only idle feature is a `/clear` nudge. **Blocked on Task 2.4**, for the same
+  `P` as 4.1, and needs an owner ruling on how "expected to end" is known.
+- [ ] ⬜ **Task 4.6** (#109): Auto-tuning. Can an always-on session set its own
+  compaction threshold and tick cadence from its history (`cache-gaps`, the
+  sidecar, transcripts)? The autocompact window is bounded at 100K to 1M (Plan
+  00428). **An owner question, not a build task**: a session that changes its
+  own config is a product decision.
 
 ### Phase 5: What the upstream documentation opened up
 
