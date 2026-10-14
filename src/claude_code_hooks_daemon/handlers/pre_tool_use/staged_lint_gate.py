@@ -51,6 +51,7 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.strategies.lint.common import build_lint_argv, matches_skip_path
+from claude_code_hooks_daemon.strategies.lint.module_context import resolve_module_context
 from claude_code_hooks_daemon.strategies.lint.protocol import (
     ClassifiesToolUnavailable,
     LintStrategy,
@@ -119,6 +120,20 @@ def _is_git_commit_command(command: str) -> bool:
         if _GIT_COMMIT_PATTERN.search(segment.strip()):
             return True
     return False
+
+
+def _headline(diagnosis: str) -> str:
+    """The line of a diagnosis that names the finding.
+
+    `go vet` run on a package leads with a ``# <package>`` banner; the finding
+    (``path:line:col: message``) is the next line, and is what identifies the
+    file. A diagnosis with nothing else keeps its first line.
+    """
+    lines = diagnosis.splitlines()
+    for line in lines:
+        if not line.startswith("#"):
+            return line
+    return lines[0]
 
 
 class StagedLintGateHandler(PreToolUseHandlerBase):
@@ -266,9 +281,7 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
     @staticmethod
     def _findings_block(failures: list[tuple[str, str]]) -> str:
         """Render the per-file findings list -- always present in full."""
-        lines = [
-            f"- {Path(path).name}: {diagnosis.splitlines()[0]}" for path, diagnosis in failures
-        ]
+        lines = [f"- {Path(path).name}: {_headline(diagnosis)}" for path, diagnosis in failures]
         return "\n".join(lines)
 
     def _lintable_files(
@@ -332,7 +345,16 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         # appends that flag to the linter's own command line. The path here
         # comes from the git index rather than a fresh Write, which narrows who
         # can choose it but not what a chosen one does (Plan 00412 class 7).
-        parts = build_lint_argv(strategy.default_lint_command, file_path, strategy)
+        # The root and target come from the same resolver lint_on_edit uses, so
+        # a Go file in a nested module is vetted as its package from its
+        # go.mod directory rather than as a loose file from the daemon's cwd.
+        module_context = resolve_module_context(file_path, strategy.language_name)
+        parts = build_lint_argv(
+            strategy.default_lint_command,
+            file_path,
+            strategy,
+            effective_path=module_context.effective_path,
+        )
 
         resolved = self._resolve_executable(parts[0])
         if resolved is None:
@@ -346,6 +368,7 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
                     capture_output=True,
                     text=True,
                     timeout=Timeout.LINT_CHECK,
+                    cwd=module_context.module_root,
                 )
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
@@ -413,7 +436,7 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
             "",
         ]
         for path, diagnosis in failures:
-            lines.append(f"- {Path(path).name}: {diagnosis.splitlines()[0]}")
+            lines.append(f"- {Path(path).name}: {_headline(diagnosis)}")
         lines.append("")
         lines.append(
             "Fix the file(s) above and re-stage before committing. This is the CHEAP "

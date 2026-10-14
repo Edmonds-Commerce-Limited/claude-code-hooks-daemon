@@ -124,9 +124,9 @@ class TestLintOnEdit:
         Answering ``True`` for an unreadable ancestor would name it as the
         module root and run the linter from the wrong directory -- "a denial
         the author cannot act on", per the handler's own comment."""
-        from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import LintOnEditHandler
+        from claude_code_hooks_daemon.strategies.lint.module_context import find_module_root
 
-        assert LintOnEditHandler._find_module_root(_UNREADABLE_PY, "go.mod") is None
+        assert find_module_root(_UNREADABLE_PY, "go.mod") is None
 
 
 class TestValidateEslintOnWrite:

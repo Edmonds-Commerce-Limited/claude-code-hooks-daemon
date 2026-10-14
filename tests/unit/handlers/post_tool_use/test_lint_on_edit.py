@@ -12,6 +12,7 @@ from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import (
     _LINT_FAILURE_RULE,
     LintOnEditHandler,
 )
+from claude_code_hooks_daemon.strategies.lint.module_context import find_module_root
 
 
 @pytest.fixture()
@@ -674,7 +675,7 @@ class TestModuleRoot:
         go_file = pkg_dir / "client.go"
         go_file.write_text("package github\n")
 
-        result = LintOnEditHandler._find_module_root(str(go_file), "go.mod")
+        result = find_module_root(str(go_file), "go.mod")
         assert result == str(tmp_path)
 
     def test_find_module_root_returns_none_when_not_found(self, tmp_path: Path) -> None:
@@ -682,7 +683,7 @@ class TestModuleRoot:
         go_file = tmp_path / "orphan.go"
         go_file.write_text("package main\n")
 
-        result = LintOnEditHandler._find_module_root(str(go_file), "go.mod")
+        result = find_module_root(str(go_file), "go.mod")
         assert result is None
 
     @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")

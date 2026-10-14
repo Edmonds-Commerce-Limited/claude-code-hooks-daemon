@@ -43,15 +43,15 @@ the file passes unchecked rather than being vetted.
 
 ### Phase 1: Fix (TDD)
 
-- [ ] ⬜ **Task 1.1**: RED: a nested-module repository fixture (`go.mod` in a
+- [x] ✅ **Task 1.1**: RED: a nested-module repository fixture (`go.mod` in a
   subdirectory, a package importing a sibling package by module path). A
   correct commit is allowed; a commit with a real vet finding (e.g. a
   `fmt.Printf` format mismatch) is denied and names the file. Skip cleanly
   when `go` is absent.
-- [ ] ⬜ **Task 1.2**: GREEN: extract `lint_on_edit`'s module-root and
+- [x] ✅ **Task 1.2**: GREEN: extract `lint_on_edit`'s module-root and
   effective-path resolution into a shared helper, and use it in both
   handlers. The gate passes `cwd` to `subprocess.run`.
-- [ ] ⬜ **Task 1.3**: Add a release note.
+- [x] ✅ **Task 1.3**: Add a release note.
 
 ## Success Criteria
 
