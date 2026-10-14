@@ -96,6 +96,23 @@ under load.
 
 **Status**: ⬜ Open.
 
+### N463 — targeted QA never runs the registry-wide handler tests for a newly added handler
+
+**Source**: the coordinator, 2026-10-14, merging Plan 00470 Phase 7 (`idle_workable_issue_stop_gate`). Targeted QA
+over the merge range passed 40/40, with 4,792 tests run. CI run 38632016530 then failed
+`tests/unit/handlers/test_pretooluse_fail_closed_tagging.py`, which requires every BLOCKING-without-SAFETY handler
+to carry an audited fail-open reason, on Python 3.11, 3.12 and 3.13. Fixed forward at `4f6703d75`.
+
+**Why it happens**: that test scans the handler registry, so no source-to-test mapping links it to a new handler's
+file. The 13 files the run reported as unmapped were left for CI's full-suite fallback to certify, which costs a
+60–90 minute round trip.
+
+**Fix direction**: when the change set ADDS a handler module (or touches `constants/handlers.py`), the targeted run
+also runs the registry-wide handler invariant tests (tagging, scope defaults, guidance coverage, declared
+behaviour). They are fast, and they are exactly the tests a new handler is most likely to break.
+
+**Status**: ⬜ Open.
+
 ### N461 — `plan_number_helper` reads a listing of one plan's own folder as a next-number scan
 
 **Source**: the coordinator, 2026-10-14, while looking up the newest entry in this ledger.
