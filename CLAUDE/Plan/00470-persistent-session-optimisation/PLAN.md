@@ -243,7 +243,9 @@ incident is in this plan's journal.
 - [ ] ⬜ **Task 7.2**: `work-queue done` prints the next eligible issue ("#N is
   next: start it now"), because that is the moment the wait-for-the-tick
   choice is made. TDD.
-- [ ] ⬜ **Task 7.3**: `CLAUDE/development/IssueSdlc.md`: "exactly one issue per
+- [x] ✅ **Task 7.3**: `CLAUDE/development/IssueSdlc.md` (plus the cron prompt
+  in `.claude/hooks-daemon.yaml` and the skill shim, which repeated the old
+  wording): "exactly one issue per
   invocation" becomes "one issue at a time: finish it completely, then pick
   the next immediately". A stop is a success only when it names a blocker,
   never "the next tick will do it". Coordinate the edit with Plan 00496 Task

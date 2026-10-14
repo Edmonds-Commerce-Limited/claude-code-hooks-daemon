@@ -4,10 +4,16 @@ Canonical procedure for the `issue-sdlc` skill and the hourly `issue-sdlc`
 cron declared under `persistent_crons` (Plan 00384). The skill is a shim; this
 document is the source of truth.
 
-One invocation handles **exactly one issue**. That bound is deliberate: the
-backlog is a dozen issues, a tick that tried to clear it would run for hours
-and exhaust its context part-way through an implementation, and a tick that
-dies mid-issue has to be cheap to recover.
+Work **one issue at a time**: carry it all the way to merged-and-closed (or
+to a recorded stop) before touching the next. That bound is deliberate: a
+session juggling several issues exhausts its context part-way through an
+implementation, and work that dies mid-issue has to be cheap to recover.
+
+It is a bound on concurrency, **not a quota per tick**. When an issue closes
+cleanly — tree clean, pushed, nothing in flight — pick the next eligible issue
+immediately. The hourly cron is a safety net for a session that has gone
+quiet, never a scheduler to wait for: a stop that says "the next issue is for
+the next tick" while an eligible issue exists is the failure, not a success.
 
 ## THE SAFETY CONTRACT — read before anything else
 
@@ -470,9 +476,10 @@ Stop and report, rather than pressing on, when:
 - the change would touch hooks, CI, permissions or a safety control;
 - anything is ambiguous enough that a wrong guess would be expensive.
 
-A tick that stops with a recorded reason is a **successful** tick. A tick that
-guesses in order to look productive is the failure this runbook exists to
-prevent.
+A stop that names a **blocker** from this list is a successful stop. A stop
+that guesses in order to look productive is the failure this runbook exists to
+prevent, and so is one that idles with an eligible issue waiting: "the next
+tick will do it" is not a blocker.
 
 ## Ticks while the session awaits the owner
 

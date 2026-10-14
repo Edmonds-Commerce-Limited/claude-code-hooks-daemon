@@ -21,8 +21,10 @@ Takes **exactly one** open GitHub issue from triage through planning,
 implementation in a worktree via a sub-agent, QA, review, and merge to the
 default branch, then comments and closes it.
 
-One issue per invocation, deliberately: the backlog is a dozen issues, and a
-tick that dies mid-implementation has to be cheap to recover.
+One issue at a time, deliberately: work that dies mid-implementation has to be
+cheap to recover. That is a bound on concurrency, not a quota per tick — when
+an issue closes cleanly, pick the next eligible one at once (the runbook's
+opening section).
 
 ## Four things to know before invoking
 
@@ -34,8 +36,9 @@ tick that dies mid-implementation has to be cheap to recover.
    all. The runbook holds the list; it is not duplicated here.
 3. **Releases stay human-gated.** This loop never releases, tags or publishes.
    It stops at "merged to the default branch".
-4. **Stopping is a success.** A tick that records why it stopped did its job. A
-   tick that guesses to look productive is the failure the runbook prevents.
+4. **Stopping on a blocker is a success.** A stop that names a real blocker did
+   its job. Guessing to look productive is the failure the runbook prevents, and
+   so is idling with an eligible issue waiting for the next tick.
 
 ## Work queue
 
