@@ -17,6 +17,12 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.utils.github_issue_validity import (
+    AuthorWhitelistCheck,
+    GhError,
+    IssueValidityService,
+    make_gh_runner,
+)
 from claude_code_hooks_daemon.utils.work_queue import (
     STATUS_ABANDONED,
     STATUS_DONE,
@@ -29,23 +35,40 @@ from claude_code_hooks_daemon.utils.work_queue import (
     read_queue,
     update_record,
 )
+from claude_code_hooks_daemon.utils.workable_issues import (
+    WORKABLE_ISSUES_FILENAME,
+    refresh_workable_cache,
+)
 
 
-def _queue_path(args: argparse.Namespace) -> Path:
-    """The queue file for the project, initialising the project context if needed."""
+def untracked_dir_for(project_root: Path | None) -> Path:
+    """The daemon's untracked state dir for the project, initialising the context if needed.
+
+    Raises:
+        RuntimeError: The project context has no untracked directory.
+    """
     from claude_code_hooks_daemon.core.project_context import ProjectContext
     from claude_code_hooks_daemon.daemon.cli import get_project_path
 
-    project_path = (
-        Path(args.project_root).resolve() if args.project_root else get_project_path(None)
-    )
+    project_path = Path(project_root).resolve() if project_root else get_project_path(None)
     if not ProjectContext.is_initialized():
         try:
             ProjectContext.initialize(project_path / ".claude" / "hooks-daemon.yaml")
         except ValueError as exc:
             print(f"WARNING: could not initialise project context: {exc}", file=sys.stderr)
+    return ProjectContext.daemon_untracked_dir()
+
+
+def _project_root_of(args: argparse.Namespace) -> Path:
+    from claude_code_hooks_daemon.daemon.cli import get_project_path
+
+    return Path(args.project_root).resolve() if args.project_root else get_project_path(None)
+
+
+def _queue_path(args: argparse.Namespace) -> Path:
+    """The queue file for the project, initialising the project context if needed."""
     try:
-        return ProjectContext.daemon_untracked_dir() / WORK_QUEUE_FILENAME
+        return untracked_dir_for(args.project_root) / WORK_QUEUE_FILENAME
     except RuntimeError as exc:
         raise WorkQueueError(f"no untracked directory to hold the queue: {exc}") from exc
 
@@ -88,9 +111,42 @@ def _cmd_update(args: argparse.Namespace, path: Path) -> int:
     return 0
 
 
+def _issue_service(project_root: Path) -> tuple[IssueValidityService, tuple[str, ...] | None]:
+    """The GitHub service and approved-author list ``done`` looks the next issue up with.
+
+    Raises:
+        ValueError: The project's ``approved_issue_authors`` option is malformed.
+    """
+    from claude_code_hooks_daemon.daemon.issue_validity_cli import load_approved_authors
+
+    approved = load_approved_authors(project_root)
+    return IssueValidityService(make_gh_runner(cwd=project_root)), approved
+
+
+def _next_issue_line(args: argparse.Namespace) -> str:
+    """Name the next workable issue and refresh the Stop gate's cache; never raises.
+
+    A lookup that fails for any reason is reported as unknown, because the
+    queue entry is already closed and that must not be undone by a GitHub error.
+    """
+    try:
+        project_root = _project_root_of(args)
+        service, approved = _issue_service(project_root)
+        if not AuthorWhitelistCheck(approved).is_configured:
+            return "next issue is unknown: no approved_issue_authors configured"
+        cache = untracked_dir_for(args.project_root) / WORKABLE_ISSUES_FILENAME
+        numbers = refresh_workable_cache(cache, service, approved, now=time.time())
+    except (GhError, ValueError, RuntimeError, OSError) as exc:
+        return f"next issue is unknown: {exc}"
+    if not numbers:
+        return "no workable issue"
+    return f"next workable issue: #{numbers[0]} - start it now"
+
+
 def _cmd_done(args: argparse.Namespace, path: Path) -> int:
     record = update_record(path, args.name, now=time.time(), last_sha=args.sha, status=STATUS_DONE)
     print(f"Closed '{record.name}' (done) at {record.last_sha}")
+    print(_next_issue_line(args))
     return 0
 
 

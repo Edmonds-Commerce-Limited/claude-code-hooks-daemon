@@ -858,6 +858,14 @@ handlers:
   # auto_continue_stop in turn. See
   # tests/integration/test_stop_chain_terminal_shadowing.py.
   stop:
+    idle_workable_issue_stop_gate:  # Refuses an idle stop while a workable issue is cached and nothing is in flight (Plan 00470 Phase 7)
+      enabled: true         # Inert unless the project declares an `issue-sdlc` persistent cron job; never terminal
+      priority: 4
+      # options:
+      #   job_id: issue-sdlc          # The declared persistent_crons job whose idle stops are judged
+      #   max_cache_age_hours: 2      # A workable-issues cache older than this is not trusted
+      #   marker_expiry_hours: 24     # How long an [awaiting-human] marker keeps the gate aside
+
     usage_pause_stop_gate:  # A usage-paused session stops only once its crons are exactly the one resume cron (Plan 00479)
       enabled: true         # Inert unless a usage pause is recorded for the session; never terminal
       priority: 6

@@ -24,6 +24,7 @@ overall verdict is *fixable*, which excludes any blocked or unknown issue.
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Final, TextIO
@@ -42,6 +43,7 @@ from claude_code_hooks_daemon.utils.github_issue_validity import (
     Verdict,
     approved_authors_from_options,
 )
+from claude_code_hooks_daemon.utils.workable_issues import workable_numbers, write_workable
 
 EXIT_OK: Final[int] = 0
 EXIT_BLOCKED: Final[int] = 1
@@ -132,6 +134,7 @@ def _list_eligible(
     service: IssueValidityService,
     stdout: TextIO,
     stderr: TextIO,
+    workable_cache: Path | None,
 ) -> int:
     author_check = AuthorWhitelistCheck(approved)
     try:
@@ -140,6 +143,11 @@ def _list_eligible(
         stderr.write(f"could not list open issues: {exc}\n")
         return EXIT_UNKNOWN
     eligible = [r.number for r in reports if r.verdict is Verdict.VALID]
+    if workable_cache is not None:
+        try:
+            write_workable(workable_cache, workable_numbers(reports), now=time.time())
+        except OSError as exc:
+            stderr.write(f"could not write the workable-issues cache {workable_cache}: {exc}\n")
     skipped = len(reports) - len(eligible)
     if as_json:
         payload: dict[str, Any] = {"eligible": eligible, "skipped": skipped}
@@ -161,8 +169,12 @@ def run_issue_validity(
     service: IssueValidityService,
     stdout: TextIO,
     stderr: TextIO,
+    workable_cache: Path | None = None,
 ) -> int:
     """Run the command; returns the process exit code.
+
+    ``workable_cache`` is where ``--list-eligible`` leaves the workable issue
+    numbers for the Stop gate (Plan 00470 Phase 7); ``None`` writes nothing.
 
     Refuses (``EXIT_USAGE``, no ``gh`` call) when no author list is configured:
     this is the strict caller, and an unconfigured list would make every issue
@@ -176,7 +188,7 @@ def run_issue_validity(
         )
         return EXIT_USAGE
     if list_eligible:
-        return _list_eligible(as_json, approved, service, stdout, stderr)
+        return _list_eligible(as_json, approved, service, stdout, stderr, workable_cache)
     if number is None:
         stderr.write("an issue number is required (or use --list-eligible)\n")
         return EXIT_USAGE

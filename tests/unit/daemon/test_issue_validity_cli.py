@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.utils.github_issue_validity import (
     GhError,
     IssueValidityService,
 )
+from claude_code_hooks_daemon.utils.workable_issues import read_workable, write_workable
 
 ME = "lts-bob"
 
@@ -92,6 +93,7 @@ def _run(
     as_json: bool = False,
     list_eligible: bool = False,
     approved: Sequence[str] | None = ("lts-bob", "ltscommerce"),
+    workable_cache: Path | None = None,
 ) -> tuple[int, str, str]:
     out, err = io.StringIO(), io.StringIO()
     code = run_issue_validity(
@@ -103,6 +105,7 @@ def _run(
         service=IssueValidityService(gh),
         stdout=out,
         stderr=err,
+        workable_cache=workable_cache,
     )
     return code, out.getvalue(), err.getvalue()
 
@@ -263,6 +266,49 @@ class TestListEligible:
         code, out, _ = _run(gh, list_eligible=True)
         assert code == EXIT_OK
         assert "skipped 1" in out
+
+
+class TestListEligibleWritesTheWorkableCache:
+    """Plan 00470 Phase 7: the Stop gate reads this file and never calls GitHub."""
+
+    def test_it_records_the_eligible_issues_that_are_not_waiting_on_a_human(
+        self, gh: FakeGh, tmp_path: Path
+    ) -> None:
+        waiting = _issue(2)
+        waiting["labels"] = [{"name": "agent-needs-human"}]
+        gh.listing = [_issue(1), waiting, _issue(3, author="stranger"), _issue(4)]
+        cache = tmp_path / "workable-issues.json"
+        code, out, _ = _run(gh, list_eligible=True, workable_cache=cache)
+        assert code == EXIT_OK
+        recorded = read_workable(cache)
+        assert recorded is not None and recorded.numbers == (1, 4)
+        assert "#2" in out  # eligible stays eligible; only the cache narrows it
+        assert [c[:2] for c in gh.calls] == [("issue", "list")]
+
+    def test_a_listing_failure_leaves_the_cache_alone(self, gh: FakeGh, tmp_path: Path) -> None:
+        cache = tmp_path / "workable-issues.json"
+        write_workable(cache, [9], now=1.0)
+        gh.listing = GhError("offline")
+        code, _, _ = _run(gh, list_eligible=True, workable_cache=cache)
+        assert code == EXIT_UNKNOWN
+        recorded = read_workable(cache)
+        assert recorded is not None and recorded.numbers == (9,)
+
+    def test_an_unwritable_cache_warns_but_the_listing_still_succeeds(
+        self, gh: FakeGh, tmp_path: Path
+    ) -> None:
+        blocker = tmp_path / "file"
+        blocker.write_text("x", encoding="utf-8")
+        gh.listing = [_issue(1)]
+        code, out, err = _run(gh, list_eligible=True, workable_cache=blocker / "c.json")
+        assert code == EXIT_OK
+        assert "#1" in out
+        assert "workable-issues cache" in err
+
+    def test_no_cache_path_writes_nothing(self, gh: FakeGh, tmp_path: Path) -> None:
+        gh.listing = [_issue(1)]
+        _run(gh, list_eligible=True)
+        assert list(tmp_path.iterdir()) == []
 
 
 class TestLoadApprovedAuthors:

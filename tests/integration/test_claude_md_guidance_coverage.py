@@ -88,6 +88,9 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "and stop, and to ignore the triggering request"
     ),
     "UsagePauseStopGateHandler": "T1 denies a paused session's stop until only the resume cron remains",
+    "IdleWorkableIssueStopGateHandler": (
+        "T1 denies a main-thread idle stop while a workable issue is cached and nothing is in flight"
+    ),
     "SubagentFullQaBlockerHandler": "T1 denies a full-suite QA run inside a subagent",
     "SubagentWorktreeWriteGuardHandler": (
         "T1 denies a subagent's Write/Edit into another checkout of its repository"

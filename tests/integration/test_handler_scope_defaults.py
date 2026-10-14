@@ -77,6 +77,8 @@ _EXPECTED_MAIN: frozenset[str] = frozenset(
         "teammate-reap-advisor",
         # Plan 00479: verifies the session's crons, which are the coordinator's.
         "usage-pause-stop-gate",
+        # Plan 00470 Phase 7: judges the coordinator's own idle stop.
+        "idle-workable-issue-stop-gate",
     }
 )
 

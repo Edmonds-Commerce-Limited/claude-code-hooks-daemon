@@ -184,6 +184,8 @@ class ValidityReport:
     number: int
     results: tuple[CheckResult, ...]
     fresh: bool = field(default=True, compare=False)
+    #: The issue's labels, when its facts were read (empty when they were not).
+    labels: tuple[str, ...] = field(default=(), compare=False)
 
     @property
     def verdict(self) -> Verdict:
@@ -468,7 +470,7 @@ class IssueValidityService:
             return ValidityReport(number, results, fresh=self._asked)
         identity = self.identity() if any(c.needs_identity for c in checks) else None
         results = tuple(c.evaluate(facts, identity) for c in checks)
-        return ValidityReport(number, results, fresh=self._asked)
+        return ValidityReport(number, results, fresh=self._asked, labels=facts.labels)
 
     def check_issue(self, number: int, checks: Sequence[ValidityCheck]) -> ValidityReport:
         """Run ``checks`` over issue ``number``."""
