@@ -224,6 +224,31 @@ waited on one bandit decision.
     worker, the new thread holds as well. The result is duplicate crons, never lost ones.
   - Done: both sockets stamp the hook's pid (`SO_PEERCRED`, caller value replaced); `utils/session_thread_group.py` walks `/proc` (bounded, deadline) to the `claude daemon run --origin transient --spawned-by` ancestor, picks the holder by worker shape (`--fork-session --resume` initial, `bg-spare` later) and persists group (pid + start time) to the holder's live worker; `persistent_cron_assertor`, `cron_stop_enforcer`, `cron_subagent_stop_enforcer` and the `usage_pause_gate` lift directive exempt a non-holder; option `persistent_crons.initial_thread_only` (default true).
 
+### Phase 7: The cron is a safety net, not a scheduler (owner request)
+
+An idle stop that defers eligible issues to the next tick must be refused on
+facts, because prose ("waiting for the cron is an own goal") was ignored. The
+incident is in this plan's journal.
+
+- [ ] ⬜ **Task 7.1**: Stop gate keyed on facts, not wording. On a main-thread
+  Stop where `issue-sdlc` is a declared job: if the work queue has no running
+  entry, the tree is clean, and the cached eligible-issue count is above zero,
+  deny the stop. The deny names the next eligible issue and says to start it
+  or name a real blocker. The gate stands aside for a usage pause, a live
+  `[awaiting-human]` marker, a non-holder thread (Task 6.4), a sub-agent stop,
+  and a usage-ceiling margin (Plan 00479's numbers). "Eligible" uses
+  `issue-validity`'s author, assignee and label rules. The count is cached and
+  refreshed by `work-queue done` and by each tick, so the Stop hook never
+  calls GitHub. TDD.
+- [ ] ⬜ **Task 7.2**: `work-queue done` prints the next eligible issue ("#N is
+  next: start it now"), because that is the moment the wait-for-the-tick
+  choice is made. TDD.
+- [ ] ⬜ **Task 7.3**: `CLAUDE/development/IssueSdlc.md`: "exactly one issue per
+  invocation" becomes "one issue at a time: finish it completely, then pick
+  the next immediately". A stop is a success only when it names a blocker,
+  never "the next tick will do it". Coordinate the edit with Plan 00496 Task
+  3.1, which edits the same file.
+
 ## Success Criteria
 
 - [ ] An issue-sdlc tick fires while a failsafe tick is suppressed by a live
