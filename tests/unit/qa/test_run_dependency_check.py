@@ -47,6 +47,28 @@ esac
 """
 
 
+#: `uv lock --check` reports a lockfile out of step with pyproject.toml.
+_FAKE_UV_STALE_LOCK = """#!/bin/sh
+echo "The lockfile at uv.lock needs to be updated" >&2
+exit 1
+"""
+
+#: Exits 0 with an empty issue list, after recording the verdict file as it
+#: stood at the moment deptry ran (the arguments are TARGET --json-output FILE).
+_FAKE_DEPTRY_WITNESS = """#!/bin/sh
+cp "$QA_DEPENDENCY_OUTPUT_DIR/dependencies.json" "$QA_DEPENDENCY_OUTPUT_DIR/witness.json"
+echo "[]" > "$3"
+exit 0
+"""
+
+#: A verdict left behind by a previous, successful run.
+_PREVIOUS_PASSED_VERDICT = {
+    "tool": "deptry",
+    "summary": {"total_issues": 0, "missing_deps": 0, "misplaced_deps": 0, "passed": True},
+    "issues": [],
+}
+
+
 def _run_gate(
     tmp_path: Path,
     *,
@@ -54,6 +76,7 @@ def _run_gate(
     deptry_bin: str = "",
     force_no_uv: bool = False,
     path_prefix: str = "",
+    previous_verdict: dict | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], dict]:
     """Run the real wrapper with QA_DEPENDENCY_* overrides; return (process, JSON).
 
@@ -66,6 +89,11 @@ def _run_gate(
     SECURITY: fixed argv, no shell, the repository's own QA wrapper.
     """
     output_dir = tmp_path / "qa"
+    if previous_verdict is not None:
+        output_dir.mkdir()
+        (output_dir / "dependencies.json").write_text(
+            json.dumps(previous_verdict), encoding="utf-8"
+        )
     env = {
         **os.environ,
         "QA_DEPENDENCY_OUTPUT_DIR": str(output_dir),
@@ -165,6 +193,58 @@ class TestDependencyGateFailsClosed:
 
         assert completed.returncode != 0
         assert "2" in output["summary"]["error"], completed.stdout + completed.stderr
+
+    def test_a_stale_lockfile_replaces_the_previous_passing_verdict(self, tmp_path: Path) -> None:
+        """Plan 00451: the gate exits non-zero, so the JSON must not still say passed."""
+        stub_dir = tmp_path / "bin"
+        stub_dir.mkdir()
+        stub = stub_dir / "uv"
+        stub.write_text(_FAKE_UV_STALE_LOCK, encoding="utf-8")
+        stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+
+        completed, output = _run_gate(
+            tmp_path,
+            targets="src/",
+            path_prefix=str(stub_dir),
+            previous_verdict=_PREVIOUS_PASSED_VERDICT,
+        )
+
+        assert completed.returncode != 0, completed.stdout + completed.stderr
+        assert output["summary"]["passed"] is False
+        assert "uv lock --check" in output["summary"]["error"]
+        assert "uv.lock" in output["summary"]["error"]
+        assert output["issues"], "count without detail is the defect this fix removes"
+
+    def test_a_missing_uv_replaces_the_previous_passing_verdict(self, tmp_path: Path) -> None:
+        completed, output = _run_gate(
+            tmp_path,
+            targets="src/",
+            force_no_uv=True,
+            previous_verdict=_PREVIOUS_PASSED_VERDICT,
+        )
+
+        assert completed.returncode != 0
+        assert output["summary"]["passed"] is False
+        assert "uv" in output["summary"]["error"]
+
+    def test_no_previous_verdict_survives_into_the_run(self, tmp_path: Path) -> None:
+        """An aborted run between steps must find a pending verdict, never the old pass."""
+        target = tmp_path / "pkg"
+        target.mkdir()
+        (target / "mod.py").write_text("x = 1\n", encoding="utf-8")
+        fake_bin = _write_fake_deptry(tmp_path, _FAKE_DEPTRY_WITNESS)
+
+        completed, output = _run_gate(
+            tmp_path,
+            targets=str(target),
+            deptry_bin=fake_bin,
+            previous_verdict=_PREVIOUS_PASSED_VERDICT,
+        )
+
+        witness = json.loads((tmp_path / "qa" / "witness.json").read_text(encoding="utf-8"))
+        assert witness["summary"]["passed"] is False, "a crash here would leave a stale pass"
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+        assert output["summary"]["passed"] is True
 
     def test_the_real_project_scope_still_passes(self, tmp_path: Path) -> None:
         """No false alarm: the real gate, on the real tree, is still green."""

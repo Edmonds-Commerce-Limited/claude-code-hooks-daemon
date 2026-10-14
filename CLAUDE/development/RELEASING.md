@@ -327,13 +327,14 @@ Agent proposes bump with justification. Manual override accepted.
 
 ### 3. Version Update
 
-**The version-carrying files (the single list; other documents point here):**
-`pyproject.toml`, `src/claude_code_hooks_daemon/version.py`, `README.md` (badge),
-`.claude/ccy/claude-supervise.py` (the standalone supervisor's hardcoded
-`__version__`, kept in lockstep — enforced by
-`tests/unit/supervise/test_compaction_gap_repro.py::TestSupervisorVersionMatchesDaemon`,
-which FAILS the QA gate if the supervisor version drifts from `version.py`),
-`.claude/HOOKS-DAEMON.md` (regenerated, below) and `uv.lock` (re-locked, below).
+**The version-carrying files have one home: `VERSION_DECLARATIONS` in
+`tests/unit/qa/test_version_bump_completeness.py` (other documents point there).** That test FAILS
+when a registered file declares a version other than `version.py`'s, and when any other tracked file
+(outside `CHANGELOG.md`, `RELEASES/`, `CLAUDE/UPGRADES/`, `CLAUDE/Plan/`, `tests/`) starts containing the
+current version without being registered. Run it right after the bump
+(`pytest tests/unit/qa/test_version_bump_completeness.py`) instead of waiting for a later gate. Two of the
+files are regenerated rather than edited: `.claude/HOOKS-DAEMON.md` (regenerated, below) and `uv.lock`
+(re-locked, below).
 
 Also check README.md's stats still hold. Both the badge and the body state a
 deliberately ROUNDED test figure ("12,000+"), which stays true across many

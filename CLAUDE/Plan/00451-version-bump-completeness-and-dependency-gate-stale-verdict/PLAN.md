@@ -70,23 +70,23 @@ stale `uv.lock` instead pointed somewhere else.
 
 ### Phase 1: Version-bump completeness
 
-- [ ] ⬜ **Task 1.1**: Enumerate every tracked file declaring the current
+- [x] ✅ **Task 1.1**: Enumerate every tracked file declaring the current
   version, excluding historical trees (`CHANGELOG.md`, `RELEASES/`,
   `CLAUDE/UPGRADES/`, `CLAUDE/Plan/`), and confirm the table above is
   complete rather than assuming it.
-- [ ] ⬜ **Task 1.2**: RED — a test that fails when a tracked file declares a
+- [x] ✅ **Task 1.2**: RED — a test that fails when a tracked file declares a
   version string not matching `version.py`. Verify it fails by pinning one
   file at an old version, so it is not passing vacuously.
-- [ ] ⬜ **Task 1.3**: GREEN — implement, and update the release procedure in
+- [x] ✅ **Task 1.3**: GREEN — implement, and update the release procedure in
   `CLAUDE/development/RELEASING.md` to name the check rather than restate
   the file list, so the list has one home.
 
 ### Phase 2: The stale dependencies verdict
 
-- [ ] ⬜ **Task 2.1**: RED — a test that runs the dependency check against a
+- [x] ✅ **Task 2.1**: RED — a test that runs the dependency check against a
   deliberately stale lockfile and asserts `dependencies.json` reports the
   failure. It must fail against the current script.
-- [ ] ⬜ **Task 2.2**: GREEN — ensure the script writes a failing
+- [x] ✅ **Task 2.2**: GREEN — ensure the script writes a failing
   `dependencies.json` naming the `uv lock --check` failure before exiting.
   Consider writing a `pending`/invalidated verdict at the START of the run
   so an aborted run can never leave a clean one behind — a crash between
@@ -94,11 +94,11 @@ stale `uv.lock` instead pointed somewhere else.
 
 ## Success Criteria
 
-- [ ] Adding a new version-carrying file without registering it fails the
+- [x] Adding a new version-carrying file without registering it fails the
   completeness check.
-- [ ] A stale `uv.lock` produces a `dependencies.json` that names the lockfile
+- [x] A stale `uv.lock` produces a `dependencies.json` that names the lockfile
   as the cause, and the gate's reported reason matches its exit code.
-- [ ] Neither check can pass vacuously — each has a test proving it fails when
+- [x] Neither check can pass vacuously — each has a test proving it fails when
   the defect is present.
 - [ ] Full QA green.
 

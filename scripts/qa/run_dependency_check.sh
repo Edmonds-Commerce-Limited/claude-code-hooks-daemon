@@ -30,14 +30,43 @@ source "${PROJECT_ROOT}/scripts/venv-include.bash"
 
 cd "${PROJECT_ROOT}"
 
+# Plan 00451: invalidate the previous run's verdict BEFORE anything can exit.
+# Every early exit below used to leave the last run's `passed: true` on disk
+# beside a non-zero exit code, so the reported artefact contradicted the gate.
+# The pending verdict is a failure by construction; only a run that reaches the
+# end overwrites it with a real result.
+mkdir -p "${OUTPUT_DIR}"
+printf '%s\n' '{"tool": "deptry", "summary": {"total_issues": 1, "missing_deps": 0, "misplaced_deps": 0, "passed": false, "error": "dependency check did not complete (pending verdict from the start of this run)"}, "issues": [{"rule": "dependency-check-pending", "module": "", "message": "dependency check did not complete (pending verdict from the start of this run)"}]}' > "${OUTPUT_FILE}"
+
+# write_failed_verdict RULE MESSAGE: record why the gate is about to exit 1.
+write_failed_verdict() {
+    "${VENV_PYTHON}" -c '
+import json
+import sys
+
+rule, message, output_file = sys.argv[1:4]
+output = {
+    "tool": "deptry",
+    "summary": {
+        "total_issues": 1,
+        "missing_deps": 0,
+        "misplaced_deps": 0,
+        "passed": False,
+        "error": message,
+    },
+    "issues": [{"rule": rule, "module": "", "message": message}],
+}
+with open(output_file, "w") as f:
+    json.dump(output, f, indent=2)
+    f.write("\n")
+' "$1" "$2" "${OUTPUT_FILE}"
+}
+
 # Ensure venv and deps
 ensure_venv || exit 1
 if ! "${VENV_PYTHON}" -c "import deptry" 2>/dev/null; then
     install_deps || exit 1
 fi
-
-# Ensure output directory exists
-mkdir -p "${OUTPUT_DIR}"
 
 # Plan 00100 Task 3.0: uv.lock is a first-class repo artefact. CI-gate it so
 # pyproject.toml drift without a regenerated lockfile surfaces immediately.
@@ -57,11 +86,15 @@ if [ "${UV_AVAILABLE}" = "true" ]; then
     if ! uv lock --check; then
         echo "❌ uv.lock is out of sync with pyproject.toml." >&2
         echo "   Fix: run 'uv lock' and commit the updated uv.lock." >&2
+        write_failed_verdict "uv-lock-stale" \
+            "uv lock --check failed: uv.lock is out of sync with pyproject.toml (fix: run 'uv lock' and commit uv.lock)"
         exit 1
     fi
 else
     echo "❌ uv not on PATH -- cannot verify uv.lock is in sync with pyproject.toml." >&2
     echo "   Install uv (https://docs.astral.sh/uv/) to run this gate locally." >&2
+    write_failed_verdict "uv-missing" \
+        "uv not on PATH: cannot run uv lock --check to verify uv.lock (install uv)"
     exit 1
 fi
 
@@ -95,32 +128,7 @@ fi
 if [ "${DEPTRY_EXIT}" != "0" ] && [ "${DEPTRY_EXIT}" != "1" ]; then
     DEPTRY_ERROR_MESSAGE="deptry exited ${DEPTRY_EXIT} (expected 0 or 1) -- it did not complete a check, so nothing below was actually checked"
     echo "FATAL: ${DEPTRY_ERROR_MESSAGE}" >&2
-    "${VENV_PYTHON}" -c '
-import json
-import sys
-
-message = sys.argv[1]
-output_file = sys.argv[2]
-summary = {
-    "total_issues": 1,
-    "missing_deps": 0,
-    "misplaced_deps": 0,
-    "passed": False,
-    "error": message,
-}
-output = {
-    "tool": "deptry",
-    "summary": summary,
-    "issues": [{
-        "rule": "deptry-run-error",
-        "module": "",
-        "message": message,
-    }],
-}
-with open(output_file, "w") as f:
-    json.dump(output, f, indent=2)
-    f.write("\n")
-' "${DEPTRY_ERROR_MESSAGE}" "${OUTPUT_FILE}"
+    write_failed_verdict "deptry-run-error" "${DEPTRY_ERROR_MESSAGE}"
     rm -f "${OUTPUT_FILE}.raw"
     exit 1
 fi
