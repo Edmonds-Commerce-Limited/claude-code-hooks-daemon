@@ -4,7 +4,12 @@ SessionStart advisory that runs the Stage 3 plan QA sweep and injects one
 compact drift report — silent when the plan tree is clean.
 """
 
+import contextlib
+import os
 import subprocess
+import threading
+from collections.abc import Iterator
+from datetime import date
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -14,6 +19,7 @@ from tests.support.git_fixtures import git_setup_timeout
 from claude_code_hooks_daemon.config.models import PlanWorkflowQaConfig
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.session_start.plan_qa_sweep import PlanQaSweepHandler
+from claude_code_hooks_daemon.plan_qa.runner import run_stage
 
 _PLAN_DIR_REL = "CLAUDE/Plan"
 
@@ -43,6 +49,17 @@ def _scaffold(tmp_path: Path) -> Path:
     return root
 
 
+@contextlib.contextmanager
+def _patched_context(root: Path) -> Iterator[None]:
+    """Point the handler at ``root`` and give its cache a per-test directory."""
+    module = "claude_code_hooks_daemon.handlers.session_start.plan_qa_sweep.ProjectContext"
+    with (
+        patch(f"{module}.project_root", return_value=root),
+        patch(f"{module}.daemon_untracked_dir", return_value=root.parent / "untracked"),
+    ):
+        yield
+
+
 def _handler(
     plan_dir_rel: str | None = _PLAN_DIR_REL,
     policy: PlanWorkflowQaConfig | None = None,
@@ -50,6 +67,9 @@ def _handler(
     handler = PlanQaSweepHandler()
     handler._track_plans_in_project = plan_dir_rel
     handler._plan_qa = policy if policy is not None else PlanWorkflowQaConfig()
+    # A cold sweep is awaited in full so these tests are not timing-dependent;
+    # TestSweepCache sets it to zero where the pending path is the point.
+    handler._sweep_wait_seconds = 60.0
     return handler
 
 
@@ -97,11 +117,7 @@ class TestMatches:
 
 class TestHandle:
     def _run(self, handler: PlanQaSweepHandler, root: Path) -> Any:
-        target = (
-            "claude_code_hooks_daemon.handlers.session_start.plan_qa_sweep."
-            "ProjectContext.project_root"
-        )
-        with patch(target, return_value=root):
+        with _patched_context(root):
             return handler.handle(_new_session_input())
 
     def test_clean_tree_is_silent(self, tmp_path: Path) -> None:
@@ -162,12 +178,112 @@ class TestProjectExcludePaths:
         handler = _handler()
         handler._project_exclude_paths = ["CLAUDE/Plan/00002-rogue/**"]
 
-        target = (
-            "claude_code_hooks_daemon.handlers.session_start.plan_qa_sweep."
-            "ProjectContext.project_root"
-        )
-        with patch(target, return_value=root):
+        with _patched_context(root):
             result = handler.handle(_new_session_input())
 
         assert result.decision == Decision.ALLOW
         assert result.context == []
+
+
+_RUN_STAGE = "claude_code_hooks_daemon.handlers.session_start.plan_qa_sweep.run_stage"
+
+
+def _rogue_plan(root: Path) -> None:
+    rogue = root / _PLAN_DIR_REL / "00002-rogue"
+    rogue.mkdir()
+    (rogue / "PLAN.md").write_text("# Plan 00002: rogue\n\n**Status**: Complete\n")
+
+
+class TestSweepCache:
+    """Plan 00495 Task 2.6: the sweep is cached by input fingerprint, off the chain."""
+
+    def _handle(self, handler: PlanQaSweepHandler, root: Path) -> list[str]:
+        with _patched_context(root):
+            context: list[str] = handler.handle(_new_session_input()).context
+        return context
+
+    def test_unchanged_inputs_reuse_the_cached_report(self, tmp_path: Path) -> None:
+        root = _scaffold(tmp_path)
+        _rogue_plan(root)
+        handler = _handler()
+        with patch(_RUN_STAGE, wraps=run_stage) as sweep:
+            first = self._handle(handler, root)
+            second = self._handle(handler, root)
+        assert first
+        assert second == first
+        assert sweep.call_count == 1
+
+    def test_editing_a_scanned_file_invalidates_the_cache(self, tmp_path: Path) -> None:
+        root = _scaffold(tmp_path)
+        handler = _handler()
+        assert self._handle(handler, root) == []
+
+        _rogue_plan(root)
+
+        assert "location-status-coherence" in "\n".join(self._handle(handler, root))
+
+    def test_fixing_drift_clears_the_cached_report(self, tmp_path: Path) -> None:
+        root = _scaffold(tmp_path)
+        _rogue_plan(root)
+        handler = _handler()
+        assert self._handle(handler, root)
+
+        (root / _PLAN_DIR_REL / "00002-rogue" / "PLAN.md").unlink()
+        (root / _PLAN_DIR_REL / "00002-rogue").rmdir()
+
+        assert self._handle(handler, root) == []
+
+    def test_a_new_day_invalidates_the_cache(self, tmp_path: Path) -> None:
+        """Staleness is judged against the current date, so one day's verdict is not the next."""
+        root = _scaffold(tmp_path)
+        handler = _handler()
+        module = "claude_code_hooks_daemon.handlers.session_start.plan_qa_sweep.date"
+        with patch(_RUN_STAGE, wraps=run_stage) as sweep, patch(module) as fake_date:
+            fake_date.today.return_value = date(2026, 1, 1)
+            self._handle(handler, root)
+            fake_date.today.return_value = date(2026, 1, 2)
+            self._handle(handler, root)
+        assert sweep.call_count == 2
+
+    def test_a_new_commit_invalidates_the_cache(self, tmp_path: Path) -> None:
+        """Dormancy and staleness read git history, which no file stat reflects."""
+        root = _scaffold(tmp_path)
+        handler = _handler()
+        identity = {
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@example.invalid",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@example.invalid",
+        }
+        with patch(_RUN_STAGE, wraps=run_stage) as sweep:
+            self._handle(handler, root)
+            subprocess.run(
+                ["git", "-C", str(root), "commit", "--allow-empty", "-m", "x"],
+                capture_output=True,
+                check=True,
+                timeout=git_setup_timeout(),
+                env={**os.environ, **identity},
+            )
+            self._handle(handler, root)
+        assert sweep.call_count == 2
+
+    def test_slow_sweep_is_reported_pending_without_blocking_the_chain(
+        self, tmp_path: Path
+    ) -> None:
+        root = _scaffold(tmp_path)
+        handler = _handler()
+        handler._sweep_wait_seconds = 0.0
+        release = threading.Event()
+
+        def slow(*args: object, **kwargs: object) -> list[object]:
+            release.wait(60.0)
+            return []
+
+        with patch(_RUN_STAGE, side_effect=slow):
+            context = self._handle(handler, root)
+            release.set()
+
+        text = "\n".join(context)
+        assert "background" in text
+        assert "plan-qa" in text
+        assert "--sweep" in text

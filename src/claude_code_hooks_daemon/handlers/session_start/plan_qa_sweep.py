@@ -13,12 +13,14 @@ options.
 
 import logging
 from datetime import date
+from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.handlers.utils.plan_numbering import read_plan_counter
 from claude_code_hooks_daemon.plan_qa.context import sweep_context
 from claude_code_hooks_daemon.plan_qa.report import format_advisory
 from claude_code_hooks_daemon.plan_qa.runner import run_stage
@@ -27,10 +29,31 @@ from claude_code_hooks_daemon.utils.cli_command import (
     daemon_cli_command,
     daemon_cli_command_for_docs,
 )
+from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
+from claude_code_hooks_daemon.utils.sweep_cache import (
+    DEFAULT_WAIT_SECONDS,
+    run_cached_sweep,
+    tree_fingerprint,
+)
+from claude_code_hooks_daemon.version import __version__
 
 logger = logging.getLogger(__name__)
 _SWEEP_MODE_ADVISE: Final[str] = "advise"
+_SWEEP_NAME: Final[str] = "plan-qa-sweep"
+_SWEEP_LABEL: Final[str] = "Plan QA sweep"
+
+
+def _git_state(project_root: Path) -> list[str]:
+    """The git facts a plan sweep reads: the HEAD commit and the plan counter.
+
+    Staleness and dormancy checks read last-commit dates, which only a new commit
+    moves; the counter check reads ``hooksdaemon.latestPlanNumber``. A repository
+    with no commit yet has no HEAD, which is itself a stable state.
+    """
+    head = run_git(project_root, "rev-parse", "--verify", "HEAD")
+    head_sha = head.stdout.strip() if head.returncode == 0 else "no-head"
+    return [head_sha, str(read_plan_counter(project_root))]
 
 
 def _cli_hint() -> str:
@@ -60,6 +83,8 @@ class PlanQaSweepHandler(SessionStartHandlerBase):
         # Injected by the registry for PLANNING-tagged handlers.
         self._track_plans_in_project: str | None = None
         self._plan_qa: Any = None
+        # How long a cache miss may hold up the SessionStart chain (Plan 00495).
+        self._sweep_wait_seconds: float = DEFAULT_WAIT_SECONDS
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         if is_resume_session(hook_input):
@@ -77,33 +102,54 @@ class PlanQaSweepHandler(SessionStartHandlerBase):
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
         project_root = ProjectContext.project_root()
+        today = date.today()
+        # Everything that can change a finding: the tree (plan documents and the
+        # files they reference), the policy, the daemon's version, the date
+        # (staleness) and git state (last-commit dates, the plan counter).
+        fingerprint = tree_fingerprint(
+            project_root,
+            [
+                __version__,
+                today.isoformat(),
+                repr(self._plan_qa),
+                plan_dir_rel,
+                repr(self._project_exclude_paths),
+                *_git_state(project_root),
+            ],
+        )
+        outcome = run_cached_sweep(
+            _SWEEP_NAME,
+            ProjectContext.daemon_untracked_dir(),
+            fingerprint,
+            lambda: self._sweep(project_root, plan_dir_rel, today),
+            self._sweep_wait_seconds,
+        )
+        return AdvisoryResult(
+            decision=Decision.ALLOW, context=outcome.advisory(_SWEEP_LABEL, _cli_hint())
+        )
+
+    def _sweep(self, project_root: Path, plan_dir_rel: str, today: date) -> list[str]:
+        """Run the SWEEP-stage catalogue; the advisory lines, empty when clean."""
         try:
             context = sweep_context(
                 project_root=project_root,
                 plan_dir_rel=plan_dir_rel,
                 policy=self._plan_qa,
-                today=date.today(),
+                today=today,
                 exclude_paths=self._project_exclude_paths,
             )
         except FileNotFoundError:
             # Structural finding, not a crash: the configured plan dir is gone.
-            return AdvisoryResult(
-                decision=Decision.ALLOW,
-                context=[
-                    f"⚠️  PLAN QA: configured plan directory {plan_dir_rel}/ does not exist.",
-                    f"Create it (plus {self._plan_qa.completed_dir}/ and README.md) or fix "
-                    "plan_workflow.directory in .claude/hooks-daemon.yaml.",
-                ],
-            )
+            return [
+                f"⚠️  PLAN QA: configured plan directory {plan_dir_rel}/ does not exist.",
+                f"Create it (plus {self._plan_qa.completed_dir}/ and README.md) or fix "
+                "plan_workflow.directory in .claude/hooks-daemon.yaml.",
+            ]
 
         findings = run_stage(Stage.SWEEP, context)
         if not findings:
-            return AdvisoryResult(decision=Decision.ALLOW, context=[])
-
-        return AdvisoryResult(
-            decision=Decision.ALLOW,
-            context=[format_advisory(findings), "", _cli_hint()],
-        )
+            return []
+        return [format_advisory(findings), "", _cli_hint()]
 
     def get_claude_md(self) -> str | None:
         return (
