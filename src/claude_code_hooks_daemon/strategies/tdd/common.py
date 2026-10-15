@@ -1,5 +1,6 @@
 """Shared constants and utilities for TDD strategies - DRY."""
 
+from claude_code_hooks_daemon.strategies.lint.module_context import find_module_root
 from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
 from claude_code_hooks_daemon.utils.path_segments import matches_path_segment
 
@@ -25,6 +26,15 @@ def is_in_common_test_directory(file_path: str) -> bool:
     return matches_path_segment(
         file_path, COMMON_TEST_DIRECTORIES, project_root=resolve_project_root()
     )
+
+
+def has_ancestor_marker(file_path: str, marker_file: str) -> bool:
+    """Whether ``marker_file`` (e.g. ``go.mod``) sits in the file's directory or any above it.
+
+    An ancestor the daemon cannot stat is not counted as holding the marker
+    (the same walk the lint handlers use to find a module root).
+    """
+    return find_module_root(file_path, marker_file) is not None
 
 
 def matches_directory(file_path: str, directories: tuple[str, ...]) -> bool:

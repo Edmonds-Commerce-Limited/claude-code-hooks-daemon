@@ -51,6 +51,18 @@ def _primary_separate_test_path(
 class TestTddEnforcementHandler:
     """Test suite for TddEnforcementHandler."""
 
+    @pytest.fixture(autouse=True)
+    def _go_paths_sit_in_a_module(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The fake /workspace/... Go paths used here have no go.mod on disk.
+
+        Go is enforced inside a module only; real-module behaviour is pinned in
+        test_tdd_enforcement_go.py against a tmp_path module.
+        """
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.strategies.tdd.go_strategy.has_ancestor_marker",
+            lambda _path, _marker: True,
+        )
+
     @pytest.fixture
     def handler(self):
         """Create handler instance."""

@@ -54,17 +54,18 @@ assigned to another account). They are recorded in [NIGGLES-FOUND.md](NIGGLES-FO
 
 ### Phase 3: tdd_enforcement for per-package tests
 
-- [ ] ⬜ **Task 3.1**: A new `.go` file in a package that already has any `_test.go` passes.
-- [ ] ⬜ **Task 3.2**: Generated files are exempt: the `// Code generated ... DO NOT EDIT.` header, plus `*.pb.go`,
+- [x] ✅ **Task 3.1**: A new `.go` file in a package that already has any `_test.go` passes.
+- [x] ✅ **Task 3.2**: Generated files are exempt: the `// Code generated ... DO NOT EDIT.` header, plus `*.pb.go`,
   `*_gen.go`, `zz_generated*`.
-- [ ] ⬜ **Task 3.3**: `doc.go` and `cmd/*/main.go` pass; root-level and other top-level packages are enforced
+- [x] ✅ **Task 3.3**: `doc.go` and `cmd/*/main.go` pass; root-level and other top-level packages are enforced
   (the `/src/ /cmd/ /pkg/ /internal/` allow-list misses them).
 
 ### Phase 4: error_hiding_blocker Go precision
 
-- [ ] ⬜ **Task 4.1**: `v, _ := m[k]`, `x, _ := y.(T)`, `for i, _ := range` and `_, _ = fmt.Fprintf` pass; matches
+- [x] ✅ **Task 4.1**: `v, _ := m[k]`, `x, _ := y.(T)`, `for i, _ := range` and `_, _ = fmt.Fprintf` pass; matches
   inside comments and string literals are ignored.
-- [ ] ⬜ **Task 4.2**: Catch `if err != nil { // ignore }` (comment-only body).
+- [x] ✅ **Task 4.2**: Catch `if err != nil { // ignore }` (comment-only body; the multi-line form, since the
+  one-line form puts the closing brace inside the comment and is not valid Go).
 
 ### Phase 5: smaller items
 

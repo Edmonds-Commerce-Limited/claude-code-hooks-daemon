@@ -1,5 +1,7 @@
 """Tests for Go TDD Strategy."""
 
+from pathlib import Path
+
 from claude_code_hooks_daemon.strategies.tdd.go_strategy import GoTddStrategy
 from claude_code_hooks_daemon.strategies.tdd.protocol import TddStrategy
 
@@ -43,20 +45,34 @@ def test_is_test_file_in_common_test_directories() -> None:
     assert strategy.is_test_file("/workspace/test/utils.go") is True
 
 
-def test_is_production_source_in_source_directories() -> None:
-    """Files in Go source directories should be production source."""
-    strategy = GoTddStrategy()
-    assert strategy.is_production_source("/workspace/src/module.go") is True
-    assert strategy.is_production_source("/workspace/cmd/app/main.go") is True
-    assert strategy.is_production_source("/workspace/pkg/lib/helper.go") is True
-    assert strategy.is_production_source("/workspace/internal/service/handler.go") is True
+def _module(root: Path) -> Path:
+    """Make ``root`` a Go module and return it."""
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "go.mod").write_text("module example.com/app\n")
+    return root
 
 
-def test_is_production_source_outside_source_directories() -> None:
-    """Files outside Go source directories should NOT be production source."""
+def test_is_production_source_inside_module_any_layout(tmp_path: Path) -> None:
+    """Any .go file inside a module is production source, whatever its directory."""
     strategy = GoTddStrategy()
-    assert strategy.is_production_source("/workspace/scripts/build.go") is False
-    assert strategy.is_production_source("/workspace/tools/generate.go") is False
+    mod = _module(tmp_path / "app")
+    for rel in (
+        "main.go",  # root-level package
+        "api/handler.go",  # other top-level package dirs
+        "server/routes.go",
+        "src/module.go",
+        "cmd/app/helper.go",
+        "pkg/lib/helper.go",
+        "internal/service/handler.go",
+    ):
+        assert strategy.is_production_source(str(mod / rel)) is True, rel
+
+
+def test_is_production_source_outside_module_is_false(tmp_path: Path) -> None:
+    """A .go file with no go.mod at or above it is not gated."""
+    strategy = GoTddStrategy()
+    (tmp_path / "scripts").mkdir()
+    assert strategy.is_production_source(str(tmp_path / "scripts" / "build.go")) is False
 
 
 def test_should_skip_vendor_directory() -> None:

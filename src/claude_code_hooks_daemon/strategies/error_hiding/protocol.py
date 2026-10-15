@@ -27,6 +27,20 @@ class ErrorHidingPattern:
 
 
 @runtime_checkable
+class ContentPreparingStrategy(Protocol):
+    """Optional capability: rewrite content before its patterns are matched.
+
+    A language whose comments and string literals can contain pattern-shaped
+    text (Go) implements this to blank them out, so the regexes see code only.
+    Strategies without it are matched against the raw content.
+    """
+
+    def prepare_content(self, content: str) -> str:
+        """Return ``content`` with the parts that are not code neutralised."""
+        ...
+
+
+@runtime_checkable
 class ErrorHidingStrategy(Protocol):
     """Strategy interface for language-specific error-hiding pattern detection.
 
