@@ -64,8 +64,9 @@ rather than merged, so each keeps its own owner decisions.
 
 - [x] ✅ **Task 1.1**: Brainstorm the levers, from the evidence
   (subagent-reports/).
-- [ ] 🔄 **Task 1.2**: Owner picks the levers and thresholds from the ranked
-  design.
+- [x] ✅ **Task 1.2**: Owner picks the levers and thresholds from the ranked
+  design. Decided by Fable ruling (owner-delegated), recorded in
+  [RULINGS-fable.md](RULINGS-fable.md); the rulings are not the owner's.
   - Decided: lever L1 (lower `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, which is 600000
     in the container env) is dropped. About 230k is too tight for the
     orchestrator, and Claude Code has no subagent-only compaction setting:
@@ -76,15 +77,85 @@ rather than merged, so each keeps its own owner decisions.
 
 ### Phase 2: Build
 
-- [ ] ⬜ **Task 2.1**: Implement the chosen levers, TDD, with a dogfood run.
+The build scope of [RULINGS-fable.md](RULINGS-fable.md) section 2, in order.
+Every gate that cannot measure fails open with a recorded `unmeasured`
+verdict.
+
+- [ ] ⬜ **Task 2.0**: Transcript readers: the tail reader, the offset cache
+  and the agent-transcript resolver.
+- [ ] ⬜ **Task 2.1**: Spend ledger (L6) in `subagent_cache_aggregator`, and
+  the `hooks-daemon spend` CLI.
+- [ ] ⬜ **Task 2.2**: Subagent context budget (L2): soft advisory on; hard
+  mode built, tested and shipped off; SubagentStop handoff gate; the
+  `budget: <N>k` dispatch override.
+- [ ] ⬜ **Task 2.3**: Resume guard (L3): deny in this repo at 150k, advise
+  by default for clients.
+- [ ] ⬜ **Task 2.4**: Live count and five-hour percentage (L4, L5),
+  advisory only.
+- [ ] ⬜ **Task 2.5**: Status segment (L7).
+- [ ] ⬜ **Task 2.6**: Review-round advisory (L9).
+- [ ] ⬜ **Task 2.7**: Docs, config manifest, holding-area entry, baseline
+  copy and the dogfood run.
+
+## Deferred
+
+- **L2 hard mode in this repo** (`hard_tokens: 250k`): left to the owner.
+  The ruling recommends it once the dogfood run shows the soft band firing
+  with zero unmeasured events.
+- **L4 and L5 deny modes**: a follow-up plan, opened only if the ledger shows
+  the live count matching `background_tasks[]` and the five-hour percentage
+  being hit.
+- **L8 CLAUDE.md diet**: a follow-up plan, whose first deliverable is the
+  blocked-call rate from `verdicts.jsonl`.
+- **L1 autocompact window**: dropped (Task 1.2). The spend report carries the
+  `compact_boundary` distribution so the owner can revisit.
+- **A savings figure as a closing criterion**: dropped. Re-measure later
+  with `hooks-daemon spend` against the baseline.
 
 ## Success Criteria
 
-- [ ] A session in this repository cannot run a subagent past the
-  configured context budget without the daemon intervening in a way that
-  is measured and recorded.
-- [ ] The intervention never loses an agent's work: it forces a handoff
-  report, not a kill.
+- [ ] `hooks-daemon spend` prints, for the live session, per-agent
+  `requests`, `max_ctx`, `mean_ctx`, ite, `compactions`, `inbound_messages`
+  and the plan key, plus the `compact_boundary` distribution and the
+  unmeasured count; a golden-output test covers it from fixture transcripts.
+- [ ] The tail reader's read count is the same for a 1 MB and an 8 MB
+  fixture, and the offset cache gives the same totals after append, truncate
+  and inode replacement.
+- [ ] In a SUB-scoped PreToolUse at or above `soft_tokens`, the budget
+  handler injects `additionalContext` exactly once per band; the acceptance
+  test shows it through a real subagent in this repo.
+- [ ] With `hard_tokens` set in a test config, every tool outside the
+  allowlist is denied with a reason naming the handoff path, the
+  allowlisted writes, commit and SendMessage pass, the reason escalates
+  after 3 consecutive denials, and SubagentStop is blocked until the handoff
+  file exists; the shipped config has `hard_tokens: null` everywhere.
+- [ ] An unreadable or missing agent transcript allows the call and writes
+  one `unmeasured` verdict per `(agent_id, reason)`; the spend report shows
+  the count.
+- [ ] A `budget: <N>k` line in a named dispatch's prompt raises that agent's
+  budget, clamped to `max_override_tokens`, and is a ledger row; an unnamed
+  dispatch's line is ignored.
+- [ ] The resume guard denies a SendMessage to a stopped, cold,
+  at-or-above-threshold agent under this repo's config, allows warm,
+  running, overridden and unresolvable targets, and the deny reason names
+  the last report file when one exists.
+- [ ] The live count excludes `end_turn` agents and reconciles against a
+  Stop payload's `background_tasks[]`; the concurrency and five-hour
+  advisories fire at their thresholds and never deny; a stale sidecar draws
+  nothing.
+- [ ] The status segment renders spend, live count, largest live context
+  and unmeasured count from fixture sidecars.
+- [ ] The review-round counter advises at round 4 on the same key and is
+  silent below it.
+- [ ] `docs/guides/HANDLER_REFERENCE.md` and the config-changes manifest
+  describe every new handler and option; the pending-release holding area
+  (`CLAUDE/UPGRADES/UNRELEASED/`) records this plan's release-bound
+  consequences (new handlers, new config keys, the new CLI command).
+- [ ] `untracked/scratch/p471_spend.json` is copied into
+  `subagent-reports/` as the baseline, and the dogfood journal entry cites a
+  `hooks-daemon spend` run and a soft-advisory verdict from a real session.
+- [ ] Targeted QA is green on the work branch; the coordinator's full gate is
+  green before merge.
 
 ## Delivery & Milestones
 
