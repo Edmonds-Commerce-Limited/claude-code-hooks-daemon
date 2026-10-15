@@ -414,6 +414,30 @@ class TestFirstWriteBindsTheAgentToItsWorktree:
         reason = handler.handle(event).reason or ""
         assert "main working tree" in reason and str(wt_a) in reason
 
+    def test_a_binding_to_a_removed_worktree_is_dropped(
+        self, handler: SubagentWorktreeWriteGuardHandler, repo: Path, tmp_path: Path
+    ) -> None:
+        """md-viewer field report (daemon 3.69.0): a sub-agent in the main tree
+        made a probe worktree, wrote a scratch file in it, removed it, and was
+        then denied its report write into the main tree, the deny naming the
+        probe that no longer existed. A removed worktree is nobody's home."""
+        probe = _worktree(repo, tmp_path / "probe", "probe")
+        assert handler.matches(_event(probe / "t.py", cwd=repo)) is False
+        _git(repo, "worktree", "remove", "--force", str(probe))
+        report = _event(repo / "untracked" / "report.md", cwd=repo)
+        assert handler.matches(report) is False
+        assert handler.handle(report).decision is Decision.ALLOW
+        assert handler.binding_count() == 0
+
+    def test_a_binding_to_a_live_worktree_still_holds(
+        self, handler: SubagentWorktreeWriteGuardHandler, repo: Path, tmp_path: Path
+    ) -> None:
+        """The near-miss: the staleness check must not drop a binding whose
+        worktree is still on disk."""
+        probe = _worktree(repo, tmp_path / "probe", "probe")
+        assert handler.matches(_event(probe / "t.py", cwd=repo)) is False
+        assert handler.matches(_event(repo / "untracked" / "report.md", cwd=repo)) is True
+
     def test_a_first_write_into_the_main_tree_binds_nothing(
         self, handler: SubagentWorktreeWriteGuardHandler, repo: Path, wt_a: Path, wt_b: Path
     ) -> None:
