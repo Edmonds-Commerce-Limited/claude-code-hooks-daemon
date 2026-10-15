@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.strategies.error_hiding.protocol import (
+    ContentPreparingStrategy,
     ErrorHidingPattern,
     ErrorHidingStrategy,
 )
@@ -222,10 +223,12 @@ class ErrorHidingBlockerHandler(PreToolUseHandlerBase):
             "- Shell: redirecting stderr to `/dev/null` to silence failures, "
             "`|| true` to suppress non-zero exit codes\n"
             "- JavaScript/TypeScript: empty `catch` blocks that swallow exceptions\n"
-            "- Go: `if err != nil {}` (empty error check), and a blank in the LAST "
-            "tuple position — `result, _ := riskyCall()` — which is where Go returns "
-            "the error. The idiomatic `_, err :=` CAPTURES it and is not blocked; a "
-            "bare `_ = err` is not matched either.\n\n"
+            "- Go: `if err != nil {}` (empty error check, also when the body is only a "
+            "comment), and a blank in the LAST position of an assignment from a "
+            "FUNCTION CALL — `n, _ := strconv.Atoi(s)` — which is where Go returns "
+            "the error. Not blocked: `_, err :=`, comma-ok forms (`v, _ := m[k]`, "
+            "`x, _ := y.(T)`), `for i, _ := range`, the explicit `_, _ = f()` "
+            "discard, and anything inside a comment or string literal.\n\n"
             "**Required action**: Handle errors explicitly — log them, return them "
             "to the caller, or propagate them. Silent error suppression masks bugs "
             "and makes debugging impossible.\n\n"
@@ -270,6 +273,8 @@ class ErrorHidingBlockerHandler(PreToolUseHandlerBase):
         self, content: str, strategy: ErrorHidingStrategy
     ) -> ErrorHidingPattern | None:
         """Return the first matching error-hiding pattern, or None if content is clean."""
+        if isinstance(strategy, ContentPreparingStrategy):
+            content = strategy.prepare_content(content)
         for pattern in strategy.patterns:
             if re.search(pattern.regex, content, re.MULTILINE):
                 return pattern

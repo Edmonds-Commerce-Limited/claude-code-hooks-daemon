@@ -52,6 +52,10 @@ its first write and judges later writes against that binding:
   denied, even when the cwd is the main tree. A target outside the repository is
   not this guard's concern.
 * No ``agent_id``, or no binding: the cwd rule, unchanged.
+* Bound to a worktree that is no longer on disk (the agent's own probe, made
+  and removed again): the binding is dropped and the call is judged unbound. A
+  removed worktree cannot be anyone's home, and keeping it denied every later
+  write the agent made, its report into the main tree included.
 
 The binding is trust on first use: an agent whose first write is the wrong one is
 bound wrong. It is held in memory on the handler instance, capped at
@@ -220,6 +224,14 @@ class SubagentWorktreeWriteGuardHandler(PreToolUseHandlerBase):
         key = agent_id if isinstance(agent_id, str) and agent_id else None
         with self._lock:
             home = self._bound(key) if key is not None else None
+            if key is not None and home is not None and enclosing_checkout(home.root) != home:
+                logger.debug(
+                    "subagent_worktree_write_guard: %s is no longer a worktree; unbinding %s",
+                    home.root,
+                    key,
+                )
+                del self._bindings[key]
+                home = None
             if home is not None:
                 if there is None or there.common_dir != home.common_dir or there.root == home.root:
                     return None
@@ -374,7 +386,9 @@ class SubagentWorktreeWriteGuardHandler(PreToolUseHandlerBase):
             "`agent_id` to the linked worktree of your first `Write`/`Edit`/`NotebookEdit` "
             "(the `agent_id` is only a map key for that binding, never a role test) and "
             "judges every later write against it, whatever the shared working directory "
-            "says. So make your first write inside your own worktree. The binding lives in "
+            "says. So make your first write inside your own worktree, and never `Write`/`Edit` "
+            "inside a scratch worktree you made yourself: that binds you to it until it is "
+            "removed (removing it releases the binding). The binding lives in "
             "the daemon's memory; a daemon restart forgets it and the working directory "
             "decides again.\n\n"
             "Not judged: the coordinator (main thread), a subagent with no binding whose "

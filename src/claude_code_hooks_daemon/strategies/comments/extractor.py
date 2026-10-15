@@ -20,7 +20,7 @@ as code, so a misread never runs to the end of the file. A marker whose closer
 does appear later is still read as a comment, up to that closer.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from claude_code_hooks_daemon.strategies.comments.syntax import CommentSyntax
 
@@ -114,7 +114,31 @@ def extract_comment_spans(content: str, syntax: CommentSyntax) -> list[CommentSp
 
         index += 1
 
+    if syntax.package_clause_prefix:
+        spans = _mark_package_docs(spans, lines, syntax)
     return spans
+
+
+def _mark_package_docs(
+    spans: list[CommentSpan], lines: list[str], syntax: CommentSyntax
+) -> list[CommentSpan]:
+    """Mark the comment block directly above the package clause as ``is_doc``.
+
+    Only a span that begins its line and ends on the line immediately before
+    a line starting with ``syntax.package_clause_prefix`` qualifies; a blank
+    line detaches it, as ``go doc`` does.
+    """
+    openers = syntax.line_prefixes + tuple(start for start, _ in syntax.block_delimiters)
+    marked: list[CommentSpan] = []
+    for span in spans:
+        following = span.end_line + 1
+        is_package_doc = (
+            following < len(lines)
+            and lines[following].startswith(syntax.package_clause_prefix)
+            and lines[span.start_line].lstrip().startswith(openers)
+        )
+        marked.append(replace(span, is_doc=True) if is_package_doc else span)
+    return marked
 
 
 @dataclass(frozen=True)

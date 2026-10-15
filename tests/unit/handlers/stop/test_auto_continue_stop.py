@@ -1456,6 +1456,37 @@ class TestAutoContinueStopHandlerExplainerBehaviours:
         assert result.reason is not None
         assert "fix" in result.reason.lower() or "fail" in result.reason.lower()
 
+    @pytest.mark.parametrize(
+        "output",
+        [
+            "--- FAIL: TestFoo (0.00s)\n    foo_test.go:12: boom\nFAIL\n",
+            "    --- FAIL: TestFoo/sub (0.00s)\n",
+            "FAIL\tgithub.com/acme/app/pkg\t0.004s\n",
+            "FAIL\n",
+        ],
+    )
+    def test_handle_go_test_failure_triggers_qa_branch(
+        self, handler: AutoContinueStopHandler, tmp_path: Path, output: str
+    ) -> None:
+        """`go test` failure output is recognised like pytest's."""
+        path = tmp_path / "t.jsonl"
+        self._write_bash_and_result(path, "go test ./...", output)
+        hook_input = {"transcript_path": str(path), "stop_hook_active": False}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.rule == RuleID.STOP_QA_FAILURE
+
+    def test_handle_go_test_pass_is_not_a_qa_failure(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """A passing `go test` run does not trip the failure branch."""
+        path = tmp_path / "t.jsonl"
+        output = "ok  \tgithub.com/acme/app/pkg\t0.004s\n--- PASS: TestFoo (0.00s)\n"
+        self._write_bash_and_result(path, "go test -v ./...", output)
+        hook_input = {"transcript_path": str(path), "stop_hook_active": False}
+        result = handler.handle(hook_input)
+        assert result.rule != RuleID.STOP_QA_FAILURE
+
     def _write_qa_bash_then_other_tool(
         self, path: Path, command: str, qa_output: str, other_output: str
     ) -> None:

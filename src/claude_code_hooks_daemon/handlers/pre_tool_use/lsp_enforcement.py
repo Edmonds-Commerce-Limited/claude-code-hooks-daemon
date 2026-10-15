@@ -251,7 +251,7 @@ def _invocation_suffixes(invocation: str) -> frozenset[str]:
 
 # Definition keywords that precede a symbol name
 _DEFINITION_KEYWORDS = re.compile(
-    r"^(class|def|function|interface|struct|enum|type|trait|impl)\s+[A-Za-z_]\w*$"
+    r"^(class|def|func|function|interface|struct|enum|type|trait|impl)\s+[A-Za-z_]\w*$"
 )
 
 # Import pattern: 'import SomeSymbol' or 'from X import Y'
@@ -567,8 +567,7 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
                 targets += _invocation_positionals(
                     invocation[: terminator.start()] if terminator else invocation
                 )[1:]
-        cwd = hook_input.get(HookInputField.CWD)
-        base = Path(cwd) if isinstance(cwd, str) and cwd else self._project_root()
+        base = self._search_base(hook_input)
         directories = [base / target for target in targets]
         # An unreadable target cannot be surveyed, so it counts as not a directory.
         if not directories or not all(
@@ -640,7 +639,7 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
         # have nothing extra to offer over just reading that one file.
         if tool_name == ToolName.BASH:
             command = get_bash_command(hook_input)
-            if command and self._is_single_file_bash_grep(command):
+            if command and self._is_single_file_bash_grep(command, self._search_base(hook_input)):
                 return False
 
         # Extract the search pattern
@@ -654,7 +653,12 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
             return self._lsp_coverage(hook_input)[0]
         return True
 
-    def _is_single_file_bash_grep(self, command: str) -> bool:
+    def _search_base(self, hook_input: dict[str, Any]) -> Path:
+        """The directory relative search targets resolve against: the hook cwd."""
+        cwd = hook_input.get(HookInputField.CWD)
+        return Path(cwd) if isinstance(cwd, str) and cwd else self._project_root()
+
+    def _is_single_file_bash_grep(self, command: str, base: Path) -> bool:
         """True when EVERY grep/rg invocation in the command names one file.
 
         The exemption describes the whole command, so one narrow grep must not
@@ -665,15 +669,16 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
         matches = list(_BASH_GREP_EXTRACT.finditer(command))
         if not matches:
             return False
-        return all(self._invocation_targets_one_file(command, match) for match in matches)
+        return all(self._invocation_targets_one_file(command, match, base) for match in matches)
 
-    def _invocation_targets_one_file(self, command: str, match: re.Match[str]) -> bool:
+    def _invocation_targets_one_file(self, command: str, match: re.Match[str], base: Path) -> bool:
         """True when a single grep/rg invocation's target is exactly one named file.
 
         False (i.e. "still enforce") whenever the scan could plausibly touch
-        more than one file: a recursive flag, a directory-looking target
-        (trailing ``/``, ``.``/``..``), a glob, more than one positional
-        argument, or NO target at all (defaults to the whole cwd/stdin).
+        more than one file: a recursive flag, a directory target (trailing
+        ``/``, ``.``/``..``, or an existing directory resolved against
+        ``base``), a glob, more than one positional argument, or NO target at
+        all (defaults to the whole cwd/stdin).
         """
         invocation = command[match.start() : match.end()]
         if _RECURSIVE_SCAN_FLAG.search(invocation):
@@ -693,6 +698,10 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
         if target.endswith("/"):
             return False
         if any(glob_char in target for glob_char in ("*", "?", "[")):
+            return False
+        # rg searches a bare directory recursively. An unreadable target
+        # cannot be shown to be a directory, so it keeps the one-file answer.
+        if path_is_dir(base / target, unreadable_means=False):
             return False
         return True
 

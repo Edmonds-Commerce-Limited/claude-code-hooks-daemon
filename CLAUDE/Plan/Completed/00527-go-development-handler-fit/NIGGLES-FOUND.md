@@ -20,6 +20,18 @@ executing this plan ... ONLY IF none is listed, create it" advisory. The advisor
 cron-pause state that the stop enforcer reads. Fix direction: when `failsafe-recovery` is paused for the session, name
 the pause and its reason instead of asking for a CronCreate.
 
+## The github_urls QA check walks gitignored files and fails on their binaries
+
+Every local `llm_qa.py changed` run in this session failed `github_urls` with two `unreadable-file` findings for
+`htmlcov/*.png`. `htmlcov/` is gitignored (`.gitignore:36`) and untracked: an old local coverage report. The checker
+scans it anyway and reports an undecodable PNG as a violation, which then marks `project_handlers` NOT MEANINGFUL.
+CI never has `htmlcov/`, so only local runs go red. Fix direction: walk tracked files (or honour `.gitignore`), and
+skip binary files rather than reporting them.
+
+**Status**: fixed narrowly. `htmlcov` joined the checker's skip list beside the other gitignored runtime directories,
+pinned by `test_the_coverage_html_report_is_skipped`. Honouring `.gitignore` generally was not done: the checker
+reports undecodable files on purpose so a dropped swathe of the tree cannot pass silently.
+
 ## A quoted heredoc piped to `pingbus say` is scanned by pipe_blocker
 
 `cat <<'EOF' | pingbus say --to ...` with a body mentioning `go test ... | tail` was denied: `pingbus` is not on the

@@ -1,6 +1,6 @@
 # Plan 00527: go development handler fit
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-15
 **Owner**: joseph
 **Priority**: Medium
@@ -44,44 +44,50 @@ assigned to another account). They are recorded in [NIGGLES-FOUND.md](NIGGLES-FO
 
 ### Phase 2: per-edit lint is syntax-and-format, package checks move later
 
-- [ ] ⬜ **Task 2.1**: TDD: a change split across two edits (call, then import) draws no deny on the first edit. The
+- [x] ✅ **Task 2.1**: TDD: a change split across two edits (call, then import) draws no deny on the first edit. The
   candidate design runs `gofmt -l -e` per edit and treats `go vet`'s unresolved-name class (`undefined:`, imported and
   not used) as advisory, mirroring Rust's E0432 carve-out. The same multi-edit false deny hits Python (ruff F821) and
   was reproduced four times in this session, so decide whether the carve-out is language-wide.
-- [ ] ⬜ **Task 2.2**: A findings-only-in-sibling-files `go vet` result is advisory, not a deny of this write.
-- [ ] ⬜ **Task 2.3**: "build constraints exclude all Go files" is a recognised advisory marker.
-- [ ] ⬜ **Task 2.4**: Add a `gofmt` check (toolchain-only); no default needs golangci-lint.
+- [x] ✅ **Task 2.2**: A findings-only-in-sibling-files `go vet` result is advisory, not a deny of this write.
+- [x] ✅ **Task 2.3**: "build constraints exclude all Go files" is a recognised advisory marker.
+- [x] ✅ **Task 2.4**: Add a `gofmt` check (toolchain-only); no default needs golangci-lint.
 
 ### Phase 3: tdd_enforcement for per-package tests
 
-- [ ] ⬜ **Task 3.1**: A new `.go` file in a package that already has any `_test.go` passes.
-- [ ] ⬜ **Task 3.2**: Generated files are exempt: the `// Code generated ... DO NOT EDIT.` header, plus `*.pb.go`,
+- [x] ✅ **Task 3.1**: A new `.go` file in a package that already has any `_test.go` passes.
+- [x] ✅ **Task 3.2**: Generated files are exempt: the `// Code generated ... DO NOT EDIT.` header, plus `*.pb.go`,
   `*_gen.go`, `zz_generated*`.
-- [ ] ⬜ **Task 3.3**: `doc.go` and `cmd/*/main.go` pass; root-level and other top-level packages are enforced
+- [x] ✅ **Task 3.3**: `doc.go` and `cmd/*/main.go` pass; root-level and other top-level packages are enforced
   (the `/src/ /cmd/ /pkg/ /internal/` allow-list misses them).
 
 ### Phase 4: error_hiding_blocker Go precision
 
-- [ ] ⬜ **Task 4.1**: `v, _ := m[k]`, `x, _ := y.(T)`, `for i, _ := range` and `_, _ = fmt.Fprintf` pass; matches
+- [x] ✅ **Task 4.1**: `v, _ := m[k]`, `x, _ := y.(T)`, `for i, _ := range` and `_, _ = fmt.Fprintf` pass; matches
   inside comments and string literals are ignored.
-- [ ] ⬜ **Task 4.2**: Catch `if err != nil { // ignore }` (comment-only body).
+- [x] ✅ **Task 4.2**: Catch `if err != nil { // ignore }` (comment-only body; the multi-line form, since the
+  one-line form puts the closing brace inside the comment and is not valid Go).
 
 ### Phase 5: smaller items
 
-- [ ] ⬜ **Task 5.1**: qa_suppression: decide whether `//nolint:<linter> // <reason>` is allowed; cover `//nosec`.
-- [ ] ⬜ **Task 5.2**: comment_size: a Go package doc comment in `doc.go` is exempt or has its own limit.
-- [ ] ⬜ **Task 5.3**: auto_continue_stop recognises `--- FAIL:` and `FAIL\t<pkg>`.
-- [ ] ⬜ **Task 5.4**: lsp_enforcement treats `func X` as a definition search.
-- [ ] ⬜ **Task 5.6**: lsp_enforcement's one-named-file exemption also exempts a single bare directory target
+- [x] ✅ **Task 5.1**: qa_suppression: decide whether `//nolint:<linter> // <reason>` is allowed; cover `//nosec`.
+- [x] ✅ **Task 5.2**: comment_size: a Go package doc comment in `doc.go` is exempt or has its own limit.
+- [x] ✅ **Task 5.3**: auto_continue_stop recognises `--- FAIL:` and `FAIL\t<pkg>`.
+- [x] ✅ **Task 5.4**: lsp_enforcement treats `func X` as a definition search.
+- [x] ✅ **Task 5.6**: lsp_enforcement's one-named-file exemption also exempts a single bare directory target
   (`rg x src/pkg`, no trailing `/`), which rg searches recursively. Judge it as a directory: with the Phase 1
   survey, a directory holding no served file is still only advised.
-- [ ] ⬜ **Task 5.5**: `guides/llm-command-wrappers.md`: replace golangci-lint v1's `--out-format json`.
+- [x] ✅ **Task 5.5**: `guides/llm-command-wrappers.md`: replace golangci-lint v1's `--out-format json`.
 
 ## Success Criteria
 
-- [ ] Every false-positive form listed in GO-AUDIT.md and the field reports is pinned by a test that failed first.
-- [ ] The fedora-desktop and md-viewer seats confirm, after upgrading, that no Go-path misfire remains.
-- [ ] Release-bound consequences recorded in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (Phase 1: note 059).
+- [x] Every false-positive form listed in GO-AUDIT.md and the field reports is pinned by a test (16/16 claims
+  verified by the fact-check in `subagent-reports/`). Phases 1-4 watched their tests fail first; Phase 5's
+  tests were written first but not observed red (its report says so).
+- [ ] The fedora-desktop and md-viewer seats confirm, after upgrading, that no Go-path misfire remains. Not
+  reachable inside this plan: the seats run released daemons, and a release is the owner's action. Handed to the
+  desktop team coordinator (fedora-desktop.1) to collect after the next release.
+- [x] Release-bound consequences recorded in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`: notes 059 (Phase 1),
+  061 (Phase 2), 062 (Phase 5) and 063 (Phases 3-4).
 
 ## Delivery & Milestones
 
@@ -89,4 +95,9 @@ assigned to another account). They are recorded in [NIGGLES-FOUND.md](NIGGLES-FO
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00527-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Phase 1 (lsp_enforcement directory survey): this plan's first commit.
+- Phase 1 (lsp_enforcement directory survey): `569b32c23`.
+- Phase 2 (lint_on_edit Go: mid-edit vet advisory, gofmt precheck): merge `86ec79011`.
+- Phase 5 (smaller Go fits): merge of `agent-af51ee2ff28e8bc9b-580be854`, note renumbered at `26285c3d1`.
+- Phases 3-4 (TDD per package, error-hiding precision): merge of `agent-a20fee8441f62dcd7-b0782f70`, note renumbered
+  at `3402ebe8c`. Post-merge targeted QA green on every merge apart from the `htmlcov/` niggle; verified live with
+  `hooks-daemon probe`.
