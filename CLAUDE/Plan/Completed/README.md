@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00475: targeted qa and small batches](00475-targeted-qa-and-small-batches/PLAN.md) - Complete at `d6caefded` + `301805f1f` + `b4576108a` (all shipped in v3.68.0) + the archiving commit (owner request: targeted QA for every change, the full gate only at release preparation, one QA run at a time, and small batches of branches; the branch-count and merge-QA advisories stay advisory by coordinator call)
+
 - [00468: claude code plugins are supported properly](00468-claude-code-plugins-are-supported-properly/PLAN.md) - Complete at `83e75879` + the archiving commit (from the 00467 plugin audit: 8 defects, 3 release-blocking, and 16 gaps, most resting on one missing resolver for the Claude config dir and its enabled plugins; the last criterion waited on 00463's simulate-record fix, now on main)
 
 - [00466: niggles ledger sixteen](00466-niggles-ledger-sixteen/PLAN.md) - Superseded by [00474](../00474-niggles-ledger-seventeen/PLAN.md) (the ledger for N1-N261; its 65 entries still open in the index are tracked from 00474, and every branch was landed or dropped with its branch-only entries carried into 00474. Opened when 00422 passed its size warning with N29, with N1: the venv fallback accepts an interpreter that cannot run on this host)
