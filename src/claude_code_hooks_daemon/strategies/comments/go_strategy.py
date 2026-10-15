@@ -6,7 +6,7 @@ from claude_code_hooks_daemon.strategies.comments.common import (
     DEFAULT_SKIP_DIRECTORIES,
 )
 from claude_code_hooks_daemon.strategies.comments.syntax import (
-    SLASH_SYNTAX,
+    GO_SYNTAX,
     CommentSyntax,
 )
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
@@ -30,7 +30,7 @@ class GoCommentStrategy:
 
     @property
     def syntax(self) -> CommentSyntax:
-        return SLASH_SYNTAX
+        return GO_SYNTAX
 
     @property
     def skip_directories(self) -> tuple[str, ...]:

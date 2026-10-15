@@ -68,14 +68,14 @@ assigned to another account). They are recorded in [NIGGLES-FOUND.md](NIGGLES-FO
 
 ### Phase 5: smaller items
 
-- [ ] ⬜ **Task 5.1**: qa_suppression: decide whether `//nolint:<linter> // <reason>` is allowed; cover `//nosec`.
-- [ ] ⬜ **Task 5.2**: comment_size: a Go package doc comment in `doc.go` is exempt or has its own limit.
-- [ ] ⬜ **Task 5.3**: auto_continue_stop recognises `--- FAIL:` and `FAIL\t<pkg>`.
-- [ ] ⬜ **Task 5.4**: lsp_enforcement treats `func X` as a definition search.
-- [ ] ⬜ **Task 5.6**: lsp_enforcement's one-named-file exemption also exempts a single bare directory target
+- [x] ✅ **Task 5.1**: qa_suppression: decide whether `//nolint:<linter> // <reason>` is allowed; cover `//nosec`.
+- [x] ✅ **Task 5.2**: comment_size: a Go package doc comment in `doc.go` is exempt or has its own limit.
+- [x] ✅ **Task 5.3**: auto_continue_stop recognises `--- FAIL:` and `FAIL\t<pkg>`.
+- [x] ✅ **Task 5.4**: lsp_enforcement treats `func X` as a definition search.
+- [x] ✅ **Task 5.6**: lsp_enforcement's one-named-file exemption also exempts a single bare directory target
   (`rg x src/pkg`, no trailing `/`), which rg searches recursively. Judge it as a directory: with the Phase 1
   survey, a directory holding no served file is still only advised.
-- [ ] ⬜ **Task 5.5**: `guides/llm-command-wrappers.md`: replace golangci-lint v1's `--out-format json`.
+- [x] ✅ **Task 5.5**: `guides/llm-command-wrappers.md`: replace golangci-lint v1's `--out-format json`.
 
 ## Success Criteria
 

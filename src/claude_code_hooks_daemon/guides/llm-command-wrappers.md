@@ -237,9 +237,15 @@ PHPUnit supports XML log output via `--log-junit`:
 
 ### Go
 
-#### golangci-lint
+The baseline is the Go toolchain alone: `gofmt -l .` (formatting), `go vet ./...` (static checks) and
+`go test -json ./...` (tests, below). Nothing in the daemon's Go path requires more than that.
+golangci-lint is **optional**: add it where it is installed, never rely on it being present.
 
-golangci-lint has native JSON output via `--out-format json`:
+#### golangci-lint (optional)
+
+golangci-lint v2 writes JSON with `--output.json.path` (the v1 `--out-format json` flag was removed in v2).
+The path may be a file, `stdout` or `stderr`; the default text report still goes to stdout, so the wrapper
+sends it to `/dev/null`:
 
 ```makefile
 lint:
@@ -247,7 +253,7 @@ lint:
 
 llm-lint:
 	@mkdir -p var/qa
-	@golangci-lint run --out-format json > ./var/qa/golangci-cache.json 2>/dev/null || true
+	@golangci-lint run --output.json.path ./var/qa/golangci-cache.json > /dev/null 2>&1 || true
 	@python3 -c "import json,sys; \
 	r=json.load(open('./var/qa/golangci-cache.json')); \
 	issues=r.get('Issues') or []; \
@@ -371,19 +377,19 @@ To add LLM command wrappers to your project:
 
 ## Tool JSON Support Reference
 
-| Tool          | Native JSON | Flag                   | Notes                                   |
-| ------------- | ----------- | ---------------------- | --------------------------------------- |
-| ESLint        | Yes         | `--format json`        | Array of file results                   |
-| Jest          | Yes         | `--json`               | Single result object                    |
-| Vitest        | Yes         | `--reporter json`      | Jest-compatible format                  |
-| tsc           | No          | N/A                    | Requires text parsing wrapper           |
-| Ruff          | Yes         | `--output-format json` | Array of violations                     |
-| mypy          | Yes         | `--output json`        | NDJSON (one object per line, mypy 1.5+) |
-| pytest        | Plugin      | `pytest-json-report`   | Requires plugin install                 |
-| PHPStan       | Yes         | `--error-format=json`  | Object with files and totals            |
-| PHPUnit       | Partial     | `--log-junit` (XML)    | No native JSON; XML available           |
-| golangci-lint | Yes         | `--out-format json`    | Object with Issues array                |
-| go test       | Yes         | `-json`                | NDJSON (one event per line)             |
-| RuboCop       | Yes         | `--format json`        | Object with files array                 |
-| Bandit        | Yes         | `--format json`        | Object with results array               |
-| Black         | No          | `--check --diff`       | Requires text parsing wrapper           |
+| Tool          | Native JSON | Flag                   | Notes                                    |
+| ------------- | ----------- | ---------------------- | ---------------------------------------- |
+| ESLint        | Yes         | `--format json`        | Array of file results                    |
+| Jest          | Yes         | `--json`               | Single result object                     |
+| Vitest        | Yes         | `--reporter json`      | Jest-compatible format                   |
+| tsc           | No          | N/A                    | Requires text parsing wrapper            |
+| Ruff          | Yes         | `--output-format json` | Array of violations                      |
+| mypy          | Yes         | `--output json`        | NDJSON (one object per line, mypy 1.5+)  |
+| pytest        | Plugin      | `pytest-json-report`   | Requires plugin install                  |
+| PHPStan       | Yes         | `--error-format=json`  | Object with files and totals             |
+| PHPUnit       | Partial     | `--log-junit` (XML)    | No native JSON; XML available            |
+| golangci-lint | Yes (v2)    | `--output.json.path`   | Object with Issues array (optional tool) |
+| go test       | Yes         | `-json`                | NDJSON (one event per line)              |
+| RuboCop       | Yes         | `--format json`        | Object with files array                  |
+| Bandit        | Yes         | `--format json`        | Object with results array                |
+| Black         | No          | `--check --diff`       | Requires text parsing wrapper            |

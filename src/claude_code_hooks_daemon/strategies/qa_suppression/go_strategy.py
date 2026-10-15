@@ -12,12 +12,14 @@ _EXTENSIONS: tuple[str, ...] = (".go",)
 _FORBIDDEN_PATTERNS: tuple[str, ...] = (
     r"//\s*no" + "lint",
     r"//\s*lint:" + "ignore",
+    # gosec: `// nosec`, `//nosec G104`, `// #nosec`, `#nosec`
+    r"(?://|#)\s*#?\s*no" + "sec",
 )
 _SKIP_DIRECTORIES: tuple[str, ...] = (
     "vendor/",
     "testdata/",
 )
-_TOOL_NAMES: tuple[str, ...] = ("golangci-lint", "golint")
+_TOOL_NAMES: tuple[str, ...] = ("golangci-lint", "golint", "gosec")
 _TOOL_DOCS_URLS: tuple[str, ...] = (
     "https://golangci-lint.run/",
     "https://go.dev/doc/effective_go",

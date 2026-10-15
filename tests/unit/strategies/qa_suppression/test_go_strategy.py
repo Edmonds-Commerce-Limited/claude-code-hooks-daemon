@@ -2,6 +2,8 @@
 
 import re
 
+import pytest
+
 from claude_code_hooks_daemon.strategies.qa_suppression.go_strategy import (
     GoQaSuppressionStrategy,
 )
@@ -62,6 +64,22 @@ def test_matches_lint_ignore() -> None:
     strategy = GoQaSuppressionStrategy()
     patterns = strategy.forbidden_patterns
     text = f"func foo() {{ {_lint_ignore_text()}"
+    assert any(re.search(p, text, re.IGNORECASE) for p in patterns)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "x := 1 // no" + "sec",
+        "x := 1 //no" + "sec G104",
+        "x := 1 // #no" + "sec",
+        "x := 1 #no" + "sec",
+        "// no" + "lint:errcheck // reasoned justification",
+    ],
+)
+def test_matches_gosec_and_reasoned_suppressions(text: str) -> None:
+    """gosec suppressions are blocked, and a nolint with a reason stays blocked."""
+    patterns = GoQaSuppressionStrategy().forbidden_patterns
     assert any(re.search(p, text, re.IGNORECASE) for p in patterns)
 
 

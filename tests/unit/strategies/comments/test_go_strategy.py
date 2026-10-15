@@ -2,7 +2,7 @@
 
 from claude_code_hooks_daemon.strategies.comments.go_strategy import GoCommentStrategy
 from claude_code_hooks_daemon.strategies.comments.protocol import CommentStrategy
-from claude_code_hooks_daemon.strategies.comments.syntax import SLASH_SYNTAX
+from claude_code_hooks_daemon.strategies.comments.syntax import GO_SYNTAX, SLASH_SYNTAX
 
 
 def test_implements_protocol() -> None:
@@ -17,8 +17,12 @@ def test_extensions() -> None:
     assert GoCommentStrategy().extensions == (".go",)
 
 
-def test_syntax_is_slash_syntax() -> None:
-    assert GoCommentStrategy().syntax is SLASH_SYNTAX
+def test_syntax_is_go_syntax() -> None:
+    syntax = GoCommentStrategy().syntax
+    assert syntax is GO_SYNTAX
+    assert syntax.package_clause_prefix == "package "
+    assert syntax.line_prefixes == SLASH_SYNTAX.line_prefixes
+    assert syntax.block_delimiters == SLASH_SYNTAX.block_delimiters
 
 
 def test_skip_directories_nonempty() -> None:
