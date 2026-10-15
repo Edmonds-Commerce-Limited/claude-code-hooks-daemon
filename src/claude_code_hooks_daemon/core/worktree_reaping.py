@@ -44,9 +44,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.worktree_paths import WORKTREE_DIR_PATTERNS
 from claude_code_hooks_daemon.utils.git_repo import (
     AGENT_BRANCH_PREFIX,
+    GIT_TIMED_OUT,
     parse_worktree_porcelain,
     run_git,
     strip_branch_ref,
@@ -459,6 +461,12 @@ def reap_worktree(
     A git refusal is REPORTED, never retried with force. That is the whole
     value of asking.
 
+    The removal runs under ``Timeout.GIT_WORKTREE_REMOVE``, not ``run_git``'s
+    metadata default: it deletes the whole tree. If even that is exceeded, the
+    outcome says the removal was interrupted and may be partial, and names the
+    recovery (``git worktree prune``, then ``git branch -d``) rather than
+    retrying or forcing.
+
     Both the worktree and the branch are addressed with what the collector read
     out of git, never with anything rebuilt from the directory name — see
     :class:`WorktreeState`.
@@ -479,7 +487,26 @@ def reap_worktree(
             ),
         )
 
-    removal = run_fn(repo_root, "worktree", "remove", str(state.path))
+    removal = run_fn(
+        repo_root, "worktree", "remove", str(state.path), timeout=Timeout.GIT_WORKTREE_REMOVE
+    )
+    if removal.returncode == GIT_TIMED_OUT:
+        # git was killed part-way through deleting the tree, so what is on disk
+        # is neither the worktree nor its absence. Retrying `worktree remove`
+        # fails on the missing `.git`; `prune` forgets the registration instead.
+        recovery = "git worktree prune"
+        if state.branch is not None:
+            recovery += f", then git branch -d {state.branch}"
+        return ReapOutcome(
+            state.name,
+            removed=False,
+            branch_removed=False,
+            detail=(
+                f"removal of {state.path} was interrupted at the "
+                f"{Timeout.GIT_WORKTREE_REMOVE} s limit and may be partial: "
+                f"{removal.stderr.strip()}. Recover with {recovery}"
+            ),
+        )
     if removal.returncode != 0:
         # git overruled the predicate. Leaving the branch alone is deliberate:
         # a branch whose worktree still exists is not clutter, it is in use.

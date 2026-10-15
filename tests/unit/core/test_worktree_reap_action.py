@@ -16,11 +16,13 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.worktree_reaping import (
     MINIMUM_AGE_SECONDS,
     WorktreeState,
     reap_worktree,
 )
+from claude_code_hooks_daemon.utils.git_repo import GIT_TIMED_OUT
 
 _Completed = subprocess.CompletedProcess[str]
 
@@ -216,6 +218,57 @@ class TestGitOverrulingThePredicate:
         assert outcome.removed
         assert not outcome.branch_removed
         assert "not fully merged" in outcome.detail
+
+
+class _TimeoutRecordingGit:
+    """Records the ``timeout`` each git call was given, keyed by subcommand."""
+
+    def __init__(self, remove: _Completed | None = None) -> None:
+        self.remove = remove if remove is not None else _ok()
+        self.timeouts: dict[str, object] = {}
+
+    def __call__(self, cwd: Path, *args: str, **kwargs: object) -> _Completed:
+        self.timeouts[args[0]] = kwargs.get("timeout", "default")
+        return self.remove if args[0] == "worktree" else _ok()
+
+
+class TestRemovingATreeIsNotAMetadataQuery:
+    """N464: `worktree remove` deletes the whole tree, venv included."""
+
+    def test_the_removal_is_given_a_timeout_sized_for_deleting_a_tree(self) -> None:
+        git = _TimeoutRecordingGit()
+        reap_worktree(Path("/repo"), _clean_state(), run_fn=git)
+        assert git.timeouts["worktree"] == Timeout.GIT_WORKTREE_REMOVE
+        assert Timeout.GIT_WORKTREE_REMOVE > Timeout.GIT_CONTEXT
+
+    def test_a_timed_out_removal_says_it_was_interrupted_and_may_be_partial(self) -> None:
+        git = _FakeGit(
+            remove=subprocess.CompletedProcess(
+                [], GIT_TIMED_OUT, "", "Command '['git']' timed out after 300 seconds"
+            )
+        )
+        outcome = reap_worktree(Path("/repo"), _clean_state(), run_fn=git)
+        assert not outcome.removed
+        assert "interrupted" in outcome.detail
+        assert "partial" in outcome.detail
+        assert len(git.calls) == 1, "it must not go on to touch the branch"
+
+    def test_a_timed_out_removal_names_the_recovery(self) -> None:
+        git = _FakeGit(remove=subprocess.CompletedProcess([], GIT_TIMED_OUT, "", "timed out"))
+        outcome = reap_worktree(Path("/repo"), _clean_state(branch="wip/x"), run_fn=git)
+        assert "git worktree prune" in outcome.detail
+        assert "git branch -d wip/x" in outcome.detail
+
+    def test_a_timed_out_removal_of_a_detached_worktree_names_no_branch_delete(self) -> None:
+        git = _FakeGit(remove=subprocess.CompletedProcess([], GIT_TIMED_OUT, "", "timed out"))
+        outcome = reap_worktree(Path("/repo"), _clean_state(branch=None), run_fn=git)
+        assert "git worktree prune" in outcome.detail
+        assert "git branch -d" not in outcome.detail
+
+    def test_an_ordinary_refusal_is_not_described_as_an_interruption(self) -> None:
+        git = _FakeGit(remove=_fail("contains modified or untracked files"))
+        outcome = reap_worktree(Path("/repo"), _clean_state(), run_fn=git)
+        assert "interrupted" not in outcome.detail
 
 
 class TestTheDryRun:

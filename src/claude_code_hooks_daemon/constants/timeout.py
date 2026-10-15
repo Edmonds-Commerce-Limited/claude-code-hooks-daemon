@@ -193,6 +193,12 @@ class Timeout:
     # never be killed part-way: it is written before any ref is removed, so a
     # truncated bundle is a lost recovery rather than a slow one.
     GIT_BUNDLE_CREATE = 300
+    # 300 seconds (`git worktree remove` from `worktree-reap --reap`). Unlike
+    # the metadata calls GIT_CONTEXT is sized for, this DELETES the whole tree,
+    # and an agent worktree carries its own venv, so the runtime scales with the
+    # tree. Killed at GIT_CONTEXT's five seconds it leaves a half-deleted,
+    # `prunable` worktree that git then refuses to remove (Plan 00474 N464).
+    GIT_WORKTREE_REMOVE = 300
     VALIDATION_CHECK = 5  # 5 seconds (installation validation subprocess)
     VERSION_CHECK = 5  # 5 seconds (git ls-remote for version check)
     # 10 seconds (`ps -eo ...` for the background harvester). A local process
