@@ -41,9 +41,10 @@ from claude_code_hooks_daemon.utils.transcript_tail import (
 logger = logging.getLogger(__name__)
 
 #: A plan number in a branch, directory or agent name: ``p471``, ``plan464``,
-#: ``00518``. Three to five significant digits, not glued to other letters.
+#: ``n464``, or the zero-padded folder form ``00518``. A bare number is not one:
+#: measured on a live session, ``pytest-6185``-style temp paths were.
 _PLAN_NUMBER: Final[re.Pattern[str]] = re.compile(
-    r"(?<![0-9a-z])(?:plan|p|n)?[-_]?0*([1-9][0-9]{2,4})(?![0-9])"
+    r"(?<![0-9a-z])(?:(?:plan|p|n)[-_]?0*([1-9][0-9]{2,4})|0+([1-9][0-9]{2,3}))(?![0-9])"
 )
 
 #: The wrapper Claude Code puts around a message from another agent.
@@ -57,7 +58,7 @@ def plan_key_from(*candidates: str) -> str:
     for candidate in candidates:
         match = _PLAN_NUMBER.search(candidate.lower()) if candidate else None
         if match is not None:
-            return match.group(1)
+            return match.group(1) or match.group(2)
     return ""
 
 

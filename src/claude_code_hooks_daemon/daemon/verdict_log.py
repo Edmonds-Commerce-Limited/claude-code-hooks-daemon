@@ -212,6 +212,44 @@ def build_verdict_lines(
     return lines
 
 
+def append_handler_note(
+    *,
+    log_dir: Path,
+    session_id: str,
+    event: str,
+    tool_name: str,
+    handler: str,
+    verdict: str,
+    detail: dict[str, Any],
+) -> Path:
+    """Append one line a handler records about itself, outside its decision.
+
+    For a fact the decision cannot carry: a spend gate that could not measure
+    allows the call (Plan 00471 Q2), and its ALLOW line is indistinguishable
+    from a measured one. ``verdict`` is never a ``Decision`` value, so the
+    verdict-mix report cannot confuse the two. The caller rate-limits: one
+    line per fact, not one per tool call, so no trim runs here.
+    """
+    line = {
+        "ts": datetime.now(UTC).isoformat(),
+        "session": session_id,
+        "event": event,
+        "tool": tool_name,
+        "handler": handler,
+        "verdict": verdict,
+        "rule": None,
+        "mode": _MODE_ADVISORY,
+        "overridden": False,
+        VERDICT_SYNTHETIC_FIELD: None,
+        "detail": detail,
+    }
+    make_private_dir(log_dir)
+    target = log_dir / VERDICT_LOG_FILENAME
+    with _WRITE_LOCK, open_private_append(target) as handle:
+        handle.write(json.dumps(line, ensure_ascii=False) + "\n")
+    return target
+
+
 def append_verdicts(
     *,
     enabled: bool,

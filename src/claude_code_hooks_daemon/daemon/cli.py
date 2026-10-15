@@ -4903,6 +4903,65 @@ def cmd_cache_gaps(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_spend(args: argparse.Namespace) -> int:
+    """Report a session's subagent spend ledger (Plan 00471 Task 2.1).
+
+    The session is the one ``--session`` names, the one whose main transcript
+    ``--transcript`` names, or the project's most recent. Its agents are read
+    through the shared offset cache, so a repeat run parses only new bytes.
+
+    Returns:
+        0 on success, 2 when no session transcript could be resolved.
+    """
+    from claude_code_hooks_daemon.core.project_context import ProjectContext
+    from claude_code_hooks_daemon.daemon.spend_report import (
+        collect_session_spend,
+        render_report,
+        report_as_dict,
+    )
+    from claude_code_hooks_daemon.utils.claude_config import claude_project_dir
+    from claude_code_hooks_daemon.utils.spend_ledger import spend_cache, unmeasured_count
+    from claude_code_hooks_daemon.utils.transcript_tail import subagents_dir
+
+    project_path = get_project_path(getattr(args, "project_root", None))
+    try:
+        if getattr(args, "session", None):
+            transcript: Path | None = (
+                claude_project_dir(project_path, must_exist=True) / f"{args.session}.jsonl"
+            )
+        else:
+            transcript = _resolve_transcript(args)
+    except FileNotFoundError as e:
+        print(f"ERROR: {e}. Pass --transcript PATH explicitly.", file=sys.stderr)
+        return 2
+    if transcript is None or not transcript.is_file():
+        print("ERROR: no session transcript found. Pass --transcript PATH.", file=sys.stderr)
+        return 2
+
+    config_file = project_path / ".claude" / "hooks-daemon.yaml"
+    if not ProjectContext._initialized and config_file.exists():
+        ProjectContext.initialize(config_file)
+    untracked = (
+        ProjectContext.daemon_untracked_dir()
+        if ProjectContext._initialized
+        else project_path / "untracked"
+    )
+
+    session_id = transcript.stem
+    agents_dir = subagents_dir(str(transcript), session_id)
+    report = collect_session_spend(
+        agents_dir if agents_dir is not None else transcript.parent / session_id,
+        session_id=session_id,
+        cache=spend_cache(untracked),
+        unmeasured=unmeasured_count(untracked, session_id),
+    )
+    if args.json:
+        print(json.dumps(report_as_dict(report), indent=2))
+    else:
+        print(render_report(report, by=args.by), end="")
+    return 0
+
+
 #: Character width of the tallest bar in the idle-gap histogram.
 _HISTOGRAM_WIDTH = 40
 
@@ -11729,6 +11788,35 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output format: text (default) or json",
     )
     parser_cache_gaps.set_defaults(func=cmd_cache_gaps)
+
+    # spend command (Plan 00471 Task 2.1) — the subagent spend ledger of a session.
+    parser_spend = subparsers.add_parser(
+        "spend",
+        help="Report per-agent or per-plan subagent spend for a session",
+    )
+    spend_target = parser_spend.add_mutually_exclusive_group()
+    spend_target.add_argument(
+        "--session",
+        dest="session",
+        metavar="ID",
+        default=None,
+        help="Session id (default: the project's most recent session)",
+    )
+    spend_target.add_argument(
+        "--transcript",
+        dest="transcript",
+        metavar="PATH",
+        default=None,
+        help="The session's main transcript (its agents sit in <stem>/subagents/)",
+    )
+    parser_spend.add_argument(
+        "--by",
+        choices=["agent", "plan"],
+        default="agent",
+        help="Group rows by agent (default) or by plan",
+    )
+    parser_spend.add_argument("--json", action="store_true", help="Emit JSON")
+    parser_spend.set_defaults(func=cmd_spend)
 
     # harvest-background command (Plan 00142, Layer B) — detect & surface, never kill
     parser_harvest = subparsers.add_parser(

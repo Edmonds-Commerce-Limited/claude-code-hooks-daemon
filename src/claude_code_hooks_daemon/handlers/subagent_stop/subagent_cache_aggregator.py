@@ -44,7 +44,9 @@ from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import SubagentStopHandlerBase
 from claude_code_hooks_daemon.daemon.synthetic_traffic import is_synthetic_event
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.spend_ledger import read_agent_meta, spend_cache
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
+from claude_code_hooks_daemon.utils.transcript_spend import SpendTotals, plan_key_from
 
 logger = logging.getLogger(__name__)
 
@@ -294,61 +296,41 @@ class SubagentCacheAggregatorHandler(SubagentStopHandlerBase):
         )
         return BlockingResult(decision=Decision.ALLOW)
 
-    def totals_for(self, transcript: Path) -> dict[str, int]:
-        """Sum the cache counters across one agent transcript.
-
-        Parsed line by line rather than slurped. The real task directory
-        interleaves agent transcripts with plain-text process output, so a
-        strict whole-file parse fails on the first non-JSON line; here such a
-        line is simply not a usage record.
-
-        **Counted per API request, not per record.** Claude Code writes one
-        record per content block, and each carries the whole request's usage,
-        so summing records counted every request about twice (measured: 4,276
-        records for 2,119 requests). A request is identified by its message
-        id. A record without an id cannot be matched against anything and is
-        counted on its own, since dropping it would lose real usage.
-        """
-        totals = dict(_EMPTY_TOTALS)
+    @staticmethod
+    def _store_root(root: Path | None) -> Path | None:
+        """Where the offset cache persists: ``root``, else the daemon's untracked dir."""
+        if root is not None:
+            return root
         try:
-            text = transcript.read_text(encoding="utf-8", errors="replace")
-        except (OSError, UnicodeDecodeError) as exc:
+            return ProjectContext.daemon_untracked_dir()
+        except RuntimeError:
+            return None
+
+    def spend_for(self, transcript: Path, root: Path | None = None) -> SpendTotals:
+        """This agent's cumulative spend, parsing only what was appended since its last stop.
+
+        The offset cache (Plan 00471 Task 2.0) replaces a whole-file read per
+        stop, which for a resumed giant was 47 MB x 19 stops. It counts per API
+        request, not per record (measured: 4,276 records for 2,119 requests),
+        skips non-JSON lines, and counts a record without an id on its own.
+        An unreadable transcript yields zeroes, never an exception on the stop.
+        """
+        try:
+            return spend_cache(self._store_root(root)).totals(transcript)
+        except OSError as exc:
             logger.debug("No readable agent transcript at %s: %s", transcript, exc)
-            return totals
+            return SpendTotals()
 
-        seen_message_ids: set[str] = set()
-        for line in text.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(record, dict):
-                continue
-            message = record.get("message") or {}
-            if not isinstance(message, dict):
-                continue
-            usage = message.get("usage")
-            if not isinstance(usage, dict):
-                continue
-
-            message_id = message.get("id")
-            if isinstance(message_id, str) and message_id:
-                if message_id in seen_message_ids:
-                    continue
-                seen_message_ids.add(message_id)
-
-            totals["requests"] += 1
-            totals["cache_read_tokens"] += _as_int(usage.get("cache_read_input_tokens"))
-            totals["cache_write_tokens"] += _as_int(usage.get("cache_creation_input_tokens"))
-            creation = usage.get("cache_creation")
-            if isinstance(creation, dict):
-                totals["ttl_5m_write_tokens"] += _as_int(creation.get("ephemeral_5m_input_tokens"))
-                totals["ttl_1h_write_tokens"] += _as_int(creation.get("ephemeral_1h_input_tokens"))
-
-        return totals
+    def totals_for(self, transcript: Path, root: Path | None = None) -> dict[str, int]:
+        """The cache counters the status line sums, from :meth:`spend_for`."""
+        spend = self.spend_for(transcript, root)
+        return {
+            "requests": spend.requests,
+            "cache_read_tokens": spend.cache_read_tokens,
+            "cache_write_tokens": spend.cache_write_tokens,
+            "ttl_5m_write_tokens": spend.ttl_5m_write_tokens,
+            "ttl_1h_write_tokens": spend.ttl_1h_write_tokens,
+        }
 
     def record(
         self,
@@ -357,13 +339,30 @@ class SubagentCacheAggregatorHandler(SubagentStopHandlerBase):
         transcript: Path,
         root: Path | None = None,
     ) -> None:
-        """Write this agent's totals to its own file, atomically.
+        """Write this agent's ledger row to its own file, atomically.
 
-        Atomicity (tmp write + ``replace``) keeps a concurrent status-line read
-        from seeing half a document. Failures are logged and swallowed: a
-        missing number must never strand a stopping agent.
+        The row keeps the status line's cache counters at the top level and adds
+        the spend ledger (Plan 00471 L6) under ``spend``, with the agent's name
+        and definition type from its ``meta.json``. Atomicity (tmp write +
+        ``replace``) keeps a concurrent status-line read from seeing half a
+        document. Failures are logged and swallowed: a missing number must
+        never strand a stopping agent.
         """
-        totals = self.totals_for(transcript)
+        spend = self.spend_for(transcript, root)
+        meta = read_agent_meta(transcript)
+        if not spend.plan_key:
+            spend.plan_key = plan_key_from(meta.name)
+        totals: dict[str, Any] = {
+            "requests": spend.requests,
+            "cache_read_tokens": spend.cache_read_tokens,
+            "cache_write_tokens": spend.cache_write_tokens,
+            "ttl_5m_write_tokens": spend.ttl_5m_write_tokens,
+            "ttl_1h_write_tokens": spend.ttl_1h_write_tokens,
+            "agent_id": agent_id,
+            "name": meta.name,
+            "subagent_type": meta.agent_type,
+            "spend": spend.to_dict(),
+        }
         try:
             directory = _sidecar_dir(session_id, root)
             directory.mkdir(parents=True, exist_ok=True)

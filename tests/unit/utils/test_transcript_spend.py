@@ -227,6 +227,8 @@ class TestSpendTotals:
         (("CLAUDE/Plan/00472-subagent-model-tier-selection",), "472"),
         (("main", "/workspace", "qa-runner"), ""),
         (("feature-v3",), ""),
+        (("/tmp/pytest-of-root/pytest-6185/x",), ""),
+        (("main", "/workspace", "n464-reap-timeout"), "464"),
     ],
 )
 def test_plan_key_from(candidates: tuple[str, ...], expected: str) -> None:
