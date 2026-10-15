@@ -44,13 +44,13 @@ assigned to another account). They are recorded in [NIGGLES-FOUND.md](NIGGLES-FO
 
 ### Phase 2: per-edit lint is syntax-and-format, package checks move later
 
-- [ ] ⬜ **Task 2.1**: TDD: a change split across two edits (call, then import) draws no deny on the first edit. The
+- [x] ✅ **Task 2.1**: TDD: a change split across two edits (call, then import) draws no deny on the first edit. The
   candidate design runs `gofmt -l -e` per edit and treats `go vet`'s unresolved-name class (`undefined:`, imported and
   not used) as advisory, mirroring Rust's E0432 carve-out. The same multi-edit false deny hits Python (ruff F821) and
   was reproduced four times in this session, so decide whether the carve-out is language-wide.
-- [ ] ⬜ **Task 2.2**: A findings-only-in-sibling-files `go vet` result is advisory, not a deny of this write.
-- [ ] ⬜ **Task 2.3**: "build constraints exclude all Go files" is a recognised advisory marker.
-- [ ] ⬜ **Task 2.4**: Add a `gofmt` check (toolchain-only); no default needs golangci-lint.
+- [x] ✅ **Task 2.2**: A findings-only-in-sibling-files `go vet` result is advisory, not a deny of this write.
+- [x] ✅ **Task 2.3**: "build constraints exclude all Go files" is a recognised advisory marker.
+- [x] ✅ **Task 2.4**: Add a `gofmt` check (toolchain-only); no default needs golangci-lint.
 
 ### Phase 3: tdd_enforcement for per-package tests
 

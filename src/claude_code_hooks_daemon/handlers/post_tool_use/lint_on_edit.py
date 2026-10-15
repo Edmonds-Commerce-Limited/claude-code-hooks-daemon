@@ -30,7 +30,9 @@ from claude_code_hooks_daemon.core.workspace import Workspace, resolve_workspace
 from claude_code_hooks_daemon.strategies.lint.common import build_lint_argv, matches_skip_path
 from claude_code_hooks_daemon.strategies.lint.module_context import resolve_module_context
 from claude_code_hooks_daemon.strategies.lint.protocol import (
+    ClassifiesMidEditOutput,
     ClassifiesToolUnavailable,
+    HasPrecheckCommands,
     LintStrategy,
 )
 from claude_code_hooks_daemon.strategies.lint.registry import LintStrategyRegistry
@@ -297,6 +299,17 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         # Get lint commands (config overrides take priority)
         default_cmd, extended_cmd = self._get_lint_commands(strategy)
 
+        # Prechecks are the strategy's cheap per-file floor (Go: gofmt syntax).
+        # Only a DENY ends the run here: a precheck that merely advises (its
+        # tool is absent) must not skip the default and extended tiers.
+        if isinstance(strategy, HasPrecheckCommands):
+            for precheck_cmd in strategy.precheck_lint_commands:
+                precheck_result = self._run_lint_command(
+                    hook_input, precheck_cmd, file_path, strategy.language_name, strategy
+                )
+                if precheck_result is not None and precheck_result.decision == Decision.DENY:
+                    return precheck_result
+
         # Run default lint command
         default_result = self._run_lint_command(
             hook_input, default_cmd, file_path, strategy.language_name, strategy
@@ -480,6 +493,23 @@ class LintOnEditHandler(PostToolUseHandlerBase):
                             f"⚠️ {language_name} lint did not run ({command_parts[0]} could "
                             f"not analyse this file), so it was NOT checked"
                             + (f" - {reason}" if reason else "")
+                        ],
+                    )
+
+                if isinstance(strategy, ClassifiesMidEditOutput) and (
+                    strategy.is_mid_edit_output(error_output, file_path)
+                ):
+                    # The tool analysed the file and every finding is expected
+                    # while a change spans several edits (an unresolved name
+                    # whose declaration is the NEXT edit) or sits in a sibling
+                    # file this write did not touch. Show it, do not deny it.
+                    return BlockingResult(
+                        decision=Decision.ALLOW,
+                        context=[
+                            f"⚠️ {language_name} lint reported findings that are expected "
+                            f"while a change is half made, or that sit in other files; "
+                            f"{Path(file_path).name} was NOT denied. Re-check once the "
+                            f"change is complete:\n{error_output.strip()}"
                         ],
                     )
 

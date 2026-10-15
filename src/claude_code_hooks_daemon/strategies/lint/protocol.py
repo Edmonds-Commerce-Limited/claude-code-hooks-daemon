@@ -153,3 +153,47 @@ class ClassifiesToolUnavailable(Protocol):
             False to treat the non-zero exit as a genuine lint failure.
         """
         ...
+
+
+@runtime_checkable
+class ClassifiesMidEditOutput(Protocol):
+    """Optional capability: a strategy that can tell "half an edit" from "wrong".
+
+    A package-level checker judges the edited file against its siblings, so a
+    change that needs two edits (a call, then its import) is reported as a
+    failure after the first. The finding is real but not yet an error, and
+    denying it teaches the author nothing. A strategy implementing this names
+    the output that is expected mid-edit; the handler then ALLOWS with the
+    output attached as an advisory.
+
+    Separate from :class:`ClassifiesToolUnavailable` because the question is
+    different (the tool DID analyse the file) and it needs the edited path.
+    """
+
+    def is_mid_edit_output(self, output: str, file_path: str) -> bool:
+        """Whether every finding in ``output`` is expected mid-edit.
+
+        Args:
+            output: The lint command's combined stdout and stderr.
+            file_path: The file that was just edited.
+
+        Returns:
+            True to degrade this run to an advisory ALLOW, False to DENY.
+        """
+        ...
+
+
+@runtime_checkable
+class HasPrecheckCommands(Protocol):
+    """Optional capability: cheap commands run before the default one.
+
+    A syntax check (``gofmt -l -e``) needs no module and no sibling files, so
+    it can run per file and deny a broken file before the package-level
+    default is even asked. The default and extended tiers stay overridable by
+    ``command_overrides``; prechecks are the strategy's own floor.
+    """
+
+    @property
+    def precheck_lint_commands(self) -> tuple[str, ...]:
+        """Command templates with ``{file}``, run in order before the default."""
+        ...
