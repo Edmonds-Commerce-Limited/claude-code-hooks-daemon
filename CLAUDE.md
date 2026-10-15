@@ -37,7 +37,7 @@ Using `Grep` or `Bash` (grep/rg) to find class definitions, function signatures,
 
 Default mode (`block_once`): the first symbol-lookup grep in a session is denied with guidance; subsequent retries are allowed.
 
-It enforces only where an enabled Claude Code plugin provides a language server for the searched file type (from the glob, type or path). Elsewhere the default `no_lsp_mode: advisory` only suggests installing a code intelligence plugin.
+It enforces only where an enabled Claude Code plugin provides a language server for the searched file type (from the glob, type or path; for a bare directory target, from the files the directory holds). Elsewhere the default `no_lsp_mode: advisory` only suggests installing a code intelligence plugin.
 
 IDs: R-LSP-SYMBOL-LOOKUP
 
