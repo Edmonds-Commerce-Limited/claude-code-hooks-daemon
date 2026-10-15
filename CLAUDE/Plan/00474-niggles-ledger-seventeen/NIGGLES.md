@@ -77,6 +77,26 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N464 — `worktree-reap --reap` kills `git worktree remove` at 5 seconds, leaving a half-deleted worktree it labels `DRY-RUN`
+
+**Source**: the coordinator, 2026-10-15, reaping the merged N463 worktree after a reboot.
+`bin/hooks-daemon worktree-reap --reap` printed `DRY-RUN git refused to remove <path>: Command '['git', '-C', '/workspace', 'worktree', 'remove', '<path>']' timed out after 5 seconds`. The directory was left with its `.git` file already gone,
+caches, `uv.lock` and an `untracked/` venv still present, so `git worktree list` marked it `prunable` and a retried
+`git worktree remove` failed with "validation failed … .git does not exist". It took `git worktree prune`,
+`git branch -d` and an `rm -rf` by hand to finish.
+
+**Why it happens**: `reap_worktree` (`core/worktree_reaping.py`) calls `run_fn(repo_root, "worktree", "remove", …)`
+with the default `run_git` timeout, `Timeout.GIT_CONTEXT`. That cap suits a metadata query. `worktree remove`
+deletes the whole tree, and an agent worktree holds a venv, so its runtime grows with the tree's size. Separately,
+`cmd_worktree_reap` labels every outcome with `removed=False` as `DRY-RUN`, even when `--reap` was given and git
+failed.
+
+**Fix direction**: give the removal a timeout sized for deleting a tree, as a named `Timeout` constant. On a
+timeout, report that the removal was interrupted and may be partial, and name the recovery (`git worktree prune`,
+then `git branch -d`). Label a refusal or failure under `--reap` as such, never as `DRY-RUN`.
+
+**Status**: ⬜ Open.
+
 ### N462 — the combinatorial-growth performance test flakes under load and names a different handler each time
 
 **Source**: the coordinator, 2026-10-14, during issue #114's targeted QA run.
