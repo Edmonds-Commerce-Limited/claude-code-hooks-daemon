@@ -643,6 +643,8 @@ bash .claude/provision.sh
 
 To move the whole project to another version instead, use `/hooks-daemon upgrade`.
 
+For an UPGRADE the session start usually does this for you: it starts `bash .claude/provision.sh --background`, and the running daemon keeps serving until the sync restarts it at the new version. When the notice says **BACKGROUND SYNC ... FAILED** or **STOPPED**, the previous version is still in place: run the command above by hand, which reports the same failure in full. The log is `.claude/hooks-daemon/untracked/background-sync/v<version>.log`. A downgrade is never synced in the background. Details: the `provision` skill page, "In the background, after a pull".
+
 ### "ERROR: hooks-daemon not installed at: /path/to/project"
 
 **Cause:** The `.claude/hooks-daemon/` directory does not exist. The daemon has not been installed for this project. If the project already uses the daemon (a fresh clone), provision it as above instead of installing.

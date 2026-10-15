@@ -15,6 +15,7 @@
 #
 # Usage:
 #   bash .claude/provision.sh [--skip-reading-confirmation=<digest>]
+#   bash .claude/provision.sh --background
 #
 # What it does:
 #   1. Resolves the expected version: daemon.expected_version in
@@ -34,6 +35,16 @@
 # venv rebuild and a restart through the clone own bin/hooks-daemon. A clone
 # already at the version is left alone. A failure after the checkout puts the
 # previous commit and its venv back and restarts the old daemon.
+#
+# --background is that sync, started detached by the SessionStart version check
+# when a pulled daemon.expected_version names a NEWER version than the running
+# daemon (Plan 00477 Task 5.2). It only ever syncs an existing clone forward:
+# never a fresh checkout, never a downgrade. It takes a lock, so two syncs never
+# overlap, and records each target version's outcome in
+# .claude/hooks-daemon/untracked/background-sync/v<version>.state; that file is
+# also the marker that the version was attempted, so it is attempted once. The
+# version check reads it back, and a failure is reported at every session start
+# with the command to run by hand. The running daemon serves until the restart.
 #
 # What it never does:
 #   - write a tracked file (everything it creates is under the gitignored
@@ -61,6 +72,7 @@ _provision_say() {
 }
 
 _provision_fail() {
+    _PROVISION_FAIL_REASON="$1"
     printf 'PROVISION FAILED: %s\n' "$1" >&2
     shift
     local line
@@ -75,8 +87,12 @@ _provision_fail() {
 # flag is passed on as an empty acknowledgement, which matches no listing.
 READING_ACKNOWLEDGED=false
 READING_ACKNOWLEDGEMENT=""
+BACKGROUND=false
 for _provision_arg in "$@"; do
     case "$_provision_arg" in
+        --background)
+            BACKGROUND=true
+            ;;
         --skip-reading-confirmation=*)
             READING_ACKNOWLEDGED=true
             READING_ACKNOWLEDGEMENT="${_provision_arg#*=}"
@@ -87,7 +103,8 @@ for _provision_arg in "$@"; do
             ;;
         *)
             _provision_fail "unknown argument: $_provision_arg" \
-                "Usage: bash .claude/provision.sh [--skip-reading-confirmation=<digest>]"
+                "Usage: bash .claude/provision.sh [--skip-reading-confirmation=<digest>]" \
+                "       bash .claude/provision.sh --background"
             ;;
     esac
 done
@@ -382,6 +399,7 @@ _provision_sync_abort() {
     shift
     local -a notes=()
     if ! _provision_sync_restore_checkout; then
+        _PROVISION_FAIL_REASON="$what The previous version could NOT be checked out again."
         printf 'PROVISION FAILED: %s\n' "$what" >&2
         printf '  The previous version v%s could NOT be put back: checking out %s failed.\n' "$PRESENT_VERSION" "$PREVIOUS_CHECKOUT" >&2
         printf '  The clone may be at %s. Restore it by hand: git -C %s checkout %s\n' "$TAG" "$DAEMON_DIR" "$PREVIOUS_CHECKOUT" >&2
@@ -486,6 +504,94 @@ _provision_sync_clone() {
 }
 
 # ------------------------------------------------------------------
+# The background sync (Plan 00477 Task 5.2)
+# ------------------------------------------------------------------
+# Under the clone's untracked/, which a checkout never touches. Keep equal to
+# SYNC_STATE_DIR_NAME in install/background_sync.py, which reads the state back
+# (a test asserts it).
+readonly SYNC_STATE_DIR_NAME="background-sync"
+SYNC_STATE_DIR=""
+SYNC_STATE_FILE=""
+SYNC_LOCK_DIR=""
+
+# Record the background sync's state: status, then a one-line detail.
+_provision_background_record() {
+    local tmp="$SYNC_STATE_FILE.tmp.$$"
+    {
+        printf 'status=%s\n' "$1"
+        printf 'target=%s\n' "$VERSION"
+        printf 'from=%s\n' "$PRESENT_VERSION"
+        printf 'pid=%s\n' "$$"
+        printf 'detail=%s\n' "${2//$'\n'/ }"
+    } > "$tmp" && mv -f "$tmp" "$SYNC_STATE_FILE"
+}
+
+# Take the lock every background sync holds, whatever its target. A lock whose
+# holder has gone is taken over. Returns 1 while a live sync holds it.
+_provision_background_lock() {
+    local holder=""
+    mkdir -p "$SYNC_STATE_DIR"
+    if mkdir "$SYNC_LOCK_DIR" 2> /dev/null; then
+        printf '%s\n' "$$" > "$SYNC_LOCK_DIR/pid"
+        return 0
+    fi
+    if [[ -f "$SYNC_LOCK_DIR/pid" ]]; then
+        IFS= read -r holder < "$SYNC_LOCK_DIR/pid" || [[ -n "$holder" ]]
+    fi
+    if [[ "$holder" =~ ^[0-9]+$ ]] && kill -0 "$holder" 2> /dev/null; then
+        _provision_say "A background sync is already running (pid $holder); this one stops without changing anything."
+        return 1
+    fi
+    _provision_say "Taking over the background sync lock from pid ${holder:-unknown}, which is no longer running."
+    rm -rf "$SYNC_LOCK_DIR"
+    if ! mkdir "$SYNC_LOCK_DIR"; then
+        _provision_say "Another background sync took the lock first; this one stops without changing anything."
+        return 1
+    fi
+    printf '%s\n' "$$" > "$SYNC_LOCK_DIR/pid"
+}
+
+# On exit: record the outcome from the exit status, then release the lock.
+_provision_background_finish() {
+    local rc="$1"
+    case "$rc" in
+        0)
+            _provision_background_record synced "moved from v$PRESENT_VERSION to $TAG and restarted"
+            ;;
+        "$GATE_NEEDS_ACKNOWLEDGEMENT")
+            _provision_background_record needs-reading \
+                "$TAG asks for its upgrade guides to be read and confirmed before it is deployed; nothing was changed"
+            ;;
+        *)
+            _provision_background_record failed "${_PROVISION_FAIL_REASON:-provision exited $rc without naming a reason}"
+            ;;
+    esac
+    rm -rf "$SYNC_LOCK_DIR"
+}
+
+# Claim the sync to $VERSION: forward only, under the lock, once per target.
+# Exits 0 without changing anything when another sync holds the lock or this
+# target was already attempted; from here on, every exit records an outcome.
+_provision_background_claim() {
+    if _version_lt "$VERSION" "$PRESENT_VERSION"; then
+        _provision_fail "a background sync never downgrades: $TAG is older than the installed v$PRESENT_VERSION." \
+            "Confirm the downgrade is intended, then run by hand: bash .claude/provision.sh"
+    fi
+    SYNC_STATE_DIR="$DAEMON_DIR/untracked/$SYNC_STATE_DIR_NAME"
+    SYNC_STATE_FILE="$SYNC_STATE_DIR/v$VERSION.state"
+    SYNC_LOCK_DIR="$SYNC_STATE_DIR/lock.d"
+    _provision_background_lock || exit 0
+    if [[ -e "$SYNC_STATE_FILE" ]]; then
+        rm -rf "$SYNC_LOCK_DIR"
+        _provision_say "A background sync to $TAG was already attempted ($SYNC_STATE_FILE); it is not repeated."
+        _provision_say "To sync by hand, run: bash .claude/provision.sh"
+        exit 0
+    fi
+    _provision_background_record running "syncing from v$PRESENT_VERSION to $TAG"
+    trap '_provision_background_finish $?' EXIT
+}
+
+# ------------------------------------------------------------------
 # Step 2: is this a fresh checkout?
 # ------------------------------------------------------------------
 if _daemon_clone_present; then
@@ -505,6 +611,9 @@ if _daemon_clone_present; then
             _provision_say "The daemon clone is already at $TAG, the expected version: nothing to do."
             exit 0
         fi
+        if [[ "$BACKGROUND" == true ]]; then
+            _provision_background_claim
+        fi
         _provision_sync_clone
         exit 0
     fi
@@ -512,6 +621,13 @@ if _daemon_clone_present; then
         "That is a different repair, and it keeps the clone: run" \
         "  $DAEMON_DIR/bin/hooks-daemon repair" \
         "Then run this again: if the clone is at the wrong version it is synced to $TAG."
+fi
+
+# Fresh provisioning is run deliberately, by a person or an agent (the owner's
+# ruling): the background sync only ever moves an existing clone.
+if [[ "$BACKGROUND" == true ]]; then
+    _provision_fail "--background only syncs an existing clone, and there is no daemon clone here." \
+        "Provision this checkout by running: bash .claude/provision.sh"
 fi
 
 # Anything in the daemon directory besides the untracked/ skeleton (or a venv

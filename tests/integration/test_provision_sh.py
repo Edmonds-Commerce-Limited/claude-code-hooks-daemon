@@ -15,14 +15,20 @@ environment, so there is no seam in the script for a test to use.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.install.background_sync import (
+    SYNC_STATE_DIR_NAME,
+    launch_background_sync,
+)
 from tests.venv_bootstrap_sandbox import CLONE_VERSION, Sandbox, snapshot
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -662,6 +668,219 @@ class TestAFailedSyncRestoresThePreviousVersion:
         assert fresh.starts() == 2, "the old daemon was restarted"
         assert fresh.tracked_changes() == ""
         assert list((fresh.clone / "untracked").glob(".sync-backup-*")) == []
+
+
+BACKGROUND = ("--background",)
+
+
+def _sync_dir(p: Provisioning) -> Path:
+    return p.clone / "untracked" / SYNC_STATE_DIR_NAME
+
+
+def _state(p: Provisioning, version: str) -> dict[str, str]:
+    """The key=value state the background sync to ``version`` recorded."""
+    path = _sync_dir(p) / f"v{version}.state"
+    assert path.is_file(), f"no state recorded at {path}"
+    return dict(line.split("=", 1) for line in path.read_text().splitlines())
+
+
+def _a_dead_pid() -> int:
+    return int(Path("/proc/sys/kernel/pid_max").read_text()) + 1
+
+
+class TestTheBackgroundSync:
+    """Plan 00477 Tasks 5.2 and 5.4: ``--background`` is the sync version_check starts."""
+
+    def test_a_pulled_newer_version_syncs_restarts_and_records_it(
+        self, fresh: Provisioning
+    ) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(MAIN_VERSION)
+
+        result = fresh.provision(args=BACKGROUND)
+
+        assert result.returncode == 0, _out(result)
+        assert fresh.clone_version() == MAIN_VERSION
+        assert fresh.starts() == 2, "the daemon was restarted exactly once, at the new version"
+        assert fresh.tracked_changes() == ""
+        state = _state(fresh, MAIN_VERSION)
+        assert state["status"] == "synced"
+        assert state["from"] == CLONE_VERSION
+        assert state["target"] == MAIN_VERSION
+        assert not (_sync_dir(fresh) / "lock.d").exists(), "the lock is released"
+
+    def test_a_sync_failure_keeps_the_old_daemon_and_records_why(
+        self, fresh: Provisioning
+    ) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        before = fresh.clone_tracked_state()
+        fresh.expect(MAIN_VERSION)
+
+        result = fresh.provision(args=BACKGROUND, uv_fails=True)
+
+        assert result.returncode != 0
+        assert fresh.clone_tracked_state() == before
+        assert fresh.clone_version() == CLONE_VERSION
+        assert fresh.box.resolves(), "the old venv is back"
+        assert fresh.starts() == 2, "the old daemon was restarted"
+        state = _state(fresh, MAIN_VERSION)
+        assert state["status"] == "failed"
+        assert "venv" in state["detail"]
+        assert not (_sync_dir(fresh) / "lock.d").exists()
+
+    def test_a_target_already_attempted_is_never_attempted_again(
+        self, fresh: Provisioning
+    ) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(MAIN_VERSION)
+        assert fresh.provision(args=BACKGROUND, uv_fails=True).returncode != 0
+        starts = fresh.starts()
+
+        result = fresh.provision(args=BACKGROUND)
+
+        assert result.returncode == 0, _out(result)
+        assert "already attempted" in _out(result)
+        assert fresh.clone_version() == CLONE_VERSION
+        assert fresh.starts() == starts
+        assert _state(fresh, MAIN_VERSION)["status"] == "failed", "the failure stays on record"
+
+    def test_a_sync_already_running_is_not_joined(self, fresh: Provisioning) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(MAIN_VERSION)
+        lock = _sync_dir(fresh) / "lock.d"
+        lock.mkdir(parents=True)
+        (lock / "pid").write_text(f"{os.getpid()}\n")
+        before = fresh.clone_tracked_state()
+
+        result = fresh.provision(args=BACKGROUND)
+
+        assert result.returncode == 0, _out(result)
+        assert "already running" in _out(result)
+        assert fresh.clone_tracked_state() == before
+        assert not (_sync_dir(fresh) / f"v{MAIN_VERSION}.state").exists(), (
+            "not claimed, so a later session tries again"
+        )
+        assert lock.is_dir(), "another sync's lock is not taken from it"
+
+    def test_a_lock_whose_holder_is_gone_is_taken_over(self, fresh: Provisioning) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(MAIN_VERSION)
+        lock = _sync_dir(fresh) / "lock.d"
+        lock.mkdir(parents=True)
+        (lock / "pid").write_text(f"{_a_dead_pid()}\n")
+
+        result = fresh.provision(args=BACKGROUND)
+
+        assert result.returncode == 0, _out(result)
+        assert fresh.clone_version() == MAIN_VERSION
+        assert not lock.exists()
+
+    def test_a_refused_clone_is_recorded_as_a_failure(self, fresh: Provisioning) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        (fresh.clone / "pyproject.toml").write_text("# local edit\n")
+        fresh.expect(MAIN_VERSION)
+
+        result = fresh.provision(args=BACKGROUND)
+
+        assert result.returncode != 0
+        state = _state(fresh, MAIN_VERSION)
+        assert state["status"] == "failed"
+        assert "local changes" in state["detail"]
+
+    def test_a_target_that_needs_reading_is_recorded_and_changes_nothing(
+        self, fresh: Provisioning
+    ) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(GATED_VERSION)
+        before = fresh.clone_tracked_state()
+        starts = fresh.starts()
+
+        result = fresh.provision(args=BACKGROUND)
+
+        assert result.returncode != 0
+        assert fresh.clone_tracked_state() == before
+        assert fresh.starts() == starts
+        assert _state(fresh, GATED_VERSION)["status"] == "needs-reading"
+
+    def test_a_fresh_checkout_is_never_provisioned_in_the_background(
+        self, fresh: Provisioning
+    ) -> None:
+        result = fresh.provision(args=BACKGROUND)
+
+        assert result.returncode != 0
+        assert "existing clone" in _out(result)
+        assert not (fresh.clone / ".git").exists()
+
+    def test_a_downgrade_is_never_synced_in_the_background(self, fresh: Provisioning) -> None:
+        _provisioned_at(fresh, MAIN_VERSION)
+        fresh.expect(CLONE_VERSION)
+        before = fresh.clone_tracked_state()
+
+        result = fresh.provision(args=BACKGROUND)
+
+        assert result.returncode != 0
+        assert "downgrade" in _out(result).lower()
+        assert fresh.clone_tracked_state() == before
+        assert not _sync_dir(fresh).exists() or not any(_sync_dir(fresh).glob("*.state"))
+
+    def test_the_daemons_own_repository_never_syncs(self, tmp_path: Path) -> None:
+        p = _make(tmp_path, _configured(MAIN_VERSION))
+        try:
+            version_py = p.project / "src" / "claude_code_hooks_daemon" / "version.py"
+            version_py.parent.mkdir(parents=True)
+            version_py.write_text(f'__version__ = "{CLONE_VERSION}"\n')
+
+            result = p.provision(args=BACKGROUND)
+
+            assert result.returncode != 0
+            assert "bootstrap-self-install" in _out(result)
+            assert not (p.clone / ".git").exists()
+        finally:
+            p.box.cleanup()
+
+
+def _outcome(p: Provisioning, version: str, timeout: float = 60.0) -> dict[str, str]:
+    """The state a background sync recorded once it stopped running."""
+    path = _sync_dir(p) / f"v{version}.state"
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if path.is_file():
+            state = _state(p, version)
+            if state.get("status") != "running":
+                return state
+        time.sleep(0.1)
+    raise AssertionError(f"the background sync to {version} did not finish within {timeout}s")
+
+
+class TestTheLauncherVersionCheckUses:
+    """The detached start ``version_check`` makes, end to end against this sync."""
+
+    def test_a_launched_sync_finishes_on_its_own_and_restarts_the_daemon(
+        self, fresh: Provisioning, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(MAIN_VERSION)
+        fresh.box.stub_uv()
+        for key in list(os.environ):
+            monkeypatch.delenv(key)
+        for key, value in fresh.box.env(fresh.git_env).items():
+            monkeypatch.setenv(key, value)
+
+        started = time.monotonic()
+        log = launch_background_sync(
+            fresh.project / ".claude" / "provision.sh",
+            fresh.project,
+            fresh.clone / "untracked",
+            MAIN_VERSION,
+        )
+        returned_after = time.monotonic() - started
+
+        state = _outcome(fresh, MAIN_VERSION)
+        assert state["status"] == "synced", log.read_text()
+        assert returned_after < 2.0, "the launcher returns without waiting for the sync"
+        assert fresh.clone_version() == MAIN_VERSION
+        assert fresh.starts() == 2
+        assert "SYNCED" in log.read_text()
 
 
 class TestTheGateConstantsAreUpgradesOwn:

@@ -20,6 +20,12 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.core import AdvisoryResult, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.install.background_sync import (
+    BackgroundSyncError,
+    SyncStatus,
+    launch_background_sync,
+    read_sync_record,
+)
 from claude_code_hooks_daemon.install.expected_version import read_expected_version
 from claude_code_hooks_daemon.install.install_stamp import InstallStamp, read_install_stamp
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
@@ -53,6 +59,9 @@ _GITHUB_REPO_URL: Final[str] = (
 #: is real but bounded: a project whose repo-local config is load-bearing for
 #: github.com gets no upgrade advisory rather than a wrong one.
 _REMOTE_ONLY_CWD: Final[Path] = Path("/")
+
+#: The tracked script, in the project's .claude/, that syncs the clone.
+_PROVISION_SCRIPT_NAME: Final[str] = "provision.sh"
 
 _DEFAULT_CACHE_TTL_HOURS: Final[int] = 24
 _SECONDS_PER_HOUR: Final[int] = 3600
@@ -202,7 +211,7 @@ class VersionCheckHandler(SessionStartHandlerBase):
         # reported on a resumed session too: a pull between sessions is exactly
         # when it appears, and a resume is how that session comes back.
         if is_resume_session(hook_input):
-            return bool(self._drift_context())
+            return self._expected_drift() is not None
         return True
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
@@ -227,9 +236,11 @@ class VersionCheckHandler(SessionStartHandlerBase):
             # Plan 00477 Task 5.1: the project expects another version than the
             # one running. Local facts only, so it too is answered before the
             # cache or the network, and says nothing about "latest".
-            drift = self._drift_context()
-            if drift:
-                return AdvisoryResult(decision=Decision.ALLOW, reason=None, context=drift)
+            expected = self._expected_drift()
+            if expected is not None:
+                return AdvisoryResult(
+                    decision=Decision.ALLOW, reason=None, context=self._drift_context(expected)
+                )
 
             cache_file = self._get_cache_file()
 
@@ -283,25 +294,24 @@ class VersionCheckHandler(SessionStartHandlerBase):
             logger.error("Version check failed: %s", e, exc_info=True)
             return AdvisoryResult(decision=Decision.ALLOW, reason=None, context=[])
 
-    def _drift_context(self) -> list[str]:
-        """The notice for a running daemon that is not the version the project expects.
+    def _expected_drift(self) -> str | None:
+        """The version the project expects, when the running daemon is not it.
 
-        Empty (silent) when the version matches, when ``daemon.expected_version``
+        None (no drift) when the version matches, when ``daemon.expected_version``
         is absent or invalid (a branch install never writes it; an invalid value
         is reported by config validation), in the daemon's own repository, and on
-        a branch install, which has its own advisory. Nothing here moves the
-        daemon: the notice names what a human runs.
+        a branch install, which has its own advisory. Starts nothing.
         """
         stamp = read_install_stamp()
         if stamp is not None and stamp.is_branch_install:
-            return []
+            return None
         try:
             if ProjectContext.self_install_mode():
-                return []
+                return None
             expected = read_expected_version(ProjectContext.config_path())
         except RuntimeError:
             # ProjectContext not initialised: nothing to compare against.
-            return []
+            return None
         except (OSError, ValueError) as exc:
             # A config that cannot be read or parsed is reported by config
             # validation; this advisory must not guess at what it said.
@@ -314,10 +324,19 @@ class VersionCheckHandler(SessionStartHandlerBase):
                     "it said, so no drift is reported"
                 ),
             )
-            return []
+            return None
         if expected is None or expected == __version__:
-            return []
+            return None
+        return expected
 
+    def _drift_context(self, expected: str) -> list[str]:
+        """The notice for a running daemon that is not the version the project expects.
+
+        For an UPGRADE in a project carrying the tracked ``provision.sh`` this is
+        also where the sync starts, in the background (Plan 00477 Task 5.2), and
+        where its outcome is reported at every later session start. A downgrade
+        is never synced automatically: the notice names what a human runs.
+        """
         is_upgrade = self._compare_versions(__version__, expected)
         direction = "UPGRADE" if is_upgrade else "DOWNGRADE"
         lines = [
@@ -336,21 +355,97 @@ class VersionCheckHandler(SessionStartHandlerBase):
                 "Confirm it is intended (the commit may have been made from an older "
                 "checkout) before syncing; if it is not, correct daemon.expected_version.",
             ]
+        provision_script = ProjectContext.config_dir() / _PROVISION_SCRIPT_NAME
+        background = is_upgrade and provision_script.is_file()
+        if background:
+            lines += self._background_sync_lines(expected, provision_script)
         lines += [
             "",
             "A restart cannot fix this: it runs the same installed version.",
-            "TO SYNC, a person or an agent runs, from the project root: "
-            "bash .claude/provision.sh",
+            ("TO SYNC BY HAND" if background else "TO SYNC")
+            + ", a person or an agent runs, from the project root: bash .claude/provision.sh",
             f"Provision checks out exactly v{expected}, runs that release's pre-deploy gate "
             "(which stops first to have the upgrade guides read), rebuilds the venv and "
             "restarts the daemon. It refuses a clone with local changes, and a failed sync "
-            f"puts v{__version__} back. Nothing has been changed: this notice never moves "
-            "the daemon to another version by itself.",
+            f"puts v{__version__} back.",
+        ]
+        if not background:
+            lines.append(
+                "Nothing has been changed: a downgrade, or a project without "
+                ".claude/provision.sh, is never synced automatically."
+            )
+        lines += [
             "To move the PROJECT to another version instead (and change "
             "daemon.expected_version), use the hooks-daemon skill to upgrade "
             "(Skill tool: skill=hooks-daemon, args=upgrade <version>).",
         ]
         return lines
+
+    @staticmethod
+    def _background_sync_lines(expected: str, provision_script: Path) -> list[str]:
+        """Start the background sync to ``expected``, or report the one already tried.
+
+        The sync is started once per target version: the state file
+        ``provision.sh --background`` writes is the marker, read back here at
+        every session start until the running version matches. Starting it costs
+        this hook only the spawn; the sync itself runs detached.
+        """
+        untracked = ProjectContext.daemon_untracked_dir()
+        record = read_sync_record(untracked, expected)
+        running = __version__
+        if record is None:
+            try:
+                log = launch_background_sync(
+                    provision_script, ProjectContext.project_root(), untracked, expected
+                )
+            except BackgroundSyncError as exc:
+                logger.error("Background sync to v%s could not start: %s", expected, exc)
+                return [
+                    "",
+                    f"⛔ BACKGROUND SYNC TO v{expected} COULD NOT START: {exc}.",
+                    f"v{running} is still running. Sync by hand with the command below.",
+                ]
+            return [
+                "",
+                f"🔄 BACKGROUND SYNC STARTED: provision is bringing the daemon to v{expected} "
+                f"outside this hook (log: {log}).",
+                f"v{running} keeps serving until the new daemon is ready; the sync then "
+                f"restarts it at v{expected}. Nothing to do now: if the sync fails, every "
+                "session start says so, with the command to run.",
+            ]
+        if record.status is SyncStatus.RUNNING:
+            return [
+                "",
+                f"🔄 BACKGROUND SYNC TO v{expected} UNDER WAY (pid {record.pid}, log: "
+                f"{record.log_path}). v{running} keeps serving until it restarts the daemon.",
+            ]
+        retry = (
+            f"Log: {record.log_path}. It is not retried automatically; to have it retried "
+            f"in the background, delete {record.state_path} and start a new session."
+        )
+        if record.status is SyncStatus.NEEDS_READING:
+            return [
+                "",
+                f"⛔ BACKGROUND SYNC TO v{expected} STOPPED: {record.detail}.",
+                f"v{running} is still running. Run bash .claude/provision.sh by hand: it lists "
+                "the upgrade guides to read and prints the --skip-reading-confirmation=<digest> "
+                "flag to re-run it with once they are read.",
+                retry,
+            ]
+        if record.status is SyncStatus.SYNCED:
+            return [
+                "",
+                f"⛔ BACKGROUND SYNC TO v{expected} recorded success, yet this daemon still "
+                f"runs v{running}. Restart it: .claude/hooks-daemon/bin/hooks-daemon restart",
+                retry,
+            ]
+        return [
+            "",
+            f"⛔ BACKGROUND SYNC TO v{expected} FAILED: {record.detail}",
+            f"v{running} is still running and serving. Sync by hand with the command below; "
+            "it reports the same failure in full.",
+            retry,
+        ]
 
     @staticmethod
     def _branch_install_context(stamp: InstallStamp) -> list[str]:
