@@ -627,6 +627,8 @@ class AutoContinueStopHandler(StopHandlerBase):
         r"Overall Status\s*:\s*FAILED",  # run_all.sh overall status
         r"\bno tests ran\b",  # pytest collected nothing
         r"\bpassed=0\b",  # zero tests passed
+        r"^\s*--- FAIL:",  # go test per-test failure (subtests are indented)
+        r"^FAIL\b",  # go test "FAIL" summary and "FAIL\t<pkg>\t<time>" lines
     )
 
     def __init__(self) -> None:

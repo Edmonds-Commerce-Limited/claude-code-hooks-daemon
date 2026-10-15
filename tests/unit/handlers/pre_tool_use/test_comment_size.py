@@ -168,6 +168,43 @@ class TestDocstringExemption:
         assert handler.matches(hook_input) is False
 
 
+class TestGoPackageDocComment:
+    """A Go package doc comment (the // block right above `package`) is API docs."""
+
+    _DOC = "\n".join(f"// Line {i} of the package documentation." for i in range(6))
+
+    def test_package_doc_over_limit_does_not_match(self, handler: CommentSizeHandler) -> None:
+        content = f"{self._DOC}\npackage widget\n"
+        hook_input = _make_write_input("/workspace/src/widget/doc.go", content)
+        assert handler.matches(hook_input) is False
+
+    def test_package_doc_with_build_tag_blank_line_gap_is_not_exempt(
+        self, handler: CommentSizeHandler
+    ) -> None:
+        """A blank line detaches the block from the package clause: not a doc comment."""
+        content = f"{self._DOC}\n\npackage widget\n"
+        hook_input = _make_write_input("/workspace/src/widget/doc.go", content)
+        assert handler.matches(hook_input) is True
+
+    def test_other_go_comment_over_limit_still_matches(self, handler: CommentSizeHandler) -> None:
+        content = f"package widget\n\n{self._DOC}\nfunc F() {{}}\n"
+        hook_input = _make_write_input("/workspace/src/widget/widget.go", content)
+        assert handler.matches(hook_input) is True
+
+    def test_package_doc_exemption_is_go_only(self, handler: CommentSizeHandler) -> None:
+        """The same shape in Rust (no package clause) keeps the limit."""
+        content = f"{self._DOC}\npackage widget\n"
+        hook_input = _make_write_input("/workspace/src/widget/lib.rs", content)
+        assert handler.matches(hook_input) is True
+
+    def test_over_limit_line_in_package_doc_is_also_exempt(
+        self, handler: CommentSizeHandler
+    ) -> None:
+        content = "// " + ("y" * 80) + "\npackage widget\n"
+        hook_input = _make_write_input("/workspace/src/widget/doc.go", content)
+        assert handler.matches(hook_input) is False
+
+
 class TestBrandNewFileGrowth:
     """A brand new file has no 'before' -> any over-limit comment blocks immediately."""
 

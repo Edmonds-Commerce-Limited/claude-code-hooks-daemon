@@ -134,6 +134,12 @@ class TestLspEnforcementMatchesPositive:
         }
         assert handler.matches(hook_input) is True
 
+    @pytest.mark.parametrize("pattern", ["func HandleRequest", "func handle_request"])
+    def test_matches_grep_go_func_definition(self, handler: Any, pattern: str) -> None:
+        """Grep for 'func Name' is a definition search like 'def name'."""
+        hook_input = {"tool_name": "Grep", "tool_input": {"pattern": pattern}}
+        assert handler.matches(hook_input) is True
+
     def test_matches_grep_interface_definition(self, handler: Any) -> None:
         """Grep for 'interface InterfaceName' should trigger."""
         hook_input = {
@@ -526,6 +532,45 @@ class TestLspEnforcementSingleFileScoping:
             "tool_input": {"command": 'grep -n "hook_input" src/'},
         }
         assert handler.matches(hook_input) is True
+
+    def test_matches_still_fires_for_bare_directory_target(
+        self, handler: Any, tmp_path: Path
+    ) -> None:
+        """rg searches a directory recursively: no trailing slash does not make it one file."""
+        (tmp_path / "pkg").mkdir()
+        hook_input = {
+            "tool_name": "Bash",
+            "cwd": str(tmp_path),
+            "tool_input": {"command": 'rg "get_bash_command" pkg'},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_bare_file_target_resolved_against_cwd_is_still_one_file(
+        self, handler: Any, tmp_path: Path
+    ) -> None:
+        (tmp_path / "mod.py").write_text("x = 1\n")
+        hook_input = {
+            "tool_name": "Bash",
+            "cwd": str(tmp_path),
+            "tool_input": {"command": 'rg "get_bash_command" mod.py'},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_bare_directory_holding_no_served_file_is_only_advised(self, tmp_path: Path) -> None:
+        """The Phase 1 survey judges the bare directory: a YAML-only tree is not covered."""
+        (tmp_path / "conf").mkdir()
+        (tmp_path / "conf" / "a.yml").write_text("x: 1\n")
+        handler = _default_handler()
+        with patch.object(handler, "_get_block_count", return_value=0):
+            result = handler.handle(
+                {
+                    "tool_name": "Bash",
+                    "cwd": str(tmp_path),
+                    "tool_input": {"command": 'rg -n "class MyHandler" conf'},
+                }
+            )
+        assert result.decision == Decision.ALLOW
+        assert "code intelligence plugin" in "\n".join(result.context)
 
     def test_matches_still_fires_for_recursive_flag(self, handler: Any) -> None:
         """-r/-R makes it project-wide even without a trailing-slash target."""

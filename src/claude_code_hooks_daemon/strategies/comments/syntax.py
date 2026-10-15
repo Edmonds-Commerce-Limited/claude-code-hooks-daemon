@@ -32,12 +32,18 @@ class CommentSyntax:
             (e.g. an inline SQL literal assigned to a variable) -- without
             this guard every triple-quoted string literal would be misread
             as a docstring.
+        package_clause_prefix: When non-empty, the comment block that sits
+            immediately above a line starting with this prefix (Go's
+            ``package `` clause) is the package doc comment and is exempt
+            from ``comment_size`` like any other API documentation. A blank
+            line between block and clause detaches it, as in ``go doc``.
     """
 
     line_prefixes: tuple[str, ...] = ()
     block_delimiters: tuple[tuple[str, str], ...] = ()
     doc_delimiters: tuple[tuple[str, str], ...] = ()
     doc_requires_line_start: bool = False
+    package_clause_prefix: str = ""
 
 
 # ── Shared syntax families (Plan 00208) ──────────────────────────────────
@@ -68,7 +74,7 @@ PHP_SYNTAX = CommentSyntax(
 )
 
 # C-family languages with no doc-block convention this extractor recognises
-# (Go, Rust, C#, Swift, Dart): '//' line, '/* */' block. C#/Swift/Dart/Rust
+# (Rust, C#, Swift, Dart): '//' line, '/* */' block. C#/Swift/Dart/Rust
 # doc comments conventionally use a '///' triple-slash line-prefix instead
 # of a block delimiter; '///' is still caught here as an ordinary '//' line
 # comment -- a doc-exemption for triple-slash is deliberately out of scope
@@ -76,6 +82,14 @@ PHP_SYNTAX = CommentSyntax(
 SLASH_SYNTAX = CommentSyntax(
     line_prefixes=("//",),
     block_delimiters=(("/*", "*/"),),
+)
+
+# Go: '//' line, '/* */' block; the block above the `package` clause is the
+# package doc comment (conventionally in doc.go), which godoc renders.
+GO_SYNTAX = CommentSyntax(
+    line_prefixes=("//",),
+    block_delimiters=(("/*", "*/"),),
+    package_clause_prefix="package ",
 )
 
 # JS/TS, Java, Kotlin: '//' line, '/* */' block, '/** */' JSDoc/Javadoc/KDoc.
