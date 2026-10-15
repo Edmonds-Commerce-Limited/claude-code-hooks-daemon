@@ -1206,6 +1206,98 @@ class TestClaudeMdInjectorFormatting:
         assert "# My Project" in content
 
 
+_FORMATTER = "claude_code_hooks_daemon.core.claude_md_injector.format_markdown_document"
+
+
+class TestUnchangedBlockCostsNoFormatterRun:
+    """Plan 00495 Task 2.4: a restart that regenerates an identical block skips mdformat.
+
+    The formatter is a pure function of its input, so when the text about to be
+    formatted is the text whose formatted form is already on disk, running it
+    again can only reproduce the file.
+    """
+
+    _GUIDANCE = "## Table\n\n| A | Bee |\n|---|---|\n| 1 | 2 |\n| longvalue | 3 |\n"
+
+    def _injector(self, root: Path, guidance: str | None = None) -> Any:
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        handler = _StubHandler("tbl", guidance or self._GUIDANCE)
+        return ClaudeMdInjector(workspace_root=root, handlers=[handler], promoted_handlers=["tbl"])
+
+    def test_second_identical_run_does_not_format(self, tmp_path: Path) -> None:
+        _init_git_repo(tmp_path)
+        # The first run formats a raw file; the second formats the block against
+        # the now-canonical surroundings. From then on the input is stable.
+        self._injector(tmp_path).inject()
+        self._injector(tmp_path).inject()
+        first = (tmp_path / "CLAUDE.md").read_text()
+
+        with patch(_FORMATTER) as formatter:
+            self._injector(tmp_path).inject()
+
+        formatter.assert_not_called()
+        assert (tmp_path / "CLAUDE.md").read_text() == first
+
+    def test_changed_block_is_formatted_identically_to_an_uncached_run(
+        self, tmp_path: Path
+    ) -> None:
+        from claude_code_hooks_daemon.utils.markdown_format import format_markdown_document
+
+        changed = "## Table\n\n| A | Bee |\n|---|---|\n| 1 | 2 |\n| a much longer value | 3 |\n"
+        cached_root = tmp_path / "cached"
+        fresh_root = tmp_path / "fresh"
+        for root in (cached_root, fresh_root):
+            root.mkdir()
+            _init_git_repo(root)
+        self._injector(cached_root).inject()
+        self._injector(cached_root).inject()
+
+        with patch(_FORMATTER, wraps=format_markdown_document) as formatter:
+            self._injector(cached_root, changed).inject()
+        self._injector(fresh_root, changed).inject()
+
+        formatter.assert_called_once()
+        assert (cached_root / "CLAUDE.md").read_text() == (fresh_root / "CLAUDE.md").read_text()
+
+    def test_edit_outside_the_block_is_still_formatted(self, tmp_path: Path) -> None:
+        _init_git_repo(tmp_path)
+        self._injector(tmp_path).inject()
+        self._injector(tmp_path).inject()
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text(claude_md.read_text() + "\nA user note.\n")
+
+        with patch(_FORMATTER, side_effect=lambda text: text) as formatter:
+            self._injector(tmp_path).inject()
+
+        formatter.assert_called_once()
+
+    def test_workspace_that_is_not_a_git_repo_always_formats(self, tmp_path: Path) -> None:
+        (tmp_path / "CLAUDE.md").write_text("# P\n")
+        self._injector(tmp_path).inject()
+
+        with patch(_FORMATTER, side_effect=lambda text: text) as formatter:
+            self._injector(tmp_path).inject()
+
+        formatter.assert_called_once()
+
+    def test_a_failed_format_is_stable_and_not_retried_on_identical_input(
+        self, tmp_path: Path
+    ) -> None:
+        """The formatter is deterministic: the same input fails the same way."""
+        _init_git_repo(tmp_path)
+        with patch(_FORMATTER, side_effect=RuntimeError("boom")):
+            self._injector(tmp_path).inject()
+            self._injector(tmp_path).inject()
+        unformatted = (tmp_path / "CLAUDE.md").read_text()
+
+        with patch(_FORMATTER, side_effect=RuntimeError("boom")) as formatter:
+            self._injector(tmp_path).inject()
+
+        formatter.assert_not_called()
+        assert (tmp_path / "CLAUDE.md").read_text() == unformatted
+
+
 class TestConcurrentEditIsNotDiscarded:
     """The daemon must never silently discard an edit it did not make.
 

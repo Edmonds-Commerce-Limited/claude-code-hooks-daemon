@@ -10,6 +10,7 @@ Usage:
     injector.inject()
 """
 
+import hashlib
 import logging
 import re
 import subprocess  # nosec B404 - imported for the CompletedProcess type; git spawns live in utils.git_repo
@@ -140,6 +141,15 @@ _COMMIT_MESSAGE_WITH_USER_EDITS = (
     "have prompted."
 )
 _GIT_HEAD_REF = "HEAD"
+
+# Fingerprint of the last markdown format, kept inside the git dir.
+_FORMAT_MEMORY_FILENAME = "hooks-daemon-claude-md-format"
+_FORMAT_MEMORY_FIELDS = 2  # input sha, output sha
+
+
+def _sha256(text: str) -> str:
+    """Hex SHA-256 of ``text`` encoded as UTF-8."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _summary_line(content: str) -> str:
@@ -460,7 +470,7 @@ class ClaudeMdInjector:
             # pre-format text). Writing the formatter-canonical form here means
             # a later Write/Edit that triggers the PostToolUse
             # markdown_table_formatter produces no churn diff on our block.
-            formatted = self._format_fail_safe(updated)
+            formatted = self._format_or_reuse(updated, original)
 
             # Re-read immediately before the write. This is the whole point: if
             # the file moved on, `formatted` is derived from a stale snapshot
@@ -468,6 +478,10 @@ class ClaudeMdInjector:
             current = claude_md_path.read_text(encoding="utf-8")
             if current == original:
                 claude_md_path.write_text(formatted, encoding="utf-8")
+                # A failed format is remembered too: the formatter is
+                # deterministic, so the same input fails the same way and its
+                # fallback (the input itself) is what was just written.
+                self._remember_format(updated, formatted)
                 return True
 
             logger.warning(
@@ -486,6 +500,51 @@ class ClaudeMdInjector:
             self._MAX_RECONCILE_ATTEMPTS,
         )
         return False
+
+    def _format_or_reuse(self, updated: str, original: str) -> str:
+        """Format ``updated``, unless its formatted form is already ``original``.
+
+        The formatter is a pure function, so the last run's (input, output)
+        pair is enough to know it would reproduce the file: the same input and
+        a file still equal to that output. Any other file content — a user
+        edit anywhere, not only inside the block — runs the formatter exactly
+        as before. Plan 00495 Task 2.4: the formatter is about 0.4 s of CPU on
+        a large CLAUDE.md, spent on every start.
+        """
+        if self._read_format_memory() == (_sha256(updated), _sha256(original)):
+            return original
+        return self._format_fail_safe(updated)
+
+    def _format_memory_path(self) -> Path | None:
+        """Where the last format's fingerprint lives: inside the git dir, or None.
+
+        The git dir is never tracked, needs no ``.gitignore`` entry in a client
+        project, and is per worktree. Outside a git repository there is nowhere
+        like that, so nothing is remembered and every run formats.
+        """
+        result = run_git(self._workspace_root, "rev-parse", "--absolute-git-dir")
+        if result.returncode != 0:
+            return None
+        return Path(result.stdout.strip()) / _FORMAT_MEMORY_FILENAME
+
+    def _read_format_memory(self) -> tuple[str, str] | None:
+        """The remembered ``(input_sha, output_sha)``, or None when absent/unreadable."""
+        path = self._format_memory_path()
+        if path is None or not path.is_file():
+            return None
+        lines = path.read_text(encoding="utf-8").split()
+        if len(lines) != _FORMAT_MEMORY_FIELDS:
+            return None
+        return lines[0], lines[1]
+
+    def _remember_format(self, formatted_input: str, formatted_output: str) -> None:
+        """Record that ``formatted_input`` formats to ``formatted_output``."""
+        path = self._format_memory_path()
+        if path is None:
+            return
+        path.write_text(
+            f"{_sha256(formatted_input)}\n{_sha256(formatted_output)}\n", encoding="utf-8"
+        )
 
     @staticmethod
     def _format_fail_safe(content: str) -> str:
