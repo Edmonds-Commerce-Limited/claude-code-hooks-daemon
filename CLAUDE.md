@@ -128,7 +128,7 @@ A `Write`/`Edit` that puts QA suppression directives into a source file is block
 
 - Python: `noqa` directives, `type: ignore` annotations
 - JavaScript/TypeScript: `eslint-disable` inline directives
-- Go: `nolint` directives (golangci-lint)
+- Go: `nolint` directives (golangci-lint, blocked even with a stated reason) and gosec `nosec` directives
 - PHP: `phpstan-ignore`, `psalm-suppress` annotations
 - Java/Kotlin: `@SuppressWarnings`, `@Suppress` annotations
 - C#: `pragma warning disable` directives
