@@ -95,7 +95,10 @@ failed.
 timeout, report that the removal was interrupted and may be partial, and name the recovery (`git worktree prune`,
 then `git branch -d`). Label a refusal or failure under `--reap` as such, never as `DRY-RUN`.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed at `e4c7b64b9`. The removal runs under the new `Timeout.GIT_WORKTREE_REMOVE` (300 s). `run_git`
+reports a timeout as return code `GIT_TIMED_OUT` (124) with the exception text in `stderr`, so `reap_worktree` now
+tests for that code and returns the interrupted-and-possibly-partial detail with the recovery. Under `--reap` the CLI
+labels an unremoved worktree `FAILED`; only a run without `--reap` says `DRY-RUN`.
 
 ### N462 — the combinatorial-growth performance test flakes under load and names a different handler each time
 
