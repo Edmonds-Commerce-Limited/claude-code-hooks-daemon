@@ -17,7 +17,9 @@ language server for the searched file type (Plan 00468 P5): Claude Code keeps
 the LSP tool inactive until a code intelligence plugin for the language is
 installed. The file type comes from the Grep ``glob``/``type``/``path`` or a
 grep/rg command's ``--include``/``-g``/``-t`` flags and file targets; when
-none names one, any enabled server counts.
+none names one and every target is a directory, a bounded survey of the files
+those directories hold decides (a YAML-only tree is not covered by a Python
+server); otherwise any enabled server counts.
 
 No-LSP modes (when no enabled plugin serves the searched file type):
     advisory (default): Allow, and advise installing a code intelligence plugin
@@ -26,10 +28,11 @@ No-LSP modes (when no enabled plugin serves the searched file type):
 """
 
 import logging
+import os
 import re
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, NamedTuple
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -49,6 +52,7 @@ from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.claude_config import session_config_dir
 from claude_code_hooks_daemon.utils.claude_plugins import resolve_enabled_plugins
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 logger = logging.getLogger(__name__)
@@ -107,6 +111,10 @@ _GLOB_OPTIONS: Final[frozenset[str]] = frozenset({"--include", "--glob", "-g"})
 _TYPE_OPTIONS: Final[frozenset[str]] = frozenset({"--type", "-t"})
 _REDIRECT_PREFIXES: Final[tuple[str, ...]] = (">", "<", "1>", "2>", "&>")
 
+#: Directory entries a search target's survey reads before it gives up and
+#: counts the search as covered by any enabled server.
+_DIRECTORY_SURVEY_LIMIT: int = 2000
+
 _CODE_INTELLIGENCE_ADVICE = (
     "Install a code intelligence plugin for the language (`/plugin`, Discover tab; "
     "https://code.claude.com/docs/en/discover-plugins#code-intelligence) and its "
@@ -141,13 +149,82 @@ def _grep_tool_suffixes(tool_input: Mapping[str, Any]) -> frozenset[str]:
     return frozenset(found)
 
 
-def _invocation_suffixes(invocation: str) -> frozenset[str]:
-    """File suffixes one grep/rg invocation's options and file targets name."""
+def _split_invocation(invocation: str) -> list[str]:
     try:
-        tokens = linear_shlex.split(invocation)
+        return linear_shlex.split(invocation)
     except ValueError as exc:
         logger.debug("lsp_enforcement: unquoted split of %r: %s", invocation, exc)
-        tokens = invocation.split()
+        return invocation.split()
+
+
+def _invocation_positionals(invocation: str) -> list[str]:
+    """The pattern and file targets of one grep/rg invocation, options removed."""
+    positionals: list[str] = []
+    skip_value = False
+    for token in _split_invocation(invocation)[1:]:
+        if skip_value:
+            skip_value = False
+        elif token.startswith(_REDIRECT_PREFIXES):
+            break
+        elif token in _GLOB_OPTIONS | _TYPE_OPTIONS:
+            skip_value = True
+        elif not token.startswith("-"):
+            positionals.append(token)
+    return positionals
+
+
+class _DirectorySurvey(NamedTuple):
+    """What a bounded walk of a search's directory targets found."""
+
+    decided: bool
+    suffixes: frozenset[str]
+
+
+_UNDECIDED: Final[_DirectorySurvey] = _DirectorySurvey(decided=False, suffixes=frozenset())
+
+
+def _survey_directory_suffixes(directory: Path, served: frozenset[str]) -> _DirectorySurvey:
+    """The file suffixes under ``directory``; undecided when the walk cannot tell.
+
+    Stops early with the first served suffix found (the search is covered), and
+    gives up at ``_DIRECTORY_SURVEY_LIMIT`` entries so a hook never walks a
+    large tree. Hidden directories are skipped, as rg skips them by default.
+    """
+    found: set[str] = set()
+    pending = [directory]
+    seen = 0
+    while pending:
+        try:
+            entries = list(os.scandir(pending.pop()))
+        except OSError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    "an unreadable directory leaves the survey undecided, which keeps the "
+                    "conservative answer: any enabled server covers the search"
+                ),
+            )
+            return _UNDECIDED
+        for entry in entries:
+            seen += 1
+            if seen > _DIRECTORY_SURVEY_LIMIT:
+                return _UNDECIDED
+            if entry.is_dir(follow_symlinks=False):
+                if not entry.name.startswith("."):
+                    pending.append(Path(entry.path))
+                continue
+            suffix = Path(entry.name).suffix.lower()
+            if suffix:
+                found.add(suffix)
+                if suffix in served:
+                    return _DirectorySurvey(decided=True, suffixes=frozenset(found))
+    return _DirectorySurvey(decided=True, suffixes=frozenset(found))
+
+
+def _invocation_suffixes(invocation: str) -> frozenset[str]:
+    """File suffixes one grep/rg invocation's options and file targets name."""
+    tokens = _split_invocation(invocation)
     found: set[str] = set()
     pending: str | None = None
     for token in tokens[1:]:
@@ -463,15 +540,64 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
             )
         return frozenset(found)
 
+    def _searched_directories(self, hook_input: dict[str, Any]) -> list[Path]:
+        """The search's targets, resolved against the hook cwd, when ALL are directories.
+
+        Empty when any target is not an existing directory (or there is none),
+        because then the directories alone cannot say what is searched.
+        """
+        if hook_input.get(HookInputField.TOOL_NAME) == ToolName.GREP:
+            tool_input = hook_input.get(HookInputField.TOOL_INPUT)
+            targets = (
+                [
+                    tool_input[key]
+                    for key in GREP_TARGET_FIELDS
+                    if isinstance(tool_input.get(key), str)
+                ]
+                if isinstance(tool_input, dict)
+                else []
+            )
+        else:
+            command = get_bash_command(hook_input) or ""
+            targets = []
+            for match in _BASH_GREP_EXTRACT.finditer(command):
+                invocation = command[match.start() :]
+                terminator = _SEGMENT_TERMINATOR.search(invocation)
+                # The first positional is the search pattern, not a target.
+                targets += _invocation_positionals(
+                    invocation[: terminator.start()] if terminator else invocation
+                )[1:]
+        cwd = hook_input.get(HookInputField.CWD)
+        base = Path(cwd) if isinstance(cwd, str) and cwd else self._project_root()
+        directories = [base / target for target in targets]
+        # An unreadable target cannot be surveyed, so it counts as not a directory.
+        if not directories or not all(
+            path_is_dir(directory, unreadable_means=False) for directory in directories
+        ):
+            return []
+        return directories
+
     def _lsp_coverage(self, hook_input: dict[str, Any]) -> tuple[bool, frozenset[str]]:
         """Whether an enabled server covers this search, and the suffixes it names.
 
-        A search that names no file type is covered by any enabled server.
+        A search that names no file type is judged by the files its directory
+        targets hold, when a bounded survey can tell; otherwise any enabled
+        server covers it.
         """
         searched = self._searched_suffixes(hook_input)
         served = self._served_suffixes(self._project_root(), hook_input)
-        covered = bool(searched & served) if searched else bool(served)
-        return covered, searched
+        if searched:
+            return bool(searched & served), searched
+        directories = self._searched_directories(hook_input) if served else []
+        if not directories:
+            return bool(served), searched
+        surveyed: set[str] = set()
+        for directory in directories:
+            survey = _survey_directory_suffixes(directory, served)
+            if not survey.decided:
+                return True, searched
+            surveyed |= survey.suffixes
+        return bool(surveyed & served), frozenset(surveyed)
 
     def _get_block_count(self, session_id: str | None = None) -> int:
         """Get number of previous blocks by this handler in ``session_id``.
@@ -740,7 +866,8 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
             "Default mode (`block_once`): the first symbol-lookup grep in a session "
             "is denied with guidance; subsequent retries are allowed.\n\n"
             "It enforces only where an enabled Claude Code plugin provides a language "
-            "server for the searched file type (from the glob, type or path). "
+            "server for the searched file type (from the glob, type or path; for a "
+            "bare directory target, from the files the directory holds). "
             "Elsewhere the default `no_lsp_mode: advisory` only suggests installing "
             "a code intelligence plugin."
         )

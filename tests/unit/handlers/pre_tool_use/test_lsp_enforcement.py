@@ -989,6 +989,78 @@ class TestLspCoverageFromPlugins:
         result = self._handle({"tool_name": "Grep", "tool_input": {"pattern": "class MyHandler"}})
         assert result.decision == Decision.DENY
 
+    def test_a_directory_holding_no_served_file_is_advised_not_denied(self, tmp_path: Path) -> None:
+        """An Ansible variable searched in a YAML-only tree, with only a Python server.
+
+        The dogfood report: ``rg -n "agent_bus_lxc_bridge" playbooks`` was denied
+        and pointed at an LSP that cannot read YAML.
+        """
+        playbooks = tmp_path / "playbooks"
+        (playbooks / "roles" / "bridge").mkdir(parents=True)
+        (playbooks / "site.yml").write_text("x: 1\n")
+        (playbooks / "roles" / "bridge" / "main.yaml").write_text("y: 2\n")
+        result = self._handle(
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": f'rg -n "agent_bus_lxc_bridge" {playbooks}'},
+            }
+        )
+        assert result.decision == Decision.ALLOW
+        assert "LSP tool available" not in "\n".join(result.context)
+
+    def test_a_relative_directory_is_resolved_against_the_hook_cwd(self, tmp_path: Path) -> None:
+        (tmp_path / "playbooks").mkdir()
+        (tmp_path / "playbooks" / "site.yml").write_text("x: 1\n")
+        result = self._handle(
+            {
+                "tool_name": "Bash",
+                "cwd": str(tmp_path),
+                "tool_input": {"command": 'rg -n "agent_bus_lxc_bridge" playbooks'},
+            }
+        )
+        assert result.decision == Decision.ALLOW
+
+    def test_a_directory_holding_a_served_file_is_enforced(self, tmp_path: Path) -> None:
+        src = tmp_path / "src"
+        (src / "pkg").mkdir(parents=True)
+        (src / "README.md").write_text("x\n")
+        (src / "pkg" / "mod.py").write_text("x = 1\n")
+        result = self._handle(
+            {"tool_name": "Bash", "tool_input": {"command": f'rg -n "class MyHandler" {src}'}}
+        )
+        assert result.decision == Decision.DENY
+
+    def test_a_grep_tool_directory_path_holding_no_served_file_is_advised(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "site.yml").write_text("x: 1\n")
+        result = self._handle(
+            {
+                "tool_name": "Grep",
+                "tool_input": {"pattern": "agent_bus_lxc_bridge", "path": str(tmp_path)},
+            }
+        )
+        assert result.decision == Decision.ALLOW
+
+    def test_a_directory_too_large_to_survey_counts_as_covered(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An undecided survey keeps the conservative answer: any server covers it."""
+        monkeypatch.setattr(lsp_enforcement, "_DIRECTORY_SURVEY_LIMIT", 3)
+        for index in range(5):
+            (tmp_path / f"f{index}.yml").write_text("x: 1\n")
+        result = self._handle(
+            {"tool_name": "Bash", "tool_input": {"command": f'rg -n "class MyHandler" {tmp_path}'}}
+        )
+        assert result.decision == Decision.DENY
+
+    def test_a_missing_directory_target_counts_as_covered(self, tmp_path: Path) -> None:
+        missing = tmp_path / "nope"
+        result = self._handle(
+            {"tool_name": "Bash", "tool_input": {"command": f'rg -n "class MyHandler" {missing}'}}
+        )
+        assert result.decision == Decision.DENY
+
     def test_no_enabled_server_at_all_is_advised_by_default(
         self, lsp_servers: list[PluginLspServer]
     ) -> None:
