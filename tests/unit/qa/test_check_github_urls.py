@@ -160,6 +160,17 @@ class TestWhereItLooks:
 
         assert checker.find_violations(tmp_path) == []
 
+    def test_the_coverage_html_report_is_skipped(self, tmp_path: Path) -> None:
+        """`htmlcov/` is pytest-cov's gitignored output: its PNG icons are
+        undecodable, so reading them failed the check on every machine that had
+        run coverage locally, with no project file at fault."""
+        (tmp_path / "htmlcov").mkdir()
+        (tmp_path / "htmlcov" / "favicon.png").write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe")
+        unreadable: list[str] = []
+
+        assert checker.find_violations(tmp_path, unreadable=unreadable) == []
+        assert unreadable == []
+
     def test_a_binary_file_does_not_stop_the_sweep(self, tmp_path: Path) -> None:
         """One unreadable file must not silently truncate the whole check."""
         (tmp_path / "docs").mkdir(parents=True)

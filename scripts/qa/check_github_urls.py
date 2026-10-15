@@ -78,6 +78,7 @@ _SKIP_DIRS: Final[frozenset[str]] = frozenset(
         ".ruff_cache",
         "__pycache__",
         "ccy",
+        "htmlcov",
         "node_modules",
         "untracked",
         "venv",

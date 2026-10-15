@@ -28,6 +28,10 @@ scans it anyway and reports an undecodable PNG as a violation, which then marks 
 CI never has `htmlcov/`, so only local runs go red. Fix direction: walk tracked files (or honour `.gitignore`), and
 skip binary files rather than reporting them.
 
+**Status**: fixed narrowly. `htmlcov` joined the checker's skip list beside the other gitignored runtime directories,
+pinned by `test_the_coverage_html_report_is_skipped`. Honouring `.gitignore` generally was not done: the checker
+reports undecodable files on purpose so a dropped swathe of the tree cannot pass silently.
+
 ## A quoted heredoc piped to `pingbus say` is scanned by pipe_blocker
 
 `cat <<'EOF' | pingbus say --to ...` with a body mentioning `go test ... | tail` was denied: `pingbus` is not on the
