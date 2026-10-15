@@ -281,7 +281,7 @@ A `Write`/`Edit` of code that silently swallows errors is blocked. All errors mu
 - Python: bare `except` clauses with an empty body, catching and discarding all exceptions, and `suppress(...)` naming `Exception` or `BaseException` (also in a tuple); a narrow `suppress(OSError)` is allowed
 - Shell: redirecting stderr to `/dev/null` to silence failures, `|| true` to suppress non-zero exit codes
 - JavaScript/TypeScript: empty `catch` blocks that swallow exceptions
-- Go: `if err != nil {}` (empty error check), and a blank in the LAST tuple position — `result, _ := riskyCall()` — which is where Go returns the error. The idiomatic `_, err :=` CAPTURES it and is not blocked; a bare `_ = err` is not matched either.
+- Go: `if err != nil {}` (empty error check, also when the body is only a comment), and a blank in the LAST position of an assignment from a FUNCTION CALL — `n, _ := strconv.Atoi(s)` — which is where Go returns the error. Not blocked: `_, err :=`, comma-ok forms (`v, _ := m[k]`, `x, _ := y.(T)`), `for i, _ := range`, the explicit `_, _ = f()` discard, and anything inside a comment or string literal.
 
 **Required action**: Handle errors explicitly — log them, return them to the caller, or propagate them. Silent error suppression masks bugs and makes debugging impossible.
 
