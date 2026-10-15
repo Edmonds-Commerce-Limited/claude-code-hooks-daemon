@@ -16,6 +16,7 @@ import pytest
 
 from claude_code_hooks_daemon.core.worktree_reaping import RunGit
 from claude_code_hooks_daemon.daemon.cli import cmd_worktree_reap
+from claude_code_hooks_daemon.utils.git_repo import GIT_TIMED_OUT
 
 _LISTING = """worktree /repo
 HEAD aaa
@@ -157,6 +158,47 @@ class TestActingRequiresTheFlag:
     def test_its_branch_goes_too(self, git: _FakeGit, capsys: pytest.CaptureFixture[str]) -> None:
         _reap(_args(reap=True), run_fn=git)
         assert any(call[0] == "branch" and "-d" in call for call in git.mutations)
+
+
+class _RefusingGit(_FakeGit):
+    """A repo whose `worktree remove` always fails with the given result."""
+
+    def __init__(self, returncode: int, stderr: str) -> None:
+        super().__init__()
+        self._failure = subprocess.CompletedProcess([], returncode, "", stderr)
+
+    def __call__(self, cwd: Path, *args: str, **_: object) -> subprocess.CompletedProcess[str]:
+        if args[0] == "worktree" and args[1] == "remove":
+            self.calls.append(args)
+            return self._failure
+        return super().__call__(cwd, *args)
+
+
+class TestAFailedRemovalIsNotLabelledADryRun:
+    """N464: `--reap` ran, git failed, and the line still read DRY-RUN."""
+
+    def test_a_git_refusal_under_reap_is_not_a_dry_run(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _reap(_args(reap=True), run_fn=_RefusingGit(1, "contains modified files"))
+        out = capsys.readouterr().out
+        assert "contains modified files" in out
+        assert "DRY-RUN" not in out
+        assert "FAILED" in out
+
+    def test_a_timed_out_removal_under_reap_is_not_a_dry_run(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _reap(_args(reap=True), run_fn=_RefusingGit(GIT_TIMED_OUT, "timed out after 300 seconds"))
+        out = capsys.readouterr().out
+        assert "DRY-RUN" not in out
+        assert "interrupted" in out
+
+    def test_a_real_dry_run_is_still_labelled_as_one(
+        self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _reap(_args(), run_fn=git)
+        assert "DRY-RUN" in capsys.readouterr().out
 
 
 class TestTheWorktreeIsAddressedWhereGitSaidItIs:

@@ -8744,7 +8744,10 @@ def cmd_worktree_reap(
         # `.claude/worktrees/` unconditionally, which named a path that does
         # not exist for every worktree under the other sanctioned root.
         outcome = reap_worktree(repo_root, state, dry_run=not reap, **collect_kwargs)
-        print(f"{'REAPED ' if outcome.removed else 'DRY-RUN'} {outcome.detail}")
+        # Under `--reap` an unremoved worktree means git refused or failed, which
+        # is not a dry run: nothing about the run was hypothetical.
+        label = "REAPED " if outcome.removed else ("FAILED " if reap else "DRY-RUN")
+        print(f"{label} {outcome.detail}")
 
     unmerged = 0
     for branch in orphans:
