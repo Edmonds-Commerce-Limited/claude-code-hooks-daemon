@@ -95,8 +95,9 @@ Evidence already seen in this session (2026-10-06), not yet explained:
 - [ ] ⬜ **Task 2.2**: Parse the YAML config once per start, with the C loader (`CSafeLoader`) where available. About
   0.4 s CPU saved.
 - [ ] ⬜ **Task 2.3**: Run handler registry discovery once per start. About 0.4 s CPU saved.
-- [ ] ⬜ **Task 2.4**: Skip the CLAUDE.md markdown formatting when the generated block is unchanged. About 0.4 s CPU
-  saved.
+- [x] ✅ **Task 2.4**: Skip the CLAUDE.md markdown formatting when the generated block is unchanged. About 0.4 s CPU
+  saved. Done (9456b40fe): `inject()` CPU on a copy of this repository's 114 KB CLAUDE.md, steady state, median of 5,
+  before -> after: 0.19-0.21 s -> 0.006 s (three interleaved rounds; host loaded).
 - [ ] ⬜ **Task 2.5**: Bind the socket before the non-essential start-up work, so the first request is answered sooner.
 - [ ] ⬜ **Task 2.6**: Add a result cache to `docs-qa-sweep` and `plan-qa-sweep`, keyed by an input fingerprint, and run them off the
   blocking chain. About 6 CPU-s saved on this repository, and no handler dropped for the budget.
