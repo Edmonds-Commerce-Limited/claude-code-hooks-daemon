@@ -22,7 +22,7 @@ Tests added: `TestRemovingATreeIsNotAMetadataQuery` (5) in `tests/unit/core/test
 - `constants/timeout.py`: `Timeout.GIT_WORKTREE_REMOVE = 300`, with a comment saying why it is not `GIT_CONTEXT`. The existing `GIT_WORKTREE = 30` is the WorktreeCreate/Remove hook budget and is tied into the chain-deadline tables, so I did not reuse or raise it.
 - `core/worktree_reaping.py`: the removal passes `timeout=Timeout.GIT_WORKTREE_REMOVE`; a `GIT_TIMED_OUT` result returns `removed=False` with "interrupted ... may be partial ... Recover with git worktree prune, then git branch -d <branch>" (no branch clause for a detached worktree) and does not touch the branch. The docstring's never `--force`, never `-D` contract is intact, extended with a paragraph on the timeout.
 - `daemon/cli.py`: under `--reap`, an unremoved worktree prints `FAILED `; without it, `DRY-RUN`.
-- Release note `CLAUDE/UPGRADES/UNRELEASED/release-notes/061-worktree-reap-gives-the-removal-time-to-finish.md`.
+- Release note `CLAUDE/UPGRADES/UNRELEASED/release-notes/061-worktree-reap-gives-the-removal-time-to-finish.md` (renumbered to 065 at merge: 061–064 were taken on `main`).
 - N464 marked fixed in `NIGGLES.md` and `STATUS-INDEX.md`.
 
 ## QA
