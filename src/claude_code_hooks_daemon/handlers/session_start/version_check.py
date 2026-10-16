@@ -21,9 +21,8 @@ from claude_code_hooks_daemon.core import AdvisoryResult, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.install.background_sync import (
-    BackgroundSyncError,
     SyncStatus,
-    launch_background_sync,
+    log_path,
     read_sync_record,
 )
 from claude_code_hooks_daemon.install.expected_version import read_expected_version
@@ -338,10 +337,11 @@ class VersionCheckHandler(SessionStartHandlerBase):
     def _drift_context(self, expected: str) -> list[str]:
         """The notice for a running daemon that is not the version the project expects.
 
-        For an UPGRADE in a project carrying the tracked ``provision.sh`` this is
-        also where the sync starts, in the background (Plan 00477 Task 5.2), and
-        where its outcome is reported at every later session start. A downgrade
-        is never synced automatically: the notice names what a human runs.
+        For an UPGRADE in a project carrying the tracked ``provision.sh``, the
+        session-start forwarder has started the sync in the background (Plan
+        00477 Task 5.2); this reports it, and its outcome at every later session
+        start. A downgrade is never synced automatically: the notice names what a
+        human runs.
         """
         is_upgrade = self._compare_versions(__version__, expected)
         direction = "UPGRADE" if is_upgrade else "DOWNGRADE"
@@ -364,7 +364,7 @@ class VersionCheckHandler(SessionStartHandlerBase):
         provision_script = ProjectContext.config_dir() / _PROVISION_SCRIPT_NAME
         background = is_upgrade and provision_script.is_file()
         if background:
-            lines += self._background_sync_lines(expected, provision_script)
+            lines += self._background_sync_lines(expected)
         lines += [
             "",
             "A restart cannot fix this: it runs the same installed version.",
@@ -388,33 +388,23 @@ class VersionCheckHandler(SessionStartHandlerBase):
         return lines
 
     @staticmethod
-    def _background_sync_lines(expected: str, provision_script: Path) -> list[str]:
-        """Start the background sync to ``expected``, or report the one already tried.
+    def _background_sync_lines(expected: str) -> list[str]:
+        """Report the background sync to ``expected``: started, under way, or its outcome.
 
-        The sync is started once per target version: the state file
-        ``provision.sh --background`` writes is the marker, read back here at
-        every session start until the running version matches. Starting it costs
-        this hook only the spawn; the sync itself runs detached.
+        The tracked session-start forwarder starts ``provision.sh --background``
+        detached, in shell, at every session start; this handler starts nothing.
+        The state file that sync writes is read back here at every session start
+        until the running version matches.
         """
         untracked = ProjectContext.daemon_untracked_dir()
         record = read_sync_record(untracked, expected)
         running = __version__
         if record is None:
-            try:
-                log = launch_background_sync(
-                    provision_script, ProjectContext.project_root(), untracked, expected
-                )
-            except BackgroundSyncError as exc:
-                logger.error("Background sync to v%s could not start: %s", expected, exc)
-                return [
-                    "",
-                    f"⛔ BACKGROUND SYNC TO v{expected} COULD NOT START: {exc}.",
-                    f"v{running} is still running. Sync by hand with the command below.",
-                ]
             return [
                 "",
-                f"🔄 BACKGROUND SYNC STARTED: provision is bringing the daemon to v{expected} "
-                f"outside this hook (log: {log}).",
+                f"🔄 BACKGROUND SYNC STARTED: this session start launched provision to bring "
+                f"the daemon to v{expected}, outside the hook "
+                f"(log: {log_path(untracked, expected)}).",
                 f"v{running} keeps serving until the new daemon is ready; the sync then "
                 f"restarts it at v{expected}. Nothing to do now: if the sync fails, every "
                 "session start says so, with the command to run.",

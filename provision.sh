@@ -36,15 +36,17 @@
 # already at the version is left alone. A failure after the checkout puts the
 # previous commit and its venv back and restarts the old daemon.
 #
-# --background is that sync, started detached by the SessionStart version check
-# when a pulled daemon.expected_version names a NEWER version than the running
-# daemon (Plan 00477 Task 5.2). It only ever syncs an existing clone forward:
-# never a fresh checkout, never a downgrade. It takes a lock, so two syncs never
-# overlap, and records each target version's outcome in
-# .claude/hooks-daemon/untracked/background-sync/v<version>.state; that file is
-# also the marker that the version was attempted, so it is attempted once. The
-# version check reads it back, and a failure is reported at every session start
-# with the command to run by hand. The running daemon serves until the restart.
+# --background is that sync, started detached by the tracked session-start
+# forwarder at every session start (Plan 00477 Task 5.2); it does nothing unless
+# a pulled daemon.expected_version names a NEWER version than the clone. It only
+# ever syncs an existing clone forward: never a fresh checkout, never a
+# downgrade. It waits for the old daemon to be running, takes a lock so two
+# syncs never overlap, and records each target version's outcome in
+# .claude/hooks-daemon/untracked/background-sync/v<version>.state (its output
+# goes to v<version>.log beside it); that file is also the marker that the
+# version was attempted, so it is attempted once. The SessionStart version check
+# reads it back, and a failure is reported at every session start with the
+# command to run by hand. The running daemon serves until the restart.
 #
 # What it never does:
 #   - write a tracked file (everything it creates is under the gitignored
@@ -513,6 +515,26 @@ readonly SYNC_STATE_DIR_NAME="background-sync"
 SYNC_STATE_DIR=""
 SYNC_STATE_FILE=""
 SYNC_LOCK_DIR=""
+# The session-start forwarder starts the sync while that same hook may still be
+# starting the old daemon. The sync waits this long for it, so it never moves a
+# clone a daemon is starting from, and the old one serves until the restart.
+readonly BACKGROUND_DAEMON_WAIT_SECONDS=30
+
+# Is a daemon running from the clone? Waits up to BACKGROUND_DAEMON_WAIT_SECONDS.
+_provision_background_daemon_up() {
+    local deadline=$((SECONDS + BACKGROUND_DAEMON_WAIT_SECONDS)) running
+    while true; do
+        running=0
+        is_daemon_running || running=$?
+        if ((running == 0)); then
+            return 0
+        fi
+        if ((SECONDS >= deadline)); then
+            return 1
+        fi
+        sleep 1
+    done
+}
 
 # Record the background sync's state: status, then a one-line detail.
 _provision_background_record() {
@@ -577,6 +599,10 @@ _provision_background_claim() {
         _provision_fail "a background sync never downgrades: $TAG is older than the installed v$PRESENT_VERSION." \
             "Confirm the downgrade is intended, then run by hand: bash .claude/provision.sh"
     fi
+    if ! _provision_background_daemon_up; then
+        _provision_say "No daemon is running from the clone after ${BACKGROUND_DAEMON_WAIT_SECONDS}s, so there is none to keep serving during a sync; nothing was changed, and a later session start tries again."
+        exit 0
+    fi
     SYNC_STATE_DIR="$DAEMON_DIR/untracked/$SYNC_STATE_DIR_NAME"
     SYNC_STATE_FILE="$SYNC_STATE_DIR/v$VERSION.state"
     SYNC_LOCK_DIR="$SYNC_STATE_DIR/lock.d"
@@ -589,6 +615,8 @@ _provision_background_claim() {
     fi
     _provision_background_record running "syncing from v$PRESENT_VERSION to $TAG"
     trap '_provision_background_finish $?' EXIT
+    _provision_say "Syncing to $TAG in the background; the output is in $SYNC_STATE_DIR/v$VERSION.log"
+    exec >> "$SYNC_STATE_DIR/v$VERSION.log" 2>&1
 }
 
 # ------------------------------------------------------------------

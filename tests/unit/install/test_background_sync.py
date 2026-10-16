@@ -1,18 +1,15 @@
 """Plan 00477 Task 5.2 - a pulled version change is synced in the background.
 
-``version_check`` notices at SessionStart that the running daemon is not the
-version ``daemon.expected_version`` names. It must not do the sync inside the
-hook's time budget, so it starts ``bash .claude/provision.sh --background``
-DETACHED and returns. ``provision.sh`` records how far that sync got in a state
-file per target version under the daemon's untracked directory; this module is
-the one place that names those files, reads them back and starts the process.
+The tracked session-start forwarder starts ``bash .claude/provision.sh
+--background`` detached, and ``provision.sh`` records how far that sync got in a
+state file per target version under the daemon's untracked directory.
+``version_check`` reads it back at every session start; this module is the one
+place in Python that names those files and reads them.
 """
 
 from __future__ import annotations
 
 import os
-import stat
-import time
 from pathlib import Path
 
 import pytest
@@ -20,9 +17,7 @@ import pytest
 from claude_code_hooks_daemon.install import background_sync
 from claude_code_hooks_daemon.install.background_sync import (
     BACKGROUND_FLAG,
-    BackgroundSyncError,
     SyncStatus,
-    launch_background_sync,
     log_path,
     read_sync_record,
     state_path,
@@ -50,6 +45,11 @@ class TestPaths:
 
         assert f'SYNC_STATE_DIR_NAME="{background_sync.SYNC_STATE_DIR_NAME}"' in script
         assert BACKGROUND_FLAG in script
+
+    def test_the_session_start_forwarder_starts_the_same_flag(self) -> None:
+        forwarder = (REPO_ROOT / ".claude" / "hooks" / "session-start").read_text()
+
+        assert f'provision.sh" {BACKGROUND_FLAG}' in forwarder
 
 
 class TestReadSyncRecord:
@@ -132,83 +132,10 @@ def _a_dead_pid() -> int:
     return int(Path("/proc/sys/kernel/pid_max").read_text()) + 1
 
 
-def _script(tmp_path: Path, body: str) -> Path:
-    script = tmp_path / "provision.sh"
-    script.write_text(f"#!/bin/bash\nset -euo pipefail\n{body}\n")
-    script.chmod(script.stat().st_mode | stat.S_IXUSR)
-    return script
+class TestNoProcessIsStartedFromPython:
+    def test_the_module_does_not_import_subprocess(self) -> None:
+        """The start is the forwarder's, in shell; Python only reads the outcome."""
+        source = Path(background_sync.__file__).read_text()
 
-
-def _wait_for(path: Path, timeout: float = 10.0) -> str:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if path.exists() and path.read_text().endswith("\n"):
-            return path.read_text()
-        time.sleep(0.05)
-    raise AssertionError(f"{path} was not written within {timeout}s")
-
-
-class TestLaunchBackgroundSync:
-    def test_runs_the_script_with_the_background_flag_from_the_project_root(
-        self, tmp_path: Path
-    ) -> None:
-        project = tmp_path / "project"
-        project.mkdir()
-        out = tmp_path / "ran.txt"
-        script = _script(tmp_path, f'printf "%s %s\\n" "$PWD" "$*" > "{out}"')
-        untracked = tmp_path / "untracked"
-
-        launch_background_sync(script, project, untracked, _VERSION)
-
-        assert _wait_for(out) == f"{project} {BACKGROUND_FLAG}\n"
-
-    def test_returns_before_the_sync_finishes(self, tmp_path: Path) -> None:
-        done = tmp_path / "done.txt"
-        script = _script(tmp_path, f'sleep 3\necho done > "{done}"')
-
-        started = time.monotonic()
-        launch_background_sync(script, tmp_path, tmp_path / "untracked", _VERSION)
-
-        assert time.monotonic() - started < 2.0
-        assert not done.exists()
-
-    def test_output_goes_to_the_target_versions_log(self, tmp_path: Path) -> None:
-        untracked = tmp_path / "untracked"
-        script = _script(tmp_path, "echo to-stdout\necho to-stderr >&2")
-
-        returned = launch_background_sync(script, tmp_path, untracked, _VERSION)
-
-        assert returned == log_path(untracked, _VERSION)
-        text = _wait_for_lines(returned, 2)
-        assert "to-stdout" in text and "to-stderr" in text
-
-    def test_the_sync_runs_in_its_own_session(self, tmp_path: Path) -> None:
-        """A restart stops the daemon that launched it; the sync must outlive that."""
-        out = tmp_path / "sid.txt"
-        script = _script(tmp_path, f'ps -o sid= -p $$ > "{out}"')
-
-        launch_background_sync(script, tmp_path, tmp_path / "untracked", _VERSION)
-
-        assert int(_wait_for(out).strip()) != os.getsid(0)
-
-    def test_a_missing_script_is_reported_not_swallowed(self, tmp_path: Path) -> None:
-        with pytest.raises(BackgroundSyncError, match="provision.sh"):
-            launch_background_sync(
-                tmp_path / "provision.sh", tmp_path, tmp_path / "untracked", _VERSION
-            )
-
-    def test_no_bash_is_reported(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        script = _script(tmp_path, "true")
-        monkeypatch.setattr(background_sync.shutil, "which", lambda _name: None)
-
-        with pytest.raises(BackgroundSyncError, match="bash"):
-            launch_background_sync(script, tmp_path, tmp_path / "untracked", _VERSION)
-
-
-def _wait_for_lines(path: Path, lines: int, timeout: float = 10.0) -> str:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if path.exists() and len(path.read_text().splitlines()) >= lines:
-            return path.read_text()
-        time.sleep(0.05)
-    raise AssertionError(f"{path} did not reach {lines} lines within {timeout}s")
+        assert "import subprocess" not in source
+        assert not hasattr(background_sync, "launch_background_sync")

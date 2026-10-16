@@ -63,15 +63,18 @@ A sync writes no tracked file, runs no config migration and regenerates no docs.
 
 ## In the background, after a pull
 
-You usually do not run the sync yourself. When a session starts with the running
-daemon OLDER than `daemon.expected_version`, the SessionStart version check
-starts `bash .claude/provision.sh --background` detached and says so. The steps
-are the ones above. The running daemon keeps serving until the sync restarts it
-at the new version. The output goes to
+You usually do not run the sync yourself. Every session start, the tracked
+session-start hook starts `bash .claude/provision.sh --background` detached. It
+does nothing unless the clone is OLDER than `daemon.expected_version`; then it
+runs the steps above, and the SessionStart version check says so. The sync waits
+for the running daemon, which keeps serving until the sync restarts it at the
+new version. The output goes to
 `.claude/hooks-daemon/untracked/background-sync/v<version>.log`.
 
 - It runs at most once per target version: the outcome is recorded in
   `v<version>.state` beside the log, and a lock stops two syncs overlapping.
+- With no daemon running from the clone it changes nothing and claims nothing,
+  so a later session start tries again.
 - It never downgrades and never provisions a fresh checkout. Both stay a
   deliberate run of the command above.
 - A failure, or a stop for the reading list, leaves the previous version in

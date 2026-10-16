@@ -7,7 +7,7 @@
 
 ## Why
 
-Plan 00477. An upgraded project gains two things that only work once they are COMMITTED. One is the `daemon.expected_version` key in `.claude/hooks-daemon.yaml`, which the upgrade writes. The other is the tracked `.claude/provision.sh`, which the upgrade deploys. A fresh clone uses them to build exactly this daemon version (`bash .claude/provision.sh`). Another checkout that pulls the commit uses them to sync its gitignored daemon clone to it. From this release, an UPGRADE pulled into another checkout is synced in the background at that checkout's next session start, with no manual step, but only once these two files are in the commit it pulls.
+Plan 00477. An upgraded project gains two things that only work once they are COMMITTED. One is the `daemon.expected_version` key in `.claude/hooks-daemon.yaml`, which the upgrade writes. The other is the tracked `.claude/provision.sh`, which the upgrade deploys. A fresh clone uses them to build exactly this daemon version (`bash .claude/provision.sh`). Another checkout that pulls the commit uses them to sync its gitignored daemon clone to it. From this release, an UPGRADE pulled into another checkout is synced in the background at that checkout's next session start, with no manual step. The sync is started by the tracked `.claude/hooks/session-start` forwarder, which the upgrade regenerates. It works only once these files are in the commit the other checkout pulls, and the upgrade commit normally carries the forwarder already.
 
 ## How to detect if this applies to you
 

@@ -13,13 +13,13 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.handlers.session_start.version_check import VersionCheckHandler
-from claude_code_hooks_daemon.install.background_sync import BackgroundSyncError, state_path
+from claude_code_hooks_daemon.install.background_sync import state_path
 from claude_code_hooks_daemon.install.install_stamp import InstallStamp
 
 _MODULE = "claude_code_hooks_daemon.handlers.session_start.version_check"
@@ -67,13 +67,11 @@ def _patched(
     *,
     self_install: bool = False,
     stamp: InstallStamp | None = None,
-    launcher: MagicMock | None = None,
 ) -> Any:
     """Patch everything the drift check reads: config path, install mode, version, stamp.
 
     The project's ``.claude`` directory is the config's own, its root the one
     above, and the daemon's untracked directory ``untracked`` beside the config.
-    The background sync launcher is always replaced: no test here starts a process.
     """
     from contextlib import ExitStack
 
@@ -94,11 +92,6 @@ def _patched(
     )
     stack.enter_context(patch(f"{_MODULE}.__version__", _RUNNING))
     stack.enter_context(patch(f"{_MODULE}.read_install_stamp", return_value=stamp))
-    stack.enter_context(
-        patch(
-            f"{_MODULE}.launch_background_sync", launcher if launcher is not None else MagicMock()
-        )
-    )
     return stack
 
 
@@ -166,12 +159,11 @@ class TestAnUpgradeIsNamed:
     ) -> None:
         """A project that predates the tracked provision.sh has nothing to start."""
         config = _config(tmp_path, '  expected_version: "3.68.0"\n')
-        launcher = MagicMock()
-        with _patched(config, launcher=launcher):
+        with _patched(config):
             text = _text(handler.handle(new_session_input)).lower()
 
-        launcher.assert_not_called()
         assert "nothing has been changed" in text
+        assert "background sync" not in text
 
 
 class TestADowngradeIsNamedAsOne:
@@ -202,12 +194,11 @@ class TestADowngradeIsNamedAsOne:
     ) -> None:
         config = _config(tmp_path, '  expected_version: "3.50.0"\n')
         _provision_sh(config)
-        launcher = MagicMock()
-        with _patched(config, launcher=launcher):
+        with _patched(config):
             text = _text(handler.handle(new_session_input)).lower()
 
-        launcher.assert_not_called()
         assert "nothing has been changed" in text
+        assert "background sync" not in text
 
 
 class TestSilentWhenNothingDrifted:
@@ -252,21 +243,19 @@ class TestSilentWhenNothingDrifted:
 
         assert result.context == []
 
-    def test_the_daemons_own_repository_never_reports_drift_or_syncs(
+    def test_the_daemons_own_repository_never_reports_drift(
         self, handler: VersionCheckHandler, new_session_input: dict[str, Any], tmp_path: Path
     ) -> None:
         config = _config(tmp_path, '  expected_version: "3.68.0"\n')
         _provision_sh(config)
-        launcher = MagicMock()
         with (
-            _patched(config, self_install=True, launcher=launcher),
+            _patched(config, self_install=True),
             patch.object(handler, "_get_latest_version", return_value=_RUNNING),
             patch.object(handler, "_get_cache_file", return_value=tmp_path / "cache.json"),
         ):
             result = handler.handle(new_session_input)
 
         assert result.context == []
-        launcher.assert_not_called()
 
     def test_a_project_context_that_is_not_ready_is_silent(
         self, handler: VersionCheckHandler, new_session_input: dict[str, Any], tmp_path: Path
@@ -347,17 +336,6 @@ class TestResumedSessions:
         with _patched(config):
             assert handler.matches(resume_session_input) is False
 
-    def test_matching_a_drifted_resume_starts_nothing(
-        self, handler: VersionCheckHandler, resume_session_input: dict[str, Any], tmp_path: Path
-    ) -> None:
-        config = _config(tmp_path, '  expected_version: "3.68.0"\n')
-        _provision_sh(config)
-        launcher = MagicMock()
-        with _patched(config, launcher=launcher):
-            assert handler.matches(resume_session_input) is True
-
-        launcher.assert_not_called()
-
 
 _EXPECTED = "3.68.0"
 
@@ -370,43 +348,34 @@ def upgrade_config(tmp_path: Path) -> Path:
     return config
 
 
-class TestAPulledUpgradeIsSyncedInTheBackground:
-    """Plan 00477 Task 5.2: the sync starts here, detached, once per target version."""
+class TestAPulledUpgradeIsReportedAsSyncingInTheBackground:
+    """Plan 00477 Task 5.2: the session-start forwarder starts the sync; this reports it."""
 
-    def test_the_first_session_starts_the_sync_and_says_so(
+    def test_the_first_session_says_the_sync_has_been_started(
         self,
         handler: VersionCheckHandler,
         new_session_input: dict[str, Any],
         upgrade_config: Path,
     ) -> None:
         log = upgrade_config.parent / "untracked" / "background-sync" / "v3.68.0.log"
-        launcher = MagicMock(return_value=log)
-        with _patched(upgrade_config, launcher=launcher):
+        with _patched(upgrade_config):
             text = _text(handler.handle(new_session_input))
 
-        launcher.assert_called_once_with(
-            upgrade_config.parent / "provision.sh",
-            upgrade_config.parent.parent,
-            upgrade_config.parent / "untracked",
-            _EXPECTED,
-        )
         assert "BACKGROUND SYNC STARTED" in text
         assert str(log) in text
         assert f"v{_RUNNING} keeps serving" in text
         assert "nothing has been changed" not in text.lower()
 
-    def test_a_sync_under_way_is_not_started_again(
+    def test_a_sync_under_way_says_so(
         self,
         handler: VersionCheckHandler,
         new_session_input: dict[str, Any],
         upgrade_config: Path,
     ) -> None:
         _record(upgrade_config, _EXPECTED, f"status=running\npid={os.getpid()}\n")
-        launcher = MagicMock()
-        with _patched(upgrade_config, launcher=launcher):
+        with _patched(upgrade_config):
             text = _text(handler.handle(new_session_input))
 
-        launcher.assert_not_called()
         assert "UNDER WAY" in text
 
     def test_a_failed_sync_is_reported_loudly_with_the_command_and_not_retried(
@@ -420,11 +389,9 @@ class TestAPulledUpgradeIsSyncedInTheBackground:
             _EXPECTED,
             "status=failed\nfrom=3.60.0\ndetail=the venv for v3.68.0 could not be built\n",
         )
-        launcher = MagicMock()
-        with _patched(upgrade_config, launcher=launcher):
+        with _patched(upgrade_config):
             text = _text(handler.handle(new_session_input))
 
-        launcher.assert_not_called()
         assert f"BACKGROUND SYNC TO v{_EXPECTED} FAILED" in text
         assert "the venv for v3.68.0 could not be built" in text
         assert f"v{_RUNNING} is still running" in text
@@ -438,11 +405,9 @@ class TestAPulledUpgradeIsSyncedInTheBackground:
         upgrade_config: Path,
     ) -> None:
         _record(upgrade_config, _EXPECTED, "status=needs-reading\ndetail=read the guides\n")
-        launcher = MagicMock()
-        with _patched(upgrade_config, launcher=launcher):
+        with _patched(upgrade_config):
             text = _text(handler.handle(new_session_input))
 
-        launcher.assert_not_called()
         assert f"BACKGROUND SYNC TO v{_EXPECTED} STOPPED" in text
         assert "--skip-reading-confirmation" in text
         assert "bash .claude/provision.sh" in text
@@ -454,26 +419,8 @@ class TestAPulledUpgradeIsSyncedInTheBackground:
         upgrade_config: Path,
     ) -> None:
         _record(upgrade_config, _EXPECTED, "status=synced\n")
-        launcher = MagicMock()
-        with _patched(upgrade_config, launcher=launcher):
+        with _patched(upgrade_config):
             text = _text(handler.handle(new_session_input))
 
-        launcher.assert_not_called()
         assert "recorded success" in text
-        assert "bash .claude/provision.sh" in text
-
-    def test_a_sync_that_cannot_start_is_reported_with_the_command(
-        self,
-        handler: VersionCheckHandler,
-        new_session_input: dict[str, Any],
-        upgrade_config: Path,
-    ) -> None:
-        launcher = MagicMock(side_effect=BackgroundSyncError("no bash on PATH"))
-        with _patched(upgrade_config, launcher=launcher):
-            result = handler.handle(new_session_input)
-
-        text = _text(result)
-        assert result.decision == Decision.ALLOW
-        assert "COULD NOT START" in text
-        assert "no bash on PATH" in text
         assert "bash .claude/provision.sh" in text

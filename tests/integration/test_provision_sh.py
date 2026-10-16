@@ -23,13 +23,16 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 
+import psutil
 import pytest
 
-from claude_code_hooks_daemon.install.background_sync import (
-    SYNC_STATE_DIR_NAME,
-    launch_background_sync,
+from claude_code_hooks_daemon.config.models import TransportConfig
+from claude_code_hooks_daemon.install.background_sync import SYNC_STATE_DIR_NAME
+from claude_code_hooks_daemon.install.forwarder_generator import (
+    INIT_SH_ANCHOR,
+    generate_forwarder_content,
 )
-from tests.venv_bootstrap_sandbox import CLONE_VERSION, Sandbox, snapshot
+from tests.venv_bootstrap_sandbox import BASH, CLONE_VERSION, Sandbox, snapshot
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROVISION_SH = REPO_ROOT / "provision.sh"
@@ -848,35 +851,95 @@ def _outcome(p: Provisioning, version: str, timeout: float = 60.0) -> dict[str, 
     raise AssertionError(f"the background sync to {version} did not finish within {timeout}s")
 
 
-class TestTheLauncherVersionCheckUses:
-    """The detached start ``version_check`` makes, end to end against this sync."""
+SESSION_START_SOURCE = REPO_ROOT / ".claude" / "hooks" / "session-start"
+#: The venv build the sync runs is made this slow, so the hook is seen to answer first.
+SLOW_BUILD_SECONDS = 5.0
 
-    def test_a_launched_sync_finishes_on_its_own_and_restarts_the_daemon(
-        self, fresh: Provisioning, monkeypatch: pytest.MonkeyPatch
+
+def _deploy_session_start(p: Provisioning, *, relay: bool = False) -> Path:
+    """The session-start forwarder as the installer deploys it into the project."""
+    content = generate_forwarder_content(
+        SESSION_START_SOURCE.read_text(),
+        "session-start",
+        TransportConfig(relay_enabled=relay),
+        p.clone / "untracked",
+        p.project,
+    )
+    hooks = p.project / ".claude" / "hooks"
+    hooks.mkdir(exist_ok=True)
+    forwarder = hooks / "session-start"
+    forwarder.write_text(content)
+    forwarder.chmod(0o755)
+    return forwarder
+
+
+def _stop_the_daemon(p: Provisioning) -> None:
+    """End the stand-in daemon, so the clone has no daemon running from it."""
+    pid = int(p.box.pid.read_text().strip())
+    stand_in = psutil.Process(pid)
+    assert stand_in.environ().get("CLAUDE_HOOKS_PID_PATH") == str(p.box.pid)
+    stand_in.terminate()
+    stand_in.wait(timeout=10)
+
+
+class TestTheSessionStartHookStartsIt:
+    """Plan 00477 Task 5.2: the tracked session-start forwarder starts the sync, detached."""
+
+    def test_a_pulled_upgrade_is_synced_after_the_hook_has_answered(
+        self, fresh: Provisioning
     ) -> None:
         _provisioned_at(fresh, CLONE_VERSION)
         fresh.expect(MAIN_VERSION)
-        fresh.box.stub_uv()
-        for key in list(os.environ):
-            monkeypatch.delenv(key)
-        for key, value in fresh.box.env(fresh.git_env).items():
-            monkeypatch.setenv(key, value)
+        forwarder = _deploy_session_start(fresh)
+        fresh.box.stub_uv(sleep=SLOW_BUILD_SECONDS)
 
-        started = time.monotonic()
-        log = launch_background_sync(
-            fresh.project / ".claude" / "provision.sh",
-            fresh.project,
-            fresh.clone / "untracked",
-            MAIN_VERSION,
+        hook = subprocess.run(
+            [BASH, str(forwarder)],
+            input='{"hook_event_name": "SessionStart"}',
+            capture_output=True,
+            text=True,
+            env=fresh.box.env(fresh.git_env),
+            cwd=fresh.project,
+            timeout=60,
+            check=False,
         )
-        returned_after = time.monotonic() - started
+        state_after_hook = _sync_dir(fresh) / f"v{MAIN_VERSION}.state"
+        answered_first = (
+            not state_after_hook.exists() or _state(fresh, MAIN_VERSION)["status"] == "running"
+        )
 
+        assert hook.returncode == 0, hook.stdout + hook.stderr
+        assert answered_first, "the hook waited for the sync instead of answering"
         state = _outcome(fresh, MAIN_VERSION)
+        log = _sync_dir(fresh) / f"v{MAIN_VERSION}.log"
         assert state["status"] == "synced", log.read_text()
-        assert returned_after < 2.0, "the launcher returns without waiting for the sync"
         assert fresh.clone_version() == MAIN_VERSION
         assert fresh.starts() == 2
         assert "SYNCED" in log.read_text()
+
+    def test_the_start_comes_before_the_relay_hot_path(self, fresh: Provisioning) -> None:
+        """A relay-enabled project never sources init.sh at session start."""
+        content = _deploy_session_start(fresh, relay=True).read_text()
+
+        launch = content.index('provision.sh" --background')
+        assert launch < content.index("# --- relay hot path (generated")
+        assert launch < content.index(INIT_SH_ANCHOR)
+
+    def test_a_sync_waits_for_a_running_daemon_and_otherwise_claims_nothing(
+        self, fresh: Provisioning
+    ) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(MAIN_VERSION)
+        _stop_the_daemon(fresh)
+        before = fresh.clone_tracked_state()
+
+        result = fresh.provision(args=BACKGROUND)
+
+        assert result.returncode == 0, _out(result)
+        assert "No daemon is running from the clone" in _out(result)
+        assert fresh.clone_tracked_state() == before
+        assert not (_sync_dir(fresh) / f"v{MAIN_VERSION}.state").exists()
+        assert not (_sync_dir(fresh) / "lock.d").exists()
 
 
 class TestTheGateConstantsAreUpgradesOwn:
