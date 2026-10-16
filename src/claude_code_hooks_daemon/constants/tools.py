@@ -59,6 +59,8 @@ class ToolName:
     # gate dispatch must match SUBAGENT_DISPATCH_TOOL_NAMES, not one literal.
     TASK = "Task"
     AGENT = "Agent"
+    # A background script that orchestrates many subagents (Plan 00472).
+    WORKFLOW = "Workflow"
     TASK_CREATE = "TaskCreate"
     TASK_UPDATE = "TaskUpdate"
     TASK_GET = "TaskGet"
@@ -112,6 +114,7 @@ ToolNameLiteral = Literal[
     "WebFetch",
     "Task",
     "Agent",
+    "Workflow",
     "TaskCreate",
     "TaskUpdate",
     "TaskGet",

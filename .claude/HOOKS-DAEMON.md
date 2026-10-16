@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (79 handlers)
+### PreToolUse (81 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -69,7 +69,7 @@
 | 44 | plan_qa_commit_gate | ADVISORY | Warn-first cross-file plan QA gate on git commit |
 | 44 | plan_qa_edit | BLOCKING | Blocking/advisory edit-time lint for plan documents |
 | 45 | plan_time_estimates | BLOCKING | Block time estimates in plan documents |
-| 46 | agent_dispatch_recorder | NON-TERMINAL | Record ``name -> subagent_type`` for every NAMED Agent/Task dispatch |
+| 46 | agent_dispatch_recorder | NON-TERMINAL | Record ``name -> subagent_type`` for a NAMED dispatch, and every dispatch's tier row |
 | 46 | agent_isolation_advisor | ADVISORY | Advise ``isolation: worktree`` when peers are already active in this checkout |
 | 46 | plan_workflow | ADVISORY | Provide guidance when creating plan files |
 | 47 | docs_qa_commit_gate | ADVISORY | Warn-first STAGED docs QA gate on git commit |
@@ -87,8 +87,10 @@
 | 60 | british_english | ADVISORY | Warn about American English spellings in content files (non-blocking) |
 | 60 | review_round_advisor | ADVISORY | Advise from the ``advise_at``-th review dispatch on one plan or branch |
 | 60 | spawn_rate_advisor | ADVISORY | Advise at the live-agent cap and near the five-hour limit; never deny |
+| 60 | subagent_tier_advisor | ADVISORY | Advise a cheaper tier on an unchosen or up-overridden dispatch, and a floor below it |
+| 60 | workflow_fanout_advisor | ADVISORY | Advise on a Workflow script's agent count, inherited sites and per-family ceiling |
 
-### PostToolUse (15 handlers)
+### PostToolUse (16 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -101,6 +103,7 @@
 | 30 | goal_injection | ADVISORY | Write a goal-intent signal when a plan TRANSITIONS to In Progress |
 | 31 | markdown_table_formatter | NON-TERMINAL | Auto-format markdown tables after Write/Edit of .md files |
 | 32 | budget_exhaustion_detector | ADVISORY | Advisory PostToolUse handler that flags budget-exhaustion messaging |
+| 33 | dispatch_model_recorder | NON-TERMINAL | Merge ``resolvedModel``, ``modelsUsed`` and ``agentId`` onto the dispatch's tier row |
 | 33 | model_downgrade_recorder | ADVISORY | Publish Claude Code's own automatic model-downgrade record, silently |
 | 34 | merge_qa_report | ADVISORY | Post-hoc plan/docs QA report over what a merge/pull/rebase just introduced |
 | 35 | daemon_sync_after_merge | ADVISORY | Advise a restart when a merge/pull/rebase changed daemon config or handlers |

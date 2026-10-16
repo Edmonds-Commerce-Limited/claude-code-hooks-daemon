@@ -45,6 +45,7 @@ from claude_code_hooks_daemon.core.data_layer import latest_usage
 from claude_code_hooks_daemon.core.handler_bases import SubagentStopHandlerBase
 from claude_code_hooks_daemon.daemon.synthetic_traffic import is_synthetic_event
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.model_fallback_records import scan_transcript_tail
 from claude_code_hooks_daemon.utils.session_load import (
     record_background_tasks,
     refresh_live_snapshot,
@@ -386,6 +387,8 @@ class SubagentCacheAggregatorHandler(SubagentStopHandlerBase):
         meta = read_agent_meta(transcript)
         if not spend.plan_key:
             spend.plan_key = plan_key_from(meta.name)
+        # Plan 00472 T1: a safety-fallback swap inside the agent, the inverse of a tier choice.
+        fallback = scan_transcript_tail(transcript)
         totals: dict[str, Any] = {
             "requests": spend.requests,
             "cache_read_tokens": spend.cache_read_tokens,
@@ -397,6 +400,9 @@ class SubagentCacheAggregatorHandler(SubagentStopHandlerBase):
             "name": meta.name,
             "subagent_type": meta.agent_type,
             "five_hour_pct": _five_hour_pct(),
+            "tool_use_id": meta.tool_use_id,
+            "downgraded": fallback is not None,
+            "fallback_model": fallback.fallback_model if fallback is not None else "",
             "spend": spend.to_dict(),
         }
         try:

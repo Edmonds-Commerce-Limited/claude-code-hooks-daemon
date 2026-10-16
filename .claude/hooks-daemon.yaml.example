@@ -376,6 +376,21 @@ handlers:
       options:
         advise_at: 4
 
+    subagent_tier_advisor:  # Names a cheaper tier on an inherited top tier or an explicit model above the definition's; a floor below it
+      enabled: true
+      priority: 60
+      options:
+        mode: advise               # The only mode: it never denies
+        default_ceiling: null      # Off. Set (e.g. sonnet) for a type with no entry in types
+        types: {}                  # subagent_type -> {ceiling, floor}, e.g. python-developer: {ceiling: sonnet}
+        role_floors: {}            # e.g. {security: opus, adversarial: opus, decide: opus}
+
+    workflow_fanout_advisor:  # Names a Workflow script's agent count, its model-less agent() sites and the per-family ceiling
+      enabled: true
+      priority: 60
+      options:
+        ceilings: {fable: 10, opus: 25, sonnet: 60, haiku: 60}  # Lifetime agents per session family
+
     installed_plugin_edit_advisor:  # Advises when a write lands in an installed Claude Code plugin's files
       enabled: true
       priority: 42
@@ -587,6 +602,10 @@ handlers:
       # going quiet.
       # options:
       #   tail_bytes: 1048576                  # bounded transcript tail scanned per tool call (default shown)
+
+    dispatch_model_recorder:  # Joins an Agent dispatch's resolvedModel/modelsUsed onto its tier row for `hooks-daemon tiers`; silent
+      enabled: true
+      priority: 33
 
     merge_qa_report:  # Post-hoc plan/docs QA report on what a git merge/pull/rebase introduced (Plan 00373)
       enabled: true   # On by default; silent unless plan/docs QA sweeps are active AND the operation introduced attributable drift.

@@ -4977,25 +4977,16 @@ def cmd_cache_gaps(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_spend(args: argparse.Namespace) -> int:
-    """Report a session's subagent spend ledger (Plan 00471 Task 2.1).
+def _resolve_ledger_session(args: argparse.Namespace) -> tuple[str, Path, Path, Path] | int:
+    """The session ``spend`` and ``tiers`` report on, or the exit code that says why not.
 
     The session is the one ``--session`` names, the one whose main transcript
-    ``--transcript`` names, or the project's most recent. Its agents are read
-    through the shared offset cache, so a repeat run parses only new bytes.
-
-    Returns:
-        0 on success, 1 when the session's agent directory cannot be listed,
-        2 when no session transcript could be resolved.
+    ``--transcript`` names, or the project's most recent. Returns
+    ``(session_id, agents_dir, daemon_untracked_dir, project_path)``, or 2 with
+    an error printed when no session transcript or agent directory resolves.
     """
     from claude_code_hooks_daemon.core.project_context import ProjectContext
-    from claude_code_hooks_daemon.daemon.spend_report import (
-        collect_session_spend,
-        render_report,
-        report_as_dict,
-    )
     from claude_code_hooks_daemon.utils.claude_config import claude_project_dir
-    from claude_code_hooks_daemon.utils.spend_ledger import spend_cache, unmeasured_count
     from claude_code_hooks_daemon.utils.transcript_tail import subagents_dir
 
     project_path = get_project_path(getattr(args, "project_root", None))
@@ -5027,6 +5018,67 @@ def cmd_spend(args: argparse.Namespace) -> int:
     if agents_dir is None:
         print(f"ERROR: no agent directory derives from {transcript}.", file=sys.stderr)
         return 2
+    return session_id, agents_dir, untracked, project_path
+
+
+def cmd_tiers(args: argparse.Namespace) -> int:
+    """Report which model each subagent of a session ran on, and why (Plan 00472 Task 3.4).
+
+    Returns:
+        0 on success, 1 when the session's agent directory cannot be listed,
+        2 when no session transcript could be resolved.
+    """
+    from claude_code_hooks_daemon.daemon.tier_report import (
+        collect_tiers,
+        render_tiers,
+        tiers_as_dict,
+    )
+    from claude_code_hooks_daemon.utils.spend_ledger import spend_cache
+
+    resolved = _resolve_ledger_session(args)
+    if isinstance(resolved, int):
+        return resolved
+    session_id, agents_dir, untracked, project_path = resolved
+    try:
+        report = collect_tiers(
+            agents_dir,
+            session_id=session_id,
+            untracked=untracked,
+            cache=spend_cache(untracked),
+            project_root=project_path,
+        )
+    except OSError as e:
+        print(f"ERROR: cannot list the agent transcripts: {e}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(tiers_as_dict(report), indent=2))
+    else:
+        print(render_tiers(report, by=args.by), end="")
+    return 0
+
+
+def cmd_spend(args: argparse.Namespace) -> int:
+    """Report a session's subagent spend ledger (Plan 00471 Task 2.1).
+
+    The session is the one ``--session`` names, the one whose main transcript
+    ``--transcript`` names, or the project's most recent. Its agents are read
+    through the shared offset cache, so a repeat run parses only new bytes.
+
+    Returns:
+        0 on success, 1 when the session's agent directory cannot be listed,
+        2 when no session transcript could be resolved.
+    """
+    from claude_code_hooks_daemon.daemon.spend_report import (
+        collect_session_spend,
+        render_report,
+        report_as_dict,
+    )
+    from claude_code_hooks_daemon.utils.spend_ledger import spend_cache, unmeasured_count
+
+    resolved = _resolve_ledger_session(args)
+    if isinstance(resolved, int):
+        return resolved
+    session_id, agents_dir, untracked, _project_path = resolved
     try:
         report = collect_session_spend(
             agents_dir,
@@ -11899,6 +11951,35 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser_spend.add_argument("--json", action="store_true", help="Emit JSON")
     parser_spend.set_defaults(func=cmd_spend)
+
+    # tiers command (Plan 00472 Task 3.4) — which model each subagent ran on, and why.
+    parser_tiers = subparsers.add_parser(
+        "tiers",
+        help="Report subagent model tiers by source, model and role for a session",
+    )
+    tiers_target = parser_tiers.add_mutually_exclusive_group()
+    tiers_target.add_argument(
+        "--session",
+        dest="session",
+        metavar="ID",
+        default=None,
+        help="Session id (default: the project's most recent session)",
+    )
+    tiers_target.add_argument(
+        "--transcript",
+        dest="transcript",
+        metavar="PATH",
+        default=None,
+        help="The session's main transcript (its agents sit in <stem>/subagents/)",
+    )
+    parser_tiers.add_argument(
+        "--by",
+        choices=["type", "role", "source"],
+        default=None,
+        help="Print only this grouping (default: the source, model and role tables)",
+    )
+    parser_tiers.add_argument("--json", action="store_true", help="Emit JSON")
+    parser_tiers.set_defaults(func=cmd_tiers)
 
     # harvest-background command (Plan 00142, Layer B) — detect & surface, never kill
     parser_harvest = subparsers.add_parser(

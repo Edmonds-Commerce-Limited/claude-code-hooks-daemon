@@ -1,0 +1,163 @@
+# Plan 00472 build: implementer report
+
+Author: p472 build implementer (Opus 5.5). Worktree `worktree-p472-tier-advisor`.
+Built to `RULINGS-fable.md` section 4 (Fable rulings under the owner's
+delegation, recorded as Fable's, never the owner's).
+
+## 1. Assumptions and open items for the coordinator
+
+1. **Main-model source for the advisories.** `spawner_model` reads the
+   spawner's own transcript tail first (a subagent's when the payload has
+   `agent_id`), then the context sidecar's `model_id` for the main thread only.
+   A subagent never takes main's sidecar: it names main's model, not the
+   subagent's. Unknown means silent, as ruled.
+2. **"Top tier" with no ceiling configured** (the client default) is read as
+   Opus or above, so an inherited Opus or Fable dispatch is advised, naming the
+   next tier down. A Sonnet main with an empty table draws nothing.
+3. **Review is a top-tier role.** The advisory is silent on security,
+   adversarial, decide and review roles (472-B section 3.2 and T3: reviews
+   "stay on Opus"). Role floors in this repo are the three the ruling names;
+   reviewer types get floors through `types`.
+4. **The type wins over free text** in the role label (`code-reviewer`,
+   `qa-runner`, `Explore`), then fix/resume before review. `implement` does not
+   match "developer", so a `python-developer` "fix review findings" dispatch is
+   `fix` (criterion 02).
+5. **A `tier:` line silences the floor advisory too** (a reason was given).
+6. **Downgraded agents in `hooks-daemon tiers`** are agents whose per-request
+   models hold more than one model id (a mid-run swap, which can stay inside
+   one family: Opus 5.5 to Opus 4.8). The aggregator row's `downgraded` flag
+   comes from the `model_fallback_records` parser, as ruled.
+7. **Not done here, waiting for the merge and a daemon restart:** the dogfood
+   run (criterion 09), the acceptance run through a real dispatch (criterion
+   04), and the issue #58 comment and close (criterion 10). The daemon serving
+   this session runs main's code. Closing the issue is outward-facing and the
+   plan is not complete, so it is left to the coordinator.
+8. **Recovery cron.** `mkplan.bash` advised creating one; a subagent's cron
+   belongs to the coordinator's session, so none was created.
+9. **Push.** The common handover says do not push; the lead's message asks for
+   `git push -u origin worktree-p472-tier-advisor`. The lead's direct
+   instruction was followed.
+
+## 2. What was built
+
+| Task | Commit    | Delivered                                                                                                                                                                                                                                                                                         |
+| ---- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 3.1  | 59cbd6a4f | `utils/model_tiers.py` (rank table, alias and full-id resolution, `family_below`, Explore cap); downgrade indicator, recorder and `downgrade_state` use it                                                                                                                                        |
+| 3.7  | 59cbd6a4f | `session_load.model_family` (the spend segment's per-family live counts) reads the shared table, so `mythos` counts as fable                                                                                                                                                                      |
+| 3.2  | 3d959a9e5 | `utils/dispatch_tier.py`: source classifier, predicted family, role label, `tier:` reason, settings.json env reader, spawner model; `context_sidecar.sidecar_path`                                                                                                                                |
+| 3.3  | 59c01ac0f | `spend-ledger/<session>/dispatches/<digest>.json` rows keyed by `tool_use_id` (`spend_ledger.write/merge/read_dispatch_rows`); `agent_dispatch_recorder` writes one per dispatch; new `dispatch_model_recorder` (PostToolUse); aggregator row gains `tool_use_id`, `downgraded`, `fallback_model` |
+| 3.5  | 317c7bac2 | `subagent_tier_advisor` (PreToolUse Agent/Task, MAIN and SUB)                                                                                                                                                                                                                                     |
+| 3.6  | 234bffa3f | `utils/workflow_fanout.py` static reader; `workflow_fanout_advisor` (PreToolUse Workflow) with the shape probe; `ToolName.WORKFLOW`                                                                                                                                                               |
+| 3.4  | ee5299367 | `daemon/tier_report.py`, `hooks-daemon tiers`; `cmd_spend`'s session resolution shared as `_resolve_ledger_session`                                                                                                                                                                               |
+| reg  | 44b717ff5 | HandlerID/Priority constants, repo config (this repo's table), example and init template (empty tables), guidance-coverage and command-anchoring lists, regenerated `.claude/HOOKS-DAEMON.md`                                                                                                     |
+| 3.8  | 05404fd2b | `docs/guides/SUBAGENT_MODEL_TIERS.md`, HANDLER_REFERENCE entries, manifest entries, release note 079, 00280 cross-reference, baseline copy, PLAN.md, follow-up Plan 00530 with its README row                                                                                                     |
+
+No RuleID was added: nothing here denies. No QA exclusion, allowlist or
+suppression entry was added.
+
+## 3. TDD evidence (red first)
+
+Each new test module failed at collection before its code existed, for example:
+
+```
+E   ModuleNotFoundError: No module named 'claude_code_hooks_daemon.utils.model_tiers'
+E   ModuleNotFoundError: No module named 'claude_code_hooks_daemon.utils.dispatch_tier'
+E   ImportError: cannot import name 'merge_dispatch_row' from 'claude_code_hooks_daemon.utils.spend_ledger'
+E   ModuleNotFoundError: No module named 'claude_code_hooks_daemon.handlers.post_tool_use.dispatch_model_recorder'
+E   ModuleNotFoundError: No module named 'claude_code_hooks_daemon.handlers.pre_tool_use.subagent_tier_advisor'
+E   ModuleNotFoundError: No module named 'claude_code_hooks_daemon.utils.workflow_fanout'
+E   ModuleNotFoundError: No module named 'claude_code_hooks_daemon.daemon.tier_report'
+```
+
+Gap: the `workflow_fanout_advisor` handler tests were written before the
+handler but not run red before it was created; its parser tests were.
+
+## 4. Verification
+
+- pytest by path, green: the new modules (`test_model_tiers`,
+  `test_dispatch_tier`, `test_workflow_fanout`, `test_tier_report`,
+  `test_subagent_tier_advisor`, `test_workflow_fanout_advisor`,
+  `test_dispatch_model_recorder`), the touched ones (`test_spend_ledger`,
+  `test_agent_dispatch_recorder`, `test_subagent_cache_aggregator`,
+  `test_session_load`, `test_spend_report`, all of `tests/unit/handlers/status_line/`
+  and `post_tool_use/`).
+- Registration lists, run by path: `test_claude_md_guidance_coverage`,
+  `test_handler_scope_defaults`, `test_bash_write_blindness_coverage`,
+  `test_acceptance_test_coverage`, `test_config_changes_manifest_examples`,
+  `test_handler_reference_check`, `test_skill_surface_coherence`, the
+  `test_registry*` modules, `test_pretooluse_fail_closed_tagging`,
+  `test_blocking_handler_evasion`, `test_default_enabled_template_consistency`,
+  both `test_init_config`, `test_cli_commands`, `test_registry_config`,
+  `test_explain_segment_completeness`. Two lists failed first (guidance
+  coverage, command anchoring) and pass after the entries were added.
+- `bin/hooks-daemon generate-docs` run from the worktree regenerated
+  `.claude/HOOKS-DAEMON.md` (81 PreToolUse, 16 PostToolUse handlers).
+- Targeted QA: section 5.
+
+## 5. Targeted QA (`llm_qa.py changed`)
+
+**First run** (on 05404fd2b): `QA: 35/40 PASSED, 4/40 FAILED, 1/40 NOT MEANINGFUL`.
+Fixed in 386e0f939:
+
+- format: Black reformatted 12 files during the run; committed.
+- error_hiding, 3 findings (`return-none-on-error`): the tier advisor's
+  `_judge` and the Workflow advisor's `_args_len` and `_script` no longer
+  return from an `except` block. `audit_error_hiding.py` then exits 0.
+- sensitive_content, 878 findings, all `session-uuid` in the baseline copy:
+  its four session UUIDs are now all-same-digit placeholders (1111..., 2222...).
+- changed_tests: `ToolNameLiteral` was missing `Workflow`, and the option
+  injection test needed valid non-default values for both advisors. That test
+  also showed `subagent_tier_advisor` never read its `mode` option: `_mode`
+  now defaults to None (read as advise) and every ledger event records it.
+
+**Final run** (`--allow-unmapped`, on 386e0f939): `QA: 39/40 PASSED, 1/40 FAILED`,
+exit 1. changed_tests reports `10133 passed, 2 failed, 9 skipped`. Both
+failures are in code and tests this branch does not touch (`git diff ac21f83d1` is empty for all four files), so they fail on main too:
+
+- `tests/integration/test_handler_instantiation.py::test_handler_matches_returns_bool[pre_tool_use/subagent_context_budget]`:
+  Plan 00471's `SubagentContextBudgetHandler.matches({})` returns True (it
+  matches every tool call when no type is exempt).
+- `tests/unit/utils/test_temp_names.py::...test_no_source_file_spells_a_pid_keyed_temp_name`:
+  it flags `utils/sweep_cache.py` (last changed by Plan 00495, 2a03b0974).
+
+`--allow-unmapped` was needed for 12 files reported as too broad or not
+covered (the configs, `.claude/HOOKS-DAEMON.md`, README, docs and the baseline
+JSON). The coordinator's full gate must cover them.
+
+## 6. The two failures on main, fixed at the lead's request (faa76e7c3)
+
+- `SubagentContextBudgetHandler.matches` now returns False for a call with no
+  `tool_name` or no `agent_id`: the instantiation test requires a PreToolUse
+  handler to reject an empty input, and only a subagent's call has a context
+  budget. Red first: the three new tests in `test_subagent_context_budget.py`
+  failed (`3 failed, 54 passed`) before the change.
+- `sweep_cache._write_cache` names its temp file with `unique_temp_path`, the
+  project convention the `test_temp_names` guard enforces (that guard was the
+  red test). The 00495 sweep-cache tests stay green.
+
+Targeted QA (`llm_qa.py changed --allow-unmapped` on faa76e7c3) failed once on
+`github_urls`, which could not decode `.coverage`. That file is the gitignored
+coverage database a test run had just written into the worktree. It was
+removed, and `--resume` re-ran the failed and not-meaningful tools:
+`QA: 40/40 PASSED`, exit 0, with changed_tests at `10224 passed, 0 failed`.
+
+## 7. Review follow-ups (8c321290f)
+
+The review of 550b9ba03 approved it; its non-blocking findings were fixed test-first:
+
+1. A script whose raw text calls `agent(` but yields no site (a regex literal
+   holding a quote, a call inside a template `${...}`) is now recorded
+   `unparsed`, never `no-agents` (`workflow_fanout.mentions_agent_call`). Both
+   shapes are fixtures.
+2. `_probe_shape` is wrapped on its own, so a failed probe write still records
+   the verdict. Both fail-open paths have OSError tests.
+3. The "Pass `model: 'sonnet'` (or lower)" sentence appears only when the
+   session family ranks above Sonnet.
+4. and 5. New tests: `Array.from({length: 5}).map(...)` without a mapper
+   counts 5, and the client template gives `subagent_tier_advisor` empty
+   tables. Both passed on arrival, because they pin existing behaviour.
+
+Red first: `5 failed, 41 passed` in the advisor module, and the parser module
+failed at import (`mentions_agent_call`). Targeted QA on 8c321290f
+(`--allow-unmapped`): `QA: 40/40 PASSED`, exit 0, with changed_tests at
+`10237 passed, 0 failed`.

@@ -3532,6 +3532,78 @@ handlers:
 
 ---
 
+#### subagent_tier_advisor
+
+| Property       | Value                   |
+| -------------- | ----------------------- |
+| **Config key** | `subagent_tier_advisor` |
+| **Priority**   | 60                      |
+| **Type**       | Advisory                |
+| **Event**      | PreToolUse              |
+
+**Description:** Names a cheaper model tier at dispatch time (Plan 00472 T3/T4). On an `Agent`/`Task` dispatch, from the main thread or a subagent, it classifies how the model is chosen (`fork`, `explicit`, `definition`, `env`, `inherited-capped`, `inherited`) and predicts the family. It advises when an inherited or forked dispatch's family is above the type's `ceiling` (else `default_ceiling`; with neither, when it is Opus or above, naming the next tier down), or when an explicit `model` is above the definition's own model. It is silent on a security, adversarial, decide or review role, on a `tier: <reason>` line in the prompt, on an explicit model not above the definition, and when the spawner's model is unknown. The FLOOR advisory fires when a dispatch resolves below the type's `floor` or its role's `role_floors` entry. Each fires once per (session, `subagent_type`, source), counted only when the dispatch went ahead, and is a spend-ledger event. Never denies. See [SUBAGENT_MODEL_TIERS.md](SUBAGENT_MODEL_TIERS.md).
+
+**Options:**
+
+| Option            | Default  | Meaning                                                                         |
+| ----------------- | -------- | ------------------------------------------------------------------------------- |
+| `mode`            | `advise` | The only value; reserved for a later enforcing mode                             |
+| `default_ceiling` | `null`   | Ceiling for a type with no `types` entry; `null` uses the source-based triggers |
+| `types`           | `{}`     | `subagent_type` -> `{ceiling, floor}`, each a family                            |
+| `role_floors`     | `{}`     | Role (`security`, `adversarial`, `decide`, ...) -> floor family                 |
+
+**Config example (this repository's table):**
+
+```yaml
+handlers:
+  pre_tool_use:
+    subagent_tier_advisor:
+      enabled: true
+      priority: 60
+      options:
+        mode: advise
+        default_ceiling: sonnet
+        types:
+          python-developer: {ceiling: sonnet}
+          qa-runner: {ceiling: haiku}
+          Explore: {ceiling: sonnet}
+          code-reviewer: {floor: opus}
+        role_floors: {security: opus, adversarial: opus, decide: opus}
+```
+
+---
+
+#### workflow_fanout_advisor
+
+| Property       | Value                     |
+| -------------- | ------------------------- |
+| **Config key** | `workflow_fanout_advisor` |
+| **Priority**   | 60                        |
+| **Type**       | Advisory                  |
+| **Event**      | PreToolUse                |
+
+**Description:** Names a `Workflow` script's fan-out before any of its agents start (Plan 00472). A script's `agent()` calls fire no PreToolUse of their own and inherit the session model unless they pass `model`. It reads `tool_input.script` (or an absolute, existing `scriptPath`) without running it, counts each `agent()` site through the literal arrays, `Array.from({length: N})`, counted loops and `args`-driven fan-outs around it (resolving `args` when it is an array), and states the agent count ("at least N" when any site is unknown), the sites with no `model` and the session family they inherit, and whether N is over that family's lifetime `ceilings` entry. An unknown fan-out counts as at the ceiling. Silent when every site passes a model within the ceiling, or when the session model is unknown. On the first call of a session it writes the `tool_input` key names and value types (never a value or the script) to `<untracked>/payload-capture/workflow-shape.json`; a shape it cannot read is allowed with one `unparsed` verdict. Never denies.
+
+**Options:**
+
+| Option     | Default                                        | Meaning                            |
+| ---------- | ---------------------------------------------- | ---------------------------------- |
+| `ceilings` | `{fable: 10, opus: 25, sonnet: 60, haiku: 60}` | Lifetime agents per session family |
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    workflow_fanout_advisor:
+      enabled: true
+      priority: 60
+      options:
+        ceilings: {fable: 10, opus: 25, sonnet: 60, haiku: 60}
+```
+
+---
+
 ## PostToolUse Handlers
 
 These handlers run **after** a tool call completes. They analyse output and provide feedback.
@@ -3860,6 +3932,29 @@ handlers:
       enabled: true
       options:
         tail_bytes: 1048576
+```
+
+---
+
+#### dispatch_model_recorder
+
+| Property       | Value                     |
+| -------------- | ------------------------- |
+| **Config key** | `dispatch_model_recorder` |
+| **Priority**   | 33                        |
+| **Type**       | Sensor                    |
+| **Event**      | PostToolUse               |
+
+**Description:** Joins the model an `Agent`/`Task` dispatch actually started on to its tier row (Plan 00472 T1). `agent_dispatch_recorder` writes each dispatch's PreToolUse row (source, predicted family, role, any `tier:` reason) into the spend ledger, keyed by `tool_use_id`; this handler merges `tool_response.resolvedModel`, `modelsUsed` and `agentId` onto it. A result with no PreToolUse row is kept and counted as unjoined. `hooks-daemon tiers` reads the rows. Silent; never blocks.
+
+**Config example:**
+
+```yaml
+handlers:
+  post_tool_use:
+    dispatch_model_recorder:
+      enabled: true
+      priority: 33
 ```
 
 ---
@@ -4923,6 +5018,9 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `british_english`          | PreToolUse       | 60       | Warns about American spellings                   |
 | `spawn_rate_advisor`       | PreToolUse       | 60       | Live-agent cap and five-hour limit on a spawn    |
 | `review_round_advisor`     | PreToolUse       | 60       | Review round count per plan or branch (opt-in)   |
+| `subagent_tier_advisor`    | PreToolUse       | 60       | Cheaper tier, or a floor, on a dispatch          |
+| `workflow_fanout_advisor`  | PreToolUse       | 60       | A Workflow script's fan-out and tier             |
+| `dispatch_model_recorder`  | PostToolUse      | 33       | Joins the resolved model onto the tier row       |
 | `background_task_recorder` | Stop             | 9        | Records finished agent tasks for the live count  |
 | `spend_meter`              | StatusLine       | 17       | Subagent spend, live agents, unmeasured calls    |
 | `validate_eslint_on_write` | PostToolUse      | 10       | Runs ESLint after .ts/.tsx writes                |

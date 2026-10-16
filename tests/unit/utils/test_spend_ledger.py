@@ -9,12 +9,15 @@ from claude_code_hooks_daemon.daemon.verdict_log import VERDICT_LOG_FILENAME
 from claude_code_hooks_daemon.utils.spend_ledger import (
     AgentMeta,
     append_event,
+    merge_dispatch_row,
     note_unmeasured,
     read_agent_meta,
+    read_dispatch_rows,
     read_events,
     session_dir,
     spend_cache,
     unmeasured_count,
+    write_dispatch_row,
 )
 
 
@@ -102,6 +105,41 @@ class TestEvents:
         assert read_events(tmp_path, "s1") == []
 
 
+class TestDispatchRows:
+    """Plan 00472 Task 3.3: one row per dispatch, keyed by tool_use_id."""
+
+    def test_write_then_merge_the_post_tool_use_fields(self, tmp_path: Path) -> None:
+        write_dispatch_row(tmp_path, "s1", "toolu_1", {"source": "inherited", "name": "w"})
+        merge_dispatch_row(tmp_path, "s1", "toolu_1", {"resolved_model": "claude-opus-5-5"})
+        assert read_dispatch_rows(tmp_path, "s1") == [
+            {
+                "tool_use_id": "toolu_1",
+                "source": "inherited",
+                "name": "w",
+                "pre_recorded": True,
+                "resolved_model": "claude-opus-5-5",
+            }
+        ]
+
+    def test_a_post_without_a_pre_row_is_kept_and_marked_unjoined(self, tmp_path: Path) -> None:
+        merge_dispatch_row(tmp_path, "s1", "toolu_2", {"resolved_model": "claude-opus-5-5"})
+        (row,) = read_dispatch_rows(tmp_path, "s1")
+        assert row["tool_use_id"] == "toolu_2"
+        assert row["pre_recorded"] is False
+
+    def test_rows_live_in_the_session_ledger(self, tmp_path: Path) -> None:
+        write_dispatch_row(tmp_path, "s1", "toolu_1", {"source": "fork"})
+        assert next((session_dir(tmp_path, "s1") / "dispatches").iterdir()).suffix == ".json"
+
+    def test_unknown_session_has_no_rows(self, tmp_path: Path) -> None:
+        assert read_dispatch_rows(tmp_path, "nobody") == []
+
+    def test_a_corrupt_row_is_skipped(self, tmp_path: Path) -> None:
+        write_dispatch_row(tmp_path, "s1", "toolu_1", {"source": "fork"})
+        (session_dir(tmp_path, "s1") / "dispatches" / "junk.json").write_text("{bad")
+        assert [row["tool_use_id"] for row in read_dispatch_rows(tmp_path, "s1")] == ["toolu_1"]
+
+
 class TestAgentMeta:
     def test_reads_the_sibling_meta_file(self, tmp_path: Path) -> None:
         transcript = tmp_path / "agent-ax-1.jsonl"
@@ -111,6 +149,12 @@ class TestAgentMeta:
         assert read_agent_meta(transcript) == AgentMeta(
             name="p471-x", agent_type="python-developer", model="opus"
         )
+
+    def test_reads_the_tool_use_id_the_dispatch_rows_join_on(self, tmp_path: Path) -> None:
+        """Plan 00472 Task 3.3: meta.json's toolUseId is the join key to the dispatch row."""
+        transcript = tmp_path / "agent-ax-2.jsonl"
+        (tmp_path / "agent-ax-2.meta.json").write_text(json.dumps({"toolUseId": "toolu_1"}))
+        assert read_agent_meta(transcript).tool_use_id == "toolu_1"
 
     def test_missing_or_corrupt_is_empty(self, tmp_path: Path) -> None:
         assert read_agent_meta(tmp_path / "agent-a.jsonl") == AgentMeta()

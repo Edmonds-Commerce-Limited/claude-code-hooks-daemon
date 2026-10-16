@@ -93,6 +93,27 @@ class TestShape:
         handler._soft_tokens = None
         assert handler.matches(event(tmp_path, project)) is False
 
+    def test_empty_input_does_not_match(self, handler: SubagentContextBudgetHandler) -> None:
+        assert handler.matches({}) is False
+
+    def test_no_tool_name_does_not_match(
+        self, handler: SubagentContextBudgetHandler, tmp_path: Path, project: Path
+    ) -> None:
+        payload = event(tmp_path, project)
+        del payload["tool_name"]
+        assert handler.matches(payload) is False
+
+    def test_no_agent_id_does_not_match(
+        self, handler: SubagentContextBudgetHandler, tmp_path: Path, project: Path
+    ) -> None:
+        """Only a subagent's call has a context budget; main's carries no agent_id."""
+        assert handler.matches(event(tmp_path, project, agent_id="")) is False
+
+    def test_a_subagent_tool_call_matches(
+        self, handler: SubagentContextBudgetHandler, tmp_path: Path, project: Path
+    ) -> None:
+        assert handler.matches(event(tmp_path, project)) is True
+
     def test_exempt_agent_type(
         self, handler: SubagentContextBudgetHandler, tmp_path: Path, project: Path
     ) -> None:

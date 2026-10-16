@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.model_tiers import resolve_model_family
 from claude_code_hooks_daemon.utils.spend_ledger import (
     read_state,
     session_dir,
@@ -61,15 +62,14 @@ class LiveAgent:
         return self.name or self.agent_id
 
 
-#: Model families the status segment counts live agents by (Plan 00472 T2).
-_FAMILIES: Final[tuple[str, ...]] = ("fable", "opus", "sonnet", "haiku")
+#: The status segment's bucket for a model the shared rank table does not know.
 _OTHER_FAMILY: Final[str] = "other"
 
 
 def model_family(model: str) -> str:
-    """The family a model id belongs to, or ``other``."""
-    lowered = model.lower()
-    return next((family for family in _FAMILIES if family in lowered), _OTHER_FAMILY)
+    """The family the status segment counts a live agent under (Plan 00472 Task 3.7), or ``other``."""
+    resolved = resolve_model_family(model)
+    return resolved[0] if resolved is not None else _OTHER_FAMILY
 
 
 def live_agents(

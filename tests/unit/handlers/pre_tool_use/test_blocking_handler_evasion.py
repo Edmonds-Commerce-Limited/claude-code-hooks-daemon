@@ -515,6 +515,14 @@ _NOT_COMMAND_ANCHORED: dict[str, str] = {
     "ReviewRoundAdvisorHandler": (
         "matches an Agent/Task dispatch's description and prompt text and never denies"
     ),
+    "SubagentTierAdvisorHandler": (
+        "matches the Agent/Task tools and never denies; it advises on the dispatch's "
+        "model choice, not on a command"
+    ),
+    "WorkflowFanoutAdvisorHandler": (
+        "matches the Workflow tool and never denies; it reads the script's agent() sites, "
+        "not a command"
+    ),
     "SpawnRateAdvisorHandler": (
         "matches the Agent/Task/SendMessage tools and never denies; it advises on the "
         "session's measured load, not on a command"

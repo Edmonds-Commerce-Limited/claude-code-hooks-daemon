@@ -717,6 +717,33 @@ handlers:
       options:
         advise_at: 4
 
+    # Plan 00472 T3/T4 (Fable rulings D2-D4, owner-delegated): advisory only.
+    # This repo's ceilings and floors; clients ship empty tables.
+    subagent_tier_advisor:  # Names a cheaper tier on an inherited top tier or an explicit up-override; a floor below it
+      enabled: true
+      priority: 60
+      options:
+        mode: advise
+        default_ceiling: sonnet   # For a type with no entry below
+        types:
+          python-developer: {ceiling: sonnet}
+          qa-fixer: {ceiling: sonnet}
+          qa-runner: {ceiling: haiku}
+          hooks-daemon-plan-dedupe-scout: {ceiling: haiku}
+          Explore: {ceiling: sonnet}
+          code-reviewer: {floor: opus}
+          security-reviewer: {floor: opus}
+          hooks-daemon-docs-qa: {floor: opus}
+        role_floors: {security: opus, adversarial: opus, decide: opus}
+
+    # Plan 00472 Workflow (Fable ruling 2(a)/(c)): advisory only, and its own
+    # payload probe until a real Workflow payload confirms the shape.
+    workflow_fanout_advisor:  # Names a Workflow script's agent count, its model-less sites and the per-family ceiling
+      enabled: true
+      priority: 60
+      options:
+        ceilings: {fable: 10, opus: 25, sonnet: 60, haiku: 60}
+
     installed_plugin_edit_advisor:  # Advises when a write lands in an installed Claude Code plugin (Plan 00468 G16)
       enabled: true
       priority: 42
@@ -972,6 +999,10 @@ handlers:
       priority: 33
       # options:
       #   tail_bytes: 1048576  # bounded transcript tail scanned per PostToolUse
+
+    dispatch_model_recorder:  # Joins an Agent dispatch's resolvedModel/modelsUsed onto its tier row (Plan 00472); silent
+      enabled: true
+      priority: 33
 
     merge_qa_report:  # Dogfood: post-hoc plan/docs QA report on what a git merge/pull/rebase introduced (Plan 00373)
       enabled: true  # On by default; silent unless plan/docs QA sweeps are active AND the operation introduced attributable drift.

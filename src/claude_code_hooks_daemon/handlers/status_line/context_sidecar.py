@@ -31,6 +31,7 @@ import logging
 import os
 import re
 import time
+from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
@@ -74,6 +75,12 @@ _SESSION_ID_FALLBACK = "unknown"
 # id is used as a filename component (session ids are normally UUIDs, but we
 # never trust an external value to be path-safe).
 _UNSAFE_SESSION_CHARS = re.compile(r"[^A-Za-z0-9_.-]")
+
+
+def sidecar_path(untracked: Path, session_id: str) -> Path:
+    """The per-session sidecar file under ``untracked``; the id is sanitised, never trusted."""
+    stem = _UNSAFE_SESSION_CHARS.sub("_", session_id) if session_id else _SESSION_ID_FALLBACK
+    return untracked / _SIDECAR_SUBDIR / f"{stem}.json"
 
 
 class ContextSidecarHandler(StatusLineHandlerBase):
@@ -189,11 +196,8 @@ class ContextSidecarHandler(StatusLineHandlerBase):
         render.
         """
         try:
-            target_dir = ProjectContext.daemon_untracked_dir() / _SIDECAR_SUBDIR
-            target_dir.mkdir(parents=True, exist_ok=True)
-
-            safe_stem = self._safe_session_stem(session_id)
-            final_path = target_dir / f"{safe_stem}.json"
+            final_path = sidecar_path(ProjectContext.daemon_untracked_dir(), session_id)
+            final_path.parent.mkdir(parents=True, exist_ok=True)
             tmp_path = unique_temp_path(final_path)
 
             tmp_path.write_text(json.dumps(payload), encoding="utf-8")
@@ -212,12 +216,6 @@ class ContextSidecarHandler(StatusLineHandlerBase):
                 e,
                 reason="an unwritable context sidecar loses only this render's context figure for the supervisor; the next render writes a fresh one and the status line proceeds",
             )
-
-    def _safe_session_stem(self, session_id: str) -> str:
-        """Return a filesystem-safe filename stem for the session id."""
-        if not session_id:
-            return _SESSION_ID_FALLBACK
-        return _UNSAFE_SESSION_CHARS.sub("_", session_id)
 
     def _now(self) -> float:
         """Return the current epoch time (seam for deterministic tests)."""

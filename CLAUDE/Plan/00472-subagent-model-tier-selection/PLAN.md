@@ -72,8 +72,10 @@ message. The decisions are listed side by side in each plan's Task 1.2.
   with Plan 00471. Report:
   `subagent-reports/260925-p472-brainstorm-opus-5-5.md` (levers T0 to T7,
   and seven owner decisions in its section 6).
-- [ ] ⬜ **Task 1.2**: The owner picks the levers and thresholds from the
-  brainstorm and the Phase 2 research.
+- [x] ✅ **Task 1.2**: The levers and thresholds are picked from the
+  brainstorm and the Phase 2 research. Decided by a Fable ruling under the
+  owner's delegation, not by the owner: [RULINGS-fable.md](RULINGS-fable.md).
+  The `CLAUDE_CODE_SUBAGENT_MODEL` flip (D1) and T7 stay with the owner.
 
 ### Phase 2: Workflow fan-out
 
@@ -87,18 +89,71 @@ message. The decisions are listed side by side in each plan's Task 1.2.
   fan-out, an explicit `model` required on fanned-out `agent()` calls when the
   session runs the top tier, and a fan-out ceiling per tier, advisory or
   deny. Report into `subagent-reports/`.
-- [ ] ⬜ **Task 2.2**: Capture one real PreToolUse(`Workflow`) payload before
-  any handler is built; the shape is undocumented and nothing captured it yet.
-  A workflow may only run when the owner opts in, so this waits on the owner
-  running one small workflow with payload capture on.
+- [x] ✅ **Task 2.2** (234bffa3f): Build the one PreToolUse(`Workflow`)
+  handler defensively and make it its own payload probe: on the first
+  `Workflow` call of a session it writes the `tool_input` key names and value
+  types (never the script text) to `payload-capture/workflow-shape.json`, and
+  allows any shape it cannot parse with an `unparsed` verdict. Confirming it
+  against a real payload is
+  [Plan 00530](../00530-subagent-tier-enforcement-follow-up/PLAN.md) Task 1.1
+  and does not block this plan.
+
+### Phase 3: Build (RULINGS-fable.md section 4)
+
+- [x] ✅ **Task 3.1** (59cbd6a4f): `resolve_model_family` and the rank table
+  in `utils/model_tiers.py`, with the Explore cap rule.
+- [x] ✅ **Task 3.2** (3d959a9e5): dispatch-source and role classifier,
+  `utils/dispatch_tier.py`.
+- [x] ✅ **Task 3.3** (59c01ac0f): dispatch tier rows in the shared spend
+  ledger, the PostToolUse `resolvedModel` join (`dispatch_model_recorder`) and
+  the `downgraded` flag at SubagentStop.
+- [x] ✅ **Task 3.4** (ee5299367): `hooks-daemon tiers`.
+- [x] ✅ **Task 3.5** (317c7bac2): `subagent_tier_advisor`.
+- [x] ✅ **Task 3.6** (234bffa3f): `workflow_fanout_advisor`.
+- [x] ✅ **Task 3.7** (59cbd6a4f): the spend segment's per-family live counts
+  read the shared rank table.
+- [ ] 🔄 **Task 3.8**: docs page, `HANDLER_REFERENCE.md`, manifest, release
+  note 079, 00280 cross-reference and baseline copy are done; the dogfood run
+  and the GitHub issue (#58) comment and close wait for the merge and a
+  daemon restart.
 
 ## Success Criteria
 
-- [ ] Every subagent dispatch in a session is recorded with its model and
-  how that model was chosen.
-- [ ] A routine task dispatched to the top tier draws an advisory naming a
-  cheaper tier, and a justified escalation draws none.
-- [ ] Full QA passes and CI is green.
+Per RULINGS-fable.md section 5.
+
+- [x] 01: every `Agent` dispatch has a ledger row (type, name, model
+  parameter, definition model, source, predicted family, role, then
+  `resolvedModel`); a fixture session proves 0 unjoined rows.
+- [x] 02: the classifier returns the 472-B section 1.2 label for the fixture
+  matrix, and labels a `python-developer` "fix review findings" dispatch fix.
+- [x] 03: `hooks-daemon tiers` prints the by-source, by-model and by-role
+  tables, the `CLAUDE_CODE_SUBAGENT_MODEL` line and the downgraded-agent list
+  from fixtures, with a mid-run swap's per-model request counts.
+- [ ] 04: the tier advisory's fire/silent matrix and the floor advisory
+  (unit-tested); the acceptance run through a real dispatch in this repo waits
+  for the merge.
+- [x] 05: no handler in this plan returns a deny; tests assert allow across
+  the matrix.
+- [x] 06: the Workflow advisor reports N and M per fixture, resolves an
+  `args`-driven fan-out exactly, treats a script-computed list as unknown and
+  at the ceiling, says "at least N", allows an unparsable `tool_input` with one
+  `unparsed` verdict, and writes the shape sidecar once per session.
+- [x] 07: the status segment shows per-family live counts from fixture
+  sidecars.
+- [x] 08: `HANDLER_REFERENCE.md`, `docs/guides/SUBAGENT_MODEL_TIERS.md` and
+  the config-changes manifest describe every new handler, option and the CLI;
+  the pending-release holding area records the release-bound consequences
+  (release note
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/079-subagent-model-tiers-measured-and-advised.md`);
+  Plan 00280's PLAN.md carries the cross-reference.
+- [ ] 09: the baseline is copied
+  (`subagent-reports/260925-p472-tiers-baseline.json`); the dogfood journal
+  entry with a `hooks-daemon tiers` run and a real tier-advisory verdict waits
+  for the merge.
+- [ ] 10: GitHub issue #58 commented with the implementation summary and
+  closed.
+- [ ] 11: targeted QA green on the work branch; the coordinator's full gate
+  green before merge.
 
 ## Delivery & Milestones
 

@@ -546,6 +546,7 @@ New team members get the same hooks automatically on first use. If your root `.g
 - [Handler Development](CLAUDE/HANDLER_DEVELOPMENT.md) — Creating custom handlers
 - [Project Handlers](CLAUDE/PROJECT_HANDLERS.md) — Per-project handler guide
 - [Claude Code Plugins](docs/guides/CLAUDE_CODE_PLUGINS.md) — Using Claude Code plugins alongside the daemon
+- [Subagent Model Tiers](docs/guides/SUBAGENT_MODEL_TIERS.md) — Which model each subagent runs on, and the tier advisories
 - [Debugging Hooks](CLAUDE/DEBUGGING_HOOKS.md) — Event introspection tool
 - [QA Pipeline](CLAUDE/development/QA.md) — Quality assurance automation
 - [Upgrade Guides](CLAUDE/UPGRADES/) — Version migration guides

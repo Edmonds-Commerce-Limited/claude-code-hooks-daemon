@@ -305,6 +305,42 @@ class TestSubagentCacheAggregatorHandler:
         assert spend["per_model_requests"] == {"claude-sonnet-5": 1}
         assert row["cache_read_tokens"] == 1000
 
+    # --- the tier fields (Plan 00472 Task 3.3) ---
+
+    def test_a_fallback_swap_is_counted_per_request_and_flagged(self, handler, tmp_path):
+        target = tmp_path / "agent-areview-guards-5-1.jsonl"
+        usage = {"input_tokens": 5}
+        records = [
+            {"requestId": "r1", "message": {"model": "claude-opus-5-5", "usage": usage}},
+            {
+                "subtype": "model_refusal_fallback",
+                "originalModel": "claude-opus-5-5",
+                "fallbackModel": "claude-opus-4-8",
+                "apiRefusalCategory": "cyber",
+                "scope": "session",
+                "timestamp": "2026-10-16T09:34:10.341Z",
+            },
+            {"requestId": "r2", "message": {"model": "claude-opus-4-8", "usage": usage}},
+            {"requestId": "r3", "message": {"model": "claude-opus-4-8", "usage": usage}},
+        ]
+        _write_agent_transcript(target, records)
+        (tmp_path / "agent-areview-guards-5-1.meta.json").write_text(
+            json.dumps({"name": "review-guards-5", "toolUseId": "toolu_9"})
+        )
+        handler.record(session_id="sess", agent_id="x", transcript=target, root=tmp_path)
+        row = json.loads((tmp_path / "cache-sidecar" / "sess" / "x.json").read_text())
+        assert row["spend"]["per_model_requests"] == {"claude-opus-5-5": 1, "claude-opus-4-8": 2}
+        assert row["downgraded"] is True
+        assert row["fallback_model"] == "claude-opus-4-8"
+        assert row["tool_use_id"] == "toolu_9"
+
+    def test_no_fallback_record_is_not_downgraded(self, handler, transcript, tmp_path):
+        handler.record(session_id="sess", agent_id="one", transcript=transcript, root=tmp_path)
+        row = json.loads(next((tmp_path / "cache-sidecar").rglob("one.json")).read_text())
+        assert row["downgraded"] is False
+        assert row["fallback_model"] == ""
+        assert row["tool_use_id"] == ""
+
     def test_a_later_stop_parses_only_the_appended_bytes(self, handler, transcript, tmp_path):
         from claude_code_hooks_daemon.utils.spend_ledger import spend_cache
 
