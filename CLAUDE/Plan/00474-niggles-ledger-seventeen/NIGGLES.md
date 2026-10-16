@@ -77,6 +77,21 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N465 — the secret-file-read guard shlex-tokenises every line of a Write, about 1.2 s per 100 KB
+
+**Source**: the Plan 00495 Task 3.2 measurement, 2026-10-16. `block-secret-file-read` reaches `_shell_words` in
+`utils/secret_file_matching.py` (through `utils/linear_shlex.py`) for every line of Write/Edit content. That costs
+about 8.5 ms per KB, linearly: 12 KB costs 100 ms, 120 KB costs 1.2 s and 1.2 MB costs 9.3 s per PreToolUse, with the
+shipped example config. The other content scanners cost 4-12 ms per 100 KB. This breaks Rule 0 (100 ms p95) on any
+large write.
+
+**Fix direction**: a cheap prefilter before tokenising. Only lines that could name a protected path (a substring or
+basename of a configured protected path, or a path-shaped token) are shlex-split. Detection must be unchanged: prove
+it with the handler's existing tests plus an equivalence test over a corpus of positive and negative content, and
+measure before and after.
+
+**Status**: ⬜ Open.
+
 ### N464 — `worktree-reap --reap` kills `git worktree remove` at 5 seconds, leaving a half-deleted worktree it labels `DRY-RUN`
 
 **Source**: the coordinator, 2026-10-15, reaping the merged N463 worktree after a reboot.
