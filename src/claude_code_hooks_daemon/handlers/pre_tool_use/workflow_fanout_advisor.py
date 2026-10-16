@@ -46,9 +46,18 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.dispatch_tier import spawner_model
-from claude_code_hooks_daemon.utils.model_tiers import FAMILIES, resolve_model_family
+from claude_code_hooks_daemon.utils.model_tiers import (
+    FAMILIES,
+    SONNET,
+    family_rank,
+    resolve_model_family,
+)
 from claude_code_hooks_daemon.utils.spend_ledger import read_state, state_path, write_state
-from claude_code_hooks_daemon.utils.workflow_fanout import FanoutReading, analyse_script
+from claude_code_hooks_daemon.utils.workflow_fanout import (
+    FanoutReading,
+    analyse_script,
+    mentions_agent_call,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +114,11 @@ def _args_len(raw: object) -> int | None:
                 level=logging.DEBUG,
             )
     return len(raw) if isinstance(raw, list) else None
+
+
+def _rank(family: str) -> int:
+    rank = family_rank(family)
+    return rank if rank is not None else -1
 
 
 def _plural(count: int, word: str) -> str:
@@ -166,7 +180,15 @@ class WorkflowFanoutAdvisorHandler(PreToolUseHandlerBase):
         untracked = self._untracked_dir()
         session = str(hook_input.get(HookInputField.SESSION_ID) or "")
         tool_input = hook_input.get(HookInputField.TOOL_INPUT)
-        self._probe_shape(untracked, session, tool_input)
+        try:
+            self._probe_shape(untracked, session, tool_input)
+        except OSError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="a lost shape probe costs one session's payload reading; the call is still read and its verdict recorded",
+                level=logging.WARNING,
+            )
         fields: dict[str, Any] = tool_input if isinstance(tool_input, dict) else {}
         script = self._script(tool_input)
         if script is None:
@@ -181,7 +203,11 @@ class WorkflowFanoutAdvisorHandler(PreToolUseHandlerBase):
             "unknown_sites": reading.unknown_sites,
         }
         if not reading.sites:
-            self._verdict(untracked, session, VERDICT_NO_AGENTS, detail)
+            # A script whose text calls agent() but yields no site was not read.
+            unread = mentions_agent_call(script)
+            self._verdict(
+                untracked, session, VERDICT_UNPARSED if unread else VERDICT_NO_AGENTS, detail
+            )
             return GatingResult(decision=Decision.ALLOW)
         resolved = resolve_model_family(spawner_model(hook_input, untracked))
         family = resolved[0] if resolved is not None else None
@@ -212,7 +238,7 @@ class WorkflowFanoutAdvisorHandler(PreToolUseHandlerBase):
                 f"{_plural(reading.unknown_sites, 'site')} fan out over a list the script "
                 f"decides at run time, counted as at the {family} ceiling of {ceiling}."
             )
-        if reading.sites_without_model:
+        if reading.sites_without_model and _rank(family) > _rank(SONNET):
             lines.append("Pass `model: 'sonnet'` (or lower) on fanned-out agent() calls.")
         return " ".join(lines)
 

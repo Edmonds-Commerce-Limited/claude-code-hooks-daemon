@@ -273,6 +273,17 @@ def _regions(code: str, pairs: dict[int, int], args_len: int | None) -> list[_Re
     return regions
 
 
+def mentions_agent_call(script: str) -> bool:
+    """Whether the RAW script text calls ``agent(`` anywhere, strings and comments included.
+
+    The reader blanks what it takes for strings: a regex literal holding a quote
+    swallows the rest of the script, and a call inside a template ``${...}`` is
+    blanked with the template. When it then finds no site but this is True, the
+    script's fan-out is unread, not absent.
+    """
+    return _AGENT_CALL.search(script) is not None
+
+
 def analyse_script(script: str, *, args_len: int | None) -> FanoutReading:
     """Every ``agent(`` site of ``script`` with its multiplier, bucket and model option.
 

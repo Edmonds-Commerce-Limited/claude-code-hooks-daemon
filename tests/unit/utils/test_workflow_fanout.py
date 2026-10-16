@@ -7,7 +7,11 @@ from __future__ import annotations
 
 import pytest
 
-from claude_code_hooks_daemon.utils.workflow_fanout import Bucket, analyse_script
+from claude_code_hooks_daemon.utils.workflow_fanout import (
+    Bucket,
+    analyse_script,
+    mentions_agent_call,
+)
 
 LITERAL_ARRAY = """
 const results = await parallel(
@@ -119,6 +123,29 @@ class TestScanner:
     def test_inclusive_loop_bound(self) -> None:
         script = "for (let i = 1; i <= 4; i++) { agent('x') }"
         assert analyse_script(script, args_len=None).total == 4
+
+    def test_array_from_length_mapped_without_a_mapper(self) -> None:
+        script = "await parallel(Array.from({length: 5}).map(() => () => agent('x')));"
+        reading = analyse_script(script, args_len=None)
+        assert (reading.total, reading.has_unknown) == (5, False)
+
+    @pytest.mark.parametrize(
+        "script",
+        [
+            # a regex literal holding a quote is read as an unterminated string
+            "const r = /'/; for (const f of ['a','b']) { await agent(f); }",
+            # a call inside a template ${...} is blanked with the template
+            "const s = `${await agent('x')}`;",
+        ],
+    )
+    def test_shapes_the_reader_misses_are_still_seen_to_call_agent(self, script: str) -> None:
+        """The static reader finds no site, but the raw text calls agent(): the
+        advisor must report that as unparsed, never as a script with no agents."""
+        assert analyse_script(script, args_len=None).sites == ()
+        assert mentions_agent_call(script)
+
+    def test_a_script_with_no_agent_call(self) -> None:
+        assert not mentions_agent_call("const x = helper.agent; run(x);")
 
     def test_args_map(self) -> None:
         reading = analyse_script("await parallel(args.map(f => () => agent(f)))", args_len=7)

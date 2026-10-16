@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -107,6 +108,23 @@ class TestAdvice:
         (message,) = handler.handle(call(tmp_path, tool_input, "claude-sonnet-5-5")).context
         assert "over" not in message
         assert "inherit the session's sonnet" in message
+        # review finding 3: on Sonnet, "pass sonnet (or lower)" could mean moving up
+        assert "Pass `model" not in message
+
+    @pytest.mark.parametrize(
+        ("main_model", "advised"),
+        [("claude-haiku-4-5", False), ("claude-opus-5-5", True), ("claude-fable-5-1", True)],
+    )
+    def test_the_cheaper_model_sentence_only_above_sonnet(
+        self,
+        handler: WorkflowFanoutAdvisorHandler,
+        tmp_path: Path,
+        main_model: str,
+        advised: bool,
+    ) -> None:
+        tool_input = {"script": FANOUT_60, "args": ["a"] * 2}
+        (message,) = handler.handle(call(tmp_path, tool_input, main_model)).context
+        assert ("Pass `model: 'sonnet'`" in message) is advised
 
 
 class TestUnparsed:
@@ -128,6 +146,60 @@ class TestUnparsed:
         assert result.context == []
         (verdict,) = [line for line in verdicts(tmp_path) if line["verdict"] == "unparsed"]
         assert verdict["handler"] == "workflow-fanout-advisor"
+
+
+class TestMissedAgentSites:
+    """Review finding 1: a script that calls agent() is never reported as having none."""
+
+    @pytest.mark.parametrize(
+        "script",
+        [
+            "const r = /'/; for (const f of ['a','b']) { await agent(f); }",
+            "const s = `${await agent('x')}`;",
+        ],
+    )
+    def test_recorded_as_unparsed(
+        self, handler: WorkflowFanoutAdvisorHandler, tmp_path: Path, script: str
+    ) -> None:
+        result = handler.handle(call(tmp_path, {"script": script}))
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+        assert [line["verdict"] for line in verdicts(tmp_path)] == ["unparsed"]
+
+    def test_a_script_without_agent_calls_is_no_agents(
+        self, handler: WorkflowFanoutAdvisorHandler, tmp_path: Path
+    ) -> None:
+        handler.handle(call(tmp_path, {"script": "const x = 1;"}))
+        assert [line["verdict"] for line in verdicts(tmp_path)] == ["no-agents"]
+
+
+class TestFailOpen:
+    """Review finding 2: both fail-open paths allow, and the verdict survives a failed probe."""
+
+    def test_a_failed_probe_write_still_records_the_verdict(
+        self, handler: WorkflowFanoutAdvisorHandler, tmp_path: Path
+    ) -> None:
+        tool_input = {"script": FANOUT_60, "args": ["a"] * 60}
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.workflow_fanout_advisor.write_state",
+            side_effect=OSError("read-only"),
+        ):
+            result = handler.handle(call(tmp_path, tool_input))
+        assert result.decision == Decision.ALLOW
+        assert len(result.context) == 1
+        assert [line["verdict"] for line in verdicts(tmp_path)] == ["advised"]
+
+    def test_a_failure_to_judge_allows_with_no_advice(
+        self, handler: WorkflowFanoutAdvisorHandler, tmp_path: Path
+    ) -> None:
+        tool_input = {"script": FANOUT_60, "args": ["a"] * 60}
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.workflow_fanout_advisor.spawner_model",
+            side_effect=OSError("unreadable transcript"),
+        ):
+            result = handler.handle(call(tmp_path, tool_input))
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
 
 
 class TestShapeProbe:

@@ -109,6 +109,23 @@ class TestConfigTemplate:
 
         assert "enforce_single_daemon_process: true" in result
 
+    def test_client_template_ships_empty_tier_tables(self) -> None:
+        """Plan 00472 rulings D2/D3: clients get no ceilings or floors, advise mode only."""
+        import yaml
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.init_config.is_container_environment",
+            return_value=False,
+        ):
+            config = yaml.safe_load(ConfigTemplate.generate_full())
+        options = config["handlers"]["pre_tool_use"]["subagent_tier_advisor"]["options"]
+        assert options == {
+            "mode": "advise",
+            "default_ceiling": None,
+            "types": {},
+            "role_floors": {},
+        }
+
     def test_plugins_block_is_labelled_as_daemon_plugins(self) -> None:
         """Both templates say the `plugins:` block holds daemon plugins, so a
         client never mistakes it for Claude Code plugins (Plan 00468 G5)."""
