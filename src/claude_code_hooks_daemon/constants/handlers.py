@@ -486,6 +486,24 @@ class HandlerID:
         config_key="review_round_advisor",
         display_name="review-round-advisor",
     )
+    # Plan 00472 T1: joins resolvedModel/modelsUsed onto a dispatch's tier row.
+    DISPATCH_MODEL_RECORDER = HandlerIDMeta(
+        class_name="DispatchModelRecorderHandler",
+        config_key="dispatch_model_recorder",
+        display_name="dispatch-model-recorder",
+    )
+    # Plan 00472 T3/T4: names a cheaper tier, or a floor, at dispatch time.
+    SUBAGENT_TIER_ADVISOR = HandlerIDMeta(
+        class_name="SubagentTierAdvisorHandler",
+        config_key="subagent_tier_advisor",
+        display_name="subagent-tier-advisor",
+    )
+    # Plan 00472 Workflow (a)/(c): a Workflow script's fan-out and tier.
+    WORKFLOW_FANOUT_ADVISOR = HandlerIDMeta(
+        class_name="WorkflowFanoutAdvisorHandler",
+        config_key="workflow_fanout_advisor",
+        display_name="workflow-fanout-advisor",
+    )
     # Plan 00471 L4: records a Stop's background_tasks for the live count.
     BACKGROUND_TASK_RECORDER = HandlerIDMeta(
         class_name="BackgroundTaskRecorderHandler",

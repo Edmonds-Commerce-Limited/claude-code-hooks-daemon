@@ -11,7 +11,10 @@ daemon's start-up cleanup removes whole once it is
   (RULINGS-fable.md Q2);
 - ``<session>/events.jsonl``: one row per deliberate act a lever records (a
   ``budget:`` override, a ``RESUME-LARGE:`` override, an advisory fired);
-- ``<session>/state/``: per-agent and per-key counters the handlers keep.
+- ``<session>/state/``: per-agent and per-key counters the handlers keep;
+- ``<session>/dispatches/``: one row per ``Agent``/``Task`` dispatch, keyed by
+  ``tool_use_id`` (Plan 00472 T1): how its model was chosen at PreToolUse,
+  joined with the ``resolvedModel`` PostToolUse reports.
 
 The per-agent ledger rows themselves are the ``cache-sidecar`` files
 ``subagent_cache_aggregator`` writes at each stop.
@@ -47,7 +50,11 @@ UNMEASURED_VERDICT: Final[str] = "unmeasured"
 
 _UNMEASURED_SUBDIR: Final[str] = "unmeasured"
 _STATE_SUBDIR: Final[str] = "state"
+_DISPATCH_SUBDIR: Final[str] = "dispatches"
 _EVENTS_FILE: Final[str] = "events.jsonl"
+_TOOL_USE_ID: Final[str] = "tool_use_id"
+#: False on a row PostToolUse created because no PreToolUse row existed (unjoined).
+_PRE_RECORDED: Final[str] = "pre_recorded"
 _UNSAFE: Final[re.Pattern[str]] = re.compile(r"[^A-Za-z0-9._-]")
 _DIGEST_LENGTH: Final[int] = 16
 
@@ -108,6 +115,55 @@ def write_state(path: Path, data: dict[str, Any]) -> None:
         )
 
 
+def _dispatch_row_path(untracked: Path, session_id: str, tool_use_id: str) -> Path:
+    return session_dir(untracked, session_id) / _DISPATCH_SUBDIR / f"{_digest(tool_use_id)}.json"
+
+
+def write_dispatch_row(
+    untracked: Path, session_id: str, tool_use_id: str, fields: dict[str, Any]
+) -> None:
+    """Write the PreToolUse row of one dispatch, replacing any earlier one."""
+    write_state(
+        _dispatch_row_path(untracked, session_id, tool_use_id),
+        {_TOOL_USE_ID: tool_use_id, **fields, _PRE_RECORDED: True},
+    )
+
+
+def merge_dispatch_row(
+    untracked: Path, session_id: str, tool_use_id: str, fields: dict[str, Any]
+) -> None:
+    """Add ``fields`` to a dispatch's row; with no PreToolUse row it is created unjoined.
+
+    PreToolUse and PostToolUse of one call are sequential, so the
+    read-merge-write cannot race with another writer of the same row.
+    """
+    path = _dispatch_row_path(untracked, session_id, tool_use_id)
+    row = read_state(path) or {_TOOL_USE_ID: tool_use_id, _PRE_RECORDED: False}
+    write_state(path, {**row, **fields})
+
+
+def read_dispatch_rows(untracked: Path, session_id: str) -> list[dict[str, Any]]:
+    """Every readable dispatch row of the session, ordered by tool_use_id."""
+    directory = session_dir(untracked, session_id) / _DISPATCH_SUBDIR
+    try:
+        paths = sorted(entry for entry in directory.iterdir() if entry.suffix == ".json")
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"an unlistable {directory} reads as no dispatch rows; only the tier report loses them",
+            level=logging.WARNING,
+        )
+        return []
+    rows = [read_state(path) for path in paths]
+    return sorted(
+        (row for row in rows if isinstance(row.get(_TOOL_USE_ID), str)),
+        key=lambda row: str(row[_TOOL_USE_ID]),
+    )
+
+
 def spend_cache(untracked: Path | None) -> TranscriptSpendCache:
     """The process-wide offset cache for ``untracked`` (in memory only for ``None``)."""
     with _caches_lock:
@@ -126,6 +182,8 @@ class AgentMeta:
     name: str = ""
     agent_type: str = ""
     model: str = ""
+    #: The dispatching call's id, the join key to its dispatch row (Plan 00472).
+    tool_use_id: str = ""
 
 
 def read_agent_meta(transcript: Path) -> AgentMeta:
@@ -146,6 +204,7 @@ def read_agent_meta(transcript: Path) -> AgentMeta:
         name=text("name"),
         agent_type=text("spawnedAgentType") or text("agentType"),
         model=text("model"),
+        tool_use_id=text("toolUseId"),
     )
 
 

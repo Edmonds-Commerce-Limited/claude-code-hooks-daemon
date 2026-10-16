@@ -19,6 +19,7 @@ from claude_code_hooks_daemon.utils.dispatch_tier import (
     has_tier_token,
     read_env_subagent_model,
     spawner_model,
+    tier_reason,
 )
 
 _BASE = DispatchFacts(
@@ -154,6 +155,10 @@ class TestTierToken:
 
     def test_no_token(self) -> None:
         assert not has_tier_token("Pick the cheapest tier: sonnet")
+
+    def test_reason_is_the_rest_of_the_line(self) -> None:
+        assert tier_reason("x\n  tier: hardest fail-closed line  \ny") == "hardest fail-closed line"
+        assert tier_reason("no token") == ""
 
 
 class TestEnvModel:

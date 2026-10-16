@@ -85,7 +85,7 @@ INHERITING_SOURCES: Final[frozenset[DispatchSource]] = frozenset(
 
 #: The prompt line that keeps a deliberate tier: ``tier: <reason>``.
 TIER_TOKEN: Final[str] = "tier:"
-_TIER_LINE: Final[re.Pattern[str]] = re.compile(r"(?im)^\s*tier:\s*\S")
+_TIER_LINE: Final[re.Pattern[str]] = re.compile(r"(?im)^[ \t]*tier:[ \t]*(\S.*?)[ \t]*$")
 
 _FORK_TYPE: Final[str] = "fork"
 _EXPLORE_TYPE: Final[str] = "Explore"
@@ -206,9 +206,15 @@ def classify(facts: DispatchFacts, *, name: str, description: str) -> DispatchTi
     )
 
 
+def tier_reason(prompt: str) -> str:
+    """The reason of the prompt's ``tier: <reason>`` line, or "" when it has none."""
+    match = _TIER_LINE.search(prompt)
+    return match.group(1) if match is not None else ""
+
+
 def has_tier_token(prompt: str) -> bool:
     """Whether the prompt carries a ``tier: <reason>`` line keeping its tier."""
-    return bool(_TIER_LINE.search(prompt))
+    return bool(tier_reason(prompt))
 
 
 def read_env_subagent_model(project_root: Path) -> str:

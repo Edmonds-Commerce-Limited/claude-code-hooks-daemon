@@ -297,6 +297,9 @@ class Priority:
     # next to goal_injection because it is the same kind of thing: a silent
     # writer of a per-session signal file the ccy supervisor consumes)
     MODEL_DOWNGRADE_RECORDER = 33
+    # Plan 00472 T1: a silent sensor of the same kind beside it, joining the
+    # model an Agent dispatch resolved to onto its PreToolUse tier row.
+    DISPATCH_MODEL_RECORDER = 33
 
     # Merge QA report (Priority: 34 - PostToolUse advisory; Plan 00373 Phase
     # 3, next free slot in the PostToolUse advisory band after
@@ -457,6 +460,10 @@ class Priority:
     SPAWN_RATE_ADVISOR = 60
     # Plan 00471 L9: advisory only, beside the spawn advisory on the same tool.
     REVIEW_ROUND_ADVISOR = 60
+    # Plan 00472 T3: advisory only, beside the other spend advisories on Agent.
+    SUBAGENT_TIER_ADVISOR = 60
+    # Plan 00472 Workflow: advisory only; the only handler on the Workflow tool.
+    WORKFLOW_FANOUT_ADVISOR = 60
     # Plan 00284: sibling gate at the same edit-time layer as plan_qa_edit,
     # deliberately a different check id/domain so priority collision with 44
     # is avoided while staying in the same workflow band.

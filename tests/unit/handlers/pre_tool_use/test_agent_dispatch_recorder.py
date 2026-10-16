@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -16,7 +17,7 @@ from claude_code_hooks_daemon.utils.agent_dispatch_registry import (
     dispatch_budget,
     effective_agent_type,
 )
-from claude_code_hooks_daemon.utils.spend_ledger import read_events
+from claude_code_hooks_daemon.utils.spend_ledger import read_dispatch_rows, read_events
 
 
 def _dispatch(tool_name: str = "Agent", **tool_input: Any) -> dict[str, Any]:
@@ -37,14 +38,21 @@ class TestMatches:
     def test_task_tool_matches(self, handler: AgentDispatchRecorderHandler) -> None:
         assert handler.matches(_dispatch("Task", name="w", subagent_type="qa-runner")) is True
 
-    def test_unnamed_dispatch_does_not_match(self, handler: AgentDispatchRecorderHandler) -> None:
-        assert handler.matches(_dispatch(subagent_type="qa-runner")) is False
+    def test_unnamed_dispatch_matches_for_its_tier_row(
+        self, handler: AgentDispatchRecorderHandler
+    ) -> None:
+        """Plan 00472 Task 3.3: every dispatch gets a ledger row, named or not."""
+        assert handler.matches(_dispatch(subagent_type="qa-runner")) is True
 
     def test_other_tool_does_not_match(self, handler: AgentDispatchRecorderHandler) -> None:
         assert handler.matches(_dispatch("Bash", name="w")) is False
 
-    def test_non_string_name_does_not_match(self, handler: AgentDispatchRecorderHandler) -> None:
-        assert handler.matches(_dispatch(name=5)) is False
+    def test_non_dict_tool_input_does_not_match(
+        self, handler: AgentDispatchRecorderHandler
+    ) -> None:
+        payload = _dispatch()
+        payload["tool_input"] = "x"
+        assert handler.matches(payload) is False
 
     def test_missing_session_does_not_match(self, handler: AgentDispatchRecorderHandler) -> None:
         payload = _dispatch(name="w")
@@ -65,6 +73,13 @@ class TestHandle:
     ) -> None:
         handler.handle(_dispatch(name="w"))
         assert effective_agent_type(tmp_path, "s1", "w") == ""
+
+    def test_non_string_name_writes_no_registry_record(
+        self, handler: AgentDispatchRecorderHandler, tmp_path: Path
+    ) -> None:
+        result = handler.handle(_dispatch(name=5, subagent_type="qa-runner"))
+        assert result.decision == Decision.ALLOW
+        assert not (tmp_path / "agent-dispatch-registry").exists()
 
     def test_unwritable_registry_still_allows(
         self, handler: AgentDispatchRecorderHandler, tmp_path: Path
@@ -102,6 +117,124 @@ class TestBudgetOverride:
         handler.handle(_dispatch(name="w", prompt="budget: 400k"))
         handler.handle(_dispatch(name="w", prompt="no override"))
         assert dispatch_budget(tmp_path, "s1", "w") is None
+
+
+def _main_transcript(tmp_path: Path, model: str) -> Path:
+    transcript = tmp_path / "s1.jsonl"
+    transcript.write_text(
+        json.dumps(
+            {"type": "assistant", "message": {"model": model, "usage": {"input_tokens": 1}}}
+        )
+        + "\n"
+    )
+    return transcript
+
+
+def _tier_dispatch(tmp_path: Path, tool_use_id: str = "toolu_1", **tool_input: Any) -> dict:
+    payload = _dispatch(**tool_input)
+    payload["tool_use_id"] = tool_use_id
+    payload["transcript_path"] = str(_main_transcript(tmp_path, "claude-opus-5-5"))
+    return payload
+
+
+class TestTierRow:
+    """Plan 00472 Task 3.3: the classifier's output, one ledger row per dispatch."""
+
+    @pytest.fixture
+    def recorder(self, tmp_path: Path) -> Any:
+        instance = AgentDispatchRecorderHandler()
+        with (
+            patch.object(AgentDispatchRecorderHandler, "_untracked_dir", return_value=tmp_path),
+            patch.object(AgentDispatchRecorderHandler, "_project_root", return_value=tmp_path),
+        ):
+            yield instance
+
+    def _row(self, tmp_path: Path) -> dict[str, Any]:
+        (row,) = read_dispatch_rows(tmp_path, "s1")
+        return row
+
+    def test_inherited_row(self, recorder: AgentDispatchRecorderHandler, tmp_path: Path) -> None:
+        recorder.handle(
+            _tier_dispatch(
+                tmp_path, name="impl-1", subagent_type="general-purpose", description="Implement"
+            )
+        )
+        row = self._row(tmp_path)
+        assert row["tool_use_id"] == "toolu_1"
+        assert row["subagent_type"] == "general-purpose"
+        assert row["name"] == "impl-1"
+        assert row["model_param"] == ""
+        assert row["definition_model"] == ""
+        assert row["source"] == "inherited"
+        assert row["predicted_family"] == "opus"
+        assert row["spawner_model"] == "claude-opus-5-5"
+        assert row["spawner"] == "main"
+        assert row["role"] == "implement"
+        assert row["tier_reason"] == ""
+        assert row["pre_recorded"] is True
+
+    def test_explicit_row(self, recorder: AgentDispatchRecorderHandler, tmp_path: Path) -> None:
+        recorder.handle(_tier_dispatch(tmp_path, subagent_type="general-purpose", model="sonnet"))
+        row = self._row(tmp_path)
+        assert (row["source"], row["model_param"], row["predicted_family"]) == (
+            "explicit",
+            "sonnet",
+            "sonnet",
+        )
+
+    def test_definition_row(self, recorder: AgentDispatchRecorderHandler, tmp_path: Path) -> None:
+        agents = tmp_path / ".claude" / "agents"
+        agents.mkdir(parents=True)
+        (agents / "python-developer.md").write_text(
+            "---\nname: python-developer\nmodel: sonnet\n---\nbody\n"
+        )
+        recorder.handle(_tier_dispatch(tmp_path, subagent_type="python-developer"))
+        row = self._row(tmp_path)
+        assert (row["source"], row["definition_model"], row["predicted_family"]) == (
+            "definition",
+            "sonnet",
+            "sonnet",
+        )
+
+    def test_fork_row(self, recorder: AgentDispatchRecorderHandler, tmp_path: Path) -> None:
+        recorder.handle(_tier_dispatch(tmp_path, subagent_type="fork"))
+        assert self._row(tmp_path)["source"] == "fork"
+
+    def test_explore_capped_row(
+        self, recorder: AgentDispatchRecorderHandler, tmp_path: Path
+    ) -> None:
+        payload = _tier_dispatch(tmp_path, subagent_type="Explore")
+        payload["transcript_path"] = str(_main_transcript(tmp_path, "claude-fable-5-1"))
+        recorder.handle(payload)
+        row = self._row(tmp_path)
+        assert (row["source"], row["predicted_family"]) == ("inherited-capped", "opus")
+
+    def test_tier_token_reason_is_recorded(
+        self, recorder: AgentDispatchRecorderHandler, tmp_path: Path
+    ) -> None:
+        recorder.handle(
+            _tier_dispatch(tmp_path, subagent_type="general-purpose", prompt="x\ntier: hard line\n")
+        )
+        assert self._row(tmp_path)["tier_reason"] == "hard line"
+
+    def test_no_tool_use_id_writes_no_row(
+        self, recorder: AgentDispatchRecorderHandler, tmp_path: Path
+    ) -> None:
+        payload = _tier_dispatch(tmp_path, subagent_type="general-purpose")
+        del payload["tool_use_id"]
+        assert recorder.handle(payload).decision == Decision.ALLOW
+        assert read_dispatch_rows(tmp_path, "s1") == []
+
+    def test_classifier_failure_still_allows(
+        self, recorder: AgentDispatchRecorderHandler, tmp_path: Path
+    ) -> None:
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.agent_dispatch_recorder.dispatch_facts",
+            side_effect=OSError("unreadable agents dir"),
+        ):
+            result = recorder.handle(_tier_dispatch(tmp_path, subagent_type="general-purpose"))
+        assert result.decision == Decision.ALLOW
+        assert read_dispatch_rows(tmp_path, "s1") == []
 
 
 class TestMetadata:
