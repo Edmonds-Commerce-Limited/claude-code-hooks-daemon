@@ -123,3 +123,20 @@ failures are in code and tests this branch does not touch (`git diff ac21f83d1` 
 `--allow-unmapped` was needed for 12 files reported as too broad or not
 covered (the configs, `.claude/HOOKS-DAEMON.md`, README, docs and the baseline
 JSON). The coordinator's full gate must cover them.
+
+## 6. The two failures on main, fixed at the lead's request (faa76e7c3)
+
+- `SubagentContextBudgetHandler.matches` now returns False for a call with no
+  `tool_name` or no `agent_id`: the instantiation test requires a PreToolUse
+  handler to reject an empty input, and only a subagent's call has a context
+  budget. Red first: the three new tests in `test_subagent_context_budget.py`
+  failed (`3 failed, 54 passed`) before the change.
+- `sweep_cache._write_cache` names its temp file with `unique_temp_path`, the
+  project convention the `test_temp_names` guard enforces (that guard was the
+  red test). The 00495 sweep-cache tests stay green.
+
+Targeted QA (`llm_qa.py changed --allow-unmapped` on faa76e7c3) failed once on
+`github_urls`, which could not decode `.coverage`. That file is the gitignored
+coverage database a test run had just written into the worktree. It was
+removed, and `--resume` re-ran the failed and not-meaningful tools:
+`QA: 40/40 PASSED`, exit 0, with changed_tests at `10224 passed, 0 failed`.
