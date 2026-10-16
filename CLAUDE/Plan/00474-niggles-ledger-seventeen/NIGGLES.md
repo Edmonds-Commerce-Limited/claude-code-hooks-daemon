@@ -94,6 +94,27 @@ files that change under the formatter were already unformatted and change the sa
 
 **Status**: ✅ Fixed (commit 9bca52a78 on branch worktree-i122-footnotes).
 
+### N469 — a dependency change does not build a matching venv on restart; the resolver keeps using the stale one
+
+**Source**: the coordinator, 2026-10-16, merging #122 (N468), which added the `mdformat-footnote` dependency.
+`bin/hooks-daemon restart` after the merge kept the old venv `81c29529`, which lacks the plugin (its
+`mdformat.parser_extension` entry points were only `gfm` and `tables`). `bin/hooks-daemon repair` built
+`2a519198` with the plugin, and the resolver then selected it.
+
+**Why it happens**: `_best_ranked_scan_candidate` (`daemon/paths.py:965`) ranks a venv whose metadata `lock_hash`
+matches the current source first, but when none matches it still returns another slugged candidate (rank 1). It
+never refuses a stale venv, and nothing on the restart path builds one for the new lock. The #122 implementer's
+statement that "a mismatched lock_hash makes the resolver skip a venv, so ensure_venv rebuilds" is wrong, and the
+#122 issue comment repeats it.
+
+**Fix direction**: establish what each path does when the source's lock hash has no matching venv: a client
+`upgrade`, `provision`, the Plan 00477 background sync, `init.sh` cold start, and `restart`. Every path that moves the
+source must leave a venv built for the new lock (the upgrade and sync paths certainly must). At minimum the daemon
+should say loudly that it is running a venv built for a different lock, naming `repair`. Then correct the #122
+comment.
+
+**Status**: ⬜ Open.
+
 ### N467 — the secret-file-read guard still scans a large Write at about 1.7 ms per KB after N465
 
 **Source**: the N465 fix, 2026-10-16. N465's prefilter halved the cost (120 KB: 376 -> 205 ms; 1.2 MB: 4569 -> 2524
