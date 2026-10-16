@@ -8,7 +8,8 @@ owner's; the follow-up plan filed with this document puts it to them.
 ## Verdict
 
 **No path justifies a new native helper today.** One path is badly heavy, but it is heavy because of how the Python is
-written, and a Python change (ledger N465, fixed separately) removes the cost without a second toolchain. The one native helper that was ever justified
+written, and a Python change (ledger N465, fixed separately) halved the cost without a second toolchain. A large write is still
+over the 100 ms target (ledger N467, open), and the next step is the same kind of Python change. The one native helper that was ever justified
 (the transport relay) already exists. Details per path follow, then the cost of a helper, then what the owner is asked.
 
 ## The rules this is judged by
@@ -25,7 +26,7 @@ From [Performance/README.md](../../../Performance/README.md), Plan 00154's decis
 
 | Path                                          | Cost now (measured)                                                                      | Upper bound a native helper could save                        | Policy in it?                         | Verdict                                                         |
 | --------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------- | --------------------------------------------------------------- |
-| Secret-file guard scanning Write/Edit content | 1208 ms per 115 KB Write (about 9 ms/KB, linear); 9.3 s for 1.15 MB; 102 ms at 11.5 KB   | all of it, but a Python prefilter takes the same cost away    | yes (what counts as a protected path) | Not a Rust candidate: Python fix, ledger N465, fixed separately |
+| Secret-file guard scanning Write/Edit content | 1208 ms per 115 KB Write (about 10 ms/KB, linear); 9.3 s for 1.15 MB; 102 ms at 11.5 KB  | all of it, but Python passes can skip the same work           | yes (what counts as a protected path) | Not a Rust candidate: Python fix, ledger N465, fixed separately |
 | Other content scanners (five handlers)        | 40 ms per 115 KB Write in all (0.04 to 0.10 ms/KB); about 0.35 s per MB                  | under 40 ms per 115 KB Write                                  | yes (the patterns are the policy)     | Below Rule 0; helper not justified                              |
 | Handler-chain dispatch                        | 7.4 ms (47 handlers) to 10.2 ms (80 handlers) p50 per PreToolUse; 0.1 ms per `matches()` | at most the 7.7 ms of `matches()` calls, none of it hot       | yes, it IS the policy                 | Rule 1 forbids; a Python index by tool name is the lever        |
 | Docs and plan QA sweeps                       | 5.9 CPU-s on a cache miss (docs 4.1, plan 1.75); 0.1 s on a hit; off the critical path   | up to 5.9 CPU-s per tree change, in the background            | yes (the checks are the policy)       | Rule 1 forbids; already off the critical path by Task 2.6       |
@@ -54,9 +55,14 @@ The Python lever is to establish cheaply that a protected path could not be in t
 substring or single compiled-alternation test over the content, microseconds), and to tokenise only content that passes.
 That is a change inside the guard, covered by its existing tests and by new ones for the large-write case, and it needs no
 second toolchain. A native tokeniser would run the same work faster, but the saving over the Python fix is nothing, since
-the Python fix removes the work. This is a Python fix tracked as niggles ledger entry N465 and fixed separately from this
-plan, so it is not a Rust candidate and the owner is not asked to decide it. The figures above are the cost before that
-fix; this assessment does not measure the fix.
+the Python fix skips the work. This is a Python fix tracked as niggles ledger entry N465 and fixed separately from this
+plan, so it is not a Rust candidate and the owner is not asked to decide it. N465's prefilter halved the cost (120 KB:
+376 -> 205 ms; 1.2 MB: 4569 -> 2524 ms) but did not finish the job: a large write is still over the 100 ms target, at
+about 1.7 ms/KB, tracked as ledger N467 (open) in
+[Plan 00474's NIGGLES.md](../../00474-niggles-ledger-seventeen/NIGGLES.md). What remains is whole-file scanning (brace
+expansion, the word stream, Python AST literals) that further Python gating can cut, so the conclusion holds: a Python
+fix is preferred to a Rust helper, because the residual is still algorithmic and a native tokeniser would run the same
+passes. The figures in this document are the cost before N465; this assessment does not measure the post-fix cost.
 
 Auditability cost of doing it natively regardless: this is a security guard, so its policy would move into a compiled
 file. That is exactly what Rule 1 exists to prevent.
@@ -117,12 +123,12 @@ For the relay this is already paid and known; any further helper pays it again:
 1. Do not commission a new native helper. None of the six paths passes Rule 3.
 2. The secret-file guard's linear tokenising is the single path over the Rule 0 budget. It is a defect in an algorithm
    rather than a limit of the language, and it is in the guard class where an unexamined native rewrite is least wanted.
-   It is a Python fix tracked as ledger N465 and fixed separately, so it is not put to the owner.
+   It is a Python fix: N465 halved the cost and N467 (open) tracks the residual, so it is not put to the owner.
 3. Leave the relay as it is (opt-in) unless the owner wants it default-on; that choice is about distribution, not speed.
 
 ## Method and limits
 
-Figures are from [BASELINE.md](../../../Performance/BASELINE.md), measured on an 8-core Linux box at host load 3 to 13, so
+Figures are from [BASELINE.md](../../../Performance/BASELINE.md), measured on an 8-core Linux box at host load 3 to 8, so
 absolute times are rough and the CPU-second figures are the dependable ones. Dispatch and scanner costs were measured
 in-process (`process_request`, per-handler timers on `matches()`), not over a socket. No native code was written or
 benchmarked for this assessment: every "saving" above is an upper bound taken from the measured cost of the Python path,

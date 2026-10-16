@@ -28,13 +28,13 @@ and
 
 ## CPU / memory
 
-| Metric                | Value                                                       | Notes                                                                                                                                    |
-| --------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Daemon CPU under load | 74% in `re.search`                                          | content scanners; rest is noise                                                                                                          |
-| Content scan cost     | ~48 µs/KB (security), ~2.4 (error-hiding), ~1.6 (QA-suppr.) | ~40 ms per 1 MB Write (Plan 00154). Plan 00495 re-measured it, and found the secret-file guard at about 9 ms/KB: ~1.2 s per 115 KB Write |
-| RSS (fresh)           | 51 MB                                                       | settled 51 → 76 MB during a benchmark flood; no session-scale leak signature                                                             |
-| Cold restart          | 1.26 s                                                      | once per session/upgrade; `import` alone 141 ms. Plan 00495 re-measured the start at 1.0-1.1 s CPU, 1.2-1.3 s wall (below)               |
-| JSON round-trip       | 5-40 µs typical, 3.4 ms at 1 MB                             | pydantic validate+dump ~4 µs, flat to 1 MB                                                                                               |
+| Metric                | Value                                                       | Notes                                                                                                                                          |
+| --------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Daemon CPU under load | 74% in `re.search`                                          | content scanners; rest is noise                                                                                                                |
+| Content scan cost     | ~48 µs/KB (security), ~2.4 (error-hiding), ~1.6 (QA-suppr.) | ~40 ms per 1 MB Write (Plan 00154). Plan 00495 re-measured it, and found the secret-file guard at about 8 to 10 ms/KB: ~1.2 s per 115 KB Write |
+| RSS (fresh)           | 51 MB                                                       | settled 51 → 76 MB during a benchmark flood; no session-scale leak signature                                                                   |
+| Cold restart          | 1.26 s                                                      | once per session/upgrade; `import` alone 141 ms. Plan 00495 re-measured the start at 1.0-1.1 s CPU, 1.2-1.3 s wall (below)                     |
+| JSON round-trip       | 5-40 µs typical, 3.4 ms at 1 MB                             | pydantic validate+dump ~4 µs, flat to 1 MB                                                                                                     |
 
 ## Budget check (Rule 0)
 

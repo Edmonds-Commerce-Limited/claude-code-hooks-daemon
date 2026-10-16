@@ -88,7 +88,7 @@ Evidence already seen in this session (2026-10-06), not yet explained:
 - [x] ✅ **Task 1.4**: Refresh `CLAUDE/Performance/BASELINE.md` with the new figures, including the dispatch figure it
   marks "not re-measured". Also correct `CLAUDE/Performance/README.md:72`, which still lists the Rust transport
   forwarder as "Never, until…" although `relay/hooks_relay.rs` exists (found by the plan's fact check). Done in
-  COMMIT_HASH: BASELINE.md has a "Plan 00495 re-measurement" section (start 2.55 s -> 1.03 s CPU on the Phase 1 method;
+  fd79648ab: BASELINE.md has a "Plan 00495 re-measurement" section (start 2.55 s -> 1.03 s CPU on the Phase 1 method;
   dispatch 7.4 to 10.2 ms; a new finding in the content scanners), and the README row now reads "Landed, opt-in".
 
 ### Phase 2: Fix (TDD, one branch per fix)
@@ -127,18 +127,19 @@ Evidence already seen in this session (2026-10-06), not yet explained:
 
 - [x] ✅ **Task 3.1**: A startup-time regression check (a benchmark with a budget, run where it is cheap enough: a
   release gate or a scheduled routine), so the next slowdown is caught by the project, not the owner. Done in
-  COMMIT_HASH: `scripts/release/check_startup_budget.py`, a blocking release step (RELEASING.md Step 8b) with the budget
+  fd79648ab: `scripts/release/check_startup_budget.py`, a blocking release step (RELEASING.md Step 8b) with the budget
   in `CLAUDE/Performance/startup-budget.json` (2 s CPU, median of 5, a failing round is measured again). A release step
   and not the per-commit suite because a sample costs about a CPU-second; CPU seconds and a retry round so host load does
   not flake it. Proof: a clean run printed PASS at 1.39 s, and with 1.5 s of CPU planted in the start path (a
-  `sitecustomize.py`) it printed FAIL at 2.92 s and exited 1; the planted-slowdown test (`tests/integration/ test_startup_budget_planted_slowdown.py`) does the same on every run of the slow tests.
+  `sitecustomize.py`) it printed FAIL at 2.92 s and exited 1; the planted-slowdown test (`tests/integration/test_startup_budget_planted_slowdown.py`) does the same on every run of the slow tests.
 - [x] ✅ **Task 3.2**: Rust helpers for specific hot paths (owner ruling A3, 2026-10-06: no full rewrite was
   proposed; the question is whether particular heavy paths justify a Rust helper). From the Phase 1 and Phase 2
   numbers, name each path that stays heavy after the Python fixes (candidates to measure: the content scanners on large
   writes, the docs and plan QA sweeps, the transport path). For each, give the measured saving a native helper would
-  bring and its auditability cost, and put the list to the owner. Delivered in COMMIT_HASH:
+  bring and its auditability cost, and put the list to the owner. Delivered in fd79648ab and 240fc6e4d:
   [RUST-HELPERS-ASSESSMENT.md](RUST-HELPERS-ASSESSMENT.md) names six paths. None passes the cost test; the one path over
-  the budget (the secret-file guard, 1.2 s per 115 KB Write) is a Python algorithm problem. The owner's decision is put
+  the budget (the secret-file guard, 1.2 s per 115 KB Write before N465, which halved it; a large write is still over
+  the 100 ms target, ledger N467) is a Python algorithm problem. The owner's decision is put
   to them in [Plan 00529](../../00529-owner-decision-on-rust-helpers-from-00495-assessment/PLAN.md).
 
 ## Success Criteria
