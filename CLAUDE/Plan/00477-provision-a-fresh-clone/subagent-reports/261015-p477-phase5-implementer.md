@@ -133,6 +133,7 @@ Tests (`TestARelocatedVenvThatFailsItsCheckIsRebuilt`). The red run (`untracked/
 - **Stub interpreter.** The stub `bin/python` now reads `.pth` files as Python does for a `-c` that imports the package. A `.pth` that names a directory that does not exist makes the import fail, and `__file__` is under the directory the `.pth` names. A `-c` that does not touch the package is unaffected, as with real Python.
 - `test_a_path_the_rebind_cannot_see_is_rebuilt_and_the_sync_completes` (background). It ends on the new version with one in-place build. The rebuilt `.pth` names `<live>/src`. The record is `synced` and says "rebuilt" and "Cannot import". The new daemon is started once.
 - `test_a_rebuild_that_fails_too_ends_on_the_old_version` (background, with every in-place build failing). It ends on the old version. The live clone is byte-identical to before. The old daemon is started again. The record is `failed` and says "rebuilding" and "Cannot import".
+- Targeted QA on `20183d293` (`FULL_QA_LOCK_WAIT_SECONDS=3600 changed --allow-unmapped`): **QA: 37/40 PASSED, 1/40 FAILED, 2/40 NOT MEANINGFUL, exit 1**. The one failure is again plan_qa's ADVISE `journal-freshness` for Plan 00471. changed_tests: 4008 passed, 0 failed.
 - All nine test files built on the sandbox, plus the background_sync unit tests: 219 passed. The session-start end-to-end test now builds with `embed_build_paths` so its venv carries the `.pth` the check reads.
 
 ## Superseded: the in-place switch (`cd8b8e315`)
