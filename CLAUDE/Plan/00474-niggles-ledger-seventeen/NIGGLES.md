@@ -152,7 +152,10 @@ passed.
 same set the other content checks use. Add a regression test with a gitignored binary file present. It can fail the
 release's full gate whenever a coverage run leaves `.coverage` behind.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed (commit 733c3886f). The check walked the whole tree and read every file; it now keeps only
+the paths `git_visible_paths` lists (tracked, plus untracked and not ignored), as `check_install_mode_marker` does. An
+undecodable file that is not ignored is still an `unreadable-file` finding, not a crash. See
+[subagent-reports/261016-n470-github-urls-implementer.md](subagent-reports/261016-n470-github-urls-implementer.md).
 
 ### N467 — the secret-file-read guard still scans a large Write at about 1.7 ms per KB after N465
 
