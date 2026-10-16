@@ -108,6 +108,11 @@ with an optional advisory PreToolUse surface proposed as a later phase.
 
 ### Phase 4 (optional): Advisory enforcement surface
 
+Cross-reference: the advisory PreToolUse surface is delivered by Plan 00472's
+`workflow_fanout_advisor` (Workflow scripts) and `subagent_tier_advisor`
+(`Agent` calls); see [Plan 00472](../00472-subagent-model-tier-selection/PLAN.md),
+so it is not built twice here.
+
 - [ ] ⬜ **Task 4.1**: Evaluate an advisory (never-deny) PreToolUse check on
   `Agent` tool calls whose `model` parameter names a banned family while the
   cap authorisation is enabled; if pursued, TDD it as a separate handler or

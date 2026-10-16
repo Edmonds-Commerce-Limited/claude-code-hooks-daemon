@@ -272,6 +272,72 @@ config_changes:
       migration_note: >-
         Nothing to do. `cache-sidecar/` session directories were removed after
         `stale_file_days`; they now follow this setting.
+    - key: handlers.pre_tool_use.subagent_tier_advisor
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00472 T3/T4). On an Agent dispatch that inherits the top
+        tier (Opus or above with no ceiling configured) or passes a `model`
+        above its definition's own, adds a two-line note naming the cheaper
+        tier; silent on security, adversarial, decide and review work, on a
+        `tier: <reason>` prompt line, and when the spawner's model is unknown.
+        Options `mode` (advise, the only value), `default_ceiling` (null),
+        `types` ({subagent_type: {ceiling, floor}}) and `role_floors`; a
+        dispatch below a floor draws the floor advisory. Once per session,
+        type and source. Never denies.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            subagent_tier_advisor:
+              enabled: true
+              priority: 60
+              options:
+                mode: advise
+                default_ceiling: null
+                types: {}
+                role_floors: {}
+      migration_note: >-
+        On by default with empty tables. Add ceilings and floors for your own
+        agent types; docs/guides/SUBAGENT_MODEL_TIERS.md shows this
+        repository's table as an example.
+    - key: handlers.pre_tool_use.workflow_fanout_advisor
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00472). On a Workflow call, reads the script without running
+        it and states how many agents it starts ("at least N" when the script
+        decides the count at run time), how many agent() sites pass no `model`
+        and inherit the session's family, and whether the count is over that
+        family's `ceilings` entry (fable 10, opus 25, sonnet 60, haiku 60). The
+        first call of a session records the tool_input key names and value
+        types, never a value, in payload-capture/workflow-shape.json. Never
+        denies.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            workflow_fanout_advisor:
+              enabled: true
+              priority: 60
+              options:
+                ceilings: {fable: 10, opus: 25, sonnet: 60, haiku: 60}
+      migration_note: >-
+        On by default; it only adds a sentence to a Workflow call.
+    - key: handlers.post_tool_use.dispatch_model_recorder
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00472 T1). A silent PostToolUse sensor joining the model an
+        Agent dispatch started on (resolvedModel, modelsUsed) onto the
+        dispatch's tier row in the spend ledger, which `hooks-daemon tiers`
+        reads.
+      example_yaml: |
+        handlers:
+          post_tool_use:
+            dispatch_model_recorder:
+              enabled: true
+              priority: 33
+      migration_note: >-
+        On by default; it never blocks.
   renamed: []
   removed:
     - key: handlers.pre_tool_use.upgrade_approval_guard
