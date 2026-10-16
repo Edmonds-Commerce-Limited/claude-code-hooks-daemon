@@ -117,6 +117,22 @@ comment.
 from the statement in
 [subagent-reports/261016-n469-stale-lock-venv-implementer.md](subagent-reports/261016-n469-stale-lock-venv-implementer.md).
 
+### N470 — the `github_urls` QA check fails on a gitignored binary `.coverage` file
+
+**Source**: the Plan 00472 implementer, 2026-10-16. A targeted `llm_qa.py changed` run in
+`worktree-p472-tier-advisor` failed `github_urls` on `.coverage`, the coverage database an earlier pytest run had just
+written into the worktree, because the checker could not decode it. Deleting the file and re-running with `--resume`
+passed.
+
+**Why it happens**: not yet established. A gitignored, binary, tool-generated file reached a checker that reads text.
+Either the check walks the tree instead of the tracked or changed file list, or it does not skip undecodable files.
+
+**Fix direction**: find the file source `github_urls` scans, and make it judge only tracked or changed text files, the
+same set the other content checks use. Add a regression test with a gitignored binary file present. It can fail the
+release's full gate whenever a coverage run leaves `.coverage` behind.
+
+**Status**: ⬜ Open.
+
 ### N467 — the secret-file-read guard still scans a large Write at about 1.7 ms per KB after N465
 
 **Source**: the N465 fix, 2026-10-16. N465's prefilter halved the cost (120 KB: 376 -> 205 ms; 1.2 MB: 4569 -> 2524
