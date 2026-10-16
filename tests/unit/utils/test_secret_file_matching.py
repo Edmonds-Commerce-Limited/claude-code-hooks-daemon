@@ -9,6 +9,7 @@ position).
 
 import itertools
 import os
+import random
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -3472,3 +3473,143 @@ class TestConsumerOptionsAreJudged:
     )
     def test_option_naming_a_protected_path_or_late_denied_subcommand(self, command: str) -> None:
         assert not self._exempt(command)
+
+
+def _unfiltered_effective_cwds(command: str, cwd: str | None) -> tuple[str, ...]:
+    """``effective_cwds`` without the N465 prefilter: every segment tokenised."""
+    directories: list[str] = [cwd] if cwd is not None and Path(cwd).is_absolute() else []
+    for segment in sfm._COMMAND_SEGMENT_SEPARATORS.split(command):
+        words = sfm._shell_words(segment)
+        if words is None or len(words) < 2 or words[0] not in sfm._DIRECTORY_CHANGE_COMMANDS:
+            continue
+        operands = [word for word in words[1:] if not word.startswith("-") or word == "-"]
+        if not operands:
+            continue
+        target = operands[0]
+        if target == "-" or any(char in sfm._WORD_EXPANDING_CHARACTERS for char in target):
+            continue
+        if not Path(target).is_absolute():
+            if not directories:
+                continue
+            target = str(Path(directories[-1]) / target)
+        directories.append(os.path.normpath(target))
+    return tuple(dict.fromkeys(directories))
+
+
+#: Segments that do, or nearly do, tokenise to a directory change: quoting,
+#: escaping and splitting the command word, and near-miss command names.
+_CD_SHAPES: tuple[str, ...] = (
+    "cd vault",
+    "cd vault && cat r.md",
+    "cd vault; cat r.md",
+    "cd vault\ncat r.md",
+    "  cd   vault",
+    "\tcd\tvault",
+    "pushd vault",
+    "pushd vault && popd",
+    "cd -P vault",
+    "cd -L -P vault",
+    "cd -- vault",
+    "cd - && cat r.md",
+    "cd",
+    "cd && cat r.md",
+    '"cd" vault',
+    "'cd' vault",
+    "c'd' vault",
+    'c"d" vault',
+    "c\\d vault",
+    "\\cd vault",
+    "''cd vault",
+    '""cd vault',
+    "c''d vault",
+    "p'u'shd vault",
+    'push"d" vault',
+    "pu\\shd vault",
+    "cd 'vault'",
+    'cd "vault"',
+    "cd v'au'lt",
+    "cd vault\\ dir",
+    "cd /abs/vault",
+    "cd ../vault",
+    "cd x && cd ../vault",
+    "cd x || cd vault",
+    "cd x | cd vault",
+    "cd x & cd vault",
+    "cd $D",
+    "cd ${D}",
+    "cd $(pwd)/vault",
+    "cd `pwd`",
+    "cd ~/vault",
+    "cd vault*",
+    "cd {a,b}",
+    "cd 'vault && cat r.md",
+    'cd "vault',
+    "cd vault\\",
+    "(cd vault)",
+    "( cd vault )",
+    "{ cd vault; }",
+    "echo cd vault",
+    "abcd vault",
+    "cdx vault",
+    "xcd vault",
+    "c d vault",
+    "pushdd vault",
+    "popd",
+    "# cd vault",
+    "#cd vault",
+    "cd#x vault",
+    "$'cd' vault",
+    '$"cd" vault',
+    "c\\\nd vault",
+    "if true; then cd vault; fi",
+    "env cd vault",
+    "builtin cd vault",
+    "CD vault",
+    "cd\u00a0vault",
+)
+
+
+class TestEffectiveCwdsPrefilterIsExact:
+    """Ledger 00474 N465: ``effective_cwds`` tokenises only a segment that
+    could be a ``cd``/``pushd``, and still returns exactly what tokenising
+    every segment returned."""
+
+    @pytest.fixture
+    def tree(self, tmp_path: Path) -> Path:
+        root = Path(os.path.realpath(tmp_path))
+        for name in ("vault", "open", "x"):
+            (root / name).mkdir()
+        return root
+
+    @pytest.mark.parametrize("shape", _CD_SHAPES)
+    @pytest.mark.parametrize("cwd_kind", ["absolute", "none", "relative"])
+    def test_hand_written_shape(self, tree: Path, shape: str, cwd_kind: str) -> None:
+        cwd = {"absolute": str(tree), "none": None, "relative": "rel/dir"}[cwd_kind]
+        assert sfm.effective_cwds(shape, cwd) == _unfiltered_effective_cwds(shape, cwd)
+
+    def test_every_shape_joined_into_one_script(self, tree: Path) -> None:
+        script = "\n".join(_CD_SHAPES)
+        expected = _unfiltered_effective_cwds(script, str(tree))
+        assert sfm.effective_cwds(script, str(tree)) == expected
+
+    def test_seeded_fuzz_of_cd_adjacent_text(self, tree: Path) -> None:
+        """Random text over the characters that build, quote, escape or split
+        a ``cd``/``pushd`` word; a divergence is a segment wrongly skipped."""
+        alphabet = [*"cdpushx/v.-' \"\\;&|\n\t$(){}#~*", "cd", "pushd", "cd ", "vault"]
+        rng = random.Random(465)
+        for _ in range(4000):
+            text = "".join(rng.choice(alphabet) for _ in range(rng.randint(1, 24)))
+            expected = _unfiltered_effective_cwds(text, str(tree))
+            assert sfm.effective_cwds(text, str(tree)) == expected, repr(text)
+
+    def test_a_script_with_no_directory_change_is_never_tokenised(self) -> None:
+        script = 'echo "building component $i" && make -C src/module all >> build.log\n' * 500
+        with patch.object(sfm, "_shell_words", wraps=sfm._shell_words) as spy:
+            assert sfm.effective_cwds(script, "/proj") == ("/proj",)
+        assert spy.call_count == 0
+
+    def test_only_the_segments_that_could_change_directory_are_tokenised(self) -> None:
+        script = "make all\ncd /proj/build\nmake install\n" * 10
+        with patch.object(sfm, "_shell_words", wraps=sfm._shell_words) as spy:
+            assert sfm.effective_cwds(script, "/proj") == ("/proj", "/proj/build")
+        assert spy.call_count == 10
