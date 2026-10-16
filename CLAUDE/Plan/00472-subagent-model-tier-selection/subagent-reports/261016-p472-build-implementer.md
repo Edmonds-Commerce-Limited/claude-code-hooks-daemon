@@ -96,4 +96,30 @@ handler but not run red before it was created; its parser tests were.
 
 ## 5. Targeted QA (`llm_qa.py changed`)
 
-See the final section appended after the run.
+**First run** (on 05404fd2b): `QA: 35/40 PASSED, 4/40 FAILED, 1/40 NOT MEANINGFUL`.
+Fixed in 386e0f939:
+
+- format: Black reformatted 12 files during the run; committed.
+- error_hiding, 3 findings (`return-none-on-error`): the tier advisor's
+  `_judge` and the Workflow advisor's `_args_len` and `_script` no longer
+  return from an `except` block. `audit_error_hiding.py` then exits 0.
+- sensitive_content, 878 findings, all `session-uuid` in the baseline copy:
+  its four session UUIDs are now all-same-digit placeholders (1111..., 2222...).
+- changed_tests: `ToolNameLiteral` was missing `Workflow`, and the option
+  injection test needed valid non-default values for both advisors. That test
+  also showed `subagent_tier_advisor` never read its `mode` option: `_mode`
+  now defaults to None (read as advise) and every ledger event records it.
+
+**Final run** (`--allow-unmapped`, on 386e0f939): `QA: 39/40 PASSED, 1/40 FAILED`,
+exit 1. changed_tests reports `10133 passed, 2 failed, 9 skipped`. Both
+failures are in code and tests this branch does not touch (`git diff ac21f83d1` is empty for all four files), so they fail on main too:
+
+- `tests/integration/test_handler_instantiation.py::test_handler_matches_returns_bool[pre_tool_use/subagent_context_budget]`:
+  Plan 00471's `SubagentContextBudgetHandler.matches({})` returns True (it
+  matches every tool call when no type is exempt).
+- `tests/unit/utils/test_temp_names.py::...test_no_source_file_spells_a_pid_keyed_temp_name`:
+  it flags `utils/sweep_cache.py` (last changed by Plan 00495, 2a03b0974).
+
+`--allow-unmapped` was needed for 12 files reported as too broad or not
+covered (the configs, `.claude/HOOKS-DAEMON.md`, README, docs and the baseline
+JSON). The coordinator's full gate must cover them.
