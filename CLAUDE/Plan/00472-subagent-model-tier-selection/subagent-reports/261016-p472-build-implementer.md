@@ -140,3 +140,24 @@ Targeted QA (`llm_qa.py changed --allow-unmapped` on faa76e7c3) failed once on
 coverage database a test run had just written into the worktree. It was
 removed, and `--resume` re-ran the failed and not-meaningful tools:
 `QA: 40/40 PASSED`, exit 0, with changed_tests at `10224 passed, 0 failed`.
+
+## 7. Review follow-ups (8c321290f)
+
+The review of 550b9ba03 approved it; its non-blocking findings were fixed test-first:
+
+1. A script whose raw text calls `agent(` but yields no site (a regex literal
+   holding a quote, a call inside a template `${...}`) is now recorded
+   `unparsed`, never `no-agents` (`workflow_fanout.mentions_agent_call`). Both
+   shapes are fixtures.
+2. `_probe_shape` is wrapped on its own, so a failed probe write still records
+   the verdict. Both fail-open paths have OSError tests.
+3. The "Pass `model: 'sonnet'` (or lower)" sentence appears only when the
+   session family ranks above Sonnet.
+4. and 5. New tests: `Array.from({length: 5}).map(...)` without a mapper
+   counts 5, and the client template gives `subagent_tier_advisor` empty
+   tables. Both passed on arrival, because they pin existing behaviour.
+
+Red first: `5 failed, 41 passed` in the advisor module, and the parser module
+failed at import (`mentions_agent_call`). Targeted QA on 8c321290f
+(`--allow-unmapped`): `QA: 40/40 PASSED`, exit 0, with changed_tests at
+`10237 passed, 0 failed`.
