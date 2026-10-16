@@ -709,9 +709,7 @@ class TestTheBackgroundSync:
         assert state["target"] == MAIN_VERSION
         assert not (_sync_dir(fresh) / "lock.d").exists(), "the lock is released"
 
-    def test_a_sync_failure_keeps_the_old_daemon_and_records_why(
-        self, fresh: Provisioning
-    ) -> None:
+    def test_a_sync_failure_keeps_the_old_daemon_and_records_why(self, fresh: Provisioning) -> None:
         _provisioned_at(fresh, CLONE_VERSION)
         before = fresh.clone_tracked_state()
         fresh.expect(MAIN_VERSION)
@@ -728,9 +726,7 @@ class TestTheBackgroundSync:
         assert "venv" in state["detail"]
         assert not (_sync_dir(fresh) / "lock.d").exists()
 
-    def test_a_target_already_attempted_is_never_attempted_again(
-        self, fresh: Provisioning
-    ) -> None:
+    def test_a_target_already_attempted_is_never_attempted_again(self, fresh: Provisioning) -> None:
         _provisioned_at(fresh, CLONE_VERSION)
         fresh.expect(MAIN_VERSION)
         assert fresh.provision(args=BACKGROUND, uv_fails=True).returncode != 0
@@ -757,9 +753,9 @@ class TestTheBackgroundSync:
         assert result.returncode == 0, _out(result)
         assert "already running" in _out(result)
         assert fresh.clone_tracked_state() == before
-        assert not (_sync_dir(fresh) / f"v{MAIN_VERSION}.state").exists(), (
-            "not claimed, so a later session tries again"
-        )
+        assert not (
+            _sync_dir(fresh) / f"v{MAIN_VERSION}.state"
+        ).exists(), "not claimed, so a later session tries again"
         assert lock.is_dir(), "another sync's lock is not taken from it"
 
     def test_a_lock_whose_holder_is_gone_is_taken_over(self, fresh: Provisioning) -> None:

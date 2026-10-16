@@ -88,7 +88,9 @@ class TestReadSyncRecord:
         assert record is not None and record.detail == "origin is a=b"
 
     @pytest.mark.parametrize("text", ["", "status=sideways\n", "garbage\n"])
-    def test_an_unreadable_state_is_a_failure_not_a_silence(self, tmp_path: Path, text: str) -> None:
+    def test_an_unreadable_state_is_a_failure_not_a_silence(
+        self, tmp_path: Path, text: str
+    ) -> None:
         _write_state(tmp_path, text)
 
         record = read_sync_record(tmp_path, _VERSION)

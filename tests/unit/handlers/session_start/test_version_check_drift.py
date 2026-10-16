@@ -95,7 +95,9 @@ def _patched(
     stack.enter_context(patch(f"{_MODULE}.__version__", _RUNNING))
     stack.enter_context(patch(f"{_MODULE}.read_install_stamp", return_value=stamp))
     stack.enter_context(
-        patch(f"{_MODULE}.launch_background_sync", launcher if launcher is not None else MagicMock())
+        patch(
+            f"{_MODULE}.launch_background_sync", launcher if launcher is not None else MagicMock()
+        )
     )
     return stack
 

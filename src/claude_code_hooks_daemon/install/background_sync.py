@@ -82,10 +82,10 @@ def read_sync_record(untracked_dir: Path, version: str) -> SyncRecord | None:
     """
     path = state_path(untracked_dir, version)
     logs = log_path(untracked_dir, version)
+    if not path.exists():
+        return None
     try:
         text = path.read_text()
-    except FileNotFoundError:
-        return None
     except OSError as exc:
         return _unreadable(path, logs, f"the state file {path} cannot be read ({exc})")
 

@@ -309,9 +309,18 @@ class VersionCheckHandler(SessionStartHandlerBase):
             if ProjectContext.self_install_mode():
                 return None
             expected = read_expected_version(ProjectContext.config_path())
-        except RuntimeError:
-            # ProjectContext not initialised: nothing to compare against.
-            return None
+            if expected is not None and expected != __version__:
+                return expected
+        except RuntimeError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    "ProjectContext is not initialised, so there is no expected version to "
+                    "compare the running daemon with, and no drift is reported"
+                ),
+                level=logging.DEBUG,
+            )
         except (OSError, ValueError) as exc:
             # A config that cannot be read or parsed is reported by config
             # validation; this advisory must not guess at what it said.
@@ -324,10 +333,7 @@ class VersionCheckHandler(SessionStartHandlerBase):
                     "it said, so no drift is reported"
                 ),
             )
-            return None
-        if expected is None or expected == __version__:
-            return None
-        return expected
+        return None
 
     def _drift_context(self, expected: str) -> list[str]:
         """The notice for a running daemon that is not the version the project expects.
