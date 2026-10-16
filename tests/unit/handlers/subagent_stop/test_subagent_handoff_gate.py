@@ -131,6 +131,39 @@ def test_never_locks_out_after_three_blocks(budget, gate, tmp_path, project) -> 
     assert decisions == [Decision.DENY, Decision.DENY, Decision.DENY, Decision.ALLOW]
 
 
+def test_a_handoff_sent_by_message_satisfies_it(budget, gate, tmp_path, project) -> None:
+    """Review S3: an agent with no Write tool hands off by SendMessage."""
+    transcript = tmp_path / "projects" / SESSION / "subagents" / f"agent-{AGENT_ID}.jsonl"
+    write_transcript(transcript, 260_000)
+    budget.handle(pre_tool(tmp_path, project, "Bash", {"command": "ls"}))
+    sent = budget.handle(
+        pre_tool(tmp_path, project, "SendMessage", {"to": "team-lead", "message": "done: x"})
+    )
+    assert sent.decision == Decision.ALLOW
+    assert gate.handle(stop(tmp_path, project)).decision == Decision.ALLOW
+
+
+def test_the_block_names_the_message_route(budget, gate, tmp_path, project) -> None:
+    transcript = tmp_path / "projects" / SESSION / "subagents" / f"agent-{AGENT_ID}.jsonl"
+    write_transcript(transcript, 260_000)
+    budget.handle(pre_tool(tmp_path, project, "Bash", {"command": "ls"}))
+    reason = gate.handle(stop(tmp_path, project)).reason or ""
+    assert "cannot Write" in reason
+    assert "SendMessage" in reason
+
+
+def test_a_failure_to_judge_allows_the_stop(gate, tmp_path, project, monkeypatch) -> None:
+    """Review S4: under strict_mode an escaped exception would block every stop."""
+
+    def broken(*_args: object) -> None:
+        raise KeyError("boom")
+
+    monkeypatch.setattr(
+        "claude_code_hooks_daemon.handlers.subagent_stop.subagent_handoff_gate.read_state", broken
+    )
+    assert gate.handle(stop(tmp_path, project)).decision == Decision.ALLOW
+
+
 def test_matches_only_real_agent_stops(gate, tmp_path, project) -> None:
     assert gate.matches(stop(tmp_path, project)) is True
     assert gate.matches({"session_id": SESSION}) is False

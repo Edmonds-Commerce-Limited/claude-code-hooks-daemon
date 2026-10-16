@@ -3329,7 +3329,7 @@ handlers:
 | **Type**       | Blocking (terminal)       |
 | **Event**      | PreToolUse (subagents)    |
 
-**Description:** Bounds a subagent's context with a forced handoff, never a kill (Plan 00471 L2). Every tool call re-reads the agent's whole context, so a large agent spends most of its tokens re-reading. It tail-reads the agent's own transcript on each of its tool calls. Past `soft_tokens` it adds context ONCE per band naming the handoff file (`<plan>/subagent-reports/<yymmdd>-<agent>-handoff.md`, else `untracked/scratch/`), a WIP commit and a SendMessage to the lead. Past `hard_tokens` (off by default) it denies every tool except the handoff: Write/Edit/Read under `handoff_globs`, Bash made only of `allowed_bash_prefixes`, and SendMessage; after three consecutive denials the reason says to stop, the worktree being the handoff (`R-SUBAGENT-CONTEXT-BUDGET`). A `budget: <N>k` line in a NAMED dispatch's prompt raises that agent's bands, clamped to `max_override_tokens`. A transcript it cannot find or read ALLOWS, with one `unmeasured` verdict per agent and reason in `verdicts.jsonl`. The coordinator is never judged (scope SUB). Companion: `subagent_handoff_gate`.
+**Description:** Bounds a subagent's context with a forced handoff, never a kill (Plan 00471 L2). Every tool call re-reads the agent's whole context, so a large agent spends most of its tokens re-reading. It tail-reads the agent's own transcript on each of its tool calls. Past `soft_tokens` it adds context ONCE per band naming the handoff file (`<plan>/subagent-reports/<yymmdd>-<agent>-handoff.md`, else `untracked/scratch/`), a WIP commit and a SendMessage to the lead. Past `hard_tokens` (off by default) it denies every tool except the handoff: Write/Edit/Read under `handoff_globs`, Bash made only of `allowed_bash_prefixes` (quote-aware; no `$(...)`, so a long commit message goes through `git commit -F`), SendMessage and ToolSearch; after three consecutive denials the reason says to stop, the worktree being the handoff (`R-SUBAGENT-CONTEXT-BUDGET`). An agent that cannot Write hands off by SendMessage. A `budget: <N>k` line in a NAMED dispatch's prompt raises that agent's bands, clamped to `max_override_tokens`. A transcript it cannot find or read, one with no usage in its last 4 MiB, and any failure inside the gate ALLOW, with one `unmeasured` verdict per agent and reason in `verdicts.jsonl`. The coordinator is never judged (scope SUB). Companion: `subagent_handoff_gate`.
 
 **Options:**
 
@@ -3368,7 +3368,7 @@ handlers:
 | **Type**       | Blocking (terminal) |
 | **Event**      | PreToolUse          |
 
-**Description:** Guards a SendMessage that would cold-resume a large finished agent (Plan 00471 L3). A message to a stopped agent resumes its whole history, and past the cache TTL that history is re-written to the cache before any work (measured mean: 336k tokens). It resolves `to` to the newest `agent-a<name>-*.jsonl` whose `meta.json` confirms the name, or to the raw agent id, and fires only when the agent is stopped (its last turn ended `end_turn`), cold (idle for `warm_seconds`) and at or above `max_resume_tokens`. `mode: advise` (default) adds context; `mode: deny` refuses (`R-RESUME-COLD-LARGE`). Either way the text names the fresh-spawn route and the agent's handoff or last persisted report when found. A message whose first line starts `RESUME-LARGE: <reason>` is allowed and recorded in the spend ledger. A running agent, a warm resume and a name this session does not know are never gated.
+**Description:** Guards a SendMessage that would cold-resume a large finished agent (Plan 00471 L3). A message to a stopped agent resumes its whole history, and past the cache TTL that history is re-written to the cache before any work (measured mean: 336k tokens). It resolves `to` to the newest `agent-a<name>-*.jsonl` whose `meta.json` confirms the name, or to the raw agent id, and fires only when the agent is stopped (its last turn ended `end_turn`), cold (idle for `warm_seconds`) and at or above `max_resume_tokens`. `mode: advise` (default) adds context; `mode: deny` refuses (`R-RESUME-COLD-LARGE`). Either way the text names the fresh-spawn route and the agent's handoff or last persisted report when found. A message whose first line starts `RESUME-LARGE: <reason>` is allowed and recorded in the spend ledger. A running agent, a warm resume, a structured message (plan approval, shutdown; it cannot carry the override) and a name this session does not know are never gated. A transcript it cannot measure, or a failure inside the guard, ALLOWS with one `unmeasured` verdict.
 
 **Options:**
 
@@ -3475,7 +3475,7 @@ handlers:
 | **Type**       | Advisory             |
 | **Event**      | PreToolUse           |
 
-**Description:** Names the session's load before another agent starts (Plan 00471 L4, L5). On an `Agent`/`Task` dispatch, and on a SendMessage that cold-resumes a stopped agent, it counts the live agents (transcripts that moved within `liveness_seconds` and have not ended their turn, minus those a Stop or SubagentStop reported finished). At `max_concurrent` it names them; at `advise_pct` of the five-hour usage limit (read from `context_sidecar`, which must be enabled) it says to serialise and gives the reset time. A sidecar older than `max_age_seconds` is unknown and draws nothing. Never denies. Each fired advisory is a ledger event.
+**Description:** Names the session's load before another agent starts (Plan 00471 L4, L5). On an `Agent`/`Task` dispatch, and on a SendMessage that cold-resumes a stopped agent, it counts the live agents (transcripts that moved within `liveness_seconds` and have not ended their turn, minus those a Stop or SubagentStop reported finished). At `max_concurrent` it names them; at `advise_pct` of the five-hour usage limit (read from the daemon's usage snapshot, which every status-line render fills from `rate_limits`) it says to serialise and gives the reset time. A reading older than `max_age_seconds` is unknown and draws nothing. Never denies. Each fired advisory is a ledger event.
 
 **Options:**
 
@@ -3484,7 +3484,7 @@ handlers:
 | `max_concurrent`   | `null`  | Live-agent count that draws the advisory; `null` = off |
 | `advise_pct`       | `80`    | Five-hour limit percentage that draws it; `null` = off |
 | `liveness_seconds` | `120`   | How recently a transcript must have moved to count     |
-| `max_age_seconds`  | `300`   | Oldest context sidecar still trusted                   |
+| `max_age_seconds`  | `300`   | Oldest usage reading still trusted                     |
 
 **Config example:**
 

@@ -202,6 +202,13 @@ class TestSubagentCacheAggregatorHandler:
         assert combined["agents_seen"] == 2
         assert combined["cache_read_tokens"] == 600
 
+    def test_a_recorded_agent_is_evicted_from_the_offset_cache(self, handler, transcript, tmp_path):
+        """Review S6: the sidecar keeps it, so memory holds only agents not yet stopped."""
+        from claude_code_hooks_daemon.utils.spend_ledger import spend_cache
+
+        handler.record(session_id="sess", agent_id="one", transcript=transcript, root=tmp_path)
+        assert spend_cache(tmp_path).resident() == 0
+
     def test_the_same_agent_recorded_twice_is_not_double_counted(
         self, handler, transcript, tmp_path
     ):

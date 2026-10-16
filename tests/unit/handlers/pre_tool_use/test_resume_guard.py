@@ -149,6 +149,31 @@ class TestDecision:
         assert handler.handle(send(tmp_path, "plan464-impl")).decision == Decision.ALLOW
         assert unmeasured_count(tmp_path / "untracked", SESSION) == 1
 
+    def test_a_large_usage_free_target_fails_open_and_is_recorded_unmeasured(
+        self, handler, tmp_path, subagents
+    ) -> None:
+        """Review B2: no usage within the tail cap is unmeasured, not a fresh agent."""
+        transcript = write_agent(subagents, NEW_ID, "plan464-impl", context=300_000)
+        line = json.dumps({"type": "user", "message": {"content": "x" * 1000}}) + "\n"
+        transcript.write_text(line * 1000, encoding="utf-8")
+        assert handler.handle(send(tmp_path, "plan464-impl")).decision == Decision.ALLOW
+        log = tmp_path / "untracked" / "logs" / "hooks" / "verdicts.jsonl"
+        assert json.loads(log.read_text())["detail"]["reason"] == "no-usage-in-tail"
+
+    def test_any_failure_to_judge_allows_and_is_recorded(
+        self, handler, tmp_path, subagents, monkeypatch
+    ) -> None:
+        """Review S4: under strict_mode an escaped exception would deny the message."""
+        write_agent(subagents, NEW_ID, "plan464-impl", context=300_000)
+
+        def broken(*_args: object) -> None:
+            raise KeyError("boom")
+
+        monkeypatch.setattr(handler, "_explain", broken)
+        assert handler.handle(send(tmp_path, "plan464-impl")).decision == Decision.ALLOW
+        log = tmp_path / "untracked" / "logs" / "hooks" / "verdicts.jsonl"
+        assert json.loads(log.read_text())["detail"]["reason"] == "handler-error"
+
     def test_override_prefix_allows_and_is_recorded(self, handler, tmp_path, subagents) -> None:
         write_agent(subagents, NEW_ID, "plan464-impl", context=300_000)
         message = "RESUME-LARGE: one-line fix it already has the context for\nfix the typo"
@@ -158,12 +183,27 @@ class TestDecision:
         assert events[-1]["to"] == "plan464-impl"
         assert events[-1]["reason"] == "one-line fix it already has the context for"
 
-    def test_non_string_message_is_judged_without_an_override(
-        self, handler, tmp_path, subagents
+    @pytest.mark.parametrize(
+        "message",
+        [
+            {"type": "plan_approval_response", "request_id": "r1", "approve": True},
+            {"type": "shutdown_request"},
+            {"type": "shutdown_response", "request_id": "r2", "approve": True},
+        ],
+        ids=lambda message: message["type"],
+    )
+    def test_a_structured_message_is_never_denied_and_is_recorded(
+        self, handler, tmp_path, subagents, message
     ) -> None:
+        """Review B1: it cannot carry RESUME-LARGE:, and denying it strands the agent."""
         write_agent(subagents, NEW_ID, "plan464-impl", context=300_000)
-        message = {"type": "shutdown_request"}
-        assert handler.handle(send(tmp_path, "plan464-impl", message)).decision == Decision.DENY
+        result = handler.handle(send(tmp_path, "plan464-impl", message))
+        assert result.decision == Decision.ALLOW
+        assert "RESUME-LARGE" not in "\n".join(result.context)
+        events = read_events(tmp_path / "untracked", SESSION)
+        assert events[-1]["kind"] == "resume-structured"
+        assert events[-1]["message_type"] == message["type"]
+        assert events[-1]["context_tokens"] == 300_000
 
     def test_advise_mode_allows_with_context(self, handler, tmp_path, subagents) -> None:
         handler._mode = "advise"

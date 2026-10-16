@@ -4,8 +4,9 @@ The SubagentStop companion of ``subagent_context_budget``. Once an agent has hit
 the hard band, that handler records it in the agent's state document along with
 the handoff path it named; when the agent stops, this gate checks the handoff
 exists (the named path, or the file the agent actually wrote under the handoff
-globs) and blocks the stop until it does. That is what makes the hard band a
-handoff rather than a kill.
+globs) and blocks the stop until it does. A SendMessage made while the hard band
+was engaged also counts, since an agent with no Write tool can hand off only by
+message. That is what makes the hard band a handoff rather than a kill.
 
 It must never strand an agent either: after ``MAX_STOP_BLOCKS`` blocks it
 allows, because by then the worktree state is the handoff. An agent that never
@@ -14,6 +15,7 @@ reached the hard band (hard mode is shipped off) always stops freely.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Final
 
@@ -26,11 +28,16 @@ from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.daemon.synthetic_traffic import is_synthetic_event
 from claude_code_hooks_daemon.handlers.pre_tool_use.subagent_context_budget import (
     STATE_HANDOFF_PATH,
+    STATE_HANDOFF_SENT,
     STATE_HANDOFF_WRITTEN,
     STATE_HARD_ENGAGED,
     STATE_KIND,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 from claude_code_hooks_daemon.utils.spend_ledger import read_state, state_path, write_state
+
+logger = logging.getLogger(__name__)
 
 #: Stops blocked before the gate gives way; the worktree is then the handoff.
 MAX_STOP_BLOCKS: Final[int] = 3
@@ -84,7 +91,22 @@ class SubagentHandoffGateHandler(SubagentStopHandlerBase):
         return [_RULE]
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
-        """DENY the stop when the hard band engaged and no handoff exists, at most three times."""
+        """DENY the stop when the hard band engaged and no handoff exists, at most three times.
+
+        Under ``strict_mode`` an escaped exception would block every stop, so a
+        failure to judge allows the stop.
+        """
+        try:
+            return self._judge(hook_input)
+        except Exception as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="a handoff-gate failure allows the stop; a cost control never holds an agent",
+            )
+            return BlockingResult(decision=Decision.ALLOW)
+
+    def _judge(self, hook_input: dict[str, Any]) -> BlockingResult:
         state_file = state_path(
             self._untracked_dir(),
             str(hook_input.get(HookInputField.SESSION_ID) or ""),
@@ -92,14 +114,12 @@ class SubagentHandoffGateHandler(SubagentStopHandlerBase):
             str(hook_input.get(HookInputField.AGENT_ID) or ""),
         )
         state = read_state(state_file)
-        if state.get(STATE_HARD_ENGAGED) is not True:
+        if state.get(STATE_HARD_ENGAGED) is not True or state.get(STATE_HANDOFF_SENT) is True:
             return BlockingResult(decision=Decision.ALLOW)
         expected = state.get(STATE_HANDOFF_PATH)
         written = state.get(STATE_HANDOFF_WRITTEN)
-        candidates = [
-            Path(value) for value in (written, expected) if isinstance(value, str) and value
-        ]
-        if any(candidate.is_file() for candidate in candidates):
+        candidates = [value for value in (written, expected) if isinstance(value, str) and value]
+        if any(path_is_file(candidate, unreadable_means=False) for candidate in candidates):
             return BlockingResult(decision=Decision.ALLOW)
         blocks = state.get(_STATE_STOP_BLOCKS)
         blocks = blocks if isinstance(blocks, int) and not isinstance(blocks, bool) else 0
@@ -113,7 +133,8 @@ class SubagentHandoffGateHandler(SubagentStopHandlerBase):
             reason=(
                 "HANDOFF MISSING: this subagent reached its hard context budget and is "
                 f"stopping without a handoff. Write it to {target} (what is done, what is "
-                "left, where the state is), commit your work in progress, then stop. "
+                "left, where the state is), commit your work in progress, then stop. If you "
+                "cannot Write, SendMessage the lead the handoff itself, then stop. "
                 f"Block {blocks + 1} of {MAX_STOP_BLOCKS}; after that the stop is allowed and "
                 "your worktree is the handoff."
             ),

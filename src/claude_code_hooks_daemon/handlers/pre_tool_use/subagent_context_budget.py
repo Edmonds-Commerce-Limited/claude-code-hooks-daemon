@@ -11,7 +11,10 @@ never touches the coordinator (scope SUB).
   on every call would itself grow the context.
 - **Hard band** (``hard_tokens``, shipped OFF): every tool is denied except the
   three handoff steps: Write/Edit (and Read) under ``handoff_globs``, Bash whose
-  every segment starts with an ``allowed_bash_prefixes`` entry, and SendMessage.
+  every segment (split by shlex, so quoted separators stay in their word) starts
+  with an ``allowed_bash_prefixes`` entry, and SendMessage (plus ToolSearch,
+  which loads a deferred SendMessage). A SendMessage made here counts as the
+  handoff for an agent with no Write tool.
   After three consecutive denials the reason escalates to "stop now; your
   worktree state is the handoff". Nothing is killed and nothing is lost: the
   allowlist always admits the handoff, and ``subagent_handoff_gate`` holds the
@@ -19,10 +22,11 @@ never touches the coordinator (scope SUB).
 - **Override**: a ``budget: <N>k`` line in a NAMED dispatch's prompt raises this
   agent's bands, clamped to ``max_override_tokens`` so it never switches the
   gate off (``agent_dispatch_recorder`` records it at dispatch).
-- **Unmeasured**: a transcript that cannot be found or read ALLOWS, with one
-  ``unmeasured`` verdict per ``(agent_id, reason)`` (RULINGS-fable.md Q2). A
-  budget is a cost control: failing closed would lock every subagent out the
-  day Claude Code moves the file.
+- **Unmeasured**: a transcript that cannot be found or read, one too large to be
+  a fresh agent with no usage in its tail, and any failure to judge all ALLOW,
+  with one ``unmeasured`` verdict per ``(agent_id, reason)`` (RULINGS-fable.md
+  Q2). A budget is a cost control: failing closed would lock every subagent out
+  the day Claude Code moves the file or renames ``usage``.
 
 List options follow the additive/replace standard: ``mode: additive`` (the
 default, and the reading of an unknown value) merges onto the built-in globs and
@@ -32,8 +36,10 @@ prefixes; ``mode: replace`` uses only the project's.
 from __future__ import annotations
 
 import fnmatch
+import logging
 import os
 import re
+import shlex
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -57,6 +63,7 @@ from claude_code_hooks_daemon.utils.agent_dispatch_registry import (
     dispatch_budget,
     effective_agent_type,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.spend_ledger import (
     note_unmeasured,
@@ -65,7 +72,13 @@ from claude_code_hooks_daemon.utils.spend_ledger import (
     write_state,
 )
 from claude_code_hooks_daemon.utils.transcript_spend import plan_key_from
-from claude_code_hooks_daemon.utils.transcript_tail import read_tail, resolve_agent_transcript
+from claude_code_hooks_daemon.utils.transcript_tail import (
+    NoUsageInTail,
+    read_tail,
+    resolve_agent_transcript,
+)
+
+logger = logging.getLogger(__name__)
 
 _MODE_ADDITIVE: Final[str] = "additive"
 _MODE_REPLACE: Final[str] = "replace"
@@ -96,6 +109,7 @@ STATE_DENIALS: Final[str] = "denials"
 STATE_HARD_ENGAGED: Final[str] = "hard_engaged"
 STATE_HANDOFF_PATH: Final[str] = "handoff_path"
 STATE_HANDOFF_WRITTEN: Final[str] = "handoff_written"
+STATE_HANDOFF_SENT: Final[str] = "handoff_sent"
 
 _BAND_SOFT: Final[str] = "soft"
 _HANDOFF_SUFFIX: Final[str] = "-handoff.md"
@@ -104,14 +118,19 @@ _SCRATCH_DIR: Final[tuple[str, ...]] = ("untracked", "scratch")
 _PLAN_ROOT: Final[tuple[str, ...]] = ("CLAUDE", "Plan")
 _LABEL_UNSAFE: Final[re.Pattern[str]] = re.compile(r"[^A-Za-z0-9._-]")
 
-#: Shell separators between the segments a Bash allowlist judges one by one.
-_SEGMENT_SPLIT: Final[re.Pattern[str]] = re.compile(r"&&|\|\||[;|\n]")
-#: Anything that runs a command the segment text does not show.
+#: Characters shlex returns as their own tokens, outside quotes: the command
+#: separators, and the redirections and subshells a handoff never needs.
+_SEPARATOR_CHARS: Final[str] = ";&|\n"
+_REJECTED_CHARS: Final[str] = "<>()"
+#: Anything that runs a command the segment text does not show, quoted or not.
 _HIDDEN_EXECUTION: Final[re.Pattern[str]] = re.compile(r"\$\(|`|<\(|>\(")
-_GIT_DIR_OPTION: Final[re.Pattern[str]] = re.compile(r"^git\s+-C\s+\S+\s+")
-_CD: Final[re.Pattern[str]] = re.compile(r"^cd(\s+\S+)?$")
 
 _FILE_TOOLS: Final[frozenset[str]] = frozenset({ToolName.WRITE, ToolName.EDIT, ToolName.READ})
+#: Tools that cost nothing and keep the handoff reachable: SendMessage IS the
+#: handoff, and ToolSearch loads it when it is deferred.
+_ALWAYS_ALLOWED_TOOLS: Final[frozenset[str]] = frozenset(
+    {ToolName.SEND_MESSAGE, ToolName.TOOL_SEARCH}
+)
 
 _RULE: Final[Rule] = Rule(
     rule_id=RuleID.SUBAGENT_CONTEXT_BUDGET,
@@ -126,8 +145,10 @@ _RULE: Final[Rule] = Rule(
         "DO INSTEAD (these are always allowed):\n"
         "  1. Write the handoff file the message names (Write/Edit under the handoff\n"
         "     directories): what is done, what is left, where the state is.\n"
-        "  2. git add and git commit your work in progress.\n"
-        "  3. SendMessage the lead with the handoff path, then stop.\n\n"
+        "  2. git add and git commit your work in progress (git commit -F a message\n"
+        "     file under untracked/scratch/ for a message with several lines).\n"
+        "  3. SendMessage the lead with the handoff path, then stop. If you cannot\n"
+        "     Write, SendMessage the lead the handoff itself.\n\n"
         "A coordinator that needs a longer run dispatches the agent with a\n"
         "`budget: <N>k` line in its prompt (clamped to max_override_tokens)."
     ),
@@ -172,6 +193,39 @@ def handoff_path(project_root: Path, cwd: str, label: str, plan_key: str) -> Pat
             if matches:
                 return matches[0] / _REPORTS_DIR / name
     return bases[0].joinpath(*_SCRATCH_DIR, name)
+
+
+def _bash_segments(command: str) -> list[list[str]]:
+    """The words of each command in ``command``; ``[]`` when it cannot be judged.
+
+    ``[]`` for an empty command, unbalanced quotes, a command substitution, a
+    redirection or a subshell: the caller denies all of them.
+    """
+    if not command.strip() or _HIDDEN_EXECUTION.search(command):
+        return []
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=_SEPARATOR_CHARS + _REJECTED_CHARS)
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="a Bash command shlex cannot split (unbalanced quotes) cannot be judged a handoff step, so it is denied",
+            level=logging.DEBUG,
+        )
+        return []
+    punctuation = set(_SEPARATOR_CHARS + _REJECTED_CHARS)
+    segments: list[list[str]] = [[]]
+    for token in tokens:
+        if set(token) <= punctuation and any(char in _REJECTED_CHARS for char in token):
+            return []
+        if set(token) <= set(_SEPARATOR_CHARS):
+            segments.append([])
+        else:
+            segments[-1].append(token)
+    return [words for words in segments if words]
 
 
 class SubagentContextBudgetHandler(PreToolUseHandlerBase):
@@ -296,18 +350,36 @@ class SubagentContextBudgetHandler(PreToolUseHandlerBase):
         return [_RULE]
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Measure the agent's context and apply its band."""
+        """Measure the agent's context and apply its band.
+
+        A cost control must never lock a subagent out, and under
+        ``strict_mode`` an escaped exception would deny every call. So any
+        failure to judge allows the call and records it as unmeasured.
+        """
+        try:
+            return self._judge(hook_input)
+        except Exception as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="a context-budget failure allows the call and is recorded unmeasured; a cost gate never locks a subagent out",
+            )
+            return self._unmeasured(hook_input, "handler-error")
+
+    def _judge(self, hook_input: dict[str, Any]) -> GatingResult:
         session = self._session(hook_input)
         agent_id = str(hook_input.get(HookInputField.AGENT_ID) or "")
-        transcript = resolve_agent_transcript(
-            str(hook_input.get(HookInputField.TRANSCRIPT_PATH) or ""), session, agent_id
-        )
-        if transcript is None:
-            return self._unmeasured(hook_input, "transcript-missing")
         try:
+            transcript = resolve_agent_transcript(
+                str(hook_input.get(HookInputField.TRANSCRIPT_PATH) or ""), session, agent_id
+            )
+            if transcript is None:
+                return self._unmeasured(hook_input, "transcript-missing")
             reading = read_tail(transcript)
         except OSError:
             return self._unmeasured(hook_input, "transcript-unreadable")
+        except NoUsageInTail:
+            return self._unmeasured(hook_input, "no-usage-in-tail")
         if reading is None:
             return GatingResult(decision=Decision.ALLOW)
 
@@ -315,14 +387,15 @@ class SubagentContextBudgetHandler(PreToolUseHandlerBase):
         context = reading.context_tokens
         state_file = state_path(self._untracked_dir(), session, STATE_KIND, agent_id)
         state = read_state(state_file)
-        target = self._handoff_target(hook_input)
 
         if bands.hard is not None and context >= bands.hard:
+            target = self._handoff_target(hook_input)
             return self._hard(hook_input, state_file, state, context, bands.hard, target)
         if bands.soft is not None and context >= bands.soft:
             advised = state.get(STATE_ADVISED)
             advised = advised if isinstance(advised, list) else []
             if _BAND_SOFT not in advised:
+                target = self._handoff_target(hook_input)
                 state[STATE_ADVISED] = [*advised, _BAND_SOFT]
                 state[STATE_HANDOFF_PATH] = str(target)
                 write_state(state_file, state)
@@ -386,6 +459,9 @@ class SubagentContextBudgetHandler(PreToolUseHandlerBase):
             state[STATE_DENIALS] = 0
             if written:
                 state[STATE_HANDOFF_WRITTEN] = written
+            if hook_input.get(HookInputField.TOOL_NAME) == ToolName.SEND_MESSAGE:
+                # An agent with no Write tool hands off by message (review S3).
+                state[STATE_HANDOFF_SENT] = True
             write_state(state_file, state)
             return GatingResult(decision=Decision.ALLOW)
         previous = state.get(STATE_DENIALS)
@@ -402,8 +478,10 @@ class SubagentContextBudgetHandler(PreToolUseHandlerBase):
         steps = (
             f"  1. Write the handoff to {target}\n"
             "     (what is done, what is left, where the state is).\n"
-            "  2. git add and git commit your work in progress.\n"
-            "  3. SendMessage the lead with the handoff path, then stop."
+            "  2. git add and git commit your work in progress. For a message with\n"
+            "     several lines, Write it under untracked/scratch/ and git commit -F it.\n"
+            "  3. SendMessage the lead with the handoff path, then stop.\n"
+            "  If you cannot Write, SendMessage the lead the handoff itself, then stop."
         )
         if escalate:
             return (
@@ -427,7 +505,7 @@ class SubagentContextBudgetHandler(PreToolUseHandlerBase):
         tool = hook_input.get(HookInputField.TOOL_NAME)
         tool_input = hook_input.get(HookInputField.TOOL_INPUT)
         tool_input = tool_input if isinstance(tool_input, dict) else {}
-        if tool == ToolName.SEND_MESSAGE:
+        if tool in _ALWAYS_ALLOWED_TOOLS:
             return True, ""
         if tool == ToolName.BASH:
             return self._bash_allowed(str(tool_input.get("command") or "")), ""
@@ -438,17 +516,23 @@ class SubagentContextBudgetHandler(PreToolUseHandlerBase):
         return False, ""
 
     def _bash_allowed(self, command: str) -> bool:
-        if not command.strip() or _HIDDEN_EXECUTION.search(command):
+        """Whether every segment of ``command`` starts with an allowed prefix.
+
+        Split with shlex, so a separator inside quotes (a commit message
+        reading ``parser done; tests left``) stays part of its word. A
+        redirection, a subshell, a command substitution or unbalanced quotes
+        fail the whole command.
+        """
+        segments = _bash_segments(command)
+        if not segments:
             return False
-        prefixes = self.bash_prefixes()
-        for raw in _SEGMENT_SPLIT.split(command):
-            segment = " ".join(raw.split())
-            if not segment or _CD.match(segment):
+        prefixes = [prefix.split() for prefix in self.bash_prefixes()]
+        for words in segments:
+            if words[0] == "cd" and len(words) <= 2:
                 continue
-            segment = _GIT_DIR_OPTION.sub("git ", segment)
-            if not any(
-                segment == prefix or segment.startswith(prefix + " ") for prefix in prefixes
-            ):
+            if words[:2] == ["git", "-C"] and len(words) > 2:
+                words = ["git", *words[3:]]
+            if not any(words[: len(prefix)] == prefix for prefix in prefixes):
                 return False
         return True
 
@@ -475,11 +559,13 @@ class SubagentContextBudgetHandler(PreToolUseHandlerBase):
             "Inside a subagent, past `soft_tokens` of context you are told ONCE to hand "
             "off; past `hard_tokens` (off unless configured) every tool is DENIED except "
             "the handoff: Write/Edit/Read under `handoff_globs` (`**/subagent-reports/**`, "
-            "`untracked/scratch/**`), Bash made only of `git status|diff|add|commit|log`, "
-            "and SendMessage. The handoff is a file at the path the message names "
-            "(`<plan>/subagent-reports/<yymmdd>-<agent>-handoff.md`), a WIP commit, and a "
-            "SendMessage to the lead. Past `hard_tokens`, `subagent_handoff_gate` also "
-            "BLOCKS the agent's stop until that handoff file exists (at most three times, "
+            "`untracked/scratch/**`), Bash made only of `git status|diff|add|commit|log` "
+            "(no `$(...)`, so write a long commit message to `untracked/scratch/` and "
+            "`git commit -F` it), SendMessage and ToolSearch. The handoff is a file at the "
+            "path the message names (`<plan>/subagent-reports/<yymmdd>-<agent>-handoff.md`), "
+            "a WIP commit, and a SendMessage to the lead; an agent that cannot Write sends "
+            "the handoff itself by SendMessage. Past `hard_tokens`, `subagent_handoff_gate` "
+            "also BLOCKS the agent's stop until that handoff exists (at most three times, "
             "then the worktree is the handoff). A coordinator raises one agent's budget with a "
             "`budget: <N>k` line in a NAMED dispatch's prompt, clamped to "
             "`max_override_tokens`. An unmeasurable transcript never blocks."

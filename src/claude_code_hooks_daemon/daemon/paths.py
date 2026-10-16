@@ -2621,18 +2621,23 @@ def sweep_dead_runtime_sets(
 # not just an on-disk one. Reaping the file here is necessary; `MtimeCachedFile`
 # also self-evicts a cache entry once its file goes missing (mtime_cache.py),
 # so the two together keep BOTH the disk and the cache bounded by live sessions.
+#
+# spend-offsets/ (Plan 00471) holds one offset-cache sidecar per transcript
+# (spend_ledger.OFFSETS_SUBDIR).
 _SESSION_RUNTIME_SUBDIRS = (
     "thread-registry",
     "context-sidecar",
     "payload-capture",
     "downgrade-indicator",
+    "spend-offsets",
 )
 
 # Writers that keep one DIRECTORY per session rather than one file. They need
 # the directory-aware primitive: prune_directory filters on is_file(), so
 # listing a nested writer above would look like retention and prune nothing
-# (Plan 00452, and the defect class behind issue #52).
-_SESSION_RUNTIME_DIR_SUBDIRS = ("cache-sidecar",)
+# (Plan 00452, and the defect class behind issue #52). spend-ledger/ is
+# spend_ledger.LEDGER_SUBDIR (Plan 00471).
+_SESSION_RUNTIME_DIR_SUBDIRS = ("cache-sidecar", "spend-ledger")
 
 
 def cleanup_stale_session_dirs(

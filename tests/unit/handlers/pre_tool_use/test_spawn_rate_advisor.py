@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.usage_snapshot import UsageSnapshot, UsageWindow
 from claude_code_hooks_daemon.handlers.pre_tool_use.spawn_rate_advisor import (
     SpawnRateAdvisorHandler,
 )
@@ -70,11 +71,21 @@ def call(
     }
 
 
-def sidecar(untracked: Path, pct: float, *, age: float = 10) -> None:
-    directory = untracked / "context-sidecar"
-    directory.mkdir(parents=True, exist_ok=True)
-    payload = {"ts": time.time() - age, "five_hour_pct": pct, "resets_at": time.time() + 3600}
-    (directory / f"{SESSION}.json").write_text(json.dumps(payload), encoding="utf-8")
+_LATEST_USAGE = "claude_code_hooks_daemon.handlers.pre_tool_use.spawn_rate_advisor.latest_usage"
+
+
+@pytest.fixture(autouse=True)
+def no_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No usage reading unless a test sets one: never the host's real snapshot."""
+    monkeypatch.setattr(_LATEST_USAGE, lambda **_: None)
+
+
+def usage(monkeypatch: pytest.MonkeyPatch, pct: float, *, age: float = 10) -> None:
+    """The daemon's shared usage snapshot, as the controller fills it from rate_limits."""
+    now = time.time()
+    window = UsageWindow(used_percentage=pct, resets_at=int(now + 3600), observed_at=now - age)
+    snapshot = UsageSnapshot(five_hour=window, seven_day=None)
+    monkeypatch.setattr(_LATEST_USAGE, lambda **_: snapshot)
 
 
 class TestShape:
@@ -149,30 +160,51 @@ class TestConcurrency:
         result = handler.handle(call(tmp_path, "SendMessage", {"to": "old", "message": "NEW TASK"}))
         assert "4 agents are live" in "\n".join(result.context)
 
+    def test_a_usage_free_target_is_not_a_cold_resume(self, handler, tmp_path, subagents) -> None:
+        """Review B2: a target with no usage in its tail cap is unknown, not a crash."""
+        for name in ("w1", "w2", "w3", "w4"):
+            agent(subagents, name)
+        agent(subagents, "old", stopped=True, age=3600)
+        transcript = subagents / "agent-aold-0123456789abcdef.jsonl"
+        line = json.dumps({"type": "user", "message": {"content": "x" * 1000}}) + "\n"
+        transcript.write_text(line * 1000, encoding="utf-8")
+        result = handler.handle(call(tmp_path, "SendMessage", {"to": "old", "message": "NEW TASK"}))
+        assert result.decision == Decision.ALLOW
+        assert not result.context
+
 
 class TestFiveHour:
+    """Review S5: read from the daemon's shared usage snapshot, not the context sidecar."""
+
     def test_advises_at_the_threshold_with_the_reset_time(
-        self, handler, tmp_path, untracked
+        self, handler, tmp_path, monkeypatch
     ) -> None:
-        sidecar(untracked, 72.0)
+        usage(monkeypatch, 72.0)
         advice = "\n".join(handler.handle(call(tmp_path)).context)
         assert "72%" in advice
         assert "serialise" in advice.lower()
         assert "UTC" in advice
 
-    def test_silent_below(self, handler, tmp_path, untracked) -> None:
-        sidecar(untracked, 50.0)
+    def test_silent_below(self, handler, tmp_path, monkeypatch) -> None:
+        usage(monkeypatch, 50.0)
         assert not handler.handle(call(tmp_path)).context
 
-    def test_stale_sidecar_draws_nothing(self, handler, tmp_path, untracked) -> None:
-        sidecar(untracked, 95.0, age=3600)
+    def test_stale_reading_draws_nothing(self, handler, tmp_path, monkeypatch) -> None:
+        usage(monkeypatch, 95.0, age=3600)
         assert not handler.handle(call(tmp_path)).context
 
-    def test_missing_sidecar_draws_nothing(self, handler, tmp_path) -> None:
+    def test_no_reading_draws_nothing(self, handler, tmp_path) -> None:
         assert not handler.handle(call(tmp_path)).context
 
-    def test_never_denies(self, handler, tmp_path, subagents, untracked) -> None:
-        sidecar(untracked, 99.0)
+    def test_the_context_sidecar_is_not_read(self, handler, tmp_path, untracked) -> None:
+        directory = untracked / "context-sidecar"
+        directory.mkdir(parents=True)
+        payload = {"ts": time.time(), "five_hour_pct": 95, "resets_at": time.time() + 3600}
+        (directory / f"{SESSION}.json").write_text(json.dumps(payload), encoding="utf-8")
+        assert not handler.handle(call(tmp_path)).context
+
+    def test_never_denies(self, handler, tmp_path, subagents, monkeypatch) -> None:
+        usage(monkeypatch, 99.0)
         for name in ("w1", "w2", "w3", "w4", "w5", "w6"):
             agent(subagents, name)
         assert handler.handle(call(tmp_path)).decision == Decision.ALLOW

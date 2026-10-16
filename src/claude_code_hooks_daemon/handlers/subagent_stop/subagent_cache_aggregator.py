@@ -368,6 +368,8 @@ class SubagentCacheAggregatorHandler(SubagentStopHandlerBase):
         never strand a stopping agent.
         """
         spend = self.spend_for(transcript, root)
+        # The sidecar now holds this agent's offsets; a resume reloads them.
+        spend_cache(self._store_root(root)).evict(transcript)
         meta = read_agent_meta(transcript)
         if not spend.plan_key:
             spend.plan_key = plan_key_from(meta.name)

@@ -365,9 +365,9 @@ handlers:
       priority: 60
       options:
         max_concurrent: null       # Off. Set (e.g. 4) to name the live agents at that count
-        advise_pct: 80             # Five-hour limit percentage (needs status_line.context_sidecar); null switches it off
+        advise_pct: 80             # Five-hour limit percentage, from the status line's rate_limits; null switches it off
         liveness_seconds: 120      # An agent whose transcript moved within this and has not ended its turn is live
-        max_age_seconds: 300       # A context sidecar older than this is unknown and draws nothing
+        max_age_seconds: 300       # A usage reading older than this is unknown and draws nothing
 
     review_round_advisor:  # Counts review dispatches per plan/branch; from advise_at, advises comparing findings counts
       enabled: false       # Opt-in: a heuristic (the count is deterministic, convergence is not)

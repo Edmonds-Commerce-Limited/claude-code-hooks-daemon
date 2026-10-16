@@ -13,6 +13,9 @@ from typing import IO, Any, BinaryIO, cast
 import pytest
 
 from claude_code_hooks_daemon.utils.transcript_tail import (
+    FRESH_AGENT_MAX_BYTES,
+    MAX_WINDOW_BYTES,
+    NoUsageInTail,
     TailReading,
     find_agent_transcript,
     input_token_equivalents,
@@ -177,6 +180,40 @@ class TestReadTail:
             assert reading is not None and reading.context_tokens == 19
             counts.append(len(reads))
         assert counts[0] == counts[1] == 1
+
+
+class TestMissPathIsBounded:
+    """No recognisable usage must not make a gate read the whole transcript (review B2)."""
+
+    @staticmethod
+    def usage_free(path: Path, megabytes: int) -> Path:
+        filler = [user("x" * 1000) for _ in range(megabytes * 1000)]
+        write_lines(path, filler)
+        assert path.stat().st_size >= megabytes * 1_000_000
+        return path
+
+    @pytest.mark.parametrize("megabytes", [1, 8])
+    def test_a_large_usage_free_transcript_is_unmeasured_within_the_cap(
+        self, tmp_path: Path, megabytes: int
+    ) -> None:
+        path = self.usage_free(tmp_path / f"t{megabytes}.jsonl", megabytes)
+        reads: list[int] = []
+        with pytest.raises(NoUsageInTail):
+            read_tail(path, opener=counting_opener(reads))
+        assert sum(reads) <= min(path.stat().st_size, MAX_WINDOW_BYTES)
+
+    def test_a_small_fresh_transcript_is_none(self, tmp_path: Path) -> None:
+        path = write_lines(tmp_path / "t.jsonl", [user()] * 10)
+        assert path.stat().st_size < FRESH_AGENT_MAX_BYTES
+        assert read_tail(path) is None
+
+    def test_usage_found_after_growing_reads_each_byte_once(self, tmp_path: Path) -> None:
+        lines = [assistant(5), *[user("x" * 1000) for _ in range(600)]]
+        path = write_lines(tmp_path / "t.jsonl", lines)
+        reads: list[int] = []
+        reading = read_tail(path, opener=counting_opener(reads))
+        assert reading is not None and reading.context_tokens == 15
+        assert sum(reads) <= path.stat().st_size
 
 
 class TestInputTokenEquivalents:

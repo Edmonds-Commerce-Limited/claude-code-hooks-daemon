@@ -85,6 +85,16 @@ def test_a_denied_dispatch_does_not_count(handler) -> None:
     assert not run_round(handler, dispatch("Review plan 00463"))
 
 
+def test_a_denied_dispatch_records_no_advisory_event(handler, tmp_path) -> None:
+    """Review N7: the ledger event is evidence, so it is written only for a dispatch that went."""
+    for _ in range(3):
+        run_round(handler, dispatch("Review plan 00463"))
+    hook_input = dispatch("Review plan 00463")
+    assert handler.handle(hook_input).context
+    handler.commit_side_effects(hook_input, Decision.DENY)
+    assert read_events(tmp_path, SESSION) == []
+
+
 def test_matches_only_review_dispatches(handler) -> None:
     assert handler.matches(dispatch("Review plan 00463"))
     assert handler.matches(dispatch("Review plan 00463", tool="Task"))

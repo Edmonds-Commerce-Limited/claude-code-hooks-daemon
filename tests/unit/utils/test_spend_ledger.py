@@ -73,6 +73,17 @@ class TestUnmeasured:
         assert unmeasured_count(tmp_path, "nobody") == 0
 
 
+class TestOffsetStore:
+    def test_offsets_live_outside_the_per_session_ledger(self, tmp_path: Path) -> None:
+        """Review S6: the session directories are pruned whole, so the offsets are not one."""
+        from claude_code_hooks_daemon.utils.spend_ledger import spend_cache
+
+        transcript = tmp_path / "agent-ax.jsonl"
+        transcript.write_text("{}\n", encoding="utf-8")
+        spend_cache(tmp_path).totals(transcript)
+        assert [path.parent.name for path in tmp_path.rglob("*.json")] == ["spend-offsets"]
+
+
 class TestEvents:
     def test_append_and_read(self, tmp_path: Path) -> None:
         append_event(tmp_path, "s1", {"kind": "budget-override", "agent": "x", "tokens": 400000})

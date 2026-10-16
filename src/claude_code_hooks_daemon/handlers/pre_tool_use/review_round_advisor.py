@@ -108,7 +108,7 @@ class ReviewRoundAdvisorHandler(PreToolUseHandlerBase):
         return self._key(hook_input) is not None
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Advise from round ``advise_at``; the count itself moves in commit_side_effects."""
+        """Advise from round ``advise_at``; the count and its event move in commit_side_effects."""
         key = self._key(hook_input)
         if key is None:
             return GatingResult(decision=Decision.ALLOW)
@@ -116,11 +116,6 @@ class ReviewRoundAdvisorHandler(PreToolUseHandlerBase):
         advise_at = int_or_none(self._advise_at) or DEFAULT_ADVISE_AT
         if this_round < advise_at:
             return GatingResult(decision=Decision.ALLOW)
-        append_event(
-            self._untracked_dir(),
-            str(hook_input.get(HookInputField.SESSION_ID) or ""),
-            {"kind": "review-round-advisory", "key": key, "round": this_round},
-        )
         return GatingResult(
             decision=Decision.ALLOW,
             context=[
@@ -132,14 +127,20 @@ class ReviewRoundAdvisorHandler(PreToolUseHandlerBase):
         )
 
     def commit_side_effects(self, hook_input: dict[str, Any], chain_decision: Decision) -> None:
-        """Count the round only when the dispatch went ahead."""
+        """Count the round, and record any advisory it drew, only when the dispatch went ahead."""
         if is_restrictive(chain_decision):
             return
         key = self._key(hook_input)
         if key is None:
             return
-        state_file = self._state_file(hook_input, key)
-        write_state(state_file, {_STATE_ROUNDS: self._rounds_so_far(hook_input, key) + 1})
+        this_round = self._rounds_so_far(hook_input, key) + 1
+        write_state(self._state_file(hook_input, key), {_STATE_ROUNDS: this_round})
+        if this_round >= (int_or_none(self._advise_at) or DEFAULT_ADVISE_AT):
+            append_event(
+                self._untracked_dir(),
+                str(hook_input.get(HookInputField.SESSION_ID) or ""),
+                {"kind": "review-round-advisory", "key": key, "round": this_round},
+            )
 
     def get_claude_md(self) -> str | None:
         """Advisory delivered with the dispatch; no standing rule to hold."""

@@ -1,8 +1,10 @@
 """The shared spend ledger's on-disk store (Plan 00471 Task 2.1, shared with Plan 00472).
 
-Everything the spend levers record lives under ``<daemon untracked>/spend-ledger/``:
+The :class:`TranscriptSpendCache` sidecars, one per transcript, live in
+``<daemon untracked>/spend-offsets/``. Everything else the spend levers record
+lives under ``<daemon untracked>/spend-ledger/<session>/``, a directory the
+daemon's start-up cleanup removes whole once it is ``stale_file_days`` old:
 
-- ``offsets/``: the :class:`TranscriptSpendCache` sidecars, one per transcript;
 - ``<session>/unmeasured/``: one marker per ``(agent_id, reason)`` a gate could
   not measure, so a fail-open is counted once and never per tool call
   (RULINGS-fable.md Q2);
@@ -33,13 +35,15 @@ from claude_code_hooks_daemon.utils.transcript_tail import META_SUFFIX
 
 logger = logging.getLogger(__name__)
 
-#: Directory under the daemon's untracked dir.
+#: Directory under the daemon's untracked dir, one subdirectory per session.
 LEDGER_SUBDIR: Final[str] = "spend-ledger"
+
+#: Directory under the daemon's untracked dir holding the offset-cache sidecars.
+OFFSETS_SUBDIR: Final[str] = "spend-offsets"
 
 #: The verdict-log value of a gate that allowed because it could not measure.
 UNMEASURED_VERDICT: Final[str] = "unmeasured"
 
-_OFFSETS_SUBDIR: Final[str] = "offsets"
 _UNMEASURED_SUBDIR: Final[str] = "unmeasured"
 _STATE_SUBDIR: Final[str] = "state"
 _EVENTS_FILE: Final[str] = "events.jsonl"
@@ -108,7 +112,7 @@ def spend_cache(untracked: Path | None) -> TranscriptSpendCache:
     with _caches_lock:
         cache = _caches.get(untracked)
         if cache is None:
-            store = untracked / LEDGER_SUBDIR / _OFFSETS_SUBDIR if untracked is not None else None
+            store = untracked / OFFSETS_SUBDIR if untracked is not None else None
             cache = TranscriptSpendCache(store)
             _caches[untracked] = cache
         return cache

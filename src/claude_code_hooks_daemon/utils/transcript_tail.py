@@ -38,6 +38,15 @@ logger = logging.getLogger(__name__)
 #: The first window read back from EOF; doubled on every miss.
 INITIAL_WINDOW_BYTES: Final[int] = 64 * 1024
 
+#: The furthest a tail read goes back from EOF. Far above the largest measured
+#: line (264 KB), so a real usage record is always inside it; a transcript that
+#: holds none within it is unmeasured, never read whole.
+MAX_WINDOW_BYTES: Final[int] = 4 * 1024 * 1024
+
+#: A whole transcript this small with no usage is a fresh agent that has not
+#: made its first request yet. Larger and usage-free is unmeasured.
+FRESH_AGENT_MAX_BYTES: Final[int] = 256 * 1024
+
 #: The model name Claude Code writes on records that are not API responses.
 SYNTHETIC_MODEL: Final[str] = "<synthetic>"
 
@@ -56,7 +65,15 @@ _WEIGHT_INPUT: Final[float] = 1.0
 _WEIGHT_WRITE_5M: Final[float] = 1.25
 _WEIGHT_WRITE_1H: Final[float] = 2.0
 _WEIGHT_READ: Final[float] = 0.1
-_WEIGHT_OUTPUT: Final[float] = 5.0
+WEIGHT_OUTPUT: Final[float] = 5.0
+
+
+class NoUsageInTail(Exception):
+    """A transcript too large to be a fresh agent holds no usage in its last MAX_WINDOW_BYTES.
+
+    The likely cause is a transcript format change, so the caller records the
+    agent as unmeasured rather than treating it as a fresh agent.
+    """
 
 
 @dataclass(frozen=True)
@@ -101,7 +118,7 @@ def input_token_equivalents(usage: Mapping[str, Any]) -> float:
         + _WEIGHT_WRITE_5M * (writes - writes_1h)
         + _WEIGHT_WRITE_1H * writes_1h
         + _WEIGHT_READ * as_int(usage.get("cache_read_input_tokens"))
-        + _WEIGHT_OUTPUT * as_int(usage.get("output_tokens"))
+        + WEIGHT_OUTPUT * as_int(usage.get("output_tokens"))
     )
 
 
@@ -131,9 +148,14 @@ def _is_conversational(record: Mapping[str, Any]) -> bool:
     return isinstance(message, dict) and message.get("model") != SYNTHETIC_MODEL
 
 
-def _scan_backwards(lines: Iterable[bytes]) -> tuple[TailReading | None, bool]:
-    """Scan ``lines`` newest first. Returns the reading and whether it is complete."""
-    stopped: bool | None = None
+def _scan_backwards(
+    lines: Iterable[bytes], stopped: bool | None = None
+) -> tuple[TailReading | None, bool | None]:
+    """Scan ``lines`` newest first, continuing from a newer scan's ``stopped``.
+
+    Returns the reading (None when ``lines`` hold no usage) and the stopped
+    state seen so far, for the scan of the lines in front of these.
+    """
     for line in lines:
         if not line.strip():
             continue
@@ -166,9 +188,9 @@ def _scan_backwards(lines: Iterable[bytes]) -> tuple[TailReading | None, bool]:
                     model=model if isinstance(model, str) else "",
                     stopped=bool(stopped),
                 ),
-                True,
+                stopped,
             )
-    return None, False
+    return None, stopped
 
 
 def _open_binary(path: Path) -> IO[bytes]:
@@ -179,29 +201,45 @@ def read_tail(
     path: Path,
     *,
     initial_window: int = INITIAL_WINDOW_BYTES,
+    max_window: int = MAX_WINDOW_BYTES,
     opener: Callable[[Path], IO[bytes]] = _open_binary,
 ) -> TailReading | None:
     """The last real request's context, model and stopped state of ``path``.
 
-    Returns None when the whole file holds no real assistant usage (a fresh
-    agent). Raises OSError when the file cannot be opened or read: the caller
-    decides what an unmeasurable transcript means.
+    The window doubles from ``initial_window`` up to ``max_window`` bytes back
+    from EOF. Each byte is read and each line parsed once: a grown window reads
+    only the part in front of what it already holds, plus the line the
+    previous window cut.
+
+    Returns None when a file of at most ``FRESH_AGENT_MAX_BYTES`` holds no real
+    assistant usage (a fresh agent). Raises NoUsageInTail when a larger file
+    holds none within ``max_window`` bytes, and OSError when the file cannot be
+    opened or read: the caller decides what an unmeasurable transcript means.
     """
     with opener(path) as handle:
         size = handle.seek(0, 2)
-        window = max(1, initial_window)
+        limit = min(size, max(1, max_window))
+        window = min(max(1, initial_window), limit)
+        start = size
+        cut = b""
+        stopped: bool | None = None
         while True:
-            start = max(0, size - window)
-            handle.seek(start)
-            data = handle.read(size - start)
-            lines = data.split(b"\n")
-            if start > 0:
-                # The first piece may be the tail of a line cut by the window.
-                lines = lines[1:]
-            reading, complete = _scan_backwards(reversed(lines))
-            if complete or start == 0:
+            new_start = size - window
+            handle.seek(new_start)
+            lines = (handle.read(start - new_start) + cut).split(b"\n")
+            start = new_start
+            # Unless the window reached the file's start, its first piece may
+            # be the tail of a line it cut: keep it for the next, wider read.
+            cut = lines.pop(0) if start > 0 else b""
+            reading, stopped = _scan_backwards(reversed(lines), stopped)
+            if reading is not None:
                 return reading
-            window *= 2
+            if window >= limit:
+                break
+            window = min(window * 2, limit)
+    if start == 0 and size <= FRESH_AGENT_MAX_BYTES:
+        return None
+    raise NoUsageInTail(f"no usage in the last {window:,} of {size:,} bytes of {path}")
 
 
 def subagents_dir(transcript_path: str, session_id: str) -> Path | None:

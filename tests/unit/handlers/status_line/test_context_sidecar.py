@@ -110,26 +110,6 @@ class TestContextSidecarHandler:
         handler.handle(_hook_input(session_id="sess-abc"))
         assert (self._sidecar_dir() / "sess-abc.json").exists()
 
-    def test_sidecar_records_the_five_hour_limit(self, handler: ContextSidecarHandler) -> None:
-        """Plan 00471 L5: the only ground truth for the five-hour limit."""
-        payload = _hook_input(session_id="s")
-        payload["rate_limits"] = {"five_hour": {"used_percentage": 71.5, "resets_at": 1800000000}}
-        handler.handle(payload)
-        data = self._read_sidecar("s")
-        assert data["five_hour_pct"] == 71.5
-        assert data["resets_at"] == 1800000000
-
-    def test_five_hour_is_null_when_absent_or_malformed(
-        self, handler: ContextSidecarHandler
-    ) -> None:
-        handler.handle(_hook_input(session_id="s"))
-        assert self._read_sidecar("s")["five_hour_pct"] is None
-        payload = _hook_input(session_id="t")
-        payload["rate_limits"] = {"five_hour": {"used_percentage": "high"}}
-        handler.handle(payload)
-        assert self._read_sidecar("t")["five_hour_pct"] is None
-        assert self._read_sidecar("t")["resets_at"] is None
-
     def test_sidecar_has_schema_version(self, handler: ContextSidecarHandler) -> None:
         handler.handle(_hook_input(session_id="s"))
         assert self._read_sidecar("s")["schema_version"] == 1

@@ -706,9 +706,9 @@ handlers:
       priority: 60
       options:
         max_concurrent: 4      # Counts a cold resume as a spawn
-        advise_pct: 70         # Five-hour limit percentage, from the context sidecar
+        advise_pct: 70         # Five-hour limit percentage, from the daemon's usage snapshot
         liveness_seconds: 120
-        max_age_seconds: 300   # An older sidecar is unknown and draws nothing
+        max_age_seconds: 300   # An older usage reading is unknown and draws nothing
 
     review_round_advisor:  # From review round 4 on one plan/branch, advises comparing findings counts (Plan 00471 L9)
       enabled: true  # On here (Fable ruling, owner-delegated); off by default for clients

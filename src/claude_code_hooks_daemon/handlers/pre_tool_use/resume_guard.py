@@ -11,17 +11,21 @@ conversational record is an ``end_turn``), **cold** (transcript untouched for
 ``warm_seconds``), and **large** (context at or above ``max_resume_tokens``).
 A message to a running agent resumes nothing and is never gated; a warm resume
 is cache reads only and is allowed. A ``to`` that matches no transcript of this
-session (a cross-session peer) fails open; an agent directory or transcript
-that cannot be read fails open too, with an ``unmeasured`` record.
+session (a cross-session peer) fails open. An agent directory or transcript
+that cannot be read, one with no usage in its tail, and any failure to judge
+all fail open too, with an ``unmeasured`` record.
 
 ``mode: deny`` refuses, naming the fresh-spawn route and the agent's last report
 or handoff file when one is found; ``mode: advise`` (the shipped default) allows
 with the same text as context. A message starting ``RESUME-LARGE: <reason>`` is
-the override: it is allowed and recorded in the spend ledger.
+the override: it is allowed and recorded in the spend ledger. A structured
+message (a plan approval, a shutdown request) cannot carry the override and is
+never gated: refusing it would strand the agent, so it is allowed and recorded.
 """
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Mapping
 from pathlib import Path
@@ -44,6 +48,7 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.subagent_context_budget impo
     STATE_KIND,
     int_or_none,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 from claude_code_hooks_daemon.utils.spend_ledger import (
     append_event,
@@ -56,11 +61,14 @@ from claude_code_hooks_daemon.utils.subagent_report_paths import (
     find_persisted_report,
 )
 from claude_code_hooks_daemon.utils.transcript_tail import (
+    NoUsageInTail,
     agent_name_of,
     find_agent_transcript,
     read_tail,
     subagents_dir,
 )
+
+logger = logging.getLogger(__name__)
 
 MODE_DENY: Final[str] = "deny"
 MODE_ADVISE: Final[str] = "advise"
@@ -93,6 +101,16 @@ _RULE: Final[Rule] = Rule(
 )
 
 
+def _target_of(hook_input: Mapping[str, Any]) -> str:
+    """The ``to`` of a SendMessage, or ``""``."""
+    tool_input = hook_input.get(HookInputField.TOOL_INPUT)
+    return str(tool_input.get("to") or "") if isinstance(tool_input, dict) else ""
+
+
+def _agent_id_of(transcript: Path) -> str:
+    return transcript.name.removeprefix("agent-").removesuffix(".jsonl")
+
+
 def target_transcript(hook_input: Mapping[str, Any]) -> Path | None:
     """The transcript of the agent a SendMessage names, or None.
 
@@ -102,9 +120,8 @@ def target_transcript(hook_input: Mapping[str, Any]) -> Path | None:
 
     Raises OSError when the session's agent directory cannot be read.
     """
-    tool_input = hook_input.get(HookInputField.TOOL_INPUT)
-    target = tool_input.get("to") if isinstance(tool_input, dict) else None
-    if not isinstance(target, str):
+    target = _target_of(hook_input)
+    if not target:
         return None
     directory = subagents_dir(
         str(hook_input.get(HookInputField.TRANSCRIPT_PATH) or ""),
@@ -156,10 +173,41 @@ class ResumeGuardHandler(PreToolUseHandlerBase):
         return [_RULE]
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Deny (or advise on) a cold resume of a large stopped agent."""
+        """Deny (or advise on) a cold resume of a large stopped agent.
+
+        A cost control must never strand a message, and under ``strict_mode``
+        an escaped exception would deny it. So any failure to judge allows the
+        message and records it as unmeasured.
+        """
+        try:
+            return self._judge(hook_input)
+        except Exception as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="a resume-guard failure allows the message and is recorded unmeasured; a cost gate never strands a message",
+            )
+            return self._unmeasured(hook_input, _target_of(hook_input), "handler-error")
+
+    def _unmeasured(
+        self, hook_input: Mapping[str, Any], agent_id: str, reason: str
+    ) -> GatingResult:
+        untracked = self._untracked_dir()
+        note_unmeasured(
+            untracked,
+            session_id=str(hook_input.get(HookInputField.SESSION_ID) or ""),
+            agent_id=agent_id,
+            reason=reason,
+            handler=self.name,
+            tool_name=ToolName.SEND_MESSAGE,
+            log_dir=untracked / "logs" / "hooks",
+        )
+        return GatingResult(decision=Decision.ALLOW)
+
+    def _judge(self, hook_input: dict[str, Any]) -> GatingResult:
         tool_input = hook_input.get(HookInputField.TOOL_INPUT)
         tool_input = tool_input if isinstance(tool_input, dict) else {}
-        target = str(tool_input.get("to") or "")
+        target = _target_of(hook_input)
         session = str(hook_input.get(HookInputField.SESSION_ID) or "")
         transcript: Path | None = None
         try:
@@ -169,21 +217,12 @@ class ResumeGuardHandler(PreToolUseHandlerBase):
             reading = read_tail(transcript)
             idle = time.time() - transcript.stat().st_mtime
         except OSError:
-            untracked = self._untracked_dir()
-            note_unmeasured(
-                untracked,
-                session_id=session,
-                agent_id=(
-                    transcript.name.removeprefix("agent-").removesuffix(".jsonl")
-                    if transcript is not None
-                    else target
-                ),
-                reason="transcript-unreadable" if transcript is not None else "agents-unlistable",
-                handler=self.name,
-                tool_name=ToolName.SEND_MESSAGE,
-                log_dir=untracked / "logs" / "hooks",
-            )
-            return GatingResult(decision=Decision.ALLOW)
+            if transcript is None:
+                return self._unmeasured(hook_input, target, "agents-unlistable")
+            return self._unmeasured(hook_input, _agent_id_of(transcript), "transcript-unreadable")
+        except NoUsageInTail:
+            agent_id = _agent_id_of(transcript) if transcript is not None else target
+            return self._unmeasured(hook_input, agent_id, "no-usage-in-tail")
         threshold = int_or_none(self._max_resume_tokens) or DEFAULT_MAX_RESUME_TOKENS
         warm = int_or_none(self._warm_seconds) or DEFAULT_WARM_SECONDS
         if (
@@ -195,9 +234,22 @@ class ResumeGuardHandler(PreToolUseHandlerBase):
             return GatingResult(decision=Decision.ALLOW)
 
         message = tool_input.get("message")
-        first_line = (
-            message.strip().splitlines()[0] if isinstance(message, str) and message.strip() else ""
-        )
+        if not isinstance(message, str):
+            # A protocol message (plan approval, shutdown) cannot carry the
+            # override, and refusing it strands the agent: allow and record it.
+            message_type = message.get("type") if isinstance(message, dict) else None
+            append_event(
+                self._untracked_dir(),
+                session,
+                {
+                    "kind": "resume-structured",
+                    "to": target,
+                    "message_type": message_type if isinstance(message_type, str) else "",
+                    "context_tokens": reading.context_tokens,
+                },
+            )
+            return GatingResult(decision=Decision.ALLOW)
+        first_line = message.strip().splitlines()[0] if message.strip() else ""
         if first_line.startswith(OVERRIDE_PREFIX):
             append_event(
                 self._untracked_dir(),
@@ -220,7 +272,7 @@ class ResumeGuardHandler(PreToolUseHandlerBase):
 
     def _last_handoff(self, session: str, transcript: Path) -> Path | None:
         """The agent's handoff file (from the budget state) or its last persisted report."""
-        agent_id = transcript.name.removeprefix("agent-").removesuffix(".jsonl")
+        agent_id = _agent_id_of(transcript)
         state = read_state(state_path(self._untracked_dir(), session, STATE_KIND, agent_id))
         for key in (STATE_HANDOFF_WRITTEN, STATE_HANDOFF_PATH):
             value = state.get(key)
@@ -253,7 +305,8 @@ class ResumeGuardHandler(PreToolUseHandlerBase):
             "above `max_resume_tokens`, the guard advises (default) or DENIES (`mode: "
             "deny`). Spawn a fresh agent briefed from the stopped one's report or handoff "
             "file instead (one task per agent). A message to a RUNNING agent, a warm "
-            "resume and a name this session does not know are never gated. When the "
+            "resume, a structured message (plan approval, shutdown) and a name this "
+            "session does not know are never gated. When the "
             "resume is genuinely worth it, start the message with "
             "`RESUME-LARGE: <reason>`; it is allowed and recorded in the spend ledger."
         )

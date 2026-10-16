@@ -1,24 +1,21 @@
-"""How loaded a session is right now: live agents and the five-hour limit (Plan 00471 L4, L5).
+"""How many agents a session has live right now (Plan 00471 L4).
 
-**Live agents.** ``background_tasks[]`` reaches only Stop and SubagentStop, not
-PreToolUse, so the count is measured from the transcripts: an agent is live
-when its transcript moved within ``liveness_seconds`` and its last
-conversational record is not an ``end_turn``. Each Stop and SubagentStop
-records which subagent/teammate tasks Claude Code reports as no longer running,
-and an agent named there is not counted however recently it wrote. The count
-only ever feeds an advisory: a stale count must never lock anyone out.
+``background_tasks[]`` reaches only Stop and SubagentStop, not PreToolUse, so
+the count is measured from the transcripts: an agent is live when its
+transcript moved within ``liveness_seconds`` and its last conversational record
+is not an ``end_turn``. Each Stop and SubagentStop records which
+subagent/teammate tasks Claude Code reports as no longer running, and an agent
+named there is not counted however recently it wrote. The count only ever
+feeds an advisory: a stale count must never lock anyone out.
 
-**Five-hour percentage.** The Status payload's ``rate_limits.five_hour`` is the
-only ground truth for the limit, and only the main thread's status line sees
-it; ``context_sidecar`` writes it beside the context figures. A sidecar older
-than ``max_age_seconds`` is unknown, and unknown means silent.
+The five-hour limit (L5) is not read here: the daemon's shared usage snapshot
+(:func:`core.data_layer.latest_usage`) holds it.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,12 +28,14 @@ from claude_code_hooks_daemon.utils.spend_ledger import (
     unmeasured_count,
     write_state,
 )
-from claude_code_hooks_daemon.utils.transcript_tail import agent_name_of, read_tail, subagents_dir
+from claude_code_hooks_daemon.utils.transcript_tail import (
+    NoUsageInTail,
+    agent_name_of,
+    read_tail,
+    subagents_dir,
+)
 
 logger = logging.getLogger(__name__)
-
-#: The context sidecar's directory under the daemon untracked dir.
-CONTEXT_SIDECAR_SUBDIR: Final[str] = "context-sidecar"
 
 #: An agent whose transcript moved this recently, and whose turn is open, is live.
 DEFAULT_LIVENESS_SECONDS: Final[int] = 120
@@ -45,7 +44,6 @@ _BACKGROUND_FILE: Final[str] = "background-tasks.json"
 _LIVE_FILE: Final[str] = "live.json"
 _AGENT_TASK_TYPES: Final[frozenset[str]] = frozenset({"subagent", "teammate"})
 _RUNNING: Final[str] = "running"
-_UNSAFE: Final[re.Pattern[str]] = re.compile(r"[^A-Za-z0-9_.-]")
 
 
 @dataclass(frozen=True)
@@ -72,14 +70,6 @@ def model_family(model: str) -> str:
     """The family a model id belongs to, or ``other``."""
     lowered = model.lower()
     return next((family for family in _FAMILIES if family in lowered), _OTHER_FAMILY)
-
-
-@dataclass(frozen=True)
-class FiveHour:
-    """The five-hour usage limit as the status line last saw it."""
-
-    pct: float
-    resets_at: float | None
 
 
 def live_agents(
@@ -124,11 +114,11 @@ def live_agents(
             continue
         try:
             reading = read_tail(path)
-        except OSError as exc:
+        except (OSError, NoUsageInTail) as exc:
             log_and_continue(
                 logger,
                 exc,
-                reason="a transcript written inside the liveness window but unreadable is counted live with an unknown context, the safe direction for an advisory",
+                reason="a transcript written inside the liveness window but unreadable or usage-free is counted live with an unknown context, the safe direction for an advisory",
                 level=logging.DEBUG,
             )
             reading = None
@@ -232,22 +222,3 @@ def refresh_live_snapshot(
 def read_live_snapshot(path: Path) -> dict[str, Any]:
     """The snapshot :func:`write_live_snapshot` wrote, or ``{}``."""
     return read_state(path)
-
-
-def read_five_hour(
-    untracked: Path, session_id: str, *, max_age_seconds: float, now: float | None = None
-) -> FiveHour | None:
-    """The five-hour percentage from this session's context sidecar, or None when unknown."""
-    stem = _UNSAFE.sub("_", session_id) or "unknown"
-    data = read_state(untracked / CONTEXT_SIDECAR_SUBDIR / f"{stem}.json")
-    pct = data.get("five_hour_pct")
-    stamp = data.get("ts")
-    if not isinstance(pct, (int, float)) or not isinstance(stamp, (int, float)):
-        return None
-    moment = time.time() if now is None else now
-    if moment - stamp > max_age_seconds:
-        return None
-    resets = data.get("resets_at")
-    return FiveHour(
-        pct=float(pct), resets_at=float(resets) if isinstance(resets, (int, float)) else None
-    )

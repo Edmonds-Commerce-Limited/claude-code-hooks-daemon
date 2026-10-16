@@ -151,13 +151,26 @@ class TestSoftBand:
         advice = "\n".join(handler.handle(hook_input).context)
         assert "untracked/scratch/" in advice
 
-    def test_fresh_agent_with_no_usage_is_silent_and_measured(
+    def test_small_fresh_agent_with_no_usage_is_silent_and_not_unmeasured(
         self, handler, tmp_path, project, transcript
     ) -> None:
         transcript.parent.mkdir(parents=True)
         transcript.write_text(json.dumps({"type": "user", "message": {"content": "go"}}) + "\n")
         assert handler.handle(event(tmp_path, project)).decision == Decision.ALLOW
         assert unmeasured_count(tmp_path / "untracked", SESSION) == 0
+
+    def test_large_transcript_with_no_usage_fails_open_and_is_recorded_unmeasured(
+        self, handler, tmp_path, project, transcript
+    ) -> None:
+        """Review B2: a renamed `usage` field must not switch the gate off silently."""
+        transcript.parent.mkdir(parents=True)
+        line = json.dumps({"type": "user", "message": {"content": "x" * 1000}}) + "\n"
+        transcript.write_text(line * 1000, encoding="utf-8")
+        for _ in range(3):
+            assert handler.handle(event(tmp_path, project)).decision == Decision.ALLOW
+        assert unmeasured_count(tmp_path / "untracked", SESSION) == 1
+        log = tmp_path / "untracked" / "logs" / "hooks" / "verdicts.jsonl"
+        assert json.loads(log.read_text())["detail"]["reason"] == "no-usage-in-tail"
 
 
 class TestUnmeasured:
@@ -187,6 +200,60 @@ class TestUnmeasured:
         assert json.loads(log.read_text())["detail"]["reason"] == "transcript-unreadable"
 
 
+class TestCostOnTheQuietPath:
+    def test_below_every_band_never_computes_the_handoff_path(
+        self, handler, tmp_path, project, transcript, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Review S1: the CLAUDE/Plan glob runs only when a band needs the path."""
+        write_transcript(transcript, 10_000)
+        calls: list[str] = []
+
+        def counting(*args: Any) -> Path:
+            calls.append("handoff_path")
+            return project / "h.md"
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.subagent_context_budget.handoff_path",
+            counting,
+        )
+        for _ in range(5):
+            handler.handle(event(tmp_path, project))
+        assert calls == []
+
+
+class TestNeverLocksOut:
+    """Review S4: under strict_mode an escaped exception would deny every call."""
+
+    def test_an_unreadable_agent_directory_is_recorded_unreadable(
+        self, handler, tmp_path, project, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def refuse(*_args: object) -> None:
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.subagent_context_budget."
+            "resolve_agent_transcript",
+            refuse,
+        )
+        assert handler.handle(event(tmp_path, project)).decision == Decision.ALLOW
+        log = tmp_path / "untracked" / "logs" / "hooks" / "verdicts.jsonl"
+        assert json.loads(log.read_text())["detail"]["reason"] == "transcript-unreadable"
+
+    def test_any_failure_to_judge_allows_and_is_recorded(
+        self, handler, tmp_path, project, transcript, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        write_transcript(transcript, 400_000)
+        handler._hard_tokens = 250_000
+
+        def broken(_hook_input: object) -> None:
+            raise KeyError("boom")
+
+        monkeypatch.setattr(handler, "bands_for", broken)
+        assert handler.handle(event(tmp_path, project)).decision == Decision.ALLOW
+        log = tmp_path / "untracked" / "logs" / "hooks" / "verdicts.jsonl"
+        assert json.loads(log.read_text())["detail"]["reason"] == "handler-error"
+
+
 class TestHardBand:
     @pytest.fixture(autouse=True)
     def _hard(self, handler: SubagentContextBudgetHandler, transcript: Path) -> None:
@@ -214,6 +281,14 @@ class TestHardBand:
                 },
             ),
             ("Read", {"file_path": "REPO/CLAUDE/Plan/00471-x/subagent-reports/h.md"}),
+            # Review S2: quoted separators and the commit idioms a handoff needs.
+            ("Bash", {"command": "git commit -m 'WIP: parser done; tests left'"}),
+            ("Bash", {"command": "cd '/path with space' && git status"}),
+            ("Bash", {"command": "git add -A && git commit -F untracked/scratch/msg.txt"}),
+            ("Bash", {"command": 'git commit -m "WIP: handoff\n\nCo-Authored-By: x <x@y>"'}),
+            ("Bash", {"command": "git status\ngit diff --stat"}),
+            # Review N6: a deferred SendMessage must stay loadable.
+            ("ToolSearch", {"query": "select:SendMessage"}),
         ],
     )
     def test_allowlist_passes(self, handler, tmp_path, project, tool, tool_input) -> None:
@@ -230,6 +305,12 @@ class TestHardBand:
             ("Bash", {"command": "git status; rm -rf src"}),
             ("Bash", {"command": 'git commit -m "$(pytest)"'}),
             ("Bash", {"command": "git push"}),
+            ("Bash", {"command": "git status\nrm -rf src"}),
+            ("Bash", {"command": "git status & rm -rf src"}),
+            ("Bash", {"command": "git log > notes.txt"}),
+            ("Bash", {"command": "git log 2>&1 >notes.txt"}),
+            ("Bash", {"command": "(git status; rm -rf src)"}),
+            ("Bash", {"command": "git commit -m 'unbalanced"}),
             ("Write", {"file_path": "REPO/src/x.py", "content": "x"}),
             ("Read", {"file_path": "REPO/src/x.py"}),
             ("Grep", {"pattern": "x"}),
@@ -245,8 +326,9 @@ class TestHardBand:
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.SUBAGENT_CONTEXT_BUDGET}]")
         assert "-p471-impl-handoff.md" in result.reason
-        assert "git commit" in result.reason
+        assert "git commit -F" in result.reason
         assert "SendMessage" in result.reason
+        assert "cannot Write" in result.reason
 
     def test_escalates_after_three_consecutive_denials(self, handler, tmp_path, project) -> None:
         reasons = [handler.handle(event(tmp_path, project)).reason or "" for _ in range(4)]

@@ -10,8 +10,10 @@ agent (in cost terms a spawn: a mean 336k cache write), it advises:
 - **Concurrency** (``max_concurrent``): at or above the cap it names the live
   agents (:mod:`utils.session_load`), so the coordinator can wait for one.
 - **Five-hour limit** (``advise_pct``): at or above it, "serialise now", with
-  the reset time, from the context sidecar's ``rate_limits.five_hour``. A
-  sidecar older than ``max_age_seconds`` is unknown and draws nothing.
+  the reset time, from the daemon's shared usage snapshot
+  (:func:`core.data_layer.latest_usage`, filled from ``rate_limits`` on every
+  Status event). A reading older than ``max_age_seconds`` is unknown and draws
+  nothing.
 
 **Advisory only, by ruling.** A stale live count that DENIED would lock the
 coordinator out of spawning, the one outcome worse than the inferno while the
@@ -22,6 +24,7 @@ refreshes the live snapshot the status segment reads.
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -37,21 +40,25 @@ from claude_code_hooks_daemon.constants import (
     ToolName,
 )
 from claude_code_hooks_daemon.core import Decision, GatingResult, ProjectContext
+from claude_code_hooks_daemon.core.data_layer import latest_usage
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.usage_snapshot import UsageWindow
 from claude_code_hooks_daemon.handlers.pre_tool_use.resume_guard import (
     DEFAULT_WARM_SECONDS,
     target_transcript,
 )
 from claude_code_hooks_daemon.handlers.pre_tool_use.subagent_context_budget import int_or_none
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.session_load import (
     DEFAULT_LIVENESS_SECONDS,
     finished_agents,
     live_agents,
-    read_five_hour,
     write_live_snapshot,
 )
 from claude_code_hooks_daemon.utils.spend_ledger import append_event
-from claude_code_hooks_daemon.utils.transcript_tail import read_tail, subagents_dir
+from claude_code_hooks_daemon.utils.transcript_tail import NoUsageInTail, read_tail, subagents_dir
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_ADVISE_PCT: Final[int] = 80
 DEFAULT_MAX_AGE_SECONDS: Final[int] = 300
@@ -132,38 +139,62 @@ class SpawnRateAdvisorHandler(PreToolUseHandlerBase):
                 )
 
         threshold = self._pct()
-        five_hour = read_five_hour(
-            untracked,
-            session,
-            max_age_seconds=int_or_none(self._max_age_seconds) or DEFAULT_MAX_AGE_SECONDS,
-        )
-        if threshold is not None and five_hour is not None and five_hour.pct >= threshold:
-            resets = (
-                datetime.fromtimestamp(five_hour.resets_at, UTC).strftime("%H:%M UTC")
-                if five_hour.resets_at is not None
-                else "an unknown time"
-            )
+        five_hour = self._five_hour()
+        if (
+            threshold is not None
+            and five_hour is not None
+            and five_hour.used_percentage >= threshold
+        ):
+            resets = datetime.fromtimestamp(five_hour.resets_at, UTC).strftime("%H:%M UTC")
             advice.append(
-                f"FIVE-HOUR LIMIT: {five_hour.pct:.0f}% of the five-hour usage limit is used "
-                f"(advise at {threshold:.0f}%). Serialise now: let running agents finish before "
-                f"starting more. The window resets at {resets}."
+                f"FIVE-HOUR LIMIT: {five_hour.used_percentage:.0f}% of the five-hour usage limit "
+                f"is used (advise at {threshold:.0f}%). Serialise now: let running agents finish "
+                f"before starting more. The window resets at {resets}."
             )
-            append_event(untracked, session, {"kind": "five-hour-advisory", "pct": five_hour.pct})
+            append_event(
+                untracked,
+                session,
+                {"kind": "five-hour-advisory", "pct": five_hour.used_percentage},
+            )
 
         if advice:
             return GatingResult(decision=Decision.ALLOW, context=advice)
         return GatingResult(decision=Decision.ALLOW)
 
+    def _five_hour(self) -> UsageWindow | None:
+        """The five-hour window from the daemon's shared usage snapshot, unless stale.
+
+        The controller fills the snapshot from ``rate_limits`` on every Status
+        event and drops a window past its ``resets_at``; a reading older than
+        ``max_age_seconds`` is unknown, and unknown means silent.
+        """
+        snapshot = latest_usage()
+        window = snapshot.five_hour if snapshot is not None else None
+        max_age = int_or_none(self._max_age_seconds) or DEFAULT_MAX_AGE_SECONDS
+        if window is None or time.time() - window.observed_at > max_age:
+            return None
+        return window
+
     @staticmethod
     def _cold_resume(hook_input: Mapping[str, Any]) -> bool:
-        """Whether this SendMessage resumes a stopped agent past the cache TTL."""
+        """Whether this SendMessage resumes a stopped agent past the cache TTL.
+
+        A target that cannot be read, or has no usage in its tail, is not known
+        to be one; the resume guard records that case as unmeasured.
+        """
         try:
             transcript = target_transcript(hook_input)
             if transcript is None:
                 return False
             reading = read_tail(transcript)
             idle = time.time() - transcript.stat().st_mtime
-        except OSError:
+        except (OSError, NoUsageInTail) as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="a SendMessage target whose transcript cannot be measured is not counted as a spawn; the advisory never blocks",
+                level=logging.DEBUG,
+            )
             return False
         return reading is not None and reading.stopped and idle >= DEFAULT_WARM_SECONDS
 

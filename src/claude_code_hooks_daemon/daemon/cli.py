@@ -4950,9 +4950,12 @@ def cmd_spend(args: argparse.Namespace) -> int:
 
     session_id = transcript.stem
     agents_dir = subagents_dir(str(transcript), session_id)
+    if agents_dir is None:
+        print(f"ERROR: no agent directory derives from {transcript}.", file=sys.stderr)
+        return 2
     try:
         report = collect_session_spend(
-            agents_dir if agents_dir is not None else transcript.parent / session_id,
+            agents_dir,
             session_id=session_id,
             cache=spend_cache(untracked),
             unmeasured=unmeasured_count(untracked, session_id),

@@ -346,6 +346,34 @@ class TestCleanupStaleSessionDirs:
         assert removed == 1
         assert not session.exists()
 
+    def test_stale_spend_ledger_sessions_and_offset_sidecars_are_reaped(
+        self, tmp_path: Path
+    ) -> None:
+        """Review S6 (Plan 00471): the ledger keeps a directory per session and a
+        sidecar per transcript, and nothing else ever deletes either."""
+        dead_session = tmp_path / "spend-ledger" / "dead-session"
+        (dead_session / "unmeasured").mkdir(parents=True)
+        _make_old(dead_session)
+        live_session = tmp_path / "spend-ledger" / "live-session"
+        live_session.mkdir(parents=True)
+        offsets = tmp_path / "spend-offsets"
+        offsets.mkdir()
+        old_offset = offsets / "0123456789abcdef.json"
+        old_offset.write_text("{}")
+        _make_old(old_offset)
+        fresh_offset = offsets / "fedcba9876543210.json"
+        fresh_offset.write_text("{}")
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.paths._get_untracked_dir",
+            return_value=tmp_path,
+        ):
+            removed = cleanup_stale_session_dirs(tmp_path, max_age_days=7)
+
+        assert removed == 2
+        assert not dead_session.exists() and live_session.exists()
+        assert not old_offset.exists() and fresh_offset.exists()
+
     def test_a_live_cache_sidecar_session_directory_survives(self, tmp_path: Path) -> None:
         """The running session's own sidecar must not be reaped underneath it."""
         session = tmp_path / "cache-sidecar" / "live-session"

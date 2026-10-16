@@ -219,6 +219,19 @@ class TestOffsetCache:
             assert TranscriptSpendCache(None).totals(transcript).requests == 1
         assert "not a transcript record" in caplog.text
 
+    def test_evict_drops_the_entry_and_the_sidecar_restores_it(
+        self, transcript: Path, tmp_path: Path
+    ) -> None:
+        """Review S6: a stopped agent's request ids do not stay resident for the daemon's life."""
+        store = tmp_path / "s"
+        write(transcript, [assistant("r1", 100)])
+        cache = TranscriptSpendCache(store)
+        cache.totals(transcript)
+        cache.evict(transcript)
+        assert cache.resident() == 0
+        write(transcript, [assistant("r1", 100), assistant("r2", 100)], mode="a")
+        assert cache.totals(transcript).requests == 2
+
     def test_no_store_works_in_memory(self, transcript: Path) -> None:
         write(transcript, [assistant("r1", 100)])
         assert TranscriptSpendCache(None).totals(transcript).requests == 1

@@ -206,8 +206,9 @@ config_changes:
                 max_concurrent: null
                 advise_pct: 80
       migration_note: >-
-        The five-hour advisory needs `status_line.context_sidecar` enabled;
-        without it the handler stays silent.
+        The five-hour advisory reads the daemon's usage snapshot, which every
+        status-line render fills from `rate_limits`; a session with no
+        usage windows (an API-key session) draws nothing.
     - key: handlers.pre_tool_use.review_round_advisor
       recommended: false
       dormant: true

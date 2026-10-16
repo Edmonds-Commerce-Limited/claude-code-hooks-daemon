@@ -32,6 +32,7 @@ from typing import Any, Final
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 from claude_code_hooks_daemon.utils.transcript_tail import (
+    WEIGHT_OUTPUT,
     as_int,
     context_of,
     input_token_equivalents,
@@ -208,7 +209,7 @@ def _apply(entry: _Entry, record: dict[str, Any]) -> None:
         delta = output - entry.last_output
         if delta > 0:
             totals.output_tokens += delta
-            totals.ite += 5.0 * delta
+            totals.ite += WEIGHT_OUTPUT * delta
             entry.last_output = output
         return
     if request_id and request_id in entry.seen_ids:
@@ -292,6 +293,20 @@ class TranscriptSpendCache:
                 reason="an unwritable offset sidecar costs a rescan after the next daemon restart, never a wrong total",
                 level=logging.DEBUG,
             )
+
+    def evict(self, transcript: Path) -> None:
+        """Drop ``transcript``'s entry from memory; its sidecar restores it if it grows again.
+
+        Called once an agent's stop is recorded, so the process holds only the
+        agents still running rather than every request id of the session.
+        """
+        with self._lock:
+            self._entries.pop(transcript, None)
+
+    def resident(self) -> int:
+        """How many transcripts the cache holds in memory."""
+        with self._lock:
+            return len(self._entries)
 
     def offset_of(self, transcript: Path) -> int:
         """The byte offset parsed so far (0 for a transcript never read)."""

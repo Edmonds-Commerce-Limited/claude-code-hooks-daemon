@@ -9,12 +9,10 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.utils.session_load import (
-    FiveHour,
     LiveAgent,
     finished_agents,
     live_agents,
     model_family,
-    read_five_hour,
     read_live_snapshot,
     record_background_tasks,
     refresh_live_snapshot,
@@ -89,6 +87,18 @@ class TestLiveAgents:
         assert [entry.label for entry in live] == ["done", "worker-1", "worker-2"]
         assert all(entry.context_tokens == 0 and entry.model == "" for entry in live)
 
+    def test_usage_free_recent_transcript_counts_live_with_unknown_context(
+        self, subagents: Path
+    ) -> None:
+        """Review B2: a large transcript with no usage in its tail is unknown, not dropped."""
+        path = subagents / "agent-adone-0000000000000003.jsonl"
+        line = json.dumps({"type": "user", "message": {"content": "x" * 1000}}) + "\n"
+        path.write_text(line * 1000, encoding="utf-8")
+        os.utime(path, (NOW - 5, NOW - 5))
+        live = live_agents(subagents, liveness_seconds=120, now=NOW)
+        assert [entry.label for entry in live] == ["done", "worker-1", "worker-2"]
+        assert live[0].context_tokens == 0
+
 
 class TestBackgroundTasks:
     def test_finished_subagent_and_teammate_tasks(self, tmp_path: Path) -> None:
@@ -145,31 +155,3 @@ class TestLiveSnapshot:
     )
     def test_model_family(self, model: str, family: str) -> None:
         assert model_family(model) == family
-
-
-class TestFiveHour:
-    def write(self, tmp_path: Path, **payload: object) -> None:
-        directory = tmp_path / "context-sidecar"
-        directory.mkdir(exist_ok=True)
-        (directory / "s1.json").write_text(json.dumps(payload), encoding="utf-8")
-
-    def test_fresh(self, tmp_path: Path) -> None:
-        self.write(tmp_path, ts=NOW - 30, five_hour_pct=72.5, resets_at=NOW + 3600)
-        assert read_five_hour(tmp_path, "s1", max_age_seconds=300, now=NOW) == FiveHour(
-            pct=72.5, resets_at=NOW + 3600
-        )
-
-    def test_stale_is_unknown(self, tmp_path: Path) -> None:
-        self.write(tmp_path, ts=NOW - 900, five_hour_pct=95)
-        assert read_five_hour(tmp_path, "s1", max_age_seconds=300, now=NOW) is None
-
-    def test_corrupt_sidecar_is_unknown(self, tmp_path: Path) -> None:
-        directory = tmp_path / "context-sidecar"
-        directory.mkdir()
-        (directory / "s1.json").write_text("{torn", encoding="utf-8")
-        assert read_five_hour(tmp_path, "s1", max_age_seconds=300, now=NOW) is None
-
-    def test_missing_or_without_the_field_is_unknown(self, tmp_path: Path) -> None:
-        assert read_five_hour(tmp_path, "s1", max_age_seconds=300, now=NOW) is None
-        self.write(tmp_path, ts=NOW)
-        assert read_five_hour(tmp_path, "s1", max_age_seconds=300, now=NOW) is None
