@@ -33,4 +33,4 @@ ansible-core is not in the worktree venv. I installed ansible-core 2.19.14 into 
 
 ## Targeted QA
 
-See the commit message and the coordinator's reply for the `changed` verdict.
+The host-wide QA lock was held by other agents for over an hour, so the first `changed` runs timed out waiting. The run after the first commit (b8081fd72) reported one finding, `magic-timeout` at the real-ansible test's `timeout=120`; every other checker passed (format, lint, mypy, pyright, error_hiding, docs_qa, plan_qa and the rest). The follow-up commit replaces the literal with `Timeout.QA_TEST_TIMEOUT`. The first commit message was truncated by a shell quoting slip (an amend is denied, so it stays); the commit content is as described here.

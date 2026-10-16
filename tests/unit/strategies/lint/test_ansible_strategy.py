@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.strategies.lint.ansible_strategy import AnsibleLintStrategy
 from claude_code_hooks_daemon.strategies.lint.common import build_lint_argv, lint_output_dir
 from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy, NarrowsByPath
@@ -364,7 +365,9 @@ class TestSyntaxCheckAgainstRealAnsible:
         strategy = AnsibleLintStrategy()
         argv = build_lint_argv(strategy.default_lint_command, path, strategy)
         argv[0] = _ansible_playbook() or argv[0]
-        return subprocess.run(argv, capture_output=True, text=True, cwd=cwd, timeout=120)
+        return subprocess.run(
+            argv, capture_output=True, text=True, cwd=cwd, timeout=Timeout.QA_TEST_TIMEOUT
+        )
 
     def test_valid_role_task_file_passes(self, tmp_path: Path) -> None:
         path = _write(tmp_path, "roles/web/tasks/main.yml", _TASK_FILE)

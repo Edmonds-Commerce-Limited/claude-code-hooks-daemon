@@ -97,7 +97,7 @@ unknown-module and attribute errors; option (c) alone would have left task files
 placeholder carries the wrapper, so `{file}` stays the real file for `ansible-lint` and for a user-configured
 command. A file with a play signal is a playbook wherever it sits. `roles` no longer claims a file by itself.
 
-**Status**: ✅ Fixed.
+**Status**: ✅ Fixed (commit b8081fd72 on branch worktree-i121-ansible-task-files).
 
 ### N465 — the secret-file-read guard shlex-tokenises every line of a Write, about 1.2 s per 100 KB
 
