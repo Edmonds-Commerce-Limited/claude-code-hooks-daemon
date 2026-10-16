@@ -688,6 +688,17 @@ handlers:
         hard_tokens: null
         max_override_tokens: 450000  # Below the 567k this environment autocompacts at
 
+    # Plan 00471 L3 (Fable ruling, owner-delegated): deny here at 150k. It never
+    # strands anything: the coordinator can always spawn fresh, and the
+    # override is one `RESUME-LARGE: <reason>` prefix.
+    resume_guard:  # A SendMessage that would cold-resume a large stopped agent
+      enabled: true
+      priority: 39
+      options:
+        mode: deny
+        max_resume_tokens: 150000
+        warm_seconds: 300
+
     installed_plugin_edit_advisor:  # Advises when a write lands in an installed Claude Code plugin (Plan 00468 G16)
       enabled: true
       priority: 42

@@ -462,6 +462,12 @@ class HandlerID:
         config_key="subagent_handoff_gate",
         display_name="subagent-handoff-gate",
     )
+    # Plan 00471 L3: a SendMessage that would cold-resume a large stopped agent.
+    RESUME_GUARD = HandlerIDMeta(
+        class_name="ResumeGuardHandler",
+        config_key="resume_guard",
+        display_name="resume-guard",
+    )
     # Plan 00468 G16: a write into an installed Claude Code plugin's files.
     INSTALLED_PLUGIN_EDIT_ADVISOR = HandlerIDMeta(
         class_name="InstalledPluginEditAdvisorHandler",

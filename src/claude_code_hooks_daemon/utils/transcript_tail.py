@@ -26,6 +26,7 @@ import json
 import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from glob import escape as glob_escape
 from pathlib import Path
 from typing import IO, Any, Final
 
@@ -34,6 +35,9 @@ INITIAL_WINDOW_BYTES: Final[int] = 64 * 1024
 
 #: The model name Claude Code writes on records that are not API responses.
 SYNTHETIC_MODEL: Final[str] = "<synthetic>"
+
+#: The sidecar Claude Code writes beside each ``agent-<id>.jsonl``.
+META_SUFFIX: Final[str] = ".meta.json"
 
 #: The stop reason of a finished turn.
 END_TURN: Final[str] = "end_turn"
@@ -208,6 +212,40 @@ def subagents_dir(transcript_path: str, session_id: str) -> Path | None:
     if not session_id:
         return None
     return path.parent / session_id / "subagents"
+
+
+def agent_name_of(transcript: Path) -> str:
+    """The ``name`` in the agent's ``meta.json``, or ``""``."""
+    meta = transcript.with_name(transcript.name.removesuffix(".jsonl") + META_SUFFIX)
+    try:
+        data = json.loads(meta.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    name = data.get("name") if isinstance(data, dict) else None
+    return name if isinstance(name, str) else ""
+
+
+def find_agent_transcript(directory: Path, target: str) -> Path | None:
+    """The transcript a SendMessage ``to`` names: a raw agent id, or a teammate name.
+
+    A name resolves to the newest ``agent-a<name>-*.jsonl`` whose ``meta.json``
+    confirms the name, so an older generation of the same name is never judged
+    in place of the live one. None when nothing matches (a cross-session peer).
+    """
+    if not _SAFE_AGENT_ID.fullmatch(target or ""):
+        return None
+    direct = directory / f"agent-{target}.jsonl"
+    if direct.is_file():
+        return direct
+    try:
+        candidates = [
+            path
+            for path in directory.glob(f"agent-a{glob_escape(target)}-*.jsonl")
+            if agent_name_of(path) == target
+        ]
+        return max(candidates, key=lambda path: path.stat().st_mtime, default=None)
+    except OSError:
+        return None
 
 
 def resolve_agent_transcript(transcript_path: str, session_id: str, agent_id: str) -> Path | None:

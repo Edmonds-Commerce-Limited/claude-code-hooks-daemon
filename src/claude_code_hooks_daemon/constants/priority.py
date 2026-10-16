@@ -448,6 +448,8 @@ class Priority:
     # Plan 00471 L2: a cost control, not a safety guard, so it sits in the
     # workflow band; a safety deny earlier in the chain owns the response.
     SUBAGENT_CONTEXT_BUDGET = 39
+    # Plan 00471 L3: same band and slot logic; it only ever sees SendMessage.
+    RESUME_GUARD = 39
     # Plan 00284: sibling gate at the same edit-time layer as plan_qa_edit,
     # deliberately a different check id/domain so priority collision with 44
     # is avoided while staying in the same workflow band.

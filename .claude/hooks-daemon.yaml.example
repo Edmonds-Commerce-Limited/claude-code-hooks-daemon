@@ -352,6 +352,14 @@ handlers:
         # allowed_bash_prefixes: [] # Added to git status|diff|add|commit|log (mode: replace to swap)
         # exempt_agent_types: []   # Definition types never measured
 
+    resume_guard:  # A SendMessage that would cold-resume a stopped agent past max_resume_tokens
+      enabled: true
+      priority: 39
+      options:
+        mode: advise               # advise (allow with context) or deny; RESUME-LARGE: <reason> overrides either
+        max_resume_tokens: 250000
+        warm_seconds: 300          # The subagent prompt-cache TTL; a warmer resume is never gated
+
     installed_plugin_edit_advisor:  # Advises when a write lands in an installed Claude Code plugin's files
       enabled: true
       priority: 42

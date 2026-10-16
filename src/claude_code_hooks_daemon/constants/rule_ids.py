@@ -551,6 +551,9 @@ class RuleID:
     #: A subagent stop over the hard context budget with no handoff file written.
     SUBAGENT_HANDOFF_MISSING: str = "R-SUBAGENT-HANDOFF-MISSING"
 
+    #: A SendMessage that would resume a stopped, cold agent at or above max_resume_tokens.
+    RESUME_COLD_LARGE: str = "R-RESUME-COLD-LARGE"
+
     # ------------------------------------------------------------------
     # write_protected_paths handler
     # ------------------------------------------------------------------

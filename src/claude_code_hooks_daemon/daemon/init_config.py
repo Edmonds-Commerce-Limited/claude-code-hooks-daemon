@@ -295,6 +295,7 @@ class ConfigTemplate:
             "    agent_dispatch_recorder: {enabled: true, priority: 46}  # Record name -> subagent_type of a named Agent dispatch (silent)\n"
             # Plan 00471 L2: advisory at the soft band; the hard band ships off.
             "    subagent_context_budget: {enabled: true, priority: 39, options: {soft_tokens: 300000, hard_tokens: null}}  # Tell a subagent past its context budget to hand off\n"
+            "    resume_guard: {enabled: true, priority: 39, options: {mode: advise, max_resume_tokens: 250000}}  # Advise against cold-resuming a large stopped agent\n"
             "    installed_plugin_edit_advisor: {enabled: true, priority: 42}  # Advise when a write lands in an installed Claude Code plugin's files (non-blocking)\n"
             "    dispatch_declaration: {enabled: true, priority: 48}  # Advise/enforce a file-handoff declaration on Task dispatch\n"
             "    docs_qa_edit: {enabled: true, priority: 47}      # Docs QA lint on documentation writes (fires only when documentation.enabled)\n"

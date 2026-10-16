@@ -82,6 +82,7 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "SubagentCronDeleteBlockerHandler": "T1 denies CronDelete inside a subagent",
     "GithubIssueAssignmentGuardHandler": "T1 denies issue-tied work on an unclaimed or foreign issue",
     "WriteProtectedPathsHandler": "T1 denies a write, move onto or deletion of a read-only path",
+    "ResumeGuardHandler": "T1 denies a cold resume of a large stopped agent under mode: deny",
     "SubagentContextBudgetHandler": (
         "T1 denies a subagent's tool calls past hard_tokens outside the handoff steps"
     ),

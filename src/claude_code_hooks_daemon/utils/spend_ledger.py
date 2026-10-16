@@ -29,6 +29,7 @@ from typing import Any, Final
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 from claude_code_hooks_daemon.utils.transcript_spend import TranscriptSpendCache
+from claude_code_hooks_daemon.utils.transcript_tail import META_SUFFIX
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +125,7 @@ class AgentMeta:
 
 def read_agent_meta(transcript: Path) -> AgentMeta:
     """The meta file beside ``transcript``; empty when absent or unreadable."""
-    meta_path = transcript.with_name(transcript.name.removesuffix(".jsonl") + ".meta.json")
+    meta_path = transcript.with_name(transcript.name.removesuffix(".jsonl") + META_SUFFIX)
     try:
         data = json.loads(meta_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
