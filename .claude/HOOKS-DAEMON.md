@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (78 handlers)
+### PreToolUse (79 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -85,6 +85,7 @@
 | 58 | flaggable_work_advisor | ADVISORY | Advise delegating safeguard-flaggable work BEFORE opening the content |
 | 59 | merge_qa_advisor | ADVISORY | Advise the static checks to run before merging a work branch with no recorded green run |
 | 60 | british_english | ADVISORY | Warn about American English spellings in content files (non-blocking) |
+| 60 | review_round_advisor | ADVISORY | Advise from the ``advise_at``-th review dispatch on one plan or branch |
 | 60 | spawn_rate_advisor | ADVISORY | Advise at the live-agent cap and near the five-hour limit; never deny |
 
 ### PostToolUse (15 handlers)

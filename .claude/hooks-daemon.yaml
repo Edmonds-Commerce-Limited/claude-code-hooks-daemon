@@ -710,6 +710,12 @@ handlers:
         liveness_seconds: 120
         max_age_seconds: 300   # An older sidecar is unknown and draws nothing
 
+    review_round_advisor:  # From review round 4 on one plan/branch, advises comparing findings counts (Plan 00471 L9)
+      enabled: true  # On here (Fable ruling, owner-delegated); off by default for clients
+      priority: 60
+      options:
+        advise_at: 4
+
     installed_plugin_edit_advisor:  # Advises when a write lands in an installed Claude Code plugin (Plan 00468 G16)
       enabled: true
       priority: 42

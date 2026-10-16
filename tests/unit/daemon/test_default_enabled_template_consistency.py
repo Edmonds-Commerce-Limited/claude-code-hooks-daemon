@@ -63,6 +63,9 @@ _EXPECTED_OPT_IN_CONFIG_KEYS = {
     "github_issue_assignment_guard",
     # Plan 00499: does nothing until `paths` lists something, so it ships off.
     "write_protected_paths",
+    # Plan 00471 L9: a heuristic round count, dogfooded in the daemon's own
+    # repository before any client gets it (Fable ruling, owner-delegated).
+    "review_round_advisor",
 }
 
 

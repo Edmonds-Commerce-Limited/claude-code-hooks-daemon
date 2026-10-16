@@ -480,6 +480,12 @@ class HandlerID:
         config_key="spawn_rate_advisor",
         display_name="spawn-rate-advisor",
     )
+    # Plan 00471 L9: counts review dispatches per plan or branch.
+    REVIEW_ROUND_ADVISOR = HandlerIDMeta(
+        class_name="ReviewRoundAdvisorHandler",
+        config_key="review_round_advisor",
+        display_name="review-round-advisor",
+    )
     # Plan 00471 L4: records a Stop's background_tasks for the live count.
     BACKGROUND_TASK_RECORDER = HandlerIDMeta(
         class_name="BackgroundTaskRecorderHandler",

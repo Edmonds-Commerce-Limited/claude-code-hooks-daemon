@@ -297,6 +297,7 @@ class ConfigTemplate:
             "    subagent_context_budget: {enabled: true, priority: 39, options: {soft_tokens: 300000, hard_tokens: null}}  # Tell a subagent past its context budget to hand off\n"
             "    resume_guard: {enabled: true, priority: 39, options: {mode: advise, max_resume_tokens: 250000}}  # Advise against cold-resuming a large stopped agent\n"
             "    spawn_rate_advisor: {enabled: true, priority: 60, options: {max_concurrent: null, advise_pct: 80}}  # Advise near the five-hour limit on a spawn (concurrency cap off)\n"
+            "    review_round_advisor: {enabled: false, priority: 60}  # From review round 4 on one plan/branch, advise comparing findings (opt-in)\n"
             "    installed_plugin_edit_advisor: {enabled: true, priority: 42}  # Advise when a write lands in an installed Claude Code plugin's files (non-blocking)\n"
             "    dispatch_declaration: {enabled: true, priority: 48}  # Advise/enforce a file-handoff declaration on Task dispatch\n"
             "    docs_qa_edit: {enabled: true, priority: 47}      # Docs QA lint on documentation writes (fires only when documentation.enabled)\n"

@@ -369,6 +369,12 @@ handlers:
         liveness_seconds: 120      # An agent whose transcript moved within this and has not ended its turn is live
         max_age_seconds: 300       # A context sidecar older than this is unknown and draws nothing
 
+    review_round_advisor:  # Counts review dispatches per plan/branch; from advise_at, advises comparing findings counts
+      enabled: false       # Opt-in: a heuristic (the count is deterministic, convergence is not)
+      priority: 60
+      options:
+        advise_at: 4
+
     installed_plugin_edit_advisor:  # Advises when a write lands in an installed Claude Code plugin's files
       enabled: true
       priority: 42

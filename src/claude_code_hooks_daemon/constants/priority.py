@@ -455,6 +455,8 @@ class Priority:
     RESUME_GUARD = 39
     # Plan 00471 L4/L5: advisory only, so it sits in the advisory band.
     SPAWN_RATE_ADVISOR = 60
+    # Plan 00471 L9: advisory only, beside the spawn advisory on the same tool.
+    REVIEW_ROUND_ADVISOR = 60
     # Plan 00284: sibling gate at the same edit-time layer as plan_qa_edit,
     # deliberately a different check id/domain so priority collision with 44
     # is avoided while staying in the same workflow band.
