@@ -40,6 +40,15 @@ choices below is the owner's.
 7. **Context budget at 547k.** This agent itself ran past every threshold it
    built. That is the measured problem; it is also why this report is short.
 
+## 1a. Targeted QA result (`llm_qa.py changed`, run on 50c14d8b4): FAILED, exit 1
+
+The rerun got the lock and finished: 35 of 40 checks passed, 4 failed, 1 was not meaningful. To fix on re-dispatch:
+
+- error_hiding: 12 findings (silent fallback in spend_report.py:126, return-None in the aggregator and the dispatch registry, silent `continue` in session_load.py:106/117, and others). See `untracked/qa/error_hiding.json`.
+- eacces_safe: 2 findings. Raw `.is_file()` at resume_guard.py:213 and `.is_dir()` at subagent_context_budget.py:166 need to use `utils.path_predicates`.
+- plan_qa: one advisory, journal freshness for 00471.
+- changed_tests: 11 failed. They are registration lists the new handlers are missing from: acceptance near-miss/deny coverage, bash-write-blindness verdicts, handler-scope SUB defaults, pretooluse fail-closed tagging (resume_guard, subagent_context_budget, subagent_handoff_gate), and registry option injection (resume_guard, subagent_context_budget). 13 files were reported unmapped, mostly too broad.
+
 ## 2. What was built (one commit per lever)
 
 | Task | Commit    | Delivered                                                                                                                                                                                    |
