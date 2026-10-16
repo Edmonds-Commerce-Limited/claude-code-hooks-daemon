@@ -11,7 +11,7 @@
 ## Overview
 
 Plan 00495 Task 3.2 asked whether particular heavy paths justify a Rust helper (owner ruling A3). It answered from the
-measured numbers in [RUST-HELPERS-ASSESSMENT.md](../00495-performance-improvement-programme/RUST-HELPERS-ASSESSMENT.md):
+measured numbers in [RUST-HELPERS-ASSESSMENT.md](../Completed/00495-performance-improvement-programme/RUST-HELPERS-ASSESSMENT.md):
 no path passes the cost test, one path is heavy for a Python reason, and the one helper that was justified (the transport
 relay) already exists, opt-in. The choice is the owner's, so this plan holds it until they make it, and carries the work
 that follows whichever way they decide.

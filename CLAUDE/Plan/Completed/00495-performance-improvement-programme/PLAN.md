@@ -1,6 +1,6 @@
 # Plan 00495: performance improvement programme
 
-**Status**: In Progress (all three phases delivered; awaiting archive)
+**Status**: Complete
 **Created**: 2026-10-06
 **Owner**: dev
 **Priority**: High
@@ -139,7 +139,7 @@ Evidence already seen in this session (2026-10-06), not yet explained:
   bring and its auditability cost, and put the list to the owner. Delivered in COMMIT_HASH:
   [RUST-HELPERS-ASSESSMENT.md](RUST-HELPERS-ASSESSMENT.md) names six paths. None passes the cost test; the one path over
   the budget (the secret-file guard, 1.2 s per 115 KB Write) is a Python algorithm problem. The owner's decision is put
-  to them in [Plan 00529](../00529-owner-decision-on-rust-helpers-from-00495-assessment/PLAN.md).
+  to them in [Plan 00529](../../00529-owner-decision-on-rust-helpers-from-00495-assessment/PLAN.md).
 
 ## Success Criteria
 
@@ -154,11 +154,12 @@ Evidence already seen in this session (2026-10-06), not yet explained:
   and says so).
 - [x] A regression check exists and fails on a planted slowdown (Task 3.1: the demonstrated FAIL run and the
   planted-slowdown test).
-- [x] The release-bound consequences are recorded in the pending-release holding area: release notes 067 to 070 in
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/` cover Phase 2 (067 sweeps, 068 config parsed once, 069 registry discovery,
+- [x] The release-bound consequences are recorded in the pending-release holding area: release notes 066 to 070 in
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/` cover Phase 2 (066 CLAUDE.md not reformatted when unchanged, 067 sweeps, 068 config parsed once, 069 registry discovery,
   070 socket bound first). Tasks 1.4, 3.1 and 3.2 change documentation and a release-procedure script that no client
   install receives, so they have no release note.
-- [ ] The branch is merged and the plan archived with its README row (the coordinator's step, after merge).
+- [x] The work is merged (`25616d385`, `34a754e02`, `03ad00d3d`, `9b04a7e72` for Tasks 1.4, 3.1 and 3.2) and the plan
+  is archived with its README row. The follow-up owner decision on Rust helpers is Plan 00529.
 
 ## Delivery & Milestones
 

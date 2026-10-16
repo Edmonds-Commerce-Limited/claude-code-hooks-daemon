@@ -2,7 +2,7 @@
 
 Plan 00495 Task 3.2. The owner's question (ruling A3): no full rewrite is on the table; do particular heavy paths
 justify a native helper? This document answers it from the numbers measured in Phase 1, Phase 2 and the Task 1.4
-re-measurement ([BASELINE.md](../../Performance/BASELINE.md), section "Plan 00495 re-measurement"). The decision is the
+re-measurement ([BASELINE.md](../../../Performance/BASELINE.md), section "Plan 00495 re-measurement"). The decision is the
 owner's; the follow-up plan filed with this document puts it to them.
 
 ## Verdict
@@ -13,7 +13,7 @@ written, and a Python change (ledger N465, fixed separately) removes the cost wi
 
 ## The rules this is judged by
 
-From [Performance/README.md](../../Performance/README.md), Plan 00154's decision framework:
+From [Performance/README.md](../../../Performance/README.md), Plan 00154's decision framework:
 
 - Rule 0: a cost matters only above a budget (a single event over about 100 ms p95, hook overhead over about 1% of a tool
   turn, or background CPU over 10% of a core).
@@ -122,7 +122,7 @@ For the relay this is already paid and known; any further helper pays it again:
 
 ## Method and limits
 
-Figures are from [BASELINE.md](../../Performance/BASELINE.md), measured on an 8-core Linux box at host load 3 to 13, so
+Figures are from [BASELINE.md](../../../Performance/BASELINE.md), measured on an 8-core Linux box at host load 3 to 13, so
 absolute times are rough and the CPU-second figures are the dependable ones. Dispatch and scanner costs were measured
 in-process (`process_request`, per-handler timers on `matches()`), not over a socket. No native code was written or
 benchmarked for this assessment: every "saving" above is an upper bound taken from the measured cost of the Python path,

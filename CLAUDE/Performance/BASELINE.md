@@ -49,7 +49,7 @@ re-measurement"). Start-up has its own budget, in [README.md](README.md#start-up
 
 Measured on `main` after the Phase 2 fixes (all of Tasks 2.2 to 2.7 merged), on an 8-core Linux box, host load average
 3 to 8 throughout, Python 3.11, no external network. The method is Plan 00495 Phase 1's
-([startup profile report](../Plan/00495-performance-improvement-programme/subagent-reports/261006-startup-profile-sonnet.md)):
+([startup profile report](../Plan/Completed/00495-performance-improvement-programme/subagent-reports/261006-startup-profile-sonnet.md)):
 a fresh process per sample on a throwaway git project, `process_time` CPU seconds (the load-robust metric), runs
 interleaved, median reported. The two configs are the shipped `hooks-daemon.yaml.example` (62 KB, 47 PreToolUse
 handlers) and this repository's own (92 KB, 80 PreToolUse handlers).

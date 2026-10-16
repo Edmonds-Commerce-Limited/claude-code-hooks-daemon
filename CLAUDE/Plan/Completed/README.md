@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00480: plan fact checker and debounce](00480-plan-fact-checker-and-debounce/PLAN.md) - Complete, the feed shipped in v3.69.0, with the N359 delivery fixes at merge `7aa463588` + the archiving commit (owner ruling after ledger 00474 N290: a Sonnet fact itemiser/verifier wired into plan QA through a first-class debounce; the final live run refuted a planted false claim delivered unasked)
+
 - [00477: provision a fresh clone](00477-provision-a-fresh-clone/PLAN.md) - Complete at merges `57295f89c` and `0a6223423` + the archiving commit (#78: a fresh clone is brought up by a new `provision` verb that installs the daemon version the config names, the hooks say loudly to the human when a checkout needs it, and an upgrade of `daemon.expected_version` is synced in the background; downgrades and read-gated targets stay manual by owner ruling; release notes 031 and 072)
 
 - [00475: targeted qa and small batches](00475-targeted-qa-and-small-batches/PLAN.md) - Complete at `d6caefded` + `301805f1f` + `b4576108a` (all shipped in v3.68.0) + the archiving commit (owner request: targeted QA for every change, the full gate only at release preparation, one QA run at a time, and small batches of branches; the branch-count and merge-QA advisories stay advisory by coordinator call)

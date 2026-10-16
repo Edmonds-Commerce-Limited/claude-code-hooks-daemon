@@ -58,7 +58,7 @@ above; the figures are in [BASELINE.md](BASELINE.md).
 process spawns are. No Rust rewrite is justified; the free Python/bash wins
 below beat any daemon rewrite's ceiling. (Plan 00495 found one exception to
 "the daemon is not the cost": the secret-file guard's scan of Write content,
-see [RUST-HELPERS-ASSESSMENT.md](../Plan/00495-performance-improvement-programme/RUST-HELPERS-ASSESSMENT.md).)
+see [RUST-HELPERS-ASSESSMENT.md](../Plan/Completed/00495-performance-improvement-programme/RUST-HELPERS-ASSESSMENT.md).)
 
 ## Start-up budget
 
