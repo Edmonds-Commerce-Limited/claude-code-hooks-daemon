@@ -113,8 +113,8 @@ source must leave a venv built for the new lock (the upgrade and sync paths cert
 should say loudly that it is running a venv built for a different lock, naming `repair`. Then correct the #122
 comment.
 
-**Status**: ✅ Fixed (commit c46cb3c41 on branch worktree-n469-stale-lock-venv). The #122 comment correction is the
-coordinator's; the statement to use is in
+**Status**: ✅ Fixed (commit c46cb3c41, merged to main in b0299ca30). The #122 comment was corrected on GitHub
+from the statement in
 [subagent-reports/261016-n469-stale-lock-venv-implementer.md](subagent-reports/261016-n469-stale-lock-venv-implementer.md).
 
 ### N467 — the secret-file-read guard still scans a large Write at about 1.7 ms per KB after N465
