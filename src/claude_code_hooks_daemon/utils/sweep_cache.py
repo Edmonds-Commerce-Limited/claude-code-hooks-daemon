@@ -10,10 +10,11 @@ of those inputs is valid for any later session that sees the same fingerprint.
 Two properties are deliberate:
 
 - A cached result is served ONLY for the exact fingerprint it was computed for.
-  The fingerprint covers the stat of every file in the project outside a small
-  prune list, not just the markdown the sweep parses, because the checks also
-  open files they link to (a dead link appears when a non-markdown target is
-  deleted). A changed input is a miss; the old result is never served as current.
+  The fingerprint covers the stat of every file git lists for the project
+  (tracked, plus untracked and not ignored; a directory walk outside git), not just
+  the markdown the sweep parses, because the checks also open files they link to
+  (a dead link appears when a non-markdown target is deleted). Gitignored trees are
+  never enumerated. A changed input is a miss; the old result is never served as current.
 - A miss runs the sweep on a background thread and waits a short, bounded time
   for it. A sweep that finishes inside the wait is delivered in this session; one
   that does not is reported as pending (with the last known result, labelled as
@@ -33,6 +34,7 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.git_repo import run_git
 
 logger = logging.getLogger(__name__)
 
@@ -120,36 +122,66 @@ def tree_fingerprint(project_root: Path, extra: Sequence[str]) -> str:
     for part in extra:
         digest.update(part.encode("utf-8", "surrogateescape"))
         digest.update(b"\x00")
-    for current, dir_names, file_names in os.walk(project_root):
-        relative_dir = os.path.relpath(current, project_root).replace(os.sep, "/")
-        dir_names[:] = sorted(
-            name
-            for name in dir_names
-            if name not in _PRUNED_DIR_NAMES
-            and _join_relative(relative_dir, name) not in _PRUNED_ROOT_PATHS
-        )
-        for name in sorted(file_names):
-            try:
-                stat = (Path(current) / name).lstat()
-            except FileNotFoundError as exc:
-                log_and_continue(
-                    logger,
-                    exc,
-                    reason=f"{name} deleted between the directory listing and its stat; "
-                    "the next walk omits it, so the fingerprint moves anyway",
-                    level=logging.DEBUG,
-                )
-                continue
-            entry = f"{_join_relative(relative_dir, name)}\x00{stat.st_mtime_ns}\x00"
-            digest.update(
-                f"{entry}{stat.st_size}\x00{stat.st_ino}\n".encode("utf-8", "surrogateescape")
+    listed = _git_listed_files(project_root)
+    for relative_path in listed if listed is not None else _walked_files(project_root):
+        try:
+            stat = (project_root / relative_path).lstat()
+        except FileNotFoundError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"{relative_path} deleted between the listing and its stat; "
+                "the next listing omits it, so the fingerprint moves anyway",
+                level=logging.DEBUG,
             )
+            continue
+        entry = f"{relative_path}\x00{stat.st_mtime_ns}\x00"
+        digest.update(f"{entry}{stat.st_size}\x00{stat.st_ino}\n".encode("utf-8", "surrogateescape"))
     return digest.hexdigest()
 
 
-def _join_relative(relative_dir: str, name: str) -> str:
-    """``relative_dir/name`` with the walk root (``.``) contributing no prefix."""
-    return name if relative_dir == "." else f"{relative_dir}/{name}"
+def _is_pruned(relative_path: str) -> bool:
+    """Whether a listed file sits under a prune-list directory."""
+    parts = relative_path.split("/")
+    if any(part in _PRUNED_DIR_NAMES for part in parts[:-1]):
+        return True
+    return any(
+        relative_path.startswith(f"{pruned}/") for pruned in _PRUNED_ROOT_PATHS
+    )
+
+
+def _git_listed_files(project_root: Path) -> list[str] | None:
+    """Tracked plus untracked-but-not-ignored files, or ``None`` outside git.
+
+    A gitignored tree (``target/``, ``build/``, ``dist/``, ``vendor/``, data
+    directories) is never enumerated, so its size cannot slow a session start.
+    The cost is that a sweep reading a gitignored file (a document linking to
+    one, say) does not see that file appear or vanish until some other input
+    moves; the foreground ``docs-qa``/``plan-qa`` ``--sweep`` always reads the
+    live tree. ``None`` (not a repository, git missing or failing) falls back to
+    walking the directory.
+    """
+    result = run_git(project_root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+    if result.returncode != 0:
+        return None
+    return sorted(
+        path for path in result.stdout.split("\0") if path and not _is_pruned(path)
+    )
+
+
+def _walked_files(project_root: Path) -> list[str]:
+    """Every file outside the prune list, as sorted root-relative POSIX paths."""
+    found: list[str] = []
+    for current, dir_names, file_names in os.walk(project_root):
+        relative_dir = os.path.relpath(current, project_root).replace(os.sep, "/")
+        prefix = "" if relative_dir == "." else f"{relative_dir}/"
+        dir_names[:] = [
+            name
+            for name in dir_names
+            if name not in _PRUNED_DIR_NAMES and f"{prefix}{name}" not in _PRUNED_ROOT_PATHS
+        ]
+        found.extend(f"{prefix}{name}" for name in file_names)
+    return sorted(found)
 
 
 def run_cached_sweep(

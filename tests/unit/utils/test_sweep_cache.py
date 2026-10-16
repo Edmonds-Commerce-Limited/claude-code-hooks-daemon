@@ -6,10 +6,13 @@ hit has a twin proving the matching edit forces a recompute.
 
 import json
 import os
+import subprocess
 import threading
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
+from tests.support.git_fixtures import git_setup_timeout
 
 from claude_code_hooks_daemon.utils.sweep_cache import (
     SweepOutcome,
@@ -86,6 +89,78 @@ class TestTreeFingerprint:
         before = tree_fingerprint(root, [])
         (root / "docs" / "untracked" / "B.md").write_text("beta\n")
         assert tree_fingerprint(root, []) != before
+
+
+def _git_project(tmp_path: Path) -> Path:
+    """A git repository with a tracked doc, a source file and a gitignored build tree."""
+    root = _tree(tmp_path)
+    (root / "src").mkdir()
+    (root / "src" / "mod.py").write_text("x = 1\n")
+    (root / ".gitignore").write_text("target/\n")
+    (root / "target").mkdir()
+    for index in range(20):
+        (root / "target" / f"artefact{index}.bin").write_text("built\n")
+    subprocess.run(
+        ["git", "init", str(root)], capture_output=True, check=True, timeout=git_setup_timeout()
+    )
+    return root
+
+
+class TestGitAwareEnumeration:
+    """Inside a git repository only tracked and non-ignored files are enumerated."""
+
+    def test_a_gitignored_directory_is_never_enumerated(self, tmp_path: Path) -> None:
+        root = _git_project(tmp_path)
+        stated: list[str] = []
+        original = Path.lstat
+
+        def spy(self: Path) -> os.stat_result:
+            stated.append(self.as_posix())
+            return original(self)
+
+        with patch.object(Path, "lstat", spy), patch("os.walk", side_effect=AssertionError):
+            tree_fingerprint(root, [])
+
+        assert stated
+        assert not [path for path in stated if "/target/" in path]
+
+    def test_editing_a_gitignored_file_does_not_move_the_fingerprint(self, tmp_path: Path) -> None:
+        root = _git_project(tmp_path)
+        before = tree_fingerprint(root, [])
+        (root / "target" / "artefact0.bin").write_text("rebuilt with more bytes\n")
+        (root / "target" / "new.bin").write_text("new\n")
+        assert tree_fingerprint(root, []) == before
+
+    def test_an_untracked_unignored_file_moves_the_fingerprint(self, tmp_path: Path) -> None:
+        root = _git_project(tmp_path)
+        before = tree_fingerprint(root, [])
+        (root / "docs" / "B.md").write_text("beta\n")
+        assert tree_fingerprint(root, []) != before
+
+    def test_deleting_an_untracked_file_moves_the_fingerprint(self, tmp_path: Path) -> None:
+        root = _git_project(tmp_path)
+        before = tree_fingerprint(root, [])
+        (root / "src" / "mod.py").unlink()
+        assert tree_fingerprint(root, []) != before
+
+    def test_deleting_a_tracked_file_moves_the_fingerprint(self, tmp_path: Path) -> None:
+        root = _git_project(tmp_path)
+        subprocess.run(
+            ["git", "-C", str(root), "add", "src/mod.py"],
+            capture_output=True,
+            check=True,
+            timeout=git_setup_timeout(),
+        )
+        before = tree_fingerprint(root, [])
+        (root / "src" / "mod.py").unlink()
+        assert tree_fingerprint(root, []) != before
+
+    def test_pruned_locations_stay_pruned_inside_a_repository(self, tmp_path: Path) -> None:
+        root = _git_project(tmp_path)
+        (root / "untracked").mkdir()
+        before = tree_fingerprint(root, [])
+        (root / "untracked" / "log.txt").write_text("noise\n")
+        assert tree_fingerprint(root, []) == before
 
 
 class TestRunCachedSweep:
