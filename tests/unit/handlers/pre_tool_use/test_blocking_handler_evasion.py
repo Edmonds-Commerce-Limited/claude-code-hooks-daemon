@@ -512,6 +512,11 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
 # assumption that let the git bypasses survive.
 _NOT_COMMAND_ANCHORED: dict[str, str] = {
     "AbsolutePathHandler": "matches on the file_path parameter, not a command",
+    "SubagentContextBudgetHandler": (
+        "matches every subagent tool call on the agent's MEASURED context, not on a command "
+        "name; its Bash rule is an ALLOWLIST (a respelling is denied, never let through), "
+        "covered in test_subagent_context_budget.py"
+    ),
     "WriteProtectedPathsHandler": (
         "matches on the PATH a file tool or a shell write names, read by the shared write "
         "scan (redirects, tee, cp/mv/install/ln, sed -i, rm, truncate), not on a command name; "

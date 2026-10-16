@@ -341,6 +341,17 @@ handlers:
       enabled: true           # Needed by subagent_full_qa_blocker's exempt_agent_types for named agents
       priority: 46
 
+    subagent_context_budget:  # A subagent past soft_tokens of context is told once to hand off; past hard_tokens only its handoff runs
+      enabled: true
+      priority: 39
+      options:
+        soft_tokens: 300000        # Advisory once per band; null switches the advisory off
+        hard_tokens: null          # Off. Set (e.g. 250000) to allow only the handoff steps above it
+        max_override_tokens: 450000  # Ceiling for a `budget: <N>k` line in a named dispatch's prompt
+        # handoff_globs: []        # Added to **/subagent-reports/**, untracked/scratch/** (mode: replace to swap)
+        # allowed_bash_prefixes: [] # Added to git status|diff|add|commit|log (mode: replace to swap)
+        # exempt_agent_types: []   # Definition types never measured
+
     installed_plugin_edit_advisor:  # Advises when a write lands in an installed Claude Code plugin's files
       enabled: true
       priority: 42
@@ -896,6 +907,10 @@ handlers:
     subagent_cache_aggregator:      # Records each sub-agent's prompt-cache cost for the status line
       enabled: true                 # Sensor only (Plan 00452): renders nothing, never blocks a stop
       priority: 9                   # Ahead of the terminal size blocker, so a rejected report still counts
+
+    subagent_handoff_gate:          # An agent that hit subagent_context_budget's hard_tokens writes its handoff before it stops
+      enabled: true                 # Silent while hard_tokens is null; gives way after three blocked stops
+      priority: 11
 
     subagent_report_persistence:    # Auto-saves every sub-agent's final reply to a gitignored file (Plan 00460)
       enabled: true                 # Sensor only: never blocks a stop; runs before the size blocker below

@@ -12,7 +12,11 @@ from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.agent_dispatch_recorder import (
     AgentDispatchRecorderHandler,
 )
-from claude_code_hooks_daemon.utils.agent_dispatch_registry import effective_agent_type
+from claude_code_hooks_daemon.utils.agent_dispatch_registry import (
+    dispatch_budget,
+    effective_agent_type,
+)
+from claude_code_hooks_daemon.utils.spend_ledger import read_events
 
 
 def _dispatch(tool_name: str = "Agent", **tool_input: Any) -> dict[str, Any]:
@@ -69,6 +73,35 @@ class TestHandle:
         blocker.write_text("a file where the directory should be", encoding="utf-8")
         result = handler.handle(_dispatch(name="w", subagent_type="qa-runner"))
         assert result.decision == Decision.ALLOW
+
+
+class TestBudgetOverride:
+    """Plan 00471 Q4: a ``budget: <N>k`` line in a named dispatch's prompt."""
+
+    def test_budget_line_is_recorded_and_ledgered(
+        self, handler: AgentDispatchRecorderHandler, tmp_path: Path
+    ) -> None:
+        prompt = "Do the migration.\nbudget: 400k\nReport to the plan folder."
+        handler.handle(_dispatch(name="w", subagent_type="python-developer", prompt=prompt))
+        assert dispatch_budget(tmp_path, "s1", "w") == 400_000
+        events = read_events(tmp_path, "s1")
+        assert events[-1]["kind"] == "budget-override"
+        assert events[-1]["name"] == "w"
+        assert events[-1]["requested_tokens"] == 400_000
+
+    def test_no_line_records_no_budget_and_no_event(
+        self, handler: AgentDispatchRecorderHandler, tmp_path: Path
+    ) -> None:
+        handler.handle(_dispatch(name="w", subagent_type="qa-runner", prompt="budget is tight"))
+        assert dispatch_budget(tmp_path, "s1", "w") is None
+        assert read_events(tmp_path, "s1") == []
+
+    def test_a_later_dispatch_of_the_name_replaces_the_budget(
+        self, handler: AgentDispatchRecorderHandler, tmp_path: Path
+    ) -> None:
+        handler.handle(_dispatch(name="w", prompt="budget: 400k"))
+        handler.handle(_dispatch(name="w", prompt="no override"))
+        assert dispatch_budget(tmp_path, "s1", "w") is None
 
 
 class TestMetadata:

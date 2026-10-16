@@ -542,6 +542,16 @@ class RuleID:
     LOCK_FILE_EDIT: str = "R-LOCK-FILE-EDIT"
 
     # ------------------------------------------------------------------
+    # subagent_context_budget / subagent_handoff_gate handlers (Plan 00471)
+    # ------------------------------------------------------------------
+
+    #: A subagent tool call outside the handoff allowlist at or above the hard context budget.
+    SUBAGENT_CONTEXT_BUDGET: str = "R-SUBAGENT-CONTEXT-BUDGET"
+
+    #: A subagent stop over the hard context budget with no handoff file written.
+    SUBAGENT_HANDOFF_MISSING: str = "R-SUBAGENT-HANDOFF-MISSING"
+
+    # ------------------------------------------------------------------
     # write_protected_paths handler
     # ------------------------------------------------------------------
 

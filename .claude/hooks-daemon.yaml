@@ -676,6 +676,18 @@ handlers:
       enabled: true
       priority: 46
 
+    # Plan 00471 L2 (Fable ruling, owner-delegated): soft advisory at 150k in
+    # this repo. hard_tokens stays null: enabling it (the ruling recommends
+    # 250000) is left to the owner, once the dogfood run shows the soft band
+    # firing with zero unmeasured events.
+    subagent_context_budget:  # A subagent past its context budget is told to hand off (soft) / limited to its handoff (hard)
+      enabled: true
+      priority: 39
+      options:
+        soft_tokens: 150000
+        hard_tokens: null
+        max_override_tokens: 450000  # Below the 567k this environment autocompacts at
+
     installed_plugin_edit_advisor:  # Advises when a write lands in an installed Claude Code plugin (Plan 00468 G16)
       enabled: true
       priority: 42
@@ -1160,6 +1172,10 @@ handlers:
     subagent_cache_aggregator:      # Sub-agent prompt-cache cost, for the status line's SUB figure (Plan 00452)
       enabled: true
       priority: 9    # Ahead of the terminal size blocker (15), so a rejected report still gets counted
+
+    subagent_handoff_gate:          # An agent that hit hard_tokens leaves its handoff before it stops (Plan 00471 L2)
+      enabled: true  # Silent while subagent_context_budget's hard_tokens is null
+      priority: 11   # Ahead of the terminal size blocker (15), non-terminal like the path verifier
 
     subagent_report_persistence:    # Auto-saves every sub-agent's final reply to a gitignored file (Plan 00460)
       enabled: true  # Sensor only: never blocks a stop

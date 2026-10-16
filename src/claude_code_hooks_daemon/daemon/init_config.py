@@ -293,6 +293,8 @@ class ConfigTemplate:
             "    plan_workflow: {enabled: true, priority: 45}     # Guidance when creating plans\n"
             "    agent_isolation_advisor: {enabled: true, priority: 46}  # Advise worktree isolation for concurrent agents (non-blocking)\n"
             "    agent_dispatch_recorder: {enabled: true, priority: 46}  # Record name -> subagent_type of a named Agent dispatch (silent)\n"
+            # Plan 00471 L2: advisory at the soft band; the hard band ships off.
+            "    subagent_context_budget: {enabled: true, priority: 39, options: {soft_tokens: 300000, hard_tokens: null}}  # Tell a subagent past its context budget to hand off\n"
             "    installed_plugin_edit_advisor: {enabled: true, priority: 42}  # Advise when a write lands in an installed Claude Code plugin's files (non-blocking)\n"
             "    dispatch_declaration: {enabled: true, priority: 48}  # Advise/enforce a file-handoff declaration on Task dispatch\n"
             "    docs_qa_edit: {enabled: true, priority: 47}      # Docs QA lint on documentation writes (fires only when documentation.enabled)\n"
@@ -411,6 +413,7 @@ class ConfigTemplate:
             "    cron_subagent_stop_enforcer: {enabled: true, priority: 7}  # SubagentStop twin of cron_stop_enforcer. Inert until persistent_crons.enabled is true AND a job is declared\n"
             "    subagent_report_path_verifier: {enabled: true, priority: 8}  # Block a stop whose final message claims a report file that is not on disk\n"
             "    subagent_cache_aggregator: {enabled: true, priority: 9}  # Sensor: record this agent's prompt-cache totals so the coordinator's status line can show SUB alongside MAIN\n"
+            "    subagent_handoff_gate: {enabled: true, priority: 11}  # An agent past subagent_context_budget's hard_tokens writes its handoff before it stops\n"
             "    subagent_report_persistence: {enabled: true, priority: 10}  # Sensor: auto-save every sub-agent's final reply to a gitignored file, before the terminal size blocker below looks it up\n"
             "    subagent_report_size_blocker: {enabled: true, priority: 15}  # Block an oversized subagent final message\n"
             "\n"

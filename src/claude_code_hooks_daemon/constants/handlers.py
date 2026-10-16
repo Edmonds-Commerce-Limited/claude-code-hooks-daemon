@@ -450,6 +450,18 @@ class HandlerID:
         config_key="agent_dispatch_recorder",
         display_name="agent-dispatch-recorder",
     )
+    # Plan 00471 L2: a subagent's context budget (soft advisory, hard handoff-only).
+    SUBAGENT_CONTEXT_BUDGET = HandlerIDMeta(
+        class_name="SubagentContextBudgetHandler",
+        config_key="subagent_context_budget",
+        display_name="subagent-context-budget",
+    )
+    # Plan 00471 L2: the SubagentStop companion, a handoff before an over-budget stop.
+    SUBAGENT_HANDOFF_GATE = HandlerIDMeta(
+        class_name="SubagentHandoffGateHandler",
+        config_key="subagent_handoff_gate",
+        display_name="subagent-handoff-gate",
+    )
     # Plan 00468 G16: a write into an installed Claude Code plugin's files.
     INSTALLED_PLUGIN_EDIT_ADVISOR = HandlerIDMeta(
         class_name="InstalledPluginEditAdvisorHandler",

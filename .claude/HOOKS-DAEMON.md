@@ -1,10 +1,10 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-10-14 (v3.69.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-10-15 (v3.69.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (75 handlers)
+### PreToolUse (76 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -57,6 +57,7 @@
 | 38 | lsp_enforcement | BLOCKING | Enforce LSP tool usage instead of Grep/Bash grep for symbol lookups |
 | 38 | remote_docs_commit_gate | BLOCKING | Deny a commit that would enter an unattributed vendored document |
 | 39 | reference_repo_freshness | BLOCKING | Gate a read of a governed reference repo on a cached freshness reading |
+| 39 | subagent_context_budget | BLOCKING | Advise a subagent past ``soft_tokens``; past ``hard_tokens`` allow only its handoff |
 | 40 | gh_issue_comments | BLOCKING | Ensure gh issue view commands always include --comments flag |
 | 40 | gh_pr_comments | BLOCKING | Ensure gh pr view commands always include --comments flag |
 | 42 | conflict_marker_commit_gate | BLOCKING | Deny a commit that would record a merge-conflict marker |
@@ -186,7 +187,7 @@
 | 9 | teammate_reap_advisor | ADVISORY | Report the Stop payload's ``background_tasks`` count and name ``TaskStop`` |
 | 10 | auto_continue_stop | TERMINAL | Intercept Stop events and enforce explicit stop reasons or auto-continue |
 
-### SubagentStop (5 handlers)
+### SubagentStop (6 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -194,6 +195,7 @@
 | 8 | subagent_report_path_verifier | BLOCKING | Block a SubagentStop whose claimed report file does not exist |
 | 9 | subagent_cache_aggregator | NON-TERMINAL | Record a stopping sub-agent's prompt-cache totals for the status line |
 | 10 | subagent_report_persistence | NON-TERMINAL | Persist every stopping sub-agent's final reply to a gitignored file |
+| 11 | subagent_handoff_gate | BLOCKING | Block an over-hard-budget subagent's stop until its handoff file exists |
 | 15 | subagent_report_size_blocker | TERMINAL | Block a SubagentStop whose ``last_assistant_message`` is oversized |
 
 ### Status (17 handlers)
