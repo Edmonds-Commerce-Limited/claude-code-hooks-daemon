@@ -97,8 +97,9 @@ anything themselves: a person or agent runs provision.
 - [x] ✅ **Task 4.1**: `LLM-INSTALL.md`, the skill's `install.md` and the
   troubleshooting guide route a fresh clone to `provision`, and `install.md`
   stops describing itself as the fresh-clone command.
-- [ ] ⬜ **Task 4.2**: A release note and an UNRELEASED post-upgrade task: an
+- [x] ✅ **Task 4.2**: A release note and an UNRELEASED post-upgrade task: an
   upgraded project gains the config key and the tracked `provision.sh`.
+  (`98c7ee990`: release note 066, post-upgrade task 02)
 
 ### Phase 5: A pulled version change syncs itself (owner request)
 
@@ -136,18 +137,21 @@ stale: the clone's checked-out tag, the venv and the running daemon.
   committed `daemon.expected_version` change is reviewed like any other commit,
   and the sync runs the target release's own pre-deploy gate, whose reading
   confirmation still applies.
-- [ ] ⬜ **Task 5.4**: Tests: a pulled newer version syncs and restarts; a sync
+- [x] ✅ **Task 5.4**: Tests: a pulled newer version syncs and restarts; a sync
   failure keeps the old daemon; the daemon's own repository never syncs.
+  (`98c7ee990`, `55642216d`)
 
 ## Success Criteria
 
 - [ ] After a pull that changes `daemon.expected_version`, the next session runs
   the daemon at the new version without a manual step.
-- [ ] In a fresh clone of a configured fixture project, the first session shows
-  the human a message naming `provision` and the expected version.
-- [ ] Running provision brings up the daemon at exactly that version, with no
-  restart and no change to any tracked file.
-- [ ] Provision never clones `main` when the config names a version.
+- [x] In a fresh clone of a configured fixture project, the first session shows
+  the human a message naming `provision` and the expected version
+  (`test_init_sh_needs_provision.py::TestSessionStartAndUserPromptSubmit`).
+- [x] Running provision brings up the daemon at exactly that version, with no
+  restart and no change to any tracked file (`test_provision_sh.py::TestProvisioning`).
+- [x] Provision never clones `main` when the config names a version
+  (`test_installs_exactly_the_tag_the_config_names_never_main`).
 
 ## Delivery & Milestones
 
