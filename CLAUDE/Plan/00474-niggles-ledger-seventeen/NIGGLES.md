@@ -132,10 +132,11 @@ that small, one scheduler or GC pause dominates the measurement, so the ratio sw
 small-input timing, so one pause cannot read as superlinear growth. Prove the fix by running the class repeatedly
 under load.
 
-**Status**: ⬜ Open. Fix landed at `50a3537ee` (`tests/scaling.py`: an over-threshold ratio is re-measured with pooled
-minimums before it is believed). Not marked done: the flake did not reproduce under real host load (8 of 8 passes
-before and after), so only a synthetic stall model (15 of 60 false positives before, 0 of 60 after) and a planted
-quadratic handler (still flagged) back it. See `subagent-reports/261016-n462-perf-flake-implementer.md`.
+**Status**: ✅ Fixed at `50a3537ee` (merged 02e9b1cad; `tests/scaling.py`: an over-threshold ratio is re-measured with
+pooled minimums before it is believed). Coordinator ruling: the evidence is enough to close. The flake did not
+reproduce under real host load (8 of 8 passes before and after), but a synthetic stall model went from 15 of 60 false
+positives to 0 of 60, and a planted quadratic handler is still flagged. The release's full QA gate exercises the file
+again under real load; reopen if it flakes there. See `subagent-reports/261016-n462-perf-flake-implementer.md`.
 
 ### N463 — targeted QA never runs the registry-wide handler tests for a newly added handler
 
