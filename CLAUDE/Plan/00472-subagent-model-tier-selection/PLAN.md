@@ -112,10 +112,10 @@ message. The decisions are listed side by side in each plan's Task 1.2.
 - [x] ✅ **Task 3.6** (234bffa3f): `workflow_fanout_advisor`.
 - [x] ✅ **Task 3.7** (59cbd6a4f): the spend segment's per-family live counts
   read the shared rank table.
-- [ ] 🔄 **Task 3.8**: docs page, `HANDLER_REFERENCE.md`, manifest, release
-  note 079, 00280 cross-reference and baseline copy are done; the dogfood run
-  and the GitHub issue (#58) comment and close wait for the merge and a
-  daemon restart.
+- [x] ✅ **Task 3.8**: docs page, `HANDLER_REFERENCE.md`, manifest, release
+  note 079, 00280 cross-reference, baseline copy and the dogfood run (JOURNAL
+  26-10-16). The issue #58 comment is drafted; posting it moved to
+  [Plan 00530](../00530-subagent-tier-enforcement-follow-up/PLAN.md) Task 1.4.
 
 ## Success Criteria
 
@@ -129,9 +129,14 @@ Per RULINGS-fable.md section 5.
 - [x] 03: `hooks-daemon tiers` prints the by-source, by-model and by-role
   tables, the `CLAUDE_CODE_SUBAGENT_MODEL` line and the downgraded-agent list
   from fixtures, with a mid-run swap's per-model request counts.
-- [ ] 04: the tier advisory's fire/silent matrix and the floor advisory
-  (unit-tested); the acceptance run through a real dispatch in this repo waits
-  for the merge.
+- [x] 04: the tier advisory's fire/silent matrix and the floor advisory
+  (unit-tested); the acceptance run through a real dispatch in this repo.
+  Tests: `tests/unit/handlers/pre_tool_use/test_subagent_tier_advisor.py`
+  `TestFires` and `TestSilent` (including
+  `test_floor_on_an_explicit_sonnet_code_reviewer`,
+  `test_role_floor_on_an_inherited_sonnet_security_check`), passing on main at
+  b1d6397f4. Live: an explicit-sonnet `hooks-daemon-plan-dedupe-scout`
+  dispatch drew the TIER advisory naming haiku (JOURNAL 26-10-16).
 - [x] 05: no handler in this plan returns a deny; tests assert allow across
   the matrix.
 - [x] 06: the Workflow advisor reports N and M per fixture, resolves an
@@ -146,14 +151,16 @@ Per RULINGS-fable.md section 5.
   (release note
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/079-subagent-model-tiers-measured-and-advised.md`);
   Plan 00280's PLAN.md carries the cross-reference.
-- [ ] 09: the baseline is copied
+- [x] 09: the baseline is copied
   (`subagent-reports/260925-p472-tiers-baseline.json`); the dogfood journal
-  entry with a `hooks-daemon tiers` run and a real tier-advisory verdict waits
-  for the merge.
-- [ ] 10: GitHub issue #58 commented with the implementation summary and
-  closed.
+  entry (26-10-16, "dogfood run") cites a `hooks-daemon tiers` run, the two
+  dispatch ledger rows and a real `subagent-tier-advisor` verdict.
+- [x] 10: the implementation summary for GitHub issue #58 is drafted for the
+  coordinator to post; posting it and the close decision moved to
+  [Plan 00530](../00530-subagent-tier-enforcement-follow-up/PLAN.md) Task 1.4.
 - [ ] 11: targeted QA green on the work branch; the coordinator's full gate
-  green before merge.
+  green before merge. The coordinator's full gate runs in the release
+  (RELEASING.md Step 1b); left for the coordinator to tick.
 
 ## Delivery & Milestones
 

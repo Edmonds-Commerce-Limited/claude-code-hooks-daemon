@@ -49,6 +49,9 @@ owner's call.
   it (472-B Tasks 1.3, 1.4).
 - [ ] ⬜ **Task 1.3**: Measure the `tier-advisory` events' share of dispatches
   from the spend ledger over representative sessions.
+- [ ] ⬜ **Task 1.4**: Post the Plan 00472 implementation summary on GitHub
+  issue #58 (moved from 00472's criterion 10; the coordinator holds the
+  drafted text), and decide whether #58 closes now or with this plan.
 
 ### Phase 2: Decisions
 

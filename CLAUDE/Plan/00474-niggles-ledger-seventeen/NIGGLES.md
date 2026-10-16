@@ -77,6 +77,26 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N471 — `hooks-daemon tiers` lists an agent-team teammate as `unrecorded` although its dispatch row is joined
+
+**Source**: the Plan 00471/00472 closure agent, 2026-10-16, during 00472's dogfood run. The closure agent itself was
+dispatched as a named teammate. Its dispatch row in `untracked/spend-ledger/<session>/dispatches/` is complete
+(`source: explicit`, `pre_recorded: true`, `resolved_model: claude-opus-5-5`, `agent_id` set). `hooks-daemon tiers`
+still put it under source `unrecorded`, and its header read "0 unjoined dispatch rows". A plain `Agent` dispatch made
+from inside that teammate joined correctly (`explicit 1`).
+
+**Why it happens**: `collect_tiers` (`daemon/tier_report.py:114-115`) finds an agent's row by the `toolUseId` in the
+agent's `.meta.json`. A plain subagent's meta carries `toolUseId`. A teammate's meta (`taskKind: in_process_teammate`) carries no `toolUseId`, so the lookup always misses. The row's own `agent_id` would match, but
+it is not used. The `unjoined` count only checks `pre_recorded` and `resolved_model` on the row, so it cannot see this
+miss.
+
+**Fix direction**: in `collect_tiers`, fall back to matching a row's `agent_id` when the meta has no `toolUseId`. Count
+a row as unjoined when no agent claims it. Add a fixture teammate whose meta has no `toolUseId`. Also check the
+SubagentStop `downgraded` flag and every other reader that joins on `toolUseId`. In this repository most named
+dispatches are teammates, so the by-source and by-role tables undercount the very dispatches the advisor judges.
+
+**Status**: ⬜ Open.
+
 ### N468 — the markdown formatter escapes GitHub footnotes, so footnotes in any written `.md` file render as literal text
 
 **Source**: GitHub issue #122 (approved author, filed with the issue-report generator), 2026-10-16. After a Write of
