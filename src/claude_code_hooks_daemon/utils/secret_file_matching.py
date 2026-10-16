@@ -1860,7 +1860,8 @@ def iter_protected_mentions(
     ``cwds`` are the directories a relative word may be read from (see
     :func:`effective_cwds`); ``None`` derives them from ``command`` and ``cwd``.
     A caller judging a fragment of a longer command passes the whole
-    command's.
+    command's. A ``"content"`` scan never reads them (:func:`_token_mention`
+    anchors and index-matches only in ``"bash"``), so none are derived for it.
 
     One entry per mentioning token, carrying the first glob it trips. The
     encrypted-target exemption (Plan 00459) needs them all: a command is let
@@ -1942,7 +1943,12 @@ def iter_protected_mentions(
     if not command or not patterns:
         return
     project_root = resolve_project_root()
-    effective = effective_cwds(command, cwd) if cwds is None else cwds
+    if cwds is not None:
+        effective = cwds
+    elif context == "bash":
+        effective = effective_cwds(command, cwd)
+    else:
+        effective = ()
     stem_pairs = _pattern_literal_stems(patterns)
     tokens = _mention_token_stream(
         command,
@@ -2522,6 +2528,21 @@ def find_protected_mention_strict(
 _DIRECTORY_CHANGE_COMMANDS: Final[frozenset[str]] = frozenset({"cd", "pushd"})
 _COMMAND_SEGMENT_SEPARATORS: Final[re.Pattern[str]] = re.compile(r"&&|\|\||[;|&\n]")
 
+#: The only characters POSIX shlex removes from inside a word: quotes and the
+#: escape. With them deleted, a segment whose first word is ``cd``/``pushd``
+#: holds that name as a substring (ledger 00474 N465).
+_SHLEX_REMOVED_CHARS: Final[dict[int, int | None]] = str.maketrans("", "", "'\"\\")
+
+
+def _may_change_directory(segment: str) -> bool:
+    """Could ``segment``'s first shell word be ``cd``/``pushd``?
+
+    The cheap, sound gate in front of :func:`_shell_words`: a False here is
+    a segment the tokeniser would also have found no directory change in.
+    """
+    unquoted = segment.translate(_SHLEX_REMOVED_CHARS)
+    return any(name in unquoted for name in _DIRECTORY_CHANGE_COMMANDS)
+
 
 def effective_cwds(command: str, cwd: str | None) -> tuple[str, ...]:
     """The directories ``command`` may run in: the hook's ``cwd``, then each literal ``cd`` target.
@@ -2534,9 +2555,15 @@ def effective_cwds(command: str, cwd: str | None) -> tuple[str, ...]:
     (a variable, substitution, glob, brace list, tilde) or that cannot be
     placed (``cd -``, a relative step with no absolute directory to start
     from) is not tracked -- out of scope, as before.
+
+    Only a segment that could start with one of those commands is tokenised
+    (:func:`_may_change_directory`), not every line of a large authored script
+    (ledger 00474 N465).
     """
     directories: list[str] = [cwd] if cwd is not None and Path(cwd).is_absolute() else []
     for segment in _COMMAND_SEGMENT_SEPARATORS.split(command):
+        if not _may_change_directory(segment):
+            continue
         words = _shell_words(segment)
         if words is None or len(words) < 2 or words[0] not in _DIRECTORY_CHANGE_COMMANDS:
             continue
