@@ -81,21 +81,23 @@ The build scope of [RULINGS-fable.md](RULINGS-fable.md) section 2, in order.
 Every gate that cannot measure fails open with a recorded `unmeasured`
 verdict.
 
-- [ ] ⬜ **Task 2.0**: Transcript readers: the tail reader, the offset cache
-  and the agent-transcript resolver.
-- [ ] ⬜ **Task 2.1**: Spend ledger (L6) in `subagent_cache_aggregator`, and
-  the `hooks-daemon spend` CLI.
-- [ ] ⬜ **Task 2.2**: Subagent context budget (L2): soft advisory on; hard
-  mode built, tested and shipped off; SubagentStop handoff gate; the
-  `budget: <N>k` dispatch override.
-- [ ] ⬜ **Task 2.3**: Resume guard (L3): deny in this repo at 150k, advise
-  by default for clients.
-- [ ] ⬜ **Task 2.4**: Live count and five-hour percentage (L4, L5),
-  advisory only.
-- [ ] ⬜ **Task 2.5**: Status segment (L7).
-- [ ] ⬜ **Task 2.6**: Review-round advisory (L9).
-- [ ] ⬜ **Task 2.7**: Docs, config manifest, holding-area entry, baseline
-  copy and the dogfood run.
+- [x] ✅ **Task 2.0** (35f174bec): Transcript readers: the tail reader, the
+  offset cache and the agent-transcript resolver.
+- [x] ✅ **Task 2.1** (ea7fab202): Spend ledger (L6) in
+  `subagent_cache_aggregator`, and the `hooks-daemon spend` CLI.
+- [x] ✅ **Task 2.2** (2ca8a05c4): Subagent context budget (L2): soft
+  advisory on; hard mode built, tested and shipped off; SubagentStop handoff
+  gate; the `budget: <N>k` dispatch override.
+- [x] ✅ **Task 2.3** (e0c1d55b0): Resume guard (L3): deny in this repo at
+  150k, advise by default for clients.
+- [x] ✅ **Task 2.4** (d50f10655): Live count and five-hour percentage (L4,
+  L5), advisory only.
+- [x] ✅ **Task 2.5** (d4425ac43): Status segment (L7).
+- [x] ✅ **Task 2.6** (05b87417c): Review-round advisory (L9).
+- [ ] 🔄 **Task 2.7**: Docs, config manifest, holding-area entry, baseline
+  copy and the dogfood run. Docs, manifest, release note and baseline are
+  done; the dogfood run and the subagent payload capture need the merged
+  code live in the daemon.
 
 ## Deferred
 

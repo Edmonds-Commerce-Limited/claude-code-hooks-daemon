@@ -120,6 +120,141 @@ config_changes:
         On by default and inert unless `persistent_crons` is enabled and a
         session opens a second thread. Set `false` to keep the previous
         behaviour of asking every thread for the declared crons.
+    - key: handlers.pre_tool_use.subagent_context_budget
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00471 L2). Inside a subagent, past `soft_tokens` of context
+        (default 300000) the agent is told once to hand off: write
+        `<plan>/subagent-reports/<yymmdd>-<agent>-handoff.md`, commit, and
+        SendMessage the lead. Past `hard_tokens` (default null, off) every
+        tool except the handoff steps is denied (R-SUBAGENT-CONTEXT-BUDGET).
+        Options `handoff_globs`, `allowed_bash_prefixes` (additive/replace via
+        `mode`), `exempt_agent_types` and `max_override_tokens` (450000, the
+        ceiling for a `budget: <N>k` line in a named dispatch's prompt). A
+        transcript it cannot read always allows, with one `unmeasured`
+        verdict per agent and reason.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            subagent_context_budget:
+              enabled: true
+              priority: 39
+              options:
+                soft_tokens: 300000
+                hard_tokens: null
+      migration_note: >-
+        On by default as an advisory only. Set `hard_tokens` to make the
+        budget a handoff-only limit; leave it null until the advisory has run
+        in your sessions.
+    - key: handlers.subagent_stop.subagent_handoff_gate
+      recommended: true
+      dormant: true
+      description: >-
+        NEW (Plan 00471 L2). Blocks the stop of an agent that reached
+        `subagent_context_budget`'s `hard_tokens` until its handoff file
+        exists, at most three times (R-SUBAGENT-HANDOFF-MISSING). Shares that
+        handler's options and is silent while `hard_tokens` is null.
+      example_yaml: |
+        handlers:
+          subagent_stop:
+            subagent_handoff_gate:
+              enabled: true
+              priority: 11
+      migration_note: >-
+        Keep it enabled with the budget; it does nothing until the hard band
+        is on.
+    - key: handlers.pre_tool_use.resume_guard
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00471 L3). A SendMessage to a stopped agent idle past
+        `warm_seconds` (300) whose context is at or above `max_resume_tokens`
+        (250000) would re-write its whole history to the cache. `mode: advise`
+        (default) adds context naming the fresh-spawn route and the agent's
+        last report; `mode: deny` refuses (R-RESUME-COLD-LARGE). A first line
+        `RESUME-LARGE: <reason>` is allowed and recorded.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            resume_guard:
+              enabled: true
+              priority: 39
+              options:
+                mode: advise
+                max_resume_tokens: 250000
+                warm_seconds: 300
+      migration_note: >-
+        On by default as an advisory. Switch to `mode: deny` once your
+        coordinators spawn fresh agents from reports as a matter of course.
+    - key: handlers.pre_tool_use.spawn_rate_advisor
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00471 L4, L5). On a spawn or a cold resume: at
+        `max_concurrent` live agents (default null, off) names them; at
+        `advise_pct` of the five-hour usage limit (default 80, read from
+        `context_sidecar`) says to serialise, with the reset time. Options
+        `liveness_seconds` (120) and `max_age_seconds` (300). Never denies.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            spawn_rate_advisor:
+              enabled: true
+              priority: 60
+              options:
+                max_concurrent: null
+                advise_pct: 80
+      migration_note: >-
+        The five-hour advisory needs `status_line.context_sidecar` enabled;
+        without it the handler stays silent.
+    - key: handlers.pre_tool_use.review_round_advisor
+      recommended: false
+      dormant: true
+      description: >-
+        NEW (Plan 00471 L9). Counts review dispatches per plan or work branch
+        and, from `advise_at` (4), advises comparing findings counts and
+        considering an owner decision. Opt-in.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            review_round_advisor:
+              enabled: true
+              priority: 60
+              options:
+                advise_at: 4
+      migration_note: >-
+        Opt in for coordinated runs with repeated review rounds.
+    - key: handlers.stop.background_task_recorder
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00471 L4). A silent Stop sensor recording which agent tasks
+        `background_tasks[]` reports as no longer running, so the live count
+        drops them, and refreshing the live snapshot the status segment reads.
+      example_yaml: |
+        handlers:
+          stop:
+            background_task_recorder:
+              enabled: true
+              priority: 9
+      migration_note: >-
+        On by default; it never blocks.
+    - key: handlers.status_line.spend_meter
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00471 L7). Status segment `Σ⚙ <ite> · N live (by model
+        family) · max <ctx> · N unmeasured`, hidden until a subagent has
+        stopped or the live count is fresh.
+      example_yaml: |
+        handlers:
+          status_line:
+            spend_meter:
+              enabled: true
+              priority: 17
+      migration_note: >-
+        On by default; set `enabled: false` to hide the segment.
   renamed: []
   removed:
     - key: handlers.pre_tool_use.upgrade_approval_guard

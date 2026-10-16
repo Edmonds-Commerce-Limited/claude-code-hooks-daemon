@@ -1,0 +1,14 @@
+# Callout: subagent spend is measured, and large subagents are told to hand off
+
+**Plan**: 00471
+**Audience**: client projects
+
+Subagents were most of a coordinated session's token spend (86.5 % in the measured run), much of it from agents re-reading contexts above 200k on every call and from finished agents resumed cold. The daemon now measures that spend and advises on it:
+
+- **`hooks-daemon spend [--session ID | --transcript PATH] [--by agent|plan] [--json]`** prints a session's subagent ledger: per agent or plan, requests, largest and mean context, input-token equivalents, compactions and inbound messages, plus the `compact_boundary` distribution and the count of gate calls that could not measure. The ledger is also written per agent at each SubagentStop (`subagent_cache_aggregator`, now reading only the bytes appended since the agent's last stop).
+- **`subagent_context_budget`** (on): a subagent past `soft_tokens` (300000) is told once to write a handoff file, commit, and message the lead. Its hard band (`hard_tokens`, shipped null) allows only the handoff steps and pairs with **`subagent_handoff_gate`**, which holds the stop until the handoff exists. A `budget: <N>k` line in a named dispatch's prompt raises one agent's budget, up to `max_override_tokens`.
+- **`resume_guard`** (on, advisory): a SendMessage that would cold-resume a stopped agent at 250000 tokens or more says to spawn a fresh agent from its report instead. `mode: deny` makes it a refusal; `RESUME-LARGE: <reason>` overrides.
+- **`spawn_rate_advisor`** (on): at 80 % of the five-hour usage limit a spawn draws "serialise now" with the reset time; a live-agent cap (`max_concurrent`) is available and off by default. **`background_task_recorder`** keeps the live count honest from each Stop.
+- **`review_round_advisor`** (opt-in) and the **`spend_meter`** status segment (`Σ⚙ <ite> · N live · max <ctx>`).
+
+None of these can lose work: every gate that cannot read a transcript allows the call and records one `unmeasured` verdict, and nothing denies by default. `context_sidecar` now also records `five_hour_pct` and `resets_at`.
