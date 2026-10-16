@@ -36,6 +36,9 @@ REPEATS: Final = 3
 SAMPLE_BUDGET_SECONDS: float = 0.01
 # Most runs of any one measurement, however cheap the work.
 MAX_REPEATS: Final = 40
+# Further measurement rounds an over-threshold ratio gets before it is believed.
+# Only a suspect ratio pays for them, so a clean sweep costs what it always did.
+CONFIRMATION_ROUNDS: Final = 4
 # Longest the clock is spun while looking for its next tick.
 _RESOLUTION_PROBE_SECONDS: float = 0.05
 # One tick where the platform cannot report the clock's resolution (Windows
@@ -133,6 +136,17 @@ def scaling_ratio(work_at: Callable[[int], object], n: int, large_text: str) -> 
     small = min_cpu_seconds(lambda: work_at(n))
     large = min_cpu_seconds(lambda: work_at(SIZE_FACTOR * n))
     floor = max(linear_baseline_seconds(large_text), clock_resolution_seconds())
+    # Noise only ever adds time, so an over-threshold reading is first suspected
+    # of being noise: a burst that outlasts every run of one side leaves the
+    # other side's minimum clean (N462). Each further round pools its minimum
+    # with the earlier ones, so a stall has to recur in every round to keep the
+    # ratio up, while a handler that really is superlinear is over the
+    # threshold in all of them and is reported as before.
+    for _ in range(CONFIRMATION_ROUNDS):
+        if large / max(small, floor) <= SUPERLINEAR_RATIO:
+            break
+        small = min(small, min_cpu_seconds(lambda: work_at(n)))
+        large = min(large, min_cpu_seconds(lambda: work_at(SIZE_FACTOR * n)))
     return large / max(small, floor)
 
 

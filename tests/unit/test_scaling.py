@@ -130,6 +130,55 @@ class TestMinCpuSecondsSampling:
         assert work.runs == scaling.MAX_REPEATS
 
 
+class _ScriptedMinimums:
+    """Stands in for ``min_cpu_seconds``: each call returns the next scripted cost."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, costs: list[float]) -> None:
+        self._costs = iter(costs)
+        self.calls = 0
+        monkeypatch.setattr(scaling, "min_cpu_seconds", self)
+        monkeypatch.setattr(scaling, "clock_resolution_seconds", lambda: 1e-9)
+
+    def __call__(self, work: Callable[[], object], repeats: int = scaling.REPEATS) -> float:
+        self.calls += 1
+        return next(self._costs)
+
+
+class TestScalingRatioConfirmsAnOverThresholdReading:
+    """A ratio over the threshold is re-measured before it is believed (N462)."""
+
+    def test_a_noisy_large_reading_is_cleared_by_a_later_clean_round(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Round one: large 0.1 against small 0.001 reads 100x. Round two is clean."""
+        _ScriptedMinimums(monkeypatch, [0.001, 0.1, 0.0005, 0.001, 0.008])
+
+        assert scaling.scaling_ratio(_noop, 10, "x" * 80) == pytest.approx(8.0)
+
+    def test_a_cost_that_stays_high_in_every_round_stays_flagged(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Quadratic growth is not noise: 64x in every round, so the verdict stands."""
+        rounds = scaling.CONFIRMATION_ROUNDS
+        costs = [0.001, 0.064, 0.0005] + [0.001, 0.064] * rounds
+        scripted = _ScriptedMinimums(monkeypatch, costs)
+
+        ratio = scaling.scaling_ratio(_noop, 10, "x" * 80)
+
+        assert ratio == pytest.approx(64.0)
+        assert ratio > scaling.SUPERLINEAR_RATIO
+        assert scripted.calls == 3 + 2 * rounds
+
+    def test_an_under_threshold_reading_is_not_re_measured(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        scripted = _ScriptedMinimums(monkeypatch, [0.001, 0.008, 0.0005])
+
+        scaling.scaling_ratio(_noop, 10, "x" * 80)
+
+        assert scripted.calls == 3
+
+
 class TestClockResolutionSeconds:
     """The measured granularity of the CPU clock the harness reads."""
 
