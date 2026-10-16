@@ -226,7 +226,21 @@ the header and the marker agree. The marker probably means "the venv in use", wh
 fingerprint a new venv would get", and the output should say so. Check also whether the next hook rebuilds a
 `2a519198` venv beside the one in use.
 
-**Status**: ⬜ Open.
+**Issue**: GitHub #120 (approved author) reports the same symptom in a client install: the fingerprint was hashed
+from the project root while venvs are keyed on the daemon directory.
+
+**Cause**: `cmd_list_venvs`, `cmd_prune_venvs` and the fingerprint half of `_enumerate_venvs` each called
+`python_venv_fingerprint(project_root)`. That names "the fingerprint of this interpreter at the project root", which
+is neither the venv in use (the resolver keys on the daemon dir and may select a venv by scan whose fingerprint
+differs from the current interpreter's) nor, in a client install, a name any venv carries. In self-install the
+project root is the daemon dir, so the header was only wrong when the resolver chose another venv by scan.
+
+**Fix**: `paths.current_venv_dir` answers "the venv this daemon runs from" from `resolve_existing_venv_python`. The
+header and the prune messages name that venv, a second line names the fingerprint a new venv would get when it
+differs, and the fingerprint half of `is_current` is keyed on the daemon dir. Pinned for a client-install layout and a
+self-install layout, including that `prune-venvs` never selects the current venv.
+
+**Status**: ✅ Fixed (commit e639697c0 on branch worktree-i120-venv-current).
 
 ### N459 — a wrapped status line shows the context segment as "..." instead of its number
 

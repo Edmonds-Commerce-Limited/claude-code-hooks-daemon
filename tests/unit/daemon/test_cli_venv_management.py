@@ -345,7 +345,7 @@ class TestEnumerateVenvsInstallModes:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         untracked, _ = self._make_normal_install_layout(tmp_path)
-        fp = python_venv_fingerprint(tmp_path)
+        fp = python_venv_fingerprint(tmp_path / ".claude" / "hooks-daemon")
 
         with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
             rc = cli.cmd_list_venvs(_args(tmp_path))
