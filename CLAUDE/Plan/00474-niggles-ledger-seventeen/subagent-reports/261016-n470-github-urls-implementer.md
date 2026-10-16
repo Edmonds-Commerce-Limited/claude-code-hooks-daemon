@@ -50,4 +50,8 @@ N470 marked fixed in NIGGLES.md and STATUS-INDEX.md; PLAN.md counts: open 12 to 
 
 ## QA
 
-See the reply for the `llm_qa.py changed` verdict.
+`llm_qa.py changed` on the first commit: 37/40 passed. `github_urls`, `lint`, `type_check`, `pyright`, `docs_qa` and
+`plan_qa` were clean. `format` failed because the run's autofix reformatted my new test file mid-run, which also made
+`project_handlers` and `changed_tests` "not meaningful" (changed_tests itself: 675 passed, 0 failed). The reformatted
+file is committed and `black --check` passes on both touched files; 30 tests pass. The wrapper was not re-run on the
+final tree because the host QA lock was held by another run for a long wait.
