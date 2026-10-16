@@ -265,3 +265,11 @@ rules:
   - glob: "src/claude_code_hooks_daemon/install/transport_verify.py"
     tests: [tests/unit/qa/test_check_inline_suppressions.py]
     why: GENUINE_REASON_ABOVE reads this file for suppressions whose reason sits above them
+  - path_glob: ".claude/hooks/session-start"
+    tests:
+      - tests/integration/test_provision_sh.py
+      - tests/unit/install/test_background_sync.py
+      - tests/integration/test_init_sh_needs_provision.py
+    why: the session-start forwarder; test_provision_sh deploys it and runs the
+      background sync it starts end to end, test_background_sync pins the flag it
+      passes, and test_init_sh_needs_provision runs it in a fresh clone

@@ -87,9 +87,10 @@ This file's lower half should list the tasks currently in this directory, so an 
 
 <!-- BEGIN TASK INDEX — regenerate when adding/removing tasks -->
 
-| File | Type | Severity | Applies to | One-line summary |
-| --- | --- | --- | --- | --- |
-| `01-clear-unproven-venvs.md` | other | recommended | all | List venvs with `list-venvs`, investigate each UNPROVEN one, remove it with `prune-venvs --unproven` once confirmed safe. |
+| File                                                 | Type            | Severity    | Applies to | One-line summary                                                                                                            |
+| ---------------------------------------------------- | --------------- | ----------- | ---------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `01-clear-unproven-venvs.md`                         | other           | recommended | all        | List venvs with `list-venvs`, investigate each UNPROVEN one, remove it with `prune-venvs --unproven` once confirmed safe.   |
+| `02-commit-the-expected-version-and-provision-sh.md` | workflow-change | recommended | all        | Commit `daemon.expected_version` and `.claude/provision.sh`, so a fresh clone provisions and a pulled upgrade syncs itself. |
 
 <!-- END TASK INDEX -->
 

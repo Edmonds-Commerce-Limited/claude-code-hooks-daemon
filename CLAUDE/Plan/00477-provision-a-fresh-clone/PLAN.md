@@ -97,8 +97,9 @@ anything themselves: a person or agent runs provision.
 - [x] ✅ **Task 4.1**: `LLM-INSTALL.md`, the skill's `install.md` and the
   troubleshooting guide route a fresh clone to `provision`, and `install.md`
   stops describing itself as the fresh-clone command.
-- [ ] ⬜ **Task 4.2**: A release note and an UNRELEASED post-upgrade task: an
+- [x] ✅ **Task 4.2**: A release note and an UNRELEASED post-upgrade task: an
   upgraded project gains the config key and the tracked `provision.sh`.
+  (`98c7ee990`: release note 066, post-upgrade task 02)
 
 ### Phase 5: A pulled version change syncs itself (owner request)
 
@@ -125,29 +126,34 @@ stale: the clone's checked-out tag, the venv and the running daemon.
   foreign origin. A failure restores the previous version and restarts the old
   daemon. The drift advisories (`init.sh`, `version_check`,
   `daemon_sync_after_merge`) name `provision` rather than `upgrade` for this case.
-- [ ] ⬜ **Task 5.2**: Sync in the background, never inside a hook's time budget:
+- [x] ✅ **Task 5.2**: Sync in the background, never inside a hook's time budget:
   fetch exactly the tag from the fixed URL, check that its `version.py` names
   it, rebuild the venv through the clone's own build path, then restart. The
   old daemon keeps serving until the new one is ready, and a failed sync leaves
-  it in place and says so loudly.
+  it in place and says so loudly. (`7bcb35cf2`, `6bc2f5b45`: the session-start
+  forwarder starts `provision.sh --background` detached; `version_check` reports
+  its recorded outcome)
 - [x] ✅ **Task 5.3**: How this meets the upgrade approval gate and its agent guard.
   Moot: on 2026-10-11 the owner had the approval tier and `upgrade_approval_guard`
   removed (Plan 00503, GitHub #112), under the careless-not-hostile threat model. A
   committed `daemon.expected_version` change is reviewed like any other commit,
   and the sync runs the target release's own pre-deploy gate, whose reading
   confirmation still applies.
-- [ ] ⬜ **Task 5.4**: Tests: a pulled newer version syncs and restarts; a sync
+- [x] ✅ **Task 5.4**: Tests: a pulled newer version syncs and restarts; a sync
   failure keeps the old daemon; the daemon's own repository never syncs.
+  (`98c7ee990`, `55642216d`)
 
 ## Success Criteria
 
 - [ ] After a pull that changes `daemon.expected_version`, the next session runs
   the daemon at the new version without a manual step.
-- [ ] In a fresh clone of a configured fixture project, the first session shows
-  the human a message naming `provision` and the expected version.
-- [ ] Running provision brings up the daemon at exactly that version, with no
-  restart and no change to any tracked file.
-- [ ] Provision never clones `main` when the config names a version.
+- [x] In a fresh clone of a configured fixture project, the first session shows
+  the human a message naming `provision` and the expected version
+  (`test_init_sh_needs_provision.py::TestSessionStartAndUserPromptSubmit`).
+- [x] Running provision brings up the daemon at exactly that version, with no
+  restart and no change to any tracked file (`test_provision_sh.py::TestProvisioning`).
+- [x] Provision never clones `main` when the config names a version
+  (`test_installs_exactly_the_tag_the_config_names_never_main`).
 
 ## Delivery & Milestones
 
