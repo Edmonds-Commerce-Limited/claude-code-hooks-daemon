@@ -77,6 +77,19 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N467 — the secret-file-read guard still scans a large Write at about 1.7 ms per KB after N465
+
+**Source**: the N465 fix, 2026-10-16. N465's prefilter halved the cost (120 KB: 376 -> 205 ms; 1.2 MB: 4569 -> 2524
+ms), but a large Write is still over the 100 ms dispatch target. What remains is whole-file scanning that a name
+prefilter cannot skip soundly: brace expansion, the word stream, and Python AST literals. See the N465 implementer
+report.
+
+**Fix direction**: profile the remaining passes on a 120 KB write, then make each one skip in a provably sound way
+(e.g. one combined precompiled pass over the text instead of several, or gating each pass on a cheap trigger that the
+pass cannot match without). Keep N465's equivalence corpus as the guard: zero verdict mismatches.
+
+**Status**: ⬜ Open.
+
 ### N465 — the secret-file-read guard shlex-tokenises every line of a Write, about 1.2 s per 100 KB
 
 **Source**: the Plan 00495 Task 3.2 measurement, 2026-10-16. `block-secret-file-read` reaches `_shell_words` in
