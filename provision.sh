@@ -29,12 +29,18 @@
 #
 # A clone that is already there is SYNCED to the expected version instead
 # (a pull changed daemon.expected_version, so the gitignored clone is behind or
-# ahead of it): the same tag fetch and version check, then the target
-# release's own pre-deploy gate (the one upgrade runs; it may stop for the
-# reading list, and --skip-reading-confirmation=<digest> confirms it), the
-# venv rebuild and a restart through the clone own bin/hooks-daemon. A clone
-# already at the version is left alone. A failure after the checkout puts the
-# previous commit and its venv back and restarts the old daemon.
+# ahead of it). First, BESIDE the running daemon and touching nothing it imports
+# from: the same tag fetch and version check, the tag checked out in its own
+# worktree (untracked/sync-stage), the target release's own pre-deploy gate run
+# from there (the one upgrade runs; it may stop for the reading list, and
+# --skip-reading-confirmation=<digest> confirms it), and a trial build of the
+# target's venv there. Only then the switch: the old daemon is stopped, the clone
+# checks out the tag, its venv is rebuilt in place (from the cache the trial
+# build filled) and the new daemon is started, while a marker keeps hooks from
+# starting one from the half-switched clone. A clone already at the version is
+# left alone. A failure before the switch changes nothing and never stops the
+# old daemon; one during it puts the previous commit and venv back and starts
+# the old daemon again.
 #
 # --background is that sync, started detached by the tracked session-start
 # forwarder at every session start (Plan 00477 Task 5.2); it does nothing unless
@@ -174,9 +180,14 @@ readonly GATE_TIMEOUT_SECONDS=300
 readonly GATE_NEEDS_ACKNOWLEDGEMENT=3
 readonly SYNC_STAMP_FILE=".daemon-version"
 
-# How far a sync has got: fetched (nothing in the clone moved), checked-out,
-# venv (the venv build has started), restart (the daemon restart has started).
+# How far a sync has got. Beside the live daemon, which nothing here touches:
+# fetched, then staged (the target is checked out in its own worktree, where its
+# gate runs and its venv is trial-built). The switch: stopped (the old daemon is
+# down), checked-out, venv (the in-place venv build has started), restart.
 SYNC_PHASE="fetched"
+# The target's staged worktree, under the clone's gitignored untracked/.
+SYNC_STAGE_DIR=""
+readonly SYNC_STAGE_DIR_NAME="sync-stage"
 PRESENT_VERSION=""
 PREVIOUS_COMMIT=""
 PREVIOUS_CHECKOUT=""
@@ -287,17 +298,17 @@ _provision_sync_restore_checkout() {
     _provision_clone_git -c advice.detachedHead=false checkout -q "$PREVIOUS_CHECKOUT"
 }
 
-# The target release's own pre-deploy gate, run the way scripts/upgrade_version.sh
-# runs it: under env -i, a standard-library-only Python found in a trusted system
+# The target release's own pre-deploy gate, run from the staged tree the way
+# scripts/upgrade_version.sh runs it: under env -i, a standard-library-only Python found in a trusted system
 # location, a verdict file only this function can write. The FROM side is the
 # installed version (the venv stamp, else the clone's version before the sync) and
 # the TO side is the target. Exit 0 proceeds, 3 stops for the reading, anything
 # else could not decide. A target that predates the gate has none to run, exactly
 # as upgrading to it runs none.
 _provision_gate() (
-    local gate_script="$DAEMON_DIR/src/claude_code_hooks_daemon/install/upgrade_gate_standalone.py"
-    local sanitise="$DAEMON_DIR/scripts/install/env_sanitise.sh"
-    local discovery="$DAEMON_DIR/scripts/lib/python_discovery.sh"
+    local gate_script="$SYNC_STAGE_DIR/src/claude_code_hooks_daemon/install/upgrade_gate_standalone.py"
+    local sanitise="$SYNC_STAGE_DIR/scripts/install/env_sanitise.sh"
+    local discovery="$SYNC_STAGE_DIR/scripts/lib/python_discovery.sh"
     if [[ ! -f "$gate_script" ]]; then
         _provision_say "$TAG predates the pre-deploy gate, so there is none to run (upgrading to it runs none either)."
         exit 0
@@ -314,7 +325,7 @@ _provision_gate() (
     PATH="$(_gate_trusted_path)"
 
     local gate_python env_bin od_bin timeout_bin nonce verdict_dir verdict_file
-    if ! gate_python="$(unset HOOKS_DAEMON_PYTHON HOOKS_DAEMON_VENV_PATH; find_latest_python "$GATE_PYTHON_FLOOR" "$DAEMON_DIR/pyproject.toml")"; then
+    if ! gate_python="$(unset HOOKS_DAEMON_PYTHON HOOKS_DAEMON_VENV_PATH; find_latest_python "$GATE_PYTHON_FLOOR" "$SYNC_STAGE_DIR/pyproject.toml")"; then
         printf 'No Python %s+ interpreter for the pre-deploy gate in a system location (%s).\n' "$GATE_PYTHON_FLOOR" "$GATE_SAFE_PATH" >&2
         exit 1
     fi
@@ -337,7 +348,7 @@ _provision_gate() (
         IFS= read -r installed_stamp < "$venv_dir/$SYNC_STAMP_FILE" || [[ -n "$installed_stamp" ]]
     fi
     local -a gate_args=(
-        --daemon-dir "$DAEMON_DIR"
+        --daemon-dir "$SYNC_STAGE_DIR"
         --project-root "$PROJECT_PATH"
         --to "$TAG"
         --target-stamp "$TAG"
@@ -393,18 +404,67 @@ _provision_gate() (
     exit "$gate_exit"
 )
 
-# Undo a sync that failed after the checkout and fail loudly: the recorded commit
-# back, its venv rebuilt and the old daemon restarted when the sync had got that
-# far, and a message that says what failed and that the previous version is back.
+# The target's own worktree beside the live checkout, at the tag. Returns 1 when
+# git cannot make it. A stage an earlier, killed sync left behind is replaced.
+_provision_stage_target() {
+    SYNC_STAGE_DIR="$DAEMON_DIR/untracked/$SYNC_STAGE_DIR_NAME"
+    _provision_stage_remove
+    _provision_clone_git -c advice.detachedHead=false worktree add -q --detach \
+        "$SYNC_STAGE_DIR" "refs/tags/$TAG"
+}
+
+# Remove the staged worktree, its trial venv with it, and git's record of it.
+_provision_stage_remove() {
+    [[ -n "$SYNC_STAGE_DIR" ]] || return 0
+    if [[ -e "$SYNC_STAGE_DIR" ]] && ! _provision_clone_git worktree remove --force "$SYNC_STAGE_DIR"; then
+        rm -rf "$SYNC_STAGE_DIR"
+    fi
+    if ! _provision_clone_git worktree prune; then
+        _provision_say "WARNING: git could not prune the record of $SYNC_STAGE_DIR from the clone."
+    fi
+}
+
+# Hold the switch marker init.sh honours: no hook starts a daemon from the clone
+# while it is mid-switch (_daemon_switch_in_progress).
+_provision_switch_begin() {
+    printf '%s\n' "$$" > "$DAEMON_DIR/untracked/$_HOOKS_DAEMON_SWITCH_MARKER_NAME"
+}
+
+_provision_switch_end() {
+    rm -f "$DAEMON_DIR/untracked/$_HOOKS_DAEMON_SWITCH_MARKER_NAME"
+}
+
+# Stop the daemon running from the clone, if one is. Returns 1 when it would not.
+_provision_stop_daemon() {
+    local running=0
+    is_daemon_running || running=$?
+    if ((running == 1)); then
+        return 0
+    fi
+    bash "$DAEMON_DIR/bin/hooks-daemon" stop
+}
+
+# Undo a sync that failed, and fail loudly. Before the switch nothing live was
+# touched: only the stage goes. After it: the recorded commit and its venv back,
+# the venv verified, the old daemon started again, and a message that says so.
 _provision_sync_abort() {
     local what="$1"
     shift
     local -a notes=()
+    case "$SYNC_PHASE" in
+        fetched | staged)
+            _provision_stage_remove
+            _provision_fail "$what" \
+                "Nothing in the clone changed, and the running daemon v$PRESENT_VERSION was never stopped. No tracked file was changed."
+            ;;
+    esac
     if ! _provision_sync_restore_checkout; then
+        _provision_switch_end
         _PROVISION_FAIL_REASON="$what The previous version could NOT be checked out again."
         printf 'PROVISION FAILED: %s\n' "$what" >&2
         printf '  The previous version v%s could NOT be put back: checking out %s failed.\n' "$PRESENT_VERSION" "$PREVIOUS_CHECKOUT" >&2
         printf '  The clone may be at %s. Restore it by hand: git -C %s checkout %s\n' "$TAG" "$DAEMON_DIR" "$PREVIOUS_CHECKOUT" >&2
+        printf '  Then start it: %s/bin/hooks-daemon restart\n' "$DAEMON_DIR" >&2
         exit 1
     fi
     notes+=("The previous version v$PRESENT_VERSION (commit $PREVIOUS_COMMIT) is checked out again.")
@@ -422,12 +482,14 @@ _provision_sync_abort() {
         else
             notes+=("WARNING: its venv could not be verified or rebuilt. Run: $DAEMON_DIR/bin/hooks-daemon repair")
         fi
-        if bash "$DAEMON_DIR/bin/hooks-daemon" restart; then
-            notes+=("The previous daemon was restarted.")
-        else
-            notes+=("WARNING: the previous daemon did not restart. Try: $DAEMON_DIR/bin/hooks-daemon restart")
-        fi
     fi
+    _provision_switch_end
+    if bash "$DAEMON_DIR/bin/hooks-daemon" restart; then
+        notes+=("The previous daemon was started again.")
+    else
+        notes+=("WARNING: the previous daemon did not start. Try: $DAEMON_DIR/bin/hooks-daemon restart")
+    fi
+    _provision_stage_remove
     _provision_fail "$what" ${notes[@]+"${notes[@]}"} "The previous version v$PRESENT_VERSION is back in place. No tracked file was changed."
 }
 
@@ -459,46 +521,69 @@ _provision_sync_clone() {
             "The clone was not changed. Report this: a release tag should name its own version."
     fi
 
-    if ! _provision_clone_git -c advice.detachedHead=false checkout -q "refs/tags/$TAG"; then
-        _provision_sync_abort "could not check out tag $TAG."
+    # Beside the live daemon: the target in its own worktree, its gate, and a
+    # trial build of its venv there. The live checkout and venv, which the
+    # running daemon imports from, are not touched, so any failure here leaves
+    # that daemon serving as it was. The trial build also fills uv's cache, so
+    # the in-place build during the switch below needs no network.
+    if ! _provision_stage_target; then
+        _provision_sync_abort "could not check out $TAG into its staged worktree at $SYNC_STAGE_DIR."
     fi
-    SYNC_PHASE="checked-out"
+    SYNC_PHASE="staged"
 
     local gate_status=0
     _provision_gate || gate_status=$?
     if [[ "$gate_status" -eq "$GATE_NEEDS_ACKNOWLEDGEMENT" ]]; then
-        if ! _provision_sync_restore_checkout; then
-            _provision_fail "stopped for the reading list, but the previous version could not be checked out again." \
-                "Restore it by hand: git -C $DAEMON_DIR checkout $PREVIOUS_CHECKOUT"
-        fi
+        _provision_stage_remove
         _provision_say ""
         _provision_say "PROVISION STOPPED before changing anything: the target release asks for its reading list to be confirmed."
-        _provision_say "The clone is back at v$PRESENT_VERSION; no venv was built and the daemon was not restarted."
+        _provision_say "The clone is still at v$PRESENT_VERSION; no venv was built and the daemon was not stopped."
         exit "$GATE_NEEDS_ACKNOWLEDGEMENT"
     elif [[ "$gate_status" -ne 0 ]]; then
         _provision_sync_abort "the pre-deploy gate of $TAG could not decide (its output is above)."
     fi
 
-    local bootstrap="$DAEMON_DIR/scripts/venv_bootstrap.sh"
-    if [[ ! -f "$bootstrap" ]]; then
+    local stage_bootstrap="$SYNC_STAGE_DIR/scripts/venv_bootstrap.sh"
+    if [[ ! -f "$stage_bootstrap" ]]; then
         _provision_sync_abort "$TAG predates the venv build driver (scripts/venv_bootstrap.sh)."
     fi
+    _provision_say "Building the venv for $TAG beside the running daemon (this can take a while on a cold cache) ..."
+    if ! bash "$stage_bootstrap" repair "$SYNC_STAGE_DIR"; then
+        _provision_sync_abort "the venv for $TAG could not be built (the output above says which condition failed)."
+    fi
+
+    # The switch. Only now does anything the daemon imports from change, and
+    # only once it is stopped: the marker keeps hooks from starting one from the
+    # half-switched clone, and the in-place build is the clone's own, from the
+    # cache the trial build filled. A venv is bound to the path it was built
+    # for, so the trial venv itself cannot be moved into place.
+    _provision_switch_begin
+    SYNC_PHASE="stopped"
+    _provision_say "Stopping v$PRESENT_VERSION to switch to $TAG ..."
+    if ! _provision_stop_daemon; then
+        _provision_sync_abort "the running daemon v$PRESENT_VERSION did not stop, so the clone was not switched."
+    fi
+    if ! _provision_clone_git -c advice.detachedHead=false checkout -q "refs/tags/$TAG"; then
+        _provision_sync_abort "could not check out tag $TAG."
+    fi
+    SYNC_PHASE="checked-out"
     if [[ -n "$SYNC_VENV_BACKUP" ]] && ! mv "$SYNC_VENV_DIR" "$SYNC_VENV_BACKUP"; then
         _provision_sync_abort "could not set the current venv aside at $SYNC_VENV_BACKUP before building the target's."
     fi
-    _provision_say "Building the venv for $TAG (this can take a while on a cold cache) ..."
     SYNC_PHASE="venv"
-    if ! bash "$bootstrap" repair "$DAEMON_DIR"; then
-        _provision_sync_abort "the venv for $TAG could not be built (the output above says which condition failed)."
+    if ! bash "$DAEMON_DIR/scripts/venv_bootstrap.sh" repair "$DAEMON_DIR"; then
+        _provision_sync_abort "the venv for $TAG could not be built in place (the output above says which condition failed)."
     fi
-    _provision_say "Restarting the daemon ..."
+    _provision_switch_end
+    _provision_say "Starting the daemon at $TAG ..."
     SYNC_PHASE="restart"
     if ! bash "$DAEMON_DIR/bin/hooks-daemon" restart; then
-        _provision_sync_abort "the daemon did not restart at $TAG."
+        _provision_sync_abort "the daemon did not start at $TAG."
     fi
     if [[ -n "$SYNC_VENV_BACKUP" ]]; then
         rm -rf "$SYNC_VENV_BACKUP"
     fi
+    _provision_stage_remove
 
     _provision_say ""
     _provision_say "SYNCED: the hooks daemon moved from v$PRESENT_VERSION to $TAG and was restarted."

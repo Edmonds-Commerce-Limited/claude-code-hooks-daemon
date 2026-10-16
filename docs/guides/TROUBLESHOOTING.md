@@ -635,7 +635,7 @@ bash .claude/provision.sh
 
 **Cause:** A pull changed `daemon.expected_version` in `.claude/hooks-daemon.yaml` (or the `.claude/HOOKS-DAEMON.md` header). The project was upgraded where it was committed, but the daemon clone under the gitignored `.claude/hooks-daemon/` is per-checkout, so it is still at the old version. A restart cannot fix this: it runs the same installed version.
 
-**Fix:** Sync the clone from the project root. It fetches the expected tag, runs that release's pre-deploy gate (read the listing and re-run with the `--skip-reading-confirmation=<digest>` it prints, if asked), rebuilds the venv and restarts the daemon. It refuses a modified clone, a foreign `origin` or a non-git directory without changing anything, restores the previous version if it fails, and writes no tracked file:
+**Fix:** Sync the clone from the project root. It fetches the expected tag, stages it beside the running daemon, runs that release's pre-deploy gate there (read the listing and re-run with the `--skip-reading-confirmation=<digest>` it prints, if asked) and trial-builds its venv there. Only then does it stop the old daemon, switch the clone, rebuild the venv and start the new one. It refuses a modified clone, a foreign `origin` or a non-git directory without changing anything, restores the previous version if it fails, and writes no tracked file:
 
 ```bash
 bash .claude/provision.sh

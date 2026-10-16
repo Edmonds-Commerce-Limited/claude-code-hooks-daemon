@@ -182,6 +182,20 @@ class Sandbox:
                     'import socket, sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' \\
                     "$CLAUDE_HOOKS_SOCKET_PATH"
             fi
+            # A stop ends the stand-in, proven to be THIS sandbox's by the PID
+            # file path in its environment (the check cleanup() makes), and
+            # removes what a real daemon removes on its way out.
+            if [ "${{1:-}}" = "-m" ] && [ "${{2:-}}" = "claude_code_hooks_daemon.daemon.cli" ] \\
+                    && [ "${{!#}}" = "stop" ]; then
+                pid="$(cat "$CLAUDE_HOOKS_PID_PATH")" || pid=""
+                if [ -n "$pid" ] && [ -r "/proc/$pid/environ" ] \\
+                        && tr '\\0' '\\n' < "/proc/$pid/environ" \\
+                        | grep -qxF "CLAUDE_HOOKS_PID_PATH=$CLAUDE_HOOKS_PID_PATH"; then
+                    kill "$pid"
+                fi
+                rm -f "$CLAUDE_HOOKS_PID_PATH" "$CLAUDE_HOOKS_SOCKET_PATH"
+                exit 0
+            fi
             exec "{sys.executable}" "$@"
             """)
         template = self.root / "venv-python.template"

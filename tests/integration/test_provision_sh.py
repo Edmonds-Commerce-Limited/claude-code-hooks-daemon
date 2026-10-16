@@ -23,6 +23,7 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 
+import psutil
 import pytest
 
 from claude_code_hooks_daemon.config.models import TransportConfig
@@ -169,12 +170,23 @@ class Provisioning:
         *,
         args: tuple[str, ...] = (),
         uv_fails: bool = False,
+        uv_wrapper: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         self.box.stub_uv(fail=uv_fails)
+        if uv_wrapper is not None:
+            self._wrap_uv(uv_wrapper)
         return self.box.run(
             ["bash", str(self.project / ".claude" / "provision.sh"), *args],
             extra_env={**self.git_env, **(extra_env or {})},
         )
+
+    def _wrap_uv(self, body: str) -> None:
+        """Run ``body`` (bash) before every stub ``uv`` build, then the stub itself."""
+        stub = self.box.root / "uv-stub" / "uv"
+        real = stub.with_name("uv-real")
+        stub.rename(real)
+        stub.write_text(f'#!/bin/bash\n{body}\nexec "{real}" "$@"\n')
+        stub.chmod(0o755)
 
     def expect(self, version: str) -> None:
         """Change the version the project's config names, as a pull would."""
@@ -650,12 +662,70 @@ class TestTheTargetsPreDeployGate:
         assert "predates the pre-deploy gate" in _out(result)
 
 
-class TestAFailedSyncRestoresThePreviousVersion:
-    def test_a_venv_build_failure_after_checkout_puts_the_old_commit_back(
+STAGE_DIR_NAME = "sync-stage"
+SWITCH_MARKER_NAME = ".provision-switching"
+
+
+def _daemon_pid(p: Provisioning) -> int:
+    return int(p.box.pid.read_text().strip())
+
+
+def _no_stage_left(p: Provisioning) -> bool:
+    worktrees = _git(p.clone, "worktree", "list", "--porcelain")
+    return (
+        not (p.clone / "untracked" / STAGE_DIR_NAME).exists() and worktrees.count("worktree ") == 1
+    )
+
+
+#: A uv wrapper that fails every build except the staged trial build.
+FAIL_ONLY_THE_CLONE_BUILD = (
+    'case "$UV_PROJECT_ENVIRONMENT" in */sync-stage/*) ;; '
+    '*) echo "error: simulated failure of the in-place build" >&2; exit 2 ;; esac'
+)
+
+
+class TestTheSwitchHappensOnlyAtRestart:
+    """The target is built beside the live daemon; the live code and venv change only once it is stopped."""
+
+    def test_the_target_is_built_beside_while_the_old_daemon_serves_unchanged(
         self, fresh: Provisioning
     ) -> None:
         _provisioned_at(fresh, CLONE_VERSION)
-        before = fresh.head()
+        old_head = fresh.head()
+        old_daemon = _daemon_pid(fresh)
+        fresh.expect(MAIN_VERSION)
+        builds = fresh.box.root / "builds.log"
+        logger = (
+            f'printf "%s head=%s old_daemon=%s\\n" "$UV_PROJECT_ENVIRONMENT" '
+            f'"$(git -C {fresh.clone} rev-parse HEAD)" '
+            f'"$(if [ -d /proc/{old_daemon} ]; then echo up; else echo down; fi)" '
+            f'>> "{builds}"'
+        )
+
+        result = fresh.provision(uv_wrapper=logger)
+
+        assert result.returncode == 0, _out(result)
+        lines = builds.read_text().splitlines()
+        staged = [line for line in lines if f"/{STAGE_DIR_NAME}/" in line]
+        in_place = [line for line in lines if f"/{STAGE_DIR_NAME}/" not in line]
+        assert staged and in_place, lines
+        assert lines.index(staged[0]) < lines.index(in_place[0]), "staged build first"
+        for line in staged:
+            assert f"head={old_head}" in line, "the live checkout did not move during it"
+            assert "old_daemon=up" in line, "the old daemon kept serving during it"
+        for line in in_place:
+            assert "old_daemon=down" in line, "the live venv is rebuilt only once it is stopped"
+            assert f"head={old_head}" not in line
+        assert fresh.clone_version() == MAIN_VERSION
+        assert _no_stage_left(fresh)
+        assert not (fresh.clone / "untracked" / SWITCH_MARKER_NAME).exists()
+
+    def test_a_target_venv_that_cannot_be_built_never_stops_the_old_daemon(
+        self, fresh: Provisioning
+    ) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        before = fresh.clone_tracked_state()
+        old_daemon = _daemon_pid(fresh)
         fresh.expect(MAIN_VERSION)
 
         result = fresh.provision(uv_fails=True)
@@ -663,14 +733,64 @@ class TestAFailedSyncRestoresThePreviousVersion:
         out = _out(result)
         assert result.returncode != 0
         assert "venv" in out
-        assert f"previous version v{CLONE_VERSION}" in out
-        assert fresh.head() == before
-        assert fresh.clone_version() == CLONE_VERSION
+        assert "never stopped" in out
         assert fresh.clone_tracked_state() == before
-        assert fresh.box.resolves(), "the previous venv still resolves"
-        assert fresh.starts() == 2, "the old daemon was restarted"
+        assert fresh.clone_version() == CLONE_VERSION
+        assert fresh.box.resolves()
+        assert fresh.starts() == 1, "nothing was restarted"
+        assert psutil.pid_exists(old_daemon), "the old daemon is still the one running"
         assert fresh.tracked_changes() == ""
+        assert _no_stage_left(fresh)
+
+    def test_a_failure_after_the_stop_restores_and_restarts_the_old_version(
+        self, fresh: Provisioning
+    ) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        before = fresh.clone_tracked_state()
+        fresh.expect(MAIN_VERSION)
+
+        result = fresh.provision(uv_wrapper=FAIL_ONLY_THE_CLONE_BUILD)
+
+        out = _out(result)
+        assert result.returncode != 0
+        assert f"previous version v{CLONE_VERSION}" in out
+        assert fresh.clone_tracked_state() == before
+        assert fresh.clone_version() == CLONE_VERSION
+        assert fresh.box.resolves(), "the previous venv is back"
+        assert fresh.starts() == 2, "the old daemon was started again"
         assert list((fresh.clone / "untracked").glob(".sync-backup-*")) == []
+        assert not (fresh.clone / "untracked" / SWITCH_MARKER_NAME).exists()
+        assert _no_stage_left(fresh)
+
+
+class TestNoHookStartsADaemonMidSwitch:
+    """init.sh refuses a lazy start while provision is switching the clone."""
+
+    def test_a_live_switch_marker_answers_starting_and_starts_nothing(
+        self, fresh: Provisioning
+    ) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        _stop_the_daemon(fresh)
+        (fresh.clone / "untracked" / SWITCH_MARKER_NAME).write_text(f"{os.getpid()}\n")
+        starts = fresh.starts()
+
+        result = fresh.box.hook("PreToolUse")
+
+        assert "the daemon is starting" in _out(result)
+        assert "provision is switching" in result.stderr
+        assert "ENSURE_DAEMON_OK" not in result.stdout
+        assert fresh.starts() == starts, "no start was even attempted"
+
+    def test_a_marker_left_by_a_dead_sync_does_not_block_a_start(self, fresh: Provisioning) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        _stop_the_daemon(fresh)
+        (fresh.clone / "untracked" / SWITCH_MARKER_NAME).write_text(f"{_a_dead_pid()}\n")
+        starts = fresh.starts()
+
+        result = fresh.box.hook("PreToolUse")
+
+        assert "provision is switching" not in result.stderr
+        assert fresh.starts() == starts + 1, "the hook went on to start the daemon"
 
 
 BACKGROUND = ("--background",)
@@ -722,8 +842,8 @@ class TestTheBackgroundSync:
         assert result.returncode != 0
         assert fresh.clone_tracked_state() == before
         assert fresh.clone_version() == CLONE_VERSION
-        assert fresh.box.resolves(), "the old venv is back"
-        assert fresh.starts() == 2, "the old daemon was restarted"
+        assert fresh.box.resolves(), "the old venv is untouched"
+        assert fresh.starts() == 1, "the old daemon was never stopped"
         state = _state(fresh, MAIN_VERSION)
         assert state["status"] == "failed"
         assert "venv" in state["detail"]
@@ -883,6 +1003,8 @@ def _stop_the_daemon(p: Provisioning) -> None:
         grace_seconds=STOP_GRACE_SECONDS,
     )
     assert stopped in (DaemonStop.TERMINATED, DaemonStop.KILLED), stopped
+    # The stand-in's socket outlives it; a real daemon removes its own on stop.
+    p.box.socket.unlink(missing_ok=True)
 
 
 class TestTheSessionStartHookStartsIt:

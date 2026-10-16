@@ -48,16 +48,23 @@ Otherwise, for a newer or an older expected version:
    `origin` is not the fixed URL, or it has tracked changes or files outside
    `untracked/` (gitignored files do not count).
 2. It fetches exactly that tag (depth 1) from the fixed URL, and checks that
-   the tag's `version.py` names the version before checking it out.
-3. It runs the target release's own pre-deploy gate, the one `upgrade` runs. If
-   the gate wants its reading list confirmed it prints the listing, puts the
-   clone back and stops; read it, then re-run with
-   `--skip-reading-confirmation=<digest>` (the digest it printed). A target that
-   predates the gate has none to run.
-4. It rebuilds the venv with the clone's own `scripts/venv_bootstrap.sh repair`
-   and restarts the daemon with the clone's own `bin/hooks-daemon restart`.
-5. A failure after the checkout puts the previous commit and its venv back,
-   restarts the old daemon, and says so.
+   the tag's `version.py` names the version.
+3. Beside the running daemon, touching nothing it runs from, it checks the tag
+   out in its own worktree (`.claude/hooks-daemon/untracked/sync-stage`). It
+   runs the target release's own pre-deploy gate from there, the one `upgrade`
+   runs. If the gate wants its reading list confirmed, it prints the listing and
+   stops; read it, then re-run with `--skip-reading-confirmation=<digest>` (the
+   digest it printed). A target that predates the gate has none to run.
+4. Still beside it, it trial-builds the target's venv in that worktree with the
+   target's own `scripts/venv_bootstrap.sh`. A failure up to here changes
+   nothing and never stops the running daemon.
+5. Then the switch. It stops the old daemon and checks the tag out in the clone.
+   It rebuilds the venv in place with the clone's own build script, which uses
+   the cache the trial build filled. Then it starts the new daemon with
+   `bin/hooks-daemon restart`. Until then, a hook that would start a daemon
+   answers "the daemon is starting; retry" instead of starting one from a
+   half-switched clone. A failure during the switch puts the previous commit and
+   its venv back, starts the old daemon again, and says so.
 
 A sync writes no tracked file, runs no config migration and regenerates no docs.
 

@@ -1976,6 +1976,15 @@ start_daemon() {
         return 0
     fi
 
+    # Plan 00477 Task 5.2: provision is switching the clone to another version
+    # and starts the new daemon itself. Not starting one from a half-switched
+    # clone, this hook answers as for a daemon that is still starting.
+    if _daemon_switch_in_progress; then
+        _HOOKS_DAEMON_STARTING=true
+        echo "HOOKS DAEMON: provision is switching the daemon to another version; no daemon is started mid-switch" >&2
+        return 1
+    fi
+
     # Validate venv before attempting startup (fail-fast with actionable error)
     if ! validate_venv; then
         echo "ERROR: Venv validation failed: $VENV_ERROR" >&2
@@ -2243,6 +2252,29 @@ _daemon_orphan_venv_present() {
         [[ -d "$venv_dir" ]] && return 0
     done
     return 1
+}
+
+# The marker provision.sh holds (its pid) while it switches the clone to another
+# version: from stopping the old daemon until it starts the new one.
+_HOOKS_DAEMON_SWITCH_MARKER_NAME=".provision-switching"
+
+#
+# _daemon_switch_in_progress() - Is provision switching the clone right now?
+#
+# Plan 00477 Task 5.2. Between the stop and the start, the checkout and the venv
+# are mid-change, and a daemon started then would load a half-switched clone.
+# Asked only on the start path, so a running daemon pays nothing. A marker
+# whose process is gone (a sync that was killed) does not count.
+#
+# Returns:
+#   0 while the marker names a live process, 1 otherwise
+#
+_daemon_switch_in_progress() {
+    local marker="$HOOKS_DAEMON_ROOT_DIR/untracked/$_HOOKS_DAEMON_SWITCH_MARKER_NAME" holder=""
+    [[ -f "$marker" ]] || return 1
+    IFS= read -r holder < "$marker" || [[ -n "$holder" ]] || return 1
+    [[ "$holder" =~ ^[0-9]+$ ]] || return 1
+    kill -0 "$holder" 2> /dev/null
 }
 
 #
