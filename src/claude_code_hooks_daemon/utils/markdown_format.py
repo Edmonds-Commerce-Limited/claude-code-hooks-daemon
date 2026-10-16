@@ -15,6 +15,9 @@ Those three rewrite a FILE, so they call :func:`format_markdown_document`,
 which refuses a document holding merge-conflict markers.
 """
 
+import functools
+import importlib.metadata
+import logging
 import re
 from typing import Any, Final
 
@@ -27,10 +30,37 @@ from claude_code_hooks_daemon.utils.conflict_markers import (
     find_conflict_markers_in_text,
 )
 
-# mdformat extensions: enable GFM tables, strikethrough, task lists, autolinks,
-# and footnotes (without "footnote" mdformat escapes ``[^1]: text`` so GitHub
-# renders it as literal text).
-_MDFORMAT_EXTENSIONS: Final[set[str]] = {"gfm", "footnote"}
+logger = logging.getLogger(__name__)
+
+# mdformat extensions: GFM tables, strikethrough, task lists, autolinks.
+_BASE_MDFORMAT_EXTENSIONS: Final[frozenset[str]] = frozenset({"gfm"})
+
+# Footnotes: without this extension mdformat escapes ``[^1]: text`` so GitHub
+# renders it as literal text. Enabled only when the plugin is installed:
+# asking mdformat for an unregistered extension raises, which would switch
+# off ALL markdown formatting in a venv that has not re-synced yet.
+_FOOTNOTE_EXTENSION: Final[str] = "footnote"
+_PARSER_EXTENSION_GROUP: Final[str] = "mdformat.parser_extension"
+
+
+def _registered_parser_extensions() -> frozenset[str]:
+    """Names of the mdformat parser extensions installed in this environment."""
+    return frozenset(
+        entry.name for entry in importlib.metadata.entry_points(group=_PARSER_EXTENSION_GROUP)
+    )
+
+
+@functools.cache
+def _mdformat_extensions() -> frozenset[str]:
+    """The mdformat extensions to enable; cached so a missing plugin warns once."""
+    if _FOOTNOTE_EXTENSION in _registered_parser_extensions():
+        return _BASE_MDFORMAT_EXTENSIONS | {_FOOTNOTE_EXTENSION}
+    logger.warning(
+        "mdformat-footnote is not installed, so markdown footnotes will be escaped "
+        "by the formatter; re-sync the daemon venv to install it"
+    )
+    return _BASE_MDFORMAT_EXTENSIONS
+
 
 # Preserve consecutive ordered-list numbering (1. 2. 3.) instead of the
 # default which renumbers every item to 1.
@@ -183,7 +213,7 @@ def format_markdown_text(content: str) -> str:
     frontmatter, body = split_frontmatter(content)
     formatted_body = mdformat.text(
         body,
-        extensions=_MDFORMAT_EXTENSIONS,
+        extensions=_mdformat_extensions(),
         options=_MDFORMAT_OPTIONS,
     )
     formatted_body = _restore_thematic_breaks(formatted_body)

@@ -34,6 +34,19 @@ Every tracked `.md` containing `[^...]` text (56 files): formatting with and wit
 identical output for all of them. 11 files change under the formatter either way (they were already unformatted):
 the plan reports and journals under `CLAUDE/Plan/` and three `remote-docs/` pages. The extension changes none of them.
 
+## Review round 1: degrade gracefully without the plugin
+
+- `markdown_format.py` now builds the extension set in `_mdformat_extensions()` (functools.cache). It adds `footnote`
+  only when `importlib.metadata.entry_points(group="mdformat.parser_extension")` lists it (no plugin import), and
+  otherwise logs one WARNING and keeps `gfm`. Tests: plugin absent (tables align, footnote escaped as before, exactly
+  one WARNING across two calls) and plugin present (no warning); the three footnote round-trip tests cover presence.
+- How a client venv picks up a new dependency: the venv name is a fingerprint built in
+  `src/claude_code_hooks_daemon/daemon/paths.py:850` from `_compute_project_lock_hash_stdlib(daemon_dir)`, which hashes
+  `pyproject.toml` plus `uv.lock` bytes (`paths.py:576-597`). Changing either selects a different venv. Resolution
+  skips a candidate whose metadata `lock_hash` differs from the current one (`paths.py:1212`), so `ensure_venv`
+  rebuilds. So yes, a changed `uv.lock` triggers a rebuild, but only once the new source is checked out; before then
+  (or if the sync fails) the fallback above applies.
+
 ## Result
 
 - Commit: 9bca52a78 (work), plus a follow-up commit recording the hash and this report.
