@@ -6,7 +6,9 @@ Worktree: `untracked/worktrees/worktree-p477-background-sync`. Commits, in order
 - `55642216d`: error_hiding and black fixes.
 - `7bcb35cf2`: the launch moved into shell (the coordinator's suppression-free route).
 - `6bc2f5b45`: signal_targets, magic_values and the changed-tests map.
-- The plan tick and this report are in the commit after those.
+- `3d36de429`: Task 5.2 tick and the report.
+- `cd8b8e315`: the target staged and trial-built beside the live daemon, and the switch only at restart (the coordinator's venv-swap follow-up).
+- This report's update is in the commit after that.
 
 ## Assumptions (for the coordinator to have ruled on)
 
@@ -28,15 +30,48 @@ The first version had `version_check` start the sync with `subprocess.Popen`, wh
 
 The coordinator's guarantees, one by one:
 
-| Guarantee                                        | How                                                                                                                                                                                             | Shown by                                                                                                                                                  |
-| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Never inside a hook's time budget                | Detached `setsid ... &` with every fd redirected                                                                                                                                                | `test_a_pulled_upgrade_is_synced_after_the_hook_has_answered` (venv build slowed to 5 s; the hook returns before the state is `synced`)                   |
-| The old daemon serves until the new one is ready | The sync waits for a running daemon (Assumption 5), and the restart is its last step; 5.2a's rollback on failure                                                                                | `test_a_sync_waits_for_a_running_daemon_and_otherwise_claims_nothing`; `test_a_sync_failure_keeps_the_old_daemon_and_records_why`                         |
-| Failure is loud                                  | State `failed` or `needs-reading` with the reason; `version_check` shows it at every session start (`systemMessage` plus context) with the log, the manual command and the state file to delete | `TestTheBackgroundSync::test_a_refused_clone_is_recorded_as_a_failure` and siblings; `TestAPulledUpgradeIsReportedAsSyncingInTheBackground`               |
-| One sync at a time                               | `mkdir` lock with the holder's pid, taken over when that pid is dead; a per-target state file as the once-only marker                                                                           | `test_a_sync_already_running_is_not_joined`, `test_a_lock_whose_holder_is_gone_is_taken_over`, `test_a_target_already_attempted_is_never_attempted_again` |
-| The daemon's own repository never syncs          | `provision.sh` refuses before sourcing `init.sh`; `version_check` reports no drift in self-install mode                                                                                         | `test_the_daemons_own_repository_never_syncs`, `test_the_daemons_own_repository_never_reports_drift`                                                      |
+| Guarantee                                        | How                                                                                                                                                                                             | Shown by                                                                                                                                                               |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Never inside a hook's time budget                | Detached `setsid ... &` with every fd redirected                                                                                                                                                | `test_a_pulled_upgrade_is_synced_after_the_hook_has_answered` (venv build slowed to 5 s; the hook returns before the state is `synced`)                                |
+| The old daemon serves until the new one is ready | The sync waits for a running daemon (Assumption 5); the target is staged, gated and trial-built beside it; the live checkout and venv change only after it is stopped (see below)               | `test_a_sync_waits_for_a_running_daemon_and_otherwise_claims_nothing`; `TestTheSwitchHappensOnlyAtRestart`; `test_a_sync_failure_keeps_the_old_daemon_and_records_why` |
+| Failure is loud                                  | State `failed` or `needs-reading` with the reason; `version_check` shows it at every session start (`systemMessage` plus context) with the log, the manual command and the state file to delete | `TestTheBackgroundSync::test_a_refused_clone_is_recorded_as_a_failure` and siblings; `TestAPulledUpgradeIsReportedAsSyncingInTheBackground`                            |
+| One sync at a time                               | `mkdir` lock with the holder's pid, taken over when that pid is dead; a per-target state file as the once-only marker                                                                           | `test_a_sync_already_running_is_not_joined`, `test_a_lock_whose_holder_is_gone_is_taken_over`, `test_a_target_already_attempted_is_never_attempted_again`              |
+| The daemon's own repository never syncs          | `provision.sh` refuses before sourcing `init.sh`; `version_check` reports no drift in self-install mode                                                                                         | `test_the_daemons_own_repository_never_syncs`, `test_the_daemons_own_repository_never_reports_drift`                                                                   |
 
-**The old-daemon limitation, stated plainly:** 5.2a checks the tag out in place and moves the venv aside before the rebuild. The old daemon PROCESS keeps answering throughout, but a module it imports lazily during that window comes from the new checkout or fails to import. Removing that window would mean changing 5.2a's build design, not the trigger. I did not measure how much the daemon imports lazily.
+## The live daemon's code and venv are never changed under it (`cd8b8e315`)
+
+The coordinator's follow-up: 5.2a checked the tag out in place and rebuilt the venv in place while the old daemon was still running. That broke "the old daemon keeps serving until the new one is ready". It is fixed: nothing the running daemon imports from changes until that daemon has been stopped.
+
+**What can and cannot be built beside the live daemon.** Venvs here are not keyed on the daemon version. The name is `venv-<slug>-py{MM}-{hex}`, where the slug comes from the daemon directory's path and the hex from the interpreter. `uv sync --project <daemon_dir>` installs the package EDITABLE, pointing at `<daemon_dir>/src`, and a venv's interpreter links and `.pth` are absolute. So a venv is bound to the path it was built for. The hooks always look for the daemon at `.claude/hooks-daemon`, which the live daemon occupies. A venv built elsewhere therefore cannot be renamed into place, and a second venv for the same path and interpreter would take the live one's name. A true "flip a pointer at restart" needs a layout change, such as versioned clone directories behind a symlink. That would change install, upgrade and every path resolver, so it is the owner's call and I did not make it.
+
+**What I implemented instead, the strongest version the current layout allows.** The sync now runs in two phases.
+
+1. **Beside the live daemon, which nothing here touches:**
+   - The tag is fetched.
+   - The tag is checked out into its OWN git worktree, `.claude/hooks-daemon/untracked/sync-stage`. This answers the shared-checkout question: the live checkout does not move in this phase.
+   - The tag's `version.py` is checked.
+   - The target's pre-deploy gate runs from the stage.
+   - The target's venv is trial-built in the stage by the TARGET's own `scripts/venv_bootstrap.sh`. This proves the target builds on this machine, with these interpreters and this network, and it fills uv's cache.
+   - Any failure in this phase removes the stage and stops. It never stops or changes the old daemon, and the message says so ("never stopped").
+2. **The switch, at restart:**
+   - A marker holding provision's pid is written (`untracked/.provision-switching`).
+   - The old daemon is stopped through the clone's `bin/hooks-daemon stop`.
+   - Only then does the clone check out the tag and its venv get rebuilt in place, by the clone's own build path, from the warm cache.
+   - The marker is removed and the new daemon is started.
+   - A failure in this phase restores the previous commit and its venv and starts the old daemon again.
+3. **No hook starts a daemon mid-switch:** `init.sh`'s `start_daemon` asks `_daemon_switch_in_progress`, only on the start path, so a running daemon pays nothing. While the marker names a live process, the hook starts nothing and answers as for a daemon still starting ("the daemon is starting; retry"; fail-open, or deny where `ci_enabled` already denies). A marker left by a killed sync, with a dead pid, does not block.
+
+**What is left:** the switch window. Between stopping the old daemon and starting the new one, the in-place venv build runs, from the warm cache, so without network. Hooks in that window get the "starting; retry" answer, not a daemon. That window is the restart itself, made as short as the in-place build allows. Removing it entirely needs the versioned-layout change above.
+
+Tests (red first, then green):
+
+- `TestTheSwitchHappensOnlyAtRestart::test_the_target_is_built_beside_while_the_old_daemon_serves_unchanged`: a uv wrapper records, for every build, the clone's HEAD and whether the old daemon process exists. The staged build comes first, with the live HEAD unmoved and the old daemon up. The in-place build comes after, with the old daemon down. No stage or marker is left.
+- `test_a_target_venv_that_cannot_be_built_never_stops_the_old_daemon`: no restart, the old pid still alive, the clone and venv untouched.
+- `test_a_failure_after_the_stop_restores_and_restarts_the_old_version`: a uv wrapper that fails only the in-place build. The old commit and venv are restored and the old daemon is started again.
+- `TestNoHookStartsADaemonMidSwitch`: with a live marker, the hook attempts no start and answers "starting". With a dead marker, it goes on to start.
+- The red run had 5 failures: 4 of those tests, plus the background failure test, which now expects the old daemon never stopped (`starts() == 1`).
+
+The sandbox's stand-in daemon gained a `stop` (`tests/venv_bootstrap_sandbox.py`). It ends the stand-in only when its environment names that sandbox's PID file, the check `cleanup()` already makes. Before this, `stop` reached the real CLI, which fails in a fixture project without an `origin` remote.
 
 ## TDD: red before green
 
@@ -71,4 +106,5 @@ The coordinator's guarantees, one by one:
 
 - A real daemon, rather than the sandbox stand-in, being restarted by a sync the forwarder started.
 - `nohup` without `setsid` (macOS), which only ignores SIGHUP. Whether Claude Code kills a finished hook's process group there is not tested.
-- How much the daemon imports lazily during the in-place checkout window.
+- The switch window's length on a real machine: the in-place venv build from the warm cache, against the stub `uv` here.
+- The real `hooks-daemon stop` in the switch. The sandbox stand-in's stop is tested, not the real CLI's, which needs a project with an `origin` remote.
