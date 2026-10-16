@@ -95,7 +95,7 @@ a row as unjoined when no agent claims it. Add a fixture teammate whose meta has
 SubagentStop `downgraded` flag and every other reader that joins on `toolUseId`. In this repository most named
 dispatches are teammates, so the by-source and by-role tables undercount the very dispatches the advisor judges.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed (e5d85dbaf).
 
 ### N468 — the markdown formatter escapes GitHub footnotes, so footnotes in any written `.md` file render as literal text
 
