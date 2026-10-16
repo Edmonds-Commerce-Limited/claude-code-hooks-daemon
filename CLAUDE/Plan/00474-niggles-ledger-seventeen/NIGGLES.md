@@ -124,8 +124,9 @@ from the statement in
 written into the worktree, because the checker could not decode it. Deleting the file and re-running with `--resume`
 passed.
 
-**Why it happens**: not yet established. A gitignored, binary, tool-generated file reached a checker that reads text.
-Either the check walks the tree instead of the tracked or changed file list, or it does not skip undecodable files.
+**Why it happens**: `scripts/qa/check_github_urls.py:130` walks the tree with `walk_files`, which ignores
+`.gitignore`, so the gitignored root-level `.coverage` is read. Lines 216-225 then report each undecodable file as an
+`unreadable-file` violation, which fails the gate.
 
 **Fix direction**: find the file source `github_urls` scans, and make it judge only tracked or changed text files, the
 same set the other content checks use. Add a regression test with a gitignored binary file present. It can fail the
