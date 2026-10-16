@@ -72,4 +72,4 @@ Closing that gap needs its own ledger entry. Candidates are making the brace sca
 
 ## QA
 
-The final targeted `llm_qa.py changed` verdict is recorded in the commit that follows this report.
+The first final run of `FULL_QA_LOCK_WAIT_SECONDS=3600 ./scripts/qa/llm_qa.py changed --allow-unmapped` failed both type checkers. `str.maketrans` returns `dict[int, int | None]`, and the table had been typed `dict[int, None]`. The second run failed on format, because the type fix had dropped a space. Both are fixed at `e43e4df2c` and `7cb63ddf5`. On `7cb63ddf5` the run gave `QA: 40/40 PASSED` with exit 0. `secret_file_matching.py` is allowed as unmapped (too-broad), so the full gate must cover it.
