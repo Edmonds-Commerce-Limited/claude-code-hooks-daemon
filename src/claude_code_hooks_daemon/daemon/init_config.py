@@ -298,6 +298,9 @@ class ConfigTemplate:
             "    resume_guard: {enabled: true, priority: 39, options: {mode: advise, max_resume_tokens: 250000}}  # Advise against cold-resuming a large stopped agent\n"
             "    spawn_rate_advisor: {enabled: true, priority: 60, options: {max_concurrent: null, advise_pct: 80}}  # Advise near the five-hour limit on a spawn (concurrency cap off)\n"
             "    review_round_advisor: {enabled: false, priority: 60}  # From review round 4 on one plan/branch, advise comparing findings (opt-in)\n"
+            # Plan 00472: advisory only; empty ceiling and floor tables for clients.
+            "    subagent_tier_advisor: {enabled: true, priority: 60, options: {mode: advise, default_ceiling: null, types: {}, role_floors: {}}}  # Name a cheaper tier on an inherited top tier or an explicit up-override\n"
+            "    workflow_fanout_advisor: {enabled: true, priority: 60}  # Name a Workflow script's agent count, model-less sites and per-family ceiling\n"
             "    installed_plugin_edit_advisor: {enabled: true, priority: 42}  # Advise when a write lands in an installed Claude Code plugin's files (non-blocking)\n"
             "    dispatch_declaration: {enabled: true, priority: 48}  # Advise/enforce a file-handoff declaration on Task dispatch\n"
             "    docs_qa_edit: {enabled: true, priority: 47}      # Docs QA lint on documentation writes (fires only when documentation.enabled)\n"
@@ -325,6 +328,7 @@ class ConfigTemplate:
             "    markdown_table_formatter: {enabled: true, priority: 31}  # Auto-format markdown tables via mdformat. Ledger 00466 RV6-M1: MUST stay above goal_injection's priority\n"
             "    budget_exhaustion_detector: {enabled: true, priority: 32}  # Advisory on a WebSearch budget-refusal or a sub-agent usage-limit termination (channel-scoped, opt-out)\n"
             "    model_downgrade_recorder: {enabled: true, priority: 33}  # Publish <session>.model-downgrade so the ccy supervisor can tell a machine downgrade from your own /model (opt-out)\n"
+            "    dispatch_model_recorder: {enabled: true, priority: 33}  # Record the model an Agent dispatch resolved to, for hooks-daemon tiers (silent)\n"
             "    merge_qa_report: {enabled: true, priority: 34}  # Post-hoc plan/docs QA report on what a git merge/pull/rebase introduced (fires only when plan/docs QA sweeps are active)\n"
             "    daemon_sync_after_merge: {enabled: true, priority: 35}  # A merge/pull/rebase that changed daemon config or handler code leaves the running daemon stale -- advises a restart, naming the paths\n"
             "    cron_record_keeper: {enabled: true, priority: 36}  # Record each CronCreate/CronDelete so cron_stop_enforcer can refresh a job before the 7-day cron expiry (silent bookkeeping, opt-out)\n"

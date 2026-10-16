@@ -484,6 +484,15 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
         "T4: subagent_context_budget's section states this gate's stop block and its "
         "three-block limit; a second section would bill the same fact twice"
     ),
+    "DispatchModelRecorderHandler": "observe-only sensor, no agent-facing action",
+    "SubagentTierAdvisorHandler": (
+        "T2: the advice arrives with the dispatch it is about and governs the NEXT one; "
+        "it never denies, and the tier: token it names is in the message itself"
+    ),
+    "WorkflowFanoutAdvisorHandler": (
+        "T2: the advice arrives with the Workflow call and governs the next script; "
+        "it never denies and holds no standing policy"
+    ),
     "DaemonStatsHandler": "status-line renderer, no agent-facing action",
     "DowngradeIndicatorHandler": "status-line renderer, no agent-facing action",
     "EnvironmentIndicatorHandler": "status-line renderer, no agent-facing action",
