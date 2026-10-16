@@ -2,6 +2,7 @@
 
 import importlib
 import types
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -15,10 +16,24 @@ from claude_code_hooks_daemon.handlers.registry import (
     EVENT_TYPE_MAPPING,
     HandlerRegistry,
     _to_snake_case,
+    clear_discovery_cache,
     event_dir_name_matches_module,
     get_registry,
     is_discoverable_handler,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolated_discovery_cache() -> Iterator[None]:
+    """Run every test here against an empty discovery cache.
+
+    The tests that mock ``import_module``/``walk_packages`` exercise the real
+    scan, so they must not be answered from, and must not leave behind, a
+    result for the real handlers package.
+    """
+    clear_discovery_cache()
+    yield
+    clear_discovery_cache()
 
 
 class MockHandler(Handler):
