@@ -49,6 +49,30 @@ The rerun got the lock and finished: 35 of 40 checks passed, 4 failed, 1 was not
 - plan_qa: one advisory, journal freshness for 00471.
 - changed_tests: 11 failed. They are registration lists the new handlers are missing from: acceptance near-miss/deny coverage, bash-write-blindness verdicts, handler-scope SUB defaults, pretooluse fail-closed tagging (resume_guard, subagent_context_budget, subagent_handoff_gate), and registry option injection (resume_guard, subagent_context_budget). 13 files were reported unmapped, mostly too broad.
 
+## 1b. Re-dispatch after the host reboot: section 1a fixed (commit 39b260884)
+
+Nothing was uncommitted after the reboot. No QA exclusion, allowlist or suppression entry was added. The one stale error-hiding exclusion (`subagent_cache_aggregator.totals_for`) was removed, because the loop it covered no longer exists.
+
+- **error_hiding.** Each swallow is now explicit:
+  - Lines that do not parse (in `transcript_tail`, `transcript_spend` and `spend_ledger.read_events`) are logged through `log_and_continue` with a reason. An unreadable, corrupt or foreign offset sidecar is logged the same way: `_Entry.from_json` raises, and `_load` rebuilds the entry.
+  - `find_agent_transcript` now uses `os.scandir` and raises `OSError`. `Path.glob` drops `PermissionError` silently. The resume guard records the failure as `unmeasured` (`agents-unlistable`) and allows the call.
+  - `collect_session_spend` raises on an agent directory it cannot list, and `hooks-daemon spend` then exits 1 with an error. A missing directory still reads as no agents. Release note 066 says so.
+  - `dispatch_budget` reads its record through `_read_budget_record`, which logs a WARNING when the record cannot be read. `read_five_hour` reads through `read_state`.
+  - `live_agents`: a transcript written recently but unreadable now counts as live with an unknown context, where before it was dropped. This is the safe direction for an advisory.
+  - The aggregator's `_store_root` checks `ProjectContext.is_initialized()`.
+- **eacces_safe.** The two calls now use `path_is_file` and `path_is_dir` with `unreadable_means=False`.
+- **changed_tests.** The new handlers are added to each registration list. They now have:
+  - near-miss ALLOW acceptance tests: a warm resume (`resume_guard`) and an over-budget stop after the handoff was written (`subagent_handoff_gate`);
+  - a DENY acceptance test for `subagent_context_budget`, harness-undrivable, which needs `hard_tokens` set for the run;
+  - an OUT-OF-FRAME bash-blindness verdict;
+  - two entries in `_EXPECTED_SUB`;
+  - three rows in `_AUDITED_BLOCKING_ONLY_REASONS`, as workflow and cost gates;
+  - valid option values in `_VALID_NON_DEFAULTS`.
+- **Defect found on the way.** `spawn_rate_advisor` imported the `ResumeGuardHandler` class. Registry discovery walks each module's attributes, so `resume-guard` was registered twice in PreToolUse, which is also why the fail-closed test listed it twice. `target_transcript` is now a module function. The new tests `TestEachHandlerOnce` in `tests/unit/handlers/test_registry.py` check that each handler is walked once and registered once. Both failed red before the fix.
+- **Red first.** The nine new behaviour tests failed before the code changed (`9 failed, 98 passed`). The two duplicate-registration tests failed too (`2 failed`), with `('pre_tool_use', 'resume_guard')` reported twice.
+- **Verification.** The touched suites passed: `tests/unit/handlers/pre_tool_use/`, `subagent_stop/`, `status_line/`, the utils and spend tests, which is 11,969 passed plus the aggregator fix. So did the six registration-list modules and `test_registry.py`. `audit_error_hiding.py` and `check_eacces_safe_predicates.py` exit 0. black, ruff and mypy are clean on the touched files. `regenerate-docs`, run from the worktree's own code, built and initialised a controller over the full handler set.
+- **After merge (not doable here).** Two items wait for this branch to be merged and the shared daemon restarted: the Q5 payload capture (assumption 1) and the dogfood run with the real-subagent acceptance check (assumption 2, criteria 3 and 12).
+
 ## 2. What was built (one commit per lever)
 
 | Task | Commit    | Delivered                                                                                                                                                                                    |
