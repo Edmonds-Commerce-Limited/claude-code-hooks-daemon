@@ -36,9 +36,8 @@ def _agent(
     (directory / f"agent-{agent_id}.jsonl").write_text(
         "".join(json.dumps(record) + "\n" for record in records)
     )
-    (directory / f"agent-{agent_id}.meta.json").write_text(
-        json.dumps({"name": name, "toolUseId": tool_use_id})
-    )
+    meta = {"name": name, "toolUseId": tool_use_id} if tool_use_id else {"name": name}
+    (directory / f"agent-{agent_id}.meta.json").write_text(json.dumps(meta))
 
 
 def _dispatch(untracked: Path, tool_use_id: str, resolved: str, **fields: str) -> None:
@@ -231,6 +230,61 @@ class TestJoin:
         _, untracked, _ = session
         merge_dispatch_row(untracked, "s1", "toolu_x", {"resolved_model": "claude-opus-5-5"})
         assert _collect(session).unjoined == 1
+
+    def test_a_teammate_without_a_tool_use_id_joins_on_agent_id(self, tmp_path: Path) -> None:
+        agents = tmp_path / "s1" / "subagents"
+        untracked = tmp_path / "u"
+        _agent(agents, "ateam", "closer", "", [_request("r1", "claude-opus-5-5", 10)])
+        _dispatch(
+            untracked,
+            "toolu_team",
+            "claude-opus-5-5",
+            subagent_type="general-purpose",
+            source="explicit",
+            role="implement",
+        )
+        merge_dispatch_row(untracked, "s1", "toolu_team", {"agent_id": "ateam"})
+        report = collect_tiers(
+            agents,
+            session_id="s1",
+            untracked=untracked,
+            cache=spend_cache(None),
+            project_root=tmp_path,
+        )
+        (agent,) = report.agents
+        assert (agent.source, agent.role) == ("explicit", "implement")
+        assert report.unjoined == 0
+
+    def test_a_tool_use_id_wins_over_an_agent_id_match(self, tmp_path: Path) -> None:
+        agents = tmp_path / "s1" / "subagents"
+        untracked = tmp_path / "u"
+        _agent(agents, "ax", "plain", "toolu_mine", [_request("r1", "claude-opus-5-5", 10)])
+        _dispatch(untracked, "toolu_mine", "claude-opus-5-5", source="explicit")
+        _dispatch(untracked, "toolu_other", "claude-opus-5-5", source="inherited")
+        merge_dispatch_row(untracked, "s1", "toolu_other", {"agent_id": "ax"})
+        report = collect_tiers(
+            agents,
+            session_id="s1",
+            untracked=untracked,
+            cache=spend_cache(None),
+            project_root=tmp_path,
+        )
+        assert report.agents[0].source == "explicit"
+
+    def test_an_agent_with_no_tool_use_id_and_no_row_counts_as_unjoined(
+        self, tmp_path: Path
+    ) -> None:
+        agents = tmp_path / "s1" / "subagents"
+        _agent(agents, "ax", "lost", "", [_request("r1", "claude-opus-5-5", 10)])
+        report = collect_tiers(
+            agents,
+            session_id="s1",
+            untracked=tmp_path / "u",
+            cache=spend_cache(None),
+            project_root=tmp_path,
+        )
+        assert report.agents[0].source == "unrecorded"
+        assert report.unjoined == 1
 
     def test_json(self, session: tuple[Path, Path, Path]) -> None:
         data = tiers_as_dict(_collect(session))
