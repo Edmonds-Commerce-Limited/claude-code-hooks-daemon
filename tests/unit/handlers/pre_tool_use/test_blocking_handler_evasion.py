@@ -512,6 +512,10 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
 # assumption that let the git bypasses survive.
 _NOT_COMMAND_ANCHORED: dict[str, str] = {
     "AbsolutePathHandler": "matches on the file_path parameter, not a command",
+    "SpawnRateAdvisorHandler": (
+        "matches the Agent/Task/SendMessage tools and never denies; it advises on the "
+        "session's measured load, not on a command"
+    ),
     "ResumeGuardHandler": (
         "matches the SendMessage tool and judges the TARGET agent's transcript, not a command"
     ),

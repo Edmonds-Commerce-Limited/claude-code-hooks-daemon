@@ -54,6 +54,7 @@ from claude_code_hooks_daemon.handlers.status_line.context_tiers import (
     is_red,
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.session_load import CONTEXT_SIDECAR_SUBDIR
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ logger = logging.getLogger(__name__)
 # sidecar files. Kept distinct from the supervisor's own decision.log so the
 # sensor output (daemon-written) and actuator output (supervisor-written)
 # never collide.
-_SIDECAR_SUBDIR = "context-sidecar"
+_SIDECAR_SUBDIR = CONTEXT_SIDECAR_SUBDIR
 
 # Bumped when the on-disk schema changes in a way a reader must notice.
 _SCHEMA_VERSION = 1
@@ -140,6 +141,7 @@ class ContextSidecarHandler(StatusLineHandlerBase):
             "window_size": window_size,
             "cost_usd": self._read_cost(hook_input),
             "effort": self._read_effort(hook_input),
+            **self._read_five_hour(hook_input),
             "session_id": session_id,
             "model_id": model_id,
             "ts": self._now(),
@@ -163,6 +165,25 @@ class ContextSidecarHandler(StatusLineHandlerBase):
             if total is not None:
                 return float(total)
         return None
+
+    @staticmethod
+    def _read_five_hour(hook_input: dict[str, Any]) -> dict[str, float | None]:
+        """``five_hour_pct`` and ``resets_at`` from ``rate_limits.five_hour``, else None.
+
+        The only ground truth for the five-hour usage limit (Plan 00471 L5); the
+        spawn advisory reads it from here. Nullable: unknown is never zero.
+        """
+        limits = hook_input.get("rate_limits")
+        window = limits.get("five_hour") if isinstance(limits, dict) else None
+        window = window if isinstance(window, dict) else {}
+
+        def number(key: str) -> float | None:
+            value = window.get(key)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return None
+            return value
+
+        return {"five_hour_pct": number("used_percentage"), "resets_at": number("resets_at")}
 
     def _read_effort(self, hook_input: dict[str, Any]) -> str | None:
         """Extract the live effort level if the payload carries it, else None.

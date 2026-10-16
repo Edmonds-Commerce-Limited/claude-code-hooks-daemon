@@ -296,6 +296,7 @@ class ConfigTemplate:
             # Plan 00471 L2: advisory at the soft band; the hard band ships off.
             "    subagent_context_budget: {enabled: true, priority: 39, options: {soft_tokens: 300000, hard_tokens: null}}  # Tell a subagent past its context budget to hand off\n"
             "    resume_guard: {enabled: true, priority: 39, options: {mode: advise, max_resume_tokens: 250000}}  # Advise against cold-resuming a large stopped agent\n"
+            "    spawn_rate_advisor: {enabled: true, priority: 60, options: {max_concurrent: null, advise_pct: 80}}  # Advise near the five-hour limit on a spawn (concurrency cap off)\n"
             "    installed_plugin_edit_advisor: {enabled: true, priority: 42}  # Advise when a write lands in an installed Claude Code plugin's files (non-blocking)\n"
             "    dispatch_declaration: {enabled: true, priority: 48}  # Advise/enforce a file-handoff declaration on Task dispatch\n"
             "    docs_qa_edit: {enabled: true, priority: 47}      # Docs QA lint on documentation writes (fires only when documentation.enabled)\n"
@@ -404,6 +405,7 @@ class ConfigTemplate:
             "    usage_pause_stop_gate: {enabled: true, priority: 6}  # A usage-paused session stops only once its crons are exactly the one resume cron. Inert unless a pause is recorded\n"
             "    cron_stop_enforcer: {enabled: true, priority: 7}  # Block a stop while a declared persistent_crons job is verified missing. Inert until persistent_crons.enabled is true AND a job is declared\n"
             "    teammate_reap_advisor: {enabled: true, priority: 9}  # Report the Stop payload's background_tasks count and name TaskStop. Advisory only, rate-limited; silent when the list is absent or empty\n"
+            "    background_task_recorder: {enabled: true, priority: 9}  # Sensor: record finished agent tasks for spawn_rate_advisor's live count\n"
             "    auto_continue_stop: {enabled: true, priority: 15}  # Auto-continue after stop events\n"
             "\n"
             "  # SubagentStop - Plan 00237 removed the only two handlers; Plan 00307\n"

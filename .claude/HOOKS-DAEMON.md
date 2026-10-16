@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (77 handlers)
+### PreToolUse (78 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -85,6 +85,7 @@
 | 58 | flaggable_work_advisor | ADVISORY | Advise delegating safeguard-flaggable work BEFORE opening the content |
 | 59 | merge_qa_advisor | ADVISORY | Advise the static checks to run before merging a work branch with no recorded green run |
 | 60 | british_english | ADVISORY | Warn about American English spellings in content files (non-blocking) |
+| 60 | spawn_rate_advisor | ADVISORY | Advise at the live-agent cap and near the five-hour limit; never deny |
 
 ### PostToolUse (15 handlers)
 
@@ -178,13 +179,14 @@
 |----------|---------|----------|-------------|
 | 50 | quota_resume_recorder | ADVISORY | Record each ``quota_auto_resume_*`` notification, silently |
 
-### Stop (5 handlers)
+### Stop (6 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 4 | idle_workable_issue_stop_gate | BLOCKING | Refuse a main-thread idle stop while a workable issue is cached and nothing runs |
 | 6 | usage_pause_stop_gate | BLOCKING | Allow a paused session's stop only when its crons are exactly the resume cron |
 | 7 | cron_stop_enforcer | BLOCKING | Block a Stop while a declared persistent cron was never created |
+| 9 | background_task_recorder | NON-TERMINAL | Record a Stop's finished agent tasks for the live count; always allow |
 | 9 | teammate_reap_advisor | ADVISORY | Report the Stop payload's ``background_tasks`` count and name ``TaskStop`` |
 | 10 | auto_continue_stop | TERMINAL | Intercept Stop events and enforce explicit stop reasons or auto-continue |
 

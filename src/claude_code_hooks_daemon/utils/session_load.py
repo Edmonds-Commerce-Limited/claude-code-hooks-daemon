@@ -1,0 +1,194 @@
+"""How loaded a session is right now: live agents and the five-hour limit (Plan 00471 L4, L5).
+
+**Live agents.** ``background_tasks[]`` reaches only Stop and SubagentStop, not
+PreToolUse, so the count is measured from the transcripts: an agent is live
+when its transcript moved within ``liveness_seconds`` and its last
+conversational record is not an ``end_turn``. Each Stop and SubagentStop
+records which subagent/teammate tasks Claude Code reports as no longer running,
+and an agent named there is not counted however recently it wrote. The count
+only ever feeds an advisory: a stale count must never lock anyone out.
+
+**Five-hour percentage.** The Status payload's ``rate_limits.five_hour`` is the
+only ground truth for the limit, and only the main thread's status line sees
+it; ``context_sidecar`` writes it beside the context figures. A sidecar older
+than ``max_age_seconds`` is unknown, and unknown means silent.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Final
+
+from claude_code_hooks_daemon.utils.spend_ledger import read_state, session_dir, write_state
+from claude_code_hooks_daemon.utils.transcript_tail import agent_name_of, read_tail
+
+logger = logging.getLogger(__name__)
+
+#: The context sidecar's directory under the daemon untracked dir.
+CONTEXT_SIDECAR_SUBDIR: Final[str] = "context-sidecar"
+
+_BACKGROUND_FILE: Final[str] = "background-tasks.json"
+_LIVE_FILE: Final[str] = "live.json"
+_AGENT_TASK_TYPES: Final[frozenset[str]] = frozenset({"subagent", "teammate"})
+_RUNNING: Final[str] = "running"
+_UNSAFE: Final[re.Pattern[str]] = re.compile(r"[^A-Za-z0-9_.-]")
+
+
+@dataclass(frozen=True)
+class LiveAgent:
+    """One agent counted as live."""
+
+    agent_id: str
+    name: str
+    context_tokens: int
+    idle_seconds: float
+
+    @property
+    def label(self) -> str:
+        return self.name or self.agent_id
+
+
+@dataclass(frozen=True)
+class FiveHour:
+    """The five-hour usage limit as the status line last saw it."""
+
+    pct: float
+    resets_at: float | None
+
+
+def live_agents(
+    directory: Path,
+    *,
+    liveness_seconds: float,
+    now: float | None = None,
+    finished: frozenset[str] = frozenset(),
+) -> list[LiveAgent]:
+    """Agents in ``directory`` that wrote recently and have not ended their turn.
+
+    ``finished`` holds agent ids or names Claude Code reported as no longer
+    running; they are excluded. Ordered by idle time, most recent first.
+    """
+    moment = time.time() if now is None else now
+    found: list[LiveAgent] = []
+    try:
+        entries = list(os.scandir(directory))
+    except OSError:
+        return []
+    for entry in entries:
+        if not (entry.name.startswith("agent-") and entry.name.endswith(".jsonl")):
+            continue
+        try:
+            idle = moment - entry.stat().st_mtime
+        except OSError:
+            continue
+        if idle > liveness_seconds:
+            continue
+        path = Path(entry.path)
+        agent_id = entry.name.removeprefix("agent-").removesuffix(".jsonl")
+        name = agent_name_of(path)
+        if agent_id in finished or (name and name in finished):
+            continue
+        try:
+            reading = read_tail(path)
+        except OSError:
+            continue
+        if reading is not None and reading.stopped:
+            continue
+        found.append(
+            LiveAgent(
+                agent_id=agent_id,
+                name=name,
+                context_tokens=reading.context_tokens if reading is not None else 0,
+                idle_seconds=idle,
+            )
+        )
+    return sorted(found, key=lambda agent: (agent.idle_seconds, agent.label))
+
+
+def record_background_tasks(untracked: Path, session_id: str, tasks: object) -> None:
+    """Record which agent tasks a Stop/SubagentStop reports as no longer running.
+
+    An absent or malformed list is "unknown" (the contract says so) and leaves
+    the previous record untouched. Each finished task contributes its ``id``
+    and its ``description``, either of which may be what names the agent.
+    """
+    if not isinstance(tasks, list):
+        return
+    finished: set[str] = set()
+    for task in tasks:
+        if not isinstance(task, dict) or task.get("type") not in _AGENT_TASK_TYPES:
+            continue
+        if task.get("status") == _RUNNING:
+            continue
+        for key in ("id", "description"):
+            value = task.get(key)
+            if isinstance(value, str) and value:
+                finished.add(value)
+    write_state(
+        session_dir(untracked, session_id) / _BACKGROUND_FILE,
+        {"ts": time.time(), "finished": sorted(finished)},
+    )
+
+
+def finished_agents(untracked: Path, session_id: str) -> frozenset[str]:
+    """The agent ids and names last reported as no longer running."""
+    state = read_state(session_dir(untracked, session_id) / _BACKGROUND_FILE)
+    finished = state.get("finished")
+    if not isinstance(finished, list):
+        return frozenset()
+    return frozenset(item for item in finished if isinstance(item, str))
+
+
+def live_snapshot_path(untracked: Path, session_id: str) -> Path:
+    """Where the last live count is kept for the status line."""
+    return session_dir(untracked, session_id) / _LIVE_FILE
+
+
+def write_live_snapshot(untracked: Path, session_id: str, agents: list[LiveAgent]) -> Path:
+    """Persist the live count so the status line reads it without a scan."""
+    path = live_snapshot_path(untracked, session_id)
+    write_state(
+        path,
+        {
+            "ts": time.time(),
+            "count": len(agents),
+            "largest_context": max((agent.context_tokens for agent in agents), default=0),
+            "agents": [agent.label for agent in agents],
+        },
+    )
+    return path
+
+
+def read_live_snapshot(path: Path) -> dict[str, Any]:
+    """The snapshot :func:`write_live_snapshot` wrote, or ``{}``."""
+    return read_state(path)
+
+
+def read_five_hour(
+    untracked: Path, session_id: str, *, max_age_seconds: float, now: float | None = None
+) -> FiveHour | None:
+    """The five-hour percentage from this session's context sidecar, or None when unknown."""
+    stem = _UNSAFE.sub("_", session_id) or "unknown"
+    try:
+        data = json.loads((untracked / CONTEXT_SIDECAR_SUBDIR / f"{stem}.json").read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    pct = data.get("five_hour_pct")
+    stamp = data.get("ts")
+    if not isinstance(pct, (int, float)) or not isinstance(stamp, (int, float)):
+        return None
+    moment = time.time() if now is None else now
+    if moment - stamp > max_age_seconds:
+        return None
+    resets = data.get("resets_at")
+    return FiveHour(
+        pct=float(pct), resets_at=float(resets) if isinstance(resets, (int, float)) else None
+    )

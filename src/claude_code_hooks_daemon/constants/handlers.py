@@ -468,6 +468,18 @@ class HandlerID:
         config_key="resume_guard",
         display_name="resume-guard",
     )
+    # Plan 00471 L4/L5: live-agent count and five-hour advisory on a spawn.
+    SPAWN_RATE_ADVISOR = HandlerIDMeta(
+        class_name="SpawnRateAdvisorHandler",
+        config_key="spawn_rate_advisor",
+        display_name="spawn-rate-advisor",
+    )
+    # Plan 00471 L4: records a Stop's background_tasks for the live count.
+    BACKGROUND_TASK_RECORDER = HandlerIDMeta(
+        class_name="BackgroundTaskRecorderHandler",
+        config_key="background_task_recorder",
+        display_name="background-task-recorder",
+    )
     # Plan 00468 G16: a write into an installed Claude Code plugin's files.
     INSTALLED_PLUGIN_EDIT_ADVISOR = HandlerIDMeta(
         class_name="InstalledPluginEditAdvisorHandler",

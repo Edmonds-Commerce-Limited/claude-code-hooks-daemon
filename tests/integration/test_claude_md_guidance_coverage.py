@@ -470,6 +470,11 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "PromptCacheIndicatorHandler": "status-line renderer, no agent-facing action",
     "UsageIndicatorHandler": "status-line renderer, no agent-facing action",
     "SubagentCacheAggregatorHandler": "observe-only sensor, no agent-facing action",
+    "BackgroundTaskRecorderHandler": "observe-only sensor, no agent-facing action",
+    "SpawnRateAdvisorHandler": (
+        "T2: the advice arrives with the spawn it is about and governs the NEXT one; "
+        "it never denies and holds no standing policy"
+    ),
     "SubagentHandoffGateHandler": (
         "T4: subagent_context_budget's section states this gate's stop block and its "
         "three-block limit; a second section would bill the same fact twice"

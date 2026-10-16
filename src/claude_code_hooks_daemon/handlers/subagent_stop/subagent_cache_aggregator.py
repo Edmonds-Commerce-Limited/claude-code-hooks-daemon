@@ -44,6 +44,7 @@ from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import SubagentStopHandlerBase
 from claude_code_hooks_daemon.daemon.synthetic_traffic import is_synthetic_event
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.session_load import record_background_tasks
 from claude_code_hooks_daemon.utils.spend_ledger import read_agent_meta, spend_cache
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 from claude_code_hooks_daemon.utils.transcript_spend import SpendTotals, plan_key_from
@@ -289,11 +290,18 @@ class SubagentCacheAggregatorHandler(SubagentStopHandlerBase):
         a number that could not be collected never strands a stopping agent.
         """
         transcript = Path(str(hook_input.get(HookInputField.AGENT_TRANSCRIPT_PATH) or ""))
+        session_id = str(hook_input.get(HookInputField.SESSION_ID) or "")
         self.record(
-            session_id=str(hook_input.get(HookInputField.SESSION_ID) or ""),
+            session_id=session_id,
             agent_id=str(hook_input.get(HookInputField.AGENT_ID) or ""),
             transcript=transcript,
         )
+        # Plan 00471 L4: the live count's reconciliation point at SubagentStop.
+        untracked = self._store_root(None)
+        if untracked is not None:
+            record_background_tasks(
+                untracked, session_id, hook_input.get(HookInputField.BACKGROUND_TASKS)
+            )
         return BlockingResult(decision=Decision.ALLOW)
 
     @staticmethod

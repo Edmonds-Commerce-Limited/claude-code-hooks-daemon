@@ -279,6 +279,27 @@ class TestSubagentCacheAggregatorHandler:
         row = json.loads((tmp_path / "cache-sidecar" / "sess" / "one.json").read_text())
         assert row["requests"] == 3
 
+    def test_a_stop_records_its_finished_background_tasks(
+        self, handler, transcript, tmp_path, monkeypatch
+    ):
+        """Plan 00471 L4: SubagentStop is one of the live count's reconciliation points."""
+        from claude_code_hooks_daemon.utils.session_load import finished_agents
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.handlers.subagent_stop."
+            "subagent_cache_aggregator.ProjectContext.daemon_untracked_dir",
+            staticmethod(lambda: tmp_path),
+        )
+        handler.handle(
+            {
+                "session_id": "sess",
+                "agent_id": "a1",
+                "agent_transcript_path": str(transcript),
+                "background_tasks": [{"id": "t9", "type": "subagent", "status": "completed"}],
+            }
+        )
+        assert finished_agents(tmp_path, "sess") == frozenset({"t9"})
+
     # --- the write is best-effort, and that has to be provable ---
 
     def test_a_missing_project_context_does_not_raise(self, handler, transcript, monkeypatch):

@@ -699,6 +699,17 @@ handlers:
         max_resume_tokens: 150000
         warm_seconds: 300
 
+    # Plan 00471 L4/L5 (Fable ruling, owner-delegated): advisory only. Deny
+    # modes wait for ledger evidence that the live count is accurate.
+    spawn_rate_advisor:  # Names the live agents at the cap, and says serialise near the five-hour limit
+      enabled: true
+      priority: 60
+      options:
+        max_concurrent: 4      # Counts a cold resume as a spawn
+        advise_pct: 70         # Five-hour limit percentage, from the context sidecar
+        liveness_seconds: 120
+        max_age_seconds: 300   # An older sidecar is unknown and draws nothing
+
     installed_plugin_edit_advisor:  # Advises when a write lands in an installed Claude Code plugin (Plan 00468 G16)
       enabled: true
       priority: 42
@@ -1297,6 +1308,10 @@ handlers:
 
     teammate_reap_advisor:  # Reports the Stop payload's background_tasks count and names TaskStop (Plan 00419 N5)
       enabled: true  # Advisory only, rate-limited; silent when the list is absent or empty
+      priority: 9
+
+    background_task_recorder:  # Records which agent tasks a Stop reports finished, for the live count (Plan 00471 L4)
+      enabled: true  # Sensor only, never blocks
       priority: 9
 
     auto_continue_stop:  # Auto-continues after stop events based on criteria

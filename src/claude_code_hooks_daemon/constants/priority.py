@@ -180,6 +180,9 @@ class Priority:
     # release_blocker project handler at 8) -- it only has to reach the chain
     # before the terminal catch-all.
     TEAMMATE_REAP_ADVISOR = 9
+    # Plan 00471 L4: a silent sensor beside the reap advisor, ahead of the
+    # terminal auto_continue_stop (10), so every Stop's background_tasks lands.
+    BACKGROUND_TASK_RECORDER = 9
 
     # Plan 00446 (ledger 00422 N15): BELOW SUBAGENT_REPORT_PATH_VERIFIER's
     # sibling SUBAGENT_REPORT_SIZE_BLOCKER (15), which is terminal and matches
@@ -450,6 +453,8 @@ class Priority:
     SUBAGENT_CONTEXT_BUDGET = 39
     # Plan 00471 L3: same band and slot logic; it only ever sees SendMessage.
     RESUME_GUARD = 39
+    # Plan 00471 L4/L5: advisory only, so it sits in the advisory band.
+    SPAWN_RATE_ADVISOR = 60
     # Plan 00284: sibling gate at the same edit-time layer as plan_qa_edit,
     # deliberately a different check id/domain so priority collision with 44
     # is avoided while staying in the same workflow band.

@@ -360,6 +360,15 @@ handlers:
         max_resume_tokens: 250000
         warm_seconds: 300          # The subagent prompt-cache TTL; a warmer resume is never gated
 
+    spawn_rate_advisor:  # On a spawn or cold resume: names the live agents at max_concurrent; says serialise at advise_pct of the five-hour limit
+      enabled: true
+      priority: 60
+      options:
+        max_concurrent: null       # Off. Set (e.g. 4) to name the live agents at that count
+        advise_pct: 80             # Five-hour limit percentage (needs status_line.context_sidecar); null switches it off
+        liveness_seconds: 120      # An agent whose transcript moved within this and has not ended its turn is live
+        max_age_seconds: 300       # A context sidecar older than this is unknown and draws nothing
+
     installed_plugin_edit_advisor:  # Advises when a write lands in an installed Claude Code plugin's files
       enabled: true
       priority: 42
@@ -897,6 +906,10 @@ handlers:
 
     teammate_reap_advisor:  # Reports the Stop payload's background_tasks count and names TaskStop (Plan 00419 N5)
       enabled: true          # Advisory only, rate-limited; silent when the list is absent or empty
+      priority: 9
+
+    background_task_recorder:  # Records which agent tasks a Stop reports finished, so spawn_rate_advisor's live count drops them
+      enabled: true            # Sensor only, never blocks
       priority: 9
 
     auto_continue_stop:  # Auto-continues after stop events based on criteria
