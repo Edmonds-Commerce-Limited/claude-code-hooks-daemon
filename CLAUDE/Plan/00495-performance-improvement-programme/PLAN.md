@@ -1,6 +1,6 @@
 # Plan 00495: performance improvement programme
 
-**Status**: In Progress (Phase 1 done; Phase 2 fixes queued behind the open-branch limit)
+**Status**: In Progress (all three phases delivered; awaiting archive)
 **Created**: 2026-10-06
 **Owner**: dev
 **Priority**: High
@@ -85,9 +85,11 @@ Evidence already seen in this session (2026-10-06), not yet explained:
   v3.62 to v3.65 and v3.65 to v3.68. The shipped example config grew from 15 KB to 58 KB over the same span. The
   report names where to bisect further, if a fix needs it.
 
-- [ ] ⬜ **Task 1.4**: Refresh `CLAUDE/Performance/BASELINE.md` with the new figures, including the dispatch figure it
+- [x] ✅ **Task 1.4**: Refresh `CLAUDE/Performance/BASELINE.md` with the new figures, including the dispatch figure it
   marks "not re-measured". Also correct `CLAUDE/Performance/README.md:72`, which still lists the Rust transport
-  forwarder as "Never, until…" although `relay/hooks_relay.rs` exists (found by the plan's fact check).
+  forwarder as "Never, until…" although `relay/hooks_relay.rs` exists (found by the plan's fact check). Done in
+  COMMIT_HASH: BASELINE.md has a "Plan 00495 re-measurement" section (start 2.55 s -> 1.03 s CPU on the Phase 1 method;
+  dispatch 7.4 to 10.2 ms; a new finding in the content scanners), and the README row now reads "Landed, opt-in".
 
 ### Phase 2: Fix (TDD, one branch per fix)
 
@@ -123,21 +125,39 @@ Evidence already seen in this session (2026-10-06), not yet explained:
 
 ### Phase 3: Guard and decide
 
-- [ ] ⬜ **Task 3.1**: A startup-time regression check (a benchmark with a budget, run where it is cheap enough: a
-  release gate or a scheduled routine), so the next slowdown is caught by the project, not the owner.
-- [ ] ⬜ **Task 3.2**: Rust helpers for specific hot paths (owner ruling A3, 2026-10-06: no full rewrite was
+- [x] ✅ **Task 3.1**: A startup-time regression check (a benchmark with a budget, run where it is cheap enough: a
+  release gate or a scheduled routine), so the next slowdown is caught by the project, not the owner. Done in
+  COMMIT_HASH: `scripts/release/check_startup_budget.py`, a blocking release step (RELEASING.md Step 8b) with the budget
+  in `CLAUDE/Performance/startup-budget.json` (2 s CPU, median of 5, a failing round is measured again). A release step
+  and not the per-commit suite because a sample costs about a CPU-second; CPU seconds and a retry round so host load does
+  not flake it. Proof: a clean run printed PASS at 1.39 s, and with 1.5 s of CPU planted in the start path (a
+  `sitecustomize.py`) it printed FAIL at 2.92 s and exited 1; the planted-slowdown test (`tests/integration/ test_startup_budget_planted_slowdown.py`) does the same on every run of the slow tests.
+- [x] ✅ **Task 3.2**: Rust helpers for specific hot paths (owner ruling A3, 2026-10-06: no full rewrite was
   proposed; the question is whether particular heavy paths justify a Rust helper). From the Phase 1 and Phase 2
   numbers, name each path that stays heavy after the Python fixes (candidates to measure: the content scanners on large
   writes, the docs and plan QA sweeps, the transport path). For each, give the measured saving a native helper would
-  bring and its auditability cost, and put the list to the owner.
+  bring and its auditability cost, and put the list to the owner. Delivered in COMMIT_HASH:
+  [RUST-HELPERS-ASSESSMENT.md](RUST-HELPERS-ASSESSMENT.md) names six paths. None passes the cost test; the one path over
+  the budget (the secret-file guard, 1.2 s per 115 KB Write) is a Python algorithm problem. The owner's decision is put
+  to them in [Plan 00529](../00529-owner-decision-on-rust-helpers-from-00495-assessment/PLAN.md).
 
 ## Success Criteria
 
-- [ ] Session start shows the status bar within a budget set from the Phase 1 data. The budget is recorded in
-  `CLAUDE/Performance/README.md`.
-- [ ] No SessionStart handler is dropped for running past the dispatch budget on a normal host.
-- [ ] Every delivered fix has before and after numbers in this plan.
-- [ ] A regression check exists and fails on a planted slowdown.
+- [x] Session start shows the status bar within a budget set from the Phase 1 data. The budget (1 s to first output, 2 s
+  CPU for the start before the bind) is recorded in `CLAUDE/Performance/README.md`, section "Start-up budget". Measured
+  0.46 s and 0.21 s cold (Task 2.7), against up to 15 s and "DAEMON FAILED" in Phase 1.
+- [x] No SessionStart handler is dropped for running past the dispatch budget on a normal host. The chain on this
+  repository, the case that overran, is 1.9 to 2.2 s on a sweep-cache hit and 5.0 s on a miss against the 20 s budget
+  (Task 2.6, [report](subagent-reports/261015-p495-sweep-cache-implementer.md)); a client with the example config was 1.6 s
+  in Phase 1.
+- [x] Every delivered fix has before and after numbers in this plan (Tasks 2.2 to 2.7 above; Task 2.3 measured no change
+  and says so).
+- [x] A regression check exists and fails on a planted slowdown (Task 3.1: the demonstrated FAIL run and the
+  planted-slowdown test).
+- [x] The release-bound consequences are recorded in the pending-release holding area: release notes 067 to 070 in
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/` cover Phase 2 (067 sweeps, 068 config parsed once, 069 registry discovery,
+  070 socket bound first). Tasks 1.4, 3.1 and 3.2 change documentation and a release-procedure script that no client
+  install receives, so they have no release note.
 
 ## Delivery & Milestones
 

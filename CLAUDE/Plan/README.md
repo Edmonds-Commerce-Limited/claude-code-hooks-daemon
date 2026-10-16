@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00529: owner decision on rust helpers from 00495 assessment](00529-owner-decision-on-rust-helpers-from-00495-assessment/PLAN.md) - Not Started (Plan 00495 Task 3.2 found no path that justifies a native helper, and one Python defect: the secret-file guard spends 1.2 s on a 115 KB Write; awaiting the owner's decision on the assessment's three recommendations)
+
 - [00526: supervisor plugin relay result](00526-supervisor-plugin-relay-result/PLAN.md) - Not Started (#119, agent-needs-human: a plugin API 1.1 `Relay` result types external message text into the session; a new prompt-injection surface, so build or not is the owner's call)
 
 - [00524: foreground blocking wait goes to the background](00524-foreground-blocking-wait-goes-to-the-background/PLAN.md) - Not Started (#117, agent-needs-human: deny or advise a foreground wait-only Bash call; the existing liveness-loop fix text recommends one)

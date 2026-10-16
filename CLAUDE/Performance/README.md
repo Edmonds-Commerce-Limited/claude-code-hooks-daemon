@@ -42,34 +42,56 @@ is only a problem when it crosses a budget:
 See [BASELINE.md](BASELINE.md) for the full measured baseline and how to
 reproduce it. Headline p50 figures:
 
-| Surface                                              | Measured             | Where the time goes                                                                |
-| ---------------------------------------------------- | -------------------- | ---------------------------------------------------------------------------------- |
-| PreToolUse event, end-to-end                         | ~45 ms               | daemon side 1.8 ms (4%); rest is forwarder process spawns                          |
-| — bash forwarder spawns                              | ~43 ms               | `jq` ~22-24 ms, `python3` transport ~19-21 ms, `init.sh` source ~13 ms, bash ~2 ms |
-| — daemon dispatch (socket+JSON+pydantic+38 handlers) | 1.8 ms               | ~1.4 ms of it is one handler forking `git remote` per Bash event (T1)              |
-| Status-line render (daemon side)                     | 15.75 ms             | ~5 git forks per render (T4)                                                       |
-| Content scanners                                     | ~48 µs/KB (security) | 74% of daemon CPU under load is `re.search` (T5)                                   |
-| RSS (fresh) / cold restart                           | 51 MB / 1.26 s       | one-off per session/upgrade                                                        |
+| Surface                                              | Measured             | Where the time goes                                                                                                                                                |
+| ---------------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| PreToolUse event, end-to-end                         | ~45 ms               | daemon side 1.8 ms (4%); rest is forwarder process spawns                                                                                                          |
+| — bash forwarder spawns                              | ~43 ms               | `jq` ~22-24 ms, `python3` transport ~19-21 ms, `init.sh` source ~13 ms, bash ~2 ms                                                                                 |
+| — daemon dispatch (socket+JSON+pydantic+38 handlers) | 1.8 ms               | ~1.4 ms of it is one handler forking `git remote` per Bash event (T1); re-measured in Plan 00495 at 7.4 ms (47 handlers) to 10.2 ms (80 handlers), see BASELINE.md |
+| Status-line render (daemon side)                     | 15.75 ms             | ~5 git forks per render (T4)                                                                                                                                       |
+| Content scanners                                     | ~48 µs/KB (security) | 74% of daemon CPU under load is `re.search` (T5)                                                                                                                   |
+| RSS (fresh) / cold restart                           | 51 MB / 1.26 s       | one-off per session/upgrade                                                                                                                                        |
+
+Plan 00495 re-measured the daemon start at 1.0-1.1 s CPU (it had grown to 2.5 s) and the dispatch and scanner costs
+above; the figures are in [BASELINE.md](BASELINE.md).
 
 **Takeaway**: the Python daemon is not the cost. The forwarder's per-event
 process spawns are. No Rust rewrite is justified; the free Python/bash wins
-below beat any daemon rewrite's ceiling.
+below beat any daemon rewrite's ceiling. (Plan 00495 found one exception to
+"the daemon is not the cost": the secret-file guard's scan of Write content,
+see [RUST-HELPERS-ASSESSMENT.md](../Plan/00495-performance-improvement-programme/RUST-HELPERS-ASSESSMENT.md).)
+
+## Start-up budget
+
+Set by Plan 00495 from its Phase 1 profile and the post-fix re-measurement. The owner's complaint was the status bar
+taking a long time to appear when a session starts; the status bar waits on the daemon's start, so the budget is on that.
+
+| Budget                                                         | Value                 | Basis                                                                                                                                                                                                                                                           |
+| -------------------------------------------------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Status bar shows output after a cold session start             | 1 s                   | Phase 1: up to 15 s and then "DAEMON FAILED". The forwarder now asks for a non-blocking start with a 1 s deadline and prints a loading line (measured 0.21-0.46 s cold)                                                                                         |
+| Daemon start CPU before the socket is bound (example config)   | 2 s CPU (median of 5) | Phase 1: 1.0 s at v3.30/v3.40, 2.5 s at v3.68/main. After the Phase 2 fixes: 1.0-1.1 s on a quiet host, 1.4-1.6 s with the host load at 12 on 8 cores (CPU time inflates under contention). 2 s is 20% under the figure the owner reported and clears that load |
+| First request answered by a cold daemon (idle host, wall time) | 3 s                   | 1.5 s median after Task 2.5; twice that leaves room for a slower disk. Not gated: wall time flakes under host load, so the CPU line is what is enforced                                                                                                         |
+
+The 2 s CPU line is enforced by `scripts/release/check_startup_budget.py`, a blocking release step (RELEASING.md, Step
+8b) that reads `CLAUDE/Performance/startup-budget.json`. It runs at release rather than per commit because a sample costs
+about a CPU-second, and it counts CPU seconds so that other agents' test runs do not flake it. A failing round is
+measured again and the check fails only if both rounds are over, so load noise passes and a real slowdown does not. The
+budget is raised only by a decision recorded here with the new measurement, never to make a failing release pass.
 
 ## Tuning backlog
 
 Ordered by measured impact. Full detail + magnitudes:
 [Plan 00154 PYTHON-TUNING.md](../Plan/Completed/00154-daemon-performance-rust-vs-python-research/PYTHON-TUNING.md).
 
-| ID  | Change                                                         | Expected                        | Risk                    | Status                                           | Plan  |
-| --- | -------------------------------------------------------------- | ------------------------------- | ----------------------- | ------------------------------------------------ | ----- |
-| T1  | Cache `is_hooks_daemon_repo` (stop per-Bash `git remote` fork) | −1.4 ms/Bash event              | near-zero               | Landed (1076→2.1 µs)                             | 00155 |
-| T4  | Status-line git: short per-cwd TTL cache                       | render 10.4 ms → ~4 µs (cached) | low                     | Landed                                           | 00155 |
-| —   | Delete broken legacy one-shot `hooks/*.py` package             | correctness                     | low                     | Landed (deleted)                                 | 00155 |
-| T2  | Drop `jq` from hook wrappers (transport does JSON wrap/unwrap) | −22 ms/event                    | medium (transport)      | Landed (jq-free transport)                       | 00156 |
-| T3  | Slim `init.sh` hot path (subshells, mkdir, tr pipelines)       | est. −5-8 ms/event              | medium (edge cases)     | Landed (portable tier, ~1.4 ms/event)            | 00156 |
-| T5  | Single-pass/combined-alternation content scanning              | est. 2-5× on ≥100 KB writes     | medium                  | Deferred (only if large writes common)           | —     |
-| T6  | `orjson` socket encode/decode                                  | −1-3 ms at MB payloads only     | low (adds compiled dep) | Not recommended                                  | —     |
-| —   | Compiled transport forwarder (Rust, policy-free)               | 45 → ~3-5 ms                    | high (distribution)     | Never, until free wins land + budget still fails | —     |
+| ID  | Change                                                         | Expected                        | Risk                    | Status                                                                                       | Plan  |
+| --- | -------------------------------------------------------------- | ------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------- | ----- |
+| T1  | Cache `is_hooks_daemon_repo` (stop per-Bash `git remote` fork) | −1.4 ms/Bash event              | near-zero               | Landed (1076→2.1 µs)                                                                         | 00155 |
+| T4  | Status-line git: short per-cwd TTL cache                       | render 10.4 ms → ~4 µs (cached) | low                     | Landed                                                                                       | 00155 |
+| —   | Delete broken legacy one-shot `hooks/*.py` package             | correctness                     | low                     | Landed (deleted)                                                                             | 00155 |
+| T2  | Drop `jq` from hook wrappers (transport does JSON wrap/unwrap) | −22 ms/event                    | medium (transport)      | Landed (jq-free transport)                                                                   | 00156 |
+| T3  | Slim `init.sh` hot path (subshells, mkdir, tr pipelines)       | est. −5-8 ms/event              | medium (edge cases)     | Landed (portable tier, ~1.4 ms/event)                                                        | 00156 |
+| T5  | Single-pass/combined-alternation content scanning              | est. 2-5× on ≥100 KB writes     | medium                  | Deferred (only if large writes common)                                                       | —     |
+| T6  | `orjson` socket encode/decode                                  | −1-3 ms at MB payloads only     | low (adds compiled dep) | Not recommended                                                                              | —     |
+| —   | Compiled transport forwarder (Rust, policy-free)               | 45 → ~3-5 ms                    | high (distribution)     | Landed, opt-in (`relay/hooks_relay.rs`; 4.3 ms p50 against 34.1 ms for the Python transport) | 00290 |
 
 ## Waves
 

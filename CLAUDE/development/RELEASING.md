@@ -150,7 +150,7 @@ gh release delete vX.Y.Z --yes
 5.  Release Notes Creation (Agent)
 6.  Move UNRELEASED Post-Upgrade Tasks   <- BLOCKING
 7.  Opus Documentation Review
-8.  QA Verification Gate                 <- BLOCKING
+8.  QA Verification Gate                 <- BLOCKING   8b Start-up Budget Gate <- BLOCKING
 9.  Breaking Changes Check               <- BLOCKING
 10. Code Review Gate                     <- BLOCKING
 11. CLAUDE.md Guidance Audit             <- BLOCKING
@@ -579,6 +579,25 @@ gate, not a separate step: `tests/integration/test_skill_surface_coherence.py`
 registered handler is invisible to `optimise`, when the skill documents a CLI
 verb that does not exist, names a retired handler, or references a config key
 the schema does not define.
+
+### Step 8b: Start-up Budget Gate (BLOCKING, Plan 00495)
+
+Main Claude runs, after Step 8:
+
+```bash
+source scripts/lib/resolve_venv.sh
+PY="$(resolve_venv_python /workspace)"
+"$PY" scripts/release/check_startup_budget.py
+```
+
+It measures the CPU a daemon start spends before it binds its socket (fresh process, throwaway project, shipped example
+config) and fails when the median is over the budget in `CLAUDE/Performance/startup-budget.json`. ANY non-zero exit =
+ABORT: 1 means the start got slower than the budget (find the commit that added the cost; do not raise the budget to
+pass), 2 means the measurement itself failed.
+
+It is a release step, not part of `llm_qa.py all`, because a sample costs about a CPU-second and five are taken. It
+measures CPU seconds, so other agents running tests on the host do not flake it. The budget and why it has that value
+are in [../Performance/README.md](../Performance/README.md#start-up-budget).
 
 ---
 
@@ -1089,7 +1108,7 @@ the result.
 #    task index; fold every
 #    UNRELEASED/release-notes/NNN-*.md callout into RELEASES/vX.Y.Z.md and move
 #    the files into the guide's release-notes/
-# 5. Run QA: ./scripts/qa/llm_qa.py all
+# 5. Run QA: ./scripts/qa/llm_qa.py all, then scripts/release/check_startup_budget.py (Step 8b; non-zero = do not release)
 # 6. Commit and push
 # 7. Body: scripts/release/build_github_release_body.py vX.Y.Z   (BEFORE the tag; non-zero = do not tag)
 # 8. Tag: git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z
