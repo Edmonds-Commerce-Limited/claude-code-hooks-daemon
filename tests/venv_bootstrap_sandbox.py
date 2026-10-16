@@ -37,6 +37,19 @@ BUILD_WAIT_SECONDS: Final[float] = 30.0
 CLONE_VERSION: Final[str] = "3.61.0"
 OTHER_VIEW_VENV: Final[str] = "venv-home_dev_project_claude_hooks-daemon-py311-0badc0de"
 
+#: Where the stub ``uv`` (with ``embed_build_paths``) writes the files that bind
+#: a real venv to the absolute path it was built at, relative to the venv.
+UV_SITE_PACKAGES: Final[str] = "lib/python3.11/site-packages"
+UV_DIST_INFO: Final[str] = "claude_code_hooks_daemon-0.0.0.dist-info"
+UV_EDITABLE_PTH: Final[str] = "__editable__.claude_code_hooks_daemon-0.0.0.pth"
+UV_CONSOLE_SCRIPT: Final[str] = "bin/hooks-tool"
+UV_EMBEDDED_PATH_FILES: Final[tuple[str, ...]] = (
+    f"{UV_SITE_PACKAGES}/{UV_EDITABLE_PTH}",
+    f"{UV_SITE_PACKAGES}/{UV_DIST_INFO}/direct_url.json",
+    UV_CONSOLE_SCRIPT,
+    "bin/activate",
+)
+
 #: init.sh's own per-source runtime file (the hourly exec-bit throttle). It
 #: predates Plan 00456 and is written on every source, so "changes nothing" is
 #: judged without it.
@@ -157,16 +170,38 @@ class Sandbox:
                 (tools / tool).symlink_to(real)
         (self.root / "home").mkdir()
 
-    def stub_uv(self, *, sleep: float = 0.0, fail: bool = False, in_uv_home: bool = False) -> None:
+    def stub_uv(
+        self,
+        *,
+        sleep: float = 0.0,
+        fail: bool = False,
+        in_uv_home: bool = False,
+        embed_build_paths: bool = False,
+    ) -> None:
         """Put a `uv` on PATH that builds (or fails to build) a usable venv.
 
         With ``in_uv_home`` it goes in ``$HOME/.local/bin`` instead, where uv's
         own installer puts it and which the caller's PATH does not name.
+
+        With ``embed_build_paths`` the venv also carries the absolute paths a
+        real ``uv sync`` writes into one (UV_EMBEDDED_PATH_FILES): the editable
+        install's ``.pth`` naming ``<project>/src``, its ``direct_url.json``, a
+        console script whose shebang names the venv's interpreter, and an
+        activate script. A venv is bound to the path it was built at by exactly
+        these files.
+
+        The stub's ``bin/python`` runs ``$SANDBOX_CLI_HOOK`` (bash, given the
+        CLI verb as ``$1``) before any daemon CLI call when it is set; a hook
+        that fails fails the call.
         """
         stub_dir = self.root / "home" / ".local" / "bin" if in_uv_home else self.root / "uv-stub"
         stub_dir.mkdir(parents=True, exist_ok=True)
         venv_python = textwrap.dedent(f"""\
             #!/bin/bash
+            if [ "${{1:-}}" = "-m" ] && [ "${{2:-}}" = "claude_code_hooks_daemon.daemon.cli" ] \\
+                    && [ -n "${{SANDBOX_CLI_HOOK:-}}" ]; then
+                bash -c "$SANDBOX_CLI_HOOK" sandbox-cli-hook "${{!#}}" || exit 1
+            fi
             if [ "${{1:-}}" = "-m" ] && [ "${{2:-}}" = "claude_code_hooks_daemon.daemon.cli" ] \\
                     && {{ [ "${{!#}}" = "start" ] || [ "${{!#}}" = "restart" ]; }}; then
                 echo "$0" >> "{self.start_log}"
@@ -200,6 +235,22 @@ class Sandbox:
             """)
         template = self.root / "venv-python.template"
         template.write_text(venv_python)
+        embed = textwrap.dedent(f"""\
+            project=""
+            while [ "$#" -gt 0 ]; do
+                if [ "$1" = "--project" ]; then project="$2"; fi
+                shift
+            done
+            venv="$UV_PROJECT_ENVIRONMENT"
+            site="$venv/{UV_SITE_PACKAGES}"
+            mkdir -p "$site/{UV_DIST_INFO}"
+            printf '%s/src\\n' "$project" > "$site/{UV_EDITABLE_PTH}"
+            printf '{{"url":"file://%s","dir_info":{{"editable":true}}}}' "$project" \\
+                > "$site/{UV_DIST_INFO}/direct_url.json"
+            printf '#!%s/bin/python\\nimport sys\\n' "$venv" > "$venv/{UV_CONSOLE_SCRIPT}"
+            chmod +x "$venv/{UV_CONSOLE_SCRIPT}"
+            printf 'VIRTUAL_ENV=%s\\nexport VIRTUAL_ENV\\n' "$venv" > "$venv/bin/activate"
+            """)
         (stub_dir / "uv").write_text(textwrap.dedent(f"""\
             #!/bin/bash
             echo "uv $* target=${{UV_PROJECT_ENVIRONMENT:-UNSET}}" >> "{self.uv_log}"
@@ -211,7 +262,7 @@ class Sandbox:
             mkdir -p "$UV_PROJECT_ENVIRONMENT/bin"
             cp "{template}" "$UV_PROJECT_ENVIRONMENT/bin/python"
             chmod +x "$UV_PROJECT_ENVIRONMENT/bin/python"
-            """))
+            """) + (embed if embed_build_paths else ""))
         (stub_dir / "uv").chmod(0o755)
 
     def other_view_venv(self) -> Path:

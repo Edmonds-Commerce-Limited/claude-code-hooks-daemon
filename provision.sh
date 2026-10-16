@@ -29,18 +29,20 @@
 #
 # A clone that is already there is SYNCED to the expected version instead
 # (a pull changed daemon.expected_version, so the gitignored clone is behind or
-# ahead of it). First, BESIDE the running daemon and touching nothing it imports
-# from: the same tag fetch and version check, the tag checked out in its own
-# worktree (untracked/sync-stage), the target release's own pre-deploy gate run
-# from there (the one upgrade runs; it may stop for the reading list, and
-# --skip-reading-confirmation=<digest> confirms it), and a trial build of the
-# target's venv there. Only then the switch: the old daemon is stopped, the clone
-# checks out the tag, its venv is rebuilt in place (from the cache the trial
-# build filled) and the new daemon is started, while a marker keeps hooks from
-# starting one from the half-switched clone. A clone already at the version is
-# left alone. A failure before the switch changes nothing and never stops the
-# old daemon; one during it puts the previous commit and venv back and starts
-# the old daemon again.
+# ahead of it). First, in a STAGE under the clone's untracked/, writing nothing
+# else of the live clone: the tag fetched from the same URL into a clone of its
+# own, its version checked, the target release's own pre-deploy gate run from
+# there (the one upgrade runs; it may stop for the reading list, and
+# --skip-reading-confirmation=<digest> confirms it), the target's venv built
+# there by its own build path and rebound to the live path. Only then the
+# switch: the old daemon is stopped, the daemon's state under untracked/ is moved
+# into the stage, the stage is swapped in by renames, the old clone is kept
+# beside it, and the new daemon is started; the old clone goes once the new
+# daemon answers. A marker keeps hooks from starting a daemon mid-switch. A
+# clone already at the version is left alone. A failure before the switch
+# changes nothing and never stops the old daemon; one during it swaps the old
+# clone back and starts its daemon again, and a switch a killed run left
+# half-done is undone the same way by the next run.
 #
 # --background is that sync, started detached by the tracked session-start
 # forwarder at every session start (Plan 00477 Task 5.2); it does nothing unless
@@ -62,7 +64,8 @@
 #   - keep a fetched tag whose version.py does not name the version asked for;
 #   - replace a modified clone: one with tracked changes, files outside
 #     untracked/, a foreign origin or no git checkout is refused untouched. A
-#     clean one is synced, never replaced;
+#     clean one is synced; its gitignored build caches outside untracked/
+#     (__pycache__ and the like) stay with the old clone;
 #   - run config migrations or regenerate docs: moving a PROJECT to a new
 #     version is upgrade, which also writes the tracked files.
 #
@@ -150,6 +153,221 @@ if [[ "$DAEMON_DIR" != "$PROJECT_PATH/.claude/hooks-daemon" ]]; then
 fi
 
 # ------------------------------------------------------------------
+# The switch to another version, and undoing one a killed run left
+# ------------------------------------------------------------------
+# A sync builds the target in a stage under the clone's gitignored untracked/.
+# With the old daemon stopped, the old clone's untracked/ entries (the daemon's
+# state) are moved into the stage, each name written to the stage's manifest
+# first, and three renames swap it in:
+#   1. the live clone                       -> SYNC_ASIDE_DIR, beside it
+#   2. SYNC_ASIDE_DIR/untracked/sync-stage  -> the live path
+#   3. SYNC_ASIDE_DIR                       -> <live>/untracked/sync-previous
+# The old clone stays there until the new daemon answers, then it is renamed to
+# sync-previous.discard and removed. A run killed anywhere in between leaves a
+# state the next run tells apart by what exists, and undoes (Plan 00477).
+readonly SYNC_STAGE_DIR_NAME="sync-stage"
+readonly SYNC_PREVIOUS_DIR_NAME="sync-previous"
+readonly SYNC_CARRIED_MANIFEST=".sync-carried"
+# Under the clone's untracked/. Keep equal to SYNC_STATE_DIR_NAME in
+# install/background_sync.py, which reads the state back (a test asserts it).
+readonly SYNC_STATE_DIR_NAME="background-sync"
+readonly SYNC_STAGE_DIR="$DAEMON_DIR/untracked/$SYNC_STAGE_DIR_NAME"
+readonly SYNC_PREVIOUS_DIR="$DAEMON_DIR/untracked/$SYNC_PREVIOUS_DIR_NAME"
+readonly SYNC_ASIDE_DIR="$DAEMON_DIR.$SYNC_PREVIOUS_DIR_NAME"
+
+# Rename a directory to a path nothing holds. Should a directory appear there
+# first, mv would move the source INTO it; that is undone and is a failure.
+_provision_rename() {
+    local from="$1" to="$2"
+    if [[ -e "$to" || -L "$to" ]]; then
+        _provision_say "Cannot rename $from to $to: something is already there."
+        return 1
+    fi
+    mv -- "$from" "$to" || return 1
+    if [[ -e "$to/${from##*/}" && ! -e "$from" ]]; then
+        mv -- "$to/${from##*/}" "$from"
+        _provision_say "Cannot rename $from to $to: a directory appeared there first."
+        return 1
+    fi
+}
+
+# Is this directory only the untracked/ skeleton init.sh creates when a hook
+# runs while the live path is empty? Nothing holding a checkout, source, a
+# venv or a switch's directories counts.
+_provision_is_skeleton() {
+    local dir="$1" entry
+    local -a entries
+    shopt -s nullglob dotglob
+    entries=("$dir"/* "$dir"/untracked/*)
+    shopt -u nullglob dotglob
+    for entry in ${entries[@]+"${entries[@]}"}; do
+        case "${entry#"$dir"/}" in
+            untracked) ;;
+            untracked/venv-* | "untracked/$SYNC_STAGE_DIR_NAME" | "untracked/$SYNC_PREVIOUS_DIR_NAME") return 1 ;;
+            untracked/*) ;;
+            *) return 1 ;;
+        esac
+    done
+}
+
+# Rename a clone onto the live path, clearing a skeleton a hook left there in
+# the instant the path was empty.
+_provision_rename_onto_live() {
+    if [[ -d "$DAEMON_DIR" ]] && _provision_is_skeleton "$DAEMON_DIR"; then
+        rm -rf -- "$DAEMON_DIR"
+    fi
+    _provision_rename "$1" "$DAEMON_DIR"
+}
+
+# A live process, other than this one, holding a switch marker anywhere a switch
+# leaves one. Prints its pid; returns 1 when there is none.
+_provision_live_switch_holder() {
+    local dir marker holder
+    for dir in "$DAEMON_DIR" "$SYNC_STAGE_DIR" "$SYNC_ASIDE_DIR" "$SYNC_ASIDE_DIR/untracked/$SYNC_STAGE_DIR_NAME"; do
+        marker="$dir/untracked/$_HOOKS_DAEMON_SWITCH_MARKER_NAME"
+        [[ -f "$marker" ]] || continue
+        holder=""
+        IFS= read -r holder < "$marker" || [[ -n "$holder" ]] || continue
+        if [[ "$holder" =~ ^[0-9]+$ && "$holder" != "$$" ]] && kill -0 "$holder" 2> /dev/null; then
+            printf '%s' "$holder"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# is_daemon_running, asked afresh. A sync asks about more than one daemon (the
+# old one, then the one it starts), and init.sh's helper proves at most one pid
+# per process, answering "not proven" for any other; a subshell starts clean.
+_provision_daemon_running() (
+    _HOOKS_DAEMON_HELPER_KEY=""
+    is_daemon_running
+)
+
+# Stop the daemon running from the clone, if one is. Returns 1 when it would not.
+_provision_stop_daemon() {
+    local running=0
+    _provision_daemon_running || running=$?
+    if ((running == 1)); then
+        return 0
+    fi
+    bash "$DAEMON_DIR/bin/hooks-daemon" stop
+}
+
+# Remove the stage, and the target clone and venv in it.
+_provision_stage_remove() {
+    rm -rf -- "$SYNC_STAGE_DIR"
+}
+
+# Move the daemon's state back from the stage to the live untracked/, by the
+# manifest written before each entry was moved. An entry the live untracked/
+# holds again (a hook re-created it) stays in the stage and goes with it.
+_provision_uncarry() {
+    local stage_untracked="$SYNC_STAGE_DIR/untracked" name
+    while IFS= read -r name; do
+        [[ -n "$name" ]] || continue
+        if [[ -e "$stage_untracked/$name" || -L "$stage_untracked/$name" ]] \
+            && [[ ! -e "$DAEMON_DIR/untracked/$name" ]]; then
+            mv -- "$stage_untracked/$name" "$DAEMON_DIR/untracked/$name" || return 1
+        fi
+    done < "$stage_untracked/$SYNC_CARRIED_MANIFEST"
+}
+
+# A background sync's record left at "running" by a process that is gone is
+# rewritten as failed, naming the switch that was undone.
+_provision_record_interrupted() {
+    local state key value status pid line
+    local -a states lines
+    shopt -s nullglob
+    states=("$DAEMON_DIR/untracked/$SYNC_STATE_DIR_NAME"/v*.state)
+    shopt -u nullglob
+    for state in ${states[@]+"${states[@]}"}; do
+        status=""
+        pid=""
+        lines=()
+        while IFS='=' read -r key value; do
+            case "$key" in
+                status) status="$value" ;;
+                pid) pid="$value" ;;
+                detail) continue ;;
+            esac
+            lines+=("$key=$value")
+        done < "$state"
+        [[ "$status" == "running" && "$pid" =~ ^[0-9]+$ ]] || continue
+        if kill -0 "$pid" 2> /dev/null; then
+            continue
+        fi
+        {
+            for line in "${lines[@]}"; do
+                [[ "$line" == status=* ]] && line="status=failed"
+                printf '%s\n' "$line"
+            done
+            printf 'detail=%s\n' "the sync (pid $pid) was killed during the switch; the previous version was put back"
+        } > "$state.tmp.$$" && mv -f "$state.tmp.$$" "$state"
+    done
+}
+
+# Undo a switch from whatever it left, and start the previous daemon again.
+# Returns 0 when no switch had begun or it was undone; 1, with the reason
+# printed, when it could not be.
+_provision_recover_switch() {
+    local recovered=false
+    if [[ -d "$SYNC_PREVIOUS_DIR.discard" ]]; then
+        rm -rf -- "$SYNC_PREVIOUS_DIR.discard"
+    fi
+    if [[ -d "$SYNC_ASIDE_DIR" ]]; then
+        recovered=true
+        if [[ -e "$DAEMON_DIR/.git" ]]; then
+            # After the second rename: the target is live, the old clone beside it.
+            _provision_rename "$SYNC_ASIDE_DIR" "$SYNC_PREVIOUS_DIR" || return 1
+        else
+            # After the first: only the old clone, beside an empty live path.
+            _provision_rename_onto_live "$SYNC_ASIDE_DIR" || return 1
+        fi
+    fi
+    if [[ -d "$SYNC_PREVIOUS_DIR" ]]; then
+        recovered=true
+        if ! _provision_stop_daemon; then
+            _provision_say "The daemon running from the swapped-in clone did not stop, so the old clone was not put back."
+            return 1
+        fi
+        _provision_rename "$SYNC_PREVIOUS_DIR" "$SYNC_ASIDE_DIR" || return 1
+        _provision_rename "$DAEMON_DIR" "$SYNC_ASIDE_DIR/untracked/$SYNC_STAGE_DIR_NAME" || return 1
+        _provision_rename_onto_live "$SYNC_ASIDE_DIR" || return 1
+    fi
+    if [[ -f "$SYNC_STAGE_DIR/untracked/$SYNC_CARRIED_MANIFEST" ]]; then
+        recovered=true
+        _provision_uncarry || return 1
+    fi
+    [[ "$recovered" == true ]] || return 0
+
+    _provision_stage_remove
+    rm -f "$DAEMON_DIR/untracked/$_HOOKS_DAEMON_SWITCH_MARKER_NAME"
+    _provision_record_interrupted
+    local previous
+    previous="$(_clone_version)" || previous="unreadable"
+    if bash "$DAEMON_DIR/bin/hooks-daemon" restart; then
+        _provision_say "RECOVERED: a switch to another version was undone; v$previous is back in place and its daemon was started again."
+    else
+        _provision_say "RECOVERED: a switch to another version was undone; v$previous is back in place."
+        _provision_say "WARNING: its daemon did not start. Try: $DAEMON_DIR/bin/hooks-daemon restart"
+    fi
+}
+
+if _PROVISION_SWITCH_HOLDER="$(_provision_live_switch_holder)"; then
+    if [[ "$BACKGROUND" == true ]]; then
+        _provision_say "Another provision (pid $_PROVISION_SWITCH_HOLDER) is switching the daemon clone; nothing to do."
+        exit 0
+    fi
+    _provision_fail "another provision (pid $_PROVISION_SWITCH_HOLDER) is switching the daemon clone to another version right now." \
+        "Nothing was changed. Wait for it to finish, then run this again."
+fi
+if ! _provision_recover_switch; then
+    _provision_fail "a switch to another version that a killed run left half-done could not be undone (the reason is above)." \
+        "Nothing else was changed. Fix that, then run this again: it retries the undo first."
+fi
+
+# ------------------------------------------------------------------
 # Step 1: which version?
 # ------------------------------------------------------------------
 if ! _resolve_expected_version; then
@@ -172,7 +390,7 @@ TAG="v$VERSION"
 _provision_say "Provisioning the hooks daemon $TAG for this checkout (version from $_HOOKS_DAEMON_EXPECTED_VERSION_SOURCE)."
 
 # ------------------------------------------------------------------
-# Syncing a clone that is already here (Plan 00477 Task 5.2a)
+# Syncing a clone that is already here (Plan 00477 Tasks 5.2a, 5.2)
 # ------------------------------------------------------------------
 # The same gate, python floor and time limit scripts/upgrade_version.sh uses.
 readonly GATE_PYTHON_FLOOR="3.11"
@@ -180,22 +398,14 @@ readonly GATE_TIMEOUT_SECONDS=300
 readonly GATE_NEEDS_ACKNOWLEDGEMENT=3
 readonly SYNC_STAMP_FILE=".daemon-version"
 
-# How far a sync has got. Beside the live daemon, which nothing here touches:
-# fetched, then staged (the target is checked out in its own worktree, where its
-# gate runs and its venv is trial-built). The switch: stopped (the old daemon is
-# down), checked-out, venv (the in-place venv build has started), restart.
-SYNC_PHASE="fetched"
-# The target's staged worktree, under the clone's gitignored untracked/.
-SYNC_STAGE_DIR=""
-readonly SYNC_STAGE_DIR_NAME="sync-stage"
+# How far a sync has got: staged (beside the live daemon, which is untouched),
+# then switching (the old daemon is being stopped, or is down).
+SYNC_PHASE="staged"
 PRESENT_VERSION=""
-PREVIOUS_COMMIT=""
-PREVIOUS_CHECKOUT=""
-TAG_KNOWN_BEFORE=false
-# The clone's own venv, and where it is set aside while the target's is built:
-# the build replaces it in place, so a failed one would otherwise leave none.
-SYNC_VENV_DIR=""
-SYNC_VENV_BACKUP=""
+# The live venv's name, which stays with the old clone, and the staged venv's
+# name once it is rebound to the live path.
+SYNC_OLD_VENV_NAME=""
+SYNC_NEW_VENV_NAME=""
 
 _provision_clone_git() {
     git -C "$DAEMON_DIR" "$@"
@@ -221,7 +431,7 @@ _provision_sync_refuse() {
 }
 
 # The checks that decide whether provision may touch this clone at all. Sets
-# PREVIOUS_COMMIT and PREVIOUS_CHECKOUT (what to return to).
+# SYNC_OLD_VENV_NAME when the live venv is one of the clone's own.
 _provision_sync_preflight() {
     local toplevel real_dir origin dirty line count=0
     local -a shown=()
@@ -256,18 +466,9 @@ _provision_sync_preflight() {
             "Commit, move or discard them yourself first. Changed ($count):" \
             "${shown[@]}"
     fi
-    if SYNC_VENV_DIR="$(_provision_own_venv_dir)"; then
-        SYNC_VENV_BACKUP="$DAEMON_DIR/untracked/.sync-backup-$(basename "$SYNC_VENV_DIR")"
-        if [[ -e "$SYNC_VENV_BACKUP" ]]; then
-            _provision_sync_refuse "an earlier sync left its set-aside venv at $SYNC_VENV_BACKUP." \
-                "It may be the only copy of a working venv: inspect it, then move it back or remove it."
-        fi
-    fi
-    if ! PREVIOUS_COMMIT="$(_provision_clone_git rev-parse --verify HEAD)"; then
-        _provision_sync_refuse "the clone has no commit checked out."
-    fi
-    if ! PREVIOUS_CHECKOUT="$(_provision_clone_git symbolic-ref -q --short HEAD)"; then
-        PREVIOUS_CHECKOUT="$PREVIOUS_COMMIT"
+    local old_venv
+    if old_venv="$(_provision_own_venv_dir)"; then
+        SYNC_OLD_VENV_NAME="${old_venv##*/}"
     fi
 }
 
@@ -282,20 +483,6 @@ _provision_own_venv_dir() {
         "$daemon_real"/untracked/venv-*) printf '%s' "$venv_dir" ;;
         *) return 1 ;;
     esac
-}
-
-# Forget a tag this sync fetched, so a refused tag leaves no ref behind.
-_provision_sync_forget_tag() {
-    if [[ "$TAG_KNOWN_BEFORE" == false ]]; then
-        if ! _provision_clone_git tag -d "$TAG" > /dev/null; then
-            _provision_say "WARNING: could not remove the fetched tag $TAG from the clone's refs."
-        fi
-    fi
-}
-
-# Put the recorded commit back. Returns 1 when it cannot be.
-_provision_sync_restore_checkout() {
-    _provision_clone_git -c advice.detachedHead=false checkout -q "$PREVIOUS_CHECKOUT"
 }
 
 # The target release's own pre-deploy gate, run from the staged tree the way
@@ -404,111 +591,28 @@ _provision_gate() (
     exit "$gate_exit"
 )
 
-# The target's own worktree beside the live checkout, at the tag. Returns 1 when
-# git cannot make it. A stage an earlier, killed sync left behind is replaced.
+# The target as a clone of its own in the stage, the one tag fetched from the
+# fixed URL. Nothing of the live clone, its git directory included, is written.
+# A stage an earlier, killed sync left behind is replaced. Fails, and exits,
+# when the tag cannot be fetched or does not name its own version.
 _provision_stage_target() {
-    SYNC_STAGE_DIR="$DAEMON_DIR/untracked/$SYNC_STAGE_DIR_NAME"
+    local -a stage_git=(git -C "$SYNC_STAGE_DIR")
     _provision_stage_remove
-    _provision_clone_git -c advice.detachedHead=false worktree add -q --detach \
-        "$SYNC_STAGE_DIR" "refs/tags/$TAG"
-}
-
-# Remove the staged worktree, its trial venv with it, and git's record of it.
-_provision_stage_remove() {
-    [[ -n "$SYNC_STAGE_DIR" ]] || return 0
-    if [[ -e "$SYNC_STAGE_DIR" ]] && ! _provision_clone_git worktree remove --force "$SYNC_STAGE_DIR"; then
-        rm -rf "$SYNC_STAGE_DIR"
+    mkdir -p "$SYNC_STAGE_DIR"
+    if ! "${stage_git[@]}" -c init.defaultBranch=main init -q \
+        || ! "${stage_git[@]}" remote add origin "$PROVISION_REPO_URL"; then
+        _provision_stage_remove
+        _provision_fail "could not create a git checkout at $SYNC_STAGE_DIR." "The clone was not changed."
     fi
-    if ! _provision_clone_git worktree prune; then
-        _provision_say "WARNING: git could not prune the record of $SYNC_STAGE_DIR from the clone."
-    fi
-}
-
-# Hold the switch marker init.sh honours: no hook starts a daemon from the clone
-# while it is mid-switch (_daemon_switch_in_progress).
-_provision_switch_begin() {
-    printf '%s\n' "$$" > "$DAEMON_DIR/untracked/$_HOOKS_DAEMON_SWITCH_MARKER_NAME"
-}
-
-_provision_switch_end() {
-    rm -f "$DAEMON_DIR/untracked/$_HOOKS_DAEMON_SWITCH_MARKER_NAME"
-}
-
-# Stop the daemon running from the clone, if one is. Returns 1 when it would not.
-_provision_stop_daemon() {
-    local running=0
-    is_daemon_running || running=$?
-    if ((running == 1)); then
-        return 0
-    fi
-    bash "$DAEMON_DIR/bin/hooks-daemon" stop
-}
-
-# Undo a sync that failed, and fail loudly. Before the switch nothing live was
-# touched: only the stage goes. After it: the recorded commit and its venv back,
-# the venv verified, the old daemon started again, and a message that says so.
-_provision_sync_abort() {
-    local what="$1"
-    shift
-    local -a notes=()
-    case "$SYNC_PHASE" in
-        fetched | staged)
-            _provision_stage_remove
-            _provision_fail "$what" \
-                "Nothing in the clone changed, and the running daemon v$PRESENT_VERSION was never stopped. No tracked file was changed."
-            ;;
-    esac
-    if ! _provision_sync_restore_checkout; then
-        _provision_switch_end
-        _PROVISION_FAIL_REASON="$what The previous version could NOT be checked out again."
-        printf 'PROVISION FAILED: %s\n' "$what" >&2
-        printf '  The previous version v%s could NOT be put back: checking out %s failed.\n' "$PRESENT_VERSION" "$PREVIOUS_CHECKOUT" >&2
-        printf '  The clone may be at %s. Restore it by hand: git -C %s checkout %s\n' "$TAG" "$DAEMON_DIR" "$PREVIOUS_CHECKOUT" >&2
-        printf '  Then start it: %s/bin/hooks-daemon restart\n' "$DAEMON_DIR" >&2
-        exit 1
-    fi
-    notes+=("The previous version v$PRESENT_VERSION (commit $PREVIOUS_COMMIT) is checked out again.")
-    if [[ "$SYNC_PHASE" == "venv" || "$SYNC_PHASE" == "restart" ]]; then
-        if [[ -n "$SYNC_VENV_BACKUP" && -d "$SYNC_VENV_BACKUP" ]]; then
-            if rm -rf "$SYNC_VENV_DIR" && mv "$SYNC_VENV_BACKUP" "$SYNC_VENV_DIR"; then
-                notes+=("Its venv was put back from the copy set aside before the build.")
-            else
-                notes+=("WARNING: its venv is at $SYNC_VENV_BACKUP, not $SYNC_VENV_DIR. Move it back by hand.")
-            fi
-        fi
-        if [[ -f "$DAEMON_DIR/scripts/venv_bootstrap.sh" ]] \
-            && bash "$DAEMON_DIR/scripts/venv_bootstrap.sh" repair "$DAEMON_DIR"; then
-            notes+=("Its venv was verified or rebuilt.")
-        else
-            notes+=("WARNING: its venv could not be verified or rebuilt. Run: $DAEMON_DIR/bin/hooks-daemon repair")
-        fi
-    fi
-    _provision_switch_end
-    if bash "$DAEMON_DIR/bin/hooks-daemon" restart; then
-        notes+=("The previous daemon was started again.")
-    else
-        notes+=("WARNING: the previous daemon did not start. Try: $DAEMON_DIR/bin/hooks-daemon restart")
-    fi
-    _provision_stage_remove
-    _provision_fail "$what" ${notes[@]+"${notes[@]}"} "The previous version v$PRESENT_VERSION is back in place. No tracked file was changed."
-}
-
-_provision_sync_clone() {
-    _provision_say "The daemon clone is at v$PRESENT_VERSION and this project expects $TAG: syncing it."
-    _provision_sync_preflight
-
-    _provision_say "Fetching $TAG from $PROVISION_REPO_URL ..."
-    if _provision_clone_git rev-parse -q --verify "refs/tags/$TAG^{commit}" > /dev/null; then
-        TAG_KNOWN_BEFORE=true
-    fi
-    if ! _provision_clone_git fetch -q --depth 1 "$PROVISION_REPO_URL" "refs/tags/$TAG:refs/tags/$TAG"; then
+    if ! "${stage_git[@]}" fetch -q --depth 1 origin "refs/tags/$TAG:refs/tags/$TAG"; then
+        _provision_stage_remove
         _provision_fail "could not fetch tag $TAG from $PROVISION_REPO_URL." \
             "Check that $TAG is a released version and that this machine can reach the repository." \
             "The clone was not changed."
     fi
     local tag_source tag_version=""
-    if ! tag_source="$(_provision_clone_git show "refs/tags/$TAG:src/claude_code_hooks_daemon/version.py")"; then
-        _provision_sync_forget_tag
+    if ! tag_source="$("${stage_git[@]}" show "refs/tags/$TAG:src/claude_code_hooks_daemon/version.py")"; then
+        _provision_stage_remove
         _provision_fail "tag $TAG has no src/claude_code_hooks_daemon/version.py." \
             "The clone was not changed. Report this: a release tag should name its own version."
     fi
@@ -516,20 +620,194 @@ _provision_sync_clone() {
         tag_version=""
     fi
     if [[ "$tag_version" != "$VERSION" ]]; then
-        _provision_sync_forget_tag
+        _provision_stage_remove
         _provision_fail "tag $TAG carries daemon version ${tag_version:-unreadable}, not $VERSION." \
             "The clone was not changed. Report this: a release tag should name its own version."
     fi
-
-    # Beside the live daemon: the target in its own worktree, its gate, and a
-    # trial build of its venv there. The live checkout and venv, which the
-    # running daemon imports from, are not touched, so any failure here leaves
-    # that daemon serving as it was. The trial build also fills uv's cache, so
-    # the in-place build during the switch below needs no network.
-    if ! _provision_stage_target; then
-        _provision_sync_abort "could not check out $TAG into its staged worktree at $SYNC_STAGE_DIR."
+    if ! "${stage_git[@]}" -c advice.detachedHead=false checkout -q "refs/tags/$TAG"; then
+        _provision_sync_abort "could not check out $TAG in the stage at $SYNC_STAGE_DIR."
     fi
-    SYNC_PHASE="staged"
+}
+
+# Replace each FROM with its TO in a text file, byte for byte, keeping its mode.
+# Args: the file, then FROM TO pairs, applied in order.
+_provision_replace_in_file() (
+    LC_ALL=C
+    local file="$1" content
+    shift
+    content="$(cat -- "$file" && printf x)" || exit 1
+    content="${content%x}"
+    while (($# >= 2)); do
+        content="${content//"$1"/"$2"}"
+        shift 2
+    done
+    printf '%s' "$content" > "$file"
+)
+
+# Rebind the stage's venv to the live path the stage is about to be renamed to.
+#
+# A venv is bound to the absolute path it was built at in two ways. Its NAME:
+# the resolver looks for venv-<path slug>-<interpreter> under the clone. And
+# TEXT files that spell the path: the editable install's .pth (<stage>/src) and
+# direct_url.json, console-script shebangs, the activate scripts and
+# .daemon-metadata.json. Nothing else holds it: bin/python links to the base
+# interpreter, outside both paths, and a cached .pyc is not trusted for its
+# path (importlib gives the code object the path it was loaded from). So the
+# stage's path becomes the live one in every text file of the venv, and the
+# venv takes the live path's name; renaming the whole stage onto the live path
+# then makes every path it names true. Returns 1 when the venv is not the one
+# the stage's build made, or a file still names the stage.
+_provision_rebind_stage_venv() {
+    local fingerprints="$SYNC_STAGE_DIR/scripts/install/python_fingerprint.sh"
+    local -a built
+    shopt -s nullglob
+    built=("$SYNC_STAGE_DIR"/untracked/venv-*)
+    shopt -u nullglob
+    if [[ "${#built[@]}" -ne 1 || ! -f "$fingerprints" ]]; then
+        _provision_say "The stage holds ${#built[@]} venvs, or no scripts/install/python_fingerprint.sh; expected one venv it built."
+        return 1
+    fi
+    local venv="${built[0]}" stage_fp live_fp stage_path live_path stage_real live_real
+    # shellcheck source=/dev/null
+    stage_fp="$(source "$fingerprints" && python_venv_fingerprint "$venv/bin/python" "$SYNC_STAGE_DIR")" || return 1
+    # shellcheck source=/dev/null
+    live_fp="$(source "$fingerprints" && python_venv_fingerprint "$venv/bin/python" "$DAEMON_DIR")" || return 1
+    if [[ "${venv##*/}" != "venv-$stage_fp" ]]; then
+        _provision_say "The stage's venv is ${venv##*/}, not venv-$stage_fp, the one its build names."
+        return 1
+    fi
+    stage_path="$(cd "$SYNC_STAGE_DIR" && pwd)" && live_path="$(cd "$DAEMON_DIR" && pwd)" || return 1
+    stage_real="$(cd "$SYNC_STAGE_DIR" && pwd -P)" && live_real="$(cd "$DAEMON_DIR" && pwd -P)" || return 1
+    local -a pairs=(
+        "$stage_path/untracked/venv-$stage_fp" "$live_path/untracked/venv-$live_fp"
+        "$stage_real/untracked/venv-$stage_fp" "$live_real/untracked/venv-$live_fp"
+        "$stage_path" "$live_path"
+        "$stage_real" "$live_real"
+        "$stage_fp" "$live_fp"
+    )
+    local file
+    local -a files=()
+    while IFS= read -r -d '' file; do
+        files+=("$file")
+    done < <(grep -rlIF --null -e "$stage_path" -e "$stage_real" -- "$venv")
+    for file in ${files[@]+"${files[@]}"}; do
+        _provision_replace_in_file "$file" "${pairs[@]}" || return 1
+    done
+
+    SYNC_NEW_VENV_NAME="venv-$live_fp"
+    local rebound="$SYNC_STAGE_DIR/untracked/$SYNC_NEW_VENV_NAME" search=0
+    if [[ "$venv" != "$rebound" ]]; then
+        _provision_rename "$venv" "$rebound" || return 1
+    fi
+    grep -rqIF -e "$stage_path" -e "$stage_real" -- "$rebound" || search=$?
+    if ((search != 1)); then
+        _provision_say "A file in $rebound still names the stage, or the venv could not be searched (grep exit $search)."
+        return 1
+    fi
+    _provision_say "The venv for $TAG was rebound to $live_path (${#files[@]} files named the stage)."
+}
+
+# Swap the staged target in for the live clone and start its daemon; the old
+# clone goes only once the new daemon answers. See "The switch to another
+# version" above for the renames, and _provision_recover_switch for their undo.
+_provision_switch() {
+    local live_untracked="$DAEMON_DIR/untracked" stage_untracked="$SYNC_STAGE_DIR/untracked"
+    local marker="$_HOOKS_DAEMON_SWITCH_MARKER_NAME" entry name
+    local manifest="$stage_untracked/$SYNC_CARRIED_MANIFEST"
+
+    # The marker keeps hooks from starting a daemon until the new one is up. It
+    # is held in the live untracked/ and in the stage's, which becomes it. The
+    # manifest records that the switch has begun, and what it carried.
+    SYNC_PHASE="switching"
+    printf '%s\n' "$$" > "$live_untracked/$marker"
+    printf '%s\n' "$$" > "$stage_untracked/$marker"
+    : > "$manifest"
+    _provision_say "Stopping v$PRESENT_VERSION to switch to $TAG ..."
+    if ! _provision_stop_daemon; then
+        _provision_sync_abort "the running daemon v$PRESENT_VERSION did not stop, so the clone was not switched."
+    fi
+
+    # The stage keeps only the rebound venv of what its build left in untracked/.
+    # The old clone's untracked/, the daemon's state, moves into it, except the
+    # old venv, which stays with the old clone.
+    local -a stage_entries live_entries
+    shopt -s nullglob dotglob
+    stage_entries=("$stage_untracked"/*)
+    live_entries=("$live_untracked"/*)
+    shopt -u nullglob dotglob
+    for entry in ${stage_entries[@]+"${stage_entries[@]}"}; do
+        case "${entry##*/}" in
+            "$SYNC_NEW_VENV_NAME" | "$marker" | "$SYNC_CARRIED_MANIFEST") ;;
+            *) rm -rf -- "$entry" ;;
+        esac
+    done
+    for entry in ${live_entries[@]+"${live_entries[@]}"}; do
+        name="${entry##*/}"
+        case "$name" in
+            "$SYNC_STAGE_DIR_NAME" | "$marker" | "$SYNC_OLD_VENV_NAME") continue ;;
+        esac
+        if [[ -e "$stage_untracked/$name" || -L "$stage_untracked/$name" ]]; then
+            continue
+        fi
+        printf '%s\n' "$name" >> "$manifest"
+        if ! mv -- "$entry" "$stage_untracked/$name"; then
+            _provision_sync_abort "could not move $entry into the stage."
+        fi
+    done
+
+    if ! _provision_rename "$DAEMON_DIR" "$SYNC_ASIDE_DIR" \
+        || ! _provision_rename_onto_live "$SYNC_ASIDE_DIR/untracked/$SYNC_STAGE_DIR_NAME" \
+        || ! _provision_rename "$SYNC_ASIDE_DIR" "$SYNC_PREVIOUS_DIR"; then
+        _provision_sync_abort "could not swap the staged $TAG in for the clone."
+    fi
+
+    # restart returns 0 once the started daemon answers on its socket; its PID
+    # file is checked as well.
+    _provision_say "Starting the daemon at $TAG ..."
+    if ! bash "$DAEMON_DIR/bin/hooks-daemon" restart; then
+        _provision_sync_abort "the daemon did not start at $TAG."
+    fi
+    local running=0
+    _provision_daemon_running || running=$?
+    if ((running != 0)); then
+        _provision_sync_abort "the daemon at $TAG did not answer after it was started."
+    fi
+    rm -f "$live_untracked/$marker" "$manifest"
+    # Renamed first, so a removal cut short is never taken for an old clone to put back.
+    if mv -- "$SYNC_PREVIOUS_DIR" "$SYNC_PREVIOUS_DIR.discard"; then
+        rm -rf -- "$SYNC_PREVIOUS_DIR.discard"
+    else
+        _provision_say "WARNING: the old clone at $SYNC_PREVIOUS_DIR could not be removed; delete it by hand."
+    fi
+}
+
+# Undo a sync that failed, and fail loudly. Before the switch nothing live was
+# touched: only the stage goes. After it began: the old clone, its venv and the
+# daemon's state are put back and its daemon started again.
+_provision_sync_abort() {
+    local what="$1"
+    if [[ "$SYNC_PHASE" == "staged" ]]; then
+        _provision_stage_remove
+        _provision_fail "$what" \
+            "Nothing in the clone changed, and the running daemon v$PRESENT_VERSION was never stopped. No tracked file was changed."
+    fi
+    if ! _provision_recover_switch; then
+        _provision_fail "$what" \
+            "The previous version v$PRESENT_VERSION could NOT be put back (the reason is above)." \
+            "Run this again: it retries putting it back first. No tracked file was changed."
+    fi
+    _provision_fail "$what" "The previous version v$PRESENT_VERSION is back in place. No tracked file was changed."
+}
+
+_provision_sync_clone() {
+    _provision_say "The daemon clone is at v$PRESENT_VERSION and this project expects $TAG: syncing it."
+    _provision_sync_preflight
+
+    # In the stage, beside the live daemon: the target's clone, its gate, and
+    # its venv, built and rebound to the live path. Nothing the running daemon
+    # imports from is touched, so any failure here leaves it serving as it was.
+    _provision_say "Fetching $TAG from $PROVISION_REPO_URL into $SYNC_STAGE_DIR ..."
+    _provision_stage_target
 
     local gate_status=0
     _provision_gate || gate_status=$?
@@ -551,39 +829,11 @@ _provision_sync_clone() {
     if ! bash "$stage_bootstrap" repair "$SYNC_STAGE_DIR"; then
         _provision_sync_abort "the venv for $TAG could not be built (the output above says which condition failed)."
     fi
+    if ! _provision_rebind_stage_venv; then
+        _provision_sync_abort "the venv built for $TAG could not be rebound to $DAEMON_DIR (the reason is above)."
+    fi
 
-    # The switch. Only now does anything the daemon imports from change, and
-    # only once it is stopped: the marker keeps hooks from starting one from the
-    # half-switched clone, and the in-place build is the clone's own, from the
-    # cache the trial build filled. A venv is bound to the path it was built
-    # for, so the trial venv itself cannot be moved into place.
-    _provision_switch_begin
-    SYNC_PHASE="stopped"
-    _provision_say "Stopping v$PRESENT_VERSION to switch to $TAG ..."
-    if ! _provision_stop_daemon; then
-        _provision_sync_abort "the running daemon v$PRESENT_VERSION did not stop, so the clone was not switched."
-    fi
-    if ! _provision_clone_git -c advice.detachedHead=false checkout -q "refs/tags/$TAG"; then
-        _provision_sync_abort "could not check out tag $TAG."
-    fi
-    SYNC_PHASE="checked-out"
-    if [[ -n "$SYNC_VENV_BACKUP" ]] && ! mv "$SYNC_VENV_DIR" "$SYNC_VENV_BACKUP"; then
-        _provision_sync_abort "could not set the current venv aside at $SYNC_VENV_BACKUP before building the target's."
-    fi
-    SYNC_PHASE="venv"
-    if ! bash "$DAEMON_DIR/scripts/venv_bootstrap.sh" repair "$DAEMON_DIR"; then
-        _provision_sync_abort "the venv for $TAG could not be built in place (the output above says which condition failed)."
-    fi
-    _provision_switch_end
-    _provision_say "Starting the daemon at $TAG ..."
-    SYNC_PHASE="restart"
-    if ! bash "$DAEMON_DIR/bin/hooks-daemon" restart; then
-        _provision_sync_abort "the daemon did not start at $TAG."
-    fi
-    if [[ -n "$SYNC_VENV_BACKUP" ]]; then
-        rm -rf "$SYNC_VENV_BACKUP"
-    fi
-    _provision_stage_remove
+    _provision_switch
 
     _provision_say ""
     _provision_say "SYNCED: the hooks daemon moved from v$PRESENT_VERSION to $TAG and was restarted."
@@ -593,10 +843,6 @@ _provision_sync_clone() {
 # ------------------------------------------------------------------
 # The background sync (Plan 00477 Task 5.2)
 # ------------------------------------------------------------------
-# Under the clone's untracked/, which a checkout never touches. Keep equal to
-# SYNC_STATE_DIR_NAME in install/background_sync.py, which reads the state back
-# (a test asserts it).
-readonly SYNC_STATE_DIR_NAME="background-sync"
 SYNC_STATE_DIR=""
 SYNC_STATE_FILE=""
 SYNC_LOCK_DIR=""
@@ -610,7 +856,7 @@ _provision_background_daemon_up() {
     local deadline=$((SECONDS + BACKGROUND_DAEMON_WAIT_SECONDS)) running
     while true; do
         running=0
-        is_daemon_running || running=$?
+        _provision_daemon_running || running=$?
         if ((running == 0)); then
             return 0
         fi

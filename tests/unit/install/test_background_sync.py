@@ -68,14 +68,18 @@ class TestReadSyncRecord:
     def test_reads_the_status_provision_recorded(
         self, tmp_path: Path, raw: str, status: SyncStatus
     ) -> None:
-        _write_state(tmp_path, f"status={raw}\ntarget={_VERSION}\nfrom=3.69.0\npid=42\ndetail=x\n")
+        # A live pid: a "running" record whose process is gone reads as failed.
+        live_pid = os.getpid()
+        _write_state(
+            tmp_path, f"status={raw}\ntarget={_VERSION}\nfrom=3.69.0\npid={live_pid}\ndetail=x\n"
+        )
 
         record = read_sync_record(tmp_path, _VERSION)
 
         assert record is not None
         assert record.status is status
         assert record.from_version == "3.69.0"
-        assert record.pid == 42
+        assert record.pid == live_pid
         assert record.detail == "x"
         assert record.state_path == state_path(tmp_path, _VERSION)
         assert record.log_path == log_path(tmp_path, _VERSION)

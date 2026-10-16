@@ -47,24 +47,29 @@ Otherwise, for a newer or an older expected version:
 1. It refuses, changing nothing, when the clone is not a git checkout, its
    `origin` is not the fixed URL, or it has tracked changes or files outside
    `untracked/` (gitignored files do not count).
-2. It fetches exactly that tag (depth 1) from the fixed URL, and checks that
-   the tag's `version.py` names the version.
-3. Beside the running daemon, touching nothing it runs from, it checks the tag
-   out in its own worktree (`.claude/hooks-daemon/untracked/sync-stage`). It
-   runs the target release's own pre-deploy gate from there, the one `upgrade`
-   runs. If the gate wants its reading list confirmed, it prints the listing and
-   stops; read it, then re-run with `--skip-reading-confirmation=<digest>` (the
-   digest it printed). A target that predates the gate has none to run.
-4. Still beside it, it trial-builds the target's venv in that worktree with the
-   target's own `scripts/venv_bootstrap.sh`. A failure up to here changes
-   nothing and never stops the running daemon.
-5. Then the switch. It stops the old daemon and checks the tag out in the clone.
-   It rebuilds the venv in place with the clone's own build script, which uses
-   the cache the trial build filled. Then it starts the new daemon with
-   `bin/hooks-daemon restart`. Until then, a hook that would start a daemon
-   answers "the daemon is starting; retry" instead of starting one from a
-   half-switched clone. A failure during the switch puts the previous commit and
-   its venv back, starts the old daemon again, and says so.
+2. In a stage, `.claude/hooks-daemon/untracked/sync-stage`, it fetches exactly
+   that tag (depth 1) from the fixed URL into a clone of its own, and checks
+   that the tag's `version.py` names the version. Nothing else of the live
+   clone, its git directory included, is written while the old daemon serves.
+3. It runs the target release's own pre-deploy gate from the stage, the one
+   `upgrade` runs. If the gate wants its reading list confirmed, it prints the
+   listing and stops; read it, then re-run with
+   `--skip-reading-confirmation=<digest>` (the digest it printed). A target that
+   predates the gate has none to run.
+4. It builds the target's venv in the stage with the target's own
+   `scripts/venv_bootstrap.sh`, then rebinds it to the live path: the venv is
+   renamed for the live path and every text file in it that names the stage
+   (the editable `.pth`, `direct_url.json`, script shebangs, activate scripts,
+   `.daemon-metadata.json`) names the live path instead. A failure up to here
+   changes nothing and never stops the running daemon.
+5. Then the switch. It stops the old daemon, moves the daemon's state under
+   `untracked/` into the stage, and swaps the stage in by renames. The old
+   clone is kept at `untracked/sync-previous` until the new daemon, started with
+   `bin/hooks-daemon restart`, answers; then it is removed. Until then, a hook
+   that would start a daemon answers "the daemon is starting; retry". A failure
+   during the switch swaps the old clone, its venv and the state back, starts
+   the old daemon again, and says so. A switch a killed run left half-done is
+   undone the same way by the next run, which says `RECOVERED`.
 
 A sync writes no tracked file, runs no config migration and regenerates no docs.
 

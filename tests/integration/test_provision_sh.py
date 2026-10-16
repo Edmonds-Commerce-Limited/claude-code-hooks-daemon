@@ -15,10 +15,13 @@ environment, so there is no seam in the script for a test to use.
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
+import sys
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -27,13 +30,24 @@ import psutil
 import pytest
 
 from claude_code_hooks_daemon.config.models import TransportConfig
+from claude_code_hooks_daemon.daemon.paths import python_venv_fingerprint
 from claude_code_hooks_daemon.install.background_sync import SYNC_STATE_DIR_NAME
 from claude_code_hooks_daemon.install.forwarder_generator import (
     INIT_SH_ANCHOR,
     generate_forwarder_content,
 )
 from claude_code_hooks_daemon.utils.safe_signal import DaemonStop, stop_verified_daemon
-from tests.venv_bootstrap_sandbox import BASH, CLONE_VERSION, TIMEOUT_SECONDS, Sandbox, snapshot
+from tests.venv_bootstrap_sandbox import (
+    BASH,
+    CLONE_VERSION,
+    TIMEOUT_SECONDS,
+    UV_CONSOLE_SCRIPT,
+    UV_EDITABLE_PTH,
+    UV_EMBEDDED_PATH_FILES,
+    UV_SITE_PACKAGES,
+    Sandbox,
+    snapshot,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROVISION_SH = REPO_ROOT / "provision.sh"
@@ -171,13 +185,15 @@ class Provisioning:
         args: tuple[str, ...] = (),
         uv_fails: bool = False,
         uv_wrapper: str | None = None,
+        cli_hook: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        self.box.stub_uv(fail=uv_fails)
+        self.box.stub_uv(fail=uv_fails, embed_build_paths=True)
         if uv_wrapper is not None:
             self._wrap_uv(uv_wrapper)
+        hook_env = {} if cli_hook is None else {"SANDBOX_CLI_HOOK": cli_hook}
         return self.box.run(
             ["bash", str(self.project / ".claude" / "provision.sh"), *args],
-            extra_env={**self.git_env, **(extra_env or {})},
+            extra_env={**self.git_env, **hook_env, **(extra_env or {})},
         )
 
     def _wrap_uv(self, body: str) -> None:
@@ -663,68 +679,183 @@ class TestTheTargetsPreDeployGate:
 
 
 STAGE_DIR_NAME = "sync-stage"
+PREVIOUS_DIR_NAME = "sync-previous"
 SWITCH_MARKER_NAME = ".provision-switching"
+#: What provision itself writes under the live clone while it syncs: the stage,
+#: the background sync's record and the switch marker. Nothing else may change.
+SYNC_OWN_PATHS = (
+    f"untracked/{STAGE_DIR_NAME}",
+    f"untracked/{SYNC_STATE_DIR_NAME}",
+    f"untracked/{SWITCH_MARKER_NAME}",
+)
+#: A stand-in for the state the daemon keeps under its untracked/ directory.
+DAEMON_STATE = "untracked/handler-state.json"
+DAEMON_STATE_TEXT = '{"kept": true}\n'
+
+#: Run in a subprocess by a wrapper: _live_state of argv[2], as JSON, into argv[3].
+_SNAPSHOT_PROGRAM = (
+    "import json, sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); "
+    "from tests.venv_bootstrap_sandbox import snapshot; "
+    "excluded = tuple(sys.argv[4:]); "
+    "state = {k: v for k, v in snapshot(Path(sys.argv[2])).items() "
+    "if not k.startswith(excluded)}; "
+    "Path(sys.argv[3]).write_text(json.dumps(state))"
+)
 
 
 def _daemon_pid(p: Provisioning) -> int:
     return int(p.box.pid.read_text().strip())
 
 
-def _no_stage_left(p: Provisioning) -> bool:
-    worktrees = _git(p.clone, "worktree", "list", "--porcelain")
-    return (
-        not (p.clone / "untracked" / STAGE_DIR_NAME).exists() and worktrees.count("worktree ") == 1
+def _live_state(clone: Path) -> dict[str, str]:
+    """Every path of the live clone with its bytes, except what the sync itself writes."""
+    return {k: v for k, v in snapshot(clone).items() if not k.startswith(SYNC_OWN_PATHS)}
+
+
+def _record_live_state(p: Provisioning, out: Path) -> str:
+    """A bash command that writes the live clone's _live_state to ``out`` as JSON.
+
+    ``out`` is double-quoted, so a ``$$`` in it names the writing shell.
+    """
+    argv = [sys.executable, "-c", _SNAPSHOT_PROGRAM, str(REPO_ROOT), str(p.clone)]
+    return f'{shlex.join(argv)} "{out}" {shlex.join(SYNC_OWN_PATHS)}'
+
+
+def _aside(p: Provisioning) -> Path:
+    """Where the old clone is renamed to for the instant of the swap."""
+    return p.clone.with_name(p.clone.name + ".sync-previous")
+
+
+def _no_switch_left(p: Provisioning) -> bool:
+    untracked = p.clone / "untracked"
+    return not any(
+        path.exists()
+        for path in (
+            untracked / STAGE_DIR_NAME,
+            untracked / PREVIOUS_DIR_NAME,
+            untracked / SWITCH_MARKER_NAME,
+            _aside(p),
+        )
     )
 
 
-#: A uv wrapper that fails every build except the staged trial build.
-FAIL_ONLY_THE_CLONE_BUILD = (
-    'case "$UV_PROJECT_ENVIRONMENT" in */sync-stage/*) ;; '
-    '*) echo "error: simulated failure of the in-place build" >&2; exit 2 ;; esac'
-)
+def _with_daemon_state(p: Provisioning) -> Path:
+    state = p.clone / DAEMON_STATE
+    state.write_text(DAEMON_STATE_TEXT)
+    return state
 
 
-class TestTheSwitchHappensOnlyAtRestart:
-    """The target is built beside the live daemon; the live code and venv change only once it is stopped."""
+def _when_restarting_the_new_version(p: Provisioning, command: str) -> str:
+    """A CLI hook that runs ``command`` when the daemon is restarted from the target."""
+    version_py = p.clone / "src" / "claude_code_hooks_daemon" / "version.py"
+    return (
+        f'if [ "$1" = restart ] && grep -q \'"{MAIN_VERSION}"\' "{version_py}"; '
+        f"then {command}; fi"
+    )
 
-    def test_the_target_is_built_beside_while_the_old_daemon_serves_unchanged(
+
+class TestTheSwitchIsADirectorySwap:
+    """The target is staged and built beside the live clone, then swapped in by rename."""
+
+    def test_the_live_clone_is_byte_identical_while_the_target_is_built(
         self, fresh: Provisioning
     ) -> None:
         _provisioned_at(fresh, CLONE_VERSION)
-        old_head = fresh.head()
+        _with_daemon_state(fresh)
         old_daemon = _daemon_pid(fresh)
         fresh.expect(MAIN_VERSION)
-        builds = fresh.box.root / "builds.log"
-        logger = (
-            f'printf "%s head=%s old_daemon=%s\\n" "$UV_PROJECT_ENVIRONMENT" '
-            f'"$(git -C {fresh.clone} rev-parse HEAD)" '
-            f'"$(if [ -d /proc/{old_daemon} ]; then echo up; else echo down; fi)" '
-            f'>> "{builds}"'
+        before = _live_state(fresh.clone)
+        seen = fresh.box.root / "seen"
+        seen.mkdir()
+        during_build = (
+            f'printf "%s\\n" "$UV_PROJECT_ENVIRONMENT" >> "{seen}/targets"\n'
+            f'{_record_live_state(fresh, seen / "build-$$.json")}\n'
+            f'if [ -d /proc/{old_daemon} ]; then echo up; else echo down; fi >> "{seen}/daemon"'
         )
+        at_stop = f'if [ "$1" = stop ]; then {_record_live_state(fresh, seen / "stop.json")}; fi'
 
-        result = fresh.provision(uv_wrapper=logger)
+        result = fresh.provision(uv_wrapper=during_build, cli_hook=at_stop)
 
         assert result.returncode == 0, _out(result)
-        lines = builds.read_text().splitlines()
-        staged = [line for line in lines if f"/{STAGE_DIR_NAME}/" in line]
-        in_place = [line for line in lines if f"/{STAGE_DIR_NAME}/" not in line]
-        assert staged and in_place, lines
-        assert lines.index(staged[0]) < lines.index(in_place[0]), "staged build first"
-        for line in staged:
-            assert f"head={old_head}" in line, "the live checkout did not move during it"
-            assert "old_daemon=up" in line, "the old daemon kept serving during it"
-        for line in in_place:
-            assert "old_daemon=down" in line, "the live venv is rebuilt only once it is stopped"
-            assert f"head={old_head}" not in line
+        builds = sorted(seen.glob("build-*.json"))
+        assert builds, "the target was built"
+        for build in builds:
+            assert json.loads(build.read_text()) == before, "the live clone changed mid-build"
+        assert json.loads((seen / "stop.json").read_text()) == before, "or before the stop"
+        targets = (seen / "targets").read_text().splitlines()
+        assert all(f"/{STAGE_DIR_NAME}/" in target for target in targets), "never built in place"
+        assert set((seen / "daemon").read_text().split()) == {"up"}, "the old daemon served"
         assert fresh.clone_version() == MAIN_VERSION
-        assert _no_stage_left(fresh)
-        assert not (fresh.clone / "untracked" / SWITCH_MARKER_NAME).exists()
+        assert _no_switch_left(fresh)
+
+    def test_the_staged_venv_is_moved_into_place_bound_to_the_live_path(
+        self, fresh: Provisioning
+    ) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(MAIN_VERSION)
+        stage = fresh.clone / "untracked" / STAGE_DIR_NAME
+        builds_before = len(fresh.box.uv_calls())
+
+        result = fresh.provision()
+
+        assert result.returncode == 0, _out(result)
+        assert len(fresh.box.uv_calls()) == builds_before + 1, "built once, in the stage"
+        venv = fresh.clone / "untracked" / f"venv-{python_venv_fingerprint(fresh.clone)}"
+        assert venv.is_dir(), "named for the live path, as the resolver looks for it"
+        for rel in UV_EMBEDDED_PATH_FILES:
+            assert str(stage) not in (venv / rel).read_text(), rel
+        pth = venv / UV_SITE_PACKAGES / UV_EDITABLE_PTH
+        assert pth.read_text() == f"{fresh.clone}/src\n"
+        assert (venv / UV_CONSOLE_SCRIPT).read_text().startswith(f"#!{venv}/bin/python\n")
+        metadata = json.loads((venv / ".daemon-metadata.json").read_text())
+        assert metadata["python_path"] == f"{venv}/bin/python"
+        assert metadata["fingerprint"] == python_venv_fingerprint(fresh.clone)
+        assert fresh.box.resolves()
+
+    def test_the_previous_copy_is_kept_until_the_new_daemon_answers(
+        self, fresh: Provisioning
+    ) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(MAIN_VERSION)
+        kept = fresh.box.root / "previous-at-restart"
+        previous_version_py = (
+            fresh.clone
+            / "untracked"
+            / PREVIOUS_DIR_NAME
+            / "src/claude_code_hooks_daemon/version.py"
+        )
+
+        result = fresh.provision(
+            cli_hook=_when_restarting_the_new_version(
+                fresh, f'cat "{previous_version_py}" > "{kept}"'
+            )
+        )
+
+        assert result.returncode == 0, _out(result)
+        assert f'"{CLONE_VERSION}"' in kept.read_text(), "the old copy was there at the restart"
+        assert fresh.clone_version() == MAIN_VERSION
+        assert fresh.starts() == 2
+        assert _no_switch_left(fresh), "and removed once the new daemon answered"
+
+    def test_the_daemons_untracked_state_is_carried_across(self, fresh: Provisioning) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        state = _with_daemon_state(fresh)
+        other_view = fresh.box.other_view_venv()
+        other_view_before = snapshot(other_view)
+        fresh.expect(MAIN_VERSION)
+
+        result = fresh.provision()
+
+        assert result.returncode == 0, _out(result)
+        assert fresh.clone_version() == MAIN_VERSION
+        assert state.read_text() == DAEMON_STATE_TEXT
+        assert snapshot(other_view) == other_view_before
 
     def test_a_target_venv_that_cannot_be_built_never_stops_the_old_daemon(
         self, fresh: Provisioning
     ) -> None:
         _provisioned_at(fresh, CLONE_VERSION)
-        before = fresh.clone_tracked_state()
+        before = _live_state(fresh.clone)
         old_daemon = _daemon_pid(fresh)
         fresh.expect(MAIN_VERSION)
 
@@ -734,33 +865,155 @@ class TestTheSwitchHappensOnlyAtRestart:
         assert result.returncode != 0
         assert "venv" in out
         assert "never stopped" in out
-        assert fresh.clone_tracked_state() == before
+        assert _live_state(fresh.clone) == before
         assert fresh.clone_version() == CLONE_VERSION
         assert fresh.box.resolves()
         assert fresh.starts() == 1, "nothing was restarted"
         assert psutil.pid_exists(old_daemon), "the old daemon is still the one running"
         assert fresh.tracked_changes() == ""
-        assert _no_stage_left(fresh)
+        assert _no_switch_left(fresh)
 
-    def test_a_failure_after_the_stop_restores_and_restarts_the_old_version(
-        self, fresh: Provisioning
-    ) -> None:
+    def test_a_new_daemon_that_does_not_start_is_swapped_back(self, fresh: Provisioning) -> None:
         _provisioned_at(fresh, CLONE_VERSION)
-        before = fresh.clone_tracked_state()
+        _with_daemon_state(fresh)
+        before = _live_state(fresh.clone)
         fresh.expect(MAIN_VERSION)
 
-        result = fresh.provision(uv_wrapper=FAIL_ONLY_THE_CLONE_BUILD)
+        result = fresh.provision(
+            cli_hook=_when_restarting_the_new_version(
+                fresh, 'echo "simulated: the new daemon does not start" >&2; exit 1'
+            )
+        )
 
         out = _out(result)
         assert result.returncode != 0
         assert f"previous version v{CLONE_VERSION}" in out
-        assert fresh.clone_tracked_state() == before
+        assert _live_state(fresh.clone) == before, "the old clone, venv and state are back"
         assert fresh.clone_version() == CLONE_VERSION
-        assert fresh.box.resolves(), "the previous venv is back"
+        assert fresh.box.resolves()
         assert fresh.starts() == 2, "the old daemon was started again"
-        assert list((fresh.clone / "untracked").glob(".sync-backup-*")) == []
-        assert not (fresh.clone / "untracked" / SWITCH_MARKER_NAME).exists()
-        assert _no_stage_left(fresh)
+        assert _no_switch_left(fresh)
+
+
+def _kill_provision(p: Provisioning) -> str:
+    """Kill the provision that holds the switch marker, as a reboot would."""
+    return f'kill -9 "$(cat "{p.clone}/untracked/{SWITCH_MARKER_NAME}")"'
+
+
+def _interrupt_earlier(p: Provisioning, shape: str) -> None:
+    """Turn the state a sync killed at the restart leaves into an earlier one.
+
+    Each step undoes one rename of the swap, so each shape is exactly what a
+    kill between those two renames leaves: the swap is old clone -> aside,
+    stage -> live, aside -> untracked/sync-previous.
+    """
+    if shape == "swapped-unconfirmed":
+        return
+    # Before the restart, no daemon was running from the swapped-in clone.
+    _stop_the_daemon(p)
+    aside = _aside(p)
+    (p.clone / "untracked" / PREVIOUS_DIR_NAME).rename(aside)
+    if shape == "between-second-and-third-rename":
+        return
+    p.clone.rename(aside / "untracked" / STAGE_DIR_NAME)
+    # A hook that ran in the gap re-creates the skeleton init.sh makes.
+    (p.clone / "untracked").mkdir(parents=True)
+    (p.clone / "untracked" / ".exec-bit-checked").touch()
+    if shape == "between-first-and-second-rename":
+        return
+    shutil.rmtree(p.clone)
+    aside.rename(p.clone)
+
+
+class TestAnInterruptedSwitchIsRecoveredByTheNextRun:
+    @pytest.mark.parametrize(
+        "shape",
+        [
+            "swapped-unconfirmed",
+            "between-second-and-third-rename",
+            "between-first-and-second-rename",
+            "carried-not-swapped",
+        ],
+    )
+    def test_the_previous_version_is_put_back(self, fresh: Provisioning, shape: str) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        state = _with_daemon_state(fresh)
+        before = _live_state(fresh.clone)
+        fresh.expect(MAIN_VERSION)
+        killed = fresh.provision(
+            cli_hook=_when_restarting_the_new_version(fresh, _kill_provision(fresh))
+        )
+        assert killed.returncode < 0, _out(killed)
+        assert (fresh.clone / "untracked" / PREVIOUS_DIR_NAME).is_dir()
+        _interrupt_earlier(fresh, shape)
+        fresh.expect(CLONE_VERSION)
+
+        result = fresh.provision()
+
+        out = _out(result)
+        assert result.returncode == 0, out
+        assert "RECOVERED" in out and f"v{CLONE_VERSION}" in out
+        assert _live_state(fresh.clone) == before
+        assert state.read_text() == DAEMON_STATE_TEXT
+        assert fresh.box.resolves()
+        assert _no_switch_left(fresh)
+
+    def test_an_interrupted_sync_is_recovered_then_completed(self, fresh: Provisioning) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(MAIN_VERSION)
+        killed = fresh.provision(
+            cli_hook=_when_restarting_the_new_version(fresh, _kill_provision(fresh))
+        )
+        assert killed.returncode < 0, _out(killed)
+
+        result = fresh.provision()
+
+        out = _out(result)
+        assert result.returncode == 0, out
+        assert "RECOVERED" in out and "SYNCED" in out
+        assert fresh.clone_version() == MAIN_VERSION
+        assert _no_switch_left(fresh)
+
+    def test_an_interrupted_background_sync_is_recorded_and_not_retried(
+        self, fresh: Provisioning
+    ) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(MAIN_VERSION)
+        killed = fresh.provision(
+            args=BACKGROUND,
+            cli_hook=_when_restarting_the_new_version(fresh, _kill_provision(fresh)),
+        )
+        assert killed.returncode < 0, _out(killed)
+
+        result = fresh.provision(args=BACKGROUND)
+
+        assert result.returncode == 0, _out(result)
+        assert fresh.clone_version() == CLONE_VERSION
+        state = _state(fresh, MAIN_VERSION)
+        assert state["status"] == "failed"
+        assert "put back" in state["detail"]
+        assert fresh.box.resolves()
+        assert _no_switch_left(fresh)
+        assert not (_sync_dir(fresh) / "lock.d").exists(), _out(result)
+
+    def test_a_switch_another_live_process_is_making_is_left_alone(
+        self, fresh: Provisioning
+    ) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(MAIN_VERSION)
+        before = _live_state(fresh.clone)
+        aside = _aside(fresh)
+        (aside / "untracked").mkdir(parents=True)
+        (aside / "untracked" / SWITCH_MARKER_NAME).write_text(f"{os.getpid()}\n")
+
+        result = fresh.provision()
+
+        out = _out(result)
+        assert result.returncode != 0
+        assert f"pid {os.getpid()}" in out
+        assert aside.is_dir()
+        assert _live_state(fresh.clone) == before
+        assert fresh.clone_version() == CLONE_VERSION
 
 
 class TestNoHookStartsADaemonMidSwitch:
