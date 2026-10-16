@@ -8,6 +8,8 @@ Worktree: `untracked/worktrees/worktree-p477-background-sync`. Commits, in order
 - `6bc2f5b45`: signal_targets, magic_values and the changed-tests map.
 - `3d36de429`: Task 5.2 tick and the report.
 - `cd8b8e315`: the target staged and trial-built beside the live daemon, and the switch only at restart (the coordinator's venv-swap follow-up).
+- `840f5addc`: report update for `cd8b8e315`.
+- `79ca131e4`: coordinator review round 2. The target is built in a stage that is a clone of its own, its venv rebound to the live path, and swapped in by rename; the old clone is kept until the new daemon answers; an interrupted switch is undone by the next run. This replaces the in-place switch of `cd8b8e315` (section "Review round 2" below).
 - This report's update is in the commit after that.
 
 ## Assumptions (for the coordinator to have ruled on)
@@ -16,7 +18,9 @@ Worktree: `untracked/worktrees/worktree-p477-background-sync`. Commits, in order
 2. **The background sync never provisions a fresh checkout.** The owner ruled that fresh provisioning is deliberate (Overview, Non-Goals). `--background` refuses when no clone exists.
 3. **"Once per target version" means once, not once per success.** After a failure the sync is not retried in the background. Every session start reports the failure and names the state file to delete for a retry, and `bash .claude/provision.sh` to run by hand.
 4. **A target whose pre-deploy gate wants the reading list confirmed is reported, not confirmed.** Task 5.3 keeps that confirmation, and a detached process has nobody to read. It records `needs-reading`.
-5. **The sync waits up to 30 s for a running daemon before it touches the clone.** If none is running by then, it claims nothing and changes nothing, and a later session start retries. This keeps the guarantee that the old daemon serves until the new one is ready, and it prevents the sync from moving a clone that the same hook's `ensure_daemon` is starting from.
+5. **Gitignored build caches outside `untracked/` are not carried to the new clone** (review round 2). By the daemon repository's own `.gitignore` they are caches (`__pycache__`, `.mypy_cache`, `*.egg-info` and the like). They stay with the old clone and are removed with it. Everything under `untracked/` is carried.
+6. **An interrupted swap is always rolled back, never forward** (review round 2). The run that would have confirmed the new daemon is gone, so nothing proves it. A background sync so undone is recorded as failed and not retried in the background (Assumption 3).
+7. **The sync waits up to 30 s for a running daemon before it touches the clone.** If none is running by then, it claims nothing and changes nothing, and a later session start retries. This keeps the guarantee that the old daemon serves until the new one is ready, and it prevents the sync from moving a clone that the same hook's `ensure_daemon` is starting from.
 
 ## The trigger point: the session-start forwarder, in shell
 
@@ -30,15 +34,90 @@ The first version had `version_check` start the sync with `subprocess.Popen`, wh
 
 The coordinator's guarantees, one by one:
 
-| Guarantee                                        | How                                                                                                                                                                                             | Shown by                                                                                                                                                               |
-| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Never inside a hook's time budget                | Detached `setsid ... &` with every fd redirected                                                                                                                                                | `test_a_pulled_upgrade_is_synced_after_the_hook_has_answered` (venv build slowed to 5 s; the hook returns before the state is `synced`)                                |
-| The old daemon serves until the new one is ready | The sync waits for a running daemon (Assumption 5); the target is staged, gated and trial-built beside it; the live checkout and venv change only after it is stopped (see below)               | `test_a_sync_waits_for_a_running_daemon_and_otherwise_claims_nothing`; `TestTheSwitchHappensOnlyAtRestart`; `test_a_sync_failure_keeps_the_old_daemon_and_records_why` |
-| Failure is loud                                  | State `failed` or `needs-reading` with the reason; `version_check` shows it at every session start (`systemMessage` plus context) with the log, the manual command and the state file to delete | `TestTheBackgroundSync::test_a_refused_clone_is_recorded_as_a_failure` and siblings; `TestAPulledUpgradeIsReportedAsSyncingInTheBackground`                            |
-| One sync at a time                               | `mkdir` lock with the holder's pid, taken over when that pid is dead; a per-target state file as the once-only marker                                                                           | `test_a_sync_already_running_is_not_joined`, `test_a_lock_whose_holder_is_gone_is_taken_over`, `test_a_target_already_attempted_is_never_attempted_again`              |
-| The daemon's own repository never syncs          | `provision.sh` refuses before sourcing `init.sh`; `version_check` reports no drift in self-install mode                                                                                         | `test_the_daemons_own_repository_never_syncs`, `test_the_daemons_own_repository_never_reports_drift`                                                                   |
+| Guarantee                                        | How                                                                                                                                                                                                                                                                | Shown by                                                                                                                                                                                                             |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Never inside a hook's time budget                | Detached `setsid ... &` with every fd redirected                                                                                                                                                                                                                   | `test_a_pulled_upgrade_is_synced_after_the_hook_has_answered` (venv build slowed to 5 s; the hook returns before the state is `synced`)                                                                              |
+| The old daemon serves until the new one is ready | The sync waits for a running daemon (Assumption 7); the target is built in a stage that writes nothing else of the live clone; it is swapped in by rename only after the old daemon stops, and the old clone is kept until the new daemon answers (review round 2) | `test_a_sync_waits_for_a_running_daemon_and_otherwise_claims_nothing`; `TestTheSwitchIsADirectorySwap`; `TestAnInterruptedSwitchIsRecoveredByTheNextRun`; `test_a_sync_failure_keeps_the_old_daemon_and_records_why` |
+| Failure is loud                                  | State `failed` or `needs-reading` with the reason; `version_check` shows it at every session start (`systemMessage` plus context) with the log, the manual command and the state file to delete                                                                    | `TestTheBackgroundSync::test_a_refused_clone_is_recorded_as_a_failure` and siblings; `TestAPulledUpgradeIsReportedAsSyncingInTheBackground`                                                                          |
+| One sync at a time                               | `mkdir` lock with the holder's pid, taken over when that pid is dead; a per-target state file as the once-only marker                                                                                                                                              | `test_a_sync_already_running_is_not_joined`, `test_a_lock_whose_holder_is_gone_is_taken_over`, `test_a_target_already_attempted_is_never_attempted_again`                                                            |
+| The daemon's own repository never syncs          | `provision.sh` refuses before sourcing `init.sh`; `version_check` reports no drift in self-install mode                                                                                                                                                            | `test_the_daemons_own_repository_never_syncs`, `test_the_daemons_own_repository_never_reports_drift`                                                                                                                 |
 
-## The live daemon's code and venv are never changed under it (`cd8b8e315`)
+## Review round 2: a staged build swapped in by rename (`79ca131e4`)
+
+The coordinator asked for: the target built in a staging location beside the live clone with its own venv; the live clone never touched while the old daemon serves; then stop, swap the directories by rename, keep the old copy until the new daemon answers, swap back on failure; an interrupted swap recovered by the next run; the venv's embedded paths surviving the rename, shown with evidence; and a test that the live clone is byte-identical during the staged build. All of it is implemented and tested. The previous round's claim that a venv "cannot be moved into place" was wrong: it can, once it is rebound (below).
+
+**Where the stage is.** `.claude/hooks-daemon/untracked/sync-stage`. It has to be gitignored and on the same filesystem as the live clone for a rename. The only gitignored place in a client project is under `.claude/hooks-daemon/` (root `.gitignore` names `.claude/hooks-daemon/` and nothing else), so a sibling such as `.claude/hooks-daemon.next` would show in the project's `git status` for the whole build. A sibling exists only for the instant between two renames (below).
+
+**Nothing of the live clone is written during the build.** The stage is NOT a `git worktree` of the live clone any more: that wrote `.git/worktrees/` and the fetched tag into the live `.git`. It is `git init` + `remote add origin <fixed URL>` + `fetch --depth 1 origin refs/tags/vX:refs/tags/vX` + checkout, exactly as fresh provisioning makes a clone. The tag's `version.py` is checked before checkout. The target's gate runs from it, and its venv is built in it by its own `scripts/venv_bootstrap.sh repair <stage>`.
+
+**How the venv survives the rename.** A venv is bound to its build path in two ways, both of which I measured on a real `uv` 0.13.1 build of this branch's daemon:
+
+1. Its NAME: `venv-<slug of the daemon dir>-pyMM-<hex>`. The stage's slug differs from the live one's, and the resolver refuses a slug that is not its own.
+2. TEXT files that spell the path. On the real build, exactly 11 non-bytecode files: the editable `.pth` (`<stage>/src`), `direct_url.json`, the three console scripts' shebangs (`mdformat`, `jsonschema`, `markdown-it`), five activate scripts, and `.daemon-metadata.json` (python_path, fingerprint). `bin/python` is a link to `/usr/bin/python3.11`, outside both paths; `pyvenv.cfg` names only `/usr/bin`. 75 `.pyc` files also embed the path, but importlib does not trust a cached code object's path: it rewrites `co_filename` to the path the module was loaded from (`_imp._fix_co_filename`), shown below.
+
+So `_provision_rebind_stage_venv` (before the old daemon is stopped, in the stage only): computes the stage and live fingerprints with the target's own `python_fingerprint.sh`, checks the built venv carries the stage one, rewrites the stage path (logical and physical spellings, full venv path first) and the fingerprint to the live ones in every text file (`grep -rlIF`, byte-exact, mode kept), renames the venv for the live slug, and fails unless `grep` then finds the stage path in no text file. Renaming the whole stage onto the live path then makes every path it names true.
+
+Evidence (`untracked/scratch/exp-venv/rebind.bash`, run against a real `uv`-built venv, sourcing provision.sh's own three functions, then doing the swap's two renames):
+
+```
+The venv for v-experiment was rebound to .../exp-venv/proj/.claude/hooks-daemon (11 files named the stage).
+== venv now: .../proj/.claude/hooks-daemon/untracked/venv-workspace_untracked_worktrees_worktr-01e8-py311-2a519198
+== .pth:  .../proj/.claude/hooks-daemon/src
+== text files naming the stage path (expect none): (none)
+== import from the live path:
+.../proj/.claude/hooks-daemon/src/claude_code_hooks_daemon/__init__.py
+.../proj/.claude/hooks-daemon/src/claude_code_hooks_daemon/daemon/cli.py     <- co_filename, though the .pyc was written in the stage
+== console script runs: mdformat 1.0.0 (mdformat-gfm 1.0.0)
+== the resolver finds it for the live path: .../hooks-daemon/untracked/venv-...-01e8-py311-2a519198/bin/python
+== uv sees nothing to change (dry run): Checked 19 packages ... Would make no changes
+```
+
+The stage venv was named `...-344f-...` before, the live one `...-01e8-...`.
+
+**The switch** (`_provision_switch`), only after the stage is built and rebound:
+
+1. The switch marker (provision's pid) is written into the live `untracked/` and the stage's, and an empty manifest `.sync-carried` into the stage. The manifest records that the switch has begun.
+2. The old daemon is stopped.
+3. The stage's `untracked/` keeps only the rebound venv. Every entry of the live `untracked/` (the daemon's state, logs, other views' venvs, the background-sync record and its open log) is moved into it, each name appended to the manifest first. The exceptions are the stage, the marker and the old venv, which stays with the old clone.
+4. Three renames: live -> `.claude/hooks-daemon.sync-previous` (the sibling, for one instant); `<aside>/untracked/sync-stage` -> live; aside -> `<live>/untracked/sync-previous`.
+5. `bin/hooks-daemon restart` (which returns 0 only once the started daemon answers on its socket, `cli._await_started_daemon`), then `is_daemon_running` on its PID file.
+6. Marker and manifest removed; the old clone renamed to `sync-previous.discard` and removed. The rename comes first so that a removal cut short is never taken for an old clone to put back.
+
+Two details: `_provision_rename` refuses an occupied destination, and if a directory appears there first (a hook's `mkdir -p untracked` in the gap) it undoes mv's move-into and fails. `_provision_rename_onto_live` clears the live path first only when it holds nothing but init.sh's `untracked/` skeleton (no checkout, no source, no venv).
+
+**Undo, on failure and after a kill** (`_provision_recover_switch`, run by every provision before anything else, and by the sync's own abort). It tells the state apart by what exists:
+
+| What exists                                             | Killed                      | Undo                                                                             |
+| ------------------------------------------------------- | --------------------------- | -------------------------------------------------------------------------------- |
+| aside, and no checkout at the live path (or a skeleton) | between renames 1 and 2     | aside -> live, then as the last row                                              |
+| aside, and a checkout at the live path                  | between renames 2 and 3     | aside -> `untracked/sync-previous`, then as the next row                         |
+| `untracked/sync-previous`                               | after the swap, unconfirmed | stop the daemon running from it; reverse the three renames; then as the last row |
+| the stage's manifest                                    | after the stop, not swapped | move every manifest entry back; remove the stage                                 |
+| `sync-previous.discard`                                 | while removing the old one  | remove it                                                                        |
+
+Then: the marker is removed, a background record left `running` by a dead pid becomes `failed` ("killed during the switch; the previous version was put back"), the old daemon is restarted, and it prints `RECOVERED: ... v<old> is back in place`. An unconfirmed swap is always rolled back, never forward: the run that would have confirmed it is gone. If any marker names a LIVE process other than itself, provision does not recover; it says another provision (pid N) is switching and changes nothing (exit 0 in the background).
+
+**Not carried:** gitignored files of the old clone outside `untracked/` (`__pycache__` and other caches by the daemon repository's `.gitignore`). The preflight already refuses anything else outside `untracked/`. Assumption 5 above.
+
+**One fix found on the way.** init.sh's `is_daemon_running` proves at most one pid per process with the daemon's helper (`_HOOKS_DAEMON_HELPER_KEY` cache), and answers "not proven" for any other. A sync asks about the old daemon and then the new one, so the second answer was always "not running". provision now asks through `_provision_daemon_running`, a subshell that starts with the cache empty.
+
+**Tests** (`tests/integration/test_provision_sh.py`; red first, 12 failed and 1 passed in `untracked/scratch/red-directory-swap.txt`):
+
+- `TestTheSwitchIsADirectorySwap::test_the_live_clone_is_byte_identical_while_the_target_is_built`: a uv wrapper snapshots every path of the live clone (sha256 of each file, link targets) during the staged build, and a CLI hook snapshots it again at the stop. The only exclusions are what the sync itself writes: `untracked/sync-stage`, `untracked/background-sync` and the marker. Both equal the snapshot taken before the run. Every build's target is in the stage, and the old daemon was up during it. Red: the old worktree stage changed `.git`.
+- `test_the_staged_venv_is_moved_into_place_bound_to_the_live_path`: the stub uv now writes the files a real uv embeds the path in (`UV_EMBEDDED_PATH_FILES`). Afterwards the venv is `venv-{python_venv_fingerprint(live)}`, none of those files names the stage, the `.pth` is `<live>/src`, the shebang names the live venv, the metadata names the live interpreter and fingerprint, the resolver resolves, and there was exactly one build (no in-place build).
+- `test_the_previous_copy_is_kept_until_the_new_daemon_answers`: at the restart, `untracked/sync-previous` holds the old `version.py`; afterwards nothing of the switch is left.
+- `test_the_daemons_untracked_state_is_carried_across`: a state file and another view's venv come through byte for byte.
+- `test_a_target_venv_that_cannot_be_built_never_stops_the_old_daemon`: now also byte-identical.
+- `test_a_new_daemon_that_does_not_start_is_swapped_back`: the restart of the new version fails. The live clone is byte-identical to before, the old daemon is started again, and nothing of the switch is left.
+- `TestAnInterruptedSwitchIsRecoveredByTheNextRun::test_the_previous_version_is_put_back[4 shapes]`: provision is `kill -9`ed at the restart (the "swapped-unconfirmed" state). The other three shapes are made from it by undoing one rename at a time, which is exactly what a kill between those renames leaves. The gap shape also gets a hook's skeleton at the live path. The next run prints `RECOVERED`, and the live clone is byte-identical to before.
+- `test_an_interrupted_sync_is_recovered_then_completed`, `test_an_interrupted_background_sync_is_recorded_and_not_retried` (state `failed`, "put back"), `test_a_switch_another_live_process_is_making_is_left_alone`.
+- `tests/unit/install/test_background_sync.py::test_reads_the_status_provision_recorded[running-running]` assumed pid 42 was alive; it is not in this container, so the reader correctly turned "running" into "failed". It now uses the test's own pid.
+
+Result: `tests/integration/test_provision_sh.py` and `tests/unit/install/test_background_sync.py` 85 passed.
+
+## Superseded: the in-place switch (`cd8b8e315`)
+
+Everything in this section was replaced by review round 2, above. It is kept for the record of the previous decision.
 
 The coordinator's follow-up: 5.2a checked the tag out in place and rebuilt the venv in place while the old daemon was still running. That broke "the old daemon keeps serving until the new one is ready". It is fixed: nothing the running daemon imports from changes until that daemon has been stopped.
 
@@ -88,6 +167,10 @@ The sandbox's stand-in daemon gained a `stop` (`tests/venv_bootstrap_sandbox.py`
   - The one failure is `plan_qa`: an ADVISE finding (`journal-freshness`) for Plan 00471, not this branch.
   - `security`, `signal_targets`, `magic_values`, `error_hiding` and every other code check pass.
   - `changed_tests`: 3673 passed, 0 failed, 5 skipped (83 test files from 16 changed files). `project_handlers`: 238 passed. Both are marked NOT MEANINGFUL only because `plan_qa` failed.
+- Final after review round 2, on `79ca131e4`, `FULL_QA_LOCK_WAIT_SECONDS=3600 changed --allow-unmapped`: **QA: 37/40 PASSED, 1/40 FAILED, 2/40 NOT MEANINGFUL, exit 1.**
+  - The one failure is again `plan_qa`'s ADVISE `journal-freshness` for Plan 00471, not this branch.
+  - `shell_check`, `shell_audit`, `security`, `error_hiding`, `signal_targets`, `magic_values`, `docs_qa` and every other check pass.
+  - `changed_tests`: 4006 passed, 0 failed, 5 skipped (93 test files from 19 changed files, 2 unmapped). `project_handlers`: 238 passed. Both are NOT MEANINGFUL only because `plan_qa` failed.
 
 ## Task 5.4 tests (the three cases the plan names)
 
@@ -106,5 +189,6 @@ The sandbox's stand-in daemon gained a `stop` (`tests/venv_bootstrap_sandbox.py`
 
 - A real daemon, rather than the sandbox stand-in, being restarted by a sync the forwarder started.
 - `nohup` without `setsid` (macOS), which only ignores SIGHUP. Whether Claude Code kills a finished hook's process group there is not tested.
-- The switch window's length on a real machine: the in-place venv build from the warm cache, against the stub `uv` here.
-- The real `hooks-daemon stop` in the switch. The sandbox stand-in's stop is tested, not the real CLI's, which needs a project with an `origin` remote.
+- The real `hooks-daemon stop` and `restart` in the switch. The sandbox stand-in's are tested, not the real CLI's, which needs a project with an `origin` remote. The switch window is now the stop, the moves and three renames, and the restart; no build runs in it.
+- The venv rebind is proven on a real `uv` venv (the experiment above) and on the stub's imitation of its files in the tests, but no test builds a real venv: the suite has no network or real `uv`. A future `uv` that writes the build path into a file not covered (a binary, or a new text file) is caught for text files by the post-rebind check and the sync fails before the stop; a binary one would not be caught.
+- macOS: `_provision_rename` uses plain `mv` and checks for a move-into afterwards, written for BSD `mv` too, but it ran only on Linux here.
