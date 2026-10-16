@@ -126,11 +126,13 @@ stale: the clone's checked-out tag, the venv and the running daemon.
   foreign origin. A failure restores the previous version and restarts the old
   daemon. The drift advisories (`init.sh`, `version_check`,
   `daemon_sync_after_merge`) name `provision` rather than `upgrade` for this case.
-- [ ] ⬜ **Task 5.2**: Sync in the background, never inside a hook's time budget:
+- [x] ✅ **Task 5.2**: Sync in the background, never inside a hook's time budget:
   fetch exactly the tag from the fixed URL, check that its `version.py` names
   it, rebuild the venv through the clone's own build path, then restart. The
   old daemon keeps serving until the new one is ready, and a failed sync leaves
-  it in place and says so loudly.
+  it in place and says so loudly. (`7bcb35cf2`, `6bc2f5b45`: the session-start
+  forwarder starts `provision.sh --background` detached; `version_check` reports
+  its recorded outcome)
 - [x] ✅ **Task 5.3**: How this meets the upgrade approval gate and its agent guard.
   Moot: on 2026-10-11 the owner had the approval tier and `upgrade_approval_guard`
   removed (Plan 00503, GitHub #112), under the careless-not-hostile threat model. A

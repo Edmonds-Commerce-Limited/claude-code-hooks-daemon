@@ -1,112 +1,74 @@
 # Plan 00477 Phase 5 implementer: Tasks 5.2, 5.4 and 4.2
 
-Worktree: `untracked/worktrees/worktree-p477-background-sync`. Commits: `98c7ee990` (the work) and `55642216d` (targeted-QA fixes: error_hiding, black). The plan tick and this report are in the commit after those.
+Worktree: `untracked/worktrees/worktree-p477-background-sync`. Commits, in order:
 
-## STOP ITEM: a suppression is needed, and I did not add it
-
-Targeted QA leaves two bandit findings on the one new process-spawn site. The handover rules forbid me adding a suppression and say to report it:
-
-- `B404  src/claude_code_hooks_daemon/install/background_sync.py:22` (`import subprocess`)
-- `B603  src/claude_code_hooks_daemon/install/background_sync.py:171` (`subprocess.Popen(`)
-
-Starting a detached process is the task itself. Bandit flags every way of doing it: `subprocess` is B404 and B603, `os.fork` plus `os.exec*` is B606. No existing helper spawns a detached process that this could reuse. The project's sanctioned form is an inline `nosec` with its reason (owner ruling B2; `scripts/qa/check_inline_suppressions.py`; the same pair exists in `install/transport_verify.py:37,158` and `daemon/background_harvester.py:47,379`). Proposed lines, for the owner to add by hand:
-
-```python
-import subprocess  # nosec B404 - only to start the project's own tracked provision.sh, fixed argv, no shell
-```
-
-```python
-            process = subprocess.Popen(  # nosec B603 - fixed argv: bash from PATH, the project's tracked .claude/provision.sh, --background; no shell, no user input
-```
-
-Because of this, **Task 5.2 is left unticked in PLAN.md**. Its code, tests and docs are complete, and it is done once those two annotations are in.
+- `98c7ee990`: the first version, which launched the sync from Python.
+- `55642216d`: error_hiding and black fixes.
+- `7bcb35cf2`: the launch moved into shell (the coordinator's suppression-free route).
+- `6bc2f5b45`: signal_targets, magic_values and the changed-tests map.
+- The plan tick and this report are in the commit after those.
 
 ## Assumptions (for the coordinator to have ruled on)
 
-1. **Only an UPGRADE is synced in the background.** A downgrade keeps the manual route. The Task 5.1 notice already asks a human to confirm that a downgrade is intended, because a commit made from an older checkout looks the same as a deliberate downgrade. Syncing it automatically would skip that confirmation. `provision.sh --background` also refuses a downgrade itself.
-2. **The background sync never provisions a fresh checkout.** The owner ruled that fresh provisioning is deliberate (Overview, Non-Goals). Phase 5 covers only the case where a daemon is already present. `--background` refuses when no clone exists.
-3. **"Once per target version" means once, not once per success.** After a failure the sync is not retried in the background. Every session start reports the failure and names the state file to delete for a background retry, and `bash .claude/provision.sh` to run by hand. This prevents a sync that fails the same way from running at every session start.
-4. **A target whose pre-deploy gate wants the reading list confirmed is reported, not confirmed.** Task 5.3 keeps the gate's reading confirmation, and a detached process has nobody to read. It records `needs-reading`, and the notice tells the human or agent to run provision by hand. Provision prints the listing and the `--skip-reading-confirmation=<digest>` flag.
+1. **Only an UPGRADE is synced in the background.** A downgrade keeps the manual route. The Task 5.1 notice asks a human to confirm that a downgrade is intended, because a commit made from an older checkout looks the same as a deliberate downgrade. `provision.sh --background` refuses a downgrade itself.
+2. **The background sync never provisions a fresh checkout.** The owner ruled that fresh provisioning is deliberate (Overview, Non-Goals). `--background` refuses when no clone exists.
+3. **"Once per target version" means once, not once per success.** After a failure the sync is not retried in the background. Every session start reports the failure and names the state file to delete for a retry, and `bash .claude/provision.sh` to run by hand.
+4. **A target whose pre-deploy gate wants the reading list confirmed is reported, not confirmed.** Task 5.3 keeps that confirmation, and a detached process has nobody to read. It records `needs-reading`.
+5. **The sync waits up to 30 s for a running daemon before it touches the clone.** If none is running by then, it claims nothing and changes nothing, and a later session start retries. This keeps the guarantee that the old daemon serves until the new one is ready, and it prevents the sync from moving a clone that the same hook's `ensure_daemon` is starting from.
 
-## The trigger point, and why
+## The trigger point: the session-start forwarder, in shell
 
-**Decision:** the SessionStart `version_check` handler, in the running daemon. When it detects UPGRADE drift and the project carries the tracked `.claude/provision.sh`, it starts `bash .claude/provision.sh --background` detached and returns. The process runs in a new session with stdin closed and output to the log, and a daemon thread reaps it.
+The first version had `version_check` start the sync with `subprocess.Popen`, which drew bandit B404/B603. The coordinator asked for a route needing no new suppression. That route exists and is implemented: Python starts no process at all.
 
-Why there, and not in `init.sh`:
+- **Where:** the tracked `.claude/hooks/session-start` forwarder, directly after `SCRIPT_DIR=`. It starts `setsid bash "$SCRIPT_DIR/../provision.sh" --background` (`nohup` where there is no `setsid`) with stdin, stdout and stderr redirected, in the background, and goes on. The hook never waits on it.
+- **Relay mode:** the relay guard is generated directly above `source "$SCRIPT_DIR/../init.sh"`. That is why `init.sh` itself was not a usable trigger: with the relay on, SessionStart never sources it. The launch sits above the guard, so it runs with the relay on or off. `test_the_start_comes_before_the_relay_hot_path` builds the relay-enabled forwarder and checks the order. The relay's `--no-relay` fallback re-enters the forwarder, so the launch is skipped on that pass.
+- **Cost:** one detached bash per session start. `provision.sh --background` decides for itself whether there is anything to do. In the usual case the clone already matches and it exits ("nothing to do"). In the daemon's own repository it exits before sourcing `init.sh`.
+- **Better than the Python route:** the forwarder and `provision.sh` are tracked files, so the commit that moved `daemon.expected_version` brings them in. The pull that changes the version is therefore enough, including the first move onto this release.
+- **What Python does now:** `version_check` only READS the state the sync wrote (`install/background_sync.py`: paths and `read_sync_record`; no subprocess import, which a test asserts). With no state yet it says the sync was started this session. Otherwise it reports under way, failed, stopped for reading, or "recorded success yet still old".
 
-- **SessionStart usually never reaches `init.sh`.** The generated forwarders `exec` the relay binary whenever the relay socket exists (`.claude/hooks/session-start`, "relay hot path"), and the relay socket exists while the daemon runs. A trigger in `init.sh` would therefore miss the common case: an old daemon that is still running, or one that `init.sh` starts successfully from the old clone.
-- **The handler already makes the drift decision** (Task 5.1), from local facts only, before the cache or the network. Starting the sync there adds one `Popen` to a decision that is already made. The hook's time budget is not touched.
-- **The sync logic is the PULLED version's.** The handler runs the tracked `.claude/provision.sh`, which the pull brought in. So the sync steps are the target's, even though an old daemon's handler starts them.
-- **The cost:** only an installed daemon at this release or later starts the sync, so the first move onto this release is still a manual `bash .claude/provision.sh` (or the upgrade itself). The release note says so.
-- **A clone too broken to start** (`init.sh`'s stale-clone path after a failed start) is not synced in the background. It still gets the 5.1/5.2a message naming provision. There is no old daemon to keep serving in that case, and the hook would have to spawn the process inside its own budget path.
+The coordinator's guarantees, one by one:
 
-**Lock and marker** (`provision.sh`, `_provision_background_claim`):
+| Guarantee                                        | How                                                                                                                                                                                             | Shown by                                                                                                                                                  |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Never inside a hook's time budget                | Detached `setsid ... &` with every fd redirected                                                                                                                                                | `test_a_pulled_upgrade_is_synced_after_the_hook_has_answered` (venv build slowed to 5 s; the hook returns before the state is `synced`)                   |
+| The old daemon serves until the new one is ready | The sync waits for a running daemon (Assumption 5), and the restart is its last step; 5.2a's rollback on failure                                                                                | `test_a_sync_waits_for_a_running_daemon_and_otherwise_claims_nothing`; `test_a_sync_failure_keeps_the_old_daemon_and_records_why`                         |
+| Failure is loud                                  | State `failed` or `needs-reading` with the reason; `version_check` shows it at every session start (`systemMessage` plus context) with the log, the manual command and the state file to delete | `TestTheBackgroundSync::test_a_refused_clone_is_recorded_as_a_failure` and siblings; `TestAPulledUpgradeIsReportedAsSyncingInTheBackground`               |
+| One sync at a time                               | `mkdir` lock with the holder's pid, taken over when that pid is dead; a per-target state file as the once-only marker                                                                           | `test_a_sync_already_running_is_not_joined`, `test_a_lock_whose_holder_is_gone_is_taken_over`, `test_a_target_already_attempted_is_never_attempted_again` |
+| The daemon's own repository never syncs          | `provision.sh` refuses before sourcing `init.sh`; `version_check` reports no drift in self-install mode                                                                                         | `test_the_daemons_own_repository_never_syncs`, `test_the_daemons_own_repository_never_reports_drift`                                                      |
 
-- Lock: `mkdir .claude/hooks-daemon/untracked/background-sync/lock.d` (atomic), holding the pid. A lock whose pid is dead is taken over. A live holder makes the new run exit 0 without claiming anything, so a later session tries again.
-- Marker: `v<version>.state`, written under the lock. If it already exists, the run stops ("already attempted"). The state then moves from `running` to `synced`, `failed` (with the `PROVISION FAILED` reason) or `needs-reading`, written by an EXIT trap from the exit status. The handler also checks the state's pid: a `running` state whose process is gone reads as `failed`, for example after a reboot.
-- Both live under the clone's `untracked/`, which a checkout never touches and which the dirty-clone check excludes.
-
-**Reuse:** `--background` is a flag on 5.2a's own sync path (`_provision_sync_clone`). Nothing in the sync was duplicated. It adds the claim before the sync, the trap after it, and the two refusals (downgrade, fresh checkout).
-
-## What "the old daemon keeps serving" does and does not mean
-
-The old daemon PROCESS is not stopped until `bin/hooks-daemon restart`, the last step, so it answers hooks throughout the fetch, the gate and the venv build. A failure before the restart never stops it. A failure after the checkout restores the commit and venv and restarts it, which is 5.2a's existing rollback. **The limitation, stated plainly:** 5.2a's sync checks the tag out in place and moves the venv aside before the rebuild. A module the old process imports lazily during that window would come from the new checkout, or fail to import. Code it imported at startup (the handlers and the server) is unaffected. Removing that window would mean building the target in a separate directory and swapping, but the clone's own build path keys the venv on the clone's path. That is a change to 5.2a's design, not to the trigger, so I did not make it. I did not measure how much the daemon imports lazily.
-
-## Delivered
-
-- `src/claude_code_hooks_daemon/install/background_sync.py` (new): names the state and log files, reads a state back (`SyncRecord`), and starts the detached process (`launch_background_sync`). An unreadable state, an unknown status or a dead `running` pid reads as FAILED, never as silence.
-- `src/claude_code_hooks_daemon/handlers/session_start/version_check.py`: drift detection (`_expected_drift`, no side effects; `matches()` on a resume uses it, so it starts nothing) is split from the notice (`_drift_context`). The notice now starts the sync, or reports the recorded outcome, for an upgrade. STARTED and UNDER WAY are informational. FAILED, STOPPED, "recorded success yet still old", and COULD NOT START are loud and each names the reason, the log, `bash .claude/provision.sh` and the state file to delete. SessionStart context is emitted as `systemMessage` too, so the human sees it.
-- `provision.sh` (`.claude/provision.sh` is a symlink to it): `--background`, `SYNC_STATE_DIR_NAME`, lock, claim, EXIT-trap outcome, and `_PROVISION_FAIL_REASON` recorded by `_provision_fail`.
-- Docs: the `provision` skill page (both copies, kept identical), "In the background, after a pull"; a TROUBLESHOOTING paragraph under the version-drift entry.
-- Task 4.2: release note `066-a-pulled-daemon-version-upgrade-syncs-itself-in-the-background.md`. Post-upgrade task `02-commit-the-expected-version-and-provision-sh.md` (an upgraded project gains the key and the tracked `provision.sh`, and must commit both for other checkouts to follow), indexed in the post-upgrade README. The key and `provision.sh` themselves shipped in v3.68.0 (notes 187 and 193, `config-changes/v3.68.0.yaml`), so the new note is about the background sync, and the task covers committing what the upgrade added.
+**The old-daemon limitation, stated plainly:** 5.2a checks the tag out in place and moves the venv aside before the rebuild. The old daemon PROCESS keeps answering throughout, but a module it imports lazily during that window comes from the new checkout or fails to import. Removing that window would mean changing 5.2a's build design, not the trigger. I did not measure how much the daemon imports lazily.
 
 ## TDD: red before green
 
-- `tests/unit/install/test_background_sync.py` before the module existed: `ImportError: cannot import name 'background_sync' from 'claude_code_hooks_daemon.install'` (collection error).
-- `tests/integration/test_provision_sh.py::TestTheBackgroundSync` before `provision.sh` changed: 10 tests failed, with `PROVISION FAILED: unknown argument: --background`.
-- `tests/unit/handlers/session_start/test_version_check_drift.py` before the handler changed: `AttributeError: <module '...version_check'> does not have the attribute 'launch_background_sync'`.
-- `TestTheLauncherVersionCheckUses` (launcher plus real `provision.sh --background`, end to end in the sandbox) was written after the parts it joins were green, so it has no red run.
-
-## Task 5.4 tests (the three cases the plan names)
-
-| Case                                      | Tests                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A pulled newer version syncs and restarts | `test_provision_sh.py::TestTheBackgroundSync::test_a_pulled_newer_version_syncs_restarts_and_records_it`; `::TestTheLauncherVersionCheckUses::test_a_launched_sync_finishes_on_its_own_and_restarts_the_daemon` (detached, launcher returns under 2 s, state `synced`, clone at the new tag, one restart); `test_version_check_drift.py::TestAPulledUpgradeIsSyncedInTheBackground::test_the_first_session_starts_the_sync_and_says_so` |
-| A sync failure keeps the old daemon       | `::test_a_sync_failure_keeps_the_old_daemon_and_records_why` (clone and venv back, old daemon restarted, state `failed` naming the venv); `::test_a_refused_clone_is_recorded_as_a_failure`; `::test_a_target_that_needs_reading_is_recorded_and_changes_nothing`; handler: `test_a_failed_sync_is_reported_loudly_with_the_command_and_not_retried` and its STOPPED, recorded-success and could-not-start siblings                     |
-| The daemon's own repository never syncs   | `test_provision_sh.py::TestTheBackgroundSync::test_the_daemons_own_repository_never_syncs`; `test_version_check_drift.py::TestSilentWhenNothingDrifted::test_the_daemons_own_repository_never_reports_drift_or_syncs` (launcher never called)                                                                                                                                                                                           |
-
-Also covered: once per target (`test_a_target_already_attempted_is_never_attempted_again`), no overlap (`test_a_sync_already_running_is_not_joined`, `test_a_lock_whose_holder_is_gone_is_taken_over`), no downgrade (provision and handler), no fresh checkout, no launch from `matches()`, and a dead `running` pid read as a failure.
-
-Runs, all in the worktree venv:
-
-- `pytest tests/integration/test_provision_sh.py tests/unit/install/test_background_sync.py`: 72 passed (before the launcher test was added). `-k 'Launcher or Background'` after it: 11 passed.
-- `pytest tests/unit/handlers/session_start/ tests/unit/install/test_background_sync.py`: 894 passed.
-- `pytest tests/integration/test_upgrade_task_schema.py tests/integration/test_post_upgrade_tasks_are_reachable.py`: 54 passed.
-- `ruff check` and `mypy --strict` on the two source files: clean.
+- First version: the module tests failed with `ImportError: cannot import name 'background_sync'`. `TestTheBackgroundSync` failed 10 tests with `PROVISION FAILED: unknown argument: --background`. The handler tests failed with `AttributeError: ... does not have the attribute 'launch_background_sync'`.
+- Shell rework, before the forwarder, `provision.sh` and module changed: 5 failed. These were `test_the_session_start_forwarder_starts_the_same_flag`, `test_the_module_does_not_import_subprocess`, `test_a_pulled_upgrade_is_synced_after_the_hook_has_answered` ("did not finish within 60.0s"), `test_the_start_comes_before_the_relay_hot_path` ("substring not found") and `test_a_sync_waits_for_a_running_daemon_and_otherwise_claims_nothing`.
 
 ## Targeted QA
 
-`./scripts/qa/llm_qa.py changed` from the worktree, with `FULL_QA_LOCK_WAIT_SECONDS=3000` because other worktrees held the host-wide lock. The first attempt timed out on the lock without running.
+`./scripts/qa/llm_qa.py changed` from the worktree, with `FULL_QA_LOCK_WAIT_SECONDS=3000` (other worktrees held the host-wide lock).
 
-- Run 1 (on `98c7ee990`): 34/40 passed. It failed `format` (black restyled three new tests; committed in `55642216d`), `error_hiding` (two `return-none-on-error`, fixed in `55642216d` by returning after the `except`, as `bebed359c` did), `security` (below) and `plan_qa`.
-- Run 2 (on `55642216d`), the final verdict: **QA: 36/40 PASSED, 2/40 FAILED, 2/40 NOT MEANINGFUL, exit 1.**
-  - `security`: the two bandit findings in the STOP ITEM above.
-  - `plan_qa`: one ADVISE finding, `journal-freshness` for Plan 00471, which is not this plan and not this branch.
-  - `changed_tests`: 2945 passed, 0 failed, 5 skipped (60 test files from 14 changed files, 0 unmapped). `project_handlers`: 238 passed. Both are marked NOT MEANINGFUL only because a detector above failed.
+- On `7bcb35cf2`: 35/40 passed. `security` passed, with no bandit finding. It failed `magic_values` (two literal timeouts in the new test), `signal_targets` (the test's `terminate()`; it now goes through `safe_signal.stop_verified_daemon`), `changed_tests` (`.claude/hooks/session-start` mapped to no test; declared in `scripts/qa/changed_tests_map.yaml` with the three test files that run it, which adds coverage and exempts nothing) and `plan_qa`.
+- On `6bc2f5b45`, plain `changed`: only `plan_qa` and `changed_tests` failed. `changed_tests` failed solely because `.claude/hooks/session-start` is "too-broad": through `daemon/cli.py` its tests reach 100+ files, "the suite by another name". The handover rule allows `--allow-unmapped` for that case.
+- Final, on `6bc2f5b45`, `changed --allow-unmapped`: **QA: 37/40 PASSED, 1/40 FAILED, 2/40 NOT MEANINGFUL, exit 1.**
+  - The one failure is `plan_qa`: an ADVISE finding (`journal-freshness`) for Plan 00471, not this branch.
+  - `security`, `signal_targets`, `magic_values`, `error_hiding` and every other code check pass.
+  - `changed_tests`: 3673 passed, 0 failed, 5 skipped (83 test files from 16 changed files). `project_handlers`: 238 passed. Both are marked NOT MEANINGFUL only because `plan_qa` failed.
+
+## Task 5.4 tests (the three cases the plan names)
+
+- **A pulled newer version syncs and restarts:** `test_provision_sh.py::TestTheSessionStartHookStartsIt::test_a_pulled_upgrade_is_synced_after_the_hook_has_answered` runs the real forwarder end to end: the state becomes `synced`, the clone is at the new tag, there is one restart, and the log reads `SYNCED`. Also `TestTheBackgroundSync::test_a_pulled_newer_version_syncs_restarts_and_records_it`.
+- **A sync failure keeps the old daemon:** `test_a_sync_failure_keeps_the_old_daemon_and_records_why` (clone and venv back, old daemon restarted, state `failed` naming the venv). Also `test_a_refused_clone_is_recorded_as_a_failure`, `test_a_target_that_needs_reading_is_recorded_and_changes_nothing`, and the handler's FAILED, STOPPED and recorded-success reports.
+- **The daemon's own repository never syncs:** the two tests named in the table above.
 
 ## Success Criteria
 
-- **After a pull that changes `daemon.expected_version`, the next session runs the daemon at the new version without a manual step:** LEFT UNTICKED. It holds for an UPGRADE, where the installed daemon is at this release or later, the project carries `provision.sh`, and the target's gate does not stop for reading (the tests above). It does not hold for a downgrade (manual by Assumption 1), for a target whose gate wants its reading confirmed (Task 5.3 keeps that confirmation), or for the first move onto this release. The criterion as written covers every pull, so I cannot show it. The coordinator may rule that the upgrade case is what was meant.
-- **In a fresh clone of a configured fixture project, the first session shows the human a message naming `provision` and the expected version:** TICKED. `tests/integration/test_init_sh_needs_provision.py::TestSessionStartAndUserPromptSubmit::test_human_and_agent_both_get_the_provision_message` (SessionStart `systemMessage` carries "NEEDS PROVISIONING", 3.68.0 and the command); the class passed in this worktree.
-- **Running provision brings up the daemon at exactly that version, with no restart and no change to any tracked file:** TICKED. `test_provision_sh.py::TestProvisioning`: `test_installs_exactly_the_tag_the_config_names_never_main`, `test_builds_the_venv_and_starts_the_daemon`, `test_says_no_session_restart_is_needed`, `test_the_next_hook_finds_the_daemon_already_running` and `test_writes_no_tracked_file` all passed in this worktree.
-- **Provision never clones `main` when the config names a version:** TICKED. `test_installs_exactly_the_tag_the_config_names_never_main` and `TestSyncingAnExistingClone::test_a_bare_tag_ref_is_fetched_and_nothing_else`.
-
-## Plan state after this branch
-
-Tasks 4.2 and 5.4 are ticked, citing the commits. Task 5.2 is unticked (STOP ITEM). Success Criteria 2-4 are ticked, citing their tests. Criterion 1 is unticked (above).
+- **After a pull that changes `daemon.expected_version`, the next session runs the daemon at the new version without a manual step:** LEFT UNTICKED. It holds for an UPGRADE in a project carrying `provision.sh`, where the target's gate does not stop for reading. It does not hold for a downgrade (manual, Assumption 1) or for a target whose gate wants its reading confirmed (Task 5.3). The criterion as written covers every pull. The coordinator may rule that the upgrade case is what was meant.
+- **The fresh-clone message names `provision` and the version:** TICKED. `test_init_sh_needs_provision.py::TestSessionStartAndUserPromptSubmit::test_human_and_agent_both_get_the_provision_message`.
+- **Provision brings up exactly that version, with no restart and no tracked change:** TICKED. `test_provision_sh.py::TestProvisioning`.
+- **Provision never clones `main`:** TICKED. `test_installs_exactly_the_tag_the_config_names_never_main`, `test_a_bare_tag_ref_is_fetched_and_nothing_else`.
 
 ## Not verified
 
-- A real daemon starting the sync and being restarted by its own detached child. The end-to-end test uses the sandbox's stand-in daemon, with pytest as the launcher. `start_new_session=True` is what makes the child survive the restart, and `test_the_sync_runs_in_its_own_session` checks it.
-- The relay path during the restart window.
-- How much the daemon imports lazily during the in-place checkout window (see above).
+- A real daemon, rather than the sandbox stand-in, being restarted by a sync the forwarder started.
+- `nohup` without `setsid` (macOS), which only ignores SIGHUP. Whether Claude Code kills a finished hook's process group there is not tested.
+- How much the daemon imports lazily during the in-place checkout window.
