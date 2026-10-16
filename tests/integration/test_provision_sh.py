@@ -23,7 +23,6 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 
-import psutil
 import pytest
 
 from claude_code_hooks_daemon.config.models import TransportConfig
@@ -32,7 +31,8 @@ from claude_code_hooks_daemon.install.forwarder_generator import (
     INIT_SH_ANCHOR,
     generate_forwarder_content,
 )
-from tests.venv_bootstrap_sandbox import BASH, CLONE_VERSION, Sandbox, snapshot
+from claude_code_hooks_daemon.utils.safe_signal import DaemonStop, stop_verified_daemon
+from tests.venv_bootstrap_sandbox import BASH, CLONE_VERSION, TIMEOUT_SECONDS, Sandbox, snapshot
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROVISION_SH = REPO_ROOT / "provision.sh"
@@ -854,6 +854,8 @@ def _outcome(p: Provisioning, version: str, timeout: float = 60.0) -> dict[str, 
 SESSION_START_SOURCE = REPO_ROOT / ".claude" / "hooks" / "session-start"
 #: The venv build the sync runs is made this slow, so the hook is seen to answer first.
 SLOW_BUILD_SECONDS = 5.0
+#: How long the stand-in daemon gets to exit on SIGTERM.
+STOP_GRACE_SECONDS = 10.0
 
 
 def _deploy_session_start(p: Provisioning, *, relay: bool = False) -> Path:
@@ -875,11 +877,12 @@ def _deploy_session_start(p: Provisioning, *, relay: bool = False) -> Path:
 
 def _stop_the_daemon(p: Provisioning) -> None:
     """End the stand-in daemon, so the clone has no daemon running from it."""
-    pid = int(p.box.pid.read_text().strip())
-    stand_in = psutil.Process(pid)
-    assert stand_in.environ().get("CLAUDE_HOOKS_PID_PATH") == str(p.box.pid)
-    stand_in.terminate()
-    stand_in.wait(timeout=10)
+    stopped = stop_verified_daemon(
+        int(p.box.pid.read_text().strip()),
+        project_root=p.project.resolve(),
+        grace_seconds=STOP_GRACE_SECONDS,
+    )
+    assert stopped in (DaemonStop.TERMINATED, DaemonStop.KILLED), stopped
 
 
 class TestTheSessionStartHookStartsIt:
@@ -900,7 +903,7 @@ class TestTheSessionStartHookStartsIt:
             text=True,
             env=fresh.box.env(fresh.git_env),
             cwd=fresh.project,
-            timeout=60,
+            timeout=TIMEOUT_SECONDS,
             check=False,
         )
         state_after_hook = _sync_dir(fresh) / f"v{MAIN_VERSION}.state"
