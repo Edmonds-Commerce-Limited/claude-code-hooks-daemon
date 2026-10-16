@@ -331,8 +331,16 @@ class SubagentContextBudgetHandler(PreToolUseHandlerBase):
     # ------------------------------------------------------------------
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Every subagent tool call, unless both bands are off or its type is exempt."""
+        """Every subagent tool call, unless both bands are off or its type is exempt.
+
+        A call is a subagent's tool call only when it names a tool and carries
+        an ``agent_id``; anything else has no agent context to measure.
+        """
         if int_or_none(self._soft_tokens) is None and int_or_none(self._hard_tokens) is None:
+            return False
+        if not hook_input.get(HookInputField.TOOL_NAME) or not hook_input.get(
+            HookInputField.AGENT_ID
+        ):
             return False
         exempt = self._exempt_agent_types or []
         if not exempt:

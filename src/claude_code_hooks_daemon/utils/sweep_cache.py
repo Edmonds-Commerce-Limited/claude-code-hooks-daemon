@@ -35,6 +35,7 @@ from typing import Final
 
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
 
@@ -305,7 +306,7 @@ def _read_cache(cache_file: Path) -> tuple[str, list[str]] | None:
 def _write_cache(cache_file: Path, fingerprint: str, context: list[str]) -> None:
     """Persist atomically; a failed write costs only the next session a recompute."""
     payload = json.dumps({_CACHE_KEY_FINGERPRINT: fingerprint, _CACHE_KEY_CONTEXT: context})
-    temp_file = cache_file.with_name(f"{cache_file.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    temp_file = unique_temp_path(cache_file)
     try:
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         temp_file.write_text(payload, encoding="utf-8")
