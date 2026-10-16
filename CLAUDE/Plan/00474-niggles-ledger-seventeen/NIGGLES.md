@@ -92,7 +92,7 @@ the `footnote` extension beside `gfm` in `markdown_format.py`. References and de
 round-trip of every tracked `.md` file containing footnote-like text is identical with and without the extension: the 11
 files that change under the formatter were already unformatted and change the same way without it.
 
-**Status**: ⬜ In progress.
+**Status**: ✅ Fixed (commit 9bca52a78 on branch worktree-i122-footnotes).
 
 ### N467 — the secret-file-read guard still scans a large Write at about 1.7 ms per KB after N465
 
