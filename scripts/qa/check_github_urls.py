@@ -36,6 +36,7 @@ import sys
 from pathlib import Path
 from typing import Any, Final
 
+from claude_code_hooks_daemon.utils.git_repo import git_visible_paths
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.scan_scope import (
     relative_parts,
@@ -122,13 +123,18 @@ def _walk(root: Path) -> tuple[list[Path], int]:
     """Every file worth reading, and how many files the walk saw in total.
 
     Hidden directories are INCLUDED; ``.git`` and nested checkouts are not
-    this project's files. Directory names are matched below ``root`` only
-    (00466 N26): matched on the absolute path, a checkout under
-    ``untracked/worktrees/`` read nothing.
+    this project's files, and neither is anything git ignores. Directory
+    names are matched below ``root`` only (00466 N26): matched on the
+    absolute path, a checkout under ``untracked/worktrees/`` read nothing.
     """
     found: list[Path] = []
     walked = walk_files(root)
+    # A gitignored file (a `.coverage` database a test run leaves behind) is
+    # not project content; `None` means `root` is no git checkout, so all count.
+    visible = git_visible_paths(root)
     for path in walked:
+        if visible is not None and "/".join(relative_parts(path, root)) not in visible:
+            continue
         if any(part in _SKIP_DIRS for part in relative_parts(path, root)):
             continue
         if not path.is_file() or path.is_symlink():

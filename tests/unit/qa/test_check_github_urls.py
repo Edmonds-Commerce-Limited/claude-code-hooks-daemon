@@ -346,3 +346,50 @@ class TestUnreadableFilesFailTheCheck:
         assert result.returncode == 0
         data = json.loads((tmp_path / "github_urls.json").read_text())
         assert data["summary"]["passed"] is True
+
+
+def _git_init(root: Path) -> None:
+    subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
+
+
+class TestGitignoredFilesAreNotJudged:
+    """N470: a gitignored tool artefact must not fail the check (00474)."""
+
+    def test_a_gitignored_binary_file_is_neither_read_nor_reported(self, tmp_path: Path) -> None:
+        """`.coverage` is a binary sqlite database a pytest run leaves behind."""
+        _git_init(tmp_path)
+        _write(tmp_path, ".gitignore", ".coverage\n")
+        (tmp_path / ".coverage").write_bytes(b"SQLite format 3\x00\xff\xfe\x80")
+        unreadable: list[str] = []
+
+        assert checker.find_violations(tmp_path, unreadable=unreadable) == []
+        assert unreadable == []
+
+    def test_a_gitignored_file_naming_a_wrong_owner_is_not_a_violation(
+        self, tmp_path: Path
+    ) -> None:
+        _git_init(tmp_path)
+        _write(tmp_path, ".gitignore", "scratch.txt\n")
+        _write(
+            tmp_path, "scratch.txt", "https://github.com/anthropics/claude-code-hooks-daemon\n"
+        )
+
+        assert checker.find_violations(tmp_path) == []
+
+    def test_an_untracked_unignored_file_is_still_judged(self, tmp_path: Path) -> None:
+        """A new file not yet added is exactly what a pre-commit sweep must see."""
+        _git_init(tmp_path)
+        _write(
+            tmp_path, "docs/new.md", "https://github.com/anthropics/claude-code-hooks-daemon\n"
+        )
+
+        assert len(checker.find_violations(tmp_path)) == 1
+
+    def test_an_undecodable_unignored_file_is_a_finding_not_a_crash(self, tmp_path: Path) -> None:
+        _git_init(tmp_path)
+        (tmp_path / "blob.bin").write_bytes(b"\xff\xfe\x80")
+        unreadable: list[str] = []
+
+        checker.find_violations(tmp_path, unreadable=unreadable)
+
+        assert len(unreadable) == 1
