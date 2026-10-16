@@ -90,6 +90,28 @@ pass cannot match without). Keep N465's equivalence corpus as the guard: zero ve
 
 **Status**: ⬜ Open.
 
+### N466 — every valid Ansible task or handler file is denied: the default lint command parses it as a playbook
+
+**Source**: GitHub issue #121 (approved author, filed with the issue-report generator), 2026-10-16. A role's
+`tasks/main.yml` containing a valid list of tasks is denied by `lint_on_edit` and `staged_lint_gate` with
+`'ansible.builtin.debug' is not a valid attribute for a Play` (rc 4), and no edit can fix it. Reproduced against
+ansible-core 2.19.
+
+**Why it happens**: `AnsibleLintStrategy.handles_file` claims any YAML under a `tasks`, `roles` or `handlers`
+directory, then lints it with `ansible-playbook --syntax-check {file}`. That command parses every top-level item as
+a Play, so a task list always fails. The `roles` segment also claimed a role's `defaults`, `vars` and `meta`, which
+are dicts and fail the same way.
+
+**Fix direction** (chosen: option (a) of the brief): check a task or handler file through a generated one-play
+wrapper that `import_tasks` it by absolute path (`tasks:` for a `tasks` directory, `handlers:` for a `handlers`
+one). Verified against real ansible-core: a valid task file and a valid handlers file pass; a YAML error and an
+unknown module are still reported and name the real file. Option (b), a YAML-only check, would have lost the
+unknown-module and attribute errors; option (c) alone would have left task files unlinted. The new `{playbook}`
+placeholder carries the wrapper, so `{file}` stays the real file for `ansible-lint` and for a user-configured
+command. A file with a play signal is a playbook wherever it sits. `roles` no longer claims a file by itself.
+
+**Status**: ✅ Fixed (commit b8081fd72 on branch worktree-i121-ansible-task-files).
+
 ### N465 — the secret-file-read guard shlex-tokenises every line of a Write, about 1.2 s per 100 KB
 
 **Source**: the Plan 00495 Task 3.2 measurement, 2026-10-16. `block-secret-file-read` reaches `_shell_words` in

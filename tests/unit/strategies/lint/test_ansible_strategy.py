@@ -14,9 +14,16 @@ catch. See DESIGN-ansible-lint.md §3.
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
 
+import pytest
+import yaml
+
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.strategies.lint.ansible_strategy import AnsibleLintStrategy
+from claude_code_hooks_daemon.strategies.lint.common import build_lint_argv, lint_output_dir
 from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy, NarrowsByPath
 
 _PLAYBOOK = """---
@@ -224,3 +231,169 @@ class TestWorkingDirectoryResolution:
         from claude_code_hooks_daemon.strategies.lint.module_context import MODULE_ROOT_MARKERS
 
         assert MODULE_ROOT_MARKERS["Ansible"] == "ansible.cfg"
+
+
+_TASK_FILE = """---
+- name: say hello
+  ansible.builtin.debug:
+    msg: hello
+"""
+
+_HANDLERS_FILE = """---
+- name: restart web
+  ansible.builtin.debug:
+    msg: restarting
+  listen: restart web
+"""
+
+_BROKEN_TASK_FILE = """---
+- name: say hello
+  ansible.builtin.debug:
+    msg: "unterminated
+"""
+
+
+class TestTaskAndHandlerFilesAreNotPlaybooks:
+    """Issue 121: a task file is a list of TASKS, which ``ansible-playbook``
+    parses as Plays and rejects, so no edit could ever make one pass."""
+
+    def test_a_role_defaults_file_is_declined(self, tmp_path: Path) -> None:
+        """Role data is not a play or a task list; the ``roles`` segment alone
+        used to claim it and the playbook parser then rejected a valid dict."""
+        path = _write(tmp_path, "roles/web/defaults/main.yml", "port: 80\n")
+        assert not AnsibleLintStrategy().handles_file(path)
+
+    def test_a_role_task_file_is_still_claimed(self, tmp_path: Path) -> None:
+        path = _write(tmp_path, "roles/web/tasks/main.yml", _TASK_FILE)
+        assert AnsibleLintStrategy().handles_file(path)
+
+    def test_a_role_handlers_file_is_still_claimed(self, tmp_path: Path) -> None:
+        path = _write(tmp_path, "roles/web/handlers/main.yml", _HANDLERS_FILE)
+        assert AnsibleLintStrategy().handles_file(path)
+
+    def test_playbook_gets_itself_as_the_syntax_check_target(self, tmp_path: Path) -> None:
+        path = _write(tmp_path, "playbooks/deploy.yml", _PLAYBOOK)
+        assert AnsibleLintStrategy().command_values(path) == {"playbook": path}
+
+    def test_play_inside_a_tasks_directory_is_still_a_playbook(self, tmp_path: Path) -> None:
+        path = _write(tmp_path, "roles/web/tasks/main.yml", _PLAYBOOK)
+        assert AnsibleLintStrategy().command_values(path) == {"playbook": path}
+
+    def test_task_file_is_wrapped_in_a_play_that_imports_it(self, tmp_path: Path) -> None:
+        path = _write(tmp_path, "roles/web/tasks/main.yml", _TASK_FILE)
+        wrapper = AnsibleLintStrategy().command_values(path)["playbook"]
+
+        assert wrapper != path
+        plays = yaml.safe_load(Path(wrapper).read_text(encoding="utf-8"))
+        assert len(plays) == 1
+        assert plays[0]["hosts"] == "localhost"
+        assert plays[0]["tasks"] == [{"ansible.builtin.import_tasks": path}]
+        assert "handlers" not in plays[0]
+
+    def test_handlers_file_is_imported_as_handlers(self, tmp_path: Path) -> None:
+        path = _write(tmp_path, "roles/web/handlers/main.yml", _HANDLERS_FILE)
+        wrapper = AnsibleLintStrategy().command_values(path)["playbook"]
+
+        plays = yaml.safe_load(Path(wrapper).read_text(encoding="utf-8"))
+        assert plays[0]["handlers"] == [{"ansible.builtin.import_tasks": path}]
+        assert "tasks" not in plays[0]
+
+    def test_wrapper_keeps_an_awkward_path_as_one_literal_string(self, tmp_path: Path) -> None:
+        """The path is data inside the generated YAML, never YAML syntax."""
+        path = _write(tmp_path, "my roles/it's: [odd]/tasks/main.yml", _TASK_FILE)
+        wrapper = AnsibleLintStrategy().command_values(path)["playbook"]
+
+        plays = yaml.safe_load(Path(wrapper).read_text(encoding="utf-8"))
+        assert plays[0]["tasks"][0]["ansible.builtin.import_tasks"] == path
+
+    def test_wrapper_lives_in_the_private_lint_output_dir(self, tmp_path: Path) -> None:
+        path = _write(tmp_path, "roles/web/tasks/main.yml", _TASK_FILE)
+        wrapper = Path(AnsibleLintStrategy().command_values(path)["playbook"])
+
+        assert wrapper.parent == Path(lint_output_dir())
+        assert not str(wrapper).startswith(str(tmp_path))
+
+    def test_wrapper_name_is_stable_per_file_and_distinct_across_files(
+        self, tmp_path: Path
+    ) -> None:
+        first = _write(tmp_path, "roles/a/tasks/main.yml", _TASK_FILE)
+        second = _write(tmp_path, "roles/b/tasks/main.yml", _TASK_FILE)
+        strategy = AnsibleLintStrategy()
+
+        assert strategy.command_values(first) == strategy.command_values(first)
+        assert strategy.command_values(first) != strategy.command_values(second)
+
+    def test_default_command_targets_the_playbook_placeholder_only(self) -> None:
+        """``{file}`` stays the real file for a user override and for
+        ``ansible-lint``, which understands task files natively."""
+        assert AnsibleLintStrategy().default_lint_command.split()[-1] == "{playbook}"
+
+    def test_argv_for_a_task_file_names_the_wrapper_not_the_task_file(self, tmp_path: Path) -> None:
+        path = _write(tmp_path, "roles/web/tasks/main.yml", _TASK_FILE)
+        strategy = AnsibleLintStrategy()
+
+        argv = build_lint_argv(strategy.default_lint_command, path, strategy)
+
+        assert argv[:2] == ["ansible-playbook", "--syntax-check"]
+        assert argv[2] == strategy.command_values(path)["playbook"]
+
+    def test_user_override_using_file_still_receives_the_real_file(self, tmp_path: Path) -> None:
+        path = _write(tmp_path, "roles/web/tasks/main.yml", _TASK_FILE)
+
+        argv = build_lint_argv("my-linter --strict {file}", path, AnsibleLintStrategy())
+
+        assert argv == ["my-linter", "--strict", path]
+
+    def test_extended_command_still_receives_the_real_file(self, tmp_path: Path) -> None:
+        path = _write(tmp_path, "roles/web/tasks/main.yml", _TASK_FILE)
+        strategy = AnsibleLintStrategy()
+
+        argv = build_lint_argv(strategy.extended_lint_command or "", path, strategy)
+
+        assert argv == ["ansible-lint", path]
+
+
+def _ansible_playbook() -> str | None:
+    return shutil.which("ansible-playbook")
+
+
+@pytest.mark.skipif(_ansible_playbook() is None, reason="ansible-playbook is not installed")
+class TestSyntaxCheckAgainstRealAnsible:
+    """The behaviour the issue reports, against the real parser."""
+
+    def _check(self, path: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+        strategy = AnsibleLintStrategy()
+        argv = build_lint_argv(strategy.default_lint_command, path, strategy)
+        argv[0] = _ansible_playbook() or argv[0]
+        return subprocess.run(
+            argv, capture_output=True, text=True, cwd=cwd, timeout=Timeout.QA_TEST_TIMEOUT
+        )
+
+    def test_valid_role_task_file_passes(self, tmp_path: Path) -> None:
+        path = _write(tmp_path, "roles/web/tasks/main.yml", _TASK_FILE)
+        result = self._check(path, tmp_path)
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_valid_handlers_file_passes(self, tmp_path: Path) -> None:
+        path = _write(tmp_path, "roles/web/handlers/main.yml", _HANDLERS_FILE)
+        result = self._check(path, tmp_path)
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_broken_task_file_is_still_reported_and_names_the_real_file(
+        self, tmp_path: Path
+    ) -> None:
+        path = _write(tmp_path, "roles/web/tasks/main.yml", _BROKEN_TASK_FILE)
+        result = self._check(path, tmp_path)
+
+        assert result.returncode != 0
+        assert path in result.stdout + result.stderr
+
+    def test_valid_playbook_passes(self, tmp_path: Path) -> None:
+        path = _write(tmp_path, "playbooks/deploy.yml", _PLAYBOOK)
+        result = self._check(path, tmp_path)
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_broken_playbook_is_reported(self, tmp_path: Path) -> None:
+        path = _write(tmp_path, "playbooks/broken.yml", _BROKEN_PLAYBOOK)
+        result = self._check(path, tmp_path)
+        assert result.returncode != 0

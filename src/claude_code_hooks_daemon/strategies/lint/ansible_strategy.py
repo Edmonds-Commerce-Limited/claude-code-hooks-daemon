@@ -19,15 +19,25 @@ requires the file to PARSE. The motivating incident was a playbook that failed
 to parse. A parse-gated test would lint every healthy playbook and skip every
 broken one, inverting the point. The sniff below is line-based for exactly that
 reason: it still works on a file no YAML parser will accept.
+
+**Why a task file is not handed to ``ansible-playbook`` as it is.** The command
+parses every top-level item as a Play, so a valid task or handler file (a list of
+tasks) is rejected with "is not a valid attribute for a Play" whatever its
+content. The cheap tier therefore checks a task or handler file through a
+generated one-play wrapper that ``import_tasks`` it by absolute path: the file
+is still parsed (a YAML error or an unknown module is reported, naming the real
+file) and a valid one passes. See :meth:`AnsibleLintStrategy.command_values`.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from pathlib import Path
 from typing import Any, Final
 
-from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS
+from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS, lint_output_dir
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 _LANGUAGE_NAME: Final = "Ansible"
@@ -37,7 +47,10 @@ _EXTENSIONS: Final[tuple[str, ...]] = (".yml", ".yaml")
 
 # Cheap tier: catches the load-time failure this strategy exists for. The full
 # linter is slow enough that it must not run on every write.
-_DEFAULT_LINT_COMMAND: Final = "ansible-playbook --syntax-check {file}"
+#: ``{playbook}`` is the file itself for a playbook and a generated wrapper for
+#: a task or handler file (see ``command_values``). ``{file}`` stays the real
+#: file for ansible-lint and for a user-configured command.
+_DEFAULT_LINT_COMMAND: Final = "ansible-playbook --syntax-check {playbook}"
 _EXTENDED_LINT_COMMAND: Final = "ansible-lint {file}"
 
 # Encrypted. Reading further is pointless and linting one reports a failure
@@ -70,7 +83,22 @@ _EXCLUDED_NAME_PREFIXES: Final[tuple[str, ...]] = ("docker-compose",)
 
 # Directory names that make a YAML file Ansible by convention. ``tasks`` and
 # ``handlers`` matter because a role's task file has no ``hosts:`` to sniff.
-_PLAYBOOK_SEGMENTS: Final[frozenset[str]] = frozenset({"playbooks", "roles", "tasks", "handlers"})
+# ``roles`` is deliberately absent: a role's ``defaults``, ``vars`` and ``meta``
+# are data, which is neither a play nor a task list.
+#
+# A task or handler directory name is also the play section the file is
+# imported into by the syntax-check wrapper.
+_WRAPPER_SECTIONS: Final[frozenset[str]] = frozenset({"tasks", "handlers"})
+_PLAYBOOK_SEGMENTS: Final[frozenset[str]] = frozenset({"playbooks"}) | _WRAPPER_SECTIONS
+
+_WRAPPER_TEMPLATE: Final = (
+    "---\n"
+    "- hosts: localhost\n"
+    "  gather_facts: false\n"
+    "  {section}:\n"
+    "    - ansible.builtin.import_tasks: {path}\n"
+)
+_WRAPPER_PLACEHOLDER: Final = "playbook"
 
 _PLAYBOOK_NAMES: Final[frozenset[str]] = frozenset({"site.yml", "site.yaml"})
 _PLAYBOOK_NAME_PREFIXES: Final[tuple[str, ...]] = ("play-", "playbook-")
@@ -137,6 +165,32 @@ class AnsibleLintStrategy:
             return False
 
         return bool(_PLAY_SIGNAL.search(content))
+
+    def command_values(self, file_path: str) -> dict[str, str]:
+        """The file the syntax check is pointed at (the ``{playbook}`` placeholder).
+
+        A playbook is checked as it is. A task or handler file is checked through
+        a generated play that imports it by absolute path, because
+        ``ansible-playbook`` cannot parse a bare task list. The wrapper sits in
+        the private per-process lint output directory, never beside the user's
+        source, under a name derived from the file's path so a rewrite replaces
+        it instead of accumulating.
+
+        The path is written with ``json.dumps``: a JSON string is a valid YAML
+        double-quoted scalar, so the path is data and never YAML syntax.
+        """
+        path = Path(file_path)
+        section = _wrapper_section(path, _sniff(path))
+        if section is None:
+            return {_WRAPPER_PLACEHOLDER: file_path}
+
+        digest = hashlib.sha256(file_path.encode("utf-8")).hexdigest()[:16]
+        wrapper = Path(lint_output_dir()) / f"ansible-{section}-{digest}.yml"
+        wrapper.write_text(
+            _WRAPPER_TEMPLATE.format(section=section, path=json.dumps(file_path)),
+            encoding="utf-8",
+        )
+        return {_WRAPPER_PLACEHOLDER: str(wrapper)}
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for the Ansible lint strategy."""
@@ -258,6 +312,21 @@ def _is_playbook_path(path: Path) -> bool:
     if name in _PLAYBOOK_NAMES or name.startswith(_PLAYBOOK_NAME_PREFIXES):
         return True
     return any(part.lower() in _PLAYBOOK_SEGMENTS for part in path.parts)
+
+
+def _wrapper_section(path: Path, content: str | None) -> str | None:
+    """The play section a task or handler file belongs in, or None for a playbook.
+
+    A file carrying a play signal is a playbook wherever it sits. Otherwise the
+    nearest ``tasks`` or ``handlers`` directory above it decides, so a file in
+    ``roles/x/handlers/tasks/`` is judged by the directory it is actually in.
+    """
+    if content is not None and _PLAY_SIGNAL.search(content):
+        return None
+    for part in reversed(path.parent.parts):
+        if part.lower() in _WRAPPER_SECTIONS:
+            return part.lower()
+    return None
 
 
 def _sniff(path: Path) -> str | None:
