@@ -26,7 +26,7 @@ how to monitor that choice and nudge it toward lower tiers where they are
 safe, without ever blocking a delegation that really needs the top tier.
 
 This is the model-choice twin of
-[Plan 00471](../00471-subagent-token-budget-protection/PLAN.md). That plan
+[Plan 00471](../Completed/00471-subagent-token-budget-protection/PLAN.md). That plan
 bounds how much context a subagent spends; this one looks at which model spends
 it. The owner marked it not urgent. It goes into the normal pipeline.
 

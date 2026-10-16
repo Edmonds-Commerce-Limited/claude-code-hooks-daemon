@@ -1,6 +1,6 @@
 # Plan 00471: subagent token budget protection
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-25
 **Owner**: dev
 **Priority**: High
@@ -35,7 +35,7 @@ The daemon already sees every Agent, SendMessage and tool call. So it can
 measure spend and gate it deterministically, which prompt-level advice alone
 cannot guarantee.
 
-**Sibling plan.** [Plan 00472](../00472-subagent-model-tier-selection/PLAN.md)
+**Sibling plan.** [Plan 00472](../../00472-subagent-model-tier-selection/PLAN.md)
 governs WHICH model a subagent runs on, including the fan-out of a
 `Workflow` script (60 parallel top-tier agents was the owner's case). This
 plan bounds how MUCH context each agent spends. The two stay cross-linked
@@ -207,3 +207,5 @@ by path, run during closure).
 ## Delivery & Milestones
 
 - Plan filed; brainstorm dispatched.
+- Built per the Fable rulings and merged to main in 2c12a3778; dogfood run
+  and closure in ab46984cf.

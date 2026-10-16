@@ -6,7 +6,7 @@ rulings, never as the owner's. Anything marked **left to owner** is unruled.
 
 **Evidence base**: `subagent-reports/260925-p471-brainstorm-opus-5-5.md`
 ("471-B"), PLAN.md Task 1.2 (L1 already dropped), the sibling rulings in
-[../00472-subagent-model-tier-selection/RULINGS-fable.md](../00472-subagent-model-tier-selection/RULINGS-fable.md),
+[../00472-subagent-model-tier-selection/RULINGS-fable.md](../../00472-subagent-model-tier-selection/RULINGS-fable.md),
 and the state of the tree as checked while ruling:
 
 - The reuse points 471-B names all exist: `subagent_cache_aggregator.py`,

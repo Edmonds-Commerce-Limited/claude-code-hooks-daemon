@@ -7,7 +7,7 @@ rulings, never as the owner's. Anything marked **left to owner** is unruled.
 **Evidence base**: `subagent-reports/260925-p472-brainstorm-opus-5-5.md`
 ("472-B", section 6 decisions), `subagent-reports/260925-p472-workflow-fanout-sonnet-5.md`
 ("472-W"), the sibling rulings in
-[../00471-subagent-token-budget-protection/RULINGS-fable.md](../00471-subagent-token-budget-protection/RULINGS-fable.md)
+[../00471-subagent-token-budget-protection/RULINGS-fable.md](../Completed/00471-subagent-token-budget-protection/RULINGS-fable.md)
 ("471-R"), and the tree as checked while ruling:
 
 - `resolve_model_family` and the rank table live in
