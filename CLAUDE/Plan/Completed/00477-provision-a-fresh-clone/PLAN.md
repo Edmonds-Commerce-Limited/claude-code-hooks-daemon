@@ -1,6 +1,6 @@
 # Plan 00477: provision a fresh clone
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-30
 **Owner**: dev
 **Priority**: High
@@ -145,8 +145,16 @@ stale: the clone's checked-out tag, the venv and the running daemon.
 
 ## Success Criteria
 
-- [ ] After a pull that changes `daemon.expected_version`, the next session runs
-  the daemon at the new version without a manual step.
+- [x] After a pull that raises `daemon.expected_version`, the next session runs
+  the daemon at the new version without a manual step (delivered scope: an
+  UPGRADE in a project carrying `provision.sh`). A downgrade and a target whose
+  pre-deploy gate wants its reading confirmed stay manual by the owner's ruling,
+  recorded as Assumptions 1 and 4 in
+  `subagent-reports/261015-p477-phase5-implementer.md` and in the 26-10-16 journal
+  entry on the archive.
+- [x] The release-bound consequences are recorded in the pending-release holding
+  area: `CLAUDE/UPGRADES/UNRELEASED/release-notes/072-a-pulled-daemon-version-upgrade-syncs-itself-in-the-background.md`
+  (Task 5.2a has note 031).
 - [x] In a fresh clone of a configured fixture project, the first session shows
   the human a message naming `provision` and the expected version
   (`test_init_sh_needs_provision.py::TestSessionStartAndUserPromptSubmit`).
