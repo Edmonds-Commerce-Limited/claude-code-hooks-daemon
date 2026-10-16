@@ -298,6 +298,10 @@ venv_version_matches() {
     fi
 }
 
+# paths.py check-venv-fresh's exit for a venv proven built for another source
+# (paths.CHECK_VENV_FRESH_EXIT_STALE).
+VENV_LOCK_HASH_STALE_RC=3
+
 #
 # venv_lock_hash_matches() - Check if the venv's metadata lock_hash is current
 #
@@ -315,7 +319,8 @@ venv_version_matches() {
 #
 # Returns:
 #   Exit code 0 if metadata lock_hash matches current project state
-#   Exit code 1 otherwise (missing metadata, mismatched hash, no pyproject)
+#   Exit code $VENV_LOCK_HASH_STALE_RC if readable metadata names another lock
+#   Exit code 1 otherwise (missing metadata, no pyproject)
 #
 # Stderr from the Python SSOT is routed to print_verbose-level logging
 # so diagnostic details remain visible when the daemon is started with
@@ -1076,9 +1081,17 @@ _venv_is_fresh() {
     # Plan 00100 Task 3.7: lock_hash is authoritative. A daemon upgrade or
     # downgrade with unchanged deps (pyproject.toml + uv.lock) must reuse the
     # existing venv — the legacy `.daemon-version` SemVer stamp is advisory.
-    if venv_lock_hash_matches "$daemon_dir" "$venv_path"; then
+    local lock_rc=0
+    venv_lock_hash_matches "$daemon_dir" "$venv_path" || lock_rc=$?
+    if [ "$lock_rc" -eq 0 ]; then
         print_verbose "ensure_venv: lock_hash unchanged — reusing $venv_path"
         return 0
+    fi
+    # Plan 00474 N469: metadata that names another lock proves the venv lacks
+    # what the dependency change added, whatever the stamp says.
+    if [ "$lock_rc" -eq "$VENV_LOCK_HASH_STALE_RC" ]; then
+        print_info "ensure_venv: pyproject.toml or uv.lock changed since $venv_path was built"
+        return 1
     fi
     # Fallback: no usable metadata but the legacy stamp matches. Kept for
     # pre-Phase-3 venvs that predate `.daemon-metadata.json`.

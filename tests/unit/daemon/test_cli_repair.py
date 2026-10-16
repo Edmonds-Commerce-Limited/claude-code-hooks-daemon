@@ -466,6 +466,36 @@ class TestCmdRepairTargetsTheDaemonDir:
         expected = daemon_dir / "untracked" / f"venv-{python_venv_fingerprint(daemon_dir)}"
         assert env["UV_PROJECT_ENVIRONMENT"] == str(expected)
 
+    def test_repair_records_the_lock_it_built_for(self, tmp_path: Path) -> None:
+        """Plan 00474 N469: a repaired venv is PROVEN built for the current source.
+
+        ``repair`` is the fix the stale-venv advisory names. Without metadata the
+        resolver cannot rank the repaired venv first, and the advisory cannot
+        tell it was repaired, so it would keep firing.
+        """
+        import json
+        import sys
+
+        from claude_code_hooks_daemon.daemon.paths import (
+            _compute_project_lock_hash_stdlib,
+            python_venv_fingerprint,
+            venv_lock_drift,
+        )
+
+        project = tmp_path / "daemon-repo"
+        (project / "src" / "claude_code_hooks_daemon").mkdir(parents=True)
+        (project / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+        venv = project / "untracked" / f"venv-{python_venv_fingerprint(project)}"
+        (venv / "bin").mkdir(parents=True)
+        (venv / "bin" / "python").symlink_to(Path(sys.executable).resolve())
+
+        rc, _sync_calls, _locked = self._repair(project)
+
+        assert rc == 0
+        metadata = json.loads((venv / ".daemon-metadata.json").read_text())
+        assert metadata["lock_hash"] == _compute_project_lock_hash_stdlib(project)
+        assert venv_lock_drift(project, venv) is None
+
     def test_self_install_is_unchanged(self, tmp_path: Path) -> None:
         from claude_code_hooks_daemon.daemon.paths import python_venv_fingerprint
 

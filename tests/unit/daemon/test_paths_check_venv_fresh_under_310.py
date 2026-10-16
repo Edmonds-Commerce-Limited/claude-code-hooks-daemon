@@ -129,10 +129,10 @@ def test_check_venv_fresh_does_not_crash_when_tomllib_unavailable(tmp_path: Path
     )
 
 
-def test_check_venv_fresh_returns_1_on_mismatch_when_tomllib_unavailable(
+def test_check_venv_fresh_returns_stale_on_mismatch_when_tomllib_unavailable(
     tmp_path: Path,
 ) -> None:
-    """Mismatch path: still exits 1 cleanly (no tomllib crash)."""
+    """Mismatch path: still exits 3 (proven stale) cleanly (no tomllib crash)."""
     daemon = _make_daemon_dir(tmp_path)
     venv = tmp_path / "venv"
     _make_venv_with_lock_hash(venv, lock_hash="sha256:" + "0" * 64)
@@ -152,7 +152,7 @@ def test_check_venv_fresh_returns_1_on_mismatch_when_tomllib_unavailable(
     assert (
         "ModuleNotFoundError" not in result.stderr
     ), f"check-venv-fresh must not surface ModuleNotFoundError. stderr=\n{result.stderr}"
-    assert result.returncode == 1, (
-        f"check-venv-fresh with non-matching lock_hash must exit 1. "
+    assert result.returncode == 3, (
+        f"check-venv-fresh with non-matching lock_hash must exit 3 (proven stale). "
         f"Got returncode={result.returncode}, stderr=\n{result.stderr}"
     )
