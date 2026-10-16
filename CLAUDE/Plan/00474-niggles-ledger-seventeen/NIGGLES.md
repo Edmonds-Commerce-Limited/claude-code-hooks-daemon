@@ -240,7 +240,7 @@ header and the prune messages name that venv, a second line names the fingerprin
 differs, and the fingerprint half of `is_current` is keyed on the daemon dir. Pinned for a client-install layout and a
 self-install layout, including that `prune-venvs` never selects the current venv.
 
-**Status**: ✅ Fixed (commit COMMIT_HASH on branch worktree-i120-venv-current).
+**Status**: ✅ Fixed (commit e639697c0 on branch worktree-i120-venv-current).
 
 ### N459 — a wrapped status line shows the context segment as "..." instead of its number
 
