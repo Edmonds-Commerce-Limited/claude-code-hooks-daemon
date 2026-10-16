@@ -6,6 +6,7 @@ from typing import Any
 
 import yaml
 
+from claude_code_hooks_daemon.config.yaml_loading import safe_load_yaml
 from claude_code_hooks_daemon.constants import ConfigKey
 
 
@@ -37,7 +38,7 @@ class ConfigLoader:
         try:
             with path.open() as f:
                 if path.suffix in [".yaml", ".yml"]:
-                    config = yaml.safe_load(f)
+                    config = safe_load_yaml(f)
                 elif path.suffix == ".json":
                     import json
 
@@ -49,10 +50,24 @@ class ConfigLoader:
         except (yaml.YAMLError, ValueError) as e:
             raise ValueError(f"Invalid YAML/JSON syntax in {config_path}: {e}") from e
 
-        if not isinstance(config, dict):
-            raise ValueError("Configuration must be a dictionary")
+        return ConfigLoader.require_mapping(config)
 
-        return config
+    @staticmethod
+    def require_mapping(document: object) -> dict[str, Any]:
+        """Return a parsed config document, which must be a mapping.
+
+        Args:
+            document: What the YAML or JSON parser produced.
+
+        Returns:
+            The document, typed as the dictionary it was checked to be.
+
+        Raises:
+            ValueError: If the document is not a dictionary.
+        """
+        if not isinstance(document, dict):
+            raise ValueError("Configuration must be a dictionary")
+        return document
 
     @staticmethod
     def find_config(start_dir: str = ".") -> Path:

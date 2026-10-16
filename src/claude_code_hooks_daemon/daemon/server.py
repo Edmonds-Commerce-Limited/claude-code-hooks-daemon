@@ -24,7 +24,7 @@ import stat
 import struct
 import sys
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -1194,6 +1194,7 @@ class HooksDaemon:
 
     __slots__ = (
         "_active_requests",
+        "_deferred_startup",
         "_event_servers",
         "_event_socket_skips",
         "_idle_check_interval",
@@ -1205,6 +1206,7 @@ class HooksDaemon:
         "_start_lock_waiting",
         "config",
         "controller",
+        "deferred_startup_done",
         "last_activity",
         "server",
         "shutdown_event",
@@ -1218,6 +1220,7 @@ class HooksDaemon:
         idle_check_interval: int = 60,
         start_lock_waiting: Callable[[bool], None] | None = None,
         serving: Callable[[], None] | None = None,
+        deferred_startup: Sequence[tuple[str, Callable[[], object]]] = (),
     ) -> None:
         """Initialise hooks daemon.
 
@@ -1229,11 +1232,17 @@ class HooksDaemon:
                 lock another start holds, and False once it has the lock
             serving: Called once ``start`` has bound and published the
                 daemon, which ends the start
+            deferred_startup: ``(description, step)`` pairs of start-up work that
+                does not change how a request is answered. ``start`` runs them
+                in a worker thread once the socket is bound, so requests are
+                served while they run. A step that fails is logged and the
+                rest still run; the daemon keeps serving.
         """
         self.config = config
         self.controller = controller
         self._start_lock_waiting = start_lock_waiting
         self._serving = serving
+        self._deferred_startup = deferred_startup
         self.server: asyncio.Server | None = None
         self._event_servers: dict[str, asyncio.Server] = {}
         # Wire event name -> why its per-event socket was not bound; reported
@@ -1248,6 +1257,9 @@ class HooksDaemon:
         # test_event_socket_listeners.py raced a fixed 100 ms against these
         # same two awaited steps under host load).
         self.started_event = asyncio.Event()
+        # Set once the deferred start-up work has finished, failed, or there
+        # was none; a caller awaits it instead of guessing a duration.
+        self.deferred_startup_done = asyncio.Event()
         self._active_requests = 0
         self._shutdown_requested = False
         self._shutdown_task: asyncio.Task[None] | None = None
@@ -1471,6 +1483,10 @@ class HooksDaemon:
         if self._serving is not None:
             self._serving()
 
+        # The socket is live, so what is left of start-up runs behind it
+        # (Plan 00495 Task 2.5); a request arriving now is answered at once.
+        deferred_startup_task = asyncio.create_task(self._run_deferred_startup())
+
         # Setup signal handlers for graceful shutdown
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
@@ -1494,14 +1510,37 @@ class HooksDaemon:
         idle_monitor_task.cancel()
         touch_task.cancel()
         straggler_monitor_task.cancel()
+        deferred_startup_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await idle_monitor_task
         with contextlib.suppress(asyncio.CancelledError):
             await touch_task
         with contextlib.suppress(asyncio.CancelledError):
             await straggler_monitor_task
+        with contextlib.suppress(asyncio.CancelledError):
+            await deferred_startup_task
 
         logger.info("Daemon shutdown complete")
+
+    async def _run_deferred_startup(self) -> None:
+        """Run the deferred start-up steps in a worker thread, then say they are done."""
+        try:
+            await asyncio.get_running_loop().run_in_executor(None, self._run_deferred_steps)
+        finally:
+            self.deferred_startup_done.set()
+
+    def _run_deferred_steps(self) -> None:
+        """Run each deferred step, logging one that fails and carrying on with the rest."""
+        for description, step in self._deferred_startup:
+            try:
+                step()
+            except Exception as exc:
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason=f"the deferred start-up step '{description}' only maintains files and warms caches; its failure must not stop the daemon serving hooks, and the next restart retries it",
+                    level=logging.ERROR,
+                )
 
     @staticmethod
     def _ensure_scratch_dir_best_effort() -> None:

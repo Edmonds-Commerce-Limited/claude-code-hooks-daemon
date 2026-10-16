@@ -468,11 +468,16 @@ def sync_agents(project_root: Path, config: Config) -> AgentSyncReport:
     return report
 
 
-def deploy_agents_if_enabled(project_root: Path, config_path: Path) -> AgentSyncReport:
+def deploy_agents_if_enabled(
+    project_root: Path, config_path: Path, config: Config | None = None
+) -> AgentSyncReport:
     """Load config (defaults when absent) and run the lifecycle sync.
 
     The single decision site for daemon-start and CLI-driven agent deployment,
-    mirroring ``deploy_plan_workflow_if_enabled``.
+    mirroring ``deploy_plan_workflow_if_enabled``. A caller that already holds
+    the config loaded from ``config_path`` passes it, so the file is not read
+    a second time.
     """
-    config = Config.load_or_default(config_path)
+    if config is None:
+        config = Config.load_or_default(config_path)
     return sync_agents(project_root, config)

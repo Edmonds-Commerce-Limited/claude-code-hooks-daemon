@@ -36,6 +36,19 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: What ``HandlerRegistry.discover`` found per package path: the handler classes by
+#: class name, and the count it returns. Discovery imports and inspects every handler
+#: module, which the daemon start did four times (Plan 00495 Phase 1); the modules do not
+#: change while a process runs, so the first result stands for the process. Only a
+#: package that imported is stored, so an import failure is retried.
+_DISCOVERY_CACHE: dict[str, tuple[dict[str, type[Handler]], int]] = {}
+
+
+def clear_discovery_cache() -> None:
+    """Forget every discovery result, so the next ``discover`` walks its package again."""
+    _DISCOVERY_CACHE.clear()
+
+
 # Mapping from directory name to EventType. Every dispatchable EventType must be
 # present so a client can drop a handler dir for it (discovery skips entries with
 # no on-disk dir via is_dir guards). Plan 00170 zero-handler-passthrough events
@@ -490,7 +503,9 @@ class HandlerRegistry:
         """Discover all handler classes in the handlers package.
 
         Scans all subpackages (pre_tool_use, post_tool_use, etc.) and
-        loads all Handler subclasses found.
+        loads all Handler subclasses found. The first discovery of a package
+        in a process does the scan; later ones, by this or any other registry,
+        take its result (see ``_DISCOVERY_CACHE``).
 
         Args:
             package_path: Python package path to scan
@@ -498,6 +513,12 @@ class HandlerRegistry:
         Returns:
             Number of handlers discovered
         """
+        cached = _DISCOVERY_CACHE.get(package_path)
+        if cached is not None:
+            self._handlers.update(cached[0])
+            logger.debug("Reused %d discovered handlers for %s", cached[1], package_path)
+            return cached[1]
+
         try:
             package = importlib.import_module(package_path)
         except ImportError as exc:
@@ -512,6 +533,7 @@ class HandlerRegistry:
             logger.warning("Package %s has no __path__", package_path)
             return 0
 
+        found: dict[str, type[Handler]] = {}
         count = 0
         for _importer, modname, ispkg in pkgutil.walk_packages(
             package.__path__,
@@ -529,7 +551,7 @@ class HandlerRegistry:
                 for attr_name in dir(module):
                     attr = getattr(module, attr_name)
                     if is_discoverable_handler(attr):
-                        self._handlers[attr.__name__] = attr
+                        found[attr.__name__] = attr
                         count += 1
                         logger.debug("Discovered handler: %s", attr.__name__)
             except Exception as e:
@@ -539,6 +561,8 @@ class HandlerRegistry:
                     reason=f"a handler module {modname} that fails to import is skipped; one broken module must not stop discovery of the others",
                 )
 
+        self._handlers.update(found)
+        _DISCOVERY_CACHE[package_path] = (found, count)
         logger.info("Discovered %d handlers", count)
         return count
 

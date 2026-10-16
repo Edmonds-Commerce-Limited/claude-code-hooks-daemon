@@ -92,13 +92,20 @@ Evidence already seen in this session (2026-10-06), not yet explained:
 ### Phase 2: Fix (TDD, one branch per fix)
 
 - [x] ✅ **Task 2.1**: Rank the fix candidates by measured saving. The clear winners, each its own branch:
-- [ ] ⬜ **Task 2.2**: Parse the YAML config once per start, with the C loader (`CSafeLoader`) where available. About
-  0.4 s CPU saved.
-- [ ] ⬜ **Task 2.3**: Run handler registry discovery once per start. About 0.4 s CPU saved.
+- [x] ✅ **Task 2.2**: Parse the YAML config once per start, with the C loader (`CSafeLoader`) where available. Done
+  in d356d41bc: 4 parses became 1 (the controller's validation and both asset syncs reuse the loaded config). Daemon
+  start CPU on this repository's config, 6 interleaved runs, median: 1.88 s -> 1.21 s.
+- [x] ✅ **Task 2.3**: Run handler registry discovery once per start. Done in c67fdb33a: walks of the handlers package
+  per start 2 -> 1 (after Task 2.2). Start CPU, 10 interleaved runs, median, 1.31 s -> 1.33 s, no measurable change: a repeated scan costs 6 ms
+  against 0.58 s for the first, so the Phase 1 figure of about 0.4 s was the first call's imports, not repeats.
 - [x] ✅ **Task 2.4**: Skip the CLAUDE.md markdown formatting when the generated block is unchanged. About 0.4 s CPU
   saved. Done (9456b40fe): `inject()` CPU on a copy of this repository's 114 KB CLAUDE.md, steady state, median of 5,
   before -> after: 0.19-0.21 s -> 0.006 s (three interleaved rounds; host loaded).
-- [ ] ⬜ **Task 2.5**: Bind the socket before the non-essential start-up work, so the first request is answered sooner.
+- [x] ✅ **Task 2.5**: Bind the socket before the non-essential start-up work, so the first request is answered sooner.
+  Done in be944c475: the CLAUDE.md regeneration, both asset syncs and the index pre-warm run in a worker thread behind
+  the bound socket; handler registration and config validation stay before it. Real forked start in a throwaway
+  project, 8 interleaved runs, median: first request answered 1.94 s -> 1.51 s, `start` returned 2.12 s -> 1.68 s. A test
+  sends a destructive git command while the deferred work is blocked and gets the same deny as afterwards.
 - [ ] ⬜ **Task 2.6**: Add a result cache to `docs-qa-sweep` and `plan-qa-sweep`, keyed by an input fingerprint, and run them off the
   blocking chain. About 6 CPU-s saved on this repository, and no handler dropped for the budget.
 - [x] ✅ **Task 2.7**: Status line: while the daemon is starting, show a baseline line saying the hooks daemon is
