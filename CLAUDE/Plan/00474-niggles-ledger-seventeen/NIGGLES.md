@@ -90,7 +90,14 @@ basename of a configured protected path, or a path-shaped token) are shlex-split
 it with the handler's existing tests plus an equivalence test over a corpus of positive and negative content, and
 measure before and after.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed at `f35dc82cf`. The per-line tokenising was `effective_cwds` looking for `cd`/`pushd` targets, not
+the protected-name match. It now tokenises only a segment that contains `cd` or `pushd` once the quote and escape
+characters shlex removes are deleted. A `"content"` scan, which never reads those directories, no longer computes
+them. A corpus of 219 pinned verdicts gives identical answers on `31cb64ee8` and on the fix. The 00495 shape takes
+205 ms rather than 376 ms at 120 KB, and 2.5 s rather than 4.6 s at 1.2 MB, measured on the same host. A large Write
+still exceeds 100 ms: the brace-word, word-stream and Python string-literal scans read the whole file, and a name
+prefilter in front of them would not be sound. See
+[the report](subagent-reports/261016-n465-secret-scan-prefilter-implementer.md).
 
 ### N464 — `worktree-reap --reap` kills `git worktree remove` at 5 seconds, leaving a half-deleted worktree it labels `DRY-RUN`
 

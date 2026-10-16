@@ -2531,7 +2531,7 @@ _COMMAND_SEGMENT_SEPARATORS: Final[re.Pattern[str]] = re.compile(r"&&|\|\||[;|&\
 #: The only characters POSIX shlex removes from inside a word: quotes and the
 #: escape. With them deleted, a segment whose first word is ``cd``/``pushd``
 #: holds that name as a substring (ledger 00474 N465).
-_SHLEX_REMOVED_CHARS: Final[dict[int, None]] = str.maketrans("", "", "'\"\\")
+_SHLEX_REMOVED_CHARS: Final[dict[int, int | None]] =str.maketrans("", "", "'\"\\")
 
 
 def _may_change_directory(segment: str) -> bool:
