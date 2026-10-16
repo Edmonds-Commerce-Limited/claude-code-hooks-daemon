@@ -111,7 +111,9 @@ class TestScanner:
         assert analyse_script("helper.agent('x')", args_len=None).sites == ()
 
     def test_nested_multipliers_multiply(self) -> None:
-        script = "for (let i = 0; i < 2; i++) { await parallel(['a','b','c'].map(x => () => agent(x))) }"
+        script = (
+            "for (let i = 0; i < 2; i++) { await parallel(['a','b','c'].map(x => () => agent(x))) }"
+        )
         assert analyse_script(script, args_len=None).total == 6
 
     def test_inclusive_loop_bound(self) -> None:

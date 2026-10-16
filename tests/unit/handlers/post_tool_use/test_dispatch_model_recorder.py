@@ -83,7 +83,9 @@ class TestJoin:
     ) -> None:
         for index in range(5):
             write_dispatch_row(tmp_path, "s1", f"toolu_{index}", {"source": "inherited"})
-            handler.handle(_post({"resolvedModel": "claude-opus-5-5"}, tool_use_id=f"toolu_{index}"))
+            handler.handle(
+                _post({"resolvedModel": "claude-opus-5-5"}, tool_use_id=f"toolu_{index}")
+            )
         rows = read_dispatch_rows(tmp_path, "s1")
         assert len(rows) == 5
         assert all(row["pre_recorded"] and row["resolved_model"] for row in rows)

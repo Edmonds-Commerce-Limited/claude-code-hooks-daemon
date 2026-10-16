@@ -120,7 +120,8 @@ def _text(tool_input: Mapping[str, Any], field: str) -> str:
 class SubagentTierAdvisorHandler(PreToolUseHandlerBase):
     """Advise a cheaper tier on an unchosen or up-overridden dispatch, and a floor below it."""
 
-    _mode: str | None = MODE_ADVISE
+    #: None reads as ``advise``, the only mode; each ledger event records it.
+    _mode: str | None = None
     _default_ceiling: str | None = None
     _types: Mapping[str, Mapping[str, str]] | None = None
     _role_floors: Mapping[str, str] | None = None
@@ -202,6 +203,7 @@ class SubagentTierAdvisorHandler(PreToolUseHandlerBase):
                 "role": verdict.tier.role.value,
                 "predicted_family": verdict.tier.predicted_family,
                 "suggested": verdict.suggested,
+                "mode": self._mode or MODE_ADVISE,
             },
         )
 
@@ -215,15 +217,15 @@ class SubagentTierAdvisorHandler(PreToolUseHandlerBase):
     def _judge(self, hook_input: dict[str, Any]) -> _Verdict | None:
         """The advisory this dispatch draws, or None; a failure to judge is silent."""
         tool_input = hook_input.get(HookInputField.TOOL_INPUT)
-        if not isinstance(tool_input, dict):
+        if not isinstance(tool_input, dict) or has_tier_token(_text(tool_input, "prompt")):
             return None
+        facts: DispatchFacts | None = None
         try:
             main_model = spawner_model(hook_input, self._untracked_dir())
-            if _family(main_model) is None:
-                return None
-            facts = dispatch_facts(
-                tool_input, project_root=self._project_root(), main_model=main_model
-            )
+            if _family(main_model) is not None:
+                facts = dispatch_facts(
+                    tool_input, project_root=self._project_root(), main_model=main_model
+                )
         except (OSError, RuntimeError) as exc:
             log_and_continue(
                 logger,
@@ -231,8 +233,7 @@ class SubagentTierAdvisorHandler(PreToolUseHandlerBase):
                 reason="a dispatch the tier advisor cannot classify draws no advice; it never blocks",
                 level=logging.DEBUG,
             )
-            return None
-        if has_tier_token(_text(tool_input, "prompt")):
+        if facts is None:
             return None
         tier = classify(
             facts, name=_text(tool_input, "name"), description=_text(tool_input, "description")
@@ -287,7 +288,11 @@ class SubagentTierAdvisorHandler(PreToolUseHandlerBase):
                 )
         if cheaper is None:
             return None
-        work = f"Routine {tier.role.value} work" if tier.role is not DispatchRole.OTHER else "Routine work"
+        work = (
+            f"Routine {tier.role.value} work"
+            if tier.role is not DispatchRole.OTHER
+            else "Routine work"
+        )
         return _Verdict(
             kind=_KIND_TIER,
             key=f"{facts.subagent_type}|{tier.source.value}",

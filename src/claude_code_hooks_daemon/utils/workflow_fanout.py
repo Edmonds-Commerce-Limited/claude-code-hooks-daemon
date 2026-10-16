@@ -47,8 +47,7 @@ _ARRAY_FROM_LENGTH: Final[re.Pattern[str]] = re.compile(
 )
 _FOR_OF: Final[re.Pattern[str]] = re.compile(r"^.*?\bof\b(.*)$", re.DOTALL)
 _FOR_COUNTED: Final[re.Pattern[str]] = re.compile(
-    r"^\s*(?:let|var)?\s*([A-Za-z_$][\w$]*)\s*=\s*(\d+)\s*;"
-    r"\s*\1\s*(<=?)\s*(\d+)\s*;"
+    r"^\s*(?:let|var)?\s*([A-Za-z_$][\w$]*)\s*=\s*(\d+)\s*;" r"\s*\1\s*(<=?)\s*(\d+)\s*;"
 )
 _RECEIVER_NAME: Final[re.Pattern[str]] = re.compile(r"[\w.$]+$")
 _CALLEE_NAME: Final[re.Pattern[str]] = re.compile(r"[\w.$]+\s*$")
@@ -243,7 +242,11 @@ def _regions(code: str, pairs: dict[int, int], args_len: int | None) -> list[_Re
 
     for match in _MAP_CALL.finditer(code):
         open_ = match.end() - 1
-        add(open_, pairs.get(open_, size), _iterable(_receiver(code, pairs, match.start()), args_len))
+        add(
+            open_,
+            pairs.get(open_, size),
+            _iterable(_receiver(code, pairs, match.start()), args_len),
+        )
     for match in _PIPELINE_CALL.finditer(code):
         open_ = match.end() - 1
         close = pairs.get(open_, size)

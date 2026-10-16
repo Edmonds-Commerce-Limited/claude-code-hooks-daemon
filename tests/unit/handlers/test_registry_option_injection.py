@@ -298,6 +298,13 @@ _VALID_NON_DEFAULTS: dict[tuple[str, str], object] = {
     ("subagent_context_budget", "allowed_bash_prefixes"): ["zzqx-status"],
     ("subagent_context_budget", "exempt_agent_types"): ["zzqx-type"],
     ("subagent_context_budget", "max_override_tokens"): 345_679,
+    # validate_options refuses anything but known families, roles and the one mode
+    ("subagent_tier_advisor", "mode"): "advise",
+    ("subagent_tier_advisor", "default_ceiling"): "haiku",
+    ("subagent_tier_advisor", "types"): {"zzqx-type": {"ceiling": "haiku"}},
+    ("subagent_tier_advisor", "role_floors"): {"docs": "haiku"},
+    # validate_options refuses anything but a family -> positive integer map
+    ("workflow_fanout_advisor", "ceilings"): {"haiku": 7},
 }
 
 

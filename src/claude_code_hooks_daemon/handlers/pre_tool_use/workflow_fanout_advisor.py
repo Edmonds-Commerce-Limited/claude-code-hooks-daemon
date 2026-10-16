@@ -93,11 +93,17 @@ def json_type(value: object) -> str:
 
 
 def _args_len(raw: object) -> int | None:
+    """The length of ``args`` when it is an array or a JSON array string, else None."""
     if isinstance(raw, str):
         try:
             raw = json.loads(raw)
-        except ValueError:
-            return None
+        except ValueError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="args that are not JSON leave an args-driven fan-out unknown, which counts as at the ceiling",
+                level=logging.DEBUG,
+            )
     return len(raw) if isinstance(raw, list) else None
 
 
@@ -181,9 +187,7 @@ class WorkflowFanoutAdvisorHandler(PreToolUseHandlerBase):
         family = resolved[0] if resolved is not None else None
         detail["family"] = family
         message = self._message(reading, family) if family is not None else None
-        self._verdict(
-            untracked, session, VERDICT_ADVISED if message else VERDICT_WITHIN, detail
-        )
+        self._verdict(untracked, session, VERDICT_ADVISED if message else VERDICT_WITHIN, detail)
         if message is None:
             return GatingResult(decision=Decision.ALLOW)
         return GatingResult(decision=Decision.ALLOW, context=[message])
@@ -226,10 +230,10 @@ class WorkflowFanoutAdvisorHandler(PreToolUseHandlerBase):
         path = Path(raw_path)
         if not path.is_absolute():
             return None
+        text: str | None = None
         try:
-            if path.stat().st_size > MAX_SCRIPT_BYTES:
-                return None
-            return path.read_text(encoding="utf-8")
+            if path.stat().st_size <= MAX_SCRIPT_BYTES:
+                text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             log_and_continue(
                 logger,
@@ -237,7 +241,7 @@ class WorkflowFanoutAdvisorHandler(PreToolUseHandlerBase):
                 reason="an unreadable scriptPath leaves the call unparsed; it is allowed",
                 level=logging.DEBUG,
             )
-            return None
+        return text
 
     def _probe_shape(self, untracked: Path, session: str, tool_input: object) -> None:
         """Write the payload's key names and value types once per session (ruling section 3)."""

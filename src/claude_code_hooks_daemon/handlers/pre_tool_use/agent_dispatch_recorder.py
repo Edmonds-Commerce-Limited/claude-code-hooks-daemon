@@ -53,6 +53,7 @@ def _text(tool_input: dict[str, Any], field: str) -> str:
     value = tool_input.get(field)
     return value if isinstance(value, str) else ""
 
+
 #: A whole line ``budget: 400k`` in the dispatch prompt (Plan 00471 Q4). Only a
 #: NAMED dispatch reaches this handler, so an unnamed one's line is ignored.
 _BUDGET_LINE = re.compile(r"(?im)^\s*budget:\s*(\d{1,4})\s*k\s*$")
@@ -162,7 +163,9 @@ class AgentDispatchRecorderHandler(PreToolUseHandlerBase):
                 self._session_id(hook_input),
                 tool_use_id,
                 {
-                    "spawner": agent_id if isinstance(agent_id, str) and agent_id else _MAIN_SPAWNER,
+                    "spawner": (
+                        agent_id if isinstance(agent_id, str) and agent_id else _MAIN_SPAWNER
+                    ),
                     "spawner_model": main_model,
                     "subagent_type": facts.subagent_type,
                     "name": name,

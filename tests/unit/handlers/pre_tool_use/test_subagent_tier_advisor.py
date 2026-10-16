@@ -203,6 +203,7 @@ class TestOncePerKey:
         assert event["source"] == "inherited"
         assert event["predicted_family"] == "opus"
         assert event["suggested"] == "sonnet"
+        assert event["mode"] == "advise"
 
     def test_a_silent_dispatch_records_nothing(self, root: Path) -> None:
         handler = make(root)
@@ -215,7 +216,9 @@ class TestNeverDenies:
     """Criterion 05: allow across the whole matrix."""
 
     @pytest.mark.parametrize("main_model", ["", "claude-haiku-4-5", "claude-opus-5-5", "fable"])
-    @pytest.mark.parametrize("subagent_type", ["general-purpose", "fork", "Explore", "code-reviewer"])
+    @pytest.mark.parametrize(
+        "subagent_type", ["general-purpose", "fork", "Explore", "code-reviewer"]
+    )
     @pytest.mark.parametrize("model", ["", "haiku", "sonnet", "opus", "fable"])
     def test_allow(self, root: Path, main_model: str, subagent_type: str, model: str) -> None:
         extra = {"model": model} if model else {}

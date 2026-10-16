@@ -227,9 +227,7 @@ class TestJoin:
         assert agent.source == "unrecorded"
         assert agent.family == "opus"
 
-    def test_a_post_only_row_counts_as_unjoined(
-        self, session: tuple[Path, Path, Path]
-    ) -> None:
+    def test_a_post_only_row_counts_as_unjoined(self, session: tuple[Path, Path, Path]) -> None:
         _, untracked, _ = session
         merge_dispatch_row(untracked, "s1", "toolu_x", {"resolved_model": "claude-opus-5-5"})
         assert _collect(session).unjoined == 1

@@ -133,7 +133,9 @@ class TestRole:
             ("general-purpose", "", "Rename a variable", DispatchRole.OTHER),
         ],
     )
-    def test_role(self, subagent_type: str, name: str, description: str, role: DispatchRole) -> None:
+    def test_role(
+        self, subagent_type: str, name: str, description: str, role: DispatchRole
+    ) -> None:
         assert classify_role(subagent_type, name, description) is role
 
     def test_classify_carries_the_role(self) -> None:

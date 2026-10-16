@@ -176,9 +176,7 @@ class TestOptions:
 
     def test_validate(self) -> None:
         assert WorkflowFanoutAdvisorHandler.validate_options({"ceilings": {"opus": 5}}) == {}
-        assert "ceilings" in WorkflowFanoutAdvisorHandler.validate_options(
-            {"ceilings": {"gpt": 5}}
-        )
+        assert "ceilings" in WorkflowFanoutAdvisorHandler.validate_options({"ceilings": {"gpt": 5}})
         assert "ceilings" in WorkflowFanoutAdvisorHandler.validate_options(
             {"ceilings": {"opus": 0}}
         )

@@ -6,8 +6,8 @@ import pytest
 
 from claude_code_hooks_daemon.utils.model_tiers import (
     EXPLORE_CAP_FAMILY,
-    family_rank,
     family_below,
+    family_rank,
     predicted_explore_family,
     resolve_model_family,
 )

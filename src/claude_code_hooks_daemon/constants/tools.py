@@ -114,6 +114,7 @@ ToolNameLiteral = Literal[
     "WebFetch",
     "Task",
     "Agent",
+    "Workflow",
     "TaskCreate",
     "TaskUpdate",
     "TaskGet",

@@ -122,9 +122,7 @@ class TestBudgetOverride:
 def _main_transcript(tmp_path: Path, model: str) -> Path:
     transcript = tmp_path / "s1.jsonl"
     transcript.write_text(
-        json.dumps(
-            {"type": "assistant", "message": {"model": model, "usage": {"input_tokens": 1}}}
-        )
+        json.dumps({"type": "assistant", "message": {"model": model, "usage": {"input_tokens": 1}}})
         + "\n"
     )
     return transcript

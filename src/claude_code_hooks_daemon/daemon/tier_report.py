@@ -114,7 +114,9 @@ def collect_tiers(
         meta = read_agent_meta(subagents / f"agent-{agent.agent_id}.jsonl")
         row = by_id.get(meta.tool_use_id, {})
         totals = agent.totals
-        busiest = max(totals.per_model_requests, key=totals.per_model_requests.__getitem__, default="")
+        busiest = max(
+            totals.per_model_requests, key=totals.per_model_requests.__getitem__, default=""
+        )
         family = (
             _family(str(row.get("resolved_model") or ""))
             or _family(totals.resolved_model)
@@ -148,9 +150,7 @@ def _key(agent: AgentTier, by: str) -> str:
 
 def _row(label: str, agents: int, ite: float, total_ite: float, models: str) -> str:
     share = 100.0 * ite / total_ite if total_ite else 0.0
-    return (
-        f"{label:<{_LABEL_WIDTH}}{agents:>7}{round(ite):>12,}{share:>7.1f}%  {models}"
-    ).rstrip()
+    return (f"{label:<{_LABEL_WIDTH}}{agents:>7}{round(ite):>12,}{share:>7.1f}%  {models}").rstrip()
 
 
 def _table(report: TierReport, by: str) -> list[str]:
@@ -231,5 +231,7 @@ def tiers_as_dict(report: TierReport) -> dict[str, Any]:
         "env_subagent_model": report.env_model,
         "unjoined": report.unjoined,
         "agents": rows,
-        "downgraded": [row for row, agent in zip(rows, report.agents, strict=True) if agent.swapped],
+        "downgraded": [
+            row for row, agent in zip(rows, report.agents, strict=True) if agent.swapped
+        ],
     }
