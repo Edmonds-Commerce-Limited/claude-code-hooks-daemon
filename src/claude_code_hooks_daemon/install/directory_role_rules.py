@@ -524,11 +524,16 @@ def sync_directory_role_rules(project_root: Path, config: Config) -> RuleSyncRep
     return report
 
 
-def sync_directory_role_rules_if_enabled(project_root: Path, config_path: Path) -> RuleSyncReport:
+def sync_directory_role_rules_if_enabled(
+    project_root: Path, config_path: Path, config: Config | None = None
+) -> RuleSyncReport:
     """Load config (defaults when absent) and run the lifecycle sync.
 
     The single decision site for daemon-start and CLI/installer-driven rule
-    deployment, mirroring ``deploy_agents_if_enabled``.
+    deployment, mirroring ``deploy_agents_if_enabled``. A caller that already
+    holds the config loaded from ``config_path`` passes it, so the file is not
+    read a second time.
     """
-    config = Config.load_or_default(config_path)
+    if config is None:
+        config = Config.load_or_default(config_path)
     return sync_directory_role_rules(project_root, config)

@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.config.exception_entries import (
     plain_patterns,
     unreasoned_entries,
 )
+from claude_code_hooks_daemon.config.yaml_loading import safe_load_yaml
 from claude_code_hooks_daemon.constants import ConfigKey, EventKey, Timeout, wired_event_metas
 from claude_code_hooks_daemon.constants.events import EventType
 from claude_code_hooks_daemon.core.handler_scope import (
@@ -2716,6 +2717,13 @@ class Config(BaseModel):
     #: ``(location, entry)`` of each plain-string config exception met under strict_mode.
     _unreasoned_exceptions: list[tuple[str, str]] = PrivateAttr(default_factory=list)
 
+    #: The file ``load`` read this config from; None for a config built any other way.
+    _source_path: Path | None = PrivateAttr(default=None)
+
+    #: The document ``load`` parsed (before ``or {}``), kept so a start-up step that
+    #: needs the raw mapping reuses it instead of parsing the file again.
+    _source_document: Any = PrivateAttr(default=None)
+
     @model_validator(mode="wrap")
     @classmethod
     def note_unreasoned_exceptions_under_strict_mode(
@@ -2845,11 +2853,12 @@ class Config(BaseModel):
         try:
             with path.open() as f:
                 if path.suffix in (".yaml", ".yml"):
-                    data = yaml.safe_load(f) or {}
+                    document = safe_load_yaml(f)
+                    data = document or {}
                 elif path.suffix == ".json":
                     import json
 
-                    data = json.load(f)
+                    data = document = json.load(f)
                 else:
                     raise ValueError(f"Unsupported format: {path.suffix}")
         except yaml.YAMLError as exc:
@@ -2873,7 +2882,33 @@ class Config(BaseModel):
             # list `ValueError`.
             raise ValueError(f"Config nested too deeply to parse: {path}: {exc}") from exc
 
-        return cls.model_validate(data)
+        config = cls.model_validate(data)
+        config._source_path = path.resolve()
+        config._source_document = document
+        return config
+
+    @property
+    def source_document(self) -> Any:
+        """The raw parsed document ``load`` read this config from (None if never loaded)."""
+        return self._source_document
+
+    def was_loaded_from(self, path: str | Path) -> bool:
+        """Whether ``path`` is the file this config stands for.
+
+        True for a config ``load`` read from that file. A config built without a
+        file (the defaults ``find_and_load`` returns when none exists) stands for
+        any path where no file exists.
+
+        Args:
+            path: A config file path.
+
+        Returns:
+            True when reading ``path`` would give this same config.
+        """
+        path = Path(path)
+        if self._source_path is None:
+            return not path.exists()
+        return self._source_path == path.resolve()
 
     @classmethod
     def load_or_default(cls, path: str | Path | None = None) -> "Config":

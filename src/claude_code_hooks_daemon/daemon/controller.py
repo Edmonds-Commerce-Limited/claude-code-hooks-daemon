@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from claude_code_hooks_daemon.config.models import ChainConfig, VerdictLogConfig
+from claude_code_hooks_daemon.config.models import ChainConfig, Config, VerdictLogConfig
 from claude_code_hooks_daemon.config.validator import ConfigValidator
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
 from claude_code_hooks_daemon.core.bounded_dispatch import get_default_dispatcher
@@ -233,6 +233,7 @@ class DaemonController:
         chain_deadline_problems: list[str] | None = None,
         config_fingerprint: str | None = None,
         config_problems: list[str] | None = None,
+        loaded_config: Config | None = None,
     ) -> None:
         """Initialise the controller with handlers.
 
@@ -284,6 +285,10 @@ class DaemonController:
                 round 3): values the daemon runs with other than as written.
                 Named in ``get_health()`` and handed to the SessionStart
                 config-problem advisory; not a degraded state.
+            loaded_config: The ``Config`` these slices came from. When it was
+                loaded from this project's config file, its parsed document
+                and model are reused by the config validation and the two
+                asset syncs instead of each reading the file again.
 
         Raises:
             ValueError: If workspace_root is None (FAIL FAST requirement)
@@ -404,21 +409,26 @@ class DaemonController:
         ).inject()
 
         # Validate configuration at startup (fail-open: degraded mode on errors)
-        self._validate_config(config_path)
+        reusable_config = (
+            loaded_config
+            if loaded_config is not None and loaded_config.was_loaded_from(config_path)
+            else None
+        )
+        self._validate_config(config_path, reusable_config)
 
         # Sync daemon-shipped agent assets with the gating config (Plan 00279):
         # enabled + missing/outdated deploys, disabled + present logs a removal
         # advisory. Best-effort — an unwritable .claude/agents/ must not stop
         # the daemon serving hooks, so the failure is logged, never swallowed
         # silently and never fatal.
-        self._sync_agent_assets(workspace_root, config_path)
+        self._sync_agent_assets(workspace_root, config_path, reusable_config)
 
         # Sync shipped .claude/rules/ directory-role pointer files (Plan
         # 00288 D5), mirroring the agent-asset sync above: deploys/refreshes
         # on every restart so a layout/documentation config change gets a
         # fresh paths: glob without waiting for a reinstall. Same best-effort
         # contract — never fatal to daemon startup.
-        self._sync_directory_role_rules(workspace_root, config_path)
+        self._sync_directory_role_rules(workspace_root, config_path, reusable_config)
 
     def prewarm_indexes(self) -> list[str]:
         """Start each guard's protected-file index build, so the first search is judged sooner.
@@ -495,13 +505,19 @@ class DaemonController:
             )
             return None
 
-    def _sync_agent_assets(self, workspace_root: Path, config_path: Path) -> None:
-        """Run the config-driven agent-asset lifecycle sync (Plan 00279)."""
+    def _sync_agent_assets(
+        self, workspace_root: Path, config_path: Path, config: Config | None = None
+    ) -> None:
+        """Run the config-driven agent-asset lifecycle sync (Plan 00279).
+
+        ``config`` is the already-loaded config for ``config_path``, when the
+        caller has one; without it the file is loaded here.
+        """
         from claude_code_hooks_daemon.install.agent_assets import deploy_agents_if_enabled
 
         messages: list[str] = []
         try:
-            messages = deploy_agents_if_enabled(workspace_root, config_path).messages
+            messages = deploy_agents_if_enabled(workspace_root, config_path, config).messages
         except (OSError, ValueError, TypeError) as exc:
             # Deliberately non-fatal, mirroring the fail-open startup contract
             # (_validate_config): an unwritable .claude/agents/ (OSError), an
@@ -518,15 +534,23 @@ class DaemonController:
         for message in messages:
             logger.info("Agent assets: %s", message)
 
-    def _sync_directory_role_rules(self, workspace_root: Path, config_path: Path) -> None:
-        """Run the config-driven directory-role-rules lifecycle sync (Plan 00288)."""
+    def _sync_directory_role_rules(
+        self, workspace_root: Path, config_path: Path, config: Config | None = None
+    ) -> None:
+        """Run the config-driven directory-role-rules lifecycle sync (Plan 00288).
+
+        ``config`` is the already-loaded config for ``config_path``, when the
+        caller has one; without it the file is loaded here.
+        """
         from claude_code_hooks_daemon.install.directory_role_rules import (
             sync_directory_role_rules_if_enabled,
         )
 
         messages: list[str] = []
         try:
-            messages = sync_directory_role_rules_if_enabled(workspace_root, config_path).messages
+            messages = sync_directory_role_rules_if_enabled(
+                workspace_root, config_path, config
+            ).messages
         except (OSError, ValueError, TypeError) as exc:
             # Same fail-open contract as _sync_agent_assets: an unwritable
             # .claude/rules/ (OSError), an invalid config (ValueError), or a
@@ -882,7 +906,7 @@ class DaemonController:
             if name in setup_functions
         }
 
-    def _validate_config(self, config_path: Path) -> None:
+    def _validate_config(self, config_path: Path, loaded_config: Config | None = None) -> None:
         """Validate configuration at startup, entering degraded mode on errors.
 
         Fail-open: If validation fails or the validator itself crashes,
@@ -890,11 +914,16 @@ class DaemonController:
 
         Args:
             config_path: Path to the configuration file
+            loaded_config: The config already loaded from ``config_path``; its
+                parsed document is validated instead of parsing the file again
         """
         try:
             from claude_code_hooks_daemon.config.loader import ConfigLoader
 
-            config_dict = ConfigLoader.load(config_path)
+            if loaded_config is not None:
+                config_dict = ConfigLoader.require_mapping(loaded_config.source_document)
+            else:
+                config_dict = ConfigLoader.load(config_path)
             errors = ConfigValidator.validate(config_dict)
             if errors:
                 self._degraded = True

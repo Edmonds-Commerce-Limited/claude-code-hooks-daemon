@@ -4005,6 +4005,7 @@ def _build_initialised_controller(
         worktree=config.worktree,
         reference_repos=config.reference_repos,
         config_fingerprint=config_fingerprint,
+        loaded_config=config,
     )
     return controller
 
