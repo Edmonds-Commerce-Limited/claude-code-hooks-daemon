@@ -48,6 +48,7 @@ def clear_discovery_cache() -> None:
     """Forget every discovery result, so the next ``discover`` walks its package again."""
     _DISCOVERY_CACHE.clear()
 
+
 # Mapping from directory name to EventType. Every dispatchable EventType must be
 # present so a client can drop a handler dir for it (discovery skips entries with
 # no on-disk dir via is_dir guards). Plan 00170 zero-handler-passthrough events

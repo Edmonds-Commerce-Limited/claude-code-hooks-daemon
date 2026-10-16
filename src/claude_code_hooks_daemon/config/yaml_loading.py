@@ -42,4 +42,4 @@ def safe_load_yaml(stream: str | IO[str]) -> Any:
         return loader.get_single_data()
     finally:
         # types-PyYAML leaves ``dispose`` unannotated; yaml.load calls it the same way.
-        cast(Any, loader).dispose()
+        cast("Any", loader).dispose()

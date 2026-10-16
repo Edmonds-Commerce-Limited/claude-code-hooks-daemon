@@ -6,6 +6,7 @@ event router, handler registration, and request processing.
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -147,6 +148,7 @@ class DaemonController:
         "_config_errors",
         "_config_fingerprint",
         "_config_problems",
+        "_deferred_startup",
         "_degraded",
         "_initialised",
         "_mode_manager",
@@ -209,6 +211,9 @@ class DaemonController:
         # Fingerprint of the config bound at startup (Plan 00415), supplied by
         # the caller that loaded it; the same never-recomputed contract.
         self._config_fingerprint: str | None = None
+        # Start-up steps ``initialise(defer_nonessential_startup=True)`` held
+        # back, as (description, step); drained by ``run_deferred_startup``.
+        self._deferred_startup: list[tuple[str, Callable[[], object]]] = []
 
     def initialise(
         self,
@@ -234,6 +239,7 @@ class DaemonController:
         config_fingerprint: str | None = None,
         config_problems: list[str] | None = None,
         loaded_config: Config | None = None,
+        defer_nonessential_startup: bool = False,
     ) -> None:
         """Initialise the controller with handlers.
 
@@ -289,6 +295,11 @@ class DaemonController:
                 loaded from this project's config file, its parsed document
                 and model are reused by the config validation and the two
                 asset syncs instead of each reading the file again.
+            defer_nonessential_startup: Hold back the CLAUDE.md regeneration, the
+                two asset syncs and the guard-index pre-warm, none of which
+                changes how a request is judged, for ``run_deferred_startup``.
+                The serving daemon passes True so it can bind its socket
+                first; the default runs them here, as one-shot callers expect.
 
         Raises:
             ValueError: If workspace_root is None (FAIL FAST requirement)
@@ -401,34 +412,72 @@ class DaemonController:
         if self._pseudo_dispatcher is not None:
             all_handlers.extend(self._pseudo_dispatcher.all_handlers())
         promoted_handlers = claude_md.promotion.promoted_handlers if claude_md else None
-        ClaudeMdInjector(
-            workspace_root=workspace_root,
-            handlers=all_handlers,
-            promoted_handlers=promoted_handlers,
-            write_in_linked_worktree=write_claude_md_in_linked_worktree,
-        ).inject()
-
-        # Validate configuration at startup (fail-open: degraded mode on errors)
         reusable_config = (
             loaded_config
             if loaded_config is not None and loaded_config.was_loaded_from(config_path)
             else None
         )
-        self._validate_config(config_path, reusable_config)
+
+        def inject_claude_md() -> None:
+            ClaudeMdInjector(
+                workspace_root=workspace_root,
+                handlers=all_handlers,
+                promoted_handlers=promoted_handlers,
+                write_in_linked_worktree=write_claude_md_in_linked_worktree,
+            ).inject()
 
         # Sync daemon-shipped agent assets with the gating config (Plan 00279):
         # enabled + missing/outdated deploys, disabled + present logs a removal
         # advisory. Best-effort — an unwritable .claude/agents/ must not stop
         # the daemon serving hooks, so the failure is logged, never swallowed
         # silently and never fatal.
-        self._sync_agent_assets(workspace_root, config_path, reusable_config)
+        def sync_agent_assets() -> None:
+            self._sync_agent_assets(workspace_root, config_path, reusable_config)
 
         # Sync shipped .claude/rules/ directory-role pointer files (Plan
         # 00288 D5), mirroring the agent-asset sync above: deploys/refreshes
         # on every restart so a layout/documentation config change gets a
         # fresh paths: glob without waiting for a reinstall. Same best-effort
         # contract — never fatal to daemon startup.
-        self._sync_directory_role_rules(workspace_root, config_path, reusable_config)
+        def sync_directory_role_rules() -> None:
+            self._sync_directory_role_rules(workspace_root, config_path, reusable_config)
+
+        # Validate configuration at startup (fail-open: degraded mode on errors).
+        # Never deferred: degraded mode changes how requests are answered.
+        if defer_nonessential_startup:
+            self._validate_config(config_path, reusable_config)
+            self._deferred_startup = [
+                ("guard-index pre-warm", self.prewarm_indexes),
+                ("CLAUDE.md guidance injection", inject_claude_md),
+                ("agent-asset sync", sync_agent_assets),
+                ("directory-role-rules sync", sync_directory_role_rules),
+            ]
+        else:
+            inject_claude_md()
+            self._validate_config(config_path, reusable_config)
+            sync_agent_assets()
+            sync_directory_role_rules()
+
+    def run_deferred_startup(self) -> None:
+        """Run the start-up steps ``initialise`` held back, once.
+
+        Called by the serving daemon after its socket is bound. Each step is
+        best-effort here, as the asset syncs always were: one raising is
+        logged at ERROR and the rest still run, because none of them changes
+        how a request is judged and the daemon must keep serving. A second
+        call finds nothing left to run.
+        """
+        steps, self._deferred_startup = self._deferred_startup, []
+        for description, step in steps:
+            try:
+                step()
+            except Exception as exc:
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason=f"the deferred start-up step '{description}' only maintains files and warms caches; its failure must not stop the daemon serving hooks, and the next restart retries it",
+                    level=logging.ERROR,
+                )
 
     def prewarm_indexes(self) -> list[str]:
         """Start each guard's protected-file index build, so the first search is judged sooner.

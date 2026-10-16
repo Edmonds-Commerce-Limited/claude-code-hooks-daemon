@@ -932,8 +932,11 @@ def _start_under_launch_lock(
     # Create and fully initialise the daemon controller. Initialising also
     # regenerates the CLAUDE.md <hooksdaemon> block (via the injector). Shared
     # single source of truth with cmd_regenerate_docs.
-    controller = _build_initialised_controller(config, project_path)
-    controller.prewarm_indexes()
+    # The CLAUDE.md regeneration, asset syncs and index pre-warm wait until the
+    # daemon is serving (Plan 00495 Task 2.5): none changes how a request is judged.
+    controller = _build_initialised_controller(
+        config, project_path, defer_nonessential_startup=True
+    )
     reporter.report(_START_STEP)
 
     # Get the daemon config with proper paths
@@ -950,6 +953,7 @@ def _start_under_launch_lock(
         controller,
         start_lock_waiting=reporter.start_lock_waiting,
         serving=launch.release,
+        deferred_startup=controller.run_deferred_startup,
     )
 
     # Write socket discovery file so bash hook forwarders (init.sh)
@@ -3952,7 +3956,11 @@ def _build_handler_config_mapping(config: Config) -> dict[str, dict[str, Any]]:
 
 
 def _build_initialised_controller(
-    config: Config, project_path: Path, *, write_claude_md_in_linked_worktree: bool = False
+    config: Config,
+    project_path: Path,
+    *,
+    write_claude_md_in_linked_worktree: bool = False,
+    defer_nonessential_startup: bool = False,
 ) -> "DaemonController":
     """Build and fully initialise a DaemonController from a loaded config.
 
@@ -3969,6 +3977,9 @@ def _build_initialised_controller(
             linked git worktree. Startup leaves it False so the worktree's
             branch never carries an auto-committed block that conflicts with
             main's on merge; the explicit ``regenerate-docs`` passes True.
+        defer_nonessential_startup: Leave the CLAUDE.md regeneration, the asset
+            syncs and the index pre-warm for ``controller.run_deferred_startup``.
+            Only the serving daemon passes True, so it can bind its socket first.
 
     Returns:
         The initialised DaemonController.
@@ -4006,6 +4017,7 @@ def _build_initialised_controller(
         reference_repos=config.reference_repos,
         config_fingerprint=config_fingerprint,
         loaded_config=config,
+        defer_nonessential_startup=defer_nonessential_startup,
     )
     return controller
 
