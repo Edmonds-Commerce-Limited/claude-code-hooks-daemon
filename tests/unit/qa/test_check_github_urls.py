@@ -370,18 +370,14 @@ class TestGitignoredFilesAreNotJudged:
     ) -> None:
         _git_init(tmp_path)
         _write(tmp_path, ".gitignore", "scratch.txt\n")
-        _write(
-            tmp_path, "scratch.txt", "https://github.com/anthropics/claude-code-hooks-daemon\n"
-        )
+        _write(tmp_path, "scratch.txt", "https://github.com/anthropics/claude-code-hooks-daemon\n")
 
         assert checker.find_violations(tmp_path) == []
 
     def test_an_untracked_unignored_file_is_still_judged(self, tmp_path: Path) -> None:
         """A new file not yet added is exactly what a pre-commit sweep must see."""
         _git_init(tmp_path)
-        _write(
-            tmp_path, "docs/new.md", "https://github.com/anthropics/claude-code-hooks-daemon\n"
-        )
+        _write(tmp_path, "docs/new.md", "https://github.com/anthropics/claude-code-hooks-daemon\n")
 
         assert len(checker.find_violations(tmp_path)) == 1
 
