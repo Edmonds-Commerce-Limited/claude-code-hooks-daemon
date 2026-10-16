@@ -39,7 +39,6 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputF
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
-from claude_code_hooks_daemon.handlers.status_line.downgrade_state import resolve_model_family
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.model_downgrade_signal import (
     SIGNAL_SUBDIR,
@@ -51,6 +50,7 @@ from claude_code_hooks_daemon.utils.model_fallback_records import (
     FallbackFacts,
     scan_transcript_tail,
 )
+from claude_code_hooks_daemon.utils.model_tiers import resolve_model_family
 
 logger = logging.getLogger(__name__)
 

@@ -149,6 +149,8 @@ class TestLiveSnapshot:
             ("claude-sonnet-5-5", "sonnet"),
             ("claude-haiku-5-5", "haiku"),
             ("claude-fable-5-1", "fable"),
+            # Plan 00472 Task 3.7: the shared rank table, so an alias counts too.
+            ("claude-mythos-1-0", "fable"),
             ("gpt", "other"),
             ("", "other"),
         ],

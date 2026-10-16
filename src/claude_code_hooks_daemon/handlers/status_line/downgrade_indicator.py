@@ -24,9 +24,9 @@ from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.handlers.status_line.downgrade_state import (
     evaluate_downgrade,
     read_downgrade_counts,
-    resolve_model_family,
     state_dir,
 )
+from claude_code_hooks_daemon.utils.model_tiers import resolve_model_family
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.model_downgrade_signal import read_downgrade_signal
 

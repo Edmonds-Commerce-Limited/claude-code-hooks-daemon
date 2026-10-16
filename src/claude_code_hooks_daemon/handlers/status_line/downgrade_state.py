@@ -39,6 +39,9 @@ from typing import Any, Final
 
 from claude_code_hooks_daemon.handlers.status_line.mtime_cache import MtimeCachedFile
 from claude_code_hooks_daemon.handlers.status_line.thread_registry import safe_session_stem
+from claude_code_hooks_daemon.utils.model_tiers import (
+    resolve_model_family as resolve_model_family,
+)
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
@@ -48,40 +51,14 @@ logger = logging.getLogger(__name__)
 # sensors sharing the untracked dir never collide.
 _STATE_SUBDIR: Final[str] = "downgrade-indicator"
 
-# Canonical model-family rank ladder (higher = more capable). `mythos` is a
-# known alias that canonicalises to the `fable` family and rank.
-_FAMILY_SUBSTRINGS: Final[tuple[tuple[str, str, int], ...]] = (
-    ("haiku", "haiku", 0),
-    ("sonnet", "sonnet", 1),
-    ("opus", "opus", 2),
-    ("fable", "fable", 3),
-    ("mythos", "fable", 3),
-)
-
 # JSON keys for the per-session state file.
 _STATE_KEY_FAMILY: Final[str] = "high_water_family"
 _STATE_KEY_RANK: Final[str] = "high_water_rank"
 
-
-def resolve_model_family(model_id: str) -> tuple[str, int] | None:
-    """Resolve a model id to its canonical family name and rank.
-
-    Args:
-        model_id: Raw model id string (e.g. ``"claude-opus-4-6"``), matched by
-            case-insensitive substring.
-
-    Returns:
-        ``(canonical_family, rank)``, or ``None`` if the id matches no known
-        family. An unrecognised model id is "no opinion" — never treated as a
-        downgrade, and never allowed to corrupt the stored high-water.
-    """
-    if not model_id:
-        return None
-    lowered = model_id.lower()
-    for substring, family, rank in _FAMILY_SUBSTRINGS:
-        if substring in lowered:
-            return family, rank
-    return None
+# The rank ladder lives in utils.model_tiers (Plan 00472 Task 3.1), shared with
+# the subagent tier handlers; the import above re-exports it. An unrecognised
+# model id is "no opinion": never a downgrade, and never allowed to corrupt the
+# stored high-water.
 
 
 def state_dir(daemon_untracked_dir: Path) -> Path:
