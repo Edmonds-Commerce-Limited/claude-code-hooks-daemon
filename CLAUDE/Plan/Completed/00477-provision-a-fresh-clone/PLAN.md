@@ -99,7 +99,7 @@ anything themselves: a person or agent runs provision.
   stops describing itself as the fresh-clone command.
 - [x] ✅ **Task 4.2**: A release note and an UNRELEASED post-upgrade task: an
   upgraded project gains the config key and the tracked `provision.sh`.
-  (`98c7ee990`: release note 066, post-upgrade task 02)
+  (`98c7ee990`: release note 072, renumbered from 066 at merge; post-upgrade task 02)
 
 ### Phase 5: A pulled version change syncs itself (owner request)
 
