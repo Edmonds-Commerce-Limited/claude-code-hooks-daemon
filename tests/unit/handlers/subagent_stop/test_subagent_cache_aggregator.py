@@ -290,6 +290,11 @@ class TestSubagentCacheAggregatorHandler:
             "subagent_cache_aggregator.ProjectContext.daemon_untracked_dir",
             staticmethod(lambda: tmp_path),
         )
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.handlers.subagent_stop."
+            "subagent_cache_aggregator.ProjectContext.is_initialized",
+            staticmethod(lambda: True),
+        )
         handler.handle(
             {
                 "session_id": "sess",

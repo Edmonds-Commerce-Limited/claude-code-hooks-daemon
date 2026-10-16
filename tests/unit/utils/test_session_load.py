@@ -78,6 +78,17 @@ class TestLiveAgents:
     def test_missing_directory_is_empty(self, tmp_path: Path) -> None:
         assert live_agents(tmp_path / "absent", liveness_seconds=120, now=NOW) == []
 
+    def test_unreadable_recent_transcript_counts_live_with_unknown_context(
+        self, subagents: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def refuse(path: Path, **_: object) -> object:
+            raise PermissionError(13, "Permission denied", str(path))
+
+        monkeypatch.setattr("claude_code_hooks_daemon.utils.session_load.read_tail", refuse)
+        live = live_agents(subagents, liveness_seconds=120, now=NOW)
+        assert [entry.label for entry in live] == ["done", "worker-1", "worker-2"]
+        assert all(entry.context_tokens == 0 and entry.model == "" for entry in live)
+
 
 class TestBackgroundTasks:
     def test_finished_subagent_and_teammate_tasks(self, tmp_path: Path) -> None:
@@ -150,6 +161,12 @@ class TestFiveHour:
 
     def test_stale_is_unknown(self, tmp_path: Path) -> None:
         self.write(tmp_path, ts=NOW - 900, five_hour_pct=95)
+        assert read_five_hour(tmp_path, "s1", max_age_seconds=300, now=NOW) is None
+
+    def test_corrupt_sidecar_is_unknown(self, tmp_path: Path) -> None:
+        directory = tmp_path / "context-sidecar"
+        directory.mkdir()
+        (directory / "s1.json").write_text("{torn", encoding="utf-8")
         assert read_five_hour(tmp_path, "s1", max_age_seconds=300, now=NOW) is None
 
     def test_missing_or_without_the_field_is_unknown(self, tmp_path: Path) -> None:

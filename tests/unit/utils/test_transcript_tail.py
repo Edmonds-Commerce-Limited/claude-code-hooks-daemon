@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import io
 import json
+import logging
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import IO, Any, BinaryIO, cast
@@ -12,6 +14,7 @@ import pytest
 
 from claude_code_hooks_daemon.utils.transcript_tail import (
     TailReading,
+    find_agent_transcript,
     input_token_equivalents,
     read_tail,
     resolve_agent_transcript,
@@ -143,6 +146,14 @@ class TestReadTail:
         reading = read_tail(path)
         assert reading is not None and reading.context_tokens == 60
 
+    def test_a_non_json_line_is_logged(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        path = write_lines(tmp_path / "t.jsonl", [assistant(50), "not json"])
+        with caplog.at_level(logging.DEBUG):
+            read_tail(path)
+        assert "not a transcript record" in caplog.text
+
     def test_trailing_line_larger_than_the_window_doubles(self, tmp_path: Path) -> None:
         """A 300 KB trailing record is found by doubling the 64 KiB window."""
         lines = [user()] * 3 + [assistant(777, pad=300_000)]
@@ -208,6 +219,30 @@ class TestResolver:
 
     def test_agent_id_cannot_escape_the_directory(self, tmp_path: Path) -> None:
         assert resolve_agent_transcript(str(tmp_path / "s1.jsonl"), "s1", "../../etc") is None
+
+    def test_find_agent_transcript_picks_the_newest_confirmed_generation(
+        self, tmp_path: Path
+    ) -> None:
+        old = tmp_path / "agent-aw-1111.jsonl"
+        new = tmp_path / "agent-aw-2222.jsonl"
+        other = tmp_path / "agent-aw-3333.jsonl"
+        for index, path in enumerate((old, new, other)):
+            path.write_text("", encoding="utf-8")
+            meta = path.with_name(path.name.removesuffix(".jsonl") + ".meta.json")
+            meta.write_text(json.dumps({"name": "w" if path != other else "x"}))
+            os.utime(path, (1000 + index, 1000 + index))
+        assert find_agent_transcript(tmp_path, "w") == new
+        assert find_agent_transcript(tmp_path, "nobody") is None
+
+    def test_find_agent_transcript_raises_when_the_directory_cannot_be_listed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def refuse(path: Path) -> Any:
+            raise PermissionError(13, "Permission denied", str(path))
+
+        monkeypatch.setattr("os.scandir", refuse)
+        with pytest.raises(PermissionError):
+            find_agent_transcript(tmp_path, "plan464-impl")
 
     def test_subagents_dir_for_both_shapes(self, tmp_path: Path) -> None:
         own = tmp_path / "s1" / "subagents" / "agent-abc.jsonl"

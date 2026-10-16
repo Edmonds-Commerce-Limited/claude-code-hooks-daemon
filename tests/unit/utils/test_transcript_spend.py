@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -195,6 +196,28 @@ class TestOffsetCache:
         for entry in store.iterdir():
             entry.write_text("{not json", encoding="utf-8")
         assert TranscriptSpendCache(store).totals(transcript).requests == 1
+
+    def test_store_of_another_transcript_is_rebuilt_and_logged(
+        self, transcript: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        store = tmp_path / "s"
+        write(transcript, [assistant("r1", 100)])
+        TranscriptSpendCache(store).totals(transcript)
+        for entry in store.iterdir():
+            data = json.loads(entry.read_text(encoding="utf-8"))
+            data["path"] = "/elsewhere/agent-x.jsonl"
+            entry.write_text(json.dumps(data), encoding="utf-8")
+        with caplog.at_level(logging.DEBUG):
+            assert TranscriptSpendCache(store).totals(transcript).requests == 1
+        assert "offset sidecar" in caplog.text
+
+    def test_non_json_line_is_skipped_and_logged(
+        self, transcript: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        transcript.write_text("plain text output\n" + assistant("r1", 100) + "\n", encoding="utf-8")
+        with caplog.at_level(logging.DEBUG):
+            assert TranscriptSpendCache(None).totals(transcript).requests == 1
+        assert "not a transcript record" in caplog.text
 
     def test_no_store_works_in_memory(self, transcript: Path) -> None:
         write(transcript, [assistant("r1", 100)])

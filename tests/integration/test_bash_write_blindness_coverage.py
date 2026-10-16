@@ -326,6 +326,14 @@ _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
         "harm the guard exists for. Its resident guidance names the three "
         "tools it judges and says a clean Bash write proves nothing",
     ),
+    "SubagentContextBudgetHandler": (
+        _OUT_OF_FRAME,
+        "Plan 00471 L2: the premise is a subagent's context size, not a file "
+        "reaching disk. Past hard_tokens EVERY tool call is gated; Write/Edit "
+        "are keyed only to ALLOW the handoff file. A Bash write is a Bash call, "
+        "judged by allowed_bash_prefixes, so a redirect or heredoc is denied, "
+        "never missed",
+    ),
 }
 
 # Handlers whose resident guidance opened with an unqualified "Writing X is

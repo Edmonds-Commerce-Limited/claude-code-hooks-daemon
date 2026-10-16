@@ -13,7 +13,7 @@ import pytest
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.resume_guard import ResumeGuardHandler
-from claude_code_hooks_daemon.utils.spend_ledger import read_events
+from claude_code_hooks_daemon.utils.spend_ledger import read_events, unmeasured_count
 
 SESSION = "s1"
 OLD_ID = "aplan464-impl-1111111111111111"
@@ -136,6 +136,18 @@ class TestDecision:
 
     def test_unresolvable_target_fails_open(self, handler, tmp_path) -> None:
         assert handler.handle(send(tmp_path, "peer-in-another-session")).decision == Decision.ALLOW
+
+    def test_unlistable_agent_directory_fails_open_and_is_recorded_unmeasured(
+        self, handler, tmp_path, subagents, monkeypatch
+    ) -> None:
+        subagents.mkdir(parents=True)
+
+        def refuse(path: Path) -> Any:
+            raise PermissionError(13, "Permission denied", str(path))
+
+        monkeypatch.setattr("os.scandir", refuse)
+        assert handler.handle(send(tmp_path, "plan464-impl")).decision == Decision.ALLOW
+        assert unmeasured_count(tmp_path / "untracked", SESSION) == 1
 
     def test_override_prefix_allows_and_is_recorded(self, handler, tmp_path, subagents) -> None:
         write_agent(subagents, NEW_ID, "plan464-impl", context=300_000)

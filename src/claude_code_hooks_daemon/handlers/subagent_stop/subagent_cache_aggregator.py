@@ -314,13 +314,16 @@ class SubagentCacheAggregatorHandler(SubagentStopHandlerBase):
 
     @staticmethod
     def _store_root(root: Path | None) -> Path | None:
-        """Where the offset cache persists: ``root``, else the daemon's untracked dir."""
+        """Where the offset cache persists: ``root``, else the daemon's untracked dir.
+
+        None outside a project context (a unit test, a CLI probe): the cache is
+        then kept in memory only.
+        """
         if root is not None:
             return root
-        try:
-            return ProjectContext.daemon_untracked_dir()
-        except RuntimeError:
+        if not ProjectContext.is_initialized():
             return None
+        return ProjectContext.daemon_untracked_dir()
 
     def spend_for(self, transcript: Path, root: Path | None = None) -> SpendTotals:
         """This agent's cumulative spend, parsing only what was appended since its last stop.

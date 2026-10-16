@@ -287,6 +287,17 @@ _VALID_NON_DEFAULTS: dict[tuple[str, str], object] = {
     ("github_issue_assignment_guard", "auto_claim"): True,
     # validate_options refuses anything but a list of repository-relative globs
     ("write_protected_paths", "paths"): ["zzqx/protected/**"],
+    # validate_options refuses anything but positive integers and a known mode
+    ("resume_guard", "mode"): "deny",
+    ("resume_guard", "max_resume_tokens"): 123_457,
+    ("resume_guard", "warm_seconds"): 601,
+    # validate_options refuses anything but positive integers and lists of strings
+    ("subagent_context_budget", "soft_tokens"): 123_457,
+    ("subagent_context_budget", "hard_tokens"): 234_567,
+    ("subagent_context_budget", "handoff_globs"): ["zzqx/handoff/**"],
+    ("subagent_context_budget", "allowed_bash_prefixes"): ["zzqx-status"],
+    ("subagent_context_budget", "exempt_agent_types"): ["zzqx-type"],
+    ("subagent_context_budget", "max_override_tokens"): 345_679,
 }
 
 

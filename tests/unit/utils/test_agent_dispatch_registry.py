@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
+import pytest
+
 from claude_code_hooks_daemon.utils.agent_dispatch_registry import (
+    dispatch_budget,
     effective_agent_type,
     record_dispatch,
 )
@@ -75,3 +79,26 @@ class TestEffectiveAgentType:
         for path in tmp_path.rglob("*.json"):
             path.write_text('{"name": "other", "subagent_type": "x"}', encoding="utf-8")
         assert effective_agent_type(tmp_path, "s1", "worker") == ""
+
+
+class TestDispatchBudget:
+    def test_recorded_budget_is_returned(self, tmp_path: Path) -> None:
+        record_dispatch(tmp_path, "s1", "worker", "qa-runner", budget_tokens=400_000)
+        assert dispatch_budget(tmp_path, "s1", "worker") == 400_000
+
+    def test_absent_record_is_no_override_and_logs_nothing(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.DEBUG):
+            assert dispatch_budget(tmp_path, "s1", "worker") is None
+        assert caplog.records == []
+
+    def test_garbled_record_is_no_override_and_is_logged(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        record_dispatch(tmp_path, "s1", "worker", "qa-runner", budget_tokens=400_000)
+        for path in tmp_path.rglob("*.json"):
+            path.write_text("{not json", encoding="utf-8")
+        with caplog.at_level(logging.WARNING):
+            assert dispatch_budget(tmp_path, "s1", "worker") is None
+        assert "configured bands" in caplog.text

@@ -4911,7 +4911,8 @@ def cmd_spend(args: argparse.Namespace) -> int:
     through the shared offset cache, so a repeat run parses only new bytes.
 
     Returns:
-        0 on success, 2 when no session transcript could be resolved.
+        0 on success, 1 when the session's agent directory cannot be listed,
+        2 when no session transcript could be resolved.
     """
     from claude_code_hooks_daemon.core.project_context import ProjectContext
     from claude_code_hooks_daemon.daemon.spend_report import (
@@ -4949,12 +4950,16 @@ def cmd_spend(args: argparse.Namespace) -> int:
 
     session_id = transcript.stem
     agents_dir = subagents_dir(str(transcript), session_id)
-    report = collect_session_spend(
-        agents_dir if agents_dir is not None else transcript.parent / session_id,
-        session_id=session_id,
-        cache=spend_cache(untracked),
-        unmeasured=unmeasured_count(untracked, session_id),
-    )
+    try:
+        report = collect_session_spend(
+            agents_dir if agents_dir is not None else transcript.parent / session_id,
+            session_id=session_id,
+            cache=spend_cache(untracked),
+            unmeasured=unmeasured_count(untracked, session_id),
+        )
+    except OSError as e:
+        print(f"ERROR: cannot list the agent transcripts: {e}", file=sys.stderr)
+        return 1
     if args.json:
         print(json.dumps(report_as_dict(report), indent=2))
     else:

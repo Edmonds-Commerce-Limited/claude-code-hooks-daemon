@@ -124,7 +124,7 @@ class SubagentHandoffGateHandler(SubagentStopHandlerBase):
         return None
 
     def get_acceptance_tests(self) -> list[Any]:
-        """One case, declared harness-undrivable: it needs a real over-budget agent."""
+        """The block and its near miss, declared harness-undrivable: both need a real over-budget agent."""
         from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
@@ -145,5 +145,25 @@ class SubagentHandoffGateHandler(SubagentStopHandlerBase):
                     "It needs a subagent whose real transcript is past hard_tokens, which "
                     "ships off; the harness fabricates neither the agent nor its transcript."
                 ),
-            )
+            ),
+            AcceptanceTest(
+                title="subagent handoff gate - an over-budget stop after its handoff is allowed",
+                command=(
+                    "Stop a subagent that hit hard_tokens after writing the handoff file "
+                    "its deny message named"
+                ),
+                description=(
+                    "The handoff exists on disk, so the stop proceeds with no block; the "
+                    "coordinator continues from that file."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="The near miss of the deny case: only the handoff file differs.",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                harness_cannot_produce=(
+                    "It needs a subagent whose real transcript is past hard_tokens, which "
+                    "ships off; the harness fabricates neither the agent nor its transcript."
+                ),
+            ),
         ]

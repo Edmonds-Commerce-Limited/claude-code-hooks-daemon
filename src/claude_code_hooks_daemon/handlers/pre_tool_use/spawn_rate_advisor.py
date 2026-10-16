@@ -40,7 +40,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.handlers.pre_tool_use.resume_guard import (
     DEFAULT_WARM_SECONDS,
-    ResumeGuardHandler,
+    target_transcript,
 )
 from claude_code_hooks_daemon.handlers.pre_tool_use.subagent_context_budget import int_or_none
 from claude_code_hooks_daemon.utils.session_load import (
@@ -157,10 +157,10 @@ class SpawnRateAdvisorHandler(PreToolUseHandlerBase):
     @staticmethod
     def _cold_resume(hook_input: Mapping[str, Any]) -> bool:
         """Whether this SendMessage resumes a stopped agent past the cache TTL."""
-        transcript = ResumeGuardHandler.target_transcript(hook_input)
-        if transcript is None:
-            return False
         try:
+            transcript = target_transcript(hook_input)
+            if transcript is None:
+                return False
             reading = read_tail(transcript)
             idle = time.time() - transcript.stat().st_mtime
         except OSError:

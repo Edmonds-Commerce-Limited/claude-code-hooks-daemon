@@ -81,6 +81,23 @@ def record_dispatch(
     tmp_path.replace(path)
 
 
+def _read_budget_record(path: Path) -> dict[str, object]:
+    """The record at ``path``; ``{}`` when it is absent or, logged, unreadable."""
+    try:
+        entry = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="an unreadable dispatch record carries no budget override, so the agent keeps its configured bands",
+            level=logging.WARNING,
+        )
+        return {}
+    return entry if isinstance(entry, dict) else {}
+
+
 def dispatch_budget(untracked_dir: Path, session_id: str, name: str) -> int | None:
     """The ``budget: <N>k`` override recorded for the named agent, or None.
 
@@ -88,12 +105,8 @@ def dispatch_budget(untracked_dir: Path, session_id: str, name: str) -> int | No
     stays at its configured value, which is the safe direction for a cost
     control (it never switches the gate off).
     """
-    path = _record_path(untracked_dir, session_id, name)
-    try:
-        entry = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if not isinstance(entry, dict) or entry.get(_KEY_NAME) != name:
+    entry = _read_budget_record(_record_path(untracked_dir, session_id, name))
+    if entry.get(_KEY_NAME) != name:
         return None
     budget = entry.get(_KEY_BUDGET)
     if isinstance(budget, bool) or not isinstance(budget, int) or budget <= 0:

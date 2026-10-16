@@ -153,13 +153,11 @@ class _Entry:
         )
 
     @classmethod
-    def from_json(cls, text: str, path: Path) -> _Entry | None:
-        try:
-            data = json.loads(text)
-        except ValueError:
-            return None
+    def from_json(cls, text: str, path: Path) -> _Entry:
+        """Rebuild an entry; ValueError when ``text`` is not one, or is another transcript's."""
+        data = json.loads(text)
         if not isinstance(data, dict) or data.get("path") != str(path):
-            return None
+            raise ValueError(f"offset sidecar does not belong to {path}")
         totals = data.get("totals")
         seen = data.get("seen_ids")
         last_id = data.get("last_id")
@@ -266,18 +264,17 @@ class TranscriptSpendCache:
         if store is None:
             return _Entry()
         try:
-            text = store.read_text(encoding="utf-8")
+            return _Entry.from_json(store.read_text(encoding="utf-8"), transcript)
         except FileNotFoundError:
             return _Entry()
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             log_and_continue(
                 logger,
                 exc,
-                reason="an unreadable offset sidecar costs one rescan of its transcript, never a wrong total",
+                reason="an unreadable, corrupt or foreign offset sidecar costs one rescan of its transcript, never a wrong total",
                 level=logging.DEBUG,
             )
             return _Entry()
-        return _Entry.from_json(text, transcript) or _Entry()
 
     def _save(self, transcript: Path, entry: _Entry) -> None:
         store = self._store_path(transcript)
@@ -328,7 +325,13 @@ class TranscriptSpendCache:
                     continue
                 try:
                     record = json.loads(line)
-                except (ValueError, UnicodeDecodeError):
+                except (ValueError, UnicodeDecodeError) as exc:
+                    log_and_continue(
+                        logger,
+                        exc,
+                        reason="a complete line that is not a transcript record carries no usage; it is parsed once, then the offset moves past it",
+                        level=logging.DEBUG,
+                    )
                     continue
                 if isinstance(record, dict):
                     _apply(entry, record)

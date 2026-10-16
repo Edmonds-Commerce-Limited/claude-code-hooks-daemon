@@ -11,7 +11,8 @@ conversational record is an ``end_turn``), **cold** (transcript untouched for
 ``warm_seconds``), and **large** (context at or above ``max_resume_tokens``).
 A message to a running agent resumes nothing and is never gated; a warm resume
 is cache reads only and is allowed. A ``to`` that matches no transcript of this
-session (a cross-session peer) fails open.
+session (a cross-session peer) fails open; an agent directory or transcript
+that cannot be read fails open too, with an ``unmeasured`` record.
 
 ``mode: deny`` refuses, naming the fresh-spawn route and the agent's last report
 or handoff file when one is found; ``mode: advise`` (the shipped default) allows
@@ -43,6 +44,7 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.subagent_context_budget impo
     STATE_KIND,
     int_or_none,
 )
+from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 from claude_code_hooks_daemon.utils.spend_ledger import (
     append_event,
     note_unmeasured,
@@ -91,6 +93,26 @@ _RULE: Final[Rule] = Rule(
 )
 
 
+def target_transcript(hook_input: Mapping[str, Any]) -> Path | None:
+    """The transcript of the agent a SendMessage names, or None.
+
+    A module function, not a method: another handler module that imported the
+    handler CLASS for it would have the registry discover, and register, the
+    guard a second time.
+
+    Raises OSError when the session's agent directory cannot be read.
+    """
+    tool_input = hook_input.get(HookInputField.TOOL_INPUT)
+    target = tool_input.get("to") if isinstance(tool_input, dict) else None
+    if not isinstance(target, str):
+        return None
+    directory = subagents_dir(
+        str(hook_input.get(HookInputField.TRANSCRIPT_PATH) or ""),
+        str(hook_input.get(HookInputField.SESSION_ID) or ""),
+    )
+    return find_agent_transcript(directory, target) if directory is not None else None
+
+
 class ResumeGuardHandler(PreToolUseHandlerBase):
     """Gate a SendMessage that would cold-resume a large stopped agent."""
 
@@ -133,29 +155,17 @@ class ResumeGuardHandler(PreToolUseHandlerBase):
         """The rule behind the deny."""
         return [_RULE]
 
-    @staticmethod
-    def target_transcript(hook_input: Mapping[str, Any]) -> Path | None:
-        """The transcript of the agent a SendMessage names, or None."""
-        tool_input = hook_input.get(HookInputField.TOOL_INPUT)
-        target = tool_input.get("to") if isinstance(tool_input, dict) else None
-        if not isinstance(target, str):
-            return None
-        directory = subagents_dir(
-            str(hook_input.get(HookInputField.TRANSCRIPT_PATH) or ""),
-            str(hook_input.get(HookInputField.SESSION_ID) or ""),
-        )
-        return find_agent_transcript(directory, target) if directory is not None else None
-
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Deny (or advise on) a cold resume of a large stopped agent."""
         tool_input = hook_input.get(HookInputField.TOOL_INPUT)
         tool_input = tool_input if isinstance(tool_input, dict) else {}
         target = str(tool_input.get("to") or "")
         session = str(hook_input.get(HookInputField.SESSION_ID) or "")
-        transcript = self.target_transcript(hook_input)
-        if transcript is None:
-            return GatingResult(decision=Decision.ALLOW)
+        transcript: Path | None = None
         try:
+            transcript = target_transcript(hook_input)
+            if transcript is None:
+                return GatingResult(decision=Decision.ALLOW)
             reading = read_tail(transcript)
             idle = time.time() - transcript.stat().st_mtime
         except OSError:
@@ -163,8 +173,12 @@ class ResumeGuardHandler(PreToolUseHandlerBase):
             note_unmeasured(
                 untracked,
                 session_id=session,
-                agent_id=transcript.name.removeprefix("agent-").removesuffix(".jsonl"),
-                reason="transcript-unreadable",
+                agent_id=(
+                    transcript.name.removeprefix("agent-").removesuffix(".jsonl")
+                    if transcript is not None
+                    else target
+                ),
+                reason="transcript-unreadable" if transcript is not None else "agents-unlistable",
                 handler=self.name,
                 tool_name=ToolName.SEND_MESSAGE,
                 log_dir=untracked / "logs" / "hooks",
@@ -210,7 +224,7 @@ class ResumeGuardHandler(PreToolUseHandlerBase):
         state = read_state(state_path(self._untracked_dir(), session, STATE_KIND, agent_id))
         for key in (STATE_HANDOFF_WRITTEN, STATE_HANDOFF_PATH):
             value = state.get(key)
-            if isinstance(value, str) and value and Path(value).is_file():
+            if isinstance(value, str) and value and path_is_file(value, unreadable_means=False):
                 return Path(value)
         reports = self._root() / DEFAULT_PERSISTED_REPORT_DIR
         return find_persisted_report(reports, agent_name_of(transcript) or agent_id, agent_id)
@@ -245,7 +259,7 @@ class ResumeGuardHandler(PreToolUseHandlerBase):
         )
 
     def get_acceptance_tests(self) -> list[Any]:
-        """One case, harness-undrivable: it needs a real stopped agent transcript."""
+        """The deny case and its warm near miss, harness-undrivable: both need a real transcript."""
         from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
@@ -266,5 +280,26 @@ class ResumeGuardHandler(PreToolUseHandlerBase):
                     "It judges a real teammate's transcript (stopped, cold, large); the "
                     "harness cannot fabricate one in the session directory."
                 ),
-            )
+            ),
+            AcceptanceTest(
+                title="resume guard - a warm resume of the same large agent is allowed",
+                command=(
+                    "SendMessage a follow-up to a teammate at 300k context within a minute "
+                    "of it finishing its turn"
+                ),
+                description=(
+                    "The agent is stopped and large but still inside the cache TTL "
+                    "(warm_seconds), so the resume is cache reads only and passes with no "
+                    "advisory."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="The near miss of the deny case: only the idle time differs.",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                harness_cannot_produce=(
+                    "It judges a real teammate's transcript (stopped, warm, large); the "
+                    "harness cannot fabricate one in the session directory."
+                ),
+            ),
         ]

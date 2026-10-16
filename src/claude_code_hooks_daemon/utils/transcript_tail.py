@@ -23,12 +23,17 @@ transcript, from which the agent's file is derived.
 from __future__ import annotations
 
 import json
+import logging
+import os
 import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from glob import escape as glob_escape
 from pathlib import Path
 from typing import IO, Any, Final
+
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+
+logger = logging.getLogger(__name__)
 
 #: The first window read back from EOF; doubled on every miss.
 INITIAL_WINDOW_BYTES: Final[int] = 64 * 1024
@@ -126,22 +131,23 @@ def _is_conversational(record: Mapping[str, Any]) -> bool:
     return isinstance(message, dict) and message.get("model") != SYNTHETIC_MODEL
 
 
-def _parse(line: bytes) -> dict[str, Any] | None:
-    try:
-        record = json.loads(line)
-    except (ValueError, UnicodeDecodeError):
-        return None
-    return record if isinstance(record, dict) else None
-
-
 def _scan_backwards(lines: Iterable[bytes]) -> tuple[TailReading | None, bool]:
     """Scan ``lines`` newest first. Returns the reading and whether it is complete."""
     stopped: bool | None = None
     for line in lines:
         if not line.strip():
             continue
-        record = _parse(line)
-        if record is None:
+        try:
+            record = json.loads(line)
+        except (ValueError, UnicodeDecodeError) as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="a line that is not a transcript record carries no usage, so the scan reads the line before it",
+                level=logging.DEBUG,
+            )
+            continue
+        if not isinstance(record, dict):
             continue
         if stopped is None and _is_conversational(record):
             message = record.get("message")
@@ -231,21 +237,27 @@ def find_agent_transcript(directory: Path, target: str) -> Path | None:
     A name resolves to the newest ``agent-a<name>-*.jsonl`` whose ``meta.json``
     confirms the name, so an older generation of the same name is never judged
     in place of the live one. None when nothing matches (a cross-session peer).
+
+    Raises OSError when ``directory`` or a candidate cannot be read: the
+    caller decides what an unmeasurable target means. A missing directory is
+    a session with no agents and matches nothing.
     """
     if not _SAFE_AGENT_ID.fullmatch(target or ""):
         return None
     direct = directory / f"agent-{target}.jsonl"
     if direct.is_file():
         return direct
-    try:
-        candidates = [
-            path
-            for path in directory.glob(f"agent-a{glob_escape(target)}-*.jsonl")
-            if agent_name_of(path) == target
-        ]
-        return max(candidates, key=lambda path: path.stat().st_mtime, default=None)
-    except OSError:
+    if not directory.is_dir():
         return None
+    prefix = f"agent-a{target}-"
+    with os.scandir(directory) as entries:
+        candidates = [
+            Path(entry.path)
+            for entry in entries
+            if entry.name.startswith(prefix) and entry.name.endswith(".jsonl")
+        ]
+    confirmed = [path for path in candidates if agent_name_of(path) == target]
+    return max(confirmed, key=lambda path: path.stat().st_mtime, default=None)
 
 
 def resolve_agent_transcript(transcript_path: str, session_id: str, agent_id: str) -> Path | None:

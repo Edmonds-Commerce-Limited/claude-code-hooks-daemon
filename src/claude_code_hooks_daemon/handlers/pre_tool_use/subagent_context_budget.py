@@ -57,6 +57,7 @@ from claude_code_hooks_daemon.utils.agent_dispatch_registry import (
     dispatch_budget,
     effective_agent_type,
 )
+from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.spend_ledger import (
     note_unmeasured,
     read_state,
@@ -163,7 +164,11 @@ def handoff_path(project_root: Path, cwd: str, label: str, plan_key: str) -> Pat
     if plan_key:
         for base in bases:
             plan_root = base.joinpath(*_PLAN_ROOT)
-            matches = sorted(plan_root.glob(f"{int(plan_key):05d}-*")) if plan_root.is_dir() else []
+            matches = (
+                sorted(plan_root.glob(f"{int(plan_key):05d}-*"))
+                if path_is_dir(plan_root, unreadable_means=False)
+                else []
+            )
             if matches:
                 return matches[0] / _REPORTS_DIR / name
     return bases[0].joinpath(*_SCRATCH_DIR, name)
@@ -481,7 +486,7 @@ class SubagentContextBudgetHandler(PreToolUseHandlerBase):
         )
 
     def get_acceptance_tests(self) -> list[Any]:
-        """The soft advisory through a real subagent; the hard band is unit-tested."""
+        """The soft advisory and the hard-band deny, both through a real subagent."""
         from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
@@ -505,5 +510,29 @@ class SubagentContextBudgetHandler(PreToolUseHandlerBase):
                     "subagent; the context also comes from a real agent transcript. Run "
                     "it through a real subagent in this repository (soft_tokens 150000)."
                 ),
-            )
+            ),
+            AcceptanceTest(
+                title="subagent context budget - past hard_tokens only the handoff steps run",
+                command=(
+                    "With hard_tokens configured below a subagent's context, have that "
+                    "subagent run `ls`"
+                ),
+                description=(
+                    "The call is denied naming the handoff file, a WIP commit and a "
+                    "SendMessage to the lead; a Write to that handoff file is then allowed."
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"CONTEXT BUDGET EXCEEDED", r"handoff"],
+                safety_notes=(
+                    "Hard mode ships off; set hard_tokens only for this test. Work is never "
+                    "lost: the worktree keeps it, and the handoff steps stay allowed."
+                ),
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                harness_cannot_produce=(
+                    "It needs a real subagent whose transcript is past hard_tokens, and "
+                    "hard_tokens set for the run; the harness marks every probe synthetic "
+                    "and fabricates neither the agent nor its transcript."
+                ),
+            ),
         ]

@@ -80,7 +80,7 @@ def read_state(path: Path) -> dict[str, Any]:
         log_and_continue(
             logger,
             exc,
-            reason="an unreadable lever state starts that agent's counters afresh; it never blocks a call",
+            reason=f"an unreadable state document {path} reads as empty: a lever's counters start afresh and a sidecar reading is unknown; it never blocks a call",
             level=logging.DEBUG,
         )
         return {}
@@ -232,13 +232,27 @@ def read_events(untracked: Path, session_id: str) -> list[dict[str, Any]]:
     path = session_dir(untracked, session_id) / _EVENTS_FILE
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError:
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"an unreadable ledger {path} reads as no events; nothing gates on them",
+            level=logging.WARNING,
+        )
         return []
     rows: list[dict[str, Any]] = []
     for line in text.splitlines():
         try:
             row = json.loads(line)
-        except ValueError:
+        except ValueError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"a torn or corrupt row of {path} is one lost event; the rows around it still read",
+                level=logging.WARNING,
+            )
             continue
         if isinstance(row, dict):
             rows.append(row)

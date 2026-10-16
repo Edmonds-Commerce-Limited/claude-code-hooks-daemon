@@ -15,6 +15,7 @@ subscription weighting: compare its shares, not its absolute value.
 
 from __future__ import annotations
 
+import os
 import statistics
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -120,13 +121,22 @@ def collect_session_spend(
     """Read every agent transcript in ``subagents`` through ``cache``.
 
     A transcript that cannot be read is listed, not fatal: the report is of
-    what could be measured, and says what could not.
+    what could be measured, and says what could not. A missing ``subagents``
+    is a session with no agents.
+
+    Raises:
+        OSError: ``subagents`` exists but cannot be listed, so there is no
+            list of agents to report on.
     """
     report = SessionSpend(session_id=session_id, unmeasured=unmeasured)
-    try:
-        transcripts = sorted(subagents.glob("agent-*.jsonl"))
-    except OSError:
-        transcripts = []
+    transcripts: list[Path] = []
+    if subagents.is_dir():
+        with os.scandir(subagents) as entries:
+            transcripts = sorted(
+                Path(entry.path)
+                for entry in entries
+                if entry.name.startswith("agent-") and entry.name.endswith(".jsonl")
+            )
     for transcript in transcripts:
         agent_id = transcript.name.removeprefix("agent-").removesuffix(".jsonl")
         try:

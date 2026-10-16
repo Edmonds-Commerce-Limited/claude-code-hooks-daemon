@@ -16,7 +16,6 @@ than ``max_age_seconds`` is unknown, and unknown means silent.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
@@ -25,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.spend_ledger import (
     read_state,
     session_dir,
@@ -92,7 +92,9 @@ def live_agents(
     """Agents in ``directory`` that wrote recently and have not ended their turn.
 
     ``finished`` holds agent ids or names Claude Code reported as no longer
-    running; they are excluded. Ordered by idle time, most recent first.
+    running; they are excluded. A recent transcript that cannot be read is
+    counted live with an unknown (zero) context. Ordered by idle time, most
+    recent first.
     """
     moment = time.time() if now is None else now
     found: list[LiveAgent] = []
@@ -105,7 +107,13 @@ def live_agents(
             continue
         try:
             idle = moment - entry.stat().st_mtime
-        except OSError:
+        except OSError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="a transcript that vanished or cannot be stat'ed after the directory scan has no write time, so it is not counted live",
+                level=logging.DEBUG,
+            )
             continue
         if idle > liveness_seconds:
             continue
@@ -116,8 +124,14 @@ def live_agents(
             continue
         try:
             reading = read_tail(path)
-        except OSError:
-            continue
+        except OSError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="a transcript written inside the liveness window but unreadable is counted live with an unknown context, the safe direction for an advisory",
+                level=logging.DEBUG,
+            )
+            reading = None
         if reading is not None and reading.stopped:
             continue
         found.append(
@@ -225,12 +239,7 @@ def read_five_hour(
 ) -> FiveHour | None:
     """The five-hour percentage from this session's context sidecar, or None when unknown."""
     stem = _UNSAFE.sub("_", session_id) or "unknown"
-    try:
-        data = json.loads((untracked / CONTEXT_SIDECAR_SUBDIR / f"{stem}.json").read_text("utf-8"))
-    except (OSError, ValueError):
-        return None
-    if not isinstance(data, dict):
-        return None
+    data = read_state(untracked / CONTEXT_SIDECAR_SUBDIR / f"{stem}.json")
     pct = data.get("five_hour_pct")
     stamp = data.get("ts")
     if not isinstance(pct, (int, float)) or not isinstance(stamp, (int, float)):

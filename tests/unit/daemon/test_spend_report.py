@@ -112,6 +112,21 @@ class TestReport:
         assert "Compactions (compact_boundary preTokens): none" in text
         assert "Unmeasured gate calls (agent, reason): 3" in text
 
+    def test_an_unlistable_agent_directory_raises(
+        self, session: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def refuse(path: Path) -> Any:
+            raise PermissionError(13, "Permission denied", str(path))
+
+        monkeypatch.setattr("os.scandir", refuse)
+        with pytest.raises(PermissionError):
+            collect_session_spend(
+                session.parent / "s1" / "subagents",
+                session_id="s1",
+                cache=TranscriptSpendCache(None),
+                unmeasured=0,
+            )
+
 
 class TestCli:
     @pytest.fixture(autouse=True)
@@ -160,3 +175,19 @@ class TestCli:
         from claude_code_hooks_daemon.daemon.cli import cmd_spend
 
         assert cmd_spend(self._args(tmp_path, tmp_path / "nope.jsonl")) == 2
+
+    def test_unlistable_agent_directory_is_an_error(
+        self,
+        tmp_path: Path,
+        session: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        from claude_code_hooks_daemon.daemon.cli import cmd_spend
+
+        def refuse(path: Path) -> Any:
+            raise PermissionError(13, "Permission denied", str(path))
+
+        monkeypatch.setattr("os.scandir", refuse)
+        assert cmd_spend(self._args(tmp_path, session)) == 1
+        assert "cannot list the agent transcripts" in capsys.readouterr().err
