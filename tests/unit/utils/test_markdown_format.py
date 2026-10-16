@@ -58,6 +58,23 @@ class TestFormatMarkdownText:
         assert "2. second" in result
         assert "3. third" in result
 
+    def test_footnote_reference_and_definition_unchanged(self) -> None:
+        """A GFM footnote reference and its definition are not escaped (GitHub #122)."""
+        doc = "A claim.[^one]\n\n[^one]: The source.\n"
+        assert format_markdown_text(doc) == doc
+
+    def test_footnote_reference_at_line_start_after_soft_wrap_unchanged(self) -> None:
+        """A reference that starts a wrapped line is not escaped."""
+        doc = "A long claim that wraps\n[^one] onto the next line.\n\n[^one]: The source.\n"
+        assert format_markdown_text(doc) == doc
+
+    def test_multiple_footnotes_round_trip_idempotent(self) -> None:
+        """Several named and numbered footnotes survive repeated formatting."""
+        doc = "Text.[^1] More.[^note]\n\n[^1]: First.\n\n[^note]: Second.\n"
+        once = format_markdown_text(doc)
+        assert once == doc
+        assert format_markdown_text(once) == once
+
 
 class TestParseFrontmatterYaml:
     """``parse_frontmatter_yaml`` — the project's single frontmatter-to-dict

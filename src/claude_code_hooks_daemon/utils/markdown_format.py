@@ -27,8 +27,10 @@ from claude_code_hooks_daemon.utils.conflict_markers import (
     find_conflict_markers_in_text,
 )
 
-# mdformat extensions: enable GFM tables, strikethrough, task lists, autolinks.
-_MDFORMAT_EXTENSIONS: Final[set[str]] = {"gfm"}
+# mdformat extensions: enable GFM tables, strikethrough, task lists, autolinks,
+# and footnotes (without "footnote" mdformat escapes ``[^1]: text`` so GitHub
+# renders it as literal text).
+_MDFORMAT_EXTENSIONS: Final[set[str]] = {"gfm", "footnote"}
 
 # Preserve consecutive ordered-list numbering (1. 2. 3.) instead of the
 # default which renumbers every item to 1.

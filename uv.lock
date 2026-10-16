@@ -336,6 +336,7 @@ source = { editable = "." }
 dependencies = [
     { name = "jsonschema" },
     { name = "mdformat" },
+    { name = "mdformat-footnote" },
     { name = "mdformat-gfm" },
     { name = "psutil" },
     { name = "pydantic" },
@@ -372,6 +373,7 @@ requires-dist = [
     { name = "deptry", marker = "extra == 'dev'", specifier = ">=0.20" },
     { name = "jsonschema", specifier = ">=4.0" },
     { name = "mdformat", specifier = ">=0.7" },
+    { name = "mdformat-footnote", specifier = ">=0.1.1" },
     { name = "mdformat-gfm", specifier = ">=0.4" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.5" },
@@ -1128,6 +1130,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/3f/05/32b5e14b192b0a8a309f32232c580aefedd9d06017cb8fe8fce34bec654c/mdformat-1.0.0.tar.gz", hash = "sha256:4954045fcae797c29f86d4ad879e43bb151fa55dbaf74ac6eaeacf1d45bb3928", size = 56953, upload-time = "2025-10-16T12:05:03.695Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/54/9a/8fe71b95985ca7a4001effbcc58e5a07a1f2a2884203f74dcf48a3b08315/mdformat-1.0.0-py3-none-any.whl", hash = "sha256:bca015d65a1d063a02e885a91daee303057bc7829c2cd37b2075a50dbb65944b", size = 53288, upload-time = "2025-10-16T12:05:02.607Z" },
+]
+
+[[package]]
+name = "mdformat-footnote"
+version = "0.1.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "mdformat" },
+    { name = "mdit-py-plugins" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3f/c0/0fe461e3c53eb72b35b642add6c3eaf1f90e43a574a18633955f9e89791d/mdformat_footnote-0.1.3.tar.gz", hash = "sha256:70617e61af87f59d7dea93a392c5093089a6d4551126fa18025c6fddb18bf742", size = 6430, upload-time = "2026-01-30T14:13:05.983Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7e/ac/60d47237a0e37fe991cbf311f10f096a28cfdbbe25d1932dadf8e9abdac8/mdformat_footnote-0.1.3-py3-none-any.whl", hash = "sha256:3033184237cbaf2a71cc02a4c37f043a97c1f16d3ed6939bc104964e77aad0b3", size = 7767, upload-time = "2026-01-30T14:13:04.944Z" },
 ]
 
 [[package]]

@@ -77,6 +77,23 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N468 — the markdown formatter escapes GitHub footnotes, so footnotes in any written `.md` file render as literal text
+
+**Source**: GitHub issue #122 (approved author, filed with the issue-report generator), 2026-10-16. After a Write of
+`A claim.[^one]` and `[^one]: The source.`, the definition line reads `\[^one\]: The source.`.
+
+**Why it happens**: reproduced against `format_markdown_text`. The shared transform enabled only the `gfm` mdformat
+extension, which has no footnote syntax, so mdformat read `[^one]:` as plain text and escaped its brackets. A
+reference at the start of a wrapped line is escaped the same way. The transform is the one call site for the
+`markdown_table_formatter` handler, `format-markdown` and the CLAUDE.md injector, so all three were affected.
+
+**Fix direction**: add the `mdformat-footnote` plugin (new dependency, lock file regenerated with `uv add`) and enable
+the `footnote` extension beside `gfm` in `markdown_format.py`. References and definitions round-trip unchanged. A
+round-trip of every tracked `.md` file containing footnote-like text is identical with and without the extension: the 11
+files that change under the formatter were already unformatted and change the same way without it.
+
+**Status**: ⬜ In progress.
+
 ### N467 — the secret-file-read guard still scans a large Write at about 1.7 ms per KB after N465
 
 **Source**: the N465 fix, 2026-10-16. N465's prefilter halved the cost (120 KB: 376 -> 205 ms; 1.2 MB: 4569 -> 2524
