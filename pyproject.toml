@@ -37,6 +37,7 @@ dependencies = [
     # Already present transitively via pydantic; pinned explicitly because
     # src/ now imports it directly (Plan 00368 Task 3.1).
     "typing-extensions>=4.12",
+    "mdformat-footnote>=0.1.1",
 ]
 
 [project.optional-dependencies]

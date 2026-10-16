@@ -6,8 +6,11 @@ format-markdown CLI command, and the CLAUDE.md injector. These tests pin
 its behaviour so all three call sites stay identical.
 """
 
+from collections.abc import Iterator
+
 import pytest
 
+from claude_code_hooks_daemon.utils import markdown_format
 from claude_code_hooks_daemon.utils.markdown_format import (
     UnresolvedConflictError,
     format_markdown_document,
@@ -57,6 +60,70 @@ class TestFormatMarkdownText:
         assert "1. first" in result
         assert "2. second" in result
         assert "3. third" in result
+
+    def test_footnote_reference_and_definition_unchanged(self) -> None:
+        """A GFM footnote reference and its definition are not escaped (GitHub #122)."""
+        doc = "A claim.[^one]\n\n[^one]: The source.\n"
+        assert format_markdown_text(doc) == doc
+
+    def test_footnote_reference_at_line_start_after_soft_wrap_unchanged(self) -> None:
+        """A reference that starts a wrapped line is not escaped."""
+        doc = "A long claim that wraps\n[^one] onto the next line.\n\n[^one]: The source.\n"
+        assert format_markdown_text(doc) == doc
+
+    def test_multiple_footnotes_round_trip_idempotent(self) -> None:
+        """Several named and numbered footnotes survive repeated formatting."""
+        doc = "Text.[^1] More.[^note]\n\n[^1]: First.\n\n[^note]: Second.\n"
+        once = format_markdown_text(doc)
+        assert once == doc
+        assert format_markdown_text(once) == once
+
+
+class TestFootnotePluginAbsent:
+    """A venv that lacks mdformat-footnote still formats everything else."""
+
+    @pytest.fixture
+    def no_footnote_plugin(self, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+        """Make the registered parser extensions list only ``gfm``."""
+        monkeypatch.setattr(
+            markdown_format,
+            "_registered_parser_extensions",
+            lambda: frozenset({"gfm"}),
+        )
+        markdown_format._mdformat_extensions.cache_clear()
+        yield
+        markdown_format._mdformat_extensions.cache_clear()
+
+    def test_tables_still_format(self, no_footnote_plugin: None) -> None:
+        """GFM table alignment keeps working without the plugin."""
+        doc = "# T\n\n| A | B |\n|---|---|\n| 1 | 22 |\n"
+        result = format_markdown_text(doc)
+        assert "| A   | B   |" in result
+
+    def test_footnote_escaped_as_before(self, no_footnote_plugin: None) -> None:
+        """Without the plugin footnote definitions fall back to the old escaping."""
+        result = format_markdown_text("A claim.[^one]\n\n[^one]: The source.\n")
+        assert "\\[^one\\]: The source." in result
+
+    def test_warns_once(self, no_footnote_plugin: None, caplog: pytest.LogCaptureFixture) -> None:
+        """The missing plugin is logged at WARNING exactly once."""
+        with caplog.at_level("WARNING", logger=markdown_format.logger.name):
+            format_markdown_text("a\n")
+            format_markdown_text("b\n")
+        warnings = [r for r in caplog.records if "mdformat-footnote" in r.getMessage()]
+        assert len(warnings) == 1
+        assert warnings[0].levelname == "WARNING"
+
+
+class TestFootnotePluginPresent:
+    """With the plugin installed no warning is logged."""
+
+    def test_no_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        """The footnote extension is enabled silently."""
+        markdown_format._mdformat_extensions.cache_clear()
+        with caplog.at_level("WARNING", logger=markdown_format.logger.name):
+            assert "footnote" in markdown_format._mdformat_extensions()
+        assert not caplog.records
 
 
 class TestParseFrontmatterYaml:
