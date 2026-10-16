@@ -82,6 +82,7 @@ from claude_code_hooks_daemon.daemon.paths import (
     cleanup_socket,
     cleanup_stale_daemon_files,
     cleanup_stale_session_dirs,
+    current_venv_dir,
     find_uv,
     gather_venv_evidence,
     get_pid_path,
@@ -2950,6 +2951,17 @@ def _live_venv_realpaths(project_root: Path) -> frozenset[Path]:
     return live_venv_realpaths(_daemon_untracked_dir(project_root).parent)
 
 
+def _current_venv_fingerprint(project_root: Path) -> str:
+    """Return the fingerprint of the venv the resolver selects, as ``list-venvs`` shows it.
+
+    Asks ``paths.current_venv_dir`` (the one resolver, keyed on the DAEMON dir)
+    and never hashes a fingerprint from ``project_root``, so the name is that of
+    a real venv in both install modes.
+    """
+    daemon_dir = _daemon_untracked_dir(project_root).parent
+    return current_venv_dir(daemon_dir).name.removeprefix(_VENV_DIR_PREFIX + "-")
+
+
 def _enumerate_venvs(project_root: Path, include_size: bool = True) -> list[dict[str, Any]]:
     """Return metadata dicts for every venv directory under the daemon's untracked/.
 
@@ -2979,7 +2991,8 @@ def _enumerate_venvs(project_root: Path, include_size: bool = True) -> list[dict
     if not untracked.is_dir():
         return []
 
-    current_fp = python_venv_fingerprint(project_root)
+    # Keyed on the daemon dir, like the resolver and bash ``ensure_venv``.
+    current_fp = python_venv_fingerprint(untracked.parent)
     live_realpaths = _live_venv_realpaths(project_root)
     verdicts = {str(v.path): v for v in classify_untracked_venvs(untracked.parent)}
     raw_entries: list[dict[str, Any]] = []
@@ -3327,8 +3340,10 @@ def cmd_list_venvs(args: argparse.Namespace) -> int:
         print(f"No venvs found under {_daemon_untracked_dir(project_root)}/.")
         return 0
 
-    current_fp = python_venv_fingerprint(project_root)
-    print(f"Current Python-env fingerprint: {current_fp}")
+    print(f"Current venv (the one the resolver selects): {_current_venv_fingerprint(project_root)}")
+    new_fp = python_venv_fingerprint(_daemon_untracked_dir(project_root).parent)
+    if new_fp != _current_venv_fingerprint(project_root):
+        print(f"A venv built now would be named: {_VENV_DIR_PREFIX}-{new_fp}")
     print()
     print(f"{'Fingerprint':<20} {'Stamp':<10} {'Size':>10}  {'Marker':<8} Path")
     print("-" * 80)
@@ -3515,7 +3530,7 @@ def cmd_prune_venvs(args: argparse.Namespace) -> int:
     if unproven:
         return _prune_one_unproven(project_root, unproven, dry_run)
 
-    current_fp = python_venv_fingerprint(project_root)
+    current_fp = _current_venv_fingerprint(project_root)
     entries = _enumerate_venvs(project_root)
     to_remove = [
         entry for entry in _stale_venv_entries(entries) if select_stale or entry["is_legacy"]

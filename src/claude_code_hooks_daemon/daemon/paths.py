@@ -2906,6 +2906,20 @@ VENV_KEEP = "keep"  # live, current, or not decidable: left alone
 _LEGACY_BARE_VENV_DIR_NAME = "venv"
 
 
+def current_venv_dir(daemon_dir: Path | str) -> Path:
+    """Return the venv directory the resolver selects for ``daemon_dir``.
+
+    The one answer to "which venv does this daemon run from": the directory of
+    :func:`resolve_existing_venv_python` (``bin/python`` -> ``bin`` -> venv dir),
+    the same resolver bash ``ensure_venv`` and ``init.sh`` agree with. The path
+    is not resolved and may not exist when nothing is provisioned yet. Callers
+    that name or mark the current venv (``list-venvs``, ``prune-venvs``) ask
+    this and never hash a fingerprint from another root: venvs are keyed on the
+    DAEMON dir, which differs from the project root in a client install.
+    """
+    return resolve_existing_venv_python(daemon_dir).parent.parent
+
+
 def live_venv_realpaths(daemon_dir: Path | str) -> frozenset[Path]:
     """Return the real directories of the venvs that are live right now.
 
