@@ -80,9 +80,7 @@ class TestTreeFingerprint:
         (root / pruned / "log.txt").write_text("noise\n")
         assert tree_fingerprint(root, []) == before
 
-    def test_a_nested_directory_named_like_a_root_prune_is_not_pruned(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_nested_directory_named_like_a_root_prune_is_not_pruned(self, tmp_path: Path) -> None:
         root = _tree(tmp_path)
         (root / "docs" / "untracked").mkdir()
         before = tree_fingerprint(root, [])

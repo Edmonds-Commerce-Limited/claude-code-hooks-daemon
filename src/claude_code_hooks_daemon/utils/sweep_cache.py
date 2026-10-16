@@ -32,6 +32,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+
 logger = logging.getLogger(__name__)
 
 SWEEP_CACHE_DIR_NAME: Final[str] = "sweep-cache"
@@ -119,7 +121,7 @@ def tree_fingerprint(project_root: Path, extra: Sequence[str]) -> str:
         digest.update(part.encode("utf-8", "surrogateescape"))
         digest.update(b"\x00")
     for current, dir_names, file_names in os.walk(project_root):
-        relative_dir = Path(current).relative_to(project_root).as_posix()
+        relative_dir = os.path.relpath(current, project_root).replace(os.sep, "/")
         dir_names[:] = sorted(
             name
             for name in dir_names
@@ -128,13 +130,20 @@ def tree_fingerprint(project_root: Path, extra: Sequence[str]) -> str:
         )
         for name in sorted(file_names):
             try:
-                stat = os.lstat(os.path.join(current, name))
-            except FileNotFoundError:
-                # Deleted between the directory listing and the stat: the next
-                # walk will not list it, so the fingerprint moves anyway.
+                stat = (Path(current) / name).lstat()
+            except FileNotFoundError as exc:
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason=f"{name} deleted between the directory listing and its stat; "
+                    "the next walk omits it, so the fingerprint moves anyway",
+                    level=logging.DEBUG,
+                )
                 continue
             entry = f"{_join_relative(relative_dir, name)}\x00{stat.st_mtime_ns}\x00"
-            digest.update(f"{entry}{stat.st_size}\x00{stat.st_ino}\n".encode("utf-8", "surrogateescape"))
+            digest.update(
+                f"{entry}{stat.st_size}\x00{stat.st_ino}\n".encode("utf-8", "surrogateescape")
+            )
     return digest.hexdigest()
 
 
@@ -200,9 +209,7 @@ def pending_context(label: str, last_known: list[str], cli_hint: str) -> list[st
     return lines
 
 
-def _start_or_join(
-    cache_file: Path, fingerprint: str, compute: Callable[[], list[str]]
-) -> _Run:
+def _start_or_join(cache_file: Path, fingerprint: str, compute: Callable[[], list[str]]) -> _Run:
     """The in-flight run for this fingerprint, started on a daemon thread if absent."""
     key = (str(cache_file), fingerprint)
     with _IN_FLIGHT_LOCK:
@@ -243,13 +250,17 @@ def _work(
 
 def _read_cache(cache_file: Path) -> tuple[str, list[str]] | None:
     """The cached ``(fingerprint, context)``, or ``None`` when absent or unreadable."""
+    if not cache_file.is_file():
+        return None
+    payload: object = None
     try:
         payload = json.loads(cache_file.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return None
     except (OSError, ValueError) as exc:
-        logger.warning("Ignoring unreadable sweep cache %s: %s", cache_file, exc)
-        return None
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"unreadable sweep cache {cache_file} is treated as a miss and rewritten",
+        )
     if not isinstance(payload, dict):
         logger.warning("Ignoring malformed sweep cache %s: not an object", cache_file)
         return None
@@ -268,6 +279,10 @@ def _write_cache(cache_file: Path, fingerprint: str, context: list[str]) -> None
     try:
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         temp_file.write_text(payload, encoding="utf-8")
-        os.replace(temp_file, cache_file)
+        temp_file.replace(cache_file)
     except OSError as exc:
-        logger.warning("Could not write sweep cache %s: %s", cache_file, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"sweep cache {cache_file} not written; the next session recomputes the sweep",
+        )

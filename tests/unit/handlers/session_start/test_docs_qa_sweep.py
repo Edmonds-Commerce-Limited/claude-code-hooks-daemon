@@ -11,8 +11,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from claude_code_hooks_daemon.core import Decision
-from claude_code_hooks_daemon.docs_qa.runner import run_stage
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy, DocumentationQaPolicy
+from claude_code_hooks_daemon.docs_qa.runner import run_stage
 from claude_code_hooks_daemon.handlers.session_start.docs_qa_sweep import DocsQaSweepHandler
 
 

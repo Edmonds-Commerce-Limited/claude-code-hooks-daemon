@@ -117,9 +117,7 @@ class DocsQaSweepHandler(SessionStartHandlerBase):
             decision=Decision.ALLOW, context=outcome.advisory(_SWEEP_LABEL, _cli_hint())
         )
 
-    def _sweep(
-        self, project_root: Path, policy: DocumentationPolicy, index_dir: Path
-    ) -> list[str]:
+    def _sweep(self, project_root: Path, policy: DocumentationPolicy, index_dir: Path) -> list[str]:
         """Run the SWEEP-stage catalogue; the advisory lines, empty when clean."""
         corpus = build_and_save_corpus(project_root, policy, index_dir / _INDEX_FILE_NAME)
         context = sweep_context(

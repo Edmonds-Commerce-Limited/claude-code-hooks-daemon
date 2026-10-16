@@ -63,6 +63,11 @@ Cold-start note: the 4.99 s chain total is dominated by non-sweep handlers on a 
 
 ## QA
 
-`./scripts/qa/llm_qa.py changed`: the first run waited the full 600 s for the host-wide QA lock (held by other agents' runs) and exited 4 without running. Re-run with `FULL_QA_LOCK_WAIT_SECONDS=3000`; verdict recorded below.
+`./scripts/qa/llm_qa.py changed` needed several runs because the host-wide QA lock was held by other agents for up to 50 minutes at a time (two runs timed out with exit 4 without running; `FULL_QA_LOCK_WAIT_SECONDS` raised). Findings the QA run raised on the first commit, all fixed in the follow-up commit, with no suppression or allowlist entry:
 
-QA verdict: PENDING (see the coordinator message for the final verdict and exit status).
+- format: three files reformatted by the autofix step (formatting only).
+- lint PTH118 / PTH105: `os.path.join` and `os.replace` replaced by `Path` operations.
+- error_hiding (4): the swallowed `FileNotFoundError` and the two cache read/write fallbacks now go through the sanctioned `utils.deliberate_swallow.log_and_continue(..., reason=...)`; the missing-cache branch is an explicit `is_file()` check.
+- semgrep `pathlib-quadratic-containment`: `Path.relative_to` in the walk replaced by `os.path.relpath`.
+
+Final `changed` run (before the semgrep fix): 36 of 40 passed, 2 failed, 2 not meaningful because those two detectors failed. The two failures were `semgrep` (fixed, then `llm_qa.py semgrep lint format error_hiding` passed 4 of 4, exit 0) and `plan_qa`, whose single advisory finding is `journal-freshness` for plan 00471 (a journal quiet for 4 days) and is not caused by this change. `changed_tests`: 2312 passed, 0 failed, 5 skipped over 39 test files. A full `changed` re-run after the semgrep fix was not repeated because of the lock queue.
