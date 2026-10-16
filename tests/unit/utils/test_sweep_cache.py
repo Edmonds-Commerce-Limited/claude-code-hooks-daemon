@@ -12,7 +12,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from tests.support.git_fixtures import git_setup_timeout
 
 from claude_code_hooks_daemon.utils.sweep_cache import (
     SweepOutcome,
@@ -21,6 +20,7 @@ from claude_code_hooks_daemon.utils.sweep_cache import (
     run_cached_sweep,
     tree_fingerprint,
 )
+from tests.support.git_fixtures import git_setup_timeout
 
 _NAME = "demo-sweep"
 _LONG_WAIT = 30.0

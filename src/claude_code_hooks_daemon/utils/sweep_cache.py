@@ -136,7 +136,9 @@ def tree_fingerprint(project_root: Path, extra: Sequence[str]) -> str:
             )
             continue
         entry = f"{relative_path}\x00{stat.st_mtime_ns}\x00"
-        digest.update(f"{entry}{stat.st_size}\x00{stat.st_ino}\n".encode("utf-8", "surrogateescape"))
+        digest.update(
+            f"{entry}{stat.st_size}\x00{stat.st_ino}\n".encode("utf-8", "surrogateescape")
+        )
     return digest.hexdigest()
 
 
@@ -145,9 +147,7 @@ def _is_pruned(relative_path: str) -> bool:
     parts = relative_path.split("/")
     if any(part in _PRUNED_DIR_NAMES for part in parts[:-1]):
         return True
-    return any(
-        relative_path.startswith(f"{pruned}/") for pruned in _PRUNED_ROOT_PATHS
-    )
+    return any(relative_path.startswith(f"{pruned}/") for pruned in _PRUNED_ROOT_PATHS)
 
 
 def _git_listed_files(project_root: Path) -> list[str] | None:
@@ -164,9 +164,7 @@ def _git_listed_files(project_root: Path) -> list[str] | None:
     result = run_git(project_root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
     if result.returncode != 0:
         return None
-    return sorted(
-        path for path in result.stdout.split("\0") if path and not _is_pruned(path)
-    )
+    return sorted(path for path in result.stdout.split("\0") if path and not _is_pruned(path))
 
 
 def _walked_files(project_root: Path) -> list[str]:
