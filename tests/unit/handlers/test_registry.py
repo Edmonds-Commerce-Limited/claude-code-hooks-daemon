@@ -1000,3 +1000,22 @@ class TestPlanTreeReachesDocsPolicy:
             assert policy is not None
             assert policy.plan_tree.plan_dir == "docs/plans"
             assert policy.plan_tree.archive_dirs == ("Done",)
+
+
+class TestEachHandlerOnce:
+    """A handler module importing another handler's CLASS must not register it twice."""
+
+    def test_no_builtin_handler_class_is_walked_twice(self) -> None:
+        from claude_code_hooks_daemon.handlers.registry import iter_builtin_handler_classes
+
+        keys = [(ref.event_dir, ref.config_key) for ref in iter_builtin_handler_classes()]
+        duplicated = sorted({key for key in keys if keys.count(key) > 1})
+        assert duplicated == []
+
+    def test_register_all_registers_each_handler_once(self) -> None:
+        router = EventRouter()
+        HandlerRegistry().register_all(router)
+        for event_type, handlers in router.get_all_handlers().items():
+            names = [handler.name for handler in handlers]
+            duplicated = sorted({name for name in names if names.count(name) > 1})
+            assert duplicated == [], event_type

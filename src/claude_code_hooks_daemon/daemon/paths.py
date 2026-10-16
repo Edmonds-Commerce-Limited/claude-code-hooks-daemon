@@ -2621,22 +2621,33 @@ def sweep_dead_runtime_sets(
 # not just an on-disk one. Reaping the file here is necessary; `MtimeCachedFile`
 # also self-evicts a cache entry once its file goes missing (mtime_cache.py),
 # so the two together keep BOTH the disk and the cache bounded by live sessions.
+#
+# spend-offsets/ (Plan 00471) holds one offset-cache sidecar per transcript
+# (spend_ledger.OFFSETS_SUBDIR).
 _SESSION_RUNTIME_SUBDIRS = (
     "thread-registry",
     "context-sidecar",
     "payload-capture",
     "downgrade-indicator",
+    "spend-offsets",
 )
 
 # Writers that keep one DIRECTORY per session rather than one file. They need
 # the directory-aware primitive: prune_directory filters on is_file(), so
 # listing a nested writer above would look like retention and prune nothing
-# (Plan 00452, and the defect class behind issue #52).
-_SESSION_RUNTIME_DIR_SUBDIRS = ("cache-sidecar",)
+# (Plan 00452, and the defect class behind issue #52). Both are the spend
+# ledger (Plan 00471): spend-ledger/ is spend_ledger.LEDGER_SUBDIR and
+# cache-sidecar/ holds its per-agent rows. They are the evidence the deferred
+# spend-lever decisions are read from, so they age out after their own, longer
+# ``ledger_max_age_days``.
+_SPEND_LEDGER_DIR_SUBDIRS = ("cache-sidecar", "spend-ledger")
 
 
 def cleanup_stale_session_dirs(
-    project_dir: Path | str, max_age_days: int = 7, now: float | None = None
+    project_dir: Path | str,
+    max_age_days: int = 7,
+    now: float | None = None,
+    ledger_max_age_days: int = 90,
 ) -> int:
     """Age out per-session runtime files under the untracked dir.
 
@@ -2644,6 +2655,7 @@ def cleanup_stale_session_dirs(
     session that their writers never delete (they only skip stale entries at
     read time); ``payload-capture/`` holds per-event capture files. A file
     untouched for ``max_age_days`` belongs to a dead session and is removed.
+    The spend ledger's session directories go after ``ledger_max_age_days``.
     Reuses the shared ``prune_directory`` retention primitive (Plan 00181) so
     all age-based pruning logic lives in one place. Missing subdirs are a no-op.
 
@@ -2652,6 +2664,8 @@ def cleanup_stale_session_dirs(
         max_age_days: Files older than this many days are removed (default 7).
         now: Epoch time to compare mtimes against (defaults to the wall clock;
             injectable for tests).
+        ledger_max_age_days: Spend-ledger session directories older than this
+            many days are removed (default 90, ``daemon.spend_ledger_retention_days``).
 
     Returns:
         Total number of stale session runtime files removed.
@@ -2682,9 +2696,12 @@ def cleanup_stale_session_dirs(
         subdir = untracked_dir / subdir_name
         removed += len(prune_directory(subdir, max_age_seconds=max_age_seconds, now=current))
 
-    for subdir_name in _SESSION_RUNTIME_DIR_SUBDIRS:
+    ledger_max_age_seconds = ledger_max_age_days * 86400
+    for subdir_name in _SPEND_LEDGER_DIR_SUBDIRS:
         subdir = untracked_dir / subdir_name
-        removed += len(prune_subdirectories(subdir, max_age_seconds=max_age_seconds, now=current))
+        removed += len(
+            prune_subdirectories(subdir, max_age_seconds=ledger_max_age_seconds, now=current)
+        )
 
     if removed:
         logger.info(

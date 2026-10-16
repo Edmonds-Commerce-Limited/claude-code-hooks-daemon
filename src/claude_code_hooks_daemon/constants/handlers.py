@@ -208,6 +208,12 @@ class HandlerID:
         config_key="prompt_cache_indicator",
         display_name="status-prompt-cache-indicator",
     )
+    # Plan 00471 L7: subagent spend, live agents and unmeasured gate calls.
+    SPEND_METER = HandlerIDMeta(
+        class_name="SpendMeterHandler",
+        config_key="spend_meter",
+        display_name="status-spend-meter",
+    )
     USAGE_INDICATOR = HandlerIDMeta(
         class_name="UsageIndicatorHandler",
         config_key="usage_indicator",
@@ -449,6 +455,42 @@ class HandlerID:
         class_name="AgentDispatchRecorderHandler",
         config_key="agent_dispatch_recorder",
         display_name="agent-dispatch-recorder",
+    )
+    # Plan 00471 L2: a subagent's context budget (soft advisory, hard handoff-only).
+    SUBAGENT_CONTEXT_BUDGET = HandlerIDMeta(
+        class_name="SubagentContextBudgetHandler",
+        config_key="subagent_context_budget",
+        display_name="subagent-context-budget",
+    )
+    # Plan 00471 L2: the SubagentStop companion, a handoff before an over-budget stop.
+    SUBAGENT_HANDOFF_GATE = HandlerIDMeta(
+        class_name="SubagentHandoffGateHandler",
+        config_key="subagent_handoff_gate",
+        display_name="subagent-handoff-gate",
+    )
+    # Plan 00471 L3: a SendMessage that would cold-resume a large stopped agent.
+    RESUME_GUARD = HandlerIDMeta(
+        class_name="ResumeGuardHandler",
+        config_key="resume_guard",
+        display_name="resume-guard",
+    )
+    # Plan 00471 L4/L5: live-agent count and five-hour advisory on a spawn.
+    SPAWN_RATE_ADVISOR = HandlerIDMeta(
+        class_name="SpawnRateAdvisorHandler",
+        config_key="spawn_rate_advisor",
+        display_name="spawn-rate-advisor",
+    )
+    # Plan 00471 L9: counts review dispatches per plan or branch.
+    REVIEW_ROUND_ADVISOR = HandlerIDMeta(
+        class_name="ReviewRoundAdvisorHandler",
+        config_key="review_round_advisor",
+        display_name="review-round-advisor",
+    )
+    # Plan 00471 L4: records a Stop's background_tasks for the live count.
+    BACKGROUND_TASK_RECORDER = HandlerIDMeta(
+        class_name="BackgroundTaskRecorderHandler",
+        config_key="background_task_recorder",
+        display_name="background-task-recorder",
     )
     # Plan 00468 G16: a write into an installed Claude Code plugin's files.
     INSTALLED_PLUGIN_EDIT_ADVISOR = HandlerIDMeta(

@@ -42,6 +42,7 @@ _UNSAFE_CHARS = re.compile(r"[^A-Za-z0-9_.-]")
 _NAME_DIGEST_LENGTH = 16
 _KEY_NAME = "name"
 _KEY_SUBAGENT_TYPE = "subagent_type"
+_KEY_BUDGET = "budget_tokens"
 
 
 def _session_dir(untracked_dir: Path, session_id: str) -> Path:
@@ -56,19 +57,61 @@ def _record_path(untracked_dir: Path, session_id: str, name: str) -> Path:
 
 
 def record_dispatch(
-    untracked_dir: Path, session_id: str, name: str, subagent_type: str | None
+    untracked_dir: Path,
+    session_id: str,
+    name: str,
+    subagent_type: str | None,
+    budget_tokens: int | None = None,
 ) -> None:
     """Record that ``name`` was dispatched as definition type ``subagent_type``.
 
     A dispatch that names no type is recorded with an empty one, so the name
     still resolves (to nothing) rather than being trusted as a type.
+    ``budget_tokens`` is the dispatch's ``budget: <N>k`` override (Plan 00471
+    Q4); a later dispatch of the same name replaces the whole row, override
+    included.
     """
     path = _record_path(untracked_dir, session_id, name)
     path.parent.mkdir(parents=True, exist_ok=True)
-    entry = {_KEY_NAME: name, _KEY_SUBAGENT_TYPE: subagent_type or ""}
+    entry: dict[str, object] = {_KEY_NAME: name, _KEY_SUBAGENT_TYPE: subagent_type or ""}
+    if budget_tokens is not None:
+        entry[_KEY_BUDGET] = budget_tokens
     tmp_path = unique_temp_path(path)
     tmp_path.write_text(json.dumps(entry), encoding="utf-8")
     tmp_path.replace(path)
+
+
+def _read_budget_record(path: Path) -> dict[str, object]:
+    """The record at ``path``; ``{}`` when it is absent or, logged, unreadable."""
+    try:
+        entry = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="an unreadable dispatch record carries no budget override, so the agent keeps its configured bands",
+            level=logging.WARNING,
+        )
+        return {}
+    return entry if isinstance(entry, dict) else {}
+
+
+def dispatch_budget(untracked_dir: Path, session_id: str, name: str) -> int | None:
+    """The ``budget: <N>k`` override recorded for the named agent, or None.
+
+    Absent, unreadable or malformed reads as no override: the budget then
+    stays at its configured value, which is the safe direction for a cost
+    control (it never switches the gate off).
+    """
+    entry = _read_budget_record(_record_path(untracked_dir, session_id, name))
+    if entry.get(_KEY_NAME) != name:
+        return None
+    budget = entry.get(_KEY_BUDGET)
+    if isinstance(budget, bool) or not isinstance(budget, int) or budget <= 0:
+        return None
+    return budget
 
 
 def effective_agent_type(

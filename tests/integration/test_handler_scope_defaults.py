@@ -88,6 +88,10 @@ _EXPECTED_SUB: frozenset[str] = frozenset(
         "subagent-cron-delete-blocker",
         "subagent-full-qa-blocker",
         "subagent-worktree-write-guard",
+        # Plan 00471 L2: a subagent's own context budget and its handoff stop;
+        # the coordinator's context is not a subagent's to hand off.
+        "subagent-context-budget",
+        "subagent-handoff-gate",
     }
 )
 

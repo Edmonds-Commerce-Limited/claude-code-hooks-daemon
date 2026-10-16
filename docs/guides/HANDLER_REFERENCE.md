@@ -3320,6 +3320,79 @@ handlers:
 
 ---
 
+#### subagent_context_budget
+
+| Property       | Value                     |
+| -------------- | ------------------------- |
+| **Config key** | `subagent_context_budget` |
+| **Priority**   | 39                        |
+| **Type**       | Blocking (terminal)       |
+| **Event**      | PreToolUse (subagents)    |
+
+**Description:** Bounds a subagent's context with a forced handoff, never a kill (Plan 00471 L2). Every tool call re-reads the agent's whole context, so a large agent spends most of its tokens re-reading. It tail-reads the agent's own transcript on each of its tool calls. Past `soft_tokens` it adds context ONCE per band naming the handoff file (`<plan>/subagent-reports/<yymmdd>-<agent>-handoff.md`, else `untracked/scratch/`), a WIP commit and a SendMessage to the lead. Past `hard_tokens` (off by default) it denies every tool except the handoff: Write/Edit/Read under `handoff_globs`, Bash made only of `allowed_bash_prefixes` (quote-aware; no `$(...)`, so a long commit message goes through `git commit -F`), SendMessage and ToolSearch; after three consecutive denials the reason says to stop, the worktree being the handoff (`R-SUBAGENT-CONTEXT-BUDGET`). An agent that cannot Write hands off by SendMessage. A `budget: <N>k` line in a NAMED dispatch's prompt raises that agent's bands, clamped to `max_override_tokens`. A transcript it cannot find or read, one with no usage in its last 4 MiB, and any failure inside the gate ALLOW, with one `unmeasured` verdict per agent and reason in `verdicts.jsonl`. The coordinator is never judged (scope SUB). Companion: `subagent_handoff_gate`.
+
+**Options:**
+
+| Option                  | Default                                                      | Meaning                                                                  |
+| ----------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| `soft_tokens`           | `300000`                                                     | Context at which the agent is told once to hand off; `null` = off        |
+| `hard_tokens`           | `null`                                                       | Context at which only the handoff steps are allowed; `null` = off        |
+| `handoff_globs`         | `["**/subagent-reports/**", "untracked/scratch/**"]`         | Where a handoff may be written or read in the hard band                  |
+| `allowed_bash_prefixes` | `git status`, `git diff`, `git add`, `git commit`, `git log` | Every Bash segment must start with one in the hard band                  |
+| `exempt_agent_types`    | `[]`                                                         | Definition types never measured                                          |
+| `max_override_tokens`   | `450000`                                                     | Ceiling for a dispatch's `budget: <N>k` override                         |
+| `mode`                  | `additive`                                                   | `additive` extends the built-in globs and prefixes; `replace` swaps them |
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    subagent_context_budget:
+      enabled: true
+      priority: 39
+      options:
+        soft_tokens: 150000
+        hard_tokens: null
+        max_override_tokens: 450000
+```
+
+---
+
+#### resume_guard
+
+| Property       | Value               |
+| -------------- | ------------------- |
+| **Config key** | `resume_guard`      |
+| **Priority**   | 39                  |
+| **Type**       | Blocking (terminal) |
+| **Event**      | PreToolUse          |
+
+**Description:** Guards a SendMessage that would cold-resume a large finished agent (Plan 00471 L3). A message to a stopped agent resumes its whole history, and past the cache TTL that history is re-written to the cache before any work (measured mean: 336k tokens). It resolves `to` to the newest `agent-a<name>-*.jsonl` whose `meta.json` confirms the name, or to the raw agent id, and fires only when the agent is stopped (its last turn ended `end_turn`), cold (idle for `warm_seconds`) and at or above `max_resume_tokens`. `mode: advise` (default) adds context; `mode: deny` refuses (`R-RESUME-COLD-LARGE`). Either way the text names the fresh-spawn route and the agent's handoff or last persisted report when found. A message whose first line starts `RESUME-LARGE: <reason>` is allowed and recorded in the spend ledger. A running agent, a warm resume, a structured message (plan approval, shutdown; it cannot carry the override) and a name this session does not know are never gated. A transcript it cannot measure, or a failure inside the guard, ALLOWS with one `unmeasured` verdict.
+
+**Options:**
+
+| Option              | Default  | Meaning                                                     |
+| ------------------- | -------- | ----------------------------------------------------------- |
+| `mode`              | `advise` | `advise` or `deny`                                          |
+| `max_resume_tokens` | `250000` | Context at or above which a cold resume is judged           |
+| `warm_seconds`      | `300`    | The subagent cache TTL; a more recent agent is never judged |
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    resume_guard:
+      enabled: true
+      priority: 39
+      options:
+        mode: deny
+        max_resume_tokens: 150000
+```
+
+---
+
 ### Advisory Handlers
 
 #### flaggable_work_advisor
@@ -3389,6 +3462,72 @@ handlers:
       priority: 60
       options:
         extra_check_directories: [private_html] # additive on top of the doc trees
+```
+
+---
+
+#### spawn_rate_advisor
+
+| Property       | Value                |
+| -------------- | -------------------- |
+| **Config key** | `spawn_rate_advisor` |
+| **Priority**   | 60                   |
+| **Type**       | Advisory             |
+| **Event**      | PreToolUse           |
+
+**Description:** Names the session's load before another agent starts (Plan 00471 L4, L5). On an `Agent`/`Task` dispatch, and on a SendMessage that cold-resumes a stopped agent, it counts the live agents (transcripts that moved within `liveness_seconds` and have not ended their turn, minus those a Stop or SubagentStop reported finished). At `max_concurrent` it names them; at `advise_pct` of the five-hour usage limit (read from the daemon's usage snapshot, which every status-line render fills from `rate_limits`) it says to serialise and gives the reset time. A reading older than `max_age_seconds` is unknown and draws nothing. Never denies. Each fired advisory is a ledger event.
+
+**Options:**
+
+| Option             | Default | Meaning                                                |
+| ------------------ | ------- | ------------------------------------------------------ |
+| `max_concurrent`   | `null`  | Live-agent count that draws the advisory; `null` = off |
+| `advise_pct`       | `80`    | Five-hour limit percentage that draws it; `null` = off |
+| `liveness_seconds` | `120`   | How recently a transcript must have moved to count     |
+| `max_age_seconds`  | `300`   | Oldest usage reading still trusted                     |
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    spawn_rate_advisor:
+      enabled: true
+      priority: 60
+      options:
+        max_concurrent: 4
+        advise_pct: 70
+```
+
+---
+
+#### review_round_advisor
+
+| Property       | Value                  |
+| -------------- | ---------------------- |
+| **Config key** | `review_round_advisor` |
+| **Priority**   | 60                     |
+| **Type**       | Advisory               |
+| **Event**      | PreToolUse             |
+
+**Description:** Counts review rounds per plan or branch (Plan 00471 L9). An `Agent`/`Task` dispatch whose description or prompt says "review" and names a plan (`Plan 00463`) or a work branch (`worktree-...`) is one round for that key; from round `advise_at` it advises comparing this round's findings count with the last and considering an owner decision. A dispatch another handler denied is not counted. Never denies. Ships **disabled**.
+
+**Options:**
+
+| Option      | Default | Meaning                                  |
+| ----------- | ------- | ---------------------------------------- |
+| `advise_at` | `4`     | The round from which the advice is given |
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    review_round_advisor:
+      enabled: true
+      priority: 60
+      options:
+        advise_at: 4
 ```
 
 ---
@@ -4220,6 +4359,21 @@ handlers:
 
 ---
 
+#### background_task_recorder
+
+| Property       | Value                      |
+| -------------- | -------------------------- |
+| **Config key** | `background_task_recorder` |
+| **Priority**   | 9                          |
+| **Type**       | Advisory (sensor)          |
+| **Event**      | Stop                       |
+
+**Description:** Records which subagent and teammate tasks a Stop's `background_tasks[]` reports as no longer running, so `spawn_rate_advisor`'s live count drops them, and refreshes the live snapshot the `spend_meter` segment reads (Plan 00471 L4). An absent list is unknown and records nothing. Never blocks.
+
+**Options:** none.
+
+---
+
 #### auto_continue_stop
 
 | Property       | Value                |
@@ -4318,6 +4472,21 @@ handlers:
         threshold_chars: 4000
         fallback_report_dir: "untracked/agent-reports/"
 ```
+
+---
+
+#### subagent_handoff_gate
+
+| Property       | Value                   |
+| -------------- | ----------------------- |
+| **Config key** | `subagent_handoff_gate` |
+| **Priority**   | 11                      |
+| **Type**       | Blocking                |
+| **Event**      | SubagentStop            |
+
+**Description:** The stop half of `subagent_context_budget` (Plan 00471 L2). An agent that reached `hard_tokens` cannot stop until its handoff file exists (the path it was told, or the file it wrote under `handoff_globs`); `R-SUBAGENT-HANDOFF-MISSING`. After three blocked stops it allows, the worktree then being the handoff, so no agent is stranded. Silent while `hard_tokens` is `null`. Shares `subagent_context_budget`'s options.
+
+**Options:** none of its own.
 
 ---
 
@@ -4667,6 +4836,19 @@ handlers:
 
 ---
 
+#### spend_meter
+
+| Property       | Value         |
+| -------------- | ------------- |
+| **Config key** | `spend_meter` |
+| **Priority**   | 17            |
+| **Type**       | Advisory      |
+| **Event**      | StatusLine    |
+
+**Description:** The subagent spend segment (Plan 00471 L7): `| Σ⚙ 1.66G ite · 3 live (2 opus, 1 sonnet) · max 412k · 2 unmeasured`. The ite figure sums the input-token equivalents of every stopped subagent from the spend ledger; the live part (count by model family, largest live context) comes from the snapshot the Stop/SubagentStop sensors and `spawn_rate_advisor` refresh, and is hidden when older than 15 minutes; `unmeasured` counts gate calls that could not read an agent's transcript. Hidden until there is something to show. `hooks-daemon spend` prints the full ledger.
+
+---
+
 ## Quick Reference Table
 
 ### All Blocking Handlers
@@ -4715,6 +4897,9 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `markdown_organization`         | PreToolUse        | 35       | Disorganised markdown; untracked Claude memory writes                    |
 | `lsp_enforcement`               | PreToolUse        | 38       | Grep/rg used for symbol lookups (use LSP)                                |
 | `reference_repo_freshness`      | PreToolUse        | 39       | Reading a governed reference clone that is stale or unverified           |
+| `subagent_context_budget`       | PreToolUse        | 39       | A subagent's non-handoff tool calls past hard_tokens (hard band off)     |
+| `resume_guard`                  | PreToolUse        | 39       | A SendMessage cold-resuming a large stopped agent (mode: deny)           |
+| `subagent_handoff_gate`         | SubagentStop      | 11       | An over-hard-budget agent's stop with no handoff file (three blocks max) |
 | `gh_issue_comments`             | PreToolUse        | 40       | gh issue view without --comments                                         |
 | `gh_pr_comments`                | PreToolUse        | 40       | gh pr view without --comments                                            |
 | `plan_time_estimates`           | PreToolUse        | 40       | Time estimates in plan docs                                              |
@@ -4736,6 +4921,10 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `plan_workflow`            | PreToolUse       | 45       | Guidance for plan creation                       |
 | `web_search_year`          | PreToolUse       | 55       | Warns about outdated search years                |
 | `british_english`          | PreToolUse       | 60       | Warns about American spellings                   |
+| `spawn_rate_advisor`       | PreToolUse       | 60       | Live-agent cap and five-hour limit on a spawn    |
+| `review_round_advisor`     | PreToolUse       | 60       | Review round count per plan or branch (opt-in)   |
+| `background_task_recorder` | Stop             | 9        | Records finished agent tasks for the live count  |
+| `spend_meter`              | StatusLine       | 17       | Subagent spend, live agents, unmeasured calls    |
 | `validate_eslint_on_write` | PostToolUse      | 10       | Runs ESLint after .ts/.tsx writes                |
 | `command_hints`            | PostToolUse      | 28       | Config-driven reminder after a command           |
 | `goal_injection`           | PostToolUse      | 30       | Goal-intent signal on plan flip to In Progress   |

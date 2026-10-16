@@ -230,6 +230,23 @@ _AUDITED_BLOCKING_ONLY_REASONS: dict[str, str] = {
         "already known to be blocked only on human input. A cost/cadence "
         "optimisation, not a guard against anything dangerous."
     ),
+    "resume_guard": (
+        "Plan 00471 L3: a cost gate on a SendMessage that would cold-resume a "
+        "large stopped agent. Denies only under mode: deny, fails open on an "
+        "unreadable transcript, and the RESUME-LARGE: prefix overrides it. Token "
+        "spend, not a dangerous action."
+    ),
+    "subagent_context_budget": (
+        "Plan 00471 L2: a cost gate on a subagent past its hard context budget, "
+        "off unless hard_tokens is set. The handoff steps stay allowed and an "
+        "unmeasurable transcript fails open, so no work is lost. Not a "
+        "dangerous-action guard."
+    ),
+    "subagent_handoff_gate": (
+        "SubagentStop, Plan 00471 L2: blocks an over-budget subagent's stop "
+        "until its handoff file exists, at most three times. Workflow "
+        "integrity (the coordinator needs the handoff), not a dangerous action."
+    ),
 }
 
 

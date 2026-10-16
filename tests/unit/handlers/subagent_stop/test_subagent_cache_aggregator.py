@@ -41,6 +41,16 @@ from claude_code_hooks_daemon.handlers.subagent_stop.subagent_cache_aggregator i
     read_subagent_cache_totals,
 )
 
+
+@pytest.fixture(autouse=True)
+def _no_usage_reading(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No five-hour reading unless a test sets one: never the host's real snapshot."""
+    monkeypatch.setattr(
+        "claude_code_hooks_daemon.handlers.subagent_stop.subagent_cache_aggregator.latest_usage",
+        lambda **_: None,
+    )
+
+
 _AGENT_RECORDS = [
     {"message": {"usage": {"cache_read_input_tokens": 100, "cache_creation_input_tokens": 40}}},
     {
@@ -64,8 +74,11 @@ def _write_agent_transcript(path: Path, records: list[dict]) -> None:
     The real task directory interleaves agent transcripts with plain-text bash
     output, and a naive slurp exits non-zero on the first one. The reader has
     to survive that, so every fixture here contains such a line.
+
+    Every real usage record is ``"type": "assistant"``, and the offset-cached
+    reader (Plan 00471) counts only those, so a record without a type gets it.
     """
-    lines = [json.dumps(r) for r in records]
+    lines = [json.dumps({"type": "assistant", **r}) for r in records]
     lines.insert(1, "this line is not JSON at all")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -199,6 +212,34 @@ class TestSubagentCacheAggregatorHandler:
         assert combined["agents_seen"] == 2
         assert combined["cache_read_tokens"] == 600
 
+    def test_each_row_carries_the_five_hour_percentage(
+        self, handler, transcript, tmp_path, monkeypatch
+    ):
+        """RULINGS-fable.md (cache reads vs the 5-hour limit): the five-hour figure is
+        logged beside the ledger totals, so the relationship can be read off later."""
+        from claude_code_hooks_daemon.core.usage_snapshot import UsageSnapshot, UsageWindow
+
+        window = UsageWindow(used_percentage=61.5, resets_at=1_800_000_000, observed_at=1.0)
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.handlers.subagent_stop.subagent_cache_aggregator.latest_usage",
+            lambda **_: UsageSnapshot(five_hour=window, seven_day=None),
+        )
+        handler.record(session_id="sess", agent_id="one", transcript=transcript, root=tmp_path)
+        row = json.loads(next((tmp_path / "cache-sidecar").rglob("one.json")).read_text())
+        assert row["five_hour_pct"] == 61.5
+
+    def test_an_unknown_five_hour_percentage_is_null(self, handler, transcript, tmp_path):
+        handler.record(session_id="sess", agent_id="one", transcript=transcript, root=tmp_path)
+        row = json.loads(next((tmp_path / "cache-sidecar").rglob("one.json")).read_text())
+        assert row["five_hour_pct"] is None
+
+    def test_a_recorded_agent_is_evicted_from_the_offset_cache(self, handler, transcript, tmp_path):
+        """Review S6: the sidecar keeps it, so memory holds only agents not yet stopped."""
+        from claude_code_hooks_daemon.utils.spend_ledger import spend_cache
+
+        handler.record(session_id="sess", agent_id="one", transcript=transcript, root=tmp_path)
+        assert spend_cache(tmp_path).resident() == 0
+
     def test_the_same_agent_recorded_twice_is_not_double_counted(
         self, handler, transcript, tmp_path
     ):
@@ -226,6 +267,81 @@ class TestSubagentCacheAggregatorHandler:
         bad.write_text("{not json", encoding="utf-8")
         combined = read_subagent_cache_totals("sess", root=tmp_path)
         assert combined["agents_seen"] == 1
+
+    # --- the spend ledger row (Plan 00471 Task 2.1) ---
+
+    def test_the_row_carries_the_spend_ledger_fields(self, handler, tmp_path):
+        target = tmp_path / "agent-ap471-x-1.jsonl"
+        _write_agent_transcript(
+            target,
+            [
+                {
+                    "requestId": "r1",
+                    "message": {
+                        "model": "claude-sonnet-5",
+                        "usage": {"input_tokens": 5, "cache_read_input_tokens": 1000},
+                    },
+                },
+                {
+                    "type": "system",
+                    "subtype": "compact_boundary",
+                    "compactMetadata": {"preTokens": 9},
+                },
+            ],
+        )
+        (tmp_path / "agent-ap471-x-1.meta.json").write_text(
+            json.dumps({"name": "p471-x", "spawnedAgentType": "python-developer"})
+        )
+        handler.record(session_id="sess", agent_id="ap471-x-1", transcript=target, root=tmp_path)
+        row = json.loads((tmp_path / "cache-sidecar" / "sess" / "ap471-x-1.json").read_text())
+        assert row["agent_id"] == "ap471-x-1"
+        assert row["name"] == "p471-x"
+        assert row["subagent_type"] == "python-developer"
+        spend = row["spend"]
+        assert spend["requests"] == 1
+        assert spend["max_ctx"] == 1005
+        assert spend["compactions"] == 1
+        assert spend["plan_key"] == "471"
+        assert spend["per_model_requests"] == {"claude-sonnet-5": 1}
+        assert row["cache_read_tokens"] == 1000
+
+    def test_a_later_stop_parses_only_the_appended_bytes(self, handler, transcript, tmp_path):
+        from claude_code_hooks_daemon.utils.spend_ledger import spend_cache
+
+        handler.record(session_id="sess", agent_id="one", transcript=transcript, root=tmp_path)
+        first_offset = spend_cache(tmp_path).offset_of(transcript)
+        with transcript.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({"type": "assistant", "message": {"usage": {}}}) + "\n")
+        handler.record(session_id="sess", agent_id="one", transcript=transcript, root=tmp_path)
+        assert spend_cache(tmp_path).offset_of(transcript) > first_offset
+        row = json.loads((tmp_path / "cache-sidecar" / "sess" / "one.json").read_text())
+        assert row["requests"] == 3
+
+    def test_a_stop_records_its_finished_background_tasks(
+        self, handler, transcript, tmp_path, monkeypatch
+    ):
+        """Plan 00471 L4: SubagentStop is one of the live count's reconciliation points."""
+        from claude_code_hooks_daemon.utils.session_load import finished_agents
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.handlers.subagent_stop."
+            "subagent_cache_aggregator.ProjectContext.daemon_untracked_dir",
+            staticmethod(lambda: tmp_path),
+        )
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.handlers.subagent_stop."
+            "subagent_cache_aggregator.ProjectContext.is_initialized",
+            staticmethod(lambda: True),
+        )
+        handler.handle(
+            {
+                "session_id": "sess",
+                "agent_id": "a1",
+                "agent_transcript_path": str(transcript),
+                "background_tasks": [{"id": "t9", "type": "subagent", "status": "completed"}],
+            }
+        )
+        assert finished_agents(tmp_path, "sess") == frozenset({"t9"})
 
     # --- the write is best-effort, and that has to be provable ---
 

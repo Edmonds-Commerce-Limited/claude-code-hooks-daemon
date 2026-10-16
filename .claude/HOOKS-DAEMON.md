@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (75 handlers)
+### PreToolUse (79 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -57,6 +57,8 @@
 | 38 | lsp_enforcement | BLOCKING | Enforce LSP tool usage instead of Grep/Bash grep for symbol lookups |
 | 38 | remote_docs_commit_gate | BLOCKING | Deny a commit that would enter an unattributed vendored document |
 | 39 | reference_repo_freshness | BLOCKING | Gate a read of a governed reference repo on a cached freshness reading |
+| 39 | resume_guard | BLOCKING | Gate a SendMessage that would cold-resume a large stopped agent |
+| 39 | subagent_context_budget | BLOCKING | Advise a subagent past ``soft_tokens``; past ``hard_tokens`` allow only its handoff |
 | 40 | gh_issue_comments | BLOCKING | Ensure gh issue view commands always include --comments flag |
 | 40 | gh_pr_comments | BLOCKING | Ensure gh pr view commands always include --comments flag |
 | 42 | conflict_marker_commit_gate | BLOCKING | Deny a commit that would record a merge-conflict marker |
@@ -83,6 +85,8 @@
 | 58 | flaggable_work_advisor | ADVISORY | Advise delegating safeguard-flaggable work BEFORE opening the content |
 | 59 | merge_qa_advisor | ADVISORY | Advise the static checks to run before merging a work branch with no recorded green run |
 | 60 | british_english | ADVISORY | Warn about American English spellings in content files (non-blocking) |
+| 60 | review_round_advisor | ADVISORY | Advise from the ``advise_at``-th review dispatch on one plan or branch |
+| 60 | spawn_rate_advisor | ADVISORY | Advise at the live-agent cap and near the five-hour limit; never deny |
 
 ### PostToolUse (15 handlers)
 
@@ -176,17 +180,18 @@
 |----------|---------|----------|-------------|
 | 50 | quota_resume_recorder | ADVISORY | Record each ``quota_auto_resume_*`` notification, silently |
 
-### Stop (5 handlers)
+### Stop (6 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 4 | idle_workable_issue_stop_gate | BLOCKING | Refuse a main-thread idle stop while a workable issue is cached and nothing runs |
 | 6 | usage_pause_stop_gate | BLOCKING | Allow a paused session's stop only when its crons are exactly the resume cron |
 | 7 | cron_stop_enforcer | BLOCKING | Block a Stop while a declared persistent cron was never created |
+| 9 | background_task_recorder | NON-TERMINAL | Record a Stop's finished agent tasks for the live count; always allow |
 | 9 | teammate_reap_advisor | ADVISORY | Report the Stop payload's ``background_tasks`` count and name ``TaskStop`` |
 | 10 | auto_continue_stop | TERMINAL | Intercept Stop events and enforce explicit stop reasons or auto-continue |
 
-### SubagentStop (5 handlers)
+### SubagentStop (6 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -194,9 +199,10 @@
 | 8 | subagent_report_path_verifier | BLOCKING | Block a SubagentStop whose claimed report file does not exist |
 | 9 | subagent_cache_aggregator | NON-TERMINAL | Record a stopping sub-agent's prompt-cache totals for the status line |
 | 10 | subagent_report_persistence | NON-TERMINAL | Persist every stopping sub-agent's final reply to a gitignored file |
+| 11 | subagent_handoff_gate | BLOCKING | Block an over-hard-budget subagent's stop until its handoff file exists |
 | 15 | subagent_report_size_blocker | TERMINAL | Block a SubagentStop whose ``last_assistant_message`` is oversized |
 
-### Status (17 handlers)
+### Status (18 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -210,6 +216,7 @@
 | 14 | current_time | NON-TERMINAL | Display current local time in status line (24-hour format, no seconds) |
 | 15 | prompt_cache_indicator | NON-TERMINAL | Render prompt-cache health as `main`, `⑂` and `Σ` background-coloured chips |
 | 16 | usage_indicator | NON-TERMINAL | Show 5-hour and weekly subscription usage, colour-coded, with reset countdown |
+| 17 | spend_meter | NON-TERMINAL | Render the session's subagent spend, live agents and unmeasured count |
 | 20 | git_branch | NON-TERMINAL | Show current git branch with magicmonty-style status icons if in a git repo |
 | 25 | git_repo_name | NON-TERMINAL | Show git repository name at start of status line |
 | 25 | working_directory | NON-TERMINAL | Display working directory when it differs from project root |

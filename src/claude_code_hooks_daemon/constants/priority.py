@@ -180,6 +180,9 @@ class Priority:
     # release_blocker project handler at 8) -- it only has to reach the chain
     # before the terminal catch-all.
     TEAMMATE_REAP_ADVISOR = 9
+    # Plan 00471 L4: a silent sensor beside the reap advisor, ahead of the
+    # terminal auto_continue_stop (10), so every Stop's background_tasks lands.
+    BACKGROUND_TASK_RECORDER = 9
 
     # Plan 00446 (ledger 00422 N15): BELOW SUBAGENT_REPORT_PATH_VERIFIER's
     # sibling SUBAGENT_REPORT_SIZE_BLOCKER (15), which is terminal and matches
@@ -197,6 +200,9 @@ class Priority:
     # whose report is rejected still has its cache cost counted — the figure
     # describes the agent's whole run, not the fate of its final message.
     SUBAGENT_CACHE_AGGREGATOR = 9
+    # Plan 00471 L2: ahead of the terminal size blocker (15) for the reason the
+    # path verifier is, and non-terminal like it, so one stop reports both.
+    SUBAGENT_HANDOFF_GATE = 11
     # Plan 00460 Task 1.6: runs ahead of the terminal size blocker (15) so a
     # persisted report EXISTS on disk before the size blocker's glob lookup
     # (subagent_report_paths.find_persisted_report) runs — there is no
@@ -442,6 +448,15 @@ class Priority:
     # Plan 00518: a silent sensor that never decides; its slot only orders it
     # among the workflow handlers that see the same dispatch.
     AGENT_DISPATCH_RECORDER = 46
+    # Plan 00471 L2: a cost control, not a safety guard, so it sits in the
+    # workflow band; a safety deny earlier in the chain owns the response.
+    SUBAGENT_CONTEXT_BUDGET = 39
+    # Plan 00471 L3: same band and slot logic; it only ever sees SendMessage.
+    RESUME_GUARD = 39
+    # Plan 00471 L4/L5: advisory only, so it sits in the advisory band.
+    SPAWN_RATE_ADVISOR = 60
+    # Plan 00471 L9: advisory only, beside the spawn advisory on the same tool.
+    REVIEW_ROUND_ADVISOR = 60
     # Plan 00284: sibling gate at the same edit-time layer as plan_qa_edit,
     # deliberately a different check id/domain so priority collision with 44
     # is avoided while staying in the same workflow band.
@@ -608,6 +623,8 @@ class Priority:
     # Plan 00479: subscription usage sits with the other account-level segments,
     # straight after the cache figure, ahead of the working directory.
     USAGE_INDICATOR = 16
+    # Plan 00471 L7: subagent spend reads next to the usage it drives.
+    SPEND_METER = 17
     WORKING_DIRECTORY = 25
     STARTUP_CLEANUP = 28  # Between working_directory (25) and daemon_stats (30)
 

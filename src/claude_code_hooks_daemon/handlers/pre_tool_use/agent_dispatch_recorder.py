@@ -11,6 +11,7 @@ never decides anything.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -25,11 +26,18 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.utils.agent_dispatch_registry import record_dispatch
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.spend_ledger import append_event
 
 logger = logging.getLogger(__name__)
 
 _NAME_FIELD = "name"
 _SUBAGENT_TYPE_FIELD = "subagent_type"
+_PROMPT_FIELD = "prompt"
+
+#: A whole line ``budget: 400k`` in the dispatch prompt (Plan 00471 Q4). Only a
+#: NAMED dispatch reaches this handler, so an unnamed one's line is ignored.
+_BUDGET_LINE = re.compile(r"(?im)^\s*budget:\s*(\d{1,4})\s*k\s*$")
+_TOKENS_PER_K = 1000
 
 
 class AgentDispatchRecorderHandler(PreToolUseHandlerBase):
@@ -69,17 +77,38 @@ class AgentDispatchRecorderHandler(PreToolUseHandlerBase):
         name = tool_input.get(_NAME_FIELD)
         return isinstance(name, str) and bool(name)
 
+    @staticmethod
+    def budget_override(prompt: object) -> int | None:
+        """The tokens a ``budget: <N>k`` line in the prompt asks for (Plan 00471 Q4)."""
+        if not isinstance(prompt, str):
+            return None
+        match = _BUDGET_LINE.search(prompt)
+        return int(match.group(1)) * _TOKENS_PER_K if match else None
+
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Write the record; always allow."""
+        """Write the record, and a ledger row for a budget override; always allow."""
         tool_input = hook_input[HookInputField.TOOL_INPUT]
         subagent_type = tool_input.get(_SUBAGENT_TYPE_FIELD)
+        budget = self.budget_override(tool_input.get(_PROMPT_FIELD))
         try:
+            untracked = self._untracked_dir()
             record_dispatch(
-                self._untracked_dir(),
+                untracked,
                 self._session_id(hook_input),
                 tool_input[_NAME_FIELD],
                 subagent_type if isinstance(subagent_type, str) else None,
+                budget_tokens=budget,
             )
+            if budget is not None:
+                append_event(
+                    untracked,
+                    self._session_id(hook_input),
+                    {
+                        "kind": "budget-override",
+                        "name": tool_input[_NAME_FIELD],
+                        "requested_tokens": budget,
+                    },
+                )
         except (OSError, RuntimeError) as exc:
             log_and_continue(
                 logger,

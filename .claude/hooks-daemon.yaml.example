@@ -7,6 +7,7 @@ daemon:
   project_root: ../../  # Project root relative to this config file (always ../../)
 
   stale_file_days: 7  # Remove daemon runtime files older than this (days)
+  spend_ledger_retention_days: 90  # Keep each session's spend ledger this long (days)
 
   # Path exclusion for content-scanning blockers (v3.35.0+, Plan 00150)
   # Gitignore-style globs (*, ?, ** = zero-or-more segments) exempted from ALL
@@ -340,6 +341,40 @@ handlers:
     agent_dispatch_recorder:  # Records name -> subagent_type of a named Agent dispatch; silent, never blocks
       enabled: true           # Needed by subagent_full_qa_blocker's exempt_agent_types for named agents
       priority: 46
+
+    subagent_context_budget:  # A subagent past soft_tokens of context is told once to hand off; past hard_tokens only its handoff runs
+      enabled: true
+      priority: 39
+      options:
+        soft_tokens: 300000        # Advisory once per band; null switches the advisory off
+        hard_tokens: null          # Off. Set (e.g. 250000) to allow only the handoff steps above it
+        max_override_tokens: 450000  # Ceiling for a `budget: <N>k` line in a named dispatch's prompt
+        # handoff_globs: []        # Added to **/subagent-reports/**, untracked/scratch/** (mode: replace to swap)
+        # allowed_bash_prefixes: [] # Added to git status|diff|add|commit|log (mode: replace to swap)
+        # exempt_agent_types: []   # Definition types never measured
+
+    resume_guard:  # A SendMessage that would cold-resume a stopped agent past max_resume_tokens
+      enabled: true
+      priority: 39
+      options:
+        mode: advise               # advise (allow with context) or deny; RESUME-LARGE: <reason> overrides either
+        max_resume_tokens: 250000
+        warm_seconds: 300          # The subagent prompt-cache TTL; a warmer resume is never gated
+
+    spawn_rate_advisor:  # On a spawn or cold resume: names the live agents at max_concurrent; says serialise at advise_pct of the five-hour limit
+      enabled: true
+      priority: 60
+      options:
+        max_concurrent: null       # Off. Set (e.g. 4) to name the live agents at that count
+        advise_pct: 80             # Five-hour limit percentage, from the status line's rate_limits; null switches it off
+        liveness_seconds: 120      # An agent whose transcript moved within this and has not ended its turn is live
+        max_age_seconds: 300       # A usage reading older than this is unknown and draws nothing
+
+    review_round_advisor:  # Counts review dispatches per plan/branch; from advise_at, advises comparing findings counts
+      enabled: false       # Opt-in: a heuristic (the count is deterministic, convergence is not)
+      priority: 60
+      options:
+        advise_at: 4
 
     installed_plugin_edit_advisor:  # Advises when a write lands in an installed Claude Code plugin's files
       enabled: true
@@ -880,6 +915,10 @@ handlers:
       enabled: true          # Advisory only, rate-limited; silent when the list is absent or empty
       priority: 9
 
+    background_task_recorder:  # Records which agent tasks a Stop reports finished, so spawn_rate_advisor's live count drops them
+      enabled: true            # Sensor only, never blocks
+      priority: 9
+
     auto_continue_stop:  # Auto-continues after stop events based on criteria
       enabled: true
       priority: 10
@@ -896,6 +935,10 @@ handlers:
     subagent_cache_aggregator:      # Records each sub-agent's prompt-cache cost for the status line
       enabled: true                 # Sensor only (Plan 00452): renders nothing, never blocks a stop
       priority: 9                   # Ahead of the terminal size blocker, so a rejected report still counts
+
+    subagent_handoff_gate:          # An agent that hit subagent_context_budget's hard_tokens writes its handoff before it stops
+      enabled: true                 # Silent while hard_tokens is null; gives way after three blocked stops
+      priority: 11
 
     subagent_report_persistence:    # Auto-saves every sub-agent's final reply to a gitignored file (Plan 00460)
       enabled: true                 # Sensor only: never blocks a stop; runs before the size blocker below
@@ -1024,6 +1067,10 @@ handlers:
         warn_pct: 60                   # yellow, and % + reset countdown shown, from here
         high_pct: 80                   # orange from here
         critical_pct: 90               # red from here
+
+    spend_meter:   # Subagent spend: Σ⚙ <ite> · N live (by family) · max <ctx> · unmeasured (Plan 00471)
+      enabled: true  # Hidden until a subagent has stopped or the live count is fresh
+      priority: 17
 
   worktree_create:  # WorktreeCreate event (isolation:worktree agents / --worktree sessions)
     worktree_create:  # Creates the git worktree at a semantic path and echoes it

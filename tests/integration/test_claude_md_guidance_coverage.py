@@ -82,6 +82,10 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "SubagentCronDeleteBlockerHandler": "T1 denies CronDelete inside a subagent",
     "GithubIssueAssignmentGuardHandler": "T1 denies issue-tied work on an unclaimed or foreign issue",
     "WriteProtectedPathsHandler": "T1 denies a write, move onto or deletion of a read-only path",
+    "ResumeGuardHandler": "T1 denies a cold resume of a large stopped agent under mode: deny",
+    "SubagentContextBudgetHandler": (
+        "T1 denies a subagent's tool calls past hard_tokens outside the handoff steps"
+    ),
     "UsagePauseToolGateHandler": "T1 denies every tool but the cron tools while usage-paused",
     "UsagePauseGateHandler": (
         "T2 changes what the agent must do: the pause directive says to replace every cron "
@@ -464,8 +468,22 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "ContextSidecarHandler": "status-line renderer, no agent-facing action",
     "CurrentTimeHandler": "status-line renderer, no agent-facing action",
     "PromptCacheIndicatorHandler": "status-line renderer, no agent-facing action",
+    "SpendMeterHandler": "status-line renderer, no agent-facing action",
     "UsageIndicatorHandler": "status-line renderer, no agent-facing action",
     "SubagentCacheAggregatorHandler": "observe-only sensor, no agent-facing action",
+    "BackgroundTaskRecorderHandler": "observe-only sensor, no agent-facing action",
+    "SpawnRateAdvisorHandler": (
+        "T2: the advice arrives with the spawn it is about and governs the NEXT one; "
+        "it never denies and holds no standing policy"
+    ),
+    "ReviewRoundAdvisorHandler": (
+        "T2: the advice arrives with the review dispatch and governs the next round; "
+        "it never denies and holds no standing policy"
+    ),
+    "SubagentHandoffGateHandler": (
+        "T4: subagent_context_budget's section states this gate's stop block and its "
+        "three-block limit; a second section would bill the same fact twice"
+    ),
     "DaemonStatsHandler": "status-line renderer, no agent-facing action",
     "DowngradeIndicatorHandler": "status-line renderer, no agent-facing action",
     "EnvironmentIndicatorHandler": "status-line renderer, no agent-facing action",
@@ -744,6 +762,11 @@ class TestAnExemptHandlerCannotQuietlyDeny:
     # genuinely covers them. Deliberately empty: every deny-capable handler
     # currently earns its own section. An addition here should be argued.
     _EXEMPT_DESPITE_DENYING: ClassVar[dict[str, str]] = {
+        "SubagentHandoffGateHandler": (
+            "subagent_context_budget's section, which states that past hard_tokens this "
+            "gate BLOCKS the agent's stop until the named handoff file exists, at most "
+            "three times. Verified by reading that section"
+        ),
         "RemoteDocsCommitGateHandler": (
             "remote_docs_provenance's section, which states the capture-not-"
             "authoring rule this gate enforces at a second moment. That section "
