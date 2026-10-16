@@ -99,5 +99,8 @@ releases the work and sends the same request again: the two responses are equal.
   `load_config_cached`); on the C loader that is about 10 ms each.
 - QA: Task 2.2's first `changed` run (before its last commit) reported 37/40 PASS, with one mypy `no-untyped-call` on
   `loader.dispose()` (fixed) and the six `too-broad` unmapped files that `--allow-unmapped` covers; its test run was 2902
-  passed, 0 failed. The second run starved on the host-wide QA lock for 3600 s and did not start. The final verdict over the
-  whole range is in the coordinator reply.
+  passed, 0 failed. The second run starved on the host-wide QA lock for 3600 s and did not start. The range run
+  (`changed --range 75fe038df..HEAD --allow-unmapped`, eight unmapped files covered by the flag) first found five
+  `magic-timeout` literals in the new test and the fail-open-inventory row (both fixed, see section 2) and a mypy-clean tree
+  otherwise; the next run was 37/40 PASS with 3545 tests passed, 0 failed, the only failure being plan_qa's advisory
+  `journal-freshness` for this plan (no journal entry for 4 days), fixed by a journal entry through `mkplan.bash --journal`.
