@@ -3,7 +3,8 @@
 The :class:`TranscriptSpendCache` sidecars, one per transcript, live in
 ``<daemon untracked>/spend-offsets/``. Everything else the spend levers record
 lives under ``<daemon untracked>/spend-ledger/<session>/``, a directory the
-daemon's start-up cleanup removes whole once it is ``stale_file_days`` old:
+daemon's start-up cleanup removes whole once it is
+``spend_ledger_retention_days`` (90) old:
 
 - ``<session>/unmeasured/``: one marker per ``(agent_id, reason)`` a gate could
   not measure, so a fail-open is counted once and never per tool call

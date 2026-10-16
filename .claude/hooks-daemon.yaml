@@ -9,6 +9,7 @@ daemon:
   project_root: ../../  # Project root relative to this config file (always ../../)
 
   stale_file_days: 7  # Remove daemon runtime files older than this many days
+  spend_ledger_retention_days: 90  # The spend ledger is the evidence for the deferred L4/L5/L8 decisions
 
   # Language filter for strategy-pattern handlers
   languages: []

@@ -41,6 +41,16 @@ from claude_code_hooks_daemon.handlers.subagent_stop.subagent_cache_aggregator i
     read_subagent_cache_totals,
 )
 
+
+@pytest.fixture(autouse=True)
+def _no_usage_reading(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No five-hour reading unless a test sets one: never the host's real snapshot."""
+    monkeypatch.setattr(
+        "claude_code_hooks_daemon.handlers.subagent_stop.subagent_cache_aggregator.latest_usage",
+        lambda **_: None,
+    )
+
+
 _AGENT_RECORDS = [
     {"message": {"usage": {"cache_read_input_tokens": 100, "cache_creation_input_tokens": 40}}},
     {
@@ -201,6 +211,27 @@ class TestSubagentCacheAggregatorHandler:
         combined = read_subagent_cache_totals("sess", root=tmp_path)
         assert combined["agents_seen"] == 2
         assert combined["cache_read_tokens"] == 600
+
+    def test_each_row_carries_the_five_hour_percentage(
+        self, handler, transcript, tmp_path, monkeypatch
+    ):
+        """RULINGS-fable.md (cache reads vs the 5-hour limit): the five-hour figure is
+        logged beside the ledger totals, so the relationship can be read off later."""
+        from claude_code_hooks_daemon.core.usage_snapshot import UsageSnapshot, UsageWindow
+
+        window = UsageWindow(used_percentage=61.5, resets_at=1_800_000_000, observed_at=1.0)
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.handlers.subagent_stop.subagent_cache_aggregator.latest_usage",
+            lambda **_: UsageSnapshot(five_hour=window, seven_day=None),
+        )
+        handler.record(session_id="sess", agent_id="one", transcript=transcript, root=tmp_path)
+        row = json.loads(next((tmp_path / "cache-sidecar").rglob("one.json")).read_text())
+        assert row["five_hour_pct"] == 61.5
+
+    def test_an_unknown_five_hour_percentage_is_null(self, handler, transcript, tmp_path):
+        handler.record(session_id="sess", agent_id="one", transcript=transcript, root=tmp_path)
+        row = json.loads(next((tmp_path / "cache-sidecar").rglob("one.json")).read_text())
+        assert row["five_hour_pct"] is None
 
     def test_a_recorded_agent_is_evicted_from_the_offset_cache(self, handler, transcript, tmp_path):
         """Review S6: the sidecar keeps it, so memory holds only agents not yet stopped."""

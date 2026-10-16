@@ -41,6 +41,7 @@ from typing import Any, Final
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
+from claude_code_hooks_daemon.core.data_layer import latest_usage
 from claude_code_hooks_daemon.core.handler_bases import SubagentStopHandlerBase
 from claude_code_hooks_daemon.daemon.synthetic_traffic import is_synthetic_event
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
@@ -90,6 +91,18 @@ def _as_int(raw: object) -> int:
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):
         return 0
     return int(raw)
+
+
+def _five_hour_pct() -> float | None:
+    """The five-hour usage percentage at this stop, or None when unknown.
+
+    Logged beside each agent's spend so the relationship between cache reads
+    and the five-hour limit can be read off the ledger later
+    (RULINGS-fable.md, Plan 00471).
+    """
+    snapshot = latest_usage()
+    window = snapshot.five_hour if snapshot is not None else None
+    return window.used_percentage if window is not None else None
 
 
 def _sidecar_dir(session_id: str, root: Path | None = None) -> Path:
@@ -383,6 +396,7 @@ class SubagentCacheAggregatorHandler(SubagentStopHandlerBase):
             "agent_id": agent_id,
             "name": meta.name,
             "subagent_type": meta.agent_type,
+            "five_hour_pct": _five_hour_pct(),
             "spend": spend.to_dict(),
         }
         try:

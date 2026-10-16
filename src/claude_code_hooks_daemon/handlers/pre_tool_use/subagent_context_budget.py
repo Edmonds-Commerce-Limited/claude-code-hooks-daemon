@@ -39,7 +39,6 @@ import fnmatch
 import logging
 import os
 import re
-import shlex
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -64,6 +63,7 @@ from claude_code_hooks_daemon.utils.agent_dispatch_registry import (
     effective_agent_type,
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.linear_shlex import LinearShlex
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.spend_ledger import (
     note_unmeasured,
@@ -203,7 +203,7 @@ def _bash_segments(command: str) -> list[list[str]]:
     """
     if not command.strip() or _HIDDEN_EXECUTION.search(command):
         return []
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=_SEPARATOR_CHARS + _REJECTED_CHARS)
+    lexer = LinearShlex(command, posix=True, punctuation_chars=_SEPARATOR_CHARS + _REJECTED_CHARS)
     lexer.whitespace = " \t\r"
     lexer.whitespace_split = True
     try:

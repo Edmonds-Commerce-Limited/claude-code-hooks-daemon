@@ -2003,6 +2003,10 @@ class DaemonConfig(BaseModel):
         default=7,
         description="Number of days before daemon runtime files (sock, pid, socket-path) are considered stale and removed on startup. Active daemons touch their files periodically to stay fresh.",
     )
+    spend_ledger_retention_days: Annotated[int, Field(ge=1, le=365)] = Field(
+        default=90,
+        description="Number of days a session's spend ledger (spend-ledger/<session>/ and the per-agent cache-sidecar rows) is kept before the startup cleanup removes it. Longer than stale_file_days because the ledger is the evidence for later decisions about the spend levers (Plan 00471).",
+    )
 
     @field_validator("exclude_paths", mode="before")
     @classmethod

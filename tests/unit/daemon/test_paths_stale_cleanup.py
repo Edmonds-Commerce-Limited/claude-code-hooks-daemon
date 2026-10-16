@@ -341,21 +341,13 @@ class TestCleanupStaleSessionDirs:
             "claude_code_hooks_daemon.daemon.paths._get_untracked_dir",
             return_value=tmp_path,
         ):
-            removed = cleanup_stale_session_dirs(tmp_path, max_age_days=7)
+            removed = cleanup_stale_session_dirs(tmp_path, max_age_days=7, ledger_max_age_days=7)
 
         assert removed == 1
         assert not session.exists()
 
-    def test_stale_spend_ledger_sessions_and_offset_sidecars_are_reaped(
-        self, tmp_path: Path
-    ) -> None:
-        """Review S6 (Plan 00471): the ledger keeps a directory per session and a
-        sidecar per transcript, and nothing else ever deletes either."""
-        dead_session = tmp_path / "spend-ledger" / "dead-session"
-        (dead_session / "unmeasured").mkdir(parents=True)
-        _make_old(dead_session)
-        live_session = tmp_path / "spend-ledger" / "live-session"
-        live_session.mkdir(parents=True)
+    def test_stale_offset_sidecars_are_reaped_at_stale_file_days(self, tmp_path: Path) -> None:
+        """Review S6 (Plan 00471): the offset cache is a cache, so it ages like runtime files."""
         offsets = tmp_path / "spend-offsets"
         offsets.mkdir()
         old_offset = offsets / "0123456789abcdef.json"
@@ -370,9 +362,68 @@ class TestCleanupStaleSessionDirs:
         ):
             removed = cleanup_stale_session_dirs(tmp_path, max_age_days=7)
 
-        assert removed == 2
-        assert not dead_session.exists() and live_session.exists()
+        assert removed == 1
         assert not old_offset.exists() and fresh_offset.exists()
+
+    def test_the_spend_ledger_outlives_stale_file_days(self, tmp_path: Path) -> None:
+        """Plan 00471 round 2: the ledger and its per-agent rows are the evidence for the
+        deferred L4/L5/L8 rulings, so they keep their own, longer retention (default 90)."""
+        week_old = time.time() - _SEVEN_DAYS - 3600
+        quarter_old = time.time() - 91 * 24 * 3600
+        kept = []
+        gone = []
+        for subdir in ("spend-ledger", "cache-sidecar"):
+            recent = tmp_path / subdir / "week-old-session"
+            recent.mkdir(parents=True)
+            os.utime(recent, (week_old, week_old))
+            ancient = tmp_path / subdir / "quarter-old-session"
+            ancient.mkdir(parents=True)
+            os.utime(ancient, (quarter_old, quarter_old))
+            kept.append(recent)
+            gone.append(ancient)
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.paths._get_untracked_dir",
+            return_value=tmp_path,
+        ):
+            removed = cleanup_stale_session_dirs(tmp_path, max_age_days=7)
+
+        assert removed == 2
+        assert all(path.exists() for path in kept)
+        assert not any(path.exists() for path in gone)
+
+    def test_the_ledger_retention_is_its_own_setting(self, tmp_path: Path) -> None:
+        session = tmp_path / "spend-ledger" / "week-old-session"
+        session.mkdir(parents=True)
+        _make_old(session)
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.paths._get_untracked_dir",
+            return_value=tmp_path,
+        ):
+            assert cleanup_stale_session_dirs(tmp_path, max_age_days=30, ledger_max_age_days=7) == 1
+
+        assert not session.exists()
+
+    def test_the_ledger_retention_defaults_to_90_days_and_reaches_the_reaper(
+        self, tmp_path: Path
+    ) -> None:
+        from claude_code_hooks_daemon.config.models import Config
+        from claude_code_hooks_daemon.daemon import cli
+
+        config = Config()
+        assert config.daemon.spend_ledger_retention_days == 90
+        config.daemon.spend_ledger_retention_days = 45
+        with (
+            patch.object(cli, "cleanup_stale_daemon_files", return_value=0),
+            patch.object(cli, "cleanup_stale_session_dirs", return_value=0) as reaper,
+            patch.object(cli, "write_cleanup_status"),
+            patch.object(cli, "sweep_dead_runtime_sets", return_value=[]),
+            patch.object(cli, "_cleanup_proven_stale_venvs", return_value=[]),
+            patch.object(cli, "_stale_venv_advisory", return_value=None),
+        ):
+            cli._reap_stale_runtime_files(tmp_path, config)
+        reaper.assert_called_once_with(tmp_path, max_age_days=7, ledger_max_age_days=45)
 
     def test_a_live_cache_sidecar_session_directory_survives(self, tmp_path: Path) -> None:
         """The running session's own sidecar must not be reaped underneath it."""

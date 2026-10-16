@@ -287,6 +287,8 @@ class TestHardBand:
             ("Bash", {"command": "git add -A && git commit -F untracked/scratch/msg.txt"}),
             ("Bash", {"command": 'git commit -m "WIP: handoff\n\nCo-Authored-By: x <x@y>"'}),
             ("Bash", {"command": "git status\ngit diff --stat"}),
+            # A bare `&` is a separator like `;`: each side is judged on its own.
+            ("Bash", {"command": "git status & git log --oneline -3"}),
             # Review N6: a deferred SendMessage must stay loadable.
             ("ToolSearch", {"query": "select:SendMessage"}),
         ],

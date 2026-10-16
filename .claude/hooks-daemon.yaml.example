@@ -7,6 +7,7 @@ daemon:
   project_root: ../../  # Project root relative to this config file (always ../../)
 
   stale_file_days: 7  # Remove daemon runtime files older than this (days)
+  spend_ledger_retention_days: 90  # Keep each session's spend ledger this long (days)
 
   # Path exclusion for content-scanning blockers (v3.35.0+, Plan 00150)
   # Gitignore-style globs (*, ?, ** = zero-or-more segments) exempted from ALL

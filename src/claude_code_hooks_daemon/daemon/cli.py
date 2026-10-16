@@ -607,7 +607,11 @@ def _reap_stale_runtime_files(project_path: Path, config: Config) -> None:
     stale_daemon = cleanup_stale_daemon_files(project_path, max_age_days=stale_days)
     # Per-session runtime subdirs (thread-registry/, context-sidecar/,
     # payload-capture/) whose writers never delete their own dead-session files.
-    stale_sessions = cleanup_stale_session_dirs(project_path, max_age_days=stale_days)
+    stale_sessions = cleanup_stale_session_dirs(
+        project_path,
+        max_age_days=stale_days,
+        ledger_max_age_days=config.daemon.spend_ledger_retention_days,
+    )
     stale_total = stale_daemon + stale_sessions
     write_cleanup_status(project_path, stale_total)
     if stale_total > 0:
