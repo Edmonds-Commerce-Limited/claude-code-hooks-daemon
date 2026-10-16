@@ -2,7 +2,8 @@
 
 Joins the session's agent transcripts (through the shared offset cache, as
 ``hooks-daemon spend`` reads them) with the dispatch rows of the spend ledger by
-``tool_use_id`` (``meta.json``'s ``toolUseId``), and prints 472-B section 2's
+``tool_use_id`` (``meta.json``'s ``toolUseId``), falling back to the row's ``agent_id``
+for a teammate, whose meta carries no ``toolUseId``, and prints 472-B section 2's
 tables: agents and ite by source, by model family and by role (or by
 ``subagent_type``). Below them:
 
@@ -101,6 +102,7 @@ def collect_tiers(
     """
     rows = read_dispatch_rows(untracked, session_id)
     by_id = {str(row["tool_use_id"]): row for row in rows}
+    by_agent = {str(row["agent_id"]): row for row in rows if row.get("agent_id")}
     unjoined = sum(
         1 for row in rows if row.get("pre_recorded") is not True or not row.get("resolved_model")
     )
@@ -112,7 +114,13 @@ def collect_tiers(
     spend = collect_session_spend(subagents, session_id=session_id, cache=cache, unmeasured=0)
     for agent in spend.agents:
         meta = read_agent_meta(subagents / f"agent-{agent.agent_id}.jsonl")
-        row = by_id.get(meta.tool_use_id, {})
+        row = by_id.get(meta.tool_use_id) if meta.tool_use_id else None
+        if row is None:
+            row = by_agent.get(agent.agent_id)
+        if row is None:
+            row = {}
+            if not meta.tool_use_id:
+                report.unjoined += 1
         totals = agent.totals
         busiest = max(
             totals.per_model_requests, key=totals.per_model_requests.__getitem__, default=""
