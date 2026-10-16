@@ -1,6 +1,6 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-10-14 (v3.69.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-10-16 (v3.69.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
@@ -140,7 +140,7 @@
 | 70 | persistent_cron_assertor | ADVISORY | State the project's declared crons and instruct a CronList reconcile |
 | 71 | reference_repo_sweep | ADVISORY | Fetch, safely fast-forward and record every governed reference repo |
 | 72 | routine_qa_sweep | ADVISORY | Advisory SessionStart sweep over the Routine tree (silent when clean) |
-| 72 | unproven_venv_advisor | ADVISORY | List venvs the code cannot prove stale, with evidence and the removal command |
+| 72 | unproven_venv_advisor | ADVISORY | Name a running venv built for another lock, and list venvs not proven stale |
 | 73 | session_actions_directive | ADVISORY | Signal the ccy supervisor when a session starts with must-do items |
 
 ### PreCompact (2 handlers)

@@ -112,6 +112,37 @@ class TestUnprovenVenvAdvisor:
         with patch(_RESOLVER, return_value=live / "bin" / "python"):
             assert _handler(project).handle(_session()).context == []
 
+    def test_running_venv_built_for_another_lock_is_reported_with_repair(
+        self, project: Path
+    ) -> None:
+        """Plan 00474 N469: a dependency change leaves the daemon on the old venv."""
+        slug = project_path_slug(project)
+        running = _venv(project / "untracked" / f"venv-{slug}-py311-aaaaaaaa", STALE_HASH)
+        handler = _handler(project)
+        handler.running_venv = running
+
+        with patch(_RESOLVER, return_value=running / "bin" / "python"):
+            result = handler.handle(_session())
+
+        text = "\n".join(result.context)
+        assert result.decision == Decision.ALLOW
+        assert "NOT BUILT FOR THIS SOURCE" in text
+        assert str(running) in text
+        assert "hooks-daemon repair" in text
+
+    def test_running_venv_built_for_this_lock_is_silent(self, project: Path) -> None:
+        from claude_code_hooks_daemon.daemon.paths import _compute_project_lock_hash_stdlib
+
+        slug = project_path_slug(project)
+        current = _compute_project_lock_hash_stdlib(project)
+        assert current is not None
+        running = _venv(project / "untracked" / f"venv-{slug}-py311-aaaaaaaa", current)
+        handler = _handler(project)
+        handler.running_venv = running
+
+        with patch(_RESOLVER, return_value=running / "bin" / "python"):
+            assert handler.handle(_session()).context == []
+
     def test_acceptance_test_is_a_context_case(self) -> None:
         (case,) = UnprovenVenvAdvisorHandler().get_acceptance_tests()
 

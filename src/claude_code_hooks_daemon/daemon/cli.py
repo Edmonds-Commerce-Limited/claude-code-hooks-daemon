@@ -100,6 +100,8 @@ from claude_code_hooks_daemon.daemon.paths import (
     resolve_hostname,
     sweep_dead_runtime_sets,
     unproven_report_lines,
+    venv_lock_drift,
+    venv_lock_drift_lines,
     write_cleanup_status,
 )
 from claude_code_hooks_daemon.daemon.permission_audit import (
@@ -1539,6 +1541,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     socket_path, pid_path, drift_warning = _resolve_effective_daemon(args, project_path)
     if drift_warning is not None:
         print(drift_warning, file=sys.stderr)
+    _warn_if_venv_not_built_for_source(project_path)
 
     # Read PID. verify_daemon guards against a stale PID file (after reboot /
     # PID reuse) whose PID now belongs to an unrelated live process, which
@@ -2529,8 +2532,25 @@ def cmd_restart(args: argparse.Namespace) -> int:
     # After successful start, print mode advisory if non-default mode was lost
     if result == 0 and pre_mode is not None:
         _print_mode_advisory(pre_mode)
+    if result == 0:
+        _warn_if_venv_not_built_for_source(get_project_path(getattr(args, "project_root", None)))
 
     return result
+
+
+def _warn_if_venv_not_built_for_source(project_root: Path) -> None:
+    """Warn on stderr when this CLI's venv is not proven built for the source (N469).
+
+    ``start`` forks this process, so the daemon runs from the same venv:
+    ``sys.prefix``. Building one here could not move the daemon onto it, and
+    when the fingerprint-keyed venv IS this one a rebuild would replace the
+    interpreter this process is running, so the fix is named instead.
+    """
+    reason = venv_lock_drift(_daemon_untracked_dir(project_root).parent, Path(sys.prefix))
+    if reason is None:
+        return
+    for line in venv_lock_drift_lines(reason, daemon_cli_command("repair")):
+        print(line, file=sys.stderr)
 
 
 def cmd_repair(args: argparse.Namespace) -> int:
@@ -2649,10 +2669,26 @@ def _repair_venv_locked(daemon_dir: Path, venv_path: Path, env: dict[str, str]) 
         return 1
     if verify.returncode == 0:
         print("Verification: import claude_code_hooks_daemon OK")
+        _record_repaired_venv_lock(daemon_dir, venv_path)
         return 0
     print("WARNING: Venv repaired but import check failed:")
     print(verify.stderr)
     return 1
+
+
+def _record_repaired_venv_lock(daemon_dir: Path, venv_path: Path) -> None:
+    """Record the lock a repaired venv was synced for, as bash ``ensure_venv`` does.
+
+    Plan 00474 N469: without it the resolver cannot rank the repaired venv
+    first, and the stale-venv advisory that names ``repair`` cannot see that it
+    ran. The venv works either way, so a failure is a warning, not a failed repair.
+    """
+    from claude_code_hooks_daemon.version import __version__
+
+    fingerprint = venv_path.name.removeprefix(_VENV_DIR_PREFIX + "-")
+    error = _write_venv_metadata(venv_path, fingerprint, f"v{__version__}", daemon_dir)
+    if error is not None:
+        print(f"WARNING: venv repaired, but its lock metadata was not written: {error}")
 
 
 # Plan 00099: venv directories that the fingerprint-keyed scheme recognises.
@@ -3574,44 +3610,50 @@ def cmd_write_venv_metadata(args: argparse.Namespace) -> int:
     daemon's startup resolver an authoritative ``python_path`` and a
     ``lock_hash`` to compare against the current project state.
     """
-    venv_path = Path(args.venv_path)
-    if not venv_path.is_dir():
-        print(f"ERROR: venv path does not exist: {venv_path}", file=sys.stderr)
+    project_root = Path(args.project_root) if args.project_root else Path.cwd()
+    error = _write_venv_metadata(
+        Path(args.venv_path), args.fingerprint, args.daemon_version, project_root
+    )
+    if error is not None:
+        print(f"ERROR: {error}", file=sys.stderr)
         return 1
+    return 0
+
+
+def _write_venv_metadata(
+    venv_path: Path, fingerprint: str, daemon_version: str, project_root: Path
+) -> str | None:
+    """Write ``venv_path``'s ``.daemon-metadata.json``; return why not, or ``None``."""
+    if not venv_path.is_dir():
+        return f"venv path does not exist: {venv_path}"
     python_binary = venv_path / "bin" / "python"
     if not python_binary.is_file():
-        print(f"ERROR: no bin/python inside venv: {venv_path}", file=sys.stderr)
-        return 1
-
-    project_root = Path(args.project_root) if args.project_root else Path.cwd()
+        return f"no bin/python inside venv: {venv_path}"
 
     try:
         lock_hash = compute_project_lock_hash(project_root)
     except FileNotFoundError as exc:
-        print(f"ERROR: cannot compute lock hash: {exc}", file=sys.stderr)
-        return 1
+        return f"cannot compute lock hash: {exc}"
 
     written_at = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     try:
         meta = DaemonVenvMetadata(
             python_path=str(python_binary),
-            fingerprint=args.fingerprint,
+            fingerprint=fingerprint,
             lock_hash=lock_hash,
-            daemon_version=args.daemon_version,
+            daemon_version=daemon_version,
             written_at=written_at,
         )
     except PydanticValidationError as exc:
-        print(f"ERROR: metadata failed schema validation: {exc}", file=sys.stderr)
-        return 1
+        return f"metadata failed schema validation: {exc}"
 
     try:
         write_daemon_metadata(venv_path, meta)
     except OSError as exc:
-        print(f"ERROR: failed to write metadata: {exc}", file=sys.stderr)
-        return 1
+        return f"failed to write metadata: {exc}"
 
-    return 0
+    return None
 
 
 def cmd_init_config(args: argparse.Namespace) -> int:

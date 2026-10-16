@@ -2845,13 +2845,21 @@ def _cli_resolve_venv(args: argparse.Namespace) -> int:
     return 1
 
 
+#: ``check-venv-fresh`` exit for a venv PROVEN built for another source: its
+#: metadata is readable and its ``lock_hash`` differs. Spelled again in
+#: ``scripts/install/venv.sh`` (``VENV_LOCK_HASH_STALE_RC``), which must rebuild
+#: such a venv without consulting the legacy stamp (Plan 00474 N469).
+CHECK_VENV_FRESH_EXIT_STALE = 3
+
+
 def _cli_check_venv_fresh(args: argparse.Namespace) -> int:
     """CLI handler for the ``check-venv-fresh`` subcommand.
 
     Plan 00100 Task 3.7 — downgrade safety. Exit 0 when the venv's
     ``.daemon-metadata.json`` records a ``lock_hash`` that matches the
-    current project state; exit 1 otherwise (including the "no metadata
-    present" state — callers fall back to stamp comparison or rebuild).
+    current project state; :data:`CHECK_VENV_FRESH_EXIT_STALE` when it records
+    a different one; exit 1 when nothing is proven (no venv, no usable
+    metadata, no pyproject.toml — callers fall back to stamp comparison).
 
     ``lock_hash`` is the authoritative freshness signal; the legacy
     ``.daemon-version`` stamp only tracks daemon SemVer and must not
@@ -2893,7 +2901,7 @@ def _cli_check_venv_fresh(args: argparse.Namespace) -> int:
         f"current={current_lock_hash[:15]}...)",
         file=sys.stderr,
     )
-    return 1
+    return CHECK_VENV_FRESH_EXIT_STALE
 
 
 # Plan 00517 Task 3.1: the ONE definition of a stale venv. Every caller (the
@@ -2976,6 +2984,49 @@ def classify_venv(
     if metadata["lock_hash"] == current_hash:
         return VENV_KEEP, "lock_hash matches the current source"
     return VENV_STALE, "lock_hash differs from the current source"
+
+
+def venv_lock_drift(daemon_dir: Path | str, venv_dir: Path | str) -> str | None:
+    """Why ``venv_dir`` is not proven built for ``daemon_dir``'s source, or ``None``.
+
+    Plan 00474 N469: the resolver still returns a venv built for an older
+    ``pyproject.toml`` + ``uv.lock`` when none matches the current one, and
+    ``restart`` and a cold start build nothing, so the daemon runs without a
+    dependency the source now needs. Only one of the daemon's own
+    ``untracked/venv*`` directories is judged, and nothing is said when the
+    current lock hash cannot be computed: there is nothing to compare against.
+    """
+    daemon_path = Path(daemon_dir)
+    venv_path = Path(venv_dir)
+    own_untracked = (daemon_path / _UNTRACKED_SUBDIR_NAME).resolve()
+    if venv_path.resolve().parent != own_untracked or not venv_path.name.startswith("venv"):
+        return None
+    current_hash = _compute_project_lock_hash_stdlib(daemon_path)
+    if current_hash is None:
+        return None
+    metadata = _read_venv_metadata_stdlib(venv_path)
+    if metadata is None:
+        return (
+            f"{venv_path} has no usable {_DAEMON_METADATA_FILENAME}, so nothing proves it "
+            "was built for the current pyproject.toml and uv.lock"
+        )
+    if metadata["lock_hash"] == current_hash:
+        return None
+    return (
+        f"{venv_path} was built for lock_hash {metadata['lock_hash'][:19]}, but "
+        f"pyproject.toml and uv.lock now hash to {current_hash[:19]}"
+    )
+
+
+def venv_lock_drift_lines(reason: str, repair_command: str) -> list[str]:
+    """The advisory for a :func:`venv_lock_drift` finding, naming ``repair_command``."""
+    return [
+        f"🚨 DAEMON VENV NOT BUILT FOR THIS SOURCE: {reason}.",
+        "A dependency added or changed since may be missing from the running daemon. "
+        "restart does not build a venv; it reuses this one.",
+        f"Fix: {repair_command} (stops the daemon and syncs the venv for the current "
+        "source; the next hook, or a restart, starts the daemon from it).",
+    ]
 
 
 @dataclass(frozen=True)

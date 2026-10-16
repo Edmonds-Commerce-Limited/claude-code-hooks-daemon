@@ -11,10 +11,16 @@ the facts that decide it (the processes using it, its interpreter and version,
 its age, its slug and the view it belongs to) and the exact command that removes
 it. The agent investigates, and removes a venv only once it has confirmed it is
 safe. Silent when there are none (Lean SessionStart, Plan 00128).
+
+It also says, first, when the venv the daemon itself runs from is not proven
+built for the current ``pyproject.toml`` + ``uv.lock`` (Plan 00474 N469): a
+dependency change followed by ``restart`` or a cold start keeps the old venv,
+and ``repair`` is the command that builds the right one.
 """
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -29,12 +35,14 @@ from claude_code_hooks_daemon.daemon.paths import (
     gather_venv_evidence,
     project_path_slug,
     unproven_report_lines,
+    venv_lock_drift,
+    venv_lock_drift_lines,
 )
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 
 
 class UnprovenVenvAdvisorHandler(SessionStartHandlerBase):
-    """List venvs the code cannot prove stale, with evidence and the removal command."""
+    """Name a running venv built for another lock, and list venvs not proven stale."""
 
     def __init__(self) -> None:
         """Initialise as a non-terminal, silent-when-clean advisory."""
@@ -50,6 +58,8 @@ class UnprovenVenvAdvisorHandler(SessionStartHandlerBase):
         )
         #: Set in tests so the scan needs no initialised ProjectContext.
         self.workspace_root: Path | None = None
+        #: The venv this daemon runs from; set in tests.
+        self.running_venv: Path = Path(sys.prefix)
 
     def _project_root(self) -> Path | None:
         """The project root, or None when the daemon has not initialised one."""
@@ -64,23 +74,30 @@ class UnprovenVenvAdvisorHandler(SessionStartHandlerBase):
         return True
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
-        """Report each UNPROVEN venv with evidence; nothing when there are none."""
+        """Report running-venv lock drift and each UNPROVEN venv; nothing when neither."""
         root = self._project_root()
         if root is None:
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
         daemon_dir = get_untracked_dir(root).parent
+        lines: list[str] = []
+        drift = venv_lock_drift(daemon_dir, self.running_venv)
+        if drift is not None:
+            lines.extend(venv_lock_drift_lines(drift, daemon_cli_command("repair")))
         unproven = [
             verdict.path
             for verdict in classify_untracked_venvs(daemon_dir)
             if verdict.verdict == VENV_UNPROVEN
         ]
-        if not unproven:
-            return AdvisoryResult(decision=Decision.ALLOW, context=[])
-        evidence = gather_venv_evidence(unproven, project_path_slug(daemon_dir))
-        lines = unproven_report_lines(
-            evidence,
-            lambda venv: daemon_cli_command("prune-venvs", "--unproven", str(venv), "--force"),
-        )
+        if unproven:
+            evidence = gather_venv_evidence(unproven, project_path_slug(daemon_dir))
+            lines.extend(
+                unproven_report_lines(
+                    evidence,
+                    lambda venv: daemon_cli_command(
+                        "prune-venvs", "--unproven", str(venv), "--force"
+                    ),
+                )
+            )
         return AdvisoryResult(decision=Decision.ALLOW, context=lines)
 
     def get_acceptance_tests(self) -> list[Any]:

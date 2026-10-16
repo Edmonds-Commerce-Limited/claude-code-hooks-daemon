@@ -4,11 +4,14 @@ Exit-code contract:
 
 - 0 → venv's ``.daemon-metadata.json`` records a ``lock_hash`` that matches
   the current project's ``pyproject.toml`` (+ ``uv.lock``) state.
+- 3 → the metadata is readable and its lock_hash differs: the venv is proven
+  built for another source (Plan 00474 N469), so ``ensure_venv`` rebuilds it
+  without consulting the legacy stamp.
 - 1 → any other state (venv missing, metadata missing/unreadable/wrong-shape,
-  current project has no pyproject.toml, or lock_hashes differ).
+  current project has no pyproject.toml): nothing is proven either way.
 
 The helper is invoked from ``scripts/install/venv.sh::venv_lock_hash_matches``
-before the legacy ``.daemon-version`` stamp check, so correctness of the five
+before the legacy ``.daemon-version`` stamp check, so correctness of the
 branches below directly drives the downgrade-safety fast path.
 """
 
@@ -18,7 +21,10 @@ import argparse
 import json
 from pathlib import Path
 
-from claude_code_hooks_daemon.daemon.paths import _cli_check_venv_fresh
+from claude_code_hooks_daemon.daemon.paths import (
+    CHECK_VENV_FRESH_EXIT_STALE,
+    _cli_check_venv_fresh,
+)
 
 
 def _make_daemon_dir(tmp: Path) -> Path:
@@ -56,13 +62,14 @@ def test_exit_0_when_lock_hash_matches(tmp_path: Path) -> None:
     assert _cli_check_venv_fresh(args) == 0
 
 
-def test_exit_1_when_lock_hash_differs(tmp_path: Path) -> None:
+def test_exit_stale_when_lock_hash_differs(tmp_path: Path) -> None:
     daemon = _make_daemon_dir(tmp_path)
     venv = tmp_path / "venv"
     _make_venv_with_metadata(venv, lock_hash="sha256:" + "0" * 64)
 
     args = argparse.Namespace(venv_path=str(venv), daemon_dir=str(daemon))
-    assert _cli_check_venv_fresh(args) == 1
+    assert CHECK_VENV_FRESH_EXIT_STALE == 3
+    assert _cli_check_venv_fresh(args) == CHECK_VENV_FRESH_EXIT_STALE
 
 
 def test_exit_1_when_venv_dir_missing(tmp_path: Path) -> None:

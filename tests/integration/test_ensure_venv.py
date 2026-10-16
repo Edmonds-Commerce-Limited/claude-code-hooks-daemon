@@ -237,6 +237,55 @@ class TestEnsureVenvDowngradeSafety:
         )
 
 
+class TestEnsureVenvLockChangeBeatsTheStamp:
+    """Plan 00474 N469: a venv proven built for another lock is never reused.
+
+    The legacy ``.daemon-version`` stamp is a fallback for a venv with NO usable
+    metadata. When the metadata is readable and its ``lock_hash`` differs, the
+    venv lacks whatever the dependency change added, whatever the stamp says, so
+    ``ensure_venv`` (every upgrade and every venv build) must rebuild it.
+    """
+
+    def _venv(self, daemon_dir: Path, lock_hash: str | None) -> Path:
+        fp_result = _run_bash(f'python_venv_fingerprint "{sys.executable}" "{daemon_dir}"')
+        venv_dir = daemon_dir / "untracked" / f"venv-{fp_result.stdout.strip()}"
+        (venv_dir / "bin").mkdir(parents=True)
+        (venv_dir / "bin" / "python").symlink_to(sys.executable)
+        (venv_dir / ".daemon-version").write_text("v99.0.0\n")
+        if lock_hash is not None:
+            (venv_dir / ".daemon-metadata.json").write_text(
+                "{"
+                f'"python_path": "{venv_dir / "bin" / "python"}",'
+                f'"lock_hash": "{lock_hash}"'
+                "}"
+            )
+        return venv_dir
+
+    def _verdict(self, daemon_dir: Path, venv_dir: Path) -> str:
+        result = _run_bash(
+            f'if _venv_is_fresh "{daemon_dir}" "{venv_dir}" "v99.0.0"; '
+            "then echo FRESH; else echo STALE; fi"
+        )
+        assert result.returncode == 0, result.stderr
+        return result.stdout.strip()
+
+    def test_stale_lock_hash_is_rebuilt_even_when_the_stamp_matches(self, tmp_path: Path) -> None:
+        daemon_dir = tmp_path / "project"
+        daemon_dir.mkdir()
+        _minimal_daemon_dir(daemon_dir)
+        venv_dir = self._venv(daemon_dir, "sha256:" + "0" * 64)
+
+        assert self._verdict(daemon_dir, venv_dir) == "STALE"
+
+    def test_no_metadata_still_falls_back_to_the_stamp(self, tmp_path: Path) -> None:
+        daemon_dir = tmp_path / "project"
+        daemon_dir.mkdir()
+        _minimal_daemon_dir(daemon_dir)
+        venv_dir = self._venv(daemon_dir, None)
+
+        assert self._verdict(daemon_dir, venv_dir) == "FRESH"
+
+
 class TestEnsureVenvCIGate:
     """CI environments + HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1 must skip the bootstrap.
 
