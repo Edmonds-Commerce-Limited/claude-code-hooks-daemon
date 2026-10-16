@@ -158,6 +158,7 @@ Evidence already seen in this session (2026-10-06), not yet explained:
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/` cover Phase 2 (067 sweeps, 068 config parsed once, 069 registry discovery,
   070 socket bound first). Tasks 1.4, 3.1 and 3.2 change documentation and a release-procedure script that no client
   install receives, so they have no release note.
+- [ ] The branch is merged and the plan archived with its README row (the coordinator's step, after merge).
 
 ## Delivery & Milestones
 

@@ -40,4 +40,7 @@ measured again before the check fails.
 
 ## Final QA
 
-See the verdict line below.
+First run on 240fc6e4d: 36/40 passed; pyright (an `__doc__` possibly None in the budget script), plan_qa
+`header-body-coherence` (every box ticked under In Progress) and `stats-recount` (Active 57 vs 58) failed. Fixed in the
+next commit: `(__doc__ or "")`, an unticked "merged and archived" criterion for the coordinator, and Active 58. The
+journal-freshness advisory names Plan 00477 and is not this plan's.

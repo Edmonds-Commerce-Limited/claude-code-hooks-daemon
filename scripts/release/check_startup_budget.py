@@ -160,7 +160,7 @@ def measure_start_cpu(python: str, project: Path) -> float:
 
 def main(argv: list[str] | None = None) -> int:
     """Measure, compare, print the verdict; return the exit code."""
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     parser.add_argument("--budget-file", type=Path, default=DEFAULT_BUDGET_FILE)
     parser.add_argument("--python", default=sys.executable)
     args = parser.parse_args(argv)
