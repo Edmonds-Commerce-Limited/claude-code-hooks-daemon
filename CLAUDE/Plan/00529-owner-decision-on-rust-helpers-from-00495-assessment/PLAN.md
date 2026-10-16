@@ -18,13 +18,12 @@ that follows whichever way they decide.
 
 The path that is over the performance budget is the secret-file guard's scan of Write and Edit content: about 9 ms per KB,
 so a 115 KB Write spends 1.2 s in that one handler, and a 1.15 MB Write 9.3 s. The assessment recommends a Python fix, not
-a helper. That fix is Task 2 below, to be started once the owner has seen the assessment.
+a helper. That fix is a Python change tracked as ledger N465 and fixed separately, so it is not in this plan.
 
 ## Goals
 
-- The owner decides, from the assessment, on each of its three recommendations.
-- The secret-file guard no longer spends time proportional to the size of content that names no protected path, with its
-  decisions unchanged.
+- The owner decides, from the assessment, on its two recommendations that are theirs: no new native helper, and the relay
+  staying opt-in.
 
 ## Non-Goals
 
@@ -37,23 +36,17 @@ a helper. That fix is Task 2 below, to be started once the owner has seen the as
 ### Phase 1: Decide
 
 - [ ] ⬜ **Task 1**: The owner decides from the assessment. Put to them, with the assessment's recommendation first:
-  (a) commission no new native helper; (b) fix the secret-file guard's linear tokenising in Python (Task 2);
-  (c) leave the relay opt-in, or make it default-on. Record each answer here.
+  (a) commission no new native helper; (b) leave the relay opt-in, or make it default-on. Record each answer here. (The
+  secret-file guard's cost is a Python fix, ledger N465, fixed separately; it is not put to the owner.)
 
 ### Phase 2: Act on the decision
 
-- [ ] ⬜ **Task 2**: If (b): test first with a large Write that names no protected path (must stay under the 100 ms budget),
-  plus every existing decision case unchanged, then a cheap check that a protected path could be present before the guard
-  tokenises the content. Before and after numbers measured with the method in
-  [BASELINE.md](../../Performance/BASELINE.md).
-- [ ] ⬜ **Task 3**: If the owner chose a different answer in Task 1 (a helper, or the relay default-on), file the plan for
+- [ ] ⬜ **Task 2**: If the owner chose a different answer in Task 1 (a helper, or the relay default-on), file the plan for
   it with the assessment as its evidence.
 
 ## Success Criteria
 
-- [ ] The owner's decision on (a), (b) and (c) is recorded in this plan.
-- [ ] If (b) was chosen: a 115 KB Write naming no protected path spends under 100 ms in the secret-file guard, with before
-  and after numbers recorded, and no guard decision changed.
+- [ ] The owner's decision on (a) and (b) is recorded in this plan.
 
 ## Delivery & Milestones
 
