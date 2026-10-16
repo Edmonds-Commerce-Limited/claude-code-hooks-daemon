@@ -406,6 +406,8 @@ PRESENT_VERSION=""
 # name once it is rebound to the live path.
 SYNC_OLD_VENV_NAME=""
 SYNC_NEW_VENV_NAME=""
+# Set when the relocated venv failed its check and was rebuilt in place: why.
+SYNC_VENV_NOTE=""
 
 _provision_clone_git() {
     git -C "$DAEMON_DIR" "$@"
@@ -707,6 +709,32 @@ _provision_rebind_stage_venv() {
     _provision_say "The venv for $TAG was rebound to $live_path (${#files[@]} files named the stage)."
 }
 
+# Can the new daemon run from the venv the swap put in place? init.sh's own
+# pre-start check (validate_venv: the resolver, then the package import), and
+# two facts the swap must have made true: the resolver chose the rebound venv,
+# and the package loads from the live clone's src. Prints why not.
+_provision_venv_healthy() (
+    local expected="$DAEMON_DIR/untracked/$SYNC_NEW_VENV_NAME/bin/python" loaded loaded_dir live_src
+    PYTHON_CMD=""
+    if ! validate_venv; then
+        printf '%s' "$VENV_ERROR"
+        exit 1
+    fi
+    if [[ "$PYTHON_CMD" != "$expected" ]]; then
+        printf 'the resolver chose %s, not the relocated %s' "$PYTHON_CMD" "$expected"
+        exit 1
+    fi
+    if ! loaded="$("$PYTHON_CMD" -c 'import claude_code_hooks_daemon; print(claude_code_hooks_daemon.__file__)')"; then
+        printf 'claude_code_hooks_daemon could not be imported to say where it loads from'
+        exit 1
+    fi
+    live_src="$(cd "$DAEMON_DIR/src" && pwd -P)" || exit 1
+    if ! loaded_dir="$(cd "${loaded%/*}" && pwd -P)" || [[ "$loaded_dir/" != "$live_src/"* ]]; then
+        printf 'claude_code_hooks_daemon loads from %s, not from %s' "$loaded" "$live_src"
+        exit 1
+    fi
+)
+
 # Swap the staged target in for the live clone and start its daemon; the old
 # clone goes only once the new daemon answers. See "The switch to another
 # version" above for the renames, and _provision_recover_switch for their undo.
@@ -759,6 +787,21 @@ _provision_switch() {
         || ! _provision_rename_onto_live "$SYNC_ASIDE_DIR/untracked/$SYNC_STAGE_DIR_NAME" \
         || ! _provision_rename "$SYNC_ASIDE_DIR" "$SYNC_PREVIOUS_DIR"; then
         _provision_sync_abort "could not swap the staged $TAG in for the clone."
+    fi
+
+    # The rebind is proven on the uv of today only: a path a later uv writes
+    # where a text rewrite cannot see it fails this check, and the venv is then
+    # rebuilt in place by the clone's own build path, with the daemon down.
+    local unhealthy rebuilt_unhealthy=""
+    if ! unhealthy="$(_provision_venv_healthy)"; then
+        _provision_say "The relocated venv failed its check: $unhealthy"
+        _provision_say "Rebuilding it in place with the clone's scripts/venv_bootstrap.sh (the daemon stays down meanwhile) ..."
+        rm -rf -- "$live_untracked/${SYNC_NEW_VENV_NAME:?}"
+        if ! bash "$DAEMON_DIR/scripts/venv_bootstrap.sh" repair "$DAEMON_DIR" \
+            || ! rebuilt_unhealthy="$(_provision_venv_healthy)"; then
+            _provision_sync_abort "the relocated venv failed its check ($unhealthy), and rebuilding it in place failed${rebuilt_unhealthy:+ ($rebuilt_unhealthy)}."
+        fi
+        SYNC_VENV_NOTE="the relocated venv failed its check ($unhealthy) and was rebuilt in place"
     fi
 
     # restart returns 0 once the started daemon answers on its socket; its PID
@@ -837,6 +880,9 @@ _provision_sync_clone() {
 
     _provision_say ""
     _provision_say "SYNCED: the hooks daemon moved from v$PRESENT_VERSION to $TAG and was restarted."
+    if [[ -n "$SYNC_VENV_NOTE" ]]; then
+        _provision_say "Note: $SYNC_VENV_NOTE."
+    fi
     _provision_say "No tracked file was changed."
 }
 
@@ -909,7 +955,8 @@ _provision_background_finish() {
     local rc="$1"
     case "$rc" in
         0)
-            _provision_background_record synced "moved from v$PRESENT_VERSION to $TAG and restarted"
+            _provision_background_record synced \
+                "moved from v$PRESENT_VERSION to $TAG and restarted${SYNC_VENV_NOTE:+; $SYNC_VENV_NOTE}"
             ;;
         "$GATE_NEEDS_ACKNOWLEDGEMENT")
             _provision_background_record needs-reading \

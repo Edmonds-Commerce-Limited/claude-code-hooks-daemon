@@ -115,6 +115,26 @@ Then: the marker is removed, a background record left `running` by a dead pid be
 
 Result: `tests/integration/test_provision_sh.py` and `tests/unit/install/test_background_sync.py` 85 passed.
 
+## Review round 3: the relocated venv is checked, and rebuilt when it fails
+
+The rebind is proven on today's uv only. A later uv that writes the build path into a binary, or into a file the rewrite misses, would otherwise go unnoticed until the new daemon failed to start. So the venv is now checked after the swap and before that start (`_provision_venv_healthy`, in `_provision_switch`):
+
+1. **init.sh's own pre-start check, reused.** `validate_venv` is what `start_daemon` runs before it starts a daemon: the canonical resolver (`_resolve_python_cmd` -> `resolve_venv.sh`), then `python -c "import claude_code_hooks_daemon"`. It runs in a subshell with `PYTHON_CMD` cleared, so the resolver runs afresh against the swapped-in clone.
+2. **The resolver/fingerprint check.** The interpreter the resolver chose must be the rebound venv, `<live>/untracked/venv-<live fingerprint>/bin/python`, and not the old venv or another view's.
+3. **The package loads from the live `src`.** The package's `__file__`, resolved physically, must lie under `<live>/src`.
+
+**If the check fails,** the venv is removed and rebuilt in place by the clone's own `scripts/venv_bootstrap.sh repair <live>`, with the daemon down. The old venv is safe in `untracked/sync-previous`. The rebuilt venv must pass the same check. The outcome records the fallback and its reason. The background record becomes `synced` with "...; the relocated venv failed its check (<reason>) and was rebuilt in place", and a manual run prints it as a `Note:` under `SYNCED`.
+
+**If the rebuild fails, or the rebuilt venv fails the check,** the sync aborts through the existing rollback: the swap is undone and the old daemon is started again. The failure reason names both the check's reason and the failed rebuild, and a background run records it as `failed`.
+
+Tests (`TestARelocatedVenvThatFailsItsCheckIsRebuilt`). The red run (`untracked/scratch/red-r3.txt`) had 2 failures: the sync ended in "the daemon did not start" and no rebuild was attempted.
+
+- **Setup.** The stub uv's new `binary_pth` writes the editable `.pth` with a NUL byte. To `grep -I` it is binary, so the rebind leaves it naming the stage. This is exactly the case of "a path written where a text rewrite cannot see it".
+- **Stub interpreter.** The stub `bin/python` now reads `.pth` files as Python does for a `-c` that imports the package. A `.pth` that names a directory that does not exist makes the import fail, and `__file__` is under the directory the `.pth` names. A `-c` that does not touch the package is unaffected, as with real Python.
+- `test_a_path_the_rebind_cannot_see_is_rebuilt_and_the_sync_completes` (background). It ends on the new version with one in-place build. The rebuilt `.pth` names `<live>/src`. The record is `synced` and says "rebuilt" and "Cannot import". The new daemon is started once.
+- `test_a_rebuild_that_fails_too_ends_on_the_old_version` (background, with every in-place build failing). It ends on the old version. The live clone is byte-identical to before. The old daemon is started again. The record is `failed` and says "rebuilding" and "Cannot import".
+- All nine test files built on the sandbox, plus the background_sync unit tests: 219 passed. The session-start end-to-end test now builds with `embed_build_paths` so its venv carries the `.pth` the check reads.
+
 ## Superseded: the in-place switch (`cd8b8e315`)
 
 Everything in this section was replaced by review round 2, above. It is kept for the record of the previous decision.

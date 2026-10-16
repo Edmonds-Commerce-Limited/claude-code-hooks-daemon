@@ -186,8 +186,9 @@ class Provisioning:
         uv_fails: bool = False,
         uv_wrapper: str | None = None,
         cli_hook: str | None = None,
+        binary_pth: bool = False,
     ) -> subprocess.CompletedProcess[str]:
-        self.box.stub_uv(fail=uv_fails, embed_build_paths=True)
+        self.box.stub_uv(fail=uv_fails, embed_build_paths=True, binary_pth=binary_pth)
         if uv_wrapper is not None:
             self._wrap_uv(uv_wrapper)
         hook_env = {} if cli_hook is None else {"SANDBOX_CLI_HOOK": cli_hook}
@@ -895,6 +896,60 @@ class TestTheSwitchIsADirectorySwap:
         assert _no_switch_left(fresh)
 
 
+#: A uv wrapper that fails every build outside the stage: the in-place rebuild.
+FAIL_IN_PLACE_BUILDS = (
+    f'case "$UV_PROJECT_ENVIRONMENT" in */{STAGE_DIR_NAME}/*) ;; '
+    '*) echo "error: simulated failure of the in-place rebuild" >&2; exit 2 ;; esac'
+)
+
+
+def _in_place_builds(p: Provisioning) -> list[str]:
+    return [call for call in p.box.uv_calls() if f"/{STAGE_DIR_NAME}/" not in call]
+
+
+class TestARelocatedVenvThatFailsItsCheckIsRebuilt:
+    """The relocated venv is checked before the new daemon starts; a failure rebuilds it."""
+
+    def test_a_path_the_rebind_cannot_see_is_rebuilt_and_the_sync_completes(
+        self, fresh: Provisioning
+    ) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(MAIN_VERSION)
+        in_place_before = len(_in_place_builds(fresh))
+
+        result = fresh.provision(args=BACKGROUND, binary_pth=True)
+
+        assert result.returncode == 0, _out(result)
+        assert fresh.clone_version() == MAIN_VERSION
+        assert len(_in_place_builds(fresh)) == in_place_before + 1, "rebuilt in place, once"
+        venv = fresh.clone / "untracked" / f"venv-{python_venv_fingerprint(fresh.clone)}"
+        pth = venv / UV_SITE_PACKAGES / UV_EDITABLE_PTH
+        assert pth.read_bytes().startswith(f"{fresh.clone}/src\n".encode())
+        state = _state(fresh, MAIN_VERSION)
+        assert state["status"] == "synced"
+        assert "rebuilt" in state["detail"] and "Cannot import" in state["detail"]
+        assert fresh.starts() == 2, "the new daemon was started once"
+        assert _no_switch_left(fresh)
+
+    def test_a_rebuild_that_fails_too_ends_on_the_old_version(self, fresh: Provisioning) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        _with_daemon_state(fresh)
+        before = _live_state(fresh.clone)
+        fresh.expect(MAIN_VERSION)
+
+        result = fresh.provision(args=BACKGROUND, binary_pth=True, uv_wrapper=FAIL_IN_PLACE_BUILDS)
+
+        assert result.returncode != 0
+        assert fresh.clone_version() == CLONE_VERSION
+        assert _live_state(fresh.clone) == before
+        assert fresh.box.resolves()
+        assert fresh.starts() == 2, "the new daemon never started; the old one was started again"
+        state = _state(fresh, MAIN_VERSION)
+        assert state["status"] == "failed"
+        assert "rebuilding" in state["detail"] and "Cannot import" in state["detail"]
+        assert _no_switch_left(fresh)
+
+
 def _kill_provision(p: Provisioning) -> str:
     """Kill the provision that holds the switch marker, as a reboot would."""
     return f'kill -9 "$(cat "{p.clone}/untracked/{SWITCH_MARKER_NAME}")"'
@@ -1269,7 +1324,7 @@ class TestTheSessionStartHookStartsIt:
         _provisioned_at(fresh, CLONE_VERSION)
         fresh.expect(MAIN_VERSION)
         forwarder = _deploy_session_start(fresh)
-        fresh.box.stub_uv(sleep=SLOW_BUILD_SECONDS)
+        fresh.box.stub_uv(sleep=SLOW_BUILD_SECONDS, embed_build_paths=True)
 
         hook = subprocess.run(
             [BASH, str(forwarder)],

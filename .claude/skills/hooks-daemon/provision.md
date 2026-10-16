@@ -63,7 +63,11 @@ Otherwise, for a newer or an older expected version:
    `.daemon-metadata.json`) names the live path instead. A failure up to here
    changes nothing and never stops the running daemon.
 5. Then the switch. It stops the old daemon, moves the daemon's state under
-   `untracked/` into the stage, and swaps the stage in by renames. The old
+   `untracked/` into the stage, and swaps the stage in by renames. Before the
+   new daemon starts, the moved venv must pass init.sh's own pre-start check,
+   resolve as the live venv and import the package from the live `src`; if it
+   does not, it is rebuilt in place by the clone's own build script (the daemon
+   stays down meanwhile) and the outcome says so. The old
    clone is kept at `untracked/sync-previous` until the new daemon, started with
    `bin/hooks-daemon restart`, answers; then it is removed. Until then, a hook
    that would start a daemon answers "the daemon is starting; retry". A failure

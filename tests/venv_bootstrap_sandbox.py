@@ -177,6 +177,7 @@ class Sandbox:
         fail: bool = False,
         in_uv_home: bool = False,
         embed_build_paths: bool = False,
+        binary_pth: bool = False,
     ) -> None:
         """Put a `uv` on PATH that builds (or fails to build) a usable venv.
 
@@ -188,7 +189,8 @@ class Sandbox:
         install's ``.pth`` naming ``<project>/src``, its ``direct_url.json``, a
         console script whose shebang names the venv's interpreter, and an
         activate script. A venv is bound to the path it was built at by exactly
-        these files.
+        these files. With ``binary_pth`` the ``.pth`` also carries a NUL byte,
+        so a text-file rewrite skips it.
 
         The stub's ``bin/python`` runs ``$SANDBOX_CLI_HOOK`` (bash, given the
         CLI verb as ``$1``) before any daemon CLI call when it is set; a hook
@@ -231,10 +233,33 @@ class Sandbox:
                 rm -f "$CLAUDE_HOOKS_PID_PATH" "$CLAUDE_HOOKS_SOCKET_PATH"
                 exit 0
             fi
+            # An editable install's .pth, as Python reads it: a directory it
+            # names that does not exist leaves the package unimportable (and
+            # nothing else), and the package's __file__ is under the directory
+            # it names.
+            if [ "${{1:-}}" = "-c" ] && [[ "${{2:-}}" == *claude_code_hooks_daemon* ]]; then
+                for pth in "$(dirname "$0")/../{UV_SITE_PACKAGES}"/*.pth; do
+                    [ -f "$pth" ] || continue
+                    dir="$(head -n 1 "$pth" | tr -d '\\0')"
+                    if [ ! -d "$dir" ]; then
+                        echo "ModuleNotFoundError: No module named 'claude_code_hooks_daemon' ($pth names $dir)" >&2
+                        exit 1
+                    fi
+                    case "${{2:-}}" in
+                        *claude_code_hooks_daemon.__file__*)
+                            echo "$dir/claude_code_hooks_daemon/__init__.py"
+                            exit 0
+                            ;;
+                    esac
+                done
+            fi
             exec "{sys.executable}" "$@"
             """)
         template = self.root / "venv-python.template"
         template.write_text(venv_python)
+        # A NUL byte makes the .pth binary to grep -I: a path written where a
+        # text rewrite cannot see it, as a future uv might.
+        pth_tail = "\\0" if binary_pth else ""
         embed = textwrap.dedent(f"""\
             project=""
             while [ "$#" -gt 0 ]; do
@@ -244,7 +269,7 @@ class Sandbox:
             venv="$UV_PROJECT_ENVIRONMENT"
             site="$venv/{UV_SITE_PACKAGES}"
             mkdir -p "$site/{UV_DIST_INFO}"
-            printf '%s/src\\n' "$project" > "$site/{UV_EDITABLE_PTH}"
+            printf '%s/src\\n{pth_tail}' "$project" > "$site/{UV_EDITABLE_PTH}"
             printf '{{"url":"file://%s","dir_info":{{"editable":true}}}}' "$project" \\
                 > "$site/{UV_DIST_INFO}/direct_url.json"
             printf '#!%s/bin/python\\nimport sys\\n' "$venv" > "$venv/{UV_CONSOLE_SCRIPT}"
