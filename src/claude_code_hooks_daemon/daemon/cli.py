@@ -953,7 +953,7 @@ def _start_under_launch_lock(
         controller,
         start_lock_waiting=reporter.start_lock_waiting,
         serving=launch.release,
-        deferred_startup=controller.run_deferred_startup,
+        deferred_startup=controller.take_deferred_startup(),
     )
 
     # Write socket discovery file so bash hook forwarders (init.sh)
@@ -3978,7 +3978,7 @@ def _build_initialised_controller(
             branch never carries an auto-committed block that conflicts with
             main's on merge; the explicit ``regenerate-docs`` passes True.
         defer_nonessential_startup: Leave the CLAUDE.md regeneration, the asset
-            syncs and the index pre-warm for ``controller.run_deferred_startup``.
+            syncs and the index pre-warm for ``controller.take_deferred_startup``.
             Only the serving daemon passes True, so it can bind its socket first.
 
     Returns:

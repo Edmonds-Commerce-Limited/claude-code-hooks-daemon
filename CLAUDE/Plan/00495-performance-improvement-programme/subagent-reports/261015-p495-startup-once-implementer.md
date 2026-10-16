@@ -28,7 +28,8 @@ Worktree `/workspace/untracked/worktrees/worktree-p495-startup-once/`, branch `w
 5. `yaml_loading.safe_load_yaml` builds the loader itself (`select_safe_loader()(stream).get_single_data()`), not through
    `yaml.load`, because the security hook blocks the text `yaml.load(` in `src/`. Same safe loader classes either way.
 6. A small fix to `yaml_loading.py` (`cast("Any", ...)`, ruff TC006) rides in the Task 2.5 commit, since Task 2.2 had already
-   been committed when ruff flagged it.
+   been committed when ruff flagged it. Later QA fixes (magic timeouts in the new test, moving the per-step catch to the
+   server) are in a fifth commit on the branch, hash in the coordinator reply.
 
 ## 2. What changed
 
@@ -42,10 +43,13 @@ Worktree `/workspace/untracked/worktrees/worktree-p495-startup-once/`, branch `w
 - **2.3**: `handlers/registry.py` `_DISCOVERY_CACHE` per package path, `clear_discovery_cache()`. Only a package that imported
   is stored. `tests/unit/handlers/test_registry.py` got an autouse fixture clearing the cache, because its mocked-discovery
   tests would otherwise be answered from, or poison, the real package's entry.
-- **2.5**: `initialise(defer_nonessential_startup=True)` stores the four steps; `DaemonController.run_deferred_startup()` runs
-  them once, each fail-open; `HooksDaemon(deferred_startup=...)` runs it in the default executor after `started_event` and
-  `serving`, and exposes `deferred_startup_done`. `cmd_start` passes the flag and the callable and no longer calls
-  `prewarm_indexes` itself.
+- **2.5**: `initialise(defer_nonessential_startup=True)` stores the four steps; `DaemonController.take_deferred_startup()` hands
+  them over once as `(description, step)` pairs; `HooksDaemon(deferred_startup=...)` runs them in the default executor after
+  `started_event` and `serving`, each in its own try/except (a failing step is logged at ERROR and the rest run), and exposes
+  `deferred_startup_done`. `cmd_start` passes the flag and the steps and no longer calls `prewarm_indexes` itself. The
+  per-step catch lives in `server.py`, not the controller: the fail-open inventory checker scans `daemon/controller.py` and
+  flagged a first version that caught inside `run_deferred_startup`, and fixing it by adding a row to
+  `scripts/qa/fail-open-boundaries.yaml` would have been an allowlist entry, which the handover forbids.
 
 ## 3. TDD: red output before the code
 

@@ -24,7 +24,7 @@ import stat
 import struct
 import sys
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -1220,7 +1220,7 @@ class HooksDaemon:
         idle_check_interval: int = 60,
         start_lock_waiting: Callable[[bool], None] | None = None,
         serving: Callable[[], None] | None = None,
-        deferred_startup: Callable[[], None] | None = None,
+        deferred_startup: Sequence[tuple[str, Callable[[], object]]] = (),
     ) -> None:
         """Initialise hooks daemon.
 
@@ -1232,10 +1232,11 @@ class HooksDaemon:
                 lock another start holds, and False once it has the lock
             serving: Called once ``start`` has bound and published the
                 daemon, which ends the start
-            deferred_startup: Start-up work that does not change how a request
-                is answered. ``start`` runs it in a worker thread once the
-                socket is bound, so requests are served while it runs. A
-                failure is logged and the daemon keeps serving.
+            deferred_startup: ``(description, step)`` pairs of start-up work that
+                does not change how a request is answered. ``start`` runs them
+                in a worker thread once the socket is bound, so requests are
+                served while they run. A step that fails is logged and the
+                rest still run; the daemon keeps serving.
         """
         self.config = config
         self.controller = controller
@@ -1522,19 +1523,24 @@ class HooksDaemon:
         logger.info("Daemon shutdown complete")
 
     async def _run_deferred_startup(self) -> None:
-        """Run the deferred start-up work in a worker thread, then say it is done."""
+        """Run the deferred start-up steps in a worker thread, then say they are done."""
         try:
-            if self._deferred_startup is not None:
-                await asyncio.get_running_loop().run_in_executor(None, self._deferred_startup)
-        except Exception as exc:
-            log_and_continue(
-                logger,
-                exc,
-                reason="deferred start-up work only maintains files and warms caches; its failure must not stop the daemon serving hooks",
-                level=logging.ERROR,
-            )
+            await asyncio.get_running_loop().run_in_executor(None, self._run_deferred_steps)
         finally:
             self.deferred_startup_done.set()
+
+    def _run_deferred_steps(self) -> None:
+        """Run each deferred step, logging one that fails and carrying on with the rest."""
+        for description, step in self._deferred_startup:
+            try:
+                step()
+            except Exception as exc:
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason=f"the deferred start-up step '{description}' only maintains files and warms caches; its failure must not stop the daemon serving hooks, and the next restart retries it",
+                    level=logging.ERROR,
+                )
 
     @staticmethod
     def _ensure_scratch_dir_best_effort() -> None:

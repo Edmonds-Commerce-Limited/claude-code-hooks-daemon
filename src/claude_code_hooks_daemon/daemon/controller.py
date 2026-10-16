@@ -297,7 +297,7 @@ class DaemonController:
                 asset syncs instead of each reading the file again.
             defer_nonessential_startup: Hold back the CLAUDE.md regeneration, the
                 two asset syncs and the guard-index pre-warm, none of which
-                changes how a request is judged, for ``run_deferred_startup``.
+                changes how a request is judged, for ``take_deferred_startup``.
                 The serving daemon passes True so it can bind its socket
                 first; the default runs them here, as one-shot callers expect.
 
@@ -458,26 +458,18 @@ class DaemonController:
             sync_agent_assets()
             sync_directory_role_rules()
 
-    def run_deferred_startup(self) -> None:
-        """Run the start-up steps ``initialise`` held back, once.
+    def take_deferred_startup(self) -> list[tuple[str, Callable[[], object]]]:
+        """Hand over, once, the start-up steps ``initialise`` held back.
 
-        Called by the serving daemon after its socket is bound. Each step is
-        best-effort here, as the asset syncs always were: one raising is
-        logged at ERROR and the rest still run, because none of them changes
-        how a request is judged and the daemon must keep serving. A second
-        call finds nothing left to run.
+        The serving daemon runs them after its socket is bound, each as its own
+        best-effort step. A second call finds nothing left.
+
+        Returns:
+            ``(description, step)`` pairs in the order they should run; empty
+            when ``initialise`` was not asked to defer, or they were taken.
         """
         steps, self._deferred_startup = self._deferred_startup, []
-        for description, step in steps:
-            try:
-                step()
-            except Exception as exc:
-                log_and_continue(
-                    logger,
-                    exc,
-                    reason=f"the deferred start-up step '{description}' only maintains files and warms caches; its failure must not stop the daemon serving hooks, and the next restart retries it",
-                    level=logging.ERROR,
-                )
+        return steps
 
     def prewarm_indexes(self) -> list[str]:
         """Start each guard's protected-file index build, so the first search is judged sooner.

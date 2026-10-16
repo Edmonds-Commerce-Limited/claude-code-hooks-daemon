@@ -62,7 +62,11 @@ def short_dir() -> Iterator[Path]:
 
 
 def _initialise(project: Path, *, defer: bool) -> tuple[DaemonController, dict[str, MagicMock]]:
-    """Initialise a controller with the three deferrable steps replaced by spies."""
+    """Initialise a controller with the three file steps replaced by spies.
+
+    With ``defer`` the held-back steps are taken and run, after checking that
+    none of them ran inside ``initialise``.
+    """
     spies = {"inject": MagicMock(), "agents": MagicMock(), "rules": MagicMock()}
     injector = MagicMock()
     injector.return_value.inject = spies["inject"]
@@ -81,20 +85,22 @@ def _initialise(project: Path, *, defer: bool) -> tuple[DaemonController, dict[s
         if defer:
             for spy in spies.values():
                 assert spy.call_count == 0, "a deferred step ran inside initialise"
-            controller.run_deferred_startup()
+            for _description, step in controller.take_deferred_startup():
+                step()
     return controller, spies
 
 
 class TestControllerDefersNonessentialStartup:
-    """``initialise(defer_nonessential_startup=True)`` holds three steps back."""
+    """``initialise(defer_nonessential_startup=True)`` holds four steps back."""
 
     def test_default_runs_every_step_inside_initialise(self, project: Path) -> None:
         """Without the flag, behaviour is unchanged: the steps run in initialise."""
-        _controller, spies = _initialise(project, defer=False)
+        controller, spies = _initialise(project, defer=False)
         assert [spy.call_count for spy in spies.values()] == [1, 1, 1]
+        assert controller.take_deferred_startup() == []
 
-    def test_deferred_steps_run_when_asked(self, project: Path) -> None:
-        """Held back by initialise, each step runs exactly once afterwards."""
+    def test_deferred_steps_run_when_taken(self, project: Path) -> None:
+        """Held back by initialise, each step runs exactly once when it is run."""
         _controller, spies = _initialise(project, defer=True)
         assert [spy.call_count for spy in spies.values()] == [1, 1, 1]
 
@@ -110,48 +116,25 @@ class TestControllerDefersNonessentialStartup:
             )
         assert controller.is_degraded is True
 
-    def test_running_the_deferred_work_twice_does_it_once(self, project: Path) -> None:
-        """A second call finds nothing left to do."""
-        controller, spies = _initialise(project, defer=True)
-        controller.run_deferred_startup()
-        assert [spy.call_count for spy in spies.values()] == [1, 1, 1]
+    def test_steps_can_be_taken_only_once(self, project: Path) -> None:
+        """A second take finds nothing left."""
+        controller, _spies = _initialise(project, defer=True)
+        assert controller.take_deferred_startup() == []
 
-    def test_deferred_work_includes_the_index_prewarm(self, project: Path) -> None:
-        """The pre-warm that used to run before binding runs with the deferred work."""
+    def test_steps_are_the_prewarm_then_the_three_file_steps(self, project: Path) -> None:
+        """The pre-warm that used to run before binding leads the deferred steps."""
         controller = DaemonController()
-        with (
-            patch("claude_code_hooks_daemon.daemon.controller.ClaudeMdInjector"),
-            patch.object(DaemonController, "prewarm_indexes") as prewarm,
-        ):
+        with patch("claude_code_hooks_daemon.daemon.controller.ClaudeMdInjector"):
             controller.initialise(
                 handler_config={}, workspace_root=project, defer_nonessential_startup=True
             )
-            prewarm.assert_not_called()
-            controller.run_deferred_startup()
-        prewarm.assert_called_once_with()
-
-    def test_a_failing_step_does_not_stop_the_others(
-        self, project: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """One deferred step raising is logged and the remaining steps still run."""
-        controller = DaemonController()
-        agents, rules = MagicMock(), MagicMock()
-        injector = MagicMock()
-        injector.return_value.inject.side_effect = RuntimeError("injector broke")
-        with (
-            patch("claude_code_hooks_daemon.daemon.controller.ClaudeMdInjector", injector),
-            patch.object(DaemonController, "_sync_agent_assets", agents),
-            patch.object(DaemonController, "_sync_directory_role_rules", rules),
-            patch.object(DaemonController, "prewarm_indexes"),
-            caplog.at_level("ERROR"),
-        ):
-            controller.initialise(
-                handler_config={}, workspace_root=project, defer_nonessential_startup=True
-            )
-            controller.run_deferred_startup()
-        assert agents.call_count == 1
-        assert rules.call_count == 1
-        assert "injector broke" in caplog.text
+        descriptions = [description for description, _step in controller.take_deferred_startup()]
+        assert descriptions == [
+            "guard-index pre-warm",
+            "CLAUDE.md guidance injection",
+            "agent-asset sync",
+            "directory-role-rules sync",
+        ]
 
 
 class TestBuilderPassesTheFlag:
@@ -202,7 +185,7 @@ class TestRequestsDuringDeferredStartup:
     async def test_request_is_answered_correctly_while_deferred_work_is_blocked(
         self, project: Path, short_dir: Path
     ) -> None:
-        """A destructive command is denied, as after start-up, with the deferred work still running."""
+        """A destructive command is denied, as after start-up, with the deferred work running."""
         controller = _build_initialised_controller(
             Config.find_and_load(project), project, defer_nonessential_startup=True
         )
@@ -210,22 +193,26 @@ class TestRequestsDuringDeferredStartup:
 
         def blocked_deferred_work() -> None:
             entered.set()
-            assert release.wait(timeout=30), "the test never released the deferred work"
+            assert release.wait(timeout=Timeout.DAEMON_STARTUP), "the test never released it"
 
         daemon = HooksDaemon(
-            _daemon_config(short_dir), controller, deferred_startup=blocked_deferred_work
+            _daemon_config(short_dir),
+            controller,
+            deferred_startup=[("blocked", blocked_deferred_work)],
         )
         server_task = asyncio.create_task(daemon.start())
         try:
             await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
-            await asyncio.to_thread(entered.wait, 30)
+            await asyncio.to_thread(entered.wait, Timeout.DAEMON_STARTUP)
             assert not daemon.deferred_startup_done.is_set()
 
             during = await _round_trip(short_dir / "d.sock", DESTRUCTIVE_GIT_REQUEST)
 
             assert not daemon.deferred_startup_done.is_set()
             release.set()
-            await asyncio.wait_for(daemon.deferred_startup_done.wait(), timeout=30)
+            await asyncio.wait_for(
+                daemon.deferred_startup_done.wait(), timeout=Timeout.DAEMON_STARTUP
+            )
             after = await _round_trip(short_dir / "d.sock", DESTRUCTIVE_GIT_REQUEST)
         finally:
             release.set()
@@ -242,41 +229,54 @@ class TestRequestsDuringDeferredStartup:
     ) -> None:
         """When the deferred work begins, the daemon is already published as serving."""
         observed: list[bool] = []
-        done = threading.Event()
 
         def deferred_work() -> None:
             observed.append((short_dir / "d.sock").exists())
-            done.set()
 
-        daemon = HooksDaemon(_daemon_config(short_dir), MagicMock(), deferred_startup=deferred_work)
+        daemon = HooksDaemon(
+            _daemon_config(short_dir), MagicMock(), deferred_startup=[("observe", deferred_work)]
+        )
         server_task = asyncio.create_task(daemon.start())
         try:
             await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
-            await asyncio.wait_for(daemon.deferred_startup_done.wait(), timeout=30)
+            await asyncio.wait_for(
+                daemon.deferred_startup_done.wait(), timeout=Timeout.DAEMON_STARTUP
+            )
         finally:
             await daemon.shutdown()
             await server_task
         assert observed == [True]
 
     @pytest.mark.anyio
-    async def test_failing_deferred_work_leaves_the_daemon_serving(self, short_dir: Path) -> None:
-        """An exception in the deferred work is logged; the daemon keeps serving."""
+    async def test_a_failing_step_is_logged_and_the_rest_still_run(self, short_dir: Path) -> None:
+        """One step raising does not stop the next, nor the daemon serving."""
         failure = RuntimeError("deferred work failed")
+        later_steps: list[str] = []
 
         def failing_work() -> None:
             raise failure
 
-        daemon = HooksDaemon(_daemon_config(short_dir), MagicMock(), deferred_startup=failing_work)
+        daemon = HooksDaemon(
+            _daemon_config(short_dir),
+            MagicMock(),
+            deferred_startup=[
+                ("failing", failing_work),
+                ("later", lambda: later_steps.append("ran")),
+            ],
+        )
         server_task = asyncio.create_task(daemon.start())
         try:
             with patch("claude_code_hooks_daemon.daemon.server.log_and_continue") as logged:
                 await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
-                await asyncio.wait_for(daemon.deferred_startup_done.wait(), timeout=30)
+                await asyncio.wait_for(
+                    daemon.deferred_startup_done.wait(), timeout=Timeout.DAEMON_STARTUP
+                )
             assert not server_task.done()
         finally:
             await daemon.shutdown()
             await server_task
         assert logged.call_args.args[1] is failure
+        assert later_steps == ["ran"]
 
     @pytest.mark.anyio
     async def test_no_deferred_work_still_sets_the_done_event(self, short_dir: Path) -> None:
@@ -285,7 +285,9 @@ class TestRequestsDuringDeferredStartup:
         server_task = asyncio.create_task(daemon.start())
         try:
             await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
-            await asyncio.wait_for(daemon.deferred_startup_done.wait(), timeout=30)
+            await asyncio.wait_for(
+                daemon.deferred_startup_done.wait(), timeout=Timeout.DAEMON_STARTUP
+            )
         finally:
             await daemon.shutdown()
             await server_task
