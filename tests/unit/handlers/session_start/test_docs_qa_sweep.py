@@ -6,17 +6,22 @@ the SWEEP-stage catalogue, and injects ONE compact advisory. Silent when
 the corpus is clean; new sessions only.
 """
 
+import threading
 from pathlib import Path
 from unittest.mock import patch
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy, DocumentationQaPolicy
+from claude_code_hooks_daemon.docs_qa.runner import run_stage
 from claude_code_hooks_daemon.handlers.session_start.docs_qa_sweep import DocsQaSweepHandler
 
 
 def _handler(policy: DocumentationPolicy | None = None) -> DocsQaSweepHandler:
     handler = DocsQaSweepHandler()
     handler._documentation = policy if policy is not None else DocumentationPolicy(enabled=True)
+    # A cold sweep is awaited in full so these tests are not timing-dependent;
+    # TestSweepCache sets it to zero where the pending path is the point.
+    handler._sweep_wait_seconds = 60.0
     return handler
 
 
@@ -146,3 +151,92 @@ class TestProjectExcludePaths:
         content = DocsQaSweepHandler().get_claude_md()
         assert content is not None
         assert "daemon.exclude_paths" in content
+
+
+_RUN_STAGE = "claude_code_hooks_daemon.handlers.session_start.docs_qa_sweep.run_stage"
+
+
+class TestSweepCache:
+    """Plan 00495 Task 2.6: the sweep is cached by input fingerprint, off the chain."""
+
+    def _handle(self, handler: DocsQaSweepHandler, root: Path) -> list[str]:
+        patches = _patched_context(root, root / "untracked")
+        with patches[0], patches[1]:
+            return handler.handle({"source": "startup"}).context
+
+    def test_unchanged_inputs_reuse_the_cached_report(self, tmp_path: Path) -> None:
+        (tmp_path / "CLAUDE").mkdir()
+        (tmp_path / "CLAUDE" / "X.md").write_text("See [missing](Nope.md).\n")
+        handler = _handler()
+        with patch(_RUN_STAGE, wraps=run_stage) as sweep:
+            first = self._handle(handler, tmp_path)
+            second = self._handle(handler, tmp_path)
+        assert first
+        assert second == first
+        assert sweep.call_count == 1
+
+    def test_editing_a_scanned_file_invalidates_the_cache(self, tmp_path: Path) -> None:
+        (tmp_path / "CLAUDE").mkdir()
+        doc = tmp_path / "CLAUDE" / "X.md"
+        doc.write_text("# clean\n")
+        handler = _handler()
+        assert self._handle(handler, tmp_path) == []
+
+        doc.write_text("See [missing](Nope.md).\n")
+
+        assert "pointer-resolves" in "\n".join(self._handle(handler, tmp_path))
+
+    def test_fixing_drift_clears_the_cached_report(self, tmp_path: Path) -> None:
+        (tmp_path / "CLAUDE").mkdir()
+        doc = tmp_path / "CLAUDE" / "X.md"
+        doc.write_text("See [missing](Nope.md).\n")
+        handler = _handler()
+        assert self._handle(handler, tmp_path)
+
+        doc.write_text("# clean\n")
+
+        assert self._handle(handler, tmp_path) == []
+
+    def test_removing_a_linked_non_markdown_file_surfaces_the_dead_link(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "CLAUDE").mkdir()
+        (tmp_path / "CLAUDE" / "X.md").write_text("See [tool](../tool.py).\n")
+        target = tmp_path / "tool.py"
+        target.write_text("x = 1\n")
+        handler = _handler()
+        assert self._handle(handler, tmp_path) == []
+
+        target.unlink()
+
+        assert "pointer-resolves" in "\n".join(self._handle(handler, tmp_path))
+
+    def test_policy_change_invalidates_the_cache(self, tmp_path: Path) -> None:
+        (tmp_path / "CLAUDE" / "fixtures").mkdir(parents=True)
+        (tmp_path / "CLAUDE" / "fixtures" / "X.md").write_text("See [missing](Nope.md).\n")
+        excluded = DocumentationPolicy(enabled=True, exclude_paths=("CLAUDE/fixtures/**",))
+        assert self._handle(_handler(excluded), tmp_path) == []
+
+        assert self._handle(_handler(), tmp_path)
+
+    def test_slow_sweep_is_reported_pending_without_blocking_the_chain(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "CLAUDE").mkdir()
+        (tmp_path / "CLAUDE" / "X.md").write_text("# clean\n")
+        handler = _handler()
+        handler._sweep_wait_seconds = 0.0
+        release = threading.Event()
+
+        def slow(*args: object, **kwargs: object) -> list[object]:
+            release.wait(60.0)
+            return []
+
+        with patch(_RUN_STAGE, side_effect=slow):
+            context = self._handle(handler, tmp_path)
+            release.set()
+
+        text = "\n".join(context)
+        assert "background" in text
+        assert "docs-qa" in text
+        assert "--sweep" in text

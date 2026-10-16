@@ -106,8 +106,12 @@ Evidence already seen in this session (2026-10-06), not yet explained:
   the bound socket; handler registration and config validation stay before it. Real forked start in a throwaway
   project, 8 interleaved runs, median: first request answered 1.94 s -> 1.51 s, `start` returned 2.12 s -> 1.68 s. A test
   sends a destructive git command while the deferred work is blocked and gets the same deny as afterwards.
-- [ ] ⬜ **Task 2.6**: Add a result cache to `docs-qa-sweep` and `plan-qa-sweep`, keyed by an input fingerprint, and run them off the
-  blocking chain. About 6 CPU-s saved on this repository, and no handler dropped for the budget.
+- [x] ✅ **Task 2.6**: Add a result cache to `docs-qa-sweep` and `plan-qa-sweep`, keyed by an input fingerprint, and run them off the
+  blocking chain. About 6 CPU-s saved on this repository, and no handler dropped for the budget. Done in 78a7fa47d
+  (report: [261015-p495-sweep-cache-implementer.md](subagent-reports/261015-p495-sweep-cache-implementer.md)).
+  Same chain-timing method as Task 1.2, idle host, this repository, before -> after: docs sweep 3.3 to 8.0 s wall ->
+  0.09 to 0.14 s on a hit; plan sweep 1.2 to 1.6 s -> 0.10 to 0.13 s on a hit; SessionStart chain 5.8 to 12.7 s -> 1.9 to
+  2.2 s on a hit and 5.0 s on a miss (each sweep waits at most 1 s, then finishes in the background).
 - [x] ✅ **Task 2.7**: Status line: while the daemon is starting, show a baseline line saying the hooks daemon is
   loading (owner ruling A3, 2026-10-06), with any cached fallback text, instead of "DAEMON FAILED". Done: the status
   line forwarder asks for a non-blocking start (`_HOOKS_DAEMON_NONBLOCKING_START`, 1 s deadline) and prints

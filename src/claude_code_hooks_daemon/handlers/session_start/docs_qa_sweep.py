@@ -15,6 +15,8 @@ Policy comes from ``documentation`` via the registry's DOCUMENTATION-tag
 injection (``_documentation``) — zero per-handler options.
 """
 
+from datetime import date
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
@@ -33,11 +35,19 @@ from claude_code_hooks_daemon.utils.cli_command import (
     daemon_cli_command_for_docs,
 )
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
+from claude_code_hooks_daemon.utils.sweep_cache import (
+    DEFAULT_WAIT_SECONDS,
+    run_cached_sweep,
+    tree_fingerprint,
+)
+from claude_code_hooks_daemon.version import __version__
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
 
 _SWEEP_MODE_ADVISE: Final[str] = "advise"
+_SWEEP_NAME: Final[str] = "docs-qa-sweep"
+_SWEEP_LABEL: Final[str] = "Docs QA sweep"
 _INDEX_DIR_NAME: Final[str] = "docs-qa"
 _INDEX_FILE_NAME: Final[str] = "index.json"
 
@@ -71,6 +81,8 @@ class DocsQaSweepHandler(SessionStartHandlerBase):
         # Injected onto every handler instance (Plan 00288); consulted here
         # so the source-tree-markdown check has scope to work with.
         self._project_layout: ProjectLayout | None = None
+        # How long a cache miss may hold up the SessionStart chain (Plan 00495).
+        self._sweep_wait_seconds: float = DEFAULT_WAIT_SECONDS
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         if is_resume_session(hook_input):
@@ -86,20 +98,35 @@ class DocsQaSweepHandler(SessionStartHandlerBase):
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
         project_root = ProjectContext.project_root()
-        index_path = ProjectContext.daemon_untracked_dir() / _INDEX_DIR_NAME / _INDEX_FILE_NAME
-        corpus = build_and_save_corpus(project_root, policy, index_path)
+        untracked_dir = ProjectContext.daemon_untracked_dir()
+        # Everything that can change a finding: the tree (including the non-markdown
+        # files links point at), the policy and layout, the daemon's own version
+        # (generated-doc staleness) and the date.
+        fingerprint = tree_fingerprint(
+            project_root,
+            [__version__, date.today().isoformat(), repr(policy), repr(self._project_layout)],
+        )
+        outcome = run_cached_sweep(
+            _SWEEP_NAME,
+            untracked_dir,
+            fingerprint,
+            lambda: self._sweep(project_root, policy, untracked_dir / _INDEX_DIR_NAME),
+            self._sweep_wait_seconds,
+        )
+        return AdvisoryResult(
+            decision=Decision.ALLOW, context=outcome.advisory(_SWEEP_LABEL, _cli_hint())
+        )
+
+    def _sweep(self, project_root: Path, policy: DocumentationPolicy, index_dir: Path) -> list[str]:
+        """Run the SWEEP-stage catalogue; the advisory lines, empty when clean."""
+        corpus = build_and_save_corpus(project_root, policy, index_dir / _INDEX_FILE_NAME)
         context = sweep_context(
             project_root=project_root, policy=policy, corpus=corpus, layout=self._project_layout
         )
-
         findings = run_stage(CheckStage.SWEEP, context)
         if not findings:
-            return AdvisoryResult(decision=Decision.ALLOW, context=[])
-
-        return AdvisoryResult(
-            decision=Decision.ALLOW,
-            context=[format_advisory(findings), "", _cli_hint()],
-        )
+            return []
+        return [format_advisory(findings), "", _cli_hint()]
 
     def get_claude_md(self) -> str | None:
         return (
