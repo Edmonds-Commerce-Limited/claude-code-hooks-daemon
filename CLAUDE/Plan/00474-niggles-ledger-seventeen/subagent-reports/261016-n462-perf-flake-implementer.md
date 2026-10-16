@@ -72,3 +72,10 @@ lower.
 
 - `50a3537ee` the scaling change and its unit tests.
 - The ledger, status-index and this report are in the follow-up commit.
+
+## Final QA verdict (branch head b8eff2b69)
+
+`llm_qa.py changed --allow-unmapped`: QA: 37/40 PASSED, 1/40 FAILED, 2/40 NOT MEANINGFUL, exit 1. The single failure is
+a plan_qa journal-freshness advisory about Plan 00472 (journal quiet for 4 days), not this plan. The two
+NOT MEANINGFUL entries (project_handlers, changed_tests: 1997 passed, 0 failed) are only so marked because the plan_qa
+detector failed. Nothing of N462's own failed.
