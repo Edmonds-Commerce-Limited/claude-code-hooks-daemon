@@ -10,7 +10,7 @@ never picks a model for you.
 Per-handler options and defaults are in
 [HANDLER_REFERENCE.md](HANDLER_REFERENCE.md#subagent_tier_advisor). The design
 and the measurements behind it are in Plan 00472
-(`CLAUDE/Plan/00472-subagent-model-tier-selection/`).
+(`CLAUDE/Plan/Completed/00472-subagent-model-tier-selection/`).
 
 ## How a subagent's model is chosen
 

@@ -1,6 +1,6 @@
 # Plan 00472: subagent model tier selection
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-25
 **Owner**: dev
 **Priority**: Low
@@ -26,7 +26,7 @@ how to monitor that choice and nudge it toward lower tiers where they are
 safe, without ever blocking a delegation that really needs the top tier.
 
 This is the model-choice twin of
-[Plan 00471](../Completed/00471-subagent-token-budget-protection/PLAN.md). That plan
+[Plan 00471](../00471-subagent-token-budget-protection/PLAN.md). That plan
 bounds how much context a subagent spends; this one looks at which model spends
 it. The owner marked it not urgent. It goes into the normal pipeline.
 
@@ -95,7 +95,7 @@ message. The decisions are listed side by side in each plan's Task 1.2.
   types (never the script text) to `payload-capture/workflow-shape.json`, and
   allows any shape it cannot parse with an `unparsed` verdict. Confirming it
   against a real payload is
-  [Plan 00530](../00530-subagent-tier-enforcement-follow-up/PLAN.md) Task 1.1
+  [Plan 00530](../../00530-subagent-tier-enforcement-follow-up/PLAN.md) Task 1.1
   and does not block this plan.
 
 ### Phase 3: Build (RULINGS-fable.md section 4)
@@ -115,7 +115,7 @@ message. The decisions are listed side by side in each plan's Task 1.2.
 - [x] ✅ **Task 3.8**: docs page, `HANDLER_REFERENCE.md`, manifest, release
   note 079, 00280 cross-reference, baseline copy and the dogfood run (JOURNAL
   26-10-16). The issue #58 comment is drafted; posting it moved to
-  [Plan 00530](../00530-subagent-tier-enforcement-follow-up/PLAN.md) Task 1.4.
+  [Plan 00530](../../00530-subagent-tier-enforcement-follow-up/PLAN.md) Task 1.4.
 
 ## Success Criteria
 
@@ -157,7 +157,7 @@ Per RULINGS-fable.md section 5.
   dispatch ledger rows and a real `subagent-tier-advisor` verdict.
 - [x] 10: the implementation summary for GitHub issue #58 is drafted for the
   coordinator to post; posting it and the close decision moved to
-  [Plan 00530](../00530-subagent-tier-enforcement-follow-up/PLAN.md) Task 1.4.
+  [Plan 00530](../../00530-subagent-tier-enforcement-follow-up/PLAN.md) Task 1.4.
 - [ ] 11: targeted QA green on the work branch; the coordinator's full gate
   green before merge. The coordinator's full gate runs in the release
   (RELEASING.md Step 1b); left for the coordinator to tick.
@@ -171,3 +171,5 @@ Per RULINGS-fable.md section 5.
 - Opened at the owner's request.
 - Scheduling (owner ruling): starts next, once the current queue has landed
   (hostname-matched crons, the quoted-glob fix, provision Phases 1–2).
+- Built per the Fable rulings and merged to main in b1d6397f4; dogfood run
+  and closure in ab46984cf.

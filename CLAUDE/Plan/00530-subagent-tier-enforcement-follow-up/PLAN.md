@@ -12,7 +12,7 @@
 Plan 00472 shipped the subagent tier levers advisory-only: a per-dispatch tier
 row in the shared spend ledger, `hooks-daemon tiers`, `subagent_tier_advisor`
 and `workflow_fanout_advisor`. Its Fable rulings
-([RULINGS-fable.md](../00472-subagent-model-tier-selection/RULINGS-fable.md),
+([RULINGS-fable.md](../Completed/00472-subagent-model-tier-selection/RULINGS-fable.md),
 section 3) moved everything that needs evidence a running session produces,
 or an owner decision, into this follow-up plan.
 
