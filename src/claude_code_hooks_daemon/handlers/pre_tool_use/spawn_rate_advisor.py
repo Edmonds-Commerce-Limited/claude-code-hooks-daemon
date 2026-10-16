@@ -44,6 +44,7 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.resume_guard import (
 )
 from claude_code_hooks_daemon.handlers.pre_tool_use.subagent_context_budget import int_or_none
 from claude_code_hooks_daemon.utils.session_load import (
+    DEFAULT_LIVENESS_SECONDS,
     finished_agents,
     live_agents,
     read_five_hour,
@@ -52,7 +53,6 @@ from claude_code_hooks_daemon.utils.session_load import (
 from claude_code_hooks_daemon.utils.spend_ledger import append_event
 from claude_code_hooks_daemon.utils.transcript_tail import read_tail, subagents_dir
 
-DEFAULT_LIVENESS_SECONDS: Final[int] = 120
 DEFAULT_ADVISE_PCT: Final[int] = 80
 DEFAULT_MAX_AGE_SECONDS: Final[int] = 300
 

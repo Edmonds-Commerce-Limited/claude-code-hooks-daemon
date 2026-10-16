@@ -20,7 +20,10 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputF
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import StopHandlerBase
 from claude_code_hooks_daemon.daemon.synthetic_traffic import is_synthetic_event
-from claude_code_hooks_daemon.utils.session_load import record_background_tasks
+from claude_code_hooks_daemon.utils.session_load import (
+    record_background_tasks,
+    refresh_live_snapshot,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,11 +50,16 @@ class BackgroundTaskRecorderHandler(StopHandlerBase):
         return isinstance(hook_input.get(HookInputField.BACKGROUND_TASKS), list)
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
-        """Record the finished tasks, then ALLOW unconditionally."""
-        record_background_tasks(
-            self._untracked_dir(),
-            str(hook_input.get(HookInputField.SESSION_ID) or ""),
-            hook_input.get(HookInputField.BACKGROUND_TASKS),
+        """Record the finished tasks and refresh the live snapshot, then ALLOW unconditionally.
+
+        The coordinator stops at the end of every turn, so this is what keeps the
+        status segment's live count current between spawns.
+        """
+        untracked = self._untracked_dir()
+        session = str(hook_input.get(HookInputField.SESSION_ID) or "")
+        record_background_tasks(untracked, session, hook_input.get(HookInputField.BACKGROUND_TASKS))
+        refresh_live_snapshot(
+            untracked, session, str(hook_input.get(HookInputField.TRANSCRIPT_PATH) or "")
         )
         return BlockingResult(decision=Decision.ALLOW)
 

@@ -13,9 +13,11 @@ from claude_code_hooks_daemon.utils.session_load import (
     LiveAgent,
     finished_agents,
     live_agents,
+    model_family,
     read_five_hour,
     read_live_snapshot,
     record_background_tasks,
+    refresh_live_snapshot,
     write_live_snapshot,
 )
 
@@ -29,7 +31,7 @@ def agent(
     record = {
         "type": "assistant",
         "message": {
-            "model": "m",
+            "model": "claude-opus-5-5",
             "stop_reason": "end_turn" if stopped else "tool_use",
             "usage": {"cache_read_input_tokens": context},
         },
@@ -64,6 +66,7 @@ class TestLiveAgents:
             name="worker-1",
             context_tokens=200_000,
             idle_seconds=10,
+            model="claude-opus-5-5",
         )
 
     def test_reconciled_against_finished_background_tasks(self, subagents: Path) -> None:
@@ -103,6 +106,34 @@ class TestLiveSnapshot:
         assert snapshot["count"] == 2
         assert snapshot["largest_context"] == 200_000
         assert snapshot["agents"] == ["worker-1", "worker-2"]
+        assert snapshot["families"] == {"opus": 2}
+        assert snapshot["unmeasured"] == 0
+
+    def test_refresh_from_either_transcript_shape(self, tmp_path: Path) -> None:
+        subagents = tmp_path / "projects" / "s1" / "subagents"
+        agent(subagents, "aw-0000000000000009", "w", context=10, stopped=False, age=0)
+        os.utime(subagents / "agent-aw-0000000000000009.jsonl")
+        main = str(tmp_path / "projects" / "s1.jsonl")
+        own = str(subagents / "agent-aw-0000000000000009.jsonl")
+        for transcript_path in (main, own):
+            path = refresh_live_snapshot(tmp_path, "s1", transcript_path)
+            assert path is not None
+            assert read_live_snapshot(path)["count"] == 1
+        assert refresh_live_snapshot(tmp_path, "s1", "") is None
+
+    @pytest.mark.parametrize(
+        ("model", "family"),
+        [
+            ("claude-opus-5-5", "opus"),
+            ("claude-sonnet-5-5", "sonnet"),
+            ("claude-haiku-5-5", "haiku"),
+            ("claude-fable-5-1", "fable"),
+            ("gpt", "other"),
+            ("", "other"),
+        ],
+    )
+    def test_model_family(self, model: str, family: str) -> None:
+        assert model_family(model) == family
 
 
 class TestFiveHour:

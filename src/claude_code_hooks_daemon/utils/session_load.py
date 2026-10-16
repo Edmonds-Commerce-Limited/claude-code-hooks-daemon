@@ -25,13 +25,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
-from claude_code_hooks_daemon.utils.spend_ledger import read_state, session_dir, write_state
-from claude_code_hooks_daemon.utils.transcript_tail import agent_name_of, read_tail
+from claude_code_hooks_daemon.utils.spend_ledger import (
+    read_state,
+    session_dir,
+    unmeasured_count,
+    write_state,
+)
+from claude_code_hooks_daemon.utils.transcript_tail import agent_name_of, read_tail, subagents_dir
 
 logger = logging.getLogger(__name__)
 
 #: The context sidecar's directory under the daemon untracked dir.
 CONTEXT_SIDECAR_SUBDIR: Final[str] = "context-sidecar"
+
+#: An agent whose transcript moved this recently, and whose turn is open, is live.
+DEFAULT_LIVENESS_SECONDS: Final[int] = 120
 
 _BACKGROUND_FILE: Final[str] = "background-tasks.json"
 _LIVE_FILE: Final[str] = "live.json"
@@ -48,10 +56,22 @@ class LiveAgent:
     name: str
     context_tokens: int
     idle_seconds: float
+    model: str = ""
 
     @property
     def label(self) -> str:
         return self.name or self.agent_id
+
+
+#: Model families the status segment counts live agents by (Plan 00472 T2).
+_FAMILIES: Final[tuple[str, ...]] = ("fable", "opus", "sonnet", "haiku")
+_OTHER_FAMILY: Final[str] = "other"
+
+
+def model_family(model: str) -> str:
+    """The family a model id belongs to, or ``other``."""
+    lowered = model.lower()
+    return next((family for family in _FAMILIES if family in lowered), _OTHER_FAMILY)
 
 
 @dataclass(frozen=True)
@@ -106,6 +126,7 @@ def live_agents(
                 name=name,
                 context_tokens=reading.context_tokens if reading is not None else 0,
                 idle_seconds=idle,
+                model=reading.model if reading is not None else "",
             )
         )
     return sorted(found, key=lambda agent: (agent.idle_seconds, agent.label))
@@ -151,8 +172,16 @@ def live_snapshot_path(untracked: Path, session_id: str) -> Path:
 
 
 def write_live_snapshot(untracked: Path, session_id: str, agents: list[LiveAgent]) -> Path:
-    """Persist the live count so the status line reads it without a scan."""
+    """Persist the live count so the status line reads it without a scan.
+
+    It also carries the per-family live counts and the session's unmeasured
+    count, so one mtime-gated read gives the status segment everything.
+    """
     path = live_snapshot_path(untracked, session_id)
+    families: dict[str, int] = {}
+    for agent in agents:
+        family = model_family(agent.model)
+        families[family] = families.get(family, 0) + 1
     write_state(
         path,
         {
@@ -160,9 +189,30 @@ def write_live_snapshot(untracked: Path, session_id: str, agents: list[LiveAgent
             "count": len(agents),
             "largest_context": max((agent.context_tokens for agent in agents), default=0),
             "agents": [agent.label for agent in agents],
+            "families": families,
+            "unmeasured": unmeasured_count(untracked, session_id),
         },
     )
     return path
+
+
+def refresh_live_snapshot(
+    untracked: Path,
+    session_id: str,
+    transcript_path: str,
+    *,
+    liveness_seconds: float = DEFAULT_LIVENESS_SECONDS,
+) -> Path | None:
+    """Recount the session's live agents and persist the snapshot; None without a session dir."""
+    directory = subagents_dir(transcript_path, session_id)
+    if directory is None:
+        return None
+    live = live_agents(
+        directory,
+        liveness_seconds=liveness_seconds,
+        finished=finished_agents(untracked, session_id),
+    )
+    return write_live_snapshot(untracked, session_id, live)
 
 
 def read_live_snapshot(path: Path) -> dict[str, Any]:

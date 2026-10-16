@@ -44,7 +44,10 @@ from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import SubagentStopHandlerBase
 from claude_code_hooks_daemon.daemon.synthetic_traffic import is_synthetic_event
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
-from claude_code_hooks_daemon.utils.session_load import record_background_tasks
+from claude_code_hooks_daemon.utils.session_load import (
+    record_background_tasks,
+    refresh_live_snapshot,
+)
 from claude_code_hooks_daemon.utils.spend_ledger import read_agent_meta, spend_cache
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 from claude_code_hooks_daemon.utils.transcript_spend import SpendTotals, plan_key_from
@@ -66,6 +69,8 @@ _EMPTY_TOTALS: Final[dict[str, int]] = {
     "cache_write_tokens": 0,
     "ttl_5m_write_tokens": 0,
     "ttl_1h_write_tokens": 0,
+    # Plan 00471 L7: input-token equivalents, rounded, for the spend segment's sum.
+    "ite": 0,
 }
 
 
@@ -302,6 +307,9 @@ class SubagentCacheAggregatorHandler(SubagentStopHandlerBase):
             record_background_tasks(
                 untracked, session_id, hook_input.get(HookInputField.BACKGROUND_TASKS)
             )
+            refresh_live_snapshot(
+                untracked, session_id, str(hook_input.get(HookInputField.TRANSCRIPT_PATH) or "")
+            )
         return BlockingResult(decision=Decision.ALLOW)
 
     @staticmethod
@@ -366,6 +374,7 @@ class SubagentCacheAggregatorHandler(SubagentStopHandlerBase):
             "cache_write_tokens": spend.cache_write_tokens,
             "ttl_5m_write_tokens": spend.ttl_5m_write_tokens,
             "ttl_1h_write_tokens": spend.ttl_1h_write_tokens,
+            "ite": round(spend.ite),
             "agent_id": agent_id,
             "name": meta.name,
             "subagent_type": meta.agent_type,

@@ -208,6 +208,12 @@ class HandlerID:
         config_key="prompt_cache_indicator",
         display_name="status-prompt-cache-indicator",
     )
+    # Plan 00471 L7: subagent spend, live agents and unmeasured gate calls.
+    SPEND_METER = HandlerIDMeta(
+        class_name="SpendMeterHandler",
+        config_key="spend_meter",
+        display_name="status-spend-meter",
+    )
     USAGE_INDICATOR = HandlerIDMeta(
         class_name="UsageIndicatorHandler",
         config_key="usage_indicator",

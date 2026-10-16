@@ -621,6 +621,8 @@ class Priority:
     # Plan 00479: subscription usage sits with the other account-level segments,
     # straight after the cache figure, ahead of the working directory.
     USAGE_INDICATOR = 16
+    # Plan 00471 L7: subagent spend reads next to the usage it drives.
+    SPEND_METER = 17
     WORKING_DIRECTORY = 25
     STARTUP_CLEANUP = 28  # Between working_directory (25) and daemon_stats (30)
 
