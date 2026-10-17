@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.utils.secret_file_matching import resolve_configured_patterns
 from claude_code_hooks_daemon.utils.sweep_cache import (
     SweepOutcome,
     SweepState,
@@ -20,7 +21,6 @@ from claude_code_hooks_daemon.utils.sweep_cache import (
     run_cached_sweep,
     tree_fingerprint,
 )
-from claude_code_hooks_daemon.utils.secret_file_matching import resolve_configured_patterns
 from tests.support.git_fixtures import git_setup_timeout
 
 _NAME = "demo-sweep"

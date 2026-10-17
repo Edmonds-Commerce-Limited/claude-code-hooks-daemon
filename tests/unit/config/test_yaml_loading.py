@@ -11,6 +11,7 @@ import yaml
 from claude_code_hooks_daemon.config import yaml_loading
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config
+from claude_code_hooks_daemon.constants import Timeout
 
 
 class TestConfigYamlLoaderSelection:
@@ -81,7 +82,10 @@ class TestDeepNestingNeverReachesTheCParser:
             "    print('RecursionError')\n"
         )
         completed = subprocess.run(
-            [sys.executable, "-c", program], capture_output=True, text=True, timeout=120
+            [sys.executable, "-c", program],
+            capture_output=True,
+            text=True,
+            timeout=Timeout.REQUEST_LONG,
         )
         assert completed.returncode == 0, completed.stderr
         assert completed.stdout.strip() == "RecursionError"

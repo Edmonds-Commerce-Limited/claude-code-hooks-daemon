@@ -77,6 +77,23 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N472 — main CI failed on the Plan 00472 merge: nine failures on Python 3.11 and 3.13, and a 3.12 leg cancelled at 101 minutes
+
+**Source**: the coordinator, 2026-10-17, CI run 38980721427 on merge b1d6397f4 (last green main: 282f49765, run 38978729873).
+
+**Why it happened**: the Plan 00471 and 00472 merges added code that the repository's own guard tests judge, and the local
+runs did not cover those tests. Causes, one per failure: libyaml overflowing its C stack on a deeply nested config;
+`install.py` not emitting the SessionStart background-sync block that the tracked hook carries; the sweep fingerprint
+stating protected paths; a live probe with no `synthetic_source`; the priority-band doc row 0-9 not naming
+`background_task_recorder`; a hard-coded status-line handler count of 17 after `spend_meter` made 18; Go 1.20+
+printing `declared and not used: x`; and a resume-guard test whose `os.scandir` patch outlived the call under
+test. The 3.12 leg was the slowest, not hung.
+
+**Fix**: each cause fixed at its source with a red test first. No exclusion, allowlist entry or suppression was added.
+See [subagent-reports/261017-n472-ci-fix-implementer.md](subagent-reports/261017-n472-ci-fix-implementer.md).
+
+**Status**: ✅ Fixed (COMMIT).
+
 ### N471 — `hooks-daemon tiers` lists an agent-team teammate as `unrecorded` although its dispatch row is joined
 
 **Source**: the Plan 00471/00472 closure agent, 2026-10-16, during 00472's dogfood run. The closure agent itself was

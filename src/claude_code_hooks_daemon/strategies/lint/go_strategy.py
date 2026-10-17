@@ -42,11 +42,12 @@ _FINDING = re.compile(r"^(?:vet: )?(?P<path>\S+?\.go):\d+:\d+: (?P<message>.*)$"
 #: Type-check messages that mean a name or import is not (yet) resolved or
 #: used, the state the first edit of a two-edit change leaves behind. go 1.19
 #: says "undeclared name" / "imported but not used" / "declared but not used";
-#: newer go says "undefined" / "imported and not used" / "declared and not used".
+#: newer go says "undefined" / "imported and not used" / "declared and not used"
+#: (go 1.20+ appends ": <name>" to the last).
 _UNRESOLVED_NAME = re.compile(
     r"^(?:undeclared name: |undefined: )"
     r"|imported (?:but|and) not used$"
-    r"|declared (?:but|and) not used$"
+    r"|declared (?:but|and) not used(?:: \S+)?$"
 )
 
 
