@@ -179,3 +179,36 @@ characters, which the pattern does not match.
 upstream UUIDs: the write is denied, mid-refresh, and the correct value was
 the placeholder all along. An auditor quoting one verbatim into a report hits
 the same block — write it as `<upstream-session-uuid>` instead.
+
+## Refreshing the instruction-loading contract
+
+`contracts/claude-code-instructions/` (Plan 00532) pins how Claude Code loads
+`CLAUDE.md`, `@` imports and `.claude/rules/`. It shares this guide's
+procedure and its RAW-fetch rule. Its loader is
+`src/claude_code_hooks_daemon/docs_qa/instructions_contract.py`.
+
+- `META.json` carries the same provenance keys as the hooks contract. The
+  source is the vendored `remote-docs/code.claude.com/docs/en/memory.md`
+  (`vendored_path`); `docs_sha256` is that file's `source_sha256` frontmatter
+  (the upstream bytes the capture converted) and `docs_bytes` is the vendored
+  file's size.
+- `FACTS.json` holds the facts (groups G1 to G5) and the `unmodelled` list
+  (the G6 inputs the footprint ignores). Every fact carries an `anchor`: the
+  heading slug in the vendored page and a quote that appears verbatim under
+  that heading.
+
+To refresh:
+
+1. Re-capture the page with `hooks-daemon remote-docs` (never edit it by
+   hand), then read the changed sections of the new text.
+2. Update each affected fact's statement and quote; add a fact for each newly
+   documented loading behaviour and a `min_claude_code_version` where the page
+   names one. Do not widen the contract into G6 without a plan.
+3. Set `last_audited_claude_code_version` to the installed Claude Code version
+   audited against, and move `fetch_date`, `docs_bytes` and `docs_sha256` to
+   the new capture.
+4. Run `pytest tests/unit/docs_qa/test_instructions_contract.py`: it fails on
+   any anchor the page no longer supports. Then
+   `tests/integration/test_claude_code_version_record.py`, which ties the
+   audited version to the hooks contract and to
+   `CLAUDE/development/claude-code-versions.yaml`.
