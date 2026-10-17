@@ -21,7 +21,7 @@ import os
 import shlex
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
@@ -42,6 +42,10 @@ SCRATCH_MAX_ENTRIES: Final[int] = 100_000
 
 #: Wall-clock cap on one scratch scan, so it cannot stall the prompt it rides on.
 SCRATCH_BUDGET_SECONDS: Final[float] = 3.0
+
+_REASON_ENTRY_LIMIT: Final[str] = "it hit its entry limit"
+_REASON_TIME_BUDGET: Final[str] = "its time budget ran out"
+_REASON_UNREADABLE: Final[str] = "some directories or files could not be read"
 
 #: Refs the report names; the rest are counted. The one command covers all of them.
 MAX_LISTED_REFS: Final[int] = 5
@@ -77,7 +81,18 @@ class _ScratchTally:
     old_bytes: int = 0
     oldest_age_seconds: float = 0.0
     entries_seen: int = 0
-    incomplete: bool = False
+    #: Why the walk did not see everything, one phrase per distinct cause.
+    incomplete_reasons: list[str] = field(default_factory=list)
+
+    @property
+    def incomplete(self) -> bool:
+        """Whether the walk stopped or skipped anything."""
+        return bool(self.incomplete_reasons)
+
+    def note_incomplete(self, reason: str) -> None:
+        """Record ``reason`` once."""
+        if reason not in self.incomplete_reasons:
+            self.incomplete_reasons.append(reason)
 
 
 def _walk_scratch(
@@ -101,12 +116,15 @@ def _walk_scratch(
         except OSError:
             # A directory that vanished or is unreadable is skipped; a report
             # must not fail because scratch is being cleaned as it is read.
-            tally.incomplete = True
+            tally.note_incomplete(_REASON_UNREADABLE)
             continue
         with scanner:
             for entry in scanner:
-                if tally.entries_seen >= max_entries or deadline.expired():
-                    tally.incomplete = True
+                if tally.entries_seen >= max_entries:
+                    tally.note_incomplete(_REASON_ENTRY_LIMIT)
+                    return tally
+                if deadline.expired():
+                    tally.note_incomplete(_REASON_TIME_BUDGET)
                     return tally
                 tally.entries_seen += 1
                 if entry.is_symlink():
@@ -117,7 +135,7 @@ def _walk_scratch(
                 try:
                     info = entry.stat(follow_symlinks=False)
                 except OSError:
-                    tally.incomplete = True
+                    tally.note_incomplete(_REASON_UNREADABLE)
                     continue
                 age = now - info.st_mtime
                 if age > cutoff_age_seconds:
@@ -140,7 +158,9 @@ def collect_scratch_report(
     """The report on files under ``scratch`` older than ``max_age_days``, or None.
 
     ``deadline`` is a budget shared with other scans; without one the scan gets
-    its own ``budget_seconds``.
+    its own ``budget_seconds``. Only a spent budget marks the shared deadline
+    exhausted: an entry limit or an unreadable path is reported here, not as a
+    timeout in the scans that share it.
 
     Quiet when the directory is absent or holds nothing old. A scan that hit its
     entry limit or time budget is never quiet: a short count from a scan that
@@ -151,8 +171,6 @@ def collect_scratch_report(
     current = time.time() if now is None else now
     shared = deadline or ScanDeadline(budget_seconds, clock=clock)
     tally = _walk_scratch(scratch, max_age_days * _SECONDS_PER_DAY, current, max_entries, shared)
-    if tally.incomplete:
-        shared.exhausted = True
     if tally.old_files == 0 and not tally.incomplete:
         return None
 
@@ -162,10 +180,8 @@ def collect_scratch_report(
         "inspect, then choose):"
     ]
     if tally.incomplete:
-        lines.append(
-            "SCAN INCOMPLETE: it stopped at its entry limit or time budget, so the "
-            "figures below are a lower bound."
-        )
+        reasons = "; ".join(tally.incomplete_reasons)
+        lines.append(f"SCAN INCOMPLETE: {reasons}, so the figures below are a lower bound.")
     if tally.old_files:
         noun = "file" if tally.old_files == 1 else "files"
         oldest_days = int(tally.oldest_age_seconds // _SECONDS_PER_DAY)
