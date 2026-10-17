@@ -109,6 +109,27 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N504 to N509 — the third delta review's edge cases (none release-blocking)
+
+**Source**: a code review of `98a3abdb0..d0fe01743 -- src/ tests/`
+([report](subagent-reports/261017-release-review-delta3.md)), which approved the v3.70.0 tag. Each is probe-confirmed.
+
+- **N504 (M1)**: in an Edit fragment, a Rust lifetime (`impl<'a> Foo<'a> { /* … 'foo'`) lets the extractor pair a
+  quote inside the comment and miss the comment. Fix: skip a lifetime-shaped `'` as a literal opener.
+- **N505 (M2)**: an unterminated `"` or backtick on a fragment line no longer opens a literal to the end of the line,
+  so a Go raw string or JS template literal holding `/*` can be read as a comment.
+- **N506 (M3)**: the N500 similar-name rule turns real external macros or attributes used without a `use` in the file
+  (`#[rstest]`, `#[instrument]`, `formatdoc!`, `assert_ok!`) into findings; an imported use stays excused. Consider
+  excusing files with `#[macro_use]` or `extern crate`, or record the trade-off.
+- **N507 (M4)**: `message_files` treats a reserved word in argument position (`echo do for`) as a compound opener, so
+  an unrelated later statement is judged as the message.
+- **N508 (M5)**: deeply nested subshells (depth 1000) raise `RecursionError` in `_leaves`/`_unwrap` (caught by the
+  chain); `_statements` is O(spans × tokens).
+- **N509 (M6, pre-existing)**: a newline after a trailing `|` splits the statement, so `echo <term> |` newline
+  `git commit -F -` is not judged.
+
+**Status**: ⬜ open, after the release.
+
 ### N500 to N503 — the second delta review over the N494 to N497 fixes
 
 **Source**: a code review of `9d1a522b0..4b3a709e1 -- src/ tests/`
