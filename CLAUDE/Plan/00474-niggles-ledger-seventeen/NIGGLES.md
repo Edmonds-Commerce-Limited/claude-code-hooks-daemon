@@ -165,7 +165,7 @@ a read closes only the browser session it opened.
 [C](subagent-reports/261017-release-review-c-daemon-install-core-opus.md),
 [D](subagent-reports/261017-release-review-d-utils-opus.md)). A release carries no known defect, so each was fixed
 before the tag, red test first, in its own worktree. None shipped, so none has a release-note callout; callout 029 was
-reworded by the N474 fix, and callout 028 is kept true by the N475 fix when it lands.
+reworded by the N474 fix, and callout 028 was reworded by the N475 fix (1adedfd7e) to state the Edit-fragment reading.
 
 - **N473 (A-D1)**: `sensitive_content` stopped scanning a commit message or `gh` body FILE that an earlier segment of
   the same command writes (`cat > m.txt <<'EOF' … EOF` then `git commit -F m.txt`), a fail-open on an unretractable
