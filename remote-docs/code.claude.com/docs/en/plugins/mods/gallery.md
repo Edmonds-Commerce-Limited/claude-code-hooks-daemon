@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/mods/gallery
-fetched_at: '2026-10-08T00:23:52.469034+00:00'
+fetched_at: '2026-10-17T03:25:24.156844+00:00'
 fidelity: converted
-source_sha256: 578125e9858345de0844cc9efc2056393a7a8fdb9e78f8bfa8203ed089a2d975
+source_sha256: c62a9fdf24e334a0e97b8d1a56792911786e6614cf945669f0ad981d03337715
 licence: unreviewed
-stale_after: '2027-01-06'
+stale_after: '2027-01-15'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -116,7 +116,7 @@ Three elements put words on screen: `Text` for your own styling, `Markdown` for 
 
 ### `Text`
 
-`Text` draws a string with the styles you give it. This sample shows one line for each style:
+`Text` draws a string with the styles you give it. This sample shows plain text and eight styles, one on each line:
 
 ```javascript theme={null}
 Box({
@@ -173,7 +173,7 @@ The terminal draws the URL as text after the label. Whether a click opens it dep
 
 ## Show code and changes
 
-`Code` draws source text with Claude Code's own syntax colors, or a diff.
+`Code` draws source text with Claude Code's own syntax colors, or a diff. In the VS Code extension, `Code` shows its `source` as plain text, with none of the colors, line numbers, or diff shading in these screenshots.
 
 ### `Code`
 
@@ -245,7 +245,7 @@ The border stretches to the width of the pane.
 
 `Button`, `Input`, and `Select` are controls: the user moves between them with Tab and uses the one that has the focus. [Keyboard focus and hotkeys](/docs/en/plugins/mods/interface#know-which-keys-your-mod-can-receive) covers which keys reach them.
 
-Opening a pane with `focus: true` gives the pane keyboard focus. Typed letters reach an `Input` once it has the focus, so add `autoFocus: true` to a field that should take typing as soon as the pane opens.
+Open a pane with `focus: true` to request keyboard focus for it. Typed letters reach an `Input` once it has the focus. To choose which field has the focus when the pane opens, see [Set a hotkey and the first focus](/docs/en/plugins/mods/interface#set-a-hotkey-and-the-first-focus).
 
 ### `Button`
 
@@ -369,7 +369,7 @@ A `Raster` rounds each color to a smaller palette, so `0x2e7d32` draws as `#3377
 
 ### `Svg`
 
-An `Svg` draws an SVG document in the Desktop app:
+An `Svg` draws an SVG document in the Desktop app and the VS Code extension:
 
 ```javascript theme={null}
 Svg({
@@ -386,6 +386,14 @@ In the terminal, a pane that returns only an `Svg` opens empty. To draw somethin
 ### `Image` and `Client`
 
 Two more elements have no sample here. `Image` draws a PNG or raw pixels in the terminal. `Client` is a region that a second file of yours draws, for animation and pointer input. The [elements reference](/docs/en/plugins/mods/reference#elements) lists their props.
+
+Unless Claude Code detects that the terminal draws kitty graphics protocol images with Unicode placeholders, the user sees an `Image`'s `alt` text, dimmed, in place of the picture. Write `alt` text that stands on its own. Detection runs at startup: it succeeds in kitty 0.28 or later and in Ghostty, once the terminal answers Claude Code's graphics query, and fails in these cases:
+
+* **Other terminals**: any terminal that isn't one of those two, or that doesn't answer the query.
+* **tmux and screen**: a session running inside tmux or screen, in any terminal, kitty and Ghostty included.
+* **Background sessions**: every [background session](/docs/en/agent-view), whatever terminal it's attached from.
+
+If your mod's users see the dimmed text in a terminal that does draw those placeholder images, they can set [`CLAUDE_CODE_FORCE_TERMINAL_IMAGES`](/docs/en/env-vars) to `1`, which skips detection. Inside tmux or screen that doesn't help: the `alt` text goes away, and Claude Code sends the picture without wrapping it for tmux or screen passthrough.
 
 ## See where a mod can draw
 

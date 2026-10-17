@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/scheduled-tasks.md
-fetched_at: '2026-10-08T00:24:19.344722+00:00'
+fetched_at: '2026-10-17T03:25:27.819312+00:00'
 fidelity: converted
-source_sha256: bd61138121e36e5e0b888c7e2ad15df0d65d735cfcdcc46e35b950b0ce80846e
+source_sha256: 8cb643f43a143fdbd8aee53fb63070d2ac473ac5046f5a301b7fb6e502c0f127
 licence: unreviewed
-stale_after: '2027-01-06'
+stale_after: '2027-01-15'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -81,7 +81,7 @@ The example below checks CI and review comments, with Claude waiting longer betw
 
 In a session where the [Monitor tool is available](/docs/en/tools-reference#monitor-tool), Claude may use it directly when you ask for a dynamic `/loop` schedule. Monitor runs a background script and streams each output line back, which avoids polling altogether and is often more token-efficient and responsive than re-running a prompt on an interval.
 
-A dynamically scheduled loop appears in your [scheduled task list](#manage-scheduled-tasks) like any other task, so you can list or cancel it the same way. The [jitter rules](#jitter) don't apply to it, but the [seven-day expiry](#seven-day-expiry) does.
+A dynamically scheduled loop appears in your [scheduled task list](#manage-scheduled-tasks) like any other task, so you can list or cancel it the same way. The list shows its pending wakeup as a one-shot task, so a wakeup scheduled for `:00` or `:30` can [run a little early](#when-a-one-shot-task-runs-early). The [seven-day expiry](#seven-day-expiry) applies to the loop too.
 
 <span id="loop-provider-differences" />
 
@@ -166,7 +166,7 @@ These are the underlying tools Claude uses:
 | Tool | Purpose |
 | :- | :- |
 | `CronCreate` | Schedule a new task. Accepts a 5-field cron expression, the prompt to run, and whether it recurs or fires once. |
-| `CronList` | List all scheduled tasks with their IDs, schedules, and prompts. |
+| `CronList` | List scheduled tasks with their IDs, schedules, [next run times](#jitter), and prompts. |
 | `CronDelete` | Cancel a task by ID. |
 
 Each scheduled task has an 8-character ID you can pass to `CronDelete`. A session can hold up to 50 scheduled tasks at once.
@@ -179,12 +179,32 @@ All times are interpreted in your local timezone. A cron expression like `0 9 * 
 
 ### Jitter
 
-To avoid every session hitting the API at the same wall-clock moment, the scheduler adds a deterministic offset to fire times:
+A scheduled task can run at a different time than its schedule says. If every session's tasks ran exactly on schedule, many of them would call the API at the same moment, so Claude Code shifts each task's run time. Recurring tasks run late, except a task that runs every five minutes, written `*/5 * * * *`. One-shot tasks scheduled on the hour or half hour run a little early.
 
-* Recurring tasks fire up to 30 minutes after the scheduled time (or up to half the interval, for tasks that run more often than hourly). An hourly job scheduled for `:00` may fire anywhere up to `:30`.
-* One-shot tasks scheduled for the top or bottom of the hour fire up to 90 seconds early.
+To see when a task is next due, read the row under Claude's `CronCreate` call in your terminal. The row shows that time after the schedule, for example `next run 10:21 AM`. To check again later, [ask Claude to list your tasks](#manage-scheduled-tasks) and look for `next run` in the rows under the `CronList` call. Next run times in these rows require Claude Code v2.1.299 or later.
 
-The offset is derived from the task ID, so the same task always gets the same offset. If exact timing matters, pick a minute that is not `:00` or `:30`, for example `3 9 * * *` instead of `0 9 * * *`, and the one-shot jitter will not apply.
+#### How late a recurring task runs
+
+Unless it runs every five minutes, a recurring task starts each run late by up to half the gap to the next run, and by at most 30 minutes. Your task is one of these three cases:
+
+* **Evenly spaced runs**: a task with equal gaps, such as hourly, daily, or every 10 minutes, runs the same number of minutes late every time, including when the session is idle.
+* **Unevenly spaced runs**: a task with uneven gaps, such as one scheduled for `:00` and `:15` each hour, can run a different number of minutes late at each.
+* **Every five minutes**: a task written `*/5 * * * *` isn't delayed. A run exactly five minutes after the last one would start after a five-minute [prompt cache](/docs/en/prompt-caching#which-ttl-each-request-gets) had expired, so each run starts 15 seconds sooner.
+
+Find your schedule in the first column of this table to see when each of its runs starts.
+
+| Schedule | When each run starts |
+| :- | :- |
+| Every 5 minutes, written `*/5 * * * *`, which is what `/loop 5m` creates | 4 minutes 45 seconds after the previous run |
+| Every 10 minutes | 0 to 5 minutes late |
+| Every 30 minutes | 0 to 15 minutes late |
+| Every hour, or less often such as daily | 0 to 30 minutes late |
+
+For example, `7,37 * * * *` schedules a task for `:07` and `:37`, which are 30 minutes apart, so its delay is somewhere between 0 and 15 minutes. If this task's delay is 14 minutes, it runs at `:21` and `:51` every hour. Changing the schedule to a different minute moves the run time, and a delay is still added on top.
+
+#### When a one-shot task runs early
+
+A one-shot task scheduled for `:00` or `:30` runs up to 90 seconds early. Claude Code doesn't shift a one-shot task scheduled for any other minute, so when the timing matters, schedule it off the hour and half hour: `3 9 * * *` instead of `0 9 * * *`.
 
 ### Seven-day expiry
 

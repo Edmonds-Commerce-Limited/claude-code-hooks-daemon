@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/mods/create
-fetched_at: '2026-10-08T00:23:48.880200+00:00'
+fetched_at: '2026-10-17T03:25:23.570259+00:00'
 fidelity: converted
-source_sha256: d373fcb2db61d41971439d6b07556fc919a163c4b652e70f1fb9b9a137b63804
+source_sha256: 9e50b9553209dfc9acffb67cecaf67cd7b72777fdf98337ca9ec8f5e8518430b
 licence: unreviewed
-stale_after: '2027-01-06'
+stale_after: '2027-01-15'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 value_swaps:
 - kind: session-uuid
@@ -43,7 +43,7 @@ The mod runs once you approve it, except in [sessions where a mod Claude writes 
     Ask for the mod in your own words, for example `make a mod that shows the current git branch above the prompt`. Claude writes the mod in a directory of its own in the session's mods folder, which is `~/.claude/dev-mods/` followed by the session's ID. A mod's full path looks like `~/.claude/dev-mods/00000000-0000-0000-0000-000000000000/git-branch/`.
 
     <Note>
-      In the `default` and `acceptEdits` [permission modes](/docs/en/permission-modes#protected-paths), Claude Code asks before Claude creates each of the mod's files, because `~/.claude` is a protected path. Approve each file as it comes up.
+      In the `default` and `acceptEdits` [permission modes](/docs/en/permission-modes), Claude Code asks before Claude creates each of the mod's files, because the mods folder is a [protected path](/docs/en/permission-modes#protected-paths). Approve each file as it comes up.
     </Note>
   </Step>
 
@@ -284,7 +284,7 @@ Files Claude saves during its turn reload when the turn ends, so you can try `/t
   Get type definitions for your version
 </h3>
 
-Each time Claude Code loads or reloads a mod from a directory you pass to `--plugin-dir`, or a mod [Claude wrote for you](#ask-claude-for-a-mod), it writes TypeScript declaration files, ending in `.d.ts`, into `.claude-plugin/types/` inside the mod's directory. They describe the exact events, mods API methods, and elements in the Claude Code version you're running, so your editor can autocomplete and type-check your hooks. To browse the declarations online, read [`mods/types/claude-code.d.ts`](https://github.com/anthropics/claude-code/blob/main/mods/types/claude-code.d.ts) in the Claude Code repository, whose first line names the version that wrote it. The directory holds these files:
+When Claude Code loads a mod from `--plugin-dir` in an interactive session, or a mod [Claude wrote for you](#ask-claude-for-a-mod), it writes TypeScript declaration files into the mod's `.claude-plugin/types/` directory. They describe the exact events, mods API methods, and elements in the Claude Code version you're running, so your editor can autocomplete and type-check your hooks. The directory holds these files:
 
 | Path | What it declares |
 | :- | :- |

@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/mods/overview
-fetched_at: '2026-10-08T00:23:56.017387+00:00'
+fetched_at: '2026-10-17T03:25:24.814271+00:00'
 fidelity: converted
-source_sha256: f916076aeef31ff2e33fd23a833228d36d137cde1f72d2cfb77b5b7b9077d928
+source_sha256: 36162dcc44348f5b61c9370d51ef528fd36801701d9f6ee374c8ff6fc6f48568
 licence: unreviewed
-stale_after: '2027-01-06'
+stale_after: '2027-01-15'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -32,7 +32,7 @@ Settings hooks, skills, status lines, and MCP servers work from outside Claude C
 * **Run your own code on a command**: a `/command` that runs your function at once, with no Claude turn, even while Claude is working. See [Add a command or a tool](/docs/en/plugins/mods/api#add-a-command-or-a-tool).
 * **Share data between hooks**: a mod's hooks share the variables in its file, so what one hook records, another can show. For example, one hook can count tool calls while another shows the count beside the spinner, or one can read each request's token usage while another charts it in a pane. See [React to events](/docs/en/plugins/mods/events).
 
-Mods work in the Claude Code CLI and in the Code tab of the Claude Desktop app. See [Where mods run](#where-mods-run) to understand how they behave elsewhere, such as in the VS Code extension, `claude -p`, and cloud sessions. If a settings hook, a skill, or an MCP server already does what you need, [compare them](#compare-mods-settings-hooks-skills-and-mcp-servers) before you write a mod. To manage mods for an organization, see [Manage mods for your organization](/docs/en/plugins/mods/admin).
+Mods work in the Claude Code CLI, the Code tab of the Claude Desktop app, and the VS Code extension. See [Where mods run](#where-mods-run) for how they behave elsewhere, such as in `claude -p` and cloud sessions. If a settings hook, a skill, or an MCP server already does what you need, [compare them](#compare-mods-settings-hooks-skills-and-mcp-servers) before you write a mod. To manage mods for an organization, see [Manage mods for your organization](/docs/en/plugins/mods/admin).
 
 ## Get a mod
 
@@ -107,7 +107,7 @@ The `hooks:` and `calls:` lines in the output list the events the mod handles an
 Mods are on by default. In the terminal, use Claude Code v2.1.287 or later. The Desktop app includes its own copy of Claude Code, and mods work there from v2.1.286. Check the version in the place you use mods:
 
 * **Terminal**: in your shell, run `claude --version`. If yours is older, [update Claude Code](/docs/en/setup#update-claude-code).
-* **Desktop app**: in a local session in the Code tab, enter `/status` and read the **Claude Code** row, which shows a version such as `2.1.286`. If yours is older, update the Desktop app.
+* **Desktop app**: in a local session in the Code tab, enter `/status` and read the **Claude Code** row, which shows a version such as `2.1.286`. If yours is older, [update the Desktop app](/docs/en/desktop#claude-code-version-in-the-code-tab).
 
 To turn mods off, choose how many to stop, and for how long. To turn them back on, undo the same change:
 
@@ -198,14 +198,14 @@ For the code behind each choice, see [React to events](/docs/en/plugins/mods/eve
 
 ### Where mods run
 
-A mod's hooks run in every kind of session that loads the plugin. Drawing is narrower: only the terminal and the Desktop app show a mod's panes, bands, and replaced rows. This table lists each place you might run Claude Code:
+A mod's hooks run in every kind of session that loads the plugin, whichever provider serves the model, including Amazon Bedrock, Google Cloud's Agent Platform, and Microsoft Foundry. Drawing is narrower: what a mod draws appears in the terminal, the Desktop app, and the VS Code extension. This table lists each place you might run Claude Code:
 
 | Where you run Claude Code | Hooks run | What the mod draws appears |
 | :- | :- | :- |
 | `claude` in a terminal, including an editor's integrated terminal and the JetBrains plugin | Yes | Yes |
 | The Code tab of the Desktop app, except in a WSL session | Yes | Yes, except elements the [elements table](/docs/en/plugins/mods/reference#elements) marks terminal-only |
 | A [WSL session](/docs/en/desktop-wsl) in the Desktop app | No, because plugins aren't available in WSL sessions | No |
-| The VS Code extension's chat panel | Yes | No |
+| The VS Code extension's chat panel | Yes | Yes, with extension version 2.1.299 or later, in a session that [fetches feature flags](/docs/en/env-vars#features-that-need-feature-flag-fetching). The [render sites](/docs/en/plugins/mods/reference#render-sites) and [elements](/docs/en/plugins/mods/reference#elements) tables mark what the panel draws. |
 | `claude -p` and the [Agent SDK](/docs/en/agent-sdk/overview) | Yes | No |
 | [Remote Control](/docs/en/remote-control) from claude.ai or the mobile app | Yes, in the session on your machine | In the terminal on your machine |
 | A [cloud session](/docs/en/claude-code-on-the-web) | Yes, for a plugin that [reaches the cloud session](/docs/en/cloud-environments#what-carries-over-from-your-setup) | No |
@@ -243,7 +243,7 @@ This table lists each entry by the name `/plugin` shows:
 | `cc-plugin-plugin-authoring` | Gives Claude the [`plugin-authoring` skill](/docs/en/plugins/mods/create#ask-claude-for-a-mod) for writing mods. It holds a skill and no mod code. | Unless Anthropic has turned installed mods off remotely | Disable it in `/plugin` |
 | `cc-plugin-sec-default` | Guards what your organization manages from the mods a user installs | [Where the guard loads](/docs/en/plugins/mods/admin#know-what-happens-by-default) | You can't. An administrator [sets the order](/docs/en/plugins/mods/admin#install-your-organizations-mods) in managed settings |
 | `cc-plugin-telemetry` | Sends the analytics records that Claude Code and its built-in mods log | Wherever Claude Code's own analytics are on | Disable it in `/plugin`, or turn analytics off, for example with [`DISABLE_TELEMETRY`](/docs/en/env-vars) |
-| `cc-plugin-you-should-know` | Runs a side agent that watches your back while Claude works on longer tasks. When it finds something worth knowing that you might miss, it shows you a note above the prompt. | Disabled by default. Listed in `/plugin` -> **Installed** -> **Show disabled** if available for your org. Enable with [`/plugin enable cc-plugin-you-should-know@builtin`](/docs/en/plugins/cli-reference#plugin-in-a-session). | Disable it in `/plugin` |
+| `cc-plugin-you-should-know` | [You should know](/docs/en/interactive-mode#you-should-know-suggestions): a side agent shows a note above the prompt when it finds something you might have missed | Off until you [turn it on](/docs/en/interactive-mode#you-should-know-suggestions) | Disable it in `/plugin` |
 
 The settings and flags that stop installed mods, such as `disableAllHooks`, `--bare`, and `--safe-mode`, don't stop built-in mods.
 

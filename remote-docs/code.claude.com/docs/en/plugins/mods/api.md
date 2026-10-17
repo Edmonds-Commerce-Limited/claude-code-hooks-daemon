@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/mods/api
-fetched_at: '2026-10-08T00:22:44.318337+00:00'
+fetched_at: '2026-10-17T03:26:16.855703+00:00'
 fidelity: converted
-source_sha256: 44a4fc9b383513b9a368e70c5c1b12f70a62852190c38b2c07a9a9288a23eb97
+source_sha256: 569f2542ba1b341d39c4652dd6763d286558980da4dcbdde1444ebd94e535188
 licence: unreviewed
-stale_after: '2027-01-06'
+stale_after: '2027-01-15'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -81,7 +81,25 @@ When you ask about a ticket, Claude can call `mcp__my-mod__ticket` with its id. 
 
 ## Call a model
 
-A mod can ask a model a question of its own, outside the conversation, for a small job such as sorting or summarizing a piece of text. `$.model.complete` sends one prompt to a model with your session's credentials and resolves to the reply. It has no conversation history.
+A mod can send its own requests to a model for a small job such as classifying or summarizing text. `$.model.complete` sends your prompt on its own, and `$.model.fork({ prompt })` sends the current conversation with your prompt at the end.
+
+This table compares what each request contains:
+
+| In the request | `$.model.complete` | `$.model.fork` |
+| :- | :- | :- |
+| Model | The `model` you pass | The session's model |
+| System prompt | A short [attribution block](/docs/en/llm-gateway-protocol#system-prompt-attribution-block), then your `system` if you pass one | The session's system prompt |
+| Messages | One user message, your `prompt` | The conversation so far, then your `prompt` as a user message |
+| CLAUDE.md and other project context | Not included | Included, as in the conversation's last request |
+| Tools | None | Claude's tools, which the model can't call |
+
+A fork repeats the conversation's last request, so the Claude API serves most of it from the [prompt cache](/docs/en/prompt-caching) while the conversation is still cached.
+
+Both calls use the session's credentials, so they bill to the user's plan, API key, or cloud provider. [The types for your build](/docs/en/plugins/mods/create#get-the-types-for-your-build) document every `$.model` method.
+
+### Send one prompt
+
+Pass `model` and `prompt` to `$.model.complete`. `prompt` becomes the user message. To give the model instructions, such as a role or an output format, also pass `system`, which becomes the system prompt.
 
 This hook answers a `/triage` command, [registered as a command](#add-a-command), by asking a small model to label the text typed after it:
 
@@ -102,13 +120,76 @@ on('command.run', { command: 'triage' }, async ($, e) => {
 })
 ```
 
-When you run `/triage the export button does nothing`, the mod sends that text to the model and prints its answer, such as `Label: bug`. Claude's conversation isn't part of the request. When the model doesn't answer, the label is `unknown`.
+When you run `/triage the export button does nothing`, the mod sends that text to the model and prints its answer, such as `Label: bug`. When the model doesn't answer, the label is `unknown`.
 
-A Claude API failure doesn't reject the call, so check `r.isAnswered`, and read `r.reason` when it's `false`. The call rejects for a request Claude Code won't send, such as a model your organization blocks. [The types for your build](/docs/en/plugins/mods/create#get-the-types-for-your-build) list the other options, such as `effort`, and the [limits](/docs/en/plugins/mods/reference#limits) give the `maxTokens` default.
+A Claude API failure doesn't reject the call, so check `r.isAnswered`, and read `r.reason` when it's `false`. The call rejects for a request Claude Code won't send, such as a model your organization blocks.
 
-`$.model.fork({ prompt })` asks one question over the current conversation instead, with the same model and system prompt, so the Claude API serves most of it from the prompt cache.
+[The types for your build](/docs/en/plugins/mods/create#get-the-types-for-your-build) list the other options, such as `effort`, and the [limits](/docs/en/plugins/mods/reference#limits) give the `maxTokens` default.
 
-These calls use the user's plan or API key.
+### Use prompt caching
+
+`$.model.complete` supports the Claude API's [prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching). The API caches the start of a request, called the prefix, up to a [cache breakpoint](https://platform.claude.com/docs/en/build-with-claude/prompt-caching#explicit-cache-breakpoints) that you set. When every call starts with the same long static content, such as instructions or reference material, set a breakpoint at the end of that content. Later calls then read it from the cache instead of paying the full input price for it.
+
+To set a breakpoint, pass `prompt` as an array of `{ text }` blocks instead of a string, and add `cache: true` to the last block of the static content. Claude Code sends that block with the API's `cache_control` field. `system` takes the same array form. To decide between them, see [Choose between `prompt` and `system`](#choose-between-prompt-and-system).
+
+<Note>
+  Arrays of blocks require Claude Code v2.1.292 or later. Earlier versions reject an array in `prompt` with an error that ends with `takes { model, prompt } (host check)`, and they leave an array in `system` out of the request.
+</Note>
+
+This version of the [`/triage` hook](#send-one-prompt) sends a long set of labeling rules before the text to label, with a breakpoint after the rules. `RULES` is a string of your own:
+
+```javascript theme={null}
+on('command.run', { command: 'triage' }, async ($, e) => {
+  const r = await $.model.complete({
+    model: 'haiku',
+    prompt: [
+      // Identical on every call, so it forms the cached prefix
+      { text: RULES, cache: true },
+      // Changes on every call, so it goes after the breakpoint
+      { text: e.args },
+    ],
+  })
+  return { text: 'Label: ' + (r.isAnswered ? r.text.trim() : 'unknown') }
+})
+```
+
+The TTL and the number of breakpoints have these limits:
+
+* **TTL**: a cache entry lasts five minutes after its last use. The TTL comes from the user's Claude Code settings, not from the call. For one hour, set [`subagentPromptCacheTtl`](/docs/en/prompt-caching#choose-the-ttl-yourself) to `1h`.
+* **Breakpoints per request**: the API accepts [up to four](https://platform.claude.com/docs/en/build-with-claude/prompt-caching#when-to-use-multiple-breakpoints), and one more comes back as an `api-error` in `r.reason`
+
+#### Choose between `prompt` and `system`
+
+Put the static content that your calls share at the start of `prompt` unless you know that your requests go directly to the Claude API:
+
+* **Directly to the Claude API, with an API key or a Claude subscription**: either field works
+* **Through [Amazon Bedrock](/docs/en/amazon-bedrock), [Claude Platform on AWS](/docs/en/claude-platform-on-aws), [Google Cloud's Agent Platform](/docs/en/google-vertex-ai), [Microsoft Foundry](/docs/en/microsoft-foundry), or an [LLM gateway](/docs/en/llm-gateway)**: use `prompt`. Claude Code begins the system prompt with an [attribution block](/docs/en/llm-gateway-protocol#system-prompt-attribution-block) whose fingerprint comes from the start of the user message. The `api.anthropic.com` endpoint strips that block before caching. Other endpoints receive it as part of the prompt, so a breakpoint in `system` can miss when `prompt` starts differently.
+* **In a mod that other people run**: use `prompt`, because you don't choose their provider
+
+`system` comes before `prompt` in the prefix, so a breakpoint in `prompt` covers `system` too, and a call with a different `system` misses the cache.
+
+#### Check for cache hits
+
+The result of `$.model.complete` has a `usage` object with the API's [cache fields](https://platform.claude.com/docs/en/build-with-claude/prompt-caching#tracking-cache-performance). `usage.cache_creation_input_tokens` counts the tokens the call wrote to the cache, and `usage.cache_read_input_tokens` counts the tokens it read from the cache. Expect a write on the first call and reads on later calls within the TTL.
+
+If every call writes and none reads, the prefix differs between calls or the calls are further apart than the TTL. For a prefix that differs, see [Choose between `prompt` and `system`](#choose-between-prompt-and-system).
+
+If both fields stay at zero on calls the model answered, nothing was cached. Check for each of these causes:
+
+* **The prefix is too short**: the API doesn't cache a prefix under the model's [minimum length](https://platform.claude.com/docs/en/build-with-claude/prompt-caching#cache-limitations), and it returns no error
+* **Prompt caching is disabled**: when a [`DISABLE_PROMPT_CACHING` variable](/docs/en/prompt-caching#disable-prompt-caching) applies to the model, Claude Code removes the breakpoints and sends the text uncached
+* **Your gateway strips `cache_control`**: a gateway can [remove the field and still return success](/docs/en/prompt-caching#where-the-cache-lives)
+* **Another mod rewrites the start of the text**: Claude Code then [sends it without breakpoints](#what-a-model-complete-hook-receives)
+
+### What a `model.complete` hook receives
+
+If you hook the [`model.complete`](/docs/en/plugins/mods/reference#mods-api-calls) event to inspect or change other mods' requests, read the text from these fields:
+
+* **`e.prompt`**: always a string. When the caller passed an array, it's the blocks' text concatenated in order.
+* **`e.system`**: a string built the same way, or absent when the caller passed no `system`
+* **`e.promptBlocks` and `e.systemBlocks`**: the caller's arrays, each present when the caller passed an array for that field
+
+Claude Code sends the strings your hook passes to `next` and uses the arrays you pass with them to place [cache breakpoints](#use-prompt-caching). It keeps the leading blocks that still match the start of the string, with their breakpoints, and sends the rest of the string with no breakpoint. For example, `next({ ...e, prompt: e.prompt + NOTE })` keeps the caller's breakpoints, and a hook that changes the start of `prompt` removes them.
 
 ## Run work in the background
 
@@ -138,8 +219,10 @@ A background job can show the user something without starting a turn. Each of th
 | Call | What the user sees |
 | :- | :- |
 | `$.ui.status(text)` | One line under the prompt that stays until you change it. It starts with `⚠` and the mod's name, as in `⚠ my-mod: checks: 3 passing`. |
-| `$.ui.toast(text)` | A toast notification at the top right, with the mod's name above the text, that disappears after a few seconds |
+| `$.ui.toast(text)` | A toast notification with the mod's name that disappears after a few seconds. It's a box at the top right in [fullscreen rendering](/docs/en/fullscreen), and one line at the right under the prompt in the classic renderer. |
 | `$.ui.log(text)` | A dim line in the transcript that Claude doesn't read. It starts with `●` and the mod's name, as in `● my-mod: build finished`. |
+
+In the [VS Code extension](/docs/en/plugins/mods/interface#draw-in-the-vs-code-extension), status lines and toasts show above the prompt box instead, and log lines in the conversation.
 
 ### Start a turn from a background job
 
@@ -151,7 +234,15 @@ Timers stop when the module reloads. For long-running work inside a hook, [`next
 
 ## Send and receive messages between sessions
 
-A mod can send a plain-text message to another of your sessions or to one of this session's subagents, and observe the messages that arrive and leave. `$.session.send({ to, text })` sends one, the same delivery the SendMessage tool makes. `to` is `{ sessionId }` for a session, `{ agentId }` for a subagent from `$.agent.list()`, or the string address a received message came from. The call resolves once the message is queued, with `{ isDelivered: true }`. When nothing was delivered it resolves with `{ isDelivered: false, reason }`, and `reason` says why.
+A mod can send a plain-text message to another of your sessions, to one of this session's subagents, or to a teammate in its [agent team](/docs/en/agent-teams). It can also observe the messages that arrive and leave.
+
+To send one, call `$.session.send({ to, text })`, which makes the same delivery the SendMessage tool makes. Set `to` by who receives the message:
+
+* **Another of your sessions**: `{ sessionId }`
+* **A subagent or teammate**: `{ agentId }`, with an id from `$.agent.list()`
+* **The sender of a message you received**: the string address that message came from
+
+The call resolves once the message is queued, with `{ isDelivered: true }`. When nothing was delivered, it resolves with `{ isDelivered: false, reason }`, and `reason` says why.
 
 This hook answers a `/ping` command, [registered as a command](#add-a-command), by asking the session whose id you type after it for a status:
 
@@ -194,13 +285,19 @@ A mod reaches the file system, processes, and the network through the mods API, 
 | `$.session` | `messages()` returns the transcript as a list of `{ role, text, toolUses }`. Also the working directory, model, and more. [`usage()`](/docs/en/plugins/mods/reference#mods-api-methods) returns context window use and plan limits. |
 | `$.mcp` | `call` a tool on a connected MCP server |
 
-Files and processes have a few rules of their own:
+Files, processes, and requests have a few rules of their own:
 
-* **Paths**: a relative path resolves against the session's working directory
+* **Paths**: a relative path resolves against the working directory of the session, or of the subagent whose event the hook is handling
 * **`$.fs.list`**: returns one directory's entries as `{ name, kind, size, isLink }` and isn't recursive
 * **`$.process.run`**: takes an argument list and uses no shell. It resolves to `{ exitCode, stdout, stderr }` whatever the exit code. It rejects if the program can't start or is still running at the timeout, which is 30 seconds by default, so wrap it in `try` and `catch`.
+* **`$.http.fetch`**: follows up to five redirects. On a redirect to a different origin, it keeps only the `accept`, `accept-language`, `content-type`, and `user-agent` request headers you set and drops the rest, so a request that depends on another header, such as `Authorization`, can fail after that redirect. The [limits](/docs/en/plugins/mods/reference#limits) give its timeout and body sizes.
 
 Every one of these calls is itself an event, named for its namespace and method without the `$.`, such as `fs.read` for `$.fs.read`. A mod [earlier in the chain](/docs/en/plugins/mods/events#the-order-mods-run-in) can observe, rewrite, or refuse your call, which is how an organization restricts what mods reach.
+
+A mod can refuse your `$.process.spawn` call after the command has produced output or exited, and nothing the command did is undone. The call then rejects with a message that ends with one of these strings and the refusing mod's reason:
+
+* **`$.process.spawn started, and a plugin withheld its result:`**: the refusing mod hadn't read the command's output to the end. Claude Code stops the command if it's still running.
+* **`$.process.spawn ran, and a plugin withheld its result:`**: the refusing mod had read the command's output to the end, so the command had exited
 
 ## Next steps
 

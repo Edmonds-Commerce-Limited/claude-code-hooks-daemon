@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/tools-reference.md
-fetched_at: '2026-10-08T00:24:23.095918+00:00'
+fetched_at: '2026-10-17T03:25:28.940419+00:00'
 fidelity: converted
-source_sha256: 9dff373c68a2072871dc8c4f4155902d5d55e275f79eca082dceaec5b87a2377
+source_sha256: 320420019ef6584aa61d1b3e30c91f07885c9dc90b5a184f68f1f0ca13c59b50
 licence: unreviewed
-stale_after: '2027-01-06'
+stale_after: '2027-01-15'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -54,7 +54,7 @@ To add custom tools, connect an [MCP server](/docs/en/mcp). To extend Claude wit
 | `ReadMcpResourceTool` | Reads a specific MCP resource by URI | No |
 | `RemoteTrigger` | Creates, updates, runs, and lists [Routines](/docs/en/routines) on claude.ai. Backs the `/schedule` command. The [`RemoteTrigger` input reference](/docs/en/agent-sdk/typescript#remotetrigger) documents every action and the organization policies that remove the tool. Routines live on claude.ai and require a Pro, Max, Team, or Enterprise plan, so this tool is not accessible from Amazon Bedrock, Claude Platform on AWS, Google Cloud's Agent Platform, or Microsoft Foundry | No |
 | `ReportFindings` | Reports code-review findings as a structured list, with a file, summary, and failure scenario per finding, so Claude Code can render them instead of printing them as text. Claude calls it when active code-review instructions tell it to. A finding can also carry an optional `category` slug, such as `correctness` or `test-coverage`, shown next to the file location in the rendered list | No |
-| `ScheduleWakeup` | Reschedules the next iteration of a [self-paced `/loop`](/docs/en/scheduled-tasks#let-claude-choose-the-interval). Claude calls this at the end of each iteration to pick when the next one runs, between one minute and one hour out; you don't call it directly. To end the loop instead, Claude calls it with `stop: true`, which cancels the pending wakeup. The `stop` field requires Claude Code v2.1.202 or later. The pending wakeup appears in `session_crons` in [Stop hook input](/docs/en/hooks#stop-input) | No |
+| `ScheduleWakeup` | Reschedules the next iteration of a [self-paced `/loop`](/docs/en/scheduled-tasks#let-claude-choose-the-interval). Claude calls this at the end of each iteration to pick when the next one runs, between one minute and one hour out; you don't call it directly. To end the loop instead, Claude calls it with `stop: true`, which cancels the pending wakeup. The pending wakeup appears in `session_crons` in [Stop hook input](/docs/en/hooks#stop-input) | No |
 | `SendFeedback` | Drafts a feedback report about Claude Code, covering a product problem or Claude's own behavior in the session, and queues it on your machine for you to review. Claude Code sends nothing until you choose to send the draft. See [SendFeedback tool behavior](#sendfeedback-tool-behavior). Requires Claude Code v2.1.238 or later | No |
 | `SendMessage` | Sends a message to another agent: an [agent team](/docs/en/agent-teams) teammate, a [subagent it resumes](/docs/en/sub-agents#resume-subagents) by agent ID or name, or one of your other Claude Code sessions, on this machine or beyond it. Messaging other sessions requires Claude Code v2.1.224 or later. [Cross-session messaging](/docs/en/cross-session-messaging) covers which sessions Claude can reach, [what a message looks like when it arrives](/docs/en/cross-session-messaging#what-a-message-looks-like), and [how Claude gets a notice when another session goes idle](/docs/en/cross-session-messaging#get-a-notice-when-another-session-goes-idle). Claude can include an optional `summary` input, typically 5-10 words, that Claude Code shows as a one-line preview. When Claude omits it on a [plain-text message](/docs/en/cross-session-messaging#limitations), Claude Code uses the first line of the message as the summary. Claude Code truncates a summary longer than 200 characters with an ellipsis | No |
 | `SendUserFile` | Sends files from the session to you with an optional caption, so a generated report, diagram, screenshot, or built artifact reaches your device instead of only being mentioned in the transcript. The optional `display` input controls presentation: `render` opens the file inline in the client, `attach` shows a download card only, and when unset the client decides by file type. Available when a [Remote Control](/docs/en/remote-control) client is connected or in a [cloud session](/docs/en/claude-code-on-the-web). Delivery runs through Anthropic-hosted infrastructure, so the tool is not available on Amazon Bedrock, Google Cloud's Agent Platform, or Microsoft Foundry | No |
@@ -64,8 +64,8 @@ To add custom tools, connect an [MCP server](/docs/en/mcp). To extend Claude wit
 | `TaskCreate` | Creates a new task in the task list. Provided by default only on the models listed under [Task tool availability](#task-tool-availability), and on other models when you opt in | No |
 | `TaskGet` | Retrieves full details for a specific task. Provided by default only on the models listed under [Task tool availability](#task-tool-availability), and on other models when you opt in | No |
 | `TaskList` | Lists all tasks with their current status. Provided by default only on the models listed under [Task tool availability](#task-tool-availability), and on other models when you opt in | No |
-| `TaskOutput` | Retrieves output from a background task. Deprecated in favor of `Read` on the task's output file path. When no task matches the ID, the error lists the running background agents by ID and description. Before v2.1.203, the error named only the missing ID | No |
-| `TaskStop` | Stops a running background task by ID. It also accepts an [agent-team teammate](/docs/en/agent-teams) or a named background agent by agent ID or name. When no task matches the ID, the error lists the running background agents by ID and description, including agents that another agent spawned. Before v2.1.203, the error listed running teammates and named agents but not background agents another agent spawned, so those couldn't be identified or stopped from the main conversation | No |
+| `TaskOutput` | Removed in v2.1.277. Previously retrieved output from a background task; Claude reads a background task's [output file](/docs/en/interactive-mode#how-backgrounding-works) with `Read` instead | No |
+| `TaskStop` | Stops a running background task by ID. It also accepts an [agent-team teammate](/docs/en/agent-teams) or a named background agent by agent ID or name. When no task matches the ID, the error lists the running background agents by ID and description, including agents that another agent spawned | No |
 | `TaskUpdate` | Updates task status, dependencies, details, or deletes tasks. Provided by default only on the models listed under [Task tool availability](#task-tool-availability), and on other models when you opt in | No |
 | `TodoWrite` | Manages the session task checklist. Disabled by default in favor of `TaskCreate`, `TaskGet`, `TaskList`, and `TaskUpdate`. Set `CLAUDE_CODE_ENABLE_TASKS=0` to re-enable it in [sessions that have the task-tracking tools](#task-tool-availability) | No |
 | `ToolSearch` | Searches for and loads deferred tools when [tool search](/docs/en/mcp#scale-with-mcp-tool-search) is enabled | No |
@@ -193,7 +193,9 @@ For long-running processes such as dev servers or watch builds, Claude can set `
 
 #### When a background command stops
 
-A command that a [foreground subagent](/docs/en/sub-agents#run-subagents-in-foreground-or-background) started stops when that subagent's run ends, whether it finished, failed, or was interrupted. A command that the main conversation or a background subagent started keeps running after a final response, until it exits, is stopped, or reaches its [time limit](#time-limit-for-background-commands). In non-interactive mode with the `-p` flag, [background commands end shortly after the run's final result](/docs/en/headless#background-tasks-at-exit).
+A command that a [foreground subagent](/docs/en/sub-agents#run-subagents-in-foreground-or-background) started stops when that subagent's run ends, whether it finished, failed, or was interrupted. A command that the main conversation or a background subagent started keeps running after a final response, until it exits, is stopped, or reaches its [time limit](#time-limit-for-background-commands).
+
+While a command that the main conversation started is still running, a run in non-interactive mode with the `-p` flag [stays open after its result](/docs/en/headless#background-tasks-at-exit) until that command exits or reaches its time limit. A command that a background subagent started is stopped when the run exits.
 
 #### Time limit for background commands
 
@@ -206,13 +208,15 @@ The time limit counts from the moment the command enters the background:
 * A command that Claude starts in the background gets 30 minutes, or the `timeout` Claude passes with `run_in_background`, up to a maximum of 2 hours
 * A command that starts in the foreground and then moves to the background, for example at its timeout, gets 30 minutes from the move
 
+In a run with the `-p` flag whose prompt you pass as text rather than with `--input-format stream-json`, both defaults are 10 minutes instead of 30, because the run [waits for background commands after its result](/docs/en/headless#background-tasks-at-exit).
+
 When a background command reaches its time limit, Claude Code stops it and tells Claude why, and Claude can start the command again with a longer `timeout` if the work still needs it. The stop notice reads `Background command "<description>" was stopped after reaching its background time limit`.
 
 #### Raise the time limit for background commands
 
-Two [environment variables](/docs/en/env-vars) raise these limits, for Bash and PowerShell commands alike. Both take milliseconds, and neither can shorten a limit: a lower value leaves the 30-minute default and the 2-hour maximum in place.
+Two [environment variables](/docs/en/env-vars) raise these limits, for Bash and PowerShell commands alike. Both take milliseconds, and neither can shorten a limit: a lower value leaves the defaults and the 2-hour maximum in place.
 
-* Set `BASH_DEFAULT_TIMEOUT_MS` above `1800000` to replace the 30-minute default with that value, both for commands Claude starts without a `timeout` and for moved commands
+* Set `BASH_DEFAULT_TIMEOUT_MS` above `1800000` to replace the 30-minute default with that value, both for commands Claude starts without a `timeout` and for moved commands. In a `-p` run whose prompt you pass as text, any value above `600000` replaces its 10-minute default
 * Set `BASH_MAX_TIMEOUT_MS` above `7200000` to raise the 2-hour maximum to that value. Setting `BASH_DEFAULT_TIMEOUT_MS` above `7200000` raises the maximum the same way
 
 #### Foreground commands that move to the background
@@ -255,17 +259,25 @@ Whatever you list, these rules apply:
 
 The Edit tool performs exact string replacement. It takes an `old_string` and a `new_string` and replaces the first with the second. It doesn't use regex or fuzzy matching.
 
-Three checks must pass for an edit to apply. Before any of them, a path matched by a [`Read` deny rule](/docs/en/permissions#tool-specific-permission-rules) is refused, including creating a new file there. The refusal requires Claude Code v2.1.208 or later.
+These checks must pass for an edit to apply. Before any of them, a path matched by a [`Read` deny rule](/docs/en/permissions#tool-specific-permission-rules) is refused, including creating a new file there. The refusal requires Claude Code v2.1.208 or later.
 
-* **Read-before-edit**: Claude reads the file in the current conversation before editing it, and a read cut short with a [`PARTIAL view` notice](#read-tool-behavior) doesn't count. Claude Opus 4.6, Claude Haiku 4.5, and older models always require the read. Newer models can edit an unread file when reading it wouldn't need a permission prompt and the Read tool is available.
+* **Read-before-edit**: Claude reads the file in the current conversation before editing it, and a read cut short with a [`PARTIAL view` notice](#large-files) doesn't count. Claude Opus 4.6, Claude Haiku 4.5, and older models always require the read. Newer models can edit an unread file when reading it wouldn't need a permission prompt and the Read tool is available.
 * **Match**: `old_string` must appear in the file exactly as written. A single character of whitespace or indentation difference is enough to miss.
 * **Uniqueness**: `old_string` must appear exactly once. When it appears more than once, Claude either supplies a longer string with enough surrounding context to pin down one occurrence, or sets `replace_all: true` to replace them all.
 
 A file that changed on disk after Claude last read it can still be edited when `old_string` matches the current content exactly and unambiguously and Claude Code can read the file without prompting. Matching against the file's current content keeps this safe, and the result notes that the file carries other changes so Claude re-reads it before edits that depend on surrounding content. In any other case, such as a stale `old_string` or one that matches more than once without `replace_all`, Claude reads the file again before editing. The relaxed handling of unread and changed files requires Claude Code v2.1.208 or later; before that, Claude Code refused any edit to a file it hadn't read in the conversation or that changed on disk after the read.
 
-Viewing a file with Bash also satisfies the read-before-edit requirement when the command is `cat`, `nl`, `bat`, `batcat`, `head`, `tail`, `sed -n 'X,Yp'`, `grep`, `egrep`, `fgrep`, or `rg` on a single file with no pipes or redirects. Piped output and other Bash commands don't count toward the read-before-edit check.
+Claude can also edit a file without a separate Read after it views the file with a Bash command such as `cat` or `grep`. Those commands are `cat`, `nl`, `bat`, `batcat`, `head`, `tail`, `sed -n 'X,Yp'`, `grep`, `egrep`, `fgrep`, and `rg`, each run on one file with no pipes or redirects. A search that prints no matches doesn't count as a read, nor does any command outside this list.
 
-Viewing a file with Bash affects edit eligibility only, not permissions. See [Read and Edit permission rules](/docs/en/permissions#read-and-edit) for which Bash commands your `Read` and `Edit` deny rules cover.
+When Claude views a file this way, Claude Code also loads any [subdirectory `CLAUDE.md`](/docs/en/memory#how-claude-md-files-load) and [path-scoped rules](/docs/en/memory#path-specific-rules) that apply to that file. See [Read and Edit permission rules](/docs/en/permissions#read-and-edit) for which Bash commands your `Read` and `Edit` deny rules cover.
+
+### Non-UTF-8 files
+
+Claude can't use [NotebookEdit](#notebookedit-tool-behavior) on a file that isn't valid UTF-8. The same goes for Edit, unless the file starts with a little-endian UTF-16 byte-order mark. When Claude tries, the tool refuses the change and leaves the file untouched. Refused files include non-ASCII text saved in a legacy encoding such as Windows-1252 or Shift-JIS, binary files, and UTF-8 with an invalid byte sequence.
+
+The tools refuse because they save the whole file back as UTF-8, which would replace every byte they can't decode with the replacement character `U+FFFD`. Instead, the [error Claude receives](/docs/en/errors#file-is-not-valid-utf-8) tells it to make the change with a shell command that keeps the file's encoding, or to ask you about converting it to UTF-8 first.
+
+Claude can still replace such a file with Write, unless the new content contains `U+FFFD`, the character Read shows Claude in place of bytes it can't decode. That guard stops Claude from writing back the garbled text it read. When Write does replace the file, it saves the new content as UTF-8, so the file's original encoding is lost.
 
 ## EndConversation tool behavior
 
@@ -417,6 +429,8 @@ Three edit modes control what happens to the target cell:
 * `insert`: add a new cell after the target. With no `cell_id`, the new cell goes at the start of the notebook. Requires `cell_type` set to `code` or `markdown`.
 * `delete`: remove the target cell.
 
+NotebookEdit refuses a notebook file that doesn't decode as UTF-8, under the [same rule as Edit](#non-utf-8-files), and writes nothing.
+
 Permission rules use the `Edit(...)` path format. A rule like `Edit(notebooks/**)` covers NotebookEdit calls on files in that directory.
 
 ## PowerShell tool
@@ -468,7 +482,9 @@ Three additional settings control where PowerShell is used:
 * `"shell": "powershell"` on individual [command hooks](/docs/en/hooks#command-hook-fields): runs that hook in PowerShell. Hooks spawn PowerShell directly, so this works regardless of `CLAUDE_CODE_USE_POWERSHELL_TOOL`.
 * `shell: powershell` in [skill frontmatter](/docs/en/skills#frontmatter-reference): runs `` !`command` `` blocks in PowerShell. Requires the PowerShell tool to be enabled.
 
-The same main-session working-directory reset behavior described under the Bash tool section applies to PowerShell commands, including the `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR` environment variable.
+PowerShell commands follow the [same main-session working-directory reset behavior](#what-persists-between-commands) as Bash commands, including the `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR` environment variable.
+
+PowerShell commands also receive the variables hooks persist through `CLAUDE_ENV_FILE`, under the conditions in [Persisted variables in PowerShell commands](/docs/en/hooks#persisted-variables-in-powershell-commands). Requires Claude Code v2.1.296 or later.
 
 Exit code 1 from `grep`, `rg`, `egrep`, `fgrep`, `findstr`, and `git grep` means no matches. Exit code 1 from `git diff` means differences exist. Neither result is reported to Claude as a command failure. For `robocopy`, exit codes 0 through 7 are informational results, such as files copied or extra files detected. Exit codes of 8 or higher count as failures.
 
@@ -495,19 +511,24 @@ The PowerShell tool has the following known limitations during the preview:
 
 The Read tool takes a file path and returns the contents with line numbers. Claude is instructed to always pass absolute paths.
 
-By default, Read returns the file from the start. When a whole-file read exceeds the token limit, Read returns the first page with a `PARTIAL view` notice that tells Claude how much of the file it received and how to read more with `offset` and `limit`. A read that passes an explicit `offset` or `limit` and still exceeds the token limit returns an error.
-
-A read with an explicit `limit` stops as soon as the selected lines exceed what the token limit could ever fit and returns an error without loading the rest of the range. The error tells Claude to use a smaller `limit`, or to search for specific content with [Grep](#grep-tool-behavior) instead when a single line is that large. Before v2.1.208, Claude Code loaded the whole range into memory before rejecting it, so reading a file with an extremely long single line could run it out of memory.
-
 Reading an empty file returns a notice that the file exists but its contents are empty, and an `offset` past the last line returns a notice giving the file's line count. Before v2.1.208, reading an empty file returned the past-the-end notice instead.
 
 Read handles several file types beyond plain text:
 
 * **Images**: PNG, JPG, and other image formats are returned as visual content that Claude can see, not as raw bytes. Claude Code resizes and recompresses large images to fit the model's image size limits before sending them, so Claude may see a downscaled version of a large screenshot. An image that is still larger than 500KB after that resize is re-encoded as a JPEG at reduced quality with its pixel dimensions unchanged. If Claude misses fine pixel-level detail in a large image, ask it to crop the region of interest first, for example with ImageMagick via Bash.
 * **PDFs**: Claude reads short `.pdf` files whole. For PDFs longer than 10 pages, it reads in ranges with a `pages` parameter, such as `"1-5"`, up to 20 pages at a time. Page-range reads render pages with `pdftoppm` from poppler-utils, so install it with `brew install poppler` on macOS or `apt-get install poppler-utils` on Debian and Ubuntu. On Windows and other platforms, install a poppler build that puts `pdftoppm` on your `PATH`. Without it, a page-range read fails with `pdftoppm is not installed`.
-* **Jupyter notebooks**: `.ipynb` files return all cells with their outputs, including code, markdown, and visualizations. Claude Code refuses to read a notebook file over 100 MB; the error tells Claude how to read a portion of the notebook instead, such as a slice of cells, with a shell command.
+* **Jupyter notebooks**: `.ipynb` files return all cells with their outputs, including code, markdown, and visualizations. A notebook whose cells come to more than 256 KB, or more than the [token limit](#large-files), returns an error instead. Claude Code refuses to read a notebook file over 100 MB; the error tells Claude how to read a portion of the notebook instead, such as a slice of cells, with a shell command.
 
 Read only reads files, not directories. Claude lists directory contents with a shell command such as `ls`.
+
+### Large files
+
+Claude can read a text file larger than a single Read call returns. By default one call returns at most 25,000 tokens, or the value you set in [`CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS`](/docs/en/env-vars), and refuses a whole file over 256 KB, so Claude reads a larger file in pages with `offset` and `limit`. On Claude Code v2.1.296 or later it can instead read the whole file, or a long line range, in one call by setting `allow_large: true` when it needs to, for example because you asked for the entire file. That read is sized against the room left in the session's [context window](/docs/en/context-window) instead of the default limits. Images, PDFs, and notebooks keep their limits.
+
+What Claude receives when a read goes over the default limits:
+
+* **Whole file over the token limit**: the first page of the file, with a `PARTIAL view` notice saying how much of the file it received and how to read more with `offset` and `limit`
+* **Whole file over 256 KB, or an `offset` or `limit` read over the token limit**: an error telling it to read a portion with `offset` and `limit`, or to search for specific content with [Grep](#grep-tool-behavior) instead
 
 ## SendFeedback tool behavior
 
@@ -569,7 +590,7 @@ Claude Code includes the tool in interactive terminal sessions on your own machi
 
 ## Task tool availability
 
-The task-tracking tools, `TaskCreate`, `TaskGet`, `TaskUpdate`, `TaskList`, and `TodoWrite`, are available by default only on Claude 3.x models, Opus 4 through 4.7, Sonnet 4 through 4.6, and Haiku 4.5. Wherever the tools are available, you get the four Task tools, or `TodoWrite` instead when you set [`CLAUDE_CODE_ENABLE_TASKS=0`](/docs/en/env-vars).
+The task-tracking tools, `TaskCreate`, `TaskGet`, `TaskUpdate`, `TaskList`, and `TodoWrite`, are available by default only on Opus 4.7, Sonnet 4.6, Haiku 4.5, and earlier models. Wherever the tools are available, you get the four Task tools, or `TodoWrite` instead when you set [`CLAUDE_CODE_ENABLE_TASKS=0`](/docs/en/env-vars).
 
 On every other model, Claude Code leaves the tools out unless you opt in. The same applies to a model ID Claude Code doesn't recognize, such as a custom model name served through an [LLM gateway](/docs/en/llm-gateway). On newer models, Claude keeps track of multi-step work without a written checklist, and the tools' definitions and reminders take up context. Without the tools, Claude adds nothing to the [task list](/docs/en/interactive-mode#task-list) while it works.
 
@@ -596,7 +617,7 @@ A few behaviors shape the response Claude receives:
 
 * WebFetch refuses `localhost` and any other hostname without a dot, such as a bare intranet name, before making a request. The [error it returns](/docs/en/errors#webfetch-cannot-fetch-localhost) tells Claude to reach local servers with `curl` through Bash instead.
 * HTTP URLs are automatically upgraded to HTTPS.
-* Large pages are truncated to a fixed character limit before processing.
+* WebFetch reads up to 100,000 characters of a page's content per call. On Claude Code v2.1.290 or later, the result for a longer page tells Claude how much went unread, so Claude can fetch the next part.
 * WebFetch caches each response for 15 minutes by default, so repeated fetches of the same URL return quickly. On Claude Code v2.1.233 or later, set [`CLAUDE_CODE_WEBFETCH_CACHE_TTL_MS`](/docs/en/env-vars#variables) to change how long WebFetch keeps each response.
 * A page that hasn't finished downloading within five minutes, including any redirects WebFetch follows, fails with a deadline error. On Claude Code v2.1.268 or later, set [`CLAUDE_CODE_WEBFETCH_DEADLINE_MS`](/docs/en/env-vars#variables) to change the limit, or to `0` to remove it.
 * When a URL redirects to a different host, WebFetch returns a text result that names the original URL and the redirect target instead of following it. Claude then fetches the new URL with a second WebFetch call.
@@ -639,24 +660,30 @@ WebSearch permission rules take no specifier. A bare `WebSearch` entry in `allow
 The search backend is not configurable. To search with a different provider, add an [MCP server](/docs/en/mcp) that exposes a search tool.
 
 <Note>
-  WebSearch is available on the Claude API and [Claude Platform on AWS](/docs/en/claude-platform-on-aws). On Microsoft Foundry it requires a [deployment hosted on Anthropic](https://platform.claude.com/docs/en/build-with-claude/claude-in-microsoft-foundry#hosting-options): deployments hosted on Azure don't support server-side tools, so the WebSearch call fails. On Google Cloud's Agent Platform it works with Claude 4 and later models, including Opus, Sonnet, and Haiku. Amazon Bedrock doesn't expose the server-side web search tool.
+  WebSearch is available on the Claude API, [Claude Platform on AWS](/docs/en/claude-platform-on-aws), and Microsoft Foundry. On Google Cloud's Agent Platform it works with Opus 4, Sonnet 4, Haiku 4.5, and later models. Amazon Bedrock doesn't expose the server-side web search tool.
 </Note>
 
 ### Session search limit
 
-A session can make at most 200 WebSearch calls, counted across the main conversation and every [subagent](/docs/en/sub-agents) it spawns, so searches made by parallel research fan-outs count against the same limit. The limit requires Claude Code v2.1.212 or later. When Claude reaches the limit, further calls return a notice telling Claude to continue with the information it already gathered, rather than an error that would invite a retry. You don't see the notice: a capped call appears in the conversation as a search that did nothing, and if Claude needs more searches, the notice tells it to ask you to raise the limit.
+An interactive terminal session has a limit of 200 WebSearch calls. Searches from the main conversation and from [subagents](/docs/en/sub-agents), such as a parallel research fan-out, count against the same limit. The limit requires Claude Code v2.1.212 or later.
 
-Set the [`CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION`](/docs/en/env-vars) environment variable to change the cap; it accepts a positive whole number, so the cap can be raised but not turned off. Running [`/clear`](/docs/en/commands#all-commands) resets the count. If work that can still spawn [subagents](/docs/en/sub-agents) survives the clear, such as a running workflow, the count carries over instead.
+While a session is at the limit, searches appear in the conversation as calls that did nothing. Claude gets a notice telling it to continue with the information it already gathered and, if it needs more searches, to ask you to raise the limit.
+
+To get more searches, raise the cap, wait for the limit to refill, or start a new conversation:
+
+* **Raise the cap**: set the [`CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION`](/docs/en/env-vars#variables) environment variable to a positive whole number, such as `500`. The cap can be raised but not turned off.
+* **Wait for the refill**: on Claude Code v2.1.290 or later, an interactive terminal session's limit refills at about 100 calls per hour. To change the rate, set [`CLAUDE_CODE_WEB_SEARCH_REFILLS_PER_HOUR`](/docs/en/env-vars#variables) to a number of calls per hour, such as `50`.
+* **Start a new conversation**: running [`/clear`](/docs/en/commands#all-commands) at the Claude Code prompt also resets the count. If work that can still spawn subagents survives the clear, such as a running workflow, the count carries over instead.
 
 ## Write tool behavior
 
-The Write tool creates a new file or overwrites an existing one with the full content provided. It doesn't append or merge.
+The Write tool creates a new file or overwrites an existing one with the full content provided. It doesn't append or merge. Write also overwrites an existing file whose bytes don't decode and saves the new content as UTF-8, as described under [non-UTF-8 files](#non-utf-8-files).
 
 Whether Claude must read an existing file in the current conversation before overwriting it depends on the model and the file:
 
 * Claude Opus 4.6, Claude Haiku 4.5, and older models always require the read, so a Write to an unread existing file fails with an error.
 * Newer models can overwrite a file they never read this session under the same conditions as [read-before-edit](#edit-tool-behavior): reading it wouldn't need a permission prompt and the Read tool is available.
-* Jupyter notebooks, and files Claude has read only partially with a [`PARTIAL view` notice](#read-tool-behavior), require the read on every model.
+* Jupyter notebooks, and files Claude has read only partially with a [`PARTIAL view` notice](#large-files), require the read on every model.
 
 This constraint doesn't apply to new files. Before v2.1.228, every model required the read before overwriting an existing file.
 

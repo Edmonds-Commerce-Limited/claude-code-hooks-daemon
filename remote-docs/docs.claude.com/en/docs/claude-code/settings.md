@@ -1,10 +1,10 @@
 ---
 source_url: https://docs.claude.com/en/docs/claude-code/settings
-fetched_at: '2026-10-08T00:22:56.792507+00:00'
+fetched_at: '2026-10-17T03:25:31.947016+00:00'
 fidelity: converted
-source_sha256: 5c41248aea5764d32b14f90b77f4aa149486ca6bad6517c400398d9096b0ee25
+source_sha256: a8cc395af5e0938659ddfd38a703bdc8a5151640216c5230098408e30625e380
 licence: unreviewed
-stale_after: '2027-01-06'
+stale_after: '2027-01-15'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -493,7 +493,7 @@ Two rules qualify the root location:
 
 Before v2.1.211, Claude Code kept the file in the starting directory. It still reads a file an earlier version left there alongside the root file; where both set the same key, the root's value applies, and permission rules from both files apply. The Agent SDK's [`resolveSettings()`](/docs/en/agent-sdk/typescript#resolvesettings) helper always reads the file from the starting directory.
 
-Claude Code reads the shared `.claude/settings.json` from the session's [primary working directory](/docs/en/permissions#working-directories), so to use a file committed at the repository root, start Claude Code there. After you [move the session with `/cd`](/docs/en/permissions#move-the-session-to-another-directory), Claude Code reads both project files from the new directory instead, placing the local file by the same rules. Reading them from the directory you moved to requires Claude Code v2.1.246 or later.
+Claude Code reads the shared `.claude/settings.json` from the session's [primary working directory](/docs/en/permissions#working-directories), so to use a file committed at the repository root, start Claude Code there. After you [move the session with `/cd`](/docs/en/permissions#move-the-session-to-another-directory), Claude Code reads both project files from the new directory instead, placing the local file by the same rules. Reading them from the directory you moved to requires Claude Code v2.1.246 or later. For a worktree session that you start from the desktop app, see [What worktrees share with the main checkout](/docs/en/worktrees#what-worktrees-share-with-the-main-checkout).
 
 <span id="managed-settings-delivery" />
 
@@ -517,7 +517,7 @@ Managed settings reach you through the [delivery mechanisms](/docs/en/managed-se
 
 In a [Cowork](https://claude.com/docs/cowork/overview) session that runs on your machine in the Claude Desktop app, Claude Code doesn't fetch server-managed settings from the claude.ai admin console, and it reads policy deployed to your device unless your organization's Claude Desktop configuration sets `requireCoworkFullVmSandbox`. [Where and when a policy applies](/docs/en/managed-settings#where-and-when-a-policy-applies) covers Cowork and cloud sessions.
 
-If you're the administrator, [Set up Claude Code for your organization](/docs/en/admin-setup) walks through choosing what to enforce, and [Deploy managed settings](/docs/en/managed-settings) covers delivery and how to confirm a policy is in force.
+If you're the administrator, [Set up Claude Code for your organization](/docs/en/admin-setup) walks through choosing what to enforce, and [Deploy managed settings](/docs/en/managed-settings) covers delivery and how to confirm a policy is in force. For the warning the managed settings editor in the claude.ai admin console can show, see [Configure server-managed settings](/docs/en/server-managed-settings#configure-server-managed-settings).
 
 ## Change a setting
 
@@ -725,7 +725,7 @@ Managed sources reach a running session on the schedule in the [delivery table](
 
 Two things keep a key in `.claude/settings.json` from applying for everyone who clones it:
 
-* **Claude Code ignores the key in a repository file.** Look for `User, local, or managed`, `User or managed`, `Managed`, or `Global config` in the Scope column of the [settings index](/docs/en/settings-reference#settings-index). Those keys never apply from the shared file, apart from a few that a repository file can still switch off. Each of those entries says so on its Scope line. `Global config` keys apply only from `~/.claude.json`.
+* **Claude Code ignores the key in a repository file.** Look for `User, local, or managed`, `User or managed`, `User`, `Managed`, or `Global config` in the Scope column of the [settings index](/docs/en/settings-reference#settings-index). Those keys never apply from the shared file, apart from a few that a repository file can still switch off. Each of those entries says so on its Scope line. `Global config` keys apply only from `~/.claude.json`.
 
   Inside the `env` key, the telemetry export variables never apply from the shared file either, apart from a few off values; see [Variables Claude Code ignores in `env`](/docs/en/settings-reference#variables-claude-code-ignores-in-env).
 * **The key waits for trust.** `permissions.allow` rules, `permissions.additionalDirectories`, `extraKnownMarketplaces`, and most [`env`](/docs/en/settings-reference#env) values apply only after each teammate [trusts the folder](/docs/en/permissions#project-allow-rules-and-workspace-trust). Until then they still see prompts and don't get plugins from a marketplace the file declares. `deny` and `ask` rules apply right away.
@@ -761,7 +761,7 @@ An app that runs Claude Code inside itself and sets [`CLAUDE_CODE_PROVIDER_MANAG
 
 A [cloud session](/docs/en/claude-code-on-the-web) runs in a [cloud environment](/docs/en/cloud-environments) on a fresh clone of your repository, not on your machine. That changes which settings reach it:
 
-* **Shared project settings** (`.claude/settings.json`): read in a session with one repository, because the file is part of the clone and the session starts inside it. Commit a setting there to apply it in those sessions. A session with several repositories starts above the clones and reads only the `enabledPlugins` and `extraKnownMarketplaces` keys from each repository's `.claude/settings.json`, not permission rules, hooks, `env`, or other keys. The marketplaces and plugins those two keys declare still [don't load in a cloud session](/docs/en/cloud-environments#what-carries-over-from-your-setup).
+* **Shared project settings** (`.claude/settings.json`): read in a session with one repository, because the file is part of the clone and the session starts inside it. Commit a setting there to apply it in those sessions. In an Anthropic-hosted environment, a session with several repositories starts above the clones and reads only the `enabledPlugins` and `extraKnownMarketplaces` keys from each repository's `.claude/settings.json`, not permission rules, hooks, `env`, or other keys. The marketplaces and plugins those two keys declare still [don't load in a cloud session](/docs/en/cloud-environments#what-carries-over-from-your-setup). For a self-hosted environment, see [which repository's settings apply](/docs/en/self-hosted-environments-configuration#repository-settings-in-sessions-with-several-repositories).
 * **User and project local settings** (`~/.claude/settings.json` and `.claude/settings.local.json`): not read. Both stay on your machine, and the local file isn't in the clone.
 * **Managed settings**: a `managed-settings.json` file or MDM profile on your device doesn't reach a cloud session. Your organization's [server-managed settings](/docs/en/server-managed-settings) do; [surface coverage](/docs/en/model-config#surface-coverage) lists which cloud sessions receive them. A [self-hosted environment](/docs/en/self-hosted-environments) also reads the managed settings file in its runner image. [How Claude Code combines managed sources](/docs/en/managed-settings#how-claude-code-combines-managed-sources) says when that file applies.
 * **`/config`**: in your browser at claude.ai/code, opens the Claude Code section of your claude.ai settings instead of changing a value. To change a setting for a cloud session, set an [environment variable](/docs/en/cloud-environments#set-environment-variables) on the environment, or in a session with one repository, commit the key to that repository's `.claude/settings.json`.

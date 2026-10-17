@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/marketplace-reference
-fetched_at: '2026-10-08T00:22:43.554961+00:00'
+fetched_at: '2026-10-17T03:26:12.355708+00:00'
 fidelity: converted
-source_sha256: e2b18454d274fc1147b8690678f0a0108e7724e6e04a0d7c1a99287f0504d8bd
+source_sha256: f9733d0ca8639440700b5e2af718c62052e5b0774e9e9d7903c8cdce353f4a07
 licence: unreviewed
-stale_after: '2027-01-06'
+stale_after: '2027-01-15'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -57,9 +57,13 @@ You can't give your marketplace any of the following names:
 * <span id="reserved-name-spellings" />**Another spelling of a reserved name**: a name that differs from a reserved name only by a trailing dot, or by a symbol other than an underscore in place of a hyphen, so `claude.code.plugins` counts as `claude-code-plugins`. Adding the marketplace fails with [`is another spelling of "<reserved>", a reserved marketplace name`](/docs/en/errors#marketplace-name-is-another-spelling-of-a-reserved-name), and a marketplace already registered under one stops loading. This check requires Claude Code v2.1.280 or later.
 * **Names Claude Code uses for plugins that don't come from a marketplace**: `inline` for plugins loaded with [`--plugin-dir`](/docs/en/cli-reference), `builtin` for built-in plugins, `skills-dir` for plugins auto-loaded from [`.claude/skills/`](/docs/en/skills), and `synced` for plugins synced from your claude.ai account. `claude-plugin-test` is also reserved. `skills-dir` also appears as `{"source": "skills-dir"}` in `strictKnownMarketplaces` and `blockedMarketplaces`, described under [Source values valid only in policy lists](#source-values-valid-only-in-policy-lists).
 * **`npm`, `pip`, `uv`, `cargo`, `github`, and `gh`**: reserved in any casing. This check requires Claude Code v2.1.275 or later.
+* **Member names that every JavaScript object has**: `constructor`, `hasOwnProperty`, `isPrototypeOf`, `propertyIsEnumerable`, `toLocaleString`, `toString`, and `valueOf`. `claude plugin marketplace add` refuses a marketplace that uses one with [`Claude Code reserves this name and cannot register a marketplace under it`](/docs/en/plugins/troubleshooting#claude-code-reserves-this-name). This check requires Claude Code v2.1.296 or later.
 * **Names starting with `claudeai-`**: reserved for marketplaces hosted on claude.ai. `claude plugin marketplace add` refuses any other marketplace that uses one with `Cannot add marketplace "<name>": names starting with "claudeai-" are reserved for marketplaces hosted on claude.ai`.
+* **The download folder of a registered GitHub marketplace, `<owner>-<repo>`**: Claude Code downloads a marketplace added from a `github` source such as `acme/x-tools` through a folder named `acme-x-tools`, whatever that marketplace's own `name` is. While that marketplace is registered under a name other than `acme-x-tools`, `claude plugin marketplace add` refuses a different marketplace named `acme-x-tools` after downloading it, and reports `Can't use the marketplace name "acme-x-tools"`. This check requires Claude Code v2.1.290 or later.
 
-When a registered marketplace stops loading because its name imitates an official one, `claude plugin list` and `/plugin` report `Claude Code refuses the marketplace name "<name>"`. The message tells you to remove the marketplace. Removing it also uninstalls its plugins and deletes their saved data. This named refusal message requires Claude Code v2.1.282 or later.
+When a registered marketplace stops loading because its name imitates an official one, `claude plugin list` and `/plugin` report `Claude Code refuses the marketplace name "<name>"`. The message tells you to remove the marketplace. Removing it also uninstalls its plugins and deletes their data, options, and secrets. This named refusal message requires Claude Code v2.1.282 or later.
+
+If a settings file declares the marketplace inline, the message tells you to rename its entry before you remove the old name. For the steps, see [Claude Code refuses the marketplace name](/docs/en/errors#claude-code-refuses-the-marketplace-name). The message lists them in Claude Code v2.1.292 or later.
 
 ## Top-level fields
 
@@ -67,7 +71,7 @@ The table lists every key Claude Code reads from `marketplace.json`. `name`, `ow
 
 | Field | Type | Description |
 | :- | :- | :- |
-| `name` | string | Marketplace identifier: letters, digits, `.`, `_`, and `-`, starting with a letter or digit, and no `..`. `claude plugin validate` fails any other name, because Claude Code can't install plugins from a marketplace that uses one. Users type the name after `@` in a [plugin id](/docs/en/plugins/loading#find-where-a-plugin-came-from) such as `my-plugin@my-marketplace` when they install a plugin. See [Reserved names](#reserved-names) |
+| `name` | string | Marketplace identifier: letters, digits, `.`, `_`, and `-`, starting with a letter or digit, and no `..`. `claude plugin validate` fails any other name, because Claude Code [can't install plugins from a marketplace that uses one](/docs/en/plugins/troubleshooting#cannot-install-plugins-from-a-marketplace-with-this-name). Users type the name after `@` in a [plugin id](/docs/en/plugins/loading#find-where-a-plugin-came-from) such as `my-plugin@my-marketplace` when they install a plugin. See [Reserved names](#reserved-names) |
 | `owner` | object | Maintainer information. `name` is required; `email` and `url` are optional |
 | `plugins` | array | [Plugin entries](#plugin-entries). Each entry is validated on its own, so one invalid entry doesn't fail the marketplace |
 | `$schema` | string | JSON Schema URL for editor autocomplete. Ignored at load time |
@@ -460,6 +464,7 @@ The table maps marketplace-level messages to the field each is about.
 | `Claude Code cannot install plugin "x". Each part of a plugin id (plugin@marketplace) may use only the letters a-z and A-Z, digits, ".", "_" and "-", and must start with a letter or digit. Change this entry's "name".` | Error | `plugins[i].name` |
 | `Duplicate plugin name "x" found in marketplace` | Error | Two entries share a `name` |
 | `plugins.i.source: Invalid input` | Error | The entry's `source` matches no type. See [Invalid input on a source](#invalid-input-on-a-source) |
+| `plugins.i.source: Invalid string: must start with "./"` | Error | A relative-path `source` without the leading `./`. Before v2.1.285, this mistake printed `Invalid input` instead |
 | `plugins[i].source: Path contains "..": <path>` | Error | A relative `source` that escapes the marketplace root |
 | `source.source: 'unsupported' is a parse-time placeholder and cannot be authored` | Error | `plugins[i].source` |
 | `Plugin "x" sets headersHelper but is not "strict": false` | Error | `plugins[i].headersHelper`, on an `archive` entry |
@@ -484,10 +489,11 @@ The table maps marketplace-level messages to the field each is about.
 
 `Invalid input` on a `source` means the object matched no source type. Check for these causes:
 
-* A relative path that doesn't start with `./`, other than `"."` or a [bare name under `metadata.pluginRoot`](#relative-path-plugin-source)
 * An `npm` `package` containing `..`
 * A `source` type that isn't one of the [plugin sources](#plugin-sources)
 * A known type with a required field missing or of the wrong type, such as `github` without `repo`
+
+A relative path that doesn't start with `./`, other than `"."` or a [bare name under `metadata.pluginRoot`](#relative-path-plugin-source), fails with `Invalid string: must start with "./"`. Before v2.1.285, it printed `Invalid input` like the causes above.
 
 ### Failures that validation doesn't catch
 

@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/components
-fetched_at: '2026-10-08T00:22:42.065827+00:00'
+fetched_at: '2026-10-17T03:26:03.190794+00:00'
 fidelity: converted
-source_sha256: 4f1eb7aebd7604eaaea6b02c35151de6323f958258586005f0eeb561364d7850
+source_sha256: 735298101629f7e87d311b277b08abea995a975172f88446ba52726f52c25e10
 licence: unreviewed
-stale_after: '2027-01-06'
+stale_after: '2027-01-15'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -746,7 +746,7 @@ You can put plugin agent files in subfolders of `agents/`. Claude Code [loads th
 
 A plugin agent's frontmatter follows these rules:
 
-* **Supported fields**: `name`, `description`, `model`, `effort`, `maxTurns`, `tools`, `disallowedTools`, `skills`, `memory`, `background`, `omitClaudeMd`, `isolation`, `color`, and the `cacheTtl` key of `experimental`. The only valid `isolation` value is `"worktree"`. See [supported frontmatter fields](/docs/en/sub-agents#supported-frontmatter-fields) for what each one does
+* **Supported fields**: `name`, `description`, `model`, `effort`, `maxTurns`, `autoCompactWindow`, `tools`, `disallowedTools`, `skills`, `memory`, `background`, `omitClaudeMd`, `isolation`, `color`, and the `cacheTtl` key of `experimental`. The only valid `isolation` value is `"worktree"`. See [supported frontmatter fields](/docs/en/sub-agents#supported-frontmatter-fields) for what each one does
 * **Ignored fields**: `permissionMode`, `hooks`, `mcpServers`, and `initialPrompt`. An agent file can't add hooks or MCP servers on its own, so add those as plugin [hooks](#hooks) and [MCP servers](#mcp-servers) instead
 * **Frontmatter that doesn't parse**: the agent still loads with every field ignored. It's named after the file, and its description reads `Agent from my-plugin plugin`. Run [`claude plugin validate`](/docs/en/plugins/cli-reference#plugin-validate) in your shell to find these files
 
@@ -781,6 +781,8 @@ Save the script at `scripts/format.sh` and make it executable.
 Load the plugin and ask Claude to edit a file. A `PostToolUse` hook that exits 0 shows nothing in the transcript, so confirm it ran with [debug logging](/docs/en/hooks#debug-hooks) or by what the script itself changes.
 
 Hooks in `hooks/hooks.json` and in the `hooks` manifest key both load. For every event and its payload, see [Hook events](/docs/en/hooks#hook-events).
+
+When another enabled plugin has the same name, one of the two registers its `hooks/hooks.json` hooks and the other's are left out. See [Hooks when two enabled plugins share a name](/docs/en/plugins/loading#hooks-when-two-enabled-plugins-share-a-name) for which one, and for the note in `/plugin` that tells you.
 
 To write hooks as JavaScript functions that run inside Claude Code and can draw in its interface, list a module file under a `modules` key in the same `hooks/hooks.json`. A plugin with one is a mod. See [Create a mod](/docs/en/plugins/mods/create).
 
@@ -1002,7 +1004,7 @@ A monitor is a shell command that runs in the background for the whole session. 
 ]
 ```
 
-The command runs in a shell, in the working directory the session started in.
+The command runs in a shell, in the session's current working directory. It runs with your full user permissions and outside the [sandbox](/docs/en/sandboxing).
 
 A monitor's command is limited in where it starts and what it can reference:
 

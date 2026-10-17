@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/overview
-fetched_at: '2026-10-08T00:22:48.056853+00:00'
+fetched_at: '2026-10-17T03:26:39.394197+00:00'
 fidelity: converted
-source_sha256: eb8b9f92d75d42d777d3bdbc89273c2df881b6a3cf58afaa63418d55a70538f5
+source_sha256: a33630ffe4a2432e4204fa0a512cffda4a037cf1441fb964a2104517589c8654
 licence: unreviewed
-stale_after: '2027-01-06'
+stale_after: '2027-01-15'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -39,7 +39,7 @@ A plugin is a directory of components, usually with a manifest. The manifest, a 
 * [**Skills**](/docs/en/plugins/components#skills): `SKILL.md` instructions Claude loads when relevant, and that you can also run as a command
 * [**Agents**](/docs/en/plugins/components#agents): subagent definitions Claude can delegate to
 * [**Hooks**](/docs/en/plugins/components#hooks): commands Claude Code runs at points in its lifecycle, such as after every edit
-* [**A hooks module**](/docs/en/plugins/mods/overview): hooks written as JavaScript functions, which can also draw panes and add commands. A plugin that has one is called a mod
+* [**A hooks module**](/docs/en/plugins/mods/overview): hooks written as JavaScript functions, which can also draw panes and add commands. A plugin that has one is called a mod. Some mods are [built into Claude Code](/docs/en/plugins/mods/overview#mods-built-into-claude-code).
 * [**MCP servers**](/docs/en/plugins/components#mcp-servers): tool servers Claude Code connects to while the plugin is enabled
 
 This diagram shows a plugin named `my-plugin` that holds a skill, an agent, hooks, and an MCP server, and what you get from each file once the plugin loads.

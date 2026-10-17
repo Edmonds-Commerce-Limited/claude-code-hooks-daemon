@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/interactive-mode.md
-fetched_at: '2026-10-08T00:23:25.247368+00:00'
+fetched_at: '2026-10-17T03:25:20.146210+00:00'
 fidelity: converted
-source_sha256: 5e2032f29361ef2f207ebdfb85d01dc2456692be417ae195dff763d0e2f7b3f5
+source_sha256: c5c6c87891f9cb427800ffaf72770c72dd9effe82a4cf25d2d67b944ea193aac
 licence: unreviewed
-stale_after: '2027-01-06'
+stale_after: '2027-01-15'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -28,7 +28,7 @@ fetch_method: agent-browser-lite-headless (accept-markdown)
 
 | Shortcut | Description | Context |
 | :- | :- | :- |
-| `Ctrl+C` | Interrupt, or clear input | Interrupts a running operation. If nothing is running, the first press clears the prompt input and a second press exits Claude Code |
+| `Ctrl+C` | Interrupt, or clear input | Interrupts a running operation. If nothing is running, the first press clears the prompt input and a second press exits Claude Code. Press `Up` while the prompt is still empty to bring the cleared draft back, which requires Claude Code v2.1.288 or later |
 | `Ctrl+X Ctrl+K` | Stop all running [background subagents](/docs/en/sub-agents#run-subagents-in-foreground-or-background) in this session, and turn off [artifact auto-replies](/docs/en/artifacts#let-claude-reply-to-comments-on-its-own) for the rest of it. Press twice within 3 seconds to confirm. You can press it while a background subagent's permission prompt is open | Subagent control |
 | `Ctrl+D` | Exit Claude Code session | The first press shows a confirmation hint and a second press within 800ms exits. When the prompt has text, `Ctrl+D` deletes the character after the cursor instead |
 | `Ctrl+G` or `Ctrl+X Ctrl+E` | Open in default text editor | Edit your prompt or custom response in your default text editor. `Ctrl+X Ctrl+E` is the readline-native binding. Turn on **Show last response in external editor** in `/config` to prepend Claude's previous reply as `#`-commented context above your prompt; Claude Code strips the comment block when you save |
@@ -198,12 +198,13 @@ Claude Code reads this setting from your user settings file, the `--settings` fl
 | `^` | First non-blank character |
 | `gg` | Beginning of input |
 | `G` | Beginning of last line |
-| `f{char}` | Jump to next occurrence of character |
-| `F{char}` | Jump to previous occurrence of character |
-| `t{char}` | Jump to just before next occurrence of character |
-| `T{char}` | Jump to just after previous occurrence of character |
+| `f{char}` | Jump to next occurrence of character on the current line |
+| `F{char}` | Jump to previous occurrence of character on the current line |
+| `t{char}` | Jump to just before next occurrence of character on the current line |
+| `T{char}` | Jump to just after previous occurrence of character on the current line |
 | `;` | Repeat last f/F/t/T motion |
 | `,` | Repeat last f/F/t/T motion in reverse |
+| `%` | Jump to the matching `()`, `[]`, or `{}` bracket, starting from the next bracket on the current line when the cursor isn't on a bracket. Requires Claude Code v2.1.301 or later |
 | `/` | Open reverse history search, same as `Ctrl+R`. The empty search prompt shows a hint: press `Esc` then `i` then `/` to open the command menu instead |
 
 <Note>
@@ -219,10 +220,11 @@ Claude Code reads this setting from your user settings file, the `--settings` fl
 | `dd` | Delete line |
 | `D` | Delete to end of line |
 | `dw`/`de`/`db` | Delete word/to end/back |
-| `df{char}`/`dt{char}` | Delete to and including, or up to, the next occurrence of a character |
+| `df{char}`/`dt{char}` | Delete to and including, or up to, the next occurrence of a character on the current line |
 | `dj`/`dk` | Delete the current line and the line below or above |
 | `dgg`/`dG` | Delete from the current line to the first or last line |
 | `d0`/`c0`/`y0` | Delete, change, or yank from the cursor back to the beginning of the line. Requires Claude Code v2.1.281 or later |
+| `d%`/`c%`/`y%` | Delete, change, or yank from the cursor through the bracket that `%` jumps to. Requires Claude Code v2.1.301 or later |
 | `cc` | Change line |
 | `C` | Change to end of line |
 | `cw`/`ce`/`cb` | Change word/to end/back |
@@ -402,6 +404,8 @@ Press `Up` from the first line of the input box to take back the queued messages
 
 Claude Code takes back queued shell commands only when the input box is empty and you have nothing else queued, and it switches the input box to shell mode when it does. Otherwise it leaves them in the queue, listed with their `!` prefix, and runs them after the turn ends.
 
+If you take back queued text while `←` [waits to background the session](/docs/en/agent-view#switch-sessions-without-leaving-the-terminal), the text stays in the input box and Claude Code cancels the switch. If you take it back at the moment the session moves, the text disappears with the foreground screen: it wasn't sent. Each message you took back is saved as its own entry in [command history](#command-history). To recover one, reopen the session and press `Up` on an empty prompt with nothing queued.
+
 ## Prompt suggestions
 
 When you first open a session, Claude Code shows a grayed-out example command in the prompt input to help you get started. It picks this from your project's git history, so the example reflects files you've been working on recently.
@@ -442,6 +446,60 @@ To disable prompt suggestions entirely, use any of the following:
   ```
 
 To turn prompt suggestions off across an organization, set `promptSuggestionEnabled` to `false` in [managed settings](/docs/en/managed-settings). Also set `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` to `false` under the managed [`env`](/docs/en/settings-reference#env) key so that users can't re-enable them with their own environment variable.
+
+## You should know suggestions
+
+"You should know" looks for one thing you should know but might have missed, such as a tradeoff Claude chose without calling it out or a result that may be off. When it finds one, it shows a short note above the prompt input:
+
+```text theme={null}
+✦ Heads up · There was a change to how folder sharing starts in June, which may have bumped usage metrics artificially.
+  1: Learn more   2: Knew this already   0: Dismiss
+```
+
+It's one of Claude Code's [built-in mods](/docs/en/plugins/mods/overview#mods-built-into-claude-code), a plugin built into Claude Code that is off by default. Requires Claude Code v2.1.287 or later.
+
+While it's on, a side agent rereads the conversation from time to time as Claude works through a longer task. The side agent is a separate request to the same model and has no tools, so it can't read files, run commands, or change what Claude does.
+
+If the mod is available for your organization, `/plugin` lists it when you connect to the Claude API directly with a claude.ai account or a Console API key. It doesn't when you connect through an [LLM gateway](/docs/en/llm-gateway) or a [Claude apps gateway](/docs/en/claude-apps-gateway), or get your key from an [`apiKeyHelper`](/docs/en/settings-reference#apikeyhelper). Even with a direct connection, these sessions don't list it:
+
+* A session that [doesn't fetch the feature flags](/docs/en/env-vars#features-that-need-feature-flag-fetching) the mod depends on, such as one with `DISABLE_TELEMETRY` set
+* A [first session after an install or upgrade](/docs/en/env-vars#first-session-after-an-install-or-upgrade) whose flags haven't arrived yet
+
+To turn it on, run this at the Claude Code prompt:
+
+```text theme={null}
+/plugin enable cc-plugin-you-should-know@builtin
+```
+
+Where `/plugin` doesn't list the mod, the enable command answers `Plugin "cc-plugin-you-should-know@builtin" is not installed in this project`.
+
+### Cost of checks
+
+While the mod is on, checks are background requests to the same model your session is using, and they count toward your plan's usage limits or your API costs. Each check sends what's already in Claude's context, meaning the conversation so far with its tool results, followed by the mod's own instructions and the text of your recent notes. The conversation part is read from the session's [prompt cache](/docs/en/prompt-caching) on the same terms as Claude's own next request. The instructions, several thousand tokens of them, and the side agent's reply are billed in full on every check.
+
+To watch the checks happen, set [`CLAUDE_CODE_YOU_SHOULD_KNOW_DEBUG=1`](/docs/en/env-vars) in your shell before you start Claude Code.
+
+### Answer a note
+
+Type the choice's digit on its own into an empty prompt input. A note offers these choices:
+
+* **Learn more**: opens a short explanation under the note, with its own choices:
+  * **Understood**: closes it and marks the topic as known
+  * **Chat in main session**: quotes the note into your prompt input so you can add a question and send it to Claude
+  * **Dismiss**: closes it without marking the topic as known
+* **Knew this already**: closes the note and marks the topic as known.
+* **Dismiss**: closes the note.
+
+The main agent doesn't see a note unless you send it with **Chat in main session**.
+
+Claude Code keeps your recent notes and the topics you marked as known in a file whose name starts with `cc-plugin-you-should-know` under `~/.claude/plugins/store/`. Each check, in this session and later ones, lists them to the side agent as ones not to repeat. Claude Code deletes the file once it has gone [`cleanupPeriodDays`](/docs/en/settings-reference#cleanupperioddays) without a session reading or writing it. To clear them sooner, delete that file while no session is running.
+
+### Turn off You should know
+
+To turn off You should know, use either of the following:
+
+* At the Claude Code prompt, run `/plugin disable cc-plugin-you-should-know@builtin`, or turn it off from the **Installed** tab of `/plugin`
+* After you choose **Dismiss** on a note without opening **Learn more** first, choose **Turn off suggestions** on the `Dismissed.` line, which clears after 20 seconds
 
 ## Emoji shortcodes
 
@@ -646,7 +704,7 @@ In an attached [background session](/docs/en/agent-view#attach-to-a-session), `L
 
 The task list is Claude's to-do checklist: items Claude created to plan multi-step work, with indicators showing what's pending, in progress, or complete. It's separate from the background-task view. To see running shells and subagents, use [`/tasks`](/docs/en/commands) instead.
 
-The list fills only in sessions that have the task-tracking tools, which Claude Code provides by default on [Claude 3.x models, Opus 4 through 4.7, Sonnet 4 through 4.6, and Haiku 4.5](/docs/en/tools-reference#task-tool-availability). On any other model, including a model ID Claude Code doesn't recognize, the list stays empty unless you opt in with `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` or one of the other ways under [Task tool availability](/docs/en/tools-reference#task-tool-availability). When the session has the tools, the task list works as follows:
+The list fills only in sessions that have the task-tracking tools, which Claude Code provides by default on [Opus 4.7, Sonnet 4.6, Haiku 4.5, and earlier models](/docs/en/tools-reference#task-tool-availability). On any other model, including a model ID Claude Code doesn't recognize, the list stays empty unless you opt in with `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` or one of the other ways under [Task tool availability](/docs/en/tools-reference#task-tool-availability). When the session has the tools, the task list works as follows:
 
 * Press `Ctrl+T` to toggle the task list view. The display shows up to five tasks at a time. When Claude hasn't created any checklist items yet, the toggle has no visible effect because there's nothing to display
 * If you leave the list expanded, Claude Code restores the expanded view the next time you launch into a session that still has tasks, such as with `--resume` or `--continue`. When the task list is empty, Claude Code starts it collapsed
@@ -773,6 +831,7 @@ You get a link only for the two-part `owner/repo#123` form. These stay plain tex
 * A bare `#123`
 * A nested GitLab path such as `group/subgroup/project#123`
 * Any reference inside a code span or code block
+* Any reference in a reply longer than about 1,000 lines or 100,000 characters
 
 Claude Code builds the link for the host of the repository it identifies from your git remote, not for the repository the reference names:
 
