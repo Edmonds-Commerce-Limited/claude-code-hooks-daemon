@@ -1,0 +1,26 @@
+error[E0432]: unresolved import `serde`
+ --> serde.rs:1:5
+  |
+1 | use serde::Serialize;
+  |     ^^^^^ use of unresolved module or unlinked crate `serde`
+  |
+help: to make use of source file serde.rs, use `mod serde` in this file to declare the module
+  |
+1 + mod serde;
+  |
+
+error: cannot find macro `json` in this scope
+ --> serde.rs:4:21
+  |
+4 | fn main() { let v = json!({}); }
+  |                     ^^^^
+
+error: cannot find attribute `serde` in this scope
+ --> serde.rs:3:14
+  |
+3 | struct S { #[serde(rename = "x")] a: u8 }
+  |              ^^^^^
+
+error: aborting due to 3 previous errors
+
+For more information about this error, try `rustc --explain E0432`.

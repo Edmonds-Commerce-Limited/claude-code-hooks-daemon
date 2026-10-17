@@ -1,0 +1,16 @@
+error: cannot find macro `prinln` in this scope
+ --> typo.rs:2:5
+  |
+2 |     prinln!("hi");
+  |     ^^^^^^
+  |
+ --> /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/std/src/macros.rs:143:0
+  |
+  = note: similarly named macro `println` defined here
+help: a macro with a similar name exists
+  |
+2 |     println!("hi");
+  |         +
+
+error: aborting due to 1 previous error
+

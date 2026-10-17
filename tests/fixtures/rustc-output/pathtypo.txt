@@ -1,0 +1,9 @@
+error[E0432]: unresolved import `std::colections`
+ --> pathtypo.rs:1:10
+  |
+1 | use std::colections::HashMap;
+  |          ^^^^^^^^^^ could not find `colections` in `std`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0432`.
