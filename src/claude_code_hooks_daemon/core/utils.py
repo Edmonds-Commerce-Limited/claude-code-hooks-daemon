@@ -973,7 +973,12 @@ def _write_target_tokens(
         if token in _COPY_VERBS or (include_mutations and token == _LINK):
             before = len(targets)
             index = _collect_trailing_operands(
-                tokens, index + 1, targets, keep_all=False, authored=False
+                tokens,
+                index + 1,
+                targets,
+                keep_all=False,
+                authored=False,
+                directory=_git_directory(tokens, index),
             )
             if include_mutations and token == _MOVE and len(targets) > before:
                 # The file moved AWAY is gone from where it was.
@@ -984,7 +989,9 @@ def _write_target_tokens(
             continue
 
         if include_mutations and token in _MUTATION_VERBS:
-            index = _collect_mutated_operands(tokens, index + 1, targets, token)
+            index = _collect_mutated_operands(
+                tokens, index + 1, targets, token, _git_directory(tokens, index)
+            )
             continue
 
         if token.startswith(_DD_OUTPUT_PREFIX):
@@ -1136,6 +1143,51 @@ def _is_command_word(tokens: list[str], index: int, verb: str) -> bool:
     return True
 
 
+#: Global options that move the directory ``git`` acts in, so its pathspecs are read from there.
+_GIT_DIRECTORY_OPTIONS: Final[frozenset[str]] = frozenset({_GIT_CHANGE_DIRECTORY, "--work-tree"})
+_WORK_TREE_PREFIX: Final[str] = "--work-tree="
+
+
+def _git_directory(tokens: list[str], index: int) -> str:
+    """The directory ``git`` acts in for the subcommand at ``tokens[index]``, or ``""``.
+
+    Each ``-C`` and ``--work-tree`` is relative to the one before it and an
+    absolute one starts over, so the result is the left-to-right join. ``""``
+    when the word is not a ``git`` subcommand reached through global options
+    alone, or when none of them moves the directory.
+    """
+    start = index
+    while start > 0 and not _is_command_boundary(tokens[start - 1]):
+        start -= 1
+    words = tokens[start:index]
+    if _GIT_PROGRAM not in words:
+        return ""
+    after_git = words[len(words) - 1 - words[::-1].index(_GIT_PROGRAM) + 1 :]
+    directory = ""
+    position = 0
+    while position < len(after_git):
+        word = after_git[position]
+        if word in _GIT_DIRECTORY_OPTIONS and position + 1 < len(after_git):
+            directory = _under_directory(directory, after_git[position + 1])
+        elif word.startswith(_WORK_TREE_PREFIX):
+            directory = _under_directory(directory, word[len(_WORK_TREE_PREFIX) :])
+        elif word not in _GIT_VALUE_OPTIONS and not word.startswith(_FLAG_PREFIX):
+            return ""
+        position += 2 if word in _GIT_VALUE_OPTIONS else 1
+    return directory
+
+
+def _under_directory(directory: str, path: str) -> str:
+    """``path`` as the command named it from ``directory``; left alone when it cannot be placed.
+
+    Text the shell expands stays in the path, so the target is left unresolved
+    (a ``~`` operand is already absolute by the time ``git`` reads it).
+    """
+    if not directory or path.startswith("~"):
+        return path
+    return posixpath.join(directory, path)
+
+
 class _ParsedWords(NamedTuple):
     """One command's words, split into operands and the options it was given."""
 
@@ -1199,11 +1251,17 @@ def _parse_command_words(
 
 
 def _collect_mutated_operands(
-    tokens: list[str], start: int, targets: list[BashWriteDestination], verb: str
+    tokens: list[str],
+    start: int,
+    targets: list[BashWriteDestination],
+    verb: str,
+    directory: str = "",
 ) -> int:
     """Append the files ``verb`` changes or removes; return the next token index.
 
     These put no new content on disk, so every candidate is not ``authored``.
+    ``directory`` is where ``git -C`` runs the verb (``git rm``): its operands
+    are named from there, a redirect's word is not.
     ``sed`` counts only with ``-i``/``--in-place``; without it the file is read.
     """
     if verb == _SED:
@@ -1222,7 +1280,10 @@ def _collect_mutated_operands(
         files = parsed.operands if script_given else parsed.operands[1:]
         if in_place:
             targets.extend(
-                BashWriteDestination(file, authored=False, mutation=True) for file in files
+                BashWriteDestination(
+                    _under_directory(directory, file), authored=False, mutation=True
+                )
+                for file in files
             )
         return parsed.end
     if verb == _TRUNCATE:
@@ -1244,7 +1305,8 @@ def _collect_mutated_operands(
     else:
         parsed = _parse_command_words(tokens, start, targets)
     targets.extend(
-        BashWriteDestination(file, authored=False, mutation=True) for file in parsed.operands
+        BashWriteDestination(_under_directory(directory, file), authored=False, mutation=True)
+        for file in parsed.operands
     )
     return parsed.end
 
@@ -1256,6 +1318,7 @@ def _collect_trailing_operands(
     *,
     keep_all: bool,
     authored: bool = True,
+    directory: str = "",
 ) -> int:
     """Consume one command's operands, appending the written ones.
 
@@ -1266,6 +1329,9 @@ def _collect_trailing_operands(
 
     ``authored`` is stamped onto every candidate this call produces: ``tee``
     writes content it is handed, a copy verb relocates content that exists.
+
+    ``directory`` is where ``git -C`` runs ``git mv``: its operands and
+    ``-t`` value are named from there, a redirect's word is not.
     """
     index = start
     operands: list[str] = []
@@ -1294,6 +1360,9 @@ def _collect_trailing_operands(
             operands.append(token)
         index += 1
 
+    operands = [_under_directory(directory, operand) for operand in operands]
+    if target_directory is not None:
+        target_directory = _under_directory(directory, target_directory)
     if keep_all:
         targets.extend(BashWriteDestination(operand, authored=authored) for operand in operands)
     elif target_directory is not None:

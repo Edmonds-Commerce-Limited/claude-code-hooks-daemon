@@ -369,6 +369,50 @@ class TestOnlyCommandsAreJudged:
         assert handler.matches(_bash(root, template.format(p=f"{root}/{PROTECTED}"))) is True
 
 
+class TestGitDirectoryOptionsMoveTheOperands:
+    """``git -C <dir> rm|mv`` acts on paths under ``<dir>``, so the guard must look there."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git -C .claude rm ccy/ccy.env.local",
+            "git -C .claude rm -f ccy/ccy.env.local",
+            "git -C .claude/ccy rm ccy.env.local",
+            "git -C .claude -C ccy rm ccy.env.local",
+            "git -C .claude/ccy -C /elsewhere -C {r}/.claude rm ccy/ccy.env.local",
+            "git -C {r}/.claude rm ccy/ccy.env.local",
+            "git -c core.x=y -C .claude rm ccy/ccy.env.local",
+            "git --work-tree=.claude rm ccy/ccy.env.local",
+            "git --work-tree .claude/ccy rm ccy.env.local",
+            "git -C .claude mv ccy/ccy.env.local /tmp/gone.txt",
+            "git -C .claude/ccy mv ccy.env.local gone.txt",
+            "git -C .claude/ccy mv /tmp/source.txt ccy.env.local",
+            "sudo git -C .claude rm ccy/ccy.env.local",
+        ],
+    )
+    def test_the_protected_file_reached_through_a_directory_option_is_denied(
+        self, handler: WriteProtectedPathsHandler, root: Path, command: str
+    ) -> None:
+        hook_input = _bash(root, command.format(r=root))
+        assert handler.matches(hook_input) is True
+        assert handler.handle(hook_input).decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git -C .claude rm ccy/other.txt",
+            "git -C elsewhere rm ccy/ccy.env.local",
+            "git -C .claude -C elsewhere rm ccy/ccy.env.local",
+            "git -C .claude mv ccy/other.txt ccy/another.txt",
+            "git -C .claude status ccy/ccy.env.local",
+        ],
+    )
+    def test_the_same_names_resolved_elsewhere_are_allowed(
+        self, handler: WriteProtectedPathsHandler, root: Path, command: str
+    ) -> None:
+        assert handler.matches(_bash(root, command)) is False
+
+
 class TestNameOnlyMatchingNeedsTheParentChain:
     @pytest.mark.parametrize(
         "command",
