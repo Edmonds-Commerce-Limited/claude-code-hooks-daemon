@@ -54,7 +54,7 @@ from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
 from claude_code_hooks_daemon.utils.command_position import segment_spans
 from claude_code_hooks_daemon.utils.heredoc_operators import Heredoc, scan_heredocs
-from claude_code_hooks_daemon.utils.message_files import read_message_files
+from claude_code_hooks_daemon.utils.message_files import message_file_writers, read_message_files
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -337,7 +337,8 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
         command = get_bash_command(hook_input)
         if not command:
             return None
-        for segment in self._message_segments(command):
+        segments = self._message_segments(command)
+        for segment in segments:
             direct = _AUTO_CLOSE_PATTERN.search(segment)
             if direct:
                 return direct.group(0)
@@ -345,6 +346,13 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
                 file_match = _AUTO_CLOSE_PATTERN.search(text)
                 if file_match:
                     return file_match.group(0)
+        # A message file the same command creates is not on disk yet, so its
+        # text is only visible in the segment that writes it.
+        cwd = hook_input.get(HookInputField.CWD)
+        for text in message_file_writers(command, segments, cwd if isinstance(cwd, str) else None):
+            written = _AUTO_CLOSE_PATTERN.search(text)
+            if written:
+                return written.group(0)
         return None
 
     def _find_match(self, hook_input: dict[str, Any]) -> str | None:

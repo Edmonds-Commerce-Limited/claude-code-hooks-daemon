@@ -76,7 +76,11 @@ from claude_code_hooks_daemon.utils.git_commit_parsing import (
 )
 from claude_code_hooks_daemon.utils.git_facts import NO_RELATIVE, GitFactsBase, commit_facts
 from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
-from claude_code_hooks_daemon.utils.message_files import read_message_files
+from claude_code_hooks_daemon.utils.message_files import (
+    COMMAND_SEPARATORS,
+    message_file_writers,
+    read_message_files,
+)
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
@@ -210,11 +214,6 @@ _GIT_CONFIG_ASSIGNMENT_OPERANDS: Final[int] = 2
 # exists and nothing new is recorded, so deleting a term-bearing branch or tag
 # is the remedy, not a leak.
 _GIT_REF_DELETE_FLAGS: Final[tuple[str, ...]] = ("-d", "-D", "--delete")
-
-# Where one command ends and the next begins. Longest first so `||` is not read
-# as two pipes. A metadata value is judged within its OWN command only, so a
-# term in an unrelated `cd <path>` earlier on the line is not metadata.
-_COMMAND_SEPARATORS: Final[tuple[str, ...]] = ("||", "&&", "|", ";", "\n")
 
 _GIT_COMMIT_SUBCOMMAND: Final[str] = "commit"
 
@@ -1037,7 +1036,8 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         # `git commit -m "<term>"` re-contaminates a history that was
         # just rewritten clean. A `gh` body inline on the command line
         # is judged the same way, as the command that records it.
-        for recording in self._metadata_commands(command):
+        cwd = hook_input.get(HookInputField.CWD)
+        for recording in self._metadata_commands(command, cwd if isinstance(cwd, str) else None):
             haystacks.append(_Haystack(subject=recording, text=recording))
             # Both surfaces can put the text in a FILE instead, and the file
             # route is read under the SAME condition as the inline one. A
@@ -1447,7 +1447,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         return False
 
     @classmethod
-    def _metadata_commands(cls, command: str) -> list[str]:
+    def _metadata_commands(cls, command: str, cwd: str | None = None) -> list[str]:
         """The text of each command in ``command`` that records metadata.
 
         A metadata value is judged within its OWN command. Scanning the whole
@@ -1457,19 +1457,25 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         A heredoc body belongs to the command whose line opens it, so it is
         kept when that command qualifies (``git commit -F - <<'EOF'``) and
         dropped with the unrelated command otherwise.
+
+        A segment that WRITES a message or body file a recording command names
+        (``-F``/``--file``/``--body-file``) is kept too, with its heredoc body:
+        the file does not exist yet at PreToolUse time, so its text is only
+        visible in the segment that creates it.
         """
         whole = normalise_line_continuations(command)
         without_bodies, heredocs = split_heredocs(whole)
         commands = [
             piece.strip()
-            for piece in split_unquoted(without_bodies, _COMMAND_SEPARATORS)
+            for piece in split_unquoted(without_bodies, COMMAND_SEPARATORS)
             if cls._is_metadata_command(piece)
         ]
+        writers = message_file_writers(command, commands, cwd)
         for heredoc in heredocs:
             opener = heredoc.opener_line.strip()
             if any(opener in found or found in opener for found in commands):
                 commands.append(heredoc.body)
-        return commands
+        return [*commands, *writers]
 
     @classmethod
     def _is_metadata_command(cls, command: str) -> bool:

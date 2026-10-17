@@ -541,3 +541,38 @@ class TestGuidanceAndAcceptance:
         for test in tests:
             assert test.title
             assert test.command
+
+
+class TestMessageFileWrittenByTheSameCommand:
+    """The file is not on disk at PreToolUse time; the writing segment carries the text."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cat > m.txt <<'EOF'\nFixes #12\nEOF\ngit commit -F m.txt",
+            "echo 'Fixes #12' > m.txt && git commit -F m.txt",
+            "cat > b.md <<'EOF'\nCloses #12\nEOF\ngh pr create --title t --body-file b.md",
+        ],
+    )
+    def test_closing_keyword_in_the_written_file_is_denied(
+        self, tmp_path: Path, command: str
+    ) -> None:
+        hook_input = {**_bash(command), "cwd": str(tmp_path)}
+
+        assert GithubAutoCloseKeywordsHandler().matches(hook_input) is True
+
+    def test_clean_written_file_is_allowed(self, tmp_path: Path) -> None:
+        command = "echo 'Addresses #12' > m.txt && git commit -F m.txt"
+
+        assert (
+            GithubAutoCloseKeywordsHandler().matches({**_bash(command), "cwd": str(tmp_path)})
+            is False
+        )
+
+    def test_keyword_in_an_unrelated_written_file_is_allowed(self, tmp_path: Path) -> None:
+        command = "echo 'Fixes #12' > notes.txt && git commit -F m.txt"
+
+        assert (
+            GithubAutoCloseKeywordsHandler().matches({**_bash(command), "cwd": str(tmp_path)})
+            is False
+        )
