@@ -109,6 +109,22 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N500 to N503 — the second delta review over the N494 to N497 fixes
+
+**Source**: a code review of `9d1a522b0..4b3a709e1 -- src/ tests/`
+([report](subagent-reports/261017-release-review-delta2.md)), each finding confirmed with a probe.
+
+- **N500 (defect)**: the N494 fix excused every uncoded "cannot find" rustc error, so typos (`prinln!`,
+  `#[derive(Debg)]`, `#[tset]`) passed `lint_on_edit` with an advisory where they were denied before.
+- **N501**: the N496 fix judged a whole `( … )` or `{ …; }` group when the message-file write was inside it, so
+  `( cd /tmp/<term> && echo msg > m.txt && git commit -F m.txt )` was denied (the N364 shape).
+- **N502**: a message written by `if … fi > m.txt` or `for … done > m.txt` (also `while`, `until`, `case`) was not
+  judged; the same gap N496 closed for `{ }`. Predates the cycle.
+- **N503**: the N495 fix paired a `'` before a `/*` with an apostrophe inside the comment (`&'a str) { /* it's`), so
+  an Edit fragment's comment produced no span.
+
+**Status**: ⬜ in progress, fixing before the tag in `worktree-rfix3-{rust-typo,msgfile-groups,comment-apostrophe}`.
+
 ### N494 to N499 — the v3.70.0 Step 10 delta review over the fixes and Plan 00531
 
 **Source**: the Step 10 delta review over `9513c3d45..9d1a522b0 -- src/`
@@ -123,7 +139,8 @@ Defects, fixed before the tag:
   [Report](subagent-reports/261017-rfix2-rust-attr.md).
 - **N495**: the N475 fix in `strategies/comments/extractor.py` read any unclosed `/*` in an Edit fragment as a comment
   to the end, even inside a string (`glob("dist/*.js")`, `"*/*"`). The rule now applies only to an opener outside
-  string literals. Callout 028 updated. [Report](subagent-reports/261017-rfix2-comment-string.md).
+  string literals (a5d0815b4). Callout 028's last sentence gains the string-literal exception in the v3.70.0 release
+  commit, where the callout has moved to the upgrade guide. [Report](subagent-reports/261017-rfix2-comment-string.md).
 - **N496**: the N473 fix in `utils/message_files.py` (and `github_auto_close_keywords`) judged only the segment that
   writes a message file, so `echo T | tee m.txt`, `{ echo T; } > m.txt` and `echo T | git commit -F -` went unjudged.
   The producer is now judged. [Report](subagent-reports/261017-rfix2-msgfile-producer.md).
