@@ -56,10 +56,14 @@ shell, and bounded to `untracked/acceptance/`.
 
 from __future__ import annotations
 
+import contextlib
+import dataclasses
 import logging
 import re
 import shutil
 import tempfile
+import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -83,6 +87,7 @@ from claude_code_hooks_daemon.daemon.playbook_harness import (
 )
 from claude_code_hooks_daemon.handlers.project_loader import ProjectHandlerLoader
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
+from claude_code_hooks_daemon.utils.workable_issues import WORKABLE_ISSUES_FILENAME, write_workable
 
 logger = logging.getLogger(__name__)
 
@@ -493,38 +498,108 @@ class TestEveryDeclaredInputProducesItsDeclaredVerdict:
     def test_every_blocking_test_with_a_declared_input_produces_its_declared_verdict(
         self,
     ) -> None:
-        tests = _collect_all_blocking_tests()
-        instances = _handler_instances()
-        project_root = _repo_root()
+        failures, driven = _contract_failures()
+        assert driven > 0, "no test was actually driven -- the harness is checking nothing"
+        assert not failures, "Acceptance-test contract violated:\n\n" + "\n\n".join(failures)
 
-        failures: list[str] = []
-        driven = 0
-        for test in tests:
-            if test.get("hook_input"):
-                instance = instances.get((test["source"], test["handler_name"]))
-                if instance is None:
-                    failures.append(f"{_identifier(test)}: no live handler instance found")
-                    continue
-                driven += 1
-                failures.extend(_drive_hook_input_test(test, instance))
-                continue
 
-            if not test.get("tool_payload"):
-                continue  # harness_cannot_produce, or reported by the coverage test above
+class TestDeclaredInputsAreIsolatedFromHostState:
+    """A declared input is driven against an EMPTY state directory.
 
-            probe = plan_probe(test, project_root)
-            if isinstance(probe, SkippedProbe):
-                # A required tool is missing on this machine (a language
-                # linter this container does not have) -- nothing to drive.
-                continue
+    A handler that reads the daemon's untracked state (the workable-issues
+    cache, the work queue, markers) must see the same nothing on every host,
+    or "no cache" in a test's description is true on a clean checkout and false
+    on one where a developer has just run `work-queue done`.
+    """
 
+    def test_a_fresh_workable_issues_cache_on_the_host_does_not_change_a_verdict(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        host_state = tmp_path / "host-untracked"
+        write_workable(host_state / WORKABLE_ISSUES_FILENAME, [4242], now=time.time())
+        real = ProjectContext._instance
+        assert real is not None
+        monkeypatch.setattr(
+            ProjectContext, "_instance", dataclasses.replace(real, daemon_untracked_dir=host_state)
+        )
+
+        failures, driven = _contract_failures()
+
+        assert driven > 0
+        assert not failures, "\n\n".join(failures)
+
+    def test_the_host_state_directory_is_restored_after_the_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        real = ProjectContext._instance
+        assert real is not None
+        host_state = tmp_path / "host-untracked"
+        monkeypatch.setattr(
+            ProjectContext, "_instance", dataclasses.replace(real, daemon_untracked_dir=host_state)
+        )
+
+        with _isolated_state_dir():
+            assert ProjectContext.daemon_untracked_dir() != host_state
+            assert not any(ProjectContext.daemon_untracked_dir().iterdir())
+
+        assert ProjectContext.daemon_untracked_dir() == host_state
+
+
+@contextlib.contextmanager
+def _isolated_state_dir() -> Iterator[None]:
+    """Point the daemon's untracked state directory at an empty temporary one.
+
+    Only the state directory moves: the project root, config and git facts stay
+    the real project's, because the handlers under test are built from them.
+    """
+    real = ProjectContext._instance
+    if real is None:
+        raise RuntimeError("ProjectContext must be initialised before isolating its state")
+    with tempfile.TemporaryDirectory(prefix="acceptance-state-") as empty_state:
+        ProjectContext._instance = dataclasses.replace(real, daemon_untracked_dir=Path(empty_state))
+        try:
+            yield
+        finally:
+            ProjectContext._instance = real
+
+
+def _contract_failures() -> tuple[list[str], int]:
+    """Drive every declared input in-process; return ``(failures, driven count)``."""
+    with _isolated_state_dir():
+        return _drive_declared_inputs()
+
+
+def _drive_declared_inputs() -> tuple[list[str], int]:
+    tests = _collect_all_blocking_tests()
+    instances = _handler_instances()
+    project_root = _repo_root()
+
+    failures: list[str] = []
+    driven = 0
+    for test in tests:
+        if test.get("hook_input"):
             instance = instances.get((test["source"], test["handler_name"]))
             if instance is None:
                 failures.append(f"{_identifier(test)}: no live handler instance found")
                 continue
-
             driven += 1
-            failures.extend(_drive_executable_probe(probe, instance, source=test["source"]))
+            failures.extend(_drive_hook_input_test(test, instance))
+            continue
 
-        assert driven > 0, "no test was actually driven -- the harness is checking nothing"
-        assert not failures, "Acceptance-test contract violated:\n\n" + "\n\n".join(failures)
+        if not test.get("tool_payload"):
+            continue  # harness_cannot_produce, or reported by the coverage test above
+
+        probe = plan_probe(test, project_root)
+        if isinstance(probe, SkippedProbe):
+            # A required tool is missing on this machine (a language
+            # linter this container does not have) -- nothing to drive.
+            continue
+
+        instance = instances.get((test["source"], test["handler_name"]))
+        if instance is None:
+            failures.append(f"{_identifier(test)}: no live handler instance found")
+            continue
+
+        driven += 1
+        failures.extend(_drive_executable_probe(probe, instance, source=test["source"]))
+    return failures, driven
