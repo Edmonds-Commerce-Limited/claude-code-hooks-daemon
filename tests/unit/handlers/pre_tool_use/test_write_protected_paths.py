@@ -918,6 +918,13 @@ class TestDirectoryChangeWithRedirectAndLoops:
             'for f in {p}; do bash -c "rm $f"; done',
             'for f in .claude/ccy/ccy.env.{{local,bak}}; do rm "$f"; done',
             "for f in a b; do echo $f; done; rm {p}",
+            'for f in a .claude/ccy/ccy.env; do rm "$f.local"; done',
+            'for d in a .claude/ccy; do rm "$d/ccy.env.local"; done',
+            'for d in a .claude/ccy; do rm "${{d}}/ccy.env.local"; done',
+            'for d in .claude/ccy a; do rm "$d/ccy.env.local"; done',
+            'for d in a b .claude/ccy c; do rm "$d/ccy.env.local"; done',
+            'for d in a .claude/ccy; do echo x > "$d/ccy.env.local"; done',
+            'for d in a .claude/*; do rm "$d/ccy.env.local"; done',
         ],
     )
     def test_a_loop_over_the_file_that_writes_it_is_denied(

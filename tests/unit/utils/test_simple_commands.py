@@ -201,3 +201,35 @@ class TestUnrollForLoops:
     def test_commands_after_the_loop_are_kept(self) -> None:
         text = unroll_for_loops("for f in a; do echo $f; done; rm z")
         assert text.rstrip().endswith("rm z")
+
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ('for f in a b; do rm "$f.local"; done', 'rm "a.local"; rm "b.local"'),
+            (
+                'for d in a b; do rm "$d/x.env.local"; done',
+                'rm "a/x.env.local"; rm "b/x.env.local"',
+            ),
+            (
+                'for d in a b; do rm "${d}/x.env.local"; done',
+                'rm "a/x.env.local"; rm "b/x.env.local"',
+            ),
+            ('for d in a b; do rm "pre-$d-post"; done', 'rm "pre-a-post"; rm "pre-b-post"'),
+            ("for d in a b; do rm $d/x; done", "rm a/x; rm b/x"),
+            ("for d in 'a b' c; do rm $d; done", "rm 'a b'; rm c"),
+            ('for d in "a b" c; do rm "$d/x"; done', 'rm "a b/x"; rm "c/x"'),
+            ("for d in a b; do rm '$d'; done", "rm '$d'; rm '$d'"),
+        ],
+    )
+    def test_the_variable_is_replaced_inside_its_word_and_quotes_stay_balanced(
+        self, command: str, expected: str
+    ) -> None:
+        assert unroll_for_loops(command) == expected
+
+    def test_a_glob_word_inside_double_quotes_stays_a_glob(self) -> None:
+        text = unroll_for_loops('for d in a .claude/ccy/*; do rm "$d/x.local"; done')
+        assert text == 'rm "a/x.local"; rm ".claude/ccy/"*"/x.local"'
+
+    def test_a_double_quote_in_a_word_is_escaped_in_a_quoted_context(self) -> None:
+        text = unroll_for_loops('for d in \'a"b\'; do rm "$d.x"; done')
+        assert text == 'rm "a\\"b.x"'
