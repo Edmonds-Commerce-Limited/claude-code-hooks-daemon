@@ -92,7 +92,7 @@ test. The 3.12 leg was the slowest, not hung.
 **Fix**: each cause fixed at its source with a red test first. No exclusion, allowlist entry or suppression was added.
 See [subagent-reports/261017-n472-ci-fix-implementer.md](subagent-reports/261017-n472-ci-fix-implementer.md).
 
-**Status**: ✅ Fixed (COMMIT).
+**Status**: ✅ Fixed (89fcb88c7).
 
 ### N471 — `hooks-daemon tiers` lists an agent-team teammate as `unrecorded` although its dispatch row is joined
 
