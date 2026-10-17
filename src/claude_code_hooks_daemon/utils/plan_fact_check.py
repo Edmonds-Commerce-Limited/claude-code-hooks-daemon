@@ -41,7 +41,13 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Final
 
-from claude_code_hooks_daemon.install.agent_assets import FACT_CHECKER_AGENT_NAME
+from claude_code_hooks_daemon.install.agent_assets import (
+    AGENT_VERSION_MARKER_PREFIX,
+    AGENTS_DIR_PARTS,
+    FACT_CHECKER_AGENT_NAME,
+    derived_from_marker,
+    spec_by_name,
+)
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
@@ -56,6 +62,10 @@ UNREADABLE_SUFFIX: Final[str] = ".unreadable"
 DIFF_SUFFIX: Final[str] = ".diff"
 FACT_CHECKER_AGENT: Final[str] = FACT_CHECKER_AGENT_NAME
 ARCHIVE_DIR: Final[str] = "Completed"
+#: Present once the project has been told how to tune the generic checker.
+TUNING_ADVISED_FILE: Final[str] = "tuning-advised"
+#: A tuned agent's name becomes a filename under ``.claude/agents/``, so it is a plain slug.
+_AGENT_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 
 #: An offer nobody confirmed is offered again after this many seconds.
 REOFFER_AFTER_SECONDS: Final[float] = 300.0
@@ -377,6 +387,15 @@ class PlanFactCheckState:
         """Folders with an owed fact-check, sorted; cheap enough for every hook event."""
         return self._folders(PENDING_SUFFIX)
 
+    def tuning_advised(self) -> bool:
+        """True once the project has been told how to tune the generic checker."""
+        return (self._dir / TUNING_ADVISED_FILE).is_file()
+
+    def mark_tuning_advised(self) -> None:
+        """Record that the tuning advice was handed to the session."""
+        self._dir.mkdir(parents=True, exist_ok=True)
+        (self._dir / TUNING_ADVISED_FILE).write_text("", encoding="utf-8")
+
     def diff_path(self, folder: str) -> Path:
         """Where the diff handed to the fact-checker agent is written."""
         return self._path(folder, DIFF_SUFFIX)
@@ -482,7 +501,50 @@ def process_quiet_plan(
     return pending
 
 
-def render_instruction(pending: PendingFactCheck, diff_path: Path) -> str:
+def resolve_checker_agent(tuned_agent: str, project_root: Path) -> str:
+    """The agent the session is told to dispatch: the project's tuned one, else the generic one.
+
+    Args:
+        tuned_agent: The ``tuned_agent`` option; empty when the project has none.
+        project_root: The project whose ``.claude/agents/`` holds the tuned copy.
+
+    Returns:
+        ``tuned_agent`` when it is a safe name and its definition is deployed;
+        otherwise the generic agent (with a warning when one was configured).
+    """
+    if not tuned_agent:
+        return FACT_CHECKER_AGENT
+    deployed = project_root.joinpath(*AGENTS_DIR_PARTS) / f"{tuned_agent}.md"
+    if _AGENT_NAME_PATTERN.fullmatch(tuned_agent) is None or not deployed.is_file():
+        logger.warning(
+            "plan_fact_check: tuned_agent %r is not a deployed agent (%s); using %s",
+            tuned_agent,
+            deployed,
+            FACT_CHECKER_AGENT,
+        )
+        return FACT_CHECKER_AGENT
+    return tuned_agent
+
+
+def render_tuning_advice() -> str:
+    """How a project tunes the generic checker and records where the copy started."""
+    spec = spec_by_name(FACT_CHECKER_AGENT_NAME)
+    return (
+        f"TUNE THE PLAN FACT-CHECKER: this project is using the generic `{FACT_CHECKER_AGENT}`, "
+        "which knows nothing of this codebase's layout, test commands or vocabulary. "
+        f"Copy `.claude/agents/{FACT_CHECKER_AGENT}.md` to `.claude/agents/<your-name>.md`, "
+        "change its `name:` to match, and add what the checker should know about this project "
+        "(where code lives, how to search it, which directories are off-limits). Replace its "
+        f"`{AGENT_VERSION_MARKER_PREFIX}` line with `{derived_from_marker(spec)}` so the "
+        "daemon can tell you when the generic template improves. Then set "
+        "`handlers.post_tool_use.plan_fact_check_feed.options.tuned_agent: <your-name>` in "
+        ".claude/hooks-daemon.yaml. This is said once."
+    )
+
+
+def render_instruction(
+    pending: PendingFactCheck, diff_path: Path, agent: str = FACT_CHECKER_AGENT
+) -> str:
     """The work item handed to the session for one owed fact-check.
 
     The daemon runs no model: it asks the session to dispatch the agent, and to
@@ -492,16 +554,20 @@ def render_instruction(pending: PendingFactCheck, diff_path: Path) -> str:
     return (
         f"PLAN FACT-CHECK OWED for {pending.folder} "
         f"({pending.trigger_count} edit(s) went quiet).\n"
-        f"Dispatch the `{FACT_CHECKER_AGENT}` agent now on `{plan_file}`, giving it the diff "
+        f"Dispatch the `{agent}` agent now on `{plan_file}`, giving it the diff "
         f"of what changed since the last checked content at `{diff_path}` "
         "(it checks only the claims that diff adds or changes). Put that diff path in the "
         "agent's prompt: seeing it there is how the daemon learns the check was taken up.\n"
         "Treat every REFUTED claim in its report as work to fix, not background: for each, "
         "name the claim, the evidence and the file, then correct the plan (or the code) "
-        "before you carry on. This is a report only; nothing is blocked.\n"
-        f"If `{FACT_CHECKER_AGENT}` is not an available agent type here, deploy it with "
-        f"`hooks-daemon agents install {FACT_CHECKER_AGENT}`; it becomes dispatchable "
-        "only from a later session."
+        "before you carry on. This is a report only; nothing is blocked."
+        + (
+            f"\nIf `{FACT_CHECKER_AGENT}` is not an available agent type here, deploy it with "
+            f"`hooks-daemon agents install {FACT_CHECKER_AGENT}`; it becomes dispatchable "
+            "only from a later session."
+            if agent == FACT_CHECKER_AGENT
+            else ""
+        )
     )
 
 
@@ -536,7 +602,11 @@ def _take(
 
 
 def _hand_over(
-    state: PlanFactCheckState, pending: PendingFactCheck, claimed: Path, now: float
+    state: PlanFactCheckState,
+    pending: PendingFactCheck,
+    claimed: Path,
+    now: float,
+    agent: str = FACT_CHECKER_AGENT,
 ) -> str | None:
     """Offer ``pending`` to the session: write its diff, keep it as offered, render it.
 
@@ -560,20 +630,24 @@ def _hand_over(
         diff_path = state.write_diff(folder, offered.diff)
         state.offer(offered)
         claimed.unlink(missing_ok=True)
-        return render_instruction(offered, diff_path)
+        return render_instruction(offered, diff_path, agent)
     state.clear_offered(folder)
     claimed.unlink(missing_ok=True)
     return None
 
 
-def deliver_pending(state: PlanFactCheckState, now: float | None = None) -> list[str]:
+def deliver_pending(
+    state: PlanFactCheckState, now: float | None = None, agent: str = FACT_CHECKER_AGENT
+) -> list[str]:
     """Turn every owed fact-check into a session instruction, and re-offer stale offers.
 
     A pending record is handed over (:func:`_hand_over`) and kept as an offered
     record until :func:`confirm_dispatch` sees the checker dispatched. An
     offered record older than :data:`REOFFER_AFTER_SECONDS` is handed over
     again, up to :data:`MAX_OFFERS` times, so a lost message does not lose the
-    check. ``now`` defaults to the wall clock.
+    check. ``now`` defaults to the wall clock. ``agent`` is the checker the
+    session is told to dispatch; while it is the generic one, the project is
+    also told once how to tune it (:func:`render_tuning_advice`).
     """
     moment = time.time() if now is None else now
     messages: list[str] = []
@@ -583,9 +657,12 @@ def deliver_pending(state: PlanFactCheckState, now: float | None = None) -> list
     )
     for folders, suffix in batches:
         for pending, claimed in _take(state, folders, suffix):
-            message = _hand_over(state, pending, claimed, now=moment)
+            message = _hand_over(state, pending, claimed, now=moment, agent=agent)
             if message is not None:
                 messages.append(message)
+    if messages and agent == FACT_CHECKER_AGENT and not state.tuning_advised():
+        messages[0] = f"{messages[0]}\n\n{render_tuning_advice()}"
+        state.mark_tuning_advised()
     return messages
 
 

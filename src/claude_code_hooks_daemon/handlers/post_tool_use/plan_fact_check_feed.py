@@ -53,7 +53,6 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.utils import get_written_file_paths
 from claude_code_hooks_daemon.core.worktree_paths import enclosing_checkout
 from claude_code_hooks_daemon.utils.plan_fact_check import (
-    FACT_CHECKER_AGENT,
     STATE_SUBDIR,
     PlanFactCheckState,
     PlanFolderMatch,
@@ -61,6 +60,7 @@ from claude_code_hooks_daemon.utils.plan_fact_check import (
     deliver_pending,
     plan_folder_match,
     process_quiet_plan,
+    resolve_checker_agent,
 )
 from claude_code_hooks_daemon.utils.plan_trigger import plan_dir_for
 
@@ -88,12 +88,12 @@ def _in_main_checkout(path: str, project_root: Path) -> bool:
     return located is not None and located[0] == project_root
 
 
-def _checker_dispatch_prompt(hook_input: dict[str, Any]) -> str | None:
-    """The prompt of a dispatch of the fact-checker agent, or ``None`` for any other event."""
+def _checker_dispatch_prompt(hook_input: dict[str, Any], agent: str) -> str | None:
+    """The prompt of a dispatch of the ``agent`` fact-checker, or ``None`` for any other event."""
     if hook_input.get(HookInputField.TOOL_NAME) not in DISPATCH_TOOLS:
         return None
     tool_input = hook_input.get(HookInputField.TOOL_INPUT)
-    if not isinstance(tool_input, dict) or tool_input.get("subagent_type") != FACT_CHECKER_AGENT:
+    if not isinstance(tool_input, dict) or tool_input.get("subagent_type") != agent:
         return None
     return str(tool_input.get("prompt", ""))
 
@@ -116,6 +116,8 @@ class PlanFactCheckFeedHandler(PostToolUseHandlerBase):
         )
         # Option, injected by the registry via setattr; typed and defaulted here.
         self._quiet_seconds: float = DEFAULT_QUIET_SECONDS
+        # Name of the project's tuned copy of the checker under .claude/agents/; empty = generic.
+        self._tuned_agent: str = ""
 
     def _plan_matches(self, hook_input: dict[str, Any]) -> list[PlanFolderMatch]:
         """One match per distinct plan folder the event wrote a tracked document in.
@@ -166,10 +168,11 @@ class PlanFactCheckFeedHandler(PostToolUseHandlerBase):
             )
         if in_subagent(hook_input):
             return BlockingResult(decision=Decision.ALLOW)
-        prompt = _checker_dispatch_prompt(hook_input)
+        agent = resolve_checker_agent(self._tuned_agent, ProjectContext.project_root())
+        prompt = _checker_dispatch_prompt(hook_input, agent)
         if prompt is not None:
             confirm_dispatch(state, prompt, now=time.time())
-        instructions = deliver_pending(state)
+        instructions = deliver_pending(state, agent=agent)
         if not instructions:
             return BlockingResult(decision=Decision.ALLOW)
         return BlockingResult(decision=Decision.ALLOW, context=instructions)

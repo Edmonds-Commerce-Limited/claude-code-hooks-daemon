@@ -537,3 +537,71 @@ class TestGuidance:
 
     def test_acceptance_tests_declared(self, handler: PlanFactCheckFeedHandler) -> None:
         assert handler.get_acceptance_tests()
+
+
+class TestTunedAgent:
+    """`tuned_agent` makes the feed dispatch the project's tuned checker (Plan 00531)."""
+
+    @staticmethod
+    def _deploy_tuned(tmp_path: Path) -> None:
+        target = tmp_path / ".claude" / "agents" / "my-checker.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("# tuned\n", encoding="utf-8")
+
+    @staticmethod
+    def _owe(
+        handler: PlanFactCheckFeedHandler, debouncer: Debouncer, clock: FakeClock, tmp_path: Path
+    ) -> None:
+        _baseline(tmp_path / "untracked", "00001-a")
+        handler.handle(_write(_plan_file(tmp_path, "00001-a", text="a claim\n")))
+        clock.advance(6.0)
+        debouncer.run_due()
+
+    def test_default_is_unset(self, handler: PlanFactCheckFeedHandler) -> None:
+        assert handler._tuned_agent == ""
+
+    def test_a_configured_tuned_agent_is_named_in_the_instruction(
+        self,
+        handler: PlanFactCheckFeedHandler,
+        debouncer: Debouncer,
+        clock: FakeClock,
+        tmp_path: Path,
+    ) -> None:
+        self._deploy_tuned(tmp_path)
+        handler._tuned_agent = "my-checker"
+        self._owe(handler, debouncer, clock, tmp_path)
+        text = "\n".join(handler.handle({"tool_name": "Read", "tool_input": {}}).context)
+        assert "Dispatch the `my-checker` agent" in text
+        assert "hooks-daemon-plan-fact-checker" not in text
+
+    def test_an_unset_option_names_the_generic_agent(
+        self,
+        handler: PlanFactCheckFeedHandler,
+        debouncer: Debouncer,
+        clock: FakeClock,
+        tmp_path: Path,
+    ) -> None:
+        self._owe(handler, debouncer, clock, tmp_path)
+        text = "\n".join(handler.handle({"tool_name": "Read", "tool_input": {}}).context)
+        assert "Dispatch the `hooks-daemon-plan-fact-checker` agent" in text
+
+    def test_dispatching_the_tuned_agent_confirms_the_check(
+        self,
+        handler: PlanFactCheckFeedHandler,
+        debouncer: Debouncer,
+        clock: FakeClock,
+        state_dir: Path,
+        tmp_path: Path,
+    ) -> None:
+        self._deploy_tuned(tmp_path)
+        handler._tuned_agent = "my-checker"
+        self._owe(handler, debouncer, clock, tmp_path)
+        handler.handle({"tool_name": "Read", "tool_input": {}})
+        state = PlanFactCheckState(state_dir / "plan-fact-check")
+        diff_path = state.diff_path("00001-a")
+        dispatch = {
+            "tool_name": "Task",
+            "tool_input": {"subagent_type": "my-checker", "prompt": f"check {diff_path}"},
+        }
+        handler.handle(dispatch)
+        assert state.offered_folders() == []

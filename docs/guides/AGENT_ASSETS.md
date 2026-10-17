@@ -30,6 +30,16 @@ The daemon ships sub-agent definitions into your project's flat
 invisible to upgrades, so prompt fixes never reach the file. Copy the agent to
 a name of your own (dropping the `hooks-daemon-` prefix) and edit that copy.
 
+### Tuning the plan fact-checker
+
+The plan fact-checker is generic by design. To tune it, copy it to your own
+name, set `handlers.post_tool_use.plan_fact_check_feed.options.tuned_agent` to
+that name, and replace the copy's version marker with
+`hooks-daemon-derived-from: hooks-daemon-plan-fact-checker <version>` (inside an
+HTML comment). The feed then dispatches your copy, and session start reports it
+when a newer template ships (`deployed_artefact_drift`). The daemon never edits
+your copy.
+
 ## CLI
 
 ```

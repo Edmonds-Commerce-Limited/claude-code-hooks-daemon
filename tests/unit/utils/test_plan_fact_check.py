@@ -15,6 +15,7 @@ import pytest
 
 from claude_code_hooks_daemon.utils.plan_fact_check import (
     CORRECTION_MAX_CHANGED_LINES,
+    FACT_CHECKER_AGENT,
     CORRECTION_WINDOW_SECONDS,
     MAX_OFFERS,
     REOFFER_AFTER_SECONDS,
@@ -25,6 +26,8 @@ from claude_code_hooks_daemon.utils.plan_fact_check import (
     deliver_pending,
     plan_folder_match,
     process_quiet_plan,
+    render_instruction,
+    resolve_checker_agent,
     snapshot_hash,
     snapshot_plan,
 )
@@ -498,3 +501,74 @@ class TestCorruptState:
     def test_unsafe_folder_name_is_rejected(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError):
             PlanFactCheckState(tmp_path).read_checked("../escape")
+
+
+class TestCheckerAgentResolution:
+    """The feed names the project's tuned checker when configured and present (Plan 00531)."""
+
+    @staticmethod
+    def _deploy(root: Path, name: str) -> None:
+        target = root / ".claude" / "agents" / f"{name}.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("# tuned\n")
+
+    def test_unset_resolves_to_the_generic_agent(self, tmp_path: Path) -> None:
+        assert resolve_checker_agent("", tmp_path) == FACT_CHECKER_AGENT
+
+    def test_a_configured_and_present_agent_is_used(self, tmp_path: Path) -> None:
+        self._deploy(tmp_path, "my-checker")
+        assert resolve_checker_agent("my-checker", tmp_path) == "my-checker"
+
+    def test_a_configured_but_absent_agent_falls_back_with_a_warning(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING):
+            assert resolve_checker_agent("my-checker", tmp_path) == FACT_CHECKER_AGENT
+        assert "my-checker" in caplog.text
+
+    @pytest.mark.parametrize("name", ["../evil", "a/b", ".hidden", "has space"])
+    def test_an_unsafe_name_falls_back(self, tmp_path: Path, name: str) -> None:
+        assert resolve_checker_agent(name, tmp_path) == FACT_CHECKER_AGENT
+
+    def test_the_instruction_names_the_given_agent(self, tmp_path: Path) -> None:
+        root = _plan(tmp_path, {"PLAN.md": "x\n"})
+        pending = PendingFactCheck(
+            folder=FOLDER,
+            content_hash="h",
+            diff="d",
+            trigger_count=1,
+            recorded_at=0.0,
+            plan_root=str(root),
+            files={},
+        )
+        text = render_instruction(pending, tmp_path / "d.diff", agent="my-checker")
+        assert "Dispatch the `my-checker` agent" in text
+        assert FACT_CHECKER_AGENT not in text
+
+
+class TestTuningAdvice:
+    """A project on the generic checker is told once how to tune it (Plan 00531)."""
+
+    def _owed(self, tmp_path: Path) -> PlanFactCheckState:
+        root, state = _seeded(tmp_path)
+        (root / "PLAN.md").write_text("changed\n", encoding="utf-8")
+        process_quiet_plan(root, FOLDER, state, trigger_count=1, now=1.0)
+        return state
+
+    def test_the_generic_checker_instruction_carries_the_advice_once(
+        self, tmp_path: Path
+    ) -> None:
+        state = self._owed(tmp_path)
+        first = "\n".join(deliver_pending(state, now=2.0))
+        assert "tuned_agent" in first
+        assert "hooks-daemon-derived-from" in first
+        # Re-offer the same record: the advice has been given, it is not repeated.
+        again = "\n".join(deliver_pending(state, now=2.0 + REOFFER_AFTER_SECONDS + 1))
+        assert "Dispatch the" in again
+        assert "tuned_agent" not in again
+
+    def test_a_tuned_checker_instruction_carries_no_advice(self, tmp_path: Path) -> None:
+        state = self._owed(tmp_path)
+        text = "\n".join(deliver_pending(state, now=2.0, agent="my-checker"))
+        assert "Dispatch the `my-checker` agent" in text
+        assert "tuned_agent" not in text
