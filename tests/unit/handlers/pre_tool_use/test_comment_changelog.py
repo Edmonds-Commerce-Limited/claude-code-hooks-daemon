@@ -244,6 +244,35 @@ class TestHighPrecisionBlockSignals:
         assert "git" in reason.lower()
         assert "journal" in reason.lower() or "changelog" in reason.lower()
 
+    @pytest.mark.parametrize(
+        ("file_path", "new_string"),
+        [
+            ("/workspace/src/x.go", "/*\n * Previously 3.69.0: retried twice\n"),
+            ("/workspace/src/x.ts", "/**\n * 2026-08-12: switched to retry loop\n"),
+            ("/workspace/src/x.py", '"""\nPrior 3.26.2: used a different algorithm\n'),
+        ],
+    )
+    def test_edit_fragment_opening_a_comment_whose_closer_is_outside_is_scanned(
+        self, file_path: str, new_string: str
+    ) -> None:
+        """An Edit new_string is a fragment; its closer may lie in the untouched file."""
+        handler = CommentChangelogHandler()
+        hook_input = _make_edit_input(file_path, new_string)
+        assert handler.matches(hook_input) is True
+        assert handler.handle(hook_input).decision == Decision.DENY
+
+    def test_write_with_unclosed_opener_keeps_issue_75_behaviour(self) -> None:
+        """Whole-file content: an opener with no closer is a string, not a comment."""
+        handler = CommentChangelogHandler()
+        content = "/*\n * Previously 3.69.0: retried twice\n"
+        hook_input = _make_write_input("/workspace/src/x.go", content)
+        assert handler.matches(hook_input) is False
+
+    def test_edit_fragment_unclosed_opener_without_narrative_is_allowed(self) -> None:
+        handler = CommentChangelogHandler()
+        hook_input = _make_edit_input("/workspace/src/x.go", "/*\n * retries twice\n")
+        assert handler.matches(hook_input) is False
+
     def test_task_number_is_not_mistaken_for_semver(self) -> None:
         """'Task 3.5.2' collides with the 3-part semver shape - must be excluded."""
         handler = CommentChangelogHandler()
