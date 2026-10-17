@@ -77,6 +77,27 @@ class TestCleanupProvenStaleVenvs:
         assert removed == [stale]
         assert not stale.exists()
 
+    @pytest.mark.parametrize(
+        ("state", "flags"),
+        [("Z", 0x40004C), ("S", 0x00200000 | 0x4)],
+        ids=["zombie", "kernel-thread"],
+    )
+    def test_a_zombie_or_kernel_thread_does_not_block_the_reclaim(
+        self, project: Path, tmp_path: Path, state: str, flags: int
+    ) -> None:
+        stale = _venv(project / "untracked" / _name(project, "py310-aaaaaaaa"), STALE_HASH)
+        proc_root = tmp_path / "fake-proc"
+        (proc_root / "77").mkdir(parents=True)
+        (proc_root / "77" / "stat").write_text(f"77 (x) {state} 0 0 0 0 -1 {flags} 0 0 0 0\n")
+
+        def scan_fake_proc(venv_dirs: list[Path]) -> ProcessScan:
+            return processes_using_venvs(venv_dirs, proc_root)
+
+        with patch(f"{cli.__name__}.processes_using_venvs", scan_fake_proc):
+            removed = cli._cleanup_proven_stale_venvs(project)
+
+        assert removed == [stale]
+
     def test_leaves_unproven_and_other_view_venvs(self, project: Path) -> None:
         no_metadata = _venv(project / "untracked" / _name(project, "py310-aaaaaaaa"))
         other_view = _venv(project / "untracked" / "venv-elsewhere-py310-bbbbbbbb", STALE_HASH)

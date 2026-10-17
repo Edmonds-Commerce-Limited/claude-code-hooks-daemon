@@ -3149,6 +3149,33 @@ def _read_argv0(path: Path) -> str:
     return raw.split(b"\0", 1)[0].decode(errors="replace")
 
 
+_PF_KTHREAD = 0x00200000  # kernel thread flag in /proc/<pid>/stat (include/linux/sched.h)
+
+
+def _holds_no_user_memory(stat_path: Path) -> bool:
+    """True when ``/proc/<pid>/stat`` says the process is a zombie or a kernel thread.
+
+    ``stat`` is world-readable, so unlike ``exe``/``cwd``/``cmdline`` it answers
+    for another user's process too. ``False`` when it cannot be read or parsed,
+    so the caller keeps the process counted as unreadable.
+    """
+    try:
+        raw = stat_path.read_text()
+    except OSError as e:
+        log_and_continue(
+            logger,
+            e,
+            reason=f"an unreadable {stat_path} leaves the process counted as unreadable, never guessed at",
+            level=logging.DEBUG,
+        )
+        return False
+    # The comm field is parenthesised and may contain spaces or ')', so split after the last ')'.
+    fields = raw.rpartition(")")[2].split()
+    if len(fields) < 7 or not fields[6].isdigit():
+        return False
+    return fields[0] == "Z" or bool(int(fields[6]) & _PF_KTHREAD)
+
+
 def processes_using_venvs(venv_dirs: list[Path], proc_root: Path = Path("/proc")) -> ProcessScan:
     """Find processes using each venv, read-only, from ``proc_root`` (``/proc``).
 
@@ -3158,7 +3185,9 @@ def processes_using_venvs(venv_dirs: list[Path], proc_root: Path = Path("/proc")
     ``argv[0]`` shows which venv started it. Later arguments are deliberately not
     read, because the command that asks the question (``prune-venvs --unproven
     <path>``) names the venv too. A process whose links and command line are all
-    unreadable (another user's) is counted in ``unreadable``, not guessed at.
+    unreadable (another user's) is counted in ``unreadable``, not guessed at. A
+    zombie or a kernel thread (read from ``stat``) shows nothing for a different
+    reason, holds no venv, and is skipped rather than counted.
     """
     prefixes = {venv: tuple(dict.fromkeys((str(venv), str(venv.resolve())))) for venv in venv_dirs}
     users: dict[Path, list[VenvProcess]] = {venv: [] for venv in venv_dirs}
@@ -3175,8 +3204,11 @@ def processes_using_venvs(venv_dirs: list[Path], proc_root: Path = Path("/proc")
             "argv0": _read_argv0(entry / "cmdline"),
         }
         if not any(found.values()):
-            # A process that exited mid-scan is gone, not unreadable.
-            if entry.exists():
+            # A process that exited mid-scan is gone, not unreadable; a zombie
+            # and a kernel thread have no user memory, so they show nothing to
+            # read and cannot hold a venv open. Anything else that shows
+            # nothing stays counted, so a doubtful scan fails closed.
+            if entry.exists() and not _holds_no_user_memory(entry / "stat"):
                 unreadable += 1
             continue
         for venv, venv_prefixes in prefixes.items():
