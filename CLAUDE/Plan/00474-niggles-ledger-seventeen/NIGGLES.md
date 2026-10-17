@@ -109,6 +109,41 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N494 to N499 — the v3.70.0 Step 10 delta review over the fixes and Plan 00531
+
+**Source**: the Step 10 delta review over `9513c3d45..9d1a522b0 -- src/`
+([report](subagent-reports/261017-release-review-delta.md)). Each defect was confirmed with a probe.
+
+Defects, fixed before the tag:
+
+- **N494**: the N474 fix in `strategies/lint/rust_strategy.py` allowed only when every rustc error was a crate-context
+  error, but an external derive-helper attribute (`#[serde(...)]`, `#[error(...)]`) gives an uncoded
+  `cannot find attribute` error stand-alone, so ordinary crate modules were denied. Unresolved external names now count
+  as crate-context errors; a real error mixed with them is still denied.
+  [Report](subagent-reports/261017-rfix2-rust-attr.md).
+- **N495**: the N475 fix in `strategies/comments/extractor.py` read any unclosed `/*` in an Edit fragment as a comment
+  to the end, even inside a string (`glob("dist/*.js")`, `"*/*"`). The rule now applies only to an opener outside
+  string literals. Callout 028 updated. [Report](subagent-reports/261017-rfix2-comment-string.md).
+- **N496**: the N473 fix in `utils/message_files.py` (and `github_auto_close_keywords`) judged only the segment that
+  writes a message file, so `echo T | tee m.txt`, `{ echo T; } > m.txt` and `echo T | git commit -F -` went unjudged.
+  The producer is now judged. [Report](subagent-reports/261017-rfix2-msgfile-producer.md).
+- **N497**: Plan 00531's `install/agent_assets.stale_derived_agents` read every `.claude/agents/*.md` with no file
+  check, so a dangling symlink or a directory lost the whole `deployed_artefact_drift` report. Bad entries are now
+  skipped; a non-string `tuned_agent` falls back to the generic agent with one warning; the drift header no longer
+  calls a tuned copy daemon-owned. [Report](subagent-reports/261017-rfix2-agent-scan.md).
+
+Open:
+
+- **N498**: `idle_workable_issue_stop_gate` consults the work queue only, so with `untracked/release-state.json`
+  present and `llm_qa.py all` running as a tracked background task, a main-thread stop naming the running gate was
+  denied with R-STOP-IDLE-WITH-WORKABLE-ISSUE ("nothing is in flight"), pointing at a runbook whose merge step is
+  forbidden until the tag. Expected: a live release state file and a running tracked background task each count as
+  work in flight, or the deny text names the in-flight sources it checked.
+- **N499**: `git -c k=v -C sub rm f` yields no target in `core/utils.py`, so `write_protected_paths` lets it
+  through. Predates this cycle; low priority.
+
+**Status**: N494 to N497 ✅ (merged 3d1db2da8, cae36a242, 3d44f0e6d, 4b3a709e1); N498 and N499 ⬜ open.
+
 ### N493 — the acceptance contract drove the idle-stop gate's "no cache" case against the host's live cache
 
 **Source**: the v3.70.0 release's post-merge `changed` run over `9513c3d45..891797f74`.
