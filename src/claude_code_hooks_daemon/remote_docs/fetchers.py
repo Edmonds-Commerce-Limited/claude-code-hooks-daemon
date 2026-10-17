@@ -29,8 +29,10 @@ handlers stay offline and testable.
 import functools
 import json
 import logging
+import os
 import shutil
 import subprocess  # nosec B404 - no shell is used; see _invoke
+import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
@@ -54,6 +56,8 @@ BINARY_CANDIDATES: Final[tuple[str, ...]] = (
 HTTPS_METHOD: Final[str] = "https-get"
 _READ: Final[str] = "read"
 _JSON_FLAG: Final[str] = "--json"
+_SESSION_FLAG: Final[str] = "--session"
+_SESSION_PREFIX: Final[str] = "hooks-daemon-remote-docs"
 _FETCH_TIMEOUT_SECONDS: Final[int] = 60
 # Identifies the fetcher honestly rather than impersonating a browser: a host
 # that wants to refuse automated capture should be able to.
@@ -132,11 +136,20 @@ def _invoke(command: list[str], runner: Runner) -> Any:
         raise CaptureError(f"{command[0]} could not be executed: {exc}") from exc
 
 
-def _close_session(binary: str, runner: Runner) -> None:
-    """Reap the browser session the read started.
+def _new_session_name() -> str:
+    """A browser session name no other read, process or agent shares."""
+    return f"{_SESSION_PREFIX}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+
+
+def _close_session(binary: str, session: str, runner: Runner) -> None:
+    """Reap the browser session the read started, and only that one.
 
     A read launches a real browser process. Without this every capture leaks
-    one until an idle timeout fires. This runs in a ``finally``, so raising
+    one until an idle timeout fires. ``close --all`` is not used: it returns
+    before the shared daemon has exited, so the next read on the default
+    session reached the dying daemon and got an empty response (7 of 15
+    back-to-back reads failed that way; none did with one named session per
+    read), and it ends every other agent's browser as well. This runs in a ``finally``, so raising
     here would replace whatever the fetch itself raised: a missing/misbehaving
     binary is exactly the shape that makes both the read and the close fail,
     and the fetch failure is the diagnostic that matters. A close failure is
@@ -145,7 +158,7 @@ def _close_session(binary: str, runner: Runner) -> None:
     """
     try:
         runner(
-            [binary, "close", "--all"],
+            [binary, "close", _SESSION_FLAG, session],
             capture_output=True,
             timeout=_FETCH_TIMEOUT_SECONDS,
             check=False,
@@ -210,11 +223,12 @@ def agent_browser_fetch(
     """
     run = runner or subprocess.run
 
+    session = _new_session_name()
     try:
-        completed = _invoke([binary, _READ, url, _JSON_FLAG], run)
+        completed = _invoke([binary, _READ, url, _JSON_FLAG, _SESSION_FLAG, session], run)
         content, source = _extract(binary, url, completed)
     finally:
-        _close_session(binary, run)
+        _close_session(binary, session, run)
 
     return (content, source) if with_source else content
 

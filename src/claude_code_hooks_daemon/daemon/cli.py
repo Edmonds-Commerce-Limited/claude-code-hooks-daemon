@@ -8788,6 +8788,7 @@ def _remote_docs_refresh(args: argparse.Namespace, project_root: Path, tree: Pat
         if verbatim not in fetchers:
             fetchers[verbatim] = _resolve_and_announce_fetcher(args, verbatim=verbatim)
         fetcher = fetchers[verbatim]
+        causes: list[str] = []
         outcome = refresh_document(
             target,
             fetch_fn=fetcher.fetch_fn,
@@ -8796,8 +8797,11 @@ def _remote_docs_refresh(args: argparse.Namespace, project_root: Path, tree: Pat
             now=now,
             content_guard=content_guard,
             value_swapper=value_swapper,
+            on_failure=causes.append,
         )
         print(f"{target}: {outcome.value}")
+        for cause in causes:
+            print(f"  {target}: {cause}")
         if outcome is RefreshOutcome.REFUSED:
             print(
                 f"  {target}: upstream is now serving content the sensitive-content "

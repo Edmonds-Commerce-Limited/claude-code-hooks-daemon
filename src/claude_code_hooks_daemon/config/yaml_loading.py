@@ -11,12 +11,14 @@ libyaml composes nested collections by C recursion with no depth limit, so a
 flow document nested some tens of thousands deep overflows the C stack and
 kills the process, where the pure-Python loader raises ``RecursionError``
 (which ``Config.load`` reports as ``ValueError``, Ledger 00466 RV9-n1). Flow
-depth cannot exceed the number of opening brackets, so a document with more
-than ``C_LOADER_MAX_OPEN_BRACKETS`` of them is parsed by the pure-Python
-loader. Block nesting that deep would need hundreds of megabytes of
-indentation, so it is not counted.
+depth cannot exceed the number of opening brackets. Block depth cannot exceed
+the longest run of indentation and ``-``/``?``/``:`` indicators that leads a
+line, because each level starts at least one column right of its parent
+(``- - - x`` nests a level per two characters). A document over either bound,
+``C_LOADER_MAX_OPEN_BRACKETS``, is parsed by the pure-Python loader.
 """
 
+import re
 from typing import IO, Any, Final, cast
 
 import yaml
@@ -27,6 +29,12 @@ _C_SAFE_LOADER: type[yaml.SafeLoader] | None = getattr(yaml, "CSafeLoader", None
 #: Most ``[`` plus ``{`` a document may hold and still be parsed by libyaml. Far
 #: below the depth that overflows its C stack, far above a real config's count.
 C_LOADER_MAX_OPEN_BRACKETS: Final[int] = 1000
+
+#: A line that opens with more than the budget of indentation / block indicators
+#: (after any YAML line break, so ``\r``-only documents are covered).
+_DEEP_LINE_PREFIX: Final[re.Pattern[str]] = re.compile(
+    rf"(?:\A|[\r\n\x85\u2028\u2029])[ \-?:]{{{C_LOADER_MAX_OPEN_BRACKETS + 1}}}"
+)
 
 
 def select_safe_loader() -> type[yaml.SafeLoader]:
@@ -52,7 +60,10 @@ def safe_load_yaml(stream: str | IO[str]) -> Any:
         RecursionError: If the document is nested too deeply to parse.
     """
     text = stream if isinstance(stream, str) else stream.read()
-    if text.count("[") + text.count("{") > C_LOADER_MAX_OPEN_BRACKETS:
+    if (
+        text.count("[") + text.count("{") > C_LOADER_MAX_OPEN_BRACKETS
+        or _DEEP_LINE_PREFIX.search(text) is not None
+    ):
         loader_class: type[yaml.SafeLoader] = yaml.SafeLoader
     else:
         loader_class = select_safe_loader()

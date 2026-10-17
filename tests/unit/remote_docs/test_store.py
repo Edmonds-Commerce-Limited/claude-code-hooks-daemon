@@ -389,6 +389,74 @@ class TestRefresh:
         assert outcome is RefreshOutcome.UNREADABLE
 
 
+class TestRefreshRetriesAndExplainsAFailedFetch:
+    """A failed fetch is retried once and says why when it still fails (ledger N478)."""
+
+    @staticmethod
+    def _flaky(failures: int):
+        calls: list[str] = []
+
+        def fetch_fn(url: str) -> bytes:
+            calls.append(url)
+            if len(calls) <= failures:
+                raise CaptureError("agent-browser failed: EOF while parsing")
+            return _BODY
+
+        return fetch_fn, calls
+
+    def test_one_transient_failure_is_retried_and_succeeds(self, tmp_path: Path) -> None:
+        written = _seed(tmp_path)
+        fetch_fn, calls = self._flaky(1)
+        pauses: list[float] = []
+
+        outcome = refresh_document(written, fetch_fn=fetch_fn, now=_LATER, sleep=pauses.append)
+
+        assert outcome is RefreshOutcome.UNCHANGED
+        assert len(calls) == 2
+        assert len(pauses) == 1
+
+    def test_the_retry_is_bounded_to_one(self, tmp_path: Path) -> None:
+        written = _seed(tmp_path)
+        fetch_fn, calls = self._flaky(5)
+
+        outcome = refresh_document(
+            written, fetch_fn=fetch_fn, now=_LATER, sleep=lambda _seconds: None
+        )
+
+        assert outcome is RefreshOutcome.FAILED
+        assert len(calls) == 2
+
+    def test_the_cause_of_a_final_failure_is_reported(self, tmp_path: Path) -> None:
+        written = _seed(tmp_path)
+        fetch_fn, _calls = self._flaky(5)
+        reasons: list[str] = []
+
+        refresh_document(
+            written,
+            fetch_fn=fetch_fn,
+            now=_LATER,
+            sleep=lambda _seconds: None,
+            on_failure=reasons.append,
+        )
+
+        assert reasons == ["agent-browser failed: EOF while parsing"]
+
+    def test_a_recovered_fetch_reports_no_failure(self, tmp_path: Path) -> None:
+        written = _seed(tmp_path)
+        fetch_fn, _calls = self._flaky(1)
+        reasons: list[str] = []
+
+        refresh_document(
+            written,
+            fetch_fn=fetch_fn,
+            now=_LATER,
+            sleep=lambda _seconds: None,
+            on_failure=reasons.append,
+        )
+
+        assert reasons == []
+
+
 class TestListAndCheck:
     def test_empty_tree_lists_nothing(self, tmp_path: Path) -> None:
         assert list_documents(tmp_path) == []

@@ -90,6 +90,56 @@ class TestDeepNestingNeverReachesTheCParser:
         assert completed.returncode == 0, completed.stderr
         assert completed.stdout.strip() == "RecursionError"
 
+    @pytest.mark.parametrize(
+        "document",
+        [
+            pytest.param("- " * 100_000 + "x\n", id="inline-block-sequences"),
+            pytest.param("? " * 100_000 + "x\n", id="inline-complex-keys"),
+            pytest.param("- " * 50_000 + "[" * 50_000 + "]" * 50_000 + "\n", id="mixed"),
+        ],
+    )
+    def test_block_nesting_past_the_c_stack_raises_instead_of_crashing(self, document: str) -> None:
+        """``- - - ...`` nests one level per two characters with no brackets at all,
+        so it reaches libyaml's C recursion unless the routing counts it too. Run
+        in a child so a segfault fails this test rather than killing pytest."""
+        program = (
+            "import sys\n"
+            "from claude_code_hooks_daemon.config.yaml_loading import safe_load_yaml\n"
+            "try:\n"
+            "    safe_load_yaml(sys.stdin.read())\n"
+            "except RecursionError:\n"
+            "    print('RecursionError')\n"
+        )
+        completed = subprocess.run(
+            [sys.executable, "-c", program],
+            input=document,
+            capture_output=True,
+            text=True,
+            timeout=Timeout.REQUEST_LONG,
+        )
+        assert completed.returncode == 0, f"exit {completed.returncode}: {completed.stderr}"
+        assert completed.stdout.strip() == "RecursionError"
+
+    def test_deep_indentation_uses_the_pure_python_loader(self) -> None:
+        """Mapping nesting by indentation is bounded by the widest indent."""
+        depth = yaml_loading.C_LOADER_MAX_OPEN_BRACKETS + 1
+        text = "".join(f"{' ' * level}k{level}:\n" for level in range(depth)) + " " * depth + "v\n"
+        with patch.object(yaml_loading.yaml, "SafeLoader", wraps=yaml.SafeLoader) as spy:
+            with pytest.raises(RecursionError):
+                yaml_loading.safe_load_yaml(text)
+        assert spy.call_count == 1
+
+    def test_deep_inline_block_indicators_use_the_pure_python_loader(self) -> None:
+        """A line led by more indicators than the budget never reaches libyaml,
+        whichever line break ends the line before it."""
+        budget = yaml_loading.C_LOADER_MAX_OPEN_BRACKETS
+        for separator in ("\n", "\r", "\r\n"):
+            text = f"a: 1{separator}" + "- " * budget + "x\n"
+            with patch.object(yaml_loading.yaml, "SafeLoader", wraps=yaml.SafeLoader) as spy:
+                with pytest.raises(yaml.YAMLError):
+                    yaml_loading.safe_load_yaml(text)
+            assert spy.call_count == 1, repr(separator)
+
     def test_a_document_over_the_bracket_budget_uses_the_pure_python_loader(self) -> None:
         """Flow depth cannot exceed the count of opening brackets, so a document
         with more than the budget is parsed where depth is bounded."""
