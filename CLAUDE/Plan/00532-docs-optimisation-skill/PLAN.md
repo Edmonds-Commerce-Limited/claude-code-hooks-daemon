@@ -86,18 +86,18 @@ staleness advisory are named follow-ups there, outside this plan.
 
 ### Phase 1: Loading-rules contract
 
-- [ ] ⬜ **Task 1.1**: Define the contract's schema at
+- [x] ✅ **Task 1.1** (d8e00958e): Define the contract's schema at
   `contracts/claude-code-instructions/` (Q3 A): a `META.json` with the same
   keys as the hooks contract's, and one facts file in which each fact carries
   an id, the pinned statement, its anchor in the vendored `memory.md`
   (heading slug plus quoted phrase), and the minimum Claude Code version
   where the page states one; plus an `unmodelled` list naming the G6 inputs
   (Q4).
-- [ ] ⬜ **Task 1.2**: Populate groups G1 to G5 (Q4 B) from
+- [x] ✅ **Task 1.2** (d8e00958e): Populate groups G1 to G5 (Q4 B) from
   `remote-docs/code.claude.com/docs/en/memory.md`, and add the refresh
   procedure as a section of `docs/guides/HOOK-CONTRACT-REFRESH.md` so both
   contracts share one procedure.
-- [ ] ⬜ **Task 1.3**: Tests (written first) that load the contract and fail
+- [x] ✅ **Task 1.3** (d8e00958e): Tests (written first) that load the contract and fail
   when a fact lacks a source anchor, the audited version is missing, or the
   `META.json` version disagrees with the hooks contract's and with
   `claude-code-versions.yaml` (extend
