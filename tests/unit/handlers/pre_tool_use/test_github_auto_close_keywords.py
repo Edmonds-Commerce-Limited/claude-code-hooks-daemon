@@ -576,3 +576,35 @@ class TestMessageFileWrittenByTheSameCommand:
             GithubAutoCloseKeywordsHandler().matches({**_bash(command), "cwd": str(tmp_path)})
             is False
         )
+
+
+class TestProducerOfTheMessageText:
+    """The stage or group that PRODUCES the message text is scanned as well."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo 'Fixes #12' | tee m.txt && git commit -F m.txt",
+            "{ echo 'Fixes #12'; } > m.txt && git commit -F m.txt",
+            "( echo 'Fixes #12' ) > m.txt && git commit -F m.txt",
+            "echo 'Fixes #12' | git commit -F -",
+            "echo 'Closes #12' | gh pr create --title t --body-file -",
+        ],
+    )
+    def test_closing_keyword_in_the_producer_is_denied(self, tmp_path: Path, command: str) -> None:
+        hook_input = {**_bash(command), "cwd": str(tmp_path)}
+
+        assert GithubAutoCloseKeywordsHandler().matches(hook_input) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo 'Addresses #12' | tee m.txt && git commit -F m.txt",
+            "echo 'Fixes #12' | tee notes.txt && git commit -F m.txt",
+            "echo 'Fixes #12' | grep x; echo ok | git commit -F -",
+        ],
+    )
+    def test_clean_or_unrelated_producer_is_allowed(self, tmp_path: Path, command: str) -> None:
+        hook_input = {**_bash(command), "cwd": str(tmp_path)}
+
+        assert GithubAutoCloseKeywordsHandler().matches(hook_input) is False

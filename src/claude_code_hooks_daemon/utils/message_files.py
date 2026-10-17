@@ -33,7 +33,11 @@ from claude_code_hooks_daemon.core.utils import scan_bash_write_targets, split_h
 from claude_code_hooks_daemon.utils.command_evasion import normalise_line_continuations
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
-from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
+from claude_code_hooks_daemon.utils.shell_segmentation import (
+    mask_quoted,
+    split_unquoted,
+    split_unquoted_spans,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,6 +54,14 @@ STDIN_MESSAGE_FILE: Final[str] = "-"
 #: Where one shell command ends and the next begins. Longest first so `||` is
 #: not read as two pipes.
 COMMAND_SEPARATORS: Final[tuple[str, ...]] = ("||", "&&", "|", ";", "\n")
+
+#: Where one top-level statement ends: a pipeline is NOT split here.
+STATEMENT_SEPARATORS: Final[tuple[str, ...]] = ("||", "&&", ";", "\n")
+
+#: A group opener is `(` or a `{` standing alone as a word; a closer is `)` or
+#: a `}` standing alone. Parameter braces (`${x}`) are not groups.
+_GROUP_OPEN: Final[re.Pattern[str]] = re.compile(r"\(|(?<![\w$])\{(?=\s)")
+_GROUP_CLOSE: Final[re.Pattern[str]] = re.compile(r"\)|(?:(?<=\s)|^)\}(?![\w}])")
 
 #: Both former copies used this bound, so it is preserved rather than chosen.
 MAX_MESSAGE_FILE_BYTES: Final[int] = 65_536
@@ -111,28 +123,93 @@ def _writes_any(segment: str, named: set[str], cwd: str | None) -> bool:
     return any(Path(path).name in names for path in named)
 
 
-def message_file_writers(command: str, recordings: Sequence[str], cwd: str | None) -> list[str]:
-    """Segments of ``command`` that WRITE a file ``recordings`` name, with their heredoc bodies.
+def _reads_stdin_message(text: str) -> bool:
+    """True when ``text`` names stdin (``-F -``, ``--file=-``, ``--body-file -``) as its message."""
+    return any(
+        next(group for group in match.groups() if group) == STDIN_MESSAGE_FILE
+        for match in MESSAGE_FILE_PATTERN.finditer(text)
+    )
 
-    ``git commit -F m.txt`` reads a file an earlier segment of the same command
+
+def _group_balance(masked: str) -> int:
+    """Opened minus closed ``{ }`` / ``( )`` groups in ``masked`` (quoted text blanked)."""
+    opened = len(_GROUP_OPEN.findall(masked))
+    closed = len(_GROUP_CLOSE.findall(masked))
+    return opened - closed
+
+
+def _statements(without_bodies: str) -> list[str]:
+    """Top-level statements of ``without_bodies``: split on ``&&``/``||``/``;``/newline.
+
+    A pipeline stays whole (``|`` does not split), and a ``{ }`` or ``( )``
+    group stays whole, so the stage that PRODUCES a text travels with the one
+    that writes it. An unbalanced group runs to the end of the command, which
+    keeps more text rather than less.
+    """
+    masked = mask_quoted(without_bodies, keep_double=False)
+    statements: list[str] = []
+    open_from: int | None = None
+    depth = 0
+    for start, end in split_unquoted_spans(without_bodies, STATEMENT_SEPARATORS):
+        if open_from is None:
+            open_from = start
+        depth += _group_balance(masked[start:end])
+        if depth <= 0:
+            statements.append(without_bodies[open_from:end])
+            open_from = None
+            depth = 0
+    if open_from is not None:
+        statements.append(without_bodies[open_from:])
+    return statements
+
+
+def _stdin_producers(statement: str, recordings: Sequence[str]) -> list[str]:
+    """Pipeline stages that feed a recording stage reading its message from stdin."""
+    stages = split_unquoted(statement, ("|",))
+    producers: list[str] = []
+    for position, stage in enumerate(stages[1:], start=1):
+        recorded = any(recording.strip() and recording.strip() in stage for recording in recordings)
+        if recorded and _reads_stdin_message(stage):
+            producers.append("|".join(stages[:position]).strip())
+    return producers
+
+
+def message_file_writers(command: str, recordings: Sequence[str], cwd: str | None) -> list[str]:
+    """Text of ``command`` that PRODUCES a message ``recordings`` take from elsewhere.
+
+    ``git commit -F m.txt`` reads a file an earlier part of the same command
     may create (``cat > m.txt <<'EOF'``, ``echo ... > m.txt``). That file is not
     on disk at PreToolUse time, so :func:`read_message_files` skips it and the
-    text it will hold is visible only in the segment that writes it. A caller
+    text it will hold is visible only in the command that creates it. A caller
     that judges message text per recording command (rather than the whole
     line) must judge these as well, or the text reaches history unexamined.
 
-    Only a segment whose write target equals a named path is returned, so an
-    unrelated segment (``cd /tmp/<term>``) is still not message text.
+    Three shapes are returned:
+
+    * the whole statement (pipeline or ``{ }`` / ``( )`` group included) that
+      writes a named file, so ``echo <text> | tee m.txt`` and
+      ``{ echo <text>; } > m.txt`` are judged on ``<text>``, not just on the
+      ``tee`` or the closing redirect;
+    * that statement's heredoc bodies;
+    * the pipeline stages feeding a recording command that reads stdin
+      (``echo <text> | git commit -F -``).
+
+    A statement that writes no named file is not message text, so an unrelated
+    one (``cd /tmp/<term>``) is still not returned. A producer whose text is
+    not on the command line (``cat other.txt | git commit -F -``) is unknowable
+    here and is left to the file reader, as an unreadable file already is.
     """
     named = _named_message_files(recordings, cwd)
-    if not named:
+    stdin = any(_reads_stdin_message(recording) for recording in recordings)
+    if not named and not stdin:
         return []
     without_bodies, heredocs = split_heredocs(normalise_line_continuations(command))
-    writers = [
-        piece.strip()
-        for piece in split_unquoted(without_bodies, COMMAND_SEPARATORS)
-        if _writes_any(piece, named, cwd)
-    ]
+    writers: list[str] = []
+    for statement in _statements(without_bodies):
+        if named and _writes_any(statement, named, cwd):
+            writers.append(statement.strip())
+        if stdin:
+            writers.extend(_stdin_producers(statement, recordings))
     for heredoc in heredocs:
         opener = heredoc.opener_line.strip()
         if any(opener in found or found in opener for found in writers):
