@@ -163,7 +163,7 @@ class TestCommandPosition:
             ("(cd /x); rm f.txt", ["/repo/f.txt"]),
             ("(true)&&rm f.txt", ["/repo/f.txt"]),
             ("git rm f.txt", ["/repo/f.txt"]),
-            ("git -C /x rm f.txt", ["/repo/f.txt"]),
+            ("git -C /x rm f.txt", ["/x/f.txt"]),
             ("find . -exec rm f.txt ;", ["/repo/f.txt"]),
             ("true && rm f.txt", ["/repo/f.txt"]),
             ("timeout 5 cp a.txt b.txt", ["/repo/b.txt"]),
@@ -184,6 +184,47 @@ class TestMoveSource:
 
     def test_copy_does_not_mutate_its_source(self) -> None:
         assert _mutated("cp a.txt b.txt") == ["/repo/b.txt"]
+
+
+class TestGitOperandsAreRelativeToItsDirectoryOptions:
+    """``git -C infra rm sub/prot.env`` removes ``infra/sub/prot.env``, not ``sub/prot.env``."""
+
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ("git -C infra rm sub/prot.env", ["/repo/infra/sub/prot.env"]),
+            ("git -C infra rm -f sub/prot.env", ["/repo/infra/sub/prot.env"]),
+            ("git -C infra rm -r -- sub/prot.env", ["/repo/infra/sub/prot.env"]),
+            ("git -C infra rm a.env b.env", ["/repo/infra/a.env", "/repo/infra/b.env"]),
+            ("git -C infra -C sub rm prot.env", ["/repo/infra/sub/prot.env"]),
+            ("git -C infra -C /abs rm prot.env", ["/abs/prot.env"]),
+            ("git -C /abs -C rel rm prot.env", ["/abs/rel/prot.env"]),
+            ("git -C infra rm /abs/prot.env", ["/abs/prot.env"]),
+            ("git -C .. rm prot.env", ["/repo/../prot.env"]),
+            ("git -c core.x=y -C infra rm prot.env", ["/repo/infra/prot.env"]),
+            ("git --work-tree=infra rm prot.env", ["/repo/infra/prot.env"]),
+            ("git --work-tree infra rm prot.env", ["/repo/infra/prot.env"]),
+            ("git -C a --work-tree=b rm prot.env", ["/repo/a/b/prot.env"]),
+            ("sudo git -C infra rm prot.env", ["/repo/infra/prot.env"]),
+            ("git -C infra mv a.env b.env", ["/repo/infra/b.env", "/repo/infra/a.env"]),
+            ("git -C infra mv -k a.env /abs/b.env", ["/abs/b.env", "/repo/infra/a.env"]),
+            ("git -C infra mv -k a.env b.env", ["/repo/infra/b.env", "/repo/infra/a.env"]),
+            ("git rm prot.env", ["/repo/prot.env"]),
+        ],
+    )
+    def test_every_directory_option_applies_in_order(
+        self, command: str, expected: list[str]
+    ) -> None:
+        assert _mutated(command) == expected
+
+    def test_a_redirect_is_relative_to_the_shell_not_to_git(self) -> None:
+        assert "/repo/out.txt" in _mutated("git -C infra rm prot.env > out.txt")
+
+    def test_a_plain_rm_after_a_git_command_is_not_rebased(self) -> None:
+        assert _mutated("git -C infra status; rm prot.env") == ["/repo/prot.env"]
+
+    def test_the_shell_expanded_home_operand_is_not_rebased(self) -> None:
+        assert _mutated("git -C infra rm ~/prot.env") == [str(Path("~/prot.env").expanduser())]
 
 
 class TestDirectories:
