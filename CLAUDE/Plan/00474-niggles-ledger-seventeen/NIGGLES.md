@@ -77,6 +77,72 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N479 to N483 — the v3.70.0 Claude Code changelog review (2.1.293 to 2.1.302): one adopt, four conflicts
+
+**Source**: RELEASING.md Step 1c for v3.70.0; the review is
+[subagent-reports/261017-claude-code-review-v3.70.0.md](subagent-reports/261017-claude-code-review-v3.70.0.md). Each
+row needs work or an audit; none was found to break a guard on this tree.
+
+- **N479 (adopt, 2.1.295)**: hooks gained `onFailure: "block"`, so a hook that cannot start, times out or exits
+  oddly blocks the action. The daemon registers its guard hooks without it, so a dead forwarder fails open. Emit and
+  verify it on the guard events (PreToolUse, PermissionRequest).
+- **N480 (conflict, 2.1.300)**: `updatedInput` from PreToolUse and PermissionRequest is now validated like Claude's
+  own input: unknown keys are dropped and rejected input denies. `core/hook_result.py` passes `updated_input` through
+  and `core/response_schemas.py` allows extra properties. Audit every handler that rewrites input.
+- **N481 (conflict, 2.1.299)**: UserPromptSubmit now runs before a skill or slash command expands, so its handlers
+  see `/skill args`, not the expanded prompt. Audit `standing_authorisations`, `usage_pause_gate`, `limit_rebrief`
+  and `idle_housekeeping_advisor`.
+- **N482 (conflict, 2.1.299)**: plan mode no longer runs a write that a PreToolUse hook allowed. Check that no
+  handler relies on an `allow` overriding plan mode.
+- **N483 (conflict, 2.1.299)**: idle compaction can now fire on a large conversation left idle, before its prompt
+  cache expires. Check that the PreCompact and PostCompact handlers, the compaction signal and the cache-gap and spend
+  reports expect it.
+
+**Status**: ⬜ Open, each.
+
+### N478 — `remote-docs refresh --all` fails about half the documents on one pass, with no error text
+
+**Source**: the coordinator, v3.70.0 release Step 1H. `bin/hooks-daemon remote-docs refresh --all` reported 24 of 48
+documents `failed` (exit 1), interleaved with successes on the same hosts, and printed no cause for any failure. Each
+then refreshed (`updated` or `unchanged`) when retried alone with `--path <file>`, one at a time with a short pause.
+
+**Likely cause, to verify**: back-to-back fetches meet a server-side rate limit or a reused connection that fails,
+and the per-document error is collapsed into a bare `failed`.
+
+**Expected**: the failure line names the cause (HTTP status or exception), and `--all` retries a transient failure
+with backoff before reporting it.
+
+**Status**: ⬜ Open.
+
+### N473 to N477 — the v3.70.0 code review (Step 10, run early) found five defects, all introduced this cycle
+
+**Source**: RELEASING.md Step 10 run before the gates, four Opus reviewers over `v3.69.0..9513c3d45` in `src/`
+([A](subagent-reports/261017-release-review-a-pre-tool-use-opus.md),
+[B](subagent-reports/261017-release-review-b-handlers-strategies-opus.md),
+[C](subagent-reports/261017-release-review-c-daemon-install-core-opus.md),
+[D](subagent-reports/261017-release-review-d-utils-opus.md)). A release carries no known defect, so each was fixed
+before the tag, red test first, in its own worktree. None shipped, so none has a release-note callout; callouts 028
+and 029 were reworded where the fix changed what they say.
+
+- **N473 (A-D1)**: `sensitive_content` stopped scanning a commit message or `gh` body FILE that an earlier segment of
+  the same command writes (`cat > m.txt <<'EOF' … EOF` then `git commit -F m.txt`), a fail-open on an unretractable
+  surface introduced by the N364 narrowing. Fix: the segments that write a path a recording command reads are kept.
+  [Report](subagent-reports/261017-rfix-sc-msgfile.md).
+- **N474 (B-D1)**: a Rust module with an unresolved import and a real compiler error was allowed unlinted, because
+  one crate-context code excused the whole run. Fix: excused only when every error is crate-context.
+  [Report](subagent-reports/261017-rfix-rust-mixed.md).
+- **N475 (B-D2)**: `comment_changelog` and `comment_size` missed a comment opened in an Edit fragment whose closer
+  is outside it, after the #75 fix made an unclosed opener read as code. Report:
+  `subagent-reports/261017-rfix-comment-fragment.md` (lands with the fix).
+- **N476 (C-D1)**: a zombie, or any kernel thread on a non-root host, counted as an unreadable process, so the
+  start-time stale-venv cleanup never removed anything. Fix: both are skipped.
+  [Report](subagent-reports/261017-rfix-venv-zombie.md).
+- **N477 (D-D1)**: a `for` loop over a quoted `"$f.local"` operand left a stray quote that hid every later word from
+  `write_protected_paths` (fail-open). Fix: the variable is substituted inside the word, quotes untouched.
+  [Report](subagent-reports/261017-rfix-loop-quote.md).
+
+**Status**: N473 ✅ (0e260c873), N474 ✅ (0987c8120), N476 ✅ (09919b3b3), N477 ✅ (9f11bf65f); N475 🔄 in progress.
+
 ### N472 — main CI failed on the Plan 00472 merge: nine failures on Python 3.11 and 3.13, and a 3.12 leg cancelled at 101 minutes
 
 **Source**: the coordinator, 2026-10-17, CI run 38980721427 on merge b1d6397f4 (last green main: 282f49765, run 38978729873).
