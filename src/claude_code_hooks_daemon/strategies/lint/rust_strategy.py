@@ -48,6 +48,11 @@ _CARGO_DEFAULT_EDITION = "2015"
 #: not found. Syntax errors stop rustc before name resolution, so they carry
 #: none of these and still deny.
 _CRATE_CONTEXT_ERROR = re.compile(r"error\[(?:E0432|E0433|E0463|E0583)\]")
+#: A rustc error finding, coded or not (``error[E0308]: ...`` / ``error: ...``).
+_ERROR_LINE = re.compile(r"error(?:\[E\d+\])?:")
+#: The trailer rustc and cargo add after the findings; they repeat the count,
+#: they are not findings themselves.
+_ERROR_SUMMARY_LINE = re.compile(r"error: (?:aborting due to|could not compile)\b")
 
 logger = logging.getLogger(__name__)
 
@@ -195,10 +200,17 @@ class RustLintStrategy:
         - the file is a module of a Cargo crate linted on its own, so rustc
           cannot resolve its imports (``_CRATE_CONTEXT_ERROR``). Resolving them
           would need the whole crate graph, which this check does not build.
+          Only when EVERY error finding is of that kind: one genuine error
+          beside an unresolved import still denies.
         """
-        return _RUSTUP_SHIM_NOT_INSTALLED_MARKER in output or bool(
-            _CRATE_CONTEXT_ERROR.search(output)
-        )
+        if _RUSTUP_SHIM_NOT_INSTALLED_MARKER in output:
+            return True
+        errors = [
+            line
+            for line in output.splitlines()
+            if _ERROR_LINE.match(line) and not _ERROR_SUMMARY_LINE.match(line)
+        ]
+        return bool(errors) and all(_CRATE_CONTEXT_ERROR.match(line) for line in errors)
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Rust lint strategy."""
