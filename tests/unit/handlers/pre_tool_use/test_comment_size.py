@@ -253,6 +253,21 @@ class TestUnterminatedOpenerIsNotAComment:
         assert handler.matches(hook_input) is True
         assert handler.handle(hook_input).decision == Decision.DENY
 
+    @pytest.mark.parametrize(
+        "extension", ["ts", "go", "rs", "java", "kt", "php", "cs", "swift", "dart"]
+    )
+    @pytest.mark.parametrize("literal", ['glob("dist/*.js")', 'accept = "*/*"'])
+    def test_edit_fragment_with_opener_inside_a_string_is_not_a_comment(
+        self, handler: CommentSizeHandler, extension: str, literal: str
+    ) -> None:
+        """A glob or media-range string must not read as a comment running to the end."""
+        code = "\n".join(f"call{n}();" for n in range(45))
+        hook_input = _make_edit_input(
+            f"/workspace/src/file.{extension}", f"{code}\n", f"x = {literal};\n{code}\n"
+        )
+        assert handler.matches(hook_input) is False
+        assert handler.handle(hook_input).decision == Decision.ALLOW
+
     def test_edit_fragment_unclosed_opener_that_shrinks_is_still_allowed(
         self, handler: CommentSizeHandler
     ) -> None:
