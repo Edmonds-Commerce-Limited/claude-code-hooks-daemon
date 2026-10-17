@@ -23,7 +23,9 @@ That rule holds for a whole file only. An ``Edit`` ``new_string`` is a
 fragment: it routinely opens a block, JSDoc or docstring comment whose closer
 stays in the untouched file. A caller scanning a fragment passes
 ``unterminated_is_comment=True`` and the unclosed opener runs to the end of
-the fragment as a comment.
+the fragment as a comment -- unless the opener sits inside a quoted literal on
+its line (``glob("dist/*.js")``, ``Accept: "*/*"``), which is a string, not a
+comment, in a fragment as in a whole file.
 """
 
 from dataclasses import dataclass, replace
@@ -232,7 +234,7 @@ def _consume_delimited(
         collected.append(lines[cursor])
         cursor += 1
 
-    if unterminated_is_comment:
+    if unterminated_is_comment and not _is_inside_string(first_line, hit.position):
         span = CommentSpan(
             text="\n".join(collected),
             start_line=start_index,
@@ -241,6 +243,42 @@ def _consume_delimited(
         )
         return span, line_total
     return None, start_index + 1
+
+
+def _is_inside_string(line: str, position: int) -> bool:
+    """Return True when ``line[position]`` sits inside a quoted literal on ``line``.
+
+    Walks ``line`` up to ``position`` tracking ``"``, `` ` `` and ``'`` literals
+    with backslash escapes. A ``'`` opens a literal only when a closing ``'``
+    follows on the line, so a Rust lifetime or a lone apostrophe does not turn
+    the rest of the line into a string. Literals spanning lines are not
+    tracked: this shares the extractor's line-based precision.
+    """
+    quote = ""
+    cursor = 0
+    while cursor < position:
+        char = line[cursor]
+        if quote:
+            if char == "\\":
+                cursor += 1
+            elif char == quote:
+                quote = ""
+        elif char in "\"`" or (char == "'" and _has_closing_quote(line, cursor + 1)):
+            quote = char
+        cursor += 1
+    return bool(quote)
+
+
+def _has_closing_quote(line: str, start: int) -> bool:
+    """Return True when an unescaped ``'`` appears in ``line[start:]``."""
+    cursor = start
+    while cursor < len(line):
+        if line[cursor] == "\\":
+            cursor += 1
+        elif line[cursor] == "'":
+            return True
+        cursor += 1
+    return False
 
 
 def _extend_comment_run(lines: list[str], start_index: int, syntax: CommentSyntax) -> int:
