@@ -11,6 +11,7 @@ makes checking often actually affordable.
 """
 
 import logging
+import time
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -21,6 +22,7 @@ from urllib.parse import urlparse
 from claude_code_hooks_daemon.remote_docs.capture import (
     DEFAULT_STALE_AFTER_DAYS,
     CaptureError,
+    CaptureResult,
     FetchFn,
     capture,
     derive_relative_path,
@@ -37,6 +39,9 @@ from claude_code_hooks_daemon.utils.fake_values import ValueSwapper
 logger = logging.getLogger(__name__)
 
 _MARKDOWN_GLOB = "*.md"
+
+#: Pause before the single retry of a failed refresh fetch.
+_RETRY_DELAY_SECONDS = 2.0
 
 #: A sensitive-content scanner: content in, a rejection reason or None out.
 ContentGuard = Callable[[str], str | None]
@@ -205,8 +210,15 @@ def refresh_document(
     fetch_method: str | None = None,
     content_guard: ContentGuard | None = None,
     value_swapper: ValueSwapper | None = None,
+    on_failure: Callable[[str], None] | None = None,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> RefreshOutcome:
     """Re-fetch one stored document from the URL recorded inside it.
+
+    A failed fetch is retried once after ``_RETRY_DELAY_SECONDS``; a failure
+    that survives the retry returns :attr:`RefreshOutcome.FAILED` and hands
+    its cause to ``on_failure``, so the caller can print why rather than only
+    that it failed.
 
     ``content_guard`` is the same scanner :func:`write_capture` takes, and for
     the same reason: this writes to disk from a CLI, bypassing the ``Write``
@@ -238,8 +250,8 @@ def refresh_document(
     previous = stored.provenance
     fetched_at = now or datetime.now(UTC)
 
-    try:
-        result = capture(
+    def fetch_once() -> CaptureResult:
+        return capture(
             previous.source_url,
             fetch_fn=fetch_fn,
             now=fetched_at,
@@ -249,8 +261,18 @@ def refresh_document(
             fetch_method=fetch_method,
             value_swapper=value_swapper,
         )
+
+    try:
+        try:
+            result = fetch_once()
+        except CaptureError as first:
+            logger.debug("refresh fetch failed for %s, retrying once: %s", path, first)
+            sleep(_RETRY_DELAY_SECONDS)
+            result = fetch_once()
     except CaptureError as exc:
         logger.debug("refresh fetch failed for %s: %s", path, exc)
+        if on_failure is not None:
+            on_failure(str(exc))
         return RefreshOutcome.FAILED
 
     # Scanned BEFORE the unchanged short-circuit is consulted, so the
@@ -268,6 +290,8 @@ def refresh_document(
         path.write_text(result.content, encoding="utf-8")
     except OSError as exc:
         logger.debug("refresh write failed for %s: %s", path, exc)
+        if on_failure is not None:
+            on_failure(f"could not write {path}: {exc}")
         return RefreshOutcome.FAILED
 
     return RefreshOutcome.UNCHANGED if unchanged else RefreshOutcome.UPDATED

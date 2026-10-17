@@ -286,6 +286,26 @@ class TestRefresh:
 
         assert cmd_remote_docs(_args(tmp_path, "refresh", path=target)) == 0
 
+    def test_a_failed_refresh_prints_its_cause(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`<path>: failed` alone sent the release pass hunting for the reason (N478)."""
+        from claude_code_hooks_daemon.remote_docs.capture import CaptureError
+
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p"))
+        capsys.readouterr()
+
+        def broken(url: str) -> bytes:
+            raise CaptureError("agent-browser failed: EOF while parsing")
+
+        with patch("claude_code_hooks_daemon.remote_docs.store.time.sleep"):
+            code = cmd_remote_docs(_args(tmp_path, "refresh", all_docs=True, fetch_fn=broken))
+
+        out = capsys.readouterr().out
+        assert code == 1
+        assert "p.md: failed" in out
+        assert "agent-browser failed: EOF while parsing" in out
+
     def test_refresh_without_a_target_is_an_error(self, tmp_path: Path) -> None:
         """Neither --all nor a path: refuse rather than guess."""
         assert cmd_remote_docs(_args(tmp_path, "refresh")) == 2

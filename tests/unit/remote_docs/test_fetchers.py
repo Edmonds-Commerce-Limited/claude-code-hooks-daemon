@@ -276,7 +276,7 @@ class TestAgentBrowserFetch:
 
         agent_browser_fetch("https://example.com", binary="agent-browser", runner=runner)
 
-        assert runner.calls[0] == [
+        assert runner.calls[0][:4] == [
             "agent-browser",
             "read",
             "https://example.com",
@@ -289,7 +289,28 @@ class TestAgentBrowserFetch:
 
         agent_browser_fetch("https://example.com", binary="agent-browser", runner=runner)
 
-        assert ["agent-browser", "close", "--all"] in runner.calls
+        read_call, close_call = runner.calls
+        assert read_call[-2] == "--session"
+        assert close_call == ["agent-browser", "close", "--session", read_call[-1]]
+
+    def test_it_never_closes_every_session(self) -> None:
+        """`close --all` ends the previous read's daemon while the next read is
+        already talking to it (7 of 15 back-to-back reads failed with an empty
+        response), and ends other agents' browsers too."""
+        runner = _Runner()
+
+        agent_browser_fetch("https://example.com", binary="agent-browser", runner=runner)
+
+        assert all("--all" not in call for call in runner.calls)
+
+    def test_each_read_gets_its_own_session(self) -> None:
+        runner = _Runner()
+
+        agent_browser_fetch("https://example.com", binary="agent-browser", runner=runner)
+        agent_browser_fetch("https://example.com", binary="agent-browser", runner=runner)
+
+        sessions = [call[-1] for call in runner.calls if "read" in call]
+        assert len(set(sessions)) == 2
 
     def test_the_session_is_closed_even_when_the_fetch_fails(self) -> None:
         runner = _Runner({"agent-browser": _Completed(stdout=_payload(success=False))})
@@ -297,7 +318,7 @@ class TestAgentBrowserFetch:
         with pytest.raises(CaptureError):
             agent_browser_fetch("https://example.com", binary="agent-browser", runner=runner)
 
-        assert ["agent-browser", "close", "--all"] in runner.calls
+        assert "close" in runner.calls[-1]
 
     def test_a_truncated_read_is_an_error_rather_than_a_partial_document(self) -> None:
         """Vendoring half a page silently is worse than failing to vendor it."""
