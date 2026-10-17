@@ -1,6 +1,7 @@
 # Plan 00532: docs optimisation skill
 
-**Status**: Not Started (decisions pending: see QUESTIONS.md)
+**Status**: Not Started (rulings recorded in RULINGS-fable.md; Fable rulings
+under the owner's delegation, not owner rulings)
 **GitHub Issue**: #123
 **Created**: 2026-10-17
 **Owner**: dev
@@ -72,65 +73,84 @@ surface, and they are inputs to Phase 1 whatever the rulings.
 
 ## Tasks
 
-Phases 2 to 4 take their shape from the QUESTIONS.md rulings; the tasks below
-assume the recommended options and are re-cut once the rulings land.
+Phases 1 to 5 are cut to the rulings in RULINGS-fable.md (Q1 C, Q2 B-only,
+Q3 A, Q4 B, Q5 D+E, Q6 C, Q7 A, Q8 D, Q9 A). The apply path, the
+`InstructionsLoaded` verification, the G6 variants group and a client-side
+staleness advisory are named follow-ups there, outside this plan.
 
 ### Phase 0: Rulings
 
-- [ ] ⬜ **Task 0.1**: Put QUESTIONS.md to the ruling agent; record each
-  ruling in QUESTIONS.md and re-cut Phases 2 to 4 to match.
+- [x] ✅ **Task 0.1**: Put QUESTIONS.md to the ruling agent; record each
+  ruling in QUESTIONS.md and RULINGS-fable.md and re-cut Phases 1 to 5 to
+  match.
 
 ### Phase 1: Loading-rules contract
 
-- [ ] ⬜ **Task 1.1**: Define the contract's schema and location (Q3, Q4): the
-  facts it pins, each with its source anchor in the vendored `memory.md`, the
-  minimum Claude Code version where the doc states one, and the audited
-  version in a `META.json` mirroring the hooks contract.
-- [ ] ⬜ **Task 1.2**: Populate it from
-  `remote-docs/code.claude.com/docs/en/memory.md` and `sub-agents.md`, and
-  write the refresh procedure as a guide alongside
-  `docs/guides/HOOK-CONTRACT-REFRESH.md`.
+- [ ] ⬜ **Task 1.1**: Define the contract's schema at
+  `contracts/claude-code-instructions/` (Q3 A): a `META.json` with the same
+  keys as the hooks contract's, and one facts file in which each fact carries
+  an id, the pinned statement, its anchor in the vendored `memory.md`
+  (heading slug plus quoted phrase), and the minimum Claude Code version
+  where the page states one; plus an `unmodelled` list naming the G6 inputs
+  (Q4).
+- [ ] ⬜ **Task 1.2**: Populate groups G1 to G5 (Q4 B) from
+  `remote-docs/code.claude.com/docs/en/memory.md`, and add the refresh
+  procedure as a section of `docs/guides/HOOK-CONTRACT-REFRESH.md` so both
+  contracts share one procedure.
 - [ ] ⬜ **Task 1.3**: Tests (written first) that load the contract and fail
-  when a fact lacks a source anchor or the audited version is missing.
+  when a fact lacks a source anchor, the audited version is missing, or the
+  `META.json` version disagrees with the hooks contract's and with
+  `claude-code-versions.yaml` (extend
+  `tests/integration/test_claude_code_version_record.py`).
 - [ ] ⬜ **Task 1.4**: Reconcile the ruleset and checks with the contract:
   R7a's frontmatter wording, `rules_file_shape`'s directory scope, and any
   other disagreement the population turns up, each as its own tested change.
 
 ### Phase 2: Re-audit trigger
 
-- [ ] ⬜ **Task 2.1**: Extend the staleness signal (Q5) so an installed Claude
-  Code newer than the contract's audited version produces one advisory per
-  version, in the daemon repository and in a client install where the
-  contract ships.
-- [ ] ⬜ **Task 2.2**: Record the contract's audited version in the release
-  step that writes `CLAUDE/development/claude-code-versions.yaml`, and extend
-  the `claude-code-changelog-reviewer` brief to flag instruction-loading
-  changes against the contract.
+- [ ] ⬜ **Task 2.1**: Extend `contract_staleness` (Q5 D+E) to read the
+  instructions contract's `META.json` and, in the daemon repository only,
+  produce one advisory per version when the installed Claude Code is newer
+  than its audited version; the client branch is unchanged (follow-up F4).
+- [ ] ⬜ **Task 2.2**: Extend release Step 1c and the
+  `claude-code-changelog-reviewer` brief to flag instruction-loading changes
+  against the contract, with the vendored page's hash in `META.json` as the
+  evidence the refresh records.
 
 ### Phase 3: Footprint measurement
 
-- [ ] ⬜ **Task 3.1**: A deterministic measurement (Q1 decides CLI verb or
-  bundled script) that resolves, per the contract, what loads at session start
-  (root and ancestor `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md`,
-  unscoped rules, imports to the pinned depth) versus on demand (nested
-  `CLAUDE.md`, `paths:`-scoped rules), with line and byte totals against the
-  contract's size guidance; JSON output for the skill.
-- [ ] ⬜ **Task 3.2**: Exclude the daemon-injected block and the daemon's
-  deployed artefacts from the proposable set while still counting their size.
+- [ ] ⬜ **Task 3.1**: `hooks-daemon docs-qa --footprint [--json]` (Q1 C), a
+  deterministic measurement that resolves, per the contract, what loads at
+  session start (root and ancestor `CLAUDE.md`, `.claude/CLAUDE.md`,
+  `CLAUDE.local.md`, unscoped rules found recursively, imports to the pinned
+  depth) versus on demand (nested `CLAUDE.md`, `paths:`-scoped rules), with
+  line and byte totals against the contract's size guidance, the contract's
+  audited version beside the installed Claude Code version, and the
+  contract's `unmodelled` list.
+- [ ] ⬜ **Task 3.2**: Count but never propose (Q9 A): the daemon-injected
+  `<hooksdaemon>` block, daemon-deployed artefacts, `CLAUDE.local.md`, and
+  user-scope files under `~/.claude/`.
 
 ### Phase 4: Restructure skill
 
-- [ ] ⬜ **Task 4.1**: Skill source under `src/claude_code_hooks_daemon/skills/`
-  (Q1, Q7), deployed by `install/skills.py`, written as a shim per R7b that
-  points at the core document and the contract rather than restating them.
-- [ ] ⬜ **Task 4.2**: The proposal procedure (Q2, Q6): classify each
+- [ ] ⬜ **Task 4.1**: Skill source at
+  `src/claude_code_hooks_daemon/skills/docs-optimise/` (Q1 C, Q7 A: deployed
+  to every client by `install/skills.py` with no config gate), written as a
+  shim per R7b that points at the core document and the contract rather than
+  restating them.
+- [ ] ⬜ **Task 4.2**: The proposal procedure (Q2 B, Q6 C): classify each
   always-loaded section as resident, path-scopable, nested-module, or
-  on-demand, and propose the move with its target home, honouring R7a's
-  create-the-home-first rule.
-- [ ] ⬜ **Task 4.3**: Hand-off to docs-qa (Q8) so a proposed or applied
-  restructure is re-verified by the existing checks and agent.
+  on-demand under the ruleset that applies (`documentation.enabled` true:
+  the daemon ruleset, R6/R7a/R7d; otherwise Claude Code's guidance), state
+  which applied, and write the proposed new files plus a unified patch under
+  `untracked/scratch/docs-optimise/<run-id>/`, never touching a tracked file
+  and never adding an allowlist entry.
+- [ ] ⬜ **Task 4.3**: The report's closing hand-offs (Q8 D): `/docs-qa`
+  scoped to the touched files for SSoT re-verification, and
+  `/doctor prompt-audit` for content audit, neither re-implemented.
 - [ ] ⬜ **Task 4.4**: Dogfood on this repository's root `CLAUDE.md` and on a
-  synthetic client fixture; record the before and after footprint.
+  synthetic client fixture run under both Q6 modes; record the before and
+  after footprint.
 
 ### Phase 5: Documentation and release
 
@@ -149,12 +169,14 @@ assume the recommended options and are re-cut once the rulings land.
   advisory; an equal or older one produces none (tested).
 - [ ] The R7a frontmatter wording and the `rules_file_shape` scope agree with
   the contract, with tests.
-- [ ] The measurement reports the session-start and on-demand footprint of
-  this repository and of a fixture client, and excludes the daemon-owned block
-  from proposals.
-- [ ] The skill deploys to a client `.claude/skills/` through
-  `install/skills.py`, and on the fixture produces the outcome Q2 rules
-  without touching a file the ruling does not permit.
+- [ ] `docs-qa --footprint` reports the session-start and on-demand footprint
+  of this repository and of a fixture client, prints the audited and
+  installed versions and the `unmodelled` list, and excludes the daemon-owned
+  block, `CLAUDE.local.md` and user-scope files from proposals.
+- [ ] The `docs-optimise` skill deploys to a client `.claude/skills/` through
+  `install/skills.py`, and on the fixture writes its proposal under
+  `untracked/scratch/docs-optimise/` with no tracked file modified (tested
+  by a clean `git status` after the run).
 - [ ] Release-bound consequences (new skill, new advisory, any new config key)
   are recorded in the pending-release holding area `CLAUDE/UPGRADES/UNRELEASED/`.
 - [ ] Targeted QA passes on the branch; the coordinator's full gate passes.

@@ -60,7 +60,8 @@ measurement (code, tested) and judgement (skill) is the pattern Plan 00284
 already proved, and a separate skill keeps `docs-qa`'s read-only contract
 intact (see Q2 and Q8).
 
-**Ruling:**
+**Ruling:** C (Fable, see RULINGS-fable.md): `hooks-daemon docs-qa --footprint`
+plus a new `docs-optimise` skill.
 
 ## Q2: How far it goes on a client's files
 
@@ -87,7 +88,8 @@ skill to apply a proposal it has shown). This matches `/doctor prompt-audit`'s
 guards (clean tree, per-move commits, protected daemon-owned spans) make the
 apply path safe to offer.
 
-**Ruling:**
+**Ruling:** B only in the first version (Fable, see RULINGS-fable.md); C is
+follow-up Task F1 and needs owner confirmation.
 
 ## Q3: What "kept in step with Claude Code" means concretely
 
@@ -115,7 +117,8 @@ Q5 something to compare against. D is a cheap follow-up that would let the
 daemon confirm the contract against real loads, but it should not be the
 source.
 
-**Ruling:**
+**Ruling:** A (Fable, see RULINGS-fable.md) at
+`contracts/claude-code-instructions/`; D is follow-up Task F2.
 
 ## Q4: Which facts the contract pins
 
@@ -152,7 +155,8 @@ safety instruction into a nested file means it can vanish after compaction
 until a file there is touched), while G6 matters to few clients and can be
 added when one asks.
 
-**Ruling:**
+**Ruling:** B (Fable, see RULINGS-fable.md), plus an explicit `unmodelled`
+list of the G6 inputs printed in the report; G6 is follow-up Task F3.
 
 ## Q5: How re-audit is triggered
 
@@ -181,7 +185,8 @@ refresh it. Client-side, the skill itself should print the contract's audited
 version and the installed Claude Code version in its report so a mismatch is
 visible at the moment it matters, without a new SessionStart advisory.
 
-**Ruling:**
+**Ruling:** D and E (Fable, see RULINGS-fable.md); the skill report prints
+both versions; F is follow-up Task F4.
 
 ## Q6: Whose ruleset governs the restructure
 
@@ -206,7 +211,8 @@ should not have the daemon's stricter house style imposed through a
 restructure tool. It also gives a clean answer to the R7a tension the
 contract surfaces (Phase 1.4).
 
-**Ruling:**
+**Ruling:** C (Fable, see RULINGS-fable.md); no proposal adds an allowlist
+entry in either mode.
 
 ## Q7: Client opt-in and default
 
@@ -222,7 +228,8 @@ contract surfaces (Phase 1.4).
 proposal-only skill costs a client nothing, while the apply path is the part
 that deserves an explicit opt-in.
 
-**Ruling:**
+**Ruling:** A (Fable, see RULINGS-fable.md), following from Q2 B; the apply
+opt-in key belongs to Task F1.
 
 ## Q8: Relationship to docs-qa and to `/doctor`
 
@@ -243,7 +250,7 @@ that deserves an explicit opt-in.
 staleness detection that docs-qa and `/doctor prompt-audit` already cover; it
 should name them as the follow-up steps and own only placement and footprint.
 
-**Ruling:**
+**Ruling:** D (Fable, see RULINGS-fable.md).
 
 ## Q9: Scope of files the skill may propose moving
 
@@ -257,4 +264,5 @@ should name them as the follow-up steps and own only placement and footprint.
 **Recommendation: A**, with `CLAUDE.local.md` and user-scope files counted in
 the footprint (they do load) but never proposed for edits.
 
-**Ruling:**
+**Ruling:** A (Fable, see RULINGS-fable.md); `.claude/rules/` is scanned
+recursively per the contract.
