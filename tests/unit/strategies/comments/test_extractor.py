@@ -228,6 +228,11 @@ class TestUnterminatedOpeners:
             ("fn f<'a>(x: &'a str) { /* opens after lifetimes\n more\n", 0),
             ('let s = "done"; /* opens after a closed string\n more\n', 0),
             ("let c = '\"'; /* opens after a quote char\n more\n", 0),
+            ("fn f(x: &'a str) { /* Prior v1.2: it's\n more\n", 0),
+            ("impl<'a> X { /* don't\n more\n", 0),
+            ('const r = /"/; /* Prior v1.2: a\n more\n', 0),
+            ("x = it's; /* can't\n more\n", 0),
+            ("fn f<'a, 'b>(x: &'a T) { /* it's\n more\n", 0),
         ],
     )
     def test_fragment_mode_still_reads_unterminated_opener_outside_a_string(
