@@ -229,3 +229,16 @@ class TestTunedCopies:
         spec = spec_by_name(FACT_CHECKER_AGENT_NAME)
         self._tuned(tmp_path, spec.version)
         assert _handle(tmp_path) == []
+
+    def test_the_header_does_not_call_a_tuned_copy_daemon_owned(self, tmp_path: Path) -> None:
+        self._tuned(tmp_path, "0.9.0")
+        header = _handle(tmp_path)[0]
+        assert "daemon-owned" not in header
+
+    def test_a_directory_in_the_agents_folder_does_not_lose_the_report(
+        self, tmp_path: Path
+    ) -> None:
+        self._tuned(tmp_path, "0.9.0")
+        (tmp_path.joinpath(*AGENTS_DIR_PARTS) / "folder.md").mkdir()
+        (tmp_path.joinpath(*AGENTS_DIR_PARTS) / "dangling.md").symlink_to(tmp_path / "nowhere")
+        assert ".claude/agents/my-fact-checker.md" in "\n".join(_handle(tmp_path))

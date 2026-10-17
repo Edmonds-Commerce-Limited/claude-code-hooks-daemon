@@ -115,12 +115,13 @@ class DeployedArtefactDriftHandler(SessionStartHandlerBase):
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
         context = [
-            "⚠️  DEPLOYED ARTEFACT DRIFT: a daemon-owned file no longer matches "
-            "the template it was deployed from.",
+            "⚠️  DEPLOYED ARTEFACT DRIFT: a deployed file no longer matches "
+            "the template it came from.",
             "",
-            "These files are refreshed by install and upgrade. Until then the "
+            "Daemon-owned files are refreshed by install and upgrade; until then the "
             "deployed copy is what your tools actually read, so it is worth "
-            "knowing it is not the shipped one.",
+            "knowing it is not the shipped one. A tuned copy of an agent is yours "
+            "and is never touched: it is listed so you can port what helps.",
             "",
         ]
         context.extend(f"  ⚠️  {entry}" for entry in drifted)

@@ -547,6 +547,22 @@ class TestCheckerAgentResolution:
     def test_an_unsafe_name_falls_back(self, tmp_path: Path, name: str) -> None:
         assert resolve_checker_agent(name, tmp_path) == FACT_CHECKER_AGENT
 
+    @pytest.mark.parametrize("value", [123, ["a"], {"a": 1}, True, 1.5])
+    def test_a_non_string_option_falls_back_instead_of_raising(
+        self, tmp_path: Path, value: object
+    ) -> None:
+        assert resolve_checker_agent(value, tmp_path) == FACT_CHECKER_AGENT
+
+    def test_a_bad_option_warns_once_not_on_every_event(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING):
+            for _ in range(3):
+                resolve_checker_agent("warn-once-absent", tmp_path)
+                resolve_checker_agent(["warn-once-list"], tmp_path)
+        assert caplog.text.count("warn-once-absent") == 1
+        assert caplog.text.count("warn-once-list") == 1
+
     def test_the_instruction_names_the_given_agent(self, tmp_path: Path) -> None:
         root = _plan(tmp_path, {"PLAN.md": "x\n"})
         pending = PendingFactCheck(
