@@ -77,6 +77,39 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 dismissed, folded or no change. The Plan 00483 triage table there (23 still open)
 is the count at that date.
 
+### N484 to N492 — the v3.70.0 code review's second pass: four defects, five follow-ups
+
+**Source**: three second-pass Opus reviewers over the code the first pass ran out of budget for
+([E, utils](subagent-reports/261017-release-review-e-utils-pass2-opus.md),
+[F, cli/core/config](subagent-reports/261017-release-review-f-cli-core-config-pass2-opus.md),
+[G, install and the rest](subagent-reports/261017-release-review-g-install-rest-pass2-opus.md)). Reviewer F's D3 is
+N478's cause (a failed fetch logged at DEBUG only, no retry), fixed with N485.
+
+Defects, fixed before the tag:
+
+- **N484 (F-D1)**: `core/utils.py` collected the files `git rm` / `git mv` act on without applying `git -C`, so
+  `git -C infra rm sub/prot.env` passed `write_protected_paths` (fail-open in a new handler).
+- **N485 (F-D2)**: `config/yaml_loading.py` routed only bracket-nested documents to the pure-Python parser; deep
+  block nesting (`- - - …`) still reached libyaml and segfaulted the process, a regression of the N472 fix.
+- **N486 (E-D1)**: `plan_fact_check.deliver_pending` re-offered in the same event a record its pending batch had
+  just written, so the feed emitted the instruction twice and hit its offer cap early.
+- **N487 (E-D2)**: `stale_litter` spent the shared deadline on any incomplete scratch walk, so the gone-branch-refs
+  report claimed "SCAN INCOMPLETE" above a complete answer.
+
+Follow-ups, not defects in the reviewers' judgement:
+
+- **N488 (G-1)**: `install/effective_handlers._replace_file` rewrites a read-only (0444) config through a rename.
+- **N489 (G-2)**: `mkplan.bash` `scan_plan_tree` and `plan_numbering.highest_plan_number` loop forever on a symlink
+  loop under the plan directory.
+- **N490 (G-3)**: a malformed `batch_defences` in `qa-rules.json` makes `defences` print a traceback.
+- **N491 (G-4)**: `unlisted_fake_value` allows the commit when git cannot read the staged registry, or when the
+  project root is a subdirectory of the repository; decide whether those should block.
+- **N492 (E, non-defects)**: a non-UTF-8 agent definition raises out of the dispatch-tier recorder (one tier row lost),
+  and a corrupted operator-signal file with a list `kind` logs an ERROR on every tool call.
+
+**Status**: N484 to N487 🔄 in progress (worktrees `worktree-rfix-gitc-protected`, `-yaml-remote-docs`,
+`-feed-litter`); N488 to N492 ⬜ open.
+
 ### N479 to N483 — the v3.70.0 Claude Code changelog review (2.1.293 to 2.1.302): one adopt, four conflicts
 
 **Source**: RELEASING.md Step 1c for v3.70.0; the review is

@@ -38,10 +38,10 @@ not-a-defect with the reasoning kept.
 What stands between `main` and the next release is in [RELEASE-BURNDOWN-3-70.md](RELEASE-BURNDOWN-3-70.md).
 
 Full write-ups are in [NIGGLES.md](NIGGLES.md). The one-line-per-niggle status
-table (188 rows) is in [STATUS-INDEX.md](STATUS-INDEX.md).
+table (197 rows) is in [STATUS-INDEX.md](STATUS-INDEX.md).
 Counted by the status column's emoji:
 
-- 17 rows are open (⬜): N479 to N483, the five Claude Code 2.1.293-2.1.302 changelog rows found by the v3.70.0 review; N478, `remote-docs refresh --all` failing half its documents silently; N467, the secret-file-read guard still scanning a large Write at about 1.7 ms per KB; N461, `plan_number_helper` denying a read of one existing plan as a next-number scan; N454, the protected-path guard denying a read-only grep loop; N455, CI-load failures (a Swift lint timeout scored as an allow, a timing bound); N424, the LSP guard denying a grep over piped output; N427, the provision sync tests leaving stub daemon processes behind; N430, the conflict-marker gate denying a commit into a repository the same command creates; N435, the report-path verifier resolving a worktree agent's relative path against the main checkout; N443, upstream's `agent_id` now also identifying in-process teammates; N447, the conflict-marker gate grepping excluded paths before filtering (#99); and N451, a stop-hook prose pattern arming the human-blocked marker on a plural. N53 of archived ledger 00466 is 🟡: batch AJ reproduced
+- 22 rows are open (⬜): N488 to N492, the v3.70.0 review's second-pass follow-ups; N479 to N483, the five Claude Code 2.1.293-2.1.302 changelog rows found by the v3.70.0 review; N478, `remote-docs refresh --all` failing half its documents silently; N467, the secret-file-read guard still scanning a large Write at about 1.7 ms per KB; N461, `plan_number_helper` denying a read of one existing plan as a next-number scan; N454, the protected-path guard denying a read-only grep loop; N455, CI-load failures (a Swift lint timeout scored as an allow, a timing bound); N424, the LSP guard denying a grep over piped output; N427, the provision sync tests leaving stub daemon processes behind; N430, the conflict-marker gate denying a commit into a repository the same command creates; N435, the report-path verifier resolving a worktree agent's relative path against the main checkout; N443, upstream's `agent_id` now also identifying in-process teammates; N447, the conflict-marker gate grepping excluded paths before filtering (#99); and N451, a stop-hook prose pattern arming the human-blocked marker on a plural. N53 of archived ledger 00466 is 🟡: batch AJ reproduced
   the mechanism of an exit 127 and extended the diagnostic, but the live cause awaits a recurrence. The other 41 of the
   "42 still open in 00466" were fixed on main (39), fixed by batch AI (N33) or graduated to Plan 00485 (N96); see
   [the 00466 evidence](../Completed/00466-niggles-ledger-sixteen/STATUS-2026-10.md).
@@ -52,12 +52,12 @@ Counted by the status column's emoji:
   - 12 of the 15 went into progress: batches AL, AM and AN, the supervisor items, or a GitHub issue (rows since fixed are counted below);
   - 1 stays part-fixed (🟡, N376), with its remainder tracked in #107, folded into Plan 00476 (Design 6);
   - the new work the owner asked for is filed as GitHub Issues #106 to #110. #104, the usage-aware sub-agent cutoff, came from a separate owner request the same day, not from this sheet.
-- 152 rows carry ✅ (148 of the 184 N rows, plus 4 "carried from dropped branch" summary rows) (fixed, dismissed, remedied, guarded or closed); 6 of them also carry a 🚫 limit, and
+- 152 rows carry ✅ (148 of the 193 N rows, plus 4 "carried from dropped branch" summary rows) (fixed, dismissed, remedied, guarded or closed); 6 of them also carry a 🚫 limit, and
   2 also carry 🔄: N280 (guarded by batch AN) for its review follow-ups, and N425 (fixed) until CI confirms
   it. N428 (the Python 3.11 CI hang) is confirmed by main run 38204671323.
-- 7 rows record a deliberate limit (🚫); 20 are in progress or graduated (16 🔄, 3 🟡, 1 ↩️), N475 (the
-  v3.70.0 review's comment-fragment fix), N280, N425 (main CI red after batch AL), N431 (the CI fallback's daemon idles out) and N433 (a quiet journal
-  fails CI) among the 16.
+- 7 rows record a deliberate limit (🚫); 24 are in progress or graduated (20 🔄, 3 🟡, 1 ↩️), N475 and N484 to N487 (the
+  v3.70.0 review's fixes still landing), N280, N425 (main CI red after batch AL), N431 (the CI fallback's daemon idles out) and N433 (a quiet journal
+  fails CI) among the 20.
 
 ## Tasks
 
