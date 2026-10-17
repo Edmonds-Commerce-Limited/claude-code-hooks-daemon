@@ -33,6 +33,14 @@ def _venv(root: Path, name: str, cfg: str | None = None) -> Path:
     return venv
 
 
+_PF_KTHREAD = 0x00200000
+
+
+def _stat(state: str, *, comm: str = "x", flags: int = 0) -> str:
+    """A ``/proc/<pid>/stat`` line: pid (comm) state ppid pgrp session tty tpgid flags ..."""
+    return f"1 ({comm}) {state} 0 0 0 0 -1 {flags} 0 0 0 0\n"
+
+
 def _fake_process(
     proc_root: Path,
     pid: int,
@@ -40,9 +48,12 @@ def _fake_process(
     exe: Path | None = None,
     cwd: Path | None = None,
     argv: list[str] | None = None,
+    stat: str | None = None,
 ) -> None:
     proc = proc_root / str(pid)
     proc.mkdir(parents=True)
+    if stat is not None:
+        (proc / "stat").write_text(stat)
     if exe is not None:
         (proc / "exe").symlink_to(exe)
     if cwd is not None:
@@ -110,6 +121,47 @@ class TestProcessesUsingVenvs:
 
         assert scan.users[venv] == []
         assert scan.unreadable == 1
+
+    def test_a_zombie_is_skipped_not_counted_unreadable(self, tmp_path: Path) -> None:
+        venv = _venv(tmp_path, "venv-a-py311-aaaaaaaa")
+        proc_root = tmp_path / "proc"
+        _fake_process(proc_root, 31, stat=_stat("Z", flags=0x40004C))
+
+        scan = processes_using_venvs([venv], proc_root)
+
+        assert scan.unreadable == 0
+
+    def test_a_kernel_thread_is_skipped_not_counted_unreadable(self, tmp_path: Path) -> None:
+        venv = _venv(tmp_path, "venv-a-py311-aaaaaaaa")
+        proc_root = tmp_path / "proc"
+        _fake_process(proc_root, 2, stat=_stat("S", comm="kthreadd", flags=_PF_KTHREAD | 0x4))
+
+        assert processes_using_venvs([venv], proc_root).unreadable == 0
+
+    def test_a_comm_with_spaces_and_parens_does_not_hide_a_zombie(self, tmp_path: Path) -> None:
+        venv = _venv(tmp_path, "venv-a-py311-aaaaaaaa")
+        proc_root = tmp_path / "proc"
+        _fake_process(proc_root, 32, stat=_stat("Z", comm="a b) c (d", flags=0x40004C))
+
+        assert processes_using_venvs([venv], proc_root).unreadable == 0
+
+    def test_a_live_user_process_with_no_readable_link_is_still_counted(
+        self, tmp_path: Path
+    ) -> None:
+        # Another user's process: stat is readable and says it is an ordinary
+        # sleeping process, but exe, cwd and cmdline are refused.
+        venv = _venv(tmp_path, "venv-a-py311-aaaaaaaa")
+        proc_root = tmp_path / "proc"
+        _fake_process(proc_root, 33, stat=_stat("S", flags=0x400000))
+
+        assert processes_using_venvs([venv], proc_root).unreadable == 1
+
+    def test_an_unparseable_stat_keeps_the_process_counted(self, tmp_path: Path) -> None:
+        venv = _venv(tmp_path, "venv-a-py311-aaaaaaaa")
+        proc_root = tmp_path / "proc"
+        _fake_process(proc_root, 34, stat="garbage")
+
+        assert processes_using_venvs([venv], proc_root).unreadable == 1
 
     def test_a_sibling_venv_with_a_common_prefix_is_not_matched(self, tmp_path: Path) -> None:
         venv = _venv(tmp_path, "venv-a")
