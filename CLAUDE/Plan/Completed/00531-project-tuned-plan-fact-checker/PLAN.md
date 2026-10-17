@@ -1,6 +1,6 @@
 # Plan 00531: project tuned plan fact checker
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-10-17
 **Owner**: dev
 **Priority**: High
@@ -40,24 +40,30 @@ classified customised and never touched (`install/agent_assets.py`). Three gaps 
 
 ### Phase 1: Design and build
 
-- [ ] ⬜ **Task 1.1**: Read `plan_fact_check_feed`, `utils/plan_fact_check.py`, `install/agent_assets.py`, the
+- [x] ✅ **Task 1.1** (`37dfd0b11`): Read `plan_fact_check_feed`, `utils/plan_fact_check.py`, `install/agent_assets.py`, the
   agent template and `deployed_artefact_drift`, and record the design in this plan: how a tuned agent is named
   and configured, how the derived-from version is recorded, and which existing handler reports a newer generic
   version.
-- [ ] ⬜ **Task 1.2**: The feed names the configured tuned agent when set and present, the generic one otherwise
+  Design: the option `plan_fact_check_feed.options.tuned_agent` names a project-owned agent under
+  `.claude/agents/`; the feed resolves it per event and falls back to the generic agent with a
+  warning when it is unset or not deployed. A tuned copy replaces its `hooks-daemon-agent-version`
+  marker with `hooks-daemon-derived-from: <shipped agent> <version>`; `agent_assets` compares that
+  with the ledger and `deployed_artefact_drift` (already the session-start reporter for deployed
+  agents) reports a stale copy. Detail in the report.
+- [x] ✅ **Task 1.2** (`37dfd0b11`): The feed names the configured tuned agent when set and present, the generic one otherwise
   (TDD).
-- [ ] ⬜ **Task 1.3**: The tuning instruction: the template's header comment and the place a client reads it say
+- [x] ✅ **Task 1.3** (`37dfd0b11`): The tuning instruction: the template's header comment and the place a client reads it say
   how to tune and how to record the derived-from version (TDD where behaviour changes).
-- [ ] ⬜ **Task 1.4**: A newer generic version than a tuned copy's derived-from version is reported to the project
+- [x] ✅ **Task 1.4** (`37dfd0b11`): A newer generic version than a tuned copy's derived-from version is reported to the project
   (TDD).
-- [ ] ⬜ **Task 1.5**: Release-bound consequences recorded in `CLAUDE/UPGRADES/UNRELEASED/` (a release-notes
+- [x] ✅ **Task 1.5** (`37dfd0b11`): Release-bound consequences recorded in `CLAUDE/UPGRADES/UNRELEASED/` (a release-notes
   callout, and a post-upgrade task telling client projects to tune the agent).
 
 ## Success Criteria
 
-- [ ] With a tuned agent configured, the feed's instruction names it; without one, it names the generic agent.
-- [ ] A client project is told how to tune the agent, and is told when the generic template moves past its copy.
-- [ ] The release-bound consequences are in the pending-release holding area (`CLAUDE/UPGRADES/UNRELEASED/`).
+- [x] With a tuned agent configured, the feed's instruction names it; without one, it names the generic agent.
+- [x] A client project is told how to tune the agent, and is told when the generic template moves past its copy.
+- [x] The release-bound consequences are in the pending-release holding area (`CLAUDE/UPGRADES/UNRELEASED/`).
 
 ## Delivery & Milestones
 
@@ -66,3 +72,4 @@ classified customised and never touched (`install/agent_assets.py`). Three gaps 
      JOURNAL/00531-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Opened at the owner's request during the v3.70.0 release.
+- Built and delivered in `37dfd0b11`; release note 081 and post-upgrade task 03 are in the holding area.

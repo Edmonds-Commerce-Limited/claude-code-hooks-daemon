@@ -54,7 +54,8 @@ AGENT_VERSION_MARKER_PREFIX: Final[str] = "<!-- hooks-daemon-agent-version:"
 #: version it can honestly claim is the one it was derived from.
 DERIVED_FROM_MARKER_PREFIX: Final[str] = "<!-- hooks-daemon-derived-from:"
 _DERIVED_FROM_PATTERN: Final[re.Pattern[str]] = re.compile(
-    re.escape(DERIVED_FROM_MARKER_PREFIX) + r"\s+(?P<origin>[\w-]+)\s+(?P<version>\d+(?:\.\d+)*)\s*-->"
+    re.escape(DERIVED_FROM_MARKER_PREFIX)
+    + r"\s+(?P<origin>[\w-]+)\s+(?P<version>\d+(?:\.\d+)*)\s*-->"
 )
 
 #: Owner rw, group/other r — a definition that is read, never executed.

@@ -537,9 +537,7 @@ class TestDerivedAgents:
 
     def test_a_malformed_version_is_ignored(self, tmp_path: Path) -> None:
         spec = _spec(FACT_CHECKER_AGENT_NAME)
-        self._tuned(
-            tmp_path, "x", f"<!-- hooks-daemon-derived-from: {spec.name} not-a-version -->"
-        )
+        self._tuned(tmp_path, "x", f"<!-- hooks-daemon-derived-from: {spec.name} not-a-version -->")
         assert agent_assets.stale_derived_agents(tmp_path) == []
 
     def test_a_project_with_no_agents_directory_has_none(self, tmp_path: Path) -> None:

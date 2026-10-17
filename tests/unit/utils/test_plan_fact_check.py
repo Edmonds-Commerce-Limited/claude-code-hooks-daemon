@@ -15,8 +15,8 @@ import pytest
 
 from claude_code_hooks_daemon.utils.plan_fact_check import (
     CORRECTION_MAX_CHANGED_LINES,
-    FACT_CHECKER_AGENT,
     CORRECTION_WINDOW_SECONDS,
+    FACT_CHECKER_AGENT,
     MAX_OFFERS,
     REOFFER_AFTER_SECONDS,
     PendingFactCheck,
@@ -555,9 +555,7 @@ class TestTuningAdvice:
         process_quiet_plan(root, FOLDER, state, trigger_count=1, now=1.0)
         return state
 
-    def test_the_generic_checker_instruction_carries_the_advice_once(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_generic_checker_instruction_carries_the_advice_once(self, tmp_path: Path) -> None:
         state = self._owed(tmp_path)
         first = "\n".join(deliver_pending(state, now=2.0))
         assert "tuned_agent" in first

@@ -210,9 +210,7 @@ class TestTunedCopies:
         spec = spec_by_name(FACT_CHECKER_AGENT_NAME)
         target = root.joinpath(*AGENTS_DIR_PARTS) / "my-fact-checker.md"
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(
-            f"<!-- hooks-daemon-derived-from: {spec.name} {version} -->\n# tuned\n"
-        )
+        target.write_text(f"<!-- hooks-daemon-derived-from: {spec.name} {version} -->\n# tuned\n")
         return target
 
     def test_an_older_derived_version_is_reported_with_how_to_catch_up(
