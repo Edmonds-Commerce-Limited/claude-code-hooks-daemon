@@ -101,6 +101,8 @@ _COMMAND_LONG_FLAG_GLUED = "--command="
 #: for a wildcard, which a protected-path check reads as "anything here".
 MAX_LOOP_WORDS: int = 32
 _WILDCARD_WORD = "*"
+_GLOB_CHARS = frozenset("*?[")
+_DOUBLE_QUOTE_SPECIALS = frozenset('\\"$`')
 _LOOP_HEADER: re.Pattern[str] = re.compile(
     r"^\s*for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in(?:\s(.*))?$", re.DOTALL
 )
@@ -410,13 +412,63 @@ def _loop_words(listing: str) -> list[str]:
     return [*words, _WILDCARD_WORD] if unreadable else words
 
 
+def _in_double_quotes(word: str) -> str:
+    """The value of the shell-spelled ``word`` written to sit inside a double-quoted
+    string: the characters the shell would expand are escaped, and a glob character
+    steps out of the quotes so it still stands for a pattern."""
+    pieces: list[str] = []
+    for char in unquote(word):
+        if char in _DOUBLE_QUOTE_SPECIALS:
+            pieces.append("\\" + char)
+        elif char in _GLOB_CHARS:
+            pieces.append(f'"{char}"')
+        else:
+            pieces.append(char)
+    return "".join(pieces)
+
+
+def _spelled(part: str, word: str, reference: re.Pattern[str]) -> str:
+    """``part`` with each ``$VAR`` / ``${VAR}`` it expands replaced by ``word``
+    (a word as the loop header spells it, quotes and all).
+
+    Only the reference is replaced; the quote characters around it are kept so
+    they stay balanced. A reference inside single quotes is literal text and is
+    left alone. A double-quoted word that is only the reference (``"$f"``) loses
+    its quotes, since the shell splits and globs the expansion's result.
+    """
+    out: list[str] = []
+    copied_to = 0
+    quote = ""
+    quote_start = -1
+    index = 0
+    while index < len(part):
+        char = part[index]
+        if char == "\\" and quote != "'":
+            index += 2
+        elif quote == char:
+            quote = ""
+            index += 1
+        elif not quote and char in "'\"":
+            quote, quote_start = char, index
+            index += 1
+        elif char == "$" and quote != "'" and (match := reference.match(part, index)):
+            end = match.end()
+            if quote == '"' and quote_start == index - 1 and part[end : end + 1] == '"':
+                out.extend((part[copied_to:quote_start], word))
+                copied_to, quote, index = end + 1, "", end + 1
+                continue
+            replacement = _in_double_quotes(word) if quote else word
+            out.extend((part[copied_to:index], replacement))
+            copied_to = index = end
+        else:
+            index += 1
+    out.append(part[copied_to:])
+    return "".join(out)
+
+
 def _unrolled(variable: str, words: list[str], body: list[str]) -> list[str]:
-    reference = re.compile(rf'"?\$(?:\{{{variable}\}}|{variable}(?![A-Za-z0-9_]))"?')
-
-    def spelled(part: str, word: str) -> str:
-        return reference.sub(lambda _match: word, part)
-
-    return [spelled(part, word) for word in words for part in body]
+    reference = re.compile(rf"\$(?:\{{{variable}\}}|{variable}(?![A-Za-z0-9_]))")
+    return [_spelled(part, word, reference) for word in words for part in body]
 
 
 def unroll_for_loops(command: str) -> str:
