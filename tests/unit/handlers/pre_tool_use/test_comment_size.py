@@ -240,19 +240,34 @@ class TestUnterminatedOpenerIsNotAComment:
         assert default_handler.matches(hook_input) is True
         assert default_handler.handle(hook_input).decision == Decision.DENY
 
-    def test_edit_fragment_with_opener_and_no_closer_is_not_counted(
+    def test_edit_fragment_with_opener_and_no_closer_is_counted_to_the_end(
         self, handler: CommentSizeHandler
     ) -> None:
-        """Edit judges new_string alone; an opener whose closer lies outside it is no span.
+        """An Edit new_string is a fragment: its closer may lie in the untouched file.
 
-        Kept deliberately. Lines inside a comment (no opener) are already invisible to
-        a fragment, so the guard only ever sees a comment that opens AND closes inside
-        the edit; an edit that inserts a whole comment carries both delimiters. The
-        reverse choice (count to the end of the fragment) is what let a glob in a
-        string deny a comment-free edit.
+        An Edit that opens a large block comment whose `*/` stays outside the edit
+        must still be measured, so the opener runs to the end of the fragment.
         """
         new = "/*\n" + "\n".join(f" * line {n}" for n in range(10)) + "\n"
         hook_input = _make_edit_input("/workspace/src/lib.rs", "fn a() {}\n", new)
+        assert handler.matches(hook_input) is True
+        assert handler.handle(hook_input).decision == Decision.DENY
+
+    def test_edit_fragment_unclosed_opener_that_shrinks_is_still_allowed(
+        self, handler: CommentSizeHandler
+    ) -> None:
+        """Old and new are both read as fragments, so shrinking stays silent."""
+        old = "/*\n" + "\n".join(f" * line {n}" for n in range(12)) + "\n"
+        new = "/*\n" + "\n".join(f" * line {n}" for n in range(6)) + "\n"
+        hook_input = _make_edit_input("/workspace/src/lib.rs", old, new)
+        assert handler.handle(hook_input).decision == Decision.ALLOW
+
+    def test_write_with_unclosed_opener_is_still_not_a_comment(
+        self, handler: CommentSizeHandler
+    ) -> None:
+        """Whole-file content keeps the #75 behaviour: no closer means a string."""
+        content = "/*\n" + "\n".join(f" * line {n}" for n in range(10)) + "\n"
+        hook_input = _make_write_input("/workspace/src/lib.rs", content)
         assert handler.matches(hook_input) is False
         assert handler.handle(hook_input).decision == Decision.ALLOW
 

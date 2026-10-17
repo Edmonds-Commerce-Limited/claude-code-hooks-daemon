@@ -291,11 +291,17 @@ class CommentChangelogHandler(PreToolUseHandlerBase):
         )
 
     def _find_violations(
-        self, content: str, strategy: CommentStrategy
+        self, content: str, strategy: CommentStrategy, *, is_fragment: bool
     ) -> list[tuple[CommentSpan, list[str], list[str]]]:
-        """Return (span, block_reasons, advisory_reasons) for every flagged span."""
+        """Return (span, block_reasons, advisory_reasons) for every flagged span.
+
+        ``is_fragment`` is True for an Edit ``new_string``: its block opener may
+        close in the untouched file, so it is read as a comment to the end.
+        """
         violations: list[tuple[CommentSpan, list[str], list[str]]] = []
-        for span in extract_comment_spans(content, strategy.syntax):
+        for span in extract_comment_spans(
+            content, strategy.syntax, unterminated_is_comment=is_fragment
+        ):
             block = _block_reasons(span.text)
             advisory = _advisory_reasons(span.text, self._max_history_entries)
             if block or advisory:
@@ -332,7 +338,8 @@ class CommentChangelogHandler(PreToolUseHandlerBase):
         if not content:
             return False
 
-        return bool(self._find_violations(content, strategy))
+        is_fragment = hook_input.get(HookInputField.TOOL_NAME) == ToolName.EDIT
+        return bool(self._find_violations(content, strategy, is_fragment=is_fragment))
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Deny (or advise) when a comment span carries changelog narrative."""
@@ -348,7 +355,8 @@ class CommentChangelogHandler(PreToolUseHandlerBase):
         if not content:
             return GatingResult(decision=Decision.ALLOW)
 
-        violations = self._find_violations(content, strategy)
+        is_fragment = hook_input.get(HookInputField.TOOL_NAME) == ToolName.EDIT
+        violations = self._find_violations(content, strategy, is_fragment=is_fragment)
         if not violations:
             return GatingResult(decision=Decision.ALLOW)
 

@@ -132,12 +132,20 @@ def _has_justified_escape_hatch(content: str) -> bool:
     return is_acceptable_reason(match.group("reason"))
 
 
-def _regular_spans(content: str, syntax: Any) -> list[CommentSpan]:
-    """Comment spans EXCLUDING docstrings/JSDoc -- those are API docs, not comments."""
-    return [span for span in extract_comment_spans(content, syntax) if not span.is_doc]
+def _regular_spans(content: str, syntax: Any, *, is_fragment: bool) -> list[CommentSpan]:
+    """Comment spans EXCLUDING docstrings/JSDoc -- those are API docs, not comments.
+
+    ``is_fragment`` is True for an Edit's ``old_string``/``new_string``, whose
+    block opener may close in the untouched file.
+    """
+    return [
+        span
+        for span in extract_comment_spans(content, syntax, unterminated_is_comment=is_fragment)
+        if not span.is_doc
+    ]
 
 
-def _total_comment_chars(content: str, syntax: Any) -> int:
+def _total_comment_chars(content: str, syntax: Any, *, is_fragment: bool) -> int:
     """Aggregate character count across all non-doc comment spans.
 
     Aggregate, not per-span matching (mirroring plan-doc-size's whole-file
@@ -146,7 +154,7 @@ def _total_comment_chars(content: str, syntax: Any) -> int:
     the SAME touched region contributes equally to both sides so it never
     biases the comparison on its own.
     """
-    return sum(len(span.text) for span in _regular_spans(content, syntax))
+    return sum(len(span.text) for span in _regular_spans(content, syntax, is_fragment=is_fragment))
 
 
 def _breaches(span: CommentSpan, max_line_chars: int, max_block_lines: int) -> bool:
@@ -260,10 +268,17 @@ class CommentSizeHandler(PreToolUseHandlerBase):
             layout=layout,
         )
 
-    def _breaching_spans(self, content: str, strategy: CommentStrategy) -> list[CommentSpan]:
+    @staticmethod
+    def _is_fragment(hook_input: dict[str, Any]) -> bool:
+        """Whether the scanned text is an Edit fragment rather than a whole file."""
+        return hook_input.get(HookInputField.TOOL_NAME) == ToolName.EDIT
+
+    def _breaching_spans(
+        self, content: str, strategy: CommentStrategy, *, is_fragment: bool
+    ) -> list[CommentSpan]:
         return [
             span
-            for span in _regular_spans(content, strategy.syntax)
+            for span in _regular_spans(content, strategy.syntax, is_fragment=is_fragment)
             if _breaches(span, self._max_comment_line_chars, self._max_comment_block_lines)
         ]
 
@@ -297,7 +312,9 @@ class CommentSizeHandler(PreToolUseHandlerBase):
         if not content:
             return False
 
-        return bool(self._breaching_spans(content, strategy))
+        return bool(
+            self._breaching_spans(content, strategy, is_fragment=self._is_fragment(hook_input))
+        )
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Deny a GROWING over-limit comment; advise on same-size; silent on shrink."""
@@ -313,16 +330,17 @@ class CommentSizeHandler(PreToolUseHandlerBase):
         if not content_after:
             return GatingResult(decision=Decision.ALLOW)
 
-        breaching = self._breaching_spans(content_after, strategy)
+        is_fragment = self._is_fragment(hook_input)
+        breaching = self._breaching_spans(content_after, strategy, is_fragment=is_fragment)
         if not breaching:
             return GatingResult(decision=Decision.ALLOW)
 
         content_before = self._region_before(hook_input, file_path)
-        chars_after = _total_comment_chars(content_after, strategy.syntax)
+        chars_after = _total_comment_chars(content_after, strategy.syntax, is_fragment=is_fragment)
         chars_before = (
             None
             if content_before is None
-            else _total_comment_chars(content_before, strategy.syntax)
+            else _total_comment_chars(content_before, strategy.syntax, is_fragment=is_fragment)
         )
 
         grows = chars_before is None or chars_after > chars_before

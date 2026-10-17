@@ -170,6 +170,31 @@ class TestUnterminatedOpeners:
         assert spans[0].start_line == 0
         assert spans[0].end_line == 2
 
+    def test_fragment_mode_reads_unterminated_block_opener_to_the_end(self) -> None:
+        content = "code();\n/*\n * one\n * two\n"
+        spans = extract_comment_spans(content, SLASH_SYNTAX, unterminated_is_comment=True)
+        assert len(spans) == 1
+        assert spans[0].text == "/*\n * one\n * two"
+        assert (spans[0].start_line, spans[0].end_line) == (1, 3)
+        assert spans[0].is_doc is False
+
+    def test_fragment_mode_marks_unterminated_doc_opener_as_doc(self) -> None:
+        spans = extract_comment_spans(
+            "/**\n * doc\n", SLASH_DOC_SYNTAX, unterminated_is_comment=True
+        )
+        assert len(spans) == 1
+        assert spans[0].is_doc is True
+
+    def test_fragment_mode_reads_unterminated_python_docstring(self) -> None:
+        spans = extract_comment_spans('"""\nnote\n', PYTHON_SYNTAX, unterminated_is_comment=True)
+        assert [span.text for span in spans] == ['"""\nnote']
+
+    def test_fragment_mode_leaves_terminated_comments_unchanged(self) -> None:
+        content = "/* a */\n// b\n"
+        assert extract_comment_spans(
+            content, SLASH_SYNTAX, unterminated_is_comment=True
+        ) == extract_comment_spans(content, SLASH_SYNTAX)
+
     def test_terminated_multi_line_block_comment_is_unchanged(self) -> None:
         content = "/*\n * one\n * two\n */\ncode();\n"
         spans = extract_comment_spans(content, SLASH_SYNTAX)

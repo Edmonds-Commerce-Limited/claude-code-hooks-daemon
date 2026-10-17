@@ -18,6 +18,12 @@ later in the content: valid code never has one, so it is a marker inside a
 string (``"src/*.rs"``) and yields no span. Scanning resumes on the next line
 as code, so a misread never runs to the end of the file. A marker whose closer
 does appear later is still read as a comment, up to that closer.
+
+That rule holds for a whole file only. An ``Edit`` ``new_string`` is a
+fragment: it routinely opens a block, JSDoc or docstring comment whose closer
+stays in the untouched file. A caller scanning a fragment passes
+``unterminated_is_comment=True`` and the unclosed opener runs to the end of
+the fragment as a comment.
 """
 
 from dataclasses import dataclass, replace
@@ -56,7 +62,9 @@ class CommentSpan:
         return max((len(line) for line in self.text.split("\n")), default=0)
 
 
-def extract_comment_spans(content: str, syntax: CommentSyntax) -> list[CommentSpan]:
+def extract_comment_spans(
+    content: str, syntax: CommentSyntax, *, unterminated_is_comment: bool = False
+) -> list[CommentSpan]:
     """Extract every comment span from ``content`` per ``syntax``.
 
     Single left-to-right pass over lines. On each line, the EARLIEST of a
@@ -66,8 +74,13 @@ def extract_comment_spans(content: str, syntax: CommentSyntax) -> list[CommentSp
     none of the registered syntaxes do).
 
     Args:
-        content: Full source text to scan.
+        content: Source text to scan.
         syntax: Comment syntax describing this language.
+        unterminated_is_comment: False (default) for whole-file content, where
+            a block/doc opener with no closer is a marker inside a string and
+            yields no span. True for a fragment (an ``Edit`` ``new_string``),
+            where the closer may lie in the untouched file, so the opener
+            starts a comment running to the end of ``content``.
 
     Returns:
         Comment spans in the order they appear in ``content``.
@@ -96,7 +109,9 @@ def extract_comment_spans(content: str, syntax: CommentSyntax) -> list[CommentSp
                 # fall through to marker handling on this same line instead.
                 pass
             else:
-                span, index = _consume_delimited(lines, index, delimiter_hit, is_doc)
+                span, index = _consume_delimited(
+                    lines, index, delimiter_hit, is_doc, unterminated_is_comment
+                )
                 if span is not None:
                     spans.append(span)
                 continue
@@ -181,14 +196,19 @@ def _find_first_delimiter(
 
 
 def _consume_delimited(
-    lines: list[str], start_index: int, hit: _DelimiterHit, is_doc: bool
+    lines: list[str],
+    start_index: int,
+    hit: _DelimiterHit,
+    is_doc: bool,
+    unterminated_is_comment: bool,
 ) -> tuple[CommentSpan | None, int]:
     """Consume a block/doc comment opening at ``lines[start_index][hit.position:]``.
 
     Returns the built span and the index of the NEXT line to resume from.
-    An opener with no closing delimiter before EOF is not a comment (valid
-    code never has one), so the span is ``None`` and scanning resumes on the
-    line AFTER the opener as ordinary code.
+    An opener with no closing delimiter before EOF is, in a whole file, not a
+    comment (valid code never has one), so the span is ``None`` and scanning
+    resumes on the line AFTER the opener as ordinary code. In a fragment
+    (``unterminated_is_comment``) it is a comment running to the last line.
     """
     first_line = lines[start_index]
     search_from = hit.position + len(hit.start)
@@ -212,6 +232,14 @@ def _consume_delimited(
         collected.append(lines[cursor])
         cursor += 1
 
+    if unterminated_is_comment:
+        span = CommentSpan(
+            text="\n".join(collected),
+            start_line=start_index,
+            end_line=line_total - 1,
+            is_doc=is_doc,
+        )
+        return span, line_total
     return None, start_index + 1
 
 
