@@ -116,7 +116,8 @@ Follow-ups, not defects in the reviewers' judgement:
 and the coordinator's `work-queue done` runs had just written a fresh cache naming #123. So the suite's verdict
 depended on the host's state, and any developer who had just closed a work-queue entry got a red suite.
 
-**Status**: 🔄 in progress (worktree `worktree-rfix-stopgate-isolation`).
+**Status**: ✅ Fixed (9c24a4fa9): the contract harness drives every declared input against an empty state dir, so
+the suite passes with a fresh live cache present. [Report](subagent-reports/261017-rfix-stopgate-isolation.md).
 
 ### N479 to N483 — the v3.70.0 Claude Code changelog review (2.1.293 to 2.1.302): one adopt, four conflicts
 
