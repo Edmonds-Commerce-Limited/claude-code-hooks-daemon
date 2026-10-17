@@ -106,6 +106,7 @@ class TestScratchReport:
 
         assert report is not None
         assert "SCAN INCOMPLETE" in report
+        assert "time budget" in report
 
     def test_a_spent_shared_budget_makes_the_scratch_scan_incomplete(self, tmp_path: Path) -> None:
         _write(tmp_path / "a.txt", 1, 30)
@@ -116,6 +117,115 @@ class TestScratchReport:
         assert report is not None
         assert "SCAN INCOMPLETE" in report
         assert deadline.exhausted
+
+    def test_entry_limit_does_not_spend_the_shared_deadline(self, tmp_path: Path) -> None:
+        for index in range(10):
+            _write(tmp_path / f"f{index}.txt", 1, 30)
+        deadline = ScanDeadline(1000.0)
+
+        report = collect_scratch_report(tmp_path, 14, now=_NOW, max_entries=3, deadline=deadline)
+
+        assert report is not None
+        assert "entry limit" in report
+        assert "time budget" not in report
+        assert not deadline.exhausted
+
+    def test_unreadable_directory_is_its_own_reason_and_spends_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write(tmp_path / "a.txt", 1, 30)
+        (tmp_path / "locked").mkdir()
+        real_scandir = os.scandir
+
+        def scandir(path: str | os.PathLike[str]) -> object:
+            if Path(path).name == "locked":
+                raise PermissionError(path)
+            return real_scandir(path)
+
+        monkeypatch.setattr(os, "scandir", scandir)
+        deadline = ScanDeadline(1000.0)
+
+        report = collect_scratch_report(tmp_path, 14, now=_NOW, deadline=deadline)
+
+        assert report is not None
+        assert "could not be read" in report
+        assert "time budget" not in report
+        assert "1 file," in report
+        assert not deadline.exhausted
+
+    def test_failed_stat_is_its_own_reason_and_spends_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write(tmp_path / "a.txt", 1, 30)
+        _write(tmp_path / "b.txt", 1, 30)
+        real_scandir = os.scandir
+
+        class _Entry:
+            def __init__(self, entry: os.DirEntry[str]) -> None:
+                self._entry = entry
+                self.path = entry.path
+
+            def is_symlink(self) -> bool:
+                return self._entry.is_symlink()
+
+            def is_dir(self, *, follow_symlinks: bool = True) -> bool:
+                return self._entry.is_dir(follow_symlinks=follow_symlinks)
+
+            def stat(self, *, follow_symlinks: bool = True) -> os.stat_result:
+                if self._entry.name == "b.txt":
+                    raise FileNotFoundError(self.path)
+                return self._entry.stat(follow_symlinks=follow_symlinks)
+
+        class _Scanner:
+            def __init__(self, path: str | os.PathLike[str]) -> None:
+                self._inner = real_scandir(path)
+
+            def __enter__(self) -> _Scanner:
+                return self
+
+            def __exit__(self, *exc: object) -> None:
+                self._inner.close()
+
+            def __iter__(self) -> object:
+                return (_Entry(entry) for entry in self._inner)
+
+        monkeypatch.setattr(os, "scandir", _Scanner)
+        deadline = ScanDeadline(1000.0)
+
+        report = collect_scratch_report(tmp_path, 14, now=_NOW, deadline=deadline)
+
+        assert report is not None
+        assert "could not be read" in report
+        assert "1 file," in report
+        assert not deadline.exhausted
+
+    def test_incomplete_scratch_walk_leaves_the_ref_scan_unmarked(
+        self, tmp_path: Path, repo: Path
+    ) -> None:
+        scratch = tmp_path / "scratch"
+        for index in range(10):
+            _write(scratch / f"f{index}.txt", 1, 30)
+        ref = _record(repo, "gone")
+        deadline = ScanDeadline(1000.0)
+
+        assert collect_scratch_report(scratch, 14, now=_NOW, max_entries=3, deadline=deadline)
+        report = collect_gone_branch_ref_report(repo, deadline=deadline)
+
+        assert report is not None
+        assert ref in report
+        assert "SCAN INCOMPLETE" not in report
+
+    def test_incomplete_scratch_walk_with_no_gone_ref_leaves_the_ref_scan_quiet(
+        self, tmp_path: Path, repo: Path
+    ) -> None:
+        scratch = tmp_path / "scratch"
+        for index in range(10):
+            _write(scratch / f"f{index}.txt", 1, 30)
+        deadline = ScanDeadline(1000.0)
+
+        assert collect_scratch_report(scratch, 14, now=_NOW, max_entries=3, deadline=deadline)
+
+        assert collect_gone_branch_ref_report(repo, deadline=deadline) is None
 
     def test_incomplete_scan_with_nothing_found_is_not_quiet(self, tmp_path: Path) -> None:
         for index in range(5):

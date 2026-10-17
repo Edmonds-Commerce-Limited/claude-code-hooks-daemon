@@ -288,6 +288,23 @@ class TestDelivery:
         assert "+second" in offered.diff
         assert offered.offers == 1
 
+    def test_a_stale_offer_and_a_new_pending_record_give_one_instruction(
+        self, tmp_path: Path
+    ) -> None:
+        """The pending batch's fresh offer must not be re-offered by the stale-offer batch."""
+        root, state = self._pending(tmp_path)
+        deliver_pending(state, now=10.0)
+        _edit(root, "claim\nsecond\n")
+        process_quiet_plan(root, FOLDER, state, trigger_count=1, now=11.0)
+        assert state.pending_folders() == [FOLDER]
+
+        messages = deliver_pending(state, now=10.0 + REOFFER_AFTER_SECONDS + 1)
+
+        assert len(messages) == 1
+        offered = state.read_offered(FOLDER)
+        assert offered is not None
+        assert offered.offers == 1
+
     def test_each_pending_record_is_delivered_once(self, tmp_path: Path) -> None:
         _, state = self._pending(tmp_path)
         assert len(deliver_pending(state, now=2.0)) == 1

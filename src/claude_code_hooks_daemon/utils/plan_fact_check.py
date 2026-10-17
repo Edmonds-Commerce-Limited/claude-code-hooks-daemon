@@ -651,12 +651,14 @@ def deliver_pending(
     """
     moment = time.time() if now is None else now
     messages: list[str] = []
+    # Due offers are read after the pending batch runs, so a record that batch
+    # has just offered is not stale and is not handed over a second time.
     batches = (
-        (state.pending_folders(), PENDING_SUFFIX),
-        (state.offered_due(moment), OFFERED_SUFFIX),
+        (state.pending_folders, PENDING_SUFFIX),
+        (lambda: state.offered_due(moment), OFFERED_SUFFIX),
     )
-    for folders, suffix in batches:
-        for pending, claimed in _take(state, folders, suffix):
+    for list_folders, suffix in batches:
+        for pending, claimed in _take(state, list_folders(), suffix):
             message = _hand_over(state, pending, claimed, now=moment, agent=agent)
             if message is not None:
                 messages.append(message)
