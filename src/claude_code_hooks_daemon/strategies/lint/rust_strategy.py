@@ -46,8 +46,13 @@ _CARGO_DEFAULT_EDITION = "2015"
 #: crate", not "this file is wrong": an unresolved import, a failed path or
 #: undeclared crate/module, a crate that cannot be found, a module file that is
 #: not found. Syntax errors stop rustc before name resolution, so they carry
-#: none of these and still deny.
-_CRATE_CONTEXT_ERROR = re.compile(r"error\[(?:E0432|E0433|E0463|E0583)\]")
+#: none of these and still deny. Also the UNCODED findings for an attribute,
+#: derive or macro name an external crate provides (``#[serde(...)]``,
+#: ``#[error(...)]``, ``json!``), which only a build with that crate resolves.
+_CRATE_CONTEXT_ERROR = re.compile(
+    r"error\[(?:E0432|E0433|E0463|E0583)\]"
+    r"|error: cannot find (?:attribute|(?:derive |attribute )?macro) `"
+)
 #: A rustc error finding, coded or not (``error[E0308]: ...`` / ``error: ...``).
 _ERROR_LINE = re.compile(r"error(?:\[E\d+\])?:")
 #: The trailer rustc and cargo add after the findings; they repeat the count,

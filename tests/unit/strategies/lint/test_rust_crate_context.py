@@ -178,6 +178,42 @@ class TestCrateContextClassification:
         output = "warning: unused variable: `x`\n\nerror[E0432]: unresolved import\n"
         assert RustLintStrategy().is_tool_unavailable_output(output) is True
 
+    @pytest.mark.parametrize(
+        "finding",
+        [
+            "cannot find attribute `serde` in this scope",
+            "cannot find derive macro `Serialize` in this scope",
+            "cannot find macro `json` in this scope",
+            "cannot find attribute macro `tokio` in this scope",
+        ],
+    )
+    def test_external_attribute_or_macro_name_is_could_not_analyse(self, finding: str) -> None:
+        output = f"error: {finding}\n --> src/b.rs:3:3\n\nerror: aborting due to 1 previous error\n"
+        assert RustLintStrategy().is_tool_unavailable_output(output) is True
+
+    def test_serde_module_with_helper_attributes_is_excused(self) -> None:
+        output = (
+            "error[E0432]: unresolved import `serde`\n --> src/b.rs:1:5\n\n"
+            "error: cannot find attribute `serde` in this scope\n --> src/b.rs:3:3\n\n"
+            "error: cannot find attribute `serde` in this scope\n --> src/b.rs:4:18\n\n"
+            "error: aborting due to 3 previous errors\n"
+        )
+        assert RustLintStrategy().is_tool_unavailable_output(output) is True
+
+    def test_unresolved_attribute_plus_syntax_error_is_a_finding(self) -> None:
+        output = (
+            "error: cannot find attribute `serde` in this scope\n --> src/b.rs:3:3\n\n"
+            "error: expected one of `!` or `::`, found `}`\n --> src/b.rs:4:1\n"
+        )
+        assert RustLintStrategy().is_tool_unavailable_output(output) is False
+
+    def test_unresolved_macro_plus_type_error_is_a_finding(self) -> None:
+        output = (
+            "error: cannot find macro `json` in this scope\n --> src/b.rs:3:3\n\n"
+            "error[E0308]: mismatched types\n --> src/b.rs:4:18\n"
+        )
+        assert RustLintStrategy().is_tool_unavailable_output(output) is False
+
     def test_shim_marker_wins_over_other_errors(self) -> None:
         output = "error: 'clippy-driver' is not installed for the toolchain 'stable'.\n"
         output += "error[E0308]: mismatched types\n"
