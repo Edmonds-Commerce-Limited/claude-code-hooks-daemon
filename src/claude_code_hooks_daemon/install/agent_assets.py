@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.config.models import Config
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -403,7 +404,19 @@ def stale_derived_agents(
     by_name = {spec.name: spec for spec in specs}
     stale: list[DerivedAgent] = []
     for path in sorted(agents_dir.glob(f"*{_MD_SUFFIX}")):
-        match = _DERIVED_FROM_PATTERN.search(path.read_text(encoding="utf-8", errors="replace"))
+        try:
+            if not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"{path} in the project's agents directory is unreadable; "
+                "skipping it so one bad entry cannot cost the drift report",
+            )
+            continue
+        match = _DERIVED_FROM_PATTERN.search(text)
         if match is None or match.group("origin") not in by_name:
             continue
         derived = DerivedAgent(

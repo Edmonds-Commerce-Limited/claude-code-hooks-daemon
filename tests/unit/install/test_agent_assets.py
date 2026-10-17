@@ -542,3 +542,43 @@ class TestDerivedAgents:
 
     def test_a_project_with_no_agents_directory_has_none(self, tmp_path: Path) -> None:
         assert agent_assets.stale_derived_agents(tmp_path) == []
+
+    def test_a_directory_named_like_an_agent_is_skipped(self, tmp_path: Path) -> None:
+        spec = _spec(FACT_CHECKER_AGENT_NAME)
+        (tmp_path.joinpath(*AGENTS_DIR_PARTS) / "folder.md").mkdir(parents=True)
+        path = self._tuned(
+            tmp_path, "my-checker", f"<!-- hooks-daemon-derived-from: {spec.name} 0.9.0 -->"
+        )
+        assert [d.path for d in agent_assets.stale_derived_agents(tmp_path)] == [path]
+
+    def test_a_dangling_symlink_costs_only_that_entry(self, tmp_path: Path) -> None:
+        spec = _spec(FACT_CHECKER_AGENT_NAME)
+        path = self._tuned(
+            tmp_path, "my-checker", f"<!-- hooks-daemon-derived-from: {spec.name} 0.9.0 -->"
+        )
+        (path.parent / "dangling.md").symlink_to(tmp_path / "nowhere.md")
+        assert [d.path for d in agent_assets.stale_derived_agents(tmp_path)] == [path]
+
+    def test_an_unreadable_file_is_logged_and_skipped(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        spec = _spec(FACT_CHECKER_AGENT_NAME)
+        good = self._tuned(
+            tmp_path, "good", f"<!-- hooks-daemon-derived-from: {spec.name} 0.9.0 -->"
+        )
+        bad = self._tuned(tmp_path, "bad", "x")
+        real_read_text = Path.read_text
+
+        def read_text(self: Path, encoding: str | None = None, errors: str | None = None) -> str:
+            if self == bad:
+                raise PermissionError(13, "denied", str(self))
+            return real_read_text(self, encoding=encoding, errors=errors)
+
+        monkeypatch.setattr(Path, "read_text", read_text)
+        with caplog.at_level("WARNING"):
+            stale = agent_assets.stale_derived_agents(tmp_path)
+        assert [d.path for d in stale] == [good]
+        assert "bad.md" in caplog.text

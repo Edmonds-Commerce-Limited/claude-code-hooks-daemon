@@ -67,6 +67,9 @@ TUNING_ADVISED_FILE: Final[str] = "tuning-advised"
 #: A tuned agent's name becomes a filename under ``.claude/agents/``, so it is a plain slug.
 _AGENT_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 
+# (repr of the bad option, project root) pairs already warned about this process.
+_warned_tuned_agents: Final[set[tuple[str, str]]] = set()
+
 #: An offer nobody confirmed is offered again after this many seconds.
 REOFFER_AFTER_SECONDS: Final[float] = 300.0
 #: Offers made for one record before it is dropped (the content stays owed).
@@ -501,8 +504,12 @@ def process_quiet_plan(
     return pending
 
 
-def resolve_checker_agent(tuned_agent: str, project_root: Path) -> str:
+def resolve_checker_agent(tuned_agent: object, project_root: Path) -> str:
     """The agent the session is told to dispatch: the project's tuned one, else the generic one.
+
+    The option comes from project YAML, so it may be any type; anything that
+    is not a deployed agent's name falls back to the generic agent. The
+    warning is given once per distinct value and project, not on every event.
 
     Args:
         tuned_agent: The ``tuned_agent`` option; empty when the project has none.
@@ -512,18 +519,22 @@ def resolve_checker_agent(tuned_agent: str, project_root: Path) -> str:
         ``tuned_agent`` when it is a safe name and its definition is deployed;
         otherwise the generic agent (with a warning when one was configured).
     """
-    if not tuned_agent:
+    if tuned_agent is None or tuned_agent == "":
         return FACT_CHECKER_AGENT
-    deployed = project_root.joinpath(*AGENTS_DIR_PARTS) / f"{tuned_agent}.md"
-    if _AGENT_NAME_PATTERN.fullmatch(tuned_agent) is None or not deployed.is_file():
+    if isinstance(tuned_agent, str) and _AGENT_NAME_PATTERN.fullmatch(tuned_agent) is not None:
+        deployed = project_root.joinpath(*AGENTS_DIR_PARTS) / f"{tuned_agent}.md"
+        if deployed.is_file():
+            return tuned_agent
+    warn_key = (repr(tuned_agent), str(project_root))
+    if warn_key not in _warned_tuned_agents:
+        _warned_tuned_agents.add(warn_key)
         logger.warning(
-            "plan_fact_check: tuned_agent %r is not a deployed agent (%s); using %s",
+            "plan_fact_check: tuned_agent %r is not a deployed agent name under %s; using %s",
             tuned_agent,
-            deployed,
+            project_root.joinpath(*AGENTS_DIR_PARTS),
             FACT_CHECKER_AGENT,
         )
-        return FACT_CHECKER_AGENT
-    return tuned_agent
+    return FACT_CHECKER_AGENT
 
 
 def render_tuning_advice() -> str:

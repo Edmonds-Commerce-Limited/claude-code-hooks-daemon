@@ -117,7 +117,8 @@ class PlanFactCheckFeedHandler(PostToolUseHandlerBase):
         # Option, injected by the registry via setattr; typed and defaulted here.
         self._quiet_seconds: float = DEFAULT_QUIET_SECONDS
         # Name of the project's tuned copy of the checker under .claude/agents/; empty = generic.
-        self._tuned_agent: str = ""
+        # Typed object: it is YAML, so resolve_checker_agent validates it.
+        self._tuned_agent: object = ""
 
     def _plan_matches(self, hook_input: dict[str, Any]) -> list[PlanFolderMatch]:
         """One match per distinct plan folder the event wrote a tracked document in.
