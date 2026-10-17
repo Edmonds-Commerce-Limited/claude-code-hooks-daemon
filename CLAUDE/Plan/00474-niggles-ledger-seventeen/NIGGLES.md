@@ -123,7 +123,12 @@ Follow-ups, not defects in the reviewers' judgement:
 - **N503**: the N495 fix paired a `'` before a `/*` with an apostrophe inside the comment (`&'a str) { /* it's`), so
   an Edit fragment's comment produced no span.
 
-**Status**: ⬜ in progress, fixing before the tag in `worktree-rfix3-{rust-typo,msgfile-groups,comment-apostrophe}`.
+**Status**: ✅ all four fixed before the tag: N500 33cfcc1c9 (a rustc similar-name suggestion keeps the error a
+finding; tests use captured rustc output), N501 and N502 51f83b941 (a group is judged whole only when the redirect
+applies to it; redirected `if`/`for`/`while`/`until`/`case` compounds are groups), N503 c61348119. Merged 3ee0715d5,
+1204284f4, d0fe01743. Reports: [rust-typo](subagent-reports/261017-rfix3-rust-typo.md),
+[msgfile-groups](subagent-reports/261017-rfix3-msgfile-groups.md),
+[comment-apostrophe](subagent-reports/261017-rfix3-comment-apostrophe.md).
 
 ### N494 to N499 — the v3.70.0 Step 10 delta review over the fixes and Plan 00531
 
