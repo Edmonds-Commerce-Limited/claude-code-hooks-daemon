@@ -311,6 +311,28 @@ _STOP_EVENT_NAMES = ("Stop", "SubagentStop")
 # .worktreePath from the daemon response and print it RAW (Plan 00188).
 _WORKTREE_CREATE_EVENT_NAME = "WorktreeCreate"
 
+# SessionStart starts provision.sh --background DETACHED (Plan 00477 Task 5.2),
+# which syncs a pulled daemon.expected_version upgrade. The block sits directly
+# under SCRIPT_DIR, ahead of the relay guard the forwarder generator inserts
+# above init.sh, so the generated forwarder carries it at every transport config.
+# The wording must not contain the guard's own marker text: the generator strips
+# a block by that marker, and a comment quoting it would be mistaken for one.
+_SESSION_START_BACKGROUND_SYNC_BLOCK = """# Plan 00477 Task 5.2: a pulled daemon.expected_version upgrade is synced by
+# provision.sh --background, started here DETACHED so this hook never waits on
+# it. It decides for itself whether anything needs syncing, records its outcome
+# for the SessionStart version check to report, and writes its own log. It sits
+# above the relay guard block so a relay-enabled project starts it too, and is
+# skipped on the relay's --no-relay fallback, which already passed here.
+if [[ "${1:-}" != "--no-relay" && -f "$SCRIPT_DIR/../provision.sh" ]]; then
+    if command -v setsid > /dev/null; then
+        setsid bash "$SCRIPT_DIR/../provision.sh" --background < /dev/null > /dev/null 2>&1 &
+    else
+        nohup bash "$SCRIPT_DIR/../provision.sh" --background < /dev/null > /dev/null 2>&1 &
+    fi
+fi
+"""
+_SESSION_START_EVENT_NAME = "SessionStart"
+
 # The status-line wrapper's basename. It is NOT a member of the forwarder map
 # below — that map drives both the generic forwarder generator and the `hooks`
 # settings block, and the status line belongs to neither: it has bespoke
@@ -461,6 +483,9 @@ fi
 send_request_stdin "{event_name}" "worktree"
 """
     else:
+        background_sync = (
+            _SESSION_START_BACKGROUND_SYNC_BLOCK if event_name == _SESSION_START_EVENT_NAME else ""
+        )
         hook_content = f"""#!/bin/bash
 #
 {_OWNERSHIP_BANNER}
@@ -475,7 +500,7 @@ send_request_stdin "{event_name}" "worktree"
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
-source "$SCRIPT_DIR/../init.sh"
+{background_sync}source "$SCRIPT_DIR/../init.sh"
 
 # Try to start daemon - if it fails, output proper JSON error to stdout
 if ! ensure_daemon; then

@@ -52,6 +52,32 @@ class TestPaths:
         assert f'provision.sh" {BACKGROUND_FLAG}' in forwarder
 
 
+class TestInstallerEmitsTheBackgroundSync:
+    """The installer is the generator of the tracked forwarder, so it carries the block."""
+
+    def _generated(self, tmp_path: Path, hook_name: str, event_name: str) -> str:
+        from install import create_forwarder_script
+
+        return create_forwarder_script(tmp_path, hook_name, event_name).read_text()
+
+    def test_session_start_starts_the_background_sync_before_init(self, tmp_path: Path) -> None:
+        content = self._generated(tmp_path, "session-start", "SessionStart")
+
+        assert f'provision.sh" {BACKGROUND_FLAG}' in content
+        assert content.index(BACKGROUND_FLAG) < content.index("init.sh")
+
+    def test_no_other_forwarder_starts_it(self, tmp_path: Path) -> None:
+        content = self._generated(tmp_path, "pre-tool-use", "PreToolUse")
+
+        assert BACKGROUND_FLAG not in content
+
+    def test_the_block_never_quotes_the_relay_guard_marker(self, tmp_path: Path) -> None:
+        """The generator strips a guard by its marker text, so a comment must not carry it."""
+        content = self._generated(tmp_path, "session-start", "SessionStart")
+
+        assert "relay hot path" not in content
+
+
 class TestReadSyncRecord:
     def test_no_state_file_means_never_attempted(self, tmp_path: Path) -> None:
         assert read_sync_record(tmp_path, _VERSION) is None
