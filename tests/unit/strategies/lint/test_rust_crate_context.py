@@ -15,6 +15,8 @@ from claude_code_hooks_daemon.strategies.lint.rust_strategy import (
     resolve_edition,
 )
 
+_RUSTC_FIXTURES = Path(__file__).parents[3] / "fixtures" / "rustc-output"
+
 
 def _write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -212,6 +214,26 @@ class TestCrateContextClassification:
             "error: cannot find macro `json` in this scope\n --> src/b.rs:3:3\n\n"
             "error[E0308]: mismatched types\n --> src/b.rs:4:18\n"
         )
+        assert RustLintStrategy().is_tool_unavailable_output(output) is False
+
+    @pytest.mark.parametrize(
+        ("fixture", "excused"),
+        [
+            ("typo.txt", False),  # prinln!  (macro typo)
+            ("typo2.txt", False),  # #[derive(Debg)] and #[tset]
+            ("serde.txt", True),  # serde import, #[serde(..)] helper, json!
+            ("pathtypo.txt", True),  # std::colections: E0432 stays crate-context
+        ],
+    )
+    def test_real_rustc_output(self, fixture: str, excused: bool) -> None:
+        """Captured from rustc 1.99.1: a typo carries a similar-name suggestion."""
+        output = (_RUSTC_FIXTURES / fixture).read_text()
+        assert RustLintStrategy().is_tool_unavailable_output(output) is excused
+
+    def test_typo_beside_unresolved_external_attribute_is_a_finding(self) -> None:
+        output = (_RUSTC_FIXTURES / "serde.txt").read_text() + (
+            _RUSTC_FIXTURES / "typo.txt"
+        ).read_text()
         assert RustLintStrategy().is_tool_unavailable_output(output) is False
 
     def test_shim_marker_wins_over_other_errors(self) -> None:

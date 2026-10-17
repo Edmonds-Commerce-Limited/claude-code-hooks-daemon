@@ -53,6 +53,11 @@ _CRATE_CONTEXT_ERROR = re.compile(
     r"error\[(?:E0432|E0433|E0463|E0583)\]"
     r"|error: cannot find (?:attribute|(?:derive |attribute )?macro) `"
 )
+#: rustc's own spelling suggestion (``help: a macro with a similar name exists``,
+#: ``= note: similarly named derive macro `Debug` defined here``). An uncoded
+#: "cannot find ..." error carrying it is a typo in a name the toolchain knows,
+#: not a name an external crate provides, so it stays a finding.
+_SIMILAR_NAME_SUGGESTION = re.compile(r"with a similar name exists|similarly named")
 #: A rustc error finding, coded or not (``error[E0308]: ...`` / ``error: ...``).
 _ERROR_LINE = re.compile(r"error(?:\[E\d+\])?:")
 #: The trailer rustc and cargo add after the findings; they repeat the count,
@@ -65,6 +70,26 @@ logger = logging.getLogger(__name__)
 def _crate_framing() -> str:
     """The framing both commands share, with the output directory resolved."""
     return _CRATE_FRAMING_TEMPLATE.format(out_dir=lint_output_dir())
+
+
+def _error_blocks(output: str) -> list[tuple[str, str]]:
+    """Each error finding in rustc output as ``(error line, whole diagnostic)``.
+
+    A diagnostic runs from its ``error`` line to the next blank line, so the
+    ``help``/``note`` lines rustc prints under it belong to it.
+    """
+    blocks: list[tuple[str, list[str]]] = []
+    in_block = False
+    for line in output.splitlines():
+        if not line.strip():
+            in_block = False
+        elif _ERROR_LINE.match(line):
+            in_block = not _ERROR_SUMMARY_LINE.match(line)
+            if in_block:
+                blocks.append((line, [line]))
+        elif in_block:
+            blocks[-1][1].append(line)
+    return [(head, "\n".join(lines)) for head, lines in blocks]
 
 
 def _find_manifest(start: Path) -> Path | None:
@@ -210,12 +235,11 @@ class RustLintStrategy:
         """
         if _RUSTUP_SHIM_NOT_INSTALLED_MARKER in output:
             return True
-        errors = [
-            line
-            for line in output.splitlines()
-            if _ERROR_LINE.match(line) and not _ERROR_SUMMARY_LINE.match(line)
-        ]
-        return bool(errors) and all(_CRATE_CONTEXT_ERROR.match(line) for line in errors)
+        errors = _error_blocks(output)
+        return bool(errors) and all(
+            _CRATE_CONTEXT_ERROR.match(head) and not _SIMILAR_NAME_SUGGESTION.search(body)
+            for head, body in errors
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Rust lint strategy."""
