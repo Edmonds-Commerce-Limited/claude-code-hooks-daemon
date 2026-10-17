@@ -23,12 +23,17 @@ from __future__ import annotations
 import logging
 import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
+from claude_code_hooks_daemon.constants import HookInputField, ToolName
+from claude_code_hooks_daemon.core.utils import scan_bash_write_targets, split_heredocs
+from claude_code_hooks_daemon.utils.command_evasion import normalise_line_continuations
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
+from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,6 +46,10 @@ MESSAGE_FILE_PATTERN: Final[re.Pattern[str]] = re.compile(
 #: `-` is stdin: a heredoc or a pipe, with no path to open. Its body sits in
 #: the command text, which every caller scans anyway.
 STDIN_MESSAGE_FILE: Final[str] = "-"
+
+#: Where one shell command ends and the next begins. Longest first so `||` is
+#: not read as two pipes.
+COMMAND_SEPARATORS: Final[tuple[str, ...]] = ("||", "&&", "|", ";", "\n")
 
 #: Both former copies used this bound, so it is preserved rather than chosen.
 MAX_MESSAGE_FILE_BYTES: Final[int] = 65_536
@@ -60,6 +69,75 @@ class MessageFile:
 
     path: Path
     text: str
+
+
+def _resolve_message_path(raw: str, cwd: str | None) -> str:
+    """``raw`` as an absolute, normalised path when ``cwd`` allows it."""
+    path = Path(raw)
+    if not path.is_absolute() and cwd:
+        path = Path(cwd) / path
+    return os.path.normpath(str(path))
+
+
+def _named_message_files(recordings: Sequence[str], cwd: str | None) -> set[str]:
+    """Normalised paths of every message/body file ``recordings`` name."""
+    named: set[str] = set()
+    for recording in recordings:
+        for match in MESSAGE_FILE_PATTERN.finditer(recording):
+            raw = next(group for group in match.groups() if group)
+            if raw != STDIN_MESSAGE_FILE:
+                named.add(_resolve_message_path(raw, cwd))
+    return named
+
+
+def _writes_any(segment: str, named: set[str], cwd: str | None) -> bool:
+    """True when ``segment`` writes one of the ``named`` paths.
+
+    With no ``cwd`` a relative path cannot be resolved, so the file NAME
+    decides: matching too much only offers one more segment to the caller.
+    """
+    hook_input: dict[str, Any] = {
+        HookInputField.TOOL_NAME: ToolName.BASH,
+        HookInputField.TOOL_INPUT: {"command": segment},
+    }
+    if cwd:
+        hook_input[HookInputField.CWD] = cwd
+    written = {os.path.normpath(target) for target in scan_bash_write_targets(hook_input).paths}
+    if written & named:
+        return True
+    if cwd:
+        return False
+    names = {Path(target).name for target in written}
+    return any(Path(path).name in names for path in named)
+
+
+def message_file_writers(command: str, recordings: Sequence[str], cwd: str | None) -> list[str]:
+    """Segments of ``command`` that WRITE a file ``recordings`` name, with their heredoc bodies.
+
+    ``git commit -F m.txt`` reads a file an earlier segment of the same command
+    may create (``cat > m.txt <<'EOF'``, ``echo ... > m.txt``). That file is not
+    on disk at PreToolUse time, so :func:`read_message_files` skips it and the
+    text it will hold is visible only in the segment that writes it. A caller
+    that judges message text per recording command (rather than the whole
+    line) must judge these as well, or the text reaches history unexamined.
+
+    Only a segment whose write target equals a named path is returned, so an
+    unrelated segment (``cd /tmp/<term>``) is still not message text.
+    """
+    named = _named_message_files(recordings, cwd)
+    if not named:
+        return []
+    without_bodies, heredocs = split_heredocs(normalise_line_continuations(command))
+    writers = [
+        piece.strip()
+        for piece in split_unquoted(without_bodies, COMMAND_SEPARATORS)
+        if _writes_any(piece, named, cwd)
+    ]
+    for heredoc in heredocs:
+        opener = heredoc.opener_line.strip()
+        if any(opener in found or found in opener for found in writers):
+            writers.append(heredoc.body)
+    return writers
 
 
 def read_message_files(command: str, cwd: str | None) -> list[MessageFile]:
