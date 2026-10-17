@@ -21,6 +21,7 @@ Re-render the index: `bin/hooks-daemon remote-docs index`
 | `code.claude.com/docs/en/hooks.md` | https://code.claude.com/docs/en/hooks.md | 2026-10-17 | 2027-01-15 |
 | `code.claude.com/docs/en/interactive-mode.md` | https://code.claude.com/docs/en/interactive-mode.md | 2026-10-17 | 2027-01-15 |
 | `code.claude.com/docs/en/managed-settings.md` | https://code.claude.com/docs/en/managed-settings | 2026-10-17 | 2027-01-15 |
+| `code.claude.com/docs/en/memory.md` | https://code.claude.com/docs/en/memory | 2026-10-17 | 2027-01-15 |
 | `code.claude.com/docs/en/permissions.md` | https://code.claude.com/docs/en/permissions | 2026-10-17 | 2027-01-15 |
 | `code.claude.com/docs/en/plugin-marketplaces.md` | https://code.claude.com/docs/en/plugin-marketplaces.md | 2026-10-17 | 2027-01-15 |
 | `code.claude.com/docs/en/plugins/cli-reference.md` | https://code.claude.com/docs/en/plugins/cli-reference | 2026-10-17 | 2027-01-15 |
