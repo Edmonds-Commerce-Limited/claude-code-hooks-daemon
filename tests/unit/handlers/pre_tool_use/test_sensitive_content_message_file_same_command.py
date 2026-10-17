@@ -84,6 +84,50 @@ class TestFileWrittenThenConsumed:
         assert handler.matches(_input(command, tmp_path)) is False
 
 
+class TestProducerOfTheMessageText:
+    """The stage or group that PRODUCES the text is judged, not only the one that writes it."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"echo {_TERM} | tee m.txt && git commit -F m.txt",
+            f"echo {_TERM} | tee -a m.txt > /dev/null && git commit -F m.txt",
+            f"{{ echo {_TERM}; }} > m.txt && git commit -F m.txt",
+            f"( echo {_TERM} ) > m.txt && git commit -F m.txt",
+            f"{{ echo a; echo {_TERM}; }} > m.txt; git commit -F m.txt",
+            f"echo {_TERM} | git commit -F -",
+            f"printf '%s' {_TERM} | git commit --file=-",
+            f"echo {_TERM} | cat | git commit -F -",
+            f"{{ echo {_TERM}; }} | git commit -F -",
+            f"echo {_TERM} | gh pr create --title t --body-file -",
+        ],
+    )
+    def test_term_in_the_producer_is_denied(
+        self, handler: SensitiveContentHandler, tmp_path: Path, command: str
+    ) -> None:
+        hook_input = _input(command, tmp_path)
+
+        assert handler.matches(hook_input) is True
+        assert handler.handle(hook_input).decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo ordinary | tee m.txt && git commit -F m.txt",
+            "{ echo ordinary; } > m.txt && git commit -F m.txt",
+            "echo ordinary | git commit -F -",
+            f"echo {_TERM} | tee notes.txt && git commit -F m.txt",
+            f"{{ echo {_TERM}; }} > notes.txt && git commit -F m.txt",
+            f"echo {_TERM} | grep x; git commit -m clean",
+            f"echo {_TERM} | grep x; echo ok | git commit -F -",
+        ],
+    )
+    def test_clean_or_unrelated_producer_is_allowed(
+        self, handler: SensitiveContentHandler, tmp_path: Path, command: str
+    ) -> None:
+        assert handler.matches(_input(command, tmp_path)) is False
+
+
 class TestNarrowingStillHolds:
     def test_term_in_an_unrelated_cd_is_allowed(
         self, handler: SensitiveContentHandler, tmp_path: Path
