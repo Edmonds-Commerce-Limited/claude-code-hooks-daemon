@@ -101,7 +101,21 @@ class TestJsonOutput:
         assert exit_code == 0
         payload = json.loads(captured.getvalue())
         assert isinstance(payload, list)
-        assert len(payload) == 17
+        from claude_code_hooks_daemon.handlers.registry import (
+            HandlerRegistry,
+            event_dir_name_matches_module,
+        )
+
+        registry = HandlerRegistry()
+        registry.discover()
+        registered = sorted(
+            name
+            for name in registry.list_handlers()
+            if (cls := registry.get_handler_class(name)) is not None
+            and event_dir_name_matches_module("status_line", cls.__module__)
+        )
+        assert registered
+        assert sorted(entry["class_name"] for entry in payload) == registered
         names = {entry["name"] for entry in payload}
         assert "Current Time" in names
         assert "Host Hostname" in names

@@ -81,6 +81,22 @@ class TestMockedShapes:
         assert "NOT denied" in joined
 
     @patch(_SUBPROCESS)
+    def test_newer_go_declared_and_not_used_with_a_name_is_allowed(
+        self, mock_subprocess: MagicMock, handler: LintOnEditHandler, tmp_path: Path
+    ) -> None:
+        _module(tmp_path)
+        target = _write(tmp_path / "c.go", "package m\n")
+        mock_subprocess.run.side_effect = [
+            _ok(),
+            _failed("# example.com/m\n./c.go:3:12: declared and not used: x\n"),
+        ]
+
+        result = handler.handle(_hook_input(target))
+
+        assert result.decision.value == "allow"
+        assert "declared and not used: x" in " ".join(result.context)
+
+    @patch(_SUBPROCESS)
     def test_a_genuine_vet_finding_denies(
         self, mock_subprocess: MagicMock, handler: LintOnEditHandler, tmp_path: Path
     ) -> None:

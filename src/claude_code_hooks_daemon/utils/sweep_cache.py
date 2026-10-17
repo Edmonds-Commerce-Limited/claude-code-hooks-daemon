@@ -35,6 +35,10 @@ from typing import Final
 
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.secret_file_matching import (
+    path_is_protected,
+    resolve_configured_patterns,
+)
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
@@ -124,7 +128,12 @@ def tree_fingerprint(project_root: Path, extra: Sequence[str]) -> str:
         digest.update(part.encode("utf-8", "surrogateescape"))
         digest.update(b"\x00")
     listed = _git_listed_files(project_root)
+    patterns = resolve_configured_patterns()
     for relative_path in listed if listed is not None else _walked_files(project_root):
+        # A protected file is not part of any sweep's corpus; stating it would
+        # also let its changes move the fingerprint.
+        if path_is_protected(str(project_root / relative_path), patterns):
+            continue
         try:
             stat = (project_root / relative_path).lstat()
         except FileNotFoundError as exc:

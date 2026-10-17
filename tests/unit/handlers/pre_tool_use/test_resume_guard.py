@@ -145,8 +145,10 @@ class TestDecision:
         def refuse(path: Path) -> Any:
             raise PermissionError(13, "Permission denied", str(path))
 
-        monkeypatch.setattr("os.scandir", refuse)
-        assert handler.handle(send(tmp_path, "plan464-impl")).decision == Decision.ALLOW
+        with monkeypatch.context() as scoped:
+            scoped.setattr("os.scandir", refuse)
+            decision = handler.handle(send(tmp_path, "plan464-impl")).decision
+        assert decision == Decision.ALLOW
         assert unmeasured_count(tmp_path / "untracked", SESSION) == 1
 
     def test_a_large_usage_free_target_fails_open_and_is_recorded_unmeasured(

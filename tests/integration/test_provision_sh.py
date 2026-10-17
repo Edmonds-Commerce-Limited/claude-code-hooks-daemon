@@ -1328,7 +1328,7 @@ class TestTheSessionStartHookStartsIt:
 
         hook = subprocess.run(
             [BASH, str(forwarder)],
-            input='{"hook_event_name": "SessionStart"}',
+            input='{"hook_event_name": "SessionStart", "synthetic_source": "test-probe"}',
             capture_output=True,
             text=True,
             env=fresh.box.env(fresh.git_env),

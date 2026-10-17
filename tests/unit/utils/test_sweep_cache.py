@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.utils.secret_file_matching import resolve_configured_patterns
 from claude_code_hooks_daemon.utils.sweep_cache import (
     SweepOutcome,
     SweepState,
@@ -24,6 +25,13 @@ from tests.support.git_fixtures import git_setup_timeout
 
 _NAME = "demo-sweep"
 _LONG_WAIT = 30.0
+
+
+def _protected_name() -> str:
+    """A file name the live secret_file_guard config protects, read from that config."""
+    return next(
+        pattern for pattern in resolve_configured_patterns() if not set(pattern) & set("*?[")
+    )
 
 
 def _tree(tmp_path: Path) -> Path:
@@ -160,6 +168,32 @@ class TestGitAwareEnumeration:
         (root / "untracked").mkdir()
         before = tree_fingerprint(root, [])
         (root / "untracked" / "log.txt").write_text("noise\n")
+        assert tree_fingerprint(root, []) == before
+
+    def test_a_protected_path_is_never_stated(self, tmp_path: Path) -> None:
+        """Git's listing includes a protected file; it must not be touched at all."""
+        root = _git_project(tmp_path)
+        protected = _protected_name()
+        (root / protected).write_text("key material\n")
+        stated: list[str] = []
+        original = Path.lstat
+
+        def spy(self: Path) -> os.stat_result:
+            stated.append(self.name)
+            return original(self)
+
+        with patch.object(Path, "lstat", spy):
+            tree_fingerprint(root, [])
+
+        assert "mod.py" in stated
+        assert protected not in stated
+
+    def test_editing_a_protected_file_does_not_move_the_fingerprint(self, tmp_path: Path) -> None:
+        root = _git_project(tmp_path)
+        protected = root / _protected_name()
+        protected.write_text("key material\n")
+        before = tree_fingerprint(root, [])
+        protected.write_text("rotated key material\n")
         assert tree_fingerprint(root, []) == before
 
 
