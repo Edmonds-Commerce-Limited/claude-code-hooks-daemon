@@ -484,3 +484,61 @@ class TestInstructionsMatchDeclaredTools:
 
 def test_module_has_no_mutable_registry() -> None:
     assert isinstance(agent_assets.SHIPPED_AGENTS, tuple)
+
+
+class TestDerivedAgents:
+    """A tuned copy records the shipped version it started from (Plan 00531)."""
+
+    @staticmethod
+    def _tuned(root: Path, name: str, marker: str | None) -> Path:
+        target = root.joinpath(*AGENTS_DIR_PARTS) / f"{name}.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        body = "# my tuned checker\n"
+        target.write_text(body if marker is None else f"{marker}\n{body}")
+        return target
+
+    def test_marker_names_the_origin_and_its_current_version(self) -> None:
+        spec = _spec(FACT_CHECKER_AGENT_NAME)
+        assert (
+            agent_assets.derived_from_marker(spec)
+            == f"<!-- hooks-daemon-derived-from: {spec.name} {spec.version} -->"
+        )
+
+    def test_an_older_derived_version_is_reported_stale(self, tmp_path: Path) -> None:
+        spec = _spec(FACT_CHECKER_AGENT_NAME)
+        path = self._tuned(
+            tmp_path, "my-checker", f"<!-- hooks-daemon-derived-from: {spec.name} 0.9.0 -->"
+        )
+        stale = agent_assets.stale_derived_agents(tmp_path)
+        assert [(d.path, d.origin.name, d.derived_version) for d in stale] == [
+            (path, spec.name, "0.9.0")
+        ]
+
+    def test_the_current_derived_version_is_not_stale(self, tmp_path: Path) -> None:
+        spec = _spec(FACT_CHECKER_AGENT_NAME)
+        self._tuned(tmp_path, "my-checker", agent_assets.derived_from_marker(spec))
+        assert agent_assets.stale_derived_agents(tmp_path) == []
+
+    def test_versions_compare_numerically_not_as_text(self, tmp_path: Path) -> None:
+        spec = replace(_spec(FACT_CHECKER_AGENT_NAME), version="1.10.0")
+        self._tuned(
+            tmp_path, "my-checker", f"<!-- hooks-daemon-derived-from: {spec.name} 1.9.0 -->"
+        )
+        stale = agent_assets.stale_derived_agents(tmp_path, specs=(spec,))
+        assert [d.derived_version for d in stale] == ["1.9.0"]
+
+    def test_a_file_without_the_marker_is_ignored(self, tmp_path: Path) -> None:
+        self._tuned(tmp_path, "unrelated", None)
+        assert agent_assets.stale_derived_agents(tmp_path) == []
+
+    def test_an_unknown_origin_is_ignored(self, tmp_path: Path) -> None:
+        self._tuned(tmp_path, "x", "<!-- hooks-daemon-derived-from: hooks-daemon-nope 1.0.0 -->")
+        assert agent_assets.stale_derived_agents(tmp_path) == []
+
+    def test_a_malformed_version_is_ignored(self, tmp_path: Path) -> None:
+        spec = _spec(FACT_CHECKER_AGENT_NAME)
+        self._tuned(tmp_path, "x", f"<!-- hooks-daemon-derived-from: {spec.name} not-a-version -->")
+        assert agent_assets.stale_derived_agents(tmp_path) == []
+
+    def test_a_project_with_no_agents_directory_has_none(self, tmp_path: Path) -> None:
+        assert agent_assets.stale_derived_agents(tmp_path) == []

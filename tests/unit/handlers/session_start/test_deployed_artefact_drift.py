@@ -21,7 +21,9 @@ from claude_code_hooks_daemon.handlers.session_start.deployed_artefact_drift imp
 )
 from claude_code_hooks_daemon.install.agent_assets import (
     AGENTS_DIR_PARTS,
+    FACT_CHECKER_AGENT_NAME,
     SHIPPED_AGENTS,
+    spec_by_name,
     spec_source_path,
 )
 from claude_code_hooks_daemon.install.core_docs import (
@@ -198,3 +200,32 @@ class TestTheConfiguredPlanDirectoryIsHonoured:
         target.write_text("#!/bin/bash\n# hand-edited\n")
 
         assert MKPLAN_SCRIPT_NAME in "\n".join(_handle(tmp_path))
+
+
+class TestTunedCopies:
+    """A tuned copy that started from an older shipped version is reported (Plan 00531)."""
+
+    @staticmethod
+    def _tuned(root: Path, version: str) -> Path:
+        spec = spec_by_name(FACT_CHECKER_AGENT_NAME)
+        target = root.joinpath(*AGENTS_DIR_PARTS) / "my-fact-checker.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(f"<!-- hooks-daemon-derived-from: {spec.name} {version} -->\n# tuned\n")
+        return target
+
+    def test_an_older_derived_version_is_reported_with_how_to_catch_up(
+        self, tmp_path: Path
+    ) -> None:
+        spec = spec_by_name(FACT_CHECKER_AGENT_NAME)
+        self._tuned(tmp_path, "0.9.0")
+        text = "\n".join(_handle(tmp_path))
+        assert ".claude/agents/my-fact-checker.md" in text
+        assert f"{spec.name} v0.9.0" in text
+        assert f"v{spec.version}" in text
+        assert str(spec_source_path(spec)) in text
+        assert "hooks-daemon-derived-from" in text
+
+    def test_a_current_derived_version_is_silent(self, tmp_path: Path) -> None:
+        spec = spec_by_name(FACT_CHECKER_AGENT_NAME)
+        self._tuned(tmp_path, spec.version)
+        assert _handle(tmp_path) == []

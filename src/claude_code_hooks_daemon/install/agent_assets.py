@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -46,6 +47,16 @@ AGENTS_DIR_PARTS: Final[tuple[str, str]] = (".claude", "agents")
 #: Marker line embedded in every shipped agent so the deployed file itself
 #: names the revision it came from.
 AGENT_VERSION_MARKER_PREFIX: Final[str] = "<!-- hooks-daemon-agent-version:"
+
+#: Marker line a project-owned, tuned copy of a shipped agent carries, naming the
+#: shipped agent and the version it started from. It replaces the copy's
+#: ``hooks-daemon-agent-version`` line: the copy is the project's, so the only
+#: version it can honestly claim is the one it was derived from.
+DERIVED_FROM_MARKER_PREFIX: Final[str] = "<!-- hooks-daemon-derived-from:"
+_DERIVED_FROM_PATTERN: Final[re.Pattern[str]] = re.compile(
+    re.escape(DERIVED_FROM_MARKER_PREFIX)
+    + r"\s+(?P<origin>[\w-]+)\s+(?P<version>\d+(?:\.\d+)*)\s*-->"
+)
 
 #: Owner rw, group/other r — a definition that is read, never executed.
 _AGENT_FILE_MODE: Final[int] = 0o644
@@ -218,7 +229,13 @@ _DOCS_QA_HISTORIC_VERSIONS: Final[tuple[tuple[str, str], ...]] = (
 _DEDUPE_MD5: Final[str] = "3b732f40fe276a8d6ac65ebba2d3f615"
 _OPUS_SECURITY_MD5: Final[str] = "63f8d6aac7a46a6bbbf2fab643d9df6e"
 _DOCS_QA_MD5: Final[str] = "30a36b6ce0ce8bbe856dd3f4966a2b5d"
-_FACT_CHECKER_MD5: Final[str] = "67f6a215896282d743f7bc1c937ee5a5"
+_FACT_CHECKER_MD5: Final[str] = "c577ce77caa72314df4b6724b673ed46"
+
+#: v1.0.0 told a project to copy the agent to a name of its own, but the feed
+#: never dispatched that copy and nothing recorded which version it came from.
+_FACT_CHECKER_HISTORIC_VERSIONS: Final[tuple[tuple[str, str], ...]] = (
+    ("1.0.0", "67f6a215896282d743f7bc1c937ee5a5"),
+)
 
 SHIPPED_AGENTS: Final[tuple[AgentAssetSpec, ...]] = (
     AgentAssetSpec(
@@ -247,10 +264,11 @@ SHIPPED_AGENTS: Final[tuple[AgentAssetSpec, ...]] = (
     ),
     AgentAssetSpec(
         name=FACT_CHECKER_AGENT_NAME,
-        version="1.0.0",
+        version="1.1.0",
         md5=_FACT_CHECKER_MD5,
         gating_config_key="handlers.post_tool_use.plan_fact_check_feed.enabled",
         is_enabled=_fact_check_feed_enabled,
+        historic_versions=_FACT_CHECKER_HISTORIC_VERSIONS,
     ),
 )
 
@@ -339,6 +357,61 @@ def classify_agent(spec: AgentAssetSpec, project_root: Path) -> AgentAssetState:
     if deployed_md5 in spec.historic_md5s:
         return AgentAssetState.OUTDATED
     return AgentAssetState.CUSTOMISED
+
+
+@dataclass(frozen=True)
+class DerivedAgent:
+    """A project-owned copy of a shipped agent, tuned for the project.
+
+    Attributes:
+        path: The tuned copy under ``.claude/agents/``.
+        origin: The shipped agent the copy started from.
+        derived_version: The shipped version the copy records it started from.
+    """
+
+    path: Path
+    origin: AgentAssetSpec
+    derived_version: str
+
+    @property
+    def is_stale(self) -> bool:
+        """True when the shipped agent has moved past the version the copy started from."""
+        return _version_key(self.origin.version) > _version_key(self.derived_version)
+
+
+def derived_from_marker(spec: AgentAssetSpec) -> str:
+    """The marker line a tuned copy of ``spec`` carries, naming the version it started from."""
+    return f"{DERIVED_FROM_MARKER_PREFIX} {spec.name} {spec.version} -->"
+
+
+def _version_key(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in version.split("."))
+
+
+def stale_derived_agents(
+    project_root: Path, specs: tuple[AgentAssetSpec, ...] = SHIPPED_AGENTS
+) -> list[DerivedAgent]:
+    """Tuned copies in ``project_root`` whose shipped origin has a newer version.
+
+    Presence is the signal: a file counts only when it carries the
+    derived-from marker naming one of ``specs`` with a well-formed version.
+    Anything else in ``.claude/agents/`` is the project's own and is ignored.
+    """
+    agents_dir = project_root.joinpath(*AGENTS_DIR_PARTS)
+    if not agents_dir.is_dir():
+        return []
+    by_name = {spec.name: spec for spec in specs}
+    stale: list[DerivedAgent] = []
+    for path in sorted(agents_dir.glob(f"*{_MD_SUFFIX}")):
+        match = _DERIVED_FROM_PATTERN.search(path.read_text(encoding="utf-8", errors="replace"))
+        if match is None or match.group("origin") not in by_name:
+            continue
+        derived = DerivedAgent(
+            path=path, origin=by_name[match.group("origin")], derived_version=match.group("version")
+        )
+        if derived.is_stale:
+            stale.append(derived)
+    return stale
 
 
 def _customised_warning(spec: AgentAssetSpec, target: Path) -> str:

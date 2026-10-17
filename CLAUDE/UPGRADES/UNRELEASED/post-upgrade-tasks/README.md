@@ -91,6 +91,7 @@ This file's lower half should list the tasks currently in this directory, so an 
 | ---------------------------------------------------- | --------------- | ----------- | ---------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `01-clear-unproven-venvs.md`                         | other           | recommended | all        | List venvs with `list-venvs`, investigate each UNPROVEN one, remove it with `prune-venvs --unproven` once confirmed safe.   |
 | `02-commit-the-expected-version-and-provision-sh.md` | workflow-change | recommended | all        | Commit `daemon.expected_version` and `.claude/provision.sh`, so a fresh clone provisions and a pulled upgrade syncs itself. |
+| `03-tune-the-plan-fact-checker.md`                   | workflow-change | optional    | all        | Copy the generic fact-checker to a project-owned tuned agent, record its derived-from version, set `tuned_agent`.           |
 
 <!-- END TASK INDEX -->
 

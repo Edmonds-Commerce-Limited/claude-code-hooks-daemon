@@ -50,6 +50,8 @@ from claude_code_hooks_daemon.install.agent_assets import (
     AgentAssetSpec,
     AgentAssetState,
     classify_agent,
+    spec_source_path,
+    stale_derived_agents,
 )
 from claude_code_hooks_daemon.install.core_docs import (
     CORE_DOCS,
@@ -105,6 +107,7 @@ class DeployedArtefactDriftHandler(SessionStartHandlerBase):
 
         drifted = [
             *self._drifted_agents(project_root),
+            *self._drifted_tuned_copies(project_root),
             *self._drifted_core_docs(project_root),
             *self._drifted_plan_tooling(project_root),
         ]
@@ -149,6 +152,23 @@ class DeployedArtefactDriftHandler(SessionStartHandlerBase):
                     f"`{daemon_cli_command(f'agents install {spec.name} --force')}`"
                 )
         return entries
+
+    @staticmethod
+    def _drifted_tuned_copies(project_root: Path) -> list[str]:
+        """Project-owned tuned copies whose shipped origin has moved on.
+
+        A tuned copy is the project's, so the daemon never touches it; the only
+        useful thing to say is that the template it started from has a newer
+        version, and where to read it.
+        """
+        return [
+            f"{'/'.join(AGENTS_DIR_PARTS)}/{derived.path.name} — your tuned copy started "
+            f"from {derived.origin.name} v{derived.derived_version}; v{derived.origin.version} "
+            f"now ships. Compare it with {spec_source_path(derived.origin)}, port what "
+            f"helps, then update the copy's `hooks-daemon-derived-from` marker to "
+            f"v{derived.origin.version}"
+            for derived in stale_derived_agents(project_root)
+        ]
 
     @staticmethod
     def _agent_rel(spec: AgentAssetSpec) -> str:

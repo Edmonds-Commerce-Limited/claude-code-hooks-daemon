@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00531: project tuned plan fact checker](00531-project-tuned-plan-fact-checker/PLAN.md) - Not Started (owner request during the v3.70.0 release: the feed dispatches a project-tuned fact-checker, projects are told to tune it, and a tuned copy tracks the generic version it came from)
-
 - [00530: subagent tier enforcement follow up](00530-subagent-tier-enforcement-follow-up/PLAN.md) - Not Started (opened by the Plan 00472 build per its Fable rulings' section 3: confirm the Workflow advisor against a real payload, then decide the Workflow deny mode, `require_explicit` and the `CLAUDE_CODE_SUBAGENT_MODEL` flip from measured evidence)
 
 - [00529: owner decision on rust helpers from 00495 assessment](00529-owner-decision-on-rust-helpers-from-00495-assessment/PLAN.md) - Not Started (Plan 00495 Task 3.2 found no path that justifies a native helper, and one Python defect: the secret-file guard spends 1.2 s on a 115 KB Write; awaiting the owner's decision on the assessment's three recommendations)
@@ -201,6 +199,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00531: project tuned plan fact checker](Completed/00531-project-tuned-plan-fact-checker/PLAN.md) - Complete at `37dfd0b11` + the archiving commit (owner request during the v3.70.0 release: the feed dispatches the project's `tuned_agent`, the generic agent tells a project once how to tune it, and `deployed_artefact_drift` reports a tuned copy whose derived-from marker is behind the shipped template; release note 081, post-upgrade task 03)
+
 - [00495: performance improvement programme](Completed/00495-performance-improvement-programme/PLAN.md) - Complete at merges `25616d385`, `34a754e02`, `03ad00d3d` and `9b04a7e72` + the archiving commit (owner report: daemon startup and the status bar at session start got much slower; the ranked causes are fixed, a start-up budget gate guards against regression, and the Rust question is re-answered from new numbers with the owner decision filed as Plan 00529; release notes 066 to 070)
 
 - [00528: worktree guard stale binding](Completed/00528-worktree-guard-stale-binding/PLAN.md) - Complete at the fix commit + the archiving commit (md-viewer field report via the desktop team: a sub-agent bound to a probe worktree it had already removed was denied its report write into the main checkout; a binding whose worktree is gone is now dropped; release note 064)
@@ -242,8 +242,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00503: remove upgrade owner approval](Completed/00503-remove-upgrade-owner-approval/PLAN.md) - Complete at merge `6976bf009` + the archiving commit (owner request, #112: the exit-4 owner approval, `approve-upgrade`, the approval markers and `upgrade_approval_guard` removed; breaking items lead the exit-3 reading, large jumps get phasing advice, and an old config naming the guard still validates; release note 022 in UNRELEASED)
 
 - [00500: full qa timing and speed](Completed/00500-full-qa-timing-and-speed/PLAN.md) - Complete at merge `c02cf9838` + the archiving commit (owner request: per-step timing, a resumable and sharded gate, and the measured hot spots cut; total wall-clock deferred to the Actions runs, #107)
-
-- [00483: threat model conformance audit](Completed/00483-threat-model-conformance-audit/PLAN.md) - Complete at batch (c) `4981618fc` + the Task 3.2 re-probe `8e84e6b76` + the archiving commit (owner ruling: the daemon is guardrails, not armour; every guard, open ledger entry and uncovered corpus row checked against the careless-not-hostile threat model, the out-of-scope ones dismissed on record, the rest narrowed or filed as 00474 N400-N409)
 
 - [00499: write-protected paths, and the ccy.env.local.dist template](Completed/00499-write-protected-paths-and-ccy-env-local-dist/PLAN.md) - Complete at Phase 1b merge `64823600a` + the archiving commit (owner rulings: `ccy.env.local` is IaC-written only; an opt-in `write_protected_paths` guard denies every Write/Edit/Bash route onto a listed path, live-probed; the dist template was cancelled because ccy writes it)
 
@@ -312,11 +310,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 530 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 531 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 452 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 453 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 56 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 55 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
