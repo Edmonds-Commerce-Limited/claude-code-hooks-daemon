@@ -107,8 +107,16 @@ Follow-ups, not defects in the reviewers' judgement:
 - **N492 (E, non-defects)**: a non-UTF-8 agent definition raises out of the dispatch-tier recorder (one tier row lost),
   and a corrupted operator-signal file with a list `kind` logs an ERROR on every tool call.
 
-**Status**: N484 to N487 🔄 in progress (worktrees `worktree-rfix-gitc-protected`, `-yaml-remote-docs`,
-`-feed-litter`); N488 to N492 ⬜ open.
+**Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
+
+### N493 — the acceptance contract drove the idle-stop gate's "no cache" case against the host's live cache
+
+**Source**: the v3.70.0 release's post-merge `changed` run over `9513c3d45..891797f74`.
+`test_acceptance_contract.py` failed with `IdleWorkableIssueStopGateHandler … an ordinary stop with no cache: expected decision 'allow', got 'deny'`. The handler reads `untracked/workable-issues.json` from the real project,
+and the coordinator's `work-queue done` runs had just written a fresh cache naming #123. So the suite's verdict
+depended on the host's state, and any developer who had just closed a work-queue entry got a red suite.
+
+**Status**: 🔄 in progress (worktree `worktree-rfix-stopgate-isolation`).
 
 ### N479 to N483 — the v3.70.0 Claude Code changelog review (2.1.293 to 2.1.302): one adopt, four conflicts
 
@@ -145,7 +153,8 @@ and the per-document error is collapsed into a bare `failed`.
 **Expected**: the failure line names the cause (HTTP status or exception), and `--all` retries a transient failure
 with backoff before reporting it.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed (f9e8c9d9c, with N485): the failure line now names its cause, one bounded retry is made, and
+a read closes only the browser session it opened.
 
 ### N473 to N477 — the v3.70.0 code review (Step 10, run early) found five defects, all introduced this cycle
 
@@ -165,8 +174,7 @@ reworded by the N474 fix, and callout 028 is kept true by the N475 fix when it l
   one crate-context code excused the whole run. Fix: excused only when every error is crate-context.
   [Report](subagent-reports/261017-rfix-rust-mixed.md).
 - **N475 (B-D2)**: `comment_changelog` and `comment_size` missed a comment opened in an Edit fragment whose closer
-  is outside it, after the #75 fix made an unclosed opener read as code. Report:
-  `subagent-reports/261017-rfix-comment-fragment.md` (lands with the fix).
+  is outside it, after the #75 fix made an unclosed opener read as code. [Report](subagent-reports/261017-rfix-comment-fragment.md).
 - **N476 (C-D1)**: a zombie, or any kernel thread on a non-root host, counted as an unreadable process, so the
   start-time stale-venv cleanup never removed anything. Fix: both are skipped.
   [Report](subagent-reports/261017-rfix-venv-zombie.md).
@@ -174,7 +182,7 @@ reworded by the N474 fix, and callout 028 is kept true by the N475 fix when it l
   `write_protected_paths` (fail-open). Fix: the variable is substituted inside the word, quotes untouched.
   [Report](subagent-reports/261017-rfix-loop-quote.md).
 
-**Status**: N473 ✅ (0e260c873), N474 ✅ (0987c8120), N476 ✅ (09919b3b3), N477 ✅ (9f11bf65f); N475 🔄 in progress.
+**Status**: N473 ✅ (0e260c873), N474 ✅ (0987c8120), N475 ✅ (1adedfd7e), N476 ✅ (09919b3b3), N477 ✅ (9f11bf65f).
 
 ### N472 — main CI failed on the Plan 00472 merge: nine failures on Python 3.11 and 3.13, and a 3.12 leg cancelled at 101 minutes
 
