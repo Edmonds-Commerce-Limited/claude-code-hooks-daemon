@@ -1,5 +1,7 @@
 """Tests for the config YAML loader: C parser when present, never the unsafe loader."""
 
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -61,6 +63,45 @@ class TestSafeLoadYaml:
         path.write_text("k: v\n", encoding="utf-8")
         with path.open() as handle:
             assert yaml_loading.safe_load_yaml(handle) == {"k": "v"}
+
+
+class TestDeepNestingNeverReachesTheCParser:
+    """libyaml composes nesting recursively in C, with no recursion limit."""
+
+    def test_a_flow_document_nested_past_the_c_stack_raises_instead_of_crashing(self) -> None:
+        """A document deep enough to overflow libyaml's C stack must raise
+        RecursionError (which ``Config.load`` turns into ValueError), not kill
+        the process. Run in a child so a crash fails this test, not the run."""
+        program = (
+            "from claude_code_hooks_daemon.config.yaml_loading import safe_load_yaml\n"
+            "depth = 100_000\n"
+            "try:\n"
+            "    safe_load_yaml('[' * depth + ']' * depth)\n"
+            "except RecursionError:\n"
+            "    print('RecursionError')\n"
+        )
+        completed = subprocess.run(
+            [sys.executable, "-c", program], capture_output=True, text=True, timeout=120
+        )
+        assert completed.returncode == 0, completed.stderr
+        assert completed.stdout.strip() == "RecursionError"
+
+    def test_a_document_over_the_bracket_budget_uses_the_pure_python_loader(self) -> None:
+        """Flow depth cannot exceed the count of opening brackets, so a document
+        with more than the budget is parsed where depth is bounded."""
+        budget = yaml_loading.C_LOADER_MAX_OPEN_BRACKETS
+        text = "a: [" + ", ".join("[1]" for _ in range(budget)) + "]\n"
+        with patch.object(yaml_loading.yaml, "SafeLoader", wraps=yaml.SafeLoader) as spy:
+            assert len(yaml_loading.safe_load_yaml(text)["a"]) == budget
+        assert spy.call_count == 1
+
+    @pytest.mark.skipif(not yaml.__with_libyaml__, reason="PyYAML built without libyaml")
+    def test_an_ordinary_config_stays_on_the_c_loader(self) -> None:
+        """This repository's own config is far under the budget."""
+        config = Path(__file__).resolve().parents[3] / ".claude" / "hooks-daemon.yaml"
+        with patch.object(yaml_loading, "_C_SAFE_LOADER", wraps=yaml.CSafeLoader) as spy:
+            yaml_loading.safe_load_yaml(config.read_text(encoding="utf-8"))
+        assert spy.call_count == 1
 
 
 class TestConfigReadersUseTheSharedLoader:
