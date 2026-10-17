@@ -149,6 +149,40 @@ class TestCrateContextClassification:
         output = "error: aborting; see docs mentioning E0432 in passing\n"
         assert RustLintStrategy().is_tool_unavailable_output(output) is False
 
+    def test_crate_context_plus_type_error_is_a_finding(self) -> None:
+        output = (
+            "error[E0432]: unresolved import `crate::other`\n --> src/b.rs:1:5\n\n"
+            "error[E0308]: mismatched types\n --> src/b.rs:2:18\n\n"
+            "error: aborting due to 2 previous errors\n"
+        )
+        assert RustLintStrategy().is_tool_unavailable_output(output) is False
+
+    def test_crate_context_plus_syntax_error_is_a_finding(self) -> None:
+        output = (
+            "error[E0433]: failed to resolve: use of undeclared crate\n --> src/b.rs:1:5\n\n"
+            "error: expected one of `!` or `::`, found `}`\n --> src/b.rs:2:1\n"
+        )
+        assert RustLintStrategy().is_tool_unavailable_output(output) is False
+
+    def test_several_crate_context_errors_with_summary_lines_are_excused(self) -> None:
+        output = (
+            "error[E0432]: unresolved import `crate::a`\n --> src/b.rs:1:5\n\n"
+            "error[E0583]: file not found for module `c`\n --> src/b.rs:2:1\n\n"
+            "error: aborting due to 2 previous errors\n\n"
+            "Some errors have detailed explanations: E0432, E0583.\n"
+            "error: could not compile `x` (lib) due to 2 previous errors\n"
+        )
+        assert RustLintStrategy().is_tool_unavailable_output(output) is True
+
+    def test_crate_context_with_a_warning_is_excused(self) -> None:
+        output = "warning: unused variable: `x`\n\nerror[E0432]: unresolved import\n"
+        assert RustLintStrategy().is_tool_unavailable_output(output) is True
+
+    def test_shim_marker_wins_over_other_errors(self) -> None:
+        output = "error: 'clippy-driver' is not installed for the toolchain 'stable'.\n"
+        output += "error[E0308]: mismatched types\n"
+        assert RustLintStrategy().is_tool_unavailable_output(output) is True
+
     def test_rustup_shim_still_recognised(self) -> None:
         output = "error: 'clippy-driver' is not installed for the toolchain 'stable'.\n"
         assert RustLintStrategy().is_tool_unavailable_output(output) is True
