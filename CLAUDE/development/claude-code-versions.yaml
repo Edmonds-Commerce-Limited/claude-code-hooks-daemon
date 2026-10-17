@@ -85,3 +85,15 @@ releases:
       tag as N374 items 13 (Grep accepts `file_path` for `path`, which the
       path-keyed guards did not read) and 14 (256-character agent names in
       report filenames).
+  v3.70.0:
+    claude_code_version: unknown
+    evidence: ""
+    review_date: "2026-10-17"
+    reviewed_through: "2.1.302"
+    review_report: CLAUDE/Plan/00474-niggles-ledger-seventeen/subagent-reports/261017-claude-code-review-v3.70.0.md
+    note: >-
+      The release host ran Claude Code 2.1.302, but the hook contract
+      (contracts/claude-code-hooks/META.json) has not been re-audited at that
+      version, so 2.1.302 is not recorded as the tested version. The review
+      ran FROM 2.1.293 (v3.69.0's reviewed_through) to 2.1.302: one adopt row
+      and four conflict rows, filed as ledger 00474 N479 to N483.
