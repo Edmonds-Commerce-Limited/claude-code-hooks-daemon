@@ -263,7 +263,7 @@ def _is_inside_string(line: str, position: int) -> bool:
                 cursor += 1
             elif char == quote:
                 quote = ""
-        elif char in "\"`" or (char == "'" and _has_closing_quote(line, cursor + 1)):
+        elif char in '"`' or (char == "'" and _has_closing_quote(line, cursor + 1)):
             quote = char
         cursor += 1
     return bool(quote)
