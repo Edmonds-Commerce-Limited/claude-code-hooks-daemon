@@ -116,8 +116,9 @@ class RuleAssetSpec:
     Attributes:
         key: Filename stem; the deployed file is ``.claude/rules/<key>.md``.
         version: Version of the CURRENT body template.
-        description: Frontmatter ``description:`` value (the trigger, in
-            R7a's terms — what makes Claude Code load this rule).
+        description: Frontmatter ``description:`` value. Documentation for
+            a human reader only: it does not make Claude Code load the rule,
+            and ``paths:`` is the only frontmatter field that scopes it.
         body_template: The rule's pointer body (heading, trigger sentence,
             the rule in <=2 imperative lines, a link) with a single
             ``{directory_roles_link}`` placeholder. No frontmatter, no

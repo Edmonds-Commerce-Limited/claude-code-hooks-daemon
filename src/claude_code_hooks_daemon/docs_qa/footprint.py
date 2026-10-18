@@ -174,21 +174,16 @@ def _is_daemon_deployed(text: str) -> bool:
     return False
 
 
-def _read_instruction_file(path: Path) -> tuple[int, str] | None:
-    """``(size on disk, text)`` of ``path``, or None when it is not a readable file.
+def _read_instruction_file(path: Path) -> tuple[int, str]:
+    """``(size on disk, text)`` of ``path``.
 
     ``text`` is empty for a file over the size limit (it is never read).
+
+    Raises:
+        OSError: ``path`` is not a readable file (broken symlink, directory, ...).
     """
-    try:
-        size = path.stat().st_size
-        text = "" if size > FILE_SKIP_BYTES else path.read_text(encoding="utf-8", errors="replace")
-    except OSError as exc:
-        log_and_continue(
-            logger,
-            exc,
-            reason=f"{path} is not a readable file, so it cannot be an instruction file",
-        )
-        return None
+    size = path.stat().st_size
+    text = "" if size > FILE_SKIP_BYTES else path.read_text(encoding="utf-8", errors="replace")
     return size, text
 
 
@@ -266,7 +261,15 @@ class _Collector:
         if resolved in self._seen:
             return
         self._seen.add(resolved)
-        loaded = _read_instruction_file(resolved)
+        loaded: tuple[int, str] | None = None
+        try:
+            loaded = _read_instruction_file(resolved)
+        except OSError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"{resolved} is not a readable file, so it cannot be an instruction file",
+            )
         if loaded is None:
             return
         size, raw = loaded

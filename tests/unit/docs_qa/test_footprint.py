@@ -353,7 +353,9 @@ class TestDaemonDeployedMarkers:
     def test_marker_mentioned_in_prose_does_not_make_a_file_daemon_owned(
         self, root: Path, contract: InstructionsContract
     ) -> None:
-        _write(root / ".claude" / "rules" / "mine.md", "We cite hooks-daemon-rule-version: in prose.\n")
+        _write(
+            root / ".claude" / "rules" / "mine.md", "We cite hooks-daemon-rule-version: in prose.\n"
+        )
         assert _entry(_measure(root, contract), ".claude/rules/mine.md").proposable is True
 
 
@@ -400,9 +402,7 @@ class TestVendorAndExclusions:
         _write(root / "vendor" / "x" / "CLAUDE.md", "v\n")
         assert _measure(root, contract).entries == ()
 
-    def test_exclude_paths_are_not_walked(
-        self, root: Path, contract: InstructionsContract
-    ) -> None:
+    def test_exclude_paths_are_not_walked(self, root: Path, contract: InstructionsContract) -> None:
         _write(root / "gen" / "CLAUDE.md", "g\n")
         _write(root / "app" / "CLAUDE.md", "a\n")
         footprint = _measure_with(root, contract, exclude_paths=("gen/**",))

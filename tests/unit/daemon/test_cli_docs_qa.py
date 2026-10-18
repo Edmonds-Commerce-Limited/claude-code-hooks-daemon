@@ -664,16 +664,51 @@ class TestFootprint:
         assert cmd_docs_qa(_args(root, footprint=True)) == 0
         assert not (root / "untracked" / "docs-qa").exists()
 
-    @pytest.mark.parametrize("other", ["check_staged", "lint"])
+    @pytest.mark.parametrize("other", ["check_staged", "lint", "sweep"])
     def test_footprint_is_exclusive_with_other_actions(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str], other: str
     ) -> None:
         root = _scaffold(tmp_path)
         args = _args(root, footprint=True)
-        setattr(args, other, True if other == "check_staged" else root / "CLAUDE" / "Foo.md")
+        setattr(args, other, root / "CLAUDE" / "Foo.md" if other == "lint" else True)
 
         assert cmd_docs_qa(args) == 2
-        assert "--footprint" in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert "--footprint" in err
+        assert f"--{other.replace('_', '-')}" in err
+
+    def test_declared_vendor_dirs_hide_a_nested_claude_md(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = _scaffold(tmp_path)
+        (root / "thirdparty" / "pkg").mkdir(parents=True)
+        (root / "thirdparty" / "pkg" / "CLAUDE.md").write_text("vendored\n")
+        (root / "kept").mkdir()
+        (root / "kept" / "CLAUDE.md").write_text("ours\n")
+        (root / ".claude" / "hooks-daemon.yaml").write_text(
+            "version: '2.0'\nlayout:\n  vendor_dirs:\n    - thirdparty\n"
+        )
+
+        assert cmd_docs_qa(_args(root, footprint=True, json_output=True)) == 0
+        paths = [e["path"] for e in json.loads(capsys.readouterr().out)["entries"]]
+
+        assert "kept/CLAUDE.md" in paths
+        assert "thirdparty/pkg/CLAUDE.md" not in paths
+
+    def test_daemon_exclude_paths_hide_a_nested_claude_md(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = _scaffold(tmp_path)
+        (root / "skipme").mkdir()
+        (root / "skipme" / "CLAUDE.md").write_text("skipped\n")
+        (root / ".claude" / "hooks-daemon.yaml").write_text(
+            "version: '2.0'\ndaemon:\n  exclude_paths:\n    - 'skipme/**'\n"
+        )
+
+        assert cmd_docs_qa(_args(root, footprint=True, json_output=True)) == 0
+        paths = [e["path"] for e in json.loads(capsys.readouterr().out)["entries"]]
+
+        assert "skipme/CLAUDE.md" not in paths
 
     def test_parser_accepts_the_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(sys, "argv", ["hooks-daemon", "docs-qa", "--help"])
