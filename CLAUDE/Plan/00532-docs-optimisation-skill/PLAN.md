@@ -119,7 +119,7 @@ staleness advisory are named follow-ups there, outside this plan.
 
 ### Phase 3: Footprint measurement
 
-- [ ] ⬜ **Task 3.1**: `hooks-daemon docs-qa --footprint [--json]` (Q1 C), a
+- [x] ✅ **Task 3.1** (PHASE3_HASH): `hooks-daemon docs-qa --footprint [--json]` (Q1 C), a
   deterministic measurement that resolves, per the contract, what loads at
   session start (root and ancestor `CLAUDE.md`, `.claude/CLAUDE.md`,
   `CLAUDE.local.md`, unscoped rules found recursively, imports to the pinned
@@ -127,7 +127,7 @@ staleness advisory are named follow-ups there, outside this plan.
   line and byte totals against the contract's size guidance, the contract's
   audited version beside the installed Claude Code version, and the
   contract's `unmodelled` list.
-- [ ] ⬜ **Task 3.2**: Count but never propose (Q9 A): the daemon-injected
+- [x] ✅ **Task 3.2** (PHASE3_HASH): Count but never propose (Q9 A): the daemon-injected
   `<hooksdaemon>` block, daemon-deployed artefacts, `CLAUDE.local.md`, and
   user-scope files under `~/.claude/`.
 

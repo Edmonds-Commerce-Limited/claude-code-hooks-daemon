@@ -95,6 +95,15 @@ class InstructionsContract:
     unmodelled: tuple[Unmodelled, ...]
 
 
+def default_contract_dir() -> Path:
+    """The contract directory of the daemon checkout this module runs from.
+
+    This module sits at ``src/<package>/docs_qa/``, which holds in self-install
+    mode and in a client's ``.claude/hooks-daemon/`` clone alike.
+    """
+    return Path(__file__).resolve().parents[3] / CONTRACT_DIR_RELATIVE
+
+
 def heading_slug(heading: str) -> str:
     """Lowercase ``heading`` with every run of non-alphanumerics collapsed to one dash."""
     return _NON_SLUG_RE.sub("-", heading.lower()).strip("-")

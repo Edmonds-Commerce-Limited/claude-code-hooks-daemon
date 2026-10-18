@@ -18,6 +18,8 @@ def _args(
     check_staged: bool = False,
     lint: Path | None = None,
     json_output: bool = False,
+    footprint: bool = False,
+    installed_version: str | None = None,
 ) -> argparse.Namespace:
     return argparse.Namespace(
         project_root=project_root,
@@ -25,6 +27,8 @@ def _args(
         check_staged=check_staged,
         lint=lint,
         json_output=json_output,
+        footprint=footprint,
+        installed_version_reader=lambda: installed_version,
     )
 
 
@@ -601,3 +605,77 @@ class TestPlanTreeWiring:
 
         assert "does not exist" not in out
         assert "CLAUDE/Plan/Done/00413-done/PLAN.md" in out
+
+
+class TestFootprint:
+    """Plan 00532 Phase 3: ``docs-qa --footprint`` measures instruction files."""
+
+    @pytest.fixture(autouse=True)
+    def _home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+
+    def test_text_report_lists_files_versions_and_unmodelled(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = _scaffold(tmp_path)
+        (root / "CLAUDE.md").write_text("a\nb\n")
+
+        assert cmd_docs_qa(_args(root, footprint=True, installed_version="2.1.400")) == 0
+        out = capsys.readouterr().out
+
+        assert "CLAUDE.md" in out
+        assert "installed v2.1.400" in out
+        assert "claudeMdExcludes" in out
+
+    def test_json_report_parses_and_carries_the_audited_version(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = _scaffold(tmp_path)
+        (root / "CLAUDE.md").write_text("a\n")
+
+        assert cmd_docs_qa(_args(root, footprint=True, json_output=True)) == 0
+        payload = json.loads(capsys.readouterr().out)
+
+        assert payload["installed_version"] is None
+        assert payload["audited_version"]
+        assert payload["entries"][0]["path"] == "CLAUDE.md"
+
+    def test_documentation_enabled_is_read_from_config(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = _scaffold(tmp_path)
+        cmd_docs_qa(_args(root, footprint=True, json_output=True))
+        assert json.loads(capsys.readouterr().out)["documentation_enabled"] is False
+
+        (root / ".claude" / "hooks-daemon.yaml").write_text(
+            "version: '2.0'\ndocumentation:\n  enabled: true\n"
+        )
+        cmd_docs_qa(_args(root, footprint=True, json_output=True))
+        assert json.loads(capsys.readouterr().out)["documentation_enabled"] is True
+
+    def test_footprint_does_not_run_the_sweep_or_write_the_corpus_index(
+        self, tmp_path: Path
+    ) -> None:
+        root = _scaffold(tmp_path)
+        (root / "CLAUDE" / "Foo.md").write_text("[missing](Nope.md)\n")
+
+        assert cmd_docs_qa(_args(root, footprint=True)) == 0
+        assert not (root / "untracked" / "docs-qa").exists()
+
+    @pytest.mark.parametrize("other", ["check_staged", "lint"])
+    def test_footprint_is_exclusive_with_other_actions(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], other: str
+    ) -> None:
+        root = _scaffold(tmp_path)
+        args = _args(root, footprint=True)
+        setattr(args, other, True if other == "check_staged" else root / "CLAUDE" / "Foo.md")
+
+        assert cmd_docs_qa(args) == 2
+        assert "--footprint" in capsys.readouterr().err
+
+    def test_parser_accepts_the_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(sys, "argv", ["hooks-daemon", "docs-qa", "--help"])
+        with pytest.raises(SystemExit):
+            main()

@@ -8161,10 +8161,65 @@ def cmd_plan_qa(args: argparse.Namespace) -> int:
     return 1 if findings else 0
 
 
+def _docs_qa_footprint(
+    args: argparse.Namespace, project_root: Path, documentation_enabled: bool
+) -> int:
+    """Print the instruction-file footprint (Plan 00532 Phase 3).
+
+    Reads the vendored instruction-loading contract, so the counts follow how
+    the audited Claude Code version loads files. The installed version comes
+    from ``args.installed_version_reader`` when given (tests), else from the
+    probe ``contract_staleness`` uses.
+
+    Returns:
+        0 on success, 2 when combined with another action or when the
+        contract cannot be loaded.
+    """
+    from claude_code_hooks_daemon.docs_qa.footprint import format_footprint, measure_footprint
+    from claude_code_hooks_daemon.docs_qa.instructions_contract import (
+        InstructionsContractError,
+        default_contract_dir,
+        load_contract,
+    )
+    from claude_code_hooks_daemon.handlers.session_start.contract_staleness import (
+        ContractStalenessHandler,
+    )
+
+    if getattr(args, "check_staged", False) or getattr(args, "lint", None) is not None:
+        print(
+            "ERROR: --footprint cannot be combined with --check-staged or --lint", file=sys.stderr
+        )
+        return 2
+    try:
+        contract = load_contract(default_contract_dir())
+    except InstructionsContractError as exc:
+        print(f"ERROR: instruction-loading contract unusable: {exc}", file=sys.stderr)
+        return 2
+    reader = getattr(args, "installed_version_reader", None)
+    installed = (
+        reader() if reader is not None else ContractStalenessHandler().installed_version_reader()
+    )
+    footprint = measure_footprint(
+        project_root=project_root,
+        contract=contract,
+        installed_version=installed,
+        home_dir=Path.home(),
+        documentation_enabled=documentation_enabled,
+    )
+    if getattr(args, "json_output", False):
+        print(json.dumps(footprint.to_dict(), indent=2))
+    else:
+        print(format_footprint(footprint))
+    return 0
+
+
 def cmd_docs_qa(args: argparse.Namespace) -> int:
     """Run docs QA checks (Plan 00284): sweep or single-file lint.
 
     Actions (mutually exclusive; default ``--sweep``):
+
+    - ``--footprint``: measure which instruction files load at session start
+      and which on demand (Plan 00532); reads, never rebuilds the corpus.
 
     - ``--sweep``: rebuild the doc corpus and evaluate it (SWEEP-stage
       checks) — CI-able, exit 1 on any finding.
@@ -8211,6 +8266,8 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
         return 2
     project_root = resolved_root
     config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
+    if getattr(args, "footprint", False):
+        return _docs_qa_footprint(args, project_root, config.documentation.enabled)
     layout = ProjectLayout.from_config(config)
     # A declared `layout.vendor_dirs` must exclude a tree from the CLI sweep
     # too (Plan 00331) -- the sweep is the surface a human runs by hand, so
@@ -11687,6 +11744,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         default=None,
         help="Run edit-time checks against one doc file's on-disk content",
+    )
+    parser_docs_qa.add_argument(
+        "--footprint",
+        action="store_true",
+        help="Measure which instruction files load at session start vs on demand "
+        "(use --json for machine-readable output)",
     )
     parser_docs_qa.add_argument(
         "--json",
