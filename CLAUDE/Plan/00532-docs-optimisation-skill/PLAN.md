@@ -154,10 +154,10 @@ staleness advisory are named follow-ups there, outside this plan.
 
 ### Phase 5: Documentation and release
 
-- [ ] ⬜ **Task 5.1**: Point the core document and
+- [x] ✅ **Task 5.1** (60085de87): Point the core document and
   `CLAUDE/DocumentationStrategy.md` at the contract and the skill (pointers
   only, R1).
-- [ ] ⬜ **Task 5.2**: Release notes and any config-changes manifest entry in
+- [x] ✅ **Task 5.2** (60085de87): Release notes and any config-changes manifest entry in
   the pending-release holding area `CLAUDE/UPGRADES/UNRELEASED/`.
 
 ## Success Criteria
@@ -177,8 +177,9 @@ staleness advisory are named follow-ups there, outside this plan.
   `install/skills.py`, and on the fixture writes its proposal under
   `untracked/scratch/docs-optimise/` with no tracked file modified (tested
   by a clean `git status` after the run).
-- [ ] Release-bound consequences (new skill, new advisory, any new config key)
-  are recorded in the pending-release holding area `CLAUDE/UPGRADES/UNRELEASED/`.
+- [x] Release-bound consequences (new skill, new advisory, any new config key)
+  are recorded in the pending-release holding area `CLAUDE/UPGRADES/UNRELEASED/`
+  (release note 001; no config key, so no config-changes entry).
 - [ ] Targeted QA passes on the branch; the coordinator's full gate passes.
 
 ## Delivery & Milestones
