@@ -109,6 +109,22 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N513 to N515 — `docs-qa --footprint` edge cases from the Plan 00532 re-review
+
+**Source**: the pre-merge re-review of Plan 00532 (issue #123), which approved the merge with four minor findings; the
+fourth, a release-note overstatement, was corrected on main. All three below sit in
+`src/claude_code_hooks_daemon/docs_qa/footprint.py`.
+
+- **N513**: an unreadable entry (a dangling link, a directory named `x.md`) is skipped through `log_and_continue` at
+  WARNING with `exc_info`, so each one prints about twelve traceback lines to stderr on a run that succeeded. Log an
+  `OSError` at DEBUG, or without the traceback.
+- **N514**: `_COMMENT_OR_FENCE_RE` recognises only an unindented three-character fence, so an HTML comment inside an
+  indented fence (a list item) or a four-backtick fence is stripped as if Claude Code dropped it: a small undercount.
+- **N515**: `_is_daemon_deployed` scans the raw text, fences included, so a fenced example of a daemon marker makes the
+  whole file non-proposable. This only ever withholds a proposal (the safe direction).
+
+**Status**: ⬜ open.
+
 ### N512 — a Rust typo with no near neighbour is still excused as a crate-context error
 
 **Source**: the N500 fix's implementer ([report](subagent-reports/261017-rfix3-rust-typo.md)). rustc attaches its
