@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00490: github issue assignment guard](00490-github-issue-assignment-guard/PLAN.md) - Complete at `8846f9d77` + `bb9bf1a98` + the archiving commit (owner request: issue-tied work requires the issue assigned to the signed-in GitHub account and opened by an approved author; a deterministic `issue-validity` checker and CLI claim an unassigned issue and stop on someone else's; the CLI refuses with no author list configured)
+
 - [00483: threat model conformance audit](00483-threat-model-conformance-audit/PLAN.md) - Complete at batch (c) `4981618fc` + the Task 3.2 re-probe `8e84e6b76` + the archiving commit (owner ruling: the daemon is guardrails, not armour; every guard, open ledger entry and uncovered corpus row checked against the careless-not-hostile threat model, the out-of-scope ones dismissed on record, the rest narrowed or filed as 00474 N400-N409)
 
 - [00480: plan fact checker and debounce](00480-plan-fact-checker-and-debounce/PLAN.md) - Complete, the feed shipped in v3.69.0, with the N359 delivery fixes at merge `7aa463588` + the archiving commit (owner ruling after ledger 00474 N290: a Sonnet fact itemiser/verifier wired into plan QA through a first-class debounce; the final live run refuted a planted false claim delivered unasked)

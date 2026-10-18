@@ -1,6 +1,6 @@
 # Plan 00532: docs optimisation skill
 
-**Status**: In Progress (rulings recorded in RULINGS-fable.md; Fable rulings
+**Status**: Complete (rulings recorded in RULINGS-fable.md; Fable rulings
 under the owner's delegation, not owner rulings)
 **GitHub Issue**: #123
 **Created**: 2026-10-17
@@ -162,25 +162,28 @@ staleness advisory are named follow-ups there, outside this plan.
 
 ## Success Criteria
 
-- [ ] Every QUESTIONS.md question carries a recorded ruling.
-- [ ] The loading-rules contract exists, every fact cites its upstream anchor,
+- [x] Every QUESTIONS.md question carries a recorded ruling.
+- [x] The loading-rules contract exists, every fact cites its upstream anchor,
   and it names the Claude Code version it was audited against.
-- [ ] An installed Claude Code newer than that version produces a re-audit
+- [x] An installed Claude Code newer than that version produces a re-audit
   advisory; an equal or older one produces none (tested).
-- [ ] The R7a frontmatter wording and the `rules_file_shape` scope agree with
+- [x] The R7a frontmatter wording and the `rules_file_shape` scope agree with
   the contract, with tests.
-- [ ] `docs-qa --footprint` reports the session-start and on-demand footprint
+- [x] `docs-qa --footprint` reports the session-start and on-demand footprint
   of this repository and of a fixture client, prints the audited and
   installed versions and the `unmodelled` list, and excludes the daemon-owned
   block, `CLAUDE.local.md` and user-scope files from proposals.
-- [ ] The `docs-optimise` skill deploys to a client `.claude/skills/` through
+- [x] The `docs-optimise` skill deploys to a client `.claude/skills/` through
   `install/skills.py`, and on the fixture writes its proposal under
   `untracked/scratch/docs-optimise/` with no tracked file modified (tested
   by a clean `git status` after the run).
 - [x] Release-bound consequences (new skill, new advisory, any new config key)
   are recorded in the pending-release holding area `CLAUDE/UPGRADES/UNRELEASED/`
   (release note 001; no config key, so no config-changes entry).
-- [ ] Targeted QA passes on the branch; the coordinator's full gate passes.
+- [x] Targeted QA passes on the branch; the coordinator's full gate passes.
+- [x] Release-bound consequences are in the holding area: release note
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/001-docs-optimise-skill-and-instruction-footprint.md`
+  and truth change `CLAUDE/UPGRADES/UNRELEASED/truth-changes/v3.71.0.yaml`.
 
 ## Delivery & Milestones
 
@@ -188,4 +191,7 @@ staleness advisory are named follow-ups there, outside this plan.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00532-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Planned; decisions pending.
+- Merged to main at `36b63400c` (Addresses #123).
+- Open follow-ups: ledger 00474 N513 to N515, and the deferred items F1 to F4
+  named in RULINGS-fable.md.
+

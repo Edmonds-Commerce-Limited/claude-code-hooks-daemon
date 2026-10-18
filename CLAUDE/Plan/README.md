@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00532: docs optimisation skill](00532-docs-optimisation-skill/PLAN.md) - Not Started (#123, decisions pending in QUESTIONS.md: a daemon-shipped skill that restructures a client's instruction files for progressive disclosure, backed by a versioned Claude Code loading-rules contract with a re-audit signal)
-
 - [00530: subagent tier enforcement follow up](00530-subagent-tier-enforcement-follow-up/PLAN.md) - Not Started (opened by the Plan 00472 build per its Fable rulings' section 3: confirm the Workflow advisor against a real payload, then decide the Workflow deny mode, `require_explicit` and the `CLAUDE_CODE_SUBAGENT_MODEL` flip from measured evidence)
 
 - [00529: owner decision on rust helpers from 00495 assessment](00529-owner-decision-on-rust-helpers-from-00495-assessment/PLAN.md) - Not Started (Plan 00495 Task 3.2 found no path that justifies a native helper, and one Python defect: the secret-file guard spends 1.2 s on a 115 KB Write; awaiting the owner's decision on the assessment's three recommendations)
@@ -201,6 +199,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00532: docs optimisation skill](Completed/00532-docs-optimisation-skill/PLAN.md) - Complete at merges `bb3eb552b`, `92c07d7bb` and `36b63400c` + the archiving commit (#123: a versioned Claude Code instruction-loading contract with a re-audit advisory, `docs-qa --footprint`, and the `docs-optimise` proposal skill; release note 001, truth change v3.71.0; follow-ups are ledger 00474 N513 to N515 and the deferred items F1 to F4 in RULINGS-fable.md)
+
 - [00531: project tuned plan fact checker](Completed/00531-project-tuned-plan-fact-checker/PLAN.md) - Complete at `37dfd0b11` + the archiving commit (owner request during the v3.70.0 release: the feed dispatches the project's `tuned_agent`, the generic agent tells a project once how to tune it, and `deployed_artefact_drift` reports a tuned copy whose derived-from marker is behind the shipped template; release note 081, post-upgrade task 03)
 
 - [00495: performance improvement programme](Completed/00495-performance-improvement-programme/PLAN.md) - Complete at merges `25616d385`, `34a754e02`, `03ad00d3d` and `9b04a7e72` + the archiving commit (owner report: daemon startup and the status bar at session start got much slower; the ranked causes are fixed, a start-up budget gate guards against regression, and the Rust question is re-answered from new numbers with the owner decision filed as Plan 00529; release notes 066 to 070)
@@ -259,8 +259,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00492: docs fake values registry](Completed/00492-docs-fake-values-registry/PLAN.md) - Complete at `f6cb38ee0` + the QA fix-up + the archiving commit (owner ruling D1: one registry of approved fake values for docs, `.claude/fake-values.yaml`; an `unlisted-fake-value` docs QA check, a sensitive-content allowance for listed fakes only, and remote-docs swaps recorded in provenance as `value_swaps`; settles N309 and unblocks 00479 Task 1.1 and 00486 Task 1.3)
 
-- [00490: github issue assignment guard](Completed/00490-github-issue-assignment-guard/PLAN.md) - Complete at `8846f9d77` + `bb9bf1a98` + the archiving commit (owner request: issue-tied work requires the issue assigned to the signed-in GitHub account and opened by an approved author; a deterministic `issue-validity` checker and CLI claim an unassigned issue and stop on someone else's; the CLI refuses with no author list configured)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -314,9 +312,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 532 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 453 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 454 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 56 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 55 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
