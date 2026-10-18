@@ -119,9 +119,9 @@ fourth, a release-note overstatement, was corrected on main. All three below sit
   WARNING with `exc_info`, so each one prints about twelve traceback lines to stderr on a run that succeeded. Log an
   `OSError` at DEBUG, or without the traceback.
 - **N514**: `_COMMENT_OR_FENCE_RE` opens only on an unindented three-character fence (```` ``` ```` or `~~~`), so an
-  HTML comment inside an indented fence (a list item) is stripped as if Claude Code dropped it, and so is one after an
-  inner three-backtick line within a four-backtick fence, because that line closes the match early. A plain
-  four-backtick fence is unaffected. A small undercount.
+  HTML comment inside an indented fence (a list item) is stripped as if Claude Code dropped it, and so is one that follows an
+  unpaired inner three-backtick line within a four-backtick fence, because that line closes the match early (a paired
+  inner fence leaves the comment counted). A plain four-backtick fence is unaffected. A small undercount.
 - **N515**: `_is_daemon_deployed` scans the raw text, fences included, so a fenced example of a daemon marker makes the
   whole file non-proposable. This only ever withholds a proposal (the safe direction).
 
