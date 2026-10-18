@@ -102,17 +102,17 @@ staleness advisory are named follow-ups there, outside this plan.
   `META.json` version disagrees with the hooks contract's and with
   `claude-code-versions.yaml` (extend
   `tests/integration/test_claude_code_version_record.py`).
-- [ ] ⬜ **Task 1.4**: Reconcile the ruleset and checks with the contract:
+- [x] ✅ **Task 1.4** (90494d83b): Reconcile the ruleset and checks with the contract:
   R7a's frontmatter wording, `rules_file_shape`'s directory scope, and any
   other disagreement the population turns up, each as its own tested change.
 
 ### Phase 2: Re-audit trigger
 
-- [ ] ⬜ **Task 2.1**: Extend `contract_staleness` (Q5 D+E) to read the
+- [x] ✅ **Task 2.1** (4c9505a30): Extend `contract_staleness` (Q5 D+E) to read the
   instructions contract's `META.json` and, in the daemon repository only,
   produce one advisory per version when the installed Claude Code is newer
   than its audited version; the client branch is unchanged (follow-up F4).
-- [ ] ⬜ **Task 2.2**: Extend release Step 1c and the
+- [x] ✅ **Task 2.2** (4c9505a30): Extend release Step 1c and the
   `claude-code-changelog-reviewer` brief to flag instruction-loading changes
   against the contract, with the vendored page's hash in `META.json` as the
   evidence the refresh records.
