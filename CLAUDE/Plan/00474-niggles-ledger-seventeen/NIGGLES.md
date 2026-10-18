@@ -109,6 +109,25 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N510 and N511 — the v3.70.0 Step 8 gate failed on the coordinator's own tree activity
+
+**Source**: the v3.70.0 Step 8 run `full-gate-step8c` (2026-10-17), which failed while the next run on a still, staged
+tree passed 43/43.
+
+- **N510**: the `sensitive_content` QA checker reports a tracked file that is deleted in the working tree but not
+  staged as deleted as an `unreadable-file` violation ("Could not read file for content scan: [Errno 2] No such file or
+  directory"). The release's `git mv` moves out of `CLAUDE/UPGRADES/UNRELEASED/` had been unstaged so a fix branch
+  could merge, and the run failed with 87 such findings, which also marked `project_handlers` and `smoke_test` NOT
+  MEANINGFUL. A missing file has no content to leak: skip an unstaged deletion, or report it once as a tree-state
+  note.
+- **N511**: four heredoc probe tests (`test_heredoc_blanking_n42_shapes.py`, `test_heredoc_grammar_chain.py`) fail
+  with "a bash probe changed the test checkout" when the coordinator commits, or creates and deletes a branch, in the
+  same checkout during the run; the same files pass 218/218 in isolation. The gate already prints "NOT RECORDED FOR
+  THIS TREE: the working tree changed during the run", but the failures read as heredoc-handler defects. Either the
+  probe tests compare only what the probe could change, or the gate labels such failures as interference.
+
+**Status**: ⬜ open.
+
 ### N504 to N509 — the third delta review's edge cases (none release-blocking)
 
 **Source**: a code review of `98a3abdb0..d0fe01743 -- src/ tests/`
