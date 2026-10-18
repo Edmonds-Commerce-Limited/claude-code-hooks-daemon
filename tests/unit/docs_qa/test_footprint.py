@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -18,6 +19,7 @@ from claude_code_hooks_daemon.docs_qa.instructions_contract import (
     default_contract_dir,
     load_contract,
 )
+from claude_code_hooks_daemon.utils.vendor_paths import VendorScope
 
 
 @pytest.fixture(scope="module")
@@ -311,3 +313,159 @@ class TestReport:
         self, root: Path, contract: InstructionsContract
     ) -> None:
         assert "unknown" in format_footprint(_measure(root, contract, installed=None))
+
+
+def _measure_with(root: Path, contract: InstructionsContract, **options: Any) -> Footprint:
+    home = root.parent / "home"
+    home.mkdir(exist_ok=True)
+    return measure_footprint(
+        project_root=root,
+        contract=contract,
+        installed_version=None,
+        home_dir=home,
+        documentation_enabled=False,
+        **options,
+    )
+
+
+class TestDaemonDeployedMarkers:
+    """Files carrying a daemon ownership marker are counted, never proposed (Plan 00532 3.2)."""
+
+    @pytest.mark.parametrize(
+        "marker",
+        [
+            "<!-- hooks-daemon-rule-version: 1.0.0 -->",
+            "<!-- hooks-daemon-agent-version: 1.1.0 -->",
+            "# DAEMON-OWNED FILE - do not edit. Deployed by the installer.",
+        ],
+    )
+    def test_marked_rules_file_is_counted_not_proposable(
+        self, root: Path, contract: InstructionsContract, marker: str
+    ) -> None:
+        _write(
+            root / ".claude" / "rules" / "source-dirs.md",
+            f"---\ndescription: x\n---\n\n{marker}\n\nbody\n",
+        )
+        entry = _entry(_measure(root, contract), ".claude/rules/source-dirs.md")
+        assert entry.proposable is False
+        assert "daemon" in entry.not_proposable_reason
+
+    def test_marker_mentioned_in_prose_does_not_make_a_file_daemon_owned(
+        self, root: Path, contract: InstructionsContract
+    ) -> None:
+        _write(root / ".claude" / "rules" / "mine.md", "We cite hooks-daemon-rule-version: in prose.\n")
+        assert _entry(_measure(root, contract), ".claude/rules/mine.md").proposable is True
+
+
+class TestUnreadableEntries:
+    """A path that is not a readable file is skipped, not a traceback."""
+
+    def test_broken_symlink_in_rules_is_skipped(
+        self, root: Path, contract: InstructionsContract
+    ) -> None:
+        rules = root / ".claude" / "rules"
+        rules.mkdir(parents=True)
+        (rules / "dangling.md").symlink_to(root / "nowhere.md")
+        _write(root / "CLAUDE.md", "a\n")
+        assert [e.path for e in _measure(root, contract).entries] == ["CLAUDE.md"]
+
+    def test_directory_named_like_a_rule_is_skipped(
+        self, root: Path, contract: InstructionsContract
+    ) -> None:
+        (root / ".claude" / "rules" / "x.md").mkdir(parents=True)
+        _write(root / "CLAUDE.md", "a\n")
+        assert [e.path for e in _measure(root, contract).entries] == ["CLAUDE.md"]
+
+    def test_dangling_nested_claude_md_symlink_is_skipped(
+        self, root: Path, contract: InstructionsContract
+    ) -> None:
+        (root / "pkg").mkdir()
+        (root / "pkg" / "CLAUDE.md").symlink_to(root / "nowhere.md")
+        assert _measure(root, contract).entries == ()
+
+
+class TestVendorAndExclusions:
+    def test_declared_vendor_dir_is_not_walked(
+        self, root: Path, contract: InstructionsContract
+    ) -> None:
+        _write(root / "thirdparty" / "CLAUDE.md", "v\n")
+        _write(root / "app" / "CLAUDE.md", "a\n")
+        scope = VendorScope(root="", vendor_dirs=frozenset({"thirdparty"}), vendor_exceptions=())
+        footprint = _measure_with(root, contract, vendor_scopes=(scope,))
+        assert [e.path for e in footprint.entries] == ["app/CLAUDE.md"]
+
+    def test_default_vendor_dirs_skip_build_directories(
+        self, root: Path, contract: InstructionsContract
+    ) -> None:
+        _write(root / "vendor" / "x" / "CLAUDE.md", "v\n")
+        assert _measure(root, contract).entries == ()
+
+    def test_exclude_paths_are_not_walked(
+        self, root: Path, contract: InstructionsContract
+    ) -> None:
+        _write(root / "gen" / "CLAUDE.md", "g\n")
+        _write(root / "app" / "CLAUDE.md", "a\n")
+        footprint = _measure_with(root, contract, exclude_paths=("gen/**",))
+        assert [e.path for e in footprint.entries] == ["app/CLAUDE.md"]
+
+
+class TestOrdering:
+    def test_entries_are_launch_first_then_by_path(
+        self, root: Path, contract: InstructionsContract
+    ) -> None:
+        _write(root / "z" / "CLAUDE.md", "z\n")
+        _write(root / "a" / "CLAUDE.md", "a\n")
+        _write(root / ".claude" / "rules" / "b.md", "b\n")
+        _write(root / ".claude" / "rules" / "a.md", "a\n")
+        _write(root / "CLAUDE.md", "root\n")
+        assert [e.path for e in _measure(root, contract).entries] == [
+            ".claude/rules/a.md",
+            ".claude/rules/b.md",
+            "CLAUDE.md",
+            "a/CLAUDE.md",
+            "z/CLAUDE.md",
+        ]
+
+
+class TestPinnedFactsModelled:
+    def test_block_level_html_comments_are_not_counted(
+        self, root: Path, contract: InstructionsContract
+    ) -> None:
+        # G1-06: stripped before injection, so they cost no context.
+        _write(root / "CLAUDE.md", "intro\n<!--\nmulti\nline\n-->\n<!-- one -->\noutro\n")
+        entry = _entry(_measure(root, contract), "CLAUDE.md")
+        assert entry.lines == 2
+        assert entry.size_bytes == len("intro\noutro\n")
+
+    def test_inline_comment_and_fenced_comment_are_kept(
+        self, root: Path, contract: InstructionsContract
+    ) -> None:
+        _write(root / "CLAUDE.md", "text <!-- inline --> more\n```\n<!-- in fence -->\n```\n")
+        assert _entry(_measure(root, contract), "CLAUDE.md").lines == 4
+
+    def test_daemon_block_opening_comment_is_not_counted(
+        self, root: Path, contract: InstructionsContract
+    ) -> None:
+        _write(root / "CLAUDE.md", "<hooksdaemon>\n<!-- generated -->\nx\n</hooksdaemon>\n")
+        entry = _entry(_measure(root, contract), "CLAUDE.md")
+        assert entry.lines == 3
+        assert entry.daemon_block_lines == 3
+
+    def test_skip_threshold_uses_on_disk_size(
+        self, root: Path, contract: InstructionsContract
+    ) -> None:
+        _write(root / "CLAUDE.md", "<!--\n" + "x" * FILE_SKIP_BYTES + "\n-->\n")
+        assert _entry(_measure(root, contract), "CLAUDE.md").skipped is True
+
+    def test_user_scope_rule_with_paths_is_on_demand(
+        self, root: Path, contract: InstructionsContract
+    ) -> None:
+        # G3-04 and G3-09: path-scoped user rules do not load at session start.
+        home = root.parent / "home"
+        _write(home / ".claude" / "rules" / "scoped.md", '---\npaths:\n  - "src/**"\n---\nb\n')
+        _write(home / ".claude" / "rules" / "plain.md", "b\n")
+        footprint = _measure(root, contract)
+        by_name = {e.path.rsplit("/", 1)[-1]: e for e in footprint.entries}
+        assert by_name["scoped.md"].loads == "on-demand"
+        assert by_name["scoped.md"].proposable is False
+        assert by_name["plain.md"].loads == "launch"

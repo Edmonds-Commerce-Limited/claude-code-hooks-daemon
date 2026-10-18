@@ -10,13 +10,18 @@ Files that are counted but never proposed for edits (Plan 00532 Q9): the
 daemon-injected ``<hooksdaemon>`` block, daemon-deployed artefacts,
 ``CLAUDE.local.md``, ancestor-directory files and user-scope files.
 
+Block-level HTML comments are stripped before counting (fact G1-06) and
+path-scoped user rules count as on-demand (facts G3-04, G3-09).
+
 Not modelled (the contract's ``unmodelled`` list, printed with every report):
 ``claudeMdExcludes``, ``AGENTS.md`` selection, ``--add-dir`` and subagent
 ``omitClaudeMd``. A project using them gets an overcount.
 """
 
+import logging
 import os
 import re
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Final, Literal
@@ -24,8 +29,21 @@ from typing import Any, Final, Literal
 import yaml
 
 from claude_code_hooks_daemon.docs_qa.instructions_contract import InstructionsContract
+from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
+from claude_code_hooks_daemon.install.agent_assets import AGENT_VERSION_MARKER_PREFIX
+from claude_code_hooks_daemon.install.client_owned_assets import OWNERSHIP_MARKER
+from claude_code_hooks_daemon.install.directory_role_rules import RULE_VERSION_MARKER_PREFIX
 from claude_code_hooks_daemon.utils.authored_paths import authored_path
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
+from claude_code_hooks_daemon.utils.path_exclusion import is_path_excluded
+from claude_code_hooks_daemon.utils.vendor_paths import (
+    VendorScope,
+    is_vendored_path_in_scopes,
+    may_contain_vendor_exception_in_scopes,
+)
+
+logger = logging.getLogger(__name__)
 
 #: Fact G4-01: the per-CLAUDE.md-file size target, in lines.
 CLAUDE_MD_LINE_TARGET: Final[int] = 200
@@ -47,6 +65,14 @@ _UNWALKED_DIRS: Final[frozenset[str]] = frozenset({"node_modules", "untracked"})
 
 _FRONTMATTER_RE: Final[re.Pattern[str]] = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n", re.DOTALL)
 _DAEMON_BLOCK_RE: Final[re.Pattern[str]] = re.compile(r"<hooksdaemon>.*?</hooksdaemon>", re.DOTALL)
+#: A fenced block (kept verbatim) or a block-level HTML comment (stripped, fact G1-06).
+#: A comment shares its line with no other text; the tempered dot stops at the first
+#: close so a later ``-->`` cannot extend the match across prose.
+_COMMENT_OR_FENCE_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?P<fence>^(?P<ticks>```|~~~)[\s\S]*?^(?P=ticks)[^\n]*$)"
+    r"|(?P<comment>^[ \t]*<!--(?:(?!-->)[\s\S])*-->[ \t]*(?:\n|\Z))",
+    re.MULTILINE,
+)
 _FENCE_RE: Final[re.Pattern[str]] = re.compile(r"^(```|~~~).*?^\1[^\n]*$", re.DOTALL | re.MULTILINE)
 _CODE_SPAN_RE: Final[re.Pattern[str]] = re.compile(r"`[^`\n]*`")
 _IMPORT_RE: Final[re.Pattern[str]] = re.compile(r"(?<![\w@])@([^\s`<>()\[\]\"']+)")
@@ -127,6 +153,45 @@ class Footprint:
         }
 
 
+def _strip_block_comments(text: str) -> str:
+    """``text`` without the block-level HTML comments Claude Code strips (fact G1-06)."""
+    return _COMMENT_OR_FENCE_RE.sub(lambda m: m.group("fence") or "", text)
+
+
+def _is_daemon_deployed(text: str) -> bool:
+    """True when a line of ``text`` is one of the daemon's ownership markers.
+
+    The rule-version and agent-version markers are HTML comments; the
+    ``DAEMON-OWNED`` banner is a ``#`` comment. A line that only mentions the
+    marker in prose is not one.
+    """
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith((RULE_VERSION_MARKER_PREFIX, AGENT_VERSION_MARKER_PREFIX)):
+            return True
+        if stripped.startswith("#") and OWNERSHIP_MARKER in stripped:
+            return True
+    return False
+
+
+def _read_instruction_file(path: Path) -> tuple[int, str] | None:
+    """``(size on disk, text)`` of ``path``, or None when it is not a readable file.
+
+    ``text`` is empty for a file over the size limit (it is never read).
+    """
+    try:
+        size = path.stat().st_size
+        text = "" if size > FILE_SKIP_BYTES else path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"{path} is not a readable file, so it cannot be an instruction file",
+        )
+        return None
+    return size, text
+
+
 def _display(path: Path, project_root: Path) -> str:
     if path_is_relative_to(path, project_root):
         return path_relative_to(path, project_root).as_posix()
@@ -190,18 +255,30 @@ class _Collector:
         hop: int = 0,
         forced_reason: str = "",
         is_claude_md: bool = False,
+        scoped_role: str | None = None,
     ) -> None:
-        """Record ``path`` once; queue its imports when it loads at launch."""
+        """Record ``path`` once; queue its imports when it loads at launch.
+
+        ``scoped_role`` marks a rule file: when its frontmatter holds ``paths`` it is
+        recorded under that role and loads on demand (facts G3-04, G3-09).
+        """
         resolved = path.resolve()
         if resolved in self._seen:
             return
         self._seen.add(resolved)
+        loaded = _read_instruction_file(resolved)
+        if loaded is None:
+            return
+        size, raw = loaded
+        if scoped_role is not None and _is_scoped_rule(raw):
+            role, loads = scoped_role, "on-demand"
         display = _display(resolved, self.project_root)
-        reason = forced_reason or self._reason_for(display)
-        size = resolved.stat().st_size
+        reason = forced_reason or self._reason_for(display, raw)
         skipped = size > FILE_SKIP_BYTES
-        text = "" if skipped else resolved.read_text(encoding="utf-8", errors="replace")
+        text = _strip_block_comments(raw)
         lines = len(text.splitlines())
+        if not skipped:
+            size = len(text.encode("utf-8"))
         block = _DAEMON_BLOCK_RE.search(text)
         self.entries.append(
             FootprintEntry(
@@ -221,10 +298,14 @@ class _Collector:
             for target in _import_targets(text, resolved, self.home_dir):
                 self.add(target, "import", "launch", hop + 1)
 
-    def _reason_for(self, display: str) -> str:
+    def _reason_for(self, display: str, text: str) -> str:
         if display.startswith("/"):
             return "outside the repository"
-        if display == _DAEMON_DEPLOYED_FILE or display.startswith(_DAEMON_DEPLOYED_DIR):
+        if (
+            display == _DAEMON_DEPLOYED_FILE
+            or display.startswith(_DAEMON_DEPLOYED_DIR)
+            or _is_daemon_deployed(text)
+        ):
             return "daemon-deployed artefact"
         return ""
 
@@ -233,14 +314,35 @@ def _rule_files(rules_dir: Path) -> list[Path]:
     return sorted(rules_dir.rglob("*.md")) if rules_dir.is_dir() else []
 
 
-def _nested_claude_mds(project_root: Path) -> list[Path]:
+def _nested_claude_mds(
+    project_root: Path, vendor_scopes: Sequence[VendorScope], exclude_paths: Sequence[str]
+) -> list[Path]:
+    """Nested CLAUDE.md files outside vendored and project-excluded trees."""
+
+    def keep_dir(rel: str) -> bool:
+        return not is_vendored_path_in_scopes(
+            rel, vendor_scopes
+        ) or may_contain_vendor_exception_in_scopes(rel, vendor_scopes)
+
     found: list[Path] = []
     for directory, subdirs, files in os.walk(project_root):
+        here = Path(directory)
+        rel_dir = "" if here == project_root else path_relative_to(here, project_root).as_posix()
         subdirs[:] = sorted(
-            name for name in subdirs if not name.startswith(".") and name not in _UNWALKED_DIRS
+            name
+            for name in subdirs
+            if not name.startswith(".")
+            and name not in _UNWALKED_DIRS
+            and keep_dir(f"{rel_dir}/{name}".lstrip("/"))
         )
-        if _CLAUDE_MD in files and Path(directory) != project_root:
-            found.append(Path(directory) / _CLAUDE_MD)
+        if _CLAUDE_MD not in files or not rel_dir:
+            continue
+        rel_file = f"{rel_dir}/{_CLAUDE_MD}"
+        if is_vendored_path_in_scopes(rel_file, vendor_scopes) or is_path_excluded(
+            rel_file, exclude_paths, project_root=""
+        ):
+            continue
+        found.append(here / _CLAUDE_MD)
     return found
 
 
@@ -268,6 +370,8 @@ def measure_footprint(
     installed_version: str | None,
     home_dir: Path,
     documentation_enabled: bool,
+    vendor_scopes: Sequence[VendorScope] | None = None,
+    exclude_paths: Sequence[str] = (),
 ) -> Footprint:
     """Measure what loads at session start and what loads on demand.
 
@@ -279,11 +383,16 @@ def measure_footprint(
         documentation_enabled: Whether the project opted into the daemon's
             documentation ruleset; carried through so the report states which
             ruleset a proposal falls under (Plan 00532 Q6).
+        vendor_scopes: The project's declared vendor scopes; nested CLAUDE.md files
+            under a vendored directory are not walked. None keeps the canonical
+            build/vendor directory names.
+        exclude_paths: The project-wide ``daemon.exclude_paths`` globs.
 
     Returns:
         The footprint, entries ordered launch-first then by path.
     """
     root = project_root.resolve()
+    scopes = DocumentationPolicy.vendor_scopes if vendor_scopes is None else vendor_scopes
     collector = _Collector(root, home_dir.resolve())
 
     for ancestor in sorted(root.parents, key=lambda p: len(p.parts)):
@@ -307,22 +416,21 @@ def measure_footprint(
         )
 
     for rule in _rule_files(root / _DOT_CLAUDE / _RULES_DIR):
-        scoped = _is_scoped_rule(rule.read_text(encoding="utf-8", errors="replace"))
-        collector.add(
-            rule, "scoped-rule" if scoped else "rule", "on-demand" if scoped else "launch"
-        )
+        collector.add(rule, "rule", "launch", scoped_role="scoped-rule")
 
     user_reason = "user-scope file outside the repository"
     user_claude = _file_in(home_dir, f"{_DOT_CLAUDE}/{_CLAUDE_MD}")
     if user_claude is not None:
         collector.add(user_claude, "user-claude-md", "launch", forced_reason=user_reason)
     for rule in _rule_files(home_dir / _DOT_CLAUDE / _RULES_DIR):
-        collector.add(rule, "user-rule", "launch", forced_reason=user_reason)
+        collector.add(
+            rule, "user-rule", "launch", forced_reason=user_reason, scoped_role="user-scoped-rule"
+        )
 
-    for nested in _nested_claude_mds(root):
+    for nested in _nested_claude_mds(root, scopes, exclude_paths):
         collector.add(nested, "nested-claude-md", "on-demand", is_claude_md=True)
 
-    entries = sorted(collector.entries, key=lambda entry: (entry.loads != "launch",))
+    entries = sorted(collector.entries, key=lambda entry: (entry.loads != "launch", entry.path))
     return Footprint(
         audited_version=contract.meta.last_audited_claude_code_version,
         installed_version=installed_version,
