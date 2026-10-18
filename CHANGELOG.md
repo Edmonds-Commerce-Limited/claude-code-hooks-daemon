@@ -5,6 +5,68 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.70.0] - 2026-10-17
+
+_A start-up-speed, venv-hygiene and guard-precision release. The pre-deploy upgrade gate loses its owner-approval stop (Plan 00503); the daemon binds its socket before non-essential start-up work and parses its config once (Plan 00495); venvs are judged by one staleness rule and the ones it cannot prove stale are surfaced (Plan 00517); sub-agent spend and model tiers are measured and advised on (Plans 00471, 00472); and a new opt-in `write_protected_paths` handler keeps listed files read-only for agents (Plan 00499). `breaking: false` in the config-changes manifest, but the removals below are documented in the upgrade guide `CLAUDE/UPGRADES/v3/v3.69.0-to-v3.70.0/`. Three post-upgrade tasks apply (two recommended, one optional)._
+
+### Added
+
+- `write_protected_paths` (opt-in, off by default, inert without `options.paths`): agents may read but never create, change, move onto or delete a listed path, by `Write`, `Edit`, `NotebookEdit` or any Bash route (Plan 00499; Addresses #88).
+- `subagent_full_qa_blocker` takes `options.exempt_agent_types`, so a dedicated QA agent may run the full gate one run at a time; the new silent `agent_dispatch_recorder` records each named dispatch's agent type (Plan 00518).
+- Sub-agent spend is measured and advised on: `subagent_context_budget` (soft handoff advice, optional hard limit), a resume guard for cold large agents, a handoff gate at stop, and a spend ledger, read with `hooks-daemon spend` and shown by the `spend_meter` status segment (Plan 00471). The model each sub-agent runs on is recorded by `dispatch_model_recorder` and a cheaper tier is suggested; `hooks-daemon tiers` reports the measurements (Plan 00472).
+- `operator_signal_notice` (PostToolUse, enabled by default) delivers a host reboot or shutdown warning to an agent in the middle of a long turn (Plan 00508).
+- `idle_workable_issue_stop_gate` refuses an idle stop while a workable issue exists and nothing is in flight (`R-STOP-IDLE-WITH-WORKABLE-ISSUE`) (Plan 00470).
+- `unproven_venv_advisor` (SessionStart) lists venvs the code cannot prove stale, with the exact `prune-venvs --unproven` command; `prune-venvs --stale` and `--unproven PATH` replace the removed flag (Plan 00517).
+- `persistent_crons.initial_thread_only` (default `true`): only a session's initial thread must hold the declared crons (Plan 00470).
+- `llm_qa.py` gains an `inline_suppressions` gate that fails a suppression carrying no reason, runs every static detector before the tests, and explains any rule ID with `--explain` (Plan 00484).
+- `hooks-daemon exceptions` lists what exempts something from a guard, and `hooks-daemon probe <event> --only <handler>` runs one handler alone; `defences` carries a `defect_class` and a `kind` per row and lists three batch checkers (Plan 00484).
+- A `$` spend-limit chip in the status-line usage segment, a visible `USAGE CEILING SUPPRESSED` signal while the owner override is in force, and an opt-in commit block for the fake-values registry (Plans 00474, 00479).
+- The daemon ships a project-neutral `hooks-daemon-plan-fact-checker` agent, which a project can tune and be told when the template moves (Plans 00474, 00531).
+- `claude_code_hooks_daemon.utils.deliberate_swallow.log_and_continue(logger, exc, reason=...)`, the one accepted form of a deliberate log-and-continue (Plan 00474).
+- `idle_housekeeping_advisory` also reports old scratch files and changed-green refs of deleted branches (Plan 00470).
+- `provision.sh` syncs a daemon clone at another version than the project expects, and a pulled `daemon.expected_version` upgrade syncs itself in the background (Plan 00477).
+- `init.sh` names each daemon-down state (`VENV BUILDING`, `VENV MISSING`, `VERSION MISMATCH`, `NOT PROVISIONED`), and a fresh clone of the daemon's own repository builds its venv with no manual step (Plan 00488).
+- `tdd_enforcement` finds the Maven/Gradle test source set (Plan 00520), and `qa_suppression` also blocks gosec `nosec` (Plan 00527).
+- `remote-docs refresh` says why a document failed, retries once, and keeps each document's recorded fidelity (Plans 00474, 00504).
+- The host status-line segment shows the session role as `role@host` (Plan 00474).
+
+### Changed
+
+- **An upgrade no longer waits for the project owner's approval.** What used to need it (a MAJOR bump, a `breaking: true` manifest, a `critical` pre-upgrade task found in the project, an unreadable installed version) is listed first under "READ THIS FIRST" in the reading the gate already stops on; a large jump also prints phasing advice (Plan 00503; Addresses #112).
+- The daemon binds its socket before the non-essential start-up work, parses its config once on the C YAML parser, discovers the handler registry once per process, caches the docs and plan QA session-start sweeps, and skips the markdown formatter when the regenerated CLAUDE.md block is unchanged (Plan 00495).
+- `destructive_git`, `git_stash`, `curl_pipe_shell`, `worktree_file_copy` and `root_recursion_guard` judge what a command runs rather than text it mentions (Plan 00483).
+- `error_hiding_blocker` blocks a `suppress()` naming `Exception` or `BaseException` (Plan 00474).
+- `branch_count_advisor` and `merge_qa_advisor` treat `agent-*` dispatch branches as work branches (Plan 00474).
+- `/hooks-daemon optimise` no longer recommends `daemon_stats` outside the daemon's own repository (Plan 00474).
+- An upgrade removes stale venvs only on a positive finding, restores dropped opt-in handlers before it restarts the daemon, and every venv build rebuilds a venv made for an older lock (Plans 00474, 00517).
+- The installed daemon version is read from `version.py`, not venv metadata (Plan 00517).
+- The deny text no longer claims batched tool calls were cancelled; every deny carries one `To disable:` footer; more denials print a `BLOCKED [R-...]` identifier; `verdicts.jsonl` records the rule ID (Plans 00474, 00484, 00511).
+- Worktree events get a budget longer than their git call (Plan 00512).
+- The vendored hooks contract matches the current upstream hooks doc (Plan 00474).
+- `hooks-daemon defences --json` lists only the content and commit gates (the Defences), so its row count drops sharply; use `explain-rule --list` for every rule, and skip that listing's new last pointer line when parsing it as TSV (Plan 00484).
+
+### Fixed
+
+- A venv cache miss no longer costs the probe's full five-second timeout (Plan 00500).
+- The status line no longer goes blank while the daemon is down, and keeps the context figure on a narrow terminal (Plans 00488, 00474).
+- `tdd_enforcement` checks a worktree's own test against a declared `test_path_map` (Addresses #74), no longer gates a `Write` over an existing file, and handles Go per package (Plans 00505, 00521, 00527).
+- `comment_size` and `comment_changelog` no longer read an unclosed `/*` as a comment to the end of the file (Plan 00506; Addresses #75).
+- `lint_on_edit` checks a Rust file as a module of its own crate (Plan 00507; Addresses #76, #89), no longer denies half a Go change, and no longer denies a valid Ansible task or handler file (Plans 00527, 00474; Addresses #121).
+- `staged_lint_gate` vets Go from its module root (Plan 00525); the conflict-marker gate scans only what the commit records (Plan 00474).
+- `list-venvs` and `prune-venvs` name the venv in use, and `prune-venvs` never selects the running venv (Plans 00474, 00517; Addresses #120).
+- The markdown formatter keeps GitHub footnotes (Addresses #122), honours `exclude_paths`, and leaves nested checkouts alone (Plans 00474, 00509); the docs QA edit lint skips nested checkouts and gitignored files (Plan 00510).
+- The plan fact-check feed names real files and no longer loses a check (Plan 00474); `issue_filing_gate` reads `gh` flags from shell words; a quoted heredoc fed to `git merge` is read as data (Plan 00474).
+- A git failure at daemon start is reported as git, not as an invalid configuration; a deeply nested config no longer kills the daemon (Plan 00474).
+- A Stop re-entry with an unreadable transcript is allowed, and a substituted test interpreter no longer trips the upgrade guard (Plan 00474).
+- `subagent_worktree_write_guard` binds on a first write from outside the repository and forgets a removed worktree; `worktree-reap` gives the removal time to finish (Plans 00474, 00528).
+- `lsp_enforcement` judges a bare directory search by the files it holds (Plan 00527).
+- Also fixed (Plan 00474): the Effort Source OK line reports what modelSettings holds; plan QA's unindexed-row finding states the accepted row forms; the merge QA report places a merge by the directory it runs in; a full_words-only `full_qa_patterns` entry judges operands as words; opening the compact summary no longer defers the post-compact resume; retiring an archived plan keeps live goals; fewer inline-code advisories; the secret-file guard judges a large script Write faster.
+
+### Removed
+
+- The upgrade owner-approval tier: the `upgrade_approval_guard` handler with its rules `R-UPGRADE-APPROVAL-AGENT` and `R-UPGRADE-APPROVAL-ENV-BYPASS`, the `hooks-daemon approve-upgrade` command, exit code 4 of the pre-deploy gate and the `upgrade-approvals/` markers. A config that still names `upgrade_approval_guard:` keeps validating (Plan 00503).
+- `prune-venvs --all-except-current`; use `--stale` (Plan 00517).
+
 ## [3.69.0] - 2026-10-08
 
 _A guard-correctness, autonomy-control and supervisor-extension release. The secret, quarantine and containment guards now deny only on a positive finding, judged against a cached index of protected files (Plan 00483); a project can say where the work-driving machinery may run with a top-level `autonomy:` block (Plan 00498); the ccy supervisor gains a stdlib-only plugin API, shipped as BETA (Plan 00487); GitHub issue work can be validated and claimed in code (Plan 00490); and the full QA gate gains per-step timing, resume and shards (Plan 00500). `breaking: false` - no config key is renamed or removed and no handler is removed, so no upgrade guide beyond the per-release material is needed. One recommended post-upgrade task applies to `strict_mode` projects. Session usage limits need ccy 3.82.1 or later._

@@ -1,7 +1,7 @@
 # Drafted by Plan 00499. The VERSION in the filename and the `version:` key are
 # a target, not a decision; the release agent confirms or renames this file.
 version: "3.70.0"
-date: "UNRELEASED"
+date: "2026-10-17"
 
 breaking: false
 
@@ -338,6 +338,119 @@ config_changes:
               priority: 33
       migration_note: >-
         On by default; it never blocks.
+    - key: handlers.post_tool_use.plan_fact_check_feed.options.tuned_agent
+      recommended: false
+      dormant: true
+      description: >-
+        NEW (Plan 00531). Name of the project's tuned copy of the plan
+        fact-checker agent under `.claude/agents/`. Empty (the default) uses
+        the generic `hooks-daemon-plan-fact-checker`. A name that is not a safe
+        agent name, or whose definition is not deployed, falls back to the
+        generic agent with a warning.
+      example_yaml: |
+        handlers:
+          post_tool_use:
+            plan_fact_check_feed:
+              options:
+                tuned_agent: my-plan-fact-checker
+      migration_note: >-
+        Opt in after tuning the checker; see post-upgrade task 03
+        (tune-the-plan-fact-checker).
+    - key: handlers.post_tool_use.operator_signal_notice
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00508). Delivers a pending host reboot or shutdown warning to
+        an agent at the next tool boundary, so a long turn is not the last to
+        hear it. Advisory only; silent unless a signal is pending; never
+        touches the signal file.
+      example_yaml: |
+        handlers:
+          post_tool_use:
+            operator_signal_notice:
+              enabled: true
+              priority: 38
+      migration_note: >-
+        On by default; set `enabled: false` to silence it.
+    - key: handlers.stop.idle_workable_issue_stop_gate
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00470). Refuses an idle stop while a fresh workable-issues
+        cache lists an issue and nothing is in flight (R-STOP-IDLE-WITH-WORKABLE-ISSUE).
+        Inert unless the project declares an `issue-sdlc` persistent cron job;
+        never terminal. Options `job_id` (default `issue-sdlc`),
+        `max_cache_age_hours` (2) and `marker_expiry_hours` (24).
+      example_yaml: |
+        handlers:
+          stop:
+            idle_workable_issue_stop_gate:
+              enabled: true
+              priority: 4
+              options:
+                job_id: issue-sdlc
+                max_cache_age_hours: 2
+                marker_expiry_hours: 24
+      migration_note: >-
+        On by default and inert without an `issue-sdlc` cron. Set
+        `enabled: false` if you declare one and do not want stops refused.
+    - key: handlers.user_prompt_submit.idle_housekeeping_advisory.options.stale_scratch_days
+      recommended: false
+      dormant: false
+      description: >-
+        NEW (Plan 00470, callout 014). Age in days beyond which a file under
+        `untracked/scratch/` is reported by the idle housekeeping advisory
+        (default 14). Report only; nothing is removed.
+      example_yaml: |
+        handlers:
+          user_prompt_submit:
+            idle_housekeeping_advisory:
+              options:
+                stale_scratch_days: 14
+      migration_note: >-
+        Only matters where `idle_housekeeping_advisory` is enabled (off by
+        default).
+    - key: handlers.user_prompt_submit.idle_housekeeping_advisory.options.report_stale_scratch
+      recommended: false
+      dormant: false
+      description: >-
+        NEW (Plan 00470, callout 014). Default `true`: report old scratch
+        files. `false` turns that report off.
+      example_yaml: |
+        handlers:
+          user_prompt_submit:
+            idle_housekeeping_advisory:
+              options:
+                report_stale_scratch: true
+    - key: handlers.user_prompt_submit.idle_housekeeping_advisory.options.report_gone_branch_refs
+      recommended: false
+      dormant: false
+      description: >-
+        NEW (Plan 00470, callout 014). Default `true`: report changed-green
+        refs of deleted branches. `false` turns that report off.
+      example_yaml: |
+        handlers:
+          user_prompt_submit:
+            idle_housekeeping_advisory:
+              options:
+                report_gone_branch_refs: true
+    - key: handlers.post_tool_use.markdown_table_formatter.options.exclude_paths
+      recommended: false
+      dormant: false
+      description: >-
+        NEW (Plan 00509, callout 032). Gitignore-style globs of markdown files
+        the formatter leaves alone, added to the project-wide
+        `daemon.exclude_paths`. Default empty. A `.md` file in a nested,
+        separately versioned git checkout is skipped regardless.
+      example_yaml: |
+        handlers:
+          post_tool_use:
+            markdown_table_formatter:
+              options:
+                exclude_paths:
+                  - docs/generated/**
+      migration_note: >-
+        Use it for generated or hand-formatted markdown.
   renamed: []
   removed:
     - key: handlers.pre_tool_use.upgrade_approval_guard

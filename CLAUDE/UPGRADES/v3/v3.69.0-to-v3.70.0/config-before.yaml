@@ -1,0 +1,13 @@
+# Configuration before the v3.70.0 upgrade
+# Shows the handler key that v3.70.0 retires.
+
+version: "1.0"
+
+handlers:
+  pre_tool_use:
+    destructive_git:
+      enabled: true
+      priority: 10
+
+    upgrade_approval_guard: # retired in v3.70.0
+      enabled: true
