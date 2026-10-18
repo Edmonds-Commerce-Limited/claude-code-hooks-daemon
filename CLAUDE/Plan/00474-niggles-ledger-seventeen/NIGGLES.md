@@ -109,6 +109,16 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N512 — a Rust typo with no near neighbour is still excused as a crate-context error
+
+**Source**: the N500 fix's implementer ([report](subagent-reports/261017-rfix3-rust-typo.md)). rustc attaches its
+similar-name suggestion only when a close match exists, so `#[serd(...)]` (no near neighbour in std) produces an
+uncoded "cannot find attribute" error with no suggestion, which `rust_strategy.is_tool_unavailable_output` still
+excuses: the typo passes `lint_on_edit` with an advisory. The other side of N506's trade-off; a fix probably needs the
+crate's declared dependencies (Cargo.toml) to tell an unknown external name from a misspelt one.
+
+**Status**: ⬜ open.
+
 ### N510 and N511 — the v3.70.0 Step 8 gate failed on the coordinator's own tree activity
 
 **Source**: the v3.70.0 Step 8 run `full-gate-step8c` (2026-10-17), which failed while the next run on a still, staged
