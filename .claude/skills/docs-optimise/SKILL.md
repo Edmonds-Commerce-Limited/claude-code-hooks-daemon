@@ -20,8 +20,9 @@ rules it applies are cited, not restated:
 
 ## What to do
 
-1. Measure first: `hooks-daemon docs-qa --footprint --json`. It lists what
-   loads at session start versus on demand, with line and byte totals.
+1. Measure first: run `.claude/skills/docs-optimise/scripts/footprint.sh`
+   (it wraps `docs-qa --footprint --json`). It lists what loads at session
+   start versus on demand, with line and byte totals.
 2. Follow [references/procedure.md](references/procedure.md) to classify each
    always-loaded section and write the proposal.
 3. Tell the user where the proposal is and how to apply the patch.

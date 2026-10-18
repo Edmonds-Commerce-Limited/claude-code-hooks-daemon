@@ -18,7 +18,8 @@ The report's first lines state which ruleset applied and why.
 
 ## 2. Measure
 
-Run `hooks-daemon docs-qa --footprint --json`. Work only from entries with
+Run `.claude/skills/docs-optimise/scripts/footprint.sh` (it wraps
+`docs-qa --footprint --json`). Work only from entries with
 `proposable: true`. Entries with `proposable: false` (the daemon-injected
 `<hooksdaemon>` block, daemon-deployed artefacts, `CLAUDE.local.md`, and
 user-scope files under `~/.claude/`) are counted in the totals and named in the

@@ -8161,9 +8161,7 @@ def cmd_plan_qa(args: argparse.Namespace) -> int:
     return 1 if findings else 0
 
 
-def _docs_qa_footprint(
-    args: argparse.Namespace, project_root: Path, documentation_enabled: bool
-) -> int:
+def _docs_qa_footprint(args: argparse.Namespace, project_root: Path, config: Config) -> int:
     """Print the instruction-file footprint (Plan 00532 Phase 3).
 
     Reads the vendored instruction-loading contract, so the counts follow how
@@ -8175,6 +8173,7 @@ def _docs_qa_footprint(
         0 on success, 2 when combined with another action or when the
         contract cannot be loaded.
     """
+    from claude_code_hooks_daemon.core.workspace import ProjectRegistry
     from claude_code_hooks_daemon.docs_qa.footprint import format_footprint, measure_footprint
     from claude_code_hooks_daemon.docs_qa.instructions_contract import (
         InstructionsContractError,
@@ -8185,9 +8184,14 @@ def _docs_qa_footprint(
         ContractStalenessHandler,
     )
 
-    if getattr(args, "check_staged", False) or getattr(args, "lint", None) is not None:
+    if (
+        getattr(args, "check_staged", False)
+        or getattr(args, "lint", None) is not None
+        or getattr(args, "sweep", False)
+    ):
         print(
-            "ERROR: --footprint cannot be combined with --check-staged or --lint", file=sys.stderr
+            "ERROR: --footprint cannot be combined with --check-staged, --lint or --sweep",
+            file=sys.stderr,
         )
         return 2
     try:
@@ -8204,7 +8208,9 @@ def _docs_qa_footprint(
         contract=contract,
         installed_version=installed,
         home_dir=Path.home(),
-        documentation_enabled=documentation_enabled,
+        documentation_enabled=config.documentation.enabled,
+        vendor_scopes=ProjectRegistry.from_config(config, project_root).vendor_scopes(),
+        exclude_paths=config.daemon.exclude_paths,
     )
     if getattr(args, "json_output", False):
         print(json.dumps(footprint.to_dict(), indent=2))
@@ -8267,7 +8273,7 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
     project_root = resolved_root
     config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
     if getattr(args, "footprint", False):
-        return _docs_qa_footprint(args, project_root, config.documentation.enabled)
+        return _docs_qa_footprint(args, project_root, config)
     layout = ProjectLayout.from_config(config)
     # A declared `layout.vendor_dirs` must exclude a tree from the CLI sweep
     # too (Plan 00331) -- the sweep is the surface a human runs by hand, so

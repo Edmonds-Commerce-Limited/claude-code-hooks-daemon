@@ -1,0 +1,20 @@
+# Drafted by Plan 00532. The VERSION in the filename is a target, not a decision.
+version: "3.71.0"
+
+truth_changes:
+  - topic: markdown-organization
+    was: >
+      A `.claude/rules/*.md` file is scoped by `paths:` plus a `description:`
+      frontmatter field, and the description is the trigger that makes Claude
+      Code load the rule.
+    now: >
+      `paths:` is the only rules-file frontmatter field Claude Code reads: it
+      scopes the rule, and a rule without it loads at session start like
+      CLAUDE.md. Any other field, `description` included, is ignored by Claude
+      Code and is documentation for a human reader only. The daemon's own
+      deployed rules still carry a `description:` for that reason, and the
+      `rules_file_shape` check and the R7a wording in the documentation
+      strategy now say so.
+
+      IF YOUR PROJECT'S DOCS TELL AN AGENT THAT A RULE'S `description` DECIDES
+      WHEN IT LOADS, UPDATE THEM: USE `paths:` TO SCOPE A RULE.

@@ -7,6 +7,7 @@ pointer to the core document and the loading-rules contract.
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -65,6 +66,44 @@ class TestSkillSource:
         text = SKILL_MD.read_text() + PROCEDURE_MD.read_text()
         assert "/docs-qa" in text
         assert "/doctor prompt-audit" in text
+
+
+class TestFootprintWrapper:
+    """A client can run the measurement: the skill ships a resolver-backed wrapper."""
+
+    WRAPPER = SKILL_DIR / "scripts" / "footprint.sh"
+    COMMAND = ".claude/skills/docs-optimise/scripts/footprint.sh"
+
+    def test_wrapper_is_executable_and_daemon_owned(self) -> None:
+        assert self.WRAPPER.is_file()
+        assert os.access(self.WRAPPER, os.X_OK)
+        assert "DAEMON-OWNED FILE" in self.WRAPPER.read_text()
+
+    def test_wrapper_resolves_the_cli_like_docs_qa_and_runs_footprint(self) -> None:
+        text = self.WRAPPER.read_text()
+        assert "docs-qa/scripts/_locate-cli.sh" in text
+        assert '"$DOCS_QA_CLI" docs-qa --footprint --json' in text
+
+    def test_skill_and_procedure_name_the_wrapper(self) -> None:
+        assert self.COMMAND in SKILL_MD.read_text()
+        assert self.COMMAND in PROCEDURE_MD.read_text()
+
+    def test_tracked_deployed_copy_is_identical(self) -> None:
+        deployed = REPO_ROOT / ".claude" / "skills" / "docs-optimise"
+        assert (deployed / "scripts" / "footprint.sh").read_bytes() == self.WRAPPER.read_bytes()
+        assert os.access(deployed / "scripts" / "footprint.sh", os.X_OK)
+        assert (deployed / "SKILL.md").read_bytes() == SKILL_MD.read_bytes()
+        assert (deployed / "references" / "procedure.md").read_bytes() == PROCEDURE_MD.read_bytes()
+
+    def test_deploy_skills_ships_the_wrapper_executable(self, tmp_path: Path) -> None:
+        project = tmp_path / "project"
+        project.mkdir()
+
+        deploy_skills(REPO_ROOT, project)
+
+        shipped = project / ".claude" / "skills" / "docs-optimise" / "scripts" / "footprint.sh"
+        assert shipped.read_bytes() == self.WRAPPER.read_bytes()
+        assert os.access(shipped, os.X_OK)
 
 
 class TestProcedure:
