@@ -59,6 +59,22 @@ class TestOrphanShrink:
         assert findings[0].severity is Severity.ADVISE
         assert findings[0].path == ".claude/rules/one.md"
 
+    def test_shrink_of_a_nested_rules_file_advises(self, tmp_path: Path) -> None:
+        """Claude Code discovers rules recursively (contract fact G3-01)."""
+        root = tmp_path / "repo"
+        _init_repo(root)
+        nested_dir = root / ".claude" / "rules" / "frontend"
+        nested_dir.mkdir(parents=True)
+        rules_file = nested_dir / "one.md"
+        rules_file.write_text("---\npaths: ['*']\n---\n" + ("word " * 100) + "\n")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-m", "initial")
+        rules_file.write_text("---\npaths: ['*']\n---\nshort\n")
+        _git(root, "add", "-A")
+
+        findings = _run_staged(staged_context(project_root=root, policy=DocumentationPolicy()))
+        assert [f.path for f in findings] == [".claude/rules/frontend/one.md"]
+
     def test_shrink_with_same_commit_canonical_growth_is_silent(self, tmp_path: Path) -> None:
         root = tmp_path / "repo"
         _init_repo(root)

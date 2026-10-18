@@ -17,6 +17,11 @@ advisory per version to run the ``claude-code-changelog-reviewer`` agent. That
 record exists only in the daemon repository, so the check is silent in a client
 install and wherever the file is absent.
 
+Third check (Plan 00532): the INSTALLED Claude Code is compared with the version
+the instruction-loading contract (``contracts/claude-code-instructions/``) was
+audited against. A newer one gets a single advisory per version, in the daemon
+repository only; a client install is silent.
+
 Install-layout note: the vendored contract ships in the REPOSITORY
 (self-install mode, or a client's .claude/hooks-daemon/ clone), not in the
 Python package — a bare wheel/site-packages install has no
@@ -96,6 +101,16 @@ _RECORD_REVIEWED_KEY: Final[str] = "reviewed_through"
 #: Cache key holding the version the review-drift advisory last fired for.
 _CACHE_DRIFT_KEY: Final[str] = "drift_advised_version"
 
+#: The vendored instruction-loading contract (Plan 00532), audited like the
+#: hooks contract but advised only in the daemon repository.
+_DEFAULT_INSTRUCTIONS_META_PATH: Final[Path] = (
+    Path(__file__).resolve().parents[4] / "contracts" / "claude-code-instructions" / "META.json"
+)
+_META_VENDORED_PATH_KEY: Final[str] = "vendored_path"
+
+#: Cache key holding the version the instructions-contract advisory last fired for.
+_CACHE_INSTRUCTIONS_KEY: Final[str] = "instructions_advised_version"
+
 
 class ContractStalenessHandler(SessionStartHandlerBase):
     """Advise a vendored-contract refresh when Claude Code has moved on."""
@@ -114,6 +129,7 @@ class ContractStalenessHandler(SessionStartHandlerBase):
         self.config: dict[str, Any] = {"enabled": True}
         self.meta_path: Path = _DEFAULT_META_PATH
         self.versions_path: Path = _DEFAULT_VERSIONS_PATH
+        self.instructions_meta_path: Path = _DEFAULT_INSTRUCTIONS_META_PATH
         #: Overrides the cache location (tests); None resolves the daemon untracked dir.
         self.cache_path: Path | None = None
         # Injection points for tests; production reads `claude --version` and
@@ -142,26 +158,71 @@ class ContractStalenessHandler(SessionStartHandlerBase):
         return not is_resume_session(hook_input)
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
-        """Run both staleness checks and join whatever advice they produce.
+        """Run the staleness checks and join whatever advice they produce.
 
         The contract check (installed Claude Code vs the last-audited hooks
-        contract) and the review-drift check (installed Claude Code vs the
-        newest changelog-reviewed version, Plan 00486) are independent: either
-        can speak without the other.
+        contract), the review-drift check (installed Claude Code vs the newest
+        changelog-reviewed version, Plan 00486) and the instructions-contract
+        check (installed Claude Code vs the last-audited instruction-loading
+        contract, Plan 00532) are independent: any can speak without the others.
         """
         meta = self._read_meta()
         reviewed = self._newest_reviewed_version()
-        installed = self.installed_version_reader() if (meta or reviewed) else None
+        instructions_meta = self._read_instructions_meta()
+        installed = (
+            self.installed_version_reader() if (meta or reviewed or instructions_meta) else None
+        )
         context: list[str] = []
         if installed is not None:
             if meta is not None:
                 context.extend(self._contract_context(meta, installed))
+            sections = []
             if reviewed is not None:
-                drift = self._drift_context(installed, reviewed)
-                if drift:
+                sections.append(self._drift_context(installed, reviewed))
+            if instructions_meta is not None:
+                sections.append(self._instructions_context(instructions_meta, installed))
+            for section in sections:
+                if section:
                     context.extend([""] if context else [])
-                    context.extend(drift)
+                    context.extend(section)
         return AdvisoryResult(decision=Decision.ALLOW, reason=None, context=context)
+
+    def _read_instructions_meta(self) -> dict[str, Any] | None:
+        """The instructions contract's META, or None when it cannot apply.
+
+        None (and so silence) for a client install, where the contract is not
+        the client's to refresh (follow-up F4), and for an absent or corrupt
+        file, which the QA guard owns.
+        """
+        if not self._is_self_install():
+            return None
+        return self._read_meta(self.instructions_meta_path)
+
+    def _instructions_context(self, meta: dict[str, Any], installed: str) -> list[str]:
+        """Advice, once per version, when Claude Code is newer than the instructions audit."""
+        audited = meta.get(_META_VERSION_KEY)
+        if not isinstance(audited, str) or not self._is_newer(installed, audited):
+            return []
+        if self.read_cache().get(_CACHE_INSTRUCTIONS_KEY) == installed:
+            return []
+        self.write_cache({_CACHE_INSTRUCTIONS_KEY: installed})
+        refresh_doc = str(meta.get(_META_REFRESH_KEY) or _FALLBACK_REFRESH_DOC)
+        page = str(meta.get(_META_VENDORED_PATH_KEY) or "the vendored memory page")
+        return [
+            (
+                f"📜 Instruction-loading contract audit is stale: installed Claude Code "
+                f"is v{installed}, but the vendored contract "
+                f"(contracts/claude-code-instructions/) was last audited against v{audited}."
+            ),
+            "",
+            (
+                f"How Claude Code loads CLAUDE.md and rules files may have changed. "
+                f"Follow the instructions-contract section of {refresh_doc}: re-fetch "
+                f"{page} with `hooks-daemon remote-docs`, check each fact's anchor, "
+                f"update FACTS.json and META.json (the page hash is the evidence), and "
+                f"re-run the version-record test. This advisory shows once for v{installed}."
+            ),
+        ]
 
     def _contract_context(self, meta: dict[str, Any], installed: str) -> list[str]:
         """Advice when the installed Claude Code is newer than the audited contract."""
@@ -288,9 +349,9 @@ class ContractStalenessHandler(SessionStartHandlerBase):
             ),
         ]
 
-    def _read_meta(self) -> dict[str, Any] | None:
+    def _read_meta(self, path: Path | None = None) -> dict[str, Any] | None:
         try:
-            data = json.loads(self.meta_path.read_text(encoding="utf-8"))
+            data = json.loads((path or self.meta_path).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             # An install without the vendored contract (or with a corrupt one)
             # must not fail session start — the QA guard owns that failure.
@@ -451,6 +512,23 @@ class ContractStalenessHandler(SessionStartHandlerBase):
                     "the newest reviewed_through in claude-code-versions.yaml, a single "
                     "advisory names both versions and the claude-code-changelog-reviewer "
                     "agent; silent in a client install or when the record is absent"
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r".*"],
+                safety_notes="Advisory handler - read-only version comparison",
+                test_type=TestType.CONTEXT,
+                requires_event="SessionStart event (new session, not resume)",
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
+            ),
+            AcceptanceTest(
+                title="instruction-loading contract staleness advisory",
+                command='echo "test"',
+                description=(
+                    "In the daemon repo, on a new session with Claude Code newer than "
+                    "contracts/claude-code-instructions/META.json's audited version, a "
+                    "single advisory names both versions and the refresh procedure; "
+                    "silent in a client install"
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r".*"],

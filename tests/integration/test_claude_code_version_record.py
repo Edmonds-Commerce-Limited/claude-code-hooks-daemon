@@ -16,6 +16,10 @@ import pytest
 import yaml
 
 from claude_code_hooks_daemon.daemon.contract_status import compare_contract
+from claude_code_hooks_daemon.docs_qa.instructions_contract import (
+    CONTRACT_DIR_RELATIVE,
+    load_contract,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RECORD_PATH = REPO_ROOT / "CLAUDE" / "development" / "claude-code-versions.yaml"
@@ -106,6 +110,31 @@ class TestAgreesWithContractMeta:
         # A contract refresh between releases leaves META ahead of the newest record
         # until the next release records its own tested version.
         assert as_tuple(newest) <= as_tuple(audited)
+
+
+class TestAgreesWithInstructionsContract:
+    """The instruction-loading contract's audit moves with the hooks contract (Plan 00532)."""
+
+    @staticmethod
+    def _as_tuple(version: str) -> tuple[int, ...]:
+        return tuple(int(p) for p in version.split("."))
+
+    def _audited(self) -> str:
+        return load_contract(
+            REPO_ROOT / CONTRACT_DIR_RELATIVE
+        ).meta.last_audited_claude_code_version
+
+    def test_instructions_audit_is_not_older_than_the_hooks_audit(self) -> None:
+        hooks = compare_contract(META_PATH, lambda _url: b"").audited_version
+        assert hooks is not None
+        assert self._as_tuple(self._audited()) >= self._as_tuple(hooks)
+
+    def test_newest_known_version_is_not_ahead_of_instructions_audit(
+        self, releases: dict[str, dict[str, Any]]
+    ) -> None:
+        known = [e["claude_code_version"] for e in releases.values()]
+        newest = max((v for v in known if v != UNKNOWN), key=self._as_tuple)
+        assert self._as_tuple(newest) <= self._as_tuple(self._audited())
 
 
 class TestReviewerAgent:

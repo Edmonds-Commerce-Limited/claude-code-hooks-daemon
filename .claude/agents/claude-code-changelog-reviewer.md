@@ -29,7 +29,11 @@ report.
    - hook events, payload fields, exit codes and decision semantics;
    - compaction, context and prompt-cache behaviour, and usage or rate limits;
    - permissions and permission modes, settings, plugins, subagents and worktrees;
-   - session start, resume and the status line.
+   - session start, resume and the status line;
+   - how instruction files load: `CLAUDE.md` discovery and imports, `.claude/rules/` and its
+     `paths` scoping, `AGENTS.md`, `claudeMdExcludes`, and what survives `/compact`. Read
+     `contracts/claude-code-instructions/FACTS.json` for what the daemon has pinned, and mark
+     each change that contradicts or extends a fact by its id.
 3. **Check the daemon's side.** For each relevant change, grep this repository for the
    handler, setting or document that overlaps it (pass `--exclude-dir=cyber-flag`, never
    search `untracked/`). A classification with no `file:line` for the daemon side is

@@ -37,7 +37,7 @@ _RULES_DIR_PARTS: Final[tuple[str, str]] = (".claude", "rules")
 
 def _is_rules_file(rel_path: str) -> bool:
     parts = tuple(rel_path.split("/"))
-    return len(parts) == 3 and parts[:2] == _RULES_DIR_PARTS
+    return len(parts) >= 3 and parts[:2] == _RULES_DIR_PARTS
 
 
 def _finding(rel_path: str) -> Finding:

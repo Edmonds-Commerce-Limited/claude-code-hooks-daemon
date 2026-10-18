@@ -1,0 +1,9 @@
+{
+  "docs_url": "https://code.claude.com/docs/en/memory",
+  "fetch_date": "2026-10-17",
+  "docs_bytes": 51839,
+  "docs_sha256": "768be47946cafc36d6fbe3988a04229521f5433bc038736739204e2ed258f6a7",
+  "vendored_path": "remote-docs/code.claude.com/docs/en/memory.md",
+  "last_audited_claude_code_version": "2.1.302",
+  "refresh_procedure": "docs/guides/HOOK-CONTRACT-REFRESH.md"
+}

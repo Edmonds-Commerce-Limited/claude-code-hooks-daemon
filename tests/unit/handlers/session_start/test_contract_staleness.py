@@ -44,6 +44,7 @@ def handler(tmp_path: Path) -> ContractStalenessHandler:
     # Isolate the drift check from the repository's real record and from the
     # real advisory cache: absent record, cache under tmp_path.
     h.versions_path = tmp_path / "absent" / "claude-code-versions.yaml"
+    h.instructions_meta_path = tmp_path / "absent" / "instructions-META.json"
     h.cache_path = tmp_path / "cache.json"
     return h
 
@@ -416,6 +417,139 @@ class TestReviewDriftAdvisory:
         assert "claude-code-changelog-reviewer" not in "\n".join(h.handle(_hook_input()).context)
 
 
+class TestInstructionsContractAdvisory:
+    """Plan 00532 Task 2.1: running Claude Code newer than the instructions contract's audit.
+
+    The third check of this handler. Only the daemon repository maintains the
+    contract, so a client install is silent here (client advisory is a
+    follow-up, F4); the advisory shows once per installed version.
+    """
+
+    @pytest.fixture
+    def instr_handler(
+        self, handler: ContractStalenessHandler, tmp_path: Path
+    ) -> ContractStalenessHandler:
+        handler.instructions_meta_path = tmp_path / "instructions-META.json"
+        handler.instructions_meta_path.write_text(
+            json.dumps(
+                {
+                    "last_audited_claude_code_version": "2.1.290",
+                    "vendored_path": "remote-docs/code.claude.com/docs/en/memory.md",
+                    "refresh_procedure": "docs/guides/HOOK-CONTRACT-REFRESH.md",
+                }
+            ),
+            encoding="utf-8",
+        )
+        # The hooks contract is audited far ahead so only the new check can speak.
+        handler.meta_path.write_text(
+            json.dumps({"last_audited_claude_code_version": "2.1.400"}), encoding="utf-8"
+        )
+        handler.installed_version_reader = lambda: "2.1.300"
+        return handler
+
+    def _text(self, h: ContractStalenessHandler) -> str:
+        result = h.handle(_hook_input())
+        assert result.decision == Decision.ALLOW
+        return "\n".join(result.context)
+
+    def test_advises_when_running_newer_than_audited(
+        self, instr_handler: ContractStalenessHandler
+    ) -> None:
+        text = self._text(instr_handler)
+        assert "2.1.300" in text
+        assert "2.1.290" in text
+        assert "contracts/claude-code-instructions/" in text
+        assert "memory.md" in text
+        assert "HOOK-CONTRACT-REFRESH.md" in text
+
+    def test_silent_when_running_the_audited_version(
+        self, instr_handler: ContractStalenessHandler
+    ) -> None:
+        instr_handler.installed_version_reader = lambda: "2.1.290"
+        assert self._text(instr_handler) == ""
+
+    def test_silent_when_running_older_than_audited(
+        self, instr_handler: ContractStalenessHandler
+    ) -> None:
+        instr_handler.installed_version_reader = lambda: "2.1.280"
+        assert self._text(instr_handler) == ""
+
+    def test_advises_once_per_version(self, instr_handler: ContractStalenessHandler) -> None:
+        assert "contracts/claude-code-instructions/" in self._text(instr_handler)
+        assert self._text(instr_handler) == "", "second session on the same version"
+        instr_handler.installed_version_reader = lambda: "2.1.301"
+        assert "2.1.301" in self._text(instr_handler), "a newer version re-arms"
+
+    def test_dedupe_marker_is_independent_of_the_drift_marker(
+        self, instr_handler: ContractStalenessHandler, tmp_path: Path
+    ) -> None:
+        self._text(instr_handler)
+        cache = json.loads((tmp_path / "cache.json").read_text(encoding="utf-8"))
+        assert cache["instructions_advised_version"] == "2.1.300"
+        assert "drift_advised_version" not in cache
+
+    def test_silent_in_client_install(self, instr_handler: ContractStalenessHandler) -> None:
+        instr_handler.self_install_reader = lambda: False
+        assert "claude-code-instructions" not in self._text(instr_handler)
+
+    def test_silent_when_install_mode_unresolvable(
+        self, instr_handler: ContractStalenessHandler
+    ) -> None:
+        def _explode() -> bool:
+            raise RuntimeError("ProjectContext not initialized")
+
+        instr_handler.self_install_reader = _explode
+        assert "claude-code-instructions" not in self._text(instr_handler)
+
+    def test_silent_when_meta_absent(
+        self, instr_handler: ContractStalenessHandler, tmp_path: Path
+    ) -> None:
+        instr_handler.instructions_meta_path = tmp_path / "absent" / "META.json"
+        assert self._text(instr_handler) == ""
+
+    def test_silent_when_meta_malformed(self, instr_handler: ContractStalenessHandler) -> None:
+        instr_handler.instructions_meta_path.write_text("{not json", encoding="utf-8")
+        assert self._text(instr_handler) == ""
+
+    def test_silent_when_audited_version_missing(
+        self, instr_handler: ContractStalenessHandler
+    ) -> None:
+        instr_handler.instructions_meta_path.write_text("{}", encoding="utf-8")
+        assert self._text(instr_handler) == ""
+
+    def test_silent_when_installed_version_unreadable(
+        self, instr_handler: ContractStalenessHandler
+    ) -> None:
+        instr_handler.installed_version_reader = lambda: None
+        assert self._text(instr_handler) == ""
+
+    def test_unwritable_marker_still_advises(
+        self, instr_handler: ContractStalenessHandler, tmp_path: Path
+    ) -> None:
+        blocker = tmp_path / "file"
+        blocker.write_text("x")
+        instr_handler.cache_path = blocker / "cache.json"
+        assert "claude-code-instructions" in self._text(instr_handler)
+
+    def test_default_path_is_the_vendored_instructions_contract(self) -> None:
+        h = ContractStalenessHandler()
+        assert h.instructions_meta_path.parts[-3:] == (
+            "contracts",
+            "claude-code-instructions",
+            "META.json",
+        )
+        assert h.instructions_meta_path.is_file()
+
+    def test_real_contract_is_silent_on_the_audited_version(self, tmp_path: Path) -> None:
+        h = ContractStalenessHandler()
+        meta = json.loads(h.instructions_meta_path.read_text(encoding="utf-8"))
+        audited = meta["last_audited_claude_code_version"]
+        h.cache_path = tmp_path / "cache.json"
+        h.installed_version_reader = lambda: audited
+        h.self_install_reader = lambda: True
+        assert "claude-code-instructions" not in "\n".join(h.handle(_hook_input()).context)
+
+
 class TestVersionParsing:
     def test_parses_claude_version_output(self) -> None:
         h = ContractStalenessHandler()
@@ -433,3 +567,4 @@ class TestContract:
         tests = h.get_acceptance_tests()
         assert isinstance(tests, list)
         assert any("review" in t.title.lower() for t in tests)
+        assert any("instruction-loading" in t.title.lower() for t in tests)

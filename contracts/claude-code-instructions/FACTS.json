@@ -1,0 +1,322 @@
+{
+  "facts": [
+    {
+      "id": "G1-01",
+      "group": "G1",
+      "statement": "CLAUDE.md and CLAUDE.local.md files in the directory hierarchy above the working directory load at launch; files in subdirectories load on demand.",
+      "anchor": {
+        "heading": "choose-where-to-put-claude-md-files",
+        "quote": "CLAUDE.md and CLAUDE.local.md files in the directory hierarchy above the working directory are loaded at launch. Files in subdirectories load on demand."
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G1-02",
+      "group": "G1",
+      "statement": "A project CLAUDE.md is either ./CLAUDE.md or ./.claude/CLAUDE.md.",
+      "anchor": {
+        "heading": "set-up-a-project-claude-md",
+        "quote": "A project CLAUDE.md can be stored in either `./CLAUDE.md` or `./.claude/CLAUDE.md`."
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G1-03",
+      "group": "G1",
+      "statement": "The launch walk takes CLAUDE.md and CLAUDE.local.md from the working directory and every directory above it.",
+      "anchor": {
+        "heading": "how-claude-md-files-load",
+        "quote": "Claude Code loads `CLAUDE.md` and `CLAUDE.local.md` from your current working directory and every directory above it."
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G1-04",
+      "group": "G1",
+      "statement": "Discovered files are concatenated into context, not overriding one another.",
+      "anchor": {
+        "heading": "how-claude-md-files-load",
+        "quote": "All discovered files are concatenated into context rather than overriding each other."
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G1-05",
+      "group": "G1",
+      "statement": "A CLAUDE.md in a subdirectory of the working directory loads once Claude reads, writes or edits another file in that subdirectory.",
+      "anchor": {
+        "heading": "how-claude-md-files-load",
+        "quote": "Instead of loading them at launch, Claude Code loads each one once Claude reads, writes, or edits another file in that subdirectory."
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G1-06",
+      "group": "G1",
+      "statement": "Block-level HTML comments in CLAUDE.md files are stripped before injection, so they cost no context.",
+      "anchor": {
+        "heading": "how-claude-md-files-load",
+        "quote": "are stripped before the content is injected into Claude's context."
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G1-07",
+      "group": "G1",
+      "statement": "CLAUDE.local.md at the project root loads alongside CLAUDE.md and is treated the same way.",
+      "anchor": {
+        "heading": "import-additional-files",
+        "quote": "It loads alongside `CLAUDE.md` and is treated the same way."
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G1-08",
+      "group": "G1",
+      "statement": "User-scope instructions live at ~/.claude/CLAUDE.md and apply to all projects.",
+      "anchor": {
+        "heading": "choose-where-to-put-claude-md-files",
+        "quote": "`~/.claude/CLAUDE.md` | Personal preferences for all projects"
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G2-01",
+      "group": "G2",
+      "statement": "An @path import is expanded and loaded at launch alongside the CLAUDE.md that references it.",
+      "anchor": {
+        "heading": "import-additional-files",
+        "quote": "Imported files are expanded and loaded into context at launch alongside the CLAUDE.md that references them."
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G2-02",
+      "group": "G2",
+      "statement": "A relative import resolves against the file containing the import, not the working directory.",
+      "anchor": {
+        "heading": "import-additional-files",
+        "quote": "Relative paths resolve relative to the file containing the import, not the working directory."
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G2-03",
+      "group": "G2",
+      "statement": "Imports nest to a maximum depth of four hops.",
+      "anchor": {
+        "heading": "import-additional-files",
+        "quote": "Imported files can recursively import other files, with a maximum depth of four hops."
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G2-04",
+      "group": "G2",
+      "statement": "Import parsing skips Markdown code spans and fenced code blocks, so a path in backticks is not imported.",
+      "anchor": {
+        "heading": "import-additional-files",
+        "quote": "Import parsing skips Markdown code spans and fenced code blocks."
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G2-05",
+      "group": "G2",
+      "statement": "An import whose path resolves outside the working directory is external and needs a one-time approval dialog.",
+      "anchor": {
+        "heading": "import-additional-files",
+        "quote": "An import in a project-level memory file is external when its path resolves outside your working directory"
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G2-06",
+      "group": "G2",
+      "statement": "Imports help organisation but do not reduce context cost: imported files load at launch too.",
+      "anchor": {
+        "heading": "write-effective-instructions",
+        "quote": "help you organize a long file but don't reduce its context cost, because imported files also load at launch."
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G3-01",
+      "group": "G3",
+      "statement": "Rules under .claude/rules/ are discovered recursively: every .md file at any depth.",
+      "anchor": {
+        "heading": "set-up-rules",
+        "quote": "All `.md` files are discovered recursively, so you can organize rules into subdirectories like `frontend/` or `backend/`"
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G3-02",
+      "group": "G3",
+      "statement": "A rule without `paths` frontmatter loads at launch with the same priority as .claude/CLAUDE.md.",
+      "anchor": {
+        "heading": "set-up-rules",
+        "quote": "are loaded at launch with the same priority as `.claude/CLAUDE.md`."
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G3-03",
+      "group": "G3",
+      "statement": "`paths` is the only frontmatter field Claude Code reads from a rule; any other field (such as `description`) is ignored without an error.",
+      "anchor": {
+        "heading": "path-specific-rules",
+        "quote": "`paths` is the only field Claude Code reads from a rule; any other field is ignored without an error."
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G3-04",
+      "group": "G3",
+      "statement": "A rule with a `paths` list loads on demand when Claude uses Read, Write or Edit on a matching file.",
+      "anchor": {
+        "heading": "path-specific-rules",
+        "quote": "A path-scoped rule loads when Claude uses the Read, Write, or Edit tool on a matching file."
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G3-05",
+      "group": "G3",
+      "statement": "A rule without a `paths` field is loaded unconditionally for all files.",
+      "anchor": {
+        "heading": "path-specific-rules",
+        "quote": "Rules without a `paths` field are loaded unconditionally and apply to all files."
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G3-06",
+      "group": "G3",
+      "statement": "Frontmatter that does not parse is ignored and the rule loads as if it had no `paths`, so it becomes unconditional.",
+      "anchor": {
+        "heading": "path-specific-rules",
+        "quote": "If the YAML between the markers doesn't parse, Claude Code ignores the frontmatter and loads the rule as if it had no `paths`."
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G3-07",
+      "group": "G3",
+      "statement": "A `paths` list shares one budget of 1,000 expanded brace patterns; a pattern over budget is used unexpanded and its literal braces match no files.",
+      "anchor": {
+        "heading": "path-specific-rules",
+        "quote": "a rule's whole `paths` list shares one budget of 1,000 expanded patterns and 4 MiB"
+      },
+      "min_claude_code_version": "2.1.217"
+    },
+    {
+      "id": "G3-08",
+      "group": "G3",
+      "statement": "A rules symlink targeting outside the working directory is an external import: only its rules without `paths` load, and only after approval.",
+      "anchor": {
+        "heading": "share-rules-across-projects-with-symlinks",
+        "quote": "The linked rules don't load until you approve external imports for the project, and after that only the ones without a"
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G3-09",
+      "group": "G3",
+      "statement": "User-level rules in ~/.claude/rules/ load before project rules.",
+      "anchor": {
+        "heading": "user-level-rules",
+        "quote": "Claude Code loads user-level rules before project rules"
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G4-01",
+      "group": "G4",
+      "statement": "The size target is under 200 lines per CLAUDE.md file; longer files consume more context and reduce adherence.",
+      "anchor": {
+        "heading": "write-effective-instructions",
+        "quote": "target under 200 lines per CLAUDE.md file. Longer files consume more context and reduce adherence."
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G4-02",
+      "group": "G4",
+      "statement": "Files within the length that together pass a combined limit at session start draw a warning; each CLAUDE.md, rules file and @path import counts as a separate file.",
+      "anchor": {
+        "heading": "my-claude-md-is-too-large",
+        "quote": "Each CLAUDE.md, rules file, and `@path` import counts as a separate file."
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G4-03",
+      "group": "G4",
+      "statement": "A CLAUDE.md file over 4 MiB is skipped.",
+      "anchor": {
+        "heading": "my-claude-md-is-too-large",
+        "quote": "Claude Code skips a file over 4 MiB."
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G4-04",
+      "group": "G4",
+      "statement": "Only the first 200 lines or 25KB of MEMORY.md (auto memory, written by Claude, not proposable) load at session start.",
+      "anchor": {
+        "heading": "how-it-works",
+        "quote": "The first 200 lines of `MEMORY.md`, or the first 25KB, whichever comes first, are loaded at the start of every conversation."
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G5-01",
+      "group": "G5",
+      "statement": "Project-root CLAUDE.md survives /compact: it is re-read from disk and re-injected.",
+      "anchor": {
+        "heading": "instructions-seem-lost-after-compact",
+        "quote": "Project-root CLAUDE.md survives compaction: after `/compact`, Claude re-reads it from disk and re-injects it into the session."
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G5-02",
+      "group": "G5",
+      "statement": "Nested CLAUDE.md files and path-scoped rules are not re-injected after /compact; they load again on demand.",
+      "anchor": {
+        "heading": "instructions-seem-lost-after-compact",
+        "quote": "Nested CLAUDE.md files in subdirectories and rules with"
+      },
+      "min_claude_code_version": null
+    },
+    {
+      "id": "G5-03",
+      "group": "G5",
+      "statement": "An instruction that must persist across compaction belongs in CLAUDE.md, not in a nested file or in conversation.",
+      "anchor": {
+        "heading": "instructions-seem-lost-after-compact",
+        "quote": "Add conversation-only instructions to CLAUDE.md to make them persist."
+      },
+      "min_claude_code_version": null
+    }
+  ],
+  "unmodelled": [
+    {
+      "id": "claudeMdExcludes",
+      "description": "The claudeMdExcludes setting skips ancestor or monorepo CLAUDE.md files and rules by glob; the footprint counts them anyway."
+    },
+    {
+      "id": "agents-md-selection",
+      "description": "AGENTS.md selection and the Project instructions setting decide whether AGENTS.md loads instead of, or beside, CLAUDE.md; the footprint reads CLAUDE.md files only."
+    },
+    {
+      "id": "add-dir-claude-md",
+      "description": "Directories added with --add-dir load their CLAUDE.md files when CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD is set; the footprint ignores them."
+    },
+    {
+      "id": "subagent-omitClaudeMd",
+      "description": "Subagents may start without project instructions (omitClaudeMd), so what a subagent loads can be less than the main session loads."
+    }
+  ]
+}
