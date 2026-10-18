@@ -133,22 +133,22 @@ staleness advisory are named follow-ups there, outside this plan.
 
 ### Phase 4: Restructure skill
 
-- [ ] ⬜ **Task 4.1**: Skill source at
+- [x] ✅ **Task 4.1** (128191ba5): Skill source at
   `src/claude_code_hooks_daemon/skills/docs-optimise/` (Q1 C, Q7 A: deployed
   to every client by `install/skills.py` with no config gate), written as a
   shim per R7b that points at the core document and the contract rather than
   restating them.
-- [ ] ⬜ **Task 4.2**: The proposal procedure (Q2 B, Q6 C): classify each
+- [x] ✅ **Task 4.2** (128191ba5): The proposal procedure (Q2 B, Q6 C): classify each
   always-loaded section as resident, path-scopable, nested-module, or
   on-demand under the ruleset that applies (`documentation.enabled` true:
   the daemon ruleset, R6/R7a/R7d; otherwise Claude Code's guidance), state
   which applied, and write the proposed new files plus a unified patch under
   `untracked/scratch/docs-optimise/<run-id>/`, never touching a tracked file
   and never adding an allowlist entry.
-- [ ] ⬜ **Task 4.3**: The report's closing hand-offs (Q8 D): `/docs-qa`
+- [x] ✅ **Task 4.3** (128191ba5): The report's closing hand-offs (Q8 D): `/docs-qa`
   scoped to the touched files for SSoT re-verification, and
   `/doctor prompt-audit` for content audit, neither re-implemented.
-- [ ] ⬜ **Task 4.4**: Dogfood on this repository's root `CLAUDE.md` and on a
+- [x] ✅ **Task 4.4** (see subagent-reports/261018-i123-build-4.md): Dogfood on this repository's root `CLAUDE.md` and on a
   synthetic client fixture run under both Q6 modes; record the before and
   after footprint.
 
