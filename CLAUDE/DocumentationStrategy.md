@@ -75,6 +75,15 @@ sequence.
 The semantic half is live: this repo enables the `hooks-daemon-docs-qa` agent
 (it ships disabled upstream) and dogfoods it through the `docs-qa` skill.
 
+## Instruction-loading footprint
+
+What Claude Code loads at session start is pinned in
+`contracts/claude-code-instructions/`; this repo measures it with
+`bin/hooks-daemon docs-qa --footprint` and drafts restructures with the
+`docs-optimise` skill, which proposes under `untracked/scratch/docs-optimise/`
+and never edits a tracked file. The core document's CLI section is the
+reference.
+
 ## Running the checks
 
 The docs-QA sweep is **not** part of this project's QA suite — run it
