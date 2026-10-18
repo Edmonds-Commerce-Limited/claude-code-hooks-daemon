@@ -2,7 +2,7 @@
 
 **Status**: Complete (rulings recorded in RULINGS-fable.md; Fable rulings
 under the owner's delegation, not owner rulings)
-**GitHub Issue**: #123
+**GitHub Issue**: #123 (closed as completed 2026-10-18, after CI passed on 36b63400c)
 **Created**: 2026-10-17
 **Owner**: dev
 **Priority**: Medium
@@ -194,4 +194,3 @@ staleness advisory are named follow-ups there, outside this plan.
 - Merged to main at `36b63400c` (Addresses #123).
 - Open follow-ups: ledger 00474 N513 to N515, and the deferred items F1 to F4
   named in RULINGS-fable.md.
-
