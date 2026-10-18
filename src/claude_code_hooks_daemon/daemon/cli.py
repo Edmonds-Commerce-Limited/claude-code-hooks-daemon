@@ -8180,6 +8180,7 @@ def _docs_qa_footprint(args: argparse.Namespace, project_root: Path, config: Con
         default_contract_dir,
         load_contract,
     )
+    from claude_code_hooks_daemon.handlers.registry import apply_handler_options
     from claude_code_hooks_daemon.handlers.session_start.contract_staleness import (
         ContractStalenessHandler,
     )
@@ -8200,9 +8201,14 @@ def _docs_qa_footprint(args: argparse.Namespace, project_root: Path, config: Con
         print(f"ERROR: instruction-loading contract unusable: {exc}", file=sys.stderr)
         return 2
     reader = getattr(args, "installed_version_reader", None)
-    installed = (
-        reader() if reader is not None else ContractStalenessHandler().installed_version_reader()
-    )
+    if reader is None:
+        staleness = ContractStalenessHandler()
+        apply_handler_options(
+            staleness,
+            handler_options(config.handlers.session_start.get(staleness.config_key)),
+        )
+        reader = staleness.installed_version_reader
+    installed = reader()
     footprint = measure_footprint(
         project_root=project_root,
         contract=contract,
