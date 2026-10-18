@@ -332,8 +332,9 @@ Each satellite has a contract. They differ, but they share R1.
 
 #### R7a — `.claude/rules/*.md`: POINTERS ONLY (firm)
 
-The whole permitted shape: frontmatter (`paths:` plus `description`), a
-trigger statement, the rule in **at most two imperative lines**, and link(s)
+The whole permitted shape: frontmatter (`paths:` only, the one field
+Claude Code reads from a rule; any other field is ignored), a trigger
+statement, the rule in **at most two imperative lines**, and link(s)
 to the agent tree or a registered `CLAUDE.md`.
 
 **No fences. No tables. No numbered procedures. No quotes.** Plus a small

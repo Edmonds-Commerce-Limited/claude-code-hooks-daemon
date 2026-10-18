@@ -75,7 +75,8 @@ class TestScope:
         )
         assert _run_edit(context) == []
 
-    def test_ignores_nested_rules_subdirectories(self, tmp_path: Path) -> None:
+    def test_checks_nested_rules_subdirectories(self, tmp_path: Path) -> None:
+        """Claude Code discovers rules recursively (contract fact G3-01)."""
         nested = tmp_path / ".claude" / "rules" / "sub" / "deep.md"
         nested.parent.mkdir(parents=True)
         context = edit_context(
@@ -85,7 +86,35 @@ class TestScope:
             file_content=_FENCE_BODY,
             file_exists_before=False,
         )
-        assert _run_edit(context) == []
+        findings = _run_edit(context)
+        assert [f.severity for f in findings] == [Severity.BLOCK]
+        assert findings[0].path == ".claude/rules/sub/deep.md"
+
+    def test_checks_a_deeply_nested_rules_file(self, tmp_path: Path) -> None:
+        nested = tmp_path / ".claude" / "rules" / "a" / "b" / "c.md"
+        nested.parent.mkdir(parents=True)
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            file_path=nested,
+            file_content=_TABLE_BODY,
+            file_exists_before=False,
+        )
+        assert [f.severity for f in _run_edit(context)] == [Severity.BLOCK]
+
+    def test_sweep_reports_a_nested_rules_file(self, tmp_path: Path) -> None:
+        nested = tmp_path / ".claude" / "rules" / "sub" / "deep.md"
+        nested.parent.mkdir(parents=True)
+        nested.write_text(_FENCE_BODY, encoding="utf-8")
+        context = sweep_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            corpus=DocCorpus(project_root=tmp_path, documents={}),
+        )
+        findings = _run_sweep(context)
+        assert [(f.severity, f.path) for f in findings] == [
+            (Severity.ADVISE, ".claude/rules/sub/deep.md")
+        ]
 
 
 class TestEditStageWorseOnly:

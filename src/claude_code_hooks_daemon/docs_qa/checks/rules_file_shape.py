@@ -9,8 +9,8 @@ numbered procedures, no ``ssot-quote`` blocks, and a body budget of
 ``CLAUDE/Plan/00284-documentation-ssot-enforcement/RULESET-sub-claude-md.md``
 §3.
 
-**Scope**: a ``.md`` file directly inside ``.claude/rules/`` — NOT a nested
-subdirectory (matching the two real files this contract governs today).
+**Scope**: a ``.md`` file at any depth under ``.claude/rules/``, because
+Claude Code discovers rules recursively (instructions contract fact G3-01).
 
 **Worse-only semantics are STRUCTURAL, not just an allowlist** (DESIGN
 §refinements): every client with template rules files starts
@@ -31,7 +31,7 @@ Frontmatter (the leading ``---\\n...\\n---`` block) is stripped before
 counting anything — it never counts toward a violation.
 
 This check needs no corpus: EDIT is single-file content, and SWEEP
-resolves ``.claude/rules/*.md`` directly against the filesystem (the same
+resolves ``.claude/rules/**/*.md`` directly against the filesystem (the same
 independence rationale as ``generated_doc_hand_edit``).
 """
 
@@ -157,14 +157,14 @@ def _measure(content: str) -> _Metrics:
 
 
 def _is_rules_file(path: Path, project_root: Path) -> bool:
-    """True only for a ``.md`` file DIRECTLY inside ``.claude/rules/``."""
+    """True for a ``.md`` file at any depth under ``.claude/rules/``."""
     if path.suffix.lower() != _MARKDOWN_SUFFIX:
         return False
     try:
         rel_parts = path_relative_to(path.resolve(), project_root.resolve()).parts
     except ValueError:
         return False
-    return len(rel_parts) == 3 and rel_parts[:2] == _RULES_DIR_PARTS
+    return len(rel_parts) >= 3 and rel_parts[:2] == _RULES_DIR_PARTS
 
 
 def _matches_allowlist(rel_path: str, patterns: tuple[str, ...]) -> bool:
@@ -256,7 +256,7 @@ def _run_edit(context: CheckContext) -> list[Finding]:
 
 def _run_sweep(context: CheckContext) -> list[Finding]:
     findings: list[Finding] = []
-    for path in sorted(context.project_root.glob("/".join((*_RULES_DIR_PARTS, "*.md")))):
+    for path in sorted(context.project_root.glob("/".join((*_RULES_DIR_PARTS, "**", "*.md")))):
         if not path.is_file():
             continue
         rel_path = str(path_relative_to(path, context.project_root))
