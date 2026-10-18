@@ -1,0 +1,12 @@
+# Configuration after the v3.70.0 upgrade
+# upgrade_approval_guard is removed: the key is retired, so leaving it in
+# place still validates, but nothing reads it.
+
+version: "1.0"
+
+handlers:
+  pre_tool_use:
+    destructive_git:
+      enabled: true
+      priority: 10
+    # upgrade_approval_guard removed - see the upgrade guide

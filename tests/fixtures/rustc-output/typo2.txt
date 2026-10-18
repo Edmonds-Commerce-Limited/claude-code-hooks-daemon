@@ -1,0 +1,31 @@
+error: cannot find attribute `tset` in this scope
+ --> typo2.rs:3:3
+  |
+3 | #[tset]
+  |   ^^^^
+  |
+ --> /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/macros/mod.rs:1801:4
+  |
+  = note: similarly named attribute macro `test` defined here
+help: an attribute macro with a similar name exists
+  |
+3 - #[tset]
+3 + #[test]
+  |
+
+error: cannot find derive macro `Debg` in this scope
+ --> typo2.rs:1:10
+  |
+1 | #[derive(Debg)]
+  |          ^^^^
+  |
+ --> /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/fmt/mod.rs:1093:4
+  |
+  = note: similarly named derive macro `Debug` defined here
+help: a derive macro with a similar name exists
+  |
+1 | #[derive(Debug)]
+  |             +
+
+error: aborting due to 2 previous errors
+

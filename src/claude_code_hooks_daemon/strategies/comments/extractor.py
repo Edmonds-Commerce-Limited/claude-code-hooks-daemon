@@ -23,7 +23,9 @@ That rule holds for a whole file only. An ``Edit`` ``new_string`` is a
 fragment: it routinely opens a block, JSDoc or docstring comment whose closer
 stays in the untouched file. A caller scanning a fragment passes
 ``unterminated_is_comment=True`` and the unclosed opener runs to the end of
-the fragment as a comment.
+the fragment as a comment -- unless the opener sits inside a quoted literal on
+its line (``glob("dist/*.js")``, ``Accept: "*/*"``), which is a string, not a
+comment, in a fragment as in a whole file.
 """
 
 from dataclasses import dataclass, replace
@@ -232,7 +234,7 @@ def _consume_delimited(
         collected.append(lines[cursor])
         cursor += 1
 
-    if unterminated_is_comment:
+    if unterminated_is_comment and not _is_inside_string(first_line, hit.position):
         span = CommentSpan(
             text="\n".join(collected),
             start_line=start_index,
@@ -241,6 +243,51 @@ def _consume_delimited(
         )
         return span, line_total
     return None, start_index + 1
+
+
+def _is_inside_string(line: str, position: int) -> bool:
+    """Return True when ``line[position]`` sits inside a quoted literal on ``line``.
+
+    Walks ``line`` left to right over ``"``, `` ` `` and ``'`` literals with
+    backslash escapes. A quote opens a literal only when a closing quote
+    follows on the line (see :func:`_find_closing_quote`), and ``position`` is
+    inside it only when that closer lies AFTER ``position``. A Rust lifetime,
+    a regex literal holding a quote, or an apostrophe in a trailing comment
+    therefore never turns a real comment opener into a string. Literals
+    spanning lines are not tracked: this shares the extractor's line-based
+    precision.
+    """
+    cursor = 0
+    while cursor < position:
+        if line[cursor] in "\"`'":
+            closer = _find_closing_quote(line, cursor)
+            if closer is not None:
+                if closer > position:
+                    return True
+                cursor = closer
+        cursor += 1
+    return False
+
+
+def _find_closing_quote(line: str, opener: int) -> int | None:
+    """Return the index of the quote closing the literal opened at ``line[opener]``.
+
+    A ``'`` closes only when the next character is not a word character: an
+    apostrophe inside a word (``it's``) and the quote of a Rust lifetime
+    (``'a``) are both followed by a letter, so neither can end a literal.
+    """
+    quote = line[opener]
+    cursor = opener + 1
+    while cursor < len(line):
+        char = line[cursor]
+        if char == "\\":
+            cursor += 1
+        elif char == quote:
+            following = line[cursor + 1 : cursor + 2]
+            if quote != "'" or not (following.isalnum() or following == "_"):
+                return cursor
+        cursor += 1
+    return None
 
 
 def _extend_comment_run(lines: list[str], start_index: int, syntax: CommentSyntax) -> int:

@@ -109,6 +109,103 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N510 and N511 — the v3.70.0 Step 8 gate failed on the coordinator's own tree activity
+
+**Source**: the v3.70.0 Step 8 run `full-gate-step8c` (2026-10-17), which failed while the next run on a still, staged
+tree passed 43/43.
+
+- **N510**: the `sensitive_content` QA checker reports a tracked file that is deleted in the working tree but not
+  staged as deleted as an `unreadable-file` violation ("Could not read file for content scan: [Errno 2] No such file or
+  directory"). The release's `git mv` moves out of `CLAUDE/UPGRADES/UNRELEASED/` had been unstaged so a fix branch
+  could merge, and the run failed with 87 such findings, which also marked `project_handlers` and `smoke_test` NOT
+  MEANINGFUL. A missing file has no content to leak: skip an unstaged deletion, or report it once as a tree-state
+  note.
+- **N511**: four heredoc probe tests (`test_heredoc_blanking_n42_shapes.py`, `test_heredoc_grammar_chain.py`) fail
+  with "a bash probe changed the test checkout" when the coordinator commits, or creates and deletes a branch, in the
+  same checkout during the run; the same files pass 218/218 in isolation. The gate already prints "NOT RECORDED FOR
+  THIS TREE: the working tree changed during the run", but the failures read as heredoc-handler defects. Either the
+  probe tests compare only what the probe could change, or the gate labels such failures as interference.
+
+**Status**: ⬜ open.
+
+### N504 to N509 — the third delta review's edge cases (none release-blocking)
+
+**Source**: a code review of `98a3abdb0..d0fe01743 -- src/ tests/`
+([report](subagent-reports/261017-release-review-delta3.md)), which approved the v3.70.0 tag. Each is probe-confirmed.
+
+- **N504 (M1)**: in an Edit fragment, a Rust lifetime (`impl<'a> Foo<'a> { /* … 'foo'`) lets the extractor pair a
+  quote inside the comment and miss the comment. Fix: skip a lifetime-shaped `'` as a literal opener.
+- **N505 (M2)**: an unterminated `"` or backtick on a fragment line no longer opens a literal to the end of the line,
+  so a Go raw string or JS template literal holding `/*` can be read as a comment.
+- **N506 (M3)**: the N500 similar-name rule turns real external macros or attributes used without a `use` in the file
+  (`#[rstest]`, `#[instrument]`, `formatdoc!`, `assert_ok!`) into findings; an imported use stays excused. Consider
+  excusing files with `#[macro_use]` or `extern crate`, or record the trade-off.
+- **N507 (M4)**: `message_files` treats a reserved word in argument position (`echo do for`) as a compound opener, so
+  an unrelated later statement is judged as the message.
+- **N508 (M5)**: deeply nested subshells (depth 1000) raise `RecursionError` in `_leaves`/`_unwrap` (caught by the
+  chain); `_statements` is O(spans × tokens).
+- **N509 (M6, pre-existing)**: a newline after a trailing `|` splits the statement, so `echo <term> |` newline
+  `git commit -F -` is not judged.
+
+**Status**: ⬜ open, after the release.
+
+### N500 to N503 — the second delta review over the N494 to N497 fixes
+
+**Source**: a code review of `9d1a522b0..4b3a709e1 -- src/ tests/`
+([report](subagent-reports/261017-release-review-delta2.md)), each finding confirmed with a probe.
+
+- **N500 (defect)**: the N494 fix excused every uncoded "cannot find" rustc error, so typos (`prinln!`,
+  `#[derive(Debg)]`, `#[tset]`) passed `lint_on_edit` with an advisory where they were denied before.
+- **N501**: the N496 fix judged a whole `( … )` or `{ …; }` group when the message-file write was inside it, so
+  `( cd /tmp/<term> && echo msg > m.txt && git commit -F m.txt )` was denied (the N364 shape).
+- **N502**: a message written by `if … fi > m.txt` or `for … done > m.txt` (also `while`, `until`, `case`) was not
+  judged; the same gap N496 closed for `{ }`. Predates the cycle.
+- **N503**: the N495 fix paired a `'` before a `/*` with an apostrophe inside the comment (`&'a str) { /* it's`), so
+  an Edit fragment's comment produced no span.
+
+**Status**: ✅ all four fixed before the tag: N500 33cfcc1c9 (a rustc similar-name suggestion keeps the error a
+finding; tests use captured rustc output), N501 and N502 51f83b941 (a group is judged whole only when the redirect
+applies to it; redirected `if`/`for`/`while`/`until`/`case` compounds are groups), N503 c61348119. Merged 3ee0715d5,
+1204284f4, d0fe01743. Reports: [rust-typo](subagent-reports/261017-rfix3-rust-typo.md),
+[msgfile-groups](subagent-reports/261017-rfix3-msgfile-groups.md),
+[comment-apostrophe](subagent-reports/261017-rfix3-comment-apostrophe.md).
+
+### N494 to N499 — the v3.70.0 Step 10 delta review over the fixes and Plan 00531
+
+**Source**: the Step 10 delta review over `9513c3d45..9d1a522b0 -- src/`
+([report](subagent-reports/261017-release-review-delta.md)). Each defect was confirmed with a probe.
+
+Defects, fixed before the tag:
+
+- **N494**: the N474 fix in `strategies/lint/rust_strategy.py` allowed only when every rustc error was a crate-context
+  error, but an external derive-helper attribute (`#[serde(...)]`, `#[error(...)]`) gives an uncoded
+  `cannot find attribute` error stand-alone, so ordinary crate modules were denied. Unresolved external names now count
+  as crate-context errors; a real error mixed with them is still denied.
+  [Report](subagent-reports/261017-rfix2-rust-attr.md).
+- **N495**: the N475 fix in `strategies/comments/extractor.py` read any unclosed `/*` in an Edit fragment as a comment
+  to the end, even inside a string (`glob("dist/*.js")`, `"*/*"`). The rule now applies only to an opener outside
+  string literals (a5d0815b4). Callout 028's last sentence gains the string-literal exception in the v3.70.0 release
+  commit, where the callout has moved to the upgrade guide. [Report](subagent-reports/261017-rfix2-comment-string.md).
+- **N496**: the N473 fix in `utils/message_files.py` (and `github_auto_close_keywords`) judged only the segment that
+  writes a message file, so `echo T | tee m.txt`, `{ echo T; } > m.txt` and `echo T | git commit -F -` went unjudged.
+  The producer is now judged. [Report](subagent-reports/261017-rfix2-msgfile-producer.md).
+- **N497**: Plan 00531's `install/agent_assets.stale_derived_agents` read every `.claude/agents/*.md` with no file
+  check, so a dangling symlink or a directory lost the whole `deployed_artefact_drift` report. Bad entries are now
+  skipped; a non-string `tuned_agent` falls back to the generic agent with one warning; the drift header no longer
+  calls a tuned copy daemon-owned. [Report](subagent-reports/261017-rfix2-agent-scan.md).
+
+Open:
+
+- **N498**: `idle_workable_issue_stop_gate` consults the work queue only, so with `untracked/release-state.json`
+  present and `llm_qa.py all` running as a tracked background task, a main-thread stop naming the running gate was
+  denied with R-STOP-IDLE-WITH-WORKABLE-ISSUE ("nothing is in flight"), pointing at a runbook whose merge step is
+  forbidden until the tag. Expected: a live release state file and a running tracked background task each count as
+  work in flight, or the deny text names the in-flight sources it checked.
+- **N499**: `git -c k=v -C sub rm f` yields no target in `core/utils.py`, so `write_protected_paths` lets it
+  through. Predates this cycle; low priority.
+
+**Status**: N494 to N497 ✅ (merged 3d1db2da8, cae36a242, 3d44f0e6d, 4b3a709e1); N498 and N499 ⬜ open.
+
 ### N493 — the acceptance contract drove the idle-stop gate's "no cache" case against the host's live cache
 
 **Source**: the v3.70.0 release's post-merge `changed` run over `9513c3d45..891797f74`.

@@ -15,6 +15,8 @@ from claude_code_hooks_daemon.strategies.lint.rust_strategy import (
     resolve_edition,
 )
 
+_RUSTC_FIXTURES = Path(__file__).parents[3] / "fixtures" / "rustc-output"
+
 
 def _write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -177,6 +179,62 @@ class TestCrateContextClassification:
     def test_crate_context_with_a_warning_is_excused(self) -> None:
         output = "warning: unused variable: `x`\n\nerror[E0432]: unresolved import\n"
         assert RustLintStrategy().is_tool_unavailable_output(output) is True
+
+    @pytest.mark.parametrize(
+        "finding",
+        [
+            "cannot find attribute `serde` in this scope",
+            "cannot find derive macro `Serialize` in this scope",
+            "cannot find macro `json` in this scope",
+            "cannot find attribute macro `tokio` in this scope",
+        ],
+    )
+    def test_external_attribute_or_macro_name_is_could_not_analyse(self, finding: str) -> None:
+        output = f"error: {finding}\n --> src/b.rs:3:3\n\nerror: aborting due to 1 previous error\n"
+        assert RustLintStrategy().is_tool_unavailable_output(output) is True
+
+    def test_serde_module_with_helper_attributes_is_excused(self) -> None:
+        output = (
+            "error[E0432]: unresolved import `serde`\n --> src/b.rs:1:5\n\n"
+            "error: cannot find attribute `serde` in this scope\n --> src/b.rs:3:3\n\n"
+            "error: cannot find attribute `serde` in this scope\n --> src/b.rs:4:18\n\n"
+            "error: aborting due to 3 previous errors\n"
+        )
+        assert RustLintStrategy().is_tool_unavailable_output(output) is True
+
+    def test_unresolved_attribute_plus_syntax_error_is_a_finding(self) -> None:
+        output = (
+            "error: cannot find attribute `serde` in this scope\n --> src/b.rs:3:3\n\n"
+            "error: expected one of `!` or `::`, found `}`\n --> src/b.rs:4:1\n"
+        )
+        assert RustLintStrategy().is_tool_unavailable_output(output) is False
+
+    def test_unresolved_macro_plus_type_error_is_a_finding(self) -> None:
+        output = (
+            "error: cannot find macro `json` in this scope\n --> src/b.rs:3:3\n\n"
+            "error[E0308]: mismatched types\n --> src/b.rs:4:18\n"
+        )
+        assert RustLintStrategy().is_tool_unavailable_output(output) is False
+
+    @pytest.mark.parametrize(
+        ("fixture", "excused"),
+        [
+            ("typo.txt", False),  # prinln!  (macro typo)
+            ("typo2.txt", False),  # #[derive(Debg)] and #[tset]
+            ("serde.txt", True),  # serde import, #[serde(..)] helper, json!
+            ("pathtypo.txt", True),  # std::colections: E0432 stays crate-context
+        ],
+    )
+    def test_real_rustc_output(self, fixture: str, excused: bool) -> None:
+        """Captured from rustc 1.99.1: a typo carries a similar-name suggestion."""
+        output = (_RUSTC_FIXTURES / fixture).read_text()
+        assert RustLintStrategy().is_tool_unavailable_output(output) is excused
+
+    def test_typo_beside_unresolved_external_attribute_is_a_finding(self) -> None:
+        output = (_RUSTC_FIXTURES / "serde.txt").read_text() + (
+            _RUSTC_FIXTURES / "typo.txt"
+        ).read_text()
+        assert RustLintStrategy().is_tool_unavailable_output(output) is False
 
     def test_shim_marker_wins_over_other_errors(self) -> None:
         output = "error: 'clippy-driver' is not installed for the toolchain 'stable'.\n"

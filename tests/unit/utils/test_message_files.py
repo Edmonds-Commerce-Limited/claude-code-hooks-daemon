@@ -172,3 +172,121 @@ class TestUndecodableBytes:
         text = read_message_files(f"git commit -F {body}", None)[0].text
         assert text.startswith("before ")
         assert text.endswith(" after")
+
+
+class TestMessageFileWriters:
+    @pytest.mark.parametrize(
+        ("command", "recordings", "expected"),
+        [
+            (
+                "echo T | tee m.txt && git commit -F m.txt",
+                ["git commit -F m.txt"],
+                ["echo T | tee m.txt"],
+            ),
+            (
+                "{ echo T; } > m.txt && git commit -F m.txt",
+                ["git commit -F m.txt"],
+                ["{ echo T; } > m.txt"],
+            ),
+            ("echo T | git commit -F -", ["git commit -F -"], ["echo T"]),
+            ("echo T | cat | git commit -F -", ["git commit -F -"], ["echo T | cat"]),
+            ("cd /tmp/T && git commit -F m.txt", ["git commit -F m.txt"], []),
+            ("echo T | grep x; git commit -m c", ["git commit -m c"], []),
+        ],
+    )
+    def test_the_producer_travels_with_the_writer(
+        self, command: str, recordings: list[str], expected: list[str]
+    ) -> None:
+        assert message_files.message_file_writers(command, recordings, "/w") == expected
+
+    @pytest.mark.parametrize(
+        ("command", "recordings", "expected"),
+        [
+            # The write sits INSIDE the group: its other statements are not the message.
+            (
+                "( cd /tmp/T && echo msg > m.txt && git commit -F m.txt )",
+                ["git commit -F m.txt"],
+                ["echo msg > m.txt"],
+            ),
+            (
+                "{ cd /tmp/T; echo msg > m.txt; } && git commit -F m.txt",
+                ["git commit -F m.txt"],
+                ["echo msg > m.txt"],
+            ),
+            (
+                "( cd /tmp/T && echo msg | git commit -F - )",
+                ["git commit -F -"],
+                ["echo msg"],
+            ),
+            (
+                "( cd /tmp/T; { echo msg; } > m.txt ); git commit -F m.txt",
+                ["git commit -F m.txt"],
+                ["{ echo msg; } > m.txt"],
+            ),
+            (
+                "if true; then cd /tmp/T; echo msg > m.txt; fi; git commit -F m.txt",
+                ["git commit -F m.txt"],
+                ["echo msg > m.txt"],
+            ),
+            # The redirect applies to the whole compound: it stays whole.
+            (
+                "( cd /tmp/T; echo T ) > m.txt; git commit -F m.txt",
+                ["git commit -F m.txt"],
+                ["( cd /tmp/T; echo T ) > m.txt"],
+            ),
+            (
+                "{ echo T; } | tee m.txt; git commit -F m.txt",
+                ["git commit -F m.txt"],
+                ["{ echo T; } | tee m.txt"],
+            ),
+            (
+                "if true; then echo T; fi > m.txt; git commit -F m.txt",
+                ["git commit -F m.txt"],
+                ["if true; then echo T; fi > m.txt"],
+            ),
+            (
+                "for i in 1 2; do echo T; done > m.txt; git commit -F m.txt",
+                ["git commit -F m.txt"],
+                ["for i in 1 2; do echo T; done > m.txt"],
+            ),
+            (
+                "while true; do echo T; done > m.txt; git commit -F m.txt",
+                ["git commit -F m.txt"],
+                ["while true; do echo T; done > m.txt"],
+            ),
+            (
+                "until false; do echo T; done > m.txt; git commit -F m.txt",
+                ["git commit -F m.txt"],
+                ["until false; do echo T; done > m.txt"],
+            ),
+            (
+                "case $x in a) echo T;; esac > m.txt; git commit -F m.txt",
+                ["git commit -F m.txt"],
+                ["case $x in a) echo T;; esac > m.txt"],
+            ),
+            (
+                "{ echo T; } | git commit -F -",
+                ["git commit -F -"],
+                ["{ echo T; }"],
+            ),
+        ],
+    )
+    def test_a_group_is_whole_only_when_the_redirect_applies_to_it(
+        self, command: str, recordings: list[str], expected: list[str]
+    ) -> None:
+        assert message_files.message_file_writers(command, recordings, "/w") == expected
+
+    def test_a_word_that_merely_looks_like_a_compound_is_not_one(self) -> None:
+        command = "echo if for; echo msg > m.txt; ls /tmp/T; git commit -F m.txt"
+
+        writers = message_files.message_file_writers(command, ["git commit -F m.txt"], "/w")
+
+        assert writers == ["echo msg > m.txt"]
+
+    def test_an_unclosed_group_runs_to_the_end_of_the_command(self) -> None:
+        command = "{ echo T; > m.txt && git commit -F m.txt"
+
+        writers = message_files.message_file_writers(command, ["git commit -F m.txt"], "/w")
+
+        assert writers
+        assert "echo T" in writers[0]
