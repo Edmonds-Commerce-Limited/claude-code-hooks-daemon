@@ -311,6 +311,13 @@ what changed since the previous one.
    `review_report` (the path above). Every adopt, redundant or conflict
    row in the report becomes a plan or ledger entry before Step 13; the report is copied
    into that plan's folder, because `untracked/` does not survive a container restart.
+5. The same review flags instruction-loading changes against the contract in
+   `contracts/claude-code-instructions/` (the agent brief names the topics). When it does,
+   refresh the contract by the instruction-loading section of
+   [HOOK-CONTRACT-REFRESH.md](../../docs/guides/HOOK-CONTRACT-REFRESH.md), so the page hash in its
+   `META.json` records the evidence; when it does not, bump only that `META.json`'s
+   `last_audited_claude_code_version`. The version-record test requires it to stay at or above the
+   hooks contract's.
 
 A release with no entry for its own version, or whose entry names a report that does not
 exist, is an ABORT at Step 7.

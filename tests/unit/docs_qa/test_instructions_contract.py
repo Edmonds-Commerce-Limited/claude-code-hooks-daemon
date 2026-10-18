@@ -157,7 +157,9 @@ class TestVerifyAnchors:
         assert verify_anchors(contract, PAGE) == []
 
     def test_quote_matching_ignores_line_wrapping(self, tmp_path: Path) -> None:
-        fact = _fact(anchor={"heading": "how-files-load", "quote": "Subdirectories load\non demand"})
+        fact = _fact(
+            anchor={"heading": "how-files-load", "quote": "Subdirectories load\non demand"}
+        )
         contract = load_contract(
             _write(tmp_path / "c", facts_doc={"facts": [fact], "unmodelled": []})
         )

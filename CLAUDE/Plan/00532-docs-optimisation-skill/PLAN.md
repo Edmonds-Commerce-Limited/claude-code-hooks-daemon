@@ -1,6 +1,6 @@
 # Plan 00532: docs optimisation skill
 
-**Status**: Not Started (rulings recorded in RULINGS-fable.md; Fable rulings
+**Status**: In Progress (rulings recorded in RULINGS-fable.md; Fable rulings
 under the owner's delegation, not owner rulings)
 **GitHub Issue**: #123
 **Created**: 2026-10-17
