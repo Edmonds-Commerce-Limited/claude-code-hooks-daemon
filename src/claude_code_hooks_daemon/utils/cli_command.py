@@ -57,6 +57,7 @@ import shlex
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 
 #: Name of the deployed wrapper script. Deliberately short and stable — it is
@@ -333,9 +334,9 @@ def is_install_recovery_command(hook_input: object, project: Path, install_root:
     The text is compared first and the filesystem touched only for a text
     match, since this runs on every Bash call the daemon judges.
     """
-    if not isinstance(hook_input, dict) or hook_input.get("tool_name") != "Bash":
+    if not isinstance(hook_input, dict) or hook_input.get(HookInputField.TOOL_NAME) != "Bash":
         return False
-    tool_input = hook_input.get("tool_input")
+    tool_input = hook_input.get(HookInputField.TOOL_INPUT)
     if not isinstance(tool_input, dict):
         return False
     command = tool_input.get("command")
@@ -344,7 +345,7 @@ def is_install_recovery_command(hook_input: object, project: Path, install_root:
     stripped = command.strip(_RECOVERY_PADDING)
     if not stripped.isprintable():
         return False
-    cwd = hook_input.get("cwd")
+    cwd = hook_input.get(HookInputField.CWD)
     absolute_spellings: list[Path] = []
     if project.is_absolute():
         absolute_spellings.extend(project / spelling for spelling in _RECOVERY_SPELLINGS)
