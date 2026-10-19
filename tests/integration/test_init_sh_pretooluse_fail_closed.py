@@ -33,6 +33,7 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.core.chain import DISPATCH_SATURATED_REASON
 from claude_code_hooks_daemon.daemon.paths import PID_MAX_LIMIT
 from tests.daemon_like_process import (
     DAEMON_CLI_MODULE,
@@ -465,6 +466,127 @@ class TestLegitimateResponsesPassThroughUnchanged:
         hso = response["hookSpecificOutput"]
         assert hso["permissionDecision"] == "deny"
         assert hso["permissionDecisionReason"] == "a real guard denied this"
+
+
+def _deny_bytes(reason: str) -> bytes:
+    return (
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": reason,
+                }
+            }
+        )
+        + "\n"
+    ).encode()
+
+
+@pytest.fixture
+def saturated_socket() -> Iterator[Path]:
+    """A daemon whose dispatch pool is full: a well-formed deny, worded as
+    the chain words it, with the router's footer after it."""
+    yield from _fake_server(
+        respond=_deny_bytes(f"{DISPATCH_SATURATED_REASON}\n\nTo disable: handlers.pre_tool_use.x")
+    )
+
+
+class TestASaturationDenyOfTheRecoveryCommandIsATransportFailure:
+    """Plan 00533 (issue #124): a full pool answers with a WELL-FORMED deny,
+    so the transport carve-out never ran and the restart command that would
+    have cleared the pool was denied with everything else."""
+
+    def test_the_recovery_command_is_not_denied(
+        self, project: Path, saturated_socket: Path
+    ) -> None:
+        response = _send(project, saturated_socket, "PreToolUse", _recovery_input(project))
+        hso = response["hookSpecificOutput"]
+        assert "permissionDecision" not in hso, hso
+        assert "saturated" in hso["additionalContext"]
+
+    def test_any_other_call_keeps_the_deny(self, project: Path, saturated_socket: Path) -> None:
+        response = _send(project, saturated_socket, "PreToolUse", _BASH_TOOL_INPUT)
+        hso = response["hookSpecificOutput"]
+        assert hso["permissionDecision"] == "deny"
+        assert hso["permissionDecisionReason"].startswith(DISPATCH_SATURATED_REASON)
+
+    def test_a_compound_recovery_command_keeps_the_deny(
+        self, project: Path, saturated_socket: Path
+    ) -> None:
+        compound = _recovery_input(project, "bin/hooks-daemon restart && rm -rf /")
+        response = _send(project, saturated_socket, "PreToolUse", compound)
+        assert response["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    def test_a_guards_own_deny_of_the_recovery_command_stands(
+        self, project: Path, valid_deny_socket: Path
+    ) -> None:
+        """Only saturation is a transport failure; a judged deny is a verdict."""
+        response = _send(project, valid_deny_socket, "PreToolUse", _recovery_input(project))
+        hso = response["hookSpecificOutput"]
+        assert hso["permissionDecision"] == "deny"
+        assert hso["permissionDecisionReason"] == "a real guard denied this"
+
+    def test_the_client_copy_of_the_saturation_reason_matches_the_daemon(self) -> None:
+        """init.sh cannot import the constant, so it carries a pinned copy."""
+        assert f"_DISPATCH_SATURATED_REASON = '{DISPATCH_SATURATED_REASON}'\n" in (
+            INIT_SH.read_text()
+        )
+
+
+class TestTheDaemonAndInitShExemptTheSameCommands:
+    """Plan 00533: the daemon judges the recovery command without a slot by
+    its own twin of init.sh's carve-out, so the two must agree."""
+
+    def _init_sh_exempts(self, project: Path, hook_input: dict[str, Any]) -> bool:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("HOOKS_DAEMON_")}
+        env["PROJECT_PATH"] = str(project)
+        env["HOOKS_DAEMON_ROOT_DIR"] = str(project / ".claude" / "hooks-daemon")
+        result = subprocess.run(
+            [BASH, "-c", "source .claude/init.sh; _hooks_daemon_stdin_is_recovery_command"],
+            cwd=project,
+            env=env,
+            input=json.dumps(hook_input),
+            capture_output=True,
+            text=True,
+            timeout=Timeout.REQUEST_LONG,
+            check=False,
+        )
+        assert result.returncode in (0, 1), result.stderr
+        return result.returncode == 0
+
+    @pytest.mark.parametrize(
+        ("command", "cwd_kind"),
+        [
+            ("bin/hooks-daemon restart", "project"),
+            (".claude/hooks-daemon/bin/hooks-daemon repair", "project"),
+            (" \tbin/hooks-daemon status\t", "project"),
+            ("bin/hooks-daemon restart", "subdir"),
+            ("bin/hooks-daemon restart", "none"),
+            ("bin/hooks-daemon restart && echo hi", "project"),
+            ("bin/hooks-daemon restart\n", "project"),
+            ("bin/hooks-daemon upgrade", "project"),
+            ("ABSOLUTE restart", "none"),
+            ("ABSOLUTE logs", "subdir"),
+        ],
+    )
+    def test_both_give_the_same_answer(self, project: Path, command: str, cwd_kind: str) -> None:
+        from claude_code_hooks_daemon.utils.cli_command import (
+            install_recovery_command,
+            is_install_recovery_command,
+        )
+
+        daemon_root = project / ".claude" / "hooks-daemon"
+        absolute = install_recovery_command(project, daemon_root, "restart")
+        assert absolute is not None
+        command = command.replace("ABSOLUTE", absolute.rsplit(" ", 1)[0])
+        subdir = project / "sub"
+        subdir.mkdir(exist_ok=True)
+        cwd = {"project": project, "subdir": subdir, "none": None}[cwd_kind]
+        hook_input = _recovery_input(cwd, command)
+        from_init_sh = self._init_sh_exempts(project, hook_input)
+        from_daemon = is_install_recovery_command(hook_input, project, daemon_root)
+        assert from_daemon == from_init_sh, (command, cwd_kind, from_daemon, from_init_sh)
 
 
 @pytest.fixture
