@@ -1,0 +1,112 @@
+# Issue #124 implementer report (Plan 00533, Tasks 1.1 to 1.4 and 2.1)
+
+Branch `worktree-issue-124-dispatch-saturation`. The brief was achievable as written; nothing in it
+was wrong. Two design choices go beyond its literal wording and are called out under "Decisions".
+
+## What changed
+
+### Task 1.1: the recovery command through a saturated pool
+
+- **Daemon side.** `utils/cli_command.py` gains `is_install_recovery_command(hook_input, project, install_root)` and `is_recovery_command(hook_input)`, a Python twin of `init.sh`'s
+  `_is_daemon_recovery_command` (same spellings, same six subcommands, same space/tab-only padding,
+  same `isprintable`, same resolved-launcher check). `DaemonController.process_event` passes
+  `capacity_exempt=True` through `EventRouter.route` and `HandlerChain.execute` to
+  `BoundedDispatcher.run` for a PreToolUse call that matches. An exempt call takes no slot and skips
+  both the in-flight and straggler caps, but it still runs the guards and its deadline still
+  applies. Its permit is a no-op (`_SinglePermit(None)`), so it never over-releases the
+  `BoundedSemaphore`.
+- **Client side.** `init.sh` now has a pinned copy `_DISPATCH_SATURATED_REASON`, equal to
+  `core.chain.DISPATCH_SATURATED_REASON` (`chain: not judged in time (dispatch pool saturated)`), and
+  `_is_saturation_deny(text)`. On the success path, a PreToolUse deny whose reason starts with that
+  string, for the exact recovery command, is sent through `fail('dispatch_saturated', ...)`. That
+  lands in the existing carve-out arm, which allows the call and adds context. A guard's own judged
+  deny of the recovery command still stands. `.claude/init.sh` is a symlink to `init.sh`, so only
+  one file was edited.
+- What counts as a recovery command is unchanged.
+
+### Task 1.2: configurable `max_inflight` and a bounded wait for a slot
+
+- `ChainConfig.max_inflight` (int, >= 1, default `DISPATCH_MAX_INFLIGHT` = 16) and
+  `ChainConfig.slot_wait_seconds` (float, >= 0, below `CHAIN_DEADLINE_DEFAULT`; default
+  `Timeout.DISPATCH_SLOT_WAIT_SECONDS` = 2.0).
+- `BoundedDispatcher.run` acquires with `timeout=min(slot_wait, call timeout)` and then refuses as
+  before. The wait is subtracted from the call's own timeout, so a chain never gets more than its
+  deadline in total.
+- `configure_default_dispatcher()` is called from `DaemonController.initialise`.
+
+### Task 1.3: the sustained-saturation WARNING
+
+`BoundedDispatcher._note_saturated` tracks the current refusal episode, which a successful acquire
+ends. Once an episode reaches `DISPATCH_SATURATION_WARN_AFTER_SECONDS` (10s) it logs one WARNING:
+`Dispatch pool saturated for Ns: X of Y slots in flight, Z straggler(s); ...`. It repeats at most
+every `DISPATCH_SATURATION_WARN_INTERVAL_SECONDS` (30s). It is logging only. The clock is
+injectable, so the tests do not sleep.
+
+### Task 1.4: the SIGTERM grace exceeds the drain
+
+- `Timeout.DAEMON_ACTIVE_REQUEST_DRAIN` = 5 (with `_POLL` = 0.1).
+- `DAEMON_SIGTERM_GRACE` = drain + `DAEMON_SHUTDOWN_AFTER_DRAIN_MARGIN` (3), so 8s.
+- `server.py`'s shutdown drain loops on the named budget instead of `range(50)`.
+- `cli.py` `cmd_stop` passes `grace_seconds=Timeout.DAEMON_SIGTERM_GRACE`, and its KILLED message
+  now names that value.
+- Grace (8) + SIGKILL grace (2) still fits `DAEMON_SHUTDOWN` (10), and a test pins that.
+
+### Task 2.1: release note and docs
+
+- `CLAUDE/UPGRADES/UNRELEASED/release-notes/002-a-saturated-daemon-can-be-restarted-from-inside-a-session.md`
+- `CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.71.0.yaml`, both keys `added`, with the target
+  version for the release agent to confirm.
+- `docs/guides/CONFIGURATION.md`: two table rows and a new "Dispatch Capacity" section beside
+  "Chain Deadline".
+
+## Not changed (out of scope)
+
+- How `chain.py` treats a refused Stop/SubagentStop chain is unchanged: it still fails closed.
+- The shipped default of 16 is unchanged.
+- No watchdog action, upgrade handover change or persistent log.
+- Task 2.2 (filing the follow-up plans) is left to the coordinator.
+
+## Decisions worth a second look
+
+1. **Daemon-side "allow" means "judge without a slot", not a bare allow.** The ruling says
+   "never need a permit". Running the chain capacity-exempt keeps every guard's verdict on the
+   recovery command, which matches how it is treated when the pool is not full. A bare allow would
+   skip guards that never asked to be skipped.
+2. **Exempt calls are not counted.** A loop that spammed the exact restart command could start
+   unbounded exempt threads, though each one is bounded by its deadline. I judged a cap unneeded
+   (YAGNI), since the command is exact and restarts the daemon anyway.
+3. **hooks-relay is not covered client-side.** The relay passes a well-formed deny through
+   unchanged and only hands off to `init.sh` on an exchange failure. A relay-rung client talking to
+   an older, saturated daemon therefore still sees the deny. The daemon-side fix covers any daemon
+   built from this branch. A relay twin of the client change would need Rust, so I left it out.
+4. The per-refusal WARNING in `_take_slot` that already existed stays, and it is not rate-limited.
+   Under sustained load that line still repeats on every refusal; the new episode WARNING is the
+   one to look for.
+
+## TDD evidence (red before green)
+
+- Dispatcher tests (`tests/unit/core/test_bounded_dispatch.py`):
+  `ImportError: cannot import name 'configure_default_dispatcher' from 'claude_code_hooks_daemon.core.bounded_dispatch'`
+- Config, matcher and controller tests: 33 failed, 77 passed. Examples:
+  - `AttributeError: module 'claude_code_hooks_daemon.utils.cli_command' has no attribute 'is_install_recovery_command'` (25 cases)
+  - `pydantic ... extra_forbidden` for `max_inflight` / `slot_wait_seconds`
+- `init.sh` tests: 2 failed. `TestASaturationDenyOfTheRecoveryCommandIsATransportFailure::test_the_recovery_command_is_not_denied`
+  failed with `AssertionError: {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny', ...}`,
+  and the pinned-copy test failed on `assert "_DISPATCH_SATURATED_REASON = ..." in init.sh`. The 10
+  init.sh/daemon parity cases passed on the first run, which confirms the Python twin agrees with
+  `init.sh`.
+- Task 1.4: `test_the_sigterm_grace_is_the_named_one` failed with `assert 5 == 8`, and
+  `test_the_active_request_drain_is_the_named_budget` failed with `AssertionError: 5.0127... < 2.0`
+  (the drain ignored the budget).
+
+## Green
+
+- `test_chain_config.py`, `test_cli_command.py`, `test_controller.py`, `test_bounded_dispatch.py`,
+  `test_chain.py`, `test_router.py`: 380 passed.
+- `tests/integration/test_init_sh_pretooluse_fail_closed.py`: 194 passed.
+- `tests/unit/daemon/test_cli_commands.py` + `tests/daemon/test_server.py`: 135 passed.
+- `test_chain.py`'s `_BogusOutcomeDispatcher.run` test double gained the new keyword.
+
+## Targeted QA
+
+See the QA section appended below.

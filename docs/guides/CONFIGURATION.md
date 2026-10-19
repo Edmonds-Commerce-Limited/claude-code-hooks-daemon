@@ -86,6 +86,8 @@ daemon:
 | `input_validation.enabled`     | `true`  | Validates hook event data before processing. Catches malformed events early.                                                                                                                                                |
 | `input_validation.strict_mode` | `false` | When `true`, invalid events are denied. When `false`, invalid events are allowed through with a warning logged.                                                                                                             |
 | `chain.deadline_seconds`       | `20`    | Per-event chain deadline in seconds, well under the client's own 30s socket timeout — see [Chain Deadline](#chain-deadline) below.                                                                                          |
+| `chain.max_inflight`           | `16`    | How many handler chains run at once, across every session the daemon serves — see [Dispatch Capacity](#dispatch-capacity) below.                                                                                            |
+| `chain.slot_wait_seconds`      | `2`     | Seconds a chain waits for a free slot before it is refused, spent from its own deadline — see [Dispatch Capacity](#dispatch-capacity) below.                                                                                |
 
 ---
 
@@ -765,6 +767,19 @@ With `daemon.strict_mode: true`, a handler that raises an exception denies the c
 The hook client gives the daemon a socket timeout (30s) and treats an expired one as an ALLOW for the whole PreToolUse chain — so a single slow handler used to bypass every guard behind it, not just itself. `daemon.chain.deadline_seconds` (default `20`, comfortably under that 30s budget) bounds how long the daemon itself spends on one event: once it is exceeded, a handler tagged both `SAFETY` and `BLOCKING` that has not run yet is denied ("not judged in time"), and any other not-yet-run handler is skipped with a note. Setting it to `null` disables enforcement — not recommended, since that reopens the original bypass.
 
 The two worktree events are the exception: `WorktreeCreate` and `WorktreeRemove` run git rather than judge a call, and their git budget (30s per call) is longer than this deadline, so they get their own: a 55s chain deadline for create and 65s for remove, and a client wait of 60s and 70s. `deadline_seconds` can raise those but never lower them below that floor, and `null` still disables enforcement. Every other event uses `deadline_seconds` unchanged.
+
+### Dispatch Capacity
+
+One daemon serves every session in the project, and it runs at most `daemon.chain.max_inflight` handler chains at once (default `16`). A chain that finds every slot taken waits up to `daemon.chain.slot_wait_seconds` (default `2`, `0` refuses at once) for one, and that wait is spent from its own deadline. If no slot frees, the chain is refused as "dispatch pool saturated", which is handled like "not judged in time": a call whose chain holds a `SAFETY`+`BLOCKING` handler is denied, Stop and SubagentStop included.
+
+The daemon's exact recovery command (`hooks-daemon restart`, `status`, `logs`, `stop`, `start` or `repair` by this install's launcher, nothing else on the line) never needs a slot, so a full pool can always be restarted from inside a session. Saturation lasting 10 seconds or more is logged as a WARNING with its duration and in-flight count, at most every 30 seconds; seeing it regularly means the host runs more concurrent sessions than `max_inflight` allows.
+
+```yaml
+daemon:
+  chain:
+    max_inflight: 32
+    slot_wait_seconds: 2.0
+```
 
 ---
 

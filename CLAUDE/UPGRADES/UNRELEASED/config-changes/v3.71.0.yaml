@@ -1,0 +1,39 @@
+# Drafted by Plan 00533. The VERSION in the filename and the `version:` key are
+# a target, not a decision; the release agent confirms or renames this file.
+version: "3.71.0"
+date: "UNRELEASED"
+
+breaking: false
+
+config_changes:
+  added:
+    - key: daemon.chain.max_inflight
+      recommended: false
+      dormant: false
+      description: >-
+        NEW (Plan 00533, GitHub #124). How many handler chains the daemon runs
+        at once, across every session it serves. Default 16, the value that
+        was previously fixed. A chain beyond it waits
+        `daemon.chain.slot_wait_seconds` for a slot, then is refused as
+        "dispatch pool saturated", which denies a PreToolUse call holding a
+        SAFETY+BLOCKING handler.
+      example_yaml: |
+        daemon:
+          chain:
+            max_inflight: 32
+      migration_note: >-
+        Raise it only on a host where many concurrent sessions share one
+        daemon and the log shows "Dispatch pool saturated for Ns".
+    - key: daemon.chain.slot_wait_seconds
+      recommended: false
+      dormant: false
+      description: >-
+        NEW (Plan 00533, GitHub #124). Seconds a chain that finds every slot
+        taken waits for one before it is refused. Default 2, spent from the
+        chain's own deadline. 0 refuses at once, the previous behaviour.
+      example_yaml: |
+        daemon:
+          chain:
+            slot_wait_seconds: 2.0
+      migration_note: >-
+        No action needed; the default applies.
