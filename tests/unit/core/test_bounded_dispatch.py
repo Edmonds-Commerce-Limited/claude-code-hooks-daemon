@@ -14,16 +14,25 @@ Python threads cannot forcibly interrupt).
 from __future__ import annotations
 
 import contextlib
+import logging
 import threading
 import time
+from collections.abc import Iterator
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from unittest.mock import patch
 
+import pytest
+
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.core.bounded_dispatch import (
+    DISPATCH_MAX_INFLIGHT,
     BoundedDispatcher,
     DispatchSaturated,
     DispatchTimeout,
+    configure_default_dispatcher,
+    get_default_dispatcher,
+    reset_default_dispatcher_for_tests,
 )
 from tests.dispatch_timeouts import DispatchTestTimeout
 
@@ -106,7 +115,7 @@ class TestBoundedDispatcherSaturation:
     """A pool with no free capacity fails closed instead of queuing."""
 
     def test_saturated_pool_returns_dispatch_saturated_immediately(self) -> None:
-        dispatcher = BoundedDispatcher(max_inflight=1)
+        dispatcher = BoundedDispatcher(max_inflight=1, slot_wait_seconds=0.0)
         occupied = threading.Event()
         release = threading.Event()
 
@@ -450,3 +459,453 @@ class TestBoundedDispatcherHandlesBaseException:
             dispatcher.shutdown(wait=True)
 
         assert outcome == "ok"
+
+
+@contextlib.contextmanager
+def _every_slot_held(dispatcher: BoundedDispatcher[object]) -> Iterator[threading.Event]:
+    """Fill every ``max_inflight`` slot of ``dispatcher`` with a blocked call.
+
+    Yields the event that releases them; it is set again on exit, so the
+    holders always finish before the dispatcher is shut down.
+    """
+    release = threading.Event()
+    holders: list[threading.Thread] = []
+    started = threading.Semaphore(0)
+
+    def _hold() -> None:
+        started.release()
+        release.wait(timeout=DispatchTestTimeout.GENEROUS)
+
+    try:
+        for index in range(dispatcher.max_inflight):
+            holder = threading.Thread(
+                target=dispatcher.run,
+                args=(_hold,),
+                kwargs={"timeout": DispatchTestTimeout.GENEROUS, "label": f"holder-{index}"},
+            )
+            holder.start()
+            holders.append(holder)
+            assert started.acquire(timeout=DispatchTestTimeout.NORMAL)
+        yield release
+    finally:
+        release.set()
+        for holder in holders:
+            holder.join(timeout=DispatchTestTimeout.GENEROUS)
+
+
+class TestBoundedDispatcherWaitsForASlot:
+    """Plan 00533 (issue #124): a full pool waits a short, bounded time for a
+    slot before refusing, so a burst one call over the limit is served."""
+
+    def test_a_slot_freed_during_the_wait_is_taken(self) -> None:
+        dispatcher: BoundedDispatcher[object] = BoundedDispatcher(
+            max_inflight=1, slot_wait_seconds=DispatchTestTimeout.GENEROUS
+        )
+        try:
+            with _every_slot_held(dispatcher) as release:
+                # Freed only after run() below has found the pool full.
+                timer = threading.Timer(DispatchTestTimeout.SHORT, release.set)
+                timer.start()
+                outcome = dispatcher.run(
+                    lambda: "served", timeout=DispatchTestTimeout.GENEROUS, label="waiter"
+                )
+                timer.join()
+        finally:
+            dispatcher.shutdown(wait=True)
+        assert outcome == "served"
+
+    def test_the_wait_is_bounded_and_then_refused(self) -> None:
+        dispatcher: BoundedDispatcher[object] = BoundedDispatcher(
+            max_inflight=1, slot_wait_seconds=DispatchTestTimeout.SHORT
+        )
+        try:
+            with _every_slot_held(dispatcher):
+                started = time.monotonic()
+                outcome = dispatcher.run(
+                    lambda: "unreachable", timeout=DispatchTestTimeout.GENEROUS, label="waiter"
+                )
+                waited = time.monotonic() - started
+        finally:
+            dispatcher.shutdown(wait=True)
+        assert isinstance(outcome, DispatchSaturated)
+        assert DispatchTestTimeout.SHORT <= waited < DispatchTestTimeout.GENEROUS
+
+    def test_the_wait_never_outlasts_the_calls_own_timeout(self) -> None:
+        dispatcher: BoundedDispatcher[object] = BoundedDispatcher(
+            max_inflight=1, slot_wait_seconds=DispatchTestTimeout.OUTER_BOUND
+        )
+        try:
+            with _every_slot_held(dispatcher):
+                started = time.monotonic()
+                outcome = dispatcher.run(
+                    lambda: "unreachable", timeout=DispatchTestTimeout.SHORT, label="waiter"
+                )
+                waited = time.monotonic() - started
+        finally:
+            dispatcher.shutdown(wait=True)
+        assert isinstance(outcome, DispatchSaturated)
+        assert waited < DispatchTestTimeout.GENEROUS
+
+    def test_time_spent_waiting_is_taken_from_the_calls_timeout(self) -> None:
+        """A call that waited most of its budget for a slot does not then get
+        the whole budget again to run in."""
+        dispatcher: BoundedDispatcher[object] = BoundedDispatcher(
+            max_inflight=1, slot_wait_seconds=DispatchTestTimeout.GENEROUS
+        )
+        never = threading.Event()
+        try:
+            with _every_slot_held(dispatcher) as release:
+                timer = threading.Timer(DispatchTestTimeout.NORMAL / 2, release.set)
+                timer.start()
+                started = time.monotonic()
+                outcome = dispatcher.run(
+                    lambda: never.wait(timeout=DispatchTestTimeout.GENEROUS),
+                    timeout=DispatchTestTimeout.NORMAL,
+                    label="waiter",
+                )
+                elapsed = time.monotonic() - started
+                timer.join()
+        finally:
+            never.set()
+            dispatcher.shutdown(wait=True)
+        assert isinstance(outcome, DispatchTimeout)
+        assert elapsed < DispatchTestTimeout.NORMAL * 1.5
+
+    def test_the_defaults_are_the_shipped_ones(self) -> None:
+        dispatcher: BoundedDispatcher[object] = BoundedDispatcher()
+        assert dispatcher.max_inflight == DISPATCH_MAX_INFLIGHT == 16
+        assert dispatcher.slot_wait_seconds == Timeout.DISPATCH_SLOT_WAIT_SECONDS
+        assert dispatcher.max_exempt_inflight == Timeout.DISPATCH_EXEMPT_MAX_INFLIGHT == 2
+
+    def test_a_slot_won_with_no_time_left_to_run_in_is_refused(self) -> None:
+        """A slot freed at the very end of the wait leaves the call too little
+        of its budget to be judged in. Running it anyway reports a dispatch
+        timeout for a call that never had a chance; it is refused instead,
+        and the slot goes straight back."""
+        dispatcher: BoundedDispatcher[object] = BoundedDispatcher(
+            max_inflight=1, slot_wait_seconds=DispatchTestTimeout.GENEROUS
+        )
+        slot = _LastMomentSlot()
+        ran = threading.Event()
+        try:
+            with patch.object(dispatcher, "_semaphore", slot):
+                outcome = dispatcher.run(
+                    ran.set, timeout=DispatchTestTimeout.SHORT, label="last-moment"
+                )
+        finally:
+            dispatcher.shutdown(wait=True)
+        assert isinstance(outcome, DispatchSaturated)
+        assert not ran.is_set()
+        assert slot.released == 1
+
+
+class _LastMomentSlot:
+    """A semaphore whose only slot frees up exactly as the wait for it ends."""
+
+    def __init__(self) -> None:
+        self.released = 0
+
+    def acquire(self, blocking: bool = True, timeout: float | None = None) -> bool:
+        if not blocking:
+            return False
+        if timeout is not None:
+            time.sleep(timeout)
+        return True
+
+    def release(self) -> None:
+        self.released += 1
+
+
+class TestBoundedDispatcherCapacityExemptCalls:
+    """Plan 00533 (issue #124): the daemon's own recovery command must be
+    judged even when every slot is taken, or nothing can recover the pool."""
+
+    def test_an_exempt_call_runs_while_the_pool_is_full(self) -> None:
+        dispatcher: BoundedDispatcher[object] = BoundedDispatcher(
+            max_inflight=1, slot_wait_seconds=0.0
+        )
+        try:
+            with _every_slot_held(dispatcher):
+                outcome = dispatcher.run(
+                    lambda: "judged",
+                    timeout=DispatchTestTimeout.GENEROUS,
+                    label="recovery",
+                    capacity_exempt=True,
+                )
+        finally:
+            dispatcher.shutdown(wait=True)
+        assert outcome == "judged"
+
+    def test_an_exempt_call_runs_while_the_straggler_cap_is_reached(self) -> None:
+        dispatcher: BoundedDispatcher[object] = BoundedDispatcher(
+            max_inflight=2, max_stragglers=1, slot_wait_seconds=0.0
+        )
+        release = threading.Event()
+        try:
+            stuck = dispatcher.run(
+                lambda: release.wait(timeout=DispatchTestTimeout.GENEROUS),
+                timeout=DispatchTestTimeout.VERY_SHORT,
+                label="straggler",
+            )
+            assert isinstance(stuck, DispatchTimeout)
+            outcome = dispatcher.run(
+                lambda: "judged",
+                timeout=DispatchTestTimeout.GENEROUS,
+                label="recovery",
+                capacity_exempt=True,
+            )
+        finally:
+            release.set()
+            dispatcher.shutdown(wait=True)
+        assert outcome == "judged"
+
+    def test_an_exempt_call_that_times_out_releases_no_permit_it_never_took(self) -> None:
+        """A BoundedSemaphore raises on over-release, so a release here would
+        surface as an exception from the timed-out call."""
+        dispatcher: BoundedDispatcher[object] = BoundedDispatcher(
+            max_inflight=1, slot_wait_seconds=0.0
+        )
+        release = threading.Event()
+        try:
+            outcome = dispatcher.run(
+                lambda: release.wait(timeout=DispatchTestTimeout.GENEROUS),
+                timeout=DispatchTestTimeout.VERY_SHORT,
+                label="recovery",
+                capacity_exempt=True,
+            )
+            release.set()
+            dispatcher.shutdown(wait=True)
+            # The single ordinary slot is still exactly one slot.
+            after = dispatcher.run(lambda: "ok", timeout=DispatchTestTimeout.NORMAL, label="next")
+        finally:
+            release.set()
+            dispatcher.shutdown(wait=True)
+        assert isinstance(outcome, DispatchTimeout)
+        assert after == "ok"
+
+    def test_exempt_calls_have_a_small_bounded_pool_of_their_own(self) -> None:
+        """status and logs are exempt and routinely run, so against a wedged
+        handler each would be another straggler: they cannot pile up past
+        their own cap, which never touches the ordinary pool."""
+        dispatcher: BoundedDispatcher[object] = BoundedDispatcher(
+            max_inflight=1, slot_wait_seconds=0.0
+        )
+        release = threading.Event()
+        started = threading.Semaphore(0)
+
+        def _hold() -> None:
+            started.release()
+            release.wait(timeout=DispatchTestTimeout.GENEROUS)
+
+        holders = [
+            threading.Thread(
+                target=dispatcher.run,
+                args=(_hold,),
+                kwargs={
+                    "timeout": DispatchTestTimeout.GENEROUS,
+                    "label": f"exempt-{index}",
+                    "capacity_exempt": True,
+                },
+            )
+            for index in range(dispatcher.max_exempt_inflight)
+        ]
+        try:
+            for holder in holders:
+                holder.start()
+                assert started.acquire(timeout=DispatchTestTimeout.NORMAL)
+            over_cap = dispatcher.run(
+                lambda: "unreachable",
+                timeout=DispatchTestTimeout.GENEROUS,
+                label="one-too-many",
+                capacity_exempt=True,
+            )
+            ordinary = dispatcher.run(
+                lambda: "ok", timeout=DispatchTestTimeout.NORMAL, label="ordinary"
+            )
+        finally:
+            release.set()
+            for holder in holders:
+                holder.join(timeout=DispatchTestTimeout.GENEROUS)
+            dispatcher.shutdown(wait=True)
+        assert isinstance(over_cap, DispatchSaturated)
+        assert ordinary == "ok"
+
+    def test_an_exempt_straggler_keeps_its_exempt_slot_until_it_finishes(self) -> None:
+        """Releasing it on timeout, as an ordinary call does, would let
+        stragglers of a wedged handler accumulate without limit again."""
+        dispatcher: BoundedDispatcher[object] = BoundedDispatcher(
+            max_inflight=1, max_exempt_inflight=1, slot_wait_seconds=0.0
+        )
+        release = threading.Event()
+        try:
+            stuck = dispatcher.run(
+                lambda: release.wait(timeout=DispatchTestTimeout.GENEROUS),
+                timeout=DispatchTestTimeout.VERY_SHORT,
+                label="exempt-straggler",
+                capacity_exempt=True,
+            )
+            while_stuck = dispatcher.run(
+                lambda: "unreachable",
+                timeout=DispatchTestTimeout.NORMAL,
+                label="exempt",
+                capacity_exempt=True,
+            )
+            release.set()
+            dispatcher.shutdown(wait=True)
+            after = dispatcher.run(
+                lambda: "judged",
+                timeout=DispatchTestTimeout.NORMAL,
+                label="exempt",
+                capacity_exempt=True,
+            )
+        finally:
+            release.set()
+            dispatcher.shutdown(wait=True)
+        assert isinstance(stuck, DispatchTimeout)
+        assert isinstance(while_stuck, DispatchSaturated)
+        assert after == "judged"
+
+
+class _FakeClock:
+    """A monotonic clock the test advances by hand."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class TestBoundedDispatcherWarnsOnSustainedSaturation:
+    """Plan 00533 (issue #124): six minutes of refusals left no single line
+    saying how long the pool had been full. One rate-limited WARNING does."""
+
+    _SUSTAINED = "Dispatch pool saturated for"
+
+    def _refuse(self, dispatcher: BoundedDispatcher[object]) -> None:
+        outcome = dispatcher.run(lambda: None, timeout=DispatchTestTimeout.NORMAL, label="refused")
+        assert isinstance(outcome, DispatchSaturated)
+
+    def _sustained(self, caplog: pytest.LogCaptureFixture) -> list[str]:
+        return [r.getMessage() for r in caplog.records if self._SUSTAINED in r.getMessage()]
+
+    def _refuse_every_second(
+        self, dispatcher: BoundedDispatcher[object], clock: _FakeClock, seconds: int
+    ) -> None:
+        """Advance the clock a second at a time, one refusal at each step."""
+        for _ in range(seconds):
+            clock.now += 1
+            self._refuse(dispatcher)
+
+    def test_it_warns_once_saturation_outlasts_the_threshold_and_then_at_an_interval(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        clock = _FakeClock()
+        dispatcher: BoundedDispatcher[object] = BoundedDispatcher(
+            max_inflight=1, slot_wait_seconds=0.0, clock=clock
+        )
+        after = int(Timeout.DISPATCH_SATURATION_WARN_AFTER_SECONDS)
+        interval = int(Timeout.DISPATCH_SATURATION_WARN_INTERVAL_SECONDS)
+        caplog.set_level(logging.WARNING, logger="claude_code_hooks_daemon.core.bounded_dispatch")
+        try:
+            with _every_slot_held(dispatcher):
+                self._refuse(dispatcher)
+                self._refuse_every_second(dispatcher, clock, after - 1)
+                assert self._sustained(caplog) == []
+                self._refuse_every_second(dispatcher, clock, 1)
+                assert len(self._sustained(caplog)) == 1
+                self._refuse_every_second(dispatcher, clock, interval - 1)
+                assert len(self._sustained(caplog)) == 1
+                self._refuse_every_second(dispatcher, clock, 1)
+                assert len(self._sustained(caplog)) == 2
+        finally:
+            dispatcher.shutdown(wait=True)
+        first, second = self._sustained(caplog)
+        # One refusal at the start, then one a second until the threshold.
+        assert f"for {after}s: {after + 1} call(s) refused in the last {after}s" in first
+        assert f": {interval} call(s) refused in the last {interval}s" in second
+
+    def test_a_slot_won_between_refusals_does_not_end_the_episode(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Under real overload slots churn and some callers win one inside
+        the wait, while the rest keep being refused. That is still one
+        sustained episode, not many short ones that never reach the
+        threshold."""
+        clock = _FakeClock()
+        dispatcher: BoundedDispatcher[object] = BoundedDispatcher(
+            max_inflight=1, slot_wait_seconds=0.0, clock=clock
+        )
+        caplog.set_level(logging.WARNING, logger="claude_code_hooks_daemon.core.bounded_dispatch")
+        try:
+            for _ in range(int(Timeout.DISPATCH_SATURATION_WARN_AFTER_SECONDS) + 1):
+                with _every_slot_held(dispatcher):
+                    self._refuse(dispatcher)
+                assert dispatcher.run(lambda: "ok", timeout=DispatchTestTimeout.NORMAL, label="ok")
+                clock.now += 1
+        finally:
+            dispatcher.shutdown(wait=True)
+        assert len(self._sustained(caplog)) == 1
+
+    def test_a_quiet_period_with_no_refusal_ends_the_episode(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        clock = _FakeClock()
+        dispatcher: BoundedDispatcher[object] = BoundedDispatcher(
+            max_inflight=1, slot_wait_seconds=0.0, clock=clock
+        )
+        after = int(Timeout.DISPATCH_SATURATION_WARN_AFTER_SECONDS)
+        caplog.set_level(logging.WARNING, logger="claude_code_hooks_daemon.core.bounded_dispatch")
+        try:
+            with _every_slot_held(dispatcher):
+                self._refuse(dispatcher)
+                clock.now += Timeout.DISPATCH_SATURATION_QUIET_SECONDS
+                self._refuse(dispatcher)
+                self._refuse_every_second(dispatcher, clock, after - 1)
+                assert self._sustained(caplog) == []
+                self._refuse_every_second(dispatcher, clock, 1)
+        finally:
+            dispatcher.shutdown(wait=True)
+        assert len(self._sustained(caplog)) == 1
+        assert f"for {after}s" in self._sustained(caplog)[0]
+
+    def test_straggler_cap_refusals_feed_the_same_signal(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        clock = _FakeClock()
+        dispatcher: BoundedDispatcher[object] = BoundedDispatcher(
+            max_inflight=2, max_stragglers=1, slot_wait_seconds=0.0, clock=clock
+        )
+        release = threading.Event()
+        caplog.set_level(logging.WARNING, logger="claude_code_hooks_daemon.core.bounded_dispatch")
+        try:
+            stuck = dispatcher.run(
+                lambda: release.wait(timeout=DispatchTestTimeout.GENEROUS),
+                timeout=DispatchTestTimeout.VERY_SHORT,
+                label="straggler",
+            )
+            assert isinstance(stuck, DispatchTimeout)
+            self._refuse(dispatcher)
+            self._refuse_every_second(
+                dispatcher, clock, int(Timeout.DISPATCH_SATURATION_WARN_AFTER_SECONDS)
+            )
+        finally:
+            release.set()
+            dispatcher.shutdown(wait=True)
+        assert len(self._sustained(caplog)) == 1
+        assert "1 straggler(s)" in self._sustained(caplog)[0]
+
+
+class TestConfigureDefaultDispatcher:
+    """Plan 00533 (issue #124): ``daemon.chain.max_inflight`` and
+    ``daemon.chain.slot_wait_seconds`` reach the process-wide dispatcher."""
+
+    def test_it_replaces_the_shared_dispatcher_with_the_configured_one(self) -> None:
+        try:
+            configure_default_dispatcher(max_inflight=3, slot_wait_seconds=0.25)
+            dispatcher = get_default_dispatcher()
+            assert dispatcher.max_inflight == 3
+            assert dispatcher.slot_wait_seconds == 0.25
+        finally:
+            reset_default_dispatcher_for_tests()
+        assert get_default_dispatcher().max_inflight == DISPATCH_MAX_INFLIGHT

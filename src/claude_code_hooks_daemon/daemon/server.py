@@ -2186,13 +2186,14 @@ class HooksDaemon:
         self._shutdown_requested = True
         logger.info("Shutting down daemon...")
 
-        # Wait for active requests to complete (with timeout)
+        # Wait for active requests to complete, for at most the drain budget
+        # `stop`'s SIGTERM grace (Timeout.DAEMON_SIGTERM_GRACE) is derived from.
         if self._active_requests > 0:
             logger.info("Waiting for %d active requests...", self._active_requests)
-            for _ in range(50):  # Wait up to 5 seconds
-                if self._active_requests == 0:
-                    break
-                await asyncio.sleep(0.1)
+            loop = asyncio.get_running_loop()
+            drain_until = loop.time() + Timeout.DAEMON_ACTIVE_REQUEST_DRAIN
+            while self._active_requests > 0 and loop.time() < drain_until:
+                await asyncio.sleep(Timeout.DAEMON_ACTIVE_REQUEST_DRAIN_POLL)
 
         # Pending debounced triggers are dropped, not flushed: they live in
         # memory only and the next event for each key re-triggers it.

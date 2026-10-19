@@ -358,3 +358,139 @@ class TestInstallRecoveryCommand:
         monkeypatch.setattr(pc.ProjectContext, "_initialized", False, raising=False)
         monkeypatch.setattr(pc.ProjectContext, "_instance", None, raising=False)
         assert cli_command.recovery_command("restart") is None
+
+
+def _client_install(project: Path) -> Path:
+    """A client project with the daemon clone's launcher; returns its root."""
+    launcher = project / ".claude" / "hooks-daemon" / "bin" / "hooks-daemon"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("#!/bin/bash\n")
+    return project / ".claude" / "hooks-daemon"
+
+
+def _bash(command: object, cwd: object = None) -> dict[str, object]:
+    hook_input: dict[str, object] = {"tool_name": "Bash", "tool_input": {"command": command}}
+    if cwd is not None:
+        hook_input["cwd"] = cwd
+    return hook_input
+
+
+class TestIsInstallRecoveryCommand:
+    """Plan 00533 (issue #124): the daemon-side twin of init.sh's
+    ``_is_daemon_recovery_command``, so a saturated pool can still judge the
+    one command that recovers it. Parity with init.sh over the same inputs
+    is pinned by test_init_sh_pretooluse_fail_closed.py."""
+
+    @pytest.mark.parametrize("sub", ["restart", "status", "logs", "stop", "start", "repair"])
+    def test_every_recovery_subcommand_by_the_clone_spelling_is_exempt(
+        self, tmp_path: Path, sub: str
+    ) -> None:
+        root = _client_install(tmp_path)
+        hook_input = _bash(f".claude/hooks-daemon/bin/hooks-daemon {sub}", str(tmp_path))
+        assert cli_command.is_install_recovery_command(hook_input, tmp_path, root)
+
+    def test_the_absolute_command_a_deny_names_is_exempt_with_no_cwd(self, tmp_path: Path) -> None:
+        root = _client_install(tmp_path)
+        command = cli_command.install_recovery_command(tmp_path, root, "restart")
+        assert command is not None
+        assert cli_command.is_install_recovery_command(_bash(command), tmp_path, root)
+
+    def test_spaces_and_tabs_around_it_are_still_exempt(self, tmp_path: Path) -> None:
+        root = _client_install(tmp_path)
+        hook_input = _bash(" \t.claude/hooks-daemon/bin/hooks-daemon restart\t ", str(tmp_path))
+        assert cli_command.is_install_recovery_command(hook_input, tmp_path, root)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            ".claude/hooks-daemon/bin/hooks-daemon restart && echo hi",
+            ".claude/hooks-daemon/bin/hooks-daemon restart\n",
+            ".claude/hooks-daemon/bin/hooks-daemon restart --force",
+            ".claude/hooks-daemon/bin/hooks-daemon upgrade",
+            "hooks-daemon restart",
+            "echo hi",
+        ],
+    )
+    def test_anything_else_is_not_exempt(self, tmp_path: Path, command: str) -> None:
+        root = _client_install(tmp_path)
+        assert not cli_command.is_install_recovery_command(
+            _bash(command, str(tmp_path)), tmp_path, root
+        )
+
+    def test_a_launcher_planted_in_another_directory_is_not_exempt(self, tmp_path: Path) -> None:
+        root = _client_install(tmp_path)
+        elsewhere = tmp_path / "elsewhere"
+        planted = elsewhere / ".claude" / "hooks-daemon" / "bin" / "hooks-daemon"
+        planted.parent.mkdir(parents=True)
+        planted.write_text("#!/bin/bash\n")
+        hook_input = _bash(".claude/hooks-daemon/bin/hooks-daemon restart", str(elsewhere))
+        assert not cli_command.is_install_recovery_command(hook_input, tmp_path, root)
+
+    @pytest.mark.parametrize("cwd", [None, "relative/dir", 7])
+    def test_a_relative_spelling_without_an_absolute_cwd_is_not_exempt(
+        self, tmp_path: Path, cwd: object
+    ) -> None:
+        root = _client_install(tmp_path)
+        hook_input = _bash(".claude/hooks-daemon/bin/hooks-daemon restart", cwd)
+        assert not cli_command.is_install_recovery_command(hook_input, tmp_path, root)
+
+    @pytest.mark.parametrize(
+        "hook_input",
+        [
+            None,
+            "a string",
+            {"tool_name": "Write", "tool_input": {"command": "bin/hooks-daemon restart"}},
+            {"tool_name": "Bash"},
+            {"tool_name": "Bash", "tool_input": "bin/hooks-daemon restart"},
+            {"tool_name": "Bash", "tool_input": {"command": 5}},
+        ],
+    )
+    def test_a_malformed_or_non_bash_input_is_not_exempt(
+        self, tmp_path: Path, hook_input: object
+    ) -> None:
+        root = _client_install(tmp_path)
+        assert not cli_command.is_install_recovery_command(hook_input, tmp_path, root)
+
+    def test_an_unknown_install_exempts_nothing(self, tmp_path: Path) -> None:
+        project = tmp_path / "proj"
+        project.mkdir()
+        other_root = _client_install(tmp_path / "other")
+        command = f"{other_root / 'bin' / 'hooks-daemon'} restart"
+        assert not cli_command.is_install_recovery_command(_bash(command), project, other_root)
+
+    def test_a_command_that_is_not_a_recovery_spelling_resolves_no_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """It runs on every Bash call, so the text is compared first and the
+        filesystem is touched only for a text match."""
+        root = _client_install(tmp_path)
+        resolved: list[Path] = []
+        real_resolve = cli_command._resolve
+
+        def _counting_resolve(path: Path) -> Path:
+            resolved.append(path)
+            return real_resolve(path)
+
+        monkeypatch.setattr(cli_command, "_resolve", _counting_resolve)
+        hook_input = _bash("git status", str(tmp_path))
+        assert not cli_command.is_install_recovery_command(hook_input, tmp_path, root)
+        assert resolved == []
+
+    @pytest.mark.parametrize("error", [OSError("unreadable"), ValueError("embedded null byte")])
+    def test_a_path_that_cannot_be_resolved_is_not_exempt(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: Exception
+    ) -> None:
+        """As init.sh's carve-out: an unresolvable install is no install."""
+        root = _client_install(tmp_path)
+
+        def _raising_resolve(path: Path) -> Path:
+            raise error
+
+        monkeypatch.setattr(cli_command, "_resolve", _raising_resolve)
+        hook_input = _bash(".claude/hooks-daemon/bin/hooks-daemon restart", str(tmp_path))
+        assert cli_command.is_install_recovery_command(hook_input, tmp_path, root) is False
+
+    def test_uninitialised_exempts_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", False, raising=False)
+        monkeypatch.setattr(pc.ProjectContext, "_instance", None, raising=False)
+        assert not cli_command.is_recovery_command(_bash("bin/hooks-daemon restart", "/"))

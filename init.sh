@@ -3079,6 +3079,25 @@ SOCKET_TIMEOUT_SECONDS = _resolve_socket_timeout()
 # test_init_sh_pretooluse_fail_closed.py pins the two equal.
 _CHAIN_DEADLINE_DEFAULT_SECONDS = 20
 
+# core.chain.DISPATCH_SATURATED_REASON, which this stdlib-only client cannot
+# import either; test_init_sh_pretooluse_fail_closed.py pins the two equal.
+_DISPATCH_SATURATED_REASON = 'chain: not judged in time (dispatch pool saturated)'
+
+def _is_saturation_deny(text):
+    '''True when text is the daemon refusing a chain because its dispatch pool
+    is full (Plan 00533, issue #124). No guard judged the call: it is the same
+    no-verdict case as a transport failure, only worded as a well-formed deny,
+    so the recovery carve-out must apply to it too.'''
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return False
+    hso = data.get('hookSpecificOutput') if isinstance(data, dict) else None
+    if not isinstance(hso, dict) or hso.get('permissionDecision') != 'deny':
+        return False
+    reason = hso.get('permissionDecisionReason')
+    return isinstance(reason, str) and reason.startswith(_DISPATCH_SATURATED_REASON)
+
 def _socket_timeout_note():
     '''Name CLAUDE_HOOKS_SOCKET_TIMEOUT when it caused a timeout (Plan 00466 N24).
 
@@ -3247,6 +3266,18 @@ def emit_error_json(event_name, error_type, error_details):
             '',
             'The daemon was REACHED and answered, but the response could not',
             'be parsed as a judged verdict for this call.',
+            '',
+        ] + _RESTART_ADVICE
+    elif error_type == 'dispatch_saturated':
+        # Plan 00533: only the exact recovery command reaches here.
+        context_lines = [
+            'HOOKS DAEMON: dispatch pool saturated',
+            '',
+            f'Error: {error_type} - {error_details}',
+            '',
+            'The daemon was REACHED, but every dispatch slot was taken, so no',
+            'guard judged this call. Restarting the daemon empties the pool;',
+            'if this recurs, raise daemon.chain.max_inflight.',
             '',
         ] + _RESTART_ADVICE
     elif error_type in ('socket_not_found', 'connection_refused') \
@@ -3556,6 +3587,14 @@ try:
         fail('malformed_response',
             f'Daemon responded but the response was not a valid PreToolUse '
             f'decision (received {output[:200]!r})')
+    elif (event_name == 'PreToolUse' and _is_saturation_deny(output)
+            and _is_daemon_recovery_command(hook_input, project_path, daemon_root)):
+        # Plan 00533 (issue #124): a full pool denies every chain, the
+        # restart that would empty it included. Only the exact recovery
+        # command is let through, by the transport-failure carve-out.
+        fail('dispatch_saturated',
+            f'Daemon at {socket_path} refused to judge this call: its dispatch '
+            'pool is saturated.')
     else:
         print(output)
     sys.exit(0)

@@ -3026,7 +3026,9 @@ class TestUnexpectedDispatchOutcomeFailsLoud:
         class _BogusOutcomeDispatcher(BoundedDispatcher[object]):
             """Returns neither a real result nor a known sentinel."""
 
-            def run(self, fn: Any, *, timeout: float, label: str) -> Any:
+            def run(
+                self, fn: Any, *, timeout: float, label: str, capacity_exempt: bool = False
+            ) -> Any:
                 return object()
 
         chain = HandlerChain()

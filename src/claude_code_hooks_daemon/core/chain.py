@@ -49,6 +49,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# The deny reason a chain gets when it was cut off before its verdict.
+NOT_JUDGED_IN_TIME_PREFIX = "chain: not judged in time"
+DISPATCH_SATURATED_DETAIL = "dispatch pool saturated"
+# The whole reason for a refusal by a full pool (Plan 00533, issue #124).
+# init.sh carries a verbatim copy: on the exact recovery command it treats a
+# deny starting with this like a transport failure, which it lets through.
+DISPATCH_SATURATED_REASON = f"{NOT_JUDGED_IN_TIME_PREFIX} ({DISPATCH_SATURATED_DETAIL})"
+
 # Decisions that restrict the tool call. Once any handler records one, later
 # laxer results (ALLOW/CONTINUE) must never overwrite it — the most
 # restrictive decision wins across the whole chain (Plan 00144).
@@ -564,6 +572,7 @@ class HandlerChain:
         max_safety_input_bytes: int | None = None,
         dispatcher: "BoundedDispatcher[object] | None" = None,
         arrival_time: float | None = None,
+        capacity_exempt: bool = False,
     ) -> ChainExecutionResult:
         """Execute the handler chain for an event.
 
@@ -636,6 +645,10 @@ class HandlerChain:
                 queued for a worker thread counts against the budget too.
                 None (the default, and every caller that predates M1) falls
                 back to this call's own start -- unchanged behaviour.
+            capacity_exempt: Dispatch without a slot of the shared pool
+                (Plan 00533, issue #124), so saturation cannot refuse this
+                chain. The controller sets it for the daemon's exact
+                recovery command only. The deadline still applies.
 
         Returns:
             ChainExecutionResult with final result and metadata
@@ -770,6 +783,7 @@ class HandlerChain:
             ),
             timeout=remaining,
             label="chain",
+            capacity_exempt=capacity_exempt,
         )
         if isinstance(outcome, ChainExecutionResult):
             return outcome
@@ -787,7 +801,7 @@ class HandlerChain:
         if isinstance(outcome, DispatchTimeout):
             detail = f"exceeded its {remaining:.2f}s dispatch budget"
         elif isinstance(outcome, DispatchSaturated):
-            detail = "dispatch pool saturated"
+            detail = DISPATCH_SATURATED_DETAIL
         else:
             # Plan 00466 N40 n2: an explicit check, not `assert` -- `-O`
             # strips asserts from the production path, which would silently
@@ -799,7 +813,7 @@ class HandlerChain:
         if any(
             HandlerTag.SAFETY in h.tags and HandlerTag.BLOCKING in h.tags for h in self.handlers
         ):
-            denied_result = HookResult.deny(reason=f"chain: not judged in time ({detail})")
+            denied_result = HookResult.deny(reason=f"{NOT_JUDGED_IN_TIME_PREFIX} ({detail})")
             denied_result.context = [f"Chain not judged in time: {detail}"]
             return ChainExecutionResult(result=denied_result, execution_time_ms=execution_time_ms)
         # No SAFETY+BLOCKING handler is waiting on a verdict, so a handler that

@@ -805,6 +805,36 @@ class TestCmdStopGenericException:
             assert cmd_stop(args) == 1
 
 
+class TestCmdStopOutlastsTheActiveRequestDrain:
+    """Plan 00533 (issue #124): the SIGTERM grace and the server's drain were
+    both 5s, so a daemon stopped under load was still draining when the grace
+    ran out, and every such stop was escalated to SIGKILL."""
+
+    def test_the_sigterm_grace_is_the_named_one(self, tmp_path: Path) -> None:
+        args = _stop_project(tmp_path)
+        with (
+            patch(_READ_PID_RECORD, return_value=_recorded(_UNREAL_PID)),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.stop_verified_daemon",
+                side_effect=RuntimeError("stop here"),
+            ) as stop,
+        ):
+            cmd_stop(args)
+        assert stop.call_args.kwargs["grace_seconds"] == Timeout.DAEMON_SIGTERM_GRACE
+
+    def test_the_grace_outlasts_the_drain_with_room_to_finish_shutting_down(self) -> None:
+        assert Timeout.DAEMON_SIGTERM_GRACE > Timeout.DAEMON_ACTIVE_REQUEST_DRAIN
+        assert (
+            Timeout.DAEMON_SIGTERM_GRACE - Timeout.DAEMON_ACTIVE_REQUEST_DRAIN
+            >= Timeout.DAEMON_SHUTDOWN_AFTER_DRAIN_MARGIN
+        )
+
+    def test_a_stop_and_its_sigkill_still_fit_the_shutdown_budget(self) -> None:
+        assert (
+            Timeout.DAEMON_SIGTERM_GRACE + Timeout.DAEMON_SIGKILL_GRACE <= Timeout.DAEMON_SHUTDOWN
+        )
+
+
 class TestCmdStopCleansUpOnlyWhatItStillOwns:
     """Plan 00466 round 2 (S2): after the proven daemon exits, ``cmd_stop``
     deleted the PID file and socket unconditionally. A successor started in
