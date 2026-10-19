@@ -37,7 +37,18 @@ class Timeout:
     DAEMON_IDLE = 600  # 10 minutes (daemon idle before shutdown)
     DAEMON_STARTUP = 30  # 30 seconds (wait for daemon to start)
     DAEMON_SHUTDOWN = 10  # 10 seconds (wait for daemon to shutdown)
-    # A process that ignores SIGTERM for the whole `SOCKET_CONNECT` grace
+    # How long a stopping daemon waits for requests already in flight to
+    # finish before it closes its socket (server.py's shutdown drain).
+    DAEMON_ACTIVE_REQUEST_DRAIN = 5  # seconds
+    DAEMON_ACTIVE_REQUEST_DRAIN_POLL = 0.1  # seconds between drain checks
+    # The SIGTERM grace `stop` gives a daemon before SIGKILL. Derived from the
+    # drain (Plan 00533, issue #124): when the two were both 5s, a daemon
+    # stopped under load was still draining when the grace ran out, so every
+    # such stop was escalated to SIGKILL. The margin covers the shutdown work
+    # after the drain (closing the server, removing the socket and PID files).
+    DAEMON_SHUTDOWN_AFTER_DRAIN_MARGIN = 3  # seconds
+    DAEMON_SIGTERM_GRACE = DAEMON_ACTIVE_REQUEST_DRAIN + DAEMON_SHUTDOWN_AFTER_DRAIN_MARGIN
+    # A process that ignores SIGTERM for the whole `DAEMON_SIGTERM_GRACE`
     # period (Plan 00466 N40 review 2 MA2) is escalated to SIGKILL, which a
     # process cannot catch, block or ignore -- this second, shorter budget is
     # only for the OS to actually reap it afterward.
@@ -105,6 +116,17 @@ class Timeout:
     # timely verdict at all.
     STRAGGLER_UNHEALTHY_COUNT = 4  # concurrent stragglers before DEGRADED health
     STRAGGLER_RESTART_AFTER_SECONDS = 120  # oldest straggler's age before self-restart
+
+    # Dispatch-pool saturation (Plan 00533, issue #124). A call that finds
+    # every slot taken waits this long for one before it is refused: long
+    # enough to ride out a burst one call over the limit, a tenth of
+    # CHAIN_DEADLINE_DEFAULT so a refused call still answers well inside the
+    # client's budget. The wait also counts against the call's own deadline.
+    DISPATCH_SLOT_WAIT_SECONDS = 2.0
+    # Refusals that continue this long are one sustained episode, logged as a
+    # WARNING naming its duration, and again at most once per interval.
+    DISPATCH_SATURATION_WARN_AFTER_SECONDS = 10.0
+    DISPATCH_SATURATION_WARN_INTERVAL_SECONDS = 30.0
 
     # Network/IO timeouts (seconds)
     SOCKET_CONNECT = 5  # 5 seconds (Unix socket connection)

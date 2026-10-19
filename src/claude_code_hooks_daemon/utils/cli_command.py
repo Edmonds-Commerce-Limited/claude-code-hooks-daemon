@@ -275,6 +275,95 @@ def recovery_command(subcommand: str) -> str | None:
     return install_recovery_command(ProjectContext.project_root(), daemon_root(), subcommand)
 
 
+#: The subcommands that recover a daemon, as ``init.sh``'s carve-out lists them.
+_RECOVERY_SUBCOMMANDS: Final[tuple[str, ...]] = (
+    "restart",
+    "status",
+    "logs",
+    "stop",
+    "start",
+    "repair",
+)
+
+#: The only characters that may pad an exempt command. ``str.strip()`` would
+#: also drop characters bash passes to the launcher as part of its argument.
+_RECOVERY_PADDING: Final[str] = " \t"
+
+
+def _installs_launcher(project: Path, install_root: Path) -> Path | None:
+    """This install's launcher, resolved, or None when it is unknown or absent."""
+    if not (project.is_absolute() and install_root.is_absolute()):
+        return None
+    try:
+        launcher = _resolve(install_root / BIN_DIR_NAME / WRAPPER_NAME)
+        if _project_it_manages(launcher) != _resolve(project) or not launcher.is_file():
+            return None
+    except (OSError, ValueError):
+        # An unresolvable path (an embedded NUL, a loop) names no install.
+        return None
+    return launcher
+
+
+def _runs(path: Path, launcher: Path) -> bool:
+    """True when running ``path`` runs ``launcher``."""
+    try:
+        return _resolve(path) == launcher
+    except (OSError, ValueError):
+        return False
+
+
+def is_install_recovery_command(hook_input: object, project: Path, install_root: Path) -> bool:
+    """True when ``hook_input`` is a Bash call of exactly one recovery command
+    that runs this install's launcher (Plan 00533, issue #124).
+
+    The daemon-side twin of ``init.sh``'s ``_is_daemon_recovery_command``,
+    by the same rule, so the client and the daemon exempt the same calls: the
+    whole command is one launcher spelling plus one recovery subcommand,
+    padded only by spaces and tabs. A relative spelling resolves against the
+    hook input's ``cwd``, which must be absolute; an absolute spelling is
+    accepted only shell-quoted as :func:`install_recovery_command` prints it.
+    """
+    if not isinstance(hook_input, dict) or hook_input.get("tool_name") != "Bash":
+        return False
+    tool_input = hook_input.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return False
+    command = tool_input.get("command")
+    if not isinstance(command, str):
+        return False
+    stripped = command.strip(_RECOVERY_PADDING)
+    if not stripped.isprintable():
+        return False
+    launcher = _installs_launcher(project, install_root)
+    if launcher is None:
+        return False
+    cwd = hook_input.get("cwd")
+    absolute_spellings = (
+        *(project / spelling for spelling in _RECOVERY_SPELLINGS),
+        install_root / BIN_DIR_NAME / WRAPPER_NAME,
+    )
+    for sub in _RECOVERY_SUBCOMMANDS:
+        for spelling in _RECOVERY_SPELLINGS:
+            if stripped == f"{spelling}{_ARG_SEPARATOR}{sub}":
+                return (
+                    isinstance(cwd, str)
+                    and Path(cwd).is_absolute()
+                    and _runs(Path(cwd) / spelling, launcher)
+                )
+        for absolute in absolute_spellings:
+            if stripped == f"{shlex.quote(str(absolute))}{_ARG_SEPARATOR}{sub}":
+                return _runs(absolute, launcher)
+    return False
+
+
+def is_recovery_command(hook_input: object) -> bool:
+    """:func:`is_install_recovery_command` for this daemon's own project and
+    root; False when :class:`ProjectContext` is not initialised."""
+    if not ProjectContext.is_initialized():
+        return False
+    return is_install_recovery_command(hook_input, ProjectContext.project_root(), daemon_root())
+
+
 def daemon_cli_command_for_docs(*args: str) -> str:
     """Return a daemon-CLI invocation safe to write into a TRACKED file.
 

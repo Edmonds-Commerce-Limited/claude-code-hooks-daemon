@@ -15,7 +15,10 @@ from typing import TYPE_CHECKING, Any
 from claude_code_hooks_daemon.config.models import ChainConfig, Config, VerdictLogConfig
 from claude_code_hooks_daemon.config.validator import ConfigValidator
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
-from claude_code_hooks_daemon.core.bounded_dispatch import get_default_dispatcher
+from claude_code_hooks_daemon.core.bounded_dispatch import (
+    configure_default_dispatcher,
+    get_default_dispatcher,
+)
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult
 from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
 from claude_code_hooks_daemon.core.data_layer import get_data_layer
@@ -37,6 +40,7 @@ from claude_code_hooks_daemon.daemon.source_fingerprint import (
 )
 from claude_code_hooks_daemon.daemon.verdict_log import append_verdicts
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
+from claude_code_hooks_daemon.utils.cli_command import is_recovery_command
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.protected_file_index import IndexPrewarmer
 
@@ -323,6 +327,10 @@ class DaemonController:
         # back to VerdictLogConfig()'s own defaults (enabled).
         self._verdict_log_config = verdict_log or VerdictLogConfig()
         self._chain_config = chain or ChainConfig()
+        configure_default_dispatcher(
+            max_inflight=self._chain_config.max_inflight,
+            slot_wait_seconds=self._chain_config.slot_wait_seconds,
+        )
         self._strict_mode = strict_mode if strict_mode is not None else False
         self._chain_deadline_problems = list(chain_deadline_problems or [])
         for problem in self._chain_deadline_problems:
@@ -1180,6 +1188,12 @@ class DaemonController:
                 deadline_seconds=self._chain_config.deadline_for(event.event_type),
                 max_safety_input_bytes=self._chain_config.max_safety_input_bytes,
                 arrival_time=arrival_time,
+                # Plan 00533 (issue #124): the exact command that restarts a
+                # saturated daemon must not itself wait for a slot.
+                capacity_exempt=(
+                    event.event_type == EventType.PRE_TOOL_USE
+                    and is_recovery_command(hook_input_dict)
+                ),
             )
             processing_time = (time.perf_counter() - start_time) * 1000
             self._stats.record_request(event.event_type.value, processing_time)

@@ -164,6 +164,7 @@ class EventRouter:
         deadline_seconds: float | None = None,
         max_safety_input_bytes: int | None = None,
         arrival_time: float | None = None,
+        capacity_exempt: bool = False,
     ) -> ChainExecutionResult:
         """Route an event to its handler chain.
 
@@ -181,6 +182,8 @@ class EventRouter:
                 (Plan 00466 N34 remedy 3). See ``HandlerChain.execute``.
             arrival_time: ``time.perf_counter()`` reading taken at request
                 arrival (Plan 00466 N40 M1). See ``HandlerChain.execute``.
+            capacity_exempt: Dispatch without a slot of the shared pool
+                (Plan 00533). See ``HandlerChain.execute``.
 
         Returns:
             Execution result from the handler chain
@@ -214,6 +217,7 @@ class EventRouter:
             deadline_seconds=deadline_seconds,
             max_safety_input_bytes=max_safety_input_bytes,
             arrival_time=arrival_time,
+            capacity_exempt=capacity_exempt,
         )
 
         # Inject config key footer into DENY/ASK results

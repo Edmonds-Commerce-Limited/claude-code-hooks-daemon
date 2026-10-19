@@ -32,9 +32,14 @@ would hang the whole daemon PROCESS's shutdown for as long as that straggler
 keeps running, exactly the failure this module exists to prevent one
 handler from causing. A plain ``threading.Thread(daemon=True)`` per call is
 never waited on at interpreter exit. Concurrency is still bounded, by a
-semaphore rather than a pool: a call beyond ``max_inflight`` is refused
-outright (``DispatchSaturated``) rather than queued -- an unbounded queue is
-exactly the "pile up threads" failure a flood of overruns must not cause.
+semaphore rather than a pool: a call beyond ``max_inflight`` waits at most
+``slot_wait_seconds`` for a slot and is then refused (``DispatchSaturated``)
+rather than queued indefinitely -- an unbounded queue is exactly the "pile up
+threads" failure a flood of overruns must not cause.
+
+Plan 00533 (issue #124): a call marked ``capacity_exempt`` needs no slot at
+all. The daemon uses it for its own exact recovery command only, so a pool
+held full by a dozen sessions can still be restarted from inside one of them.
 """
 
 from __future__ import annotations
@@ -47,6 +52,8 @@ from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from typing import Final, Generic, TypeVar
+
+from claude_code_hooks_daemon.constants.timeout import Timeout
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +127,9 @@ class _SinglePermit:
 
     __slots__ = ("_lock", "_released", "_semaphore")
 
-    def __init__(self, semaphore: threading.BoundedSemaphore) -> None:
+    def __init__(self, semaphore: threading.BoundedSemaphore | None) -> None:
+        """Hold one permit of ``semaphore``; None for a capacity-exempt call,
+        which took no permit and so has none to give back."""
         self._semaphore = semaphore
         self._lock = threading.Lock()
         self._released = False
@@ -131,7 +140,8 @@ class _SinglePermit:
             if self._released:
                 return
             self._released = True
-        self._semaphore.release()
+        if self._semaphore is not None:
+            self._semaphore.release()
 
 
 class BoundedDispatcher(Generic[T]):
@@ -150,9 +160,14 @@ class BoundedDispatcher(Generic[T]):
     """
 
     __slots__ = (
+        "_clock",
+        "_last_saturation_warning",
         "_max_inflight",
         "_max_stragglers",
+        "_saturated_since",
+        "_saturation_lock",
         "_semaphore",
+        "_slot_wait_seconds",
         "_stragglers",
         "_threads",
         "_threads_lock",
@@ -163,13 +178,21 @@ class BoundedDispatcher(Generic[T]):
         max_inflight: int = DISPATCH_MAX_INFLIGHT,
         *,
         max_stragglers: int | None = None,
+        slot_wait_seconds: float = Timeout.DISPATCH_SLOT_WAIT_SECONDS,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         """Create a dispatcher.
 
         Args:
             max_inflight: Upper bound on calls being ACTIVELY WAITED ON at
-                once, on this dispatcher. A submission beyond it is refused
-                outright (:class:`DispatchSaturated`), never queued.
+                once, on this dispatcher. A submission beyond it waits up to
+                ``slot_wait_seconds`` for a slot, then is refused
+                (:class:`DispatchSaturated`).
+            slot_wait_seconds: How long a call that finds every slot taken
+                waits for one (Plan 00533). 0 refuses at once. Never longer
+                than the call's own ``timeout``, which the wait is taken from.
+            clock: Monotonic seconds, for the sustained-saturation WARNING's
+                episode timing only. Injectable so tests need not sleep.
             max_stragglers: Upper bound on abandoned calls (Plan 00466 N40
                 M2) still running in the background at once. A timed-out
                 call's ``max_inflight`` permit is released immediately (see
@@ -179,9 +202,21 @@ class BoundedDispatcher(Generic[T]):
                 Truth, one dial governs both unless a caller deliberately
                 splits them.
         """
+        if max_inflight < 1:
+            raise ValueError(f"max_inflight must be at least 1, got {max_inflight}")
+        if slot_wait_seconds < 0:
+            raise ValueError(f"slot_wait_seconds must not be negative, got {slot_wait_seconds}")
         self._max_inflight = max_inflight
         self._max_stragglers = max_stragglers if max_stragglers is not None else max_inflight
         self._semaphore = threading.BoundedSemaphore(max_inflight)
+        self._slot_wait_seconds = slot_wait_seconds
+        self._clock = clock
+        # The current saturation episode (Plan 00533): when the first refusal
+        # of it happened, and when it was last reported. A call that gets a
+        # slot ends the episode.
+        self._saturation_lock = threading.Lock()
+        self._saturated_since: float | None = None
+        self._last_saturation_warning: float | None = None
         # Only the CURRENTLY in-flight threads -- a finishing thread removes
         # itself (see `_run_and_release`), so this never grows past
         # `max_inflight` however many calls this dispatcher serves over its
@@ -197,8 +232,23 @@ class BoundedDispatcher(Generic[T]):
         self._stragglers: dict[threading.Thread, _StragglerInfo] = {}
         self._threads_lock = threading.Lock()
 
+    @property
+    def max_inflight(self) -> int:
+        """How many calls may be actively waited on at once."""
+        return self._max_inflight
+
+    @property
+    def slot_wait_seconds(self) -> float:
+        """How long a call waits for a slot before it is refused."""
+        return self._slot_wait_seconds
+
     def run(
-        self, fn: Callable[[], T], *, timeout: float, label: str
+        self,
+        fn: Callable[[], T],
+        *,
+        timeout: float,
+        label: str,
+        capacity_exempt: bool = False,
     ) -> T | DispatchTimeout | DispatchSaturated:
         """Run ``fn`` on its own daemon thread, waiting up to ``timeout``
         seconds for it.
@@ -213,6 +263,10 @@ class BoundedDispatcher(Generic[T]):
                 even if it never finishes.
             label: Identifies ``fn`` in the WARNING logged on overrun or
                 saturation. Carries no behaviour.
+            capacity_exempt: Run without a slot, past both the in-flight and
+                the straggler cap (Plan 00533). Only for the daemon's exact
+                recovery command: a full pool must not stop the command that
+                restarts it. ``timeout`` still bounds the wait.
 
         Returns:
             ``fn``'s own return value on success; :class:`DispatchSaturated`
@@ -226,31 +280,18 @@ class BoundedDispatcher(Generic[T]):
                 ``timeout`` elapsed -- propagated exactly as a direct,
                 synchronous call to ``fn()`` would have raised it.
         """
-        # Checked BEFORE the semaphore (Plan 00466 N40 M2): a timed-out
-        # call's permit is released immediately below, so the semaphore
-        # alone would let an unbounded number of abandoned calls accumulate.
-        with self._threads_lock:
-            straggler_count = len(self._stragglers)
-        if straggler_count >= self._max_stragglers:
-            logger.warning(
-                "Bounded dispatch stragglers at capacity (%d abandoned call(s)) -- "
-                "%s could not even be started; treating as not judged in time",
-                straggler_count,
-                label,
-            )
-            return DispatchSaturated()
-
-        if not self._semaphore.acquire(blocking=False):
-            logger.warning(
-                "Bounded dispatch pool saturated (max_inflight exhausted) -- "
-                "%s could not even be started; treating as not judged in time",
-                label,
-            )
-            return DispatchSaturated()
-
         start = time.perf_counter()
+        if capacity_exempt:
+            permit = _SinglePermit(None)
+        else:
+            refused = self._take_slot(label, timeout)
+            if refused is not None:
+                return refused
+            permit = _SinglePermit(self._semaphore)
+            # The wait for a slot is spent from the call's own budget.
+            timeout = max(0.0, timeout - (time.perf_counter() - start))
+
         future: Future[T] = Future()
-        permit = _SinglePermit(self._semaphore)
 
         def _run_and_release() -> None:
             try:
@@ -320,6 +361,66 @@ class BoundedDispatcher(Generic[T]):
             )
             future.add_done_callback(self._log_late_completion(label, start))
             return DispatchTimeout(waited=time.perf_counter() - start)
+
+    def _take_slot(self, label: str, timeout: float) -> DispatchSaturated | None:
+        """Acquire one slot, waiting up to the slot wait (never past
+        ``timeout``); None once held, :class:`DispatchSaturated` if refused."""
+        # Checked BEFORE the semaphore (Plan 00466 N40 M2): a timed-out
+        # call's permit is released immediately in `run`, so the semaphore
+        # alone would let an unbounded number of abandoned calls accumulate.
+        with self._threads_lock:
+            straggler_count = len(self._stragglers)
+        if straggler_count >= self._max_stragglers:
+            logger.warning(
+                "Bounded dispatch stragglers at capacity (%d abandoned call(s)) -- "
+                "%s could not even be started; treating as not judged in time",
+                straggler_count,
+                label,
+            )
+            return DispatchSaturated()
+
+        wait = min(self._slot_wait_seconds, max(0.0, timeout))
+        if not self._semaphore.acquire(timeout=wait):
+            logger.warning(
+                "Bounded dispatch pool saturated (max_inflight exhausted for %.2fs) -- "
+                "%s could not even be started; treating as not judged in time",
+                wait,
+                label,
+            )
+            self._note_saturated()
+            return DispatchSaturated()
+        with self._saturation_lock:
+            self._saturated_since = None
+            self._last_saturation_warning = None
+        return None
+
+    def _note_saturated(self) -> None:
+        """Record one refusal for a full pool, and WARN when the episode it
+        belongs to has lasted past the threshold (Plan 00533): at most once
+        per interval, naming how long and how many slots are in flight."""
+        now = self._clock()
+        with self._saturation_lock:
+            if self._saturated_since is None:
+                self._saturated_since = now
+            duration = now - self._saturated_since
+            if duration < Timeout.DISPATCH_SATURATION_WARN_AFTER_SECONDS:
+                return
+            last = self._last_saturation_warning
+            if last is not None and now - last < Timeout.DISPATCH_SATURATION_WARN_INTERVAL_SECONDS:
+                return
+            self._last_saturation_warning = now
+        with self._threads_lock:
+            stragglers = len(self._stragglers)
+        # Every slot is held while the pool refuses, so in flight IS the cap.
+        logger.warning(
+            "Dispatch pool saturated for %.0fs: %d of %d slots in flight, %d straggler(s); "
+            "every chain needing a slot is refused. Raise daemon.chain.max_inflight if "
+            "this host runs more concurrent sessions than it allows.",
+            duration,
+            self._max_inflight,
+            self._max_inflight,
+            stragglers,
+        )
 
     def straggler_health(self) -> StragglerHealth:
         """Count and oldest age of calls currently running past their own
@@ -413,6 +514,20 @@ def get_default_dispatcher() -> BoundedDispatcher[object]:
             if _default_dispatcher is None:
                 _default_dispatcher = BoundedDispatcher()
     return _default_dispatcher
+
+
+def configure_default_dispatcher(*, max_inflight: int, slot_wait_seconds: float) -> None:
+    """Replace the shared dispatcher with one sized by the daemon's config.
+
+    Called once at daemon start-up (``daemon.chain.max_inflight`` and
+    ``daemon.chain.slot_wait_seconds``, Plan 00533), before any request is
+    served, so no call is ever running on the dispatcher being replaced.
+    """
+    global _default_dispatcher
+    with _default_dispatcher_lock:
+        _default_dispatcher = BoundedDispatcher(
+            max_inflight=max_inflight, slot_wait_seconds=slot_wait_seconds
+        )
 
 
 def reset_default_dispatcher_for_tests() -> None:

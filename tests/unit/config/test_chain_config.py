@@ -10,6 +10,7 @@ from claude_code_hooks_daemon.config.models import (
     TransportConfig,
 )
 from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.core.bounded_dispatch import DISPATCH_MAX_INFLIGHT
 
 
 class TestDefaults:
@@ -57,6 +58,41 @@ class TestParsing:
     def test_rejects_a_non_positive_deadline(self) -> None:
         with pytest.raises(ValidationError):
             ChainConfig.model_validate({"deadline_seconds": 0})
+
+
+class TestDispatchCapacity:
+    """Plan 00533 (issue #124): the dispatch pool's size and slot wait."""
+
+    def test_max_inflight_defaults_to_the_shipped_sixteen(self) -> None:
+        assert ChainConfig().max_inflight == DISPATCH_MAX_INFLIGHT == 16
+
+    def test_slot_wait_defaults_well_under_the_chain_deadline(self) -> None:
+        slot_wait = ChainConfig().slot_wait_seconds
+        assert slot_wait == Timeout.DISPATCH_SLOT_WAIT_SECONDS
+        assert 0 < slot_wait < Timeout.CHAIN_DEADLINE_DEFAULT / 4
+
+    def test_parses_both_from_the_daemon_chain_block(self) -> None:
+        config = Config.model_validate(
+            {"daemon": {"chain": {"max_inflight": 32, "slot_wait_seconds": 0.5}}}
+        )
+        assert config.daemon.chain.max_inflight == 32
+        assert config.daemon.chain.slot_wait_seconds == 0.5
+
+    def test_zero_slot_wait_refuses_at_once(self) -> None:
+        assert ChainConfig(slot_wait_seconds=0).slot_wait_seconds == 0
+
+    @pytest.mark.parametrize(
+        "values",
+        [
+            {"max_inflight": 0},
+            {"max_inflight": -1},
+            {"slot_wait_seconds": -0.1},
+            {"slot_wait_seconds": Timeout.CHAIN_DEADLINE_DEFAULT},
+        ],
+    )
+    def test_rejects_values_that_cannot_work(self, values: dict[str, float]) -> None:
+        with pytest.raises(ValidationError):
+            ChainConfig.model_validate(values)
 
 
 def _daemon(transport: dict[str, object], deadline: float | None) -> DaemonConfig:

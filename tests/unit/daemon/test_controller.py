@@ -17,7 +17,7 @@ from claude_code_hooks_daemon.core.bounded_dispatch import (
     get_default_dispatcher,
     reset_default_dispatcher_for_tests,
 )
-from claude_code_hooks_daemon.core.chain import ChainExecutionResult
+from claude_code_hooks_daemon.core.chain import DISPATCH_SATURATED_REASON, ChainExecutionResult
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.core.event import EventType, HookEvent
 from claude_code_hooks_daemon.core.project_context import ProjectContext
@@ -1026,6 +1026,7 @@ class TestControllerChainConfig:
             deadline_seconds: float | None = None,
             max_safety_input_bytes: int | None = None,
             arrival_time: float | None = None,
+            capacity_exempt: bool = False,
         ) -> ChainExecutionResult:
             captured["deadline_seconds"] = deadline_seconds
             return ChainExecutionResult(result=HookResult.allow())
@@ -1056,6 +1057,7 @@ class TestControllerChainConfig:
             deadline_seconds: float | None = None,
             max_safety_input_bytes: int | None = None,
             arrival_time: float | None = None,
+            capacity_exempt: bool = False,
         ) -> ChainExecutionResult:
             captured["max_safety_input_bytes"] = max_safety_input_bytes
             return ChainExecutionResult(result=HookResult.allow())
@@ -1093,6 +1095,150 @@ class TestControllerChainConfig:
         session = "chain-config-session"
         assert history.count_blocks_by_handler("the-blocker", session_id=session) == 1
         assert history.count_blocks_by_handler("the-advisor", session_id=session) == 0
+
+
+class TestControllerDispatchSaturation:
+    """Plan 00533 (issue #124): ``daemon.chain.max_inflight`` and
+    ``slot_wait_seconds`` size the shared dispatcher, and the daemon's exact
+    recovery command is judged even while every slot is taken."""
+
+    def teardown_method(self) -> None:
+        ProjectContext.reset()
+        reset_data_layer()
+        reset_default_dispatcher_for_tests()
+
+    @pytest.fixture
+    def workspace_root(self, tmp_path: Path) -> Path:
+        workspace = tmp_path / "test-workspace"
+        claude_dir = workspace / ".claude"
+        claude_dir.mkdir(parents=True)
+        (claude_dir / "hooks-daemon.yaml").write_text(
+            "version: '1.0'\n"
+            "daemon:\n"
+            "  idle_timeout_seconds: 600\n"
+            "  log_level: INFO\n"
+            "handlers:\n"
+            "  pre_tool_use: {}\n"
+        )
+        return workspace
+
+    def _initialised_controller(self, workspace_root: Path, chain: ChainConfig) -> DaemonController:
+        controller = DaemonController()
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+            ]
+            controller.initialise(
+                workspace_root=workspace_root,
+                verdict_log=VerdictLogConfig(enabled=False),
+                chain=chain,
+            )
+        return controller
+
+    @staticmethod
+    def _bash_event(command: str) -> HookEvent:
+        from claude_code_hooks_daemon.core.event import HookInput
+
+        return HookEvent(
+            event_type=EventType.PRE_TOOL_USE,
+            hook_input=HookInput(
+                tool_name="Bash",
+                tool_input={"command": command},
+                transcript_path="/tmp/transcript.jsonl",
+                session_id="saturation-session",
+            ),
+        )
+
+    @staticmethod
+    def _restart_command() -> str:
+        """This install's exact restart command, with its launcher on disk."""
+        from claude_code_hooks_daemon.utils import cli_command
+
+        launcher = cli_command.daemon_bin_path()
+        launcher.parent.mkdir(parents=True, exist_ok=True)
+        launcher.write_text("#!/bin/bash\n")
+        command = cli_command.recovery_command("restart")
+        assert command is not None
+        return command
+
+    def test_the_configured_capacity_sizes_the_shared_dispatcher(
+        self, workspace_root: Path
+    ) -> None:
+        self._initialised_controller(
+            workspace_root, ChainConfig(max_inflight=3, slot_wait_seconds=0.25)
+        )
+        dispatcher = get_default_dispatcher()
+        assert dispatcher.max_inflight == 3
+        assert dispatcher.slot_wait_seconds == 0.25
+
+    def test_only_the_exact_recovery_command_is_routed_capacity_exempt(
+        self, workspace_root: Path
+    ) -> None:
+        from claude_code_hooks_daemon.core.hook_result import HookResult
+        from claude_code_hooks_daemon.core.router import EventRouter
+
+        controller = self._initialised_controller(workspace_root, ChainConfig())
+        restart = self._restart_command()
+        captured: list[bool] = []
+
+        def fake_route(
+            self: EventRouter,
+            event_type: EventType,
+            hook_input: dict[str, Any],
+            strict_mode: bool = False,
+            *,
+            collect_all: bool = False,
+            deadline_seconds: float | None = None,
+            max_safety_input_bytes: int | None = None,
+            arrival_time: float | None = None,
+            capacity_exempt: bool = False,
+        ) -> ChainExecutionResult:
+            captured.append(capacity_exempt)
+            return ChainExecutionResult(result=HookResult.allow())
+
+        with patch.object(EventRouter, "route", new=fake_route):
+            controller.process_event(self._bash_event(restart))
+            controller.process_event(self._bash_event(f"{restart} && echo hi"))
+            controller.process_event(self._bash_event("echo hi"))
+
+        assert captured == [True, False, False]
+
+    def test_a_full_pool_denies_other_calls_but_judges_the_recovery_command(
+        self, workspace_root: Path
+    ) -> None:
+        controller = self._initialised_controller(
+            workspace_root, ChainConfig(max_inflight=1, slot_wait_seconds=0.0)
+        )
+        restart = self._restart_command()
+        dispatcher = get_default_dispatcher()
+        occupied = threading.Event()
+        release = threading.Event()
+
+        def _hold() -> None:
+            occupied.set()
+            release.wait(timeout=DispatchTestTimeout.GENEROUS)
+
+        holder = threading.Thread(
+            target=dispatcher.run,
+            args=(_hold,),
+            kwargs={"timeout": DispatchTestTimeout.GENEROUS, "label": "holder"},
+        )
+        holder.start()
+        try:
+            assert occupied.wait(timeout=DispatchTestTimeout.NORMAL)
+            ordinary = controller.process_event(self._bash_event("echo hi"))
+            recovery = controller.process_event(self._bash_event(restart))
+        finally:
+            release.set()
+            holder.join(timeout=DispatchTestTimeout.GENEROUS)
+
+        assert ordinary.result.decision.value == "deny"
+        # The wire form init.sh matches on (it keeps a verbatim copy).
+        wire = ordinary.result.to_json("PreToolUse")["hookSpecificOutput"]
+        assert wire["permissionDecisionReason"].startswith(DISPATCH_SATURATED_REASON)
+        assert recovery.result.decision.value != "deny", recovery.result.reason
 
 
 class TestControllerHealthStragglers:

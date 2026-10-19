@@ -29,6 +29,7 @@ from claude_code_hooks_daemon.config.exception_entries import (
 from claude_code_hooks_daemon.config.yaml_loading import safe_load_yaml
 from claude_code_hooks_daemon.constants import ConfigKey, EventKey, Timeout, wired_event_metas
 from claude_code_hooks_daemon.constants.events import EventType
+from claude_code_hooks_daemon.core.bounded_dispatch import DISPATCH_MAX_INFLIGHT
 from claude_code_hooks_daemon.core.handler_scope import (
     SCOPE_CONFIG_KEY,
     HandlerScope,
@@ -1785,6 +1786,14 @@ class ChainConfig(BaseModel):
             self-restarts once its OLDEST straggler has run this long,
             rather than staying wedged behind an unbounded pileup. None
             disables self-restart.
+        max_inflight: Plan 00533 (issue #124). How many chains the shared
+            ``BoundedDispatcher`` runs at once, across every session this
+            daemon serves. 16 by default; a host running many concurrent
+            sessions on one daemon may need more.
+        slot_wait_seconds: Plan 00533. How long a chain that finds every slot
+            taken waits for one before it is refused ("dispatch pool
+            saturated"). Spent from the chain's own deadline. 0 refuses at
+            once.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1838,6 +1847,25 @@ class ChainConfig(BaseModel):
             "next hook call) rather than staying wedged indefinitely with a "
             "16-straggler pileup denying every PreToolUse call and no way "
             "out short of a manual restart. None disables self-restart."
+        ),
+    )
+    max_inflight: Annotated[int, Field(ge=1)] = Field(
+        default=DISPATCH_MAX_INFLIGHT,
+        description=(
+            "Plan 00533: how many handler chains the daemon runs at once, "
+            "across every session it serves. A chain beyond it waits "
+            "slot_wait_seconds for a slot, then is refused as 'dispatch pool "
+            "saturated' (denied when it holds a SAFETY+BLOCKING handler)."
+        ),
+    )
+    slot_wait_seconds: Annotated[
+        float, Field(ge=0, lt=Timeout.CHAIN_DEADLINE_DEFAULT)
+    ] = Field(
+        default=Timeout.DISPATCH_SLOT_WAIT_SECONDS,
+        description=(
+            "Plan 00533: seconds a chain that finds every max_inflight slot "
+            "taken waits for one before it is refused. Spent from the chain's "
+            "own deadline. 0 refuses at once."
         ),
     )
 
