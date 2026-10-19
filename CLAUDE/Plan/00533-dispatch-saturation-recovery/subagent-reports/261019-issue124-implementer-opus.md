@@ -127,3 +127,47 @@ Nine files remain unmapped as too-broad, so the coordinator's full gate must cov
 `config/models.py`, `constants/timeout.py`, `core/chain.py`, `core/router.py`, `daemon/cli.py`,
 `daemon/controller.py`, `daemon/server.py` and `utils/cli_command.py`. The targeted test files listed
 under "Green" above cover each change directly. The daemon was not restarted, per the brief.
+
+## Review fixes
+
+All four review findings were fixed with a red test first. None was disputed. Stop/SubagentStop
+semantics, the default of 16 and what counts as a recovery command are all unchanged.
+
+1. **The saturation warning fires under churn.** Only a quiet period ends an episode now:
+   `Timeout.DISPATCH_SATURATION_QUIET_SECONDS` (5s) with no refusal. A successful acquire no
+   longer ends it. Straggler-cap refusals and last-moment refusals (finding 3) call
+   `_note_saturated` too. The message reports refusals since the last report and over what
+   window: `Dispatch pool saturated for 10s: 11 call(s) refused in the last 10s, with max_inflight N and S straggler(s) of at most M; ...`. Red:
+   `test_a_slot_won_between_refusals_does_not_end_the_episode`: `assert 0 == 1`;
+   `test_straggler_cap_refusals_feed_the_same_signal`: `assert 0 == 1`; the message test failed on
+   `assert 'for 10s: 11 call(s) refused in the last 10...`.
+2. **Exempt calls are bounded.** They use their own `BoundedSemaphore`
+   (`Timeout.DISPATCH_EXEMPT_MAX_INFLIGHT` = 2, the `max_exempt_inflight` constructor argument, not
+   a config key). An exempt call that times out keeps its slot until its worker finishes, so that
+   slot bounds exempt stragglers. A refused exempt call returns `DispatchSaturated`, and init.sh's
+   carve-out still lets the exact recovery command through that deny. Red:
+   `AttributeError: 'BoundedDispatcher' object has no attribute 'max_exempt_inflight'` and
+   `TypeError: ... unexpected keyword argument 'max_exempt_inflight'`.
+3. **A slot won too late is refused.** Acquire is tried without blocking first, so the
+   uncontended path does not change. A slot won only after waiting, with less than
+   `Timeout.DISPATCH_MIN_RUN_SECONDS` (0.1s) of the budget left, is released at once and the call
+   gets `DispatchSaturated`. Red: `test_a_slot_won_with_no_time_left_to_run_in_is_refused`:
+   `assert False` (on `isinstance(outcome, DispatchSaturated)`), using a semaphore double whose slot
+   frees exactly as the wait ends.
+4. **The recovery matcher no longer raises, and is cheap.** `is_install_recovery_command` compares
+   the text first. Only on a text match does `_runs_installs_launcher` resolve paths, and it
+   returns False on `OSError`/`ValueError`, as init.sh does. Red:
+   `test_a_command_that_is_not_a_recovery_spelling_resolves_no_path`:
+   `AssertionError: assert [PosixPath('/...is_not_a_r0')] == []`;
+   `test_a_path_that_cannot_be_resolved_is_not_exempt`: `OSError: unreadable` /
+   `ValueError: embedded null byte`. The new parity case
+   `test_both_exempt_nothing_when_the_root_cannot_be_resolved` uses a daemon root with a
+   300-character component. init.sh said not exempt, and the daemon raised
+   `OSError: [Errno 36] File name too long`.
+
+Docs: the Dispatch Capacity section of `docs/guides/CONFIGURATION.md` and release note 002 now
+describe the exempt pool and the new warning.
+
+Targeted QA: `./scripts/qa/llm_qa.py changed --allow-unmapped` on a still tree: **QA: 40/40
+PASSED**. `changed_tests`: 7725 passed, 0 failed, 56 skipped. The same nine files are unmapped as
+too-broad, so the coordinator's full gate must cover them. The daemon was not restarted.

@@ -293,9 +293,8 @@ _RECOVERY_PADDING: Final[str] = " \t"
 def _installs_launcher(project: Path, install_root: Path) -> Path | None:
     """This install's launcher, resolved, or None when it is unknown or absent.
 
-    Both paths are the daemon's own (ProjectContext), not hook input, so a
-    path that cannot be resolved is a broken install and raises, as it does
-    in :func:`install_recovery_command`.
+    Raises OSError/ValueError for a path that cannot be resolved; the one
+    caller, :func:`_runs_installs_launcher`, decides what that means.
     """
     if not (project.is_absolute() and install_root.is_absolute()):
         return None
@@ -305,10 +304,17 @@ def _installs_launcher(project: Path, install_root: Path) -> Path | None:
     return launcher
 
 
-def _runs(path: Path, launcher: Path) -> bool:
-    """True when running ``path`` runs ``launcher``."""
+def _runs_installs_launcher(path: Path, project: Path, install_root: Path) -> bool:
+    """True when running ``path`` runs this install's launcher.
+
+    An unresolvable path, the hook input's or the install's own, exempts
+    nothing, as in ``init.sh``: the install root can be inherited from
+    whatever started Claude Code, and this runs inside every Bash call's
+    dispatch, so raising would fail that call rather than refuse a carve-out.
+    """
     try:
-        return _resolve(path) == launcher
+        launcher = _installs_launcher(project, install_root)
+        return launcher is not None and _resolve(path) == launcher
     except (OSError, ValueError):
         return False
 
@@ -323,6 +329,9 @@ def is_install_recovery_command(hook_input: object, project: Path, install_root:
     padded only by spaces and tabs. A relative spelling resolves against the
     hook input's ``cwd``, which must be absolute; an absolute spelling is
     accepted only shell-quoted as :func:`install_recovery_command` prints it.
+
+    The text is compared first and the filesystem touched only for a text
+    match, since this runs on every Bash call the daemon judges.
     """
     if not isinstance(hook_input, dict) or hook_input.get("tool_name") != "Bash":
         return False
@@ -335,25 +344,23 @@ def is_install_recovery_command(hook_input: object, project: Path, install_root:
     stripped = command.strip(_RECOVERY_PADDING)
     if not stripped.isprintable():
         return False
-    launcher = _installs_launcher(project, install_root)
-    if launcher is None:
-        return False
     cwd = hook_input.get("cwd")
-    absolute_spellings = (
-        *(project / spelling for spelling in _RECOVERY_SPELLINGS),
-        install_root / BIN_DIR_NAME / WRAPPER_NAME,
-    )
+    absolute_spellings: list[Path] = []
+    if project.is_absolute():
+        absolute_spellings.extend(project / spelling for spelling in _RECOVERY_SPELLINGS)
+    if install_root.is_absolute():
+        absolute_spellings.append(install_root / BIN_DIR_NAME / WRAPPER_NAME)
     for sub in _RECOVERY_SUBCOMMANDS:
         for spelling in _RECOVERY_SPELLINGS:
             if stripped == f"{spelling}{_ARG_SEPARATOR}{sub}":
                 return (
                     isinstance(cwd, str)
                     and Path(cwd).is_absolute()
-                    and _runs(Path(cwd) / spelling, launcher)
+                    and _runs_installs_launcher(Path(cwd) / spelling, project, install_root)
                 )
         for absolute in absolute_spellings:
             if stripped == f"{shlex.quote(str(absolute))}{_ARG_SEPARATOR}{sub}":
-                return _runs(absolute, launcher)
+                return _runs_installs_launcher(absolute, project, install_root)
     return False
 
 

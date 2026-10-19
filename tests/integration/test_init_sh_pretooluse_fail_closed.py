@@ -538,10 +538,12 @@ class TestTheDaemonAndInitShExemptTheSameCommands:
     """Plan 00533: the daemon judges the recovery command without a slot by
     its own twin of init.sh's carve-out, so the two must agree."""
 
-    def _init_sh_exempts(self, project: Path, hook_input: dict[str, Any]) -> bool:
+    def _init_sh_exempts(
+        self, project: Path, hook_input: dict[str, Any], daemon_root: Path | None = None
+    ) -> bool:
         env = {k: v for k, v in os.environ.items() if not k.startswith("HOOKS_DAEMON_")}
         env["PROJECT_PATH"] = str(project)
-        env["HOOKS_DAEMON_ROOT_DIR"] = str(project / ".claude" / "hooks-daemon")
+        env["HOOKS_DAEMON_ROOT_DIR"] = str(daemon_root or project / ".claude" / "hooks-daemon")
         result = subprocess.run(
             [BASH, "-c", "source .claude/init.sh; _hooks_daemon_stdin_is_recovery_command"],
             cwd=project,
@@ -587,6 +589,21 @@ class TestTheDaemonAndInitShExemptTheSameCommands:
         from_init_sh = self._init_sh_exempts(project, hook_input)
         from_daemon = is_install_recovery_command(hook_input, project, daemon_root)
         assert from_daemon == from_init_sh, (command, cwd_kind, from_daemon, from_init_sh)
+
+    def test_both_exempt_nothing_when_the_root_cannot_be_resolved(self, project: Path) -> None:
+        """HOOKS_DAEMON_ROOT_DIR can be inherited from anywhere. A name too
+        long to stat makes resolving it raise OSError, which init.sh treats
+        as no install; the daemon must too, not raise on every Bash call."""
+        from claude_code_hooks_daemon.utils.cli_command import is_install_recovery_command
+
+        daemon_root = project / ("x" * 300) / ".claude" / "hooks-daemon"
+        # init.sh reads the root from the env file, over the environment.
+        (project / ".claude" / "hooks-daemon.env").write_text(
+            f'HOOKS_DAEMON_ROOT_DIR="{daemon_root}"\n'
+        )
+        hook_input = _recovery_input(project, "bin/hooks-daemon restart")
+        assert self._init_sh_exempts(project, hook_input, daemon_root) is False
+        assert is_install_recovery_command(hook_input, project, daemon_root) is False
 
 
 @pytest.fixture

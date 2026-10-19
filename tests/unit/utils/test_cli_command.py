@@ -458,6 +458,38 @@ class TestIsInstallRecoveryCommand:
         command = f"{other_root / 'bin' / 'hooks-daemon'} restart"
         assert not cli_command.is_install_recovery_command(_bash(command), project, other_root)
 
+    def test_a_command_that_is_not_a_recovery_spelling_resolves_no_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """It runs on every Bash call, so the text is compared first and the
+        filesystem is touched only for a text match."""
+        root = _client_install(tmp_path)
+        resolved: list[Path] = []
+        real_resolve = cli_command._resolve
+
+        def _counting_resolve(path: Path) -> Path:
+            resolved.append(path)
+            return real_resolve(path)
+
+        monkeypatch.setattr(cli_command, "_resolve", _counting_resolve)
+        hook_input = _bash("git status", str(tmp_path))
+        assert not cli_command.is_install_recovery_command(hook_input, tmp_path, root)
+        assert resolved == []
+
+    @pytest.mark.parametrize("error", [OSError("unreadable"), ValueError("embedded null byte")])
+    def test_a_path_that_cannot_be_resolved_is_not_exempt(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: Exception
+    ) -> None:
+        """As init.sh's carve-out: an unresolvable install is no install."""
+        root = _client_install(tmp_path)
+
+        def _raising_resolve(path: Path) -> Path:
+            raise error
+
+        monkeypatch.setattr(cli_command, "_resolve", _raising_resolve)
+        hook_input = _bash(".claude/hooks-daemon/bin/hooks-daemon restart", str(tmp_path))
+        assert cli_command.is_install_recovery_command(hook_input, tmp_path, root) is False
+
     def test_uninitialised_exempts_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(pc.ProjectContext, "_initialized", False, raising=False)
         monkeypatch.setattr(pc.ProjectContext, "_instance", None, raising=False)

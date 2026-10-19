@@ -126,10 +126,20 @@ class Timeout:
     # CHAIN_DEADLINE_DEFAULT so a refused call still answers well inside the
     # client's budget. The wait also counts against the call's own deadline.
     DISPATCH_SLOT_WAIT_SECONDS = 2.0
+    # A call that wins a slot only after waiting is refused when less than
+    # this is left of its budget: it could not be judged in that time.
+    DISPATCH_MIN_RUN_SECONDS = 0.1
+    # The daemon's own recovery commands bypass the pool above but share a
+    # small one of their own, held until each call really finishes, so
+    # routine `status` calls against a wedged handler cannot pile up.
+    DISPATCH_EXEMPT_MAX_INFLIGHT = 2
     # Refusals that continue this long are one sustained episode, logged as a
-    # WARNING naming its duration, and again at most once per interval.
+    # WARNING naming its duration, and again at most once per interval. The
+    # episode ends only after a quiet period with no refusal at all: under
+    # overload some callers still win a slot, which is not recovery.
     DISPATCH_SATURATION_WARN_AFTER_SECONDS = 10.0
     DISPATCH_SATURATION_WARN_INTERVAL_SECONDS = 30.0
+    DISPATCH_SATURATION_QUIET_SECONDS = 5.0
 
     # Network/IO timeouts (seconds)
     SOCKET_CONNECT = 5  # 5 seconds (Unix socket connection)
