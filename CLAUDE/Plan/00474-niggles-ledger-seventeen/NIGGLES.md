@@ -121,8 +121,8 @@ test on that head and on `main`; evidence in Plan 00533's
   the head and `main`. The scaling-ratio check is flaky under the gate's own concurrent load.
 - **N519**: playbook probe #119 (rsync from a worktree into the main checkout) is denied by
   `project_containment` (priority 14) before `worktree_file_copy` (15) whenever QA runs with a worktree
-  as the project root, so the full gate fails in a worktree and passes in the main checkout. Also,
-  `project_containment` judges an rsync destination but not a cp one.
+  as the project root, so the full gate fails in a worktree and passes in the main checkout. The cp
+  probe (#118) is not matched by `project_containment` under either root, so only the rsync probe flips.
 - **N520**: the py3.11 acceptance leg errored 10 times with "Daemon not running — no live socket" although
   the gate printed that it had started one; the py3.12 and py3.13 legs on the same head reached a
   daemon. The gate should assert daemon liveness before each acceptance leg.
