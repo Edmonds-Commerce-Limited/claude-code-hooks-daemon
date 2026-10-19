@@ -4940,7 +4940,7 @@ handlers:
 | **Type**       | Advisory      |
 | **Event**      | StatusLine    |
 
-**Description:** The subagent spend segment (Plan 00471 L7): `| Σ⚙ 1.66G ite · 3 live (2 opus, 1 sonnet) · max 412k · 2 unmeasured`. The ite figure sums the input-token equivalents of every stopped subagent from the spend ledger; the live part (count by model family, largest live context) comes from the snapshot the Stop/SubagentStop sensors and `spawn_rate_advisor` refresh, and is hidden when older than 15 minutes; `unmeasured` counts gate calls that could not read an agent's transcript. Hidden until there is something to show. `hooks-daemon spend` prints the full ledger.
+**Description:** The subagent spend segment (Plan 00471 L7): `| Σ⚙ 1.66G tok-eq · 3 live (2 opus, 1 sonnet) · max 412k · 2 unmeasured`. The tok-eq figure sums the token equivalents (tokens weighted by price; `hooks-daemon spend` calls it `ite`) of every stopped subagent from the spend ledger; the live part (count by model family, largest live context) comes from the snapshot the Stop/SubagentStop sensors and `spawn_rate_advisor` refresh, and is hidden when older than 15 minutes; `unmeasured` counts gate calls that could not read an agent's transcript. Hidden until there is something to show. `hooks-daemon spend` prints the full ledger.
 
 ---
 

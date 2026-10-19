@@ -1,8 +1,9 @@
 """SpendMeterHandler - the subagent spend segment (Plan 00471 L7, shared with Plan 00472).
 
-``| Σ⚙ 1.66G ite · 3 live (2 opus, 1 sonnet) · max 412k · 2 unmeasured``
+``| Σ⚙ 1.66G tok-eq · 3 live (2 opus, 1 sonnet) · max 412k · 2 unmeasured``
 
-- **Σ⚙ ite**: summed input-token equivalents of every subagent that has stopped
+- **Σ⚙ tok-eq**: summed token equivalents (the ledger's ``ite``, input-token
+  equivalents: a price-weighted token count) of every subagent that has stopped
   in this session, from the spend ledger rows ``subagent_cache_aggregator``
   writes (one memoised ``stat`` per render, see ``read_subagent_cache_totals``).
 - **live**: the live-agent count with its per-model-family split, and the
@@ -21,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any, Final
 
@@ -45,19 +47,40 @@ _SEPARATOR: Final[str] = " · "
 #: A live snapshot older than this is not shown.
 _FRESH_SECONDS: Final[int] = 900
 
-_SCALES: Final[tuple[tuple[float, str, int], ...]] = (
-    (1e9, "G", 2),
-    (1e6, "M", 1),
-    (1e3, "k", 1),
+#: The figure's unit: token equivalents, a price-weighted token count
+#: (``input_token_equivalents``), so not plain tokens.
+_UNIT: Final[str] = "tok-eq"
+
+#: ``(scale, suffix, decimals)`` from smallest to largest. A decimal is kept
+#: only where it carries information: none for k, one for M, two for G.
+_SCALES: Final[tuple[tuple[int, str, int], ...]] = (
+    (1, "", 0),
+    (1_000, "k", 0),
+    (1_000_000, "M", 1),
+    (1_000_000_000, "G", 2),
 )
+
+#: A scaled figure that rounds to this moves to the next scale (``1M``, never ``1000k``).
+_ROLLOVER: Final[int] = 1_000
 
 
 def compact(value: float) -> str:
-    """``1.66G``, ``2.5M``, ``412k`` or the plain number below a thousand."""
-    for scale, suffix, digits in _SCALES:
-        if value >= scale:
-            return f"{value / scale:.{digits}f}".rstrip("0").rstrip(".") + suffix
-    return str(round(value))
+    """``1.66G``, ``2.5M``, ``412k`` or the plain number below a thousand.
+
+    Rounds half up, and a trailing zero decimal is dropped (``3M``, ``1.6G``).
+    """
+    text = "0"
+    for scale, suffix, decimals in _SCALES:
+        rounded = Decimal(str(value / scale)).quantize(
+            Decimal(1).scaleb(-decimals), rounding=ROUND_HALF_UP
+        )
+        text = format(rounded, "f")
+        if decimals:
+            text = text.rstrip("0").rstrip(".")
+        text += suffix
+        if rounded < _ROLLOVER:
+            break
+    return text
 
 
 def _parse_snapshot(text: str) -> dict[str, Any]:
@@ -105,7 +128,7 @@ class SpendMeterHandler(StatusLineHandlerBase):
         if not ite and not fresh:
             return AdvisoryResult(context=[])
 
-        parts = [f"{_ICON} {compact(ite)} ite"]
+        parts = [f"{_ICON} {compact(ite)} {_UNIT}"]
         if fresh:
             count = _int(snapshot.get("count"))
             families = snapshot.get("families")
@@ -138,12 +161,13 @@ class SpendMeterHandler(StatusLineHandlerBase):
                 "from the spend ledger (Plan 00471)."
             ),
             how_to_read=(
-                "`Σ⚙ 1.66G ite` is the summed input-token equivalents of every subagent "
-                "that has stopped (input 1, cache write 1.25, cache read 0.1, output 5: a "
-                "proxy, so compare shares rather than absolute values). `3 live (2 opus, 1 "
-                "sonnet)` counts agents working now by model family, `max 412k` is the "
-                "largest live context, and `2 unmeasured` counts gate calls that could not "
-                "read an agent's transcript and so let the call through. The live part is "
+                "`Σ⚙ 1.66G tok-eq` is the summed token equivalents of every subagent that "
+                "has stopped: tokens weighted by price, input 1, cache write 1.25, cache "
+                "read 0.1, output 5 (a proxy, so compare shares rather than absolute "
+                "values; `hooks-daemon spend` calls the same figure `ite`). `3 live (2 "
+                "opus, 1 sonnet)` counts agents working now by model family, `max 412k` is "
+                "the largest live context in tokens, and `2 unmeasured` counts agents whose "
+                "context a gate could not read, so it let the call through. The live part is "
                 f"hidden when the count is older than {_FRESH_SECONDS // 60} minutes. "
                 "`hooks-daemon spend` prints the full ledger."
             ),
@@ -165,7 +189,7 @@ class SpendMeterHandler(StatusLineHandlerBase):
                 title="spend meter renders subagent spend",
                 command='echo "test"',
                 description=(
-                    "Verify the status line carries a 'Σ⚙ <n> ite' segment once a subagent "
+                    "Verify the status line carries a 'Σ⚙ <n> tok-eq' segment once a subagent "
                     "has stopped in the session, with the live count while it is fresh."
                 ),
                 expected_decision=Decision.ALLOW,

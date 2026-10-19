@@ -60,24 +60,33 @@ def test_full_segment(handler, untracked) -> None:
         families={"opus": 2, "sonnet": 1},
         unmeasured=2,
     )
-    assert render(handler) == "| Σ⚙ 1.66G ite · 3 live (2 opus, 1 sonnet) · max 412k · 2 unmeasured"
+    assert (
+        render(handler) == "| Σ⚙ 1.66G tok-eq · 3 live (2 opus, 1 sonnet) · max 412k · 2 unmeasured"
+    )
+
+
+def test_the_owner_reported_segment_reads_whole_k(handler, untracked) -> None:
+    """N516: `61.2M ite` read as a truncated word and `277.5k` carried a needless decimal."""
+    ledger_row(untracked, "a1", 61_200_000)
+    snapshot(untracked, count=1, largest_context=277_500, families={"opus": 1}, unmeasured=47)
+    assert render(handler) == "| Σ⚙ 61.2M tok-eq · 1 live (1 opus) · max 278k · 47 unmeasured"
 
 
 def test_spend_only(handler, untracked) -> None:
     ledger_row(untracked, "a1", 64_500)
-    assert render(handler) == "| Σ⚙ 64.5k ite"
+    assert render(handler) == "| Σ⚙ 65k tok-eq"
 
 
 def test_stale_snapshot_drops_the_live_part(handler, untracked) -> None:
     ledger_row(untracked, "a1", 3_000_000)
     snapshot(untracked, age=3600, count=5, largest_context=1, families={"opus": 5}, unmeasured=0)
-    assert render(handler) == "| Σ⚙ 3M ite"
+    assert render(handler) == "| Σ⚙ 3M tok-eq"
 
 
 def test_zero_live_shows_no_max(handler, untracked) -> None:
     ledger_row(untracked, "a1", 500)
     snapshot(untracked, count=0, largest_context=0, families={}, unmeasured=0)
-    assert render(handler) == "| Σ⚙ 500 ite · 0 live"
+    assert render(handler) == "| Σ⚙ 500 tok-eq · 0 live"
 
 
 def test_nothing_to_show_renders_nothing(handler) -> None:
@@ -86,14 +95,32 @@ def test_nothing_to_show_renders_nothing(handler) -> None:
 
 def test_unmeasured_alone_is_shown(handler, untracked) -> None:
     snapshot(untracked, count=0, largest_context=0, families={}, unmeasured=1)
-    assert render(handler) == "| Σ⚙ 0 ite · 0 live · 1 unmeasured"
+    assert render(handler) == "| Σ⚙ 0 tok-eq · 0 live · 1 unmeasured"
 
 
 @pytest.mark.parametrize(
     ("value", "text"),
-    [(0, "0"), (999, "999"), (1_500, "1.5k"), (2_500_000, "2.5M"), (1_664_000_000, "1.66G")],
+    [
+        (0, "0"),
+        (999, "999"),
+        (999.6, "1k"),
+        (1_500, "2k"),
+        (2_500, "3k"),
+        (277_500, "278k"),
+        (412_000, "412k"),
+        (999_499, "999k"),
+        (999_500, "1M"),
+        (2_500_000, "2.5M"),
+        (3_000_000, "3M"),
+        (61_249_999, "61.2M"),
+        (999_960_000, "1G"),
+        (1_600_000_000, "1.6G"),
+        (1_664_000_000, "1.66G"),
+        (2_000_000_000, "2G"),
+    ],
 )
-def test_compact(value: int, text: str) -> None:
+def test_compact(value: float, text: str) -> None:
+    """Whole k; one decimal for M and two for G, each dropped when it is zero."""
     assert compact(value) == text
 
 

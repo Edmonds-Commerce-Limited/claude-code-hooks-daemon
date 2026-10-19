@@ -43,10 +43,6 @@ INITIAL_WINDOW_BYTES: Final[int] = 64 * 1024
 #: holds none within it is unmeasured, never read whole.
 MAX_WINDOW_BYTES: Final[int] = 4 * 1024 * 1024
 
-#: A whole transcript this small with no usage is a fresh agent that has not
-#: made its first request yet. Larger and usage-free is unmeasured.
-FRESH_AGENT_MAX_BYTES: Final[int] = 256 * 1024
-
 #: The model name Claude Code writes on records that are not API responses.
 SYNTHETIC_MODEL: Final[str] = "<synthetic>"
 
@@ -69,10 +65,12 @@ WEIGHT_OUTPUT: Final[float] = 5.0
 
 
 class NoUsageInTail(Exception):
-    """A transcript too large to be a fresh agent holds no usage in its last MAX_WINDOW_BYTES.
+    """A transcript that is not a fresh agent's holds no usage in its last MAX_WINDOW_BYTES.
 
-    The likely cause is a transcript format change, so the caller records the
-    agent as unmeasured rather than treating it as a fresh agent.
+    Either an assistant record without usage was read (the likely cause is a
+    transcript format change) or the file's start lies past the cap, so
+    freshness cannot be shown. The caller records the agent as unmeasured
+    rather than treating it as a fresh agent.
     """
 
 
@@ -148,13 +146,18 @@ def _is_conversational(record: Mapping[str, Any]) -> bool:
     return isinstance(message, dict) and message.get("model") != SYNTHETIC_MODEL
 
 
-def _scan_backwards(
-    lines: Iterable[bytes], stopped: bool | None = None
-) -> tuple[TailReading | None, bool | None]:
-    """Scan ``lines`` newest first, continuing from a newer scan's ``stopped``.
+@dataclass
+class _ScanState:
+    """What the scans of newer lines have seen, carried into the scan of older ones."""
 
-    Returns the reading (None when ``lines`` hold no usage) and the stopped
-    state seen so far, for the scan of the lines in front of these.
+    stopped: bool | None = None
+    saw_assistant: bool = False
+
+
+def _scan_backwards(lines: Iterable[bytes], state: _ScanState) -> TailReading | None:
+    """Scan ``lines`` newest first, updating ``state`` for the lines in front of these.
+
+    Returns the reading, or None when ``lines`` hold no usage.
     """
     for line in lines:
         if not line.strip():
@@ -171,26 +174,26 @@ def _scan_backwards(
             continue
         if not isinstance(record, dict):
             continue
-        if stopped is None and _is_conversational(record):
-            message = record.get("message")
-            stopped = (
-                record.get("type") == "assistant"
-                and isinstance(message, dict)
-                and message.get("stop_reason") == END_TURN
-            )
+        if _is_conversational(record):
+            is_assistant = record.get("type") == "assistant"
+            state.saw_assistant = state.saw_assistant or is_assistant
+            if state.stopped is None:
+                message = record.get("message")
+                state.stopped = (
+                    is_assistant
+                    and isinstance(message, dict)
+                    and message.get("stop_reason") == END_TURN
+                )
         found = real_assistant_usage(record)
         if found is not None:
             message, usage = found
             model = message.get("model")
-            return (
-                TailReading(
-                    context_tokens=context_of(usage),
-                    model=model if isinstance(model, str) else "",
-                    stopped=bool(stopped),
-                ),
-                stopped,
+            return TailReading(
+                context_tokens=context_of(usage),
+                model=model if isinstance(model, str) else "",
+                stopped=bool(state.stopped),
             )
-    return None, stopped
+    return None
 
 
 def _open_binary(path: Path) -> IO[bytes]:
@@ -211,18 +214,24 @@ def read_tail(
     only the part in front of what it already holds, plus the line the
     previous window cut.
 
-    Returns None when a file of at most ``FRESH_AGENT_MAX_BYTES`` holds no real
-    assistant usage (a fresh agent). Raises NoUsageInTail when a larger file
-    holds none within ``max_window`` bytes, and OSError when the file cannot be
-    opened or read: the caller decides what an unmeasurable transcript means.
+    Returns None for a fresh agent: the whole file was read and it holds no
+    real assistant record. Its size says nothing (N517): the prompt,
+    attachments and ``api-request*`` records of a first call run to about
+    400 KB, and the first assistant record, the only carrier of usage, is
+    flushed after the first tool call's hook has run.
+
+    Raises NoUsageInTail when an assistant record without usage was read (a
+    format change) or the file's start lies beyond ``max_window`` bytes, and
+    OSError when the file cannot be opened or read: the caller decides what an
+    unmeasurable transcript means.
     """
+    state = _ScanState()
     with opener(path) as handle:
         size = handle.seek(0, 2)
         limit = min(size, max(1, max_window))
         window = min(max(1, initial_window), limit)
         start = size
         cut = b""
-        stopped: bool | None = None
         while True:
             new_start = size - window
             handle.seek(new_start)
@@ -231,13 +240,13 @@ def read_tail(
             # Unless the window reached the file's start, its first piece may
             # be the tail of a line it cut: keep it for the next, wider read.
             cut = lines.pop(0) if start > 0 else b""
-            reading, stopped = _scan_backwards(reversed(lines), stopped)
+            reading = _scan_backwards(reversed(lines), state)
             if reading is not None:
                 return reading
             if window >= limit:
                 break
             window = min(window * 2, limit)
-    if start == 0 and size <= FRESH_AGENT_MAX_BYTES:
+    if start == 0 and not state.saw_assistant:
         return None
     raise NoUsageInTail(f"no usage in the last {window:,} of {size:,} bytes of {path}")
 
