@@ -171,3 +171,27 @@ describe the exempt pool and the new warning.
 Targeted QA: `./scripts/qa/llm_qa.py changed --allow-unmapped` on a still tree: **QA: 40/40
 PASSED**. `changed_tests`: 7725 passed, 0 failed, 56 skipped. The same nine files are unmapped as
 too-broad, so the coordinator's full gate must cover them. The daemon was not restarted.
+
+## Full-gate fixes
+
+The full gate on the combined head b4e83885c (this branch at 9f3eff5fd plus N516/N517 on main)
+passed 42 of 43 checks; `tests` had 6 failed and 10 errored. A classifier agent ran each failing
+test on the combined head and on `main`; the coordinator applied fix 1 (the classifier's own edit
+was denied by the cross-worktree write guard, as it was launched in the integration worktree).
+
+1. **Caused by this branch**: `test_hook_input_field_single_source` was red on 9f3eff5fd
+   (`utils/cli_command.py:336; :338; :347` read payload fields as raw literals). Fixed to
+   `HookInputField.TOOL_NAME`, `.TOOL_INPUT` and `.CWD`. After the fix: that test, `test_cli_command`
+   and `test_bounded_dispatch` 111 passed; `tests/integration/test_init_sh_pretooluse_fail_closed.py`
+   (the shell parity test) 195 passed; ruff, black and mypy clean on the file.
+2. **Environmental**: `test_safety_handlers_hostile_input_performance[deep_eval_nesting]` failed on
+   the py3.12 leg only (`block-ancestry-severing-merge` "160x for 8x input"); 5/5 isolated runs pass
+   on both the combined head and `main`, and neither branch touches that handler or Bash parsing.
+3. **Pre-existing, worktree artefact**: playbook probe #119 (rsync from a worktree into the main
+   checkout) is denied by `project_containment` (priority 14) before `worktree_file_copy` (15)
+   whenever the project root is a worktree; `main`'s own code reproduces it, and `main`'s checkout
+   passes. Neither branch touches either handler or the order.
+4. **Environmental**: the py3.11 acceptance leg's 10 "Daemon not running" errors; with a live daemon
+   the same tests run (9 pass, the 10th is item 3). The py3.12 and py3.13 legs reached a daemon.
+
+Items 2 to 4 are filed in ledger 00474 by the coordinator.
