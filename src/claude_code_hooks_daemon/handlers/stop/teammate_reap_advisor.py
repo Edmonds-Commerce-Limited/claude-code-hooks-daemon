@@ -52,6 +52,7 @@ from claude_code_hooks_daemon.core.handler_scope import HandlerScope
 from claude_code_hooks_daemon.handlers.utils.session_advice_counter import (
     SessionAdviceCounter,
 )
+from claude_code_hooks_daemon.utils.stop_hook_helpers import reported_background_tasks
 
 #: Advise on the first qualifying stop of a session, then every Nth. Public
 #: because the rate-limit test must assert against the real interval rather
@@ -75,10 +76,7 @@ def _background_task_count(hook_input: dict[str, Any]) -> int:
     (``Stop.json``), and an advisory that guessed at a count it was not given
     would be inventing the very fact it exists to report.
     """
-    tasks = hook_input.get(HookInputField.BACKGROUND_TASKS)
-    if not isinstance(tasks, list):
-        return 0
-    return len(tasks)
+    return len(reported_background_tasks(hook_input))
 
 
 def _advisory(count: int) -> str:
