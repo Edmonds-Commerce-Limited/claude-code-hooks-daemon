@@ -117,6 +117,9 @@ class Timeout:
     STRAGGLER_UNHEALTHY_COUNT = 4  # concurrent stragglers before DEGRADED health
     STRAGGLER_RESTART_AFTER_SECONDS = 120  # oldest straggler's age before self-restart
 
+    # How many handler chains the shared dispatcher runs at once by default
+    # (`daemon.chain.max_inflight`), across every session one daemon serves.
+    DISPATCH_MAX_INFLIGHT = 16
     # Dispatch-pool saturation (Plan 00533, issue #124). A call that finds
     # every slot taken waits this long for one before it is refused: long
     # enough to ride out a burst one call over the limit, a tenth of

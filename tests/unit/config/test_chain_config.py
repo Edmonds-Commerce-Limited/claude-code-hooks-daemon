@@ -10,7 +10,6 @@ from claude_code_hooks_daemon.config.models import (
     TransportConfig,
 )
 from claude_code_hooks_daemon.constants import Timeout
-from claude_code_hooks_daemon.core.bounded_dispatch import DISPATCH_MAX_INFLIGHT
 
 
 class TestDefaults:
@@ -64,7 +63,7 @@ class TestDispatchCapacity:
     """Plan 00533 (issue #124): the dispatch pool's size and slot wait."""
 
     def test_max_inflight_defaults_to_the_shipped_sixteen(self) -> None:
-        assert ChainConfig().max_inflight == DISPATCH_MAX_INFLIGHT == 16
+        assert ChainConfig().max_inflight == Timeout.DISPATCH_MAX_INFLIGHT == 16
 
     def test_slot_wait_defaults_well_under_the_chain_deadline(self) -> None:
         slot_wait = ChainConfig().slot_wait_seconds

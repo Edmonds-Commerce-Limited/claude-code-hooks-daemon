@@ -64,7 +64,7 @@ T = TypeVar("T")
 # headroom for several concurrent client connections, not a per-request
 # budget. Ordinary traffic never approaches it; a flood of genuinely stuck
 # handlers hits a hard ceiling instead of spawning threads without limit.
-DISPATCH_MAX_INFLIGHT: Final[int] = 16
+DISPATCH_MAX_INFLIGHT: Final[int] = Timeout.DISPATCH_MAX_INFLIGHT
 
 
 @dataclass(frozen=True, slots=True)

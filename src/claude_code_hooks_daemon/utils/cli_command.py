@@ -291,15 +291,16 @@ _RECOVERY_PADDING: Final[str] = " \t"
 
 
 def _installs_launcher(project: Path, install_root: Path) -> Path | None:
-    """This install's launcher, resolved, or None when it is unknown or absent."""
+    """This install's launcher, resolved, or None when it is unknown or absent.
+
+    Both paths are the daemon's own (ProjectContext), not hook input, so a
+    path that cannot be resolved is a broken install and raises, as it does
+    in :func:`install_recovery_command`.
+    """
     if not (project.is_absolute() and install_root.is_absolute()):
         return None
-    try:
-        launcher = _resolve(install_root / BIN_DIR_NAME / WRAPPER_NAME)
-        if _project_it_manages(launcher) != _resolve(project) or not launcher.is_file():
-            return None
-    except (OSError, ValueError):
-        # An unresolvable path (an embedded NUL, a loop) names no install.
+    launcher = _resolve(install_root / BIN_DIR_NAME / WRAPPER_NAME)
+    if _project_it_manages(launcher) != _resolve(project) or not launcher.is_file():
         return None
     return launcher
 
