@@ -109,6 +109,26 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N518 to N520 — full-gate failures from issue #124's integration run that neither branch caused
+
+**Source**: the full gate on b4e83885c (issue #124 plus N516/N517), classified by running each failing
+test on that head and on `main`; evidence in Plan 00533's
+[implementer report](../00533-dispatch-saturation-recovery/subagent-reports/261019-issue124-implementer-opus.md),
+"Full-gate fixes".
+
+- **N518**: `test_safety_handlers_hostile_input_performance[deep_eval_nesting]` failed on the py3.12 leg
+  only ("block-ancestry-severing-merge cost grew 160x for 8x input") and passed 5/5 isolated on both
+  the head and `main`. The scaling-ratio check is flaky under the gate's own concurrent load.
+- **N519**: playbook probe #119 (rsync from a worktree into the main checkout) is denied by
+  `project_containment` (priority 14) before `worktree_file_copy` (15) whenever QA runs with a worktree
+  as the project root, so the full gate fails in a worktree and passes in the main checkout. Also,
+  `project_containment` judges an rsync destination but not a cp one.
+- **N520**: the py3.11 acceptance leg errored 10 times with "Daemon not running — no live socket" although
+  the gate printed that it had started one; the py3.12 and py3.13 legs on the same head reached a
+  daemon. The gate should assert daemon liveness before each acceptance leg.
+
+**Status**: ⬜ open.
+
 ### N516 and N517 — the spend-meter status segment
 
 **Source**: the owner, from a status bar reading `Σ⚙ 61.2M ite · 1 live (1 opus) · max 277.5k · 47 unmeasured`,
