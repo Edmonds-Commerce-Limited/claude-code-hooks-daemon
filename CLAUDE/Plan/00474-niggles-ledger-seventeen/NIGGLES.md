@@ -123,7 +123,16 @@ seen "on a few sessions" and taken for a rendering fault.
   written) is counted as a failure, or the gate cannot measure agents at all. Establish which before changing either
   the gate or the count.
 
-**Status**: ⬜ open.
+**Verdict (N517)**: benign, but counted as a failure. All 48 markers fired 60 to 100 ms after the timestamp of the
+agent's first assistant record, at its first tool call, and `read_tail` over the finished files finds usage in every
+one. So that record was not yet flushed when the hook ran. The size test was what failed: `FRESH_AGENT_MAX_BYTES`
+(256 KiB) treated a usage-free file as fresh only below that size, and a first call's prefix (prompt, attachments of
+about 220 KB, `api-request-shape`/`api-request-blob`/`api-request` records) now runs to 350 to 430 KB. 230 of 520
+transcripts in the session exceed it. Fresh now means the whole file was read and holds no real assistant record; an
+assistant record without usage still raises `NoUsageInTail`, so a format change is still reported.
+
+**Status**: N516 ✅ and N517 ✅ (branch `worktree-n516-spend-segment`; report
+`subagent-reports/261019-n516-n517-spend-segment-opus.md`).
 
 ### N513 to N515 — `docs-qa --footprint` edge cases from the Plan 00532 re-review
 

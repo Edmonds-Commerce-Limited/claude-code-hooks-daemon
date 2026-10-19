@@ -180,12 +180,36 @@ class TestSoftBand:
         assert handler.handle(event(tmp_path, project)).decision == Decision.ALLOW
         assert unmeasured_count(tmp_path / "untracked", SESSION) == 0
 
+    def test_first_call_before_any_assistant_record_is_silent_and_not_unmeasured(
+        self, handler, tmp_path, project, transcript
+    ) -> None:
+        """N517: the hook outruns the first assistant record's flush on a 400 KB prefix."""
+        transcript.parent.mkdir(parents=True)
+        records = [
+            {"type": "user", "message": {"content": "brief"}},
+            {"type": "attachment", "attachment": {"content": "c" * 223_000}},
+            {"type": "api-request-blob", "hash": "h1", "message": "m" * 117_000},
+            {"type": "api-request", "id": "r1", "params": {}},
+        ]
+        transcript.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+        assert transcript.stat().st_size > 256 * 1024
+        assert handler.handle(event(tmp_path, project)).decision == Decision.ALLOW
+        assert unmeasured_count(tmp_path / "untracked", SESSION) == 0
+
     def test_large_transcript_with_no_usage_fails_open_and_is_recorded_unmeasured(
         self, handler, tmp_path, project, transcript
     ) -> None:
         """Review B2: a renamed `usage` field must not switch the gate off silently."""
         transcript.parent.mkdir(parents=True)
-        line = json.dumps({"type": "user", "message": {"content": "x" * 1000}}) + "\n"
+        line = (
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {"model": "claude-opus-5-5", "content": "x" * 1000},
+                }
+            )
+            + "\n"
+        )
         transcript.write_text(line * 1000, encoding="utf-8")
         for _ in range(3):
             assert handler.handle(event(tmp_path, project)).decision == Decision.ALLOW

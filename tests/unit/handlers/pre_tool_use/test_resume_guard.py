@@ -156,7 +156,15 @@ class TestDecision:
     ) -> None:
         """Review B2: no usage within the tail cap is unmeasured, not a fresh agent."""
         transcript = write_agent(subagents, NEW_ID, "plan464-impl", context=300_000)
-        line = json.dumps({"type": "user", "message": {"content": "x" * 1000}}) + "\n"
+        line = (
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {"model": "claude-opus-5-5", "content": "x" * 1000},
+                }
+            )
+            + "\n"
+        )
         transcript.write_text(line * 1000, encoding="utf-8")
         assert handler.handle(send(tmp_path, "plan464-impl")).decision == Decision.ALLOW
         log = tmp_path / "untracked" / "logs" / "hooks" / "verdicts.jsonl"

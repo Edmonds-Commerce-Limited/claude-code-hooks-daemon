@@ -13,7 +13,6 @@ from typing import IO, Any, BinaryIO, cast
 import pytest
 
 from claude_code_hooks_daemon.utils.transcript_tail import (
-    FRESH_AGENT_MAX_BYTES,
     MAX_WINDOW_BYTES,
     NoUsageInTail,
     TailReading,
@@ -66,6 +65,38 @@ def synthetic() -> str:
                 "model": "<synthetic>",
                 "stop_reason": "stop_sequence",
                 "usage": {"input_tokens": 0, "output_tokens": 0},
+            },
+        }
+    )
+
+
+def first_call_prefix() -> list[str]:
+    """The records a subagent transcript holds when its FIRST tool call's hook fires (N517).
+
+    Shape measured on real sub-agent transcripts: the prompt, attachments (one
+    of about 220 KB), then ``api-request-shape``/``api-request-blob``/
+    ``api-request`` records of about 150 KB. The first assistant record (the
+    only carrier of ``usage``) is not yet flushed when the hook runs, so the
+    file is over 256 KiB with no assistant record at all.
+    """
+    return [
+        user("brief"),
+        json.dumps({"type": "attachment", "attachment": {"content": "c" * 223_000}}),
+        json.dumps({"type": "attachment", "attachment": {"content": "c" * 18_000}}),
+        json.dumps({"type": "api-request-shape", "shape": "s" * 31_000, "shapeHash": "h"}),
+        json.dumps({"type": "api-request-blob", "hash": "h1", "message": "m" * 117_000}),
+        json.dumps({"type": "api-request", "id": "r1", "shapeHash": "h", "params": {}}),
+    ]
+
+
+def assistant_without_usage(pad: int = 1000) -> str:
+    """An assistant record whose usage field is gone: the shape of a transcript format change."""
+    return json.dumps(
+        {
+            "type": "assistant",
+            "message": {
+                "model": "claude-opus-5-5",
+                "content": [{"type": "text", "text": "x" * pad}],
             },
         }
     )
@@ -187,7 +218,7 @@ class TestMissPathIsBounded:
 
     @staticmethod
     def usage_free(path: Path, megabytes: int) -> Path:
-        filler = [user("x" * 1000) for _ in range(megabytes * 1000)]
+        filler = [assistant_without_usage() for _ in range(megabytes * 1000)]
         write_lines(path, filler)
         assert path.stat().st_size >= megabytes * 1_000_000
         return path
@@ -204,8 +235,27 @@ class TestMissPathIsBounded:
 
     def test_a_small_fresh_transcript_is_none(self, tmp_path: Path) -> None:
         path = write_lines(tmp_path / "t.jsonl", [user()] * 10)
-        assert path.stat().st_size < FRESH_AGENT_MAX_BYTES
         assert read_tail(path) is None
+
+    def test_a_first_call_transcript_over_256_kib_is_a_fresh_agent(self, tmp_path: Path) -> None:
+        """N517: no assistant record yet means no request measured yet, whatever the size."""
+        path = write_lines(tmp_path / "t.jsonl", first_call_prefix())
+        assert path.stat().st_size > 256 * 1024
+        assert read_tail(path) is None
+
+    def test_a_usage_free_assistant_record_is_unmeasured_even_when_small(
+        self, tmp_path: Path
+    ) -> None:
+        """An assistant record with no usage is a format change, not a fresh agent."""
+        path = write_lines(tmp_path / "t.jsonl", [user(), assistant_without_usage()])
+        with pytest.raises(NoUsageInTail):
+            read_tail(path)
+
+    def test_a_fresh_prefix_beyond_the_cap_is_unmeasured(self, tmp_path: Path) -> None:
+        """Past the cap the start of the file is unread, so freshness cannot be shown."""
+        path = write_lines(tmp_path / "t.jsonl", first_call_prefix())
+        with pytest.raises(NoUsageInTail):
+            read_tail(path, initial_window=64 * 1024, max_window=128 * 1024)
 
     def test_usage_found_after_growing_reads_each_byte_once(self, tmp_path: Path) -> None:
         lines = [assistant(5), *[user("x" * 1000) for _ in range(600)]]
