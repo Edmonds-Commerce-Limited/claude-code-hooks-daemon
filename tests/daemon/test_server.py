@@ -12,6 +12,7 @@ import time
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -704,6 +705,28 @@ class TestHooksDaemon:
         # Should have cleaned up properly
         assert not _require_path(daemon_config.socket_path_obj).exists()
         assert not _require_path(daemon_config.pid_file_path_obj).exists()
+
+    @pytest.mark.anyio
+    async def test_the_active_request_drain_is_the_named_budget(
+        self, daemon_config: DaemonConfig, front_controller: FrontController
+    ) -> None:
+        """Plan 00533 (issue #124): the drain is Timeout.DAEMON_ACTIVE_REQUEST_DRAIN,
+        the budget `stop`'s SIGTERM grace is derived from, not a loop count of
+        its own that the grace can silently stop exceeding."""
+        daemon = HooksDaemon(config=daemon_config, controller=front_controller)
+        server_task = asyncio.create_task(daemon.start())
+        await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
+        loop = asyncio.get_running_loop()
+        daemon._active_requests = 1  # a request that never finishes
+        try:
+            with patch.object(Timeout, "DAEMON_ACTIVE_REQUEST_DRAIN", 0.2):
+                started = loop.time()
+                await daemon.shutdown()
+                drained_for = loop.time() - started
+        finally:
+            daemon._active_requests = 0
+        await server_task
+        assert 0.2 <= drained_for < 2.0, drained_for
 
     @pytest.mark.anyio
     async def test_daemon_tracks_active_requests_count(

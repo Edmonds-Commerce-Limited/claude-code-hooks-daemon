@@ -1391,7 +1391,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
         outcome = stop_verified_daemon(
             pid,
             project_root=project_path,
-            grace_seconds=Timeout.SOCKET_CONNECT,
+            grace_seconds=Timeout.DAEMON_SIGTERM_GRACE,
             kill_grace_seconds=Timeout.DAEMON_SIGKILL_GRACE,
             logical_root=getattr(args, "caller_logical_root", None),
             recorded_at=recorded_at,
@@ -1422,7 +1422,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
         return 1
     if outcome is DaemonStop.KILLED:
         print(
-            f"WARNING: Daemon still running after {Timeout.SOCKET_CONNECT}s; "
+            f"WARNING: Daemon still running after {Timeout.DAEMON_SIGTERM_GRACE}s; "
             "escalated to SIGKILL",
             file=sys.stderr,
         )
