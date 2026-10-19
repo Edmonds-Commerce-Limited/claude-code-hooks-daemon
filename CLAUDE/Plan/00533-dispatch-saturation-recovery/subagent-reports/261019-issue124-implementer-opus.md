@@ -109,4 +109,21 @@ injectable, so the tests do not sleep.
 
 ## Targeted QA
 
-See the QA section appended below.
+`./scripts/qa/llm_qa.py changed --allow-unmapped` on `ba4b142e5`: **QA: 40/40 PASSED**.
+`changed_tests`: 7716 passed, 0 failed, 56 skipped, 124 test files from 22 changed files.
+
+The first run, without `--allow-unmapped`, found three problems, all fixed in `ba4b142e5`:
+
+- `format`: black reformatted the `slot_wait_seconds` annotation in `config/models.py`.
+- `error_hiding` (return-none-on-error): `_installs_launcher` caught `OSError`/`ValueError` and
+  returned None. Its paths are the daemon's own, never hook input, so it now fails fast, the same
+  as `install_recovery_command`. Hook-input paths are still guarded, in `_runs`.
+- `changed_tests` unmapped: importing `core.bounded_dispatch` into `config/models.py` made the
+  dispatcher reachable from config, which turned it into a too-broad file. The pool-size default
+  now lives in `Timeout.DISPATCH_MAX_INFLIGHT`, and `bounded_dispatch.DISPATCH_MAX_INFLIGHT`
+  aliases it.
+
+Nine files remain unmapped as too-broad, so the coordinator's full gate must cover them: `init.sh`,
+`config/models.py`, `constants/timeout.py`, `core/chain.py`, `core/router.py`, `daemon/cli.py`,
+`daemon/controller.py`, `daemon/server.py` and `utils/cli_command.py`. The targeted test files listed
+under "Green" above cover each change directly. The daemon was not restarted, per the brief.
