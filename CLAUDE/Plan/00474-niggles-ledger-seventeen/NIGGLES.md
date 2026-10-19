@@ -109,6 +109,22 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N516 and N517 — the spend-meter status segment
+
+**Source**: the owner, from a status bar reading `Σ⚙ 61.2M ite · 1 live (1 opus) · max 277.5k · 47 unmeasured`,
+seen "on a few sessions" and taken for a rendering fault.
+
+- **N516**: `handlers/status_line/spend_meter.py` labels its figure `ite` (input-token equivalents), which reads as a
+  word cut off mid-render; `compact()` gives `277.5k` where `278k` says the same. Remedy: a unit a reader recognises,
+  and whole numbers below a million.
+- **N517**: all 47 unmeasured records in that session are `subagent_context_budget` / `no-usage-in-tail`, one per
+  agent; other sessions hold one `transcript-missing` each. So the gate found no usage line in almost every agent's
+  transcript tail it checked and allowed the call. Either a benign case (an agent's first calls, before any usage is
+  written) is counted as a failure, or the gate cannot measure agents at all. Establish which before changing either
+  the gate or the count.
+
+**Status**: ⬜ open.
+
 ### N513 to N515 — `docs-qa --footprint` edge cases from the Plan 00532 re-review
 
 **Source**: the pre-merge re-review of Plan 00532 (issue #123), which approved the merge with four minor findings; the
