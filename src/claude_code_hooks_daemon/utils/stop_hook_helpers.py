@@ -39,6 +39,9 @@ _TAIL_CHUNK_BYTES: Final[int] = 65_536
 # the newest entries, so the newest few megabytes are where it can be.
 _MAX_TAIL_SCAN_BYTES: Final[int] = 4_194_304
 
+_TASK_STATUS_KEY: Final[str] = "status"
+_TASK_RUNNING: Final[str] = "running"
+
 
 def is_stop_hook_active(hook_input: dict[str, Any]) -> bool:
     """Check if stop hook is in re-entry state (prevents infinite loops).
@@ -54,6 +57,26 @@ def is_stop_hook_active(hook_input: dict[str, Any]) -> bool:
     """
     return bool(
         hook_input.get("stop_hook_active", False) or hook_input.get("stopHookActive", False)
+    )
+
+
+def reported_background_tasks(hook_input: dict[str, Any]) -> list[Any]:
+    """The Stop payload's ``background_tasks`` list, or ``[]`` for "no information".
+
+    The field is CONDITIONAL (``contracts/claude-code-hooks/Stop.json``): absent
+    means *unknown*, never *empty*, and a non-list value is malformed. All three
+    of absent, empty and malformed return ``[]`` because every caller's response
+    to them is identical.
+    """
+    tasks = hook_input.get(HookInputField.BACKGROUND_TASKS)
+    return tasks if isinstance(tasks, list) else []
+
+
+def has_running_background_task(hook_input: dict[str, Any]) -> bool:
+    """True when a reported background task carries ``status == "running"``."""
+    return any(
+        isinstance(task, dict) and task.get(_TASK_STATUS_KEY) == _TASK_RUNNING
+        for task in reported_background_tasks(hook_input)
     )
 
 

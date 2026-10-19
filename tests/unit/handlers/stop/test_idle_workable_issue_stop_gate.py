@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
 from claude_code_hooks_daemon.handlers.stop.idle_workable_issue_stop_gate import (
+    RELEASE_STATE_FILENAME,
     IdleWorkableIssueStopGateHandler,
 )
 from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, write_marker
@@ -262,6 +263,53 @@ class TestItStandsAside:
         assert _judge(_handler(None), _stop()) is Decision.ALLOW
 
 
+class TestOtherInFlightSources:
+    """N498: the work queue is not the only evidence that work is running."""
+
+    def test_a_running_background_task_holds_the_gate_back(self, state: Path) -> None:
+        _cache(state, [5])
+        tasks = [{"id": "a", "status": "running"}, {"id": "b", "status": "running"}]
+        assert _judge(_handler(state), _stop(background_tasks=tasks)) is Decision.ALLOW
+
+    def test_one_running_among_finished_tasks_holds_the_gate_back(self, state: Path) -> None:
+        _cache(state, [5])
+        tasks = [{"id": "a", "status": "completed"}, {"id": "b", "status": "running"}]
+        assert _judge(_handler(state), _stop(background_tasks=tasks)) is Decision.ALLOW
+
+    @pytest.mark.parametrize(
+        "tasks",
+        [
+            [],
+            [{"id": "a", "status": "completed"}],
+            ["running"],
+            [None, 3],
+            {"status": "running"},
+            "x",
+        ],
+    )
+    def test_no_running_task_or_a_malformed_field_changes_nothing(
+        self, state: Path, tasks: Any
+    ) -> None:
+        _cache(state, [5])
+        assert _judge(_handler(state), _stop(background_tasks=tasks)) is Decision.DENY
+
+    def test_an_absent_field_changes_nothing(self, state: Path) -> None:
+        _cache(state, [5])
+        assert _judge(_handler(state), _stop()) is Decision.DENY
+
+    def test_a_release_state_file_holds_the_gate_back(self, state: Path) -> None:
+        _cache(state, [5])
+        (state / RELEASE_STATE_FILENAME).write_text("{}", encoding="utf-8")
+        assert _judge(_handler(state), _stop()) is Decision.ALLOW
+
+    def test_the_deny_names_the_sources_it_checked(self, state: Path) -> None:
+        _cache(state, [5])
+        reason = _handler(state).handle(_stop()).reason or ""
+        assert "work queue" in reason
+        assert "background tasks" in reason
+        assert "release state" in reason
+
+
 class TestTheAwaitingHumanDeclaration:
     def test_a_live_marker_for_this_session(self, state: Path) -> None:
         _cache(state, [5])
@@ -346,6 +394,14 @@ class TestDocumentation:
         guidance = handler.get_claude_md() or ""
         assert "safety net" in guidance
         assert "idle_workable_issue_stop_gate" in guidance
+
+    def test_the_guidance_and_acceptance_tests_name_every_in_flight_source(self) -> None:
+        handler = IdleWorkableIssueStopGateHandler()
+        guidance = handler.get_claude_md() or ""
+        for source in ("work queue", "background_tasks", "release-state.json"):
+            assert source in guidance
+        descriptions = " ".join(t.description for t in handler.get_acceptance_tests())
+        assert "background" in descriptions
 
     def test_it_declares_acceptance_tests(self) -> None:
         assert IdleWorkableIssueStopGateHandler().get_acceptance_tests()

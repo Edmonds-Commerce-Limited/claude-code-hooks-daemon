@@ -237,7 +237,7 @@ Open:
 - **N499**: `git -c k=v -C sub rm f` yields no target in `core/utils.py`, so `write_protected_paths` lets it
   through. Predates this cycle; low priority.
 
-**Status**: N494 to N497 ✅ (merged 3d1db2da8, cae36a242, 3d44f0e6d, 4b3a709e1); N498 and N499 ⬜ open.
+**Status**: N494 to N497 ✅ (merged 3d1db2da8, cae36a242, 3d44f0e6d, 4b3a709e1); N498 ✅ (branch worktree-n498-idle-gate-inflight: a running payload `background_tasks` entry or a present `release-state.json` holds the gate back, and the deny names the sources it checked); N499 ⬜ open.
 
 ### N493 — the acceptance contract drove the idle-stop gate's "no cache" case against the host's live cache
 
