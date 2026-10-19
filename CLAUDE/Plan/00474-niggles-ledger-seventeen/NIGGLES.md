@@ -228,7 +228,12 @@ Open:
   present and `llm_qa.py all` running as a tracked background task, a main-thread stop naming the running gate was
   denied with R-STOP-IDLE-WITH-WORKABLE-ISSUE ("nothing is in flight"), pointing at a runbook whose merge step is
   forbidden until the tag. Expected: a live release state file and a running tracked background task each count as
-  work in flight, or the deny text names the in-flight sources it checked.
+  work in flight, or the deny text names the in-flight sources it checked. Second occurrence (issue #124's triage):
+  with #124 claimed by this session and two triage agents running, the Stop payload's `background_tasks` listed both
+  as `running` (`teammate_reap_advisor` reported them in the same Stop) yet the gate said "nothing is in flight", and
+  it counted the claimed #124 among the workable issues. The runbook writes a work-queue entry only at Step 4, so
+  every triage and planning wait hits this. Fix scope: a payload `background_tasks` entry with `status: "running"`
+  and a live release state file each hold the gate back.
 - **N499**: `git -c k=v -C sub rm f` yields no target in `core/utils.py`, so `write_protected_paths` lets it
   through. Predates this cycle; low priority.
 

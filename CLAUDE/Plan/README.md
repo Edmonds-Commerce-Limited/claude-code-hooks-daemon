@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00533: dispatch saturation recovery](00533-dispatch-saturation-recovery/PLAN.md) - In Progress (#124: a saturated dispatch pool denied every hook, the exempt recovery command included; scope per the Fable stand-in ruling: recovery carve-out, configurable pool with a bounded wait, saturation warning, clean SIGTERM grace)
+
 - [00530: subagent tier enforcement follow up](00530-subagent-tier-enforcement-follow-up/PLAN.md) - Not Started (opened by the Plan 00472 build per its Fable rulings' section 3: confirm the Workflow advisor against a real payload, then decide the Workflow deny mode, `require_explicit` and the `CLAUDE_CODE_SUBAGENT_MODEL` flip from measured evidence)
 
 - [00529: owner decision on rust helpers from 00495 assessment](00529-owner-decision-on-rust-helpers-from-00495-assessment/PLAN.md) - Not Started (Plan 00495 Task 3.2 found no path that justifies a native helper, and one Python defect: the secret-file guard spends 1.2 s on a 115 KB Write; awaiting the owner's decision on the assessment's three recommendations)
@@ -310,11 +312,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 532 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 533 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 454 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 55 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 56 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
