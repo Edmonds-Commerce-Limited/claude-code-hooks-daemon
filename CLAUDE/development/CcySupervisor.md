@@ -167,6 +167,80 @@ cost one wasted compact at worst, never a nudge.
 Ship it like any other supervisor change: the worker hot-reload below, verified
 by the `ps` check, never a session restart.
 
+## The focus hold: nothing is typed while focus may be off the main prompt
+
+Plan 00537 (issue #125). The supervisor cannot see the screen. Text it types
+while a sub-agent's panel row is selected, or while that sub-agent's transcript
+is open, goes to that sub-agent. Its Enter then opens the selected row, and its
+Esc deselects instead of interrupting. The ONE place this rule lives is
+`MainFocusModel` in `.claude/ccy/claude-supervise.py`, and
+`tests/unit/supervise/test_main_focus_hold.py` pins it.
+
+**How the hold latches and clears.** The model reads the human's own keys from
+the same forwarded stdin as `HumanInputLine`, which it leaves unchanged: an Up
+arrow still counts as box content there. The rules fail toward holding:
+
+- A bare Up or Down arrow latches the hold. This covers CSI or SS3 with no
+  parameters, but not inside a bracketed paste. A history recall looks the same,
+  so it latches too.
+- Enter while latched keeps the hold, because it may have opened a transcript.
+- Only a bare Esc clears it: an ESC that no CSI, SS3 or string introducer
+  follows.
+- Ctrl-C, Ctrl-U, Enter and child output never clear it.
+
+The hold is host-side, like `input_line_abandoned`, so a worker restart keeps
+it.
+
+**What is held.** Every send. `TickFacts.main_focus_confirmed` is ANDed into
+`can_inject`, which holds every family that already waits on it, including the
+ESC interrupt, the resubmit and every dry-run marker. The sends that bypass
+`can_inject` are gated explicitly:
+
+- the manual model switch;
+- the abandoned-box flush. Its gate sits ahead of the one-shot
+  `_abandoned_box_handled`, so a held flush is not spent.
+- the usage-pause compact. This keeps its bypass of the idle gate, but not the
+  focus gate.
+- the restart coordinator's `/exit`;
+- a payload the worker decided before the hold latched. `_apply_decision`
+  re-reads the host model at apply time.
+
+A held send is deferred and retried, never queued. A held `/exit` leaves no
+pending restart, no own line, no abandon count and no cooldown. A test pins
+the `_perform_injection(` call sites to the gated set.
+
+**What the human sees.** Every held tick posts a WARNING status-line banner
+("supervisor holding: focus may be on a sub-agent; press Esc to return to the
+main thread"). It is posted at WARNING because an INFO write yields to a live
+warning. `decision.log` gets an `injection deferred: main-thread focus unconfirmed` line naming the family and the latch reason, at most once per
+family per minute, and again at each escalation step.
+
+**The one option.** `CCY_FOCUS_HOLD_ESCALATE_SECONDS="<first>,<second>"`
+(default `300,900`). Past the first bound the banner turns louder and names the
+minutes held. Past the second, the log line also names the bytes that latched
+the hold. Any value other than `0 < first < second` keeps the default.
+Escalation never resumes typing, and there is no off switch: only the human's
+Esc ends a hold.
+
+**Edit-to-live: this one needs a ccy relaunch.** The model and the
+`TickFacts` it fills are HOST code, and the host never hot-reloads. A reloaded
+worker running under an older host receives no `main_focus_confirmed` key, and
+reads that as confirmed. Behaviour is then unchanged until the next ccy
+relaunch: holding with no host model would stop every send, with no Esc able to
+end it. After relaunching, verify the hold:
+
+1. Press Up at an idle prompt while a send is due.
+2. Confirm the banner appears and `decision.log` shows the deferred line.
+3. Press Esc and confirm the send goes out on the next tick.
+
+**Known limits.**
+
+- A history-recall Up in a session with no panel holds until Esc. The daemon's
+  live sub-agent count was rejected as a second way to clear the hold, because
+  it can under-report a started agent (Plan 00537 JOURNAL, Task 2.1).
+- Whether Esc also closes an OPEN transcript was not verified live. If it does
+  not, an Esc pressed in that state releases the hold early.
+
 ## Supported Python and the launcher
 
 **Supported Python: 3.11 or later** — the canonical statement is
