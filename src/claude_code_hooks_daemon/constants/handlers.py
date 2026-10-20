@@ -1453,7 +1453,9 @@ RETIRED_HANDLERS: dict[str, str] = {
         "untracked/transcripts/ on every compaction, but compaction never "
         "deletes the original and the original already lives on the same "
         "persistent mount, so the copies protected nothing and nothing ever "
-        "read them. Safe to delete this key from your config."
+        "read them. Safe to delete this key from your config; delete "
+        "`untracked/transcripts/` to reclaim the disk. Those archives are "
+        "copies of transcripts you still have."
     ),
     "usage_tracking": (
         "removed in Plan 00237 — its matches() had returned a hardcoded False "

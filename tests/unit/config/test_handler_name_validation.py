@@ -58,6 +58,15 @@ class TestRetiredHandlerNames:
         with pytest.raises(ValidationError):
             ConfigValidator.validate_and_raise(config)
 
+    def test_transcript_archiver_advisory_names_the_orphaned_directory(self) -> None:
+        """The advisory tells the user where the leftover archives are and that they are copies."""
+        advisory = RETIRED_HANDLERS["transcript_archiver"]
+
+        assert "untracked/transcripts/" in advisory
+        assert "copies of transcripts you still have" in advisory
+        assert "delete `untracked/transcripts/` to reclaim the disk" in advisory
+        assert "Safe to delete this key from your config" in advisory
+
     def test_retired_name_under_the_wrong_event_is_still_accepted(self) -> None:
         """Retirement is by NAME, not by event.
 
