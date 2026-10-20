@@ -497,9 +497,11 @@ file. It is written with mode `0600` and atomically (temp file + rename):
   record stands) and a focus hold (Plan 00537). If the record cannot be written,
   the failure is logged and the restart goes ahead; only the signal is lost.
 - **Removed** when typing `/exit` raises (the error is re-raised), when the
-  request is abandoned, and in the supervisor's exit path once the child has
-  exited. The resumed session keeps the same session id, so a leftover record
-  would mislabel a later genuine exit.
+  request is abandoned, once the child has exited, and when the supervisor
+  leaves by an exception before reaching that point. The resumed session keeps
+  the same session id, so a leftover record would mislabel a later genuine
+  exit. A crash or `SIGKILL` that runs no cleanup can still leave the file;
+  the wall-clock `deadline` is the backstop that makes it stale.
 - **`deadline`** is wall-clock seconds: `requested_at` +
   `_RESTART_EXIT_WAIT_SECONDS` (30) + `_RESTART_PENDING_DEADLINE_MARGIN_SECONDS`
   (5). It stays valid for at least as long as the supervisor holds the request.

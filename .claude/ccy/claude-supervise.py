@@ -9080,8 +9080,9 @@ def _exit_code_from_status(status: int) -> int:
 # before the child exits. Its path reaches the child as
 # `CCY_SUPERVISOR_RESTART_PENDING`. A hook treats its session as restarting
 # only when the record exists, names the hook's own session id, and its
-# deadline has not passed. The record is removed when typing fails, on abandon
-# and in `finish()`.
+# deadline has not passed. The record is removed when typing fails, on abandon,
+# in `finish()`, and when `supervise()` leaves by an exception; the deadline is
+# the backstop for a crash or SIGKILL.
 # ---------------------------------------------------------------------------
 
 # sysexits.h EX_TEMPFAIL: "temporary failure, retry". Never `claude`'s own
@@ -9229,6 +9230,15 @@ class RestartCoordinator:
             _log_line(
                 log, f"exit for restart: could not write {self._pending_record_path}: {error}"
             )
+
+    def discard_pending_record(self, log: DecisionLog | None) -> None:
+        """Remove a still-pending request's record when the supervisor is leaving abnormally.
+
+        A no-op once `finish()` or `abandon()` has run. A crash or SIGKILL that
+        skips this leaves the record to its wall-clock deadline.
+        """
+        if self._pending is not None:
+            self._remove_pending_record(log)
 
     def _remove_pending_record(self, log: DecisionLog | None) -> None:
         """Remove the record: the resumed session keeps the same id, so none may linger."""
@@ -10150,31 +10160,36 @@ def supervise(
             log.write(f"ctrl-c guard: {event}")
 
     try:
-        _forward_io(
-            resolved_stdin_fd,
-            master_fd,
-            activity,
-            poll_seconds=poll_seconds,
-            on_poll=_on_poll,
-            output_activity=output_activity,
-            on_suspend=lambda: status_message_poster.post(
-                _CTRL_Z_NOTICE_TEXT, level=_STATUS_LEVEL_WARNING
-            ),
-            ctrl_c_gate=ctrl_c_gate,
-            on_ctrl_c_event=_on_ctrl_c_event,
-            raw_tap=raw_tap,
-        )
-    finally:
-        for guarded_signal, prior_handler in prev_signal_guards.items():
-            signal.signal(guarded_signal, prior_handler)
-        signal.signal(signal.SIGWINCH, previous_handler)
-        if old_termios is not None:
-            termios.tcsetattr(resolved_stdin_fd, termios.TCSAFLUSH, old_termios)
+        try:
+            _forward_io(
+                resolved_stdin_fd,
+                master_fd,
+                activity,
+                poll_seconds=poll_seconds,
+                on_poll=_on_poll,
+                output_activity=output_activity,
+                on_suspend=lambda: status_message_poster.post(
+                    _CTRL_Z_NOTICE_TEXT, level=_STATUS_LEVEL_WARNING
+                ),
+                ctrl_c_gate=ctrl_c_gate,
+                on_ctrl_c_event=_on_ctrl_c_event,
+                raw_tap=raw_tap,
+            )
+        finally:
+            for guarded_signal, prior_handler in prev_signal_guards.items():
+                signal.signal(guarded_signal, prior_handler)
+            signal.signal(signal.SIGWINCH, previous_handler)
+            if old_termios is not None:
+                termios.tcsetattr(resolved_stdin_fd, termios.TCSAFLUSH, old_termios)
 
-    _pid, status = os.waitpid(pid, 0)
-    # A pending exit-for-restart turns the child's clean exit into the dedicated
-    # status (and the request file) the ccy launcher relaunches on.
-    exit_code = restart.finish(_exit_code_from_status(status), log)
+        _pid, status = os.waitpid(pid, 0)
+        # A pending exit-for-restart turns the child's clean exit into the dedicated
+        # status (and the request file) the ccy launcher relaunches on.
+        exit_code = restart.finish(_exit_code_from_status(status), log)
+    finally:
+        # Plan 00539: a raise anywhere above skips finish(); the record must not
+        # outlive this supervisor and mislabel the session's next genuine exit.
+        restart.discard_pending_record(log)
 
     if log is not None:
         log.write(

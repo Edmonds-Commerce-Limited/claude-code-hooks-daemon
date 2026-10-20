@@ -253,8 +253,14 @@ class TestPendingRecordIsWritten:
         _request(_coordinator(tmp_path), _Writer())
         assert stat.S_IMODE(_record_path(tmp_path).stat().st_mode) == 0o600
 
-    def test_the_deadline_margin_is_named_and_positive(self) -> None:
-        assert _mod._RESTART_PENDING_DEADLINE_MARGIN_SECONDS > 0
+    def test_the_deadline_never_ends_before_the_coordinators_own_hold(
+        self, tmp_path: Path
+    ) -> None:
+        for wait in (0.5, 7.0, 30.0, 120.0):
+            directory = tmp_path / f"wait-{wait:g}"
+            _request(_coordinator(directory, wait=wait), _Writer())
+            record = json.loads(_record_path(directory).read_text())
+            assert record["deadline"] >= record["requested_at"] + wait
 
     def test_an_unwritable_record_is_logged_and_the_exit_still_typed(self, tmp_path: Path) -> None:
         (tmp_path / "state").write_text("a file where the directory should be")
@@ -767,6 +773,34 @@ class TestTheChildIsToldWhereTheRecordIs:
         assert record["session_id"] == _SESSION
         assert record["plugin"] == "max-age"
         # Gone once the child has exited: the resumed session keeps the same id.
+        assert not coordinator.pending_record_path.exists()
+
+    def test_a_crash_in_the_io_loop_still_removes_the_record(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        coordinator = _coordinator(tmp_path)
+        assert _request(coordinator, _Writer())
+        assert coordinator.pending_record_path.exists()
+
+        def crash(*args: object, **kwargs: object) -> None:
+            raise RuntimeError("io loop crashed")
+
+        monkeypatch.setattr(_mod, "_forward_io", crash)
+        stdin_fd = os.open(os.devnull, os.O_RDONLY)
+        try:
+            with pytest.raises(RuntimeError, match="io loop crashed"):
+                _mod.supervise(
+                    [_mod.sys.executable, "-c", "pass"],
+                    dry_run=False,
+                    log=None,
+                    stdin_fd=stdin_fd,
+                    poll_seconds=0.05,
+                    sidecar_dir=tmp_path / "untracked" / "context-sidecar",
+                    decider=lambda facts: _noop(),
+                    restart_coordinator=coordinator,
+                )
+        finally:
+            os.close(stdin_fd)
         assert not coordinator.pending_record_path.exists()
 
     def test_the_supervisors_own_environment_is_left_alone(
