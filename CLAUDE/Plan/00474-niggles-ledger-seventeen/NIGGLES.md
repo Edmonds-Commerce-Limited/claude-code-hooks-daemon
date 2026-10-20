@@ -113,7 +113,7 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Source**: the full gate on b4e83885c (issue #124 plus N516/N517), classified by running each failing
 test on that head and on `main`; evidence in Plan 00533's
-[implementer report](../00533-dispatch-saturation-recovery/subagent-reports/261019-issue124-implementer-opus.md),
+[implementer report](../Completed/00533-dispatch-saturation-recovery/subagent-reports/261019-issue124-implementer-opus.md),
 "Full-gate fixes".
 
 - **N518**: `test_safety_handlers_hostile_input_performance[deep_eval_nesting]` failed on the py3.12 leg

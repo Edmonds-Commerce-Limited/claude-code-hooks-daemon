@@ -10,7 +10,7 @@
 
 ## Overview
 
-Follow-up to [Plan 00533](../00533-dispatch-saturation-recovery/PLAN.md) (issue
+Follow-up to [Plan 00533](../Completed/00533-dispatch-saturation-recovery/PLAN.md) (issue
 #124), from the owner's discussion of what the daemon should do when the host is
 overloaded. The strategy, in order:
 

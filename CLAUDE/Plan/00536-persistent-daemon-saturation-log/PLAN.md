@@ -4,7 +4,7 @@
 **Created**: 2026-10-19
 **Owner**: dev
 **Priority**: Low
-**GitHub Issue**: #124 (follow-up, split out by the Fable stand-in ruling in [Plan 00533](../00533-dispatch-saturation-recovery/RULING-fable.md))
+**GitHub Issue**: #124 (follow-up, split out by the Fable stand-in ruling in [Plan 00533](../Completed/00533-dispatch-saturation-recovery/RULING-fable.md))
 **Recommended Executor**: Sonnet
 **Execution Strategy**: Sub-Agent Orchestration
 
