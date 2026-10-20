@@ -109,6 +109,20 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N521 — `HumanInputLine` carries a lone Esc into the next read
+
+**Source**: the issue #125 implementer (Plan 00537), after the code review found the same defect in the new
+focus model and it was fixed there.
+
+- **N521**: in `.claude/ccy/claude-supervise.py`, a lone Esc at the end of one stdin read carries into the
+  next. If the human's next letter is `P`, `X`, `]`, `^` or `_` (for example "Please…"), `HumanInputLine`
+  enters its string-sequence state and swallows the human's typing until a BEL or `ESC \`. The box then reads
+  empty while it holds text, so the supervisor can paste over what the human is typing. This predates Plan 00537.
+  The fix is the one Plan 00537 applied to its focus model: resolve a carried Esc against the next read, and
+  never enter string state from a carried Esc.
+
+**Status**: ⬜ open.
+
 ### N518 to N520 — full-gate failures from issue #124's integration run that neither branch caused
 
 **Source**: the full gate on b4e83885c (issue #124 plus N516/N517), classified by running each failing
