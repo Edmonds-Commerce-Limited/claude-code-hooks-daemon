@@ -1,6 +1,6 @@
 # Plan 00539: supervisor restart pending record
 
-**Status**: In Progress
+**Status**: Complete (2026-10-20)
 **Created**: 2026-10-20
 **Owner**: dev
 **Priority**: Medium
@@ -20,7 +20,7 @@ announces every restart.
 
 Triage:
 [subagent-reports/261020-issue127-triage-opus.md](subagent-reports/261020-issue127-triage-opus.md).
-This plan builds on [Plan 00537](../Completed/00537-supervisor-holds-sends-off-main-focus/PLAN.md),
+This plan builds on [Plan 00537](../00537-supervisor-holds-sends-off-main-focus/PLAN.md),
 issue #125. Its ruling says a restart is persisted only when `/exit` was actually
 sent, never on a focus hold.
 
@@ -77,7 +77,8 @@ sent, never on a focus hold.
 - [x] No refusal path, focus hold included, leaves a record behind.
 - [x] A release note is in the pending-release holding area
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (004).
-- [ ] Targeted QA is green on the merged head (40/40 on bb7664cbd), and CI is green.
+- [x] Targeted QA is green on the merged head (40/40 on bb7664cbd), and CI is green
+  (run 39364691440 on e1f208711, which contains the merge).
 
 ## Delivery & Milestones
 
