@@ -52,9 +52,10 @@ Related plans (dedupe scout, not duplicates):
     of the one-shot `_abandoned_box_handled` latch, so a held flush is not
     spent.
   - the restart coordinator's `/exit`;
-  - the usage-pause send (`_usage_pause_outcome`), which returns before the
-    families run. It keeps its bypass of the idle gate but not the focus gate:
-    typed into a sub-agent it would not pause the main thread anyway.
+  - the usage-pause send (`_usage_pause_outcome`), which runs before the
+    machine's `evaluate` and the families. It applies its own copy of the
+    `can_inject` condition, so the focus gate is added inside it. Typed into a
+    sub-agent, it would not pause the main thread anyway.
   - the dry-run marker, which uses the same send path.
 - **A held send is deferred and retried, never dropped or queued.** A held
   `/exit` creates no pending restart, adds no abandon count and starts no
@@ -74,8 +75,7 @@ Related plans (dedupe scout, not duplicates):
   ruling.
 - An off switch. "Off" is the defect.
 - Changing how `HumanInputLine._finish_csi` treats Up/Down, or weakening
-  `_is_idle`, `load_foreground_sidecar` or the usage-pause bypass of the idle
-  gate.
+  `_is_idle`, `load_foreground_sidecar` or the usage-pause send's own gate.
 
 ## Tasks
 
