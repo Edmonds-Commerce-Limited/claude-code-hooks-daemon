@@ -109,6 +109,32 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N522 — the Stop guidance says every declared job's tick is dropped while awaiting a human
+
+**Source**: the main session's issue-sdlc loop. It made three `[awaiting-human]` stops, and
+`[tick:watchdog]` and `[tick:job:issue-sdlc]` ticks still reached the model. Diagnosis:
+`untracked/scratch/blockage-suppressor-diagnosis.md`.
+
+- **N522**: the suppressor behaves as its own docs describe, and the failsafe ticks were dropped
+  (`R-FAILSAFE-CRON-SUPPRESSED`). Two ticks still get through:
+
+  - **issue-sdlc:** the job is exempt because `.claude/hooks-daemon.yaml` sets
+    `runs_while_awaiting_human: true` (Plan 00470).
+  - **watchdog:** the background-watchdog job is declared under `persistent_crons`, but its prompt
+    starts `[tick:watchdog]`, not `[tick:job:<name>]`. `failsafe_cron_blockage_suppressor` therefore
+    files it under `_handle_other_tick`, which always allows.
+
+  The generated CLAUDE.md Stop guidance says the opposite: an awaiting-human stop "turns the failsafe
+  cron and every declared `persistent_crons` job off", and "every declared job's tick" is dropped.
+  An agent reading it takes the delivered ticks for a suppressor defect.
+
+- **Fix:** name both exemptions in the guidance. Then decide whether a declared job with a non-`job:`
+  sentinel should be matched as a declared job.
+
+- **Cost meanwhile:** each idle hour costs two model turns, and the issue-sdlc turn finds nothing.
+
+**Status**: ⬜ open.
+
 ### N521 — `HumanInputLine` carries a lone Esc into the next read
 
 **Source**: the issue #125 implementer (Plan 00537), after the code review found the same defect in the new
