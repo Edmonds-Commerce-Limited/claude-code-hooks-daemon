@@ -449,6 +449,168 @@ class TestArmCcySupervisor:
         assert result.wrapper_migrated is False
         assert env_file.read_text() == disabled
 
+    @pytest.mark.parametrize(
+        "prefix",
+        [
+            "python3 ",
+            "python ",
+            "python3.12 ",
+            "/usr/bin/python3 ",
+            "/opt/py/bin/python3.11 ",
+            "env python3 ",
+            "/usr/bin/env python3 ",
+        ],
+    )
+    @pytest.mark.parametrize("name", ["claude-supervise.py", "claude-supervise"])
+    def test_an_interpreter_prefix_becomes_sh_on_the_launcher(
+        self, tmp_path: Path, prefix: str, name: str
+    ) -> None:
+        """`python3 X.py` (and the 3.69/3.70 breakage `python3 X`) must run the launcher via sh."""
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        env_file = ccy / CCY_ENV_NAME
+        env_file.write_text(
+            f'export CCY_CLAUDE_WRAPPER="${{CCY_CLAUDE_WRAPPER:-{prefix}.claude/ccy/{name} --arm --}}"\n'
+        )
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        expected = (
+            'export CCY_CLAUDE_WRAPPER="${CCY_CLAUDE_WRAPPER:-sh .claude/ccy/claude-supervise '
+            '--arm --}"\n'
+        )
+        assert result.wrapper_migrated is True
+        assert env_file.read_text() == expected
+        again = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+        assert again.wrapper_migrated is False
+        assert env_file.read_text() == expected
+
+    def test_the_reporters_absolute_path_wrapper_is_rewritten(self, tmp_path: Path) -> None:
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        env_file = ccy / CCY_ENV_NAME
+        env_file.write_text(f'export CCY_CLAUDE_WRAPPER="python3  {ccy}/claude-supervise.py --"\n')
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        assert env_file.read_text() == (
+            f'export CCY_CLAUDE_WRAPPER="sh  {ccy}/claude-supervise --"\n'
+        )
+
+    def test_the_self_locating_line_keeps_its_interpreter_rewrite(self, tmp_path: Path) -> None:
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        env_file = ccy / CCY_ENV_NAME
+        locating = '$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/'
+        env_file.write_text(
+            f'export CCY_CLAUDE_WRAPPER="python3 {locating}claude-supervise.py --arm --"\n'
+        )
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        assert env_file.read_text() == (
+            f'export CCY_CLAUDE_WRAPPER="sh {locating}claude-supervise --arm --"\n'
+        )
+
+    def test_an_interpreter_prefix_in_a_comment_is_untouched(self, tmp_path: Path) -> None:
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        env_file = ccy / CCY_ENV_NAME
+        disabled = '# export CCY_CLAUDE_WRAPPER="python3 .claude/ccy/claude-supervise.py --arm --"\n'
+        env_file.write_text(disabled)
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        assert result.wrapper_migrated is False
+        assert env_file.read_text() == disabled
+
+    def test_an_interpreter_before_a_script_in_another_directory_is_left_alone(
+        self, tmp_path: Path
+    ) -> None:
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        env_file = ccy / CCY_ENV_NAME
+        line = 'export CCY_CLAUDE_WRAPPER="python3 /opt/tools/claude-supervise.py --arm --"\n'
+        env_file.write_text(line)
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        assert result.wrapper_migrated is False
+        assert env_file.read_text() == line
+        assert any("left unchanged" in message for message in result.messages)
+
+    @pytest.mark.parametrize(
+        ("prefix", "pinned"),
+        [
+            ("python3.12 ", "python3.12"),
+            ("/usr/bin/python3 ", "/usr/bin/python3"),
+            ("env python3.11 ", "python3.11"),
+        ],
+    )
+    def test_a_pinned_interpreter_is_reported_with_a_ccy_python_suggestion(
+        self, tmp_path: Path, prefix: str, pinned: str
+    ) -> None:
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        (ccy / CCY_ENV_NAME).write_text(
+            f'export CCY_CLAUDE_WRAPPER="{prefix}.claude/ccy/claude-supervise.py --arm --"\n'
+        )
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        assert any(f"export CCY_PYTHON={pinned}" in message for message in result.messages)
+
+    @pytest.mark.parametrize("prefix", ["python3 ", "python ", "env python3 ", "/usr/bin/env python "])
+    def test_a_plain_interpreter_is_not_reported_as_pinned(
+        self, tmp_path: Path, prefix: str
+    ) -> None:
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        (ccy / CCY_ENV_NAME).write_text(
+            f'export CCY_CLAUDE_WRAPPER="{prefix}.claude/ccy/claude-supervise.py --arm --"\n'
+        )
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        assert result.wrapper_migrated is True
+        assert not any("CCY_PYTHON" in message for message in result.messages)
+
+    def test_a_sh_prefixed_launcher_is_left_untouched(self, tmp_path: Path) -> None:
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        env_file = ccy / CCY_ENV_NAME
+        line = 'export CCY_CLAUDE_WRAPPER="sh .claude/ccy/claude-supervise --arm --"\n'
+        env_file.write_text(line)
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        assert result.wrapper_migrated is False
+        assert env_file.read_text() == line
+
     def test_generated_wrapper_sources_to_absolute_supervisor_path(self, tmp_path: Path) -> None:
         """The armed line must resolve, in bash, to an absolute armed wrapper.
 

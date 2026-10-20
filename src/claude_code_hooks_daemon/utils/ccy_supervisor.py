@@ -102,6 +102,54 @@ def wrapper_execs_bare_script(ccy_env: Path) -> bool:
     return any(_SUPERVISOR_SCRIPT_NAME in line for line in _active_wrapper_lines(ccy_env))
 
 
+# A Python interpreter word: ``python``, ``python3``, ``python3.N`` or a path to
+# one, optionally behind ``env``. The ``word`` group is the interpreter itself
+# (``env`` excluded). It must not start inside a longer path or variable.
+_INTERPRETER_PATH_PREFIX: Final[str] = r"(?:[\w.+/$~{}][\w.+\-/$~{}]*)?/"
+_INTERPRETER_PATTERN: Final[str] = (
+    r"(?<![\w./+$~{}])"
+    rf"(?:(?:{_INTERPRETER_PATH_PREFIX})?env\s+)?"
+    rf"(?P<word>(?:{_INTERPRETER_PATH_PREFIX})?python(?:3(?:\.\d+)?)?)(?![\w.])"
+)
+# What a path token may be made of before the supervisor's file name: plain
+# characters, or ccy.env's self-locating ``$(cd ... && pwd)/`` spelling.
+_WRAPPER_PATH_PREFIX: Final[str] = r"(?:[^\s\"']*|\$\(cd\b.*?\bpwd\)/)"
+#: Interpreter words that pin nothing: the launcher's own default search finds them.
+PLAIN_INTERPRETER_WORDS: Final[frozenset[str]] = frozenset({"python", "python3"})
+
+
+def interpreter_before_supervisor(file_name_pattern: str) -> re.Pattern[str]:
+    """Pattern for a Python interpreter word directly before the supervisor path.
+
+    Matches the interpreter word (named group ``word``) and the whitespace after
+    it (group ``gap``) only; the path token that follows is a lookahead, so a
+    substitution touches nothing else. ``file_name_pattern`` is a regex for the
+    supervisor file name the path must end in.
+    """
+    return re.compile(
+        rf"{_INTERPRETER_PATTERN}(?P<gap>\s+)(?={_WRAPPER_PATH_PREFIX}{file_name_pattern})"
+    )
+
+
+_LAUNCHER_INTERPRETER_RE: Final[re.Pattern[str]] = interpreter_before_supervisor(
+    re.escape(_SUPERVISOR_LAUNCHER_NAME) + r"(?!\.py)"
+)
+
+
+def wrapper_interpreter_before_launcher(ccy_env: Path) -> str | None:
+    """The Python interpreter word in front of the launcher in an active wrapper line.
+
+    The launcher is a ``sh`` script, so a Python interpreter in front of it runs
+    shell text as Python and every ccy launch dies with a SyntaxError. Returns
+    the interpreter word of the first such line, or ``None`` when there is none.
+    """
+    for line in _active_wrapper_lines(ccy_env):
+        match = _LAUNCHER_INTERPRETER_RE.search(line)
+        if match:
+            return match.group("word")
+    return None
+
+
 def wrapper_names_launcher(ccy_env: Path) -> bool:
     """True when an active wrapper line names the launcher (not just the bare script)."""
     pattern = re.compile(re.escape(_SUPERVISOR_LAUNCHER_NAME) + r"(?!\.py)")

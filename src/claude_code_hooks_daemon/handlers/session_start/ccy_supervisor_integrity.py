@@ -235,6 +235,14 @@ class CcySupervisorIntegrityHandler(SessionStartHandlerBase):
                 "import and Claude Code cannot start. Fix: run a daemon upgrade, which "
                 f"repoints CCY_CLAUDE_WRAPPER at {launcher_rel}."
             )
+        interpreter = ccy_supervisor.wrapper_interpreter_before_launcher(env_path)
+        if interpreter is not None:
+            problems.append(
+                f"{env_rel} runs the {_LAUNCHER_NAME} launcher under `{interpreter}`, but the "
+                "launcher is a sh script: Python fails on it with a SyntaxError and Claude "
+                f"Code cannot start. Fix: use `sh {launcher_rel}` (or no prefix, if the file is "
+                "executable) in CCY_CLAUDE_WRAPPER; a daemon upgrade repairs the line."
+            )
         if ccy_supervisor.wrapper_names_launcher(env_path):
             tracked_rels.append(launcher_rel)
             if not launcher.is_file():
@@ -324,6 +332,10 @@ class CcySupervisorIntegrityHandler(SessionStartHandlerBase):
             "- **wrapper still execs `claude-supervise.py` directly** → on a system Python "
             "older than 3.11 Claude Code cannot start; a daemon upgrade repoints it at "
             "the launcher.\n"
+            "- **wrapper runs the launcher under a Python interpreter** (`python3 "
+            ".claude/ccy/claude-supervise`) → the launcher is a sh script, so Python dies "
+            "with a SyntaxError; use `sh .claude/ccy/claude-supervise` or no prefix (a "
+            "daemon upgrade repairs the line).\n"
             "- **`ccy.deploy_supervisor: false` while armed+present** → the installer "
             "skips deploy on `false`, so upgrades never refresh `claude-supervise.py` and "
             "the project runs an increasingly stale supervisor. Set it to `true` (or "

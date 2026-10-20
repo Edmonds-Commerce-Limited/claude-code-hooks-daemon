@@ -50,7 +50,7 @@ path, so the broken line passes silently.
 
 ### Phase 1: Fix
 
-- [ ] ⬜ **Task 1.1**: Red tests, then the migration rewrite. Each of these is
+- [x] ✅ **Task 1.1**: Red tests, then the migration rewrite. Each of these is
   rewritten to `sh <dir>/claude-supervise`, with every other byte (quotes,
   `${…:-…}`, arguments) preserved:
 
@@ -61,14 +61,14 @@ path, so the broken line passes silently.
 
   A bare `X.py` behaves as before, and a comment line is untouched.
 
-- [ ] ⬜ **Task 1.2**: Red tests, then the repair of an already-broken
+- [x] ✅ **Task 1.2**: Red tests, then the repair of an already-broken
   `<python> <dir>/claude-supervise` line, and the pinned-interpreter report.
 
-- [ ] ⬜ **Task 1.3**: Red tests, then the `ccy_supervisor_integrity` warning.
+- [x] ✅ **Task 1.3**: Red tests, then the `ccy_supervisor_integrity` warning.
 
 ### Phase 2: Close out
 
-- [ ] ⬜ **Task 2.1**: Add a release note in
+- [x] ✅ **Task 2.1**: Add a release note in
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/`. It says that an upgrade repairs
   the broken line, and that 3.69.0 and 3.70.0 broke it.
 

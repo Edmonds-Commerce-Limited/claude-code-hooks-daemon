@@ -233,6 +233,42 @@ class TestHandle:
         assert "execs claude-supervise.py directly" in text
         assert "older than 3.11" in text
 
+    @pytest.mark.parametrize(
+        "prefix", ["python3 ", "python3.12 ", "/usr/bin/python3 ", "env python3 "]
+    )
+    def test_interpreter_prefix_before_the_launcher_warns(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path, prefix: str
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(
+            _ARMED_ENV.replace("${CCY_CLAUDE_WRAPPER:-", f"${{CCY_CLAUDE_WRAPPER:-{prefix}")
+        )
+        _write_script(ccy)
+        text = "\n".join(_run(handler, tmp_path).context)
+        assert "sh script" in text
+        assert "sh .claude/ccy/claude-supervise" in text
+
+    def test_sh_prefix_before_the_launcher_is_silent(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(
+            _ARMED_ENV.replace("${CCY_CLAUDE_WRAPPER:-", "${CCY_CLAUDE_WRAPPER:-sh ")
+        )
+        _write_script(ccy)
+        assert _run(handler, tmp_path).context == []
+
+    def test_interpreter_prefix_before_the_bare_script_does_not_warn_about_the_launcher(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(
+            _BARE_SCRIPT_ENV.replace("${CCY_CLAUDE_WRAPPER:-", "${CCY_CLAUDE_WRAPPER:-python3 ")
+        )
+        _write_script(ccy)
+        text = "\n".join(_run(handler, tmp_path).context)
+        assert "sh script" not in text
+
     def test_project_root_none_is_silent(self, handler: CcySupervisorIntegrityHandler) -> None:
         assert _run(handler, None).context == []
 
