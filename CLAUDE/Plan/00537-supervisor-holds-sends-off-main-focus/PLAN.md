@@ -81,24 +81,24 @@ Related plans (dedupe scout, not duplicates):
 
 ### Phase 1: Hold
 
-- [ ] ⬜ **Task 1.1**: Red tests from stdin byte fixtures, then the focus model.
+- [x] ✅ **Task 1.1**: Red tests from stdin byte fixtures, then the focus model.
   Fixtures:
   - no navigation: nothing held;
   - Up then Esc: held, then released;
   - Up, Enter, text, Enter: held throughout;
   - Up with no Esc: held and escalating, never typing.
-- [ ] ⬜ **Task 1.2**: Red tests, then `main_focus_confirmed` in `TickFacts`,
+- [x] ✅ **Task 1.2**: Red tests, then `main_focus_confirmed` in `TickFacts`,
   computed host-side and ANDed into `can_inject`.
-- [ ] ⬜ **Task 1.3**: Red tests, then gate each bypass family. One test
+- [x] ✅ **Task 1.3**: Red tests, then gate each bypass family. One test
   enumerates the `_perform_injection(` call sites and asserts each one defers
   while latched. Include the restart `/exit` (no pending restart, no abandon
   count) and the dry-run marker.
-- [ ] ⬜ **Task 1.4**: Red tests, then the rate-limited `deferred` log line, the
+- [x] ✅ **Task 1.4**: Red tests, then the rate-limited `deferred` log line, the
   status-line banner, and the two escalation bounds as one supervisor option.
 
 ### Phase 2: Fewer false holds
 
-- [ ] ⬜ **Task 2.1**: A history-recall Up in a session with no panel holds
+- [x] ✅ **Task 2.1**: A history-recall Up in a session with no panel holds
   until Esc. Find out whether a reading can show positively that no other thread
   exists, for example a live sub-agent count fresher than the latch event. Use
   it as a second way to clear the latch only if the count cannot under-report:
@@ -107,7 +107,7 @@ Related plans (dedupe scout, not duplicates):
 
 ### Phase 3: Close out
 
-- [ ] ⬜ **Task 3.1**:
+- [x] ✅ **Task 3.1**:
   - Record the edit-to-live reload check (`CLAUDE/development/CcySupervisor.md`).
   - Add a release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
   - Document the new option.
