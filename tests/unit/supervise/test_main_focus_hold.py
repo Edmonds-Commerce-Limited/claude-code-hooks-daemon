@@ -39,6 +39,7 @@ _CTRL_C = b"\x03"
 _CTRL_U = b"\x15"
 _NOW = 10_000.0
 _SESSION = "s"
+_SETTLE = _mod._FOCUS_ESC_SETTLE_SECONDS
 
 
 def _hold(*, since: float = _NOW, reason: str = "bare Up arrow") -> Any:
@@ -127,6 +128,9 @@ class TestMainFocusModel:
         assert model.hold.since == _NOW
         assert "\\x1b[A" in model.hold.latch_bytes
         model.feed(_ESC, now=_NOW + 1)
+        # The Esc ended its read: unresolved until the settle window passes.
+        assert model.confirmed is False
+        model.settle(now=_NOW + 1 + _SETTLE)
         assert model.confirmed is True
         assert model.hold is None
 
@@ -178,6 +182,7 @@ class TestMainFocusModel:
     def test_esc_in_same_chunk_after_up_releases(self) -> None:
         model = MainFocusModel()
         model.feed(_UP + _ESC, now=_NOW)
+        model.settle(now=_NOW + _SETTLE)
         assert model.confirmed is True
 
     def test_double_esc_releases(self) -> None:
@@ -192,13 +197,12 @@ class TestMainFocusModel:
         model.feed(_ESC + b"x", now=_NOW + 1)
         assert model.confirmed is True
 
-    def test_trailing_esc_that_continues_a_sequence_restores_the_hold(self) -> None:
-        # A focus event split across reads: its ESC alone looked like a bare
-        # Esc, but the next read shows it was a sequence -- hold again.
+    def test_trailing_esc_that_continues_an_arrow_keeps_the_hold(self) -> None:
         model = MainFocusModel()
         model.feed(_UP, now=_NOW)
         model.feed(_ESC, now=_NOW + 1)
-        model.feed(b"[I", now=_NOW + 1)
+        model.feed(b"[A", now=_NOW + 1)
+        model.settle(now=_NOW + 10)
         assert model.confirmed is False
         assert model.hold is not None
         assert model.hold.since == _NOW
@@ -227,7 +231,103 @@ class TestMainFocusModel:
         activity.record(_UP, now=_NOW)
         assert activity.focus.confirmed is False
         activity.record(_ESC, now=_NOW + 1)
+        activity.focus.settle(now=_NOW + 1 + _SETTLE)
         assert activity.focus.confirmed is True
+
+
+def _after_reads(chunks: list[bytes], *, settle: bool = True) -> Any:
+    """Feed each chunk as one read() 50 ms apart, then let a pending Esc settle."""
+    model = MainFocusModel()
+    for index, chunk in enumerate(chunks):
+        model.feed(chunk, now=_NOW + index * 0.05)
+    if settle:
+        model.settle(now=_NOW + len(chunks) + _SETTLE)
+    return model
+
+
+class TestFocusModelAcrossReads:
+    """Review C1/I2: an Esc that ends one read must not reinterpret the next one."""
+
+    @pytest.mark.parametrize(
+        ("chunks", "confirmed"),
+        [
+            pytest.param([_ESC, b"P", b"lease fix", _ENTER, _UP], False, id="A-esc-Please-up"),
+            pytest.param([_ESC, b"]", _UP], False, id="B-esc-bracket-up"),
+            pytest.param([_UP, _ESC, b"O", b"K"], True, id="C-up-esc-OK"),
+            pytest.param([_UP, _ESC, b"[", b"x"], True, id="D-up-esc-[x"),
+            pytest.param([_UP, _ESC, b"P", b"lease"], True, id="E-up-esc-Please"),
+            pytest.param([_UP, _ESC], True, id="F-up-esc"),
+            pytest.param([_ESC, b"Please fix"], True, id="esc-then-text-one-read"),
+            pytest.param([_UP, _ESC, b"OK"], True, id="up-esc-OK-one-read"),
+            pytest.param([_ESC, b"_", _UP], False, id="esc-underscore-up"),
+            pytest.param([_ESC, b"^X", _UP], False, id="esc-caret-up"),
+        ],
+    )
+    def test_probe_cases(self, chunks: list[bytes], confirmed: bool) -> None:
+        assert _after_reads(chunks).confirmed is confirmed
+
+    @pytest.mark.parametrize(
+        "chunks",
+        [
+            pytest.param([_ESC, b"[A"], id="esc|[A"),
+            pytest.param([_ESC, b"[", b"A"], id="esc|[|A"),
+            pytest.param([b"\x1b[", b"A"], id="esc[|A"),
+            pytest.param([_ESC, b"OA"], id="esc|OA"),
+            pytest.param([_ESC, b"O", b"B"], id="esc|O|B"),
+            pytest.param([_ESC, b"[B"], id="esc|[B"),
+        ],
+    )
+    def test_arrow_split_across_reads_latches(self, chunks: list[bytes]) -> None:
+        assert _after_reads(chunks).confirmed is False
+
+    def test_split_arrow_with_params_neither_latches_nor_releases(self) -> None:
+        assert _after_reads([_ESC, b"[1;2A"]).confirmed is True
+        assert _after_reads([_UP, _ESC, b"[1;2A"]).confirmed is False
+
+    def test_pending_esc_keeps_the_hold_until_it_resolves(self) -> None:
+        model = MainFocusModel()
+        model.feed(_UP, now=_NOW)
+        model.feed(_ESC, now=_NOW + 1)
+        model.settle(now=_NOW + 1 + _SETTLE / 10)
+        assert model.confirmed is False
+        model.settle(now=_NOW + 1 + _SETTLE)
+        assert model.confirmed is True
+
+    def test_prefix_read_keeps_the_hold_while_pending(self) -> None:
+        model = MainFocusModel()
+        model.feed(_UP, now=_NOW)
+        model.feed(_ESC, now=_NOW + 1)
+        model.feed(b"[", now=_NOW + 1.01)
+        assert model.confirmed is False
+        model.feed(b"x", now=_NOW + 1.02)
+        assert model.confirmed is True
+
+    def test_letters_after_a_settled_esc_are_text(self) -> None:
+        # Past the settle window the Esc was bare, whatever arrives next.
+        model = MainFocusModel()
+        model.feed(_UP, now=_NOW)
+        model.feed(_ESC, now=_NOW + 1)
+        model.feed(b"[A", now=_NOW + 1 + 2 * _SETTLE)
+        assert model.confirmed is True
+
+    def test_open_string_sequence_does_not_outlive_its_read(self) -> None:
+        assert _after_reads([b"\x1b]11;rgb", _UP]).confirmed is False
+
+    def test_complete_terminal_reply_in_one_read_does_not_release(self) -> None:
+        assert _after_reads([_UP, b"\x1b]11;rgb:0/0/0\x1b\\"]).confirmed is False
+
+    def test_unterminated_paste_is_bounded(self) -> None:
+        model = MainFocusModel()
+        model.feed(b"\x1b[200~" + b"x" * (_mod._PASTE_LATCH_MAX_BYTES + 1), now=_NOW)
+        model.feed(_UP, now=_NOW + 1)
+        assert model.confirmed is False
+
+    def test_paste_end_marker_split_across_reads(self) -> None:
+        model = MainFocusModel()
+        model.feed(b"\x1b[200~text\x1b", now=_NOW)
+        model.feed(b"[201~", now=_NOW + 0.01)
+        model.feed(_UP, now=_NOW + 0.02)
+        assert model.confirmed is False
 
 
 # ── Task 1.2: the TickFacts field, ANDed into can_inject ────────────────────
@@ -381,7 +481,7 @@ def _coordinator(tmp_path: Path) -> Any:
         wait_seconds=30.0,
         monotonic=lambda: 100.0,
         wall_clock=lambda: _NOW,
-        sleep=lambda _seconds: None,
+        sleep=lambda _: None,
     )
 
 
@@ -431,6 +531,107 @@ class TestApplyDecisionBelt:
         )
         assert injected is False
         assert writer.chunks == []
+
+
+def _write_pause(sidecar_dir: Path) -> None:
+    from claude_code_hooks_daemon.utils import usage_pause
+    from claude_code_hooks_daemon.utils.usage_pause import UsagePause
+
+    usage_pause.write_usage_pause(
+        sidecar_dir.parent,
+        UsagePause(
+            session_id=_SESSION,
+            paused_at=_NOW - 60.0,
+            resume_at=_NOW + 3600.0,
+            window=usage_pause.WINDOW_FIVE_HOUR,
+            used_percentage=93.0,
+            ceiling=90.0,
+            reason="five_hour window at 93% (ceiling 90%)",
+        ),
+    )
+
+
+class TestWorkerOutcomeHeldAtApply:
+    """Review I1: a payload the host refuses at apply time is not booked as sent.
+
+    The worker decided with focus confirmed; the host's model latched before
+    apply. Like a failed PTY write, the host keeps its own pre-tick state.
+    """
+
+    def _apply(self, outcome: Any, machine: Any, line: Any, *, confirmed: bool) -> bool:
+        return bool(
+            _mod._apply_worker_outcome(
+                outcome,
+                machine=machine,
+                line=line,
+                master_writer=_Writer(),
+                log=None,
+                main_focus_confirmed=confirmed,
+                now_wall=_NOW,
+            )
+        )
+
+    def _decided(self, sidecar_dir: Path, facts: Any, *, dry_run: bool = False) -> Any:
+        return _decide(sidecar_dir, CompactStateMachine(CompactPolicy()), facts, dry_run=dry_run)
+
+    def test_held_compact_leaves_the_host_in_monitor(self, sidecar_dir: Path) -> None:
+        _write_red_sidecar(sidecar_dir)
+        outcome = self._decided(sidecar_dir, _facts())
+        assert outcome.decision_value == Decision.WOULD_COMPACT.value
+        host = CompactStateMachine(CompactPolicy())
+        assert self._apply(outcome, host, _mod.HumanInputLine(), confirmed=False) is False
+        assert host.state is _mod.SupervisorState.MONITOR
+
+    def test_confirmed_compact_is_adopted(self, sidecar_dir: Path) -> None:
+        _write_red_sidecar(sidecar_dir)
+        outcome = self._decided(sidecar_dir, _facts())
+        host = CompactStateMachine(CompactPolicy())
+        assert self._apply(outcome, host, _mod.HumanInputLine(), confirmed=True) is True
+        assert host.state is _mod.SupervisorState.AWAIT_COMPACTING
+
+    def test_held_usage_pause_compact_is_not_latched(self, sidecar_dir: Path) -> None:
+        _write_pause(sidecar_dir)
+        outcome = self._decided(sidecar_dir, _facts())
+        assert outcome.decision_value == Decision.WOULD_COMPACT.value
+        host = CompactStateMachine(CompactPolicy())
+        self._apply(outcome, host, _mod.HumanInputLine(), confirmed=False)
+        assert host.pause_compacted_for is None
+
+    def test_held_dry_run_marker_keeps_its_fuse(self, sidecar_dir: Path) -> None:
+        _write_red_sidecar(sidecar_dir)
+        outcome = self._decided(sidecar_dir, _facts(), dry_run=True)
+        assert outcome.payload is not None
+        host = CompactStateMachine(CompactPolicy())
+        self._apply(outcome, host, _mod.HumanInputLine(), confirmed=False)
+        assert host.dry_run_fired is False
+
+    def test_held_abandoned_flush_keeps_the_box_text(self, sidecar_dir: Path) -> None:
+        _write_red_sidecar(sidecar_dir)
+        outcome = self._decided(
+            sidecar_dir, _facts(input_line_empty=False, input_line_abandoned=True)
+        )
+        assert outcome.abandoned_box_flushed is True
+        line = _mod.HumanInputLine()
+        line.feed(b"half-typed", now=_NOW)
+        self._apply(outcome, CompactStateMachine(CompactPolicy()), line, confirmed=False)
+        assert line.is_empty is False
+
+    def test_confirmed_abandoned_flush_clears_the_box_model(self, sidecar_dir: Path) -> None:
+        _write_red_sidecar(sidecar_dir)
+        outcome = self._decided(
+            sidecar_dir, _facts(input_line_empty=False, input_line_abandoned=True)
+        )
+        line = _mod.HumanInputLine()
+        line.feed(b"half-typed", now=_NOW)
+        self._apply(outcome, CompactStateMachine(CompactPolicy()), line, confirmed=True)
+        assert line.is_empty is True
+
+    def test_held_own_line_is_not_recorded(self, sidecar_dir: Path) -> None:
+        _write_red_sidecar(sidecar_dir)
+        outcome = self._decided(sidecar_dir, _facts())
+        host = CompactStateMachine(CompactPolicy())
+        self._apply(outcome, host, _mod.HumanInputLine(), confirmed=False)
+        assert host.own_line_pending is False
 
 
 def _perform_injection_call_sites() -> set[str]:

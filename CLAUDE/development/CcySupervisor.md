@@ -185,7 +185,15 @@ arrow still counts as box content there. The rules fail toward holding:
   so it latches too.
 - Enter while latched keeps the hold, because it may have opened a transcript.
 - Only a bare Esc clears it: an ESC that no CSI, SS3 or string introducer
-  follows.
+  follows within the same read.
+- A sequence still open when a read ends never reinterprets the next read.
+  An open string sequence is dropped. An open ESC, `ESC [` or `ESC O` stays
+  pending, and any hold stays in place until it resolves:
+  - the next read completing an Up/Down arrow honours that split key;
+  - the next read being a strict prefix of an arrow keeps it pending;
+  - anything else makes it a bare Esc, and the new read is parsed fresh;
+  - no further byte within `_FOCUS_ESC_SETTLE_SECONDS` (0.5 s) also makes it a
+    bare Esc. The host resolves this each tick.
 - Ctrl-C, Ctrl-U, Enter and child output never clear it.
 
 The hold is host-side, like `input_line_abandoned`, so a worker restart keeps

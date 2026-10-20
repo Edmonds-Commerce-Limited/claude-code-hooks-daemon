@@ -928,6 +928,34 @@ class HumanInputLine:
 
 _FOCUS_REASON_ARROW = "bare Up/Down arrow (focus may have moved into the sub-agent panel)"
 _FOCUS_REASON_ENTER = "Enter after panel navigation (a sub-agent transcript may be open)"
+# How long an ESC that ended a read may wait for the rest of a split key before
+# it counts as a bare Esc. A terminal delivers a split sequence's halves within
+# milliseconds; a human's next key comes far later than either.
+_FOCUS_ESC_SETTLE_SECONDS = 0.5
+
+
+def _split_arrow(buffer: bytes) -> tuple[bool, int]:
+    """How ``buffer`` (starting with ESC) relates to an Up/Down arrow key.
+
+    Returns ``(True, length)`` when it begins with a complete CSI (any
+    parameters) or SS3 Up/Down, ``(False, len(buffer))`` when it is a strict
+    prefix of one, and ``(False, 0)`` when it is neither.
+    """
+    if len(buffer) < 2:
+        return False, len(buffer)
+    arrows = (_CSI_ARROW_UP, _CSI_ARROW_DOWN)
+    if buffer[1] == _SS3_INTRODUCER:
+        if len(buffer) == 2:
+            return False, 2
+        return (True, 3) if buffer[2] in arrows else (False, 0)
+    if buffer[1] != _CSI_INTRODUCER:
+        return False, 0
+    index = 2
+    while index < len(buffer) and _CSI_PARAM_MIN <= buffer[index] <= _CSI_PARAM_MAX:
+        index += 1
+    if index == len(buffer):
+        return False, index
+    return (True, index + 1) if buffer[index] in arrows else (False, 0)
 
 
 @dataclass(frozen=True)
@@ -956,20 +984,28 @@ class MainFocusModel:
     - Enter while latched keeps the latch (it may have opened a transcript);
     - only a bare Esc clears it. Ctrl-C, Ctrl-U, Enter and child output never do.
 
-    A bare Esc is an ESC not followed by a CSI/SS3/string introducer. An ESC
-    that ends a read is taken as bare (a lone Esc key arrives alone), and the
-    hold is restored if the next read shows it began a sequence after all.
-    Bytes inside a bracketed paste are text, never keys.
+    A bare Esc is an ESC that no CSI/SS3/string introducer follows within the
+    same read. A sequence still open when a read ends never reinterprets the
+    next read: an open string sequence is dropped (a terminal reply arrives
+    whole, and a human never types one), and an open ESC, ESC [ or ESC O is
+    kept PENDING, with any hold left in place. The next read resolves it: if
+    it completes an arrow (``ESC | [A``, a split key) that arrow is honoured,
+    a strict prefix of one keeps it pending, and anything else makes the ESC
+    a bare Esc, with the new read parsed from ground. A pending ESC that sees
+    no further byte within ``_FOCUS_ESC_SETTLE_SECONDS`` resolves as a bare
+    Esc at :meth:`settle`. Bytes inside a bracketed paste are text, never keys.
     """
 
     def __init__(self) -> None:
         self._state: int = _ST_GROUND
         self._csi_params: list[int] = []
         self._in_paste: bool = False
+        self._paste_bytes: int = 0
         self._hold: FocusHold | None = None
-        # The hold an ESC ending a read provisionally cleared, until the next
-        # byte shows whether that ESC was bare.
-        self._provisional: FocusHold | None = None
+        # The open sequence (always starting with ESC) a read ended inside of,
+        # and when that read arrived; empty when nothing is pending.
+        self._pending: bytes = b""
+        self._pending_since: float = 0.0
 
     @property
     def hold(self) -> FocusHold | None:
@@ -981,20 +1017,64 @@ class MainFocusModel:
         """True when no hold is latched."""
         return self._hold is None
 
+    def settle(self, *, now: float) -> None:
+        """Resolve a pending ESC as a bare Esc once no byte followed it in time."""
+        if self._pending and now - self._pending_since >= _FOCUS_ESC_SETTLE_SECONDS:
+            self._pending = b""
+            self._hold = None
+
     def feed(self, data: bytes, *, now: float | None = None) -> None:
-        """Advance the model with forwarded human stdin bytes."""
+        """Advance the model with one read of forwarded human stdin bytes."""
         stamp = time.time() if now is None else now
+        self.settle(now=stamp)
+        if self._pending:
+            data = self._resolve_pending(data, stamp)
         for byte in data:
             self._consume(byte, stamp)
-        if self._state == _ST_ESC and not self._in_paste and self._hold is not None:
-            self._provisional, self._hold = self._hold, None
+        self._end_read(stamp)
+
+    def _resolve_pending(self, data: bytes, now: float) -> bytes:
+        """Settle the carried-over sequence against this read; return what to parse."""
+        buffer = self._pending + data
+        complete, used = _split_arrow(buffer)
+        if not complete and used:
+            self._pending = buffer
+            return b""
+        self._pending = b""
+        if complete:
+            introducer, final = buffer[1], buffer[used - 1]
+            if introducer == _SS3_INTRODUCER or used == 3:
+                self._latch(introducer, final, now)
+            return buffer[used:]
+        self._hold = None
+        return buffer[1:]
+
+    def _end_read(self, now: float) -> None:
+        if self._in_paste:
+            # A paste spans reads; only its end marker matters inside it.
+            return
+        if self._state == _ST_ESC:
+            self._pending = bytes((_ESC,))
+        elif self._state == _ST_CSI:
+            self._pending = bytes((_ESC, _CSI_INTRODUCER, *self._csi_params))
+        elif self._state == _ST_SS3:
+            self._pending = bytes((_ESC, _SS3_INTRODUCER))
+        if self._pending:
+            self._pending_since = now
+        self._state = _ST_GROUND
 
     def _consume(self, byte: int, now: float) -> None:
         state = self._state
         if state == _ST_GROUND:
             if byte == _ESC:
                 self._state = _ST_ESC
-            elif byte in _LINE_SUBMIT_BYTES and not self._in_paste and self._hold is not None:
+            elif self._in_paste:
+                self._paste_bytes += 1
+                if self._paste_bytes > _PASTE_LATCH_MAX_BYTES:
+                    # Same bound as `HumanInputLine`: a lost end marker must
+                    # not stop every later arrow from latching.
+                    self._in_paste = False
+            elif byte in _LINE_SUBMIT_BYTES and self._hold is not None:
                 self._hold = replace(self._hold, reason=_FOCUS_REASON_ENTER)
         elif state == _ST_ESC:
             self._consume_esc(byte)
@@ -1018,33 +1098,28 @@ class MainFocusModel:
             self._state = _ST_GROUND if byte == _ST_TERMINATOR else _ST_STR
 
     def _consume_esc(self, byte: int) -> None:
-        introducer = byte in (_CSI_INTRODUCER, _SS3_INTRODUCER) or byte in _STRING_INTRODUCERS
-        if self._provisional is not None:
-            if introducer:
-                self._hold = self._provisional
-            self._provisional = None
         if byte == _CSI_INTRODUCER:
             self._state = _ST_CSI
             self._csi_params = []
+        elif self._in_paste:
+            # Inside a paste only the ESC [ 201 ~ end marker means anything.
+            self._state = _ST_ESC if byte == _ESC else _ST_GROUND
         elif byte == _SS3_INTRODUCER:
             self._state = _ST_SS3
         elif byte in _STRING_INTRODUCERS:
             self._state = _ST_STR
         elif byte == _ESC:
             # The first ESC was bare; this one starts whatever follows.
-            self._release()
-        else:
-            self._release()
-            self._state = _ST_GROUND
-
-    def _release(self) -> None:
-        if not self._in_paste:
             self._hold = None
+        else:
+            self._hold = None
+            self._state = _ST_GROUND
 
     def _finish_csi(self, final: int, now: float) -> None:
         params = tuple(self._csi_params)
         if final == _CSI_FINAL_TILDE and params == _PASTE_START_PARAMS:
             self._in_paste = True
+            self._paste_bytes = 0
         elif final == _CSI_FINAL_TILDE and params == _PASTE_END_PARAMS:
             self._in_paste = False
         elif not params and final in (_CSI_ARROW_UP, _CSI_ARROW_DOWN):
@@ -8180,6 +8255,58 @@ def _apply_decision(
     return False
 
 
+def _apply_worker_outcome(
+    outcome: TickOutcome,
+    *,
+    machine: CompactStateMachine,
+    line: HumanInputLine,
+    master_writer: Callable[[bytes], None],
+    log: DecisionLog | None,
+    main_focus_confirmed: bool,
+    now_wall: float,
+) -> bool:
+    """Perform a worker-decided outcome on the host and adopt what it decided.
+
+    Returns True when a payload was typed. A payload held by the host's focus
+    model at apply time (Plan 00537) is treated like a failed PTY write: the
+    worker's post-tick state is NOT adopted, nothing is booked and the box
+    model is not cleared, so the held send is retried rather than recorded as
+    sent -- a held `/compact` would otherwise leave the machine awaiting a
+    compaction that never started.
+    """
+    if outcome.payload is not None and not main_focus_confirmed:
+        _apply_decision(
+            outcome, master_writer=master_writer, log=log, main_focus_confirmed=False
+        )
+        return False
+    # Plan 00182: pass the host's authoritative PRE-tick state so a stale
+    # WOULD_COMPACT reply (worker still MONITOR, host already awaiting)
+    # is suppressed instead of stacking a second /compact.
+    injected = _apply_decision(
+        outcome,
+        master_writer=master_writer,
+        log=log,
+        host_state=machine.state.value,
+    )
+    # Adopt the worker's post-tick state so `machine` remains the single
+    # source of truth; a later in-process fallback tick then cannot
+    # diverge and inject a duplicate /compact (Plan 00164 Phase 4 fix).
+    if outcome.machine_state is not None:
+        machine.import_state(outcome.machine_state)
+    # Success-only bookkeeping, run AFTER adopting the worker state
+    # (which carries the pre-injection counts) so no increment is
+    # ever overwritten. A PTY write failure raises above, so no cap
+    # is burned and no pending episode/signal is lost (Plan 00269
+    # review fix; Plan 00278 continuation).
+    _apply_post_injection_bookkeeping(machine, outcome, injected=injected, now_wall=now_wall)
+    # Plan 00398 Phase 3: the flush's own Enter never passes through
+    # `feed` (same as every other supervisor injection), so without
+    # this the model would show the just-flushed text forever.
+    if outcome.abandoned_box_flushed:
+        line.clear()
+    return injected
+
+
 def _apply_post_injection_bookkeeping(
     machine: CompactStateMachine,
     outcome: TickOutcome,
@@ -9819,6 +9946,8 @@ def supervise(
             now=now_wall, threshold_seconds=input_line_abandon_seconds
         )
         # Plan 00537: also the host's own long-lived model (see `TickFacts`).
+        # A lone Esc that no further byte followed resolves here.
+        activity.focus.settle(now=now_wall)
         focus_hold = activity.focus.hold
         outcome = None
         if decider is not None:
@@ -9861,35 +9990,16 @@ def supervise(
                     )
                 )
         if outcome is not None:
-            # Plan 00182: pass the host's authoritative PRE-tick state so a stale
-            # WOULD_COMPACT reply (worker still MONITOR, host already awaiting)
-            # is suppressed instead of stacking a second /compact.
-            injected = _apply_decision(
+            _apply_worker_outcome(
                 outcome,
+                machine=machine,
+                line=activity.line,
                 master_writer=_write_master,
                 log=log,
-                host_state=machine.state.value,
                 # Read now, not at tick start: the worker was waited on.
                 main_focus_confirmed=activity.focus.confirmed,
+                now_wall=now_wall,
             )
-            # Adopt the worker's post-tick state so `machine` remains the single
-            # source of truth; a later in-process fallback tick then cannot
-            # diverge and inject a duplicate /compact (Plan 00164 Phase 4 fix).
-            if outcome.machine_state is not None:
-                machine.import_state(outcome.machine_state)
-            # Success-only bookkeeping, run AFTER adopting the worker state
-            # (which carries the pre-injection counts) so no increment is
-            # ever overwritten. A PTY write failure raises above, so no cap
-            # is burned and no pending episode/signal is lost (Plan 00269
-            # review fix; Plan 00278 continuation).
-            _apply_post_injection_bookkeeping(
-                machine, outcome, injected=injected, now_wall=now_wall
-            )
-            # Plan 00398 Phase 3: the flush's own Enter never passes through
-            # `feed` (same as every other supervisor injection), so without
-            # this the model would show the just-flushed text forever.
-            if outcome.abandoned_box_flushed:
-                activity.line.clear()
             _handle_plugin_outcome(outcome)
         else:
             _poll_once(
