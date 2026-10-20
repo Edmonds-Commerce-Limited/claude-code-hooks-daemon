@@ -136,3 +136,81 @@ CcySupervisor.md, for the follow-up plan to verify.
 - Task 3.2, the follow-up plan.
 - A live dogfood check after a ccy relaunch. The coordinator or a human should
   run the steps in CcySupervisor.md.
+
+## Review fixes
+
+These answer `untracked/agent-reports/261020-issue125-review-opus.md`. Commits
+`3e27d39b3` (fixes and tests) and `1ed3da37b` (black formatting).
+
+**C1: an Esc that ended a read reinterpreted the next read.** Fixed in
+`MainFocusModel`:
+
+- A string sequence (OSC/DCS/APC/PM/SOS) can still open and close within one
+  read, so a complete terminal reply such as `ESC ] 11;rgb… ESC \` never acts
+  as a bare Esc. A string sequence left open at the end of a read is dropped.
+- An ESC, `ESC [` or `ESC O` left open at the end of a read is kept PENDING,
+  and any hold stays in place. The next read resolves it:
+  - a completed Up/Down arrow is honoured (`_split_arrow`): with no
+    parameters it latches, with parameters it neither latches nor releases;
+  - a strict prefix of an arrow stays pending;
+  - anything else makes the ESC a bare Esc, and the read is parsed from
+    ground.
+- With no further byte, `settle()` resolves the pending ESC as a bare Esc after
+  `_FOCUS_ESC_SETTLE_SECONDS` (0.5 s). The host calls it every tick, and
+  `feed()` calls it first, so letters arriving after the window are text.
+- The focus model's paste state is bounded by `_PASTE_LATCH_MAX_BYTES`, like
+  `HumanInputLine`, and inside a paste only `ESC [` is followed.
+
+**I1: a send held at apply time was booked as sent.** The worker-outcome
+application moved from `_on_poll` into `_apply_worker_outcome`. A payload the
+host model refuses at apply time is handled like a failed PTY write: no
+`import_state`, no bookkeeping, no `line.clear()`.
+
+**I2: tests.** These were added to `test_main_focus_hold.py` (78 tests now):
+
+- every probe case, A to F, plus one-read variants and `_`/`^` introducers;
+- six split-arrow shapes;
+- a split arrow with parameters;
+- the pending Esc keeping the hold, for a lone Esc and for a prefix read;
+- letters after the settle window;
+- an open and a complete string sequence;
+- the paste bound and a split paste end marker;
+- `TestWorkerOutcomeHeldAtApply`, one test per family (compact, usage-pause
+  compact, dry-run marker, abandoned flush, own line), plus controls that
+  confirm a confirmed apply still adopts the state and clears the box.
+
+The unused-lambda-parameter hint is fixed.
+
+**Red before green.**
+
+- The new tests failed at collection (`_FOCUS_ESC_SETTLE_SECONDS` absent).
+- The reviewer's probe on the old code gave the wrong answer for A to E.
+- After the fix, A to E are correct. F reads held in the probe only because the
+  probe never calls `settle()`. That is the required "keep the hold until the
+  Esc resolves" behaviour; the host settles every tick.
+- The mutation check now has 15 mutants, including 5 for C1 and 1 for I1, and
+  all 15 go RED. One survivor from a first run, a prefix read clearing the
+  hold, was closed with a test.
+
+**Suggestions not taken.**
+
+- Writing the audit-flush line before the belt's early return. A held outcome's
+  state is not adopted, so the audit backlog is re-flushed and logged on the
+  next sent tick. Logging it now would duplicate it.
+- Not overwriting a different live WARNING with the hold banner. Left as is: the
+  hold banner is what tells the human how to unblock every send.
+
+**Found, not fixed (outside this brief):** `HumanInputLine` has the same
+carry-over. Its parser state persists across reads, and `_consume_esc` enters
+string state on `P`, `X`, `]`, `^` or `_`. After a lone Esc, typing "Please…"
+would therefore be swallowed, and the box would read empty while the human
+types. That lets the supervisor paste over the human's text. It predates this
+plan, and `_finish_csi` is off-limits under the ruling. It should be filed as
+its own issue.
+
+**QA after the fixes.**
+
+- `pytest tests/unit/supervise`: 1411 passed, 1 skipped.
+- `llm_qa.py changed --allow-unmapped`, on a still tree: 36/40, with format
+  clean. The same 4 pre-existing ADVISE findings on the 00533 links remain, and
+  `changed_tests` passed 1457.
