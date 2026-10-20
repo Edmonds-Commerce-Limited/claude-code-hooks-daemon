@@ -44,19 +44,25 @@ Related plans (dedupe scout, not duplicates):
   bare Up/Down, or an Enter while latched. A bare Esc from the human clears the
   latch.
 - **Gate every send path.** `main_focus_confirmed` is a host-side `TickFacts`
-  field, ANDed into `can_inject`. Every send path that bypasses `can_inject` is
-  gated explicitly as well:
-  - the model switch;
-  - the abandoned-box Enter flush, gated before its red-or-worse check;
-  - the ESC interrupt payload;
-  - the resubmit payload;
+  field, ANDed into `can_inject`. That covers the ESC interrupt and resubmit
+  payloads, which are produced only when `idle` (`_evaluate_await`). Every send
+  that does not pass through `can_inject` is gated explicitly as well:
+  - the model switch, whose gate is `input_line_empty` only;
+  - the abandoned-box Enter flush, taken when `not idle`. The gate sits ahead
+    of the one-shot `_abandoned_box_handled` latch, so a held flush is not
+    spent.
   - the restart coordinator's `/exit`;
+  - the usage-pause send (`_usage_pause_outcome`), which returns before the
+    families run. It keeps its bypass of the idle gate but not the focus gate:
+    typed into a sub-agent it would not pause the main thread anyway.
   - the dry-run marker, which uses the same send path.
 - **A held send is deferred and retried, never dropped or queued.** A held
   `/exit` creates no pending restart, adds no abandon count and starts no
   cooldown.
 - **A hold is visible.** It writes a rate-limited `deferred` line to
   decision.log and posts a status-line banner telling the user to press Esc.
+  The banner is posted at WARNING level, because an INFO message is dropped
+  while a WARNING is live.
   The banner escalates after configurable bounds (default 300 s and 900 s).
   Escalation never resumes sending.
 
@@ -68,7 +74,8 @@ Related plans (dedupe scout, not duplicates):
   ruling.
 - An off switch. "Off" is the defect.
 - Changing how `HumanInputLine._finish_csi` treats Up/Down, or weakening
-  `_is_idle`, `load_foreground_sidecar` or the usage-pause bypass.
+  `_is_idle`, `load_foreground_sidecar` or the usage-pause bypass of the idle
+  gate.
 
 ## Tasks
 
