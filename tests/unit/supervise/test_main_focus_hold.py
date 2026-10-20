@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -253,12 +254,15 @@ class TestFocusModelAcrossReads:
         [
             pytest.param([_ESC, b"P", b"lease fix", _ENTER, _UP], False, id="A-esc-Please-up"),
             pytest.param([_ESC, b"]", _UP], False, id="B-esc-bracket-up"),
-            pytest.param([_UP, _ESC, b"O", b"K"], True, id="C-up-esc-OK"),
-            pytest.param([_UP, _ESC, b"[", b"x"], True, id="D-up-esc-[x"),
+            # C and D: once `[` / `O` follows the Esc it is a sequence, resolved
+            # by the bytes that arrive, never a bare Esc -- unsure means hold.
+            pytest.param([_UP, _ESC, b"O", b"K"], False, id="C-up-esc-OK"),
+            pytest.param([_UP, _ESC, b"[", b"x"], False, id="D-up-esc-[x"),
             pytest.param([_UP, _ESC, b"P", b"lease"], True, id="E-up-esc-Please"),
             pytest.param([_UP, _ESC], True, id="F-up-esc"),
             pytest.param([_ESC, b"Please fix"], True, id="esc-then-text-one-read"),
-            pytest.param([_UP, _ESC, b"OK"], True, id="up-esc-OK-one-read"),
+            pytest.param([_UP, _ESC, b"OK"], False, id="up-esc-OK-one-read"),
+            pytest.param([_UP, _ESC, b"]x"], True, id="up-esc-string-introducer"),
             pytest.param([_ESC, b"_", _UP], False, id="esc-underscore-up"),
             pytest.param([_ESC, b"^X", _UP], False, id="esc-caret-up"),
         ],
@@ -298,17 +302,76 @@ class TestFocusModelAcrossReads:
         model.feed(_UP, now=_NOW)
         model.feed(_ESC, now=_NOW + 1)
         model.feed(b"[", now=_NOW + 1.01)
+        model.settle(now=_NOW + 100)
         assert model.confirmed is False
-        model.feed(b"x", now=_NOW + 1.02)
-        assert model.confirmed is True
+
+    @pytest.mark.parametrize("prefix", [b"\x1b[", b"\x1bO", b"\x1b[200", b"\x1b[1;"])
+    def test_pending_sequence_prefix_never_settles_bare(self, prefix: bytes) -> None:
+        model = MainFocusModel()
+        model.feed(_UP, now=_NOW)
+        model.feed(prefix, now=_NOW + 1)
+        model.settle(now=_NOW + 100)
+        assert model.confirmed is False
 
     def test_letters_after_a_settled_esc_are_text(self) -> None:
-        # Past the settle window the Esc was bare, whatever arrives next.
+        # Settled bare by the host tick, the next read is text.
         model = MainFocusModel()
         model.feed(_UP, now=_NOW)
         model.feed(_ESC, now=_NOW + 1)
+        model.settle(now=_NOW + 1 + _SETTLE)
         model.feed(b"[A", now=_NOW + 1 + 2 * _SETTLE)
         assert model.confirmed is True
+
+    def test_g_split_up_read_late_still_latches(self) -> None:
+        # The stamp is the host's READ time; a host stalled on the worker
+        # reads the second half late. Bytes that arrived decide, not the clock.
+        model = MainFocusModel()
+        model.feed(_ESC, now=_NOW)
+        model.feed(b"[A", now=_NOW + 0.6)
+        assert model.confirmed is False
+
+    def test_h_split_up_read_late_keeps_a_live_hold(self) -> None:
+        model = MainFocusModel()
+        model.feed(_UP, now=_NOW - 1)
+        model.feed(_ESC, now=_NOW)
+        model.feed(b"[A", now=_NOW + 0.6)
+        assert model.confirmed is False
+        assert model.hold is not None
+        assert model.hold.since == _NOW - 1
+
+    def test_i_split_paste_start_keeps_the_hold(self) -> None:
+        model = MainFocusModel()
+        model.feed(_UP, now=_NOW - 1)
+        model.feed(b"\x1b[200", now=_NOW)
+        model.feed(b"~hi\x1b[201~", now=_NOW + 0.01)
+        assert model.confirmed is False
+
+    def test_split_paste_start_then_arrow_text_does_not_latch(self) -> None:
+        model = MainFocusModel()
+        model.feed(b"\x1b[200", now=_NOW)
+        model.feed(b"~a\x1b[Ab\x1b[201~", now=_NOW + 0.01)
+        assert model.confirmed is True
+
+
+class TestStdinReadable:
+    """The host settles a pending Esc only when no stdin byte is waiting."""
+
+    def test_waiting_bytes_are_seen(self) -> None:
+        read_fd, write_fd = os.pipe()
+        try:
+            assert _mod._fd_readable(read_fd) is False
+            os.write(write_fd, b"[A")
+            assert _mod._fd_readable(read_fd) is True
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+    def test_an_unpollable_fd_counts_as_readable(self) -> None:
+        # Fail toward hold: an fd that cannot be checked never settles an Esc.
+        read_fd, write_fd = os.pipe()
+        os.close(read_fd)
+        os.close(write_fd)
+        assert _mod._fd_readable(read_fd) is True
 
     def test_open_string_sequence_does_not_outlive_its_read(self) -> None:
         assert _after_reads([b"\x1b]11;rgb", _UP]).confirmed is False

@@ -934,28 +934,19 @@ _FOCUS_REASON_ENTER = "Enter after panel navigation (a sub-agent transcript may 
 _FOCUS_ESC_SETTLE_SECONDS = 0.5
 
 
-def _split_arrow(buffer: bytes) -> tuple[bool, int]:
-    """How ``buffer`` (starting with ESC) relates to an Up/Down arrow key.
+def _fd_readable(fd: int) -> bool:
+    """True when ``fd`` has bytes waiting; also True when it cannot be checked.
 
-    Returns ``(True, length)`` when it begins with a complete CSI (any
-    parameters) or SS3 Up/Down, ``(False, len(buffer))`` when it is a strict
-    prefix of one, and ``(False, 0)`` when it is neither.
+    Plan 00537: the host settles a lone pending ESC only when no stdin byte
+    is waiting, because a waiting byte may be the rest of a split key. An fd
+    that cannot be polled is reported readable so the ESC is NOT settled --
+    the hold stays, which is the safe direction.
     """
-    if len(buffer) < 2:
-        return False, len(buffer)
-    arrows = (_CSI_ARROW_UP, _CSI_ARROW_DOWN)
-    if buffer[1] == _SS3_INTRODUCER:
-        if len(buffer) == 2:
-            return False, 2
-        return (True, 3) if buffer[2] in arrows else (False, 0)
-    if buffer[1] != _CSI_INTRODUCER:
-        return False, 0
-    index = 2
-    while index < len(buffer) and _CSI_PARAM_MIN <= buffer[index] <= _CSI_PARAM_MAX:
-        index += 1
-    if index == len(buffer):
-        return False, index
-    return (True, index + 1) if buffer[index] in arrows else (False, 0)
+    try:
+        readable, _, _ = select.select([fd], [], [], 0)
+    except (OSError, ValueError):
+        return True
+    return bool(readable)
 
 
 @dataclass(frozen=True)
@@ -1018,36 +1009,42 @@ class MainFocusModel:
         return self._hold is None
 
     def settle(self, *, now: float) -> None:
-        """Resolve a pending ESC as a bare Esc once no byte followed it in time."""
-        if self._pending and now - self._pending_since >= _FOCUS_ESC_SETTLE_SECONDS:
+        """Resolve a lone pending ESC as a bare Esc once nothing followed it in time.
+
+        Only the HOST TICK calls this, and only when no stdin byte is waiting:
+        a read's stamp is when the host read it, not when it arrived, so
+        bytes that have arrived decide a pending ESC, never the clock. A
+        pending `ESC [` / `ESC O` prefix is already a sequence and never
+        settles bare.
+        """
+        if (
+            self._pending == bytes((_ESC,))
+            and now - self._pending_since >= _FOCUS_ESC_SETTLE_SECONDS
+        ):
             self._pending = b""
             self._hold = None
 
     def feed(self, data: bytes, *, now: float | None = None) -> None:
         """Advance the model with one read of forwarded human stdin bytes."""
         stamp = time.time() if now is None else now
-        self.settle(now=stamp)
-        if self._pending:
-            data = self._resolve_pending(data, stamp)
+        if self._pending and data:
+            data = self._resolve_pending(data)
         for byte in data:
             self._consume(byte, stamp)
         self._end_read(stamp)
 
-    def _resolve_pending(self, data: bytes, now: float) -> bytes:
-        """Settle the carried-over sequence against this read; return what to parse."""
-        buffer = self._pending + data
-        complete, used = _split_arrow(buffer)
-        if not complete and used:
-            self._pending = buffer
-            return b""
-        self._pending = b""
-        if complete:
-            introducer, final = buffer[1], buffer[used - 1]
-            if introducer == _SS3_INTRODUCER or used == 3:
-                self._latch(introducer, final, now)
-            return buffer[used:]
-        self._hold = None
-        return buffer[1:]
+    def _resolve_pending(self, data: bytes) -> bytes:
+        """Settle the carried-over sequence against this read; return what to parse.
+
+        A lone ESC followed by anything but ``[`` or ``O`` was a bare Esc, and
+        the read is parsed from ground. Otherwise the carried bytes and the
+        read are parsed together as the sequence they form.
+        """
+        pending, self._pending = self._pending, b""
+        if pending == bytes((_ESC,)) and data[0] not in (_CSI_INTRODUCER, _SS3_INTRODUCER):
+            self._hold = None
+            return data
+        return pending + data
 
     def _end_read(self, now: float) -> None:
         if self._in_paste:
@@ -9944,8 +9941,10 @@ def supervise(
             now=now_wall, threshold_seconds=input_line_abandon_seconds
         )
         # Plan 00537: also the host's own long-lived model (see `TickFacts`).
-        # A lone Esc that no further byte followed resolves here.
-        activity.focus.settle(now=now_wall)
+        # A lone Esc that no further byte followed resolves here -- but never
+        # while stdin has unread bytes, which may be the rest of a split key.
+        if not _fd_readable(resolved_stdin_fd):
+            activity.focus.settle(now=now_wall)
         focus_hold = activity.focus.hold
         outcome = None
         if decider is not None:

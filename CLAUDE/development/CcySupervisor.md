@@ -189,11 +189,15 @@ arrow still counts as box content there. The rules fail toward holding:
 - A sequence still open when a read ends never reinterprets the next read.
   An open string sequence is dropped. An open ESC, `ESC [` or `ESC O` stays
   pending, and any hold stays in place until it resolves:
-  - the next read completing an Up/Down arrow honours that split key;
-  - the next read being a strict prefix of an arrow keeps it pending;
-  - anything else makes it a bare Esc, and the new read is parsed fresh;
-  - no further byte within `_FOCUS_ESC_SETTLE_SECONDS` (0.5 s) also makes it a
-    bare Esc. The host resolves this each tick.
+  - a lone ESC followed by anything but `[` or `O` was a bare Esc, and the new
+    read is parsed fresh;
+  - otherwise the carried bytes and the new read are parsed together as the
+    sequence they form, so a split arrow latches, a split paste marker opens a
+    paste, and a split non-arrow sequence neither latches nor releases;
+  - a lone ESC with no further byte within `_FOCUS_ESC_SETTLE_SECONDS` (0.5 s)
+    becomes a bare Esc. The host tick does this only while no stdin byte is
+    waiting, because a read's timestamp is when the host read it, not when the
+    byte arrived. A pending `ESC [` / `ESC O` prefix never settles bare.
 - Ctrl-C, Ctrl-U, Enter and child output never clear it.
 
 The hold is host-side, like `input_line_abandoned`, so a worker restart keeps
