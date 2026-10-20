@@ -577,6 +577,15 @@ class TestRestartExitHolds:
         assert self._request(coordinator, writer, machine, None) is True
         assert b"/exit" in b"".join(writer.chunks)
 
+    def test_held_exit_leaves_no_restart_pending_record(self, tmp_path: Path) -> None:
+        # Plan 00539: the record is written only when `/exit` is actually sent.
+        coordinator = _coordinator(tmp_path)
+        machine = CompactStateMachine(CompactPolicy())
+        assert self._request(coordinator, _Writer(), machine, _hold()) is False
+        assert not coordinator.pending_record_path.exists()
+        assert self._request(coordinator, _Writer(), machine, None) is True
+        assert coordinator.pending_record_path.exists()
+
 
 class TestApplyDecisionBelt:
     def test_payload_decided_before_a_latch_is_not_typed(self) -> None:

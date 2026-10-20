@@ -447,8 +447,8 @@ that. `reason` is short, logged only, and never typed into the chat. The host:
    unless `cached_own_session_ids()` holds exactly one id. That set only ever
    grows, so a `/clear` or a resumed conversation that introduced a second id
    makes every later request refuse until the supervisor is relaunched;
-2. types `/exit` through the ordinary injection path and tracks it as an
-   unconfirmed own line;
+2. writes the **restart-pending record** (below), then types `/exit` through
+   the ordinary injection path and tracks it as an unconfirmed own line;
 3. **holds every other injection** until the child exits, for at most
    `_RESTART_EXIT_WAIT_SECONDS` (30). A child that ignores `/exit` is
    abandoned: the hold is released, a line is logged, and the session carries
@@ -480,6 +480,42 @@ fresh** (check `requested_at`), relaunch with `--resume <session_id>`, and
 delete the file once it has read it. A genuine child exit status of 75 with no
 file is not a request. If the file cannot be written, the supervisor exits with
 the child's own status instead, because the launcher could not act on 75.
+
+**The restart-pending record** lets the child's own SessionEnd hooks tell a
+scheduled restart from a genuine exit. Claude Code runs SessionEnd hooks while
+it exits, so the hooks run before the request file above exists. The record is
+`.claude/ccy/state/restart-pending.json`, in the same directory as the request
+file. It is written with mode `0600` and atomically (temp file + rename):
+
+```json
+{"session_id": "<id>", "plugin": "<name>", "reason": "<short text>", "requested_at": 1790000000.0, "deadline": 1790000035.0}
+```
+
+- **Written** after every refusal has been checked and before `/exit` is typed.
+  A refused request leaves no record. That includes dry-run, cooldown, the
+  abandon cap, an ambiguous session id, an already-pending request (whose own
+  record stands) and a focus hold (Plan 00537). If the record cannot be written,
+  the failure is logged and the restart goes ahead; only the signal is lost.
+- **Removed** when typing `/exit` raises (the error is re-raised), when the
+  request is abandoned, once the child has exited, and when the supervisor
+  leaves by an exception before reaching that point. The resumed session keeps
+  the same session id, so a leftover record would mislabel a later genuine
+  exit. A crash or `SIGKILL` that runs no cleanup can still leave the file;
+  the wall-clock `deadline` is the backstop that makes it stale.
+- **`deadline`** is wall-clock seconds: `requested_at` +
+  `_RESTART_EXIT_WAIT_SECONDS` (30) + `_RESTART_PENDING_DEADLINE_MARGIN_SECONDS`
+  (5). It stays valid for at least as long as the supervisor holds the request.
+- **The path reaches the child** as `CCY_SUPERVISOR_RESTART_PENDING`. It is
+  exported at spawn whether or not the file exists, and only in the child, so
+  the supervisor's own environment is unchanged.
+
+**Reader contract.** A hook treats its session as restarting **only when all
+three hold**: the file named by `CCY_SUPERVISOR_RESTART_PENDING` exists, its
+`session_id` is the hook's own session id, and `deadline` has not passed.
+Anything else is a genuine exit: an unset variable, a missing or unparseable
+file, another session's id, or an expired deadline. A reader may also require
+the SessionEnd `reason` to be `prompt_input_exit` or `other`. A human `/clear`
+inside the pending window would otherwise read as a restart.
 
 ### The failure path
 
