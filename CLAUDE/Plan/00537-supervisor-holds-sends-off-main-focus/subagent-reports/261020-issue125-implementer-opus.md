@@ -214,3 +214,63 @@ its own issue.
 - `llm_qa.py changed --allow-unmapped`, on a still tree: 36/40, with format
   clean. The same 4 pre-existing ADVISE findings on the 00533 links remain, and
   `changed_tests` passed 1457.
+
+### Re-review fixes
+
+Commit `3afb238dc`. The re-review approved I1 and found a remaining C1 defect.
+
+**Must-fix: the read clock settled a pending Esc.** `feed()` called `settle()`
+with the read stamp. That stamp is when the host READ the bytes, and the host
+reads stdin only after its tick, which waits on the worker. So the second half
+of a split key, read 0.5 s or more late, settled the ESC as bare:
+
+- case G missed the arrow;
+- case H released a live hold.
+
+The fix:
+
+- `feed()` no longer settles; the bytes that have arrived decide a pending ESC.
+- Only the host tick calls `settle()`, and only while `_fd_readable(stdin)` is
+  False. An fd that cannot be polled counts as readable, so the hold stays.
+- Only a lone pending ESC ever settles bare.
+
+**Fail direction: a split non-arrow CSI cleared the hold.** For example,
+`ESC[200 | ~` (case I) cleared the hold and parsed the paste as keys. Now:
+
+- A lone ESC followed by anything but `[` or `O` is a bare Esc.
+- Otherwise the carried bytes and the new read are parsed together as the
+  sequence they form. A split arrow latches, a split paste start opens the
+  paste, and a split non-arrow sequence neither latches nor releases.
+- `_split_arrow` is removed.
+
+**Deliberate change of expectation.** Two first-review probe cases now HOLD
+where that probe expected CONFIRMED:
+
+- case C: Up, Esc | `O` | `K`;
+- case D: Up, Esc | `[` | `x`.
+
+Once `[` or `O` follows the Esc it is a sequence, and the lead's rule says such
+a sequence never resolves as a bare Esc. The cost is a banner and a second Esc
+press, never a send. Case E (Esc | `Please`) still releases.
+
+**Tests (89 in the file).** New:
+
+- cases G, H and I;
+- prefixes `ESC[`, `ESC O`, `ESC[200` and `ESC[1;`, none of which settle bare;
+- a split paste start whose paste holds an arrow;
+- `_fd_readable` for a pipe with bytes waiting and for a closed fd.
+
+**Red, then green.**
+
+- Before the fix, 14 new or changed cases failed.
+- After it, the re-review probe holds for G, H and I.
+- The mutation check now has 17 mutants and all go RED. The new mutants cover
+  settle inside `feed`, a prefix settling bare, a carried prefix treated as
+  bare, and an unpollable fd being settled.
+
+**QA.**
+
+- `pytest tests/unit/supervise`: 1422 passed, 1 skipped.
+- `llm_qa.py changed --allow-unmapped`: 36/40, with format and error_hiding
+  clean. Only the same 4 pre-existing 00533 link advisories fail, and
+  `changed_tests` passed 1468.
