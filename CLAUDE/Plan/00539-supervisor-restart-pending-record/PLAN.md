@@ -53,30 +53,34 @@ sent, never on a focus hold.
 
 ### Phase 1: Record
 
-- [ ] ⬜ **Task 1.1**: Red tests, then write the record in `request()` after the
+- [x] ✅ **Task 1.1**: Red tests, then write the record in `request()` after the
   last refusal and before `_perform_injection`. Tests: the record exists between
   `request()` and `finish()`/`abandon()`; it is absent after every refusal
   branch, including the focus hold, and when typing fails; it names the own
   session id; its deadline is wall-clock; the file is mode 0600.
-- [ ] ⬜ **Task 1.2**: Red tests, then remove the record in `abandon()` and
-  `finish()`.
-- [ ] ⬜ **Task 1.3**: Red test, then export `CCY_SUPERVISOR_RESTART_PENDING` in
+- [x] ✅ **Task 1.2**: Red tests, then remove the record in `abandon()` and
+  `finish()`. A `finally` in `supervise()` also removes it if the I/O loop
+  raises; the wall-clock deadline is the backstop for a SIGKILL.
+- [x] ✅ **Task 1.3**: Red test, then export `CCY_SUPERVISOR_RESTART_PENDING` in
   the child's environment at spawn.
 
 ### Phase 2: Close out
 
-- [ ] ⬜ **Task 2.1**: Document the reader contract where the supervisor's
-  restart and plugin contract is documented. Add a release note in
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] ✅ **Task 2.1**: Document the reader contract where the supervisor's
+  restart and plugin contract is documented (`CLAUDE/development/CcySupervisor.md`,
+  "Exit for restart"). Add a release note in
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (004).
 
 ## Success Criteria
 
-- [ ] Each change has a test that failed before it.
-- [ ] No refusal path, focus hold included, leaves a record behind.
-- [ ] A release note is in the pending-release holding area
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
-- [ ] Targeted QA is green on the merged head, and CI is green.
+- [x] Each change has a test that failed before it.
+- [x] No refusal path, focus hold included, leaves a record behind.
+- [x] A release note is in the pending-release holding area
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (004).
+- [ ] Targeted QA is green on the merged head (40/40 on bb7664cbd), and CI is green.
 
 ## Delivery & Milestones
 
-- <!-- delivery commit hashes -->
+- bb7664cbd: merge of `worktree-plan-00539`. The code review approved it; its
+  two suggestions were fixed in f1f763f65
+  (`subagent-reports/261020-issue127-review-opus.md`).
