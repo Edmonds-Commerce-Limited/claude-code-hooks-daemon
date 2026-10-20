@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00540: ccy wrapper migration interpreter prefix](00540-ccy-wrapper-migration-interpreter-prefix/PLAN.md) - In Progress (#126: the upgrade turns `python3 …/claude-supervise.py` into `python3 …/claude-supervise`, Python reading a shell launcher; rewrite to `sh`, repair broken lines, warn)
-
 - [00538: supervisor auto refocus and focus signal](00538-supervisor-auto-refocus-and-focus-signal/PLAN.md) - Not Started (#125 follow-up: a spike for a non-screen focus signal; auto-refocus and the mods route are owner decisions)
 
 - [00536: persistent daemon saturation log](00536-persistent-daemon-saturation-log/PLAN.md) - Not Started (#124 follow-up: a bounded journal of saturation episodes, straggler restarts and forced stops that survives a daemon restart, with a verb to print it)
@@ -209,6 +207,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00540: ccy wrapper migration interpreter prefix](Completed/00540-ccy-wrapper-migration-interpreter-prefix/PLAN.md) - Complete at merge `6e349af66` (green CI) + the archiving commit (#126: the upgrade rewrites a Python interpreter prefix to `sh`, repairs lines broken by 3.69.0/3.70.0, reports pins, and the integrity check warns; release note 005)
+
 - [00539: supervisor restart pending record](Completed/00539-supervisor-restart-pending-record/PLAN.md) - Complete at merge `bb7664cbd` (green CI) + the archiving commit (#127: a private restart-pending record written before `/exit` and exported to the child lets a SessionEnd hook tell a supervisor restart from a genuine exit; release note 004)
 
 - [00537: supervisor holds sends off main focus](Completed/00537-supervisor-holds-sends-off-main-focus/PLAN.md) - Complete at merge `605d8ed4d` (green CI) + the archiving commit (#125: the ccy supervisor holds every send while the human's keys show focus may have left the main prompt, cleared by Esc; release note 003; follow-up Plan 00538)
@@ -262,8 +262,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00500: full qa timing and speed](Completed/00500-full-qa-timing-and-speed/PLAN.md) - Complete at merge `c02cf9838` + the archiving commit (owner request: per-step timing, a resumable and sharded gate, and the measured hot spots cut; total wall-clock deferred to the Actions runs, #107)
 
 - [00499: write-protected paths, and the ccy.env.local.dist template](Completed/00499-write-protected-paths-and-ccy-env-local-dist/PLAN.md) - Complete at Phase 1b merge `64823600a` + the archiving commit (owner rulings: `ccy.env.local` is IaC-written only; an opt-in `write_protected_paths` guard denies every Write/Edit/Bash route onto a listed path, live-probed; the dist template was cancelled because ccy writes it)
-
-- [00487: Supervisor plugin API and the ccy restart plugin](Completed/00487-supervisor-plugin-api-and-ccy-restart-plugin/PLAN.md) - Complete, shipped as beta in v3.69.0 + the archiving commit (owner request, #71: a crash-isolated plugin API for the ccy supervisor and a ccy max-age restart and deadline plugin on fedora-desktop; every supervisor-side live-test step passed, and the three launcher-only steps were handed to fedora-desktop#61 by owner ruling D11)
 
 - [00498: autonomy only where allowed](Completed/00498-autonomy-only-where-allowed/PLAN.md) - Complete at merge `68dd20179` + the archiving commit (owner request after a desktop agent drifted off its one task: a top-level `autonomy:` block, keyed on the detected environment and role alias, decides whether crons, goal pressure and resume advice run; this repo allows them in containers only, and the owner's desktop session showed `no autonomy` with an empty CronList)
 
@@ -322,9 +320,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 540 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 457 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 458 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 60 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 59 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

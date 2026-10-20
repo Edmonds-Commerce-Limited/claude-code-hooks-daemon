@@ -1,6 +1,6 @@
 # Plan 00540: ccy wrapper migration interpreter prefix
 
-**Status**: In Progress
+**Status**: Complete (2026-10-20)
 **Created**: 2026-10-20
 **Owner**: dev
 **Priority**: High
@@ -79,7 +79,7 @@ path, so the broken line passes silently.
 - [x] The release note is in the pending-release holding area
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
   (`005-ccy-wrapper-interpreter-prefix-repaired.md`).
-- [ ] Targeted QA is green on the merged head, and CI is green.
+- [x] Targeted QA is green on the merged head, and CI is green (run 39453689073 on `6e349af66`).
 
 ## Delivery & Milestones
 
