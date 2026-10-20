@@ -40,12 +40,12 @@ triaged as actionable on 2026-09-22. The ruling is in this plan's JOURNAL/.
 
 ### Phase 1: Fix
 
-- [ ] ⬜ **Task 1.1**: A red test that the advisory text names `untracked/transcripts/` and the delete
+- [x] ✅ **Task 1.1**: A red test that the advisory text names `untracked/transcripts/` and the delete
   action. Then the text change.
 
 ### Phase 2: Close out
 
-- [ ] ⬜ **Task 2.1**: A release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] ✅ **Task 2.1**: A release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
 ## Success Criteria
 
