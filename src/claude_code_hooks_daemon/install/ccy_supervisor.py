@@ -38,7 +38,10 @@ from typing import Final
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.utils.ccy_supervisor import (
     PLAIN_INTERPRETER_WORDS,
-    interpreter_before_supervisor,
+    SHELL_INTERPRETER,
+    file_name_token,
+    names_deployed_file,
+    prefix_before_supervisor,
 )
 
 logger = logging.getLogger(__name__)
@@ -74,8 +77,8 @@ _SUPERVISOR_MODE: Final[int] = 0o755
 # Its mere presence (set OR commented out) means the user has a stance on
 # arming, so we never overwrite it.
 _WRAPPER_EXPORT_KEY: Final[str] = "CCY_CLAUDE_WRAPPER"
-# The launcher is a POSIX shell script; this runs it without needing an exec bit.
-_SHELL_INTERPRETER: Final[str] = "sh"
+# The launcher's path relative to the project root, as a wrapper line names it.
+_DEPLOYED_LAUNCHER_REL: Final[str] = "/".join((*_CCY_DIR_PARTS, SUPERVISOR_LAUNCHER_NAME))
 # The env var the launcher reads to choose its Python before searching python3.x.
 _CCY_PYTHON_ENV: Final[str] = "CCY_PYTHON"
 
@@ -250,30 +253,26 @@ def deploy_ccy_supervisor_if_enabled(
     return result
 
 
-#: Spellings that put the wrapper in the deployed ``.claude/ccy/`` directory: this
-#: module's own self-locating armed line, and a path through ``.claude/ccy``.
-_DEPLOYED_LOCATIONS: Final[tuple[str, ...]] = (
-    '$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/',
-    ".claude/ccy/",
+#: A command word directly before the supervisor path, which may name the script
+#: or the launcher.
+_PREFIX_BEFORE_SUPERVISOR_RE: Final[re.Pattern[str]] = prefix_before_supervisor(
+    rf"(?:{re.escape(SUPERVISOR_SCRIPT_NAME)}|{re.escape(SUPERVISOR_LAUNCHER_NAME)})"
 )
+_SCRIPT_TOKEN_RE: Final[re.Pattern[str]] = file_name_token(SUPERVISOR_SCRIPT_NAME)
 
 
-def _names_deployed_file(line: str, target_ccy_dir: Path, file_name: str) -> bool:
-    """Does ``line`` name ``file_name`` in the directory the launcher is deployed to?"""
-    locations = (*_DEPLOYED_LOCATIONS, f"{target_ccy_dir}/")
-    return any(f"{location}{file_name}" in line for location in locations)
+@dataclass
+class _WrapperMigration:
+    """Outcome of migrating ccy.env's wrapper lines to the launcher."""
 
-
-def _names_deployed_script(line: str, target_ccy_dir: Path) -> bool:
-    """Does ``line`` name ``claude-supervise.py`` in the directory the launcher is deployed to?"""
-    return _names_deployed_file(line, target_ccy_dir, SUPERVISOR_SCRIPT_NAME)
-
-
-#: A Python interpreter word directly before the supervisor path. The launcher
-#: name is a prefix of the script name, so one pattern covers both.
-_INTERPRETER_BEFORE_SUPERVISOR_RE: Final[re.Pattern[str]] = interpreter_before_supervisor(
-    re.escape(SUPERVISOR_LAUNCHER_NAME)
-)
+    content: str
+    #: Lines naming the script outside the deployed directory, left as written.
+    other_directory: list[str] = field(default_factory=list)
+    #: Lines with Python options or a variable before the supervisor path, left
+    #: as written because no ``sh`` rewrite is known to keep their meaning.
+    unrewritable_prefix: list[str] = field(default_factory=list)
+    #: Interpreters that pinned a specific Python, which the ``sh`` rewrite dropped.
+    pinned: list[str] = field(default_factory=list)
 
 
 def _replace_interpreter_with_sh(line: str) -> tuple[str, list[str]]:
@@ -290,14 +289,20 @@ def _replace_interpreter_with_sh(line: str) -> tuple[str, list[str]]:
         word = match.group("word")
         if word not in PLAIN_INTERPRETER_WORDS:
             pinned.append(word)
-        return f"{_SHELL_INTERPRETER}{match.group('gap')}"
+        return f"{SHELL_INTERPRETER}{match.group('gap')}"
 
-    return _INTERPRETER_BEFORE_SUPERVISOR_RE.sub(to_sh, line), pinned
+    return _PREFIX_BEFORE_SUPERVISOR_RE.sub(to_sh, line), pinned
 
 
-def _migrate_wrapper_to_launcher(
-    content: str, target_ccy_dir: Path
-) -> tuple[str, list[str], list[str]]:
+def _has_unrewritable_prefix(line: str) -> bool:
+    """Is the supervisor path behind Python options or a variable?"""
+    return any(
+        match.group("flags") or match.group("variable")
+        for match in _PREFIX_BEFORE_SUPERVISOR_RE.finditer(line)
+    )
+
+
+def _migrate_wrapper_to_launcher(content: str, target_ccy_dir: Path) -> _WrapperMigration:
     """Repoint ACTIVE wrapper exports from the bare script to the launcher.
 
     Only non-comment lines that export ``CCY_CLAUDE_WRAPPER`` and name the
@@ -307,29 +312,67 @@ def _migrate_wrapper_to_launcher(
 
     A Python interpreter word directly before the path is replaced by ``sh``,
     because the launcher is a shell script. That also repairs a line an earlier
-    release left as ``python3 <dir>/claude-supervise``.
+    release left as ``python3 <dir>/claude-supervise``. Python options between the
+    word and the path, or a variable as the word, have no rewrite known to keep
+    their meaning, so such a line is left as written and reported.
 
     The launcher exists only in ``target_ccy_dir``, so a line naming the script in
     any other directory is left as written (rewriting it would name a file that
-    is not there) and returned as the second item, for the caller to report. The
-    third item lists the pinned interpreters the rewrite dropped.
+    is not there) and reported.
     """
     lines = content.split("\n")
-    left_alone: list[str] = []
-    pinned: list[str] = []
+    migration = _WrapperMigration(content="")
     for index, line in enumerate(lines):
         if line.lstrip().startswith("#") or _WRAPPER_EXPORT_KEY not in line:
             continue
-        if SUPERVISOR_SCRIPT_NAME in line:
-            if not _names_deployed_script(line, target_ccy_dir):
-                left_alone.append(line.strip())
+        if _SCRIPT_TOKEN_RE.search(line):
+            if not names_deployed_file(line, target_ccy_dir, SUPERVISOR_SCRIPT_NAME):
+                migration.other_directory.append(line.strip())
                 continue
-        elif not _names_deployed_file(line, target_ccy_dir, SUPERVISOR_LAUNCHER_NAME):
+        elif not names_deployed_file(line, target_ccy_dir, SUPERVISOR_LAUNCHER_NAME):
+            continue
+        if _has_unrewritable_prefix(line):
+            migration.unrewritable_prefix.append(line.strip())
             continue
         rewritten, line_pinned = _replace_interpreter_with_sh(line)
-        pinned.extend(line_pinned)
-        lines[index] = rewritten.replace(SUPERVISOR_SCRIPT_NAME, SUPERVISOR_LAUNCHER_NAME)
-    return "\n".join(lines), left_alone, pinned
+        migration.pinned.extend(line_pinned)
+        lines[index] = _SCRIPT_TOKEN_RE.sub(SUPERVISOR_LAUNCHER_NAME, rewritten)
+    migration.content = "\n".join(lines)
+    return migration
+
+
+def _migration_note(migration: _WrapperMigration, target_ccy_dir: Path, env_path: Path) -> str:
+    """The report appended to the arming message for lines the migration did not fix."""
+    launcher_path = f"{target_ccy_dir}/{SUPERVISOR_LAUNCHER_NAME}"
+    note = ""
+    if migration.other_directory:
+        note += (
+            f"; left unchanged (it names {SUPERVISOR_SCRIPT_NAME} outside "
+            f"{target_ccy_dir}, where the {SUPERVISOR_LAUNCHER_NAME} launcher is not "
+            f"deployed - point it at {launcher_path} to use the launcher): "
+            + " | ".join(migration.other_directory)
+        )
+    if migration.unrewritable_prefix:
+        note += (
+            "; left unchanged (Python options or a variable stand before the supervisor "
+            f"path, and the {SUPERVISOR_LAUNCHER_NAME} launcher is a sh script that cannot "
+            "pass Python options on - change it by hand to "
+            f"`{SHELL_INTERPRETER} {_DEPLOYED_LAUNCHER_REL} ...` and set {_CCY_PYTHON_ENV} "
+            "to choose the Python): " + " | ".join(migration.unrewritable_prefix)
+        )
+    if note:
+        logger.warning("ccy.env wrapper lines left unchanged in %s: %s", env_path, note)
+    pins = list(dict.fromkeys(migration.pinned))
+    if pins:
+        exports = " or ".join(f"`export {_CCY_PYTHON_ENV}={pin}`" for pin in pins)
+        pin_note = (
+            f"; replaced a pinned interpreter ({', '.join(pins)}) with "
+            f"{SHELL_INTERPRETER} - the launcher picks its own Python, so to keep the "
+            f"pin add {exports} to {env_path}"
+        )
+        logger.warning("ccy.env wrapper dropped a pinned interpreter: %s", pin_note)
+        note += pin_note
+    return note
 
 
 def _arm_ccy_supervisor(target_ccy_dir: Path) -> tuple[bool, bool, str]:
@@ -357,26 +400,9 @@ def _arm_ccy_supervisor(target_ccy_dir: Path) -> tuple[bool, bool, str]:
     if env_path.is_file():
         content = env_path.read_text(encoding="utf-8")
         if _WRAPPER_EXPORT_KEY in content:
-            migrated_content, left_alone, pinned = _migrate_wrapper_to_launcher(
-                content, target_ccy_dir
-            )
-            note = ""
-            if left_alone:
-                note = (
-                    f"; left unchanged (it names {SUPERVISOR_SCRIPT_NAME} outside "
-                    f"{target_ccy_dir}, where the {SUPERVISOR_LAUNCHER_NAME} launcher is not "
-                    f"deployed - point it at {target_ccy_dir}/{SUPERVISOR_LAUNCHER_NAME} to use "
-                    "the launcher): " + " | ".join(left_alone)
-                )
-                logger.warning("ccy.env wrapper left on a custom path in %s: %s", env_path, note)
-            if pinned:
-                pin_note = (
-                    f"; replaced a pinned interpreter ({', '.join(pinned)}) with "
-                    f"{_SHELL_INTERPRETER} - the launcher picks its own Python, so to keep the "
-                    f"pin add `export {_CCY_PYTHON_ENV}={pinned[0]}` to {env_path}"
-                )
-                logger.warning("ccy.env wrapper dropped a pinned interpreter: %s", pin_note)
-                note += pin_note
+            migration = _migrate_wrapper_to_launcher(content, target_ccy_dir)
+            migrated_content = migration.content
+            note = _migration_note(migration, target_ccy_dir, env_path)
             if migrated_content != content:
                 env_path.write_text(migrated_content, encoding="utf-8")
                 logger.info("Migrated %s in %s to the launcher", _WRAPPER_EXPORT_KEY, env_path)

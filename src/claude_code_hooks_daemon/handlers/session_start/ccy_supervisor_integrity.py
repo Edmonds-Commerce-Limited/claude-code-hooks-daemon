@@ -196,6 +196,33 @@ class CcySupervisorIntegrityHandler(SessionStartHandlerBase):
             "supervisor. (Nothing is broken meanwhile — the old supervisor keeps working.)",
         ]
 
+    def _launcher_prefix_problem(
+        self, prefix: ccy_supervisor.LauncherPrefix, env_rel: str, launcher_rel: str
+    ) -> str:
+        """Describe a command word in front of the launcher, and how to fix it."""
+        shell = ccy_supervisor.SHELL_INTERPRETER
+        fix = (
+            f"Fix: use `{shell} {launcher_rel}` (or no prefix, if the file is executable) in "
+            "CCY_CLAUDE_WRAPPER"
+        )
+        if not prefix.is_python:
+            return (
+                f"{env_rel} runs the {_LAUNCHER_NAME} launcher under `{prefix.word}`, whose "
+                "value cannot be checked here. The launcher is a sh script, so if that "
+                "variable names a Python it fails with a SyntaxError and Claude Code cannot "
+                f"start. {fix}, and set CCY_PYTHON to choose the Python."
+            )
+        repair = (
+            "a daemon upgrade repairs the line"
+            if prefix.upgrade_repairs
+            else "a daemon upgrade leaves this line alone, so change it by hand"
+        )
+        return (
+            f"{env_rel} runs the {_LAUNCHER_NAME} launcher under `{prefix.word}`, but the "
+            "launcher is a sh script: Python fails on it with a SyntaxError and Claude "
+            f"Code cannot start. {fix}; {repair}."
+        )
+
     def _find_problems(self, project_root: Path, ccy_dir: Path) -> list[str]:
         """Return a list of brick-risk problem descriptions (empty when healthy)."""
         problems: list[str] = []
@@ -235,14 +262,9 @@ class CcySupervisorIntegrityHandler(SessionStartHandlerBase):
                 "import and Claude Code cannot start. Fix: run a daemon upgrade, which "
                 f"repoints CCY_CLAUDE_WRAPPER at {launcher_rel}."
             )
-        interpreter = ccy_supervisor.wrapper_interpreter_before_launcher(env_path)
-        if interpreter is not None:
-            problems.append(
-                f"{env_rel} runs the {_LAUNCHER_NAME} launcher under `{interpreter}`, but the "
-                "launcher is a sh script: Python fails on it with a SyntaxError and Claude "
-                f"Code cannot start. Fix: use `sh {launcher_rel}` (or no prefix, if the file is "
-                "executable) in CCY_CLAUDE_WRAPPER; a daemon upgrade repairs the line."
-            )
+        prefix = ccy_supervisor.wrapper_prefix_before_launcher(env_path)
+        if prefix is not None:
+            problems.append(self._launcher_prefix_problem(prefix, env_rel, launcher_rel))
         if ccy_supervisor.wrapper_names_launcher(env_path):
             tracked_rels.append(launcher_rel)
             if not launcher.is_file():
@@ -335,7 +357,9 @@ class CcySupervisorIntegrityHandler(SessionStartHandlerBase):
             "- **wrapper runs the launcher under a Python interpreter** (`python3 "
             ".claude/ccy/claude-supervise`) → the launcher is a sh script, so Python dies "
             "with a SyntaxError; use `sh .claude/ccy/claude-supervise` or no prefix (a "
-            "daemon upgrade repairs the line).\n"
+            "daemon upgrade repairs a plain interpreter word before the deployed launcher, "
+            "but not one with Python options or a launcher elsewhere). A variable such as "
+            "`$PY` in front of the launcher is reported as unverifiable.\n"
             "- **`ccy.deploy_supervisor: false` while armed+present** → the installer "
             "skips deploy on `false`, so upgrades never refresh `claude-supervise.py` and "
             "the project runs an increasingly stale supervisor. Set it to `true` (or "

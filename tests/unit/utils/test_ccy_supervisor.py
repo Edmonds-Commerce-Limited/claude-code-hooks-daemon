@@ -72,6 +72,24 @@ class TestIsArmed:
         assert ccy_supervisor.wrapper_names_launcher(env) is False
         assert ccy_supervisor.wrapper_execs_bare_script(env) is True
 
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "claude-supervise-wrapper",
+            "claude-supervise_x",
+            "claude-supervise.sh",
+            "claude-supervise_helper.py",
+            "claude-supervise.py.bak",
+        ],
+    )
+    def test_a_name_that_only_starts_with_the_supervisor_name_is_neither(
+        self, tmp_path: Path, name: str
+    ) -> None:
+        env = tmp_path / "ccy.env"
+        _write(env, f'export CCY_CLAUDE_WRAPPER="/x/.claude/ccy/{name} --arm --"\n')
+        assert ccy_supervisor.wrapper_names_launcher(env) is False
+        assert ccy_supervisor.wrapper_execs_bare_script(env) is False
+
     def test_commented_export_is_not_armed(self, tmp_path: Path) -> None:
         env = tmp_path / "ccy.env"
         _write(env, '# export CCY_CLAUDE_WRAPPER="/x/.claude/ccy/claude-supervise.py --arm --"\n')

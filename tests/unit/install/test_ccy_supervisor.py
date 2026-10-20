@@ -16,6 +16,7 @@ from claude_code_hooks_daemon.install.ccy_supervisor import (
     CCY_ENV_NAME,
     SUPERVISOR_LAUNCHER_NAME,
     SUPERVISOR_SCRIPT_NAME,
+    CcySupervisorDeployResult,
     ccy_launcher_source_path,
     ccy_supervisor_source_path,
     deploy_ccy_supervisor_if_enabled,
@@ -49,6 +50,17 @@ def _write_config(project_root: Path, body: str) -> Path:
     config_path = config_dir / "hooks-daemon.yaml"
     config_path.write_text(body)
     return config_path
+
+
+def _migrate(tmp_path: Path, env_content: str) -> tuple[Path, CcySupervisorDeployResult]:
+    """Deploy over a project whose ``ccy.env`` holds ``env_content``; return env and result."""
+    daemon_root = tmp_path / "daemon"
+    project_root = tmp_path / "project"
+    _make_source(daemon_root)
+    env_file = _make_target_ccy(project_root) / CCY_ENV_NAME
+    env_file.write_text(env_content)
+    config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+    return env_file, deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
 
 
 class TestDeployCcySupervisorIfEnabled:
@@ -614,6 +626,104 @@ class TestArmCcySupervisor:
 
         assert result.wrapper_migrated is False
         assert env_file.read_text() == line
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "claude-supervise_helper.py",
+            "claude-supervise-wrapper",
+            "claude-supervise.sh",
+            "claude-supervise.py.bak",
+        ],
+    )
+    def test_a_file_that_only_starts_with_the_supervisor_name_is_untouched(
+        self, tmp_path: Path, name: str
+    ) -> None:
+        line = f'export CCY_CLAUDE_WRAPPER="python3 .claude/ccy/{name} --arm --"\n'
+        env_file, result = _migrate(tmp_path, line)
+
+        assert result.wrapper_migrated is False
+        assert env_file.read_text() == line
+        assert not any("left unchanged" in message for message in result.messages)
+
+    @pytest.mark.parametrize(
+        ("line", "expected"),
+        [
+            (
+                'export CCY_CLAUDE_WRAPPER="foo-python3 .claude/ccy/claude-supervise --"\n',
+                'export CCY_CLAUDE_WRAPPER="foo-python3 .claude/ccy/claude-supervise --"\n',
+            ),
+            (
+                'export CCY_CLAUDE_WRAPPER="/usr/bin/foo-python3 .claude/ccy/claude-supervise.py --"\n',
+                'export CCY_CLAUDE_WRAPPER="/usr/bin/foo-python3 .claude/ccy/claude-supervise --"\n',
+            ),
+        ],
+    )
+    def test_a_word_that_only_ends_in_python3_is_not_an_interpreter(
+        self, tmp_path: Path, line: str, expected: str
+    ) -> None:
+        env_file, _result = _migrate(tmp_path, line)
+
+        assert env_file.read_text() == expected
+
+    @pytest.mark.parametrize(
+        ("line", "expected"),
+        [
+            (
+                "export CCY_CLAUDE_WRAPPER='python3 \".claude/ccy/claude-supervise.py\" --arm --'\n",
+                "export CCY_CLAUDE_WRAPPER='sh \".claude/ccy/claude-supervise\" --arm --'\n",
+            ),
+            (
+                "export CCY_CLAUDE_WRAPPER=\"python3 '.claude/ccy/claude-supervise.py' --arm --\"\n",
+                "export CCY_CLAUDE_WRAPPER=\"sh '.claude/ccy/claude-supervise' --arm --\"\n",
+            ),
+            (
+                "export CCY_CLAUDE_WRAPPER=\"python3.12 '.claude/ccy/claude-supervise' --arm --\"\n",
+                "export CCY_CLAUDE_WRAPPER=\"sh '.claude/ccy/claude-supervise' --arm --\"\n",
+            ),
+        ],
+    )
+    def test_a_quoted_path_keeps_its_quote_and_loses_the_interpreter(
+        self, tmp_path: Path, line: str, expected: str
+    ) -> None:
+        env_file, result = _migrate(tmp_path, line)
+
+        assert result.wrapper_migrated is True
+        assert env_file.read_text() == expected
+
+    @pytest.mark.parametrize(
+        "prefix",
+        ["python3 -u ", "python3 -X dev ", "/usr/bin/python3.12 -I ", "python3 -m trace ", "$PY "],
+    )
+    @pytest.mark.parametrize("name", ["claude-supervise.py", "claude-supervise"])
+    def test_a_prefix_the_upgrade_cannot_rewrite_is_left_alone_and_reported(
+        self, tmp_path: Path, prefix: str, name: str
+    ) -> None:
+        """Python flags or a variable before the path: no safe `sh` rewrite exists."""
+        line = (
+            f'export CCY_CLAUDE_WRAPPER="${{CCY_CLAUDE_WRAPPER:-{prefix}.claude/ccy/{name} --}}"\n'
+        )
+        env_file, result = _migrate(tmp_path, line)
+
+        assert result.wrapper_migrated is False
+        assert env_file.read_text() == line
+        report = "\n".join(result.messages)
+        assert "left unchanged" in report
+        assert line.strip() in report
+        assert "sh .claude/ccy/claude-supervise" in report
+
+    def test_every_pinned_interpreter_is_listed_in_the_ccy_python_hint(
+        self, tmp_path: Path
+    ) -> None:
+        content = (
+            'export CCY_CLAUDE_WRAPPER="python3.12 .claude/ccy/claude-supervise.py --"\n'
+            'export CCY_CLAUDE_WRAPPER="/opt/py/bin/python3.11 .claude/ccy/claude-supervise --"\n'
+        )
+        _env_file, result = _migrate(tmp_path, content)
+
+        report = "\n".join(result.messages)
+        assert "export CCY_PYTHON=python3.12" in report
+        assert "export CCY_PYTHON=/opt/py/bin/python3.11" in report
 
     def test_generated_wrapper_sources_to_absolute_supervisor_path(self, tmp_path: Path) -> None:
         """The armed line must resolve, in bash, to an absolute armed wrapper.

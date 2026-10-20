@@ -269,6 +269,74 @@ class TestHandle:
         text = "\n".join(_run(handler, tmp_path).context)
         assert "sh script" not in text
 
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "python3 .claude/ccy/claude-supervise-wrapper --arm --",
+            "python3 .claude/ccy/claude-supervise_x --arm --",
+            "python3 .claude/ccy/claude-supervise.sh --arm --",
+            "foo-python3 .claude/ccy/claude-supervise --arm --",
+            "/usr/bin/foo-python3 .claude/ccy/claude-supervise --arm --",
+        ],
+    )
+    def test_a_line_that_is_not_python_before_the_launcher_does_not_warn(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path, value: str
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(f'export CCY_CLAUDE_WRAPPER="{value}"\n')
+        _write_script(ccy)
+        text = "\n".join(_run(handler, tmp_path).context)
+        assert "sh script" not in text
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "export CCY_CLAUDE_WRAPPER=\"python3 '.claude/ccy/claude-supervise' --arm --\"\n",
+            "export CCY_CLAUDE_WRAPPER='python3 \".claude/ccy/claude-supervise\" --arm --'\n",
+        ],
+    )
+    def test_a_quoted_launcher_path_under_python_warns_and_the_upgrade_repairs_it(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path, line: str
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(line)
+        _write_script(ccy)
+        text = "\n".join(_run(handler, tmp_path).context)
+        assert "sh script" in text
+        assert "a daemon upgrade repairs the line" in text
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "python3 -u .claude/ccy/claude-supervise --arm --",
+            "python3 -X dev .claude/ccy/claude-supervise --arm --",
+            "/usr/bin/python3 /opt/other/claude-supervise --arm --",
+        ],
+    )
+    def test_a_python_launcher_line_the_upgrade_leaves_alone_is_not_promised_a_repair(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path, value: str
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(f'export CCY_CLAUDE_WRAPPER="{value}"\n')
+        _write_script(ccy)
+        text = "\n".join(_run(handler, tmp_path).context)
+        assert "sh script" in text
+        assert "upgrade repairs" not in text
+        assert "by hand" in text
+
+    @pytest.mark.parametrize("variable", ["$PY", "${PY}"])
+    def test_a_variable_before_the_launcher_is_reported_as_unverifiable(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path, variable: str
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(
+            f'export CCY_CLAUDE_WRAPPER="{variable} .claude/ccy/claude-supervise --arm --"\n'
+        )
+        _write_script(ccy)
+        text = "\n".join(_run(handler, tmp_path).context)
+        assert f"`{variable}`" in text
+        assert "cannot be checked" in text
+
     def test_project_root_none_is_silent(self, handler: CcySupervisorIntegrityHandler) -> None:
         assert _run(handler, None).context == []
 
