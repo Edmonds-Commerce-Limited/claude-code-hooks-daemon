@@ -73,7 +73,7 @@ or `${VAR}` is the command word directly before the supervisor path.
 
 **A5.** `SHELL_INTERPRETER` is now shared from utils, by both install and integrity.
 
-## Residual (not fixed)
+## Residual (fixed in follow-up `f2220c282`, see below)
 
 The integrity warning for the bare script ("execs claude-supervise.py directly ... a daemon
 upgrade repoints it") still promises a repoint in two cases where the upgrade now leaves the line
@@ -90,3 +90,61 @@ The upgrade output does report both lines.
 changed_tests: 2728 passed, 0 failed, 5 skipped (45 test files from 8 changed files, 0 unmapped).
 The run was recorded green for the merge-time advisory. The full output is in
 `untracked/scratch/rf126-qa.txt`.
+
+## Follow-up: bare-script repoint promise (`f2220c282`)
+
+**Red tests** (integrity):
+
+- `test_a_bare_script_line_the_upgrade_leaves_alone_is_not_promised_a_repoint` covers
+  `python3 -u X.py`, `$PY X.py` and `/opt/tools/claude-supervise.py`. All 3 failed on `a78d84bb8`
+  (`untracked/scratch/rf126b-red.txt`).
+- `test_a_bare_script_line_the_upgrade_repoints_is_promised_the_repoint` is a guard. It passed
+  before and after the fix.
+
+**Fix:** the decision is now one predicate in `utils/ccy_supervisor.py`:
+`upgrade_repoints_script(line, deployed_ccy_dir)`. It requires the deployed script and no
+unrewritable prefix. `has_unrewritable_prefix` and `SUPERVISOR_PREFIX_RE` moved there as well.
+
+- `_migrate_wrapper_to_launcher` repoints a script line only when that predicate holds. When it
+  does not hold, the line is sorted into one of the existing report lists: the unrewritable-prefix
+  list or the other-directory list.
+- The integrity handler calls `bare_script_upgrade_repoints(env)`, which applies the same
+  predicate to every active script line. It promises the upgrade repoint only when that is true.
+  Otherwise it says the upgrade leaves the line alone and to change it by hand to
+  `sh .claude/ccy/claude-supervise`.
+- The handler guidance text is updated to match.
+
+**Tests:** all 182 tests in the three touched files pass (`untracked/scratch/rf126b-green.txt`).
+ruff and mypy are clean.
+
+**QA:** `./scripts/qa/llm_qa.py changed` on head `f2220c282` gave QA_EXIT=0 and **40/40 PASSED**.
+changed_tests: 2732 passed, 0 failed, 5 skipped (45 test files from 9 changed files, 0 unmapped).
+The full output is in `untracked/scratch/rf126b-qa.txt`.
+
+## Re-review fixes (`d0ba739de`)
+
+These respond to `261020-issue126-rereview-opus.md`, which approved `f2220c282` with two
+suggestions.
+
+**S1.** The `wrapper_execs_bare_script` docstring now says that an upgrade repoints the line only
+when `upgrade_repoints_script` holds. Otherwise the line must be fixed by hand.
+
+**S2.** When there are several bare-script lines, the warning now names exactly the lines the
+upgrade leaves alone. When other lines are repointable, it adds "a daemon upgrade repoints the
+other lines". The predicate now has utils-level tests.
+
+- Red tests, run on `a78d84bb8`+`f2220c282` code: 2 failed (`untracked/scratch/rf126c-red.txt`).
+  - Integrity: `test_mixed_bare_script_lines_name_only_the_line_to_fix_by_hand`
+  - Utils: `test_bare_script_lines_left_alone_lists_only_active_unrepointable_lines` (comment line
+    ignored, CRLF line)
+- Guards that already passed: `test_upgrade_repoints_script_matches_the_migration_rule` (5
+  params: plain, CRLF, flags, variable, outside dir).
+- Fix:
+  - `bare_script_lines(env)` is the one line selector. `wrapper_execs_bare_script` and
+    `bare_script_lines_left_alone(env)` both build on it, and `bare_script_lines_left_alone` uses
+    the shared `upgrade_repoints_script`.
+  - `bare_script_upgrade_repoints` is replaced by `bare_script_lines_left_alone`.
+- Tests: all 189 tests in the three touched files pass. ruff and mypy are clean.
+- QA: `./scripts/qa/llm_qa.py changed` on head `d0ba739de` gave QA_EXIT=0 and **40/40 PASSED**.
+  changed_tests: 2739 passed, 0 failed, 5 skipped. The full output is in
+  `untracked/scratch/rf126c-qa.txt`.
