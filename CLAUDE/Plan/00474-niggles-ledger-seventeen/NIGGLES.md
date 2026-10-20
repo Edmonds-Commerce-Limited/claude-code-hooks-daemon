@@ -739,6 +739,9 @@ prune. Release note 052.
   for 6ae406932.
 - Run for 6ae406932: `test_subagent_full_qa_blocker.py:4501` (`test_many_edits_each_run_are_judged_quickly[a=['y']+a]`)
   measured 1.615s against `scaled_cpu_seconds(1.5)`. This is the N376 class (tracked in #107, Plan 00476 Design 6).
+- Recurrence, run 39364158757 for d5f7a2cf0 (a plan-files-only commit): the same test, parameter `a=a+['x{i}']`,
+  measured 1.615s against 1.5. It was the run's only failure (50744 passed). The next run, 39364691440 for
+  e1f208711, was green.
 
 **Fix direction**: a lint timeout is an environment fact, not the handler's verdict, so a probe whose linter timed out
 must not be scored as the handler's decision (skip with the reason, or raise the CI Swift timeout); the timing bound
