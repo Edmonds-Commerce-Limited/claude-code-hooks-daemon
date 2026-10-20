@@ -57,5 +57,5 @@ triaged as actionable on 2026-09-22. The ruling is in this plan's JOURNAL/.
 
 ## Delivery & Milestones
 
-- Merged to main in `31c6a1454`; the change itself is `876a4e4e8`. Targeted QA was 40/40 on the merge.
+- Merged to main in `31c6a1454`; the change itself is `0cb0e2543`, and `876a4e4e8` (the branch tip) adds the implementer report. Targeted QA was 40/40 on the merge.
   `constants/handlers.py` is unmapped (too broad), so the full CI run covers it.
