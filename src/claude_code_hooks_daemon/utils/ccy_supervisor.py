@@ -185,6 +185,40 @@ def prefix_before_supervisor(file_name_pattern: str) -> re.Pattern[str]:
 _LAUNCHER_PREFIX_RE: Final[re.Pattern[str]] = prefix_before_supervisor(
     re.escape(_SUPERVISOR_LAUNCHER_NAME)
 )
+#: A command word directly before the supervisor path, which may name the script
+#: or the launcher.
+SUPERVISOR_PREFIX_RE: Final[re.Pattern[str]] = prefix_before_supervisor(
+    rf"(?:{re.escape(_SUPERVISOR_SCRIPT_NAME)}|{re.escape(_SUPERVISOR_LAUNCHER_NAME)})"
+)
+
+
+def has_unrewritable_prefix(line: str) -> bool:
+    """Is the supervisor path behind Python options or a variable?
+
+    The launcher is a ``sh`` script that cannot pass Python options on, and what
+    a variable runs is unknown, so no ``sh`` rewrite is known to keep the meaning.
+    """
+    return any(
+        match.group("flags") or match.group("variable")
+        for match in SUPERVISOR_PREFIX_RE.finditer(line)
+    )
+
+
+def upgrade_repoints_script(line: str, deployed_ccy_dir: Path) -> bool:
+    """Would a daemon upgrade repoint this ``claude-supervise.py`` line at the launcher?
+
+    The one decision the upgrade's migration and the integrity warning share: the
+    script must be the deployed one, with no prefix the upgrade cannot rewrite.
+    """
+    return names_deployed_file(
+        line, deployed_ccy_dir, _SUPERVISOR_SCRIPT_NAME
+    ) and not has_unrewritable_prefix(line)
+
+
+def bare_script_upgrade_repoints(ccy_env: Path) -> bool:
+    """True when a daemon upgrade repoints every active line that execs the bare script."""
+    lines = [line for line in _active_wrapper_lines(ccy_env) if _SCRIPT_TOKEN_RE.search(line)]
+    return bool(lines) and all(upgrade_repoints_script(line, ccy_env.parent) for line in lines)
 
 
 @dataclass(frozen=True)

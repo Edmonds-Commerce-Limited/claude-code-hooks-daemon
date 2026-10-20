@@ -39,9 +39,11 @@ from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.utils.ccy_supervisor import (
     PLAIN_INTERPRETER_WORDS,
     SHELL_INTERPRETER,
+    SUPERVISOR_PREFIX_RE,
     file_name_token,
+    has_unrewritable_prefix,
     names_deployed_file,
-    prefix_before_supervisor,
+    upgrade_repoints_script,
 )
 
 logger = logging.getLogger(__name__)
@@ -253,11 +255,6 @@ def deploy_ccy_supervisor_if_enabled(
     return result
 
 
-#: A command word directly before the supervisor path, which may name the script
-#: or the launcher.
-_PREFIX_BEFORE_SUPERVISOR_RE: Final[re.Pattern[str]] = prefix_before_supervisor(
-    rf"(?:{re.escape(SUPERVISOR_SCRIPT_NAME)}|{re.escape(SUPERVISOR_LAUNCHER_NAME)})"
-)
 _SCRIPT_TOKEN_RE: Final[re.Pattern[str]] = file_name_token(SUPERVISOR_SCRIPT_NAME)
 
 
@@ -291,15 +288,7 @@ def _replace_interpreter_with_sh(line: str) -> tuple[str, list[str]]:
             pinned.append(word)
         return f"{SHELL_INTERPRETER}{match.group('gap')}"
 
-    return _PREFIX_BEFORE_SUPERVISOR_RE.sub(to_sh, line), pinned
-
-
-def _has_unrewritable_prefix(line: str) -> bool:
-    """Is the supervisor path behind Python options or a variable?"""
-    return any(
-        match.group("flags") or match.group("variable")
-        for match in _PREFIX_BEFORE_SUPERVISOR_RE.finditer(line)
-    )
+    return SUPERVISOR_PREFIX_RE.sub(to_sh, line), pinned
 
 
 def _migrate_wrapper_to_launcher(content: str, target_ccy_dir: Path) -> _WrapperMigration:
@@ -326,12 +315,15 @@ def _migrate_wrapper_to_launcher(content: str, target_ccy_dir: Path) -> _Wrapper
         if line.lstrip().startswith("#") or _WRAPPER_EXPORT_KEY not in line:
             continue
         if _SCRIPT_TOKEN_RE.search(line):
-            if not names_deployed_file(line, target_ccy_dir, SUPERVISOR_SCRIPT_NAME):
-                migration.other_directory.append(line.strip())
+            if not upgrade_repoints_script(line, target_ccy_dir):
+                if names_deployed_file(line, target_ccy_dir, SUPERVISOR_SCRIPT_NAME):
+                    migration.unrewritable_prefix.append(line.strip())
+                else:
+                    migration.other_directory.append(line.strip())
                 continue
         elif not names_deployed_file(line, target_ccy_dir, SUPERVISOR_LAUNCHER_NAME):
             continue
-        if _has_unrewritable_prefix(line):
+        elif has_unrewritable_prefix(line):
             migration.unrewritable_prefix.append(line.strip())
             continue
         rewritten, line_pinned = _replace_interpreter_with_sh(line)

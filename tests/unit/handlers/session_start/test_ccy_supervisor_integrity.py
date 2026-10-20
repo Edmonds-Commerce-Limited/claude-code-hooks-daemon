@@ -324,6 +324,34 @@ class TestHandle:
         assert "upgrade repairs" not in text
         assert "by hand" in text
 
+    def test_a_bare_script_line_the_upgrade_repoints_is_promised_the_repoint(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(_BARE_SCRIPT_ENV)
+        _write_script(ccy)
+        text = "\n".join(_run(handler, tmp_path).context)
+        assert "run a daemon upgrade, which repoints" in text
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "python3 -u .claude/ccy/claude-supervise.py --arm --",
+            "$PY .claude/ccy/claude-supervise.py --arm --",
+            "/opt/tools/claude-supervise.py --arm --",
+        ],
+    )
+    def test_a_bare_script_line_the_upgrade_leaves_alone_is_not_promised_a_repoint(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path, value: str
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(f'export CCY_CLAUDE_WRAPPER="{value}"\n')
+        _write_script(ccy)
+        text = "\n".join(_run(handler, tmp_path).context)
+        assert "execs claude-supervise.py directly" in text
+        assert "repoints" not in text
+        assert "by hand" in text
+
     @pytest.mark.parametrize("variable", ["$PY", "${PY}"])
     def test_a_variable_before_the_launcher_is_reported_as_unverifiable(
         self, handler: CcySupervisorIntegrityHandler, tmp_path: Path, variable: str

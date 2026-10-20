@@ -256,11 +256,19 @@ class CcySupervisorIntegrityHandler(SessionStartHandlerBase):
         launcher_rel = f"{_CCY_DIR_PARTS[0]}/{_CCY_DIR_PARTS[1]}/{_LAUNCHER_NAME}"
         tracked_rels = [script_rel, env_rel]
         if ccy_supervisor.wrapper_execs_bare_script(env_path):
+            fix = (
+                f"run a daemon upgrade, which repoints CCY_CLAUDE_WRAPPER at {launcher_rel}"
+                if ccy_supervisor.bare_script_upgrade_repoints(env_path)
+                else (
+                    "a daemon upgrade leaves this line alone (Python options or a variable "
+                    "stand before the script, or it is outside the deployed directory), so "
+                    f"change it by hand to `{ccy_supervisor.SHELL_INTERPRETER} {launcher_rel}`"
+                )
+            )
             problems.append(
                 f"{env_rel} execs claude-supervise.py directly, bypassing the {_LAUNCHER_NAME} "
                 "launcher. On a system Python older than 3.11 the supervisor crashes at "
-                "import and Claude Code cannot start. Fix: run a daemon upgrade, which "
-                f"repoints CCY_CLAUDE_WRAPPER at {launcher_rel}."
+                f"import and Claude Code cannot start. Fix: {fix}."
             )
         prefix = ccy_supervisor.wrapper_prefix_before_launcher(env_path)
         if prefix is not None:
@@ -353,7 +361,8 @@ class CcySupervisorIntegrityHandler(SessionStartHandlerBase):
             "(or starts claude unsupervised with a warning). Same fixes as the script.\n"
             "- **wrapper still execs `claude-supervise.py` directly** → on a system Python "
             "older than 3.11 Claude Code cannot start; a daemon upgrade repoints it at "
-            "the launcher.\n"
+            "the launcher, unless Python options or a variable stand before the script or "
+            "it is outside the deployed directory, which must be fixed by hand.\n"
             "- **wrapper runs the launcher under a Python interpreter** (`python3 "
             ".claude/ccy/claude-supervise`) → the launcher is a sh script, so Python dies "
             "with a SyntaxError; use `sh .claude/ccy/claude-supervise` or no prefix (a "
