@@ -74,12 +74,16 @@ path, so the broken line passes silently.
 
 ## Success Criteria
 
-- [ ] Each change has a test that failed before it.
-- [ ] The reporter's reproduction gives a working `sh …/claude-supervise` line.
-- [ ] The release note is in the pending-release holding area
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] Each change has a test that failed before it.
+- [x] The reporter's reproduction gives a working `sh …/claude-supervise` line.
+- [x] The release note is in the pending-release holding area
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
+  (`005-ccy-wrapper-interpreter-prefix-repaired.md`).
 - [ ] Targeted QA is green on the merged head, and CI is green.
 
 ## Delivery & Milestones
 
-- <!-- delivery commit hashes -->
+- Merged to main in `6e349af66`. The fix is c8186ede1/f5ba6fbc4, the review fixes are 8b7faec53, the
+  bare-script repoint promise is f2220c282, and the re-review fixes are d0ba739de.
+- Targeted QA was 40/40 on `6e349af66`, with 2744 changed tests passing. The first run errored only
+  because the daemon was stale. Reports are in `subagent-reports/`.
