@@ -111,19 +111,21 @@ Related plans (dedupe scout, not duplicates):
   - Record the edit-to-live reload check (`CLAUDE/development/CcySupervisor.md`).
   - Add a release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
   - Document the new option.
-- [ ] ⬜ **Task 3.2**: File the follow-up plan. It covers auto-refocus and the
+- [x] ✅ **Task 3.2**: File the follow-up plan, done as
+  [Plan 00538](../00538-supervisor-auto-refocus-and-focus-signal/PLAN.md). It covers auto-refocus and the
   screen model (agent-needs-human, cross-referencing Plans 00160 and 00453), and
   a spike for a non-screen focus signal. Note for #127: its restart request
   persists only when `/exit` was actually sent.
 
 ## Success Criteria
 
-- [ ] Each change has a test that failed before it.
-- [ ] No `_perform_injection` call site sends while the latch is set.
-- [ ] The release note is in the pending-release holding area
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
-- [ ] Targeted QA is green on the merged head, and CI is green.
+- [x] Each change has a test that failed before it.
+- [x] No `_perform_injection` call site sends while the latch is set.
+- [x] The release note is in the pending-release holding area
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (003).
+- [ ] Targeted QA is green on the merged head (40/40 on 605d8ed4d), and CI is green.
 
 ## Delivery & Milestones
 
-- <!-- delivery commit hashes -->
+- 605d8ed4d: merge of `worktree-plan-00537`. It went through a review and two
+  re-review rounds (`subagent-reports/`); code head 3afb238dc.
