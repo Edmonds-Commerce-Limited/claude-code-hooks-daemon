@@ -49,11 +49,13 @@ triaged as actionable on 2026-09-22. The ruling is in this plan's JOURNAL/.
 
 ## Success Criteria
 
-- [ ] The new test failed before the change and passes after it.
-- [ ] The release note is in the pending-release holding area
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] The new test failed before the change and passes after it.
+- [x] The release note is in the pending-release holding area
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
+  (`006-transcript-archiver-advisory-names-orphaned-dir.md`).
 - [ ] Targeted QA is green on the merged head, and CI is green.
 
 ## Delivery & Milestones
 
-- <!-- delivery commit hashes -->
+- Merged to main in `31c6a1454`; the change itself is `876a4e4e8`. Targeted QA was 40/40 on the merge.
+  `constants/handlers.py` is unmapped (too broad), so the full CI run covers it.
