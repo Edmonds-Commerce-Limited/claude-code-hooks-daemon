@@ -253,9 +253,7 @@ class TestPendingRecordIsWritten:
         _request(_coordinator(tmp_path), _Writer())
         assert stat.S_IMODE(_record_path(tmp_path).stat().st_mode) == 0o600
 
-    def test_the_deadline_never_ends_before_the_coordinators_own_hold(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_deadline_never_ends_before_the_coordinators_own_hold(self, tmp_path: Path) -> None:
         for wait in (0.5, 7.0, 30.0, 120.0):
             directory = tmp_path / f"wait-{wait:g}"
             _request(_coordinator(directory, wait=wait), _Writer())
