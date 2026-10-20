@@ -527,7 +527,9 @@ class TestArmCcySupervisor:
         _make_source(daemon_root)
         ccy = _make_target_ccy(project_root)
         env_file = ccy / CCY_ENV_NAME
-        disabled = '# export CCY_CLAUDE_WRAPPER="python3 .claude/ccy/claude-supervise.py --arm --"\n'
+        disabled = (
+            '# export CCY_CLAUDE_WRAPPER="python3 .claude/ccy/claude-supervise.py --arm --"\n'
+        )
         env_file.write_text(disabled)
         config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
 
@@ -578,7 +580,9 @@ class TestArmCcySupervisor:
 
         assert any(f"export CCY_PYTHON={pinned}" in message for message in result.messages)
 
-    @pytest.mark.parametrize("prefix", ["python3 ", "python ", "env python3 ", "/usr/bin/env python "])
+    @pytest.mark.parametrize(
+        "prefix", ["python3 ", "python ", "env python3 ", "/usr/bin/env python "]
+    )
     def test_a_plain_interpreter_is_not_reported_as_pinned(
         self, tmp_path: Path, prefix: str
     ) -> None:
