@@ -9062,7 +9062,9 @@ def _exit_code_from_status(status: int) -> int:
 #
 #   1. refuse unless exactly one own session id is known (the relaunch has to
 #      resume THE conversation, and a wrong id would resume another);
-#   2. type `/exit` through the ordinary injection path;
+#   2. write `restart-pending.json` (session_id, plugin, reason, requested_at
+#      and a wall-clock deadline), then type `/exit` through the ordinary
+#      injection path;
 #   3. HOLD every other injection until the child exits -- bounded: a child
 #      that ignores `/exit` is abandoned after `_RESTART_EXIT_WAIT_SECONDS` and
 #      the session carries on as if nothing had been asked;
@@ -9073,6 +9075,13 @@ def _exit_code_from_status(status: int) -> int:
 #
 # The launcher must treat the status as a request only when the file is present
 # and fresh, and delete the file once it has read it.
+#
+# The restart-pending record is for the child's SessionEnd hooks, which run
+# before the child exits. Its path reaches the child as
+# `CCY_SUPERVISOR_RESTART_PENDING`. A hook treats its session as restarting
+# only when the record exists, names the hook's own session id, and its
+# deadline has not passed. The record is removed when typing fails, on abandon
+# and in `finish()`.
 # ---------------------------------------------------------------------------
 
 # sysexits.h EX_TEMPFAIL: "temporary failure, retry". Never `claude`'s own
@@ -9094,6 +9103,13 @@ _RESTARTED_MARKER_MAX_AGE_SECONDS = 24 * 60 * 60.0
 _CLAUDE_VERSION_TIMEOUT_SECONDS = 3.0
 _SESSION_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
 _RESTART_MAX_ABANDONED = 3
+# Plan 00539: the restart-pending record, beside the request file, and the
+# variable that names it to the child. Its wall-clock deadline is
+# `requested_at` + `_RESTART_EXIT_WAIT_SECONDS` + this margin, so a reader never
+# sees it expire while the supervisor still holds the request.
+_RESTART_PENDING_FILENAME = "restart-pending.json"
+_RESTART_PENDING_ENV = "CCY_SUPERVISOR_RESTART_PENDING"
+_RESTART_PENDING_DEADLINE_MARGIN_SECONDS = 5.0
 
 
 def _restart_request_path() -> Path:
@@ -9145,6 +9161,7 @@ class RestartCoordinator:
         *,
         state_path: Path,
         marker_path: Path | None = None,
+        pending_record_path: Path | None = None,
         wait_seconds: float = _RESTART_EXIT_WAIT_SECONDS,
         cooldown_seconds: float = _RESTART_RETRY_COOLDOWN_SECONDS,
         max_abandoned: int = _RESTART_MAX_ABANDONED,
@@ -9157,6 +9174,11 @@ class RestartCoordinator:
             marker_path
             if marker_path is not None
             else state_path.with_name(_RESTARTED_MARKER_FILENAME)
+        )
+        self._pending_record_path = (
+            pending_record_path
+            if pending_record_path is not None
+            else state_path.with_name(_RESTART_PENDING_FILENAME)
         )
         self._wait_seconds = wait_seconds
         self._cooldown_seconds = cooldown_seconds
@@ -9173,9 +9195,49 @@ class RestartCoordinator:
         """True from the moment `/exit` was typed until the child exits or the wait is abandoned."""
         return self._pending is not None
 
+    @property
+    def pending_record_path(self) -> Path:
+        """Where the restart-pending record is written; exported to the child at spawn."""
+        return self._pending_record_path
+
     def expired(self) -> bool:
         """True when a pending request has waited out its bound."""
         return self._pending is not None and self._monotonic() >= self._pending.deadline
+
+    def _write_pending_record(
+        self,
+        *,
+        plugin: str,
+        reason: str,
+        session_id: str,
+        requested_at: float,
+        log: DecisionLog | None,
+    ) -> None:
+        """Write the record a SessionEnd hook reads; a failure loses only that signal."""
+        payload: dict[str, object] = {
+            "session_id": session_id,
+            "plugin": plugin,
+            "reason": reason,
+            "requested_at": requested_at,
+            "deadline": requested_at
+            + self._wait_seconds
+            + _RESTART_PENDING_DEADLINE_MARGIN_SECONDS,
+        }
+        try:
+            _write_private_json(self._pending_record_path, payload)
+        except OSError as error:
+            _log_line(
+                log, f"exit for restart: could not write {self._pending_record_path}: {error}"
+            )
+
+    def _remove_pending_record(self, log: DecisionLog | None) -> None:
+        """Remove the record: the resumed session keeps the same id, so none may linger."""
+        try:
+            self._pending_record_path.unlink(missing_ok=True)
+        except OSError as error:
+            _log_line(
+                log, f"exit for restart: could not remove {self._pending_record_path}: {error}"
+            )
 
     def request(
         self,
@@ -9232,13 +9294,27 @@ class RestartCoordinator:
             if held_line is not None:
                 _log_line(log, held_line)
             return False
-        _perform_injection(write_master, _RESTART_EXIT_COMMAND, submit=True, sleep=self._sleep)
+        # Plan 00539: every refusal is behind us. The record must exist before
+        # `/exit` is typed, because Claude Code runs SessionEnd hooks as it exits.
+        requested_at = self._wall_clock()
+        self._write_pending_record(
+            plugin=plugin,
+            reason=reason,
+            session_id=session_id,
+            requested_at=requested_at,
+            log=log,
+        )
+        try:
+            _perform_injection(write_master, _RESTART_EXIT_COMMAND, submit=True, sleep=self._sleep)
+        except BaseException:
+            self._remove_pending_record(log)
+            raise
         machine.mark_own_line_typed(_RESTART_EXIT_COMMAND, self._wall_clock())
         self._pending = _PendingRestart(
             plugin=plugin,
             reason=reason,
             session_id=session_id,
-            requested_at=self._wall_clock(),
+            requested_at=requested_at,
             deadline=self._monotonic() + self._wait_seconds,
         )
         _log_line(
@@ -9258,6 +9334,7 @@ class RestartCoordinator:
         pending, self._pending = self._pending, None
         if pending is None:
             return None
+        self._remove_pending_record(log)
         self._cooldown_until = self._monotonic() + self._cooldown_seconds
         count = self._abandoned.get(pending.plugin, 0) + 1
         self._abandoned[pending.plugin] = count
@@ -9280,6 +9357,7 @@ class RestartCoordinator:
         pending, self._pending = self._pending, None
         if pending is None:
             return exit_code
+        self._remove_pending_record(log)
         payload = {
             "session_id": pending.session_id,
             "reason": pending.reason,
@@ -9842,8 +9920,13 @@ def supervise(
         spinner = _StartupSpinner(sys.stderr)
         spinner.start()
 
+    # Plan 00539: the child's SessionEnd hooks find the restart-pending record
+    # here. Set only in the child, so the supervisor's own environment (and the
+    # worker it spawns) is untouched.
+    child_environment = {_RESTART_PENDING_ENV: str(restart.pending_record_path)}
     pid, master_fd = pty.fork()
     if pid == 0:  # pragma: no cover - runs in the forked child process
+        os.environ.update(child_environment)
         # SECURITY: no shell involved -- argv is passed directly to execvp as
         # a list (never a shell string), so there is no command-injection
         # surface here. This IS the supervisor's job: exec the wrapped

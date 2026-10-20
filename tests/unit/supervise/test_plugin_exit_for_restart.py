@@ -15,12 +15,13 @@ import os
 import stat
 from typing import TYPE_CHECKING, Any
 
+import pytest
+
 from tests.unit.supervise._load import load_supervisor_module
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
-
-    import pytest
 
 _mod = load_supervisor_module()
 
@@ -61,7 +62,7 @@ def _coordinator(tmp_path: Path, clock: _Clock | None = None, wait: float = 30.0
 
 def _request(
     coordinator: Any,
-    writer: _Writer,
+    writer: Callable[[bytes], None],
     *,
     sessions: frozenset[str] = frozenset({_SESSION}),
     dry_run: bool = False,
@@ -197,6 +198,152 @@ class TestFinish:
     def test_the_default_location_is_under_the_ccy_state_directory(self) -> None:
         assert _mod._restart_request_path() == _mod._ccy_state_dir() / "restart-request.json"
         assert _mod._ccy_state_dir().parent == _mod._SELF_PATH.parent
+
+
+# -- Plan 00539: the restart-pending record a SessionEnd hook can read --------
+
+
+def _record_path(tmp_path: Path) -> Path:
+    return tmp_path / "state" / "restart-pending.json"
+
+
+def _expected_record(plugin: str = "max-age") -> dict[str, object]:
+    return {
+        "session_id": _SESSION,
+        "plugin": plugin,
+        "reason": "session is 3 days old",
+        "requested_at": _NOW,
+        "deadline": _NOW
+        + _mod._RESTART_EXIT_WAIT_SECONDS
+        + _mod._RESTART_PENDING_DEADLINE_MARGIN_SECONDS,
+    }
+
+
+def _raising_writer(data: bytes) -> None:
+    raise OSError("pty gone")
+
+
+class TestPendingRecordIsWritten:
+    def test_the_record_sits_beside_the_request_file(self, tmp_path: Path) -> None:
+        assert _coordinator(tmp_path).pending_record_path == _record_path(tmp_path)
+
+    def test_the_default_location_is_under_the_ccy_state_directory(self) -> None:
+        coordinator = _mod.RestartCoordinator(state_path=_mod._restart_request_path())
+        assert coordinator.pending_record_path == _mod._ccy_state_dir() / "restart-pending.json"
+
+    def test_the_record_exists_before_exit_is_typed(self, tmp_path: Path) -> None:
+        seen: list[bool] = []
+
+        def writer(data: bytes) -> None:
+            seen.append(_record_path(tmp_path).exists())
+
+        assert _request(_coordinator(tmp_path), writer)
+        assert seen
+        assert all(seen)
+
+    def test_the_record_names_the_own_session_and_a_wall_clock_deadline(
+        self, tmp_path: Path
+    ) -> None:
+        clock = _Clock()
+        clock.now = 5.0  # monotonic: nowhere near the wall clock
+        _request(_coordinator(tmp_path, clock), _Writer())
+        assert json.loads(_record_path(tmp_path).read_text()) == _expected_record()
+
+    def test_the_record_is_private(self, tmp_path: Path) -> None:
+        _request(_coordinator(tmp_path), _Writer())
+        assert stat.S_IMODE(_record_path(tmp_path).stat().st_mode) == 0o600
+
+    def test_the_deadline_margin_is_named_and_positive(self) -> None:
+        assert _mod._RESTART_PENDING_DEADLINE_MARGIN_SECONDS > 0
+
+    def test_an_unwritable_record_is_logged_and_the_exit_still_typed(self, tmp_path: Path) -> None:
+        (tmp_path / "state").write_text("a file where the directory should be")
+        writer = _Writer()
+        log = _mod.DecisionLog(tmp_path / "decision.log")
+        assert _request(_coordinator(tmp_path), writer, log=log)
+        assert "/exit" in writer.text
+        assert "could not write" in (tmp_path / "decision.log").read_text()
+
+
+class TestNoRecordWithoutAnExit:
+    def test_dry_run_leaves_no_record(self, tmp_path: Path) -> None:
+        _request(_coordinator(tmp_path), _Writer(), dry_run=True)
+        assert not _record_path(tmp_path).exists()
+
+    def test_an_ambiguous_session_leaves_no_record(self, tmp_path: Path) -> None:
+        for sessions in (frozenset(), frozenset({"a", "b"})):
+            _request(_coordinator(tmp_path), _Writer(), sessions=sessions)
+            assert not _record_path(tmp_path).exists()
+
+    def test_the_cooldown_leaves_no_record(self, tmp_path: Path) -> None:
+        clock = _Clock()
+        coordinator = _coordinator(tmp_path, clock)
+        _abandon_one(coordinator, clock)
+        assert not _request(coordinator, _Writer())
+        assert not _record_path(tmp_path).exists()
+
+    def test_the_abandon_cap_leaves_no_record(self, tmp_path: Path) -> None:
+        clock = _Clock()
+        coordinator = _coordinator(tmp_path, clock)
+        for _ in range(_mod._RESTART_MAX_ABANDONED):
+            _abandon_one(coordinator, clock)
+            clock.now += _mod._RESTART_RETRY_COOLDOWN_SECONDS + 1.0
+        assert not _request(coordinator, _Writer())
+        assert not _record_path(tmp_path).exists()
+
+    def test_an_already_pending_request_keeps_the_first_record(self, tmp_path: Path) -> None:
+        coordinator = _coordinator(tmp_path)
+        _request(coordinator, _Writer())
+        assert not coordinator.request(
+            "other-plugin",
+            "another reason",
+            session_ids=frozenset({_SESSION}),
+            machine=_mod.CompactStateMachine(_mod.CompactPolicy()),
+            write_master=_Writer(),
+            log=None,
+            dry_run=False,
+        )
+        assert json.loads(_record_path(tmp_path).read_text()) == _expected_record()
+
+    def test_a_typing_failure_removes_the_record_and_re_raises(self, tmp_path: Path) -> None:
+        coordinator = _coordinator(tmp_path)
+        with pytest.raises(OSError, match="pty gone"):
+            _request(coordinator, _raising_writer)
+        assert not _record_path(tmp_path).exists()
+        assert not coordinator.pending
+
+
+class TestPendingRecordIsRemoved:
+    def test_abandoning_removes_the_record(self, tmp_path: Path) -> None:
+        clock = _Clock()
+        coordinator = _coordinator(tmp_path, clock)
+        _request(coordinator, _Writer())
+        clock.now += 31.0
+        coordinator.abandon(None)
+        assert not _record_path(tmp_path).exists()
+
+    def test_finishing_removes_the_record_and_still_writes_the_request(
+        self, tmp_path: Path
+    ) -> None:
+        coordinator = _coordinator(tmp_path)
+        _request(coordinator, _Writer())
+        assert coordinator.finish(0, None) == _mod.EXIT_STATUS_RESTART_REQUESTED
+        assert not _record_path(tmp_path).exists()
+        assert (tmp_path / "state" / "restart-request.json").exists()
+
+    def test_a_record_that_cannot_be_removed_is_logged(self, tmp_path: Path) -> None:
+        coordinator = _mod.RestartCoordinator(
+            state_path=tmp_path / "state" / "restart-request.json",
+            pending_record_path=tmp_path / "a-directory",
+            wall_clock=lambda: _NOW,
+            sleep=lambda seconds: None,
+        )
+        (tmp_path / "a-directory").mkdir()
+        (tmp_path / "a-directory" / "child").write_text("keeps the directory non-empty")
+        log = _mod.DecisionLog(tmp_path / "decision.log")
+        _request(coordinator, _Writer(), log=log)
+        coordinator.abandon(log)
+        assert "could not remove" in (tmp_path / "decision.log").read_text()
 
 
 # -- supervise(): the whole path over a real PTY -----------------------------
@@ -547,3 +694,84 @@ class TestSuperviseCapDisablesThePlugin:
         )
         assert code == 4
         assert b"COMPACT-AFTER-BOUND" in received.read_bytes()
+
+
+# -- Plan 00539: the child is told where the record is ------------------------
+
+# A child that reports CCY_SUPERVISOR_RESTART_PENDING and, as a SessionEnd hook
+# would at that moment, the record's content when `/exit` arrives. With "now"
+# it reports at once and exits with status 3.
+_RECORD_READING_CHILD = r"""
+import os, sys, time, select
+def report():
+    path = os.environ.get("CCY_SUPERVISOR_RESTART_PENDING", "<unset>")
+    with open(sys.argv[1], "w") as handle:
+        handle.write(path + "\n")
+        if os.path.exists(path):
+            handle.write(open(path).read())
+if sys.argv[2] == "now":
+    report()
+    sys.exit(3)
+deadline = time.time() + 5.0
+while time.time() < deadline:
+    ready, _, _ = select.select([0], [], [], 0.05)
+    if ready and b"/exit" in os.read(0, 4096):
+        report()
+        sys.exit(0)
+sys.exit(3)
+"""
+
+
+def _run_record_reader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, mode: str, decider: Any
+) -> tuple[int, Any, list[str]]:
+    monkeypatch.setattr(_mod, "cached_own_session_ids", lambda *a, **k: frozenset({_SESSION}))
+    report = tmp_path / "report.txt"
+    coordinator = _mod.RestartCoordinator(state_path=tmp_path / "state" / "restart-request.json")
+    stdin_fd = os.open(os.devnull, os.O_RDONLY)
+    try:
+        code = _mod.supervise(
+            [_mod.sys.executable, "-c", _RECORD_READING_CHILD, str(report), mode],
+            dry_run=False,
+            log=_mod.DecisionLog(tmp_path / "decision.log"),
+            stdin_fd=stdin_fd,
+            poll_seconds=0.05,
+            sidecar_dir=tmp_path / "untracked" / "context-sidecar",
+            decider=decider,
+            restart_coordinator=coordinator,
+        )
+    finally:
+        os.close(stdin_fd)
+    return int(code), coordinator, report.read_text().splitlines()
+
+
+class TestTheChildIsToldWhereTheRecordIs:
+    def test_the_path_is_exported_even_with_no_restart_pending(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        code, coordinator, lines = _run_record_reader(
+            tmp_path, monkeypatch, mode="now", decider=lambda facts: _noop()
+        )
+        assert code == 3
+        assert lines == [str(coordinator.pending_record_path)]
+
+    def test_the_child_reads_its_own_record_while_exiting(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        code, coordinator, lines = _run_record_reader(
+            tmp_path, monkeypatch, mode="on-exit", decider=_asks_once()
+        )
+        assert code == _mod.EXIT_STATUS_RESTART_REQUESTED
+        assert lines[0] == str(coordinator.pending_record_path)
+        record = json.loads(lines[1])
+        assert record["session_id"] == _SESSION
+        assert record["plugin"] == "max-age"
+        # Gone once the child has exited: the resumed session keeps the same id.
+        assert not coordinator.pending_record_path.exists()
+
+    def test_the_supervisors_own_environment_is_left_alone(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv(_mod._RESTART_PENDING_ENV, raising=False)
+        _run_record_reader(tmp_path, monkeypatch, mode="now", decider=lambda facts: _noop())
+        assert _mod._RESTART_PENDING_ENV not in os.environ
