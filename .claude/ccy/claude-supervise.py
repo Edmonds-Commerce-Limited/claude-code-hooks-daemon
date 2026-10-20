@@ -8275,9 +8275,7 @@ def _apply_worker_outcome(
     compaction that never started.
     """
     if outcome.payload is not None and not main_focus_confirmed:
-        _apply_decision(
-            outcome, master_writer=master_writer, log=log, main_focus_confirmed=False
-        )
+        _apply_decision(outcome, master_writer=master_writer, log=log, main_focus_confirmed=False)
         return False
     # Plan 00182: pass the host's authoritative PRE-tick state so a stale
     # WOULD_COMPACT reply (worker still MONITOR, host already awaiting)
