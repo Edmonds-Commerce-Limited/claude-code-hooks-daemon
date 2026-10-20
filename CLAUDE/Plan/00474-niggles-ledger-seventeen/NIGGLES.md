@@ -115,9 +115,11 @@ Follow-ups, not defects in the reviewers' judgement:
 focus model and it was fixed there.
 
 - **N521**: in `.claude/ccy/claude-supervise.py`, a lone Esc at the end of one stdin read carries into the
-  next. If the human's next letter is `P`, `X`, `]`, `^` or `_` (for example "Please…"), `HumanInputLine`
-  enters its string-sequence state and swallows the human's typing until a BEL or `ESC \`. The box then reads
-  empty while it holds text, so the supervisor can paste over what the human is typing. This predates Plan 00537.
+  next (`_consume_esc`). If the human's next letter is `P`, `X`, `]`, `^` or `_` (for example "Please…"),
+  `HumanInputLine` enters its string-sequence state and swallows the human's typing, Enter included, until a
+  BEL or `ESC \`. A next `[` or `O` is likewise taken as a CSI or SS3 opener. When the swallowed text is all the
+  box holds, the box reads empty, so the supervisor can paste over what the human is typing. Introduced in
+  f8c5f72c8, before Plan 00537.
   The fix is the one Plan 00537 applied to its focus model: resolve a carried Esc against the next read, and
   never enter string state from a carried Esc.
 
