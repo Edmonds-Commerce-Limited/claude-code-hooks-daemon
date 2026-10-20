@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00537: supervisor holds sends off main focus](00537-supervisor-holds-sends-off-main-focus/PLAN.md) - In Progress (#125: the ccy supervisor holds every send while the human's keys show focus may have left the main prompt, cleared by Esc; auto-refocus left to the owner)
+
 - [00536: persistent daemon saturation log](00536-persistent-daemon-saturation-log/PLAN.md) - Not Started (#124 follow-up: a bounded journal of saturation episodes, straggler restarts and forced stops that survives a daemon restart, with a verb to print it)
 
 - [00535: upgrade handover without live daemon rebuild](00535-upgrade-handover-without-live-daemon-rebuild/PLAN.md) - Not Started (#124 follow-up: an upgrade never rebuilds the venv or checks out source under a daemon still serving sessions)
@@ -316,11 +318,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 536 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 537 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 455 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 58 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 59 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
