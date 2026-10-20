@@ -233,6 +233,152 @@ class TestHandle:
         assert "execs claude-supervise.py directly" in text
         assert "older than 3.11" in text
 
+    @pytest.mark.parametrize(
+        "prefix", ["python3 ", "python3.12 ", "/usr/bin/python3 ", "env python3 "]
+    )
+    def test_interpreter_prefix_before_the_launcher_warns(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path, prefix: str
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(
+            _ARMED_ENV.replace("${CCY_CLAUDE_WRAPPER:-", f"${{CCY_CLAUDE_WRAPPER:-{prefix}")
+        )
+        _write_script(ccy)
+        text = "\n".join(_run(handler, tmp_path).context)
+        assert "sh script" in text
+        assert "sh .claude/ccy/claude-supervise" in text
+
+    def test_sh_prefix_before_the_launcher_is_silent(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(
+            _ARMED_ENV.replace("${CCY_CLAUDE_WRAPPER:-", "${CCY_CLAUDE_WRAPPER:-sh ")
+        )
+        _write_script(ccy)
+        assert _run(handler, tmp_path).context == []
+
+    def test_interpreter_prefix_before_the_bare_script_does_not_warn_about_the_launcher(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(
+            _BARE_SCRIPT_ENV.replace("${CCY_CLAUDE_WRAPPER:-", "${CCY_CLAUDE_WRAPPER:-python3 ")
+        )
+        _write_script(ccy)
+        text = "\n".join(_run(handler, tmp_path).context)
+        assert "sh script" not in text
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "python3 .claude/ccy/claude-supervise-wrapper --arm --",
+            "python3 .claude/ccy/claude-supervise_x --arm --",
+            "python3 .claude/ccy/claude-supervise.sh --arm --",
+            "foo-python3 .claude/ccy/claude-supervise --arm --",
+            "/usr/bin/foo-python3 .claude/ccy/claude-supervise --arm --",
+        ],
+    )
+    def test_a_line_that_is_not_python_before_the_launcher_does_not_warn(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path, value: str
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(f'export CCY_CLAUDE_WRAPPER="{value}"\n')
+        _write_script(ccy)
+        text = "\n".join(_run(handler, tmp_path).context)
+        assert "sh script" not in text
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "export CCY_CLAUDE_WRAPPER=\"python3 '.claude/ccy/claude-supervise' --arm --\"\n",
+            "export CCY_CLAUDE_WRAPPER='python3 \".claude/ccy/claude-supervise\" --arm --'\n",
+        ],
+    )
+    def test_a_quoted_launcher_path_under_python_warns_and_the_upgrade_repairs_it(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path, line: str
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(line)
+        _write_script(ccy)
+        text = "\n".join(_run(handler, tmp_path).context)
+        assert "sh script" in text
+        assert "a daemon upgrade repairs the line" in text
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "python3 -u .claude/ccy/claude-supervise --arm --",
+            "python3 -X dev .claude/ccy/claude-supervise --arm --",
+            "/usr/bin/python3 /opt/other/claude-supervise --arm --",
+        ],
+    )
+    def test_a_python_launcher_line_the_upgrade_leaves_alone_is_not_promised_a_repair(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path, value: str
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(f'export CCY_CLAUDE_WRAPPER="{value}"\n')
+        _write_script(ccy)
+        text = "\n".join(_run(handler, tmp_path).context)
+        assert "sh script" in text
+        assert "upgrade repairs" not in text
+        assert "by hand" in text
+
+    def test_a_bare_script_line_the_upgrade_repoints_is_promised_the_repoint(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(_BARE_SCRIPT_ENV)
+        _write_script(ccy)
+        text = "\n".join(_run(handler, tmp_path).context)
+        assert "run a daemon upgrade, which repoints" in text
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "python3 -u .claude/ccy/claude-supervise.py --arm --",
+            "$PY .claude/ccy/claude-supervise.py --arm --",
+            "/opt/tools/claude-supervise.py --arm --",
+        ],
+    )
+    def test_a_bare_script_line_the_upgrade_leaves_alone_is_not_promised_a_repoint(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path, value: str
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(f'export CCY_CLAUDE_WRAPPER="{value}"\n')
+        _write_script(ccy)
+        text = "\n".join(_run(handler, tmp_path).context)
+        assert "execs claude-supervise.py directly" in text
+        assert "repoints" not in text
+        assert "by hand" in text
+
+    def test_mixed_bare_script_lines_name_only_the_line_to_fix_by_hand(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        left_alone = 'export CCY_CLAUDE_WRAPPER="python3 -u .claude/ccy/claude-supervise.py --"'
+        repointed = 'export CCY_CLAUDE_WRAPPER="python3 .claude/ccy/claude-supervise.py --"'
+        (ccy / "ccy.env").write_text(f"{repointed}\n{left_alone}\n")
+        _write_script(ccy)
+        text = "\n".join(_run(handler, tmp_path).context)
+        assert "by hand" in text
+        assert left_alone in text
+        assert repointed not in text
+        assert "repoints the other" in text
+
+    @pytest.mark.parametrize("variable", ["$PY", "${PY}"])
+    def test_a_variable_before_the_launcher_is_reported_as_unverifiable(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path, variable: str
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(
+            f'export CCY_CLAUDE_WRAPPER="{variable} .claude/ccy/claude-supervise --arm --"\n'
+        )
+        _write_script(ccy)
+        text = "\n".join(_run(handler, tmp_path).context)
+        assert f"`{variable}`" in text
+        assert "cannot be checked" in text
+
     def test_project_root_none_is_silent(self, handler: CcySupervisorIntegrityHandler) -> None:
         assert _run(handler, None).context == []
 

@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
@@ -92,20 +93,181 @@ def is_armed(ccy_env: Path) -> bool:
     return bool(_active_wrapper_lines(ccy_env))
 
 
+#: The launcher is a POSIX shell script; this runs it without needing an exec bit.
+SHELL_INTERPRETER: Final[str] = "sh"
+
+#: What may follow the supervisor's file name: the end of its path token. Without
+#: it ``claude-supervise-wrapper`` or ``claude-supervise_helper.py`` would count.
+SUPERVISOR_NAME_END: Final[str] = r"(?=[\s\"'};]|$)"
+# What may precede a file name standing alone: not the inside of a longer name.
+_NAME_START: Final[str] = r"(?<![\w.\-])"
+
+
+def file_name_token(file_name: str) -> re.Pattern[str]:
+    """Pattern for ``file_name`` as a whole file name, not part of a longer one."""
+    return re.compile(rf"{_NAME_START}{re.escape(file_name)}{SUPERVISOR_NAME_END}")
+
+
+_SCRIPT_TOKEN_RE: Final[re.Pattern[str]] = file_name_token(_SUPERVISOR_SCRIPT_NAME)
+_LAUNCHER_TOKEN_RE: Final[re.Pattern[str]] = file_name_token(_SUPERVISOR_LAUNCHER_NAME)
+
+#: Spellings that put the wrapper in the deployed ``.claude/ccy/`` directory: the
+#: installer's own self-locating armed line, and a path through ``.claude/ccy``.
+DEPLOYED_LOCATIONS: Final[tuple[str, ...]] = (
+    '$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/',
+    ".claude/ccy/",
+)
+
+
+def names_deployed_file(line: str, deployed_ccy_dir: Path, file_name: str) -> bool:
+    """Does ``line`` name ``file_name`` in the directory the launcher is deployed to?"""
+    locations = (*DEPLOYED_LOCATIONS, f"{deployed_ccy_dir}/")
+    return any(
+        re.search(rf"{re.escape(location + file_name)}{SUPERVISOR_NAME_END}", line)
+        for location in locations
+    )
+
+
+def bare_script_lines(ccy_env: Path) -> list[str]:
+    """Active wrapper lines that still exec ``claude-supervise.py`` directly."""
+    return [line for line in _active_wrapper_lines(ccy_env) if _SCRIPT_TOKEN_RE.search(line)]
+
+
 def wrapper_execs_bare_script(ccy_env: Path) -> bool:
     """True when an active wrapper line still execs ``claude-supervise.py`` directly.
 
     Such an install bypasses the version-gating launcher, so an unsupported
     system Python crashes the supervisor and Claude Code cannot start. A daemon
-    upgrade repoints the line at the launcher.
+    upgrade repoints the line at the launcher only when ``upgrade_repoints_script``
+    holds for it; otherwise it must be fixed by hand.
     """
-    return any(_SUPERVISOR_SCRIPT_NAME in line for line in _active_wrapper_lines(ccy_env))
+    return bool(bare_script_lines(ccy_env))
+
+
+# A command word may start only where a shell word starts in a wrapper value:
+# the start of the line, after whitespace, a quote or ``=``, or after the ``:-``
+# of ``${CCY_CLAUDE_WRAPPER:-...}``. So ``foo-python3`` is not ``python3``.
+_WORD_START: Final[str] = r"(?:^|(?<=[\s\"'=])|(?<=:-))"
+# A Python interpreter word: ``python``, ``python3``, ``python3.N`` or a path to
+# one, optionally behind ``env``. The ``word`` group is the interpreter itself
+# (``env`` excluded).
+_INTERPRETER_PATH_PREFIX: Final[str] = r"(?:[\w.+/$~{}][\w.+\-/$~{}]*)?/"
+_INTERPRETER_PATTERN: Final[str] = (
+    rf"(?:(?:{_INTERPRETER_PATH_PREFIX})?env\s+)?"
+    rf"(?P<word>(?:{_INTERPRETER_PATH_PREFIX})?python(?:3(?:\.\d+)?)?)(?![\w.])"
+    # Interpreter options (``-u``, ``-X dev``, ``-m mod``) between the word and
+    # the path: the launcher cannot pass them on, so no ``sh`` rewrite keeps them.
+    r"(?P<flags>(?:\s+-[^\s\"'}]+(?:\s+[^\s\"'}\-][^\s\"'}]*)?)*)"
+)
+# A shell variable used as the command word (``$PY``, ``${PY}``): what it runs
+# cannot be known without the environment it is expanded in.
+_VARIABLE_PATTERN: Final[str] = r"(?P<variable>\$\{?[A-Za-z_]\w*\}?)"
+# What a path token may be made of before the supervisor's file name: an optional
+# opening quote, then plain characters or ccy.env's self-locating
+# ``$(cd ... && pwd)/`` spelling.
+_WRAPPER_PATH_PREFIX: Final[str] = r"[\"']?(?:[^\s\"']*|\$\(cd\b.*?\bpwd\)/)"
+#: Interpreter words whose dropping loses no choice of Python. The launcher's
+#: search ends at ``python3``; it never tries ``python``, but wherever both exist
+#: and ``python`` could run the supervisor, ``python3`` is a Python 3 too.
+PLAIN_INTERPRETER_WORDS: Final[frozenset[str]] = frozenset({"python", "python3"})
+
+
+def prefix_before_supervisor(file_name_pattern: str) -> re.Pattern[str]:
+    """Pattern for a command word directly before the supervisor path.
+
+    The word is a Python interpreter (group ``word``, with any interpreter
+    options in group ``flags``, empty when there are none) or a shell variable
+    (group ``variable``). Group ``gap`` is the whitespace before the path; the
+    path itself is a lookahead, so a substitution touches nothing else.
+    ``file_name_pattern`` is a regex for the supervisor file name the path must
+    end in; the end of the path token is required after it.
+    """
+    return re.compile(
+        rf"{_WORD_START}(?:{_INTERPRETER_PATTERN}|{_VARIABLE_PATTERN})(?P<gap>\s+)"
+        rf"(?={_WRAPPER_PATH_PREFIX}{file_name_pattern}{SUPERVISOR_NAME_END})"
+    )
+
+
+_LAUNCHER_PREFIX_RE: Final[re.Pattern[str]] = prefix_before_supervisor(
+    re.escape(_SUPERVISOR_LAUNCHER_NAME)
+)
+#: A command word directly before the supervisor path, which may name the script
+#: or the launcher.
+SUPERVISOR_PREFIX_RE: Final[re.Pattern[str]] = prefix_before_supervisor(
+    rf"(?:{re.escape(_SUPERVISOR_SCRIPT_NAME)}|{re.escape(_SUPERVISOR_LAUNCHER_NAME)})"
+)
+
+
+def has_unrewritable_prefix(line: str) -> bool:
+    """Is the supervisor path behind Python options or a variable?
+
+    The launcher is a ``sh`` script that cannot pass Python options on, and what
+    a variable runs is unknown, so no ``sh`` rewrite is known to keep the meaning.
+    """
+    return any(
+        match.group("flags") or match.group("variable")
+        for match in SUPERVISOR_PREFIX_RE.finditer(line)
+    )
+
+
+def upgrade_repoints_script(line: str, deployed_ccy_dir: Path) -> bool:
+    """Would a daemon upgrade repoint this ``claude-supervise.py`` line at the launcher?
+
+    The one decision the upgrade's migration and the integrity warning share: the
+    script must be the deployed one, with no prefix the upgrade cannot rewrite.
+    """
+    return names_deployed_file(
+        line, deployed_ccy_dir, _SUPERVISOR_SCRIPT_NAME
+    ) and not has_unrewritable_prefix(line)
+
+
+def bare_script_lines_left_alone(ccy_env: Path) -> list[str]:
+    """Active lines execing the bare script that a daemon upgrade will NOT repoint."""
+    return [
+        line
+        for line in bare_script_lines(ccy_env)
+        if not upgrade_repoints_script(line, ccy_env.parent)
+    ]
+
+
+@dataclass(frozen=True)
+class LauncherPrefix:
+    """A command word in front of the launcher in an active wrapper line."""
+
+    #: The interpreter word or the variable, as written.
+    word: str
+    #: True for a Python interpreter; False for a variable that cannot be checked.
+    is_python: bool
+    #: True when a daemon upgrade rewrites the line to ``sh``: a Python word with
+    #: no options, before the launcher in the deployed directory.
+    upgrade_repairs: bool
+
+
+def wrapper_prefix_before_launcher(ccy_env: Path) -> LauncherPrefix | None:
+    """The command word in front of the launcher in an active wrapper line, if any.
+
+    The launcher is a ``sh`` script, so a Python interpreter in front of it runs
+    shell text as Python and every ccy launch dies with a SyntaxError. Returns
+    the first such word (a Python interpreter, or a variable that may hold one),
+    or ``None`` when there is none.
+    """
+    for line in _active_wrapper_lines(ccy_env):
+        match = _LAUNCHER_PREFIX_RE.search(line)
+        if match is None:
+            continue
+        word = match.group("word")
+        if word is None:
+            return LauncherPrefix(match.group("variable"), is_python=False, upgrade_repairs=False)
+        repairs = not match.group("flags") and names_deployed_file(
+            line, ccy_env.parent, _SUPERVISOR_LAUNCHER_NAME
+        )
+        return LauncherPrefix(word, is_python=True, upgrade_repairs=repairs)
+    return None
 
 
 def wrapper_names_launcher(ccy_env: Path) -> bool:
     """True when an active wrapper line names the launcher (not just the bare script)."""
-    pattern = re.compile(re.escape(_SUPERVISOR_LAUNCHER_NAME) + r"(?!\.py)")
-    return any(pattern.search(line) for line in _active_wrapper_lines(ccy_env))
+    return any(_LAUNCHER_TOKEN_RE.search(line) for line in _active_wrapper_lines(ccy_env))
 
 
 def supervisor_relevance(context: RelevanceContext) -> Relevance:

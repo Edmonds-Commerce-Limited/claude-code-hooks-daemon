@@ -72,6 +72,52 @@ class TestIsArmed:
         assert ccy_supervisor.wrapper_names_launcher(env) is False
         assert ccy_supervisor.wrapper_execs_bare_script(env) is True
 
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "claude-supervise-wrapper",
+            "claude-supervise_x",
+            "claude-supervise.sh",
+            "claude-supervise_helper.py",
+            "claude-supervise.py.bak",
+        ],
+    )
+    def test_a_name_that_only_starts_with_the_supervisor_name_is_neither(
+        self, tmp_path: Path, name: str
+    ) -> None:
+        env = tmp_path / "ccy.env"
+        _write(env, f'export CCY_CLAUDE_WRAPPER="/x/.claude/ccy/{name} --arm --"\n')
+        assert ccy_supervisor.wrapper_names_launcher(env) is False
+        assert ccy_supervisor.wrapper_execs_bare_script(env) is False
+
+    @pytest.mark.parametrize(
+        ("line", "repoints"),
+        [
+            ('export CCY_CLAUDE_WRAPPER="python3 .claude/ccy/claude-supervise.py --"', True),
+            ('export CCY_CLAUDE_WRAPPER=".claude/ccy/claude-supervise.py --"\r', True),
+            ('export CCY_CLAUDE_WRAPPER="python3 -u .claude/ccy/claude-supervise.py --"', False),
+            ('export CCY_CLAUDE_WRAPPER="$PY .claude/ccy/claude-supervise.py --"', False),
+            ('export CCY_CLAUDE_WRAPPER="/opt/tools/claude-supervise.py --"', False),
+        ],
+    )
+    def test_upgrade_repoints_script_matches_the_migration_rule(
+        self, tmp_path: Path, line: str, repoints: bool
+    ) -> None:
+        assert ccy_supervisor.upgrade_repoints_script(line, tmp_path) is repoints
+
+    def test_bare_script_lines_left_alone_lists_only_active_unrepointable_lines(
+        self, tmp_path: Path
+    ) -> None:
+        env = tmp_path / "ccy.env"
+        flagged = 'export CCY_CLAUDE_WRAPPER="python3 -u .claude/ccy/claude-supervise.py --"'
+        _write(
+            env,
+            f"# {flagged}\n"
+            'export CCY_CLAUDE_WRAPPER="python3 .claude/ccy/claude-supervise.py --"\r\n'
+            f"{flagged}\n",
+        )
+        assert ccy_supervisor.bare_script_lines_left_alone(env) == [flagged]
+
     def test_commented_export_is_not_armed(self, tmp_path: Path) -> None:
         env = tmp_path / "ccy.env"
         _write(env, '# export CCY_CLAUDE_WRAPPER="/x/.claude/ccy/claude-supervise.py --arm --"\n')
