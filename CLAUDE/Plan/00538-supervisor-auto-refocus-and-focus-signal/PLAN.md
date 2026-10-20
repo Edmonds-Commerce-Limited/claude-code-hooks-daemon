@@ -4,7 +4,7 @@
 **Created**: 2026-10-20
 **Owner**: dev
 **Priority**: Low
-**GitHub Issue**: #125 (follow-up, split out by the Fable stand-in ruling in [Plan 00537](../00537-supervisor-holds-sends-off-main-focus/RULING-fable.md))
+**GitHub Issue**: #125 (follow-up, split out by the Fable stand-in ruling in [Plan 00537](../Completed/00537-supervisor-holds-sends-off-main-focus/RULING-fable.md))
 **Recommended Executor**: Opus
 **Execution Strategy**: Sub-Agent Orchestration
 

@@ -8,8 +8,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00538: supervisor auto refocus and focus signal](00538-supervisor-auto-refocus-and-focus-signal/PLAN.md) - Not Started (#125 follow-up: a spike for a non-screen focus signal; auto-refocus and the mods route are owner decisions)
 
-- [00537: supervisor holds sends off main focus](00537-supervisor-holds-sends-off-main-focus/PLAN.md) - In Progress (#125: the ccy supervisor holds every send while the human's keys show focus may have left the main prompt, cleared by Esc; auto-refocus left to the owner)
-
 - [00536: persistent daemon saturation log](00536-persistent-daemon-saturation-log/PLAN.md) - Not Started (#124 follow-up: a bounded journal of saturation episodes, straggler restarts and forced stops that survives a daemon restart, with a verb to print it)
 
 - [00535: upgrade handover without live daemon rebuild](00535-upgrade-handover-without-live-daemon-rebuild/PLAN.md) - Not Started (#124 follow-up: an upgrade never rebuilds the venv or checks out source under a daemon still serving sessions)
@@ -211,6 +209,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00537: supervisor holds sends off main focus](Completed/00537-supervisor-holds-sends-off-main-focus/PLAN.md) - Complete at merge `605d8ed4d` (green CI) + the archiving commit (#125: the ccy supervisor holds every send while the human's keys show focus may have left the main prompt, cleared by Esc; release note 003; follow-up Plan 00538)
+
 - [00533: dispatch saturation recovery](Completed/00533-dispatch-saturation-recovery/PLAN.md) - Complete at merges `b4e83885c` and `3dbbcfaeb` (green CI) + the archiving commit (#124: the recovery command always gets through a saturated pool, a configurable pool with a bounded wait, a saturation warning and a clean SIGTERM grace; release note 002; follow-ups 00534 to 00536)
 
 - [00532: docs optimisation skill](Completed/00532-docs-optimisation-skill/PLAN.md) - Complete at merges `bb3eb552b`, `92c07d7bb` and `36b63400c` + the archiving commit (#123: a versioned Claude Code instruction-loading contract with a re-audit advisory, `docs-qa --footprint`, and the `docs-optimise` proposal skill; release note 001, truth change v3.71.0; follow-ups are ledger 00474 N513 to N515 and the deferred items F1 to F4 in RULINGS-fable.md)
@@ -269,8 +269,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00493: upgrade silently disables opt-in handlers](Completed/00493-upgrade-silently-disables-opt-in-handlers/PLAN.md) - Complete at `3d696453b`, merged `4030e688f` + the archiving commit (client report: the v3.68.0 upgrade dropped unnamed opt-in handlers silently; the upgrade now names every handler it stops or starts, prints the restore snippet and the from-to version, and the config diff summary finds the real backup; auto-restore stays an owner question)
 
-- [00486: Claude Code version tracking](Completed/00486-claude-code-version-tracking/PLAN.md) - Complete at `af0237910` + `b9e01a690` + `4d507be1a` + the archiving commit (owner request: each release records the Claude Code version it was built against, RELEASING.md Step 1c reviews the changelog per release, and `contract_staleness` advises once on a newer running version; backfill findings are 00474 N330–N337)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -324,9 +322,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 539 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 455 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 456 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 61 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 60 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

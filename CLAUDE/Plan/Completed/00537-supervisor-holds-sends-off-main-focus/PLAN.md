@@ -1,6 +1,6 @@
 # Plan 00537: supervisor holds sends off main focus
 
-**Status**: In Progress
+**Status**: Complete (2026-10-20)
 **Created**: 2026-10-20
 **Owner**: dev
 **Priority**: High
@@ -26,13 +26,13 @@ Scope is the stand-in engineering ruling in
 
 Related plans (dedupe scout, not duplicates):
 
-- **[Plan 00160](../00160-supervisor-foreground-identity-and-reaping/PLAN.md)**
+- **[Plan 00160](../../00160-supervisor-foreground-identity-and-reaping/PLAN.md)**
   (Dormant) wants an explicit foreground signal across Agent View sessions.
   This plan is narrower: it holds sends inside one session when focus may have
   left the main prompt. It does not replace that signal.
-- **[Plan 00158](../00158-agent-thread-navigation-statusline/PLAN.md)** (Dormant)
+- **[Plan 00158](../../00158-agent-thread-navigation-statusline/PLAN.md)** (Dormant)
   documents that the status-line payload carries no focus field.
-- **[Plan 00328](../Completed/00328-human-model-choice-cannot-be-read-from-keystrokes/PLAN.md)**
+- **[Plan 00328](../00328-human-model-choice-cannot-be-read-from-keystrokes/PLAN.md)**
   found that text chosen in Claude Code's own UI never crosses the PTY input
   tap. Arrow keys do cross, as bare CSI finals, which is the only signal this
   plan reads.
@@ -112,7 +112,7 @@ Related plans (dedupe scout, not duplicates):
   - Add a release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
   - Document the new option.
 - [x] ✅ **Task 3.2**: File the follow-up plan, done as
-  [Plan 00538](../00538-supervisor-auto-refocus-and-focus-signal/PLAN.md). It covers auto-refocus and the
+  [Plan 00538](../../00538-supervisor-auto-refocus-and-focus-signal/PLAN.md). It covers auto-refocus and the
   screen model (agent-needs-human, cross-referencing Plans 00160 and 00453), and
   a spike for a non-screen focus signal. Note for #127: its restart request
   persists only when `/exit` was actually sent.
@@ -123,7 +123,8 @@ Related plans (dedupe scout, not duplicates):
 - [x] No `_perform_injection` call site sends while the latch is set.
 - [x] The release note is in the pending-release holding area
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (003).
-- [ ] Targeted QA is green on the merged head (40/40 on 605d8ed4d), and CI is green.
+- [x] Targeted QA is green on the merged head (40/40 on 605d8ed4d), and CI is green
+  (run 39357356513).
 
 ## Delivery & Milestones
 
