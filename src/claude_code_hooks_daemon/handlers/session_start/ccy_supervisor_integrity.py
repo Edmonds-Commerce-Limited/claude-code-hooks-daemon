@@ -255,16 +255,19 @@ class CcySupervisorIntegrityHandler(SessionStartHandlerBase):
         launcher = ccy_dir / _LAUNCHER_NAME
         launcher_rel = f"{_CCY_DIR_PARTS[0]}/{_CCY_DIR_PARTS[1]}/{_LAUNCHER_NAME}"
         tracked_rels = [script_rel, env_rel]
-        if ccy_supervisor.wrapper_execs_bare_script(env_path):
-            fix = (
-                f"run a daemon upgrade, which repoints CCY_CLAUDE_WRAPPER at {launcher_rel}"
-                if ccy_supervisor.bare_script_upgrade_repoints(env_path)
-                else (
-                    "a daemon upgrade leaves this line alone (Python options or a variable "
+        bare_lines = ccy_supervisor.bare_script_lines(env_path)
+        if bare_lines:
+            left_alone = ccy_supervisor.bare_script_lines_left_alone(env_path)
+            fix = f"run a daemon upgrade, which repoints CCY_CLAUDE_WRAPPER at {launcher_rel}"
+            if left_alone:
+                fix = (
+                    "a daemon upgrade leaves these lines alone (Python options or a variable "
                     "stand before the script, or it is outside the deployed directory), so "
-                    f"change it by hand to `{ccy_supervisor.SHELL_INTERPRETER} {launcher_rel}`"
+                    f"change them by hand to `{ccy_supervisor.SHELL_INTERPRETER} {launcher_rel}`: "
+                    + " | ".join(left_alone)
                 )
-            )
+                if len(left_alone) < len(bare_lines):
+                    fix += "; a daemon upgrade repoints the other lines"
             problems.append(
                 f"{env_rel} execs claude-supervise.py directly, bypassing the {_LAUNCHER_NAME} "
                 "launcher. On a system Python older than 3.11 the supervisor crashes at "

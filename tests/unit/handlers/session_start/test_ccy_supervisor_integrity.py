@@ -352,6 +352,20 @@ class TestHandle:
         assert "repoints" not in text
         assert "by hand" in text
 
+    def test_mixed_bare_script_lines_name_only_the_line_to_fix_by_hand(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        left_alone = 'export CCY_CLAUDE_WRAPPER="python3 -u .claude/ccy/claude-supervise.py --"'
+        repointed = 'export CCY_CLAUDE_WRAPPER="python3 .claude/ccy/claude-supervise.py --"'
+        (ccy / "ccy.env").write_text(f"{repointed}\n{left_alone}\n")
+        _write_script(ccy)
+        text = "\n".join(_run(handler, tmp_path).context)
+        assert "by hand" in text
+        assert left_alone in text
+        assert repointed not in text
+        assert "repoints the other" in text
+
     @pytest.mark.parametrize("variable", ["$PY", "${PY}"])
     def test_a_variable_before_the_launcher_is_reported_as_unverifiable(
         self, handler: CcySupervisorIntegrityHandler, tmp_path: Path, variable: str

@@ -128,14 +128,20 @@ def names_deployed_file(line: str, deployed_ccy_dir: Path, file_name: str) -> bo
     )
 
 
+def bare_script_lines(ccy_env: Path) -> list[str]:
+    """Active wrapper lines that still exec ``claude-supervise.py`` directly."""
+    return [line for line in _active_wrapper_lines(ccy_env) if _SCRIPT_TOKEN_RE.search(line)]
+
+
 def wrapper_execs_bare_script(ccy_env: Path) -> bool:
     """True when an active wrapper line still execs ``claude-supervise.py`` directly.
 
     Such an install bypasses the version-gating launcher, so an unsupported
     system Python crashes the supervisor and Claude Code cannot start. A daemon
-    upgrade repoints the line at the launcher.
+    upgrade repoints the line at the launcher only when ``upgrade_repoints_script``
+    holds for it; otherwise it must be fixed by hand.
     """
-    return any(_SCRIPT_TOKEN_RE.search(line) for line in _active_wrapper_lines(ccy_env))
+    return bool(bare_script_lines(ccy_env))
 
 
 # A command word may start only where a shell word starts in a wrapper value:
@@ -215,10 +221,13 @@ def upgrade_repoints_script(line: str, deployed_ccy_dir: Path) -> bool:
     ) and not has_unrewritable_prefix(line)
 
 
-def bare_script_upgrade_repoints(ccy_env: Path) -> bool:
-    """True when a daemon upgrade repoints every active line that execs the bare script."""
-    lines = [line for line in _active_wrapper_lines(ccy_env) if _SCRIPT_TOKEN_RE.search(line)]
-    return bool(lines) and all(upgrade_repoints_script(line, ccy_env.parent) for line in lines)
+def bare_script_lines_left_alone(ccy_env: Path) -> list[str]:
+    """Active lines execing the bare script that a daemon upgrade will NOT repoint."""
+    return [
+        line
+        for line in bare_script_lines(ccy_env)
+        if not upgrade_repoints_script(line, ccy_env.parent)
+    ]
 
 
 @dataclass(frozen=True)
