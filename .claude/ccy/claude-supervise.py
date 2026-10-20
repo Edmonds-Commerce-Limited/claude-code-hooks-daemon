@@ -7054,8 +7054,9 @@ def _usage_pause_outcome(
         )
     focus_hold = _focus_hold_of(facts)
     if focus_hold is not None:
-        # Plan 00537: this send bypasses the idle gate, not the focus gate --
-        # typed into a sub-agent it would not pause the main thread anyway.
+        # Plan 00537: this function bypasses `can_inject` and applies its own
+        # copy of it above, so the focus term is added here -- typed into a
+        # sub-agent, this compact would not pause the main thread anyway.
         return outcome(
             Decision.NOOP,
             held,

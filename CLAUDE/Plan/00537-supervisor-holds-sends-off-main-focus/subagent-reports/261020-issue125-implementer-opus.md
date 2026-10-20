@@ -39,7 +39,9 @@ All code is in `.claude/ccy/claude-supervise.py`. Tests are in the new
   - The model switch.
   - The abandoned-box flush, in `_evaluate_monitor` AHEAD of the one-shot
     `_abandoned_box_handled`, so a held flush is not spent.
-  - The usage-pause compact, which keeps its idle bypass.
+  - The usage-pause compact. The gate is inside `_usage_pause_outcome`, which
+    bypasses `can_inject` and applies its own copy of it (idle, work idle,
+    empty box).
   - `RestartCoordinator.request(focus_hold=...)`. A held `/exit` returns False
     before `_perform_injection`. It creates no `_PendingRestart`, does not call
     `mark_own_line_typed`, adds no abandon count and starts no cooldown.

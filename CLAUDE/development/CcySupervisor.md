@@ -199,8 +199,9 @@ ESC interrupt, the resubmit and every dry-run marker. The sends that bypass
 - the manual model switch;
 - the abandoned-box flush. Its gate sits ahead of the one-shot
   `_abandoned_box_handled`, so a held flush is not spent.
-- the usage-pause compact. This keeps its bypass of the idle gate, but not the
-  focus gate.
+- the usage-pause compact. `_usage_pause_outcome` bypasses `can_inject` and
+  applies its own copy of it (idle, work idle, empty box), so the focus gate
+  is added inside that function.
 - the restart coordinator's `/exit`;
 - a payload the worker decided before the hold latched. `_apply_decision`
   re-reads the host model at apply time.
