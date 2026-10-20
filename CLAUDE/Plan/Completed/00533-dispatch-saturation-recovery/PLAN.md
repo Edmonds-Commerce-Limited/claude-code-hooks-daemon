@@ -1,6 +1,6 @@
 # Plan 00533: dispatch saturation recovery
 
-**Status**: In Progress
+**Status**: Complete (2026-10-20)
 **Created**: 2026-10-19
 **Owner**: dev
 **Priority**: High
@@ -49,29 +49,33 @@ Scope is the Fable stand-in ruling
 
 ### Phase 1: Recovery and capacity
 
-- [ ] ⬜ **Task 1.1**: Red test, then let the exact recovery command through a
+- [x] ✅ **Task 1.1**: Red test, then let the exact recovery command through a
   saturated pool: daemon-side before dispatch, and client-side by treating a
   saturation deny of a recovery command like a transport failure.
-- [ ] ⬜ **Task 1.2**: Red test, then a configurable `max_inflight` and a
+- [x] ✅ **Task 1.2**: Red test, then a configurable `max_inflight` and a
   bounded wait for a slot instead of an instant refusal.
-- [ ] ⬜ **Task 1.3**: Red test, then a rate-limited sustained-saturation WARNING.
-- [ ] ⬜ **Task 1.4**: Red test, then a SIGTERM grace longer than the
+- [x] ✅ **Task 1.3**: Red test, then a rate-limited sustained-saturation WARNING.
+- [x] ✅ **Task 1.4**: Red test, then a SIGTERM grace longer than the
   active-request drain.
 
 ### Phase 2: Close out
 
-- [ ] ⬜ **Task 2.1**: Release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
+- [x] ✅ **Task 2.1**: Release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
   and config docs for the new option.
-- [ ] ⬜ **Task 2.2**: File the follow-up plans for the split items; record the
-  Stop-semantics question as `agent-needs-human`.
+- [x] ✅ **Task 2.2**: File the follow-up plans for the split items (00534,
+  00535, 00536); the Stop-semantics question is left to the owner in the #124
+  closing comment.
 
 ## Success Criteria
 
-- [ ] Each change has a test that failed before it.
-- [ ] The release note for the new option and behaviour is in the pending-release
-  holding area `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
-- [ ] Targeted QA green on the merged head; CI green.
+- [x] Each change has a test that failed before it.
+- [x] The release note for the new option and behaviour is in the pending-release
+  holding area `CLAUDE/UPGRADES/UNRELEASED/release-notes/`, with
+  `config-changes/v3.71.0.yaml` for the new keys.
+- [x] Targeted QA green on the merged head; CI green.
 
 ## Delivery & Milestones
 
-- <!-- delivery commit hashes -->
+- b4e83885c: merge of the dispatch saturation recovery (Tasks 1.1–2.1).
+- 3dbbcfaeb: merge of the full-gate fix (payload fields via `HookInputField`).
+- f7e3d328e: follow-up Plans 00535 and 00536 (Task 2.2).
