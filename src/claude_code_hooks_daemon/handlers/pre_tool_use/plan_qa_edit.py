@@ -56,7 +56,7 @@ _RULE_WHY = "Plan QA linting catches issues you can fix immediately, before they
 _RULE_FIX = "Fix the content per each finding's remediation below and retry"
 _RULE_VERBOSE = (
     "Every Write/Edit of a PLAN.md, the plan-index README.md, or a journal "
-    "day-file under the plan directory is checked against the plan QA "
+    "file under the plan directory is checked against the plan QA "
     "edit-stage rules on the content the file WOULD have. Each finding below "
     "names its own remediation -- fix the content accordingly and retry. "
     "Grandfathered plans in `plan_workflow.qa.legacy_plan_allowlist` only "
@@ -128,7 +128,7 @@ class PlanQaEditHandler(PreToolUseHandlerBase):
         return self._is_lintable_plan_file(file_path, policy)
 
     def _is_lintable_plan_file(self, file_path: str, policy: Any) -> bool:
-        """True for a PLAN.md, the plan INDEX, or a journal day-file.
+        """True for a PLAN.md, the plan INDEX, or a journal file.
 
         Journal files are ``*.md`` directly inside a ``{journal_dir_name}/``
         directory (Plan 00163); the per-check target resolvers do the precise
@@ -431,15 +431,15 @@ class PlanQaEditHandler(PreToolUseHandlerBase):
                 requires_main_thread=True,
             ),
             AcceptanceTest(
-                title="plan-qa edit lint - blocks a stale-dated legacy journal day-file",
+                title="plan-qa edit lint - blocks a write to an existing legacy journal day-file",
                 command=(
                     "Use the Write tool to write to an existing plan's legacy "
-                    "`JOURNAL/NNNNN-Journal-YY-MM-DD.md` day-file whose date is "
-                    "YESTERDAY (or any other non-today date), not today's"
+                    "`JOURNAL/NNNNN-Journal-YY-MM-DD.md` day-file that already "
+                    "exists (any date, including a stale one)"
                 ),
                 harness_cannot_produce=(
                     "Needs an EXISTING plan's journal directory, so the probe "
-                    "would have to name a real plan and a real stale day-file — "
+                    "would have to name a real plan and a real existing day-file — "
                     "writing into another plan's append-only journal, which is the "
                     "one thing journalling forbids. A scratch copy would not be "
                     "under the plan directory and so would not reach the lint at "
@@ -447,13 +447,13 @@ class PlanQaEditHandler(PreToolUseHandlerBase):
                     "tests/unit/handlers/pre_tool_use/test_plan_qa_edit.py."
                 ),
                 description=(
-                    "A journal day-file edit dated anything other than today must be "
-                    "denied with the journal-dayfile-is-today remediation naming the "
-                    "exact today-dated filename to use instead."
+                    "A write to a journal file that already exists must be denied with "
+                    "the journal-dayfile-is-today remediation, which names "
+                    "`mkplan.bash --journal` for recording the change as a new entry."
                 ),
                 expected_decision=Decision.DENY,
-                expected_message_patterns=[r"journal-dayfile-is-today", r"not today"],
-                safety_notes="Deny path — no file is written; retry against today's day-file",
+                expected_message_patterns=[r"journal-dayfile-is-today", r"already exists"],
+                safety_notes="Deny path — no file is written; record the change with mkplan.bash --journal",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=True,

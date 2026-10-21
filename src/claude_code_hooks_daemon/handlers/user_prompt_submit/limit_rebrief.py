@@ -112,7 +112,7 @@ _REBRIEF_PLACES: Final[tuple[str, ...]] = (
     "(worktree, branch, brief, last sha) listed below",
     "`git worktree list`, then `git status` and `git log -1` inside each worktree that "
     "held in-flight work",
-    "the newest entries of the active plan's JOURNAL/ day-file",
+    "the newest entry files of the active plan's JOURNAL/ (newest date folder)",
 )
 
 

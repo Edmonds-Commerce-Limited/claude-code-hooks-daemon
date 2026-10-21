@@ -173,7 +173,7 @@ WRITE_ACT_ONLY_RULES: Final[dict[str, str]] = {
         "moved."
     ),
     "journal_dayfile_is_today": (
-        "Reports that a day-file dated other than today, or a journal file "
+        "Reports that a legacy day-file dated other than today, or a journal file "
         "that already exists, is being WRITTEN; its COMMIT half reports the "
         "same rewrite of an entry file staged by any route. Yesterday's "
         "day-file existing on disk is exactly what a journal is."

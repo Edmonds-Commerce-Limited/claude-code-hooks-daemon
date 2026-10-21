@@ -33,7 +33,7 @@ from claude_code_hooks_daemon.plan_qa.types import (
 
 CHECK_ID: Final[str] = "journal-append-only"
 STATEMENT: Final[str] = (
-    "A journal day-file is an append-only log. Add new entries at the end and do not edit earlier ones."
+    "A legacy journal day-file is append-only: never edit earlier entries. Record new entries as new files with `mkplan.bash --journal`."
 )
 
 
