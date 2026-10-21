@@ -182,3 +182,50 @@ It reads `daemon.transport` from `P/.claude/hooks-daemon.yaml` (`load_transport_
 The shell caller should treat 3 as warn-loudly-and-continue (per section 3), and repeat the banner before `exit 0`.
 Not built here (outside items 1 and 2): the "upgrade preserving an explicit relay_enabled false" test in
 `tests/unit/install/test_config_merger.py`.
+
+## Build part B (shell, config) and QA
+
+### 0f5495a6f: shared shell library
+
+`scripts/install/relay_provision.sh` provides `provision_relay_binary VENV_PY DAEMON_DIR PROJECT_ROOT VERSION` and
+`report_relay_provision_failure`. Exit 0 prints the CLI lines; exit 3 prints the banner and sets
+`RELAY_PROVISION_FAILED=1`; any other code prints a loud banner naming the code. Forwarders are always regenerated
+afterwards (`regenerate_forwarders_for_transport`), at all three sites, because upgrade Step 8 deploys hooks before the
+Step 10 merge that may enable the relay. `install_version.sh` and `upgrade_version.sh` source it, replacing the three
+heredocs (install Step 7b, upgrade fast path, upgrade Step 14c). The report call sits just before each final `exit 0`,
+so the banner is the last thing printed. `bash -n` and `shellcheck -x` are clean.
+
+Test: `tests/integration/test_relay_provision_sh.py`, 12 tests (stub python exit 0, 3 and 1; the real CLI with the relay
+disabled and enabled with no source; call-site pins).
+
+RED: `12 failed in 0.95s`. Each library test failed with `/usr/bin/bash: line 3: .../relay_provision.sh: No such file`,
+and each call-site test with `assert 'source "$INSTALL_LIB_DIR/relay_provision.sh"' in ...`. After the library existed:
+5 failed, 7 passed (call sites only). Then green.
+
+### c6d28098a: new configs enable the relay
+
+A `transport:` block (`relay_enabled: true`, `relay_source: auto`, `nc_enabled: false`, `timeout_seconds: 30`) in
+`.claude/hooks-daemon.yaml.example`, and `_TRANSPORT_BLOCK` (`relay_enabled`, `relay_source`) in `init_config.py`, minimal
+and full. The model default is unchanged (off), pinned by `test_the_model_default_keeps_the_relay_off`.
+`TestRelayDefaultAcrossTheUpgradeMerge` in `test_config_merger.py` covers the upgrade merge: an explicit false survives,
+a keyless config takes the new default, and a partial block (`{nc_enabled: true}`) is kept whole so the relay stays off.
+
+RED: `4 failed, 75 passed` with `KeyError: 'transport'` (three times) and `assert False is True` (example). Green: 431
+passed across the merger, init_config, example, generated_config_validity, reference_config_completeness,
+config_changes_manifest_examples and relay_provision_sh tests.
+
+### Manifest and release note (this unit)
+
+`CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.71.0.yaml` gains an `added` entry for `daemon.transport.relay_source: auto`
+and a `changed` entry for `daemon.transport.relay_enabled` (`recommended: true`, `recommended_value: true`) stating the
+coordinator ruling: a config with no `transport` block adopts the relay at its next upgrade through the example merge,
+an explicit false is kept, and a partial block is kept whole. Release note
+`release-notes/013-relay-is-on-by-default-for-new-installs.md` written in the style of 011.
+`test_config_changes_manifest_examples.py`: 326 passed.
+
+### QA verdict
+
+`llm_qa.py changed --allow-unmapped`: QA 40/40 PASSED (1871.7s, mostly a wait for the host QA lock and
+`changed_tests` at 1303s). No failures, no flake seen, nothing re-run.
+
+Not run: no real install or upgrade against /workspace.
