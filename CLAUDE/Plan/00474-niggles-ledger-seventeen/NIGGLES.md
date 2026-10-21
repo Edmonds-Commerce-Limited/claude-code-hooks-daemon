@@ -787,7 +787,10 @@ prune. Release note 052.
   e1f208711, was green.
 - Recurrence, run 39610947367 for 6e517516c (the #132 merge; its unmapped `utils/usage_pause_gate.py` sent the job to
   the full-suite fallback): the same test, parameter `a=['y']+a`, measured 1.616s against 1.5. It was the only
-  failure (50840 passed). The failed job was re-run, not the bound changed.
+  failure (50840 passed). The failed job was re-run, not the bound changed. The re-run (attempt 2) failed the same
+  way on the other parameter, `a=a+['x{i}']`, at 1.575s against 1.5 (1 failed, 50840 passed, 1 h 02 min). Every
+  full-suite fallback run now trips this class. The fix-forward is Plan 00476 Task 2.2 (Design 6: timing sweeps in their
+  own CI job, thresholds unchanged), taken up to unblock #132 and #131.
 
 **Fix direction**: a lint timeout is an environment fact, not the handler's verdict, so a probe whose linter timed out
 must not be scored as the handler's decision (skip with the reason, or raise the CI Swift timeout); the timing bound
