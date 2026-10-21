@@ -13,7 +13,10 @@ import sys
 from pathlib import Path
 
 from claude_code_hooks_daemon.constants import Timeout
-from claude_code_hooks_daemon.install.forwarder_generator import strip_relay_guard_block
+from claude_code_hooks_daemon.install.forwarder_generator import (
+    strip_relay_guard_block,
+    strip_status_fast_path_block,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _HOOKS_DEPLOY_SH = _REPO_ROOT / "scripts" / "install" / "hooks_deploy.sh"
@@ -69,8 +72,8 @@ def test_default_config_deploy_is_byte_identical(tmp_path: Path) -> None:
     for name in ("pre-tool-use", "post-tool-use", "status-line"):
         deployed = (project_root / ".claude" / "hooks" / name).read_text()
         source = (_SOURCE_HOOKS_DIR / name).read_text()
-        assert deployed == strip_relay_guard_block(
-            source
+        assert deployed == strip_status_fast_path_block(
+            strip_relay_guard_block(source)
         ), f"{name}: deployed content diverged from the guard-free canonical shape"
         assert "relay hot path" not in deployed
 

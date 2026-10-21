@@ -13,6 +13,47 @@
 
 set -euo pipefail
 
+# --- status fast path (generated; Plan 00542) ---
+if [[ "${BASH_SOURCE[0]}" == "/workspace/.claude/hooks/"* ]]; then
+    _rl_dir="/workspace/untracked"
+    _rl_sfx="-${HOSTNAME:-localhost}"; _rl_sfx="${_rl_sfx,,}"; _rl_sfx="${_rl_sfx// /-}"
+    _rl_events_dir="${HOOKS_DAEMON_EVENTS_DIR:-$_rl_dir/events$_rl_sfx}"
+    _sf_sock="$_rl_events_dir/status-line.sock"
+    _sf_client=""
+    _rl_bin="${HOOKS_DAEMON_RELAY_BINARY:-/workspace/untracked/bin/hooks-relay}"
+    if [[ -x "$_rl_bin" ]]; then _sf_client="relay"; fi
+    if [[ -n "$_sf_client" && -S "$_sf_sock" ]]; then
+        _sf_payload=""; _sf_rc=0
+        # read returns 1 at a normal EOF (no trailing NUL), above 1 on a real fault.
+        IFS= read -r -d '' _sf_payload || _sf_rc=$?
+        if [[ "$_sf_rc" -le 1 ]]; then
+            _sf_req="${_sf_payload%"${_sf_payload##*[![:space:]]}"}"
+            _sf_req="${_sf_req#"${_sf_req%%[![:space:]]*}"}"
+            if [[ "$_sf_req" == "{"*"}" ]]; then
+                _sf_req="${_sf_req%\}}"
+                _sf_req="${_sf_req%"${_sf_req##*[![:space:]]}"}"
+                if [[ "$_sf_req" != "{" ]]; then _sf_req+=","; fi
+                _sf_req+='"hooks_daemon_raw_text":true'
+                if [[ "${COLUMNS:-}" =~ ^[1-9][0-9]{0,8}$ ]]; then
+                    _sf_req+=",\"terminal_columns\":$COLUMNS"
+                fi
+                if [[ "${LINES:-}" =~ ^[1-9][0-9]{0,8}$ ]]; then
+                    _sf_req+=",\"terminal_lines\":$LINES"
+                fi
+                _sf_req+="}"
+                _sf_reply=""; _sf_rc=0
+                _sf_reply="$("$_rl_bin" "$_sf_sock" --no-fallback --timeout-ms "2000" <<< "$_sf_req")" || _sf_rc=$?
+                if [[ "$_sf_rc" -eq 0 && -n "$_sf_reply" ]]; then
+                    printf '%s\n' "$_sf_reply"
+                    exit 0
+                fi
+            fi
+        fi
+        # Fall through: hand the legacy path the stdin it was owed.
+        exec 0<<< "$_sf_payload"
+    fi
+fi
+# --- end status fast path ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../init.sh"
 

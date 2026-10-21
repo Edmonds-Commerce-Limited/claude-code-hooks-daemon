@@ -299,6 +299,9 @@ STATUS_LINE_INPUT_SCHEMA: Final[dict[str, Any]] = {
         # Optional/nullable: absent on Claude Code clients predating COLUMNS/LINES.
         "terminal_columns": {"type": ["integer", "null"]},
         "terminal_lines": {"type": ["integer", "null"]},
+        # Sent by the status-line forwarder's fast path (issue #131) to ask the
+        # Status socket for bare text; the daemon pops it before validation.
+        "hooks_daemon_raw_text": {"type": "boolean"},
     },
     "additionalProperties": True,
 }

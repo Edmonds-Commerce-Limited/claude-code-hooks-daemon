@@ -68,7 +68,10 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     TEST_PROBE,
     ProbeThread,
 )
-from claude_code_hooks_daemon.install.forwarder_generator import generate_forwarder_content
+from claude_code_hooks_daemon.install.forwarder_generator import (
+    generate_forwarder_content,
+    strip_status_fast_path_block,
+)
 from tests.daemon._start_wait import wait_for_daemon_started
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -299,7 +302,8 @@ class TestExcludedEventsCarryNoGuard:
             f"{meta.bash_key} is relay-ineligible but the generated forwarder "
             "carries a relay guard block"
         )
-        assert result == source
+        # The status line carries its own fast path (Plan 00542), not the relay guard.
+        assert strip_status_fast_path_block(result) == strip_status_fast_path_block(source)
 
 
 class TestHookEventNameEnrichmentAcrossEverySocket:

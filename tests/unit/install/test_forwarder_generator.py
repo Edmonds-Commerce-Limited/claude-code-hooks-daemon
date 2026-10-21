@@ -24,6 +24,7 @@ from claude_code_hooks_daemon.install.forwarder_generator import (
     load_transport_config,
     regenerate_deployed_hooks,
     strip_relay_guard_block,
+    strip_status_fast_path_block,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -87,7 +88,7 @@ def test_every_real_deployed_hook_is_byte_identical_when_disabled(hook_file: str
 
     result = generate_forwarder_content(source, hook_file, transport, _UNTRACKED, _ROOT)
 
-    assert result == strip_relay_guard_block(source)
+    assert result == strip_status_fast_path_block(strip_relay_guard_block(source))
     assert "relay hot path" not in result
 
 
@@ -265,7 +266,8 @@ def test_relay_guard_excludes_raw_stdout_events(event_file_name: str) -> None:
     result = generate_forwarder_content(source, event_file_name, transport, _UNTRACKED, _ROOT)
 
     assert "relay hot path" not in result
-    assert result == source
+    # The status line gets its own fast path (Plan 00542), which is not the relay guard.
+    assert strip_status_fast_path_block(result) == source
 
 
 @pytest.mark.parametrize("hook_file", ["status-line", "worktree-create"])
@@ -276,7 +278,7 @@ def test_real_raw_stdout_hooks_never_get_relay_guard_when_enabled(hook_file: str
     result = generate_forwarder_content(source, hook_file, transport, _UNTRACKED, _ROOT)
 
     assert "relay hot path" not in result
-    assert result == source
+    assert strip_status_fast_path_block(result) == strip_status_fast_path_block(source)
 
 
 def test_relay_excluded_set_matches_typed_catalogue_source() -> None:

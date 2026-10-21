@@ -375,6 +375,16 @@ environment variable.
 3. **Minimal I/O**: Most handlers read from in-memory state or fast local files. Only `GitBranchHandler` shells out to a subprocess.
 4. **Silent failures**: Every handler catches exceptions and returns empty context rather than crashing the chain.
 
+### The forwarder fast path (issue #131, Plan 00542)
+
+The legacy forwarder path sources `.claude/init.sh` and starts `python3` on every tick (about 0.08 CPU-seconds). When `daemon.transport` enables the relay (`relay_enabled`, binary executable) or nc (`nc_enabled`, `HOOKS_DAEMON_NC_UNIX_CAPABLE=1` in `.claude/hooks-daemon.env`), the generated `.claude/hooks/status-line` first runs a bash-builtin-only block (`forwarder_generator.build_status_fast_path_block`) that:
+
+1. computes the per-event socket path exactly as the relay guard does and requires it to be a socket;
+2. reads stdin, requires a JSON object, and splices in `"hooks_daemon_raw_text":true` plus `terminal_columns` / `terminal_lines` from `COLUMNS` / `LINES` (digits only);
+3. sends it through the enabled client with a 2 second timeout and prints a non-empty reply.
+
+The daemon (`HooksDaemon._answer_event`) answers a raw-text Status request with the exact bytes the python rung prints, `text` plus a newline, and with an EMPTY body for an error or no text. Every other outcome falls through to the legacy path with stdin replayed. The block is confined to its own checkout (a `BASH_SOURCE` guard), is absent when both clients are disabled, and is stripped and re-applied on regeneration like the relay guard. Measured: about 0.011 s wall and 0.005 CPU-seconds against 0.11 s and 0.085 CPU-seconds.
+
 ### Performance Characteristics by Handler
 
 | Handler                 | I/O Type                                  | Expected Latency |

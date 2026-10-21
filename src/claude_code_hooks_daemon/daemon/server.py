@@ -138,6 +138,25 @@ class _ChunkReader(Protocol):
 #: this module needs the full event-metadata machinery for this one check.
 _PRE_TOOL_USE_WIRE_KEY: Final[str] = "PreToolUse"
 
+#: The wire event name the status-line socket carries (`EventID.STATUS_LINE`).
+_STATUS_WIRE_KEY: Final[str] = "Status"
+
+
+def _raw_text_reply(response: dict[str, Any]) -> bytes:
+    """The bytes a raw-text Status request is answered with (issue #131).
+
+    Exactly what init.sh's python rung prints for a successful status reply:
+    the ``text`` plus a newline. An error response, or one with no usable text,
+    is an EMPTY body: the shell client cannot parse JSON, and an empty reply is
+    the one signal it can test for, so it then falls through to the legacy
+    path, which renders the error or ``NO STATUS DATA`` itself.
+    """
+    text = response.get("text")
+    if response.get("error") or not isinstance(text, str) or not text:
+        return b""
+    return text.encode() + b"\n"
+
+
 #: Reason text for a transport-level PreToolUse deny (Plan 00466 N40 review 2
 #: MA3): a malformed/oversized/undecodable payload, or an uncaught exception,
 #: on the per-event socket used to answer `{}` -- indistinguishable from a
@@ -1940,6 +1959,12 @@ class HooksDaemon:
         if isinstance(hook_input, dict) and not hook_input.get(HookInputField.HOOK_EVENT_NAME):
             hook_input[HookInputField.HOOK_EVENT_NAME] = event_json_key
 
+        # Raw-text mode (issue #131) exists for the Status socket only; the flag
+        # is consumed here so no handler or schema ever sees it.
+        raw_text = False
+        if isinstance(hook_input, dict) and event_json_key == _STATUS_WIRE_KEY:
+            raw_text = hook_input.pop(HookInputField.RAW_TEXT, False) is True
+
         request_data = json.dumps({"event": event_json_key, "hook_input": hook_input})
         response = await self._process_request(request_data, arrival_time=arrival_time)
         if event_json_key == _PRE_TOOL_USE_WIRE_KEY and not _pre_tool_use_response_looks_valid(
@@ -1960,7 +1985,7 @@ class HooksDaemon:
         if is_blocking_response(response):
             log_blocking_response(response_json, debug_enabled=logger.isEnabledFor(logging.DEBUG))
 
-        writer.write(response_json.encode())
+        writer.write(_raw_text_reply(response) if raw_text else response_json.encode())
         await writer.drain()
 
     async def _handle_event_client(
@@ -2550,7 +2575,7 @@ class HooksDaemon:
             response_dict: dict[str, Any] = hook_result.to_json(
                 event,
                 stop_hook_active=stop_hook_active,
-                terminal_columns=hook_input.get("terminal_columns"),
+                terminal_columns=hook_input.get(HookInputField.TERMINAL_COLUMNS),
             )
             if request_id:
                 response_dict["request_id"] = request_id
