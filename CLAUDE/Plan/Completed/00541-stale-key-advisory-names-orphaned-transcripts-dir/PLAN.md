@@ -1,6 +1,6 @@
 # Plan 00541: stale key advisory names orphaned transcripts dir
 
-**Status**: In Progress
+**Status**: Complete (2026-10-21)
 **Created**: 2026-10-20
 **Owner**: dev
 **Priority**: Medium
@@ -53,7 +53,7 @@ triaged as actionable on 2026-09-22. The ruling is in this plan's JOURNAL/.
 - [x] The release note is in the pending-release holding area
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
   (`006-transcript-archiver-advisory-names-orphaned-dir.md`).
-- [ ] Targeted QA is green on the merged head, and CI is green.
+- [x] Targeted QA is green on the merged head, and CI is green (run 39514039648 on `31c6a1454`).
 
 ## Delivery & Milestones
 
