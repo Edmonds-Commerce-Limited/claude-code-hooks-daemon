@@ -1,6 +1,6 @@
 # Plan 00543: journal file per entry
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-21
 **Owner**: dev
 **Priority**: High
@@ -59,12 +59,14 @@ append-only becomes "no existing entry file is modified or deleted".
 
 ## Success Criteria
 
-- [ ] Two branches that each journal the same plan on the same day merge with no conflict (tested).
-- [ ] Every journal check passes on a tree with legacy day-files and new entries side by side (tested).
-- [ ] No doc still tells an agent to write to a day-file.
-- [ ] Release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] Two branches that each journal the same plan on the same day merge with no conflict (tested, Task 2.4).
+- [x] Every journal check passes on a tree with legacy day-files and new entries side by side (tested, Task 2.2).
+- [x] No doc still tells an agent to write to a day-file (wording sweep merged `c05b91eeb`).
+- [x] Release note `CLAUDE/UPGRADES/UNRELEASED/release-notes/009-plan-journal-is-one-file-per-entry.md` (the
+  pending-release holding area).
 
 ## Delivery & Milestones
 
 - Filed from #135 on the owner's direction. Related: Plan 00163, which designed the day-file model and which this
-  plan supersedes for new entries, and Plan 00516 (#108), to be re-scoped.
+  plan supersedes for new entries, and Plan 00516 (#108), which now carries a re-scope note (`f6a3f00d0`).
+- Delivered: merged to main at `c127d7356`, wording sweep `c05b91eeb`; CI green on `15127181d`. Fixes ledger N524.

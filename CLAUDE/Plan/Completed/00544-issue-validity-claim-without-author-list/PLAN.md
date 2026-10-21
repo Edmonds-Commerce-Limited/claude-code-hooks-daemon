@@ -1,6 +1,6 @@
 # Plan 00544: issue validity claim without author list
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-21
 **Owner**: dev
 **Priority**: Medium
@@ -40,13 +40,13 @@ Triage evidence: `untracked/scratch/triage-129.md` (session scratch); the verifi
 - [x] ✅ **Task 1.2**: Move the not-configured refusal under the `--list-eligible` branch of
   `daemon/issue_validity_cli.py`; the single-issue path prints the author check as not applicable. Update the CLI help
   text and the release note.
-- [ ] ⬜ **Task 1.3**: Targeted QA, merge, close #129.
+- [x] ✅ **Task 1.3**: Targeted QA (40 of 40), merge, close #129.
 
 ## Success Criteria
 
-- [ ] The three behaviours in Goals are pinned by tests that failed before the change.
-- [ ] A release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` records the behaviour change (the pending-release
-  holding area).
+- [x] The three behaviours in Goals are pinned by tests that failed before the change (4 red, `assert 4 == 0`).
+- [x] Release note `CLAUDE/UPGRADES/UNRELEASED/release-notes/010-issue-validity-claim-works-without-an-author-list.md`
+  records the behaviour change (the pending-release holding area).
 
 ## Delivery & Milestones
 
@@ -54,4 +54,4 @@ Triage evidence: `untracked/scratch/triage-129.md` (session scratch); the verifi
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00544-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Not yet delivered.
+- Delivered: `c1913d851`, merged to main at `15127181d`; CI green on that head.

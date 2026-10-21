@@ -4,6 +4,10 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00499: write-protected paths, and the ccy.env.local.dist template](00499-write-protected-paths-and-ccy-env-local-dist/PLAN.md) - Complete at Phase 1b merge `64823600a` + the archiving commit (owner rulings: `ccy.env.local` is IaC-written only; an opt-in `write_protected_paths` guard denies every Write/Edit/Bash route onto a listed path, live-probed; the dist template was cancelled because ccy writes it)
+
+- [00498: autonomy only where allowed](00498-autonomy-only-where-allowed/PLAN.md) - Complete at merge `68dd20179` + the archiving commit (owner request after a desktop agent drifted off its one task: a top-level `autonomy:` block, keyed on the detected environment and role alias, decides whether crons, goal pressure and resume advice run; this repo allows them in containers only, and the owner's desktop session showed `no autonomy` with an empty CronList)
+
 - [00494: Claude Code mods review](00494-claude-code-mods-review/PLAN.md) - Complete at `f794f4cd1` + the archiving commit (owner request: 21 mod docs vendored, an Opus review and brainstorm, then a one-mod proposal the owner approved with its build order and deployment route; the build is Plan 00497)
 
 - [00488: status line visible during daemon outage](00488-status-line-visible-during-daemon-outage/PLAN.md) - Complete at `2790de8eb` + `7e8e71e5b` + `a468e29c7` + `9517a3c7f` + the archiving commit (owner request, #72: the status-line forwarder exits 0 on its down path and names venv building, venv missing and version mismatch; a raw self-install clone builds its own venv; the build window fails open, announced, per a coordinator ruling (RULING-3.2); a startup race no longer denies)
