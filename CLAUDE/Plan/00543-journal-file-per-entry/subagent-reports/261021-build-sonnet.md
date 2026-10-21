@@ -89,3 +89,21 @@ The design is worked out file by file, including parity with the guard's conflic
 exceptions, and the new COMMIT half of `journal-dayfile-is-today`. It is in the handoff
 `untracked/scratch/261021-ae87dd9c72ec3433a-handoff.md`. `same-commit-plan-doc` keys on `PLAN.md` and never reads
 journals, so it is unaffected and there is nothing to pin.
+
+## Task 2.2 plan_qa readers
+
+Done, one commit each, TDD (red counts quoted):
+
+- `plan_qa/model.py`: `JournalEntryFileName` (`is_valid_time`, `is_valid_date`, `date`, `label`),
+  `is_journal_entry_folder_name`, `journal_entry_folder_date`, `parse_journal_entry_path`; `_scan_journal` counts a
+  date folder holding a valid entry file, so freshness reads entry folders (handoff item 9's freshness pin is
+  `TestPlanFolderJournal::test_entry_folder_*` in `tests/unit/plan_qa/test_model.py`). Red: collection error. `31f2196d0`.
+- `plan_qa/paths.py`: `PlanFileKind.JOURNAL_ENTRY`, in `_JOURNAL_KINDS`. Red: collection error. `188c71027`.
+- `checks/common.py`: `JournalEditTarget.entry_folder`, `is_entry_file`, `journal_date`; `journal_edit_target` and
+  `journal_tree_targets` include entry files (malformed names too). Red: 4 failed, 15 passed. `e3b984a04`.
+- `journal_append_only` skips entry files; `journal_dayfile_naming` checks entry grammar, folder date, UTC time,
+  category. Red: 6 failed, 22 passed. `3e4eb4579`.
+
+Left: handoff items 6 (`journal_entry_ordering`), 7 (`journal_entry_future_dated`), 8 (`journal_dayfile_is_today`
+EDIT reframe and COMMIT half), 9 (`has_staged_journal_entry` pins), then Task 2.3. Handoff:
+`untracked/scratch/261021-ab83fba2ca446f2ac-handoff.md`.
