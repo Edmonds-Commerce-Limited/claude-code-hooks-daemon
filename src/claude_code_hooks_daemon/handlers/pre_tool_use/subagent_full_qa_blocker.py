@@ -3301,9 +3301,21 @@ def _starts_a_process(code: str) -> bool:
     )
 
 
-def _python_strings_of(
-    code: str, argv: Sequence[str]
-) -> tuple[list[str], list[list[str]], list[str], list[list[str]]]:
+class _PythonStrings(NamedTuple):
+    """What process calls in Python code can receive (:func:`_python_strings`).
+
+    ``over_budget`` is True when the parse meter ran out before every grown
+    argv list was judged (N526), so the code holds runs that were not seen.
+    """
+
+    texts: list[str]
+    argvs: list[list[str]]
+    unsure_texts: list[str]
+    unsure_argvs: list[list[str]]
+    over_budget: bool
+
+
+def _python_strings_of(code: str, argv: Sequence[str]) -> _PythonStrings:
     """The strings and argv lists of Python code (:func:`_python_strings`).
 
     Code Python cannot parse, or whose expressions nest too deep to walk (a
@@ -3315,7 +3327,7 @@ def _python_strings_of(
         return _python_strings(tree, runs, maybe, argv)
     except (SyntaxError, ValueError, RecursionError) as error:
         logger.debug("Python judged by its quoted literals, unparsable (%s)", error)
-        return _string_literals(code), [], [], []
+        return _PythonStrings(_string_literals(code), [], [], [], over_budget=False)
 
 
 def _constant_names(tree: ast.Module) -> dict[str, list[str]]:
@@ -3780,7 +3792,7 @@ def _argv_operand(call: ast.Call, callee: str) -> ast.expr | None:
 
 def _grown_argvs(
     tree: ast.Module, names: Mapping[str, list[str]], argv: Sequence[str]
-) -> tuple[list[list[str]], set[int]]:
+) -> tuple[list[list[str]], set[int], bool]:
     """The argvs of lists built by changes and then handed to a process call (N409).
 
     ``a = []; a.append("pytest"); subprocess.Popen(a)`` starts pytest: the
@@ -3790,13 +3802,15 @@ def _grown_argvs(
     built in (a name found nowhere there is looked for in the functions around
     it). The work is bounded: each list is swept once, at most
     :data:`_MAX_ARGV_WORDS` words are judged per call, and the words are
-    charged to the parse meter; past it the lists are left to be judged as
-    they are written.
+    charged to the parse meter. The first call the meter cannot afford ends
+    the sweep, and is reported (N526): the calls left unjudged may run the
+    whole suite, so the caller judges the code over budget.
 
     Returns:
-        The argvs, and the ids of the list literals they replace: only the
+        The argvs; the ids of the list literals they replace (only the
         literal a list was last assigned from before a call that runs it,
-        which is just the first part of that argv.
+        which is just the first part of that argv); and whether the meter
+        ran out before every call was judged.
     """
     nodes = list(ast.walk(tree))
     scope_of, parent_of = _function_scopes(tree)
@@ -3906,10 +3920,11 @@ def _grown_argvs(
                     continue
                 program = path if _python_argv_heads(path, names) else items[0]
                 exec_words = [program, *items[1:_MAX_ARGV_WORDS]]
-                if _spend(len(exec_words)):
-                    argvs.extend(
-                        _python_argvs(ast.List(elts=exec_words, ctx=ast.Load()), names, argv)
-                    )
+                if not _spend(len(exec_words)):
+                    return argvs, replaced, True
+                argvs.extend(
+                    _python_argvs(ast.List(elts=exec_words, ctx=ast.Load()), names, argv)
+                )
             continue
         if reading.sink == _ASYNC_EXEC_SINK or reading.sink in _EXEC_SPREAD_SINKS:
             words: list[ast.expr] = []
@@ -3934,18 +3949,22 @@ def _grown_argvs(
                 # `execl(path, argv0, *args)`: argv0 is a name for the program, not a word.
                 del words[_EXEC_ARGV_ZERO : _EXEC_ARGV_ZERO + 1]
             words = words[:_MAX_ARGV_WORDS]
-            if _spend(len(words)):
-                argvs.extend(_python_argvs(ast.List(elts=words, ctx=ast.Load()), names, argv))
+            if not _spend(len(words)):
+                return argvs, replaced, True
+            argvs.extend(_python_argvs(ast.List(elts=words, ctx=ast.Load()), names, argv))
             continue
         for key in reading.keys:
             if key not in reading.counts or (key, reading.counts[key]) in judged:
                 continue
             state = states[key][reading.counts[key]]
-            if state.items and _spend(len(state.items)):
-                judged.add((key, reading.counts[key]))
-                argvs.extend(_python_argvs(ast.List(elts=state.items, ctx=ast.Load()), names, argv))
-                set_aside(state)
-    return argvs, replaced
+            if not state.items:
+                continue
+            if not _spend(len(state.items)):
+                return argvs, replaced, True
+            judged.add((key, reading.counts[key]))
+            argvs.extend(_python_argvs(ast.List(elts=state.items, ctx=ast.Load()), names, argv))
+            set_aside(state)
+    return argvs, replaced, False
 
 
 #: Calls that print, log, exit with or declare TEXT, so what they are given is
@@ -4697,7 +4716,7 @@ def _passed_literals(code: str) -> tuple[list[str], list[str]]:
 
 def _python_strings(
     tree: ast.Module, runs: frozenset[int], maybe: frozenset[int], argv: Sequence[str]
-) -> tuple[list[str], list[list[str]], list[str], list[list[str]]]:
+) -> _PythonStrings:
     """Every string a call can receive, and every argv list it can receive (review 8 M1).
 
     A string literal counts wherever it sits as long as a call can be handed
@@ -4722,7 +4741,7 @@ def _python_strings(
     names = _constant_names(tree)
     texts: list[str] = []
     unsure_texts: list[str] = []
-    argvs, replaced = _grown_argvs(tree, names, argv)
+    argvs, replaced, over_budget = _grown_argvs(tree, names, argv)
     unsure_argvs: list[list[str]] = []
     for node in nodes:
         if id(node) in runs:
@@ -4743,7 +4762,7 @@ def _python_strings(
             and id(node) not in replaced
         ):
             argv_bucket.extend(_python_argvs(node, names, argv))
-    return texts, argvs, unsure_texts, unsure_argvs
+    return _PythonStrings(texts, argvs, unsure_texts, unsure_argvs, over_budget)
 
 
 def _open_quote(text: str) -> str:
@@ -4797,17 +4816,23 @@ def _python_command(text: str, segment: str, depth: int) -> Iterator[tuple[str, 
 def _python_commands(
     code: str, argv: Sequence[str], segment: str, depth: int
 ) -> Iterator[tuple[str, list[str], str]]:
-    """What the strings and argv lists of process-starting Python code run."""
-    texts, argvs, unsure_texts, unsure_argvs = _python_strings_of(code, argv)
-    for text in texts:
+    """What the strings and argv lists of process-starting Python code run.
+
+    Grown argv lists the parse meter could not afford are ``_OVER_BUDGET``,
+    yielded last so a run seen positively still wins (N526).
+    """
+    found = _python_strings_of(code, argv)
+    for text in found.texts:
         yield from _python_command(text, segment, depth)
-    for argv in argvs:
+    for argv in found.argvs:
         yield from _resolve(argv, segment, depth)
     # Handed only to code this cannot read: what it runs is not seen (N417).
-    for text in unsure_texts:
+    for text in found.unsure_texts:
         yield from _unsure(_python_command(text, segment, depth))
-    for argv in unsure_argvs:
+    for argv in found.unsure_argvs:
         yield from _unsure(_resolve(argv, segment, depth))
+    if found.over_budget:
+        yield _OVER_BUDGET, [], segment
 
 
 def _unsure(

@@ -48,6 +48,7 @@ from claude_code_hooks_daemon.handlers.pre_tool_use import (
 from claude_code_hooks_daemon.handlers.pre_tool_use.subagent_full_qa_blocker import (
     PYTEST_FLAG_OPTIONS,
     PYTEST_VALUE_OPTIONS,
+    FullQaMatch,
     FullQaPattern,
     SubagentFullQaBlockerHandler,
     find_full_qa_invocation,
@@ -4518,6 +4519,42 @@ class TestListEditsAndExecRoutesReachAFullRun:
     def test_many_open_exec_calls_are_judged_quickly(self, tmp_path: Path) -> None:
         body = "".join(f"f = open('f{i}.py')\n{_EXEC}(f.read())\n" for i in range(1500))
         assert self._timed(tmp_path, body) < scaled_cpu_seconds(1.5)
+
+    @staticmethod
+    def _past_the_meter(tmp_path: Path, tail: str) -> FullQaMatch | None:
+        """Judge ``tail`` after grown-list runs that exhaust the parse meter.
+
+        A long comment spends most of the meter on the code itself, so the
+        64-word argvs exhaust what is left within a hundred or so calls,
+        while the code stays under the size that is parsed rather than scanned.
+        """
+        words = ", ".join(f"'w{i}'" for i in range(64))
+        filler = "a.append('y')\nsubprocess.run(a)\n" * 150
+        code = f"# {'x' * 90_000}\nimport subprocess\na=[{words}]\n{filler}{tail}"
+        assert len(code) < _blocker_module._MAX_PARSED_BYTES
+        script = tmp_path / "grown.py"
+        script.write_text(code, encoding="utf-8")
+        return find_full_qa_invocation(f"python3 {script}", _patterns(), cwd=_REPO_ROOT)
+
+    def test_a_grown_list_past_the_parse_meter_is_judged_over_budget(
+        self, tmp_path: Path
+    ) -> None:
+        """N526: a grown argv the meter cannot afford is named, never silently dropped."""
+        tail = "b=['./scripts/qa/llm_qa.py']\nb=b+['all']\nsubprocess.run(b)\n"
+        match = self._past_the_meter(tmp_path, tail)
+        assert match is not None
+        assert match.pattern_id == _blocker_module._OVER_BUDGET_ID
+        assert match.fail_closed == _blocker_module._OVER_BUDGET_REASON
+
+    def test_a_seen_full_run_still_wins_over_a_grown_list_past_the_meter(
+        self, tmp_path: Path
+    ) -> None:
+        """N526: the over-budget verdict is unseen, so a positive match still wins."""
+        tail = "subprocess.run(['./scripts/qa/llm_qa.py', 'all'])\n"
+        match = self._past_the_meter(tmp_path, tail)
+        assert match is not None
+        assert match.pattern_id == "llm-qa-whole-suite"
+        assert match.fail_closed == ""
 
 
 class TestAProtectedFileIsNeverRead:
