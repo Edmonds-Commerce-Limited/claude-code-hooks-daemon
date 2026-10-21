@@ -584,6 +584,17 @@ def is_journal_entry_folder_name(name: str) -> bool:
     return _JOURNAL_ENTRY_FOLDER_RE.match(name) is not None
 
 
+def journal_entry_folder_date(name: str) -> date | None:
+    """The calendar date an entry folder name states, or ``None`` when it is not one."""
+    match = _JOURNAL_ENTRY_FOLDER_RE.match(name)
+    if match is None:
+        return None
+    year, month, day = (int(part) for part in match.groups())
+    if not _is_valid_calendar_date(year, month, day):
+        return None
+    return date(year, month, day)
+
+
 def parse_journal_entry_path(folder: str, filename: str) -> JournalEntryFileName | None:
     """Parse an entry file's folder and file names, or ``None`` when either is malformed.
 
