@@ -17,6 +17,7 @@ from .optimal_config_checker import OptimalConfigCheckerHandler
 from .persistent_cron_assertor import PersistentCronAssertorHandler
 from .plan_qa_sweep import PlanQaSweepHandler
 from .project_handler_load_checker import ProjectHandlerLoadCheckerHandler
+from .relay_binary_checker import RelayBinaryCheckerHandler
 from .remote_docs_staleness import RemoteDocsStalenessHandler
 from .routine_qa_sweep import RoutineQaSweepHandler
 from .skill_opportunity_detector import SkillOpportunityDetectorHandler
@@ -46,6 +47,7 @@ __all__ = [
     "PersistentCronAssertorHandler",
     "PlanQaSweepHandler",
     "ProjectHandlerLoadCheckerHandler",
+    "RelayBinaryCheckerHandler",
     "RemoteDocsStalenessHandler",
     "RoutineQaSweepHandler",
     "SecretFileHygieneCheckerHandler",
