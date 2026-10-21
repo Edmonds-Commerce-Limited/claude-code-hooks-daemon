@@ -1,0 +1,49 @@
+# Issue #133 report: spend meter agents-only segment
+
+## Task 1.1: what bf01783be and release note 002 already fixed
+
+- `bf01783be` (N516, N517): the unit became `tok-eq` with whole `k`. `transcript_tail.read_tail` now returns None
+  (a fresh agent) for a FULLY read file holding no real assistant record, whatever its size. Cause: the first tool
+  call's hook runs before the first assistant record is flushed, behind 350-430 KB of prompt and `api-request*`
+  records, which used to miss the 256 KiB size test.
+- Still raising `NoUsageInTail` by design: an assistant record without usage (format-change signal), and a file
+  whose start lies past the 4 MiB window cap.
+- The gates (context budget, resume guard, spawn advisor, session_load, dispatch_tier) all go through `read_tail`,
+  so the no-assistant-record start-up state is already never counted as unmeasured. Task 1.3 needed no code change.
+
+## Disagreement / judgement call (Task 1.3)
+
+The brief says a transcript holding NO assistant usage at all is a start-up state. One shape contradicts N517's
+deliberate design: a transcript whose only assistant record has no `usage`. I left it as unmeasured, because that
+is the only signal of a transcript format change and I found no evidence it occurs at agent start-up (the 50 of 54
+`no-usage-in-tail` in the owner's session match the no-assistant-record shape that bf01783be fixed). If the owner's
+count stays high after this ships, the next step is to log what shape those transcripts have, not to widen the
+exemption blind.
+
+## Implemented
+
+- `handlers/status_line/spend_meter.py`: renders `| ⚙ <n> agent(s) (<families>) · <largest ctx>` only from a fresh
+  snapshot with `count > 0`; no ledger read, no `Σ⚙`/`tok-eq`. `N unmeasured` in red (`\033[31m`), appended, or alone
+  when `count == 0`; nothing when no agent and zero failures, or when the snapshot is stale or missing.
+- `explain_segment` rewritten (name "Running Subagents"); acceptance test text updated.
+- Docs: `CLAUDE/Architecture/StatusLine.md` (new subsection; it described no spend segment before),
+  `docs/guides/HANDLER_REFERENCE.md`, both `hooks-daemon.yaml*` comments, `init_config.py` comment.
+- Release note `CLAUDE/UPGRADES/UNRELEASED/release-notes/012-spend-meter-shows-running-agents-only.md`.
+
+## TDD red output (tests written first, before the handler change)
+
+```
+FAILED test_agents_segment_names_count_families_and_largest_context - assert '| Σ⚙ 0 tok-e...t) · max 140k' == '| ⚙ 2 agents...
+FAILED test_one_agent_is_singular
+FAILED test_families_are_listed_by_count_then_name_without_numbers
+FAILED test_no_family_split_and_no_context_are_left_out - assert '| Σ⚙ 0 tok-eq · 1 live' == '| ⚙ 1 agent'
+FAILED test_the_cumulative_total_is_never_on_the_bar
+FAILED test_a_ledger_without_running_agents_renders_nothing - assert ['| Σ⚙ 65k tok-eq'] == []
+FAILED test_no_running_agent_renders_nothing - assert ['| Σ⚙ 0 tok-eq · 0 live'] == []
+FAILED test_failures_are_red_and_appended_to_the_agents_segment
+FAILED test_failures_alone_are_shown_red_when_no_agent_is_running
+FAILED test_metadata - assert 'Subagent Spend' == 'Running Subagents'
+10 failed, 19 passed
+```
+
+After the change: 29 passed.
