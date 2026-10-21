@@ -3992,9 +3992,7 @@ def _grown_argvs(
                 exec_words = [program, *items[1:_MAX_ARGV_WORDS]]
                 if not _spend(len(exec_words)):
                     return argvs, replaced, True
-                argvs.extend(
-                    _python_argvs(ast.List(elts=exec_words, ctx=ast.Load()), names, argv)
-                )
+                argvs.extend(_python_argvs(ast.List(elts=exec_words, ctx=ast.Load()), names, argv))
             continue
         if reading.sink == _ASYNC_EXEC_SINK or reading.sink in _EXEC_SPREAD_SINKS:
             words: list[ast.expr] = []

@@ -4536,9 +4536,7 @@ class TestListEditsAndExecRoutesReachAFullRun:
         script.write_text(code, encoding="utf-8")
         return find_full_qa_invocation(f"python3 {script}", _patterns(), cwd=_REPO_ROOT)
 
-    def test_a_grown_list_past_the_parse_meter_is_judged_over_budget(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_grown_list_past_the_parse_meter_is_judged_over_budget(self, tmp_path: Path) -> None:
         """N526: a grown argv the meter cannot afford is named, never silently dropped."""
         tail = "b=['./scripts/qa/llm_qa.py']\nb=b+['all']\nsubprocess.run(b)\n"
         match = self._past_the_meter(tmp_path, tail)
