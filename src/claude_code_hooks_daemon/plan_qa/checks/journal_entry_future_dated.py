@@ -25,7 +25,7 @@ to ignore the check" failure its sibling was careful to avoid. At EDIT time the
 entry has not landed, and fixing it costs one keystroke.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Final
 
 from claude_code_hooks_daemon.plan_qa.checks.common import (
@@ -98,9 +98,27 @@ def _is_utc_dayfile(content: str) -> bool:
     return _UTC_SENTINEL in content
 
 
-def _rule(context: CheckContext, target: JournalEditTarget, content: str) -> list[Finding]:
+def _entry_date(target: JournalEditTarget) -> date | None:
+    """The day the target's entries belong to, or ``None`` when naming owns it.
+
+    An entry file's day is its folder's; a day-file's is its name's, parsed
+    without calendar validation so an impossible date reaches the
+    ``datetime`` guard below rather than being skipped silently here.
+    """
+    if target.is_entry_file:
+        return target.journal_date
     parsed = parse_journal_dayfile_name(target.basename)
     if parsed is None:
+        return None
+    try:
+        return date(parsed.year, parsed.month, parsed.day)
+    except ValueError:
+        return None
+
+
+def _rule(context: CheckContext, target: JournalEditTarget, content: str) -> list[Finding]:
+    entry_date = _entry_date(target)
+    if entry_date is None:
         # An unparseable name is journal-dayfile-naming's finding, and without
         # a date there is nothing to compare a time against.
         return []
@@ -112,13 +130,18 @@ def _rule(context: CheckContext, target: JournalEditTarget, content: str) -> lis
     latest = max(headings, key=lambda heading: heading.minutes)
     label = latest.label
     try:
-        entry_at = datetime(parsed.year, parsed.month, parsed.day, latest.hour, latest.minute)
+        entry_at = datetime(
+            entry_date.year, entry_date.month, entry_date.day, latest.hour, latest.minute
+        )
     except ValueError:
         # An impossible clock reading (25:61) is a grammar defect, not a
         # drift one; reporting it here would put it under the wrong check.
         return []
 
-    now = _utc_now() if _is_utc_dayfile(content) else _now()
+    # An entry file is scaffolder-written and UTC by construction (Plan 00543);
+    # a day-file says which clock wrote it through its sentinel.
+    utc = target.is_entry_file or _is_utc_dayfile(content)
+    now = _utc_now() if utc else _now()
     ahead_minutes = (entry_at - now).total_seconds() / 60
     if ahead_minutes <= _TOLERANCE_MINUTES:
         return []
