@@ -71,6 +71,8 @@ source "$INSTALL_LIB_DIR/validation.sh"
 source "$INSTALL_LIB_DIR/daemon_control.sh"
 # shellcheck source=install/rollback.sh
 source "$INSTALL_LIB_DIR/rollback.sh"
+# shellcheck source=install/relay_provision.sh
+source "$INSTALL_LIB_DIR/relay_provision.sh"
 # shellcheck source=install/settings_deploy.sh
 source "$INSTALL_LIB_DIR/settings_deploy.sh"
 # shellcheck source=install/expected_version.sh
@@ -1035,30 +1037,10 @@ FASTPATH_CCY_PY
         print_warning "ccy supervisor deployment had issues (non-fatal)"
     fi
 
-    # Plan 00290 Phase 5: relay binary provisioning on the idempotent fast
-    # path too, so a re-run against the same target version still honours a
-    # newly-set daemon.transport.relay_source. Null (the default) is a no-op.
-    if "$VENV_PYTHON" - "$DAEMON_DIR" "$PROJECT_ROOT" "$TARGET_VERSION" <<'FASTPATH_RELAY_PY'; then
-import sys
-from pathlib import Path
-
-from claude_code_hooks_daemon.install.forwarder_generator import load_transport_config
-from claude_code_hooks_daemon.install.relay_deploy import deploy_relay_if_configured
-
-daemon_dir = Path(sys.argv[1])
-project_root = Path(sys.argv[2])
-version_tag = sys.argv[3]
-
-transport = load_transport_config(project_root)
-result = deploy_relay_if_configured(daemon_dir, project_root, transport, version_tag=version_tag)
-for msg in result.messages:
-    print(f"  -> {msg}")
-sys.exit(0 if (transport.relay_source is None or result.deployed) else 1)
-FASTPATH_RELAY_PY
-        print_success "Relay binary provisioning complete"
-    else
-        print_warning "Relay binary provisioning had issues (non-fatal; relay rung falls back to the legacy transport)"
-    fi
+    # Plan 00529: relay binary provisioning on the idempotent fast path too, so
+    # a re-run against the same target version still provisions an enabled
+    # relay. A failure warns and is repeated before this path's exit.
+    provision_relay_binary "$VENV_PYTHON" "$DAEMON_DIR" "$PROJECT_ROOT" "$TARGET_VERSION"
 
     if ! restart_daemon_verified "$VENV_PYTHON"; then
         fail_fast "Daemon failed to start after idempotent upgrade"
@@ -1093,6 +1075,7 @@ FASTPATH_RELAY_PY
     if [ "$BRANCH_INSTALL_STATE" = "armed" ]; then
         print_branch_install_banner "$TRACK_REF" "$TRACK_REASON" "$INSTALL_STAMP"
     fi
+    report_relay_provision_failure
     exit 0
 fi
 
@@ -1539,39 +1522,17 @@ else
 fi
 
 # ============================================================
-# Step 14c: Deploy relay binary (Plan 00290 Phase 5 — explicit config choice only)
+# Step 14c: Provision the relay binary (Plan 00529)
 # ============================================================
 #
-# daemon.transport.relay_source is null by default and never runs implicitly
-# (Phase 5 owner ruling): "build" compiles from source with plain rustc when a
-# musl-capable toolchain is present, "download" fetches the digest-verified
-# release asset matching TARGET_VERSION. Either way this is advisory-only —
-# a failure never aborts the upgrade; the relay rung simply stays unprovisioned
-# and every hook falls back to the permanent bash+python3 transport.
+# Runs after the Step 10 config merge, which may have enabled the relay (a
+# config with no daemon.transport block takes the new default's). A failure
+# warns loudly and is repeated before the final exit; it never aborts the
+# upgrade (scripts/install/relay_provision.sh). The forwarders deployed at
+# Step 8 read the pre-merge config, so this step also regenerates them.
 
-log_step "14c" "Deploying relay binary (if daemon.transport.relay_source is configured)"
-
-if "$VENV_PYTHON" - "$DAEMON_DIR" "$PROJECT_ROOT" "$TARGET_VERSION" <<'SLOWPATH_RELAY_PY'; then
-import sys
-from pathlib import Path
-
-from claude_code_hooks_daemon.install.forwarder_generator import load_transport_config
-from claude_code_hooks_daemon.install.relay_deploy import deploy_relay_if_configured
-
-daemon_dir = Path(sys.argv[1])
-project_root = Path(sys.argv[2])
-version_tag = sys.argv[3]
-
-transport = load_transport_config(project_root)
-result = deploy_relay_if_configured(daemon_dir, project_root, transport, version_tag=version_tag)
-for msg in result.messages:
-    print(f"  -> {msg}")
-sys.exit(0 if (transport.relay_source is None or result.deployed) else 1)
-SLOWPATH_RELAY_PY
-    print_success "Relay binary provisioning complete"
-else
-    print_warning "Relay binary provisioning had issues (non-fatal; relay rung falls back to the legacy transport)"
-fi
+log_step "14c" "Provisioning relay binary (daemon.transport)"
+provision_relay_binary "$VENV_PYTHON" "$DAEMON_DIR" "$PROJECT_ROOT" "$TARGET_VERSION"
 
 # ============================================================
 # Step 15: Restart daemon and verify
@@ -1788,4 +1749,5 @@ if [ "$LAYER2_SOURCE_CHANGED" = true ] && [ -z "${HOOKS_DAEMON_UPGRADE_SECOND_PA
     exec bash "$LAYER2_TARGET_SCRIPT" "$PROJECT_ROOT" "$DAEMON_DIR" "$TARGET_VERSION" "${@:4}"
 fi
 
+report_relay_provision_failure
 exit 0

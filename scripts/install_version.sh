@@ -52,6 +52,8 @@ source "$INSTALL_LIB_DIR/validation.sh"
 source "$INSTALL_LIB_DIR/daemon_control.sh"
 # shellcheck source=install/transport_env.sh
 source "$INSTALL_LIB_DIR/transport_env.sh"
+# shellcheck source=install/relay_provision.sh
+source "$INSTALL_LIB_DIR/relay_provision.sh"
 # shellcheck source=install/settings_deploy.sh
 source "$INSTALL_LIB_DIR/settings_deploy.sh"
 # shellcheck source=install/expected_version.sh
@@ -534,40 +536,18 @@ else
 fi
 
 # ============================================================
-# Step 7b: Deploy relay binary (Plan 00290 Phase 5 — explicit config choice only)
+# Step 7b: Provision the relay binary (Plan 00529)
 # ============================================================
 #
-# daemon.transport.relay_source is null by default and never runs implicitly
-# (Phase 5 owner ruling): "build" compiles from source with plain rustc when a
-# musl-capable toolchain is present, "download" fetches the digest-verified
-# release asset matching the installed version. A fresh install always ships
-# the default config (relay_source: null), so this is a genuine no-op unless
-# TARGET_CONFIG was hand-edited between Step 7 and here — advisory-only, a
-# failure never aborts the install.
+# The default config deployed at Step 7 enables the relay with
+# relay_source: auto (build with a musl-capable rustc, else the digest-verified
+# release asset). A failure warns loudly and is repeated before the final exit;
+# it never aborts the install (scripts/install/relay_provision.sh). The
+# forwarders deployed at Step 4 predate the config, so this step also
+# regenerates them for the transport.
 
-log_step "7b" "Deploying relay binary (if daemon.transport.relay_source is configured)"
-
-if "$VENV_PYTHON" - "$DAEMON_DIR" "$PROJECT_ROOT" "$INSTALLED_VERSION" <<'DEPLOY_RELAY_PY'; then
-import sys
-from pathlib import Path
-
-from claude_code_hooks_daemon.install.forwarder_generator import load_transport_config
-from claude_code_hooks_daemon.install.relay_deploy import deploy_relay_if_configured
-
-daemon_dir = Path(sys.argv[1])
-project_root = Path(sys.argv[2])
-version_tag = sys.argv[3]
-
-transport = load_transport_config(project_root)
-result = deploy_relay_if_configured(daemon_dir, project_root, transport, version_tag=version_tag)
-for msg in result.messages:
-    print(f"  -> {msg}")
-sys.exit(0 if (transport.relay_source is None or result.deployed) else 1)
-DEPLOY_RELAY_PY
-    print_success "Relay binary provisioning complete"
-else
-    print_warning "Relay binary provisioning had issues (non-fatal; relay rung falls back to the legacy transport)"
-fi
+log_step "7b" "Provisioning relay binary (daemon.transport)"
+provision_relay_binary "$VENV_PYTHON" "$DAEMON_DIR" "$PROJECT_ROOT" "$INSTALLED_VERSION"
 
 # ============================================================
 # Step 8: Setup .gitignore
@@ -845,4 +825,5 @@ echo "  Status:   $DAEMON_DIR/bin/hooks-daemon status"
 echo "  Restart:  $DAEMON_DIR/bin/hooks-daemon restart"
 echo ""
 
+report_relay_provision_failure
 exit 0
