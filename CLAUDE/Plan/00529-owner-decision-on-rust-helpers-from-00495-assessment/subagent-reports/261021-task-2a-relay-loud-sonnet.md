@@ -115,3 +115,6 @@ left for that owner and are reported here:
    sees. A fix that also fits the owner's rule: when the config is invalid
    (not merely absent), print a status WARNING that the relay state is unknown,
    as `relay_binary_checker` does, instead of returning None silently.
+
+Follow-up: black reformat committed; _load_status_transport_config now returns a frozen _StatusTransport(config, problem), so an invalid config prints a transport-config-unreadable WARNING in both status branches (exit code still liveness only) and no except block returns None.
+Red first (2 failed, 5 passed), then green; mypy cli.py clean; llm_qa format error_hiding lint type_check 4/4 PASSED. Note: get_project_path already exits on an invalid config, so the branch is reached only on a load race; tests patch Config.find_and_load.

@@ -1533,31 +1533,53 @@ def _print_install_stamp_line() -> None:
     )
 
 
-def _load_status_transport_config(project_path: Path) -> TransportConfig | None:
-    """Load ``daemon.transport`` for ``status``; None when config is absent or invalid."""
+@dataclass(frozen=True)
+class _StatusTransport:
+    """What ``status`` could learn about ``daemon.transport``.
+
+    ``config`` is None when there is nothing to report on: either no project
+    config exists (a legitimate state for a bare ``status`` probe, ``problem``
+    None) or the config is invalid (``problem`` carries the reason, which
+    ``status`` must print).
+    """
+
+    config: TransportConfig | None
+    problem: str | None
+
+
+def _load_status_transport_config(project_path: Path) -> _StatusTransport:
+    """Load ``daemon.transport`` for ``status``; an invalid config is reported, never dropped."""
     try:
-        return Config.find_and_load(project_path).daemon.transport
-    except (FileNotFoundError, PydanticValidationError) as exc:
+        return _StatusTransport(Config.find_and_load(project_path).daemon.transport, None)
+    except FileNotFoundError as exc:
         log_and_continue(
             logger,
             exc,
             reason=(
-                "cmd_status: could not resolve daemon.transport config; config is "
-                "legitimately absent/invalid for a bare `status` probe (no project config "
-                "yet, or a config mid-edit), so the transport section is shown as unknown"
+                "cmd_status: no project config exists, which is a legitimate state for a "
+                "bare `status` probe; there is no transport section to report"
             ),
             level=logging.DEBUG,
         )
-        return None
+        return _StatusTransport(None, None)
+    except PydanticValidationError as exc:
+        first = exc.errors()[0]
+        location = ".".join(str(part) for part in first["loc"])
+        return _StatusTransport(None, f"{location}: {first['msg']}")
 
 
-def _print_relay_binary_warning(
-    project_path: Path, transport_config: TransportConfig | None
-) -> None:
-    """Print a WARNING line when the relay is configured on but its binary is unusable."""
-    if transport_config is None:
+def _print_transport_status_warnings(project_path: Path, transport: _StatusTransport) -> None:
+    """Print the loud transport WARNING lines: unreadable config, or an unusable relay binary."""
+    if transport.problem is not None:
+        print(
+            f"WARNING: transport config unreadable ({transport.problem}): relay and "
+            "listener state unknown. Fix the config, then run "
+            f"{daemon_cli_command('config-validate')}"
+        )
         return
-    binary = missing_configured_relay_binary(project_path, transport_config)
+    if transport.config is None:
+        return
+    binary = missing_configured_relay_binary(project_path, transport.config)
     if binary is not None:
         fix = daemon_cli_command("transport", "on")
         print(f"WARNING: {relay_binary_missing_warning(binary, fix)}")
@@ -1586,14 +1608,15 @@ def cmd_status(args: argparse.Namespace) -> int:
     # would otherwise be falsely reported as a RUNNING daemon.
     pid = read_pid_file(str(pid_path), verify_daemon=True)
 
-    transport_config = _load_status_transport_config(project_path)
+    transport = _load_status_transport_config(project_path)
+    transport_config = transport.config
 
     if pid is None:
         print("Daemon: NOT RUNNING")
         print(f"Socket: {socket_path}")
         print(f"PID file: {pid_path}")
         _print_install_stamp_line()
-        _print_relay_binary_warning(project_path, transport_config)
+        _print_transport_status_warnings(project_path, transport)
         return 1
 
     # Check socket exists
@@ -1608,7 +1631,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     # Plan 00290: name active per-event listeners when the transport config
     # needs them. Silent when the transport is disabled (default) — matches
     # today's status output byte-for-byte.
-    _print_relay_binary_warning(project_path, transport_config)
+    _print_transport_status_warnings(project_path, transport)
     if transport_config is not None and (
         transport_config.relay_enabled or transport_config.nc_enabled
     ):

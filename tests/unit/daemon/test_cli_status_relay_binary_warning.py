@@ -9,7 +9,9 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 
+from claude_code_hooks_daemon.config.models import Config, TransportConfig
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.cli import cmd_status
 
@@ -104,3 +106,47 @@ class TestStatusRelayBinaryWarning:
         _run(tmp_path, socket_path, None)
 
         assert "relay is enabled but" not in capsys.readouterr().out
+
+
+def _invalid_transport_error() -> PydanticValidationError:
+    try:
+        TransportConfig.model_validate({"relay_enabled": "not-a-bool"})
+    except PydanticValidationError as exc:
+        return exc
+    raise AssertionError("relay_enabled: 'not-a-bool' must fail validation")
+
+
+class TestStatusUnreadableTransportConfig:
+    """The project already validated at startup; a loader failure inside status is loud."""
+
+    @pytest.mark.parametrize(("pid", "expected_exit"), [(12345, 0), (None, 1)])
+    def test_invalid_config_warns_loudly_and_keeps_liveness_exit_code(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        pid: int | None,
+        expected_exit: int,
+    ) -> None:
+        socket_path = _make_project(tmp_path, tmp_path / "hooks-relay")
+
+        with patch.object(Config, "find_and_load", side_effect=_invalid_transport_error()):
+            result = _run(tmp_path, socket_path, pid)
+
+        out = capsys.readouterr().out
+        assert result == expected_exit
+        assert "WARNING: transport config unreadable (" in out
+        assert "relay and listener state unknown" in out
+        assert "config-validate" in out
+
+    def test_absent_config_is_a_legitimate_silent_state(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        socket_path = _make_project(tmp_path, tmp_path / "hooks-relay")
+
+        with patch.object(Config, "find_and_load", side_effect=FileNotFoundError("gone")):
+            result = _run(tmp_path, socket_path, 12345)
+
+        out = capsys.readouterr().out
+        assert result == 0
+        assert "transport config unreadable" not in out
+        assert "relay is enabled but" not in out
