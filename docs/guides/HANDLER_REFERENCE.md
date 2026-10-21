@@ -1414,7 +1414,7 @@ handlers:
 **Description:** Blocks Write/Edit content that writes HISTORICAL NARRATIVE
 into a code comment. A comment describes CURRENT STATE; changelog narrative
 belongs in git (the commit message), the project's changelog file, or a
-plan's `JOURNAL/` day-file. The failure mode is monotonic — nobody deletes
+plan's `JOURNAL/` entries. The failure mode is monotonic — nobody deletes
 from a comment changelog, so it only ever grows (Plan 00208's field report: a
 bash version-marker trailing comment reached 5,645 characters, six releases
 deep, and broke the banner that echoed it).
@@ -2333,7 +2333,7 @@ handlers:
 | **Type**       | Blocking             |
 | **Event**      | PreToolUse           |
 
-**Description:** Denies a plan journal entry written by hand, in any checkout including git worktrees: an `Edit`/`Write` that adds any line to (or creates) a `JOURNAL/` day-file, or a Bash command that writes into one by any route. The deny prints the exact `mkplan.bash --journal <plan> <category> <body-file>` command for that plan, with absolute paths, because the tool stamps the real UTC time and a hand-typed one can be wrong. `mkplan.bash`, `git`, reads and edits that add no line are allowed. Active only when the plan workflow and journalling are on, the journal directory keeps its default `JOURNAL` name, and the checkout's plan directory holds `_JOURNAL_TEMPLATE_.md` and a `mkplan.bash` that offers `--journal`; otherwise it is inert and logs why once. Full rule: [CLAUDE/PlanJournalling.md](../../CLAUDE/PlanJournalling.md#appending-an-entry).
+**Description:** Denies a plan journal entry written by hand, in any checkout including git worktrees: an `Edit`/`Write` that creates a `JOURNAL/` entry file or changes any existing journal file (entry file or legacy day-file), or a Bash command that does so by any route. Only removing conflict markers, or restoring the committed bytes, is allowed. The deny prints the exact `mkplan.bash --journal <plan> <category> <body-file>` command for that plan, with absolute paths, because the tool stamps the real UTC time and a hand-typed one can be wrong. `mkplan.bash`, `git`, reads and edits that add no line are allowed. Active only when the plan workflow and journalling are on, the journal directory keeps its default `JOURNAL` name, and the checkout's plan directory holds `_JOURNAL_TEMPLATE_.md` and a `mkplan.bash` that offers `--journal`; otherwise it is inert and logs why once. Full rule: [CLAUDE/PlanJournalling.md](../../CLAUDE/PlanJournalling.md#appending-an-entry).
 
 **Config example:**
 
@@ -2630,7 +2630,7 @@ handlers:
 
 **Description:** Lints every Write/Edit of a `PLAN.md` under the plan directory in real time, running the plan QA edit-stage checks against the content the file *would* have after the tool call (for Edit, the old/new replacement is applied to the current file first). Single-file invariants only -- cross-file checks belong to `plan_qa_commit_gate` and `plan_qa_sweep`.
 
-**Fires when:** a Write or Edit targets a file named `PLAN.md` inside the configured plan directory (`plan_workflow.directory`, default `CLAUDE/Plan`), a journal day-file under a plan's `JOURNAL/`, or the plan-index `README.md` at the plan directory root. A path matching the project-wide `daemon.exclude_paths` is never linted (see [Path Exclusion](#path-exclusion-exclude_paths)).
+**Fires when:** a Write or Edit targets a file named `PLAN.md` inside the configured plan directory (`plan_workflow.directory`, default `CLAUDE/Plan`), a journal file under a plan's `JOURNAL/`, or the plan-index `README.md` at the plan directory root. A path matching the project-wide `daemon.exclude_paths` is never linted (see [Path Exclusion](#path-exclusion-exclude_paths)).
 
 **Enforcement mode:** honours `plan_workflow.qa.edit_mode` (`block` | `warn` | `off`, default `block`). In `block`, block-level findings on new material deny the tool call with the exact remediation; `warn` downgrades everything to advisory context; `off` disables the handler. Plans listed in `legacy_plan_allowlist` only ever advise.
 
@@ -2661,7 +2661,7 @@ plan_workflow:
       enabled: true              # master switch for all journal checks
       mode: advise               # advise | block | off (only naming honours block)
       dir_name: JOURNAL           # journal sub-directory name inside a plan folder
-      freshness_days: 3          # nag a plan whose newest day-file is older than N days
+      freshness_days: 3          # nag a plan whose newest journal entry is older than N days
       enforce_on_completion: false
       grandfather_before: 0      # plans below this number are never nagged for a JOURNAL/
       today_only_mode: block     # advise | block | off (Plan 00197; independent of `mode`)
@@ -2677,7 +2677,7 @@ plan_workflow:
 
 `plan_doc_size` bounds **plan documents only**. A `PLAN.md` is read in full at
 the start of every session that touches the plan, so its size is a recurring
-context cost; a `JOURNAL/` day-file is only ever tailed, grepped or read by a
+context cost; a `JOURNAL/` entry file is only ever tailed, grepped or read by a
 sub-agent, so journals -- and the plan-index `README.md` -- are exempt at any
 size. Each tier trips on `bytes > B OR lines > L`, since a long thin plan and a
 short dense one cost the same to read. Tiers must increase strictly on both
@@ -2711,8 +2711,10 @@ built-in member of the accepted set, so a project no longer needs this
 allowlist just to deploy it.
 
 The `journal` sub-block governs per-plan journalling (Plan 00163): each plan
-folder may carry a `JOURNAL/` of append-only `NNNNN-Journal-YY-MM-DD.md`
-day-files, scaffolded by `mkplan.bash`. Seven checks ride the existing plan QA
+folder may carry a `JOURNAL/` of append-only entry files
+(`YYYY-MM-DD/HHMMSSZ-<category>-<hex>.md`, one per entry, written by
+`mkplan.bash --journal`; existing `NNNNN-Journal-YY-MM-DD.md` day-files stay
+valid and read-only). Seven checks ride the existing plan QA
 surfaces (no new handler): `journal-dayfile-naming` + `journal-append-only`
 (edit stage, ADVISE), `journal-folder-present` + `journal-freshness` (sweep
 stage, ADVISE), `journal-entry-with-progress` + `journal-completion-entry`
@@ -2727,12 +2729,16 @@ where it runs and the commit not naming paths that leave it out; the
 status without a closing journal entry — the latter is OPT-IN, firing only
 when `enforce_on_completion: true`.
 
-`journal-dayfile-naming` validates grammar, plan-number coherence and calendar
-validity only; it does NOT judge recency. `journal-dayfile-is-today` owns
-recency exclusively: a Write/Edit to a journal day-file dated anything other
-than TODAY (including yesterday) is blocked, with a remediation naming the
-exact today-dated filename to use instead. The split keeps the two checks from
-ever giving contradictory advice about one file. `journal-dayfile-naming` may
+`journal-dayfile-naming` validates grammar (entry files and legacy day-files),
+plan-number coherence and calendar validity only; it does NOT judge recency or
+mutation. `journal-dayfile-is-today` closes existing journal files: a
+Write/Edit to a journal file that already exists (an entry file, or a legacy
+day-file) is blocked, as is creating a legacy day-file dated anything other than
+TODAY, with a remediation pointing at `mkplan.bash --journal`. Removing only
+conflict markers, or restoring the committed bytes, stays clean. It also has a
+COMMIT half: a staged modification or deletion of an entry file, or a rename
+whose content changed, is blocked (a pure rename is clean). The split keeps the
+two checks from ever giving contradictory advice about one file. `journal-dayfile-naming` may
 ratchet to BLOCK via `mode: block`; `journal-dayfile-is-today` has its own
 independent `today_only_mode` knob (default `block`) rather than sharing
 `mode`, because unlike the rest of the journalling feature it does not ship

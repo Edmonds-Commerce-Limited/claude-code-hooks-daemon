@@ -391,8 +391,8 @@ _BODY_FILE_PLACEHOLDER: Final[str] = "<body-file>"
 #: every remediation that names the command says it the same way.
 JOURNAL_BODY_FILE_HINT: Final[str] = (
     "write the entry BODY (no heading) with the Write tool to a fresh file under "
-    "untracked/scratch/ first; the tool stamps the real UTC time and creates "
-    "today's day-file when there is none"
+    "untracked/scratch/ first; the tool stamps the real UTC time and writes the "
+    "entry as a NEW file under JOURNAL/YYYY-MM-DD/"
 )
 
 

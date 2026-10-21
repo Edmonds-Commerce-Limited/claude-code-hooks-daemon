@@ -60,7 +60,7 @@ from claude_code_hooks_daemon.utils.git_facts import GitFactsBase, StagedChange
 
 CHECK_ID: Final[str] = "journal-dayfile-is-today"
 STATEMENT: Final[str] = (
-    "A journal day-file edit must be for exactly today's date. Append to today's day-file with `mkplan.bash --journal`."
+    "An existing journal file is closed, and a legacy day-file must be dated exactly today. Record entries as new files with `mkplan.bash --journal`."
 )
 
 _GENERIC_DAYFILE_NAME: Final[str] = "NNNNN-Journal-YY-MM-DD.md"
@@ -76,10 +76,11 @@ def _remediation(plan_dir: str, plan_number: int | None, today: date) -> str:
         _GENERIC_DAYFILE_NAME if plan_number is None else _suggested_filename(plan_number, today)
     )
     return (
-        "Journals are append-only per-day logs — never edit a stale day-file, "
-        "even one dated yesterday. Append the entry with "
+        "A journal is append-only — never edit a stale legacy day-file, "
+        "even one dated yesterday. Record the entry with "
         f"`{journal_append_command(plan_dir, plan_number)}` instead "
-        f"({JOURNAL_BODY_FILE_HINT}); it writes to today's day-file, `{dayfile}`."
+        f"({JOURNAL_BODY_FILE_HINT}); a new entry is its own file, so there is "
+        f"no day-file (`{dayfile}`) to append to."
     )
 
 
