@@ -118,10 +118,11 @@ Follow-ups, not defects in the reviewers' judgement:
   `scaled_cpu_seconds(1.5)`. Contention therefore does not explain it. That was the hypothesis behind moving these tests
   into their own job (N455), and it is refuted for this test.
 - **N526b**: a scaling probe on the development host (`find_full_qa_invocation` on a script of N `<edit>` +
-  `subprocess.run(a)` pairs) shows linear cost, about 0.45 ms per line, for every edit shape: 500 lines 0.20-0.35 s,
+  `subprocess.run(a)` pairs) shows linear cost, about 0.45 ms per line, for the four edit shapes probed (of the test's
+  five): 500 lines 0.20-0.35 s,
   1000 lines 0.38-0.55 s, 2000 lines 0.78-0.93 s. The CI runner is about twice as slow, which leaves no margin under a
   1.5 s bound. The test is right that the scan is slow, and it is not quadratic.
-- **N526c**: at 4000 lines every shape returns in about 0.001 s, so the scan stops at a size limit. What it then decides
+- **N526c**: at 4000 lines every probed shape returns in 0.001-0.002 s, so the scan stops at a size limit. What it then decides
   is unverified. If an oversized script is ALLOWED, a full QA run hidden in a long script passes the sub-agent full-QA
   gate silently. That is a fail-open, against the owner's no-silent-fallback ruling.
 
