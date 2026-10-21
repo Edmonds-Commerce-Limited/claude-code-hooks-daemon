@@ -225,7 +225,9 @@ feedback loop.
 A session paused on one token's 7-day window was restarted on another token. It stayed paused for the old window's
 reset, about 2.5 days away. The status line showed `⏸ usage 23:02` beside a 7d reading of 19% under an 80% ceiling.
 The usage snapshot is refreshed from `rate_limits` on every status-line render, so the daemon already held the new
-account's reading. But `_resume` drops every tick before `resume_at` unread, and under a pause no other prompt arrives.
+account's reading. But `_resume` drops every tick before `resume_at` unread. A held real prompt does re-check
+(`_hold_or_lift`), but an unattended paused session gets none: the supervisor sends nothing and the resume tick is the
+only automated prompt left.
 
 - [ ] ⬜ **Task 8.1**: An early resume tick consults the current snapshot, which costs no model turn:
 
