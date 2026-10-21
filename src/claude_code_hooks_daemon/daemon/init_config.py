@@ -390,6 +390,7 @@ class ConfigTemplate:
             "    model_fallback_detector: {enabled: false, priority: 63}  # Opt-in (Plan 00278): loud SessionStart alert on a recorded model fallback. Probably leave OFF — it reports a fallback that already happened and is noisy; the downgrade_indicator status line shows a LIVE downgrade instead. Enable only to capture diagnostic snapshots for tuning delegation config.\n"
             "    docs_qa_sweep: {enabled: true, priority: 64}  # Whole-corpus docs drift report (fires only when documentation.enabled); silent when clean\n"
             "    unproven_venv_advisor: {enabled: true, priority: 72}  # List venvs the code cannot prove stale (missing or unreadable metadata, another view's slug) with evidence and the removal command; silent when there are none\n"
+            "    relay_binary_checker: {enabled: true, priority: 72}  # Warn when daemon.transport.relay_enabled is true but the relay binary is missing or not executable, naming the path and the fix; silent otherwise\n"
             "    tool_disable_advisor: {enabled: false, priority: 65}  # Opt-in (Plan 00293): advise when a tool_policy.never_want tool is not disabled in project settings (never edits)\n"
             "    monorepo_detector: {enabled: true, priority: 66}  # Advise on an unconfigured monorepo shape (manifests found below the repo root, none at it)\n"
             "    config_optimisation_reminder: {enabled: true, priority: 67}  # Remind to re-run the config-optimisation review after an upgrade; silent once a run is recorded against the current version\n"

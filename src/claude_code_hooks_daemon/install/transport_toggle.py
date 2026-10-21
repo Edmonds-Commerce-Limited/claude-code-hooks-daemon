@@ -89,6 +89,12 @@ class ToggleOutcome:
     #: ``changed``, which means the config itself moved — a reconcile leaves it
     #: untouched.
     reconciled: bool = False
+    #: The route (``build``/``download``) that wrote the relay binary during
+    #: this toggle, or None when no binary was written. A provisioned binary
+    #: is a change in its own right, independent of ``changed``/``reconciled``.
+    provisioned_route: str | None = None
+    #: Where that binary was written; set together with ``provisioned_route``.
+    provisioned_binary: str | None = None
 
     @property
     def succeeded(self) -> bool:
@@ -103,7 +109,23 @@ class ToggleOutcome:
             "reverted": self.reverted,
             "revert_verified": self.revert_verified,
             "reconciled": self.reconciled,
+            "provisioned_route": self.provisioned_route,
+            "provisioned_binary": self.provisioned_binary,
         }
+
+
+@dataclass(frozen=True)
+class RelayProvision:
+    """What :func:`ensure_relay_binary` found or did.
+
+    All fields None: the binary was already present and executable. ``failure``
+    set: it is absent and could not be provisioned. ``route``/``binary`` set:
+    it was absent and has just been written by that route, at that path.
+    """
+
+    failure: str | None = None
+    route: str | None = None
+    binary: str | None = None
 
 
 def _config_path(project_root: Path) -> Path:
@@ -286,7 +308,7 @@ def _failure_lines(probes: list[ProbeResult]) -> list[str]:
     return [f"{probe.name}: {probe.detail}" for probe in probes if not probe.passed]
 
 
-def ensure_relay_binary(project_root: Path) -> str | None:
+def ensure_relay_binary(project_root: Path) -> RelayProvision:
     """When enabling: make sure the relay binary actually exists (defect D2).
 
     ``relay_source`` was previously honoured only by the installer's Step 7b,
@@ -298,18 +320,22 @@ def ensure_relay_binary(project_root: Path) -> str | None:
     ``relay_source``) or fail the toggle loudly.
 
     Returns:
-        A failure line for the toggle report, or ``None`` when the binary is
-        present (or was just provisioned) and executable.
+        A :class:`RelayProvision`: empty when the binary was already present
+        and executable, carrying a failure line when it could not be
+        provisioned, and carrying the route and path when it was provisioned
+        now — the toggle reports that as a change (Plan 00474 N525).
     """
     transport = load_transport_config(project_root)
     binary = resolve_relay_binary_path(project_root, transport)
     if binary.is_file() and os.access(binary, os.X_OK):
-        return None
+        return RelayProvision()
     if transport.relay_source is None:
-        return (
-            f"relay-binary: {binary} is absent and daemon.transport.relay_source "
-            "is null — set relay_source: build|download (or put a relay binary "
-            "at that path) before enabling the relay rung"
+        return RelayProvision(
+            failure=(
+                f"relay-binary: {binary} is absent and daemon.transport.relay_source "
+                "is null — set relay_source: build|download (or put a relay binary "
+                "at that path) before enabling the relay rung"
+            )
         )
     # Self-install: the daemon checkout IS the project root; client install:
     # .claude/hooks-daemon/. Both are exactly the untracked dir's parent.
@@ -319,9 +345,11 @@ def ensure_relay_binary(project_root: Path) -> str | None:
     )
     if not result.deployed:
         details = "; ".join(result.messages) or "no reason reported"
-        return f"relay-binary: provisioning via relay_source={transport.relay_source} failed: {details}"
+        return RelayProvision(
+            failure=f"relay-binary: provisioning via relay_source={transport.relay_source} failed: {details}"
+        )
     logger.info("relay binary provisioned via %s route at %s", result.route, binary)
-    return None
+    return RelayProvision(route=result.route, binary=str(binary))
 
 
 def _converge_deployed_state(
@@ -332,7 +360,7 @@ def _converge_deployed_state(
     enable: bool,
     restart: Callable[[], int],
     verify: Callable[[bool], list[ProbeResult]],
-    provision: Callable[[], str | None],
+    provision: Callable[[], RelayProvision],
 ) -> ToggleOutcome:
     """The config already holds the requested value — establish that state
     rather than assuming it (Plan 00383).
@@ -350,7 +378,14 @@ def _converge_deployed_state(
     names it rewrote. So a converged project pays nothing here — no write, no
     restart, no probes — and that is what keeps this safe to do on every
     toggle rather than behind a flag.
+
+    A relay binary provisioned here is a change even when no forwarder was
+    rewritten (Plan 00474 N525): the guards already named the binary, so the
+    relay rung engages from the next hook on. No restart is needed for that,
+    but the rung is verified rather than assumed, and the outcome carries the
+    route so the report can never call the repair "nothing to do".
     """
+    provisioned = RelayProvision()
     if enable:
         # The regenerated hot path NAMES the relay binary, so provisioning has
         # to clear before anything is written: otherwise a reconcile deploys a
@@ -358,10 +393,10 @@ def _converge_deployed_state(
         # "green enable with no relay engaged" failure that made provisioning
         # a precondition of the flip path in the first place. Disabling never
         # references the binary, so it needs no such gate.
-        provision_error = provision()
-        if provision_error is not None:
+        provisioned = provision()
+        if provisioned.failure is not None:
             outcome = ToggleOutcome(
-                action=action, changed=False, verified=False, failures=[provision_error]
+                action=action, changed=False, verified=False, failures=[provisioned.failure]
             )
             _write_toggle_state(project_root, outcome)
             return outcome
@@ -371,17 +406,24 @@ def _converge_deployed_state(
     except Exception as exc:
         logger.warning("transport %s could not read the deployed forwarders: %s", action, exc)
         outcome = ToggleOutcome(
-            action=action, changed=False, verified=False, failures=[f"{type(exc).__name__}: {exc}"]
+            action=action,
+            changed=False,
+            verified=False,
+            failures=[f"{type(exc).__name__}: {exc}"],
+            provisioned_route=provisioned.route,
+            provisioned_binary=provisioned.binary,
         )
         _write_toggle_state(project_root, outcome)
         return outcome
 
-    if not rewritten:
+    if not rewritten and provisioned.route is None:
         return ToggleOutcome(action=action, changed=False, verified=None)
 
     failures: list[str] = []
     try:
-        restart_rc = restart()
+        # Rewritten forwarders need the daemon restarted before they are
+        # probed; a provisioned binary alone does not.
+        restart_rc = restart() if rewritten else 0
         if restart_rc != 0:
             failures.append(f"daemon-restart: exit code {restart_rc}")
         else:
@@ -400,7 +442,9 @@ def _converge_deployed_state(
         changed=False,
         verified=not failures,
         failures=failures,
-        reconciled=True,
+        reconciled=bool(rewritten),
+        provisioned_route=provisioned.route,
+        provisioned_binary=provisioned.binary,
     )
     _write_toggle_state(project_root, outcome)
     return outcome
@@ -412,7 +456,7 @@ def run_toggle(
     enable: bool,
     restart_fn: Callable[[], int] | None = None,
     verify_fn: Callable[[bool], list[ProbeResult]] | None = None,
-    provision_fn: Callable[[], str | None] | None = None,
+    provision_fn: Callable[[], RelayProvision] | None = None,
 ) -> ToggleOutcome:
     """Toggle the relay transport, verified, with auto-revert on failure.
 
@@ -425,7 +469,7 @@ def run_toggle(
         verify_fn: Verification pass for an expected relay state, returning
             probe results. Defaults to :func:`transport_verify.run_probes`.
         provision_fn: Relay-binary provisioning check run only when ENABLING,
-            returning a failure line or ``None``. Defaults to
+            returning a :class:`RelayProvision`. Defaults to
             :func:`ensure_relay_binary`.
 
     Returns:
@@ -462,18 +506,19 @@ def run_toggle(
             provision=provision,
         )
 
+    provisioned = RelayProvision()
     if enable:
         # Defect D2: provisioning runs BEFORE anything is flipped, so a
         # build/download failure leaves the project completely untouched —
         # there is nothing to revert, and the failure is still reported
         # loudly with exit-code semantics identical to a probe failure.
-        provision_error = provision()
-        if provision_error is not None:
+        provisioned = provision()
+        if provisioned.failure is not None:
             outcome = ToggleOutcome(
                 action=action,
                 changed=False,
                 verified=False,
-                failures=[provision_error],
+                failures=[provisioned.failure],
             )
             _write_toggle_state(project_root, outcome)
             return outcome
@@ -496,7 +541,13 @@ def run_toggle(
         failures.append(f"{type(exc).__name__}: {exc}")
 
     if not failures:
-        outcome = ToggleOutcome(action=action, changed=True, verified=True)
+        outcome = ToggleOutcome(
+            action=action,
+            changed=True,
+            verified=True,
+            provisioned_route=provisioned.route,
+            provisioned_binary=provisioned.binary,
+        )
         _write_toggle_state(project_root, outcome)
         return outcome
 
@@ -527,6 +578,8 @@ def run_toggle(
         failures=failures,
         reverted=True,
         revert_verified=revert_verified,
+        provisioned_route=provisioned.route,
+        provisioned_binary=provisioned.binary,
     )
     _write_toggle_state(project_root, outcome)
     return outcome

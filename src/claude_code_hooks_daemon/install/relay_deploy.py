@@ -101,6 +101,27 @@ def resolve_relay_binary_path(project_root: Path, transport: TransportConfig) ->
     return untracked_dir / "bin" / "hooks-relay"
 
 
+def missing_configured_relay_binary(project_root: Path, transport: TransportConfig) -> Path | None:
+    """The relay binary path when the relay is configured on but unusable.
+
+    Returns None when the relay is disabled or the binary is an executable file.
+    """
+    if not transport.relay_enabled:
+        return None
+    binary = resolve_relay_binary_path(project_root, transport)
+    if binary.is_file() and os.access(binary, os.X_OK):
+        return None
+    return binary
+
+
+def relay_binary_missing_warning(binary: Path, fix_command: str) -> str:
+    """One-line warning for a configured relay whose binary is missing or not executable."""
+    return (
+        f"relay is enabled but its binary is missing or not executable: {binary} "
+        f"- relay-eligible hooks run on the fallback transport. Fix: {fix_command}"
+    )
+
+
 def _route_marker_path(binary_path: Path) -> Path:
     return binary_path.with_name(binary_path.name + _ROUTE_MARKER_SUFFIX)
 

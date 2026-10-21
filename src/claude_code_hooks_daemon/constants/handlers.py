@@ -1070,6 +1070,14 @@ class HandlerID:
         config_key="unproven_venv_advisor",
         display_name="unproven-venv-advisor",
     )
+    # Relay binary checker (SessionStart handler) -- Plan 00474 N523: an enabled
+    # relay whose binary is missing or not executable is named at session start
+    # with the path and the fix, instead of hooks quietly using the fallback.
+    RELAY_BINARY_CHECKER = HandlerIDMeta(
+        class_name="RelayBinaryCheckerHandler",
+        config_key="relay_binary_checker",
+        display_name="relay-binary-checker",
+    )
     # Persistent-cron assertor (SessionStart handler) -- Plan 00384: Claude
     # Code crons are session-only (durable has no effect, recurring jobs expire
     # after 7 days), so a cron a project wants ALWAYS present has to be

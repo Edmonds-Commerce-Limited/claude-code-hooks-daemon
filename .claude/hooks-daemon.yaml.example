@@ -796,6 +796,10 @@ handlers:
       enabled: true  # Advisory only, never removes; silent when there are none
       priority: 72
 
+    relay_binary_checker:  # Warn when the relay is enabled but its binary is missing or not executable (Plan 00474 N523)
+      enabled: true  # Advisory only, never builds; silent when the relay is off or the binary is usable
+      priority: 72
+
     tool_disable_advisor:  # Check tool_policy.never_want tools against project settings (Plan 00293)
       enabled: false  # Opt-in; advisory only, never edits settings; inert without tool_policy.never_want entries
       priority: 65

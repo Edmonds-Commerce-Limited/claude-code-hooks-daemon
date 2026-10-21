@@ -574,6 +574,9 @@ class Priority:
     # cheap and silent when clean, and the band is full up to
     # session_actions_directive, which must stay last.
     UNPROVEN_VENV_ADVISOR = 72
+    # Plan 00474 N523: enabled relay with an unusable binary. Shares slot 72 for
+    # the same reason: cheap, silent when clean, and the band is full.
+    RELAY_BINARY_CHECKER = 72
     # Plan 00416 Task 2.3: the supervisor directive sensor -- so ADVISORY_MAX
     # widens by one again. Last is REQUIRED here, not merely tidy: it counts
     # what is still ACTION_REQUIRED after every other handler has run, and

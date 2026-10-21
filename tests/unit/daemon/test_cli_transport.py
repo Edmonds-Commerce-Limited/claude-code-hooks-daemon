@@ -206,6 +206,78 @@ class TestTransportToggleWiring:
         assert "AUTO-REVERTED" not in captured.err
         assert "forwarders" in captured.err
 
+    def test_a_provisioned_binary_is_reported_and_never_called_nothing_to_do(
+        self, project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """N525: config already enabled, forwarders current, binary absent —
+        ``transport on`` builds it. That repair must say what it did."""
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.install.transport_toggle.run_toggle",
+            lambda *_a, **_k: ToggleOutcome(
+                action="on",
+                changed=False,
+                verified=True,
+                provisioned_route="build",
+                provisioned_binary="/p/untracked/bin/hooks-relay",
+            ),
+        )
+
+        exit_code = cmd_transport(_args(project, "on"))
+        out = capsys.readouterr().out
+
+        assert exit_code == 0
+        assert "nothing to do" not in out
+        assert (
+            "transport on: relay binary provisioned via build at /p/untracked/bin/hooks-relay"
+            in out
+        )
+        assert "verified" in out
+
+    def test_a_provisioned_flip_names_the_provisioning(
+        self, project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.install.transport_toggle.run_toggle",
+            lambda *_a, **_k: ToggleOutcome(
+                action="on",
+                changed=True,
+                verified=True,
+                provisioned_route="download",
+                provisioned_binary="/p/bin/hooks-relay",
+            ),
+        )
+
+        exit_code = cmd_transport(_args(project, "on"))
+        out = capsys.readouterr().out
+
+        assert exit_code == 0
+        assert "relay binary provisioned via download at /p/bin/hooks-relay" in out
+        assert "flipped" in out
+
+    def test_a_failed_verification_after_provisioning_does_not_claim_nothing_changed(
+        self, project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.install.transport_toggle.run_toggle",
+            lambda *_a, **_k: ToggleOutcome(
+                action="on",
+                changed=False,
+                verified=False,
+                failures=["relay-rung-active: relay exited 3"],
+                provisioned_route="build",
+                provisioned_binary="/p/bin/hooks-relay",
+            ),
+        )
+
+        exit_code = cmd_transport(_args(project, "on"))
+        captured = capsys.readouterr()
+
+        assert exit_code == 1
+        assert "relay binary provisioned via build at /p/bin/hooks-relay" in captured.out
+        assert "relay-rung-active" in captured.err
+        assert "no state was changed" not in captured.err.lower()
+        assert "left in place" in captured.err
+
     def test_toggle_error_exits_nonzero(
         self, project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:

@@ -50,7 +50,7 @@ import psutil
 from pydantic import ValidationError as PydanticValidationError
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
-from claude_code_hooks_daemon.config.models import Config, handler_options
+from claude_code_hooks_daemon.config.models import Config, TransportConfig, handler_options
 from claude_code_hooks_daemon.constants import DaemonPath, HandlerID, Timeout
 from claude_code_hooks_daemon.constants.dbf import DefectClass, DefenceBeforeFix
 from claude_code_hooks_daemon.constants.modes import DaemonMode
@@ -140,6 +140,10 @@ from claude_code_hooks_daemon.daemon.venv_lock import VenvLockTimeout, venv_lock
 from claude_code_hooks_daemon.daemon.work_queue_cli import add_work_queue_parser
 from claude_code_hooks_daemon.docs_qa.comment_finder import DEFAULT_MIN_BLOCK_LINES
 from claude_code_hooks_daemon.install.install_stamp import read_install_stamp
+from claude_code_hooks_daemon.install.relay_deploy import (
+    missing_configured_relay_binary,
+    relay_binary_missing_warning,
+)
 from claude_code_hooks_daemon.install.release_notes import load_release_notes_between
 from claude_code_hooks_daemon.issue_report.build import build_report
 from claude_code_hooks_daemon.issue_report.upstream import filing_command
@@ -1529,6 +1533,58 @@ def _print_install_stamp_line() -> None:
     )
 
 
+@dataclass(frozen=True)
+class _StatusTransport:
+    """What ``status`` could learn about ``daemon.transport``.
+
+    ``config`` is None when there is nothing to report on: either no project
+    config exists (a legitimate state for a bare ``status`` probe, ``problem``
+    None) or the config is invalid (``problem`` carries the reason, which
+    ``status`` must print).
+    """
+
+    config: TransportConfig | None
+    problem: str | None
+
+
+def _load_status_transport_config(project_path: Path) -> _StatusTransport:
+    """Load ``daemon.transport`` for ``status``; an invalid config is reported, never dropped."""
+    try:
+        return _StatusTransport(Config.find_and_load(project_path).daemon.transport, None)
+    except FileNotFoundError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason=(
+                "cmd_status: no project config exists, which is a legitimate state for a "
+                "bare `status` probe; there is no transport section to report"
+            ),
+            level=logging.DEBUG,
+        )
+        return _StatusTransport(None, None)
+    except PydanticValidationError as exc:
+        first = exc.errors()[0]
+        location = ".".join(str(part) for part in first["loc"])
+        return _StatusTransport(None, f"{location}: {first['msg']}")
+
+
+def _print_transport_status_warnings(project_path: Path, transport: _StatusTransport) -> None:
+    """Print the loud transport WARNING lines: unreadable config, or an unusable relay binary."""
+    if transport.problem is not None:
+        print(
+            f"WARNING: transport config unreadable ({transport.problem}): relay and "
+            "listener state unknown. Fix the config, then run "
+            f"{daemon_cli_command('config-validate')}"
+        )
+        return
+    if transport.config is None:
+        return
+    binary = missing_configured_relay_binary(project_path, transport.config)
+    if binary is not None:
+        fix = daemon_cli_command("transport", "on")
+        print(f"WARNING: {relay_binary_missing_warning(binary, fix)}")
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     """Check daemon status.
 
@@ -1552,11 +1608,15 @@ def cmd_status(args: argparse.Namespace) -> int:
     # would otherwise be falsely reported as a RUNNING daemon.
     pid = read_pid_file(str(pid_path), verify_daemon=True)
 
+    transport = _load_status_transport_config(project_path)
+    transport_config = transport.config
+
     if pid is None:
         print("Daemon: NOT RUNNING")
         print(f"Socket: {socket_path}")
         print(f"PID file: {pid_path}")
         _print_install_stamp_line()
+        _print_transport_status_warnings(project_path, transport)
         return 1
 
     # Check socket exists
@@ -1571,20 +1631,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     # Plan 00290: name active per-event listeners when the transport config
     # needs them. Silent when the transport is disabled (default) — matches
     # today's status output byte-for-byte.
-    try:
-        transport_config = Config.find_and_load(project_path).daemon.transport
-    except (FileNotFoundError, PydanticValidationError) as exc:
-        log_and_continue(
-            logger,
-            exc,
-            reason=(
-                "cmd_status: could not resolve daemon.transport config; config is "
-                "legitimately absent/invalid for a bare `status` probe (no project config "
-                "yet, or a config mid-edit), so the transport section is shown as unknown"
-            ),
-            level=logging.DEBUG,
-        )
-        transport_config = None
+    _print_transport_status_warnings(project_path, transport)
     if transport_config is not None and (
         transport_config.relay_enabled or transport_config.nc_enabled
     ):
@@ -7556,6 +7603,14 @@ def cmd_transport(args: argparse.Namespace) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
+    if outcome.provisioned_route is not None:
+        # A binary written by this toggle is a change whatever else happened
+        # (Plan 00474 N525), so it is named before any verdict.
+        print(
+            f"transport {outcome.action}: relay binary provisioned via "
+            f"{outcome.provisioned_route} at {outcome.provisioned_binary}"
+        )
+
     if outcome.verified is False:
         # Failure first: a pre-flip refusal (e.g. relay provisioning) also
         # carries changed=False, and must never read as a clean no-op.
@@ -7587,6 +7642,13 @@ def cmd_transport(args: argparse.Namespace) -> int:
                 "forwarders before relying on any hook transport",
                 file=sys.stderr,
             )
+        elif outcome.provisioned_route is not None:
+            print(
+                "The config and forwarders were not changed; the relay binary provisioned "
+                "above is left in place, because it is what the config asks for. Inspect "
+                "it and the daemon before relying on the relay transport",
+                file=sys.stderr,
+            )
         elif not outcome.changed:
             print(
                 "No state was changed — the toggle refused before flipping anything",
@@ -7602,6 +7664,12 @@ def cmd_transport(args: argparse.Namespace) -> int:
             print(
                 f"transport {outcome.action}: relay already {state} in config, but the "
                 "deployed forwarders had drifted — regenerated, daemon restarted, verified"
+            )
+            return 0
+        if outcome.provisioned_route is not None:
+            print(
+                f"transport {outcome.action}: relay already {state} in config and the "
+                "forwarders were current — the provisioned relay rung verified"
             )
             return 0
         print(f"transport {outcome.action}: relay already {state} — nothing to do")

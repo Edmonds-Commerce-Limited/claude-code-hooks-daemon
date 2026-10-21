@@ -37,3 +37,22 @@ config_changes:
             slot_wait_seconds: 2.0
       migration_note: >-
         No action needed; the default applies.
+    - key: handlers.session_start.relay_binary_checker
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00529, Plan 00474 N523, GitHub #131). At session start, when
+        `daemon.transport.relay_enabled` is true but the relay binary is missing
+        or not executable, prints one WARNING naming the binary path, saying
+        relay-eligible hooks run on the fallback transport, and giving the fix
+        `bin/hooks-daemon transport on`. Advisory only: it never builds the
+        binary. Silent when the relay is disabled or the binary is executable.
+      example_yaml: |
+        handlers:
+          session_start:
+            relay_binary_checker:
+              enabled: true
+              priority: 72
+      migration_note: >-
+        On by default. When it fires, run `bin/hooks-daemon transport on` to
+        provision the binary; set `enabled: false` to silence it.
