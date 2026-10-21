@@ -59,7 +59,7 @@ def _remediation(plan_dir: str, folder: str, journal_dir: str, plan_number: int 
         f"write-ups, hand-off prose — it belongs in {folder}/{journal_dir}/, which "
         "is append-only and unbounded by design; append it with "
         f"`{journal_append_command(plan_dir, plan_number)}` ({JOURNAL_BODY_FILE_HINT}) "
-        "and stage the day-file in this commit. If it was durable-but-current "
+        "and stage the new entry file in this commit. If it was durable-but-current "
         "detail — research output, findings, decisions and their reasoning, "
         "evidence tables — EXTRACT it into a named supporting document in "
         f"{folder}/ instead and stage it in this commit. If the content is "

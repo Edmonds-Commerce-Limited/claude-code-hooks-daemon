@@ -591,7 +591,7 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
             f'       {script} {_JOURNAL_FLAG} {number} <category> {body_file} --title "short title"\n\n'
             f"     <category> is one of: {', '.join(JOURNAL_CATEGORIES)}. "
             "Add `--ref T1.2` for a task reference.\n\n"
-            "It creates today's day-file from the template when there is none."
+            "It writes the entry as its own file under today's `JOURNAL/YYYY-MM-DD/` folder."
         )
         return GatingResult.deny(reason=message)
 

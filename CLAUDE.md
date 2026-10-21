@@ -293,7 +293,7 @@ IDs: R-ERROR-HIDING
 
 ## comment_changelog — no changelog narrative in code comments
 
-A `Write`/`Edit` that puts HISTORICAL NARRATIVE into a code comment is blocked. A comment describes CURRENT STATE; changelog narrative belongs in git (the commit message), the project's changelog file, or a plan's `JOURNAL/` day-file.
+A `Write`/`Edit` that puts HISTORICAL NARRATIVE into a code comment is blocked. A comment describes CURRENT STATE; changelog narrative belongs in git (the commit message), the project's changelog file, or a plan journal entry (`mkplan.bash --journal`).
 
 **Blocked (high-precision) signals**, either of which denies the write:
 

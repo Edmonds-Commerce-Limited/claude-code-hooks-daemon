@@ -24,7 +24,7 @@ from claude_code_hooks_daemon.plan_qa.types import CheckContext, CheckSpec, Find
 
 CHECK_ID: Final[str] = "journal-freshness"
 STATEMENT: Final[str] = (
-    "An In Progress plan's newest journal day-file is stale. Journal the recent activity."
+    "An In Progress plan's newest journal entry is stale. Journal the recent activity."
 )
 
 
