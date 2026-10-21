@@ -121,7 +121,8 @@ Follow-ups, not defects in the reviewers' judgement:
 **Fix direction**: carry a `provisioned` fact on `ToggleOutcome` and print it, with the route used (build or
 download). Fold this into Plan 00529 Task 2, which owns relay provisioning.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed by Plan 00529 Task 2 (036540c88, merged 376612d38): `transport on` prints the provisioning route and
+path, and verifies the provisioned rung.
 
 ### N524 — the journal guard lets an edit shrink a journal but denies the edit that restores it, and docs QA asks for a journal rewrite
 
@@ -141,7 +142,8 @@ download). Fold this into Plan 00529 Task 2, which owns relay provisioning.
 **Fix direction**: fold both into Plan 00543 Task 2.2, which rebuilds the journal checks for per-entry files. Under
 that layout an entry file is immutable: deny any modification or deletion, and allow only an exact restore.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed by Plan 00543 (merged c127d7356): `duplicate-block` skips journals, and the guard denies any change
+to an existing journal file except removing conflict-marker lines or an exact restore to HEAD.
 
 ### N523 — the relay is enabled in config but its binary is missing, and every forwarder falls back silently
 
@@ -158,7 +160,9 @@ that layout an entry file is immutable: deny any modification or deletion, and a
 **Fix direction**: a configured-but-absent relay binary is surfaced, for example by a SessionStart advisory or in
 `hooks-daemon status`, naming the `transport on` or build command that restores it. It is not swallowed.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed by Plan 00529 Task 2 (merged 376612d38): `status` prints a WARNING naming the path and
+`bin/hooks-daemon transport on`, and the SessionStart `relay_binary_checker` says the same. What a safety forwarder
+does at call time with no binary stays with the Plan 00529 owner question.
 
 ### N522 — the Stop guidance says every declared job's tick is dropped while awaiting a human
 
