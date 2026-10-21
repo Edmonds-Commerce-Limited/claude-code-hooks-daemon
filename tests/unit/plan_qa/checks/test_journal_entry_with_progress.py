@@ -141,6 +141,15 @@ class TestFindings:
         context = _context(repo)
         assert CHECK.run(context) == []
 
+    def test_task_change_with_new_entry_file_is_clean(self, repo: Path) -> None:
+        """Plan 00543: a staged new entry file is a journal entry."""
+        (repo / "CLAUDE/Plan/00200-widget/PLAN.md").write_text(_PLAN_TASK_TICKED)
+        entry = repo / "CLAUDE/Plan/00200-widget/JOURNAL/2026-07-15/100000Z-action-0a1b2c.md"
+        entry.parent.mkdir()
+        entry.write_text("## 10:00 · action · — — ticked\n\nticked task 1.1\n")
+        _git(repo, "add", "-A")
+        assert CHECK.run(_context(repo)) == []
+
     def test_task_change_with_appended_journal_entry_is_clean(self, repo: Path) -> None:
         (repo / "CLAUDE/Plan/00200-widget/PLAN.md").write_text(_PLAN_TASK_TICKED)
         day = repo / "CLAUDE/Plan/00200-widget/JOURNAL/00200-Journal-26-07-14.md"
