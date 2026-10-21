@@ -16,8 +16,10 @@ from claude_code_hooks_daemon.plan_qa.model import (
     PlanLocation,
     PlanStatus,
     PlanTree,
+    is_journal_entry_folder_name,
     journal_entry_headings,
     parse_journal_dayfile_name,
+    parse_journal_entry_path,
 )
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
 
@@ -540,6 +542,67 @@ def _write_journal_day(
     return day_file
 
 
+def _write_journal_entry(
+    plan_folder: Path, entry_date: str, filename: str, heading: str = "## 09:30 · action · —"
+) -> Path:
+    """Create ``plan_folder/JOURNAL/YYYY-MM-DD/<filename>`` (Plan 00543)."""
+    entry_dir = plan_folder / "JOURNAL" / entry_date
+    entry_dir.mkdir(parents=True, exist_ok=True)
+    entry_file = entry_dir / filename
+    entry_file.write_text(f"{heading}\n\nx\n")
+    return entry_file
+
+
+class TestJournalEntryFileName:
+    """Plan 00543: ``YYYY-MM-DD/HHMMSSZ-<category>-<6 hex>.md`` entry files."""
+
+    def test_folder_name_shape(self) -> None:
+        assert is_journal_entry_folder_name("2026-10-21") is True
+        assert is_journal_entry_folder_name("2026-13-45") is True  # shape only
+        assert is_journal_entry_folder_name("26-10-21") is False
+        assert is_journal_entry_folder_name("2026-10-21x") is False
+        assert is_journal_entry_folder_name("notes") is False
+
+    def test_parses_folder_and_file(self) -> None:
+        parsed = parse_journal_entry_path("2026-10-21", "093015Z-decision-0a1b2c.md")
+        assert parsed is not None
+        assert (parsed.year, parsed.month, parsed.day) == (2026, 10, 21)
+        assert (parsed.hour, parsed.minute, parsed.second) == (9, 30, 15)
+        assert parsed.category == "decision"
+        assert parsed.is_valid_date is True
+        assert parsed.date == date(2026, 10, 21)
+        assert parsed.label == "09:30"
+
+    @pytest.mark.parametrize(
+        ("folder", "filename"),
+        [
+            ("2026-10-21", "0930Z-action-0a1b2c.md"),
+            ("2026-10-21", "093015-action-0a1b2c.md"),
+            ("2026-10-21", "093015Z-action-0A1B2C.md"),
+            ("2026-10-21", "093015Z-action-0a1b2.md"),
+            ("2026-10-21", "093015Z-Action-0a1b2c.md"),
+            ("2026-10-21", "notes.md"),
+            ("26-10-21", "093015Z-action-0a1b2c.md"),
+        ],
+    )
+    def test_rejects_malformed(self, folder: str, filename: str) -> None:
+        assert parse_journal_entry_path(folder, filename) is None
+
+    @pytest.mark.parametrize(
+        ("folder", "filename"),
+        [
+            ("2026-02-30", "093015Z-action-0a1b2c.md"),
+            ("2026-10-21", "243015Z-action-0a1b2c.md"),
+            ("2026-10-21", "096015Z-action-0a1b2c.md"),
+            ("2026-10-21", "093060Z-action-0a1b2c.md"),
+        ],
+    )
+    def test_impossible_date_or_time_is_invalid(self, folder: str, filename: str) -> None:
+        parsed = parse_journal_entry_path(folder, filename)
+        assert parsed is not None
+        assert parsed.is_valid_date is False
+
+
 class TestPlanFolderJournal:
     """Plan 00163: PlanFolder.has_journal / latest_journal_date (filename parse only)."""
 
@@ -594,6 +657,29 @@ class TestPlanFolderJournal:
         folder = PlanTree.scan(plan_root, journal_dir_name="LOG").folders[0]
         assert folder.has_journal is True
         assert folder.latest_journal_date == date(2026, 7, 14)
+
+    def test_entry_folder_counts_toward_latest_date(self, plan_root: Path) -> None:
+        """Plan 00543: an entry folder holding an entry file dates the journal."""
+        plan_folder = _write_plan(plan_root, 163, "journalling", "In Progress")
+        _write_journal_day(plan_folder, 163, "26-07-12")
+        _write_journal_entry(plan_folder, "2026-07-20", "093000Z-action-a1b2c3.md")
+        folder = PlanTree.scan(plan_root).folders[0]
+        assert folder.latest_journal_date == date(2026, 7, 20)
+
+    def test_entry_folder_without_parseable_entry_is_ignored(self, plan_root: Path) -> None:
+        plan_folder = _write_plan(plan_root, 163, "journalling", "In Progress")
+        _write_journal_day(plan_folder, 163, "26-07-12")
+        _write_journal_entry(plan_folder, "2026-07-20", "notes.md")
+        (plan_folder / "JOURNAL" / "2026-07-21").mkdir()
+        folder = PlanTree.scan(plan_root).folders[0]
+        assert folder.latest_journal_date == date(2026, 7, 12)
+
+    def test_impossible_entry_folder_date_is_ignored(self, plan_root: Path) -> None:
+        plan_folder = _write_plan(plan_root, 163, "journalling", "In Progress")
+        _write_journal_entry(plan_folder, "2026-13-45", "093000Z-action-a1b2c3.md")
+        folder = PlanTree.scan(plan_root).folders[0]
+        assert folder.has_journal is True
+        assert folder.latest_journal_date is None
 
     def test_extra_root_files_defaults_empty_unchanged(self, plan_root: Path) -> None:
         # Default (no extra) = today's behaviour: the file is a stray.
