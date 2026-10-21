@@ -788,8 +788,9 @@ prune. Release note 052.
 - Recurrence, run 39610947367 for 6e517516c (the #132 merge; its unmapped `utils/usage_pause_gate.py` sent the job to
   the full-suite fallback): the same test, parameter `a=['y']+a`, measured 1.616s against 1.5. It was the only
   failure (50840 passed). The failed job was re-run, not the bound changed. The re-run (attempt 2) failed the same
-  way on the other parameter, `a=a+['x{i}']`, at 1.575s against 1.5 (1 failed, 50840 passed, 1 h 02 min). Every
-  full-suite fallback run now trips this class. The fix-forward is Plan 00476 Task 2.2 (Design 6: timing sweeps in their
+  way on the other parameter, `a=a+['x{i}']`, at 1.575s against 1.5 (1 failed, 50840 passed, 1 h 02 min).
+  This class has now failed both of #132's full-suite fallback runs, after earlier failures on 6ae406932, d5f7a2cf0 and
+  N431's run. The fix-forward is Plan 00476 Task 2.2 (Design 6: timing sweeps in their
   own CI job, thresholds unchanged), taken up to unblock #132 and #131.
 
 **Fix direction**: a lint timeout is an environment fact, not the handler's verdict, so a probe whose linter timed out
