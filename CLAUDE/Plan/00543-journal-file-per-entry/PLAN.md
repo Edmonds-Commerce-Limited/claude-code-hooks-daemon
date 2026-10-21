@@ -1,6 +1,6 @@
 # Plan 00543: journal file per entry
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-21
 **Owner**: dev
 **Priority**: High
@@ -44,7 +44,7 @@ append-only becomes "no existing entry file is modified or deleted".
 
 ### Phase 1: Design check
 
-- [ ] ⬜ **Task 1.1**: Map every reader, writer and check that knows the day-file name or path pattern: `mkplan.bash`,
+- [x] ✅ **Task 1.1**: Map every reader, writer and check that knows the day-file name or path pattern: `mkplan.bash`,
   the `plan_qa` checks, `plan_journal_guard`, the plan workflow handlers, and docs. Record the map and the chosen entry
   file name in `DESIGN.md`. Decide how a legacy day-file and new entries are interleaved when read in time order.
 
