@@ -561,6 +561,11 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
         "T4 fires once at session start naming each plugin, its hook events and "
         "how to acknowledge it; nothing to hold across later decisions"
     ),
+    "RelayBinaryCheckerHandler": (
+        "T4 fires at session start naming the unusable relay binary and the one "
+        "command that provisions it; the warning carries its own fix, so nothing "
+        "needs to stay resident once it has been read"
+    ),
     "UnprovenVenvAdvisorHandler": (
         "T4 fires at session start naming each venv the code cannot prove stale, "
         "its evidence and the exact removal command; the finding carries its own "

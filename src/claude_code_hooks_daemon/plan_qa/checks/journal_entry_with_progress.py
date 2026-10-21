@@ -62,7 +62,7 @@ def _remediation(plan_dir: str, plan_number: int | None) -> str:
     return (
         "Append an entry recording what changed with "
         f"`{journal_append_command(plan_dir, plan_number)}` ({JOURNAL_BODY_FILE_HINT}), "
-        "and stage the day-file in this commit."
+        "and stage the new entry file in this commit."
     )
 
 

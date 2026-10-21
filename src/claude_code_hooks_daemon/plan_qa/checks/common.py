@@ -9,6 +9,8 @@ check module stays a single focused rule.
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import date
+from pathlib import Path
 from typing import Final, NamedTuple
 
 from claude_code_hooks_daemon.plan_qa.model import (
@@ -16,8 +18,11 @@ from claude_code_hooks_daemon.plan_qa.model import (
     README_FILENAME,
     PlanDoc,
     PlanLocation,
+    is_journal_entry_folder_name,
+    journal_entry_folder_date,
+    parse_journal_dayfile_name,
 )
-from claude_code_hooks_daemon.plan_qa.paths import classify
+from claude_code_hooks_daemon.plan_qa.paths import PlanFileKind, classify
 from claude_code_hooks_daemon.plan_qa.readme_index import ReadmeIndex
 from claude_code_hooks_daemon.plan_qa.types import (
     JOURNAL_MODE_OFF,
@@ -168,8 +173,10 @@ WRITE_ACT_ONLY_RULES: Final[dict[str, str]] = {
         "moved."
     ),
     "journal_dayfile_is_today": (
-        "Reports that a day-file dated other than today is being WRITTEN. "
-        "Yesterday's day-file existing on disk is exactly what a journal is."
+        "Reports that a legacy day-file dated other than today, or a journal file "
+        "that already exists, is being WRITTEN; its COMMIT half reports the "
+        "same rewrite of an entry file staged by any route. Yesterday's "
+        "day-file existing on disk is exactly what a journal is."
     ),
     "plan_doc_size": (
         "Tiered on grow/shrink: only an edit that GROWS an over-limit document "
@@ -264,13 +271,52 @@ def level_for_plan(context: CheckContext, plan_number: int | None) -> Level:
     return Level.BLOCK
 
 
+_JOURNAL_TARGET_KINDS: Final[frozenset[PlanFileKind]] = frozenset(
+    {PlanFileKind.JOURNAL_DAYFILE, PlanFileKind.JOURNAL_ENTRY, PlanFileKind.JOURNAL_OTHER}
+)
+
+
 @dataclass(frozen=True)
 class JournalEditTarget:
-    """A journal day-file edit resolved against the plan directory."""
+    """A journal file resolved against the plan directory.
+
+    Either a legacy day-file directly in the journal directory
+    (``entry_folder is None``) or a Plan 00543 entry file inside a
+    ``YYYY-MM-DD`` folder there, whose name is ``entry_folder``.
+    """
 
     rel_path: str
     plan_number: int | None
     basename: str
+    entry_folder: str | None = None
+
+    @property
+    def is_entry_file(self) -> bool:
+        """Whether this is a one-entry file rather than a legacy day-file."""
+        return self.entry_folder is not None
+
+    @property
+    def journal_date(self) -> date | None:
+        """The day this file belongs to, from either grammar; ``None`` when not a real date.
+
+        An entry file's day is its FOLDER's, whatever its own name says; a
+        legacy day-file's is the date in its name.
+        """
+        if self.entry_folder is not None:
+            return journal_entry_folder_date(self.entry_folder)
+        parsed = parse_journal_dayfile_name(self.basename)
+        if parsed is None or not parsed.is_valid_date:
+            return None
+        return parsed.date
+
+
+def _entry_folder_of(path: Path, journal_dir_name: str) -> str | None:
+    """The entry folder name when ``path`` sits in ``JOURNAL/YYYY-MM-DD/``, else ``None``."""
+    if path.parent.parent.name == journal_dir_name and is_journal_entry_folder_name(
+        path.parent.name
+    ):
+        return path.parent.name
+    return None
 
 
 def journal_edit_target(context: CheckContext) -> JournalEditTarget | None:
@@ -292,18 +338,23 @@ def journal_edit_target(context: CheckContext) -> JournalEditTarget | None:
         return None
 
     classified = classify(context.file_path, context)
-    if not classified.is_journal:
+    if classified.kind not in _JOURNAL_TARGET_KINDS:
         return None
-    # Day-files live DIRECTLY in the journal directory. Anything nested deeper
-    # is journal territory (so plan rules stay off it) but is not a day-file
-    # the journal checks act on.
-    if context.file_path.parent.name != context.journal_dir_name:
+    # Day-files live DIRECTLY in the journal directory and entry files one
+    # date folder below it (Plan 00543). Anything else nested deeper is
+    # journal territory (so plan rules stay off it) but not a file the journal
+    # checks act on.
+    entry_folder = (
+        context.file_path.parent.name if classified.kind is PlanFileKind.JOURNAL_ENTRY else None
+    )
+    if entry_folder is None and context.file_path.parent.name != context.journal_dir_name:
         return None
 
     return JournalEditTarget(
         rel_path=classified.rel_path,
         plan_number=classified.plan_number,
         basename=context.file_path.name,
+        entry_folder=entry_folder,
     )
 
 
@@ -311,6 +362,7 @@ def journal_tree_targets(context: CheckContext) -> list[JournalEditTarget]:
     """Every journal day-file candidate on disk — the batch twin of :func:`journal_edit_target`.
 
     Yields every ``.md`` directly inside a plan folder's journal directory,
+    and every ``.md`` inside a ``YYYY-MM-DD`` entry folder there (Plan 00543),
     INCLUDING files whose names do not parse: a malformed name is precisely
     what the naming check exists to report, so filtering by the grammar here
     would hide exactly the findings the caller wants.
@@ -326,15 +378,21 @@ def journal_tree_targets(context: CheckContext) -> list[JournalEditTarget]:
         if journal_dir is None or not journal_dir.is_dir():
             continue
         for entry in sorted(journal_dir.iterdir()):
-            if not entry.is_file() or entry.suffix != _MARKDOWN_SUFFIX:
-                continue
-            targets.append(
-                JournalEditTarget(
-                    rel_path=str(path_relative_to(entry, context.project_root)),
-                    plan_number=folder.number,
-                    basename=entry.name,
+            if entry.is_dir() and is_journal_entry_folder_name(entry.name):
+                candidates = sorted(entry.iterdir())
+            else:
+                candidates = [entry]
+            for candidate in candidates:
+                if not candidate.is_file() or candidate.suffix != _MARKDOWN_SUFFIX:
+                    continue
+                targets.append(
+                    JournalEditTarget(
+                        rel_path=str(path_relative_to(candidate, context.project_root)),
+                        plan_number=folder.number,
+                        basename=candidate.name,
+                        entry_folder=_entry_folder_of(candidate, context.journal_dir_name),
+                    )
                 )
-            )
     return targets
 
 

@@ -109,6 +109,42 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N525 — `transport on` builds a missing relay binary and then reports "nothing to do"
+
+**Source**: the coordinator, provisioning the relay after merging Plan 00542 (#131).
+
+- **N525**: with `relay_enabled: true` already in config and `untracked/bin/hooks-relay` absent, `bin/hooks-daemon transport on` built and installed the binary (the converge path calls `ensure_relay_binary` first,
+  `transport_toggle.py:354-367`), but the forwarders were already current, so the outcome carried `changed=False, verified=None` and the CLI printed `relay already enabled — nothing to do` (`cli.py:7607`). That is the command the
+  status line's red relay-missing line names, so the repair succeeds while saying it did nothing. A provisioned binary
+  is a change and must be reported as one. The code at `cli.py:7599` already states that rule.
+
+**Fix direction**: carry a `provisioned` fact on `ToggleOutcome` and print it, with the route used (build or
+download). Fold this into Plan 00529 Task 2, which owns relay provisioning.
+
+**Status**: ✅ Fixed by Plan 00529 Task 2 (036540c88, merged 376612d38): `transport on` prints the provisioning route and
+path, and verifies the provisioned rung.
+
+### N524 — the journal guard lets an edit shrink a journal but denies the edit that restores it, and docs QA asks for a journal rewrite
+
+**Source**: the coordinator, integrating Plan 00476 Task 2.2 (targeted QA on the integration head).
+
+- **N524a**: `docs_qa` `duplicate-block` flagged two journal entries carrying the same four-item list (Plan 00529 and
+  Plan 00542, both journalled from one body file). Its remediation is to extract the list to one place. A journal is
+  append-only, so the check asks for something the journal rules forbid. Journals should be outside `duplicate-block`.
+- **N524b**: following that remediation, an Edit replacing the four lines in the Plan 00542 day-file with a two-line pointer (a
+  net shrink) was ALLOWED, with
+  only a `journal-append-only` advisory. The Edit restoring the same four lines was DENIED as a hand-written entry
+  (`R-JOURNAL-HAND-WRITTEN-ENTRY`), and so was restoring the file from `git show HEAD:<path>` through Bash. The guard
+  is open in the destructive direction and closed in the repairing one. A shrinking edit should be denied, and an exact
+  restore to the committed content allowed. The working-tree change was left for the owner to discard with
+  `git checkout -- <path>`.
+
+**Fix direction**: fold both into Plan 00543 Task 2.2, which rebuilds the journal checks for per-entry files. Under
+that layout an entry file is immutable: deny any modification or deletion, and allow only an exact restore.
+
+**Status**: ✅ Fixed by Plan 00543 (merged c127d7356): `duplicate-block` skips journals, and the guard denies any change
+to an existing journal file except removing conflict-marker lines or an exact restore to HEAD.
+
 ### N523 — the relay is enabled in config but its binary is missing, and every forwarder falls back silently
 
 **Source**: the coordinator's #131 triage (Plan 00542, `RESEARCH-COST.md` section 4).
@@ -124,7 +160,9 @@ Follow-ups, not defects in the reviewers' judgement:
 **Fix direction**: a configured-but-absent relay binary is surfaced, for example by a SessionStart advisory or in
 `hooks-daemon status`, naming the `transport on` or build command that restores it. It is not swallowed.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed by Plan 00529 Task 2 (merged 376612d38): `status` prints a WARNING naming the path and
+`bin/hooks-daemon transport on`, and the SessionStart `relay_binary_checker` says the same. What a safety forwarder
+does at call time with no binary stays with the Plan 00529 owner question.
 
 ### N522 — the Stop guidance says every declared job's tick is dropped while awaiting a human
 

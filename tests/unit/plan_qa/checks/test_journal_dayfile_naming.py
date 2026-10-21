@@ -100,3 +100,34 @@ class TestRun:
     def test_disabled_journalling_is_ignored(self) -> None:
         assert _CHECK.run(_ctx("bad.md", journal_enabled=False)) == []
         assert _CHECK.run(_ctx("bad.md", journal_mode="off")) == []
+
+
+class TestEntryFileNaming:
+    """Plan 00543: ``YYYY-MM-DD/HHMMSSZ-<category>-<6 hex>.md``."""
+
+    def test_well_formed_entry_file_passes(self) -> None:
+        assert _CHECK.run(_ctx("2026-07-14/093015Z-decision-0a1b2c.md")) == []
+
+    def test_malformed_entry_file_name_is_reported(self) -> None:
+        findings = _CHECK.run(_ctx("2026-07-14/notes.md"))
+        assert len(findings) == 1
+        assert "HHMMSSZ-<category>-<6 hex>.md" in findings[0].message
+
+    def test_impossible_folder_date_is_reported(self) -> None:
+        findings = _CHECK.run(_ctx("2026-02-30/093015Z-action-0a1b2c.md"))
+        assert len(findings) == 1
+        assert "2026-02-30 is not a real calendar date" in findings[0].message
+
+    def test_impossible_time_is_reported(self) -> None:
+        findings = _CHECK.run(_ctx("2026-07-14/246015Z-action-0a1b2c.md"))
+        assert len(findings) == 1
+        assert "24:60:15 is not a real UTC time" in findings[0].message
+
+    def test_unknown_category_is_reported(self) -> None:
+        findings = _CHECK.run(_ctx("2026-07-14/093015Z-musing-0a1b2c.md"))
+        assert len(findings) == 1
+        assert "category `musing`" in findings[0].message
+
+    def test_entry_file_honours_block_mode(self) -> None:
+        findings = _CHECK.run(_ctx("2026-07-14/notes.md", journal_mode="block"))
+        assert findings[0].level == Level.BLOCK

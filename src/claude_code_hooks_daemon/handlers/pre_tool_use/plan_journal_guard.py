@@ -22,26 +22,30 @@ to the MAIN daemon, so a day-file is located with
 ``core.worktree_paths.enclosing_checkout`` and the command printed is THAT
 checkout's ``mkplan.bash``, as an absolute path.
 
-Two surfaces, both keyed on the day-file a call would write:
+Two surfaces, both keyed on the journal file a call would write: a legacy
+day-file directly in ``JOURNAL/``, or an entry file one folder down
+(``JOURNAL/YYYY-MM-DD/<entry>.md``, Plan 00543).
 
-* ``Write``/``Edit``: denied when the would-be content has more non-blank lines
-  or more entry headings than the file does now, or when a ``Write`` creates a
-  day-file. Any added line is denied, not only an added heading, because text
-  appended under the last entry inherits that entry's stamp. Headings come from
-  ``plan_qa.model.journal_entry_headings``, the parser the journal checks use.
-  An Edit that adds no line passes: a deletion (conflict markers after two
-  branches each appended an entry), a reordering, a same-line redaction.
-  Whether it rewrites history is ``journal-append-only``'s question.
+* ``Write``/``Edit``: denied when it creates a journal file, and when it
+  changes an existing one in any way. Any added line is denied, not only an
+  added heading, because text appended under the last entry inherits that
+  entry's stamp. Headings come from ``plan_qa.model.journal_entry_headings``,
+  the parser the journal checks use. A removal or rewrite is denied too (N524,
+  ledger 00474: fail closed in the destructive direction). Two exceptions:
+  removing only conflict-marker lines, which keeps both sides' entries, and a
+  result byte-identical to the committed (HEAD) file, which can only undo.
 * ``Bash``: denied when the command writes into a day-file by any route
   ``handlers.utils.bash_file_writes`` finds: a redirect, ``tee``, a heredoc, a
   copy, an in-place editor, a program handed to an interpreter (inline, on a
   heredoc, or behind a wrapper), a patch, a link. ``git`` relocations are never
-  judged (``git mv`` of a plan folder into ``Completed/``).
+  judged (``git mv`` of a plan folder into ``Completed/``), and the one write
+  allowed is the exact restore ``git show HEAD:<p> > <p>``.
 
 Fails CLOSED on a destination it cannot place: one built at run time
 (``$(date …)``, a variable, a glob), or a relative one after a ``cd``. Such a
 destination is denied when it visibly names a day-file (``NNNNN-Journal-``), or
-when its file name is built at run time inside a ``JOURNAL/`` directory.
+when any part after a ``JOURNAL/`` directory is built at run time (the entry
+folder included: ``JOURNAL/$(date -u +%F)/x.md``).
 
 Gated as ``plan_number_helper`` is: the plan workflow is on and the checkout's
 scaffolder is deployed. That scaffolder must also offer ``--journal``, and the
@@ -83,10 +87,12 @@ from claude_code_hooks_daemon.plan_qa.model import (
     JOURNAL_CATEGORIES,
     MKPLAN_SCRIPT_NAME,
     journal_entry_headings,
+    only_conflict_markers_removed,
     parse_journal_dayfile_name,
 )
 from claude_code_hooks_daemon.plan_qa.types import DEFAULT_JOURNAL_DIR_NAME, JOURNAL_MODE_OFF
 from claude_code_hooks_daemon.utils import linear_shlex
+from claude_code_hooks_daemon.utils.git_facts import GitFactsBase
 from claude_code_hooks_daemon.utils.path_predicates import (
     TextOrReason,
     path_is_file,
@@ -138,6 +144,12 @@ _EXPANSION_CHARACTERS: Final[tuple[str, ...]] = ("$", "*", "?", "`", "{", "[")
 _HOME_PREFIX: Final[str] = "~"
 _PATH_SEPARATOR: Final[str] = "/"
 
+#: The one restore shape allowed: `git show HEAD:<p> > <p>`, five words.
+_GIT_SHOW: Final[str] = "show"
+_HEAD_BLOB_PREFIX: Final[str] = "HEAD:"
+_REDIRECT_TRUNCATE: Final[str] = ">"
+_HEAD_RESTORE_WORD_COUNT: Final[int] = 5
+
 #: Shown in place of a number the command did not reveal.
 _PLAN_NUMBER_PLACEHOLDER: Final[str] = "<plan-number>"
 
@@ -157,6 +169,8 @@ class _JournalTarget:
     placed: bool = True
     #: A `git checkout --ours/--theirs` of the day-file: advised on, never denied.
     conflict_checkout: bool = False
+    #: The call removes or rewrites existing journal content (N524).
+    destructive: bool = False
 
 
 class PlanJournalGuardHandler(PreToolUseHandlerBase):
@@ -177,7 +191,8 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
 
         self._rule = Rule(
             rule_id=RuleID.JOURNAL_HAND_WRITTEN_ENTRY,
-            blocked="a plan journal entry written by hand (Edit/Write/Bash into a JOURNAL/ day-file)",
+            blocked="a plan journal entry written by hand, or existing journal content "
+            "changed (Edit/Write/Bash into a JOURNAL/ day-file or entry file)",
             why="Only `mkplan.bash --journal` stamps the real UTC time; hand-typed "
             "stamps have landed 40 minutes in the future",
             fix="Write the entry body to a fresh file under untracked/scratch/, then run "
@@ -305,11 +320,18 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
         plan_parts = Path(plan_dir).parts
         if relative.parts[: len(plan_parts)] != plan_parts:
             return None
-        if relative.parent.name != DEFAULT_JOURNAL_DIR_NAME:
+        if relative.parent.name == DEFAULT_JOURNAL_DIR_NAME:
+            # A legacy day-file, directly in `JOURNAL/`.
+            if parse_journal_dayfile_name(relative.name) is None:
+                return None
+            plan_folder = relative.parent.parent.name
+        elif relative.parent.parent.name == DEFAULT_JOURNAL_DIR_NAME:
+            # An entry file, one folder down (Plan 00543). Any folder name:
+            # fail closed rather than trust the date shape.
+            plan_folder = relative.parent.parent.parent.name
+        else:
             return None
-        if parse_journal_dayfile_name(relative.name) is None:
-            return None
-        plan_number = plan_number_for_folder(relative.parent.parent.name)
+        plan_number = plan_number_for_folder(plan_folder)
         if plan_number is None:
             return None
         return _JournalTarget(display=str(relative), plan_number=plan_number, checkout=checkout)
@@ -331,9 +353,14 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
             return None
         is_write = hook_input.get(HookInputField.TOOL_NAME) == ToolName.WRITE
         if not exists:
-            # Creating a day-file is `--journal`'s job: it seeds the file from
-            # the template and stamps the first entry in one step.
-            return target if is_write else None
+            if not is_write:
+                return None
+            # Creating a journal file is `--journal`'s job; the one exception
+            # is putting back a committed file exactly as HEAD holds it.
+            content = hook_input.get(HookInputField.TOOL_INPUT, {}).get("content")
+            if isinstance(content, str) and content == self._head_text(target):
+                return None
+            return target
 
         read = self._read_text(path)
         if read.text is None:
@@ -349,11 +376,60 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
         if after is None:
             # An Edit whose old_string is absent fails with its own error.
             return None
+        if after == before:
+            return None
         if _non_blank_lines(after) > _non_blank_lines(before) or len(
             journal_entry_headings(after)
         ) > len(journal_entry_headings(before)):
+            if after == self._head_text(target):
+                return None
             return target
-        return None
+        # N524 (ledger 00474): nothing added, so this edit removes or rewrites
+        # existing content. Fail closed, except for removing conflict-marker
+        # lines (both sides' entries stay) and an exact restore to HEAD.
+        if only_conflict_markers_removed(before, after):
+            return None
+        if after == self._head_text(target):
+            return None
+        return replace(target, destructive=True)
+
+    def _head_text(self, target: _JournalTarget) -> str | None:
+        """The committed (HEAD) content of a journal file; None when there is none."""
+        return GitFactsBase(target.checkout).head_file_text(target.display)
+
+    def _is_head_restore(
+        self, command: str, cwd: str | None, target: _JournalTarget, plan_dir: str
+    ) -> bool:
+        """Whether ``command`` is exactly ``git show HEAD:<p> > <p>`` for ``target``.
+
+        Only that one shape: it writes the committed bytes back over the same
+        file, so it can only undo a change, never make one.
+        """
+        if not target.placed:
+            return False
+        lexer = linear_shlex.LinearShlex(command, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        try:
+            words = list(lexer)
+        except ValueError:
+            return False
+        if len(words) != _HEAD_RESTORE_WORD_COUNT or words[:2] != [_GIT, _GIT_SHOW]:
+            return False
+        source, redirect, destination = words[2:]
+        if redirect != _REDIRECT_TRUNCATE or not source.startswith(_HEAD_BLOB_PREFIX):
+            return False
+        spec = source[len(_HEAD_BLOB_PREFIX) :]
+        if spec.startswith((".", _PATH_SEPARATOR)) or not spec:
+            # Relative to the cwd (`./`, `../`) or absolute: not the plain
+            # repository-relative spelling this exemption is limited to.
+            return False
+        if os.path.normpath(spec) != os.path.normpath(target.display):
+            return False
+        placed = self._dayfile_target(destination, cwd, plan_dir)
+        return placed is not None and (placed.checkout, placed.display) == (
+            target.checkout,
+            target.display,
+        )
 
     def _bash_target(self, hook_input: dict[str, Any], plan_dir: str) -> _JournalTarget | None:
         """The first day-file a Bash command would write into, else None."""
@@ -441,7 +517,13 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
             return None
         if tool_name == ToolName.BASH:
             target = self._bash_target(hook_input, plan_dir)
-            if target is None:
+            if target is not None:
+                raw_cwd = hook_input.get(HookInputField.CWD)
+                cwd = raw_cwd if isinstance(raw_cwd, str) and raw_cwd else None
+                command = get_bash_command(hook_input) or ""
+                if self._is_head_restore(command, cwd, target, plan_dir):
+                    return None
+            else:
                 target = self._conflict_checkout_target(hook_input, plan_dir)
         else:
             target = self._file_tool_target(hook_input, plan_dir)
@@ -493,6 +575,10 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
             "so it is treated as one)"
         )
         message = self._render(hook_input)
+        if target.destructive:
+            return GatingResult.deny(
+                reason=message + self._destructive_tail(target, plan_dir, number)
+            )
         # The target and the command are invocation-specific, so they are shown
         # on every fire, terse or verbose.
         message += (
@@ -505,9 +591,29 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
             f'       {script} {_JOURNAL_FLAG} {number} <category> {body_file} --title "short title"\n\n'
             f"     <category> is one of: {', '.join(JOURNAL_CATEGORIES)}. "
             "Add `--ref T1.2` for a task reference.\n\n"
-            "It creates today's day-file from the template when there is none."
+            "It writes the entry as its own file under today's `JOURNAL/YYYY-MM-DD/` folder."
         )
         return GatingResult.deny(reason=message)
+
+    def _destructive_tail(self, target: _JournalTarget, plan_dir: str, number: str) -> str:
+        """The invocation-specific half of a deny for removing or rewriting content."""
+        script = target.checkout / plan_dir / MKPLAN_SCRIPT_NAME
+        return (
+            f"\n\nTarget: `{target.display}`\n\n"
+            "This edit removes or rewrites existing journal content. A journal is "
+            "append-only: no entry is ever changed or taken out, in a day-file or "
+            "an entry file.\n\n"
+            "- To correct an entry, append a `correction` naming it:\n"
+            f'    {script} {_JOURNAL_FLAG} {number} correction <body-file> --ref <HH:MM> --title "short title"\n'
+            "- To undo a change already made to this file, restore it exactly:\n"
+            f"    git show HEAD:{target.display} > {target.display}\n"
+            "  (run from the checkout root; an Edit/Write whose result equals HEAD "
+            "is allowed too).\n"
+            "- A merge conflict in a day-file: run\n"
+            f"    {script} {_RESOLVE_CONFLICT_FLAG} {target.display}\n"
+            "  or remove only the conflict-marker lines; dropping one side's "
+            "entries is denied."
+        )
 
     def _render(self, hook_input: dict[str, Any]) -> str:
         """Verbose on first fire per transcript, terse after (Plan 00116)."""
@@ -539,16 +645,24 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
             "(Use the project's configured plan directory if it is not `CLAUDE/Plan/`, "
             "and the `mkplan.bash` of the checkout you are in — a worktree has its "
             "own.) The deny message prints the exact command, with absolute paths.\n\n"
-            "**DENIED**: an `Edit`/`Write` that adds any line to a day-file or creates "
-            "one, and a Bash command that writes into a day-file by any route — `>`, "
+            "Each entry is its own file, `JOURNAL/YYYY-MM-DD/HHMMSSZ-<category>-<hex>.md`; "
+            "older plans also hold legacy day-files (`NNNNN-Journal-YY-MM-DD.md`) "
+            "directly in `JOURNAL/`, which are read but never written again.\n\n"
+            "**DENIED**: an `Edit`/`Write` that creates a journal file or changes an "
+            "existing one in ANY way (adding, removing, reordering or rewording a line), "
+            "and a Bash command that writes into one by any route — `>`, "
             "`>>`, `tee`, a heredoc, `cp`/`mv`/`dd`/`ln`/`rsync`, an in-place editor, "
             "a patch, an interpreter program (inline, on a heredoc, or behind "
             "`timeout`/`uv run`/…). A destination the shell builds at run time "
             "(`$(date …)`, a variable, a glob, a relative name after `cd`) is denied "
-            "when it names a day-file. Every worktree and archived plan included. "
+            "when it names a day-file or builds any part after `JOURNAL/`. Every "
+            "worktree and archived plan included. A wrong entry is fixed by a new "
+            "`correction` entry (`--ref HH:MM`), never by editing it.\n\n"
             "**Allowed**: the tool itself, `git` (moving a plan folder into "
-            "`Completed/`), reading a journal, and an Edit that adds no line (removing "
-            "conflict markers, reordering, a same-line redaction).\n\n"
+            "`Completed/`), reading a journal, an Edit that removes ONLY conflict-marker "
+            "lines, and an exact restore to the committed content — an Edit/Write whose "
+            "result equals HEAD, or `git show HEAD:<path> > <path>` from the checkout "
+            "root.\n\n"
             "**A merge conflict in a day-file** is resolved with "
             "`CLAUDE/Plan/mkplan.bash --resolve-conflict <day-file>`, which writes the "
             "union of both sides in time order and stages it. No hand edit can resolve "
@@ -720,9 +834,12 @@ def _could_name_dayfile(token: str, directories: tuple[str, ...]) -> bool:
     """
     if _DAYFILE_MENTION_RE.search(token):
         return True
-    directory, _, name = token.rpartition(_PATH_SEPARATOR)
-    if not _needs_expansion(name):
+    parts = token.split(_PATH_SEPARATOR)
+    if DEFAULT_JOURNAL_DIR_NAME in parts[:-1]:
+        # Entry files sit one folder down (Plan 00543), so the folder can be
+        # the part built at run time: `JOURNAL/$(date -u +%F)/x.md`.
+        after_journal = parts[parts.index(DEFAULT_JOURNAL_DIR_NAME) + 1 :]
+        return any(_needs_expansion(part) for part in after_journal)
+    if not any(_needs_expansion(part) for part in parts):
         return False
-    if _names_journal_dir(directory):
-        return True
     return not _is_anchored(token) and any(_names_journal_dir(d) for d in directories)

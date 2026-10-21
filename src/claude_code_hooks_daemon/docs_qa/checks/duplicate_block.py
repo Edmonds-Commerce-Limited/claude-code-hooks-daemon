@@ -51,6 +51,7 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Finding,
     Severity,
 )
+from claude_code_hooks_daemon.plan_links import PlanTreeLayout
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 CHECK_ID: Final[str] = "duplicate-block"
@@ -93,12 +94,18 @@ def _finding(reporter: _PathSpan, partners: tuple[_PathSpan, ...]) -> Finding:
     )
 
 
-def _hash_index(corpus: DocCorpus) -> dict[str, tuple[_PathSpan, ...]]:
+def _hash_index(corpus: DocCorpus, plan_tree: PlanTreeLayout) -> dict[str, tuple[_PathSpan, ...]]:
     """``block_hash -> sorted (rel_path, start_line, end_line)``, restricted
     to hashes shared by 2+ DISTINCT documents. When a document repeats the
-    same block internally, only its FIRST occurrence's span is indexed."""
+    same block internally, only its FIRST occurrence's span is indexed.
+
+    Plan journals (day-files and per-entry files) are never indexed: a journal
+    quotes what it records and is append-only, so a block it shares is a
+    record rather than drift, and no finding about it could be acted on."""
     index: dict[str, dict[str, tuple[int, int]]] = {}
     for rel_path, record in corpus.documents.items():
+        if plan_tree.is_journal(rel_path):
+            continue
         first_span_for_hash: dict[str, tuple[int, int]] = {}
         for location in record.block_locations:
             first_span_for_hash.setdefault(
@@ -122,6 +129,8 @@ def _run_edit(context: CheckContext) -> list[Finding]:
     rel_path = str(path_relative_to(context.file_path, context.project_root))
     if _matches_allowlist(rel_path, context.policy.qa.grandfather_allowlist):
         return []
+    if context.policy.plan_tree.is_journal(rel_path):
+        return []
 
     own_locations = extract_structured_block_locations(context.file_content)
     if not own_locations:
@@ -130,7 +139,7 @@ def _run_edit(context: CheckContext) -> list[Finding]:
     for location in own_locations:
         own_span_for_hash.setdefault(location.block_hash, (location.start_line, location.end_line))
 
-    index = _hash_index(context.corpus)
+    index = _hash_index(context.corpus, context.policy.plan_tree)
     findings: list[Finding] = []
     for block_hash in sorted(own_span_for_hash):
         own_start, own_end = own_span_for_hash[block_hash]
@@ -146,7 +155,9 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
         return []
 
     findings: list[Finding] = []
-    for block_hash, entries in sorted(_hash_index(context.corpus).items()):
+    for block_hash, entries in sorted(
+        _hash_index(context.corpus, context.policy.plan_tree).items()
+    ):
         # One finding per shared block: the alphabetically-first (path,
         # span) reports, naming every other entry as a partner -- never a
         # mirrored second finding for the same hash from a partner's

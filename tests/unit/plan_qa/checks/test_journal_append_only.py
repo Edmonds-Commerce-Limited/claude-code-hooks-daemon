@@ -125,3 +125,15 @@ class TestRun:
             )
             == []
         )
+
+
+class TestEntryFiles:
+    """Plan 00543: an entry file is immutable, which journal-dayfile-is-today owns."""
+
+    def test_rewrite_of_entry_file_is_not_reported_here(self) -> None:
+        context = _ctx(
+            before=_BEFORE,
+            after="## 09:00 · action · —\n\nrewritten\n",
+            basename="2026-07-14/090000Z-action-0a1b2c.md",
+        )
+        assert journal_append_only.CHECK.run(context) == []

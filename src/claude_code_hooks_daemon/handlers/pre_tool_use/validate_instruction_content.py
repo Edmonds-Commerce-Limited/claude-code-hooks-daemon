@@ -40,7 +40,7 @@ _RULE_DEFINITIONS: Final[tuple[tuple[str, str, str, str, str, str], ...]] = (
         "Instruction files hold permanent instructions, not a log of past edits",
         "Remove the log sentence; put implementation history in git or a plan JOURNAL/",
         "Implementation logs describe WHAT WAS DONE, not what the instructions ARE. "
-        "That belongs in a commit message, a plan's JOURNAL/ day-file, or a changelog "
+        "That belongs in a commit message, a plan journal entry (`mkplan.bash --journal`), or a changelog "
         "-- never in CLAUDE.md/README.md, which are read fresh every session and must "
         "stay a stable description of the project, not a diary of edits.",
     ),

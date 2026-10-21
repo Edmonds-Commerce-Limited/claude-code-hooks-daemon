@@ -1,6 +1,6 @@
 # Plan 00542: statusline fast path raw text
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-21
 **Owner**: dev
 **Priority**: High
@@ -63,10 +63,10 @@ silent substitute.
 
 ### Phase 1: Raw status text and a forwarder fast path (TDD)
 
-- [ ] ⬜ **Task 1.1**: The daemon answers a status request with raw text when the request asks for it, taking the
+- [x] ✅ **Task 1.1**: The daemon answers a status request with raw text when the request asks for it, taking the
   terminal size from the request. An ordinary status request is answered as before, so the Python rung keeps working.
 
-- [ ] ⬜ **Task 1.2**: The generated status-line forwarder gains a fast path ahead of `source init.sh`, built from
+- [x] ✅ **Task 1.2**: The generated status-line forwarder gains a fast path ahead of `source init.sh`, built from
   bash builtins only:
 
   - it builds the raw request;
@@ -75,7 +75,7 @@ silent substitute.
 
   As first built, it fell through silently on any failure. Task 1.4 makes those failures loud.
 
-- [ ] ⬜ **Task 1.4**: Loud failures (owner ruling).
+- [x] ✅ **Task 1.4**: Loud failures (owner ruling).
 
   - A configured relay that is missing or not executable prints a red status naming the fix.
   - A reply without the raw-text marker prints a red "daemon too old for raw status, restart" status.
@@ -85,22 +85,33 @@ silent substitute.
 
   Each case is tested.
 
-- [ ] ⬜ **Task 1.3**: Measure the generated forwarder before and after on this host (daemon up, 6 runs). Record the
+- [x] ✅ **Task 1.3**: Measure the generated forwarder before and after on this host (daemon up). Record the
   numbers here.
+
+  - Before: 0.077 CPU-s per tick (bash, `init.sh`, a fresh python3; [RESEARCH-COST.md](RESEARCH-COST.md)).
+  - After, through the relay, with the forwarder at its absolute path as Claude Code runs it: 20 ticks took 0.116 CPU-s
+    (user 0.053 + sys 0.063) and 0.254 s wall, so about 0.006 CPU-s and 13 ms per tick. About 13x less CPU.
 
 ### Phase 2: Relay found missing although enabled
 
-- [ ] ⬜ **Task 2.1**: This repo's config has `relay_enabled: true`, but `untracked/bin/hooks-relay` is absent, so
-  every relay-eligible forwarder's guard falls through to bash. Only the transport toggle or verify step reports it. Recorded as N523 in the Plan 00474 niggles ledger for its own fix. A
-  missing binary that the config claims is enabled should be surfaced, not swallowed.
+- [x] ✅ **Task 2.1**: This repo's config has `relay_enabled: true`, but `untracked/bin/hooks-relay` was absent, so
+  every relay-eligible forwarder's guard fell through to bash. Only the transport toggle or verify step reported it.
+
+  - The status line now prints a red line naming `bin/hooks-daemon transport on` when the binary is missing (Task 1.4).
+  - `transport on` provisioned it here by building it, but printed "nothing to do" (N525).
+  - Surfacing a missing binary for the other forwarders is N523, owned by Plan 00529 Task 2.
 
 ## Success Criteria
 
-- [ ] With the daemon up, a status tick is answered by the fast path, and its measured CPU per call drops by at least 5x.
-- [ ] With the daemon down, the status line shows the same text as before.
-- [ ] No fast-path failure is silent. Every case shows a loud status naming the fix, and is tested.
-- [ ] Release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] With the daemon up, a status tick is answered by the fast path, and its measured CPU per call drops by at least 5x.
+- [x] With the daemon down, the status line shows the same text as before (the no-socket and refused cases hand off to
+  the unchanged start-up path; pinned in `tests/unit/install/test_forwarder_status_fast_path.py`).
+- [x] No fast-path failure is silent. Every case shows a loud status naming the fix, and is tested.
+- [x] Release note `CLAUDE/UPGRADES/UNRELEASED/release-notes/008-status-line-fast-path-raw-text.md` (the
+  pending-release holding area).
 
 ## Delivery & Milestones
 
 - Triage: issue #131 comment; evidence in [RESEARCH-COST.md](RESEARCH-COST.md).
+- Delivered: b476a3911 (raw text and fast path), 8d882fdc2 (sentinel), 864f3f99d (loud failures); merged to main as
+  901e59a7a.

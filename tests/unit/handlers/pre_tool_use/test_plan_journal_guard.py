@@ -12,12 +12,15 @@ remedy, an ordinary git operation or a read gets switched off:
 * ``mkplan.bash --journal`` itself;
 * ``git`` (``git mv`` of a plan folder into ``Completed/``, ``git add``);
 * READING a day-file (``tail``, ``grep``, a read-only one-liner);
-* an Edit that adds no line: a deletion (conflict markers after a merge), a
-  reordering, or a same-line redaction.
+* an Edit that removes only conflict-marker lines, after a merge;
+* an exact restore to the committed (HEAD) content, by Edit/Write or by
+  ``git show HEAD:<path> > <path>`` (N524: every other change to existing
+  journal content is denied, in a day-file or an entry file).
 """
 
 import logging
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -257,30 +260,17 @@ class TestEditWriteSurfaceIsAllowed:
         )
         assert handler.matches(_edit(path, "<<<<<<< HEAD\n", "")) is False
 
-    def test_reordering_two_entries_is_allowed(
+    def test_removing_every_marker_of_a_conflict_in_one_write_is_allowed(
         self, handler: PlanJournalGuardHandler, project: Path
     ) -> None:
+        """Only marker lines go; both sides' entries stay."""
         path = _live_path(project)
-        first = "## 14:02 · action · — theirs\n\nB.\n"
-        second = "## 14:00 · action · — ours\n\nA.\n"
-        path.write_text(EXISTING_JOURNAL + "\n" + first + "\n" + second)
-        hook_input = _edit(path, first + "\n" + second, second + "\n" + first)
-        assert handler.matches(hook_input) is False
-
-    def test_same_line_redaction_is_allowed(
-        self, handler: PlanJournalGuardHandler, project: Path
-    ) -> None:
-        hook_input = _edit(_live_path(project), "created via", "scaffolded via")
-        assert handler.matches(hook_input) is False
-
-    def test_a_same_count_heading_rewrite_passes_to_the_append_only_check(
-        self, handler: PlanJournalGuardHandler, project: Path
-    ) -> None:
-        """m4, by design: a rewrite adds no line, so it is `journal-append-only`'s."""
-        content = EXISTING_JOURNAL.replace(
-            "## 13:30 · action · — — plan scaffolded", "## 15:00 · finding · — replaced"
+        ours = "## 14:00 · action · — ours\n\nA.\n"
+        theirs = "## 14:02 · action · — theirs\n\nB.\n"
+        path.write_text(
+            EXISTING_JOURNAL + "<<<<<<< HEAD\n" + ours + "=======\n" + theirs + ">>>>>>> branch\n"
         )
-        assert handler.matches(_write(_live_path(project), content)) is False
+        assert handler.matches(_write(path, EXISTING_JOURNAL + ours + theirs)) is False
 
     def test_edit_whose_old_string_is_absent_is_left_to_the_tool(
         self, handler: PlanJournalGuardHandler, project: Path
@@ -305,6 +295,187 @@ class TestEditWriteSurfaceIsAllowed:
     ) -> None:
         elsewhere = project.parent / "unrelated" / PLAN_DIR / LIVE_FOLDER / "JOURNAL" / LIVE_DAYFILE
         assert handler.matches(_write(elsewhere, NEW_ENTRY)) is False
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(root), *args],
+        check=True,
+        capture_output=True,
+    )
+
+
+@pytest.fixture
+def committed(project: Path) -> Path:
+    """The project as a git repository, with every journal committed at HEAD."""
+    _git(project, "init", "-q")
+    (project / ENTRY_DIR_REL).mkdir(parents=True)
+    (project / ENTRY_REL).write_text(ENTRY_CONTENT)
+    _git(project, "add", "-A")
+    _git(project, "commit", "-q", "-m", "base")
+    return project
+
+
+ENTRY_DIR_REL = f"{PLAN_DIR}/{LIVE_FOLDER}/JOURNAL/2026-09-24"
+ENTRY_REL = f"{ENTRY_DIR_REL}/140501Z-finding-3fa2c1.md"
+ENTRY_CONTENT = "## 14:05 · finding · T1.1 — stamped\n\nThe clock was read.\n"
+
+
+class TestExistingJournalContentIsNeverRemovedOrRewritten:
+    """N524 (ledger 00474): fail closed in the destructive direction.
+
+    The guard once ALLOWED an Edit that removed lines from a day-file and then
+    DENIED the Edit restoring them. Any change to existing journal content is
+    denied now, except removing conflict markers and an exact restore to HEAD.
+    """
+
+    def test_an_edit_removing_lines_from_a_day_file_is_denied(
+        self, handler: PlanJournalGuardHandler, committed: Path
+    ) -> None:
+        hook_input = _edit(_live_path(committed), LAST_LINE, "")
+        assert handler.matches(hook_input) is True
+        assert handler.handle(hook_input).decision == Decision.DENY
+
+    def test_the_deny_for_a_removal_names_the_restore_and_the_correction(
+        self, handler: PlanJournalGuardHandler, committed: Path
+    ) -> None:
+        reason = handler.handle(_edit(_live_path(committed), LAST_LINE, "")).reason or ""
+        assert f"git show HEAD:{_relative_live()} > {_relative_live()}" in reason
+        assert "correction" in reason
+
+    def test_an_edit_restoring_the_committed_content_is_allowed(
+        self, handler: PlanJournalGuardHandler, committed: Path
+    ) -> None:
+        path = _live_path(committed)
+        path.write_text(EXISTING_JOURNAL.replace(LAST_LINE, ""))
+        hook_input = _edit(path, "plan scaffolded\n\n", "plan scaffolded\n\n" + LAST_LINE)
+        assert handler.matches(hook_input) is False
+
+    def test_a_bash_restore_from_head_is_allowed(
+        self, handler: PlanJournalGuardHandler, committed: Path
+    ) -> None:
+        _live_path(committed).write_text(EXISTING_JOURNAL.replace(LAST_LINE, ""))
+        command = f"git show HEAD:{_relative_live()} > {_relative_live()}"
+        assert handler.matches(_bash(command, committed)) is False
+
+    def test_a_bash_restore_of_an_entry_file_from_head_is_allowed(
+        self, handler: PlanJournalGuardHandler, committed: Path
+    ) -> None:
+        (committed / ENTRY_REL).unlink()
+        command = f"git show HEAD:{ENTRY_REL} > {ENTRY_REL}"
+        assert handler.matches(_bash(command, committed)) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"git show HEAD:{PLAN_DIR}/{LIVE_FOLDER}/PLAN.md > {_relative_live()}",
+            f"git show HEAD~1:{_relative_live()} > {_relative_live()}",
+            f"git show HEAD:{_relative_live()} >> {_relative_live()}",
+            f"git show HEAD:{_relative_live()} > {_relative_live()} && echo x >> {_relative_live()}",
+        ],
+    )
+    def test_anything_but_an_exact_restore_from_head_is_denied(
+        self, handler: PlanJournalGuardHandler, committed: Path, command: str
+    ) -> None:
+        assert handler.matches(_bash(command, committed)) is True, command
+
+    def test_a_write_restoring_a_deleted_entry_file_to_head_is_allowed(
+        self, handler: PlanJournalGuardHandler, committed: Path
+    ) -> None:
+        (committed / ENTRY_REL).unlink()
+        assert handler.matches(_write(committed / ENTRY_REL, ENTRY_CONTENT)) is False
+
+    def test_without_git_any_removal_is_denied(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        """No HEAD to compare with: fail closed."""
+        assert handler.matches(_edit(_live_path(project), LAST_LINE, "")) is True
+
+    def test_dropping_one_side_of_a_conflict_is_denied(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        """Only marker lines may go; `--resolve-conflict` keeps both sides."""
+        path = _live_path(project)
+        path.write_text(
+            EXISTING_JOURNAL
+            + "<<<<<<< HEAD\n## 14:00 · action · — ours\n\nA.\n=======\n"
+            + "## 14:02 · action · — theirs\n\nB.\n>>>>>>> branch\n"
+        )
+        hook_input = _edit(path, "=======\n## 14:02 · action · — theirs\n\nB.\n", "")
+        assert handler.matches(hook_input) is True
+        assert "--resolve-conflict" in (handler.handle(hook_input).reason or "")
+
+    def test_reordering_two_entries_is_denied(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        path = _live_path(project)
+        first = "## 14:02 · action · — theirs\n\nB.\n"
+        second = "## 14:00 · action · — ours\n\nA.\n"
+        path.write_text(EXISTING_JOURNAL + "\n" + first + "\n" + second)
+        hook_input = _edit(path, first + "\n" + second, second + "\n" + first)
+        assert handler.matches(hook_input) is True
+
+    def test_a_same_line_redaction_is_denied(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        assert handler.matches(_edit(_live_path(project), "created via", "made via")) is True
+
+    def test_a_same_count_heading_rewrite_is_denied(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        content = EXISTING_JOURNAL.replace(
+            "## 13:30 · action · — — plan scaffolded", "## 15:00 · finding · — replaced"
+        )
+        assert handler.matches(_write(_live_path(project), content)) is True
+
+
+class TestEntryFiles:
+    """Plan 00543: one file per entry in `JOURNAL/YYYY-MM-DD/`."""
+
+    def test_a_write_creating_an_entry_file_is_denied(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        hook_input = _write(project / ENTRY_REL, ENTRY_CONTENT)
+        assert handler.matches(hook_input) is True
+        assert "--journal 461 " in (handler.handle(hook_input).reason or "")
+
+    @pytest.mark.parametrize(
+        ("old", "new"),
+        [
+            ("The clock was read.\n", "The clock was read.\nMore.\n"),
+            ("The clock was read.\n", "The clock was guessed.\n"),
+            ("The clock was read.\n", ""),
+        ],
+    )
+    def test_any_edit_of_an_existing_entry_file_is_denied(
+        self, handler: PlanJournalGuardHandler, project: Path, old: str, new: str
+    ) -> None:
+        path = project / ENTRY_REL
+        path.parent.mkdir(parents=True)
+        path.write_text(ENTRY_CONTENT)
+        assert handler.matches(_edit(path, old, new)) is True
+
+    def test_an_archived_plans_entry_file_is_covered(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        path = _archived_path(project).parent / "2026-09-01" / "090000Z-action-000000.md"
+        hook_input = _write(path, ENTRY_CONTENT)
+        assert "--journal 300 " in (handler.handle(hook_input).reason or "")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"echo x > {ENTRY_REL}",
+            f"cat > {ENTRY_DIR_REL}/$(date -u +%H%M%S)Z-action-abc123.md <<'EOF'\nx\nEOF",
+            f"echo x > {_live_journal_dir()}/$(date -u +%F)/120000Z-action-abc123.md",
+            f"echo x > {_live_journal_dir()}/$DAY/entry.md",
+            f"cd {_live_journal_dir()} && echo x > $(date -u +%F)/entry.md",
+        ],
+    )
+    def test_a_bash_write_into_an_entry_folder_is_denied(
+        self, handler: PlanJournalGuardHandler, project: Path, command: str
+    ) -> None:
+        assert handler.matches(_bash(command, project)) is True, command
 
 
 class TestWorktreeJournals:
@@ -357,7 +528,8 @@ class TestBashSurfaceIsDenied:
             f"cp untracked/scratch/entry.md {_relative_live()}",
             f"mv untracked/scratch/entry.md {_relative_live()}",
             f"dd if=untracked/scratch/entry.md of={_relative_live()}",
-            f"git show HEAD:{_relative_live()} > {_relative_live()}",
+            # Another branch's copy, not an exact restore to HEAD (N524).
+            f"git show other:{_relative_live()} > {_relative_live()}",
             "python3 -c \"open('" + _relative_live() + "', 'a').write('## 14:05 · action · —')\"",
             "python3 -c \"from pathlib import Path; Path('"
             + _relative_live()

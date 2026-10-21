@@ -4,7 +4,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00542: statusline fast path raw text](00542-statusline-fast-path-raw-text/PLAN.md) - In Progress (#131: a status tick costs about 0.08 CPU-s through bash, init.sh and a fresh python3; raw status text plus a byte-pump fast path ahead of init.sh, falling through to today's path when the daemon is down)
+- [00544: issue validity claim without author list](00544-issue-validity-claim-without-author-list/PLAN.md) - In Progress (#129: `issue-validity N --claim` refuses with no author list although the guard that names it treats the list as optional; narrow the refusal to `--list-eligible`)
+
+- [00543: journal file per entry](00543-journal-file-per-entry/PLAN.md) - Not Started (#135, owner-directed: one journal file per entry in a per-day folder, so concurrent branches never conflict on a day-file; legacy day-files stay and are read alongside)
 
 - [00538: supervisor auto refocus and focus signal](00538-supervisor-auto-refocus-and-focus-signal/PLAN.md) - Not Started (#125 follow-up: a spike for a non-screen focus signal; auto-refocus and the mods route are owner decisions)
 
@@ -209,6 +211,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00542: statusline fast path raw text](Completed/00542-statusline-fast-path-raw-text/PLAN.md) - Complete at merge `901e59a7a` + the archiving commit (#131: raw status text plus a builtin-only forwarder fast path through the Rust relay, about 0.006 CPU-s per tick against 0.077 before; every fast-path fault is a red line naming the fix, and only a daemon that is not running hands off to the start-up path)
+
 - [00541: stale key advisory names orphaned transcripts dir](Completed/00541-stale-key-advisory-names-orphaned-transcripts-dir/PLAN.md) - Complete at merge `31c6a1454` (green CI) + the archiving commit (#52 part 1, a stand-in ruling: the `transcript_archiver` stale-key advisory names `untracked/transcripts/` and the reclaim action; part 2 stays owner-only; release note 006)
 
 - [00540: ccy wrapper migration interpreter prefix](Completed/00540-ccy-wrapper-migration-interpreter-prefix/PLAN.md) - Complete at merge `6e349af66` (green CI) + the archiving commit (#126: the upgrade rewrites a Python interpreter prefix to `sh`, repairs lines broken by 3.69.0/3.70.0, reports pins, and the integrity check warns; release note 005)
@@ -267,8 +271,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00498: autonomy only where allowed](Completed/00498-autonomy-only-where-allowed/PLAN.md) - Complete at merge `68dd20179` + the archiving commit (owner request after a desktop agent drifted off its one task: a top-level `autonomy:` block, keyed on the detected environment and role alias, decides whether crons, goal pressure and resume advice run; this repo allows them in containers only, and the owner's desktop session showed `no autonomy` with an empty CronList)
 
-- [00494: Claude Code mods review](Completed/00494-claude-code-mods-review/PLAN.md) - Complete at `f794f4cd1` + the archiving commit (owner request: 21 mod docs vendored, an Opus review and brainstorm, then a one-mod proposal the owner approved with its build order and deployment route; the build is Plan 00497)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -320,11 +322,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 542 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 544 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 459 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 460 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 60 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 61 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

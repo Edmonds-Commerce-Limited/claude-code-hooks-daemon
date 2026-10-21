@@ -85,7 +85,9 @@ every issue in the repository, which is the one outcome this gate exists to
 prevent. For the same reason the command is **strict**: an issue whose author
 cannot be read is not eligible (a non-zero exit, never a silent pass), and with
 no `approved_issue_authors` configured `--list-eligible` refuses to list at all
-rather than treating every issue as eligible. (The PreToolUse handler is the
+rather than treating every issue as eligible. A single-issue `issue-validity N`
+or `--claim` still runs with no list: the issue was already chosen, and the
+author check prints `[n/a]`. (The PreToolUse handler is the
 lenient caller: it only advises when `gh` cannot answer.)
 
 **What this does NOT do.** It gates the issue's author, and nothing else. The

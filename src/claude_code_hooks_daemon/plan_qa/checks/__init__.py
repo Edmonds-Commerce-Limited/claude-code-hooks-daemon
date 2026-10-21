@@ -77,7 +77,8 @@ def all_checks() -> tuple[CheckSpec, ...]:
         terminal_placement_hint.CHECK,
         archive_immutability.CHECK,
         plan_doc_size.CHECK,
-        journal_dayfile_is_today.CHECK,
+        # EDIT + COMMIT: the commit half sees a Bash write the EDIT hook cannot.
+        *journal_dayfile_is_today.CHECKS,
         journal_append_only.CHECK,
         # Cross-file tree checks — dual COMMIT + SWEEP registration
         *no_new_collisions.CHECKS,

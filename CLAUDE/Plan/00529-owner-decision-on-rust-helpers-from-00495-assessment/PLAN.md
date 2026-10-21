@@ -50,11 +50,20 @@ a helper. That fix is a Python change tracked as ledger N465 and fixed separatel
 
 ### Phase 2: Act on the decision
 
-- [ ] ⬜ **Task 2**: The relay becomes default-on.
-  - Install and upgrade put the binary in place: build with `rustc` and the musl target when present, otherwise the
+- [ ] 🔄 **Task 2**: The relay becomes default-on.
+  - [ ] Install and upgrade put the binary in place: build with `rustc` and the musl target when present, otherwise the
     digest-verified release asset. Where neither works, the failure is loud and names the fix.
-  - The status line uses the relay (Plan 00542).
-  - A configured relay that is missing or not executable is reported loudly instead of silently falling back (N523).
+  - [x] The status line uses the relay (Plan 00542, merged `901e59a7a`). A missing binary prints a red line naming
+    `bin/hooks-daemon transport on`.
+  - [x] A configured relay that is missing or not executable is reported loudly: `transport on` reports a provisioned
+    binary (N525), and `status` and the new SessionStart `relay_binary_checker` name the path and the fix (N523).
+    Merged `376612d38`.
+  - [ ] **Open owner question**: what a relay-eligible SAFETY forwarder (PreToolUse and similar) does when the binary is
+    missing. Today its guard falls through to the bash path, which still enforces every rule but is slower and silent
+    at the moment of the call. Denying every tool call would also deny the commands that rebuild the relay. The
+    coordinator's recommendation, held until the owner rules: repair automatically at session start and upgrade; if
+    that fails, deny every tool call except the repair command, naming it; never a silent bash path. The SessionStart
+    and `status` warnings above already make the missing binary loud.
 - [ ] ⬜ **Task 3**: Measure the default-on relay against bash on the hot hooks, under many concurrent sessions, and list
   further Rust candidates with their numbers for the owner.
 

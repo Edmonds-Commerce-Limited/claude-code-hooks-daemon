@@ -33,7 +33,7 @@ from claude_code_hooks_daemon.plan_qa.types import (
 
 CHECK_ID: Final[str] = "journal-append-only"
 STATEMENT: Final[str] = (
-    "A journal day-file is an append-only log. Add new entries at the end and do not edit earlier ones."
+    "A legacy journal day-file is append-only: never edit earlier entries. Record new entries as new files with `mkplan.bash --journal`."
 )
 
 
@@ -54,7 +54,10 @@ _NEWLINE: Final[str] = "\n"
 
 def _run(context: CheckContext) -> list[Finding]:
     target = journal_edit_target(context)
-    if target is None:
+    # An entry file (Plan 00543) is immutable rather than append-only:
+    # journal-dayfile-is-today reports any change to one, so a second finding
+    # here would double-report it.
+    if target is None or target.is_entry_file:
         return []
 
     before = context.file_content_before

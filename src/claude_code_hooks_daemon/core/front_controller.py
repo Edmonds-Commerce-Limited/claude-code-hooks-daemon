@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.core.chain import carry_accumulated_fields, is_restrictive
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
@@ -218,7 +219,7 @@ class FrontController:
         output = result.to_json(
             self.event_name,
             stop_hook_active=stop_hook_active,
-            terminal_columns=hook_input.get("terminal_columns"),
+            terminal_columns=hook_input.get(HookInputField.TERMINAL_COLUMNS),
         )
         json.dump(output, sys.stdout)
         sys.exit(0)

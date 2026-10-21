@@ -20,8 +20,10 @@ from claude_code_hooks_daemon.install.relay_deploy import (
     deploy_relay_from_build,
     deploy_relay_from_download,
     deploy_relay_if_configured,
+    missing_configured_relay_binary,
     read_deployed_digest,
     read_deployed_route,
+    relay_binary_missing_warning,
     resolve_relay_binary_path,
 )
 
@@ -438,3 +440,47 @@ class TestDeployRelayIfConfigured:
         # Sums parse will fail (no valid entry) — deployed False, but the
         # point is real urlopen was never invoked.
         assert result.deployed is False
+
+
+class TestMissingConfiguredRelayBinary:
+    """A configured relay whose binary is absent or not executable is reported."""
+
+    def _config(self, binary: Path, *, enabled: bool = True) -> TransportConfig:
+        return TransportConfig(relay_enabled=enabled, relay_binary=str(binary))
+
+    def test_disabled_relay_is_never_reported(self, tmp_path: Path) -> None:
+        binary = tmp_path / "hooks-relay"
+        assert (
+            missing_configured_relay_binary(tmp_path, self._config(binary, enabled=False)) is None
+        )
+
+    def test_absent_binary_is_reported_with_its_path(self, tmp_path: Path) -> None:
+        binary = tmp_path / "hooks-relay"
+        assert missing_configured_relay_binary(tmp_path, self._config(binary)) == binary
+
+    def test_non_executable_binary_is_reported(self, tmp_path: Path) -> None:
+        binary = tmp_path / "hooks-relay"
+        binary.write_bytes(b"x")
+        binary.chmod(0o644)
+        assert missing_configured_relay_binary(tmp_path, self._config(binary)) == binary
+
+    def test_directory_at_binary_path_is_reported(self, tmp_path: Path) -> None:
+        binary = tmp_path / "hooks-relay"
+        binary.mkdir()
+        assert missing_configured_relay_binary(tmp_path, self._config(binary)) == binary
+
+    def test_executable_binary_is_silent(self, tmp_path: Path) -> None:
+        binary = tmp_path / "hooks-relay"
+        binary.write_bytes(b"x")
+        binary.chmod(0o755)
+        assert missing_configured_relay_binary(tmp_path, self._config(binary)) is None
+
+
+class TestRelayBinaryMissingWarning:
+    def test_names_path_fallback_and_fix(self, tmp_path: Path) -> None:
+        binary = tmp_path / "hooks-relay"
+        line = relay_binary_missing_warning(binary, "bin/hooks-daemon transport on")
+        assert str(binary) in line
+        assert "fallback" in line
+        assert line.endswith("Fix: bin/hooks-daemon transport on")
+        assert "\n" not in line
