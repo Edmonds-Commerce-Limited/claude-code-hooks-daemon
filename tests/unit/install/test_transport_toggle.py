@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.install.forwarder_generator import (
 )
 from claude_code_hooks_daemon.install.transport_toggle import (
     _RESTART_TIMEOUT_SECONDS,
+    RelayProvision,
     ToggleOutcome,
     TransportToggleError,
     ensure_relay_binary,
@@ -602,7 +603,9 @@ class TestRelayProvisioning:
             enable=True,
             restart_fn=lambda: 0,
             verify_fn=_passing_probes,
-            provision_fn=lambda: "relay-binary: build exited 1: rustc not found",
+            provision_fn=lambda: RelayProvision(
+                failure="relay-binary: build exited 1: rustc not found"
+            ),
         )
 
         assert outcome.verified is False
@@ -618,13 +621,14 @@ class TestRelayProvisioning:
         assert outcome.verified is True
 
     def test_ensure_relay_binary_short_circuits_on_present_binary(self, project: Path) -> None:
-        assert ensure_relay_binary(project) is None
+        assert ensure_relay_binary(project) == RelayProvision()
 
     def test_ensure_relay_binary_reports_null_source(self, project: Path) -> None:
         self._remove_fixture_binary(project)
-        message = ensure_relay_binary(project)
-        assert message is not None
-        assert "relay_source" in message
+        provision = ensure_relay_binary(project)
+        assert provision.failure is not None
+        assert "relay_source" in provision.failure
+        assert provision.route is None
 
     def test_ensure_relay_binary_delegates_to_configured_route(
         self, project: Path, monkeypatch: pytest.MonkeyPatch
@@ -652,7 +656,7 @@ class TestRelayProvisioning:
             fake_deploy,
         )
 
-        assert ensure_relay_binary(project) is None
+        assert ensure_relay_binary(project) == RelayProvision(route="build", binary=str(binary))
         assert calls == ["deploy"]
 
     def test_ensure_relay_binary_reports_route_failure(
@@ -672,10 +676,129 @@ class TestRelayProvisioning:
             lambda *_a, **_k: RelayDeployResult(False, "build", ("no musl toolchain",)),
         )
 
-        message = ensure_relay_binary(project)
+        provision = ensure_relay_binary(project)
 
-        assert message is not None
-        assert "no musl toolchain" in message
+        assert provision.failure is not None
+        assert "no musl toolchain" in provision.failure
+        assert provision.route is None
+
+
+class TestProvisioningIsReported:
+    """N525: a binary provisioned by ``transport on`` is a change and is carried
+    on the outcome, so the CLI can never call the repair "nothing to do"."""
+
+    _BINARY = "/opt/relay/hooks-relay"
+
+    def _enabled_and_converged(self, project: Path) -> None:
+        set_relay_enabled(_config_path(project), True)
+        regenerate_deployed_hooks(project, _hooks_dir(project))
+
+    def test_converged_project_carries_the_provisioned_route_and_is_verified(
+        self, project: Path
+    ) -> None:
+        self._enabled_and_converged(project)
+        restarts: list[int] = []
+        verified: list[bool] = []
+
+        def restart() -> int:
+            restarts.append(1)
+            return 0
+
+        def verify(expect_relay: bool) -> list[ProbeResult]:
+            verified.append(expect_relay)
+            return _passing_probes(expect_relay)
+
+        outcome = run_toggle(
+            project,
+            enable=True,
+            restart_fn=restart,
+            verify_fn=verify,
+            provision_fn=lambda: RelayProvision(route="build", binary=self._BINARY),
+        )
+
+        assert outcome.provisioned_route == "build"
+        assert outcome.provisioned_binary == self._BINARY
+        assert outcome.changed is False
+        assert outcome.reconciled is False
+        # The forwarders already named the binary, so no restart is needed —
+        # but the relay rung it engages is verified rather than assumed.
+        assert restarts == []
+        assert verified == [True]
+        assert outcome.verified is True
+        assert read_last_toggle_state(project) is not None
+
+    def test_converged_project_reports_a_failed_verification_after_provisioning(
+        self, project: Path
+    ) -> None:
+        self._enabled_and_converged(project)
+
+        outcome = run_toggle(
+            project,
+            enable=True,
+            restart_fn=lambda: 0,
+            verify_fn=_failing_probes,
+            provision_fn=lambda: RelayProvision(route="download", binary=self._BINARY),
+        )
+
+        assert outcome.verified is False
+        assert outcome.provisioned_route == "download"
+        assert any("pre-tool-use-json" in failure for failure in outcome.failures)
+        assert outcome.reverted is False
+
+    def test_converged_project_with_a_present_binary_stays_a_no_op(self, project: Path) -> None:
+        self._enabled_and_converged(project)
+
+        outcome = run_toggle(
+            project,
+            enable=True,
+            restart_fn=lambda: 0,
+            verify_fn=_passing_probes,
+            provision_fn=RelayProvision,
+        )
+
+        assert outcome == ToggleOutcome(action="on", changed=False, verified=None)
+
+    def test_flip_carries_the_provisioned_route(self, project: Path) -> None:
+        outcome = run_toggle(
+            project,
+            enable=True,
+            restart_fn=lambda: 0,
+            verify_fn=_passing_probes,
+            provision_fn=lambda: RelayProvision(route="build", binary=self._BINARY),
+        )
+
+        assert outcome.changed is True
+        assert outcome.verified is True
+        assert outcome.provisioned_route == "build"
+        assert outcome.provisioned_binary == self._BINARY
+
+    def test_reconcile_carries_the_provisioned_route(self, project: Path) -> None:
+        # Config says enabled; the forwarders were deployed while it said
+        # disabled, so the reconcile rewrites them.
+        set_relay_enabled(_config_path(project), True)
+
+        outcome = run_toggle(
+            project,
+            enable=True,
+            restart_fn=lambda: 0,
+            verify_fn=_passing_probes,
+            provision_fn=lambda: RelayProvision(route="build", binary=self._BINARY),
+        )
+
+        assert outcome.reconciled is True
+        assert outcome.provisioned_route == "build"
+
+    def test_as_dict_records_the_provisioning(self) -> None:
+        outcome = ToggleOutcome(
+            action="on",
+            changed=False,
+            verified=True,
+            provisioned_route="build",
+            provisioned_binary=self._BINARY,
+        )
+        record = outcome.as_dict()
+        assert record["provisioned_route"] == "build"
+        assert record["provisioned_binary"] == self._BINARY
 
 
 class TestStatusSnapshot:

@@ -7556,6 +7556,14 @@ def cmd_transport(args: argparse.Namespace) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
+    if outcome.provisioned_route is not None:
+        # A binary written by this toggle is a change whatever else happened
+        # (Plan 00474 N525), so it is named before any verdict.
+        print(
+            f"transport {outcome.action}: relay binary provisioned via "
+            f"{outcome.provisioned_route} at {outcome.provisioned_binary}"
+        )
+
     if outcome.verified is False:
         # Failure first: a pre-flip refusal (e.g. relay provisioning) also
         # carries changed=False, and must never read as a clean no-op.
@@ -7587,6 +7595,13 @@ def cmd_transport(args: argparse.Namespace) -> int:
                 "forwarders before relying on any hook transport",
                 file=sys.stderr,
             )
+        elif outcome.provisioned_route is not None:
+            print(
+                "The config and forwarders were not changed; the relay binary provisioned "
+                "above is left in place, because it is what the config asks for. Inspect "
+                "it and the daemon before relying on the relay transport",
+                file=sys.stderr,
+            )
         elif not outcome.changed:
             print(
                 "No state was changed — the toggle refused before flipping anything",
@@ -7602,6 +7617,12 @@ def cmd_transport(args: argparse.Namespace) -> int:
             print(
                 f"transport {outcome.action}: relay already {state} in config, but the "
                 "deployed forwarders had drifted — regenerated, daemon restarted, verified"
+            )
+            return 0
+        if outcome.provisioned_route is not None:
+            print(
+                f"transport {outcome.action}: relay already {state} in config and the "
+                "forwarders were current — the provisioned relay rung verified"
             )
             return 0
         print(f"transport {outcome.action}: relay already {state} — nothing to do")
