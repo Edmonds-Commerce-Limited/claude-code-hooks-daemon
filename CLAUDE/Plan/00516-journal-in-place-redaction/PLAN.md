@@ -12,7 +12,8 @@
 
 > **Re-scope needed (Plan 00543, merged `c127d7356`).** Journals are now one file per entry under
 > `JOURNAL/YYYY-MM-DD/`, and the guard denies ANY change to an existing journal file (legacy day-file or entry file)
-> except removing conflict-marker lines or an exact restore to HEAD; `journal-dayfile-is-today` now closes every
+> except an Edit/Write that only removes conflict-marker lines, or an exact restore to HEAD (the only Bash route,
+> `plan_journal_guard.py` ~434-456); `journal-dayfile-is-today` now closes every
 > existing journal file at EDIT and flags a rewritten entry file at COMMIT. The blockers listed below describe the
 > pre-00543 rules. A redaction tool must now address an entry FILE (or a legacy day-file entry) and be an explicit,
 > audited exception to the immutability rule. Re-verify each point below before building.
