@@ -109,14 +109,36 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N524 — the journal guard lets an edit shrink a journal but denies the edit that restores it, and docs QA asks for a journal rewrite
+
+**Source**: the coordinator, integrating Plan 00476 Task 2.2 (targeted QA on the integration head).
+
+- **N524a**: `docs_qa` `duplicate-block` flagged two journal entries carrying the same four-item list (Plan 00529 and
+  Plan 00542, both journalled from one body file). Its remediation is to extract the list to one place. A journal is
+  append-only, so the check asks for something the journal rules forbid. Journals should be outside `duplicate-block`.
+- **N524b**: following that remediation, an Edit replacing the four lines in the Plan 00542 day-file with a two-line pointer (a
+  net shrink) was ALLOWED, with
+  only a `journal-append-only` advisory. The Edit restoring the same four lines was DENIED as a hand-written entry
+  (`R-JOURNAL-HAND-WRITTEN-ENTRY`), and so was restoring the file from `git show HEAD:<path>` through Bash. The guard
+  is open in the destructive direction and closed in the repairing one. A shrinking edit should be denied, and an exact
+  restore to the committed content allowed. The working-tree change was left for the owner to discard with
+  `git checkout -- <path>`.
+
+**Fix direction**: fold both into Plan 00543 Task 2.2, which rebuilds the journal checks for per-entry files. Under
+that layout an entry file is immutable: deny any modification or deletion, and allow only an exact restore.
+
+**Status**: ⬜ Open.
+
 ### N523 — the relay is enabled in config but its binary is missing, and every forwarder falls back silently
 
 **Source**: the coordinator's #131 triage (Plan 00542, `RESEARCH-COST.md` section 4).
 
 - **N523**: this repository's `.claude/hooks-daemon.yaml` sets `daemon.transport.relay_enabled: true`
   (`relay_source: build`). Only `untracked/relay-build/` exists; `untracked/bin/hooks-relay` does not. Each
-  generated forwarder's relay guard requires the binary to be executable, so every hook event takes the bash path, and
-  nothing reports it. The config claims a transport that is not in use, so any measurement that assumes the relay is
+  relay-eligible forwarder's guard requires the binary to be executable, so those events take the bash path. The
+  status-line, stop, subagent-stop and worktree-create forwarders have no guard
+  (`forwarder_generator.py:70`). A missing binary is reported only when the relay is toggled or verified
+  (`transport_toggle.py:289-310`, `transport_verify.py:491`), never at session start or at run time. The config claims a transport that is not in use, so any measurement that assumes the relay is
   wrong without saying so.
 
 **Fix direction**: a configured-but-absent relay binary is surfaced, for example by a SessionStart advisory or in
@@ -785,7 +807,11 @@ prune. Release note 052.
   e1f208711, was green.
 - Recurrence, run 39610947367 for 6e517516c (the #132 merge; its unmapped `utils/usage_pause_gate.py` sent the job to
   the full-suite fallback): the same test, parameter `a=['y']+a`, measured 1.616s against 1.5. It was the only
-  failure (50840 passed). The failed job was re-run, not the bound changed.
+  failure (50840 passed). The failed job was re-run, not the bound changed. The re-run (attempt 2) failed the same
+  way on the other parameter, `a=a+['x{i}']`, at 1.575s against 1.5 (1 failed, 50840 passed, 1 h 02 min).
+  This class has now failed both of #132's full-suite fallback runs, after earlier failures on 6ae406932, d5f7a2cf0 and
+  N431's run. The fix-forward is Plan 00476 Task 2.2 (Design 6: timing sweeps in their
+  own CI job, thresholds unchanged), taken up to unblock #132 and #131.
 
 **Fix direction**: a lint timeout is an environment fact, not the handler's verdict, so a probe whose linter timed out
 must not be scored as the handler's decision (skip with the reason, or raise the CI Swift timeout); the timing bound

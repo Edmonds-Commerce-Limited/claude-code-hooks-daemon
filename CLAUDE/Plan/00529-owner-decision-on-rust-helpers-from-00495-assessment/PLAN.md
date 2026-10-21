@@ -1,6 +1,6 @@
 # Plan 00529: owner decision on rust helpers from 00495 assessment
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-16
 **Owner**: dev
 **Priority**: Medium
@@ -29,24 +29,39 @@ a helper. That fix is a Python change tracked as ledger N465 and fixed separatel
 
 - A full Rust rewrite of the daemon or its handlers.
 - Compiling any policy (Plan 00154 Rule 1).
-- Making the transport relay default-on unless the owner decides so in Task 1.
+- A new native helper commissioned without a measured case.
 
 ## Tasks
 
 ### Phase 1: Decide
 
-- [ ] ⬜ **Task 1**: The owner decides from the assessment. Put to them, with the assessment's recommendation first:
-  (a) commission no new native helper; (b) leave the relay opt-in, or make it default-on. Record each answer here. (The
-  secret-file guard's cost is a Python fix, ledger N465, fixed separately; it is not put to the owner.)
+- [x] ✅ **Task 1**: The owner decided, in session messages while #131 was being worked:
+
+  - **(b) The relay is the new default, starting with the status line.** In the owner's words: "wondering if we can
+    have rust for statusline by default ... or maybe we make rust the new default and see how it goes". The project
+    has no consumers but the owner, so there is no support cost to weigh.
+  - **(a) Rust is welcome where it pays.** The owner wants it suggested "for other stuff as well". No specific helper
+    is commissioned yet. Each candidate is still measured against the assessment's cost test.
+  - **Performance is now a priority.** In the owner's words: "the paradigm is definitely shifting to having lots of
+    claude code sessions running, and that means hooks daemon/status line load is increasingly important".
+  - **A standing principle, for this work and the repository:** "this repo should not have silent fallbacks - that is
+    error hiding - we need this repo to have LOUD AND CLEAR FAIL FAST". A configured transport that is not in use (ledger
+    N523) is a loud failure, not a silent fall back to bash.
 
 ### Phase 2: Act on the decision
 
-- [ ] ⬜ **Task 2**: If the owner chose a different answer in Task 1 (a helper, or the relay default-on), file the plan for
-  it with the assessment as its evidence.
+- [ ] ⬜ **Task 2**: The relay becomes default-on.
+  - Install and upgrade put the binary in place: build with `rustc` and the musl target when present, otherwise the
+    digest-verified release asset. Where neither works, the failure is loud and names the fix.
+  - The status line uses the relay (Plan 00542).
+  - A configured relay that is missing or not executable is reported loudly instead of silently falling back (N523).
+- [ ] ⬜ **Task 3**: Measure the default-on relay against bash on the hot hooks, under many concurrent sessions, and list
+  further Rust candidates with their numbers for the owner.
 
 ## Success Criteria
 
-- [ ] The owner's decision on (a) and (b) is recorded in this plan.
+- [x] The owner's decision on (a) and (b) is recorded in this plan.
+- [ ] The relay is default-on, and a configured-but-missing relay fails loudly with the fix named.
 
 ## Delivery & Milestones
 

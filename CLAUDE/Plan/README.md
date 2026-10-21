@@ -4,6 +4,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00544: issue validity claim without author list](00544-issue-validity-claim-without-author-list/PLAN.md) - In Progress (#129: `issue-validity N --claim` refuses with no author list although the guard that names it treats the list as optional; narrow the refusal to `--list-eligible`)
+
+- [00543: journal file per entry](00543-journal-file-per-entry/PLAN.md) - Not Started (#135, owner-directed: one journal file per entry in a per-day folder, so concurrent branches never conflict on a day-file; legacy day-files stay and are read alongside)
+
 - [00542: statusline fast path raw text](00542-statusline-fast-path-raw-text/PLAN.md) - In Progress (#131: a status tick costs about 0.08 CPU-s through bash, init.sh and a fresh python3; raw status text plus a byte-pump fast path ahead of init.sh, falling through to today's path when the daemon is down)
 
 - [00538: supervisor auto refocus and focus signal](00538-supervisor-auto-refocus-and-focus-signal/PLAN.md) - Not Started (#125 follow-up: a spike for a non-screen focus signal; auto-refocus and the mods route are owner decisions)
@@ -16,7 +20,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00530: subagent tier enforcement follow up](00530-subagent-tier-enforcement-follow-up/PLAN.md) - Not Started (opened by the Plan 00472 build per its Fable rulings' section 3: confirm the Workflow advisor against a real payload, then decide the Workflow deny mode, `require_explicit` and the `CLAUDE_CODE_SUBAGENT_MODEL` flip from measured evidence)
 
-- [00529: owner decision on rust helpers from 00495 assessment](00529-owner-decision-on-rust-helpers-from-00495-assessment/PLAN.md) - Not Started (Plan 00495 Task 3.2 found no path that justifies a native helper, and one Python defect: the secret-file guard spends 1.2 s on a 115 KB Write; awaiting the owner's decision on the assessment's three recommendations)
+- [00529: owner decision on rust helpers from 00495 assessment](00529-owner-decision-on-rust-helpers-from-00495-assessment/PLAN.md) - In Progress (the owner decided: the Rust relay becomes the default, starting with the status line; Rust is welcome where measured; performance is a priority; no silent fallbacks, a configured transport not in use fails loudly)
 
 - [00526: supervisor plugin relay result](00526-supervisor-plugin-relay-result/PLAN.md) - Not Started (#119, agent-needs-human: a plugin API 1.1 `Relay` result types external message text into the session; a new prompt-injection surface, so build or not is the owner's call)
 
@@ -320,11 +324,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 542 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 544 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 459 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 60 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 62 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

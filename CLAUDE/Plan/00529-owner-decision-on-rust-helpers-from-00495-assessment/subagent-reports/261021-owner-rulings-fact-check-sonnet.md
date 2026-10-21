@@ -1,0 +1,19 @@
+# Fact check: owner rulings diffs (Plans 00529 and 00542)
+
+| #   | Claim                                                                                         | Verdict            | Evidence                                                                                                                                                                                          |
+| --- | --------------------------------------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Owner quotes and rulings (relay default, performance priority, no silent fallbacks)           | UNVERIFIABLE-HERE  | Session messages                                                                                                                                                                                  |
+| 2   | Project has no consumers but the owner                                                        | UNVERIFIABLE-HERE  | Not checkable from files                                                                                                                                                                          |
+| 3   | `rustc` with the musl target is present ("build with rustc and the musl target when present") | VERIFIED           | `rustc 1.99.1`; `rustup target list --installed` lists x86_64-unknown-linux-musl                                                                                                                  |
+| 4   | A digest-verified release asset exists                                                        | VERIFIED           | `gh release view v3.70.0`: `hooks-relay-x86_64-unknown-linux-musl` with sha256:33f45e1b...                                                                                                        |
+| 5   | Digest-verified download path is a relay source                                               | VERIFIED           | models.py:1617-1650 `relay_source: Literal["build","download"]`, "digest-verified GitHub release asset"                                                                                           |
+| 6   | Install and upgrade place the binary (Task 2)                                                 | VERIFIED as intent | models.py:1644 says provisioning happens "at install/upgrade time" when relay_source is set. It is None by default, so default-on is future work (Task 2, unchecked)                              |
+| 7   | Start-up path starts the daemon and shows DAEMON FAILED or venv building (Plan 00488, #72)    | VERIFIED           | init.sh:44-47 cites Plan 00488 / #72 with `VENV BUILDING` text; `DAEMON FAILED` at events.py:323 and install.py:560; plan at CLAUDE/Plan/Completed/00488-status-line-visible-during-daemon-outage |
+| 8   | Ledger N523: configured relay is not in use, silent fallback                                  | VERIFIED           | NIGGLES.md:112-122; .claude/hooks-daemon.yaml:46,50 relay_enabled true, relay_source build; `untracked/bin` absent; STATUS-INDEX.md row N523 open                                                 |
+| 9   | N523 "silent" matches the plan wording                                                        | VERIFIED           | NIGGLES.md says a missing binary is reported only at toggle or verify time                                                                                                                        |
+
+## REFUTED
+
+None.
+
+Note: the 00542 text says "As first built, it fell through silently on any failure". I did not check the forwarder code for this; the claim is in the plan's own history and was not itemised.
