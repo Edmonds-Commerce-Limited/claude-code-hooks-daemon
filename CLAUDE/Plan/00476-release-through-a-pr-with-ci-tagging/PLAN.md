@@ -1,6 +1,6 @@
 # Plan 00476: release through a pr with ci tagging
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-30
 **Owner**: dev
 **Priority**: Medium
@@ -93,7 +93,9 @@ modules only.
 
 - [ ] ⬜ **Task 2.1**: A release pull request workflow that runs the whole gate,
   one job per Python, sharded where measured to need it (Design 5).
-- [ ] ⬜ **Task 2.2**: A separate performance-sweep job (Design 6).
+- [x] ✅ **Task 2.2**: A separate performance-sweep job (Design 6). Delivered:
+  `perf_sweep` marker on the 7 `scaled_cpu_seconds` tests (11 cases), deselected
+  from the fallback and matrix steps, run alone by the `perf-sweep` CI job.
 - [ ] ⬜ **Task 2.3**: The release state file records the CI run and `/release`
   checks it on resume (Design 7).
 
