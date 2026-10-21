@@ -6,7 +6,7 @@
 **Priority**: Medium
 **Recommended Executor**: Sonnet
 **Execution Strategy**: Sub-Agent Orchestration
-**GitHub Issue**: #104 (the single-thread cutoff, Phase 7)
+**GitHub Issue**: #104 (the single-thread cutoff, Phase 7); #132 (re-evaluating a pause early, Phase 8)
 
 ## Overview
 
@@ -219,6 +219,23 @@ feedback loop.
 - [ ] ⬜ **Task 7.1**: Deny new sub-agent and background spawns at a usage threshold below the pause, and tell
   the main thread to wind up. Blocked on owner question 6. Proposal, relations and questions:
   [SINGLE-THREAD-CUTOFF.md](SINGLE-THREAD-CUTOFF.md).
+
+### Phase 8: Re-evaluate a pause before its resume time (#132)
+
+A session paused on one token's 7-day window was restarted on another token. It stayed paused for the old window's
+reset, about 2.5 days away. The status line showed `⏸ usage 23:02` beside a 7d reading of 19% under an 80% ceiling.
+The usage snapshot is refreshed from `rate_limits` on every status-line render, so the daemon already held the new
+account's reading. But `_resume` drops every tick before `resume_at` unread, and under a pause no other prompt arrives.
+
+- [ ] ⬜ **Task 8.1**: An early resume tick consults the current snapshot, which costs no model turn:
+
+  - a **fresh** reading (every limited window's `observed_at` recent) under the ceiling lifts the pause;
+  - a fresh reading still over the ceiling re-bases the record on that reading's reset when it differs, and otherwise
+    drops the tick as today;
+  - a stale or missing reading drops the tick as today.
+
+  TDD: a red test reproducing the token-change case first. The token label is not used: the daemon sees only a
+  host-wide last-launch file, not a per-session identity.
 
 ## Open questions for the owner
 
