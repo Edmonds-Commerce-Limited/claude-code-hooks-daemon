@@ -4,7 +4,7 @@ Branch `worktree-issue-130-p2-guard`.
 
 ## What was built
 
-- `src/claude_code_hooks_daemon/python_floor.py`: the single declaration, `MIN_PYTHON = (3, 11)`, plus `require_min_python(entry_point)`. It is written in old syntax (no `|` annotations, no f-strings, no `__future__`, string annotations under `TYPE_CHECKING`), so it parses on any Python 3. On failure it writes ONE line to stderr and exits 1. Run as a script it checks the running interpreter.
+- `src/claude_code_hooks_daemon/python_floor.py`: the single declaration, `MIN_PYTHON = (3, 11)`, plus `require_min_python(entry_point)`. It is written in old syntax (no `|` annotations, no `__future__`, string annotations under `TYPE_CHECKING`; the QA autofix turned its `.format` into an f-string, so 3.6+), so it parses on every Python that could plausibly be a host python3. On failure it writes ONE line to stderr and exits 1. Run as a script it checks the running interpreter.
 - A test pins `MIN_PYTHON` to `requires-python` in `pyproject.toml`.
 - Entry points:
   - `daemon/paths.py`: guard under `if __name__ == "__main__"`, after the stdlib imports and before `functools.cache`. Tolerates a lone copy with no sibling `python_floor.py`, because 13 test fixtures copy `paths.py` alone.
@@ -45,7 +45,7 @@ Targeted run: 4904 passed (tests/unit/test_python_floor.py, tests/unit/daemon, t
 
 ## Limits
 
-- The real-interpreter tests need 3.8 and 3.9 on the host (here from `uv python install`) and skip otherwise. Nothing below 3.8 was tried; 3.6 and below are covered by reasoning only (the floor file uses only syntax valid since Python 3.0 except annotations, 3.0+, and `typing`, 3.5+).
+- The real-interpreter tests need 3.8 and 3.9 on the host (here from `uv python install`) and skip otherwise. Nothing below 3.8 was tried; 3.6 and below are covered by reasoning only (the floor file's newest syntax is the f-string, 3.6+, and `typing`, 3.5+).
 - `paths.py` skips the check when its sibling `python_floor.py` is absent (see above).
 - `-m` runs print the package name as the entry point, not the module.
 - Phase 3 (a QA rule over bare `python3` in shell scripts) is untouched.

@@ -2,9 +2,9 @@
 
 This file is deliberately written in the oldest syntax that still parses
 everywhere an arbitrary interpreter might start the daemon: no ``X | Y``
-annotations, no f-strings, no ``from __future__`` import, no third-party or
-package imports. It can therefore run, and refuse, under an interpreter far
-older than the code it protects.
+annotations, no ``from __future__`` import, no third-party or package imports.
+It can therefore run, and refuse, under an interpreter far older than the code
+it protects (f-strings, 3.6+, are its newest syntax).
 
 Entry points call :func:`require_min_python` BEFORE their first construct that
 needs more than the oldest interpreter they accept:
@@ -37,15 +37,12 @@ def _dotted(parts: "Sequence[int]") -> str:
 
 def refusal_line(entry_point: str, version_info: "Sequence[int]") -> str:
     """The single line an entry point prints when the interpreter is too old."""
-    return "{entry}: needs Python {needed} or newer, but this is Python {found} ({exe}).".format(
-        entry=entry_point,
-        needed=_dotted(MIN_PYTHON),
-        found=_dotted(tuple(version_info[:3])),
-        exe=sys.executable,
-    )
+    return f"{entry_point}: needs Python {_dotted(MIN_PYTHON)} or newer, but this is Python {_dotted(tuple(version_info[:3]))} ({sys.executable})."
 
 
-def require_min_python(entry_point: str, version_info: "Sequence[int]" = sys.version_info) -> None:
+def require_min_python(
+    entry_point: str, version_info: "Sequence[int]" = sys.version_info[:3]
+) -> None:
     """Exit with status 1 and one line on stderr when below :data:`MIN_PYTHON`."""
     if tuple(version_info[:2]) >= MIN_PYTHON:
         return

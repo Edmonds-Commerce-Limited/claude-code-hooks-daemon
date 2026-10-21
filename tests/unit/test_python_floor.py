@@ -56,7 +56,7 @@ class TestTheMinimumIsDeclaredOnce:
 
 class TestRequireMinPython:
     def test_returns_quietly_at_the_minimum(self, capsys: pytest.CaptureFixture[str]) -> None:
-        python_floor.require_min_python("x.py", python_floor.MIN_PYTHON + (0,))
+        python_floor.require_min_python("x.py", (*python_floor.MIN_PYTHON, 0))
 
         assert capsys.readouterr().err == ""
 
