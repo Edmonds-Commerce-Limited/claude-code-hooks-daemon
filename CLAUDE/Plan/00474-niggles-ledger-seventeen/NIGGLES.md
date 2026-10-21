@@ -116,7 +116,8 @@ Follow-ups, not defects in the reviewers' judgement:
 - **N524a**: `docs_qa` `duplicate-block` flagged two journal entries carrying the same four-item list (Plan 00529 and
   Plan 00542, both journalled from one body file). Its remediation is to extract the list to one place. A journal is
   append-only, so the check asks for something the journal rules forbid. Journals should be outside `duplicate-block`.
-- **N524b**: following that remediation, an Edit removing the four lines from the Plan 00542 day-file was ALLOWED, with
+- **N524b**: following that remediation, an Edit replacing the four lines in the Plan 00542 day-file with a two-line pointer (a
+  net shrink) was ALLOWED, with
   only a `journal-append-only` advisory. The Edit restoring the same four lines was DENIED as a hand-written entry
   (`R-JOURNAL-HAND-WRITTEN-ENTRY`), and so was restoring the file from `git show HEAD:<path>` through Bash. The guard
   is open in the destructive direction and closed in the repairing one. A shrinking edit should be denied, and an exact
