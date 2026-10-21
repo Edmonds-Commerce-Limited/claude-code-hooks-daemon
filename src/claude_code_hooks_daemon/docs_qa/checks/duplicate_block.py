@@ -155,7 +155,9 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
         return []
 
     findings: list[Finding] = []
-    for block_hash, entries in sorted(_hash_index(context.corpus, context.policy.plan_tree).items()):
+    for block_hash, entries in sorted(
+        _hash_index(context.corpus, context.policy.plan_tree).items()
+    ):
         # One finding per shared block: the alphabetically-first (path,
         # span) reports, naming every other entry as a partner -- never a
         # mirrored second finding for the same hash from a partner's

@@ -316,7 +316,9 @@ class TestNeverTouchesExistingFiles:
         first = _entry_files(plan_repo)[0]
         before = {legacy: legacy.read_bytes(), first: first.read_bytes()}
 
-        result = _run(plan_repo, "--journal", "42", "action", str(_write_body(plan_repo, "Later.\n")))
+        result = _run(
+            plan_repo, "--journal", "42", "action", str(_write_body(plan_repo, "Later.\n"))
+        )
 
         assert result.returncode == 0, result.stderr
         assert {path: path.read_bytes() for path in before} == before

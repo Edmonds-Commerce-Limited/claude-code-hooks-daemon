@@ -429,9 +429,7 @@ class TestStaleOwnRecordFromCache:
 
 _LEGACY_DAYFILE = "CLAUDE/Plan/00543-journal/JOURNAL/00543-Journal-26-10-21.md"
 _ENTRY_FILE = "CLAUDE/Plan/00543-journal/JOURNAL/2026-10-21/171233Z-finding-0b9e44.md"
-_ARCHIVED_ENTRY_FILE = (
-    "CLAUDE/Plan/Completed/00500-old/JOURNAL/2026-09-01/090101Z-action-77d0aa.md"
-)
+_ARCHIVED_ENTRY_FILE = "CLAUDE/Plan/Completed/00500-old/JOURNAL/2026-09-01/090101Z-action-77d0aa.md"
 
 
 class TestPlanJournalsAreNotScanned:
