@@ -128,7 +128,14 @@ Follow-ups, not defects in the reviewers' judgement:
 **Fix direction**: first establish N526c, which is a security-relevant behaviour; an oversized script must fail closed
 or be named. Then profile the 2000-line case and cut the per-line constant. The bound stays as it is.
 
-**Status**: ⬜ Open.
+**Finding (N526c)**: past 96 KiB a Python file is not parsed. It is raw-scanned, and a declared program named anywhere
+in it returns `fail_closed` (`_SCANNED_FILE_REASON`), which `unseen_policy` then judges (advisory by default, the review
+10 M1 ruling). That path is not silent, and it is unchanged. The silent drop was found below the cap: `_grown_argvs`
+skipped every grown argv the parse meter could not afford, so `b=['./scripts/qa/llm_qa.py']; b=b+['all']; subprocess.run(b)` placed after about 1090 edit+run pairs was judged `None`. Those calls are now judged
+`too-much-code-to-judge`. The slowest shape at 2000 lines went from 0.415 s to 0.179 s of CPU, with the bound unchanged.
+Report: `subagent-reports/261021-n526-fix-opus.md`.
+
+**Status**: ✅ b7d2275fd (N526c), a75f800cc (N526a/b).
 
 ### N525 — `transport on` builds a missing relay binary and then reports "nothing to do"
 

@@ -1,0 +1,6 @@
+# Callout: the sub-agent full-QA gate names a script it could not finish, and reads scripts faster
+
+**Plan**: 00474
+**Audience**: everyone
+
+`subagent_full_qa_blocker` reads a Python script that a sub-agent runs, to check whether it starts a full QA run. A script that builds a lot of argument lists step by step (`a.append(...)`, `a = a + [...]`, `a.insert(...)`) and hands each list to `subprocess` could use up the parse budget for one judgement. When that happened, the remaining calls were skipped without any report, so a full run built later in the script was allowed silently. The handler now stops at the first call it cannot afford and judges the script as `too-much-code-to-judge`, giving the same reason as every other budget overrun. As with any other command it could not fully read, your `unseen_policy` setting decides the outcome (`advisory` by default, or `deny`). A full run the handler does see positively still wins and is denied as before. Scripts over the size that is parsed are unchanged: they are scanned for a declared program's name, as before. Each parsed script is now walked once per judgement instead of once per pass, which roughly halves the time to judge a long script. No config keys change and no action is needed after upgrading.
