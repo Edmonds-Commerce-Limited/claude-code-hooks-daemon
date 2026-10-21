@@ -111,7 +111,7 @@ deletion:**
    `DECISIONS.md`) and link to it from the task. This is the correct answer
    most often: `PLAN.md` is a task list, so almost anything making it big is
    detail that wants a name, not history and not more tasks.
-2. **Relocate** dated narrative into this plan's `JOURNAL/` day-file.
+2. **Relocate** dated narrative into this plan's `JOURNAL/` as an entry.
 3. **Split** the plan if the task tree itself is the bulk — an over-scoped
    plan is not fixed by better journalling.
 
@@ -137,8 +137,10 @@ CLAUDE/Plan/NNNNN-name/
   DECISIONS.md                     # optional: another one — as many as needed
   assets/                          # optional: diagrams, logs, non-markdown artefacts
   JOURNAL/
-    NNNNN-Journal-YY-MM-DD.md      # one file per LOCAL day with activity
-    NNNNN-Journal-YY-MM-DD.md
+    2026-10-21/                    # one folder per UTC day with activity
+      170500Z-action-3fa2c1.md     # one file per entry
+      171233Z-decision-0b9e44.md
+    NNNNN-Journal-YY-MM-DD.md      # legacy day-file (read-only; never created now)
 ```
 
 - Supporting documents are plain `.md` files living **directly** in the plan
@@ -149,12 +151,18 @@ CLAUDE/Plan/NNNNN-name/
 - `JOURNAL/` is an upper-case landmark sibling of `PLAN.md`, **inside** the plan
   folder — so archiving a plan (`git mv` into `Completed/`) carries the journal
   (and every supporting document) for free.
-- Day-files are named `NNNNN-Journal-YY-MM-DD.md`: the redundant `NNNNN` plan
-  number survives copy/paste and greps cleanly; `YY-MM-DD` is the local day.
-- **One file per local day.** Multiple entries append to that day's file. A day
-  with no activity has **no file** — never scaffold empty day-files.
-- `mkplan.bash` scaffolds `JOURNAL/` plus a seeded day-1 file automatically when
-  a `_JOURNAL_TEMPLATE_.md` is present in the plan directory.
+- Entry files are named `HHMMSSZ-<category>-<6 hex>.md` inside a `YYYY-MM-DD`
+  folder (UTC). The time sorts the folder; the hex suffix keeps two writers in
+  the same second apart, and the file is created with `noclobber` so a
+  collision fails instead of overwriting.
+- **One file per entry.** Nothing is ever appended to or edited, so two
+  branches journalling the same day add different files and cannot conflict. A
+  day with no activity has **no folder**.
+- Legacy day-files, `NNNNN-Journal-YY-MM-DD.md` directly in `JOURNAL/`, stay
+  valid and are read alongside the entry files; they are never migrated and
+  never created.
+- `mkplan.bash` scaffolds `JOURNAL/` plus a seeded `plan scaffolded` entry file
+  automatically when a `_JOURNAL_TEMPLATE_.md` is present in the plan directory.
 
 ## Entry grammar
 
@@ -164,11 +172,11 @@ Each entry is a heading with a fixed grammar followed by a free markdown body:
 ## HH:MM · CATEGORY · REF   [— optional short title]
 ```
 
-- **`HH:MM`** — UTC 24-hour time when appended through `mkplan.bash --journal`
-  (the date lives in the filename, also UTC); a day-file whose preamble
+- **`HH:MM`** — UTC 24-hour time written by `mkplan.bash --journal` (the date
+  is the folder name, also UTC) and equal to the file name's `HHMMSS` prefix. An
+  entry file holds exactly one heading. A legacy day-file whose preamble
   carries no sentinel line predates this system and its times are local with
-  the zone unrecorded (legacy — never migrated). Times run monotonically down
-  a file.
+  the zone unrecorded (never migrated); times run monotonically down it.
 - **`CATEGORY`** — one of a small fixed core set:
   `action` · `finding` · `decision` · `thought` · `blocker` · `handoff` ·
   `correction`. `mkplan.bash --journal` accepts exactly these seven and
@@ -194,8 +202,9 @@ the caller never supplies a time:
 CLAUDE/Plan/mkplan.bash --journal 190 finding untracked/scratch/journal-190-260924-1405.md --title "rate limit is per token"
 ```
 
-Add `--ref T2.1` for a task reference. If today's day-file does not exist yet,
-the script creates it from `_JOURNAL_TEMPLATE_.md` first. `mkplan.bash --help`
+Add `--ref T2.1` for a task reference. The script writes a new entry file
+`JOURNAL/YYYY-MM-DD/HHMMSSZ-<category>-<hex>.md` and never opens an existing
+one. `mkplan.bash --help`
 prints the full usage. Use a new body-file name for every entry: the file stays
 behind after the append, and a second Write to the same name is refused by the
 clobber guard (ledger 00422 N29), as is one sub-agent writing over another's.
@@ -207,36 +216,37 @@ clock read `09:11`. A journal is append-only, so a wrong stamp can only be
 corrected by a later `correction` entry that names it, and the file then
 carries both readings for good. The `plan_journal_guard` handler therefore DENIES a hand-written entry and
 prints the exact `--journal` command for that plan, with absolute paths into
-the checkout the day-file belongs to. It covers every checkout, worktrees
+the checkout the journal file belongs to. It covers every checkout, worktrees
 included, and archived plans. It denies:
 
-- an `Edit` or `Write` that adds any line to a day-file, or a `Write` that
-  creates one. Any line, not only a heading: a note appended under the last
-  entry inherits that entry's stamp;
-- a Bash command that writes into a day-file by any route: `>`/`>>`, `tee`, a
-  heredoc, `cp`/`mv`/`install`/`dd`/`ln`/`rsync`/`sponge` onto it, an in-place
+- an `Edit` or `Write` that changes ANY existing journal file (an entry file or
+  a legacy day-file), or a `Write` that creates one by hand. A journal file is
+  never edited: a note added under an entry inherits that entry's stamp;
+- a Bash command that writes into a journal file by any route: `>`/`>>`, `tee`,
+  a heredoc, `cp`/`mv`/`install`/`dd`/`ln`/`rsync`/`sponge` onto it, an in-place
   editor, a patch, or a program handed to an interpreter (inline, on a heredoc,
   or behind a wrapper such as `timeout` or `uv run`) that opens it for writing;
 - a Bash destination the shell builds at run time (`$(date …)`, a variable, a
-  glob, a relative name after a `cd` in the same command) that names a
-  day-file, or whose file name is built inside a `JOURNAL/` directory.
+  glob, a relative name after a `cd` in the same command) that names a journal
+  file, or whose file name or any folder below `JOURNAL/` is built at run time.
 
 It allows `mkplan.bash` itself, `git` (moving a plan folder into `Completed/`
-carries the journal), reading a journal, and an `Edit` that adds no line:
-removing conflict markers after merging two branches that each appended an
-entry, reordering, or redacting within a line. It is active only where the tool
+carries the journal), reading a journal, and two exceptions to the edit ban:
+an `Edit` whose only change is removing conflict markers from a legacy
+day-file, and any change whose result is byte-equal to `HEAD` (restoring a
+file, e.g. `git show HEAD:<path> > <path>` in Bash). It is active only where the tool
 exists: plan workflow enabled, journalling enabled and not `off`,
 `mkplan.bash` deployed with `--journal`, `_JOURNAL_TEMPLATE_.md` present, and
 the journal directory left at its default `JOURNAL` name. When any of those
 fails it is inert and logs which one, once, at INFO. A coordinator that asks a
 sub-agent to journal puts the two-step pattern above in the brief.
 
-### Resolving a merge conflict in a day-file
+### Resolving a merge conflict in a legacy day-file
 
-Two branches that each journal the same plan on the same day both append to
-the end of one day-file, so the merge conflicts there. This also happens after
-midnight UTC, when the conflicted file is yesterday's and `journal-dayfile-is-today`
-refuses an `Edit` of it. Resolve it with the scaffolder, not by hand:
+Entry files cannot conflict: each branch adds its own. Only a legacy day-file
+that two branches both appended to before the switch can conflict, and
+`journal-dayfile-is-today` refuses an `Edit` of it. Resolve it with the
+scaffolder, not by hand:
 
 ```bash
 git merge other-branch            # stops: conflict in 00190-Journal-26-10-03.md
@@ -283,22 +293,24 @@ daemon's `journal-append-only` check confirm each edit only adds.
 CLAUDE/Plan/mkplan.bash --journal 190 correction untracked/scratch/journal-190-fix.md --ref 09:00
 ```
 
-The `--ref` is `HH:MM` for an entry in today's day-file, or `YY-MM-DD/HH:MM`
-for one in an earlier day-file of the same plan. The script refuses a
-correction whose named entry does not exist, and writes nothing.
+The `--ref` is `HH:MM` for an entry of today, or `YY-MM-DD/HH:MM` for one of an
+earlier day. It resolves in that day's entry folder or in that day's legacy
+day-file. The script refuses a correction whose named entry does not exist, and
+writes nothing.
 
 **A correction is also how a wrong clock reading is fixed.** If an entry was
 stamped `09:50` when the clock read `09:11`, the correction's honest time is
 earlier than the entry it corrects. Appending it still breaks "times increase
-down the file", and moving it would break append-only. So an entry that a
-correction in the same day-file names no longer counts for
+down the day", and moving it would break append-only. So an entry that a
+correction of the same day names no longer counts for
 `journal-entry-ordering`. It stays where it is, with its text unchanged, and
 the entries around it are judged without it. Only a `correction` has this
 effect. A `--ref` on any other category is a task reference.
 
 ### Hand-off convention
 
-The resumer's entry point is the **last entry of the newest day-file**. End a
+The resumer's entry point is the **newest entry file** (the last file of the
+newest date folder; a legacy day-file dated later wins). End a
 work session with a `handoff` entry naming what's done, what's next, and any
 in-flight state — so the next agent (or the failsafe recovery cron) can resume
 without re-deriving context.
@@ -338,9 +350,9 @@ journalling into a heartbeat.
 
 | When                         | Do                                                                                                                                                                                                           |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Plan created (`mkplan.bash`) | `JOURNAL/` + day-1 file scaffolded; append an `action` entry with `mkplan.bash --journal`                                                                                                                    |
+| Plan created (`mkplan.bash`) | `JOURNAL/` + a seeded entry file scaffolded; add an `action` entry with `mkplan.bash --journal`                                                                                                              |
 | Work happens                 | Append `action`/`finding`/`decision`/`blocker` entries with `mkplan.bash --journal <plan-number> <category> <body-file> [--ref R] [--title T]` — the only way; see [Appending an entry](#appending-an-entry) |
-| A day rolls over             | Nothing to do: `--journal` creates today's `NNNNN-Journal-YY-MM-DD.md` on the day's first entry (never create one by hand)                                                                                   |
+| A day rolls over             | Nothing to do: `--journal` creates the new `YYYY-MM-DD/` folder with the day's first entry (never create one by hand)                                                                                        |
 | Session ends / context low   | Append a `handoff` entry naming next steps, with `mkplan.bash --journal`                                                                                                                                     |
 | Plan archived                | `JOURNAL/` moves with the folder automatically                                                                                                                                                               |
 
@@ -379,12 +391,13 @@ of those is logged once at INFO. It is switched off on its own with
 
 ### Daemon-enforced (POLICY)
 
-| Check                    | Stage | What it advises                                                                            | Knob                                                |
-| ------------------------ | ----- | ------------------------------------------------------------------------------------------ | --------------------------------------------------- |
-| `journal-dayfile-naming` | edit  | day-file name matches `NNNNN-Journal-YY-MM-DD.md`, right plan number, today/yesterday date | `mode` (the only check that may ratchet to `block`) |
-| `journal-append-only`    | edit  | an edit only appends — never rewrites/removes earlier entries                              | always advise                                       |
-| `journal-folder-present` | sweep | an In-Progress plan ≥ `grandfather_before` has a `JOURNAL/`                                | `grandfather_before`                                |
-| `journal-freshness`      | sweep | a plan's newest day-file isn't older than `freshness_days`                                 | `freshness_days`                                    |
+| Check                      | Stage         | What it advises                                                                                                                                                         | Knob                                                |
+| -------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `journal-dayfile-naming`   | edit          | a day-file matches `NNNNN-Journal-YY-MM-DD.md`; an entry file sits in a real `YYYY-MM-DD` folder and matches `HHMMSSZ-<category>-<6 hex>.md`                            | `mode` (the only check that may ratchet to `block`) |
+| `journal-dayfile-is-today` | edit + commit | an EXISTING journal file is never edited: any edit of a legacy day-file or entry file; at commit, a staged M or D of an entry file (an R only when its content changed) | `today_only_mode`                                   |
+| `journal-append-only`      | edit          | a legacy day-file edit only appends — never rewrites/removes earlier entries                                                                                            | always advise                                       |
+| `journal-folder-present`   | sweep         | an In-Progress plan ≥ `grandfather_before` has a `JOURNAL/`                                                                                                             | `grandfather_before`                                |
+| `journal-freshness`        | sweep         | a plan's newest journal date (entry folder or day-file) isn't older than `freshness_days`                                                                               | `freshness_days`                                    |
 
 Configuration block (defaults shown):
 
