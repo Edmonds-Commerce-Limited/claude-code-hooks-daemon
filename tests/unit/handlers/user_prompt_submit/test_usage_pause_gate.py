@@ -326,21 +326,11 @@ class TestResume:
     ) -> None:
         """Round 4 R3-2: the cron fires every ten minutes, so ticks before resume_at are noise."""
         _record(tmp_path, resume_at=_NOW + 3600)
-        handler = _handler(tmp_path, snapshot=_snapshot(five=10.0))  # even under the ceiling
+        handler = _handler(tmp_path, snapshot=_snapshot(five=91.0))  # still over the ceiling
         result = _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT))
         assert result.decision == Decision.DENY
         assert not result.context
         assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is not None
-
-    def test_an_early_tick_reads_no_usage(self, tmp_path: Path) -> None:
-        _record(tmp_path, resume_at=_NOW + 3600)
-        handler = _handler(tmp_path, snapshot=_snapshot(five=10.0))
-
-        def boom(_now: float) -> UsageSnapshot | None:
-            raise AssertionError("an early tick must not read usage")
-
-        handler._usage_loader = boom
-        assert _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT)).decision == Decision.DENY
 
     def test_the_first_tick_at_the_resume_time_lifts_the_pause(self, tmp_path: Path) -> None:
         _record(tmp_path, resume_at=_NOW)
@@ -350,9 +340,9 @@ class TestResume:
         assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is None
         assert "PAUSE LIFTED" in "\n".join(result.context)
 
-    def test_a_tick_one_second_early_is_dropped(self, tmp_path: Path) -> None:
+    def test_a_tick_one_second_early_over_the_ceiling_is_dropped(self, tmp_path: Path) -> None:
         _record(tmp_path, resume_at=_NOW + 1)
-        handler = _handler(tmp_path, snapshot=_snapshot(five=10.0))
+        handler = _handler(tmp_path, snapshot=_snapshot(five=91.0))
         assert _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT)).decision == Decision.DENY
 
     def test_the_lift_tells_the_model_to_delete_the_recurring_resume_cron(
@@ -479,6 +469,147 @@ class TestResume:
             result = _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT))
         text = "\n".join(result.context)
         assert "usage is back under" not in text
+
+
+def _snapshot_observed(
+    *, five: float | None = None, seven: float | None = None, age: float
+) -> UsageSnapshot:
+    """A snapshot whose windows were last observed ``age`` seconds before now."""
+    seen = _NOW - age
+    return UsageSnapshot(
+        five_hour=UsageWindow(five, _FIVE_RESET, seen) if five is not None else None,
+        seven_day=UsageWindow(seven, _SEVEN_RESET, seen) if seven is not None else None,
+    )
+
+
+class TestEarlyTickReadsAFreshSnapshot:
+    """Issue #132: an early resume tick consults a FRESH snapshot instead of dropping unread."""
+
+    def test_field_case_a_new_account_under_the_ceiling_lifts_a_pause_days_from_resume(
+        self, tmp_path: Path
+    ) -> None:
+        _record(tmp_path, resume_at=_NOW + 2.5 * 86400)
+        handler = _handler(tmp_path, snapshot=_snapshot_observed(seven=19.0, age=5.0))
+        result = _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT))
+        assert result.decision == Decision.ALLOW
+        assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is None
+        text = "\n".join(result.context)
+        assert "PAUSE LIFTED" in text
+        assert "back under" in text.lower()  # a verified lift
+
+    def test_a_reading_exactly_at_the_freshness_limit_counts(self, tmp_path: Path) -> None:
+        _record(tmp_path, resume_at=_NOW + 3600)
+        snapshot = _snapshot_observed(five=10.0, age=gate.EARLY_READING_MAX_AGE_SECONDS)
+        result = _run(
+            _handler(tmp_path, snapshot=snapshot), tmp_path, _input(gate.USAGE_RESUME_PROMPT)
+        )
+        assert result.decision == Decision.ALLOW
+        assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is None
+
+    def test_a_reading_one_second_past_the_freshness_limit_is_dropped_unread(
+        self, tmp_path: Path
+    ) -> None:
+        _record(tmp_path, resume_at=_NOW + 3600)
+        snapshot = _snapshot_observed(five=10.0, age=gate.EARLY_READING_MAX_AGE_SECONDS + 1)
+        result = _run(
+            _handler(tmp_path, snapshot=snapshot), tmp_path, _input(gate.USAGE_RESUME_PROMPT)
+        )
+        assert result.decision == Decision.DENY
+        assert not result.context
+        assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is not None
+
+    def test_one_stale_window_makes_the_whole_reading_stale(self, tmp_path: Path) -> None:
+        _record(tmp_path, resume_at=_NOW + 3600)
+        snapshot = UsageSnapshot(
+            five_hour=UsageWindow(10.0, _FIVE_RESET, _NOW - 1),
+            seven_day=UsageWindow(10.0, _SEVEN_RESET, _NOW - 10_000),
+        )
+        result = _run(
+            _handler(tmp_path, snapshot=snapshot), tmp_path, _input(gate.USAGE_RESUME_PROMPT)
+        )
+        assert result.decision == Decision.DENY
+        assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is not None
+
+    def test_no_snapshot_drops_the_tick(self, tmp_path: Path) -> None:
+        _record(tmp_path, resume_at=_NOW + 3600)
+        result = _run(_handler(tmp_path, snapshot=None), tmp_path, _input(gate.USAGE_RESUME_PROMPT))
+        assert result.decision == Decision.DENY
+        assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is not None
+
+    def test_a_snapshot_with_no_windows_drops_the_tick(self, tmp_path: Path) -> None:
+        _record(tmp_path, resume_at=_NOW + 3600)
+        handler = _handler(tmp_path, snapshot=UsageSnapshot(five_hour=None, seven_day=None))
+        assert _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT)).decision == Decision.DENY
+
+    def test_an_unreadable_snapshot_drops_the_tick(self, tmp_path: Path) -> None:
+        _record(tmp_path, resume_at=_NOW + 3600)
+        handler = _handler(tmp_path)
+
+        def unreadable(_now: float) -> UsageSnapshot | None:
+            raise OSError("snapshot file unreadable")
+
+        handler._usage_loader = unreadable
+        assert _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT)).decision == Decision.DENY
+        assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is not None
+
+    def test_still_over_on_another_accounts_window_silently_re_bases_the_resume_time(
+        self, tmp_path: Path
+    ) -> None:
+        _record(tmp_path, resume_at=_NOW + 3600)  # recorded against a five-hour window
+        handler = _handler(tmp_path, snapshot=_snapshot_observed(seven=85.0, age=5.0))
+        result = _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT))
+        assert result.decision == Decision.DENY
+        assert not result.context  # a silent re-base costs the model no turn
+        pause = read_usage_pause(tmp_path, _SESSION, now=_NOW)
+        assert pause is not None
+        assert pause.resume_at == _SEVEN_RESET + gate.RESUME_MARGIN_SECONDS
+        assert pause.paused_at == _NOW - 60  # when it began is not rewritten
+
+    def test_still_over_with_the_same_resume_time_leaves_the_record_alone(
+        self, tmp_path: Path
+    ) -> None:
+        resume_at = _FIVE_RESET + gate.RESUME_MARGIN_SECONDS + gate.REBASE_TOLERANCE_SECONDS
+        _record(tmp_path, resume_at=resume_at)
+        before = read_usage_pause(tmp_path, _SESSION, now=_NOW)
+        handler = _handler(tmp_path, snapshot=_snapshot_observed(five=91.0, age=5.0))
+        assert _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT)).decision == Decision.DENY
+        assert read_usage_pause(tmp_path, _SESSION, now=_NOW) == before
+
+    def test_a_difference_past_the_tolerance_is_re_based(self, tmp_path: Path) -> None:
+        resume_at = _FIVE_RESET + gate.RESUME_MARGIN_SECONDS + gate.REBASE_TOLERANCE_SECONDS + 1
+        _record(tmp_path, resume_at=resume_at)
+        handler = _handler(tmp_path, snapshot=_snapshot_observed(five=91.0, age=5.0))
+        assert _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT)).decision == Decision.DENY
+        pause = read_usage_pause(tmp_path, _SESSION, now=_NOW)
+        assert pause is not None
+        assert pause.resume_at == _FIVE_RESET + gate.RESUME_MARGIN_SECONDS
+
+    def test_a_failed_re_base_write_keeps_the_old_record(self, tmp_path: Path) -> None:
+        _record(tmp_path, resume_at=_NOW + 3600)
+        handler = _handler(tmp_path, snapshot=_snapshot_observed(seven=85.0, age=5.0))
+        with patch.object(gate, "write_usage_pause", side_effect=OSError("disk full")):
+            result = _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT))
+        assert result.decision == Decision.DENY
+        pause = read_usage_pause(tmp_path, _SESSION, now=_NOW)
+        assert pause is not None
+        assert pause.resume_at == _NOW + 3600
+
+    def test_a_failed_clear_on_the_early_lift_does_not_claim_a_lift(self, tmp_path: Path) -> None:
+        _record(tmp_path, resume_at=_NOW + 3600)
+        handler = _handler(tmp_path, snapshot=_snapshot_observed(five=10.0, age=5.0))
+        with patch(
+            "claude_code_hooks_daemon.handlers.user_prompt_submit.usage_pause_gate.clear_pause",
+            return_value=False,
+        ):
+            result = _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT))
+        assert "PAUSE LIFTED" not in "\n".join(result.context)
+
+    def test_no_ceiling_for_the_host_lifts_an_early_pause(self, tmp_path: Path) -> None:
+        _record(tmp_path, resume_at=_NOW + 3600)
+        handler = _handler(tmp_path, config=_config(limit=None), snapshot=None)
+        result = _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT))
+        assert result.decision == Decision.ALLOW
+        assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is None
 
 
 class TestHeldPromptReResolvesTheCeiling:
