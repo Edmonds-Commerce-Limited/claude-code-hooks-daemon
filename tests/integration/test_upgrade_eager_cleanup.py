@@ -27,9 +27,11 @@ script here. End-to-end integration is covered by
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from claude_code_hooks_daemon.daemon.paths import (
@@ -46,7 +48,7 @@ STALE_HASH = "sha256:" + "0" * 64
 FP_TAIL = "py313-abc12345"
 
 
-def _run_bash(script: str) -> subprocess.CompletedProcess[str]:
+def _run_bash(script: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     wrapper = f"""
 set -euo pipefail
 source "{VENV_SH}"
@@ -56,13 +58,18 @@ source "{VENV_SH}"
         ["bash", "-c", wrapper],
         capture_output=True,
         text=True,
+        env=env,
     )
 
 
 def _seed_venv_dir(path: Path, lock_hash: str | None = None) -> None:
-    """Create a fake venv dir with a bin/python stub; optionally stamp metadata."""
+    """Create a fake venv dir whose bin/python runs the test interpreter.
+
+    The cleanup runs on the venv's own interpreter, so the stub must be a
+    working Python rather than a placeholder.
+    """
     (path / "bin").mkdir(parents=True)
-    (path / "bin" / "python").write_text("#!/bin/bash\necho fake\n")
+    (path / "bin" / "python").write_text(f'#!/bin/bash\nexec "{sys.executable}" "$@"\n')
     (path / "bin" / "python").chmod(0o755)
     if lock_hash is not None:
         (path / ".daemon-metadata.json").write_text(
@@ -242,6 +249,116 @@ class TestEagerCleanupKeepsEverythingElse:
         _cleanup(daemon_dir, current)
 
         assert stale.exists(), "no decision available means no deletion"
+
+
+class TestEagerCleanupInterpreterChoice:
+    """The cleanup runs on the venv's interpreter or HOOKS_DAEMON_PYTHON, never bare python3.
+
+    A host whose ``python3`` is older than paths.py supports (3.9) must not
+    break the cleanup, and when no usable interpreter exists the output says
+    so with a WARNING rather than a routine "kept" line.
+    """
+
+    @staticmethod
+    def _env_with_old_python3(
+        tmp_path: Path, extra: dict[str, str] | None = None
+    ) -> dict[str, str]:
+        """An environment whose first ``python3`` fails like a 3.9 import error."""
+        fake_bin = tmp_path / "fakebin"
+        fake_bin.mkdir()
+        marker = tmp_path / "python3-was-run"
+        fake = fake_bin / "python3"
+        fake.write_text(
+            f"#!/bin/bash\ntouch '{marker}'\n"
+            "echo 'TypeError: unsupported operand type(s) for |' >&2\nexit 1\n"
+        )
+        fake.chmod(0o755)
+        env = {k: v for k, v in os.environ.items() if k != "HOOKS_DAEMON_PYTHON"}
+        env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+        env.update(extra or {})
+        return env
+
+    @staticmethod
+    def _seed_stale_pair(daemon_dir: Path) -> tuple[Path, Path]:
+        untracked = daemon_dir / "untracked"
+        current = untracked / f"venv-{_own_slug(daemon_dir)}-py313-deadbeef"
+        stale = untracked / f"venv-{_own_slug(daemon_dir)}-py312-abc12345"
+        _seed_venv_dir(current, _current_hash(daemon_dir))
+        _seed_venv_dir(stale, STALE_HASH)
+        return current, stale
+
+    def test_old_python3_on_path_uses_venv_interpreter(self, tmp_path: Path) -> None:
+        daemon_dir = _make_daemon_dir(tmp_path)
+        current, stale = self._seed_stale_pair(daemon_dir)
+        env = self._env_with_old_python3(tmp_path)
+
+        result = _run_bash(f'eager_cleanup_stale_venvs "{daemon_dir}" "{current}"', env)
+
+        assert result.returncode == 0, f"stderr={result.stderr!r}"
+        assert not stale.exists(), "cleanup must work on the venv interpreter"
+        assert current.exists()
+        assert f"Removed stale venv: {stale}" in result.stdout + result.stderr
+        assert not (tmp_path / "python3-was-run").exists(), "bare python3 must never run"
+
+    def test_old_python3_on_path_uses_hooks_daemon_python(self, tmp_path: Path) -> None:
+        daemon_dir = _make_daemon_dir(tmp_path)
+        current, stale = self._seed_stale_pair(daemon_dir)
+        # With no runnable venv python the resolver would otherwise adopt the
+        # stale venv as the live one, so neither venv has a runnable python.
+        (current / "bin" / "python").chmod(0o644)
+        (stale / "bin" / "python").chmod(0o644)
+        env = self._env_with_old_python3(tmp_path, {"HOOKS_DAEMON_PYTHON": sys.executable})
+
+        result = _run_bash(f'eager_cleanup_stale_venvs "{daemon_dir}" "{current}"', env)
+
+        assert result.returncode == 0, f"stderr={result.stderr!r}"
+        assert not stale.exists(), "cleanup must work on HOOKS_DAEMON_PYTHON"
+        assert not (tmp_path / "python3-was-run").exists(), "bare python3 must never run"
+
+    def test_no_usable_interpreter_warns_loudly(self, tmp_path: Path) -> None:
+        daemon_dir = _make_daemon_dir(tmp_path)
+        current, stale = self._seed_stale_pair(daemon_dir)
+        (current / "bin" / "python").chmod(0o644)
+        env = self._env_with_old_python3(tmp_path)
+
+        result = _run_bash(f'eager_cleanup_stale_venvs "{daemon_dir}" "{current}"', env)
+
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, "stale-venv cleanup is housekeeping, not an upgrade gate"
+        assert stale.exists(), "nothing is removed without a decision"
+        assert "WARNING" in combined, f"expected a loud warning; got:\n{combined}"
+        assert "HOOKS_DAEMON_PYTHON" in combined, "the warning must name the missing interpreter"
+        assert "Kept venv-* entries" not in combined, "must not read as a routine line"
+        assert not (tmp_path / "python3-was-run").exists(), "bare python3 must never run"
+
+    def test_unusable_hooks_daemon_python_warns_loudly(self, tmp_path: Path) -> None:
+        daemon_dir = _make_daemon_dir(tmp_path)
+        current, stale = self._seed_stale_pair(daemon_dir)
+        (current / "bin" / "python").chmod(0o644)
+        env = self._env_with_old_python3(
+            tmp_path, {"HOOKS_DAEMON_PYTHON": str(tmp_path / "no-such-python")}
+        )
+
+        result = _run_bash(f'eager_cleanup_stale_venvs "{daemon_dir}" "{current}"', env)
+
+        combined = result.stdout + result.stderr
+        assert stale.exists()
+        assert "WARNING" in combined
+        assert str(tmp_path / "no-such-python") in combined
+
+    def test_interpreter_that_cannot_list_warns_loudly(self, tmp_path: Path) -> None:
+        daemon_dir = _make_daemon_dir(tmp_path)
+        current, stale = self._seed_stale_pair(daemon_dir)
+        (current / "bin" / "python").write_text("#!/bin/bash\necho 'boom' >&2\nexit 1\n")
+        env = self._env_with_old_python3(tmp_path)
+
+        result = _run_bash(f'eager_cleanup_stale_venvs "{daemon_dir}" "{current}"', env)
+
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0
+        assert stale.exists()
+        assert "WARNING" in combined
+        assert "boom" in combined, "the interpreter's own error must be shown"
 
 
 class TestEagerCleanupEmitsLogLines:

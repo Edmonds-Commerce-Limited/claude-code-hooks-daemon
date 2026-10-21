@@ -42,10 +42,10 @@ the resolved interpreter.
 
 ### Phase 1: The reported defect (TDD)
 
-- [ ] ⬜ **Task 1.1**: A shell test sources `venv.sh` with a fake 3.9 `python3` first on PATH and a working venv
+- [x] ✅ **Task 1.1**: A shell test sources `venv.sh` with a fake 3.9 `python3` first on PATH and a working venv
   interpreter, and asserts that the cleanup works. A second case, with no usable interpreter, asserts a loud warning.
   Red first.
-- [ ] ⬜ **Task 1.2**: Use `"$venv"/bin/python`, else `HOOKS_DAEMON_PYTHON`; never fall back to `python3`. Release note.
+- [x] ✅ **Task 1.2**: Use `"$venv"/bin/python`, else `HOOKS_DAEMON_PYTHON`; never fall back to `python3`. Release note.
 
 ### Phase 2: One minimum, checked at the entry points
 

@@ -1631,7 +1631,13 @@ install_package_editable() {
 #   $1 - daemon_dir      (absolute)
 #   $2 - current_venv    (absolute, the venv the daemon was just verified on)
 #
-# Returns 0 always.
+# Interpreter: the current venv's bin/python, else HOOKS_DAEMON_PYTHON, never a
+# bare python3. With neither usable (or a failing list-stale-venvs) it prints a
+# WARNING to stderr and removes nothing.
+#
+# Returns 0 always: cleanup is housekeeping that runs after the new daemon is
+# verified RUNNING, so a failure to tidy must not fail the upgrade -- but it is
+# never silent.
 #
 eager_cleanup_stale_venvs() {
     local daemon_dir="$1"
@@ -1661,15 +1667,33 @@ eager_cleanup_stale_venvs() {
     # The slug and lock_hash rules live in paths.py (stdlib-only, run as a
     # direct script); bash only deletes what it reports as `remove`.
     local paths_script="$daemon_dir/src/claude_code_hooks_daemon/daemon/paths.py"
-    if [ ! -f "$paths_script" ] || [ -z "$(command -v python3)" ]; then
-        echo "Kept venv-* entries: cannot classify them (no paths.py or python3)"
+    if [ ! -f "$paths_script" ]; then
+        echo "Kept venv-* entries: cannot classify them (no paths.py)"
+        return 0
+    fi
+
+    # paths.py needs the daemon's minimum Python, so it runs on the venv's own
+    # interpreter, else the one the upgrade resolved (HOOKS_DAEMON_PYTHON) --
+    # never a bare python3 from PATH, which may be too old to import it.
+    local interpreter=""
+    if [ -x "$current_abs/bin/python" ]; then
+        interpreter="$current_abs/bin/python"
+    elif [ -n "${HOOKS_DAEMON_PYTHON:-}" ] && [ -x "${HOOKS_DAEMON_PYTHON}" ]; then
+        interpreter="$HOOKS_DAEMON_PYTHON"
+    fi
+    if [ -z "$interpreter" ]; then
+        echo "WARNING: stale venv-* cleanup SKIPPED: no usable interpreter." >&2
+        echo "  Not executable: $current_abs/bin/python" >&2
+        echo "  HOOKS_DAEMON_PYTHON: ${HOOKS_DAEMON_PYTHON:-<unset>} (unset or not executable)" >&2
+        echo "  Stale venv-* entries were left in place; see: bin/hooks-daemon list-venvs" >&2
         return 0
     fi
 
     local verdicts
-    if ! verdicts="$(python3 "$paths_script" list-stale-venvs \
+    if ! verdicts="$("$interpreter" "$paths_script" list-stale-venvs \
         --daemon-dir "$daemon_dir" --current-venv "$current_abs")"; then
-        echo "Kept venv-* entries: list-stale-venvs failed"
+        echo "WARNING: stale venv-* cleanup SKIPPED: $interpreter could not run list-stale-venvs (error above)." >&2
+        echo "  Stale venv-* entries were left in place; see: bin/hooks-daemon list-venvs" >&2
         return 0
     fi
 
