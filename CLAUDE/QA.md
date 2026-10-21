@@ -410,6 +410,16 @@ In the `docs` and `code` tiers a changed file the mapper cannot cover
 suite (`scripts/ci/full_suite_if_unmapped.bash`) rather than passing on tests
 that did not reach it.
 
+**CPU-timing sweeps run in their own job.** A test whose assertion is a
+`scaled_cpu_seconds` bound carries `@pytest.mark.perf_sweep`
+(`tests/unit/qa/test_perf_sweep_marker.py` fails a test that uses the helper
+without it). The whole-suite CI steps (the full-suite fallback and the matrix
+job's "Tests + coverage") run `-m "not perf_sweep"`, because their own load
+pushes those bounds over. The `perf-sweep` job (`QA` workflow, every tier, one
+Python, no xdist, no coverage) runs `pytest tests/ -m perf_sweep` alone, so a
+real slowdown still turns the run red. Thresholds are never loosened. Local
+`llm_qa.py` and `pytest` runs are unchanged and still include the marked tests.
+
 **A `docs` or `code` green is NOT release evidence.** Plan 00359's release
 slate gate looks for a green run on HEAD's exact sha and does not yet tell the
 tiers apart. A release needs the full-matrix run: dispatch the workflow

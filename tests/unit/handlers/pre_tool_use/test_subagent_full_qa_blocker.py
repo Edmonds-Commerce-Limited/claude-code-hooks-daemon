@@ -4216,6 +4216,7 @@ class TestResidualRoutesReviewRound2:
         )
         assert find_full_qa_invocation(_python_heredoc(code), _patterns(), cwd=_REPO_ROOT) is None
 
+    @pytest.mark.perf_sweep
     def test_a_big_alias_chain_is_judged_quickly(self, tmp_path: Path) -> None:
         links = "".join(f"a{i + 1}=a{i}\n" for i in range(3000))
         code = (
@@ -4228,6 +4229,7 @@ class TestResidualRoutesReviewRound2:
         find_full_qa_invocation(f"python3 {script}", _patterns(), cwd=_REPO_ROOT)
         assert time.perf_counter() - start < scaled_cpu_seconds(1.5)
 
+    @pytest.mark.perf_sweep
     def test_many_appends_each_run_are_judged_quickly(self, tmp_path: Path) -> None:
         body = "".join(f"a.append('x{i}')\nsubprocess.run(a)\n" for i in range(2000))
         script = tmp_path / "many.py"
@@ -4459,6 +4461,7 @@ class TestListEditsAndExecRoutesReachAFullRun:
         assert found is not None and found.fail_closed != ""
         assert self._judge(named, root) is None
 
+    @pytest.mark.perf_sweep
     def test_the_text_tracking_is_linear(self, tmp_path: Path) -> None:
         body = "".join(f"s{i} = open('{_RUN_PY}').read()\ns{i} = 'x'\n" for i in range(3000))
         script = tmp_path / "many_reads.py"
@@ -4467,6 +4470,7 @@ class TestListEditsAndExecRoutesReachAFullRun:
         find_full_qa_invocation(f"python3 {script}", _patterns(), cwd=tmp_path)
         assert time.perf_counter() - start < scaled_cpu_seconds(1.5)
 
+    @pytest.mark.perf_sweep
     def test_many_chains_and_literal_loops_are_judged_quickly(self, tmp_path: Path) -> None:
         body = "".join(
             f"for p{i} in ['f{i}.py', 'g{i}.py']:\n"
@@ -4491,6 +4495,7 @@ class TestListEditsAndExecRoutesReachAFullRun:
         find_full_qa_invocation(f"python3 {script}", _patterns(), cwd=_REPO_ROOT)
         return time.perf_counter() - start
 
+    @pytest.mark.perf_sweep
     @pytest.mark.parametrize(
         "edit",
         ["a.insert(0,'x{i}')", "a.insert(1,'x{i}')", "a.pop()", "a=a+['x{i}']", "a=['y']+a"],
@@ -4500,6 +4505,7 @@ class TestListEditsAndExecRoutesReachAFullRun:
         code = f"import subprocess\na=['ruff']\n{body}"
         assert self._timed(tmp_path, code) < scaled_cpu_seconds(1.5)
 
+    @pytest.mark.perf_sweep
     def test_many_exec_and_spawn_calls_are_judged_quickly(self, tmp_path: Path) -> None:
         body = "".join(
             f"a.append('x{i}')\nos.execvp('ls', a)\nos.execl('ls', 'ls', *a)\npty.spawn(a)\n"
@@ -4508,6 +4514,7 @@ class TestListEditsAndExecRoutesReachAFullRun:
         code = f"import os, pty\na=['ruff']\n{body}"
         assert self._timed(tmp_path, code) < scaled_cpu_seconds(1.5)
 
+    @pytest.mark.perf_sweep
     def test_many_open_exec_calls_are_judged_quickly(self, tmp_path: Path) -> None:
         body = "".join(f"f = open('f{i}.py')\n{_EXEC}(f.read())\n" for i in range(1500))
         assert self._timed(tmp_path, body) < scaled_cpu_seconds(1.5)

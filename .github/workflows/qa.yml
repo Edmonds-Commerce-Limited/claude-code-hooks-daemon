@@ -475,8 +475,11 @@ jobs:
           GIT_COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir)"
           exec {FULL_QA_LOCK_FD}>> "${GIT_COMMON_DIR}/hooksdaemon-full-qa.lock"
           flock "${FULL_QA_LOCK_FD}"
+          # perf_sweep tests run alone in the perf-sweep job, not under this
+          # run's coverage and suite load.
           pytest tests/ \
             -rs \
+            -m "not perf_sweep" \
             --cov=src \
             --cov-report=term-missing \
             --cov-report=xml \
@@ -517,6 +520,45 @@ jobs:
       - name: Dependencies (deptry)
         if: ${{ !cancelled() }}
         run: deptry src/
+
+  # Plan 00476 Design 6: the CPU-timing sweeps (marker perf_sweep), alone on
+  # the runner. The whole-suite steps above deselect them because their own
+  # load pushes a 1.5 s bound to 1.6 s (ledger 00474 N455); their thresholds
+  # are unchanged. No other test, no xdist and no coverage here, so a real
+  # slowdown still fails this job. Every tier runs it: any tier can reach a
+  # whole-suite step.
+  perf-sweep:
+    name: Performance sweeps
+    needs: classify
+    runs-on: ubuntu-latest
+    # Install dominates; the marked tests take seconds.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install --user uv
+          export PATH="$HOME/.local/bin:$PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          VENV_DIR="$(HOOKS_DAEMON_PYTHON="$(command -v python)" \
+            bash scripts/lib/resolve_venv.sh dir "$PWD" --fallback-target)"
+          UV_PROJECT_ENVIRONMENT="$VENV_DIR" \
+            uv sync --frozen --all-extras --python "$(command -v python)"
+          test "$(bash scripts/lib/resolve_venv.sh python "$PWD")" = "$VENV_DIR/bin/python"
+          echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
+
+      - name: Performance sweeps (perf_sweep tests only)
+        run: pytest tests/ -rs -m perf_sweep
 
   # Cheap, and a docs-only change cannot break them.
   shell:

@@ -30,5 +30,7 @@ flock "${lock_fd}"
 # error on a missing socket (Plan 00474 N431). Start it again just before use.
 ./bin/hooks-daemon restart
 ./bin/hooks-daemon status
-pytest tests/ -rs
+# CPU-timing sweeps (perf_sweep) miss their bounds under this run's own load;
+# the perf-sweep job runs them alone, with the same thresholds.
+pytest tests/ -rs -m "not perf_sweep"
 pytest .claude/project-handlers --import-mode=importlib
