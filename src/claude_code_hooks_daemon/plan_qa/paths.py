@@ -28,6 +28,7 @@ from typing import Final
 
 from claude_code_hooks_daemon.plan_qa.model import (
     PLAN_DOC_FILENAME,
+    is_journal_entry_folder_name,
     parse_journal_dayfile_name,
 )
 from claude_code_hooks_daemon.plan_qa.types import DEFAULT_JOURNAL_DIR_NAME, CheckContext
@@ -51,6 +52,7 @@ class PlanFileKind(Enum):
     PLAN_DOCUMENT = "plan_document"
     PLAN_INDEX = "plan_index"
     JOURNAL_DAYFILE = "journal_dayfile"
+    JOURNAL_ENTRY = "journal_entry"
     JOURNAL_OTHER = "journal_other"
     SUPPORTING_DOC = "supporting_doc"
     OUTSIDE = "outside"
@@ -59,7 +61,7 @@ class PlanFileKind(Enum):
 # Kinds whose content is journal territory: append-only, unbounded by design,
 # and exempt from every plan-document rule (size, curation, task grammar).
 _JOURNAL_KINDS: Final[frozenset[PlanFileKind]] = frozenset(
-    {PlanFileKind.JOURNAL_DAYFILE, PlanFileKind.JOURNAL_OTHER}
+    {PlanFileKind.JOURNAL_DAYFILE, PlanFileKind.JOURNAL_ENTRY, PlanFileKind.JOURNAL_OTHER}
 )
 
 
@@ -149,6 +151,22 @@ def _outside(path: Path, context: CheckContext) -> PlanFile:
     )
 
 
+def _journal_kind(path: Path, journal_dir_name: str) -> PlanFileKind:
+    """Which journal kind a path already known to be journal territory is.
+
+    A legacy day-file sits directly in the journal dir; an entry file (Plan
+    00543) sits in a ``YYYY-MM-DD`` folder directly in it, whatever its own
+    name, so the naming check can report a badly named one.
+    """
+    if path.parent.name == journal_dir_name and parse_journal_dayfile_name(path.name) is not None:
+        return PlanFileKind.JOURNAL_DAYFILE
+    if path.parent.parent.name == journal_dir_name and is_journal_entry_folder_name(
+        path.parent.name
+    ):
+        return PlanFileKind.JOURNAL_ENTRY
+    return PlanFileKind.JOURNAL_OTHER
+
+
 def classify(path: Path, context: CheckContext) -> PlanFile:
     """Classify ``path`` against the plan directory layout.
 
@@ -183,12 +201,8 @@ def classify(path: Path, context: CheckContext) -> PlanFile:
     if journal_depth is not None:
         # The plan folder is whatever directory encloses the journal dir.
         plan_folder = directories[journal_depth - 1] if journal_depth > 0 else None
-        is_dayfile = (
-            path.parent.name == context.journal_dir_name
-            and parse_journal_dayfile_name(path.name) is not None
-        )
         return PlanFile(
-            kind=PlanFileKind.JOURNAL_DAYFILE if is_dayfile else PlanFileKind.JOURNAL_OTHER,
+            kind=_journal_kind(path, context.journal_dir_name),
             path=path,
             rel_path=str(path_relative_to(path, context.project_root)),
             plan_folder=plan_folder,

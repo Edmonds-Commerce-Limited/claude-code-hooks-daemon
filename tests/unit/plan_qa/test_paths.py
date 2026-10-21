@@ -37,6 +37,7 @@ _SAMPLES: dict[PlanFileKind, str] = {
     PlanFileKind.PLAN_INDEX: "CLAUDE/Plan/README.md",
     PlanFileKind.JOURNAL_DAYFILE: "CLAUDE/Plan/00190-t/JOURNAL/00190-Journal-26-07-31.md",
     PlanFileKind.JOURNAL_OTHER: "CLAUDE/Plan/00190-thing/JOURNAL/notes.md",
+    PlanFileKind.JOURNAL_ENTRY: "CLAUDE/Plan/00190-t/JOURNAL/2026-10-21/093015Z-action-0a1b2c.md",
     PlanFileKind.SUPPORTING_DOC: "CLAUDE/Plan/00190-thing/RESEARCH.md",
     PlanFileKind.OUTSIDE: "src/module.py",
 }
@@ -100,6 +101,30 @@ class TestJournalPrecedence:
         result = _classify("CLAUDE/Plan/00190-thing/JOURNAL/sub/PLAN.md")
         assert result.is_journal is True
         assert result.kind is not PlanFileKind.PLAN_DOCUMENT
+
+    def test_entry_file_is_recognised(self):
+        """Plan 00543: a file in a ``YYYY-MM-DD`` folder under the journal dir."""
+        result = _classify("CLAUDE/Plan/00190-thing/JOURNAL/2026-10-21/093015Z-action-0a1b2c.md")
+        assert result.kind is PlanFileKind.JOURNAL_ENTRY
+        assert result.plan_number == 190
+        assert result.plan_folder == "00190-thing"
+        assert result.is_journal is True
+
+    def test_malformed_name_in_entry_folder_is_still_an_entry(self):
+        """The naming check needs to see a badly named entry file to report it."""
+        result = _classify("CLAUDE/Plan/00190-thing/JOURNAL/2026-10-21/notes.md")
+        assert result.kind is PlanFileKind.JOURNAL_ENTRY
+
+    def test_non_date_subfolder_is_journal_other(self):
+        result = _classify("CLAUDE/Plan/00190-thing/JOURNAL/sub/093015Z-action-0a1b2c.md")
+        assert result.kind is PlanFileKind.JOURNAL_OTHER
+
+    def test_entry_file_in_archive(self):
+        result = _classify(
+            "CLAUDE/Plan/Completed/00042-t/JOURNAL/2026-10-21/093015Z-action-0a1b2c.md"
+        )
+        assert result.kind is PlanFileKind.JOURNAL_ENTRY
+        assert result.in_archive is True
 
     def test_journal_dir_name_is_configurable(self):
         result = _classify(
