@@ -450,7 +450,9 @@ class TestMissingConfiguredRelayBinary:
 
     def test_disabled_relay_is_never_reported(self, tmp_path: Path) -> None:
         binary = tmp_path / "hooks-relay"
-        assert missing_configured_relay_binary(tmp_path, self._config(binary, enabled=False)) is None
+        assert (
+            missing_configured_relay_binary(tmp_path, self._config(binary, enabled=False)) is None
+        )
 
     def test_absent_binary_is_reported_with_its_path(self, tmp_path: Path) -> None:
         binary = tmp_path / "hooks-relay"
