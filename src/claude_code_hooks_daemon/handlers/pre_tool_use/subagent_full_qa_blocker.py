@@ -3330,10 +3330,79 @@ def _python_strings_of(code: str, argv: Sequence[str]) -> _PythonStrings:
         return _PythonStrings(_string_literals(code), [], [], [], over_budget=False)
 
 
+#: Leaf nodes that only mark how their parent is read or combined (``Load``,
+#: ``Store``, ``Add``, ``And``, ``Eq``, ``Not``...). No pass judges them as
+#: nodes, only through the parent's ``ctx``/``op`` attribute, and a third of
+#: a typical tree is made of them, so the index leaves them out.
+_MARKER_NODES: Final[tuple[type[ast.AST], ...]] = (
+    ast.expr_context,
+    ast.operator,
+    ast.boolop,
+    ast.cmpop,
+    ast.unaryop,
+)
+
+
+class _TreeIndex(NamedTuple):
+    """One parsed tree swept once: its nodes in :func:`ast.walk`'s order, and each one's children.
+
+    Marker leaves (:data:`_MARKER_NODES`) are left out; every other node is
+    in both. Both are shared with every reader, which only reads them. Nodes
+    are keyed by themselves (an AST node hashes by identity), so the index
+    holds them alive and a key never stands for another node.
+    """
+
+    nodes: list[ast.AST]
+    children: dict[ast.AST, list[ast.AST]]
+
+
+#: The indexes of the judgement in progress, by the tree's id, set per call
+#: by :func:`find_full_qa_invocation` beside the parse meter (N526): a
+#: parsed file is swept by a dozen passes, and each re-walking the whole
+#: tree made the per-line cost several times one walk's. Unset, each tree
+#: is indexed afresh, with the same result.
+_TREE_INDEXES: Final[ContextVar[dict[int, tuple[ast.AST, _TreeIndex]]]] = ContextVar(
+    "subagent_full_qa_tree_indexes"
+)
+
+
+def _tree_index(tree: ast.AST) -> _TreeIndex:
+    """``tree`` swept once per judgement (see :class:`_TreeIndex`)."""
+    indexes = _TREE_INDEXES.get(None)
+    held = indexes.get(id(tree)) if indexes is not None else None
+    if held is not None and held[0] is tree:
+        return held[1]
+    nodes: list[ast.AST] = [tree]
+    children: dict[ast.AST, list[ast.AST]] = {}
+    index = 0
+    while index < len(nodes):
+        node = nodes[index]
+        below = [
+            child for child in ast.iter_child_nodes(node) if not isinstance(child, _MARKER_NODES)
+        ]
+        children[node] = below
+        nodes.extend(below)
+        index += 1
+    found = _TreeIndex(nodes, children)
+    if indexes is not None:
+        indexes[id(tree)] = (tree, found)
+    return found
+
+
+def _walk(tree: ast.AST) -> list[ast.AST]:
+    """Every node under ``tree``, in :func:`ast.walk`'s order; the list is shared, read only."""
+    return _tree_index(tree).nodes
+
+
+def _child_lister(tree: ast.AST) -> Callable[[ast.AST], list[ast.AST]]:
+    """The children of each node under ``tree``; a node from elsewhere raises KeyError."""
+    return _tree_index(tree).children.__getitem__
+
+
 def _constant_names(tree: ast.Module) -> dict[str, list[str]]:
     """Each name the code binds to a string constant, with every value it is given."""
     names: dict[str, list[str]] = {}
-    for node in ast.walk(tree):
+    for node in _walk(tree):
         if isinstance(node, ast.Assign):
             targets, value = node.targets, node.value
         elif isinstance(node, ast.AnnAssign) and node.value is not None:
@@ -3663,6 +3732,7 @@ def _function_scopes(tree: ast.Module) -> tuple[dict[int, int], dict[int, int]]:
     """
     scope_of: dict[int, int] = {}
     parent_of: dict[int, int] = {}
+    children = _child_lister(tree)
     pending: list[tuple[ast.AST, int]] = [(tree, 0)]
     while pending:
         node, scope = pending.pop()
@@ -3670,7 +3740,7 @@ def _function_scopes(tree: ast.Module) -> tuple[dict[int, int], dict[int, int]]:
         inner = id(node) if isinstance(node, _FUNCTIONS) else scope
         if inner != scope:
             parent_of[inner] = scope
-        pending.extend((child, inner) for child in ast.iter_child_nodes(node))
+        pending.extend((child, inner) for child in children(node))
     return scope_of, parent_of
 
 
@@ -3812,7 +3882,7 @@ def _grown_argvs(
         which is just the first part of that argv); and whether the meter
         ran out before every call was judged.
     """
-    nodes = list(ast.walk(tree))
+    nodes = _walk(tree)
     scope_of, parent_of = _function_scopes(tree)
     changes = _list_changes(nodes, scope_of)
     aliases: dict[_ListKey, list[str]] = {}
@@ -4303,6 +4373,7 @@ class _CallRanker:
         definitions: dict[str, list[_Scope | None]] = {}
         calls: list[tuple[str | None, _Scope | None, ast.Call]] = []
         members: dict[str, set[str]] = {}
+        children = _child_lister(tree)
         stack: list[tuple[ast.AST, str | None, str | None, _Scope | None]] = [
             (tree, None, None, None)
         ]
@@ -4346,7 +4417,7 @@ class _CallRanker:
             elif isinstance(node, ast.Call):
                 calls.append((owner, scope, node))
                 self._call_scope[id(node)] = scope
-            stack.extend((child, owner, klass, scope) for child in ast.iter_child_nodes(node))
+            stack.extend((child, owner, klass, scope) for child in children(node))
         self._plain: dict[str, _Scope] = {
             name: found[0]
             for name, found in definitions.items()
@@ -4632,7 +4703,7 @@ def _process_arguments(tree: ast.Module) -> tuple[set[int], set[int]]:
 
     Iterative, so a deeply nested expression costs its size once.
     """
-    nodes = list(ast.walk(tree))
+    nodes = _walk(tree)
     bound = _bindings(nodes)
     ranker = _CallRanker(tree, bound)
     seeds: dict[int, list[ast.AST]] = {_MAY_RUN_IT: [], _RUNS_IT: []}
@@ -4652,6 +4723,7 @@ def _process_arguments(tree: ast.Module) -> tuple[set[int], set[int]]:
     runs: set[int] = set()
     maybe: set[int] = set()
     followed: set[str] = set()
+    children = _child_lister(tree)
     # What a run reaches is closed under the walk, so the second pass skips it.
     for pending, reached in ((seeds[_RUNS_IT], runs), (seeds[_MAY_RUN_IT], maybe)):
         while pending:
@@ -4659,7 +4731,7 @@ def _process_arguments(tree: ast.Module) -> tuple[set[int], set[int]]:
             if id(current) in runs or id(current) in maybe:
                 continue
             reached.add(id(current))
-            pending.extend(ast.iter_child_nodes(current))
+            pending.extend(children(current))
             key = (
                 current.id
                 if isinstance(current, ast.Name)
@@ -4705,7 +4777,7 @@ def _passed_literals(code: str) -> tuple[list[str], list[str]]:
         return _string_literals(code), []
     literals = [
         node
-        for node in ast.walk(tree)
+        for node in _walk(tree)
         if isinstance(node, ast.Constant) and isinstance(node.value, str)
     ]
     return (
@@ -4731,7 +4803,7 @@ def _python_strings(
     two, what only a call to unreadable code receives (N417), which may run
     them and is judged as unseen.
     """
-    nodes = list(ast.walk(tree))
+    nodes = _walk(tree)
     links = {
         id(side)
         for node in nodes
@@ -4974,6 +5046,7 @@ def _operands_run_in_process(
     shadowed: list[list[tuple[str, ast.expr | None, ast.expr | None, ast.expr | None]]] = []
     # The loop variable each open literal ``for`` bound, with what it held before.
     looping: list[tuple[str, ast.expr | None]] = []
+    children = _child_lister(tree)
     stack: list[tuple[ast.AST, bool]] = [(tree, False)]
     while stack:
         node, finished = stack.pop()
@@ -5024,7 +5097,7 @@ def _operands_run_in_process(
                 looping.append(("", None))
         if isinstance(node, (ast.Assign, ast.withitem, ast.For, *_SCOPES)):
             stack.append((node, True))
-        stack.extend((child, False) for child in reversed(list(ast.iter_child_nodes(node))))
+        stack.extend((child, False) for child in reversed(children(node)))
     return operands
 
 
@@ -5837,9 +5910,11 @@ def find_full_qa_invocation(
         return FullQaMatch(named.pattern_id, quoted, fail_closed=_OVERSIZED_REASON)
     event = _Event(patterns=patterns, start=cwd, addopts=_addopts(command))
     token = _PARSE_METER.set(_ParseMeter(remaining=_MAX_PARSED_BYTES))
+    indexes_token = _TREE_INDEXES.set({})
     try:
         return _first_full_run(_invocations(command), command, event, cwd, 0)
     finally:
+        _TREE_INDEXES.reset(indexes_token)
         _PARSE_METER.reset(token)
 
 
