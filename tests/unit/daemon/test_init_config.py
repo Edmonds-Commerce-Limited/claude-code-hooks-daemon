@@ -126,6 +126,30 @@ class TestConfigTemplate:
             "role_floors": {},
         }
 
+    def test_both_templates_enable_the_relay_with_auto_source(self) -> None:
+        """Plan 00529: a new config turns the relay on and provisions it with auto."""
+        import yaml
+
+        from claude_code_hooks_daemon.config.models import TransportConfig
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.init_config.is_container_environment",
+            return_value=False,
+        ):
+            templates = (ConfigTemplate.generate_minimal(), ConfigTemplate.generate_full())
+        for template in templates:
+            transport = yaml.safe_load(template)["daemon"]["transport"]
+            parsed = TransportConfig.model_validate(transport)
+            assert parsed.relay_enabled is True
+            assert parsed.relay_source == "auto"
+
+    def test_the_model_default_keeps_the_relay_off(self) -> None:
+        """Only generated/example configs turn the relay on; the model default stays off."""
+        from claude_code_hooks_daemon.config.models import TransportConfig
+
+        assert TransportConfig().relay_enabled is False
+        assert TransportConfig().relay_source is None
+
     def test_plugins_block_is_labelled_as_daemon_plugins(self) -> None:
         """Both templates say the `plugins:` block holds daemon plugins, so a
         client never mistakes it for Claude Code plugins (Plan 00468 G5)."""

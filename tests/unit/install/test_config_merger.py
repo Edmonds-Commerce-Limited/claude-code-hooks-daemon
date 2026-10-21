@@ -3,7 +3,11 @@
 TDD: These tests are written FIRST, before the implementation.
 """
 
+import copy
+from pathlib import Path
 from typing import Any
+
+import yaml
 
 from claude_code_hooks_daemon.install.config_differ import ConfigDiff, ConfigDiffer
 from claude_code_hooks_daemon.install.config_merger import ConfigMerger, MergeConflict, MergeResult
@@ -806,3 +810,63 @@ class TestRelocatedHandlerKeyMigration:
         )
         assert result.handler_key_migrations == []
         assert result.to_dict()["handler_key_migrations"] == []
+
+
+_SHIPPED_EXAMPLE = Path(__file__).resolve().parents[3] / ".claude" / "hooks-daemon.yaml.example"
+
+
+class TestRelayDefaultAcrossTheUpgradeMerge:
+    """Plan 00529: the shipped example enables the relay for new installs.
+
+    The upgrade merge diffs the user config against the OLD example, which had
+    no ``daemon.transport`` block, and applies the differences onto the NEW
+    example. An explicit ``relay_enabled: false`` must survive that; a config
+    with no transport block takes the new default (coordinator ruling, see
+    release note 013).
+    """
+
+    @staticmethod
+    def _new_default() -> dict[str, Any]:
+        loaded: dict[str, Any] = yaml.safe_load(_SHIPPED_EXAMPLE.read_text(encoding="utf-8"))
+        return loaded
+
+    @classmethod
+    def _old_default(cls) -> dict[str, Any]:
+        old = copy.deepcopy(cls._new_default())
+        old["daemon"].pop("transport", None)
+        return old
+
+    @classmethod
+    def _merge(cls, user_config: dict[str, Any]) -> dict[str, Any]:
+        diff = ConfigDiffer().diff(user_config=user_config, default_config=cls._old_default())
+        merged: dict[str, Any] = (
+            ConfigMerger().merge(new_default_config=cls._new_default(), diff=diff).merged_config
+        )
+        return merged
+
+    def test_the_shipped_example_enables_the_relay_with_auto_source(self) -> None:
+        transport = self._new_default()["daemon"]["transport"]
+        assert transport["relay_enabled"] is True
+        assert transport["relay_source"] == "auto"
+
+    def test_an_explicit_relay_enabled_false_survives(self) -> None:
+        user = self._old_default()
+        user["daemon"]["transport"] = {"relay_enabled": False}
+
+        merged = self._merge(user)
+
+        assert merged["daemon"]["transport"]["relay_enabled"] is False
+
+    def test_a_config_with_no_transport_block_takes_the_new_default(self) -> None:
+        merged = self._merge(self._old_default())
+
+        assert merged["daemon"]["transport"]["relay_enabled"] is True
+        assert merged["daemon"]["transport"]["relay_source"] == "auto"
+
+    def test_a_partial_transport_block_is_kept_whole_and_leaves_the_relay_off(self) -> None:
+        user = self._old_default()
+        user["daemon"]["transport"] = {"nc_enabled": True}
+
+        merged = self._merge(user)
+
+        assert merged["daemon"]["transport"] == {"nc_enabled": True}

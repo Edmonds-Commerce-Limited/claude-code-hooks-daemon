@@ -9,6 +9,18 @@ daemon:
   stale_file_days: 7  # Remove daemon runtime files older than this (days)
   spend_ledger_retention_days: 90  # Keep each session's spend ledger this long (days)
 
+  # Hook transport (Plan 00290, Plan 00529). The Rust relay is the default for
+  # new installs: install/upgrade provisions the binary and the forwarders exec
+  # it. relay_source auto builds with rustc when the musl target is installed,
+  # otherwise downloads the digest-verified release asset. If neither works the
+  # install/upgrade prints a loud banner naming the fix; hooks still run on the
+  # bash transport with every rule enforced. Turn off: relay_enabled: false.
+  transport:
+    relay_enabled: true
+    relay_source: auto
+    nc_enabled: false
+    timeout_seconds: 30
+
   # Path exclusion for content-scanning blockers (v3.35.0+, Plan 00150)
   # Gitignore-style globs (*, ?, ** = zero-or-more segments) exempted from ALL
   # three content blockers at once: security_antipattern, qa_suppression,

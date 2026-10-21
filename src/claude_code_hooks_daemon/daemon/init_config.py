@@ -31,6 +31,16 @@ _CHAIN_BLOCK = (
     "    collect_all_violations: false  # true = report EVERY violation of a tool call in one response\n"
 )
 
+# daemon.transport (Plan 00529). The Rust relay is the default for new configs;
+# the TransportConfig model default stays off, so a config that never names the
+# key is unchanged. relay_source auto builds with a musl-capable rustc, else
+# downloads the digest-verified release asset.
+_TRANSPORT_BLOCK = (
+    "  transport:\n"
+    "    relay_enabled: true   # Rust relay forwarder; false = bash transport only\n"
+    "    relay_source: auto    # build with rustc + musl target, else digest-verified download\n"
+)
+
 
 class ConfigTemplate:
     """Generate configuration templates for hooks-daemon.yaml.
@@ -57,6 +67,7 @@ class ConfigTemplate:
             "  log_level: INFO            # DEBUG, INFO, WARNING, ERROR\n"
             + enforcement_line
             + _CHAIN_BLOCK
+            + _TRANSPORT_BLOCK
             + "\n"
             "# Handler Configuration\n"
             "# Enable/disable handlers per event type\n"
@@ -122,6 +133,7 @@ class ConfigTemplate:
             "  log_level: INFO            # DEBUG, INFO, WARNING, ERROR\n"
             + enforcement_line
             + _CHAIN_BLOCK
+            + _TRANSPORT_BLOCK
             + "\n"
             "# Handler Configuration\n"
             "# Enable/disable handlers per event type\n"

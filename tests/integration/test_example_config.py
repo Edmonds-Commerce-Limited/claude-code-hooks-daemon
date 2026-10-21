@@ -239,6 +239,13 @@ def test_example_config_has_version_2(example_config: dict) -> None:
     assert example_config["version"] == "2.0"
 
 
+def test_example_config_enables_the_relay_with_auto_source(example_config: dict) -> None:
+    """Plan 00529: new installs get the relay, built or downloaded by `auto`."""
+    config = Config.model_validate(example_config)
+    assert config.daemon.transport.relay_enabled is True
+    assert config.daemon.transport.relay_source == "auto"
+
+
 def test_example_config_input_validation_enabled(example_config: dict) -> None:
     """Input validation should be enabled by default."""
     daemon = example_config["daemon"]
