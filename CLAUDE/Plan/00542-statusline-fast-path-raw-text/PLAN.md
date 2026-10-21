@@ -67,7 +67,7 @@ path on any failure.
 ### Phase 2: Relay found missing although enabled
 
 - [ ] ⬜ **Task 2.1**: This repo's config has `relay_enabled: true`, but `untracked/bin/hooks-relay` is absent, so
-  every forwarder's relay guard silently falls through to bash. Recorded as N523 in the Plan 00474 niggles ledger for its own fix. A
+  every relay-eligible forwarder's guard falls through to bash. Only the transport toggle or verify step reports it. Recorded as N523 in the Plan 00474 niggles ledger for its own fix. A
   missing binary that the config claims is enabled should be surfaced, not swallowed.
 
 ## Success Criteria

@@ -115,8 +115,10 @@ Follow-ups, not defects in the reviewers' judgement:
 
 - **N523**: this repository's `.claude/hooks-daemon.yaml` sets `daemon.transport.relay_enabled: true`
   (`relay_source: build`). Only `untracked/relay-build/` exists; `untracked/bin/hooks-relay` does not. Each
-  generated forwarder's relay guard requires the binary to be executable, so every hook event takes the bash path, and
-  nothing reports it. The config claims a transport that is not in use, so any measurement that assumes the relay is
+  relay-eligible forwarder's guard requires the binary to be executable, so those events take the bash path. The
+  status-line, stop, subagent-stop and worktree-create forwarders have no guard
+  (`forwarder_generator.py:70`). A missing binary is reported only when the relay is toggled or verified
+  (`transport_toggle.py:289-310`, `transport_verify.py:491`), never at session start or at run time. The config claims a transport that is not in use, so any measurement that assumes the relay is
   wrong without saying so.
 
 **Fix direction**: a configured-but-absent relay binary is surfaced, for example by a SessionStart advisory or in
