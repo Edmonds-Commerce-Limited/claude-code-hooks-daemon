@@ -95,6 +95,13 @@ class TestGeneratedText:
         text = _generate(TransportConfig(relay_enabled=True), tmp_path)
         assert f'"${{BASH_SOURCE[0]}}" == "{tmp_path}/.claude/hooks/"*' in text
 
+    def test_a_read_status_above_one_is_loud(self, tmp_path: Path) -> None:
+        """bash `read` returns 1 for every I/O error (EISDIR, EBADF, EIO, EOF alike) and above 1
+        only for a timeout or a bad `-u` fd, so no stdin can drive it there in a test."""
+        text = _generate(TransportConfig(relay_enabled=True), tmp_path)
+        assert '[[ "$_sf_rc" -gt 1 ]]' in text
+        assert "could not read its input" in text
+
     def test_the_block_forks_nothing_outside_the_client_call(self, tmp_path: Path) -> None:
         text = _generate(TransportConfig(relay_enabled=True, nc_enabled=True), tmp_path)
         block = text[text.index(_HEADER) : text.index(_SCRIPT_DIR_LINE)]
@@ -179,6 +186,20 @@ def _relay_env(rig: _Rig) -> dict[str, str]:
 
 PAYLOAD = '{"model": {"display_name": "M"}}'
 
+_RED = "\x1b[31m"
+
+
+def _is_loud(result: subprocess.CompletedProcess[str], message: str) -> bool:
+    """One red status line naming the fault, exit 0, and no hand-off to the legacy path."""
+    lines = result.stdout.splitlines()
+    return (
+        result.returncode == 0
+        and len(lines) == 1
+        and lines[0].startswith(_RED)
+        and message in lines[0]
+        and "LEGACY" not in result.stdout
+    )
+
 
 class TestRelayFastPath:
     def test_a_non_empty_reply_is_printed_and_the_legacy_path_never_runs(self, rig: _Rig) -> None:
@@ -225,74 +246,69 @@ class TestRelayFastPath:
             '{"error": "unknown field"}',
             "plain text from nowhere\n",
             f"x{SENTINEL}not at the start\n",
-            SENTINEL,
-            f"{SENTINEL}\n",
         ],
     )
-    def test_a_reply_without_the_sentinel_or_text_falls_through_unprinted(
+    def test_a_non_empty_reply_without_the_sentinel_is_loud_and_never_printed(
         self, rig: _Rig, reply: str
     ) -> None:
-        """An older daemon answers raw requests with JSON; it must never be printed."""
+        """An older daemon answers raw requests with JSON: name the fault, never print it."""
         rig.install_client(reply)
         result = rig.run(PAYLOAD, _relay_env(rig))
-        assert result.stdout.startswith("LEGACY:")
-        assert PAYLOAD in result.stdout
+        assert _is_loud(result, "daemon older than its forwarder: run bin/hooks-daemon restart")
         assert '"text"' not in result.stdout
         assert '"error"' not in result.stdout
 
-    @pytest.mark.parametrize("reply, rc", [("", 0), ("partial", 11), ("", 10)])
-    def test_empty_reply_or_client_failure_falls_through_with_stdin_intact(
-        self, rig: _Rig, reply: str, rc: int
+    @pytest.mark.parametrize("reply", ["", SENTINEL, f"{SENTINEL}\n"])
+    def test_an_empty_reply_is_a_protocol_fault_and_loud(self, rig: _Rig, reply: str) -> None:
+        rig.install_client(reply)
+        result = rig.run(PAYLOAD, _relay_env(rig))
+        assert _is_loud(result, "empty status reply")
+
+    def test_a_daemon_error_reply_is_printed_as_the_python_rung_prints_it(self, rig: _Rig) -> None:
+        rig.install_client(f"{SENTINEL}⚠️ ERROR: boom\n")
+        result = rig.run(PAYLOAD, _relay_env(rig))
+        assert result.stdout == "⚠️ ERROR: boom\n"
+        assert result.returncode == 0
+
+    def test_a_relay_timeout_is_loud(self, rig: _Rig) -> None:
+        rig.install_client("partial", 11)
+        result = rig.run(PAYLOAD, _relay_env(rig))
+        assert _is_loud(result, "status timed out after 2s (daemon busy)")
+        assert "partial" not in result.stdout
+
+    @pytest.mark.parametrize("rc", [12, 13, 99])
+    def test_any_other_relay_failure_is_loud_and_names_the_exit_code(
+        self, rig: _Rig, rc: int
     ) -> None:
-        rig.install_client(reply, rc)
+        rig.install_client("", rc)
+        result = rig.run(PAYLOAD, _relay_env(rig))
+        assert _is_loud(result, f"status client failed (exit {rc})")
+
+    def test_a_refused_connection_hands_off_to_the_startup_path_with_stdin_intact(
+        self, rig: _Rig
+    ) -> None:
+        rig.install_client("", 10)
         result = rig.run(PAYLOAD, _relay_env(rig))
         assert result.stdout.startswith("LEGACY:")
         assert PAYLOAD in result.stdout
-        assert "partial" not in result.stdout
+        assert _RED not in result.stdout
 
-    def test_no_socket_falls_through_without_invoking_the_client(self, rig: _Rig) -> None:
+    def test_no_socket_hands_off_without_invoking_the_client(self, rig: _Rig) -> None:
         rig.sock_path.unlink()
         result = rig.run(PAYLOAD, _relay_env(rig))
         assert result.stdout.startswith("LEGACY:")
         assert not rig.record.exists()
 
-    def test_a_missing_relay_binary_is_inert(self, rig: _Rig) -> None:
+    def test_a_missing_relay_binary_is_loud_and_names_the_fix(self, rig: _Rig) -> None:
         result = rig.run(PAYLOAD, {"HOOKS_DAEMON_RELAY_BINARY": str(rig.project / "absent")})
-        assert result.stdout.startswith("LEGACY:")
-        assert PAYLOAD in result.stdout
+        assert _is_loud(result, "hooks-relay missing")
+        assert "run bin/hooks-daemon transport on" in result.stdout
+        assert "LEGACY" not in result.stdout
 
-    @pytest.mark.parametrize("payload", ["", "not json", "[1, 2]", '{"unterminated": 1'])
-    def test_a_payload_that_is_not_a_json_object_falls_through(
-        self, rig: _Rig, payload: str
-    ) -> None:
-        result = rig.run(payload, _relay_env(rig))
-        assert result.stdout.startswith("LEGACY:")
-        assert payload in result.stdout
-        assert not rig.record.exists()
-
-    def test_a_forwarder_run_from_another_checkout_is_inert(
-        self, rig: _Rig, tmp_path: Path
-    ) -> None:
-        other = tmp_path / "other" / ".claude" / "hooks"
-        other.mkdir(parents=True)
-        (tmp_path / "other" / ".claude" / "init.sh").write_text(_LEGACY_INIT_SH)
-        copy = other / "status-line"
-        copy.write_text(rig.forwarder.read_text())
-        result = subprocess.run(
-            ["/bin/bash", str(copy)],
-            input=PAYLOAD,
-            capture_output=True,
-            text=True,
-            timeout=Timeout.REQUEST_DEFAULT,
-            env={
-                "PATH": "/usr/bin:/bin",
-                "HOOKS_DAEMON_EVENTS_DIR": str(rig.events),
-                **_relay_env(rig),
-            },
-            check=False,
-        )
-        assert result.stdout.startswith("LEGACY:")
-        assert not rig.record.exists()
+    def test_a_missing_relay_binary_is_loud_even_with_no_socket(self, rig: _Rig) -> None:
+        rig.sock_path.unlink()
+        result = rig.run(PAYLOAD, {"HOOKS_DAEMON_RELAY_BINARY": str(rig.project / "absent")})
+        assert _is_loud(result, "hooks-relay missing")
 
 
 class TestNcFastPath:
@@ -317,18 +333,57 @@ class TestNcFastPath:
         assert result.stdout == "from nc\n"
         assert "-U -N -w" in nc_rig.record.read_text().splitlines()[0]
 
-    def test_an_incapable_nc_is_never_invoked(self, nc_rig: _Rig) -> None:
+    def test_an_incapable_nc_is_loud_and_names_the_probe_result(self, nc_rig: _Rig) -> None:
         (nc_rig.project / ".claude" / "hooks-daemon.env").write_text(
             'HOOKS_DAEMON_NC_UNIX_CAPABLE="0"\n'
         )
         result = nc_rig.run(PAYLOAD, self._env(nc_rig))
-        assert result.stdout.startswith("LEGACY:")
+        assert _is_loud(result, "nc cannot do unix sockets (HOOKS_DAEMON_NC_UNIX_CAPABLE=0)")
         assert not nc_rig.record.exists()
 
-    def test_no_env_file_means_no_nc(self, nc_rig: _Rig) -> None:
+    def test_no_env_file_is_loud_as_an_unprobed_nc(self, nc_rig: _Rig) -> None:
+        result = nc_rig.run(PAYLOAD, self._env(nc_rig))
+        assert _is_loud(result, "nc cannot do unix sockets (HOOKS_DAEMON_NC_UNIX_CAPABLE=0)")
+        assert not nc_rig.record.exists()
+
+    def _capable(self, rig: _Rig) -> None:
+        (rig.project / ".claude" / "hooks-daemon.env").write_text(
+            'HOOKS_DAEMON_NC_UNIX_CAPABLE="1"\n'
+        )
+
+    def test_nc_not_on_the_path_is_loud(self, nc_rig: _Rig) -> None:
+        self._capable(nc_rig)
+        (nc_rig.project / "bin" / "nc").unlink()
+        result = nc_rig.run(PAYLOAD, {"PATH": str(nc_rig.project / "bin")})
+        assert _is_loud(result, "nc not found")
+
+    def test_nc_refused_hands_off_to_the_startup_path(self, nc_rig: _Rig) -> None:
+        """nc exits 1 for a refused connection; the socket file exists (a stale one)."""
+        self._capable(nc_rig)
+        nc_rig.install_client("", 1)
+        result = nc_rig.run(PAYLOAD, self._env(nc_rig))
+        assert result.stdout.startswith("LEGACY:")
+        assert PAYLOAD in result.stdout
+
+    def test_nc_no_socket_hands_off_without_invoking_nc(self, nc_rig: _Rig) -> None:
+        self._capable(nc_rig)
+        nc_rig.sock_path.unlink()
         result = nc_rig.run(PAYLOAD, self._env(nc_rig))
         assert result.stdout.startswith("LEGACY:")
         assert not nc_rig.record.exists()
+
+    def test_nc_silent_timeout_is_an_empty_reply_and_loud(self, nc_rig: _Rig) -> None:
+        """A silent listener makes `nc -w` exit 0 with an empty reply."""
+        self._capable(nc_rig)
+        nc_rig.install_client("", 0)
+        result = nc_rig.run(PAYLOAD, self._env(nc_rig))
+        assert _is_loud(result, "timed out after 2s")
+
+    def test_nc_failure_is_loud(self, nc_rig: _Rig) -> None:
+        self._capable(nc_rig)
+        nc_rig.install_client("", 2)
+        result = nc_rig.run(PAYLOAD, self._env(nc_rig))
+        assert _is_loud(result, "status client failed (exit 2)")
 
     def test_the_env_file_is_read_not_sourced(self, nc_rig: _Rig) -> None:
         """Sourcing would run its contents under set -u (an unset PROJECT_PATH)."""

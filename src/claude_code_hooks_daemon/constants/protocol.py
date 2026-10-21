@@ -222,6 +222,11 @@ class RawTextReply:
     # reply that carries it. Printable text and JSON cannot begin with it.
     SENTINEL = "\x1e"
 
+    # What init.sh's python rung prints for an error response and for a reply
+    # with no text, so the two rungs show the same line.
+    ERROR_PREFIX = "⚠️ ERROR: "
+    NO_STATUS_DATA = "⚠️ NO STATUS DATA"
+
 
 __all__ = [
     "HookInputField",

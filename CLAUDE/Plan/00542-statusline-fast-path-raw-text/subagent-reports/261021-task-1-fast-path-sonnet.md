@@ -46,3 +46,14 @@ Defect: the fast path printed any non-empty reply, so a daemon from before raw m
 - The generated block prints only a reply that starts with `$'\x1e'` (bash builtin test), strips it, and prints when the remainder is non-empty; JSON, no sentinel, or sentinel-only fall through with stdin replayed.
 - Tests first (red: 9 failures, e.g. `'\x1eone | two\n' == 'one | two\n'` and the old-daemon `{"text": "x"}` reply printed instead of falling through), then green: 1952 passed over tests/unit/install, the raw-text daemon test and the two relay integration files.
 - `.claude/hooks/status-line` regenerated with the forwarder_generator CLI (`--project-root /workspace`); StatusLine.md and release note 008 updated.
+
+## Task 1.4: loud fast-path failures (owner ruling: no silent fallbacks)
+
+- Generator (`build_status_fast_path_block`): one client only (relay if `relay_enabled`, else nc). A red one-line `_sf_loud` (ANSI 31, exit 0) for: relay binary missing, nc probe not 1 (names `HOOKS_DAEMON_NC_UNIX_CAPABLE=<value>`), nc not on PATH, relay exit 11 (`status timed out after 2s (daemon busy)`), any other non-zero client exit, empty reply, non-empty reply without the sentinel (`daemon older than its forwarder: run bin/hooks-daemon restart`), sentinel-only reply, `read` status above 1. The ONE hand-off, stdin replayed: no socket file, relay exit 10, nc exit 1 (and a payload that is not a JSON object, as before).
+- Daemon (`_raw_text_reply`): error replies `sentinel + "⚠️ ERROR: <msg>"`, no text `sentinel + "⚠️ NO STATUS DATA"` (constants `RawTextReply.ERROR_PREFIX`, `NO_STATUS_DATA`); an empty reply is now a protocol fault.
+- Exit-code facts used: relay `--no-fallback` 10 connect, 11 timeout, 12 I/O/oversize, 13 usage. nc: refused and missing socket both exit 1, a silent listener at `-w` exits 0 with an empty reply, so for nc the missing socket is decided by testing the socket file first and an empty reply is loud (timeout or protocol fault; nc cannot tell them apart).
+- Missing-relay message names `bin/hooks-daemon transport on` (it provisions the binary, `ensure_relay_binary`). The nc message points at `bin/hooks-daemon transport status` (no separate probe command exists).
+- Limitation: bash `read` returns 1 for EISDIR, EBADF, EIO and EOF alike and above 1 only for a timeout or bad `-u`, so the `read` fault branch cannot be driven by a real stdin; it is pinned by a generated-text test only.
+- RED: 26 failed, 30 passed over the two touched test files (e.g. `_is_loud(...)` False for every loud row). GREEN: tests/unit/install and the raw-text daemon test, 1888 passed.
+- Behaviour change: relay-and-nc both enabled no longer falls back from a missing relay to nc; relay wins and a missing binary is loud.
+- Regenerated `.claude/hooks/status-line` (`--project-root /workspace`); StatusLine.md and release note 008 updated.

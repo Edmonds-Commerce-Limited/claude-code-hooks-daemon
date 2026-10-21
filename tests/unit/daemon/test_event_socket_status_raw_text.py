@@ -41,19 +41,13 @@ class TestRawTextReply:
     def test_non_ascii_text_is_utf8(self) -> None:
         assert _raw_text_reply({"text": "⚠ ok"}) == SENTINEL + "⚠ ok\n".encode()
 
-    @pytest.mark.parametrize(
-        "response",
-        [
-            {"error": "boom"},
-            {"error": "boom", "text": "stale"},
-            {},
-            {"text": ""},
-            {"text": None},
-            {"text": 5},
-        ],
-    )
-    def test_error_or_no_text_is_an_empty_body(self, response: dict[str, Any]) -> None:
-        assert _raw_text_reply(response) == b""
+    @pytest.mark.parametrize("response", [{"error": "boom"}, {"error": "boom", "text": "stale"}])
+    def test_an_error_is_the_python_rungs_error_line(self, response: dict[str, Any]) -> None:
+        assert _raw_text_reply(response) == SENTINEL + "⚠️ ERROR: boom\n".encode()
+
+    @pytest.mark.parametrize("response", [{}, {"text": ""}, {"text": None}, {"text": 5}])
+    def test_no_text_is_the_python_rungs_no_data_line(self, response: dict[str, Any]) -> None:
+        assert _raw_text_reply(response) == SENTINEL + "⚠️ NO STATUS DATA\n".encode()
 
 
 @pytest.fixture(autouse=True)
@@ -106,7 +100,7 @@ class TestRawTextOverTheSocket:
         raw = await _round_trip(sock, {**payload, HookInputField.RAW_TEXT: True})
         text = plain.get("text")
         if plain.get("error") or not isinstance(text, str) or not text:
-            assert raw == b""
+            assert raw.startswith(SENTINEL + "⚠️ ".encode())
         else:
             assert raw == SENTINEL + text.encode() + b"\n"
 
