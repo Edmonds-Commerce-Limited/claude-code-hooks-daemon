@@ -51,8 +51,13 @@ a helper. That fix is a Python change tracked as ledger N465 and fixed separatel
 ### Phase 2: Act on the decision
 
 - [ ] 🔄 **Task 2**: The relay becomes default-on.
-  - [ ] Install and upgrade put the binary in place: build with `rustc` and the musl target when present, otherwise the
-    digest-verified release asset. Where neither works, the failure is loud and names the fix.
+  - [x] Install and upgrade put the binary in place: build with `rustc` and the musl target when present, otherwise the
+    digest-verified release asset. Where neither works, the failure is loud and names the fix. Merged `59320d842`:
+    - `relay_source: auto`;
+    - new configs enable the relay;
+    - an upgrade picks the default up only for a config with no `transport` block (a coordinator ruling, overturnable);
+    - a provisioning failure completes the install with a banner repeated before exit, naming the path and the fix.
+    - Report: [subagent-reports/261021-task-2b-install-provisioning-opus.md](subagent-reports/261021-task-2b-install-provisioning-opus.md).
   - [x] The status line uses the relay (Plan 00542, merged `901e59a7a`). A missing binary prints a red line naming
     `bin/hooks-daemon transport on`.
   - [x] A configured relay that is missing or not executable is reported loudly: `transport on` reports a provisioned
