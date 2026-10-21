@@ -42,6 +42,10 @@ _SENTINEL_PATTERN = re.compile(
 
 _ENTRY_HEADING = re.compile(r"^## (\d{2}):(\d{2}) · (\w+) · (\S+)(?:\s+— (.+))?$", re.MULTILINE)
 
+#: Plan 00543: one file per entry, JOURNAL/YYYY-MM-DD/HHMMSSZ-<category>-<6 hex>.md.
+_ENTRY_FILE_NAME = re.compile(r"^(\d{2})(\d{2})(\d{2})Z-([a-z]+)-([0-9a-f]{6})\.md$")
+_DAY_FOLDER_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
 
 def _git(repo: Path, *args: str) -> str:
     completed = subprocess.run(
@@ -219,116 +223,120 @@ class TestD6aCounterIsolation:
         assert not (plan_repo / "CLAUDE" / "Plan" / ".mkplan.lock").exists()
 
 
-class TestSentinel:
-    """D1: exactly one sentinel line, in the preamble, never per-entry."""
+def _journal_dir(repo: Path) -> Path:
+    return repo / "CLAUDE" / "Plan" / "00042-sample-plan" / "JOURNAL"
 
-    def test_a_fresh_dayfile_carries_exactly_one_sentinel(self, plan_repo: Path) -> None:
+
+def _entry_files(repo: Path) -> list[Path]:
+    """Every per-entry file of plan 00042, in path order."""
+    return sorted(_journal_dir(repo).glob("*/*.md"))
+
+
+class TestEntryFileLayout:
+    """Plan 00543: each entry is its own NEW file under a per-day folder."""
+
+    def test_an_entry_lands_in_a_dated_folder_with_a_stamped_name(self, plan_repo: Path) -> None:
         _make_plan(plan_repo, "00042", "sample-plan")
-        body = _write_body(plan_repo)
 
-        result = _run(plan_repo, "--journal", "42", "action", str(body))
+        result = _run(plan_repo, "--journal", "42", "action", str(_write_body(plan_repo)))
+
         assert result.returncode == 0, result.stderr
+        files = _entry_files(plan_repo)
+        assert len(files) == 1
+        assert _DAY_FOLDER_NAME.match(files[0].parent.name), files[0]
+        name = _ENTRY_FILE_NAME.match(files[0].name)
+        assert name is not None, files[0].name
+        assert name.group(4) == "action"
+        assert result.stdout.strip() == str(files[0])
 
-        journal_dir = plan_repo / "CLAUDE" / "Plan" / "00042-sample-plan" / "JOURNAL"
-        day_files = list(journal_dir.glob("00042-Journal-*.md"))
-        assert len(day_files) == 1
-        lines = day_files[0].read_text().splitlines()
-        sentinel_lines = [line for line in lines if _SENTINEL_PATTERN.match(line)]
-        assert len(sentinel_lines) == 1
-
-    def test_a_second_append_the_same_day_adds_no_extra_sentinel(self, plan_repo: Path) -> None:
-        """Appending again must add an entry, not a second sentinel line."""
+    def test_no_legacy_day_file_is_created(self, plan_repo: Path) -> None:
         _make_plan(plan_repo, "00042", "sample-plan")
-        body1 = _write_body(plan_repo, "First entry.\n")
-        body2 = _write_body(plan_repo, "Second entry.\n")
+
+        _run(plan_repo, "--journal", "42", "action", str(_write_body(plan_repo)))
+
+        assert list(_journal_dir(plan_repo).glob("*-Journal-*.md")) == []
+
+    def test_an_entry_file_holds_its_heading_a_blank_line_and_the_body_only(
+        self, plan_repo: Path
+    ) -> None:
+        _make_plan(plan_repo, "00042", "sample-plan")
+
+        _run(plan_repo, "--journal", "42", "finding", str(_write_body(plan_repo, "Just this.\n")))
+
+        content = _entry_files(plan_repo)[0].read_text()
+        lines = content.splitlines()
+        assert _ENTRY_HEADING.match(lines[0]), lines[0]
+        assert lines[1:] == ["", "Just this."]
+        assert len(_ENTRY_HEADING.findall(content)) == 1
+
+    def test_the_file_name_time_equals_the_heading_time(self, plan_repo: Path) -> None:
+        _make_plan(plan_repo, "00042", "sample-plan")
+
+        _run(plan_repo, "--journal", "42", "decision", str(_write_body(plan_repo)))
+
+        path = _entry_files(plan_repo)[0]
+        name = _ENTRY_FILE_NAME.match(path.name)
+        heading = _ENTRY_HEADING.match(path.read_text().splitlines()[0])
+        assert name is not None and heading is not None
+        assert (name.group(1), name.group(2)) == (heading.group(1), heading.group(2))
+
+    def test_two_entries_in_a_row_are_two_files(self, plan_repo: Path) -> None:
+        _make_plan(plan_repo, "00042", "sample-plan")
         (plan_repo / "b1.txt").write_text("First entry.\n")
         (plan_repo / "b2.txt").write_text("Second entry.\n")
 
         r1 = _run(plan_repo, "--journal", "42", "action", str(plan_repo / "b1.txt"))
-        r2 = _run(plan_repo, "--journal", "42", "finding", str(plan_repo / "b2.txt"))
+        r2 = _run(plan_repo, "--journal", "42", "action", str(plan_repo / "b2.txt"))
+
         assert r1.returncode == 0, r1.stderr
         assert r2.returncode == 0, r2.stderr
-        del body1, body2
+        files = _entry_files(plan_repo)
+        assert len(files) == 2, "the same category in the same second must still not collide"
+        assert {f.read_text().splitlines()[-1] for f in files} == {"First entry.", "Second entry."}
 
-        journal_dir = plan_repo / "CLAUDE" / "Plan" / "00042-sample-plan" / "JOURNAL"
-        day_files = list(journal_dir.glob("00042-Journal-*.md"))
-        assert len(day_files) == 1, "both appends must land in the SAME UTC day-file"
-        content = day_files[0].read_text()
-        lines = content.splitlines()
-        sentinel_lines = [line for line in lines if _SENTINEL_PATTERN.match(line)]
-        assert len(sentinel_lines) == 1, "an entry must cost no extra sentinel line"
-        assert "First entry." in content
-        assert "Second entry." in content
-
-    def test_entry_body_does_not_repeat_the_sentinel_text(self, plan_repo: Path) -> None:
-        """An entry costs no extra LINES at all beyond its own heading/body."""
+    def test_a_refused_call_creates_no_dated_folder(self, plan_repo: Path) -> None:
         _make_plan(plan_repo, "00042", "sample-plan")
-        body = _write_body(plan_repo, "Body text unrelated to timestamps.\n")
 
-        _run(plan_repo, "--journal", "42", "action", str(body))
+        _run(plan_repo, "--journal", "42", "bogus", str(_write_body(plan_repo)))
 
-        journal_dir = plan_repo / "CLAUDE" / "Plan" / "00042-sample-plan" / "JOURNAL"
-        content = next(journal_dir.glob("00042-Journal-*.md")).read_text()
-        assert content.count("Scaffolded by `mkplan.bash`") == 1
+        assert not _journal_dir(plan_repo).exists()
 
 
-class TestAppendOnly:
-    """D4: prove append-only by trying to violate it, not by one success."""
+class TestNeverTouchesExistingFiles:
+    """Plan 00543: the writer only ever ADDS a file (append-only by construction)."""
 
-    def test_earlier_entry_bytes_are_never_altered_by_a_later_append(self, plan_repo: Path) -> None:
-        _make_plan(plan_repo, "00042", "sample-plan")
-        b1 = plan_repo / "b1.txt"
-        b1.write_text("Original finding, must survive verbatim.\n")
-        b2 = plan_repo / "b2.txt"
-        b2.write_text("Later entry.\n")
-
-        _run(plan_repo, "--journal", "42", "finding", str(b1))
-        journal_dir = plan_repo / "CLAUDE" / "Plan" / "00042-sample-plan" / "JOURNAL"
-        day_file = next(journal_dir.glob("00042-Journal-*.md"))
-        snapshot_before = day_file.read_text()
-
-        _run(plan_repo, "--journal", "42", "action", str(b2))
-        content_after = day_file.read_text()
-
-        assert content_after.startswith(
-            snapshot_before
-        ), "earlier bytes were rewritten, not just appended to"
-        assert content_after != snapshot_before, "the second call must have added something"
-
-    def test_the_template_preamble_is_written_only_once_ever(self, plan_repo: Path) -> None:
-        """A third append still shows only one copy of the template's intro
-        line -- proves the day-file is never re-rendered from the template
-        once created."""
-        _make_plan(plan_repo, "00042", "sample-plan")
-        for i in range(3):
-            b = plan_repo / f"b{i}.txt"
-            b.write_text(f"Entry {i}.\n")
-            result = _run(plan_repo, "--journal", "42", "thought", str(b))
-            assert result.returncode == 0, result.stderr
-
-        journal_dir = plan_repo / "CLAUDE" / "Plan" / "00042-sample-plan" / "JOURNAL"
-        content = next(journal_dir.glob("00042-Journal-*.md")).read_text()
-        assert content.count("Append-only activity log") == 1
-
-    def test_a_day_file_it_creates_holds_only_the_entry_it_was_asked_for(
+    def test_existing_entry_and_legacy_day_files_survive_byte_identical(
         self, plan_repo: Path
     ) -> None:
-        """Plan 00461: the template's seeded `plan scaffolded` entry belongs to
-        plan CREATION. Copied into the day-file `--journal` opens on a later
-        day, it records an event that did not happen then, and every
-        multi-day plan gets one once `--journal` is the only way to append."""
-        _make_plan(plan_repo, "00042", "sample-plan")
-        body = _write_body(plan_repo, "The only entry today.\n")
+        folder = _make_plan(plan_repo, "00042", "sample-plan")
+        (folder / "JOURNAL").mkdir()
+        legacy = folder / "JOURNAL" / "00042-Journal-26-01-01.md"
+        legacy.write_text("# Plan 00042 — Journal 26-01-01\n\n## 10:50 · finding · —\n\nOld.\n")
+        _run(plan_repo, "--journal", "42", "finding", str(_write_body(plan_repo, "Earlier.\n")))
+        first = _entry_files(plan_repo)[0]
+        before = {legacy: legacy.read_bytes(), first: first.read_bytes()}
 
-        result = _run(plan_repo, "--journal", "42", "finding", str(body))
+        result = _run(plan_repo, "--journal", "42", "action", str(_write_body(plan_repo, "Later.\n")))
+
         assert result.returncode == 0, result.stderr
+        assert {path: path.read_bytes() for path in before} == before
+        assert len(_entry_files(plan_repo)) == 2
 
-        journal_dir = plan_repo / "CLAUDE" / "Plan" / "00042-sample-plan" / "JOURNAL"
-        content = next(journal_dir.glob("00042-Journal-*.md")).read_text()
-        headings = [match.group(3) for match in _ENTRY_HEADING.finditer(content)]
-        assert headings == ["finding"], content
-        assert "plan scaffolded" not in content
-        assert "Append-only activity log" in content
+    def test_a_same_day_legacy_day_file_is_not_appended_to(self, plan_repo: Path) -> None:
+        import datetime
+
+        folder = _make_plan(plan_repo, "00042", "sample-plan")
+        (folder / "JOURNAL").mkdir()
+        today = datetime.datetime.now(datetime.UTC).strftime("%y-%m-%d")
+        legacy = folder / "JOURNAL" / f"00042-Journal-{today}.md"
+        legacy.write_text("# Plan 00042 — Journal\n\n## 00:00 · finding · —\n\nOld.\n")
+        before = legacy.read_bytes()
+
+        result = _run(plan_repo, "--journal", "42", "action", str(_write_body(plan_repo)))
+
+        assert result.returncode == 0, result.stderr
+        assert legacy.read_bytes() == before
+        assert len(_entry_files(plan_repo)) == 1
 
 
 class TestEntryShape:
@@ -340,13 +348,8 @@ class TestEntryShape:
 
         _run(plan_repo, "--journal", "42", "decision", str(body))
 
-        journal_dir = plan_repo / "CLAUDE" / "Plan" / "00042-sample-plan" / "JOURNAL"
-        content = next(journal_dir.glob("00042-Journal-*.md")).read_text()
-        headings = [
-            _ENTRY_HEADING.match(line) for line in content.splitlines() if line.startswith("## ")
-        ]
-        headings = [h for h in headings if h is not None]
-        new_heading = headings[-1]
+        content = _entry_files(plan_repo)[0].read_text()
+        new_heading = _last_heading(content)
         assert new_heading.group(3) == "decision"
         assert new_heading.group(4) == "—"
         assert new_heading.group(5) is None
@@ -369,8 +372,7 @@ class TestEntryShape:
         )
         assert result.returncode == 0, result.stderr
 
-        journal_dir = plan_repo / "CLAUDE" / "Plan" / "00042-sample-plan" / "JOURNAL"
-        content = next(journal_dir.glob("00042-Journal-*.md")).read_text()
+        content = _entry_files(plan_repo)[0].read_text()
         assert "· blocker · T2.1" in content
         assert "waiting on upstream" in content
 
@@ -386,8 +388,10 @@ class TestEntryShape:
 _JOURNAL_DIR_PARTS = ("CLAUDE", "Plan", "00042-sample-plan", "JOURNAL")
 
 
-def _only_dayfile(repo: Path) -> Path:
-    return next(repo.joinpath(*_JOURNAL_DIR_PARTS).glob("00042-Journal-*.md"))
+def _only_entry(repo: Path) -> Path:
+    files = _entry_files(repo)
+    assert len(files) == 1, files
+    return files[0]
 
 
 def _last_heading(content: str) -> re.Match[str]:
@@ -407,7 +411,8 @@ class TestCorrectionEntries:
         _make_plan(plan_repo, "00042", "sample-plan")
         first = _run(plan_repo, "--journal", "42", "finding", str(_write_body(plan_repo)))
         assert first.returncode == 0, first.stderr
-        corrected = _last_heading(_only_dayfile(plan_repo).read_text())
+        corrected = _last_heading(_only_entry(plan_repo).read_text())
+        first_entry = _only_entry(plan_repo)
         label = f"{corrected.group(1)}:{corrected.group(2)}"
 
         body = plan_repo / "correction.txt"
@@ -415,7 +420,8 @@ class TestCorrectionEntries:
         result = _run(plan_repo, "--journal", "42", "correction", str(body), "--ref", label)
 
         assert result.returncode == 0, result.stderr
-        heading = _last_heading(_only_dayfile(plan_repo).read_text())
+        (new_entry,) = [f for f in _entry_files(plan_repo) if f != first_entry]
+        heading = _last_heading(new_entry.read_text())
         assert heading.group(3) == "correction"
         assert heading.group(4) == label
 
@@ -437,12 +443,29 @@ class TestCorrectionEntries:
         )
 
         assert result.returncode == 0, result.stderr
-        todays = [
-            path
-            for path in (folder / "JOURNAL").glob("00042-Journal-*.md")
-            if path.name != "00042-Journal-26-01-01.md"
-        ]
-        assert "· correction · 26-01-01/10:50" in todays[0].read_text()
+        assert "· correction · 26-01-01/10:50" in _only_entry(plan_repo).read_text()
+
+    def test_a_correction_may_name_an_entry_file_of_an_earlier_day(self, plan_repo: Path) -> None:
+        folder = _make_plan(plan_repo, "00042", "sample-plan")
+        day = folder / "JOURNAL" / "2026-01-01"
+        day.mkdir(parents=True)
+        old = day / "105001Z-finding-abc123.md"
+        old.write_text("## 10:50 · finding · —\n\nWrong.\n")
+
+        result = _run(
+            plan_repo,
+            "--journal",
+            "42",
+            "correction",
+            str(_write_body(plan_repo)),
+            "--ref",
+            "26-01-01/10:50",
+        )
+
+        assert result.returncode == 0, result.stderr
+        (new_entry,) = [f for f in _entry_files(plan_repo) if f != old]
+        assert "· correction · 26-01-01/10:50" in new_entry.read_text()
+        assert old.read_text().endswith("Wrong.\n")
 
     def test_a_correction_without_a_ref_is_refused(self, plan_repo: Path) -> None:
         _make_plan(plan_repo, "00042", "sample-plan")
@@ -468,7 +491,7 @@ class TestCorrectionEntries:
         _make_plan(plan_repo, "00042", "sample-plan")
         first = _run(plan_repo, "--journal", "42", "finding", str(_write_body(plan_repo)))
         assert first.returncode == 0, first.stderr
-        before = _only_dayfile(plan_repo).read_bytes()
+        before = _only_entry(plan_repo).read_bytes()
         existing = _last_heading(before.decode())
         absent = "00:01" if f"{existing.group(1)}:{existing.group(2)}" == "00:00" else "00:00"
 
@@ -478,7 +501,7 @@ class TestCorrectionEntries:
 
         assert result.returncode != 0
         assert absent in result.stderr
-        assert _only_dayfile(plan_repo).read_bytes() == before, "a refusal writes nothing"
+        assert _only_entry(plan_repo).read_bytes() == before, "a refusal writes nothing"
 
     def test_a_heading_quoted_inside_a_fence_is_not_an_entry(self, plan_repo: Path) -> None:
         folder = _make_plan(plan_repo, "00042", "sample-plan")
@@ -540,14 +563,13 @@ class TestUtcCrossZoneRegression:
         assert r1.returncode == 0, r1.stderr
         assert r2.returncode == 0, r2.stderr
 
-        journal_dir = plan_repo / "CLAUDE" / "Plan" / "00042-sample-plan" / "JOURNAL"
-        day_files = list(journal_dir.glob("00042-Journal-*.md"))
-        assert len(day_files) == 1, (
-            "a writer under TZ=Asia/Kolkata (UTC+5:30) landed on a DIFFERENT "
-            f"day-file than the UTC writer: {[f.name for f in day_files]} -- "
+        day_folders = {f.parent.name for f in _entry_files(plan_repo)}
+        assert len(day_folders) == 1, (
+            "a writer under TZ=Asia/Kolkata (UTC+5:30) landed in a DIFFERENT "
+            f"day folder than the UTC writer: {sorted(day_folders)} -- "
             "the script is reading the local clock, not normalising to UTC"
         )
-        content = day_files[0].read_text()
+        content = "".join(f.read_text() for f in _entry_files(plan_repo))
         assert "Writer A (UTC)." in content
         assert "Writer B (UTC+5:30)." in content
 
@@ -566,9 +588,8 @@ class TestUtcCrossZoneRegression:
         assert r1.returncode == 0, r1.stderr
         assert r2.returncode == 0, r2.stderr
 
-        journal_dir = plan_repo / "CLAUDE" / "Plan" / "00042-sample-plan" / "JOURNAL"
-        day_files = list(journal_dir.glob("00042-Journal-*.md"))
-        assert len(day_files) == 1, [f.name for f in day_files]
+        day_folders = {f.parent.name for f in _entry_files(plan_repo)}
+        assert len(day_folders) == 1, sorted(day_folders)
 
     def test_recorded_times_are_utc_not_the_writers_local_clock(self, plan_repo: Path) -> None:
         """The written HH:MM must match `date -u`, not a Kolkata-local reading
@@ -584,8 +605,7 @@ class TestUtcCrossZoneRegression:
         after_utc = datetime.datetime.now(datetime.UTC)
         assert result.returncode == 0, result.stderr
 
-        journal_dir = plan_repo / "CLAUDE" / "Plan" / "00042-sample-plan" / "JOURNAL"
-        content = next(journal_dir.glob("00042-Journal-*.md")).read_text()
+        content = _only_entry(plan_repo).read_text()
         match = list(_ENTRY_HEADING.finditer(content))[-1]
         written_hour, written_minute = int(match.group(1)), int(match.group(2))
         written_minutes = written_hour * 60 + written_minute
@@ -637,3 +657,100 @@ class TestHelpDocumentsJournalMode:
             "correction",
         ):
             assert category in result.stderr
+
+
+class TestScaffoldSeedsAnEntryFile:
+    """Plan 00543: a new plan's seeded `plan scaffolded` entry is an entry file."""
+
+    def test_a_scaffolded_plan_has_one_seed_entry_file_and_no_day_file(
+        self, plan_repo: Path
+    ) -> None:
+        result = _run(plan_repo, "scaffold-seed-check")
+        assert result.returncode == 0, result.stderr
+
+        (plan_folder,) = (plan_repo / "CLAUDE" / "Plan").glob("*-scaffold-seed-check")
+        journal = plan_folder / "JOURNAL"
+        assert list(journal.glob("*-Journal-*.md")) == []
+        (seed,) = journal.glob("*/*.md")
+        assert _DAY_FOLDER_NAME.match(seed.parent.name)
+        name = _ENTRY_FILE_NAME.match(seed.name)
+        assert name is not None and name.group(4) == "action", seed.name
+        lines = seed.read_text().splitlines()
+        heading = _ENTRY_HEADING.match(lines[0])
+        assert heading is not None and heading.group(3) == "action"
+        assert (heading.group(1), heading.group(2)) == (name.group(1), name.group(2))
+        assert "plan scaffolded" in lines[0]
+        assert "{{" not in seed.read_text()
+
+
+def _commit_all(repo: Path, message: str) -> None:
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "--quiet", "-m", message)
+
+
+class TestSameDayJournallingOnTwoBranchesMergesCleanly:
+    """Plan 00543 Task 2.4: the point of the layout, shown with real git.
+
+    Two branches journal the SAME plan on the SAME UTC day (same category too,
+    the worst case for a name clash). With one file per day that is the
+    conflict #135 reports; with one NEW file per entry the three-way merge adds
+    two files and `git merge-tree --write-tree` exits 0 with a tree.
+    """
+
+    @staticmethod
+    def _journal_on_branch(repo: Path, branch: str, text: str) -> None:
+        _git(repo, "checkout", "--quiet", "-b", branch, "base")
+        body = repo / f"{branch}-body.txt"
+        body.write_text(text)
+        result = _run(repo, "--journal", "42", "action", str(body))
+        assert result.returncode == 0, result.stderr
+        body.unlink()
+        _commit_all(repo, f"journal on {branch}")
+
+    @staticmethod
+    def _merge_tree(repo: Path, left: str, right: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(repo), "merge-tree", "--write-tree", left, right],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_SHELL_TIMEOUT,
+        )
+
+    def test_two_branches_journalling_the_same_day_merge_without_conflict(
+        self, plan_repo: Path
+    ) -> None:
+        _make_plan(plan_repo, "00042", "sample-plan")
+        _commit_all(plan_repo, "base")
+        _git(plan_repo, "branch", "base")
+
+        self._journal_on_branch(plan_repo, "branch-a", "Written on branch A.\n")
+        self._journal_on_branch(plan_repo, "branch-b", "Written on branch B.\n")
+        merged = self._merge_tree(plan_repo, "branch-a", "branch-b")
+
+        assert merged.returncode == 0, merged.stdout + merged.stderr
+        tree = merged.stdout.splitlines()[0]
+        listing = _git(plan_repo, "ls-tree", "-r", "--name-only", tree)
+        entries = [line for line in listing.splitlines() if "/JOURNAL/" in line]
+        assert len(entries) == 2, entries
+        assert len({Path(line).parent for line in map(Path, entries)}) == 1, "one shared day folder"
+
+    def test_a_legacy_day_file_on_the_base_does_not_make_the_merge_conflict(
+        self, plan_repo: Path
+    ) -> None:
+        import datetime
+
+        folder = _make_plan(plan_repo, "00042", "sample-plan")
+        (folder / "JOURNAL").mkdir()
+        today = datetime.datetime.now(datetime.UTC).strftime("%y-%m-%d")
+        (folder / "JOURNAL" / f"00042-Journal-{today}.md").write_text(
+            "# Plan 00042 — Journal\n\n## 00:00 · finding · —\n\nBefore the switch.\n"
+        )
+        _commit_all(plan_repo, "base")
+        _git(plan_repo, "branch", "base")
+
+        self._journal_on_branch(plan_repo, "branch-a", "A.\n")
+        self._journal_on_branch(plan_repo, "branch-b", "B.\n")
+        merged = self._merge_tree(plan_repo, "branch-a", "branch-b")
+
+        assert merged.returncode == 0, merged.stdout + merged.stderr
