@@ -34,7 +34,7 @@ Triage evidence: `untracked/scratch/triage-129.md` (session scratch); the verifi
 
 ### Phase 1: Narrow the refusal
 
-- [ ] ⬜ **Task 1.1**: Red tests in `tests/unit/daemon/test_issue_validity_cli.py`: claim with no list claims an
+- [x] ✅ **Task 1.1**: Red tests in `tests/unit/daemon/test_issue_validity_cli.py`: claim with no list claims an
   unassigned issue (exit 0, one assign call); `--list-eligible` with no list exits 4 with zero `gh` calls; a set list
   still rejects an unapproved author.
 - [ ] ⬜ **Task 1.2**: Move the not-configured refusal under the `--list-eligible` branch of

@@ -187,17 +187,26 @@ class TestSingleIssue:
         assert not [c for c in gh.calls if c[:2] == ("issue", "edit")]
 
     @pytest.mark.parametrize("approved", [None, ()])
-    @pytest.mark.parametrize("claim", [False, True])
-    def test_refuses_to_judge_an_issue_without_a_configured_list(
-        self, gh: FakeGh, approved: Sequence[str] | None, claim: bool
+    def test_claim_without_a_configured_list_claims_and_reports_author_not_applicable(
+        self, gh: FakeGh, approved: Sequence[str] | None
     ) -> None:
-        """Issue selection must never fail open: no list, no verdict, no gh call."""
+        """A single chosen issue is claimable with no list (the guard's deny text says so)."""
         gh.issues[5] = _issue(5, author="anyone")
-        code, out, err = _run(gh, number=5, claim=claim, approved=approved)
-        assert code == EXIT_USAGE
-        assert out == ""
-        assert "approved_issue_authors" in err
-        assert gh.calls == []
+        code, out, _ = _run(gh, number=5, claim=True, approved=approved)
+        assert code == EXIT_OK
+        edits = [c for c in gh.calls if c[:2] == ("issue", "edit")]
+        assert edits == [("issue", "edit", "5", "--add-assignee", "@me")]
+        assert "[n/a] author: no approved issue authors configured" in out
+
+    @pytest.mark.parametrize("approved", [None, ()])
+    def test_plain_check_without_a_configured_list_judges_with_author_not_applicable(
+        self, gh: FakeGh, approved: Sequence[str] | None
+    ) -> None:
+        gh.issues[5] = _issue(5, [ME], author="anyone")
+        code, out, _ = _run(gh, number=5, approved=approved)
+        assert code == EXIT_OK
+        assert "[n/a] author:" in out
+        assert not [c for c in gh.calls if c[:2] == ("issue", "edit")]
 
     def test_json_output(self, gh: FakeGh) -> None:
         gh.issues[5] = _issue(5)
