@@ -70,9 +70,10 @@ a helper. That fix is a Python change tracked as ledger N465 and fixed separatel
   - Client side, per call: 4.3-5.6 ms CPU through the relay against 79-82 ms through bash. At 16 sessions, 0.16 cores
     against 2.73.
   - The daemon is now the cost: PreToolUse Bash takes 49.5 ms CPU per call, which caps one daemon at about 30
-    sessions.
+    sessions (extrapolated from the 16-session run, not measured).
   - Ranked candidates, none of them Rust:
-    1. `prevent-destructive-git` parses the command once instead of 18 times (measured 36% off PreToolUse Bash).
+    1. `prevent-destructive-git` parses the command once instead of 18 times (measured 36% off PreToolUse Bash, for
+       commands that mention git).
     2. One shared parse across the Bash guards.
     3. Move `SCRIPT_DIR` after the relay check in the forwarder (4.3 to 2.2 ms client CPU).
   - No further Rust helper passes the Plan 00495 cost test yet.
