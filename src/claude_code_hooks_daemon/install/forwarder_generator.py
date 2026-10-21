@@ -31,11 +31,13 @@ from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config, TransportConfig
 from claude_code_hooks_daemon.constants import DaemonPath, Timeout
 from claude_code_hooks_daemon.constants.events import (
+    STATUS_LINE_JSON_KEY,
     EventIDMeta,
     raw_stdout_bash_keys,
     relay_ineligible_bash_keys,
     wired_event_metas,
 )
+from claude_code_hooks_daemon.constants.protocol import HookInputField, RawTextReply
 from claude_code_hooks_daemon.daemon.paths import (
     event_socket_dir_is_fallback,
     get_event_socket_dir_from_untracked,
@@ -216,6 +218,41 @@ def deployed_hooks_dir(project_root: Path) -> str:
     return f"{project_root}/.claude/hooks/"
 
 
+def _checkout_guard_open(project_root: Path, *, honour_no_relay: bool) -> str:
+    """The ``if`` line that confines a generated block to ONE checkout.
+
+    The condition tests ``${BASH_SOURCE[0]}`` against :func:`deployed_hooks_dir`
+    (see :func:`build_relay_guard_block` for why), and, for the relay guard,
+    also lets ``--no-relay`` re-entry skip it.
+    """
+    hooks_dir = _escape_for_double_quotes(deployed_hooks_dir(project_root))
+    no_relay = '"${1:-}" != "--no-relay" && ' if honour_no_relay else ""
+    return f'if [[ {no_relay}"${{BASH_SOURCE[0]}}" == "{hooks_dir}"* ]]; then\n'
+
+
+def _events_dir_lines(untracked_dir: Path) -> list[str]:
+    """Bash lines that set ``_rl_dir`` and ``_rl_events_dir`` with no spawn.
+
+    Shared by the relay guard and the status fast path so both name the same
+    per-event socket directory; the lines' shapes are what
+    :func:`recorded_untracked_dir` reads back.
+    """
+    lines = [f'    _rl_dir="{_escape_for_double_quotes(str(untracked_dir))}"\n']
+    if event_socket_dir_is_fallback(untracked_dir):
+        resolved_events_dir = get_event_socket_dir_from_untracked(untracked_dir)
+        # Test-isolation fix (Plan 00290 Phase 6 dogfood finding), preserved
+        # in the fallback case too: still `${VAR:-default}` parameter
+        # expansion, zero spawns, so a test fixture can still redirect this.
+        lines.append(f'    _rl_events_dir="${{HOOKS_DAEMON_EVENTS_DIR:-{resolved_events_dir}}}"\n')
+    else:
+        lines.append(
+            '    _rl_sfx="-${HOSTNAME:-localhost}"; _rl_sfx="${_rl_sfx,,}"; '
+            '_rl_sfx="${_rl_sfx// /-}"\n'
+        )
+        lines.append('    _rl_events_dir="${HOOKS_DAEMON_EVENTS_DIR:-$_rl_dir/events$_rl_sfx}"\n')
+    return lines
+
+
 def build_relay_guard_block(
     event_file_name: str,
     transport: TransportConfig,
@@ -305,23 +342,9 @@ def build_relay_guard_block(
     # See DECISION-forwarder-interpolation-contexts.md.
     lines = [
         _GUARD_HEADER,
-        'if [[ "${1:-}" != "--no-relay" && '
-        f'"${{BASH_SOURCE[0]}}" == "{_escape_for_double_quotes(deployed_hooks_dir(project_root))}"'
-        "* ]]; then\n",
-        f'    _rl_dir="{_escape_for_double_quotes(str(untracked_dir))}"\n',
+        _checkout_guard_open(project_root, honour_no_relay=True),
+        *_events_dir_lines(untracked_dir),
     ]
-    if event_socket_dir_is_fallback(untracked_dir):
-        resolved_events_dir = get_event_socket_dir_from_untracked(untracked_dir)
-        # Test-isolation fix (Plan 00290 Phase 6 dogfood finding), preserved
-        # in the fallback case too: still `${VAR:-default}` parameter
-        # expansion, zero spawns, so a test fixture can still redirect this.
-        lines.append(f'    _rl_events_dir="${{HOOKS_DAEMON_EVENTS_DIR:-{resolved_events_dir}}}"\n')
-    else:
-        lines.append(
-            '    _rl_sfx="-${HOSTNAME:-localhost}"; _rl_sfx="${_rl_sfx,,}"; '
-            '_rl_sfx="${_rl_sfx// /-}"\n'
-        )
-        lines.append('    _rl_events_dir="${HOOKS_DAEMON_EVENTS_DIR:-$_rl_dir/events$_rl_sfx}"\n')
     lines.append(f'    _rl_bin="${{HOOKS_DAEMON_RELAY_BINARY:-{relay_binary}}}"\n')
     lines.append(f'    _rl_sock="$_rl_events_dir/{event_file_name}.sock"\n')
     lines.append('    if [[ -x "$_rl_bin" && -S "$_rl_sock" ]]; then\n')
@@ -348,6 +371,193 @@ def build_relay_guard_block(
 _GUARD_BLOCK_PATTERN = re.compile(
     re.escape(_GUARD_HEADER) + r".*?" + re.escape(_GUARD_FOOTER), re.DOTALL
 )
+
+
+#: The line the status fast path is inserted above: it must run before the
+#: forwarder's first fork (``$(cd ... && pwd)``), let alone ``source init.sh``.
+SCRIPT_DIR_ANCHOR: str = 'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\n'
+
+_FAST_PATH_HEADER = "# --- status fast path (generated; Plan 00542) ---\n"
+_FAST_PATH_FOOTER = "# --- end status fast path ---\n"
+_FAST_PATH_BLOCK_PATTERN = re.compile(
+    re.escape(_FAST_PATH_HEADER) + r".*?" + re.escape(_FAST_PATH_FOOTER), re.DOTALL
+)
+
+#: The one forwarder that gets a fast path: the status line's ``bash_key``, taken
+#: from the catalogue. The others answer a decision, not a display line.
+STATUS_FAST_PATH_EVENT_FILE_NAME: Final[str] = next(
+    m.bash_key for m in wired_event_metas() if m.json_key == STATUS_LINE_JSON_KEY
+)
+
+#: How long the fast path's client waits for the daemon. Short on purpose: past
+#: it the legacy path asks again, and a status line must not stall on a busy
+#: daemon.
+_FAST_PATH_TIMEOUT_SECONDS: Final[int] = 2
+
+#: ``hooks-relay --no-fallback`` exit codes (relay/hooks_relay.rs EXIT_CONNECT_FAIL and
+#: EXIT_TIMEOUT): no daemon answered, and a daemon that did not reply in time.
+_RELAY_EXIT_CONNECT_FAIL: Final[int] = 10
+_RELAY_EXIT_TIMEOUT: Final[int] = 11
+
+#: ``nc -U`` exits 1 for a refused connection. A silent listener hitting ``-w`` exits 0
+#: with an empty reply, so nc cannot tell a timeout from a protocol fault.
+_NC_EXIT_REFUSED: Final[int] = 1
+
+#: A positive integer without leading zeros: valid JSON as it stands.
+_FAST_PATH_DIGITS = "^[1-9][0-9]{0,8}$"
+
+
+def strip_status_fast_path_block(source_content: str) -> str:
+    """Remove any existing status fast-path block (strip-then-reapply, as for the relay guard)."""
+    return _FAST_PATH_BLOCK_PATTERN.sub("", source_content)
+
+
+def build_status_fast_path_block(
+    transport: TransportConfig, untracked_dir: Path, project_root: Path
+) -> str:
+    """Render the status-line fast path: raw status text with no init.sh and no python.
+
+    Pure bash builtins, plus the ONE client process it execs. It asks the
+    status per-event socket for RAW text (``hooks_daemon_raw_text``) with the
+    terminal size from ``COLUMNS``/``LINES``, and prints the reply once it has
+    stripped the leading ``RawTextReply.SENTINEL`` and found text after it.
+
+    No silent fallbacks. The ONE hand-off to the legacy path (stdin replayed)
+    is "no daemon answered": no socket file, or a refused connection (relay
+    exit 10, nc exit 1); the legacy start-up path starts the daemon and reports
+    loudly. A payload that is not a JSON object is also handed off. Every other
+    fault prints one red line naming the fault and the fix, and exits 0: a
+    configured client that is missing or cannot do unix sockets, a timeout, any
+    other client failure, an empty reply, a non-empty reply without the sentinel
+    (an older daemon's JSON), a ``read`` fault.
+
+    It uses only the client ``transport`` selects: the relay binary when
+    ``relay_enabled``, else nc when ``nc_enabled`` (the install probe must have
+    recorded ``HOOKS_DAEMON_NC_UNIX_CAPABLE=1``, read from the env file line by
+    line, never sourced: it references variables that are unset here).
+
+    The socket path is the relay guard's (:func:`_events_dir_lines`) and the
+    block is confined to its own checkout the same way, so a forwarder copied
+    into a worktree is inert. A wrong guess at the path can only fail the
+    ``-S`` test or the connect, and then falls through.
+    """
+    sock = f'"$_rl_events_dir/{STATUS_FAST_PATH_EVENT_FILE_NAME}.sock"'
+    sentinel = f"$'\\x{ord(RawTextReply.SENTINEL):02x}'"
+    timeout_s = _FAST_PATH_TIMEOUT_SECONDS
+    lines = [
+        _FAST_PATH_HEADER,
+        _checkout_guard_open(project_root, honour_no_relay=False),
+        *_events_dir_lines(untracked_dir),
+        f"    _sf_sock={sock}\n",
+        "    # One red line naming the fault and its fix, then exit 0: the status line\n",
+        "    # is the loud channel and nothing below falls back silently.\n",
+        "    _sf_loud() { printf '\\033[31m%s\\033[0m\\n' \"$1\"; exit 0; }\n",
+    ]
+    if transport.relay_enabled:
+        relay_binary = transport.relay_binary or _default_relay_binary_path(untracked_dir)
+        refused, timed_out = _RELAY_EXIT_CONNECT_FAIL, _RELAY_EXIT_TIMEOUT
+        lines += [
+            f'    _rl_bin="${{HOOKS_DAEMON_RELAY_BINARY:-{relay_binary}}}"\n',
+            '    if [[ ! -x "$_rl_bin" ]]; then\n',
+            '        _sf_loud "⚠ hooks-relay missing or not executable ($_rl_bin):'
+            ' run bin/hooks-daemon transport on"\n',
+            "    fi\n",
+        ]
+        send = (
+            '"$_rl_bin" "$_sf_sock" --no-fallback '
+            f'--timeout-ms "{timeout_s * 1000}" <<< "$_sf_req"'
+        )
+    else:
+        refused, timed_out = _NC_EXIT_REFUSED, None
+        # Only the capability line of the env file is wanted; `case` on it is a
+        # builtin, so reading it forks nothing.
+        lines += [
+            '    _sf_nc_ok="${HOOKS_DAEMON_NC_UNIX_CAPABLE:-0}"\n',
+            '    _sf_env="${BASH_SOURCE[0]%/*}/../hooks-daemon.env"\n',
+            '    if [[ -r "$_sf_env" ]]; then\n',
+            '        while IFS= read -r _sf_line || [[ -n "$_sf_line" ]]; do\n',
+            '            case "$_sf_line" in\n',
+            "                'HOOKS_DAEMON_NC_UNIX_CAPABLE=\"1\"') _sf_nc_ok=1;;\n",
+            "                'HOOKS_DAEMON_NC_UNIX_CAPABLE=\"0\"') _sf_nc_ok=0;;\n",
+            "            esac\n",
+            '        done < "$_sf_env"\n',
+            "    fi\n",
+            '    if [[ "$_sf_nc_ok" != "1" ]]; then\n',
+            '        _sf_loud "⚠ nc cannot do unix sockets (HOOKS_DAEMON_NC_UNIX_CAPABLE=$_sf_nc_ok):'
+            ' run bin/hooks-daemon transport status"\n',
+            "    fi\n",
+            "    if ! command -v nc > /dev/null; then\n",
+            '        _sf_loud "⚠ nc not found on PATH: install it or run bin/hooks-daemon transport off"\n',
+            "    fi\n",
+        ]
+        send = f'nc -U -N -w "{timeout_s}" "$_sf_sock" <<< "$_sf_req"'
+    timeout_check = (
+        []
+        if timed_out is None
+        else [
+            f'                    if [[ "$_sf_rc" -eq {timed_out} ]]; then\n',
+            f'                        _sf_loud "⚠ status timed out after {timeout_s}s (daemon busy)"\n',
+            "                    fi\n",
+        ]
+    )
+    raw = HookInputField.RAW_TEXT
+    cols = HookInputField.TERMINAL_COLUMNS
+    rows = HookInputField.TERMINAL_LINES
+    lines += [
+        '    if [[ -S "$_sf_sock" ]]; then\n',
+        '        _sf_payload=""; _sf_rc=0\n',
+        "        # read returns 1 at a normal EOF (no trailing NUL), above 1 on a real fault.\n",
+        "        IFS= read -r -d '' _sf_payload || _sf_rc=$?\n",
+        '        if [[ "$_sf_rc" -gt 1 ]]; then\n',
+        '            _sf_loud "⚠ status line could not read its input (read status $_sf_rc)"\n',
+        "        fi\n",
+        '        _sf_req="${_sf_payload%"${_sf_payload##*[![:space:]]}"}"\n',
+        '        _sf_req="${_sf_req#"${_sf_req%%[![:space:]]*}"}"\n',
+        '        if [[ "$_sf_req" == "{"*"}" ]]; then\n',
+        '            _sf_req="${_sf_req%\\}}"\n',
+        '            _sf_req="${_sf_req%"${_sf_req##*[![:space:]]}"}"\n',
+        '            if [[ "$_sf_req" != "{" ]]; then _sf_req+=","; fi\n',
+        f"            _sf_req+='\"{raw}\":true'\n",
+        f'            if [[ "${{COLUMNS:-}}" =~ {_FAST_PATH_DIGITS} ]]; then\n',
+        f'                _sf_req+=",\\"{cols}\\":$COLUMNS"\n',
+        "            fi\n",
+        f'            if [[ "${{LINES:-}}" =~ {_FAST_PATH_DIGITS} ]]; then\n',
+        f'                _sf_req+=",\\"{rows}\\":$LINES"\n',
+        "            fi\n",
+        '            _sf_req+="}"\n',
+        '            _sf_reply=""; _sf_rc=0\n',
+        f'            _sf_reply="$({send})" || _sf_rc=$?\n',
+        "            # The ONE hand-off: no daemon answered. The start-up path below starts\n",
+        "            # it and already reports loudly; every other outcome is judged here.\n",
+        f'            if [[ "$_sf_rc" -ne {refused} ]]; then\n',
+        *[line[4:] for line in timeout_check],
+        '                if [[ "$_sf_rc" -ne 0 ]]; then\n',
+        '                    _sf_loud "⚠ status client failed (exit $_sf_rc)"\n',
+        "                fi\n",
+        '                if [[ -z "$_sf_reply" ]]; then\n',
+        f'                    _sf_loud "⚠ empty status reply (timed out after {timeout_s}s,'
+        ' or protocol fault): run bin/hooks-daemon restart"\n',
+        "                fi\n",
+        f'                if [[ "$_sf_reply" != {sentinel}* ]]; then\n',
+        '                    _sf_loud "⚠ daemon older than its forwarder:'
+        ' run bin/hooks-daemon restart"\n',
+        "                fi\n",
+        f'                _sf_reply="${{_sf_reply#{sentinel}}}"\n',
+        '                if [[ -z "$_sf_reply" ]]; then\n',
+        '                    _sf_loud "⚠ empty status reply (sentinel only):'
+        ' run bin/hooks-daemon restart"\n',
+        "                fi\n",
+        "                printf '%s\\n' \"$_sf_reply\"\n",
+        "                exit 0\n",
+        "            fi\n",
+        "        fi\n",
+        "        # Hand-off: give the legacy path the stdin it was owed.\n",
+        '        exec 0<<< "$_sf_payload"\n',
+        "    fi\n",
+        "fi\n",
+        _FAST_PATH_FOOTER,
+    ]
+    return "".join(lines)
 
 
 def strip_relay_guard_block(source_content: str) -> str:
@@ -674,6 +884,14 @@ def generate_forwarder_content(
     ):
         guard = build_relay_guard_block(event_file_name, transport, untracked_dir, project_root)
         result = result.replace(INIT_SH_ANCHOR, guard + INIT_SH_ANCHOR, 1)
+    result = strip_status_fast_path_block(result)
+    if (
+        event_file_name == STATUS_FAST_PATH_EVENT_FILE_NAME
+        and (transport.relay_enabled or transport.nc_enabled)
+        and SCRIPT_DIR_ANCHOR in result
+    ):
+        fast_path = build_status_fast_path_block(transport, untracked_dir, project_root)
+        result = result.replace(SCRIPT_DIR_ANCHOR, fast_path + SCRIPT_DIR_ANCHOR, 1)
     if transport.nc_enabled:
         result = append_nc_socket_arg(result, event_file_name, untracked_dir)
     return result

@@ -22,8 +22,9 @@ STATEMENT: Final[str] = (
 )
 
 _REMEDIATION: Final[str] = (
-    "Start a journal for each listed plan: create "
-    "`{plan}/JOURNAL/NNNNN-Journal-YY-MM-DD.md` (mkplan.bash scaffolds it for "
+    "Start a journal for each listed plan: record the first entry with "
+    "`mkplan.bash --journal` (it writes `{plan}/JOURNAL/YYYY-MM-DD/"
+    "HHMMSSZ-<category>-<hex>.md`; mkplan.bash scaffolds the folder for "
     "new plans) and log activity as you work. See CLAUDE/PlanJournalling.md."
 )
 

@@ -47,9 +47,10 @@ def _ctx(
     plan_number: int = 377,
     journal_mode: str = "advise",
     journal_enabled: bool = True,
+    basename: str | None = None,
 ) -> CheckContext:
     root = Path("/repo")
-    name = f"{plan_number:05d}-Journal-26-09-11.md"
+    name = basename or f"{plan_number:05d}-Journal-26-09-11.md"
     file_path = root / "CLAUDE" / "Plan" / f"{plan_number:05d}-thing" / "JOURNAL" / name
     return CheckContext(
         project_root=root,
@@ -455,3 +456,146 @@ class TestACrossDayCorrectionVoidsTheEntryItNames:
             ref="26-09-11/09:00",
         )
         assert "journal-entry-ordering" in ids
+
+
+_ENTRY_NAME = "2026-10-21/093015Z-action-0a1b2c.md"
+
+
+class TestEntryFilesOnTheEditStage:
+    """Plan 00543: an entry file holds ONE entry whose heading names the file's time."""
+
+    def test_a_matching_heading_passes(self) -> None:
+        body = _PREAMBLE + _entry("09:30")
+        assert _EDIT.run(_ctx(body, basename=_ENTRY_NAME)) == []
+
+    def test_a_heading_that_disagrees_with_the_file_name_is_a_finding(self) -> None:
+        findings = _EDIT.run(_ctx(_PREAMBLE + _entry("09:45"), basename=_ENTRY_NAME))
+        assert len(findings) == 1
+        assert "09:30" in findings[0].message
+        assert "09:45" in findings[0].message
+
+    def test_two_headings_are_a_finding(self) -> None:
+        body = _PREAMBLE + _entry("09:30") + _entry("09:40")
+        assert len(_EDIT.run(_ctx(body, basename=_ENTRY_NAME))) == 1
+
+    def test_no_heading_is_a_finding(self) -> None:
+        assert len(_EDIT.run(_ctx(_PREAMBLE, basename=_ENTRY_NAME))) == 1
+
+    def test_an_unparseable_name_is_left_to_the_naming_check(self) -> None:
+        body = _PREAMBLE + _entry("09:45")
+        assert _EDIT.run(_ctx(body, basename="2026-10-21/not-an-entry.md")) == []
+
+    def test_a_day_file_is_still_judged_by_ordering(self) -> None:
+        body = _PREAMBLE + _entry("13:00") + _entry("12:50")
+        assert len(_EDIT.run(_ctx(body))) == 1
+
+
+def _sweep_entry_files(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    files: dict[str, str],
+    *,
+    archived: bool = False,
+) -> list[dict[str, str]]:
+    """Sweep a one-plan tree whose JOURNAL holds the given ``folder/name -> body`` files."""
+    import argparse
+    import json
+    import subprocess
+
+    from claude_code_hooks_daemon.daemon.cli import cmd_plan_qa
+
+    root = tmp_path / "repo"
+    plan_dir = root / "CLAUDE" / "Plan"
+    (plan_dir / "Completed").mkdir(parents=True)
+    (plan_dir / "Cancelled").mkdir()
+    (root / ".claude").mkdir()
+    (root / ".claude" / "hooks-daemon.yaml").write_text("plan_workflow:\n  enabled: true\n")
+    status = "Complete" if archived else "In Progress"
+    folder = (plan_dir / "Completed" if archived else plan_dir) / "00001-first"
+    folder.mkdir()
+    (folder / "PLAN.md").write_text(
+        f"# Plan 00001: first\n\n**Status**: {status}\n\n- [ ] ⬜ **Task 1.1**: x\n"
+    )
+    for rel, body in files.items():
+        target = folder / "JOURNAL" / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body)
+    (plan_dir / "README.md").write_text(
+        f"# Plans Index\n\n## Active Plans\n\n- [00001: first](00001-first/PLAN.md) - {status}\n"
+    )
+    subprocess.run(
+        ["git", "init", str(root)],
+        capture_output=True,
+        check=True,
+        timeout=git_setup_timeout(),
+    )
+    cmd_plan_qa(
+        argparse.Namespace(
+            project_root=root,
+            sweep=True,
+            check_staged=False,
+            lint=None,
+            json_output=True,
+        )
+    )
+    findings: list[dict[str, str]] = json.loads(capsys.readouterr().out)
+    return [f for f in findings if f["check_id"] == "journal-entry-ordering"]
+
+
+class TestTheSweepWalksEntryFiles:
+    def test_a_mismatched_entry_file_is_reported(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        files = {_ENTRY_NAME: _entry("09:45")}
+        assert len(_sweep_entry_files(tmp_path, capsys, files)) == 1
+
+    def test_a_matching_entry_file_passes(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        files = {_ENTRY_NAME: _entry("09:30")}
+        assert _sweep_entry_files(tmp_path, capsys, files) == []
+
+    def test_a_pre_cutoff_folder_is_grandfathered(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        files = {"2026-07-14/093015Z-action-0a1b2c.md": _entry("09:45")}
+        assert _sweep_entry_files(tmp_path, capsys, files) == []
+
+    def test_an_archived_plans_entry_file_is_not_swept(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        files = {_ENTRY_NAME: _entry("09:45")}
+        assert _sweep_entry_files(tmp_path, capsys, files, archived=True) == []
+
+    def test_an_unparseable_entry_name_is_skipped(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        files = {"2026-10-21/whatever.md": _entry("09:45")}
+        assert _sweep_entry_files(tmp_path, capsys, files) == []
+
+    def test_a_same_day_correction_entry_voids_the_label(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        files = {
+            "2026-10-21/095015Z-action-0a1b2c.md": _entry("09:50"),
+            "2026-10-21/091200Z-correction-0d1e2f.md": _correction("09:12", "09:50"),
+        }
+        assert _sweep_entry_files(tmp_path, capsys, files) == []
+
+    def test_a_cross_day_correction_entry_voids_the_label(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        files = {
+            "2026-10-20/095015Z-action-0a1b2c.md": _entry("09:55"),
+            "2026-10-21/091200Z-correction-0d1e2f.md": _correction("09:12", "26-10-20/09:55"),
+        }
+        assert _sweep_entry_files(tmp_path, capsys, files) == []
+
+    def test_a_correction_for_another_day_voids_nothing(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        files = {
+            "2026-10-20/095015Z-action-0a1b2c.md": _entry("09:55"),
+            "2026-10-21/091200Z-correction-0d1e2f.md": _correction("09:12", "26-10-19/09:55"),
+        }
+        assert len(_sweep_entry_files(tmp_path, capsys, files)) == 1

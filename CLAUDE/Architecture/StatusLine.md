@@ -375,6 +375,31 @@ environment variable.
 3. **Minimal I/O**: Most handlers read from in-memory state or fast local files. Only `GitBranchHandler` shells out to a subprocess.
 4. **Silent failures**: Every handler catches exceptions and returns empty context rather than crashing the chain.
 
+### The forwarder fast path (issue #131, Plan 00542)
+
+The legacy forwarder path sources `.claude/init.sh` and starts `python3` on every tick (about 0.08 CPU-seconds). When `daemon.transport` enables the relay (`relay_enabled`) or nc (`nc_enabled`; the relay wins when both are on), the generated `.claude/hooks/status-line` first runs a bash-builtin-only block (`forwarder_generator.build_status_fast_path_block`) that:
+
+1. computes the per-event socket path exactly as the relay guard does and requires it to be a socket;
+2. reads stdin, requires a JSON object, and splices in `"hooks_daemon_raw_text":true` plus `terminal_columns` / `terminal_lines` from `COLUMNS` / `LINES` (digits only);
+3. sends it through the enabled client with a 2 second timeout, requires the reply to start with the sentinel byte, strips it, and prints the rest.
+
+The daemon (`HooksDaemon._answer_event`) answers a raw-text Status request with the sentinel (`RawTextReply.SENTINEL`, the ASCII record separator 0x1e) followed by the exact line the python rung prints: `text` plus a newline, `⚠️ ERROR: <msg>` for an error, `⚠️ NO STATUS DATA` for no text. The sentinel is what lets the client reject the JSON a daemon from before raw mode sends during an upgrade.
+
+**No silent fallbacks.** The ONE hand-off to the legacy path (stdin replayed) is "no daemon answered": no socket file, or a refused connection (relay exit 10, nc exit 1). The legacy start-up path starts the daemon and reports loudly (`DAEMON FAILED`, venv building). A payload that is not a JSON object is handed off too. Every other fault prints one red line naming the fault and the fix, and exits 0, so the status line itself is the loud channel:
+
+| Fault                                                          | Red line                                                                  |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| relay enabled, binary missing or not executable                | `hooks-relay missing or not executable (<path>): run bin/hooks-daemon transport on` |
+| nc enabled, probe says no unix sockets (or no probe recorded)  | `nc cannot do unix sockets (HOOKS_DAEMON_NC_UNIX_CAPABLE=<0>): run bin/hooks-daemon transport status` |
+| nc enabled, `nc` not on PATH                                   | `nc not found on PATH: ...`                                               |
+| relay exit 11                                                  | `status timed out after 2s (daemon busy)`                                 |
+| any other client exit above 0 (relay 12, 13, ...; nc 2, ...)   | `status client failed (exit N)`                                           |
+| empty reply (nc `-w` timeout exits 0 with nothing)             | `empty status reply (timed out after 2s, or protocol fault): ...restart`  |
+| non-empty reply without the sentinel                           | `daemon older than its forwarder: run bin/hooks-daemon restart`           |
+| `read` status above 1                                          | `status line could not read its input (read status N)`                    |
+
+Neither client enabled is not a failure: the configured path is the python rung and no block is generated. Exit codes: relay `--no-fallback` 10 connect, 11 timeout, 12 I/O or oversized reply, 13 usage (`relay/hooks_relay.rs`); nc cannot tell a missing socket from a refused one (both exit 1), so a missing socket is decided by testing the socket file first. The block is confined to its own checkout (a `BASH_SOURCE` guard), is absent when both clients are disabled, and is stripped and re-applied on regeneration like the relay guard. Measured: about 0.011 s wall and 0.005 CPU-seconds against 0.11 s and 0.085 CPU-seconds.
+
 ### Performance Characteristics by Handler
 
 | Handler                 | I/O Type                                  | Expected Latency |

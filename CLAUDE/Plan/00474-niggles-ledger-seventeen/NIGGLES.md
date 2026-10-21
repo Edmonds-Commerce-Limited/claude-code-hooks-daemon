@@ -109,6 +109,20 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N525 — `transport on` builds a missing relay binary and then reports "nothing to do"
+
+**Source**: the coordinator, provisioning the relay after merging Plan 00542 (#131).
+
+- **N525**: with `relay_enabled: true` already in config and `untracked/bin/hooks-relay` absent, `bin/hooks-daemon transport on` built and installed the binary (the converge path calls `ensure_relay_binary` first,
+  `transport_toggle.py:354-367`), but the forwarders were already current, so the outcome carried `changed=False, verified=None` and the CLI printed `relay already enabled — nothing to do` (`cli.py:7607`). That is the command the
+  status line's red relay-missing line names, so the repair succeeds while saying it did nothing. A provisioned binary
+  is a change and must be reported as one. The code at `cli.py:7599` already states that rule.
+
+**Fix direction**: carry a `provisioned` fact on `ToggleOutcome` and print it, with the route used (build or
+download). Fold this into Plan 00529 Task 2, which owns relay provisioning.
+
+**Status**: ⬜ Open.
+
 ### N524 — the journal guard lets an edit shrink a journal but denies the edit that restores it, and docs QA asks for a journal rewrite
 
 **Source**: the coordinator, integrating Plan 00476 Task 2.2 (targeted QA on the integration head).

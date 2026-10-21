@@ -139,6 +139,18 @@ class TestFindings:
         context = _context(repo)
         assert CHECK.run(context) == []
 
+    def test_completion_with_new_entry_file_is_clean(self, repo: Path) -> None:
+        """Plan 00543: a staged new entry file is the closing entry."""
+        _git(repo, "mv", "CLAUDE/Plan/00200-widget", "CLAUDE/Plan/Completed/00200-widget")
+        (repo / "CLAUDE/Plan/Completed/00200-widget/PLAN.md").write_text(_PLAN_COMPLETE)
+        entry = (
+            repo / "CLAUDE/Plan/Completed/00200-widget/JOURNAL/2026-07-15/160000Z-handoff-0a1b2c.md"
+        )
+        entry.parent.mkdir()
+        entry.write_text("## 16:00 · handoff · — — done\n\nplan complete\n")
+        _git(repo, "add", "-A")
+        assert CHECK.run(_context(repo)) == []
+
     def test_completion_with_appended_entry_to_moved_dayfile_is_clean(self, repo: Path) -> None:
         _git(repo, "mv", "CLAUDE/Plan/00200-widget", "CLAUDE/Plan/Completed/00200-widget")
         (repo / "CLAUDE/Plan/Completed/00200-widget/PLAN.md").write_text(_PLAN_COMPLETE)

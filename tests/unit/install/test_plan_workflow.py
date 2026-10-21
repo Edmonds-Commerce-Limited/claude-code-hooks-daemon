@@ -1,5 +1,6 @@
 """Tests for plan workflow bootstrapping."""
 
+import re
 import stat
 import subprocess
 from pathlib import Path
@@ -527,7 +528,7 @@ class TestMkplanScaffoldsJournal:
         return Path(result.stdout.strip())
 
     def test_scaffolds_journal_when_template_present(self, tmp_path: Path) -> None:
-        """A _JOURNAL_TEMPLATE_.md triggers JOURNAL/NNNNN-Journal-YY-MM-DD.md creation."""
+        """A _JOURNAL_TEMPLATE_.md triggers a seed entry file JOURNAL/YYYY-MM-DD/<entry>.md."""
         _, plan_dir = self._scaffold_repo(tmp_path)
         (plan_dir / self._JOURNAL_TEMPLATE_NAME).write_text(
             "# Plan {{PLAN_NUMBER}} — Journal {{DATE}}\n\n"
@@ -539,18 +540,17 @@ class TestMkplanScaffoldsJournal:
 
         journal_dir = target / "JOURNAL"
         assert journal_dir.is_dir(), "JOURNAL/ folder should be scaffolded"
-        day_files = list(journal_dir.glob("00001-Journal-*.md"))
-        assert len(day_files) == 1, f"expected one day-file, got {day_files}"
+        assert list(journal_dir.glob("*-Journal-*.md")) == [], "no legacy day-file"
+        entry_files = list(journal_dir.glob("*/*.md"))
+        assert len(entry_files) == 1, f"expected one seed entry file, got {entry_files}"
 
-        name = day_files[0].name
-        # NNNNN-Journal-YY-MM-DD.md
-        assert name.startswith("00001-Journal-") and name.endswith(".md")
-        date_part = name[len("00001-Journal-") : -len(".md")]
-        chunks = date_part.split("-")
-        assert len(chunks) == 3 and all(len(c) == 2 and c.isdigit() for c in chunks), name
+        # YYYY-MM-DD/HHMMSSZ-<category>-<6 hex>.md
+        folder_chunks = entry_files[0].parent.name.split("-")
+        assert [len(c) for c in folder_chunks] == [4, 2, 2], entry_files[0]
+        assert re.fullmatch(r"\d{6}Z-action-[0-9a-f]{6}\.md", entry_files[0].name), entry_files[0]
 
-        content = day_files[0].read_text()
-        assert "# Plan 00001 — Journal" in content
+        content = entry_files[0].read_text()
+        assert content.startswith("## ")
         assert "By Journal Tester on plan 00001." in content
         assert "{{" not in content
 

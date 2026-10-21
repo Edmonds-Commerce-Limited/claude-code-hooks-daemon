@@ -56,6 +56,14 @@ class HookInputField:
     # connected process's environment. Absent when the session set neither.
     # Consumed via utils.cron_hosts.effective_hostname (Plan 00470 Task 6.1).
     SESSION_HOSTNAME = "hooks_daemon_hostname"
+    # NOT sent by Claude Code: set by the generated status-line forwarder's fast
+    # path (issue #131) to ask the Status per-event socket for the bare status
+    # text instead of the JSON response. The daemon pops it before dispatch.
+    RAW_TEXT = "hooks_daemon_raw_text"
+    # NOT sent by Claude Code: the terminal size the status-line client read
+    # from COLUMNS / LINES, so the status text can wrap to it.
+    TERMINAL_COLUMNS = "terminal_columns"
+    TERMINAL_LINES = "terminal_lines"
     # NOT sent by Claude Code: the pid of the hook process on the other end of the
     # event socket, stamped by the daemon from SO_PEERCRED. Consumed by
     # utils.session_thread_group to tell later threads of one Claude Code session
@@ -205,4 +213,25 @@ class SocketLimit:
     REQUEST_BUFFER_BYTES = 16 * 1024 * 1024  # 16 MiB
 
 
-__all__ = ["HookInputField", "HookOutputField", "PermissionDecision", "SocketLimit"]
+class RawTextReply:
+    """The wire shape of a raw-text status reply (issue #131)."""
+
+    # The first byte of every raw-text reply: the ASCII record separator. A
+    # daemon from before raw-text mode answers with JSON, which never starts
+    # with this byte, so the client can tell the two apart and print only a
+    # reply that carries it. Printable text and JSON cannot begin with it.
+    SENTINEL = "\x1e"
+
+    # What init.sh's python rung prints for an error response and for a reply
+    # with no text, so the two rungs show the same line.
+    ERROR_PREFIX = "⚠️ ERROR: "
+    NO_STATUS_DATA = "⚠️ NO STATUS DATA"
+
+
+__all__ = [
+    "HookInputField",
+    "HookOutputField",
+    "PermissionDecision",
+    "RawTextReply",
+    "SocketLimit",
+]

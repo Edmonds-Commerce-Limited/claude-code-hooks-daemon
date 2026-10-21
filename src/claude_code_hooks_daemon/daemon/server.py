@@ -33,7 +33,7 @@ from typing import Any, Final, Protocol, Self, runtime_checkable
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.events import wired_event_metas
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
-from claude_code_hooks_daemon.constants.protocol import HookInputField, SocketLimit
+from claude_code_hooks_daemon.constants.protocol import HookInputField, RawTextReply, SocketLimit
 from claude_code_hooks_daemon.core.debouncer import shutdown_debouncer
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.core.input_schemas import get_input_schema
@@ -137,6 +137,31 @@ class _ChunkReader(Protocol):
 #: paths below run before ANY parsing of the payload, so nothing else in
 #: this module needs the full event-metadata machinery for this one check.
 _PRE_TOOL_USE_WIRE_KEY: Final[str] = "PreToolUse"
+
+#: The wire event name the status-line socket carries (`EventID.STATUS_LINE`).
+_STATUS_WIRE_KEY: Final[str] = "Status"
+
+
+def _raw_text_reply(response: dict[str, Any]) -> bytes:
+    """The bytes a raw-text Status request is answered with (issue #131).
+
+    The ``RawTextReply.SENTINEL`` byte, then exactly what init.sh's python
+    rung prints: the ``text`` plus a newline, or for an error response
+    ``⚠️ ERROR: <msg>``, or for a reply with no usable text ``⚠️ NO STATUS
+    DATA``. The shell client cannot parse JSON, so the daemon renders those
+    lines itself; the sentinel lets the client tell this reply from the JSON a
+    daemon that predates raw mode sends. An EMPTY reply is therefore a
+    protocol fault, which the client reports loudly.
+    """
+    text = response.get("text")
+    if response.get("error"):
+        line = RawTextReply.ERROR_PREFIX + str(response["error"])
+    elif isinstance(text, str) and text:
+        line = text
+    else:
+        line = RawTextReply.NO_STATUS_DATA
+    return (RawTextReply.SENTINEL + line + "\n").encode()
+
 
 #: Reason text for a transport-level PreToolUse deny (Plan 00466 N40 review 2
 #: MA3): a malformed/oversized/undecodable payload, or an uncaught exception,
@@ -1940,6 +1965,12 @@ class HooksDaemon:
         if isinstance(hook_input, dict) and not hook_input.get(HookInputField.HOOK_EVENT_NAME):
             hook_input[HookInputField.HOOK_EVENT_NAME] = event_json_key
 
+        # Raw-text mode (issue #131) exists for the Status socket only; the flag
+        # is consumed here so no handler or schema ever sees it.
+        raw_text = False
+        if isinstance(hook_input, dict) and event_json_key == _STATUS_WIRE_KEY:
+            raw_text = hook_input.pop(HookInputField.RAW_TEXT, False) is True
+
         request_data = json.dumps({"event": event_json_key, "hook_input": hook_input})
         response = await self._process_request(request_data, arrival_time=arrival_time)
         if event_json_key == _PRE_TOOL_USE_WIRE_KEY and not _pre_tool_use_response_looks_valid(
@@ -1960,7 +1991,7 @@ class HooksDaemon:
         if is_blocking_response(response):
             log_blocking_response(response_json, debug_enabled=logger.isEnabledFor(logging.DEBUG))
 
-        writer.write(response_json.encode())
+        writer.write(_raw_text_reply(response) if raw_text else response_json.encode())
         await writer.drain()
 
     async def _handle_event_client(
@@ -2550,7 +2581,7 @@ class HooksDaemon:
             response_dict: dict[str, Any] = hook_result.to_json(
                 event,
                 stop_hook_active=stop_hook_active,
-                terminal_columns=hook_input.get("terminal_columns"),
+                terminal_columns=hook_input.get(HookInputField.TERMINAL_COLUMNS),
             )
             if request_id:
                 response_dict["request_id"] = request_id

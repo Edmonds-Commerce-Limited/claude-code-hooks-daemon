@@ -17,6 +17,7 @@ EARLIER than one above it is a defect.
 """
 
 from datetime import date
+from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.plan_qa.checks.common import (
@@ -35,6 +36,7 @@ from claude_code_hooks_daemon.plan_qa.model import (
     journal_correction_command,
     journal_entry_headings,
     parse_journal_dayfile_name,
+    parse_journal_entry_path,
 )
 from claude_code_hooks_daemon.plan_qa.types import (
     CheckContext,
@@ -92,12 +94,64 @@ def _remediation(plan_dir: str, plan_number: int | None) -> str:
     )
 
 
+def _entry_file_rule(
+    context: CheckContext,
+    target: JournalEditTarget,
+    content: str,
+    extra_voided: frozenset[str],
+) -> list[Finding]:
+    """An entry file holds ONE entry, and its heading time is the file name's time.
+
+    A label a correction names is declared wrong by the record itself, so it is
+    not judged against the name. An unparseable name is the naming check's.
+    """
+    parsed = (
+        parse_journal_entry_path(target.entry_folder, target.basename)
+        if target.entry_folder is not None
+        else None
+    )
+    if parsed is None:
+        return []
+    headings = journal_entry_headings(content)
+    if len(headings) != 1:
+        problem = f"holds {len(headings)} entry headings, not exactly one"
+    elif headings[0].label == parsed.label or headings[0].label in (
+        corrected_entry_labels(headings) | extra_voided
+    ):
+        return []
+    else:
+        problem = (
+            f"has the heading time `{headings[0].label}` but its file name says `{parsed.label}`"
+        )
+    return [
+        Finding(
+            check_id=CHECK_ID,
+            level=journal_level(context),
+            message=(
+                f"Journal entry file `{target.basename}` {problem} (an entry file is "
+                "one entry whose heading time is its file name's time)."
+            ),
+            remediation=(
+                "Entry files are never edited once written. Correct the record with a NEW "
+                f"entry appended with `{journal_append_command(context.plan_dir_rel, target.plan_number)}` "
+                f"({JOURNAL_BODY_FILE_HINT}); a wrong heading time is declared wrong by a "
+                f"`{JOURNAL_CORRECTION_CATEGORY}` entry whose `--ref` names it "
+                f"(`{journal_correction_command(context.plan_dir_rel, target.plan_number)}`). "
+                "Only a file that is NOT yet committed may be fixed in place."
+            ),
+            path=target.rel_path,
+        )
+    ]
+
+
 def _rule(
     context: CheckContext,
     target: JournalEditTarget,
     content: str,
     extra_voided: frozenset[str] = frozenset(),
 ) -> list[Finding]:
+    if target.is_entry_file:
+        return _entry_file_rule(context, target, content, extra_voided)
     headings = journal_entry_headings(content)
     # An entry a correction in this file names has a clock reading the file
     # itself declares wrong, so it sets no high-water mark. It stays where it
@@ -169,6 +223,9 @@ def _live_journal_targets(context: CheckContext) -> list[JournalEditTarget]:
         if journal_dir is None or not journal_dir.is_dir():
             continue
         for entry in sorted(journal_dir.iterdir()):
+            if entry.is_dir():
+                targets.extend(_entry_folder_targets(context, folder.number, entry))
+                continue
             if not entry.is_file() or entry.suffix != ".md":
                 continue
             parsed = parse_journal_dayfile_name(entry.name)
@@ -183,6 +240,28 @@ def _live_journal_targets(context: CheckContext) -> list[JournalEditTarget]:
                     basename=entry.name,
                 )
             )
+    return targets
+
+
+def _entry_folder_targets(
+    context: CheckContext, plan_number: int | None, folder: Path
+) -> list[JournalEditTarget]:
+    """Parseable, post-cutoff entry files in one ``YYYY-MM-DD`` folder (same grandfathering)."""
+    targets: list[JournalEditTarget] = []
+    for entry in sorted(folder.iterdir()):
+        if not entry.is_file() or entry.suffix != ".md":
+            continue
+        parsed = parse_journal_entry_path(folder.name, entry.name)
+        if parsed is None or (parsed.year, parsed.month, parsed.day) < _NO_BACKFILL_BEFORE:
+            continue
+        targets.append(
+            JournalEditTarget(
+                rel_path=str(path_relative_to(entry, context.project_root)),
+                plan_number=plan_number,
+                basename=entry.name,
+                entry_folder=folder.name,
+            )
+        )
     return targets
 
 
@@ -217,16 +296,25 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
             )
             continue
         contents[target.rel_path] = content
-        for voided_date, label in cross_file_corrected_entries(journal_entry_headings(content)):
+        headings = journal_entry_headings(content)
+        for voided_date, label in cross_file_corrected_entries(headings):
             cross_voided.setdefault(voided_date, set()).add(label)
+        if target.is_entry_file and target.journal_date is not None:
+            # An entry file is its own day's record: its same-day corrections
+            # void labels in OTHER entry files of that folder.
+            cross_voided.setdefault(target.journal_date, set()).update(
+                corrected_entry_labels(headings)
+            )
 
     for target in targets:
         target_content = contents.get(target.rel_path)
         if target_content is None:
             continue
-        parsed = parse_journal_dayfile_name(target.basename)
+        target_date = target.journal_date
         extra_voided = (
-            frozenset(cross_voided.get(parsed.date, set())) if parsed is not None else frozenset()
+            frozenset(cross_voided.get(target_date, set()))
+            if target_date is not None
+            else frozenset()
         )
         findings.extend(_rule(context, target, target_content, extra_voided))
     return findings
