@@ -17,8 +17,9 @@ Each plan folder contains:
 - **`PLAN.md`** — the plan itself: goals, task tree with status icons,
   decisions, success criteria. Kept lean and always stating *current* truth;
   it is edited in place, and git holds its history.
-- **`JOURNAL/`** — append-only day-files recording what actually happened:
-  progress, findings, incidents, hand-offs. Journals grow forever and are
+- **`JOURNAL/`** — append-only entry files (one file per entry,
+  `JOURNAL/YYYY-MM-DD/HHMMSSZ-<category>-<hex>.md`) recording what actually
+  happened: progress, findings, incidents, hand-offs. Journals grow forever and are
   never trimmed. See [CLAUDE/PlanJournalling.md](../CLAUDE/PlanJournalling.md)
   for the journalling contract.
 - **Supporting docs** (optional) — research, analysis, evidence, kept next to

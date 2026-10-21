@@ -57,7 +57,7 @@ def _remediation(plan_dir: str, plan_number: int | None) -> str:
     command = journal_append_command(plan_dir, plan_number, _CLOSING_CATEGORY)
     return (
         f"Append a closing entry (why it ended, hand-off state) with `{command}` "
-        f"({JOURNAL_BODY_FILE_HINT}), and stage the day-file in this commit."
+        f"({JOURNAL_BODY_FILE_HINT}), and stage the new entry file in this commit."
     )
 
 

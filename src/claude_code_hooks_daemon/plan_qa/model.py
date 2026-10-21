@@ -391,8 +391,8 @@ _BODY_FILE_PLACEHOLDER: Final[str] = "<body-file>"
 #: every remediation that names the command says it the same way.
 JOURNAL_BODY_FILE_HINT: Final[str] = (
     "write the entry BODY (no heading) with the Write tool to a fresh file under "
-    "untracked/scratch/ first; the tool stamps the real UTC time and creates "
-    "today's day-file when there is none"
+    "untracked/scratch/ first; the tool stamps the real UTC time and writes the "
+    "entry as a NEW file under JOURNAL/YYYY-MM-DD/"
 )
 
 
@@ -470,6 +470,39 @@ def journal_entry_headings(content: str) -> list[JournalEntryHeading]:
     return headings
 
 
+#: The lines git writes around a merge conflict. Removing only these keeps
+#: every entry of both sides, so it is the one removal that destroys nothing.
+_CONFLICT_MARKER_PREFIXES: Final[tuple[str, ...]] = ("<<<<<<< ", "||||||| ", ">>>>>>> ")
+_CONFLICT_SEPARATOR: Final[str] = "======="
+
+
+def is_conflict_marker(line: str) -> bool:
+    """Whether ``line`` is one git writes around a merge conflict."""
+    return line.rstrip() == _CONFLICT_SEPARATOR or line.startswith(_CONFLICT_MARKER_PREFIXES)
+
+
+def only_conflict_markers_removed(before: str, after: str) -> bool:
+    """Whether ``after`` is ``before`` with only conflict-marker lines taken out.
+
+    Line order is kept and nothing is added or changed, so both sides' entries
+    survive: the hand route for a journal conflict that the coordinator asked
+    to keep beside `mkplan.bash --resolve-conflict`. The one reader for both
+    ``plan_journal_guard`` and ``journal-dayfile-is-today``, so the two cannot
+    disagree about which rewrite of a journal file is harmless.
+    """
+    remaining = iter(after.splitlines())
+    expected = next(remaining, None)
+    removed_any = False
+    for line in before.splitlines():
+        if line == expected:
+            expected = next(remaining, None)
+        elif is_conflict_marker(line):
+            removed_any = True
+        else:
+            return False
+    return expected is None and removed_any
+
+
 def corrected_entry_labels(headings: list[JournalEntryHeading]) -> frozenset[str]:
     """The ``HH:MM`` labels that this day-file's own corrections declare wrong.
 
@@ -534,14 +567,112 @@ def parse_journal_dayfile_name(filename: str) -> JournalDayfileName | None:
     )
 
 
+#: Plan 00543: one folder per UTC day under ``JOURNAL/``, ``YYYY-MM-DD``.
+_JOURNAL_ENTRY_FOLDER_RE: Final[re.Pattern[str]] = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
+
+#: Plan 00543: one file per entry, ``HHMMSSZ-<category>-<6 hex>.md``.
+_JOURNAL_ENTRY_FILE_RE: Final[re.Pattern[str]] = re.compile(
+    r"^(\d{2})(\d{2})(\d{2})Z-([a-z]+)-([0-9a-f]{6})\.md$"
+)
+
+_HOURS_PER_DAY: Final[int] = 24
+_SECONDS_PER_MINUTE: Final[int] = 60
+
+
+@dataclass(frozen=True)
+class JournalEntryFileName:
+    """The parts of a ``YYYY-MM-DD/HHMMSSZ-<category>-<hex>.md`` entry path (Plan 00543)."""
+
+    year: int
+    month: int
+    day: int
+    hour: int
+    minute: int
+    second: int
+    category: str
+
+    @property
+    def is_valid_time(self) -> bool:
+        """Whether the name's ``HHMMSS`` is a real time of day."""
+        return (
+            self.hour < _HOURS_PER_DAY
+            and self.minute < _MINUTES_PER_HOUR
+            and self.second < _SECONDS_PER_MINUTE
+        )
+
+    @property
+    def is_valid_date(self) -> bool:
+        """Whether the folder is a real calendar date and the name a real UTC time."""
+        return _is_valid_calendar_date(self.year, self.month, self.day) and self.is_valid_time
+
+    @property
+    def date(self) -> date:
+        """The entry folder's date — only meaningful when :attr:`is_valid_date`."""
+        return date(self.year, self.month, self.day)
+
+    @property
+    def label(self) -> str:
+        """The entry time as its heading writes it, ``HH:MM``."""
+        return f"{self.hour:02d}:{self.minute:02d}"
+
+
+def is_journal_entry_folder_name(name: str) -> bool:
+    """Whether ``name`` has the ``YYYY-MM-DD`` entry-folder SHAPE (validity not checked)."""
+    return _JOURNAL_ENTRY_FOLDER_RE.match(name) is not None
+
+
+def journal_entry_folder_date(name: str) -> date | None:
+    """The calendar date an entry folder name states, or ``None`` when it is not one."""
+    match = _JOURNAL_ENTRY_FOLDER_RE.match(name)
+    if match is None:
+        return None
+    year, month, day = (int(part) for part in match.groups())
+    if not _is_valid_calendar_date(year, month, day):
+        return None
+    return date(year, month, day)
+
+
+def parse_journal_entry_path(folder: str, filename: str) -> JournalEntryFileName | None:
+    """Parse an entry file's folder and file names, or ``None`` when either is malformed.
+
+    Like :func:`parse_journal_dayfile_name`, ``None`` is a classification; the
+    calendar and clock validity of the parts is :attr:`JournalEntryFileName.is_valid_date`.
+    """
+    folder_match = _JOURNAL_ENTRY_FOLDER_RE.match(folder)
+    file_match = _JOURNAL_ENTRY_FILE_RE.match(filename)
+    if folder_match is None or file_match is None:
+        return None
+    year, month, day = (int(part) for part in folder_match.groups())
+    hour, minute, second, category, _suffix = file_match.groups()
+    return JournalEntryFileName(
+        year=year,
+        month=month,
+        day=day,
+        hour=int(hour),
+        minute=int(minute),
+        second=int(second),
+        category=category,
+    )
+
+
+def _entry_folder_date(folder: Path, view: TreeView) -> date | None:
+    """The date of an entry folder holding at least one valid entry file, else ``None``."""
+    for entry in view.children(folder):
+        parsed = parse_journal_entry_path(folder.name, entry.name)
+        if parsed is not None and parsed.is_valid_date and view.is_file(entry):
+            return parsed.date
+    return None
+
+
 def _scan_journal(
     plan_folder: Path, journal_dir_name: str, view: TreeView
 ) -> tuple[bool, date | None]:
     """Return ``(has_journal, latest_journal_date)`` for one plan folder.
 
     ``has_journal`` is True when the journal directory exists at all;
-    ``latest_journal_date`` is the newest well-formed day-file date, or
-    ``None`` when the directory is empty or holds only malformed names.
+    ``latest_journal_date`` is the newest well-formed legacy day-file date or
+    entry-folder date (Plan 00543: a folder counts only when it holds an entry
+    file), or ``None`` when there is neither.
     """
     # CONFIG-derived, so contained -- see the twin in `checks/common.py`. The
     # "no journal directory" answer is already this function's own None case,
@@ -549,11 +680,16 @@ def _scan_journal(
     journal_dir = contained_authored_path(plan_folder, journal_dir_name)
     if journal_dir is None or not view.is_dir(journal_dir):
         return False, None
-    dates = [
-        parsed.date
-        for entry in view.children(journal_dir)
-        if (parsed := parse_journal_dayfile_name(entry.name)) is not None and parsed.is_valid_date
-    ]
+    dates: list[date] = []
+    for entry in view.children(journal_dir):
+        if is_journal_entry_folder_name(entry.name) and view.is_dir(entry):
+            folder_date = _entry_folder_date(entry, view)
+            if folder_date is not None:
+                dates.append(folder_date)
+            continue
+        parsed = parse_journal_dayfile_name(entry.name)
+        if parsed is not None and parsed.is_valid_date:
+            dates.append(parsed.date)
     return True, (max(dates) if dates else None)
 
 

@@ -1,5 +1,6 @@
 """Tests for plan_qa.checks.common — shared edit-target helpers (Plan 00144)."""
 
+from datetime import date
 from pathlib import Path
 from typing import ClassVar
 
@@ -104,3 +105,78 @@ class TestLevelForPlan:
 
     def test_blocks_for_unknown_number(self) -> None:
         assert level_for_plan(_context(None), None) == Level.BLOCK
+
+
+class TestJournalEntryTargets:
+    """Plan 00543: entry files under ``JOURNAL/YYYY-MM-DD/`` are journal targets."""
+
+    _ENTRY = "CLAUDE/Plan/00042-widget/JOURNAL/2026-10-21/093015Z-action-0a1b2c.md"
+
+    def test_entry_file_edit_target(self) -> None:
+        from claude_code_hooks_daemon.plan_qa.checks.common import journal_edit_target
+
+        target = journal_edit_target(_context(self._ENTRY, content="## 09:30 · action · —\n"))
+        assert target is not None
+        assert target.is_entry_file is True
+        assert target.entry_folder == "2026-10-21"
+        assert target.basename == "093015Z-action-0a1b2c.md"
+        assert target.plan_number == 42
+        assert target.journal_date == date(2026, 10, 21)
+
+    def test_dayfile_target_is_not_an_entry_file(self) -> None:
+        from claude_code_hooks_daemon.plan_qa.checks.common import journal_edit_target
+
+        target = journal_edit_target(
+            _context("CLAUDE/Plan/00042-widget/JOURNAL/00042-Journal-26-07-31.md", content="x\n")
+        )
+        assert target is not None
+        assert target.is_entry_file is False
+        assert target.entry_folder is None
+        assert target.journal_date == date(2026, 7, 31)
+
+    def test_journal_date_none_for_impossible_folder(self) -> None:
+        from claude_code_hooks_daemon.plan_qa.checks.common import journal_edit_target
+
+        target = journal_edit_target(
+            _context(
+                "CLAUDE/Plan/00042-widget/JOURNAL/2026-02-30/093015Z-action-0a1b2c.md",
+                content="x\n",
+            )
+        )
+        assert target is not None
+        assert target.journal_date is None
+
+    def test_non_date_subfolder_is_not_a_target(self) -> None:
+        from claude_code_hooks_daemon.plan_qa.checks.common import journal_edit_target
+
+        context = _context("CLAUDE/Plan/00042-widget/JOURNAL/sub/x.md", content="x\n")
+        assert journal_edit_target(context) is None
+
+    def test_tree_targets_walk_entry_folders(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.plan_qa.checks.common import journal_tree_targets
+        from claude_code_hooks_daemon.plan_qa.model import PlanTree
+
+        plan_root = tmp_path / "CLAUDE" / "Plan"
+        journal = plan_root / "00042-widget" / "JOURNAL"
+        (journal / "2026-10-21").mkdir(parents=True)
+        (journal / "sub").mkdir()
+        (plan_root / "00042-widget" / "PLAN.md").write_text(_PLAN_CONTENT)
+        (journal / "00042-Journal-26-07-31.md").write_text("x\n")
+        (journal / "2026-10-21" / "093015Z-action-0a1b2c.md").write_text("x\n")
+        (journal / "2026-10-21" / "badly-named.md").write_text("x\n")
+        (journal / "sub" / "ignored.md").write_text("x\n")
+        context = CheckContext(
+            project_root=tmp_path, plan_dir_rel="CLAUDE/Plan", tree=PlanTree.scan(plan_root)
+        )
+        targets = journal_tree_targets(context)
+        assert sorted((t.entry_folder or "", t.basename) for t in targets) == sorted(
+            [
+                ("", "00042-Journal-26-07-31.md"),
+                ("2026-10-21", "093015Z-action-0a1b2c.md"),
+                ("2026-10-21", "badly-named.md"),
+            ]
+        )
+        entry = next(t for t in targets if t.basename == "093015Z-action-0a1b2c.md")
+        assert entry.rel_path == (
+            "CLAUDE/Plan/00042-widget/JOURNAL/2026-10-21/093015Z-action-0a1b2c.md"
+        )

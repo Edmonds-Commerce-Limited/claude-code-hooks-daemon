@@ -425,3 +425,92 @@ class TestStaleOwnRecordFromCache:
         assert len(findings) == 1
         assert findings[0].path == "A.md"
         assert "B.md" in findings[0].message
+
+
+_LEGACY_DAYFILE = "CLAUDE/Plan/00543-journal/JOURNAL/00543-Journal-26-10-21.md"
+_ENTRY_FILE = "CLAUDE/Plan/00543-journal/JOURNAL/2026-10-21/171233Z-finding-0b9e44.md"
+_ARCHIVED_ENTRY_FILE = "CLAUDE/Plan/Completed/00500-old/JOURNAL/2026-09-01/090101Z-action-77d0aa.md"
+
+
+class TestPlanJournalsAreNotScanned:
+    """N524(a): a journal quotes what it records, verbatim and append-only.
+
+    A block shared with a journal is a record of the block, not drift, and the
+    journal cannot be edited to remove it. Day-files and per-entry files alike.
+    """
+
+    def test_sweep_ignores_journals_sharing_a_block(self, tmp_path: Path) -> None:
+        corpus = DocCorpus(
+            project_root=tmp_path,
+            documents={
+                _LEGACY_DAYFILE: _record(_LEGACY_DAYFILE, block_hashes=_DUPLICATED_HASHES),
+                _ENTRY_FILE: _record(_ENTRY_FILE, block_hashes=_DUPLICATED_HASHES),
+                _ARCHIVED_ENTRY_FILE: _record(
+                    _ARCHIVED_ENTRY_FILE, block_hashes=_DUPLICATED_HASHES
+                ),
+            },
+        )
+        context = sweep_context(project_root=tmp_path, policy=DocumentationPolicy(), corpus=corpus)
+        assert _run_sweep(context) == []
+
+    def test_sweep_never_names_a_journal_as_a_partner(self, tmp_path: Path) -> None:
+        corpus = DocCorpus(
+            project_root=tmp_path,
+            documents={
+                "A.md": _record("A.md", block_hashes=_DUPLICATED_HASHES),
+                _ENTRY_FILE: _record(_ENTRY_FILE, block_hashes=_DUPLICATED_HASHES),
+                _LEGACY_DAYFILE: _record(_LEGACY_DAYFILE, block_hashes=_DUPLICATED_HASHES),
+            },
+        )
+        context = sweep_context(project_root=tmp_path, policy=DocumentationPolicy(), corpus=corpus)
+        assert _run_sweep(context) == []
+
+    def test_edit_of_an_entry_file_is_not_judged(self, tmp_path: Path) -> None:
+        corpus = DocCorpus(
+            project_root=tmp_path,
+            documents={
+                "B.md": _record("B.md", block_hashes=_DUPLICATED_HASHES),
+                _ENTRY_FILE: _record(_ENTRY_FILE, block_hashes=_DUPLICATED_HASHES),
+            },
+        )
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            file_path=tmp_path / _ENTRY_FILE,
+            file_content=_DUPLICATED_TEXT,
+            file_exists_before=False,
+            corpus=corpus,
+        )
+        assert _run_edit(context) == []
+
+    def test_edit_of_a_doc_does_not_name_a_journal_partner(self, tmp_path: Path) -> None:
+        corpus = DocCorpus(
+            project_root=tmp_path,
+            documents={
+                "A.md": _record("A.md", block_hashes=_DUPLICATED_HASHES),
+                _LEGACY_DAYFILE: _record(_LEGACY_DAYFILE, block_hashes=_DUPLICATED_HASHES),
+            },
+        )
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            file_path=tmp_path / "A.md",
+            file_content=_DUPLICATED_TEXT,
+            file_exists_before=True,
+            corpus=corpus,
+        )
+        assert _run_edit(context) == []
+
+    def test_a_folder_named_journal_outside_the_plan_tree_is_still_judged(
+        self, tmp_path: Path
+    ) -> None:
+        outside = "docs/JOURNAL/notes.md"
+        corpus = DocCorpus(
+            project_root=tmp_path,
+            documents={
+                "A.md": _record("A.md", block_hashes=_DUPLICATED_HASHES),
+                outside: _record(outside, block_hashes=_DUPLICATED_HASHES),
+            },
+        )
+        context = sweep_context(project_root=tmp_path, policy=DocumentationPolicy(), corpus=corpus)
+        assert len(_run_sweep(context)) == 1

@@ -1,6 +1,6 @@
 # Plan 00543: journal file per entry
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-21
 **Owner**: dev
 **Priority**: High
@@ -44,17 +44,17 @@ append-only becomes "no existing entry file is modified or deleted".
 
 ### Phase 1: Design check
 
-- [ ] ⬜ **Task 1.1**: Map every reader, writer and check that knows the day-file name or path pattern: `mkplan.bash`,
+- [x] ✅ **Task 1.1**: Map every reader, writer and check that knows the day-file name or path pattern: `mkplan.bash`,
   the `plan_qa` checks, `plan_journal_guard`, the plan workflow handlers, and docs. Record the map and the chosen entry
   file name in `DESIGN.md`. Decide how a legacy day-file and new entries are interleaved when read in time order.
 
 ### Phase 2: Build (TDD)
 
-- [ ] ⬜ **Task 2.1**: `mkplan.bash --journal` writes per-entry files, stamped with the real UTC time by the tool alone.
-- [ ] ⬜ **Task 2.2**: Plan QA checks, the guard and the workflow handlers read both layouts. Their invariants hold on
+- [x] ✅ **Task 2.1**: `mkplan.bash --journal` writes per-entry files, stamped with the real UTC time by the tool alone.
+- [x] ✅ **Task 2.2**: Plan QA checks, the guard and the workflow handlers read both layouts. Their invariants hold on
   mixed trees, and a modified or deleted entry file is denied.
-- [ ] ⬜ **Task 2.3**: Update the docs, template and generated guidance.
-- [ ] ⬜ **Task 2.4**: Proof. Two branches journal the same plan on the same day and merge cleanly. A test does this in a
+- [x] ✅ **Task 2.3**: Update the docs, template and generated guidance.
+- [x] ✅ **Task 2.4**: Proof. Two branches journal the same plan on the same day and merge cleanly. A test does this in a
   scratch repository with `git merge-tree`.
 
 ## Success Criteria

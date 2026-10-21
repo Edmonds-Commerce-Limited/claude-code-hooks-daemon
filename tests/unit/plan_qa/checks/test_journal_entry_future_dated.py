@@ -186,6 +186,61 @@ class TestSentinelledFilesAreJudgedInUtc:
         assert _ids(_ctx(_PREAMBLE + _entry("16:44"))) == ["journal-entry-future-dated"]
 
 
+def _entry_ctx(body: str, *, folder: str = "2026-09-11") -> CheckContext:
+    root = Path("/repo")
+    return CheckContext(
+        project_root=root,
+        plan_dir_rel="CLAUDE/Plan",
+        file_path=root
+        / "CLAUDE"
+        / "Plan"
+        / "00377-thing"
+        / "JOURNAL"
+        / folder
+        / "140000Z-action-0a1b2c.md",
+        file_content=body,
+        file_exists_before=False,
+        today=date(2026, 9, 11),
+        journal_enabled=True,
+        journal_mode="advise",
+        journal_dir_name="JOURNAL",
+    )
+
+
+class TestEntryFiles:
+    """Plan 00543: an entry file's day is its folder's, and its clock is always UTC.
+
+    The scaffolder writes entry files with no preamble, so the day-file
+    sentinel cannot be what selects the clock; every entry file is UTC by
+    construction.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _zones(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Local and UTC disagree, so each verdict proves which clock was read."""
+        monkeypatch.setattr(check, "_now", lambda: datetime(2026, 9, 11, 10, 0))
+        monkeypatch.setattr(check, "_utc_now", lambda: datetime(2026, 9, 11, 14, 0))
+
+    def test_a_utc_entry_at_the_utc_time_is_silent(self) -> None:
+        assert _ids(_entry_ctx(_entry("13:59"))) == []
+
+    def test_a_future_utc_entry_is_reported(self) -> None:
+        assert _ids(_entry_ctx(_entry("14:45"))) == ["journal-entry-future-dated"]
+
+    def test_the_folder_date_is_the_entry_date(self) -> None:
+        """A late entry in yesterday's folder is behind the clock by a day."""
+        assert _ids(_entry_ctx(_entry("23:50"), folder="2026-09-10")) == []
+
+    def test_a_future_folder_date_is_reported(self) -> None:
+        assert _ids(_entry_ctx(_entry("09:00"), folder="2026-09-12")) == [
+            "journal-entry-future-dated"
+        ]
+
+    def test_an_impossible_folder_date_is_silent(self) -> None:
+        """Naming owns a folder that is not a calendar date."""
+        assert _ids(_entry_ctx(_entry("23:50"), folder="2026-02-30")) == []
+
+
 class TestPolicy:
     def test_silent_when_journalling_is_disabled(self) -> None:
         body = _PREAMBLE + _entry("16:44")

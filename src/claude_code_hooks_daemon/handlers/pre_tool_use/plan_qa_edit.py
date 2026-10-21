@@ -344,19 +344,21 @@ class PlanQaEditHandler(PreToolUseHandlerBase):
             "update the README row); edits to archived plans; backticked\n"
             "`src/...` paths that no longer exist.\n"
             "\n"
-            "**Journal day-files** (`JOURNAL/NNNNN-Journal-YY-MM-DD.md`) are also\n"
+            "**Journal files** (entry files `JOURNAL/YYYY-MM-DD/HHMMSSZ-<category>-<hex>.md`,\n"
+            "and legacy day-files `JOURNAL/NNNNN-Journal-YY-MM-DD.md`) are also\n"
             "linted: the name must match the grammar and the enclosing plan\n"
             "number (`journal-dayfile-naming`, ADVISE), and edits must APPEND —\n"
             "never rewrite or remove earlier entries (`journal-append-only`,\n"
             "ADVISE). Corrections are new entries, not edits to old ones, and\n"
-            "every entry is appended with `mkplan.bash --journal`\n"
+            "every entry is recorded as a new file with `mkplan.bash --journal`\n"
             "(`plan_journal_guard` denies one written by hand).\n"
             "\n"
-            "**A Write/Edit to a journal day-file dated anything other than\n"
-            "TODAY is BLOCKED by default** (`journal-dayfile-is-today`) — this\n"
-            "includes yesterday's date. A session that spans midnight must start\n"
-            "TODAY's day-file, not keep appending to yesterday's; `--journal`\n"
-            "always writes to today's, creating it when there is none.\n"
+            "**A Write/Edit to a journal file that already exists is BLOCKED by\n"
+            "default** (`journal-dayfile-is-today`): an entry file is immutable\n"
+            "and a legacy day-file is closed. Only removing conflict markers or\n"
+            "restoring the committed bytes passes. A staged modification or\n"
+            "deletion of an entry file is caught at commit too, and creating a\n"
+            "legacy day-file dated other than TODAY is still blocked.\n"
             "Controlled independently of the other journal checks via\n"
             "`plan_workflow.qa.journal.today_only_mode` (advise | block | off;\n"
             "default block).\n"
@@ -364,7 +366,7 @@ class PlanQaEditHandler(PreToolUseHandlerBase):
             "A journal is **unbounded by design** — its length is never a problem\n"
             "and it must not be tidied or trimmed. It is safe to grow forever\n"
             "precisely because it is never read whole: grep it, `tail -n N` the\n"
-            "newest day-file directly, or send a sub-agent. `PLAN.md` is the\n"
+            "newest entry file directly, or send a sub-agent. `PLAN.md` is the\n"
             "opposite — read in full every session, so keep it lean and curated,\n"
             "with history in git rather than in the file body.\n"
             "\n"
@@ -429,9 +431,9 @@ class PlanQaEditHandler(PreToolUseHandlerBase):
                 requires_main_thread=True,
             ),
             AcceptanceTest(
-                title="plan-qa edit lint - blocks a stale-dated journal day-file",
+                title="plan-qa edit lint - blocks a stale-dated legacy journal day-file",
                 command=(
-                    "Use the Write tool to write to an existing plan's "
+                    "Use the Write tool to write to an existing plan's legacy "
                     "`JOURNAL/NNNNN-Journal-YY-MM-DD.md` day-file whose date is "
                     "YESTERDAY (or any other non-today date), not today's"
                 ),
@@ -457,19 +459,19 @@ class PlanQaEditHandler(PreToolUseHandlerBase):
                 requires_main_thread=True,
             ),
             AcceptanceTest(
-                title="plan-qa edit lint - allows today's journal day-file",
+                title="plan-qa edit lint - allows creating today's legacy journal day-file",
                 command=(
-                    "Use the Write tool to append to (or create) a plan's "
+                    "Use the Write tool to create a plan's legacy "
                     "`JOURNAL/NNNNN-Journal-YY-MM-DD.md` day-file dated TODAY"
                 ),
                 harness_cannot_produce=(
                     "Same boundary as its stale-dated sibling above: reaching the "
                     "recency check means writing into a real plan's journal."
                 ),
-                description="A today-dated journal day-file edit passes the recency check.",
+                description="Creating a today-dated legacy journal day-file passes the recency check.",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Creates/appends a scratch journal entry; remove it after the test",
+                safety_notes="Creates a scratch legacy journal day-file; remove it after the test",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=True,
