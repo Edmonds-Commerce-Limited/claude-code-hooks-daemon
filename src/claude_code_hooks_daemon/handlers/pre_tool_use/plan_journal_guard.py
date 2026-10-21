@@ -87,6 +87,7 @@ from claude_code_hooks_daemon.plan_qa.model import (
     JOURNAL_CATEGORIES,
     MKPLAN_SCRIPT_NAME,
     journal_entry_headings,
+    only_conflict_markers_removed,
     parse_journal_dayfile_name,
 )
 from claude_code_hooks_daemon.plan_qa.types import DEFAULT_JOURNAL_DIR_NAME, JOURNAL_MODE_OFF
@@ -148,11 +149,6 @@ _GIT_SHOW: Final[str] = "show"
 _HEAD_BLOB_PREFIX: Final[str] = "HEAD:"
 _REDIRECT_TRUNCATE: Final[str] = ">"
 _HEAD_RESTORE_WORD_COUNT: Final[int] = 5
-
-#: The lines git writes around a merge conflict. Removing only these keeps
-#: every entry of both sides, so it is the one removal that destroys nothing.
-_CONFLICT_MARKER_PREFIXES: Final[tuple[str, ...]] = ("<<<<<<< ", "||||||| ", ">>>>>>> ")
-_CONFLICT_SEPARATOR: Final[str] = "======="
 
 #: Shown in place of a number the command did not reveal.
 _PLAN_NUMBER_PLACEHOLDER: Final[str] = "<plan-number>"
@@ -391,7 +387,7 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
         # N524 (ledger 00474): nothing added, so this edit removes or rewrites
         # existing content. Fail closed, except for removing conflict-marker
         # lines (both sides' entries stay) and an exact restore to HEAD.
-        if _only_conflict_markers_removed(before, after):
+        if only_conflict_markers_removed(before, after):
             return None
         if after == self._head_text(target):
             return None
@@ -802,30 +798,6 @@ def _segment_conflict_paths(words: list[str]) -> list[tuple[str | None, str]]:
 
 def _non_blank_lines(text: str) -> int:
     return sum(1 for line in text.splitlines() if line.strip())
-
-
-def _is_conflict_marker(line: str) -> bool:
-    return line.rstrip() == _CONFLICT_SEPARATOR or line.startswith(_CONFLICT_MARKER_PREFIXES)
-
-
-def _only_conflict_markers_removed(before: str, after: str) -> bool:
-    """Whether ``after`` is ``before`` with only conflict-marker lines taken out.
-
-    Line order is kept and nothing is added or changed, so both sides' entries
-    survive: the hand route for a day-file conflict that the coordinator asked
-    to keep beside `mkplan.bash --resolve-conflict`.
-    """
-    remaining = iter(after.splitlines())
-    expected = next(remaining, None)
-    removed_any = False
-    for line in before.splitlines():
-        if line == expected:
-            expected = next(remaining, None)
-        elif _is_conflict_marker(line):
-            removed_any = True
-        else:
-            return False
-    return expected is None and removed_any
 
 
 def _needs_expansion(token: str) -> bool:

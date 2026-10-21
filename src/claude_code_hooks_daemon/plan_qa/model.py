@@ -470,6 +470,39 @@ def journal_entry_headings(content: str) -> list[JournalEntryHeading]:
     return headings
 
 
+#: The lines git writes around a merge conflict. Removing only these keeps
+#: every entry of both sides, so it is the one removal that destroys nothing.
+_CONFLICT_MARKER_PREFIXES: Final[tuple[str, ...]] = ("<<<<<<< ", "||||||| ", ">>>>>>> ")
+_CONFLICT_SEPARATOR: Final[str] = "======="
+
+
+def is_conflict_marker(line: str) -> bool:
+    """Whether ``line`` is one git writes around a merge conflict."""
+    return line.rstrip() == _CONFLICT_SEPARATOR or line.startswith(_CONFLICT_MARKER_PREFIXES)
+
+
+def only_conflict_markers_removed(before: str, after: str) -> bool:
+    """Whether ``after`` is ``before`` with only conflict-marker lines taken out.
+
+    Line order is kept and nothing is added or changed, so both sides' entries
+    survive: the hand route for a journal conflict that the coordinator asked
+    to keep beside `mkplan.bash --resolve-conflict`. The one reader for both
+    ``plan_journal_guard`` and ``journal-dayfile-is-today``, so the two cannot
+    disagree about which rewrite of a journal file is harmless.
+    """
+    remaining = iter(after.splitlines())
+    expected = next(remaining, None)
+    removed_any = False
+    for line in before.splitlines():
+        if line == expected:
+            expected = next(remaining, None)
+        elif is_conflict_marker(line):
+            removed_any = True
+        else:
+            return False
+    return expected is None and removed_any
+
+
 def corrected_entry_labels(headings: list[JournalEntryHeading]) -> frozenset[str]:
     """The ``HH:MM`` labels that this day-file's own corrections declare wrong.
 

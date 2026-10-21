@@ -18,21 +18,37 @@ Ships BLOCK by default via its own ``today_only_mode`` knob, independent of
 rollout grace period the original journalling checks received (Decision 4 in
 ``journal_dayfile_naming``), because the user-reported failure mode is agents
 silently mis-filing entries, not a rollout concern.
+
+**An existing journal file is closed (Plan 00543).** New entries are new files
+(``JOURNAL/YYYY-MM-DD/HHMMSSZ-<category>-<hex>.md``), so a write to a journal
+file that already exists rewrites the record whatever its date: a legacy
+day-file is closed and an entry file is immutable. Two rewrites destroy
+nothing and stay clean, for parity with ``plan_journal_guard``: removing only
+conflict-marker lines, and restoring the committed (HEAD) bytes. Creating an
+entry file is clean; creating a legacy day-file keeps the not-today rule.
+
+The COMMIT half covers what no EDIT hook sees — a Bash write: a staged
+modification or deletion of an entry file, or a rename whose content differs
+from the file it was moved from. A pure rename (archiving a plan) is clean.
 """
 
 from datetime import date
 from typing import Final
 
 from claude_code_hooks_daemon.plan_qa.checks.common import (
+    JournalEditTarget,
     journal_edit_target,
     journal_today_only_level,
+    journalling_active,
     level_for_plan,
 )
 from claude_code_hooks_daemon.plan_qa.model import (
     JOURNAL_BODY_FILE_HINT,
     journal_append_command,
+    only_conflict_markers_removed,
     parse_journal_dayfile_name,
 )
+from claude_code_hooks_daemon.plan_qa.paths import PlanFileKind, classify
 from claude_code_hooks_daemon.plan_qa.types import (
     CheckContext,
     CheckSpec,
@@ -40,6 +56,7 @@ from claude_code_hooks_daemon.plan_qa.types import (
     Level,
     Stage,
 )
+from claude_code_hooks_daemon.utils.git_facts import GitFactsBase, StagedChange
 
 CHECK_ID: Final[str] = "journal-dayfile-is-today"
 STATEMENT: Final[str] = (
@@ -66,13 +83,65 @@ def _remediation(plan_dir: str, plan_number: int | None, today: date) -> str:
     )
 
 
-def _run(context: CheckContext) -> list[Finding]:
+def _closed_remediation(plan_dir: str, plan_number: int | None) -> str:
+    return (
+        "A journal file is never rewritten once it exists: a legacy day-file is "
+        "closed and an entry file is immutable. Record the change as a NEW entry "
+        f"with `{journal_append_command(plan_dir, plan_number)}` ({JOURNAL_BODY_FILE_HINT}); "
+        "a correction entry names the one it corrects."
+    )
+
+
+def _effective_level(context: CheckContext, level: Level, plan_number: int | None) -> Level:
+    if level is Level.BLOCK:
+        return level_for_plan(context, plan_number)
+    return level
+
+
+def _head_text(context: CheckContext, rel_path: str) -> str | None:
+    """The committed (HEAD) content of ``rel_path``; ``None`` when there is none."""
+    gitfacts = context.gitfacts or GitFactsBase(context.project_root)
+    return gitfacts.head_file_text(rel_path)
+
+
+def _existing_file_findings(
+    context: CheckContext, target: JournalEditTarget, level: Level
+) -> list[Finding]:
+    after = context.file_content
+    before = context.file_content_before
+    if after is None or after == before:
+        return []
+    if before is not None and only_conflict_markers_removed(before, after):
+        return []
+    if after == _head_text(context, target.rel_path):
+        return []
+    return [
+        Finding(
+            check_id=CHECK_ID,
+            level=_effective_level(context, level, target.plan_number),
+            message=(
+                f"Journal file `{target.basename}` already exists; writing to it "
+                "rewrites the journal record"
+            ),
+            remediation=_closed_remediation(context.plan_dir_rel, target.plan_number),
+            path=target.rel_path,
+        )
+    ]
+
+
+def _run_edit(context: CheckContext) -> list[Finding]:
     target = journal_edit_target(context)
     if target is None:
         return []
 
     level = journal_today_only_level(context)
     if level is None:
+        return []
+
+    if context.file_exists_before is True:
+        return _existing_file_findings(context, target, level)
+
+    if target.is_entry_file:
         return []
 
     # Grammar / plan-number / calendar-validity problems belong to
@@ -91,13 +160,10 @@ def _run(context: CheckContext) -> list[Finding]:
     if parsed.date == context.today:
         return []
 
-    if level is Level.BLOCK:
-        level = level_for_plan(context, target.plan_number)
-
     return [
         Finding(
             check_id=CHECK_ID,
-            level=level,
+            level=_effective_level(context, level, target.plan_number),
             message=(
                 f"Journal day-file `{target.basename}` is dated "
                 f"{parsed.date.isoformat()}, not today ({context.today.isoformat()})"
@@ -108,10 +174,74 @@ def _run(context: CheckContext) -> list[Finding]:
     ]
 
 
-CHECK: Final[CheckSpec] = CheckSpec(
+_MODIFY_STATUS: Final[str] = "M"
+_DELETE_STATUS: Final[str] = "D"
+_RENAME_PREFIX: Final[str] = "R"
+
+_CHANGE_WORDS: Final[dict[str, str]] = {
+    _MODIFY_STATUS: "modified",
+    _DELETE_STATUS: "deleted",
+    _RENAME_PREFIX: "moved with its content changed",
+}
+
+
+def _rewrite_kind(context: CheckContext, change: StagedChange) -> str | None:
+    """The status key of a staged change that rewrites an entry file, else ``None``."""
+    if change.status in (_MODIFY_STATUS, _DELETE_STATUS):
+        return change.status
+    if change.status.startswith(_RENAME_PREFIX) and context.gitfacts is not None:
+        staged = context.gitfacts.staged_file_text(change.path)
+        if staged != context.gitfacts.head_file_text(change.old_path or change.path):
+            return _RENAME_PREFIX
+    return None
+
+
+def _run_commit(context: CheckContext) -> list[Finding]:
+    gitfacts = context.gitfacts
+    if gitfacts is None or not journalling_active(context):
+        return []
+    level = journal_today_only_level(context)
+    if level is None:
+        return []
+
+    findings: list[Finding] = []
+    for change in gitfacts.staged_changes():
+        rel_path = change.old_path or change.path
+        classified = classify(context.project_root / rel_path, context)
+        if classified.kind is not PlanFileKind.JOURNAL_ENTRY:
+            continue
+        kind = _rewrite_kind(context, change)
+        if kind is None:
+            continue
+        findings.append(
+            Finding(
+                check_id=CHECK_ID,
+                level=_effective_level(context, level, classified.plan_number),
+                message=(
+                    f"Journal entry file `{rel_path}` is {_CHANGE_WORDS[kind]} in this "
+                    "commit; an entry file is immutable once written"
+                ),
+                remediation=_closed_remediation(context.plan_dir_rel, classified.plan_number),
+                path=rel_path,
+            )
+        )
+    return findings
+
+
+EDIT_CHECK: Final[CheckSpec] = CheckSpec(
     check_id=CHECK_ID,
     stage=Stage.EDIT,
     level=Level.BLOCK,
     sins=(),
-    run=_run,
+    run=_run_edit,
 )
+
+COMMIT_CHECK: Final[CheckSpec] = CheckSpec(
+    check_id=CHECK_ID,
+    stage=Stage.COMMIT,
+    level=Level.BLOCK,
+    sins=(),
+    run=_run_commit,
+)
+
+CHECKS: Final[tuple[CheckSpec, CheckSpec]] = (EDIT_CHECK, COMMIT_CHECK)

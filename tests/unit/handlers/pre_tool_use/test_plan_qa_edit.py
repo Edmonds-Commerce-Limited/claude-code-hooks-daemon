@@ -247,15 +247,16 @@ class TestHandleJournal:
         assert result.context
         assert "journal-dayfile-naming" in " ".join(result.context)
 
-    def test_pure_append_is_silent(self, tmp_path: Path) -> None:
+    def test_appending_to_an_existing_dayfile_is_denied(self, tmp_path: Path) -> None:
+        """Plan 00543: a legacy day-file is closed; a new entry is a new file."""
         target = self._journal_file(tmp_path)
         before = "# Journal\n\n## 09:00 · action · —\n\nfirst\n"
         target.write_text(before)
         after = before + "\n## 10:00 · finding · —\n\nsecond\n"
         with _patched_root(tmp_path):
             result = _handler().handle(_write_input(target, after))
-        assert result.decision == Decision.ALLOW
-        assert not result.context
+        assert result.decision == Decision.DENY
+        assert "journal-dayfile-is-today" in (result.reason or "")
 
     def test_future_dated_entry_advises_regardless_of_run_time(self, tmp_path: Path) -> None:
         """The clock-dependence that broke CI, pinned as deterministic behaviour.
@@ -284,16 +285,15 @@ class TestHandleJournal:
         assert result.decision == Decision.ALLOW
         assert "journal-entry-future-dated" in " ".join(result.context)
 
-    def test_history_rewrite_advises(self, tmp_path: Path) -> None:
+    def test_history_rewrite_is_denied(self, tmp_path: Path) -> None:
         target = self._journal_file(tmp_path)
         before = "# Journal\n\n## 09:00 · action · —\n\nfirst\n"
         target.write_text(before)
         rewritten = before.replace("first", "EDITED first")
         with _patched_root(tmp_path):
             result = _handler().handle(_write_input(target, rewritten))
-        assert result.decision == Decision.ALLOW
-        assert result.context
-        assert "journal-append-only" in " ".join(result.context)
+        assert result.decision == Decision.DENY
+        assert "journal-dayfile-is-today" in (result.reason or "")
 
 
 class TestHandleWrite:

@@ -161,7 +161,8 @@ class TestRegistryCatalogue:
         #   loosening rather than the tightening it is.
         # + plan-stats-arithmetic (Plan 00466 N13)
         # + archival-links-resolve (Plan 00408 Task 3.2b; COMMIT only by design)
-        assert len(by_stage[Stage.COMMIT]) == 20
+        # + journal-dayfile-is-today's commit half (Plan 00543: entry files immutable)
+        assert len(by_stage[Stage.COMMIT]) == 21
         # 3 sweep-only + 5 dual tree checks + 2 journal SWEEP checks (Plan 00163)
         # + index-row-length (Plan 00218) + index-no-log + 5 document-rule sweep
         # twins and the journal-dayfile-naming sweep twin (Plan 00230)
