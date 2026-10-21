@@ -1618,7 +1618,9 @@ class TransportConfig(BaseModel):
             ``"build"`` (compile from source with plain ``rustc``, preferred
             whenever a musl-capable toolchain is present), ``"download"``
             (fetch the digest-verified precompiled asset from the matching
-            GitHub release), or ``None`` (default — neither route runs; the
+            GitHub release), ``"auto"`` (build when a musl-capable toolchain
+            is present, otherwise or on build failure download), or ``None``
+            (default — neither route runs; the
             relay rung stays opt-in on top of an explicit distribution
             choice, per Plan 00290 Phase 5's owner ruling: nothing implicit).
     """
@@ -1641,13 +1643,15 @@ class TransportConfig(BaseModel):
         default=None,
         description="Absolute-path override; null = {untracked}/bin/hooks-relay",
     )
-    relay_source: Literal["build", "download"] | None = Field(
+    relay_source: Literal["build", "download", "auto"] | None = Field(
         default=None,
         description=(
             "How the relay binary is provisioned at install/upgrade time: "
             "'build' (plain rustc, no cargo, preferred when a musl-capable "
-            "toolchain is present) or 'download' (digest-verified GitHub "
-            "release asset). Default null = neither route runs — an "
+            "toolchain is present), 'download' (digest-verified GitHub "
+            "release asset) or 'auto' (build when a musl-capable toolchain "
+            "is present, otherwise - or when the build fails - download). "
+            "Default null = neither route runs — an "
             "explicit, deliberate choice, never an implicit side effect of "
             "relay_enabled."
         ),

@@ -8,19 +8,24 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
 from claude_code_hooks_daemon.config.models import TransportConfig
+from claude_code_hooks_daemon.install import relay_deploy
 from claude_code_hooks_daemon.install.relay_deploy import (
     RELAY_ASSET_NAME,
+    RELAY_PROVISION_FAILED_EXIT_CODE,
     SHA256SUMS_ASSET_NAME,
     RelayDeployResult,
     check_musl_toolchain,
     deploy_relay_from_build,
     deploy_relay_from_download,
     deploy_relay_if_configured,
+    main,
     missing_configured_relay_binary,
+    provision_relay_for_install,
     read_deployed_digest,
     read_deployed_route,
     relay_binary_missing_warning,
@@ -484,3 +489,344 @@ class TestRelayBinaryMissingWarning:
         assert "fallback" in line
         assert line.endswith("Fix: bin/hooks-daemon transport on")
         assert "\n" not in line
+
+
+_MUSL_TARGETS = "x86_64-unknown-linux-musl\n"
+
+
+def _good_fetch(content: bytes = b"downloaded-binary") -> relay_deploy.FetchFn:
+    import hashlib
+
+    digest = hashlib.sha256(content).hexdigest()
+
+    def fetch_fn(url: str) -> bytes:
+        if url.endswith(SHA256SUMS_ASSET_NAME):
+            return f"{digest}  {RELAY_ASSET_NAME}\n".encode()
+        return content
+
+    return fetch_fn
+
+
+def _failing_fetch(url: str) -> bytes:
+    raise OSError("network is unreachable")
+
+
+def _daemon_dir_with_build_output(tmp_path: Path) -> Path:
+    daemon_dir = tmp_path / "daemon"
+    (daemon_dir / "relay").mkdir(parents=True)
+    (daemon_dir / "relay" / "build.sh").write_text("#!/bin/bash\n")
+    built_dir = daemon_dir / "untracked" / "relay-build"
+    built_dir.mkdir(parents=True)
+    (built_dir / RELAY_ASSET_NAME).write_bytes(b"built-binary")
+    return daemon_dir
+
+
+def _toolchain_run(build_returncode: int = 0) -> relay_deploy.RunFn:
+    def fake_run(*args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        argv = args[0] if args else []
+        if argv and "rustc" in str(argv[0]):
+            return _fake_process(0, stdout=_MUSL_TARGETS)
+        return _fake_process(build_returncode, stderr="boom: linker not found")
+
+    return fake_run
+
+
+class TestAutoRelaySource:
+    """relay_source: auto builds when a musl toolchain exists, else downloads."""
+
+    def test_auto_is_a_valid_source(self) -> None:
+        assert TransportConfig(relay_source="auto").relay_source == "auto"
+
+    def test_toolchain_present_builds_and_never_fetches(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/rustc")
+        daemon_dir = _daemon_dir_with_build_output(tmp_path)
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        result = deploy_relay_if_configured(
+            daemon_dir,
+            project_root,
+            TransportConfig(relay_source="auto"),
+            version_tag="v1.0.0",
+            fetch_fn=_failing_fetch,
+            run_fn=_toolchain_run(),
+        )
+
+        assert result.deployed is True
+        assert result.route == "build"
+
+    def test_no_toolchain_downloads_and_reports_why_build_was_skipped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("shutil.which", lambda name: None)
+        monkeypatch.setenv("HOME", str(tmp_path / "no-cargo-here"))
+
+        result = deploy_relay_if_configured(
+            tmp_path,
+            tmp_path,
+            TransportConfig(relay_source="auto"),
+            version_tag="v1.0.0",
+            fetch_fn=_good_fetch(),
+        )
+
+        assert result.deployed is True
+        assert result.route == "download"
+        assert any("musl" in message for message in result.messages)
+
+    def test_build_failure_then_download_success_keeps_both_messages(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/rustc")
+        daemon_dir = _daemon_dir_with_build_output(tmp_path)
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        result = deploy_relay_if_configured(
+            daemon_dir,
+            project_root,
+            TransportConfig(relay_source="auto"),
+            version_tag="v1.0.0",
+            fetch_fn=_good_fetch(),
+            run_fn=_toolchain_run(build_returncode=1),
+        )
+
+        assert result.deployed is True
+        assert result.route == "download"
+        assert any("relay build exited 1" in message for message in result.messages)
+        assert any("Downloaded" in message for message in result.messages)
+
+    def test_both_routes_failing_reports_both_reasons(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("shutil.which", lambda name: None)
+        monkeypatch.setenv("HOME", str(tmp_path / "no-cargo-here"))
+
+        result = deploy_relay_if_configured(
+            tmp_path,
+            tmp_path,
+            TransportConfig(relay_source="auto"),
+            version_tag="v1.0.0",
+            fetch_fn=_failing_fetch,
+        )
+
+        assert result.deployed is False
+        joined = "\n".join(result.messages)
+        assert "musl" in joined
+        assert "network is unreachable" in joined
+
+
+class TestProvisionRelayForInstall:
+    """The install/upgrade entry point: loud on failure, silent no-op when disabled."""
+
+    def _transport(
+        self,
+        tmp_path: Path,
+        *,
+        relay_enabled: bool,
+        relay_source: Literal["build", "download", "auto"] | None,
+    ) -> TransportConfig:
+        return TransportConfig(
+            relay_enabled=relay_enabled,
+            relay_source=relay_source,
+            relay_binary=str(tmp_path / "bin" / "hooks-relay"),
+        )
+
+    def test_disabled_does_nothing(self, tmp_path: Path) -> None:
+        calls: list[str] = []
+
+        def fetch_fn(url: str) -> bytes:
+            calls.append(url)
+            return b""
+
+        def run_fn(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+            calls.append("run")
+            return _fake_process(0)
+
+        result = provision_relay_for_install(
+            tmp_path,
+            tmp_path,
+            self._transport(tmp_path, relay_enabled=False, relay_source="auto"),
+            version_tag="v1.0.0",
+            fetch_fn=fetch_fn,
+            run_fn=run_fn,
+        )
+
+        assert result.status == "disabled"
+        assert len(result.lines) == 1
+        assert calls == []
+        assert not (tmp_path / "bin" / "hooks-relay").exists()
+
+    def test_enabled_with_download_provisions(self, tmp_path: Path) -> None:
+        result = provision_relay_for_install(
+            tmp_path,
+            tmp_path,
+            self._transport(tmp_path, relay_enabled=True, relay_source="download"),
+            version_tag="v1.0.0",
+            fetch_fn=_good_fetch(),
+        )
+
+        assert result.status == "provisioned"
+        assert (tmp_path / "bin" / "hooks-relay").is_file()
+
+    def test_enabled_auto_with_build_present_provisions_by_build(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/rustc")
+        daemon_dir = _daemon_dir_with_build_output(tmp_path)
+
+        result = provision_relay_for_install(
+            daemon_dir,
+            tmp_path,
+            self._transport(tmp_path, relay_enabled=True, relay_source="auto"),
+            version_tag="v1.0.0",
+            fetch_fn=_failing_fetch,
+            run_fn=_toolchain_run(),
+        )
+
+        assert result.status == "provisioned"
+        assert read_deployed_route(tmp_path / "bin" / "hooks-relay") == "build"
+
+    def test_enabled_auto_without_build_downloads(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("shutil.which", lambda name: None)
+        monkeypatch.setenv("HOME", str(tmp_path / "no-cargo-here"))
+
+        result = provision_relay_for_install(
+            tmp_path,
+            tmp_path,
+            self._transport(tmp_path, relay_enabled=True, relay_source="auto"),
+            version_tag="v1.0.0",
+            fetch_fn=_good_fetch(),
+        )
+
+        assert result.status == "provisioned"
+        assert read_deployed_route(tmp_path / "bin" / "hooks-relay") == "download"
+
+    def test_both_routes_failing_is_loud_and_names_path_reasons_and_fix(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("shutil.which", lambda name: None)
+        monkeypatch.setenv("HOME", str(tmp_path / "no-cargo-here"))
+
+        result = provision_relay_for_install(
+            tmp_path,
+            tmp_path,
+            self._transport(tmp_path, relay_enabled=True, relay_source="auto"),
+            version_tag="v1.0.0",
+            fetch_fn=_failing_fetch,
+        )
+
+        assert result.status == "failed"
+        text = "\n".join(result.lines)
+        assert str(tmp_path / "bin" / "hooks-relay") in text
+        assert "network is unreachable" in text
+        assert "musl" in text
+        assert "rustup target add x86_64-unknown-linux-musl" in text
+        assert str(tmp_path / "bin" / "hooks-daemon") in text
+        assert "transport on" in text
+        assert "bash" in text
+
+    def test_enabled_without_source_and_without_binary_fails_naming_fix(
+        self, tmp_path: Path
+    ) -> None:
+        result = provision_relay_for_install(
+            tmp_path,
+            tmp_path,
+            self._transport(tmp_path, relay_enabled=True, relay_source=None),
+            version_tag="v1.0.0",
+            fetch_fn=_failing_fetch,
+        )
+
+        assert result.status == "failed"
+        text = "\n".join(result.lines)
+        assert str(tmp_path / "bin" / "hooks-relay") in text
+        assert "relay_source: auto" in text
+
+    def test_enabled_without_source_but_binary_present_is_provisioned(self, tmp_path: Path) -> None:
+        binary = tmp_path / "bin" / "hooks-relay"
+        binary.parent.mkdir()
+        binary.write_bytes(b"x")
+        binary.chmod(0o755)
+
+        result = provision_relay_for_install(
+            tmp_path,
+            tmp_path,
+            self._transport(tmp_path, relay_enabled=True, relay_source=None),
+            version_tag="v1.0.0",
+            fetch_fn=_failing_fetch,
+        )
+
+        assert result.status == "provisioned"
+
+
+class TestProvisionMainCli:
+    """``python -m ...relay_deploy``: distinct exit codes per outcome."""
+
+    def _write_config(self, project_root: Path, transport_yaml: str) -> None:
+        config_dir = project_root / ".claude"
+        config_dir.mkdir(parents=True)
+        (config_dir / "hooks-daemon.yaml").write_text(
+            f'version: "1.0"\ndaemon:\n  transport:\n{transport_yaml}'
+        )
+
+    def _argv(self, daemon_dir: Path, project_root: Path) -> list[str]:
+        return [
+            "--daemon-dir",
+            str(daemon_dir),
+            "--project-root",
+            str(project_root),
+            "--version-tag",
+            "v1.0.0",
+        ]
+
+    def test_exit_codes_are_distinct(self) -> None:
+        assert RELAY_PROVISION_FAILED_EXIT_CODE not in (0, 2)
+
+    def test_disabled_exits_zero(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        self._write_config(tmp_path, "    relay_enabled: false\n    relay_source: auto\n")
+
+        assert main(self._argv(tmp_path, tmp_path)) == 0
+        assert "disabled" in capsys.readouterr().out.lower()
+
+    def test_provisioned_exits_zero(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        binary = tmp_path / "hooks-relay"
+        self._write_config(
+            tmp_path,
+            f"    relay_enabled: true\n    relay_source: download\n    relay_binary: {binary}\n",
+        )
+        monkeypatch.setattr(relay_deploy, "_default_fetch", _good_fetch())
+
+        assert main(self._argv(tmp_path, tmp_path)) == 0
+        assert binary.is_file()
+        assert "Downloaded" in capsys.readouterr().out
+
+    def test_failure_exits_with_dedicated_code_and_prints_banner(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        binary = tmp_path / "hooks-relay"
+        self._write_config(
+            tmp_path,
+            f"    relay_enabled: true\n    relay_source: download\n    relay_binary: {binary}\n",
+        )
+        monkeypatch.setattr(relay_deploy, "_default_fetch", _failing_fetch)
+
+        assert main(self._argv(tmp_path, tmp_path)) == RELAY_PROVISION_FAILED_EXIT_CODE
+        out = capsys.readouterr().out
+        assert str(binary) in out
+        assert "network is unreachable" in out
+
+    def test_missing_required_argument_exits_two(self) -> None:
+        with pytest.raises(SystemExit) as excinfo:
+            main(["--daemon-dir", "x"])
+        assert excinfo.value.code == 2

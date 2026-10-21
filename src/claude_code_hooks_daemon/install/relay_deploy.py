@@ -6,7 +6,8 @@ build-from-source is the FIRST-CLASS route — preferred whenever a musl-capable
 documented in ``relay/build.sh`` (no cargo, no crates) — and the precompiled
 GitHub-release download is the convenience option. Source ships in the
 package either way. Both routes are explicit, deliberate config choices
-(``daemon.transport.relay_source: build|download``); with the default
+(``daemon.transport.relay_source: build|download|auto``, where ``auto`` builds
+when a musl toolchain is present and otherwise downloads); with the default
 ``null`` neither route ever runs, so relaying stays opt-in on top of an
 explicit distribution choice rather than a side effect of ``relay_enabled``.
 
@@ -16,18 +17,22 @@ See ``CLAUDE/Plan/00290-rust-socket-relay-forwarder/DESIGN-socket-relay.md``
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import os
 import shutil
 import subprocess  # nosec B404 - subprocess used only for the trusted, hardcoded rustc build invocation (no shell, no user input)
+import sys
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from claude_code_hooks_daemon.config.models import TransportConfig
 from claude_code_hooks_daemon.daemon.paths import get_untracked_dir
+from claude_code_hooks_daemon.install.forwarder_generator import load_transport_config
 
 #: The one relay target this project builds/ships today (design §3.2).
 RELAY_TARGET: str = "x86_64-unknown-linux-musl"
@@ -388,6 +393,16 @@ def deploy_relay_if_configured(
     if transport.relay_source is None:
         return RelayDeployResult(False, None, ())
 
+    if transport.relay_source == "auto":
+        return _deploy_auto(
+            daemon_dir,
+            project_root,
+            transport,
+            version_tag=version_tag,
+            fetch_fn=fetch_fn,
+            run_fn=run_fn,
+        )
+
     if transport.relay_source == "build":
         if not check_musl_toolchain(run_fn=run_fn):
             return RelayDeployResult(
@@ -406,3 +421,175 @@ def deploy_relay_if_configured(
     return deploy_relay_from_download(
         project_root, transport, version_tag=version_tag, fetch_fn=resolved_fetch
     )
+
+
+def _deploy_auto(
+    daemon_dir: Path,
+    project_root: Path,
+    transport: TransportConfig,
+    *,
+    version_tag: str,
+    fetch_fn: FetchFn | None,
+    run_fn: RunFn,
+) -> RelayDeployResult:
+    """``relay_source: auto`` - build when a musl toolchain exists, else download.
+
+    The build is tried first (the first-class route). When it is not possible
+    or does not deploy, the digest-verified download is attempted. Messages
+    from every attempt are kept, so a failed build followed by a successful
+    download is still reported rather than hidden.
+    """
+    messages: list[str] = []
+    if check_musl_toolchain(run_fn=run_fn):
+        built = deploy_relay_from_build(daemon_dir, project_root, transport, run_fn=run_fn)
+        if built.deployed:
+            return built
+        messages.extend(built.messages)
+    else:
+        messages.append(
+            "no musl-capable rustc toolchain was found, so the relay was not built "
+            "from source (`rustup target add x86_64-unknown-linux-musl` enables it)"
+        )
+
+    resolved_fetch: FetchFn = fetch_fn if fetch_fn is not None else _default_fetch
+    downloaded = deploy_relay_from_download(
+        project_root, transport, version_tag=version_tag, fetch_fn=resolved_fetch
+    )
+    return RelayDeployResult(
+        downloaded.deployed, downloaded.route, (*messages, *downloaded.messages)
+    )
+
+
+#: Exit code of the install/upgrade CLI when the relay is enabled but could not
+#: be provisioned. Distinct from 0 (disabled / provisioned) and argparse's 2.
+RELAY_PROVISION_FAILED_EXIT_CODE: int = 3
+
+ProvisionStatus = Literal["disabled", "provisioned", "failed"]
+
+
+@dataclass(frozen=True)
+class RelayProvisionResult:
+    """Outcome of :func:`provision_relay_for_install`.
+
+    Attributes:
+        status: ``disabled`` (relay off, nothing done), ``provisioned`` (the
+            binary is in place) or ``failed`` (relay on, binary not usable).
+        lines: Human-readable output, ready to print. For ``failed`` it is a
+            multi-line banner naming the path, every reason and the fix.
+    """
+
+    status: ProvisionStatus
+    lines: tuple[str, ...]
+
+
+def _failure_banner(
+    binary: Path, reasons: tuple[str, ...], wrapper: Path, source_hint: bool
+) -> tuple[str, ...]:
+    """The loud, multi-line failure text for a relay that could not be provisioned."""
+    rule = "=" * 72
+    lines = [
+        rule,
+        "WARNING: RELAY BINARY NOT PROVISIONED",
+        rule,
+        f"The relay is enabled but its binary is missing or not executable: {binary}",
+    ]
+    lines.extend(f"  - {reason}" for reason in reasons)
+    lines.append(
+        "Effect: relay-eligible hooks run on the slower bash transport; "
+        "every rule is still enforced."
+    )
+    lines.append("Fix, any one of:")
+    if source_hint:
+        lines.append("  - set daemon.transport.relay_source: auto in .claude/hooks-daemon.yaml")
+    lines.extend(
+        [
+            "  - install a musl-capable rustc: rustup target add x86_64-unknown-linux-musl",
+            "  - or allow network access to the GitHub release (digest-verified asset)",
+            f"Then run: {wrapper} transport on",
+            rule,
+        ]
+    )
+    return tuple(lines)
+
+
+def provision_relay_for_install(
+    daemon_dir: Path,
+    project_root: Path,
+    transport: TransportConfig,
+    *,
+    version_tag: str,
+    fetch_fn: FetchFn | None = None,
+    run_fn: RunFn = subprocess.run,
+) -> RelayProvisionResult:
+    """Put the relay binary in place for an install or upgrade, loudly.
+
+    ``relay_enabled`` false does nothing (no build, no download). With it on,
+    ``relay_source`` selects the route (see :func:`deploy_relay_if_configured`);
+    with no source the binary must already be executable. Any failure returns
+    ``failed`` with a banner naming the path, the reasons and the fix - the
+    caller decides the exit policy.
+    """
+    if not transport.relay_enabled:
+        return RelayProvisionResult(
+            "disabled", ("Relay disabled (daemon.transport.relay_enabled is false); nothing to do",)
+        )
+
+    binary = resolve_relay_binary_path(project_root, transport)
+    wrapper = daemon_dir / "bin" / "hooks-daemon"
+
+    if transport.relay_source is None:
+        if missing_configured_relay_binary(project_root, transport) is None:
+            return RelayProvisionResult(
+                "provisioned", (f"Relay binary already in place: {binary}",)
+            )
+        return RelayProvisionResult(
+            "failed",
+            _failure_banner(
+                binary,
+                ("daemon.transport.relay_source is not set, so nothing builds or downloads it",),
+                wrapper,
+                source_hint=True,
+            ),
+        )
+
+    result = deploy_relay_if_configured(
+        daemon_dir,
+        project_root,
+        transport,
+        version_tag=version_tag,
+        fetch_fn=fetch_fn,
+        run_fn=run_fn,
+    )
+    if result.deployed:
+        return RelayProvisionResult("provisioned", tuple(result.messages))
+    return RelayProvisionResult(
+        "failed", _failure_banner(binary, result.messages, wrapper, source_hint=False)
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI used by the install and upgrade scripts.
+
+    Exit codes: 0 = disabled or provisioned, 2 = bad arguments (argparse),
+    :data:`RELAY_PROVISION_FAILED_EXIT_CODE` (3) = relay enabled but not provisioned.
+    """
+    parser = argparse.ArgumentParser(
+        prog="python -m claude_code_hooks_daemon.install.relay_deploy",
+        description="Provision the relay binary for an install or upgrade.",
+    )
+    parser.add_argument("--daemon-dir", type=Path, required=True)
+    parser.add_argument("--project-root", type=Path, required=True)
+    parser.add_argument("--version-tag", required=True)
+    args = parser.parse_args(argv)
+
+    transport = load_transport_config(args.project_root)
+    result = provision_relay_for_install(
+        args.daemon_dir, args.project_root, transport, version_tag=args.version_tag
+    )
+    for line in result.lines:
+        print(line)
+    return RELAY_PROVISION_FAILED_EXIT_CODE if result.status == "failed" else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

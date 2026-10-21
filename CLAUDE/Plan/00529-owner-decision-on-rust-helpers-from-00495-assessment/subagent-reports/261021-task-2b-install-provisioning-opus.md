@@ -132,3 +132,53 @@ That needs an owner call.
 **`relay_enabled: false` with `relay_source` set** stops building or downloading at install/upgrade (the brief's
 "relay disabled, nothing done"). `transport on` still provisions on demand through `ensure_relay_binary`, which this
 change does not touch.
+
+## Build part A (Python)
+
+Design items 1 and 2 plus their tests are built in `src/claude_code_hooks_daemon/install/relay_deploy.py` and
+`config/models.py` (`relay_source` Literal gains `auto`). Shell scripts, config defaults, manifest and release note
+are for the next agent.
+
+### Red output (tests written first)
+
+```
+ImportError while importing test module '.../tests/unit/install/test_relay_deploy.py'.
+E   ImportError: cannot import name 'RELAY_PROVISION_FAILED_EXIT_CODE' from 'claude_code_hooks_daemon.install.relay_deploy'
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 2.02s
+```
+
+Green: `pytest tests/unit/install/` 1907 passed; mypy clean on relay_deploy.py, config/models.py and the test file;
+ruff and black clean.
+
+### What was built
+
+- `deploy_relay_if_configured` with `relay_source: auto`: build when `check_musl_toolchain` passes; if that build
+  does not deploy, or there is no toolchain, take the digest-verified download. Messages from both attempts are
+  kept. `build`, `download` and `None` are unchanged.
+- `provision_relay_for_install(daemon_dir, project_root, transport, *, version_tag, fetch_fn=None, run_fn=...)`
+  returns `RelayProvisionResult(status, lines)` with status `disabled` | `provisioned` | `failed`:
+  - relay disabled: one line, no build or fetch;
+  - enabled, no `relay_source`: provisioned if the binary is already executable, else failed;
+  - enabled with a source: runs `deploy_relay_if_configured`; failure gives a banner naming the binary path, every
+    reason, the bash-transport effect, the rustup and network fixes, and `<daemon_dir>/bin/hooks-daemon transport on`.
+- Tests cover: auto with build present, auto without a toolchain (download), build failing then download OK, both
+  failing, disabled doing nothing, null source with and without a binary, and the CLI exit codes.
+
+### CLI
+
+```
+python -m claude_code_hooks_daemon.install.relay_deploy --daemon-dir D --project-root P --version-tag vX.Y.Z
+```
+
+It reads `daemon.transport` from `P/.claude/hooks-daemon.yaml` (`load_transport_config`) and prints the lines.
+
+| Exit | Meaning                                                                                  |
+| ---- | ---------------------------------------------------------------------------------------- |
+| 0    | relay disabled, or binary provisioned                                                    |
+| 2    | missing or bad arguments (argparse)                                                      |
+| 3    | relay enabled but not provisioned (`RELAY_PROVISION_FAILED_EXIT_CODE`); banner on stdout |
+
+The shell caller should treat 3 as warn-loudly-and-continue (per section 3), and repeat the banner before `exit 0`.
+Not built here (outside items 1 and 2): the "upgrade preserving an explicit relay_enabled false" test in
+`tests/unit/install/test_config_merger.py`.
