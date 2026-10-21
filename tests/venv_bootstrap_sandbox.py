@@ -66,6 +66,9 @@ CLONE_FILES: Final[tuple[str, ...]] = (
     # venv_bootstrap.sh sources this unconditionally (Plan 00466 N30).
     "scripts/lib/portable_time.sh",
     "src/claude_code_hooks_daemon/daemon/paths.py",
+    # The one declaration of the minimum Python, loaded by file path by paths.py,
+    # signal_standalone.py and bin/hooks-daemon (Plan 00546 Task 2.1).
+    "src/claude_code_hooks_daemon/python_floor.py",
     # The venv-free `signal` verb (Plan 00457, #55) and its own dependencies,
     # loaded by file path rather than package import -- see
     # daemon/signal_standalone.py's module docstring.

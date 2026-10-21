@@ -12,12 +12,12 @@ venv's slug does not match the host path and its interpreter cannot run on
 the host, so ``signal`` -- the operator-signal channel's host-reachable
 caller (Plan 00417) -- was refused on the exact deployment it exists for.
 This module needs no venv and no third-party package: only the standard
-library, at Python 3.8+ (``operator_signal.py``'s ``typing.Final`` import
-is the binding constraint -- see
-``tests/unit/daemon/test_signal_standalone.py`` ``TestSyntaxFloor``, which
-pins this across every file this module loads). A python3 below that floor
-is refused with a clear message (see ``_MIN_PYTHON`` below), before this
-module attempts to load anything that would need it.
+library. It must still PARSE on Python 3.8+ (``TestSyntaxFloor`` in
+``tests/unit/daemon/test_signal_standalone.py`` pins that across every file
+this module loads), so that a python3 below the declared minimum
+(``python_floor.MIN_PYTHON``, the package's ``requires-python``) is refused
+with one clear line (see below) before this module loads
+``operator_signal.py``, which needs 3.10+ at run time (``slots=True``).
 
 ``operator_signal.py`` is itself standard-library-only, but a normal
 ``from claude_code_hooks_daemon.utils.operator_signal import ...`` executes
@@ -56,45 +56,18 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import os
+import runpy
 import sys
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING
 
-#: The lowest Python this module can run under. Nothing in THIS file needs
-#: more than the stdlib has carried since ~3.4, but ``operator_signal.py``
-#: (loaded below, unconditionally) imports ``typing.Final`` (added 3.8) at
-#: module scope -- an ImportError there would be a confusing failure inside
-#: a file this caller never asked to look at, so this module checks first
-#: and names the real reason.
-_MIN_PYTHON = (3, 8)
-
-
-def _check_python_version(version_info: tuple[int, int] = sys.version_info[:2]) -> bool:
-    """True if ``version_info`` meets :data:`_MIN_PYTHON`.
-
-    Otherwise prints a clear error to stderr and returns False.
-    ``version_info`` defaults to the REAL running interpreter's
-    ``(major, minor)`` -- a parameter rather than reading ``sys.version_info``
-    directly inline so this is unit-testable with a synthetic value; the
-    real attribute is a read-only structseq and cannot be monkeypatched
-    (see ``tests/unit/daemon/test_signal_standalone.py::TestVersionFloorEnforcement``).
-    """
-    if version_info >= _MIN_PYTHON:
-        return True
-    floor = ".".join(str(part) for part in _MIN_PYTHON)
-    actual = ".".join(str(part) for part in version_info)
-    print(
-        f"ERROR: signal_standalone.py needs python3 >= {floor} (this interpreter is "
-        f"{actual}). operator_signal.py's `typing.Final` import needs it. "
-        "Use a newer system python3.",
-        file=sys.stderr,
-    )
-    return False
-
-
-if not _check_python_version():
-    sys.exit(1)
+# `operator_signal.py` (loaded below, unconditionally) needs 3.10+ at run time,
+# which would otherwise surface as a TypeError inside a file this caller never
+# asked to look at. The minimum is declared once, in python_floor.py.
+runpy.run_path(str(Path(__file__).resolve().parent.parent / "python_floor.py"))[
+    "require_min_python"
+]("signal_standalone.py")
 
 if TYPE_CHECKING:
     # Type-checking only -- never executed (see the module docstring for why
