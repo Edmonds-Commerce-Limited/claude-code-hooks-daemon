@@ -24,7 +24,11 @@ remains. The one exception here is the resume cron's own tick.
 
 **Exit (Task 4.6).** The resume cron fires every ten minutes whatever the pause's
 resume time (no clock time, so no host time zone can misplace it). A tick before
-``resume_at`` is dropped at zero cost; the first one at or after it re-reads usage. A window past its
+``resume_at`` consults the in-memory usage snapshot (no model turn): a FRESH reading under the
+ceiling lifts the pause, a fresh reading still over re-bases the record's resume time silently
+when it differs materially, and a stale or missing reading drops the tick. The first tick at or
+after ``resume_at`` re-reads usage. This trusts the same host-wide snapshot a held prompt
+already does. A window past its
 ``resets_at`` is absent from the snapshot, so a reading from before the reset
 cannot keep the session paused. Below the ceiling the record is cleared and the
 model is told to re-establish its declared crons and continue; still over (the
@@ -67,9 +71,11 @@ from claude_code_hooks_daemon.utils.usage_pause_gate import (
     clear_pause,
     current_breaches,
     default_usage_loader,
+    fresh_breaches,
     is_resume_tick,
     load_project_config,
     override_notices,
+    rebase_pause,
     render_lift_not_recorded_note,
     render_pause_directive,
     render_resume_lifted_directive,
@@ -192,17 +198,13 @@ class UsagePauseGateHandler(InitialThreadExemption, UserPromptSubmitHandlerBase)
     ) -> BlockingResult:
         """The resume cron fired: drop it if early, else pause again if still over, else lift.
 
-        The cron fires every ten minutes whatever the pause's resume time, so a tick before
-        ``resume_at`` is dropped here without reading usage (it costs the model no turn).
+        The cron fires every ten minutes whatever the pause's resume time. A tick before
+        ``resume_at`` is judged by :meth:`_early_tick`; it costs the model no turn either way
+        unless it lifts the pause.
         """
         record = active_usage_pause(session_id, now=env.clock())
         if record is not None and not resume_is_due(record, now=env.clock()):
-            until = resume_time_text(record.resume_at)
-            logger.info("usage_pause_gate: dropping an early resume tick, paused until %s", until)
-            return BlockingResult(
-                decision=Decision.DENY,
-                reason=f"Usage pause: the resume cron fired before {until}; the pause holds.",
-            ).under_rule(_RULE, blocked="a resume cron tick that fired before the pause is due")
+            return self._early_tick(hook_input, session_id, record, env)
         breaches = current_breaches(hook_input, env)
         if not breaches:
             return self._lift(hook_input, session_id, record, env, verified_under_ceiling=True)
@@ -217,6 +219,33 @@ class UsagePauseGateHandler(InitialThreadExemption, UserPromptSubmitHandlerBase)
         # could not be written and read back): the pause ends without a fresh reading
         # showing usage under the ceiling, and the text must not say it does.
         return self._lift(hook_input, session_id, record, env, verified_under_ceiling=False)
+
+    def _early_tick(
+        self,
+        hook_input: dict[str, Any],
+        session_id: str,
+        record: UsagePause,
+        env: PauseEnvironment,
+    ) -> BlockingResult:
+        """A resume tick before ``resume_at``: consult the snapshot, which costs no model turn.
+
+        A fresh reading under the ceiling lifts the pause (the recorded window may belong to
+        another account than the one the session runs on). A fresh reading still over re-bases the
+        record's resume time silently when it differs materially, and the tick is dropped
+        either way. A stale or missing reading drops the tick unread.
+        """
+        breaches = fresh_breaches(hook_input, env)
+        if breaches is not None and not breaches:
+            logger.warning("usage_pause_gate: a fresh reading is under the ceiling, lifting early")
+            return self._lift(hook_input, session_id, record, env, verified_under_ceiling=True)
+        if breaches:
+            rebase_pause(record, breaches, env)
+        until = resume_time_text(record.resume_at)
+        logger.info("usage_pause_gate: dropping an early resume tick, paused until %s", until)
+        return BlockingResult(
+            decision=Decision.DENY,
+            reason=f"Usage pause: the resume cron fired before {until}; the pause holds.",
+        ).under_rule(_RULE, blocked="a resume cron tick that fired before the pause is due")
 
     def _lift(
         self,
@@ -283,7 +312,9 @@ class UsagePauseGateHandler(InitialThreadExemption, UserPromptSubmitHandlerBase)
             "When it fires usage is re-read: below the ceiling you are told to "
             "re-establish the declared crons (and `CronDelete` the resume cron) and continue; "
             "still over, to stay paused and stop again (the resume cron stays in place). "
-            "A tick before the resume time is dropped at no cost.\n\n"
+            "A tick before the resume time costs no turn: a fresh usage reading under "
+            "the ceiling lifts the pause at once (the session may be on a different "
+            "account than the one that paused), otherwise the tick is dropped.\n\n"
             "The ceiling is re-checked on every held prompt, so the pause lifts by itself "
             "when it no longer applies. A human can type "
             f"`{CLEAR_IN_SESSION}` in the session: it removes the record and records an "

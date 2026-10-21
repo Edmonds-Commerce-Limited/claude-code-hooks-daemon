@@ -7,8 +7,12 @@ cron (``CronCreate``/``CronDelete`` are model tools), so the daemon DIRECTS the
 model and then verifies what it did.
 
 **The resume cron names no clock time**, so no host time zone can misplace it:
-it fires every ten minutes, a tick before the pause's ``resume_at`` is dropped at
-zero cost, and the first tick at or after it re-reads usage and lifts the pause.
+it fires every ten minutes. A tick before the pause's ``resume_at`` costs the model no
+turn: it consults the in-memory usage snapshot, lifts the pause when a FRESH reading
+(:data:`EARLY_READING_MAX_AGE_SECONDS`) is under the ceiling, re-bases the record's
+``resume_at`` silently when a fresh reading is still over on a different window, and is
+otherwise dropped. The first tick at or after ``resume_at`` re-reads usage and lifts the
+pause as before. The early read trusts the same host-wide snapshot a held prompt does.
 
 Every part of that protocol reads the same few facts, so they live here once:
 
@@ -41,7 +45,7 @@ import logging
 import math
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
@@ -87,6 +91,18 @@ RESUME_MARGIN_SECONDS: Final[float] = 120.0
 
 #: The resume cron's schedule: every ten minutes, the same expression in every time zone.
 RESUME_CRON_SCHEDULE: Final[str] = "*/10 * * * *"
+
+#: How old a window's reading may be for an EARLY resume tick (before ``resume_at``) to act
+#: on it. The status line re-reads usage about once a second while the UI runs, so a window
+#: not seen for this long means nothing is refreshing it. Fifteen minutes is the ten-minute
+#: tick interval plus a margin of half a tick: a tick never judges a reading older than the
+#: previous tick could have seen, and one missed refresh does not strand a lift.
+EARLY_READING_MAX_AGE_SECONDS: Final[float] = 900.0
+
+#: An early tick that finds usage still over re-bases the record only when the new resume time
+#: differs from the recorded one by more than this (one tick interval): a smaller shift cannot
+#: change which tick lifts the pause, so rewriting the record for it is churn.
+REBASE_TOLERANCE_SECONDS: Final[float] = 600.0
 
 #: The only tools a paused session may use: just enough to replace its crons and to
 #: wind up its subagents. ToolSearch is among them because the cron tools are deferred
@@ -477,25 +493,106 @@ def current_breaches(hook_input: Mapping[str, Any], env: PauseEnvironment) -> li
     now = env.clock()
     hostname = effective_hostname(hook_input)
     ceiling = session_ceiling(env.config_loader(), hook_input)
-    if ceiling.five_hour is None and ceiling.seven_day is None:
+    if not _has_ceiling(ceiling):
         logger.debug("usage_pause_gate: no usage ceiling for host %r, not pausing", hostname)
         return []
+    snapshot = _read_snapshot(env, now)
+    if snapshot is None:
+        return []
+    breaches = find_breaches(snapshot, ceiling)
+    if not breaches:
+        logger.debug("usage_pause_gate: usage below the ceiling for host %r", hostname)
+    return breaches
+
+
+def _has_ceiling(ceiling: HostUsageCeiling) -> bool:
+    return ceiling.five_hour is not None or ceiling.seven_day is not None
+
+
+def _read_snapshot(env: PauseEnvironment, now: float) -> UsageSnapshot | None:
+    """The latest snapshot; None (logged) when there is none or it cannot be read."""
+    snapshot: UsageSnapshot | None = None
     try:
         snapshot = env.usage_loader(now)
     except OSError as exc:
         log_and_continue(
             logger,
             exc,
-            reason="an unreadable usage snapshot is no data, so no breach is found ([]) and the session is not paused on a reading nobody could take",
+            reason="an unreadable usage snapshot is no data (None), so no breach is found and the session is not paused on a reading nobody could take",
         )
-        return []
     if snapshot is None:
-        logger.debug("usage_pause_gate: no usage snapshot (no rate_limits seen), not pausing")
+        logger.debug("usage_pause_gate: no usage snapshot (no rate_limits seen)")
+    return snapshot
+
+
+def _reading_is_fresh(snapshot: UsageSnapshot, now: float) -> bool:
+    """Whether the snapshot has a window and every window it has was seen recently enough.
+
+    An absent window is not a stale one: it rolled over or the payload never carried it,
+    and :func:`find_breaches` already reads it as under the ceiling.
+    """
+    windows = [w for w in (snapshot.five_hour, snapshot.seven_day) if w is not None]
+    return bool(windows) and all(
+        now - w.observed_at <= EARLY_READING_MAX_AGE_SECONDS for w in windows
+    )
+
+
+def fresh_breaches(
+    hook_input: Mapping[str, Any], env: PauseEnvironment
+) -> list[UsageBreach] | None:
+    """:func:`current_breaches`, but None when the reading is too old to act on early.
+
+    For a resume tick that fired BEFORE ``resume_at``: it may only act on a reading
+    every present window of which was seen within :data:`EARLY_READING_MAX_AGE_SECONDS`.
+    A host with no ceiling needs no reading, so it yields ``[]`` as :func:`current_breaches`
+    does.
+    """
+    now = env.clock()
+    ceiling = session_ceiling(env.config_loader(), hook_input)
+    if not _has_ceiling(ceiling):
         return []
-    breaches = find_breaches(snapshot, ceiling)
-    if not breaches:
-        logger.debug("usage_pause_gate: usage below the ceiling for host %r", hostname)
-    return breaches
+    snapshot = _read_snapshot(env, now)
+    if snapshot is None or not _reading_is_fresh(snapshot, now):
+        logger.debug("usage_pause_gate: no fresh usage reading, an early resume tick holds")
+        return None
+    return find_breaches(snapshot, ceiling)
+
+
+def rebase_pause(
+    record: UsagePause, breaches: Sequence[UsageBreach], env: PauseEnvironment
+) -> bool:
+    """Move ``record``'s resume time to the one ``breaches`` imply, when it differs materially.
+
+    Returns whether the record was rewritten. False means it is left as it is: the times
+    agree within :data:`REBASE_TOLERANCE_SECONDS`, there is no project context, or the write
+    failed (the old record still holds the pause, so a failed re-base never lifts it).
+    ``paused_at`` is kept: when the pause began has not changed.
+    """
+    resume_at = resume_at_for(breaches)
+    if abs(resume_at - record.resume_at) <= REBASE_TOLERANCE_SECONDS:
+        return False
+    directory = untracked_dir()
+    if directory is None:
+        return False
+    rebased = replace(
+        build_pause(record.session_id, breaches, now=env.clock()), paused_at=record.paused_at
+    )
+    try:
+        write_usage_pause(directory, rebased)
+    except (OSError, ValueError) as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="a re-base that cannot be written leaves the old record in force, which still holds the pause",
+        )
+        return False
+    logger.warning(
+        "usage_pause_gate: re-based the pause from %s to %s (%s)",
+        resume_time_text(record.resume_at),
+        resume_time_text(rebased.resume_at),
+        rebased.reason,
+    )
+    return True
 
 
 def start_pause(

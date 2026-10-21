@@ -187,8 +187,12 @@ it does not end. Three handlers (`usage_pause_gate`, `usage_pause_tool_gate`,
 - The prompt that trips the ceiling carries a directive to delete every cron
   and create ONE recurring resume cron on the schedule `*/10 * * * *`, then
   stop. The schedule names no clock time, so no host time zone can misplace it;
-  a tick before the resume time (the window's reset plus two minutes) is dropped
-  at zero cost. The directive also winds up subagents: start no new ones, let
+  a tick before the resume time (the window's reset plus two minutes) costs the
+  model no turn: it reads the daemon's usage snapshot, lifts the pause when a
+  fresh reading (seen within 15 minutes) is under the ceiling (for example after
+  the session moved to another account), re-bases the recorded resume time when
+  a fresh reading is still over on a different window, and is otherwise dropped.
+  This trusts the same host-wide snapshot a held prompt already does. The directive also winds up subagents: start no new ones, let
   running ones finish.
 - While paused, other prompts are dropped before the model, every main-thread
   tool but `CronList`/`CronDelete`/`CronCreate`/`ToolSearch`/`SendMessage`/
