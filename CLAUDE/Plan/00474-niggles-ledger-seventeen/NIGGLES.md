@@ -109,6 +109,27 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N526 — the isolated perf-sweep CI job still fails: the full-QA script scan is linear but slow, and a large script is cut off
+
+**Source**: the coordinator, reading the first run of the new `Performance sweeps` CI job (Plan 00476 Task 2.2) on
+`9d33b0cea`.
+
+- **N526a**: `test_many_edits_each_run_are_judged_quickly[a=['y']+a]` failed alone in its own job, at 1.716 s against
+  `scaled_cpu_seconds(1.5)`. Contention therefore does not explain it. That was the hypothesis behind moving these tests
+  into their own job (N455), and it is refuted for this test.
+- **N526b**: a scaling probe on the development host (`find_full_qa_invocation` on a script of N `<edit>` +
+  `subprocess.run(a)` pairs) shows linear cost, about 0.45 ms per line, for every edit shape: 500 lines 0.20-0.35 s,
+  1000 lines 0.38-0.55 s, 2000 lines 0.78-0.93 s. The CI runner is about twice as slow, which leaves no margin under a
+  1.5 s bound. The test is right that the scan is slow, and it is not quadratic.
+- **N526c**: at 4000 lines every shape returns in about 0.001 s, so the scan stops at a size limit. What it then decides
+  is unverified. If an oversized script is ALLOWED, a full QA run hidden in a long script passes the sub-agent full-QA
+  gate silently. That is a fail-open, against the owner's no-silent-fallback ruling.
+
+**Fix direction**: first establish N526c, which is a security-relevant behaviour; an oversized script must fail closed
+or be named. Then profile the 2000-line case and cut the per-line constant. The bound stays as it is.
+
+**Status**: ⬜ Open.
+
 ### N525 — `transport on` builds a missing relay binary and then reports "nothing to do"
 
 **Source**: the coordinator, provisioning the relay after merging Plan 00542 (#131).
