@@ -90,8 +90,8 @@ readonly JOURNAL_DAYFILE_NAME_PATTERN='^[0-9]{1,5}-Journal-[0-9]{2}-[0-9]{2}-[0-
 readonly JOURNAL_CATEGORIES=(action finding decision thought blocker handoff correction)
 
 # A `correction` entry (ledger 00422 N3) names the entry it corrects in its
-# REF: HH:MM for an entry in today's day-file, or YY-MM-DD/HH:MM for one in an
-# earlier day-file of the same plan. The entry must exist when it is named.
+# REF: HH:MM for an entry stamped today, or YY-MM-DD/HH:MM for one on an
+# earlier day of the same plan. The entry must exist when it is named.
 readonly JOURNAL_CORRECTION_CATEGORY="correction"
 readonly JOURNAL_CORRECTION_REF_PATTERN='^(([0-9]{2}-[0-9]{2}-[0-9]{2})/)?([0-9]{2}:[0-9]{2})$'
 
@@ -275,13 +275,13 @@ journal_usage() {
     cat >&2 <<'USAGE'
 Usage: mkplan.bash --journal <plan-number> <category> <body-file> [--ref R] [--title T]
 
-Appends one entry to today's JOURNAL/ day-file for an existing plan. The
-script reads the clock itself (UTC) -- it never accepts a time from the
-caller. Never rewrites: the day-file is created from _JOURNAL_TEMPLATE_.md
-when absent, then the entry is appended.
+Adds one entry to an existing plan's JOURNAL/ as its own new file,
+JOURNAL/YYYY-MM-DD/HHMMSSZ-<category>-<hex>.md. The script reads the clock
+itself (UTC) -- it never accepts a time from the caller. It never opens an
+existing file, so two branches that journal the same day cannot conflict.
 
 This is THE way to add a journal entry. The hooks daemon denies an entry
-written by hand (Edit, Write, a heredoc or a redirect into a day-file),
+written by hand (Edit, Write, a heredoc or a redirect into JOURNAL/),
 because a hand-typed time can be wrong and an append-only journal cannot
 correct it until the clock has passed the wrong time.
 
@@ -295,8 +295,9 @@ Options:
   --ref R      Optional task/phase reference (e.g. T2.1, P1). Defaults to
                the grammar's "no ref" marker (an em dash). REQUIRED for a
                correction, where it names the entry being corrected: HH:MM
-               for an entry in today's day-file, or YY-MM-DD/HH:MM for one
-               in an earlier day-file. That entry must exist. The corrected
+               for an entry stamped today, or YY-MM-DD/HH:MM for one on an
+               earlier day (in its entry folder or a legacy day-file). That
+               entry must exist. The corrected
                entry is never edited or moved.
   --title T    Optional short title appended to the heading.
 
@@ -405,7 +406,7 @@ run_journal_mode() {
     local corrected_day="" corrected_time=""
     if [[ "$category" == "$JOURNAL_CORRECTION_CATEGORY" ]]; then
         if [[ ! "$ref" =~ $JOURNAL_CORRECTION_REF_PATTERN ]]; then
-            die "a correction needs --ref naming the entry it corrects: HH:MM in today's day-file, or YY-MM-DD/HH:MM in an earlier one (got '$ref')"
+            die "a correction needs --ref naming the entry it corrects: HH:MM for an entry stamped today, or YY-MM-DD/HH:MM for one on an earlier day (got '$ref')"
         fi
         corrected_day="${BASH_REMATCH[2]}"
         corrected_time="${BASH_REMATCH[3]}"
@@ -864,7 +865,7 @@ cat > "$plan_file" <<PLAN
 
 <!-- Curated milestones + delivery commit hashes only (git is the SSoT for
      "when" — do not add dates). The blow-by-blow activity log lives in
-     JOURNAL/$padded-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
+     JOURNAL/YYYY-MM-DD/<entry>.md — see CLAUDE/PlanJournalling.md. -->
 
 - <!-- milestone or delivery commit hash -->
 PLAN
@@ -872,9 +873,9 @@ fi
 
 # --- scaffold the plan JOURNAL/ (Plan 00163) -------------------------------
 
-# First-class plan journalling: a JOURNAL/ subfolder of per-day, append-only
-# files NNNNN-Journal-YY-MM-DD.md — the linear activity log complementary to
-# PLAN.md. Gated on a project-owned _JOURNAL_TEMPLATE_.md whose presence is the
+# First-class plan journalling: a JOURNAL/ subfolder of per-day folders holding
+# one append-only file per entry (JOURNAL/YYYY-MM-DD/HHMMSSZ-<category>-<hex>.md)
+# — the linear activity log complementary to PLAN.md. Gated on a project-owned _JOURNAL_TEMPLATE_.md whose presence is the
 # "this project journals" marker, so non-journalling projects get clean plans.
 # Written with bash (mkdir / cat), not the Write tool — same reason as PLAN.md.
 # (JOURNAL_DIR_BASENAME / JOURNAL_TEMPLATE_BASENAME are declared once, near

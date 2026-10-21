@@ -25,8 +25,8 @@ Conflating either of these with `PLAN.md` is the same failure mode with two
 different symptoms: append the time-series and `PLAN.md` becomes a stale
 log; compress the durable detail to keep `PLAN.md` "lean" and you delete
 real content trying to hit a size target. A **journal** is the first
-stream — each plan folder gains a `JOURNAL/` sub-directory holding per-day,
-append-only files. A **supporting document** is the second — a plain `.md`
+stream — each plan folder gains a `JOURNAL/` sub-directory holding one
+append-only file per entry, grouped in a folder per day. A **supporting document** is the second — a plain `.md`
 file living directly in the plan folder, edited in place like `PLAN.md` but
 never re-read in full by every session, only opened on demand via a link
 from a task.
@@ -50,12 +50,12 @@ This table is the single source of truth for how the three file kinds
 differ. Everything else — handler guidance, `docs/PLAN_SYSTEM.md`, the size
 checks — points here rather than restating it.
 
-|             | `PLAN.md`                                                                          | supporting `SOME-DOC.md`                                                                                                                 | `JOURNAL/NNNNN-Journal-YY-MM-DD.md`                                                                              |
-| ----------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| **Write**   | Commit if dirty, edit **in place**, commit. Rewrite freely — git holds the history | Edit **in place**, freely — a named document, not a log                                                                                  | **APPEND ONLY.** Never edit or remove an earlier entry; corrections are new dated entries at the bottom          |
-| **Content** | Lean, surgical, always correct — current truth only                                | Durable detail that is current but too big for the task list: research, findings, decisions and their reasoning, evidence tables, drafts | What actually happened: dated progress, findings, dead-ends, hand-offs                                           |
-| **Read**    | Read **in full** every session — it is your grounding                              | **On demand only** — opened when its link from `PLAN.md` is followed                                                                     | **Never read whole.** `tail -n N` the newest day-file, grep for a term, or send a sub-agent for deep archaeology |
-| **Size**    | Bounded and enforced — see the tiers below                                         | **Unbounded** — never opened by a session that doesn't follow its link, so it costs that session nothing                                 | **Unbounded by design.** Length is never a problem; never tidy, trim or summarise a journal                      |
+|             | `PLAN.md`                                                                          | supporting `SOME-DOC.md`                                                                                                                 | `JOURNAL/YYYY-MM-DD/<entry>.md`                                                                             |
+| ----------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **Write**   | Commit if dirty, edit **in place**, commit. Rewrite freely — git holds the history | Edit **in place**, freely — a named document, not a log                                                                                  | **APPEND ONLY.** An entry file is written once and never edited or removed; corrections are new entries     |
+| **Content** | Lean, surgical, always correct — current truth only                                | Durable detail that is current but too big for the task list: research, findings, decisions and their reasoning, evidence tables, drafts | What actually happened: dated progress, findings, dead-ends, hand-offs                                      |
+| **Read**    | Read **in full** every session — it is your grounding                              | **On demand only** — opened when its link from `PLAN.md` is followed                                                                     | **Never read whole.** Read the newest entry file, grep for a term, or send a sub-agent for deep archaeology |
+| **Size**    | Bounded and enforced — see the tiers below                                         | **Unbounded** — never opened by a session that doesn't follow its link, so it costs that session nothing                                 | **Unbounded by design.** Length is never a problem; never tidy, trim or summarise a journal                 |
 
 ### Why the asymmetry (the read contract justifies the write contract)
 
@@ -76,12 +76,17 @@ would be a category error. It is also why "my journal is getting long" (or
 ### Reading a journal without flooding your context
 
 ```bash
-tail -n 60 CLAUDE/Plan/00190-thing/JOURNAL/00190-Journal-26-07-31.md
-grep -n "rate limit" CLAUDE/Plan/00190-thing/JOURNAL/*.md
+ls CLAUDE/Plan/00190-thing/JOURNAL/2026-10-21/
+cat CLAUDE/Plan/00190-thing/JOURNAL/2026-10-21/171233Z-decision-0b9e44.md
+grep -rn "rate limit" CLAUDE/Plan/00190-thing/JOURNAL/
 ```
 
-Both take the path as an **argument**, so no pipe is involved and the
-`pipe_blocker` handler never sees them. For anything deeper — "why did we
+Each takes the path as an **argument**, so no pipe is involved and the
+`pipe_blocker` handler never sees them. File names start with the UTC time,
+so a listing is already in time order, and the newest entry is the last file
+of the newest date folder (unless a legacy day-file is dated later, which can
+only happen on a branch cut before the layout changed). A legacy day-file is
+still sampled with `tail -n 60 <file>`. For anything deeper — "why did we
 abandon approach B three weeks ago?" — dispatch a sub-agent to read the
 journal and report back, so the bulk never enters your own context.
 
