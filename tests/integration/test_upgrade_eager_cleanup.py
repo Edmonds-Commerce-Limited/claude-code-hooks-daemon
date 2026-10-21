@@ -27,9 +27,9 @@ script here. End-to-end integration is covered by
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -48,9 +48,7 @@ STALE_HASH = "sha256:" + "0" * 64
 FP_TAIL = "py313-abc12345"
 
 
-def _run_bash(
-    script: str, env: dict[str, str] | None = None
-) -> subprocess.CompletedProcess[str]:
+def _run_bash(script: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     wrapper = f"""
 set -euo pipefail
 source "{VENV_SH}"
@@ -262,7 +260,9 @@ class TestEagerCleanupInterpreterChoice:
     """
 
     @staticmethod
-    def _env_with_old_python3(tmp_path: Path, extra: dict[str, str] | None = None) -> dict[str, str]:
+    def _env_with_old_python3(
+        tmp_path: Path, extra: dict[str, str] | None = None
+    ) -> dict[str, str]:
         """An environment whose first ``python3`` fails like a 3.9 import error."""
         fake_bin = tmp_path / "fakebin"
         fake_bin.mkdir()
