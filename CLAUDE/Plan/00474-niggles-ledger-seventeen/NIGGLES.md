@@ -109,6 +109,21 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N523 — the relay is enabled in config but its binary is missing, and every forwarder falls back silently
+
+**Source**: the coordinator's #131 triage (Plan 00542, `RESEARCH-COST.md` section 4).
+
+- **N523**: this repository's `.claude/hooks-daemon.yaml` sets `daemon.transport.relay_enabled: true`
+  (`relay_source: build`). Only `untracked/relay-build/` exists; `untracked/bin/hooks-relay` does not. Each
+  generated forwarder's relay guard requires the binary to be executable, so every hook event takes the bash path, and
+  nothing reports it. The config claims a transport that is not in use, so any measurement that assumes the relay is
+  wrong without saying so.
+
+**Fix direction**: a configured-but-absent relay binary is surfaced, for example by a SessionStart advisory or in
+`hooks-daemon status`, naming the `transport on` or build command that restores it. It is not swallowed.
+
+**Status**: ⬜ Open.
+
 ### N522 — the Stop guidance says every declared job's tick is dropped while awaiting a human
 
 **Source**: the main session's issue-sdlc loop. It made three `[awaiting-human]` stops, and

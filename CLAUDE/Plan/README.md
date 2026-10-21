@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00542: statusline fast path raw text](00542-statusline-fast-path-raw-text/PLAN.md) - In Progress (#131: a status tick costs about 0.08 CPU-s through bash, init.sh and a fresh python3; raw status text plus a byte-pump fast path ahead of init.sh, falling through to today's path when the daemon is down)
+
 - [00538: supervisor auto refocus and focus signal](00538-supervisor-auto-refocus-and-focus-signal/PLAN.md) - Not Started (#125 follow-up: a spike for a non-screen focus signal; auto-refocus and the mods route are owner decisions)
 
 - [00536: persistent daemon saturation log](00536-persistent-daemon-saturation-log/PLAN.md) - Not Started (#124 follow-up: a bounded journal of saturation episodes, straggler restarts and forced stops that survives a daemon restart, with a verb to print it)
@@ -318,11 +320,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 541 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 542 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 459 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 59 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 60 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
