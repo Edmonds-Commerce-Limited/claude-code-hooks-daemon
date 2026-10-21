@@ -559,14 +559,18 @@ class JournalEntryFileName:
     category: str
 
     @property
-    def is_valid_date(self) -> bool:
-        """Whether the folder is a real calendar date and the name a real UTC time."""
+    def is_valid_time(self) -> bool:
+        """Whether the name's ``HHMMSS`` is a real time of day."""
         return (
-            _is_valid_calendar_date(self.year, self.month, self.day)
-            and self.hour < _HOURS_PER_DAY
+            self.hour < _HOURS_PER_DAY
             and self.minute < _MINUTES_PER_HOUR
             and self.second < _SECONDS_PER_MINUTE
         )
+
+    @property
+    def is_valid_date(self) -> bool:
+        """Whether the folder is a real calendar date and the name a real UTC time."""
+        return _is_valid_calendar_date(self.year, self.month, self.day) and self.is_valid_time
 
     @property
     def date(self) -> date:

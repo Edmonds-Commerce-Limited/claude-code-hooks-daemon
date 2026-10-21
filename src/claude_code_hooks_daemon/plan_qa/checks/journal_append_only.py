@@ -54,7 +54,10 @@ _NEWLINE: Final[str] = "\n"
 
 def _run(context: CheckContext) -> list[Finding]:
     target = journal_edit_target(context)
-    if target is None:
+    # An entry file (Plan 00543) is immutable rather than append-only:
+    # journal-dayfile-is-today reports any change to one, so a second finding
+    # here would double-report it.
+    if target is None or target.is_entry_file:
         return []
 
     before = context.file_content_before
