@@ -3301,9 +3301,21 @@ def _starts_a_process(code: str) -> bool:
     )
 
 
-def _python_strings_of(
-    code: str, argv: Sequence[str]
-) -> tuple[list[str], list[list[str]], list[str], list[list[str]]]:
+class _PythonStrings(NamedTuple):
+    """What process calls in Python code can receive (:func:`_python_strings`).
+
+    ``over_budget`` is True when the parse meter ran out before every grown
+    argv list was judged (N526), so the code holds runs that were not seen.
+    """
+
+    texts: list[str]
+    argvs: list[list[str]]
+    unsure_texts: list[str]
+    unsure_argvs: list[list[str]]
+    over_budget: bool
+
+
+def _python_strings_of(code: str, argv: Sequence[str]) -> _PythonStrings:
     """The strings and argv lists of Python code (:func:`_python_strings`).
 
     Code Python cannot parse, or whose expressions nest too deep to walk (a
@@ -3315,13 +3327,82 @@ def _python_strings_of(
         return _python_strings(tree, runs, maybe, argv)
     except (SyntaxError, ValueError, RecursionError) as error:
         logger.debug("Python judged by its quoted literals, unparsable (%s)", error)
-        return _string_literals(code), [], [], []
+        return _PythonStrings(_string_literals(code), [], [], [], over_budget=False)
+
+
+#: Leaf nodes that only mark how their parent is read or combined (``Load``,
+#: ``Store``, ``Add``, ``And``, ``Eq``, ``Not``...). No pass judges them as
+#: nodes, only through the parent's ``ctx``/``op`` attribute, and a third of
+#: a typical tree is made of them, so the index leaves them out.
+_MARKER_NODES: Final[tuple[type[ast.AST], ...]] = (
+    ast.expr_context,
+    ast.operator,
+    ast.boolop,
+    ast.cmpop,
+    ast.unaryop,
+)
+
+
+class _TreeIndex(NamedTuple):
+    """One parsed tree swept once: its nodes in :func:`ast.walk`'s order, and each one's children.
+
+    Marker leaves (:data:`_MARKER_NODES`) are left out; every other node is
+    in both. Both are shared with every reader, which only reads them. Nodes
+    are keyed by themselves (an AST node hashes by identity), so the index
+    holds them alive and a key never stands for another node.
+    """
+
+    nodes: list[ast.AST]
+    children: dict[ast.AST, list[ast.AST]]
+
+
+#: The indexes of the judgement in progress, by the tree's id, set per call
+#: by :func:`find_full_qa_invocation` beside the parse meter (N526): a
+#: parsed file is swept by a dozen passes, and each re-walking the whole
+#: tree made the per-line cost several times one walk's. Unset, each tree
+#: is indexed afresh, with the same result.
+_TREE_INDEXES: Final[ContextVar[dict[int, tuple[ast.AST, _TreeIndex]]]] = ContextVar(
+    "subagent_full_qa_tree_indexes"
+)
+
+
+def _tree_index(tree: ast.AST) -> _TreeIndex:
+    """``tree`` swept once per judgement (see :class:`_TreeIndex`)."""
+    indexes = _TREE_INDEXES.get(None)
+    held = indexes.get(id(tree)) if indexes is not None else None
+    if held is not None and held[0] is tree:
+        return held[1]
+    nodes: list[ast.AST] = [tree]
+    children: dict[ast.AST, list[ast.AST]] = {}
+    index = 0
+    while index < len(nodes):
+        node = nodes[index]
+        below = [
+            child for child in ast.iter_child_nodes(node) if not isinstance(child, _MARKER_NODES)
+        ]
+        children[node] = below
+        nodes.extend(below)
+        index += 1
+    found = _TreeIndex(nodes, children)
+    if indexes is not None:
+        indexes[id(tree)] = (tree, found)
+    return found
+
+
+def _walk(tree: ast.AST) -> list[ast.AST]:
+    """Every node under ``tree``, in :func:`ast.walk`'s order; the list is shared, read only."""
+    return _tree_index(tree).nodes
+
+
+def _child_lister(tree: ast.AST) -> Callable[[ast.AST], list[ast.AST]]:
+    """The children of each node under ``tree``; a node from elsewhere raises KeyError."""
+    return _tree_index(tree).children.__getitem__
 
 
 def _constant_names(tree: ast.Module) -> dict[str, list[str]]:
     """Each name the code binds to a string constant, with every value it is given."""
     names: dict[str, list[str]] = {}
-    for node in ast.walk(tree):
+    for node in _walk(tree):
         if isinstance(node, ast.Assign):
             targets, value = node.targets, node.value
         elif isinstance(node, ast.AnnAssign) and node.value is not None:
@@ -3651,6 +3732,7 @@ def _function_scopes(tree: ast.Module) -> tuple[dict[int, int], dict[int, int]]:
     """
     scope_of: dict[int, int] = {}
     parent_of: dict[int, int] = {}
+    children = _child_lister(tree)
     pending: list[tuple[ast.AST, int]] = [(tree, 0)]
     while pending:
         node, scope = pending.pop()
@@ -3658,7 +3740,7 @@ def _function_scopes(tree: ast.Module) -> tuple[dict[int, int], dict[int, int]]:
         inner = id(node) if isinstance(node, _FUNCTIONS) else scope
         if inner != scope:
             parent_of[inner] = scope
-        pending.extend((child, inner) for child in ast.iter_child_nodes(node))
+        pending.extend((child, inner) for child in children(node))
     return scope_of, parent_of
 
 
@@ -3780,7 +3862,7 @@ def _argv_operand(call: ast.Call, callee: str) -> ast.expr | None:
 
 def _grown_argvs(
     tree: ast.Module, names: Mapping[str, list[str]], argv: Sequence[str]
-) -> tuple[list[list[str]], set[int]]:
+) -> tuple[list[list[str]], set[int], bool]:
     """The argvs of lists built by changes and then handed to a process call (N409).
 
     ``a = []; a.append("pytest"); subprocess.Popen(a)`` starts pytest: the
@@ -3790,15 +3872,17 @@ def _grown_argvs(
     built in (a name found nowhere there is looked for in the functions around
     it). The work is bounded: each list is swept once, at most
     :data:`_MAX_ARGV_WORDS` words are judged per call, and the words are
-    charged to the parse meter; past it the lists are left to be judged as
-    they are written.
+    charged to the parse meter. The first call the meter cannot afford ends
+    the sweep, and is reported (N526): the calls left unjudged may run the
+    whole suite, so the caller judges the code over budget.
 
     Returns:
-        The argvs, and the ids of the list literals they replace: only the
+        The argvs; the ids of the list literals they replace (only the
         literal a list was last assigned from before a call that runs it,
-        which is just the first part of that argv.
+        which is just the first part of that argv); and whether the meter
+        ran out before every call was judged.
     """
-    nodes = list(ast.walk(tree))
+    nodes = _walk(tree)
     scope_of, parent_of = _function_scopes(tree)
     changes = _list_changes(nodes, scope_of)
     aliases: dict[_ListKey, list[str]] = {}
@@ -3906,10 +3990,9 @@ def _grown_argvs(
                     continue
                 program = path if _python_argv_heads(path, names) else items[0]
                 exec_words = [program, *items[1:_MAX_ARGV_WORDS]]
-                if _spend(len(exec_words)):
-                    argvs.extend(
-                        _python_argvs(ast.List(elts=exec_words, ctx=ast.Load()), names, argv)
-                    )
+                if not _spend(len(exec_words)):
+                    return argvs, replaced, True
+                argvs.extend(_python_argvs(ast.List(elts=exec_words, ctx=ast.Load()), names, argv))
             continue
         if reading.sink == _ASYNC_EXEC_SINK or reading.sink in _EXEC_SPREAD_SINKS:
             words: list[ast.expr] = []
@@ -3934,18 +4017,22 @@ def _grown_argvs(
                 # `execl(path, argv0, *args)`: argv0 is a name for the program, not a word.
                 del words[_EXEC_ARGV_ZERO : _EXEC_ARGV_ZERO + 1]
             words = words[:_MAX_ARGV_WORDS]
-            if _spend(len(words)):
-                argvs.extend(_python_argvs(ast.List(elts=words, ctx=ast.Load()), names, argv))
+            if not _spend(len(words)):
+                return argvs, replaced, True
+            argvs.extend(_python_argvs(ast.List(elts=words, ctx=ast.Load()), names, argv))
             continue
         for key in reading.keys:
             if key not in reading.counts or (key, reading.counts[key]) in judged:
                 continue
             state = states[key][reading.counts[key]]
-            if state.items and _spend(len(state.items)):
-                judged.add((key, reading.counts[key]))
-                argvs.extend(_python_argvs(ast.List(elts=state.items, ctx=ast.Load()), names, argv))
-                set_aside(state)
-    return argvs, replaced
+            if not state.items:
+                continue
+            if not _spend(len(state.items)):
+                return argvs, replaced, True
+            judged.add((key, reading.counts[key]))
+            argvs.extend(_python_argvs(ast.List(elts=state.items, ctx=ast.Load()), names, argv))
+            set_aside(state)
+    return argvs, replaced, False
 
 
 #: Calls that print, log, exit with or declare TEXT, so what they are given is
@@ -4284,6 +4371,7 @@ class _CallRanker:
         definitions: dict[str, list[_Scope | None]] = {}
         calls: list[tuple[str | None, _Scope | None, ast.Call]] = []
         members: dict[str, set[str]] = {}
+        children = _child_lister(tree)
         stack: list[tuple[ast.AST, str | None, str | None, _Scope | None]] = [
             (tree, None, None, None)
         ]
@@ -4327,7 +4415,7 @@ class _CallRanker:
             elif isinstance(node, ast.Call):
                 calls.append((owner, scope, node))
                 self._call_scope[id(node)] = scope
-            stack.extend((child, owner, klass, scope) for child in ast.iter_child_nodes(node))
+            stack.extend((child, owner, klass, scope) for child in children(node))
         self._plain: dict[str, _Scope] = {
             name: found[0]
             for name, found in definitions.items()
@@ -4613,7 +4701,7 @@ def _process_arguments(tree: ast.Module) -> tuple[set[int], set[int]]:
 
     Iterative, so a deeply nested expression costs its size once.
     """
-    nodes = list(ast.walk(tree))
+    nodes = _walk(tree)
     bound = _bindings(nodes)
     ranker = _CallRanker(tree, bound)
     seeds: dict[int, list[ast.AST]] = {_MAY_RUN_IT: [], _RUNS_IT: []}
@@ -4633,6 +4721,7 @@ def _process_arguments(tree: ast.Module) -> tuple[set[int], set[int]]:
     runs: set[int] = set()
     maybe: set[int] = set()
     followed: set[str] = set()
+    children = _child_lister(tree)
     # What a run reaches is closed under the walk, so the second pass skips it.
     for pending, reached in ((seeds[_RUNS_IT], runs), (seeds[_MAY_RUN_IT], maybe)):
         while pending:
@@ -4640,7 +4729,7 @@ def _process_arguments(tree: ast.Module) -> tuple[set[int], set[int]]:
             if id(current) in runs or id(current) in maybe:
                 continue
             reached.add(id(current))
-            pending.extend(ast.iter_child_nodes(current))
+            pending.extend(children(current))
             key = (
                 current.id
                 if isinstance(current, ast.Name)
@@ -4686,7 +4775,7 @@ def _passed_literals(code: str) -> tuple[list[str], list[str]]:
         return _string_literals(code), []
     literals = [
         node
-        for node in ast.walk(tree)
+        for node in _walk(tree)
         if isinstance(node, ast.Constant) and isinstance(node.value, str)
     ]
     return (
@@ -4697,7 +4786,7 @@ def _passed_literals(code: str) -> tuple[list[str], list[str]]:
 
 def _python_strings(
     tree: ast.Module, runs: frozenset[int], maybe: frozenset[int], argv: Sequence[str]
-) -> tuple[list[str], list[list[str]], list[str], list[list[str]]]:
+) -> _PythonStrings:
     """Every string a call can receive, and every argv list it can receive (review 8 M1).
 
     A string literal counts wherever it sits as long as a call can be handed
@@ -4712,7 +4801,7 @@ def _python_strings(
     two, what only a call to unreadable code receives (N417), which may run
     them and is judged as unseen.
     """
-    nodes = list(ast.walk(tree))
+    nodes = _walk(tree)
     links = {
         id(side)
         for node in nodes
@@ -4722,7 +4811,7 @@ def _python_strings(
     names = _constant_names(tree)
     texts: list[str] = []
     unsure_texts: list[str] = []
-    argvs, replaced = _grown_argvs(tree, names, argv)
+    argvs, replaced, over_budget = _grown_argvs(tree, names, argv)
     unsure_argvs: list[list[str]] = []
     for node in nodes:
         if id(node) in runs:
@@ -4743,7 +4832,7 @@ def _python_strings(
             and id(node) not in replaced
         ):
             argv_bucket.extend(_python_argvs(node, names, argv))
-    return texts, argvs, unsure_texts, unsure_argvs
+    return _PythonStrings(texts, argvs, unsure_texts, unsure_argvs, over_budget)
 
 
 def _open_quote(text: str) -> str:
@@ -4797,17 +4886,23 @@ def _python_command(text: str, segment: str, depth: int) -> Iterator[tuple[str, 
 def _python_commands(
     code: str, argv: Sequence[str], segment: str, depth: int
 ) -> Iterator[tuple[str, list[str], str]]:
-    """What the strings and argv lists of process-starting Python code run."""
-    texts, argvs, unsure_texts, unsure_argvs = _python_strings_of(code, argv)
-    for text in texts:
+    """What the strings and argv lists of process-starting Python code run.
+
+    Grown argv lists the parse meter could not afford are ``_OVER_BUDGET``,
+    yielded last so a run seen positively still wins (N526).
+    """
+    found = _python_strings_of(code, argv)
+    for text in found.texts:
         yield from _python_command(text, segment, depth)
-    for argv in argvs:
+    for argv in found.argvs:
         yield from _resolve(argv, segment, depth)
     # Handed only to code this cannot read: what it runs is not seen (N417).
-    for text in unsure_texts:
+    for text in found.unsure_texts:
         yield from _unsure(_python_command(text, segment, depth))
-    for argv in unsure_argvs:
+    for argv in found.unsure_argvs:
         yield from _unsure(_resolve(argv, segment, depth))
+    if found.over_budget:
+        yield _OVER_BUDGET, [], segment
 
 
 def _unsure(
@@ -4949,6 +5044,7 @@ def _operands_run_in_process(
     shadowed: list[list[tuple[str, ast.expr | None, ast.expr | None, ast.expr | None]]] = []
     # The loop variable each open literal ``for`` bound, with what it held before.
     looping: list[tuple[str, ast.expr | None]] = []
+    children = _child_lister(tree)
     stack: list[tuple[ast.AST, bool]] = [(tree, False)]
     while stack:
         node, finished = stack.pop()
@@ -4999,7 +5095,7 @@ def _operands_run_in_process(
                 looping.append(("", None))
         if isinstance(node, (ast.Assign, ast.withitem, ast.For, *_SCOPES)):
             stack.append((node, True))
-        stack.extend((child, False) for child in reversed(list(ast.iter_child_nodes(node))))
+        stack.extend((child, False) for child in reversed(children(node)))
     return operands
 
 
@@ -5812,9 +5908,11 @@ def find_full_qa_invocation(
         return FullQaMatch(named.pattern_id, quoted, fail_closed=_OVERSIZED_REASON)
     event = _Event(patterns=patterns, start=cwd, addopts=_addopts(command))
     token = _PARSE_METER.set(_ParseMeter(remaining=_MAX_PARSED_BYTES))
+    indexes_token = _TREE_INDEXES.set({})
     try:
         return _first_full_run(_invocations(command), command, event, cwd, 0)
     finally:
+        _TREE_INDEXES.reset(indexes_token)
         _PARSE_METER.reset(token)
 
 
