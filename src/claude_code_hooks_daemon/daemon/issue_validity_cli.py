@@ -176,18 +176,21 @@ def run_issue_validity(
     ``workable_cache`` is where ``--list-eligible`` leaves the workable issue
     numbers for the Stop gate (Plan 00470 Phase 7); ``None`` writes nothing.
 
-    Refuses (``EXIT_USAGE``, no ``gh`` call) when no author list is configured:
-    this is the strict caller, and an unconfigured list would make every issue
-    eligible. The PreToolUse handler keeps "no list = author check n/a".
+    ``--list-eligible`` refuses (``EXIT_USAGE``, no ``gh`` call) when no author
+    list is configured: autonomous picking with no list would make every issue
+    eligible. A single-issue check or ``--claim`` acts on an issue the caller
+    already chose, so it proceeds and reports the author check as not
+    applicable, the same reading the PreToolUse handler takes.
     """
-    if not AuthorWhitelistCheck(approved).is_configured:
-        stderr.write(
-            "refusing to judge issues: no approved_issue_authors configured. Set it under "
-            "handlers.pre_tool_use.github_issue_assignment_guard.options in "
-            ".claude/hooks-daemon.yaml; an unconfigured list would make every issue eligible.\n"
-        )
-        return EXIT_USAGE
     if list_eligible:
+        if not AuthorWhitelistCheck(approved).is_configured:
+            stderr.write(
+                "refusing to list eligible issues: no approved_issue_authors configured. Set it "
+                "under handlers.pre_tool_use.github_issue_assignment_guard.options in "
+                ".claude/hooks-daemon.yaml; an unconfigured list would make every issue "
+                "eligible.\n"
+            )
+            return EXIT_USAGE
         return _list_eligible(as_json, approved, service, stdout, stderr, workable_cache)
     if number is None:
         stderr.write("an issue number is required (or use --list-eligible)\n")
