@@ -16,7 +16,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00530: subagent tier enforcement follow up](00530-subagent-tier-enforcement-follow-up/PLAN.md) - Not Started (opened by the Plan 00472 build per its Fable rulings' section 3: confirm the Workflow advisor against a real payload, then decide the Workflow deny mode, `require_explicit` and the `CLAUDE_CODE_SUBAGENT_MODEL` flip from measured evidence)
 
-- [00529: owner decision on rust helpers from 00495 assessment](00529-owner-decision-on-rust-helpers-from-00495-assessment/PLAN.md) - Not Started (Plan 00495 Task 3.2 found no path that justifies a native helper, and one Python defect: the secret-file guard spends 1.2 s on a 115 KB Write; awaiting the owner's decision on the assessment's three recommendations)
+- [00529: owner decision on rust helpers from 00495 assessment](00529-owner-decision-on-rust-helpers-from-00495-assessment/PLAN.md) - In Progress (the owner decided: the Rust relay becomes the default, starting with the status line; Rust is welcome where measured; performance is a priority; no silent fallbacks, a configured transport not in use fails loudly)
 
 - [00526: supervisor plugin relay result](00526-supervisor-plugin-relay-result/PLAN.md) - Not Started (#119, agent-needs-human: a plugin API 1.1 `Relay` result types external message text into the session; a new prompt-injection surface, so build or not is the owner's call)
 

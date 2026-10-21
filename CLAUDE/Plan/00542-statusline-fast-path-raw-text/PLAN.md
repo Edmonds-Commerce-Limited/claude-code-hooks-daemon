@@ -41,8 +41,23 @@ path on any failure.
 ## Non-Goals
 
 - A new Go or Rust client. The existing std-only relay is the compiled client.
-- Turning the relay on by default, or changing how its binary is distributed. Both are Plan 00529's owner decision.
+- Turning the relay on by default for every hook, and how its binary is distributed. The owner has decided both, and the
+  work is Plan 00529 Task 2. This plan makes the status line use the relay.
 - Changing `refreshInterval`.
+
+## Owner rulings that reshape Phase 1
+
+Plan 00529 records them:
+
+- the relay is the default, starting with the status line;
+- performance is a priority, because many sessions now run at once;
+- **no silent fallbacks: loud and clear, fail fast.**
+
+So a failure the fast path can name is shown loudly on the status line, naming the fix: a configured relay that is
+missing, a daemon too old for raw text, a timeout, or an error reply. It does not fall through quietly to the Python
+rung. The one hand-off that stays is a daemon that is not running at all. That goes to the existing start-up path,
+which starts the daemon and shows `DAEMON FAILED` or venv building loudly (Plan 00488, #72). That is recovery, not a
+silent substitute.
 
 ## Tasks
 
@@ -58,8 +73,17 @@ path on any failure.
   - it sends it through the relay binary when that is executable, else `nc -U -N` when the host's nc is capable;
   - it uses a short timeout and prints the reply.
 
-  It falls through to the existing path on no socket, a refused connection, a timeout, an empty reply or an error
-  reply.
+  As first built, it fell through silently on any failure. Task 1.4 makes those failures loud.
+
+- [ ] ⬜ **Task 1.4**: Loud failures (owner ruling).
+
+  - A configured relay that is missing or not executable prints a red status naming the fix.
+  - A reply without the raw-text marker prints a red "daemon too old for raw status, restart" status.
+  - A timeout or an error reply prints a red status naming what failed.
+  - Only "no daemon running" (no socket, or the connection refused) hands off to the start-up path, which reports
+    loudly.
+
+  Each case is tested.
 
 - [ ] ⬜ **Task 1.3**: Measure the generated forwarder before and after on this host (daemon up, 6 runs). Record the
   numbers here.
@@ -73,7 +97,8 @@ path on any failure.
 ## Success Criteria
 
 - [ ] With the daemon up, a status tick is answered by the fast path, and its measured CPU per call drops by at least 5x.
-- [ ] With the daemon down, the status line shows the same text as before. Tests cover each fall-through case.
+- [ ] With the daemon down, the status line shows the same text as before.
+- [ ] No fast-path failure is silent. Every case shows a loud status naming the fix, and is tested.
 - [ ] Release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
 ## Delivery & Milestones
