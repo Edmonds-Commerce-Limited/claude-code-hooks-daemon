@@ -107,3 +107,28 @@ Done, one commit each, TDD (red counts quoted):
 Left: handoff items 6 (`journal_entry_ordering`), 7 (`journal_entry_future_dated`), 8 (`journal_dayfile_is_today`
 EDIT reframe and COMMIT half), 9 (`has_staged_journal_entry` pins), then Task 2.3. Handoff:
 `untracked/scratch/261021-ab83fba2ca446f2ac-handoff.md`.
+
+## Task 2.2 readers, items 6-9
+
+Items 7, 8 and 9 are done; item 6 (`journal-entry-ordering`) is left, so Task 2.2 is not ticked.
+Handoff: `untracked/scratch/261021-a1587e84e888de63f-handoff.md`.
+
+- Item 7, `journal-entry-future-dated`: an entry file takes its date from its folder (`target.journal_date`) and
+  is always judged on the UTC clock. Red: 2 failed, 18 passed. `e6b427468`.
+- Item 8, `journal-dayfile-is-today`, EDIT half: writing to any journal file that already exists is a finding.
+  There are three exceptions: a no-op write, removing only conflict markers, and restoring the HEAD bytes.
+  Creating an entry file is clean, and creating a legacy day-file keeps the not-today rule.
+- Item 8, COMMIT half: it reports a staged M or D of a JOURNAL_ENTRY path, or an R whose staged text differs from
+  the HEAD text of `old_path`. The level comes from the today-only mode, with `level_for_plan` applied when that
+  mode is BLOCK. `CHECKS` is now `(EDIT_CHECK, COMMIT_CHECK)` and is registered in `checks/__init__.py`.
+- Item 8, shared code: `is_conflict_marker` and `only_conflict_markers_removed` are now public in
+  `plan_qa/model.py`, and `plan_journal_guard` imports them. The `WRITE_ACT_ONLY_RULES` reason is updated.
+- Item 8, changed tests: two journal tests in `test_plan_qa_edit.py` now expect the new contract, because
+  appending to an existing day-file is DENY. The COMMIT count in `test_runner.py` goes from 20 to 21.
+  Red: 12 failed, 7 errors, 16 passed. `5485524fd`.
+- Item 9: pins show that a staged new entry file satisfies `has_staged_journal_entry`
+  (`test_journal_entry_with_progress`, `test_journal_completion_entry`). They pin existing behaviour, so there was
+  no red phase. `7fbbd2098`.
+
+Targeted QA passes: `tests/unit/plan_qa` plus `test_plan_qa_edit`, `test_plan_qa_commit_gate` and
+`test_plan_journal_guard`, 1310 tests. mypy and ruff are clean on the touched sources.
