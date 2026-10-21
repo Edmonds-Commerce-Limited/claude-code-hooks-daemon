@@ -768,6 +768,9 @@ prune. Release note 052.
 - Recurrence, run 39364158757 for d5f7a2cf0 (a plan-files-only commit): the same test, parameter `a=a+['x{i}']`,
   measured 1.615s against 1.5. It was the run's only failure (50744 passed). The next run, 39364691440 for
   e1f208711, was green.
+- Recurrence, run 39610947367 for 6e517516c (the #132 merge; its unmapped `utils/usage_pause_gate.py` sent the job to
+  the full-suite fallback): the same test, parameter `a=['y']+a`, measured 1.616s against 1.5. It was the only
+  failure (50840 passed). The failed job was re-run, not the bound changed.
 
 **Fix direction**: a lint timeout is an environment fact, not the handler's verdict, so a probe whose linter timed out
 must not be scored as the handler's decision (skip with the reason, or raise the CI Swift timeout); the timing bound
