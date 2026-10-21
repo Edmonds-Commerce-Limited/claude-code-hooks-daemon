@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00545: spend meter agents only segment](00545-spend-meter-agents-only-segment/PLAN.md) - In Progress (#133: the spend segment shows only running agents, drops the cumulative total, and stops counting start-up transcripts as unmeasured)
+
 - [00538: supervisor auto refocus and focus signal](00538-supervisor-auto-refocus-and-focus-signal/PLAN.md) - Not Started (#125 follow-up: a spike for a non-screen focus signal; auto-refocus and the mods route are owner decisions)
 
 - [00536: persistent daemon saturation log](00536-persistent-daemon-saturation-log/PLAN.md) - Not Started (#124 follow-up: a bounded journal of saturation episodes, straggler restarts and forced stops that survives a daemon restart, with a verb to print it)
@@ -318,11 +320,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 544 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 545 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 462 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 59 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 60 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
