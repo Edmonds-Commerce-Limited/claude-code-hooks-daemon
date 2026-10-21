@@ -132,3 +132,23 @@ Handoff: `untracked/scratch/261021-a1587e84e888de63f-handoff.md`.
 
 Targeted QA passes: `tests/unit/plan_qa` plus `test_plan_qa_edit`, `test_plan_qa_commit_gate` and
 `test_plan_journal_guard`, 1310 tests. mypy and ruff are clean on the touched sources.
+
+## Tasks 2.2 item 6 and 2.3
+
+- `5c3696dee`: `journal_entry_ordering` judges entry files by folder and name (Task 2.2 item 6); 42 tests green.
+- `c3b463aac`: Task 2.2 ticked in PLAN.md.
+- `fa3342b41`: Task 2.3, first part. `mkplan.bash` usage text, correction comments and scaffold comment (both
+  copies, byte-identical), the plan and journal templates, and the `PlanJournalling.md` intro, contracts table
+  and "Reading a journal" section.
+- `5df5ce68b`: Task 2.3, source strings and docs. `JOURNAL_BODY_FILE_HINT` now says the tool writes a NEW file
+  under `JOURNAL/YYYY-MM-DD/`; the `journal-dayfile-is-today` statement and remediation say an existing journal
+  file is closed; the `journal-completion-entry` and `journal-folder-present` remediations, the `pipe_blocker`
+  guidance, the `plan_workflow` table, `plan_qa_edit` text and acceptance tests, `markdown_table_formatter` and
+  `plan_time_estimates` descriptions, `docs/PLAN_SYSTEM.md` and `docs/guides/HANDLER_REFERENCE.md` describe
+  entry files. No test pinned a changed string. Release note
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/009-plan-journal-is-one-file-per-entry.md`. Targeted pytest (1257
+  tests across plan_qa, plan_qa_edit, plan_workflow, pipe_blocker, plan_time_estimates, markdown_table_formatter)
+  and `check_handler_reference.py` pass.
+- Left for the coordinator: the `<hooksdaemon>` block in CLAUDE.md is rebuilt from the running daemon, so it
+  updates on a daemon restart (`regenerate-docs` ran but the loaded code was stale). `comment_changelog` and
+  `validate_instruction_content` still say "JOURNAL/ day-file" as a destination for narrative.
