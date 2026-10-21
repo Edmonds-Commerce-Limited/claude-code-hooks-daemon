@@ -53,7 +53,7 @@ append-only becomes "no existing entry file is modified or deleted".
 - [x] ✅ **Task 2.1**: `mkplan.bash --journal` writes per-entry files, stamped with the real UTC time by the tool alone.
 - [x] ✅ **Task 2.2**: Plan QA checks, the guard and the workflow handlers read both layouts. Their invariants hold on
   mixed trees, and a modified or deleted entry file is denied.
-- [ ] ⬜ **Task 2.3**: Update the docs, template and generated guidance.
+- [x] ✅ **Task 2.3**: Update the docs, template and generated guidance.
 - [x] ✅ **Task 2.4**: Proof. Two branches journal the same plan on the same day and merge cleanly. A test does this in a
   scratch repository with `git merge-tree`.
 
