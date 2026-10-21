@@ -63,3 +63,29 @@ Nothing in the new layout is read by the daemon yet. Not fixed by me, by design:
 - No release note written (not in my scope).
 - Other tests that scaffold or read day-files and were NOT run: `tests/unit/handlers/pre_tool_use/test_plan_journal_guard.py`,
   `test_plan_qa_commit_gate.py`, `test_journal_remediations_name_the_tool.py`, `tests/acceptance/test_install_sh_end_to_end.py`.
+
+## Task 2.2 readers and N524a
+
+**N524a done** (`ecfa5a3e3`). `docs_qa/checks/duplicate_block.py` leaves plan journals out of the hash index, so a
+journal is never a reporter or a partner, and it skips an EDIT of a journal. It uses
+`context.policy.plan_tree.is_journal`, the same call as `pointer_resolves.py:136`. That check ignores depth, so it
+covers legacy day-files and per-entry files, in live and archived plans. A folder named `JOURNAL/` outside the plan
+tree is still judged (pinned).
+
+Red output, `tests/unit/docs_qa/checks/test_duplicate_block.py`, before the fix:
+
+```
+FAILED ...TestPlanJournalsAreNotScanned::test_sweep_ignores_journals_sharing_a_block
+FAILED ...TestPlanJournalsAreNotScanned::test_sweep_never_names_a_journal_as_a_partner
+FAILED ...TestPlanJournalsAreNotScanned::test_edit_of_an_entry_file_is_not_judged
+FAILED ...TestPlanJournalsAreNotScanned::test_edit_of_a_doc_does_not_name_a_journal_partner
+4 failed, 22 passed
+```
+
+Green: `tests/unit/docs_qa` 652 passed. ruff and mypy are clean on the touched file.
+
+**The plan_qa readers are not started.** I stopped at the subagent context budget before editing any plan_qa file.
+The design is worked out file by file, including parity with the guard's conflict-marker and HEAD-restore
+exceptions, and the new COMMIT half of `journal-dayfile-is-today`. It is in the handoff
+`untracked/scratch/261021-ae87dd9c72ec3433a-handoff.md`. `same-commit-plan-doc` keys on `PLAN.md` and never reads
+journals, so it is unaffected and there is nothing to pin.
