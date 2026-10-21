@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.config.models import TransportConfig
-from claude_code_hooks_daemon.constants.protocol import HookInputField
+from claude_code_hooks_daemon.constants.protocol import HookInputField, RawTextReply
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.install.forwarder_generator import generate_forwarder_content
 
@@ -102,6 +102,9 @@ class TestGeneratedText:
             assert forbidden not in block, forbidden
 
 
+SENTINEL = RawTextReply.SENTINEL
+
+
 @pytest.fixture
 def short_dir() -> Generator[Path, None, None]:
     """A short directory: an AF_UNIX path may not exceed ~100 bytes."""
@@ -165,7 +168,7 @@ class _Rig:
 @pytest.fixture
 def rig(tmp_path: Path, short_dir: Path) -> Generator[_Rig, None, None]:
     made = _Rig(tmp_path, short_dir / "ev", TransportConfig(relay_enabled=True))
-    made.install_client("model | 25%\n")
+    made.install_client(f"{SENTINEL}model | 25%\n")
     yield made
     made.close()
 
@@ -207,6 +210,35 @@ class TestRelayFastPath:
     def test_trailing_whitespace_after_the_object_is_tolerated(self, rig: _Rig) -> None:
         result = rig.run(PAYLOAD + "\n\n", _relay_env(rig))
         assert result.stdout == "model | 25%\n"
+
+    def test_the_sentinel_is_stripped_and_exactly_the_text_is_printed(self, rig: _Rig) -> None:
+        rig.install_client(f"{SENTINEL}one | two\n")
+        result = rig.run(PAYLOAD, _relay_env(rig))
+        assert result.stdout == "one | two\n"
+        assert SENTINEL not in result.stdout
+
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            '{"text": "x"}',
+            '{"text": "x"}\n',
+            '{"error": "unknown field"}',
+            "plain text from nowhere\n",
+            f"x{SENTINEL}not at the start\n",
+            SENTINEL,
+            f"{SENTINEL}\n",
+        ],
+    )
+    def test_a_reply_without_the_sentinel_or_text_falls_through_unprinted(
+        self, rig: _Rig, reply: str
+    ) -> None:
+        """An older daemon answers raw requests with JSON; it must never be printed."""
+        rig.install_client(reply)
+        result = rig.run(PAYLOAD, _relay_env(rig))
+        assert result.stdout.startswith("LEGACY:")
+        assert PAYLOAD in result.stdout
+        assert '"text"' not in result.stdout
+        assert '"error"' not in result.stdout
 
     @pytest.mark.parametrize("reply, rc", [("", 0), ("partial", 11), ("", 10)])
     def test_empty_reply_or_client_failure_falls_through_with_stdin_intact(
@@ -267,7 +299,7 @@ class TestNcFastPath:
     @pytest.fixture
     def nc_rig(self, tmp_path: Path, short_dir: Path) -> Generator[_Rig, None, None]:
         made = _Rig(tmp_path, short_dir / "ev", TransportConfig(nc_enabled=True))
-        made.install_client("from nc\n")
+        made.install_client(f"{SENTINEL}from nc\n")
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         (bin_dir / "nc").symlink_to(made.client)

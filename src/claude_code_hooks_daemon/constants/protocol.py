@@ -213,4 +213,20 @@ class SocketLimit:
     REQUEST_BUFFER_BYTES = 16 * 1024 * 1024  # 16 MiB
 
 
-__all__ = ["HookInputField", "HookOutputField", "PermissionDecision", "SocketLimit"]
+class RawTextReply:
+    """The wire shape of a raw-text status reply (issue #131)."""
+
+    # The first byte of every raw-text reply: the ASCII record separator. A
+    # daemon from before raw-text mode answers with JSON, which never starts
+    # with this byte, so the client can tell the two apart and print only a
+    # reply that carries it. Printable text and JSON cannot begin with it.
+    SENTINEL = "\x1e"
+
+
+__all__ = [
+    "HookInputField",
+    "HookOutputField",
+    "PermissionDecision",
+    "RawTextReply",
+    "SocketLimit",
+]

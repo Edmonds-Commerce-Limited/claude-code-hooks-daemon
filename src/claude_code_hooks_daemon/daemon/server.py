@@ -33,7 +33,7 @@ from typing import Any, Final, Protocol, Self, runtime_checkable
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.events import wired_event_metas
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
-from claude_code_hooks_daemon.constants.protocol import HookInputField, SocketLimit
+from claude_code_hooks_daemon.constants.protocol import HookInputField, RawTextReply, SocketLimit
 from claude_code_hooks_daemon.core.debouncer import shutdown_debouncer
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.core.input_schemas import get_input_schema
@@ -145,8 +145,10 @@ _STATUS_WIRE_KEY: Final[str] = "Status"
 def _raw_text_reply(response: dict[str, Any]) -> bytes:
     """The bytes a raw-text Status request is answered with (issue #131).
 
-    Exactly what init.sh's python rung prints for a successful status reply:
-    the ``text`` plus a newline. An error response, or one with no usable text,
+    The ``RawTextReply.SENTINEL`` byte, then exactly what init.sh's python
+    rung prints for a successful status reply: the ``text`` plus a newline. The
+    sentinel lets the shell client tell this reply from the JSON a daemon that
+    predates raw mode sends. An error response, or one with no usable text,
     is an EMPTY body: the shell client cannot parse JSON, and an empty reply is
     the one signal it can test for, so it then falls through to the legacy
     path, which renders the error or ``NO STATUS DATA`` itself.
@@ -154,7 +156,7 @@ def _raw_text_reply(response: dict[str, Any]) -> bytes:
     text = response.get("text")
     if response.get("error") or not isinstance(text, str) or not text:
         return b""
-    return text.encode() + b"\n"
+    return (RawTextReply.SENTINEL + text + "\n").encode()
 
 
 #: Reason text for a transport-level PreToolUse deny (Plan 00466 N40 review 2

@@ -381,9 +381,9 @@ The legacy forwarder path sources `.claude/init.sh` and starts `python3` on ever
 
 1. computes the per-event socket path exactly as the relay guard does and requires it to be a socket;
 2. reads stdin, requires a JSON object, and splices in `"hooks_daemon_raw_text":true` plus `terminal_columns` / `terminal_lines` from `COLUMNS` / `LINES` (digits only);
-3. sends it through the enabled client with a 2 second timeout and prints a non-empty reply.
+3. sends it through the enabled client with a 2 second timeout, requires the reply to start with the sentinel byte, strips it, and prints the rest when it is non-empty.
 
-The daemon (`HooksDaemon._answer_event`) answers a raw-text Status request with the exact bytes the python rung prints, `text` plus a newline, and with an EMPTY body for an error or no text. Every other outcome falls through to the legacy path with stdin replayed. The block is confined to its own checkout (a `BASH_SOURCE` guard), is absent when both clients are disabled, and is stripped and re-applied on regeneration like the relay guard. Measured: about 0.011 s wall and 0.005 CPU-seconds against 0.11 s and 0.085 CPU-seconds.
+The daemon (`HooksDaemon._answer_event`) answers a raw-text Status request with the sentinel (`RawTextReply.SENTINEL`, the ASCII record separator 0x1e) followed by the exact bytes the python rung prints, `text` plus a newline, and with an EMPTY body for an error or no text. The sentinel is what lets the client reject the JSON a daemon from before raw mode sends during an upgrade, before it restarts. Every other outcome falls through to the legacy path with stdin replayed. The block is confined to its own checkout (a `BASH_SOURCE` guard), is absent when both clients are disabled, and is stripped and re-applied on regeneration like the relay guard. Measured: about 0.011 s wall and 0.005 CPU-seconds against 0.11 s and 0.085 CPU-seconds.
 
 ### Performance Characteristics by Handler
 

@@ -21,21 +21,25 @@ from tests.daemon._start_wait import wait_for_daemon_started
 
 from claude_code_hooks_daemon.config.models import DaemonConfig, LogLevel, TransportConfig
 from claude_code_hooks_daemon.constants import Timeout
-from claude_code_hooks_daemon.constants.protocol import HookInputField
+from claude_code_hooks_daemon.constants.protocol import HookInputField, RawTextReply
 from claude_code_hooks_daemon.core.front_controller import FrontController
 from claude_code_hooks_daemon.daemon.paths import get_event_socket_dir_from_untracked
 from claude_code_hooks_daemon.daemon.server import HooksDaemon, _raw_text_reply
 from claude_code_hooks_daemon.utils.cron_hosts import PeerHostname
 
+SENTINEL = RawTextReply.SENTINEL.encode()
+
 
 class TestRawTextReply:
     """The pure response-to-bytes mapping."""
 
-    def test_text_gets_a_trailing_newline(self) -> None:
-        assert _raw_text_reply({"text": "model | 25%"}) == b"model | 25%\n"
+    def test_text_starts_with_the_sentinel_and_ends_with_a_newline(self) -> None:
+        reply = _raw_text_reply({"text": "model | 25%"})
+        assert reply == SENTINEL + b"model | 25%\n"
+        assert reply.startswith(b"\x1e")
 
     def test_non_ascii_text_is_utf8(self) -> None:
-        assert _raw_text_reply({"text": "⚠ ok"}) == "⚠ ok\n".encode()
+        assert _raw_text_reply({"text": "⚠ ok"}) == SENTINEL + "⚠ ok\n".encode()
 
     @pytest.mark.parametrize(
         "response",
@@ -104,7 +108,7 @@ class TestRawTextOverTheSocket:
         if plain.get("error") or not isinstance(text, str) or not text:
             assert raw == b""
         else:
-            assert raw == text.encode() + b"\n"
+            assert raw == SENTINEL + text.encode() + b"\n"
 
         await daemon.shutdown()
         await server_task

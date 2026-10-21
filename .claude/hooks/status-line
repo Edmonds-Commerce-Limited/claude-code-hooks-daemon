@@ -43,9 +43,14 @@ if [[ "${BASH_SOURCE[0]}" == "/workspace/.claude/hooks/"* ]]; then
                 _sf_req+="}"
                 _sf_reply=""; _sf_rc=0
                 _sf_reply="$("$_rl_bin" "$_sf_sock" --no-fallback --timeout-ms "2000" <<< "$_sf_req")" || _sf_rc=$?
-                if [[ "$_sf_rc" -eq 0 && -n "$_sf_reply" ]]; then
-                    printf '%s\n' "$_sf_reply"
-                    exit 0
+                # Only a reply that starts with the sentinel is raw text: a daemon
+                # that predates raw mode answers with JSON, which falls through.
+                if [[ "$_sf_rc" -eq 0 && "$_sf_reply" == $'\x1e'* ]]; then
+                    _sf_reply="${_sf_reply#$'\x1e'}"
+                    if [[ -n "$_sf_reply" ]]; then
+                        printf '%s\n' "$_sf_reply"
+                        exit 0
+                    fi
                 fi
             fi
         fi

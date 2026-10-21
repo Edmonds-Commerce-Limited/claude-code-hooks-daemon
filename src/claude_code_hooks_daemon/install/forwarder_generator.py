@@ -37,7 +37,7 @@ from claude_code_hooks_daemon.constants.events import (
     relay_ineligible_bash_keys,
     wired_event_metas,
 )
-from claude_code_hooks_daemon.constants.protocol import HookInputField
+from claude_code_hooks_daemon.constants.protocol import HookInputField, RawTextReply
 from claude_code_hooks_daemon.daemon.paths import (
     event_socket_dir_is_fallback,
     get_event_socket_dir_from_untracked,
@@ -410,9 +410,11 @@ def build_status_fast_path_block(
 
     Pure bash builtins, plus the ONE client process it execs. It asks the
     status per-event socket for RAW text (``hooks_daemon_raw_text``) with the
-    terminal size from ``COLUMNS``/``LINES``, and prints a non-empty reply.
+    terminal size from ``COLUMNS``/``LINES``, and prints the reply once it has
+    stripped the leading ``RawTextReply.SENTINEL`` and found text after it.
     Every other outcome (no usable client, no socket, a refused connection, a
-    timeout, an empty reply, a payload that is not a JSON object) replays the
+    timeout, an empty reply, a reply without the sentinel such as the JSON an
+    older daemon sends, a payload that is not a JSON object) replays the
     original stdin and falls through to the legacy path unchanged, so
     ``DAEMON FAILED``, the loading text, venv building and version handling
     stay where they were.
@@ -428,6 +430,7 @@ def build_status_fast_path_block(
     ``-S`` test or the connect, and then falls through.
     """
     sock = f'"$_rl_events_dir/{STATUS_FAST_PATH_EVENT_FILE_NAME}.sock"'
+    sentinel = f"$'\\x{ord(RawTextReply.SENTINEL):02x}'"
     relay_binary = transport.relay_binary or _default_relay_binary_path(untracked_dir)
     lines = [
         _FAST_PATH_HEADER,
@@ -502,9 +505,14 @@ def build_status_fast_path_block(
         '                _sf_req+="}"\n',
         '                _sf_reply=""; _sf_rc=0\n',
         *send,
-        '                if [[ "$_sf_rc" -eq 0 && -n "$_sf_reply" ]]; then\n',
-        "                    printf '%s\\n' \"$_sf_reply\"\n",
-        "                    exit 0\n",
+        "                # Only a reply that starts with the sentinel is raw text: a daemon\n",
+        "                # that predates raw mode answers with JSON, which falls through.\n",
+        f'                if [[ "$_sf_rc" -eq 0 && "$_sf_reply" == {sentinel}* ]]; then\n',
+        f'                    _sf_reply="${{_sf_reply#{sentinel}}}"\n',
+        '                    if [[ -n "$_sf_reply" ]]; then\n',
+        "                        printf '%s\\n' \"$_sf_reply\"\n",
+        "                        exit 0\n",
+        "                    fi\n",
         "                fi\n",
         "            fi\n",
         "        fi\n",

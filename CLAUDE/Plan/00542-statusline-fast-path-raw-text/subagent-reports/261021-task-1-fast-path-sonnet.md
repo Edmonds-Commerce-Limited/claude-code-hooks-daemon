@@ -37,3 +37,12 @@ Two measurement passes shown as ranges. The stdout of the fast and legacy runs s
 - Stdin replay on fall-through adds a trailing newline (here-string); the status payload is JSON, so this is harmless.
 - Worktree venv: `tests/` needed `PYTHONPATH=<worktree>/src` to import this checkout's package; `./bin/hooks-daemon` restart in the worktree used its own venv.
 - Two existing tests in `tests/unit/install/test_forwarder_generator.py` were adjusted to expect the status-line fast path (strip it before comparing).
+
+## Review fix
+
+Defect: the fast path printed any non-empty reply, so a daemon from before raw mode (answering with JSON during an upgrade, before its restart) would have its JSON printed on the status line.
+
+- Added `RawTextReply.SENTINEL` (ASCII record separator, 0x1e) in `constants/protocol.py` (a separate class, because `test_input_fields_use_snake_case` requires every `HookInputField` value to be snake_case); `_raw_text_reply` now starts a text reply with it. Error and no-text replies stay empty.
+- The generated block prints only a reply that starts with `$'\x1e'` (bash builtin test), strips it, and prints when the remainder is non-empty; JSON, no sentinel, or sentinel-only fall through with stdin replayed.
+- Tests first (red: 9 failures, e.g. `'\x1eone | two\n' == 'one | two\n'` and the old-daemon `{"text": "x"}` reply printed instead of falling through), then green: 1952 passed over tests/unit/install, the raw-text daemon test and the two relay integration files.
+- `.claude/hooks/status-line` regenerated with the forwarder_generator CLI (`--project-root /workspace`); StatusLine.md and release note 008 updated.
