@@ -96,7 +96,9 @@ class TestCmdStatusPerEventListeners:
         relay_binary = tmp_path / "hooks-relay"
         relay_binary.write_bytes(b"x")
         relay_binary.chmod(0o755)
-        transport_yaml = f"  transport:\n    relay_enabled: true\n    relay_binary: {relay_binary}\n"
+        transport_yaml = (
+            f"  transport:\n    relay_enabled: true\n    relay_binary: {relay_binary}\n"
+        )
         socket_path, untracked_dir = _make_project(tmp_path, transport_yaml=transport_yaml)
         events_dir = untracked_dir / "events-whatever-suffix"
         events_dir.mkdir()
