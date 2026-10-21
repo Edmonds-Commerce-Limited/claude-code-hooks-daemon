@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00494: Claude Code mods review](00494-claude-code-mods-review/PLAN.md) - Complete at `f794f4cd1` + the archiving commit (owner request: 21 mod docs vendored, an Opus review and brainstorm, then a one-mod proposal the owner approved with its build order and deployment route; the build is Plan 00497)
+
 - [00488: status line visible during daemon outage](00488-status-line-visible-during-daemon-outage/PLAN.md) - Complete at `2790de8eb` + `7e8e71e5b` + `a468e29c7` + `9517a3c7f` + the archiving commit (owner request, #72: the status-line forwarder exits 0 on its down path and names venv building, venv missing and version mismatch; a raw self-install clone builds its own venv; the build window fails open, announced, per a coordinator ruling (RULING-3.2); a startup race no longer denies)
 
 - [00487: Supervisor plugin API and the ccy restart plugin](00487-supervisor-plugin-api-and-ccy-restart-plugin/PLAN.md) - Complete, shipped as beta in v3.69.0 + the archiving commit (owner request, #71: a crash-isolated plugin API for the ccy supervisor and a ccy max-age restart and deadline plugin on fedora-desktop; every supervisor-side live-test step passed, and the three launcher-only steps were handed to fedora-desktop#61 by owner ruling D11)
