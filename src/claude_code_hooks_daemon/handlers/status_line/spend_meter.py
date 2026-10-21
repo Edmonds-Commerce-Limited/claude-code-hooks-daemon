@@ -1,20 +1,19 @@
-"""SpendMeterHandler - the subagent spend segment (Plan 00471 L7, shared with Plan 00472).
+"""SpendMeterHandler - the running-subagents segment (Plan 00471 L7, reshaped by issue #133).
 
-``| Σ⚙ 1.66G tok-eq · 3 live (2 opus, 1 sonnet) · max 412k · 2 unmeasured``
+``| ⚙ 2 agents (opus, sonnet) · 140k``
 
-- **Σ⚙ tok-eq**: summed token equivalents (the ledger's ``ite``, input-token
-  equivalents: a price-weighted token count) of every subagent that has stopped
-  in this session, from the spend ledger rows ``subagent_cache_aggregator``
-  writes (one memoised ``stat`` per render, see ``read_subagent_cache_totals``).
-- **live**: the live-agent count with its per-model-family split, and the
+- Shown ONLY while sub-agents are running: the count, the model families and the
   largest live context, from the snapshot the Stop/SubagentStop sensors and the
   spawn advisory refresh. A snapshot older than ``_FRESH_SECONDS`` is not shown:
-  a stale count is worse than none.
-- **unmeasured**: gate calls that could not read an agent's transcript and so
-  failed open (RULINGS-fable.md Q2); shown only when non-zero.
+  a stale count is worse than none. With no agent running the segment is empty.
+- **unmeasured** (red, only when non-zero): gate calls that failed open because
+  they could not measure an agent (RULINGS-fable.md Q2). A start-up agent whose
+  transcript holds no assistant record yet is not one (``read_tail`` returns None
+  for it). Failures show alone, still red, when no agent is running.
+- The cumulative total is not on the bar: ``hooks-daemon spend`` prints the ledger.
 
-Every read is mtime-gated or memoised (this package's no-ungated-reads rule),
-and every read fails silent: a broken segment must never break the bar.
+Every read is mtime-gated (this package's no-ungated-reads rule), and every
+read fails silent: a broken segment must never break the bar.
 """
 
 from __future__ import annotations
@@ -34,22 +33,17 @@ from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.handlers.status_line.mtime_cache import MtimeCachedFile
-from claude_code_hooks_daemon.handlers.subagent_stop.subagent_cache_aggregator import (
-    read_subagent_cache_totals,
-)
 from claude_code_hooks_daemon.utils.session_load import live_snapshot_path
 
 logger = logging.getLogger(__name__)
 
-_ICON: Final[str] = "Σ⚙"
+_ICON: Final[str] = "⚙"
 _SEPARATOR: Final[str] = " · "
+_RED: Final[str] = "\033[31m"
+_RESET: Final[str] = "\033[0m"
 
 #: A live snapshot older than this is not shown.
 _FRESH_SECONDS: Final[int] = 900
-
-#: The figure's unit: token equivalents, a price-weighted token count
-#: (``input_token_equivalents``), so not plain tokens.
-_UNIT: Final[str] = "tok-eq"
 
 #: ``(scale, suffix, decimals)`` from smallest to largest. A decimal is kept
 #: only where it carries information: none for k, one for M, two for G.
@@ -92,8 +86,25 @@ def _int(value: object) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
+def _agents_text(count: int, families: object) -> str:
+    """``⚙ 2 agents (opus, sonnet)``: families by count then name, without their numbers."""
+    names = (
+        [
+            family
+            for family, number in sorted(
+                families.items(), key=lambda item: (-_int(item[1]), item[0])
+            )
+            if _int(number)
+        ]
+        if isinstance(families, dict)
+        else []
+    )
+    noun = "agent" if count == 1 else "agents"
+    return f"{_ICON} {count} {noun}" + (f" ({', '.join(names)})" if names else "")
+
+
 class SpendMeterHandler(StatusLineHandlerBase):
-    """Render the session's subagent spend, live agents and unmeasured count."""
+    """Render the running sub-agents, and any measurement failures in red."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -113,67 +124,56 @@ class SpendMeterHandler(StatusLineHandlerBase):
         return True
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
-        """Render the segment, or nothing when the session has no subagent activity."""
+        """Render the segment, or nothing when no agent runs and nothing failed."""
         session = str(hook_input.get(HookInputField.SESSION_ID) or "")
         try:
-            untracked = self._untracked_dir()
-            ite = _int(read_subagent_cache_totals(session, root=untracked).get("ite"))
-            snapshot = self._snapshots.read(live_snapshot_path(untracked, session))
+            snapshot = self._snapshots.read(live_snapshot_path(self._untracked_dir(), session))
         except (OSError, RuntimeError, ValueError) as exc:
             logger.debug("spend meter has nothing to read: %s", exc)
             return AdvisoryResult(context=[])
 
         stamp = snapshot.get("ts")
-        fresh = isinstance(stamp, (int, float)) and time.time() - stamp <= _FRESH_SECONDS
-        if not ite and not fresh:
+        if not (isinstance(stamp, (int, float)) and time.time() - stamp <= _FRESH_SECONDS):
             return AdvisoryResult(context=[])
 
-        parts = [f"{_ICON} {compact(ite)} {_UNIT}"]
-        if fresh:
-            count = _int(snapshot.get("count"))
-            families = snapshot.get("families")
-            split = (
-                ", ".join(
-                    f"{_int(number)} {family}"
-                    for family, number in sorted(
-                        families.items(), key=lambda item: (-_int(item[1]), item[0])
-                    )
-                )
-                if isinstance(families, dict) and count
-                else ""
-            )
-            parts.append(f"{count} live" + (f" ({split})" if split else ""))
+        parts: list[str] = []
+        count = _int(snapshot.get("count"))
+        if count:
+            parts.append(_agents_text(count, snapshot.get("families")))
             largest = _int(snapshot.get("largest_context"))
-            if count and largest:
-                parts.append(f"max {compact(largest)}")
-            unmeasured = _int(snapshot.get("unmeasured"))
-            if unmeasured:
-                parts.append(f"{unmeasured} unmeasured")
+            if largest:
+                parts.append(compact(largest))
+        unmeasured = _int(snapshot.get("unmeasured"))
+        if unmeasured:
+            parts.append(f"{_RED}{unmeasured} unmeasured{_RESET}")
+        if not parts:
+            return AdvisoryResult(context=[])
         return AdvisoryResult(context=[f"| {_SEPARATOR.join(parts)}"])
 
     def explain_segment(self) -> SegmentExplanation:
         """Describe this segment (read-only, no I/O)."""
         return SegmentExplanation(
             glyphs=(_ICON,),
-            name="Subagent Spend",
+            name="Running Subagents",
             what_it_is=(
-                "What this session's subagents have cost and how many are running now, "
-                "from the spend ledger (Plan 00471)."
+                "The sub-agents running right now, from the live snapshot the Stop and "
+                "SubagentStop sensors refresh (Plan 00471). It is absent when none run."
             ),
             how_to_read=(
-                "`Σ⚙ 1.66G tok-eq` is the summed token equivalents of every subagent that "
-                "has stopped: tokens weighted by price, input 1, cache write 1.25, cache "
-                "read 0.1, output 5 (a proxy, so compare shares rather than absolute "
-                "values; `hooks-daemon spend` calls the same figure `ite`). `3 live (2 "
-                "opus, 1 sonnet)` counts agents working now by model family, `max 412k` is "
-                "the largest live context in tokens, and `2 unmeasured` counts agents whose "
-                "context a gate could not read, so it let the call through. The live part is "
-                f"hidden when the count is older than {_FRESH_SECONDS // 60} minutes. "
-                "`hooks-daemon spend` prints the full ledger."
+                "`⚙ 2 agents (opus, sonnet) · 140k` is the number of sub-agents running, "
+                "their model families, and the largest context any of them holds, in "
+                "tokens. A red `2 unmeasured` is added only when that many context-budget "
+                "or resume-guard calls could not read an agent's transcript and so let the "
+                "call through (a missing or unreadable transcript, a usage-less tail, a "
+                "handler error); an agent that has not written its first reply yet is not "
+                "counted. Failures show alone when no agent is running. The segment is "
+                f"hidden when the snapshot is older than {_FRESH_SECONDS // 60} minutes. "
+                "The cumulative spend is not on the bar: `hooks-daemon spend` prints the "
+                "ledger."
             ),
             current_value=(
-                "Rendered per session from the ledger and live snapshot; there is no value "
-                "outside a status-line render."
+                "Rendered per session from the live snapshot; there is no value outside a "
+                "status-line render."
             ),
         )
 
@@ -186,11 +186,11 @@ class SpendMeterHandler(StatusLineHandlerBase):
 
         return [
             AcceptanceTest(
-                title="spend meter renders subagent spend",
+                title="spend meter renders running subagents",
                 command='echo "test"',
                 description=(
-                    "Verify the status line carries a 'Σ⚙ <n> tok-eq' segment once a subagent "
-                    "has stopped in the session, with the live count while it is fresh."
+                    "Verify the status line carries a '⚙ <n> agents (<families>) · <context>' "
+                    "segment while a subagent runs, and nothing once none does."
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r".*"],

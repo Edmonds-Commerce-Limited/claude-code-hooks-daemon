@@ -1,4 +1,4 @@
-"""Tests for SpendMeterHandler (Plan 00471 Task 2.5, lever L7): render from fixture sidecars."""
+"""Tests for SpendMeterHandler: the agents-only status-line segment (issue #133)."""
 
 from __future__ import annotations
 
@@ -12,6 +12,9 @@ from claude_code_hooks_daemon.handlers.status_line.spend_meter import SpendMeter
 from claude_code_hooks_daemon.utils.session_load import live_snapshot_path
 
 SESSION = "s1"
+
+_RED = "\033[31m"
+_RESET = "\033[0m"
 
 
 @pytest.fixture
@@ -50,52 +53,77 @@ def render(handler: SpendMeterHandler) -> str:
     return "".join(handler.handle({"session_id": SESSION}).context)
 
 
-def test_full_segment(handler, untracked) -> None:
-    ledger_row(untracked, "a1", 1_200_000_000)
-    ledger_row(untracked, "a2", 460_000_000)
+def red(text: str) -> str:
+    return f"{_RED}{text}{_RESET}"
+
+
+def test_agents_segment_names_count_families_and_largest_context(handler, untracked) -> None:
+    snapshot(untracked, count=2, largest_context=140_000, families={"opus": 1, "sonnet": 1})
+    assert render(handler) == "| ⚙ 2 agents (opus, sonnet) · 140k"
+
+
+def test_one_agent_is_singular(handler, untracked) -> None:
+    snapshot(untracked, count=1, largest_context=127_400, families={"sonnet": 1})
+    assert render(handler) == "| ⚙ 1 agent (sonnet) · 127k"
+
+
+def test_families_are_listed_by_count_then_name_without_numbers(handler, untracked) -> None:
     snapshot(
         untracked,
-        count=3,
+        count=4,
         largest_context=412_000,
-        families={"opus": 2, "sonnet": 1},
-        unmeasured=2,
+        families={"sonnet": 1, "opus": 2, "haiku": 1},
     )
-    assert (
-        render(handler) == "| Σ⚙ 1.66G tok-eq · 3 live (2 opus, 1 sonnet) · max 412k · 2 unmeasured"
-    )
+    assert render(handler) == "| ⚙ 4 agents (opus, haiku, sonnet) · 412k"
 
 
-def test_the_owner_reported_segment_reads_whole_k(handler, untracked) -> None:
-    """N516: `61.2M ite` read as a truncated word and `277.5k` carried a needless decimal."""
-    ledger_row(untracked, "a1", 61_200_000)
-    snapshot(untracked, count=1, largest_context=277_500, families={"opus": 1}, unmeasured=47)
-    assert render(handler) == "| Σ⚙ 61.2M tok-eq · 1 live (1 opus) · max 278k · 47 unmeasured"
+def test_no_family_split_and_no_context_are_left_out(handler, untracked) -> None:
+    snapshot(untracked, count=1, largest_context=0, families={})
+    assert render(handler) == "| ⚙ 1 agent"
 
 
-def test_spend_only(handler, untracked) -> None:
+def test_the_cumulative_total_is_never_on_the_bar(handler, untracked) -> None:
+    ledger_row(untracked, "a1", 1_200_000_000)
+    snapshot(untracked, count=1, largest_context=127_000, families={"sonnet": 1})
+    text = render(handler)
+    assert "tok-eq" not in text
+    assert "Σ" not in text
+    assert "1.2G" not in text
+
+
+def test_a_ledger_without_running_agents_renders_nothing(handler, untracked) -> None:
     ledger_row(untracked, "a1", 64_500)
-    assert render(handler) == "| Σ⚙ 65k tok-eq"
-
-
-def test_stale_snapshot_drops_the_live_part(handler, untracked) -> None:
-    ledger_row(untracked, "a1", 3_000_000)
-    snapshot(untracked, age=3600, count=5, largest_context=1, families={"opus": 5}, unmeasured=0)
-    assert render(handler) == "| Σ⚙ 3M tok-eq"
-
-
-def test_zero_live_shows_no_max(handler, untracked) -> None:
-    ledger_row(untracked, "a1", 500)
-    snapshot(untracked, count=0, largest_context=0, families={}, unmeasured=0)
-    assert render(handler) == "| Σ⚙ 500 tok-eq · 0 live"
-
-
-def test_nothing_to_show_renders_nothing(handler) -> None:
     assert handler.handle({"session_id": SESSION}).context == []
 
 
-def test_unmeasured_alone_is_shown(handler, untracked) -> None:
+def test_no_running_agent_renders_nothing(handler, untracked) -> None:
+    snapshot(untracked, count=0, largest_context=0, families={}, unmeasured=0)
+    assert handler.handle({"session_id": SESSION}).context == []
+
+
+def test_stale_snapshot_renders_nothing(handler, untracked) -> None:
+    snapshot(untracked, age=3600, count=5, largest_context=1, families={"opus": 5}, unmeasured=3)
+    assert handler.handle({"session_id": SESSION}).context == []
+
+
+def test_missing_snapshot_renders_nothing(handler) -> None:
+    assert handler.handle({"session_id": SESSION}).context == []
+
+
+def test_failures_are_red_and_appended_to_the_agents_segment(handler, untracked) -> None:
+    snapshot(untracked, count=1, largest_context=127_000, families={"sonnet": 1}, unmeasured=2)
+    expected = f"| ⚙ 1 agent (sonnet) · 127k · {red('2 unmeasured')}"
+    assert render(handler) == expected
+
+
+def test_zero_failures_show_nothing_extra(handler, untracked) -> None:
+    snapshot(untracked, count=1, largest_context=127_000, families={"sonnet": 1}, unmeasured=0)
+    assert "unmeasured" not in render(handler)
+
+
+def test_failures_alone_are_shown_red_when_no_agent_is_running(handler, untracked) -> None:
     snapshot(untracked, count=0, largest_context=0, families={}, unmeasured=1)
-    assert render(handler) == "| Σ⚙ 0 tok-eq · 0 live · 1 unmeasured"
+    assert render(handler) == f"| {red('1 unmeasured')}"
 
 
 @pytest.mark.parametrize(
@@ -127,5 +155,5 @@ def test_compact(value: float, text: str) -> None:
 def test_metadata(handler) -> None:
     assert handler.terminal is False
     assert handler.get_claude_md() is None
-    assert handler.explain_segment().name == "Subagent Spend"
+    assert handler.explain_segment().name == "Running Subagents"
     assert handler.get_acceptance_tests()

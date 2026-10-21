@@ -1472,7 +1472,7 @@ handlers:
         high_pct: 80                   # orange from here
         critical_pct: 90               # red from here
 
-    spend_meter:   # Subagent spend: Σ⚙ <n> tok-eq · N live (by family) · max <ctx> · unmeasured (Plan 00471 L7)
+    spend_meter:   # Running subagents: ⚙ N agents (families) · <ctx>, red unmeasured when non-zero (Plan 00471 L7)
       enabled: true  # Hidden until a subagent has stopped or the live count is fresh
       priority: 17
 

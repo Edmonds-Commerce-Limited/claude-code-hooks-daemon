@@ -195,6 +195,13 @@ Claude Code sends a JSON payload on every status-line call. The daemon accepts u
 - **Segment**: `usage_indicator` (priority 16) renders `📈 5h10%|7d5%`: one background-coloured chip per window, using the `model_context` chip bands per window: green, yellow from `warn_pct` (60), orange from `high_pct` (80), red from `critical_pct` (90). A window below `warn_pct` is its label and percentage run together; from `warn_pct` it is spaced out and adds its reset countdown (`📈 5h 67% 3h 20m|7d5%`). The `|` between chips has no background. Percentages round down. Hidden when there is no live window. When the host's `hosts:` entry sets a usage ceiling (`session_ceiling`, resolved against the effective hostname), the segment ends with plain-text `⛔ 80%`: one figure when both windows share a limit, else each limited window labelled (`⛔ 5h 80% 7d 95%`). It is not shown without usage data, and a paused session also leads with `⏸ usage HH:MM`. `rate_limits` is therefore read by the data layer's usage snapshot (`core/usage_snapshot.py`), by `usage_indicator`, and by the usage-pause gates through `latest_usage()`. The upstream payload reference is the Claude Code status line docs, https://code.claude.com/docs/en/statusline; it is not vendored under `remote-docs/` because `remote-docs add` refuses the page (its example payload matches the `session-uuid` sensitive-content pattern).
 - **Fixtures**: synthetic payloads in `tests/fixtures/status_usage/`, loaded by `tests/support/status_usage.py`. Whether a subagent (`agent`) payload carries `rate_limits` is not established; the snapshot reads it from any payload that does, and ignores one that does not.
 
+### The running-subagents segment (`spend_meter`, issue #133)
+
+`spend_meter` (priority 17) renders `⚙ 2 agents (opus, sonnet) · 140k` ONLY while sub-agents are running: the count, the model families (by count, then name) and the largest live context. It reads the live snapshot the Stop/SubagentStop sensors refresh, and shows nothing once that snapshot is older than 15 minutes or no agent runs.
+
+- **No cumulative total on the bar.** The summed `tok-eq` figure was removed (it only grew and had no reference point). `hooks-daemon spend` and the ledger are unchanged.
+- **Failures, in red, only when non-zero**: `2 unmeasured` is appended to the agents segment, or shown alone when no agent runs. It counts context-budget and resume-guard calls that failed open: a missing or unreadable transcript, a usage-less tail in a transcript that has usage, a handler error. A transcript with no assistant record yet is a start-up agent and is never counted (`transcript_tail.read_tail` returns None for it).
+
 ### `prompt_cache` is READ: the prompt-cache chips (Plan 00452)
 
 Claude Code ships a pre-computed `prompt_cache` object on every Status payload (`warm`, `caching_observed`, `ttl`, `expires_at`, `hit_ratio`, `cache_write_tokens`, `last_miss_at`, `last_miss_cause`, `recache_tokens_if_cold`). Nothing is parsed from a transcript. `prompt_cache_tiers.classify_prompt_cache` decides the state (UNKNOWN, WARM, EXPIRING, COLD, plus a recent-miss flag) and `prompt_cache_indicator` (priority 15) renders it after a `⚡` icon as background-coloured chips, in the style of the usage segment:
@@ -387,16 +394,16 @@ The daemon (`HooksDaemon._answer_event`) answers a raw-text Status request with 
 
 **No silent fallbacks.** The ONE hand-off to the legacy path (stdin replayed) is "no daemon answered": no socket file, or a refused connection (relay exit 10, nc exit 1). The legacy start-up path starts the daemon and reports loudly (`DAEMON FAILED`, venv building). A payload that is not a JSON object is handed off too. Every other fault prints one red line naming the fault and the fix, and exits 0, so the status line itself is the loud channel:
 
-| Fault                                                          | Red line                                                                  |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| relay enabled, binary missing or not executable                | `hooks-relay missing or not executable (<path>): run bin/hooks-daemon transport on` |
-| nc enabled, probe says no unix sockets (or no probe recorded)  | `nc cannot do unix sockets (HOOKS_DAEMON_NC_UNIX_CAPABLE=<0>): run bin/hooks-daemon transport status` |
-| nc enabled, `nc` not on PATH                                   | `nc not found on PATH: ...`                                               |
-| relay exit 11                                                  | `status timed out after 2s (daemon busy)`                                 |
-| any other client exit above 0 (relay 12, 13, ...; nc 2, ...)   | `status client failed (exit N)`                                           |
-| empty reply (nc `-w` timeout exits 0 with nothing)             | `empty status reply (timed out after 2s, or protocol fault): ...restart`  |
-| non-empty reply without the sentinel                           | `daemon older than its forwarder: run bin/hooks-daemon restart`           |
-| `read` status above 1                                          | `status line could not read its input (read status N)`                    |
+| Fault                                                         | Red line                                                                                              |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| relay enabled, binary missing or not executable               | `hooks-relay missing or not executable (<path>): run bin/hooks-daemon transport on`                   |
+| nc enabled, probe says no unix sockets (or no probe recorded) | `nc cannot do unix sockets (HOOKS_DAEMON_NC_UNIX_CAPABLE=<0>): run bin/hooks-daemon transport status` |
+| nc enabled, `nc` not on PATH                                  | `nc not found on PATH: ...`                                                                           |
+| relay exit 11                                                 | `status timed out after 2s (daemon busy)`                                                             |
+| any other client exit above 0 (relay 12, 13, ...; nc 2, ...)  | `status client failed (exit N)`                                                                       |
+| empty reply (nc `-w` timeout exits 0 with nothing)            | `empty status reply (timed out after 2s, or protocol fault): ...restart`                              |
+| non-empty reply without the sentinel                          | `daemon older than its forwarder: run bin/hooks-daemon restart`                                       |
+| `read` status above 1                                         | `status line could not read its input (read status N)`                                                |
 
 Neither client enabled is not a failure: the configured path is the python rung and no block is generated. Exit codes: relay `--no-fallback` 10 connect, 11 timeout, 12 I/O or oversized reply, 13 usage (`relay/hooks_relay.rs`); nc cannot tell a missing socket from a refused one (both exit 1), so a missing socket is decided by testing the socket file first. The block is confined to its own checkout (a `BASH_SOURCE` guard), is absent when both clients are disabled, and is stripped and re-applied on regeneration like the relay guard. Measured: about 0.011 s wall and 0.005 CPU-seconds against 0.11 s and 0.085 CPU-seconds.
 

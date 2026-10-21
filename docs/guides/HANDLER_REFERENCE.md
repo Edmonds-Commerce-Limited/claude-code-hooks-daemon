@@ -4946,7 +4946,7 @@ handlers:
 | **Type**       | Advisory      |
 | **Event**      | StatusLine    |
 
-**Description:** The subagent spend segment (Plan 00471 L7): `| Σ⚙ 1.66G tok-eq · 3 live (2 opus, 1 sonnet) · max 412k · 2 unmeasured`. The tok-eq figure sums the token equivalents (tokens weighted by price; `hooks-daemon spend` calls it `ite`) of every stopped subagent from the spend ledger; the live part (count by model family, largest live context) comes from the snapshot the Stop/SubagentStop sensors and `spawn_rate_advisor` refresh, and is hidden when older than 15 minutes; `unmeasured` counts gate calls that could not read an agent's transcript. Hidden until there is something to show. `hooks-daemon spend` prints the full ledger.
+**Description:** The running-subagents segment (Plan 00471 L7, issue #133): `| ⚙ 2 agents (opus, sonnet) · 140k`. It shows only while sub-agents run: the count, their model families and the largest live context, from the snapshot the Stop/SubagentStop sensors and `spawn_rate_advisor` refresh (hidden when older than 15 minutes). A red `2 unmeasured` is appended only when non-zero (a gate call that could not read an agent's transcript; an agent with no reply yet is not counted), and shows alone when no agent runs. The cumulative spend is not on the bar; `hooks-daemon spend` prints the full ledger.
 
 ---
 
@@ -5028,7 +5028,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `workflow_fanout_advisor`  | PreToolUse       | 60       | A Workflow script's fan-out and tier             |
 | `dispatch_model_recorder`  | PostToolUse      | 33       | Joins the resolved model onto the tier row       |
 | `background_task_recorder` | Stop             | 9        | Records finished agent tasks for the live count  |
-| `spend_meter`              | StatusLine       | 17       | Subagent spend, live agents, unmeasured calls    |
+| `spend_meter`              | StatusLine       | 17       | Running subagents, unmeasured calls (red)        |
 | `validate_eslint_on_write` | PostToolUse      | 10       | Runs ESLint after .ts/.tsx writes                |
 | `command_hints`            | PostToolUse      | 28       | Config-driven reminder after a command           |
 | `goal_injection`           | PostToolUse      | 30       | Goal-intent signal on plan flip to In Progress   |

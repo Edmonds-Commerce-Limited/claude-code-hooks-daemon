@@ -39,11 +39,11 @@ agents only.
 
 ### Phase 1: Build (TDD)
 
-- [ ] ⬜ **Task 1.1**: Establish what is already done. Commit `bf01783be` (N516, N517: "a first-call transcript is a
+- [x] ✅ **Task 1.1**: Establish what is already done. Commit `bf01783be` (N516, N517: "a first-call transcript is a
   fresh agent") and release note 002 may already cover part of the miscount; read them and record what remains.
-- [ ] ⬜ **Task 1.2**: Agents-only rendering, with red real-failure count only when non-zero. Tests first.
-- [ ] ⬜ **Task 1.3**: Start-up transcripts are not counted as unmeasured, if not already done. Tests first.
-- [ ] ⬜ **Task 1.4**: Update `status-line-explained`, `CLAUDE/Architecture/StatusLine.md`, and a release note.
+- [x] ✅ **Task 1.2**: Agents-only rendering, with red real-failure count only when non-zero. Tests first.
+- [x] ✅ **Task 1.3**: Start-up transcripts are not counted as unmeasured, if not already done. Tests first.
+- [x] ✅ **Task 1.4**: Update `status-line-explained`, `CLAUDE/Architecture/StatusLine.md`, and a release note.
 
 ### Phase 2: Ship
 
