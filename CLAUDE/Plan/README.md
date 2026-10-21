@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00544: issue validity claim without author list](00544-issue-validity-claim-without-author-list/PLAN.md) - In Progress (#129: `issue-validity N --claim` refuses with no author list although the guard that names it treats the list as optional; narrow the refusal to `--list-eligible`)
+
 - [00543: journal file per entry](00543-journal-file-per-entry/PLAN.md) - Not Started (#135, owner-directed: one journal file per entry in a per-day folder, so concurrent branches never conflict on a day-file; legacy day-files stay and are read alongside)
 
 - [00542: statusline fast path raw text](00542-statusline-fast-path-raw-text/PLAN.md) - In Progress (#131: a status tick costs about 0.08 CPU-s through bash, init.sh and a fresh python3; raw status text plus a byte-pump fast path ahead of init.sh, falling through to today's path when the daemon is down)
@@ -322,11 +324,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 543 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 544 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 459 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 61 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 62 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
