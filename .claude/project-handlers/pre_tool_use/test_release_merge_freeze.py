@@ -35,7 +35,9 @@ def _state(pr_number: object = _RELEASE_PR) -> dict[str, Any]:
 @pytest.fixture
 def root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A project root; the handler is pointed at it and every branch is `main`."""
-    monkeypatch.setattr(ReleaseMergeFreezeHandler, "_project_root", staticmethod(lambda _h: tmp_path))
+    monkeypatch.setattr(
+        ReleaseMergeFreezeHandler, "_project_root", staticmethod(lambda _h: tmp_path)
+    )
     (tmp_path / "untracked").mkdir()
     monkeypatch.setattr(
         "release_merge_freeze.current_branch", lambda _directory: "main", raising=True
@@ -115,9 +117,7 @@ class TestFrozenMovesOfMain:
             "gh pr merge 120 --merge --delete-branch",
         ],
     )
-    def test_denied(
-        self, handler: ReleaseMergeFreezeHandler, frozen: Path, command: str
-    ) -> None:
+    def test_denied(self, handler: ReleaseMergeFreezeHandler, frozen: Path, command: str) -> None:
         payload = _input(command, frozen)
         assert handler.matches(payload) is True
         result = handler.handle(payload)
@@ -146,9 +146,7 @@ class TestFrozenMovesOfMain:
             "git pull",
         ],
     )
-    def test_allowed(
-        self, handler: ReleaseMergeFreezeHandler, frozen: Path, command: str
-    ) -> None:
+    def test_allowed(self, handler: ReleaseMergeFreezeHandler, frozen: Path, command: str) -> None:
         assert handler.matches(_input(command, frozen)) is False
 
     def test_merge_off_main_is_allowed(
