@@ -32,6 +32,27 @@ fi
 echo -e "${BLUE}Config file: $CONFIG_FILE${NC}"
 echo ""
 
+# Resolve the daemon's interpreter (its venv bin/python via the canonical
+# resolver, else $HOOKS_DAEMON_PYTHON). Never a bare python3 from PATH, which
+# may be older than the daemon's floor or lack PyYAML.
+RESOLVE_DAEMON_DIR=".claude/hooks-daemon"
+if [[ ! -d "$RESOLVE_DAEMON_DIR" ]]; then
+    RESOLVE_DAEMON_DIR="."
+fi
+RESOLVE_LIB="$RESOLVE_DAEMON_DIR/scripts/lib/resolve_venv.sh"
+PYTHON_BIN=""
+if [[ -f "$RESOLVE_LIB" ]]; then
+    # shellcheck disable=SC1090
+    source "$RESOLVE_LIB"
+    PYTHON_BIN="$(resolve_venv_python "$(cd "$RESOLVE_DAEMON_DIR" && pwd)")" || PYTHON_BIN=""
+elif [[ -n "${HOOKS_DAEMON_PYTHON:-}" ]]; then
+    PYTHON_BIN="$HOOKS_DAEMON_PYTHON"
+fi
+if [[ -z "$PYTHON_BIN" ]]; then
+    echo -e "${RED}❌ No daemon Python interpreter resolved (no venv under $RESOLVE_DAEMON_DIR, HOOKS_DAEMON_PYTHON unset)${NC}" >&2
+    exit 1
+fi
+
 # Check if old handler name exists
 if ! grep -q "$OLD_HANDLER" "$CONFIG_FILE"; then
     echo -e "${GREEN}✅ No migration needed${NC}"
@@ -58,7 +79,7 @@ echo ""
 
 # Perform replacement using Python (safe string replacement)
 echo -e "${BLUE}Performing migration...${NC}"
-python3 << 'PYTHON_SCRIPT'
+"$PYTHON_BIN" << 'PYTHON_SCRIPT'
 import sys
 
 config_file = ".claude/hooks-daemon.yaml"
@@ -93,7 +114,7 @@ fi
 
 # Verify syntax
 echo -e "${BLUE}Verifying YAML syntax...${NC}"
-if python3 -c "import yaml; yaml.safe_load(open('$CONFIG_FILE'))" 2>/dev/null; then
+if "$PYTHON_BIN" -c "import sys, yaml; yaml.safe_load(open(sys.argv[1]))" "$CONFIG_FILE"; then
     echo -e "${GREEN}✅ YAML syntax valid${NC}"
 else
     echo -e "${RED}❌ YAML syntax error after migration${NC}"

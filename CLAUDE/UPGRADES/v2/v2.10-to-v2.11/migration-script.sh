@@ -30,6 +30,27 @@ fi
 echo "Config file: $CONFIG_FILE"
 echo ""
 
+# Resolve the daemon's interpreter (its venv bin/python via the canonical
+# resolver, else $HOOKS_DAEMON_PYTHON). Never a bare python3 from PATH, which
+# may be older than the daemon's floor.
+RESOLVE_DAEMON_DIR=".claude/hooks-daemon"
+if [[ ! -d "$RESOLVE_DAEMON_DIR" ]]; then
+    RESOLVE_DAEMON_DIR="."
+fi
+RESOLVE_LIB="$RESOLVE_DAEMON_DIR/scripts/lib/resolve_venv.sh"
+PYTHON_BIN=""
+if [[ -f "$RESOLVE_LIB" ]]; then
+    # shellcheck disable=SC1090
+    source "$RESOLVE_LIB"
+    PYTHON_BIN="$(resolve_venv_python "$(cd "$RESOLVE_DAEMON_DIR" && pwd)")" || PYTHON_BIN=""
+elif [[ -n "${HOOKS_DAEMON_PYTHON:-}" ]]; then
+    PYTHON_BIN="$HOOKS_DAEMON_PYTHON"
+fi
+if [[ -z "$PYTHON_BIN" ]]; then
+    echo -e "${RED}❌ No daemon Python interpreter resolved (no venv under $RESOLVE_DAEMON_DIR, HOOKS_DAEMON_PYTHON unset)${NC}" >&2
+    exit 1
+fi
+
 # Check if removed handlers are referenced
 VALIDATE_SITEMAP_FOUND=false
 REMIND_VALIDATOR_FOUND=false
@@ -82,7 +103,7 @@ case "$OPTION" in
         echo "Commenting out removed handlers..."
 
         # Use Python to process the file
-        python3 << 'PYTHON_SCRIPT'
+        "$PYTHON_BIN" << 'PYTHON_SCRIPT'
 import sys
 
 CONFIG_FILE = ".claude/hooks-daemon.yaml"
@@ -157,7 +178,7 @@ PYTHON_SCRIPT
         echo "Deleting removed handlers..."
 
         # Use Python to process the file
-        python3 << 'PYTHON_SCRIPT'
+        "$PYTHON_BIN" << 'PYTHON_SCRIPT'
 import sys
 
 CONFIG_FILE = ".claude/hooks-daemon.yaml"
