@@ -19,6 +19,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+  # TEMPORARY, remove before this branch merges (Plan 00476 Task 2.1 proof
+  # run): GitHub dispatches a workflow only once it is on the default branch,
+  # so until then a push to this work branch is the only way to run it.
+  push:
+    branches: [worktree-476-release-pr-workflow]
 
 permissions:
   contents: read
@@ -54,7 +59,7 @@ jobs:
   # the `if` here.
   layout:
     name: Gate layout covers every check and shard
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/')
+    if: github.event_name != 'pull_request' || startsWith(github.head_ref, 'release/')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
