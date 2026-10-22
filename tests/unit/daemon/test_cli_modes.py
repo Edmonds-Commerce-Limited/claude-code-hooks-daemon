@@ -343,6 +343,22 @@ class TestPrintModeAdvisory:
 class TestCmdRestartModeAdvisory:
     """Tests for cmd_restart mode advisory integration."""
 
+    @pytest.fixture(autouse=True)
+    def _no_real_project_read(self) -> object:
+        """Keep a successful restart off the real checkout.
+
+        After a successful start, ``cmd_restart`` resolves the project and
+        checks its venv. Unpatched, that loads this checkout's own
+        ``.claude/hooks-daemon.yaml`` and venv lock, so these tests depended on
+        the repository they ran in (and failed whenever that load did, e.g.
+        under a module-scoped ``--cov``). The venv check has its own tests.
+        """
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=Path("/p")),
+            patch("claude_code_hooks_daemon.daemon.cli._warn_if_venv_not_built_for_source"),
+        ):
+            yield
+
     def test_restart_aborts_when_stop_fails(self) -> None:
         """cmd_restart must NOT start a new daemon when stop fails.
 
