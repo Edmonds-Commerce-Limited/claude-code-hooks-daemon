@@ -82,7 +82,7 @@ and refreshed rather than re-derived. Plan 00169's prior-art survey touched open
 
 ### Phase 3: Synthesis and gate
 
-- [ ] ⬜ **Task 3.1**: `FINDINGS.md`: answers to the four questions, the same/different comparison, and an epic
+- [x] ✅ **Task 3.1**: `FINDINGS.md`: answers to the four questions, the same/different comparison, and an epic
   proposal broken into candidate plans.
 - [ ] ⬜ **Task 3.2**: A fact-check of the findings against opencode's source and docs and this repository. Fix
   anything refuted.
