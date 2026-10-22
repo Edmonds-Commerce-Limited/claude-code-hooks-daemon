@@ -252,7 +252,19 @@ transcript's size.
 
 ### QA
 
-QA_PLACEHOLDER
+The first targeted run (`changed --range f8a3a36a0..HEAD --allow-unmapped`) gave
+`QA: 36/41 PASSED, 3/41 FAILED`, failing format, lint and error_hiding. Those findings were fixed in `2db729bfb`:
+
+- black reformatting;
+- RUF007, by using `itertools.pairwise` in `assess`;
+- PTH116, by using `Path.stat` in `test_goal_loop.py`;
+- `return-none-on-error`, because `_timestamp` now raises `ValueError` and `extract_events` counts it as skipped;
+- `log-and-continue`, because a failed transition append now goes through
+  `deliberate_swallow.log_and_continue` with a reason.
+
+The re-run on the clean tree at `77a084b1e` (the code head; only this report line follows it) gave
+**`QA: 41/41 PASSED`**, with changed_tests at 6709 passed, 0 failed and 5 skipped, across 97 test files mapped from 25
+changed files.
 
 ### What part B must know
 
