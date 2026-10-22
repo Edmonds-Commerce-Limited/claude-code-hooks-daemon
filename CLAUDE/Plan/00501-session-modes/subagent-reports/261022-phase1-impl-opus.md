@@ -95,6 +95,8 @@ Task 1.3 logs it at DEBUG and treats the session as having no modes (same conven
 
 ## Task 1.2: delivered (second Opus sub-agent)
 
+Commit `6d847a63c` (pushed).
+
 - `src/claude_code_hooks_daemon/core/session_mode_registry.py`: `SessionModeRegistry(state_dir, *, clock)` behind an
   `RLock`, with `path_for`, `enter`, `exit`, `active`, `policy`, `note_prompt`, `reap`, `take_notices` and `load`
   (once; a second call raises `RuntimeError`). `ModeNotice`/`NoticeKind` (EXPIRED, SURVIVED_RESTART,
