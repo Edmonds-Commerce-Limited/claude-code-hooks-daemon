@@ -208,31 +208,45 @@ check_all_prerequisites() {
 }
 
 #
-# get_python_version() - Get Python version string
+# _require_resolved_python() - Fail loudly unless check_python3 resolved one
 #
-# Returns:
-#   Prints version string (e.g., "3.11.5") to stdout
-#   Exit code 0 on success, 1 on failure
+# The version helpers below report the version of the RESOLVED interpreter
+# (HOOKS_DAEMON_PYTHON, exported by check_python3), never whatever `python3`
+# happens to be first on PATH.
 #
-get_python_version() {
-    if ! command -v python3 &> /dev/null; then
+_require_resolved_python() {
+    if [ -z "${HOOKS_DAEMON_PYTHON:-}" ]; then
+        echo "HOOKS_DAEMON_PYTHON is not set: run check_python3 (or export the interpreter path) first." >&2
         return 1
     fi
-
-    python3 -c 'import sys; print(".".join(map(str, sys.version_info[:3])))' 2>/dev/null
+    if [ ! -x "$HOOKS_DAEMON_PYTHON" ]; then
+        echo "HOOKS_DAEMON_PYTHON=$HOOKS_DAEMON_PYTHON is not an executable interpreter." >&2
+        return 1
+    fi
 }
 
 #
-# get_python_major_minor() - Get Python major.minor version
+# get_python_version() - Get the resolved interpreter's version string
+#
+# Returns:
+#   Prints version string (e.g., "3.11.5") to stdout
+#   Exit code 0 on success, 1 on failure (no resolved interpreter)
+#
+get_python_version() {
+    _require_resolved_python || return 1
+
+    "$HOOKS_DAEMON_PYTHON" -c 'import sys; print(".".join(map(str, sys.version_info[:3])))'
+}
+
+#
+# get_python_major_minor() - Get the resolved interpreter's major.minor version
 #
 # Returns:
 #   Prints version string (e.g., "3.11") to stdout
-#   Exit code 0 on success, 1 on failure
+#   Exit code 0 on success, 1 on failure (no resolved interpreter)
 #
 get_python_major_minor() {
-    if ! command -v python3 &> /dev/null; then
-        return 1
-    fi
+    _require_resolved_python || return 1
 
-    python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))' 2>/dev/null
+    "$HOOKS_DAEMON_PYTHON" -c 'import sys; print(".".join(map(str, sys.version_info[:2])))'
 }

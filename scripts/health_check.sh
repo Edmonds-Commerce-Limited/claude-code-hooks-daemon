@@ -61,11 +61,50 @@ echo ""
 
 FAILED=0
 
+CONFIG_FILE="$PROJECT_ROOT/.claude/hooks-daemon.yaml"
+
+# The YAML checks run the project's RESOLVED interpreter (its venv's
+# bin/python, or $HOOKS_DAEMON_PYTHON), never a bare python3 from PATH, which
+# may be older than the daemon's floor or lack PyYAML. When none resolves the
+# checks that need one FAIL loudly; the resolver's own diagnostic goes to
+# stderr.
+# shellcheck source=install/venv_resolver.sh
+source "${SCRIPT_DIR}/install/venv_resolver.sh"
+CONFIG_PYTHON=""
+if [[ -f "$CONFIG_FILE" ]]; then
+    if [[ -d "$PROJECT_ROOT/.claude/hooks-daemon" ]]; then
+        RESOLVE_DAEMON_DIR="$PROJECT_ROOT/.claude/hooks-daemon"
+    else
+        RESOLVE_DAEMON_DIR="$PROJECT_ROOT"
+    fi
+    CONFIG_PYTHON="$(resolve_existing_venv_python "$RESOLVE_DAEMON_DIR")" || CONFIG_PYTHON=""
+fi
+
+#
+# read_self_install_mode() - Print "true"/"false" for daemon.self_install_mode
+#
+# Returns 1 (printing nothing) when no interpreter was resolved. A config the
+# parser cannot read prints "false"; check 2 is what reports invalid YAML.
+#
+read_self_install_mode() {
+    [[ -n "$CONFIG_PYTHON" ]] || return 1
+    "$CONFIG_PYTHON" -c "
+import sys
+import yaml
+try:
+    with open(sys.argv[1]) as f:
+        config = yaml.safe_load(f) or {}
+    daemon = config.get('daemon', {})
+    print('true' if daemon.get('self_install_mode', False) else 'false')
+except (OSError, yaml.YAMLError, AttributeError):
+    print('false')
+" "$CONFIG_FILE"
+}
+
 #
 # Check 1: Config file exists
 #
 echo -n "1. Config file exists... "
-CONFIG_FILE="$PROJECT_ROOT/.claude/hooks-daemon.yaml"
 if [[ -f "$CONFIG_FILE" ]]; then
     echo -e "${GREEN}✓${NC}"
 else
@@ -78,7 +117,10 @@ fi
 #
 echo -n "2. Config file is valid... "
 if [[ -f "$CONFIG_FILE" ]]; then
-    if python3 -c "import yaml; yaml.safe_load(open('$CONFIG_FILE'))" 2>/dev/null; then
+    if [[ -z "$CONFIG_PYTHON" ]]; then
+        echo -e "${RED}✗ No resolved Python interpreter to validate the config${NC}"
+        FAILED=1
+    elif "$CONFIG_PYTHON" -c "import sys, yaml; yaml.safe_load(open(sys.argv[1]))" "$CONFIG_FILE"; then
         echo -e "${GREEN}✓${NC}"
     else
         echo -e "${RED}✗ Invalid YAML syntax${NC}"
@@ -121,14 +163,10 @@ if [[ -d "$PROJECT_ROOT/.git" ]]; then
         if [[ -f "$PROJECT_ROOT/.claude/hooks-daemon.env" ]]; then
             echo -e "${GREEN}✓ hooks-daemon repo with self-install env${NC}"
         elif [[ -f "$CONFIG_FILE" ]]; then
-            SELF_INSTALL=$(python3 -c "
-import yaml
-with open('$CONFIG_FILE') as f:
-    config = yaml.safe_load(f) or {}
-daemon = config.get('daemon', {})
-print('true' if daemon.get('self_install_mode', False) else 'false')
-" 2>/dev/null || echo "false")
-            if [[ "$SELF_INSTALL" == "true" ]]; then
+            if ! SELF_INSTALL=$(read_self_install_mode); then
+                echo -e "${RED}✗ hooks-daemon repo but no resolved Python interpreter to read self_install_mode${NC}"
+                FAILED=1
+            elif [[ "$SELF_INSTALL" == "true" ]]; then
                 echo -e "${GREEN}✓ hooks-daemon repo with self_install_mode${NC}"
             else
                 echo -e "${RED}✗ hooks-daemon repo without self_install_mode${NC}"
@@ -155,13 +193,11 @@ HOOKS_DAEMON_DIR="$PROJECT_ROOT/.claude/hooks-daemon"
 # Detect self-install mode from YAML config (not .env file presence)
 SELF_INSTALL="false"
 if [[ -f "$CONFIG_FILE" ]]; then
-    SELF_INSTALL=$(python3 -c "
-import yaml
-with open('$CONFIG_FILE') as f:
-    config = yaml.safe_load(f) or {}
-daemon = config.get('daemon', {})
-print('true' if daemon.get('self_install_mode', False) else 'false')
-" 2>/dev/null || echo "false")
+    if ! SELF_INSTALL=$(read_self_install_mode); then
+        echo -e "${RED}✗ No resolved Python interpreter to read self_install_mode${NC}"
+        FAILED=1
+        SELF_INSTALL="false"
+    fi
 fi
 
 if [[ "$SELF_INSTALL" == "true" ]]; then
