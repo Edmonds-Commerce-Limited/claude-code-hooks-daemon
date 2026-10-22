@@ -67,7 +67,16 @@ reproduces in this tree.
 
 - First run: `QA: 38/41 PASSED, 1/41 FAILED, 2/41 NOT MEANINGFUL`. Pyright found 2 errors, both in a Mock double in
   `test_session_mode_ipc.py`; they were fixed in `2745a63c2`. In that run, `changed_tests` passed 7031 with 0 failed.
-- The re-run's result is recorded below.
+- Second run: `QA: 38/41 PASSED, 2/41 FAILED, 1/41 NOT MEANINGFUL`.
+  - The format failure was the autofix rewrapping one line. It was committed in `12cb2e81f`.
+  - `changed_tests` reported 7030 passed and 1 failed: `tests/unit/test_doc_write_jail.py::TestSessionWiring::test_every_checkout_of_the_repository_is_protected`.
+- Third run, at head `12cb2e81f`: **`QA: 40/41 PASSED, 1/41 FAILED`**. `changed_tests` again reported 7030 passed and 1
+  failed, and it was the same jail test.
+- That test passes on its own, and it also passes beside every Phase 3 test file (128 passed;
+  `untracked/scratch/p3-jail2.txt`). It compares the protected-path set captured when the pytest session starts with
+  the repository's checkouts at the moment it runs. Other agents create and remove worktrees while a long run is in
+  progress, which explains the result. Phase 3 does not touch `doc_write_jail` or the conftest.
+- The coordinator's full gate should confirm the test is clean.
 
 QA could not map 10 files, all marked too-broad: `.claude/HOOKS-DAEMON.md`, `.claude/hooks-daemon.yaml`, `CLAUDE.md`,
 `constants/handlers.py`, `constants/modes.py`, `constants/priority.py`, `daemon/cli.py`, `daemon/init_config.py`,
