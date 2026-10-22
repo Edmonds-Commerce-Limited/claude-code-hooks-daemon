@@ -105,8 +105,11 @@ modules only.
 - [ ] ⬜ **Task 3.1**: Rewrite `RELEASING.md`, the release skill and the release
   agent: prepare, open the pull request, wait for CI green, then acceptance
   tests, merge, tag and publish locally.
-- [ ] ⬜ **Task 3.2**: A freeze on merges to `main` while a release pull request
-  is open.
+- [x] ✅ **Task 3.2**: A freeze on merges to `main` while a release pull request
+  is open. Delivered: project handler `release_merge_freeze` (R-RELEASE-MERGE-FREEZE)
+  denies `git merge` on main, `git push` to main and `gh pr merge` of any pull
+  request but the one in the state file's `ci.pr_number`; a malformed state file
+  fails closed. Task 3.1 must document the freeze in `RELEASING.md`.
 
 ## Success Criteria
 
