@@ -702,6 +702,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - flaggable_work_advisor — delegate flaggable work BEFORE reading it
 
+<!-- handler: focus-mode-trigger -->
+
+- focus_mode_trigger — `hooks-daemon focus <task>` points one session at one task
+
 <!-- handler: git-hooks-executable-fixer -->
 
 - git_hooks_executable_fixer — auto-fixes non-executable git hooks
