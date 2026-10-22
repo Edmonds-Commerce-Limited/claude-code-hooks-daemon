@@ -2917,6 +2917,17 @@ def _session_modes_number(value: object, name: str) -> float:
     return number
 
 
+def _session_modes_member(value: object, allowed: frozenset[str], name: str) -> str:
+    """``value`` when it is one of ``allowed``. Raises ``_SessionModesError``.
+
+    The ``isinstance`` check comes first: a list or object is unhashable, and a
+    membership test on it would escape as ``TypeError`` instead of the named error.
+    """
+    if not isinstance(value, str) or value not in allowed:
+        raise _SessionModesError(f"{name} {value!r} is unknown")
+    return value
+
+
 def _parse_session_modes_record(record: object) -> tuple[str | None, float]:
     """Validate one mode record the way the daemon's reader does.
 
@@ -2930,9 +2941,9 @@ def _parse_session_modes_record(record: object) -> tuple[str | None, float]:
         raise _SessionModesError("a mode record is not an object")
     if set(record) != _SESSION_MODES_RECORD_FIELDS:
         raise _SessionModesError(f"a mode record has fields {sorted(record)}")
-    mode = record[_SESSION_MODES_FIELD_MODE]
-    if mode not in _SESSION_MODES_STORED_MODES:
-        raise _SessionModesError(f"mode {mode!r} is not stored in a session-modes file")
+    mode = _session_modes_member(
+        record[_SESSION_MODES_FIELD_MODE], _SESSION_MODES_STORED_MODES, _SESSION_MODES_FIELD_MODE
+    )
     reason = record[_SESSION_MODES_FIELD_REASON]
     label: str | None = None
     if mode == _SESSION_MODES_BLOCKED:
@@ -2941,10 +2952,14 @@ def _parse_session_modes_record(record: object) -> tuple[str | None, float]:
             raise _SessionModesError(f"blocked reason {reason!r} is not declared or goal-loop")
     elif reason is not None:
         raise _SessionModesError(f"only a blocked mode takes a reason, not {mode!r}")
-    if record[_SESSION_MODES_FIELD_SOURCE] not in _SESSION_MODES_SOURCES:
-        raise _SessionModesError(f"source {record[_SESSION_MODES_FIELD_SOURCE]!r} is unknown")
-    if record[_SESSION_MODES_FIELD_LIFETIME] not in _SESSION_MODES_LIFETIMES:
-        raise _SessionModesError(f"lifetime {record[_SESSION_MODES_FIELD_LIFETIME]!r} is unknown")
+    _session_modes_member(
+        record[_SESSION_MODES_FIELD_SOURCE], _SESSION_MODES_SOURCES, _SESSION_MODES_FIELD_SOURCE
+    )
+    _session_modes_member(
+        record[_SESSION_MODES_FIELD_LIFETIME],
+        _SESSION_MODES_LIFETIMES,
+        _SESSION_MODES_FIELD_LIFETIME,
+    )
     if not isinstance(record[_SESSION_MODES_FIELD_DETAIL], str):
         raise _SessionModesError(f"{_SESSION_MODES_FIELD_DETAIL} is not a string")
     entered_at = _session_modes_number(
@@ -3102,6 +3117,10 @@ _DRY_RUN_GOAL_BODY_PREFIX = "would inject /goal (dry-run — no real /goal sent)
 _GOAL_CLEAR_GLOB = "*.goal-clear"
 _GOAL_CLEAR_COMMAND = "/goal clear"
 _MAX_GOAL_CLEAR_INJECTIONS = 5
+# Plan 00501 Task 5.2: a BLOCKED clear is exempt from the cap above, but a trigger
+# whose delete keeps failing would otherwise be retyped every idle tick for its
+# whole TTL. This higher ceiling still bounds that storm.
+_MAX_BLOCKED_GOAL_CLEAR_INJECTIONS = 3 * _MAX_GOAL_CLEAR_INJECTIONS
 _DRY_RUN_GOAL_CLEAR_BODY = "would inject /goal clear (dry-run — no real /goal clear sent)"
 
 
@@ -7981,6 +8000,7 @@ def decide_once(
     # Plan 00501 Task 5.2: under BLOCKED the goal is skipped above, so the clear
     # wins instead, and the per-process cap does not refuse it: the cap exists
     # against unrelated clears, and a blocked loop is the clear that must land.
+    # The higher BLOCKED ceiling still bounds a trigger that cannot be deleted.
     if (
         payload is None
         and evaluation.decision is Decision.NOOP
@@ -8011,6 +8031,8 @@ def decide_once(
                 and not session_modes.is_blocked
             ):
                 noop_reason_log = f"{_NOOP_LOG_PREFIX}: goal clear cap reached"
+            elif machine.goal_clear_injections >= _MAX_BLOCKED_GOAL_CLEAR_INJECTIONS:
+                noop_reason_log = f"{_NOOP_LOG_PREFIX}: goal clear ceiling reached while BLOCKED"
             else:
                 decision_value = Decision.WOULD_GOAL_CLEAR.value
                 reason = "goal clear trigger -> would inject /goal clear"

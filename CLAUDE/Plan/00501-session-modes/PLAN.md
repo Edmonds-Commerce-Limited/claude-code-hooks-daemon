@@ -39,7 +39,10 @@ plan does not repeat them. The earlier code fact-check is in `subagent-reports/2
   `autonomy_verdict` Plan 00498 built (both the central chain gate and the direct `autonomy_allowed` callers see
   it), and the goal-ledger stop challenge is replaced by a one-line focus reminder.
 - Declared `persistent_crons` ticks are dropped before the model; the watchdog is delivered; the failsafe tick is
-  delivered with a prepended line naming the focus task (Q4). The ccy supervisor injects no goals or prompts.
+  delivered with a prepended line naming the focus task (Q4). The ccy supervisor types no goal and no
+  session-actions directive while focused, because the daemon writes neither signal (goal cleared once on entry,
+  `.goal-intent` and `.session-actions` not written); the supervisor itself reads no focus state. The post-compact
+  `continue` and the standing-authorisation reminder are unaffected: focus is a working mode, not a halt.
 - Focus is stated back to the agent once when set, when cleared, when it expires (TTL 12 hours, renewed by each
   genuine human prompt, classified from the prompt text with no file read) and when it survives a daemon restart
   (Q1, Q2). An unreadable session-modes file is logged at WARNING and renamed `*.corrupt`, never read as "no modes".
@@ -191,7 +194,11 @@ All CLEAR; rationale and code citations in
 ### Phase 7: Docs and acceptance
 
 - [ ] ⬜ **Task 7.1**: Handler guidance, a "Session modes" section in the autonomy docs (no autonomy doc exists yet;
-  choose its home when this task starts), release note in the UNRELEASED holding area.
+  choose its home when this task starts), release note in the UNRELEASED holding area. The session-modes docs carry
+  the Goals' focus sentence on what the supervisor does and does not type (adviser Q2,
+  `subagent-reports/261022-phase5-merge-advice-fable.md`), and `status-line-explained` names the modes-file WARNING
+  text so an operator knows the fix is to let the daemon load its registry / check the `.corrupt` file, not a
+  restart (adviser Q3).
 - [ ] ⬜ **Task 7.2**: Acceptance: focus on (with a live goal), a declared tick dropped, a rewritten failsafe tick
   delivered, focus off; awaiting-human in one session not cleared by another; a live goal loop caught in observe
   mode, then in act mode, observing the supervisor's `/goal clear` landing during the stop loop itself (spike 0.3

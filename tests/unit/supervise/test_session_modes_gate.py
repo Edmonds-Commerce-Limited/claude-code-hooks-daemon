@@ -377,6 +377,39 @@ class TestReader:
                 },
                 "expires_at",
             ),
+            # Wrongly-TYPED values: an unhashable one must not escape as TypeError.
+            ({"version": 1, "session_id": _SESSION, "modes": [_raw_record(mode=[])]}, "mode"),
+            ({"version": 1, "session_id": _SESSION, "modes": [_raw_record(mode={})]}, "mode"),
+            ({"version": 1, "session_id": _SESSION, "modes": [_raw_record(reason={})]}, "reason"),
+            (
+                {
+                    "version": 1,
+                    "session_id": _SESSION,
+                    "modes": [_raw_record(mode="focus", reason=[])],
+                },
+                "reason",
+            ),
+            ({"version": 1, "session_id": _SESSION, "modes": [_raw_record(source={})]}, "source"),
+            ({"version": 1, "session_id": _SESSION, "modes": [_raw_record(source=[])]}, "source"),
+            (
+                {"version": 1, "session_id": _SESSION, "modes": [_raw_record(lifetime=[])]},
+                "lifetime",
+            ),
+            (
+                {"version": 1, "session_id": _SESSION, "modes": [_raw_record(lifetime={})]},
+                "lifetime",
+            ),
+            ({"version": 1, "session_id": _SESSION, "modes": [_raw_record(detail=[])]}, "detail"),
+            (
+                {"version": 1, "session_id": _SESSION, "modes": [_raw_record(entered_at=[])]},
+                "entered_at",
+            ),
+            (
+                {"version": 1, "session_id": _SESSION, "modes": [_raw_record(expires_at={})]},
+                "expires_at",
+            ),
+            ({"version": [], "session_id": _SESSION, "modes": []}, "version"),
+            ({"version": 1, "session_id": [], "modes": []}, "session_id"),
         ],
     )
     def test_a_malformed_file_is_a_named_error_not_no_modes(
@@ -520,6 +553,23 @@ class TestUnreadableModesFile:
         self._corrupt(sidecar_dir)
         assert _decide(sidecar_dir).decision_value == _mod.Decision.WOULD_COMPACT.value
 
+    @pytest.mark.parametrize("field", ["mode", "source", "lifetime"])
+    def test_a_wrongly_typed_field_fails_closed_inside_decide_once(
+        self, sidecar_dir: Path, field: str
+    ) -> None:
+        """An unhashable value is the named error, never an exception out of the tick."""
+        _write_goal(sidecar_dir)
+        _write_raw(
+            sidecar_dir,
+            {"version": 1, "session_id": _SESSION, "modes": [_raw_record(**{field: []})]},
+        )
+        outcome = _decide(sidecar_dir)
+        assert outcome.payload is None
+        assert outcome.noop_reason_log is not None
+        assert outcome.noop_reason_log.startswith("noop: session-modes file unreadable")
+        assert field in outcome.noop_reason_log
+        assert _status_message(sidecar_dir)["level"] == _mod._STATUS_LEVEL_WARNING
+
 
 # ── Task 5.2: the goal clear under BLOCKED ───────────────────────────────────
 
@@ -559,3 +609,48 @@ class TestGoalClearUnderBlocked:
         outcome = _decide(sidecar_dir, machine=machine)
         assert outcome.decision_value == _mod.Decision.WOULD_GOAL_CLEAR.value
         assert outcome.payload == _mod._GOAL_CLEAR_COMMAND
+
+    def test_blocked_clears_have_a_bounded_ceiling(self, sidecar_dir: Path) -> None:
+        """A trigger whose delete keeps failing is not retyped every tick for its TTL."""
+        assert _mod._MAX_BLOCKED_GOAL_CLEAR_INJECTIONS > _mod._MAX_GOAL_CLEAR_INJECTIONS
+        _write_clear(sidecar_dir)
+        _enter_blocked(sidecar_dir)
+        machine = _mod.CompactStateMachine(_mod.CompactPolicy())
+        machine.import_state({"goal_clear_injections": _mod._MAX_BLOCKED_GOAL_CLEAR_INJECTIONS})
+        outcome = _decide(sidecar_dir, machine=machine)
+        assert outcome.payload is None
+        assert outcome.noop_reason_log == "noop: goal clear ceiling reached while BLOCKED"
+
+    def test_an_undeletable_clear_stops_at_the_ceiling(
+        self, sidecar_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """End to end: every consume fails (and is logged), the retyping still stops."""
+        _write_clear(sidecar_dir)
+        _enter_blocked(sidecar_dir)
+        machine = _mod.CompactStateMachine(_mod.CompactPolicy())
+        warnings: list[str] = []
+
+        class _Log:
+            def write(self, line: str) -> None:
+                warnings.append(line)
+
+            def write_noop(self, line: str) -> None:
+                warnings.append(line)
+
+        def _refuse(self: Path, missing_ok: bool = False) -> None:
+            raise PermissionError("read-only sidecar")
+
+        monkeypatch.setattr(Path, "unlink", _refuse)
+        typed = 0
+        for _ in range(_mod._MAX_BLOCKED_GOAL_CLEAR_INJECTIONS + 10):
+            outcome = _decide(sidecar_dir, machine=machine)
+            if outcome.payload is None:
+                assert outcome.noop_reason_log == "noop: goal clear ceiling reached while BLOCKED"
+                break
+            typed += 1
+            _mod._consume_signal(Path(outcome.consume_signal_path), _Log())
+            _mod._apply_post_injection_bookkeeping(machine, outcome, injected=True, now_wall=_NOW)
+            # The typed line was submitted; only the undeletable trigger remains.
+            machine.clear_own_line()
+        assert typed == _mod._MAX_BLOCKED_GOAL_CLEAR_INJECTIONS
+        assert sum("could not consume" in line for line in warnings) == typed

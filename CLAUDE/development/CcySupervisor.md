@@ -199,7 +199,11 @@ ticks.
 pending `.goal-clear` wins the tick instead of waiting behind it, and
 `_MAX_GOAL_CLEAR_INJECTIONS` does not refuse it: that cap guards against
 unrelated clears, and the clear of a blocked loop is the one that must land
-(spike 0.3 saw the cap reached). The clear still waits for `can_inject` and an
+(spike 0.3 saw the cap reached). A higher ceiling,
+`_MAX_BLOCKED_GOAL_CLEAR_INJECTIONS` (three times the cap), still bounds BLOCKED
+clears, so a trigger whose delete keeps failing (`_consume_signal` logs each
+failure as a `warning:` line) is not retyped every idle tick for its whole TTL;
+past it the tick logs `noop: goal clear ceiling reached while BLOCKED`. The clear still waits for `can_inject` and an
 empty own line, and needs no busy-session rule: it already types into a running
 turn and takes effect at once.
 
@@ -214,6 +218,11 @@ a prompt costs a turn the human can restart, where typing into a blocked loop
 is exactly what the mode stops. The cap exemption above is NOT granted on an
 unreadable file, because it is earned only by a confirmed BLOCKED entry. The
 daemon renames a malformed file `*.corrupt` when it next loads its registry.
+A wrongly-typed value (a list or object where a string belongs) is the same
+named error, never an exception out of the tick. A corrupt file therefore keeps
+the session BLOCKED until the daemon renames it aside on that next registry
+load; a human prompt does not clear it, and the status-line WARNING is how it
+is seen.
 
 **Edit-to-live.** All of this is WORKER code (`decide_once` and the reader), so
 it ships by the worker hot reload; no ccy relaunch. The host's in-process
