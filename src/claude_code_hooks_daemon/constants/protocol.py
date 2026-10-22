@@ -228,10 +228,25 @@ class RawTextReply:
     NO_STATUS_DATA = "⚠️ NO STATUS DATA"
 
 
+class RequestEnvelopeField:
+    """Optional top-level fields of the request envelope init.sh sends.
+
+    The envelope is ``{"event": ..., "hook_input": ...}`` plus these. init.sh
+    cannot import this module, so it carries a literal copy of each value,
+    pinned equal by a test.
+    """
+
+    # The relay binary path the generated relay guard could not run (missing,
+    # not executable, or not an ELF or ``#!`` file). Present only when the
+    # guard fell through to the bash path for that reason (Plan 00529).
+    RELAY_UNUSED = "relay_unused"
+
+
 __all__ = [
     "HookInputField",
     "HookOutputField",
     "PermissionDecision",
     "RawTextReply",
+    "RequestEnvelopeField",
     "SocketLimit",
 ]

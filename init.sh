@@ -118,6 +118,15 @@ _HOOKS_DAEMON_BOOTSTRAP_ELAPSED=""
 _HOOKS_DAEMON_RELAY_FAILED="${HOOKS_DAEMON_RELAY_FAILED:-}"
 unset HOOKS_DAEMON_RELAY_FAILED
 
+# Set by the generated relay guard (forwarder_generator.RELAY_UNUSED_ENV; Plan
+# 00529) to the relay binary path when the relay socket was live but the
+# binary was missing or could not run, so this call took the bash path.
+# send_request_stdin carries it to the daemon as the envelope's relay_unused
+# field, and the daemon adds a warning line. It never changes a verdict.
+# Captured and unset at once, so a daemon this hook starts never inherits it.
+_HOOKS_DAEMON_RELAY_UNUSED="${HOOKS_DAEMON_RELAY_UNUSED:-}"
+unset HOOKS_DAEMON_RELAY_UNUSED
+
 #
 # The daemon-recovery carve-out (Plan 00466 N24 review 3 MA4, N67), shared
 # verbatim by both python3 checks that apply it -- emit_hook_error's, via
@@ -2976,8 +2985,11 @@ send_request_stdin() {
     # replay is always safe).
     local _nc_replay_payload=""
     # A relay hand-off (Plan 00466 N126) already knows the daemon did not
-    # answer, so it goes straight to the python3 rung's judged deny.
-    if [[ -z "$_HOOKS_DAEMON_RELAY_FAILED" && -z "$response_mode" && -n "$event_sock_name" ]] \
+    # answer, so it goes straight to the python3 rung's judged deny. A relay
+    # the guard could not run (Plan 00529) also skips this rung: nc sends the
+    # raw hook input with no envelope, so it cannot carry relay_unused.
+    if [[ -z "$_HOOKS_DAEMON_RELAY_FAILED" && -z "$_HOOKS_DAEMON_RELAY_UNUSED" ]] \
+        && [[ -z "$response_mode" && -n "$event_sock_name" ]] \
         && [[ "${HOOKS_DAEMON_NC_UNIX_CAPABLE:-0}" == "1" ]] \
         && command -v nc > /dev/null; then
         local _nc_events_dir="${HOOKS_DAEMON_EVENTS_DIR:-${events_dir_override:-$_untracked_dir/events${_hostname_suffix}}}"
@@ -3143,6 +3155,8 @@ _RESTART_ADVICE = _recovery_advice(project_path, daemon_root) + [
 # Plan 00466 N126: what hooks-relay reported when it handed this call over
 # after its own exchange with the daemon failed; empty otherwise.
 relay_failure = sys.argv[4] if len(sys.argv) > 4 else ''
+# Plan 00529: the relay binary the guard could not run; empty otherwise.
+relay_unused = sys.argv[6] if len(sys.argv) > 6 else ''
 
 def _pretooluse_response_looks_valid(text):
     '''True when text parses as one of PreToolUse's two legitimate response
@@ -3536,8 +3550,13 @@ if isinstance(hook_input, dict):
 # Wrap into the daemon request envelope; newline-terminated as the daemon
 # expects. The envelope is one level deeper than the input, so input that
 # only just parsed can still be too deep to encode.
+_envelope = {'event': event_name, 'hook_input': hook_input}
+# Plan 00529: the relay binary the guard could not run. The literal is pinned
+# equal to RequestEnvelopeField.RELAY_UNUSED by a test.
+if relay_unused:
+    _envelope['relay_unused'] = relay_unused
 try:
-    request = json.dumps({'event': event_name, 'hook_input': hook_input}) + '\n'
+    request = json.dumps(_envelope) + '\n'
 except Exception as exc:
     hook_input = None
     fail('invalid_hook_input',
@@ -3642,7 +3661,7 @@ except (BrokenPipeError, ConnectionResetError) as e:
 except Exception as e:
     fail(type(e).__name__, f'{type(e).__name__}: {e}')
 " "$event_name" "$response_mode" "${PROJECT_PATH:-}" "$_HOOKS_DAEMON_RELAY_FAILED" \
-        "${HOOKS_DAEMON_ROOT_DIR:-}" <&3; printf 'x%s' "$?")"
+        "${HOOKS_DAEMON_ROOT_DIR:-}" "$_HOOKS_DAEMON_RELAY_UNUSED" <&3; printf 'x%s' "$?")"
     _rv="${_hd_answer##*x}"
     _hd_answer="${_hd_answer%x*}"
     # Every PreToolUse path above answers and exits 0, so a failure here is
