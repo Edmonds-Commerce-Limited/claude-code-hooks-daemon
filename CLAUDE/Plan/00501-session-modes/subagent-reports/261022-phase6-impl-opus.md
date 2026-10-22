@@ -186,3 +186,81 @@ are still open.
 3. **Latency**: time `handle()` on a synthetic transcript of about 50 MB, measuring the first sight, the steady state
    and the fingerprint separately. Run it with the venv python from untracked/scratch.
 4. **QA**: run the targeted QA command from the brief, then tick 6.1 and 6.2 and append the numbers here.
+
+## Part A2: the Stop handler wired (6.1 and 6.2)
+
+### What changed
+
+- `handlers/stop/goal_loop_detector.py`: `GoalLoopDetectorHandler`, a `StopHandlerBase` that is non-terminal, uses
+  `HandlerScope.MAIN` and has priority 5. It follows the part A `handle()` flow exactly, and it always allows.
+  - Per-session `_SessionState(ring, checkpoint)` is kept in an `OrderedDict` LRU, `MAX_TRACKED_SESSIONS = 64`.
+    `TAIL_BYTES` is 2 MiB.
+  - Options are `_mode`, `_cycle_threshold`, `_declared_cycle_threshold`, `_window_minutes` and `_blocked_hours`. Each
+    Stop builds `GoalLoopConfig.from_options`, and `validate_options = staticmethod(option_problems)`.
+  - Seams: `_fingerprint_repo` (default `repo_fingerprint(ProjectContext.project_root())`), `_append_transition`
+    (default `get_data_layer().session_modes.transition_log.append`, and None is skipped) and `_clock`.
+  - Transitions use the label `GOAL_BLOCKED`.
+    - `loop-reset` sets `detail` to the cause and the evidence to `cause=<c> dropped=<n>`, at the reset's time.
+    - `near-miss` and `would-enter` are logged only on a Stop that added cycles, with `Assessment.evidence`.
+  - Named WARNINGs, each prefixed `goal-loop detector:`: `transcript unreadable <path>: <err>`, `checkpoint invalid, re-anchored at EOF`, `fingerprint failed: <err>` (with no assessment on that Stop), and
+    `transition not logged (...)` (for `OSError` or `RuntimeError`). A missing `transcript_path` or `session_id` is
+    logged at INFO.
+  - `get_claude_md()` returns None. It is recorded as exempt in `test_claude_md_guidance_coverage.py`, because it is
+    observe-only.
+- `TransitionAction` gains `NEAR_MISS`, `WOULD_ENTER` and `LOOP_RESET`. The existing log and registry tests are
+  unaffected, since no test is exhaustive over the enum.
+- Wiring:
+  - `HandlerID.GOAL_LOOP_DETECTOR` and `Priority.GOAL_LOOP_DETECTOR = 5`.
+  - The yaml, the `.example` (options commented) and `init_config.py`.
+  - A `HANDLER_REFERENCE.md` section, plus the 0-9 band rows in HANDLER_DEVELOPMENT.md, CONTRIBUTING.md and
+    CONFIGURATION.md.
+  - `_EXPECTED_MAIN` in `test_handler_scope_defaults.py`, and `_VALID_NON_DEFAULTS` in
+    `test_registry_option_injection.py`.
+  - `regenerate-docs`, which updated HOOKS-DAEMON.md (Stop now lists 7 handlers). The CLAUDE.md block is unchanged.
+- **Deviation:** `mode` is NOT a row in the reference's options table. It is mentioned in the prose instead. The reason
+  is that `test_registry_option_injection` needs a valid non-default for every declared option, and `observe` is the
+  only valid value. **Part B** adds `ACT`, then adds the `mode` row back with `("goal_loop_detector", "mode"): "act"`
+  in `_VALID_NON_DEFAULTS`.
+
+### Red/green
+
+- Red: `tests/unit/handlers/stop/test_goal_loop_detector.py` failed at collection with
+  `ModuleNotFoundError: ...goal_loop_detector`.
+- Green: 26 passed. With `test_session_mode_log.py` and `test_session_mode_registry.py`, 134 passed. mypy --strict is
+  clean on the handler and its test.
+- A subset of the wiring-sensitive tests (39 integration and daemon files, plus `tests/unit/handlers/test_*.py`,
+  `tests/unit/config` and `tests/unit/handlers/stop`) first gave 4 failed and 5420 passed:
+  - the guidance verdict;
+  - two scope defaults;
+  - option injection.
+- After those fixes, the three affected files gave 820 passed.
+
+### Latency (`untracked/scratch/goal_loop_latency.py`, worktree venv)
+
+These were measured on a 52,429,110-byte synthetic transcript of 4 KB tool_result lines, with the real
+`repo_fingerprint` on this worktree:
+
+| Stop                                        | Added latency                 |
+| ------------------------------------------- | ----------------------------- |
+| First sight (2 MiB tail read and parse)     | 9.1 ms                        |
+| Warm, no new cycle (checkpoint read only)   | median 0.07 ms, max 0.22 ms   |
+| Warm, new cycle (read, fingerprint, assess) | median 9.77 ms, max 10.73 ms  |
+| `repo_fingerprint` alone (two git calls)    | median 10.27 ms, max 12.75 ms |
+
+On a cycle Stop the cost is dominated by the fingerprint. The first-sight cost is bounded by `TAIL_BYTES`, not by the
+transcript's size.
+
+### QA
+
+QA_PLACEHOLDER
+
+### What part B must know
+
+- Add `DetectorMode.ACT`. Restore the `mode` row in HANDLER_REFERENCE.md and add the `_VALID_NON_DEFAULTS` entry (see
+  the deviation above).
+- `handle()` has one place to act: the `WOULD_ENTER` branch. It logs through `self._log(...)`. Entering the mode
+  belongs there, behind `config.mode is DetectorMode.ACT`.
+- The ring is not reset by the detector after a `would-enter`. A further cycle logs `would-enter` again, with a higher
+  count. Act mode should decide whether entering the mode clears the ring.
+- `blocked_hours` is validated and delivered, but no code reads it yet. Act mode's TTL reads it.
+- Release note 024 and the unblock command are still open.

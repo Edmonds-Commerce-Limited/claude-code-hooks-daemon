@@ -179,8 +179,8 @@ All CLEAR; rationale and code citations in
 
 ### Phase 6: Goal-loop detector
 
-- [ ] ⬜ **Task 6.1**: TDD transcript extraction from scrubbed fixture records, including a reworded-stops run.
-- [ ] ⬜ **Task 6.2**: TDD the cycle ring, repo fingerprint (conditional, `git status --porcelain -uno` plus HEAD),
+- [x] ✅ **Task 6.1**: TDD transcript extraction from scrubbed fixture records, including a reworded-stops run.
+- [x] ✅ **Task 6.2**: TDD the cycle ring, repo fingerprint (conditional, `git status --porcelain -uno` plus HEAD),
   thresholds (a declared `[awaiting-human]` stop counts toward the 2-cycle threshold), `observe` mode, near-miss
   logging. Similarity is logged but not a fire condition.
 - [ ] ⬜ **Task 6.3**: TDD `act` mode: enter BLOCKED(goal-loop), clear the goal signal (the lever spike 0.3
