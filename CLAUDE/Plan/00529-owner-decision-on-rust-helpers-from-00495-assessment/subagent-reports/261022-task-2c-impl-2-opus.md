@@ -80,13 +80,25 @@ Green: install, checker and CLI relay/status tests, 485 passed.
 
 ## QA
 
-**There is no `llm_qa.py changed` result yet.** The run is started and writes to
-`untracked/scratch/qa-529.txt` in the worktree. When this report was written, it was queued on the host-wide QA
-lock behind another worktree's run (pid 365338, `worktree-issue-130-p3-dbf`), 20 minutes into its 60-minute
-wait. Read its `QA:` line there; if the wait expired, re-run it.
+`llm_qa.py changed --allow-unmapped`, run on head `1cc5a8d7b`:
 
-The targeted pytest runs that did finish are listed under each step above, and `black --check src tests` is
-clean.
+```
+QA: 36/40 PASSED, 2/40 FAILED, 2/40 NOT MEANINGFUL (detector failed: format, generated_doc_drift)
+changed_tests: 7377 passed, 0 failed, 64 skipped | 143 test files from 43 changed files (8 unmapped)
+```
+
+Both failures are fixed in the commit that follows this report's first version:
+
+- format: Black reflowed `tests/integration/test_relay_unused_marker_reaches_daemon.py`, via `run_autofix.sh`.
+- generated_doc_drift: `.claude/HOOKS-DAEMON.md` was regenerated with `bin/hooks-daemon generate-docs`. It is
+  one row, the checker's reworded description.
+
+After the fix, `black --check src tests` and `scripts/qa/check_generated_doc_drift.py` are both clean. The
+whole `llm_qa.py` was not re-run. The two "not meaningful" rows were test runs that passed, and they were
+discounted only because the format and doc-drift checks had failed.
+
+The 8 unmapped files (`init.sh`, the forwarders, `protocol.py`, `relay_deploy.py`, `transport_toggle.py`) are
+marked too broad to map, so the coordinator's full gate must cover them.
 
 ## Handoff: what is left
 
