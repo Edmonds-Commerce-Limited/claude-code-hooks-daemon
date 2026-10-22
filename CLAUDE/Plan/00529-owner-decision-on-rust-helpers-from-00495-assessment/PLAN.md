@@ -67,10 +67,13 @@ a helper. That fix is a Python change tracked as ledger N465 and fixed separatel
     the binary is missing or broken. Adopted: no deny-all lockout. The call falls through to the bash path, where every
     guard still judges it, and every answer carries a warning naming the binary and `transport on`. Repair runs
     detached at session start, once per cause. The adviser also found that a BROKEN binary (executable but corrupt)
-    fails OPEN today: the failed `exec` exits 126 with nothing on stdout, so the tool runs unguarded. Ruling and
+    fails OPEN today: under the forwarder's `set -euo pipefail` the failed `exec` exits non-zero (1 for a corrupt
+    ELF, 127 for text garbage, which bash runs as a script) with nothing on stdout, so the tool runs unguarded
+    (corrected by [subagent-reports/261022-fact-check-ruling-sonnet.md](subagent-reports/261022-fact-check-ruling-sonnet.md)). Ruling and
     evidence: [subagent-reports/261022-forwarder-failure-advice-fable.md](subagent-reports/261022-forwarder-failure-advice-fable.md).
-  - [ ] **Task 2c**: Implement the ruling (the report's tasks 1-6): close the fail-open with `shopt -s execfail` and
-    an unused-relay marker in the generated guard; carry the marker through `init.sh` into the request; the daemon
+  - [ ] **Task 2c**: Implement the ruling (the report's tasks 1-6): close the fail-open in the generated guard with an
+    explicitly handled failed `exec` (`shopt -s execfail` alone does not survive `set -e`) that sets an unused-relay
+    marker; carry the marker through `init.sh` into the request; the daemon
     adds one warning line to every relay-eligible answer without changing a verdict; detached session-start repair,
     once per cause; tests red first (an executable file of garbage bytes is the safety regression test); docs and a
     release note.
