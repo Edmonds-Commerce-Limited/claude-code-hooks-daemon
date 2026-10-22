@@ -109,6 +109,21 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N531 — a subprocess test's child pytest passes, then does not exit within 60 s on CI
+
+**Source**: main CI run 39853605423 at `cc49aebbb`, job QA (Python3.12), 1 failed of 52,074:
+`test_project_containment.py::TestProjectRootDoublePatchDoesNotLeakAcrossFiles::test_the_polluter_and_a_victim_pass_together_in_one_process`.
+The child `python -m pytest -p no:xdist -q <polluter> <victim>` printed `2 passed in 0.43s`, then was killed by
+`TimeoutExpired` after 60 s (`Timeout.REQUEST_LONG`). It ran at 99% of an 85-minute run with coverage on.
+
+- **Not reproduced**: three local runs of the same child command (Python 3.11) exit with rc 0 in about 0.45 s. The
+  same run passed on 3.11 and 3.13, and the test file has not changed in recent history.
+- **Hypothesis to establish first**: exit-time work in the child that a loaded runner stretches, such as coverage
+  inherited from the parent run being flushed or combined at exit. Measure the child's exit phase on CI before
+  changing anything; raising the timeout is not a fix until the cause is known.
+
+**Status**: ⬜ open; the next main runs say whether it recurs.
+
 ### N530 — `plan_number_helper` denies an `ls` of a folder inside an existing plan as a next-number scan
 
 **Source**: the coordinator during Plan 00501 Phase 6 preparation. The command
