@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from claude_code_hooks_daemon.config.models import ChainConfig, Config, VerdictLogConfig
 from claude_code_hooks_daemon.config.validator import ConfigValidator
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
+from claude_code_hooks_daemon.constants.protocol import RequestEnvelopeField
 from claude_code_hooks_daemon.core.bounded_dispatch import (
     configure_default_dispatcher,
     get_default_dispatcher,
@@ -34,6 +35,10 @@ from claude_code_hooks_daemon.core.pseudo_event import (
 )
 from claude_code_hooks_daemon.core.router import EventRouter
 from claude_code_hooks_daemon.core.usage_snapshot import resolve_usage_state_file
+from claude_code_hooks_daemon.daemon.relay_unused_warning import (
+    add_relay_unused_warning,
+    is_relay_eligible_event,
+)
 from claude_code_hooks_daemon.daemon.source_fingerprint import (
     HEALTH_KEY_CONFIG_FINGERPRINT,
     HEALTH_KEY_SOURCE_FINGERPRINT,
@@ -1363,11 +1368,43 @@ class DaemonController:
         )
         # Plan 00167: forward the terminal width (init.sh injects it for Status)
         # so the Status renderer can wrap onto multiple rows on a narrow screen.
-        return result.result.to_json(
+        response = result.result.to_json(
             event.event_type.value,
             stop_hook_active=stop_hook_active,
             terminal_columns=hook_input_dict.get("terminal_columns"),
         )
+        return self._warn_if_relay_unused(request_data, event.event_type, response)
+
+    @staticmethod
+    def _warn_if_relay_unused(
+        request_data: dict[str, Any], event_type: EventType, response: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Name an unused relay binary on the answer; the verdict is never changed.
+
+        Plan 00529: the relay guard fell through to the bash path, so every
+        answer says so until ``transport on`` is run. A marker on an event that
+        has no relay guard, or one that is not a string, is a protocol defect:
+        it is logged at ERROR and the verdict is returned as decided.
+        """
+        marker = request_data.get(RequestEnvelopeField.RELAY_UNUSED)
+        if marker is None or marker == "":
+            return response
+        if not isinstance(marker, str):
+            logger.error(
+                "Request envelope field %s must be a string, got %s; no relay warning added",
+                RequestEnvelopeField.RELAY_UNUSED,
+                type(marker).__name__,
+            )
+            return response
+        if not is_relay_eligible_event(event_type):
+            logger.error(
+                "Request envelope field %s on %s, whose forwarder has no relay guard; "
+                "no relay warning added",
+                RequestEnvelopeField.RELAY_UNUSED,
+                event_type.value,
+            )
+            return response
+        return add_relay_unused_warning(response, event_type, marker)
 
     def get_stats(self) -> DaemonStats:
         """Get daemon statistics.
