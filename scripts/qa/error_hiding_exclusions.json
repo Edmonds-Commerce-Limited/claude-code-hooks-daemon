@@ -474,14 +474,6 @@
       "reason": "Plan 00200 Task 5.4: line 83 is `if ! git clone ... >/dev/null 2>&1; then _fail ...` (explicit failure handling). Line 101 is the curl-based uv installer inside a compound `if` condition, whose success is verified afterward via a fresh `command -v uv` check rather than trusting curl's own exit code -- a deliberate self-verifying fallback, not error hiding. Module-level, hence line-based match."
     },
     {
-      "file": "scripts/detect_location.sh",
-      "lines": [
-        117
-      ],
-      "rule": "shell-redirect-all-to-null",
-      "reason": "Plan 00200 Task 5.4: `if command -v python3 &>/dev/null; then` -- exit code explicitly checked. Module-level (no enclosing function at this call site), hence line-based match."
-    },
-    {
       "file": "scripts/install/hooks_deploy.sh",
       "function": "git_force_executable",
       "rule": "shell-discard-both-streams",
@@ -506,24 +498,6 @@
       "reason": "Plan 00200 Task 5.4: version-probe command inside an explicit if/exit-code check within the same function as the &>/dev/null presence probes above."
     },
     {
-      "file": "scripts/install/prerequisites.sh",
-      "function": "get_python_version",
-      "rule": "shell-redirect-all-to-null",
-      "reason": "Plan 00200 Task 5.4: interpreter presence/version probe inside an explicit if/exit-code check."
-    },
-    {
-      "file": "scripts/install/prerequisites.sh",
-      "function": "get_python_major_minor",
-      "rule": "shell-redirect-all-to-null",
-      "reason": "Plan 00200 Task 5.4: interpreter presence probe inside an explicit if/exit-code check."
-    },
-    {
-      "file": "scripts/install/project_detection.sh",
-      "function": "detect_install_mode",
-      "rule": "shell-redirect-all-to-null",
-      "reason": "Plan 00200 Task 5.4: `if ! command -v python3 &>/dev/null; then echo \"normal\"` -- exit code explicitly checked, falls back to a safe default detection result."
-    },
-    {
       "file": "scripts/install/venv.sh",
       "function": "verify_venv",
       "rule": "shell-discard-both-streams",
@@ -532,7 +506,7 @@
     {
       "file": "scripts/qa/run_shell_check.sh",
       "lines": [
-        21
+        30
       ],
       "rule": "shell-redirect-all-to-null",
       "reason": "Plan 00200 Task 5.4: `if ! command -v shellcheck &>/dev/null; then echo \"shellcheck not installed\"` -- exit code explicitly checked, specific error printed on failure. Module-level, hence line-based match."

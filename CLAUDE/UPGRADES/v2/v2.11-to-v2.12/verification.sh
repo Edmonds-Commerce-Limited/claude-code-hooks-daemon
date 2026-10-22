@@ -63,14 +63,14 @@ if [[ -f "$VERSION_FILE" ]]; then
 
     if [[ "$VERSION_MAJOR_MINOR" == "$EXPECTED_MAJOR_MINOR" ]] || [[ "$VERSION" > "$EXPECTED_VERSION" ]]; then
         echo -e "${GREEN}✅ PASS: Version is $VERSION (>= $EXPECTED_VERSION)${NC}"
-        ((PASS_COUNT++))
+        PASS_COUNT=$((PASS_COUNT + 1))
     else
         echo -e "${RED}❌ FAIL: Version is $VERSION, expected >= $EXPECTED_VERSION${NC}"
-        ((FAIL_COUNT++))
+        FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 else
     echo -e "${RED}❌ FAIL: Version file not found: $VERSION_FILE${NC}"
-    ((FAIL_COUNT++))
+    FAIL_COUNT=$((FAIL_COUNT + 1))
 fi
 echo ""
 
@@ -79,17 +79,17 @@ echo -e "${BLUE}[2/5] Validating config file...${NC}"
 if [[ -f "$CONFIG_FILE" ]]; then
     if [[ -z "$PYTHON_BIN" ]]; then
         echo -e "${RED}❌ FAIL: No daemon Python interpreter resolved to validate the config${NC}"
-        ((FAIL_COUNT++))
+        FAIL_COUNT=$((FAIL_COUNT + 1))
     elif "$PYTHON_BIN" -c "import sys, yaml; yaml.safe_load(open(sys.argv[1]))" "$CONFIG_FILE"; then
         echo -e "${GREEN}✅ PASS: Config file is valid YAML${NC}"
-        ((PASS_COUNT++))
+        PASS_COUNT=$((PASS_COUNT + 1))
     else
         echo -e "${RED}❌ FAIL: Config file has YAML syntax errors${NC}"
-        ((FAIL_COUNT++))
+        FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 else
     echo -e "${RED}❌ FAIL: Config file not found: $CONFIG_FILE${NC}"
-    ((FAIL_COUNT++))
+    FAIL_COUNT=$((FAIL_COUNT + 1))
 fi
 echo ""
 
@@ -101,10 +101,10 @@ if grep -q "$OLD_HANDLER" "$CONFIG_FILE" 2>/dev/null; then
     grep -n "$OLD_HANDLER" "$CONFIG_FILE"
     echo ""
     echo "Run migration script: bash CLAUDE/UPGRADES/v2/v2.11-to-v2.12/migration-script.sh"
-    ((FAIL_COUNT++))
+    FAIL_COUNT=$((FAIL_COUNT + 1))
 else
     echo -e "${GREEN}✅ PASS: No old handler name in config${NC}"
-    ((PASS_COUNT++))
+    PASS_COUNT=$((PASS_COUNT + 1))
 fi
 echo ""
 
@@ -114,15 +114,15 @@ if grep -q "post_tool_use:" "$CONFIG_FILE" 2>/dev/null; then
     if grep -q "$NEW_HANDLER" "$CONFIG_FILE" 2>/dev/null; then
         echo -e "${GREEN}✅ PASS: New handler name '$NEW_HANDLER' found in config${NC}"
         grep -n "$NEW_HANDLER" "$CONFIG_FILE" | head -3
-        ((PASS_COUNT++))
+        PASS_COUNT=$((PASS_COUNT + 1))
     else
         echo -e "${YELLOW}ℹ️  INFO: New handler name not found (may not be configured)${NC}"
         echo "This is OK if you never used the old handler."
-        ((PASS_COUNT++))
+        PASS_COUNT=$((PASS_COUNT + 1))
     fi
 else
     echo -e "${YELLOW}ℹ️  INFO: No PostToolUse handlers configured${NC}"
-    ((PASS_COUNT++))
+    PASS_COUNT=$((PASS_COUNT + 1))
 fi
 echo ""
 
@@ -130,7 +130,7 @@ echo ""
 echo -e "${BLUE}[5/5] Checking handler loads successfully...${NC}"
 if [[ -z "$PYTHON_BIN" ]]; then
     echo -e "${RED}❌ FAIL: No daemon Python interpreter resolved, cannot run the import check${NC}"
-    ((FAIL_COUNT++))
+    FAIL_COUNT=$((FAIL_COUNT + 1))
 else
     # Detect self-install mode vs normal install
     if [[ -d "src/claude_code_hooks_daemon" ]]; then
@@ -143,7 +143,7 @@ else
             cd "$DAEMON_DIR"
         else
             echo -e "${YELLOW}⚠️  WARNING: Daemon directory not found: $DAEMON_DIR${NC}"
-            ((FAIL_COUNT++))
+            FAIL_COUNT=$((FAIL_COUNT + 1))
             DAEMON_DIR=""
         fi
     fi
@@ -151,10 +151,10 @@ else
     if [[ -n "$DAEMON_DIR" ]]; then
         if "$PYTHON_BIN" -c "from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import LintOnEditHandler; print('OK')"; then
             echo -e "${GREEN}✅ PASS: Handler imports successfully${NC}"
-            ((PASS_COUNT++))
+            PASS_COUNT=$((PASS_COUNT + 1))
         else
             echo -e "${RED}❌ FAIL: Handler import error${NC}"
-            ((FAIL_COUNT++))
+            FAIL_COUNT=$((FAIL_COUNT + 1))
         fi
         if [[ "$DAEMON_DIR" != "." ]]; then
             cd - > /dev/null

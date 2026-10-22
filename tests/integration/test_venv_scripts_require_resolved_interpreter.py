@@ -26,11 +26,17 @@ INSTALL_SH: Final[Path] = SCRIPTS / "install_version.sh"
 SETUP_WT_SH: Final[Path] = SCRIPTS / "setup_worktree.sh"
 
 #: Matches ``python3`` used as a command, a default value or an argument.
-_BARE_PYTHON_USE: Final[re.Pattern[str]] = re.compile(r":-python3\}|\bpython3 -|\)\s+python3\)|\s+python3\)")
+_BARE_PYTHON_USE: Final[re.Pattern[str]] = re.compile(
+    r":-python3\}|\bpython3 -|\)\s+python3\)|\s+python3\)"
+)
 
 
-def _bash(script: str, *, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    env = {k: v for k, v in os.environ.items() if k not in ("CI", "HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP")}
+def _bash(
+    script: str, *, extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    env = {
+        k: v for k, v in os.environ.items() if k not in ("CI", "HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP")
+    }
     env.update(extra_env or {})
     return subprocess.run(
         ["bash", "-c", f'set -uo pipefail\nsource "{VENV_SH}"\nsource "{FP_SH}"\n{script}'],
@@ -53,7 +59,9 @@ class TestRequiredInterpreterArgument:
         result = _bash(f'ensure_venv "{tmp_path}" "v1.0.0" ""')
         assert result.returncode != 0
 
-    def test_ensure_venv_locked_without_python_fails_with_named_reason(self, tmp_path: Path) -> None:
+    def test_ensure_venv_locked_without_python_fails_with_named_reason(
+        self, tmp_path: Path
+    ) -> None:
         result = _bash(f'ensure_venv_locked "{tmp_path}" "v1.0.0"')
         assert result.returncode != 0
         assert "ensure_venv_locked: python_bin" in result.stderr + result.stdout
@@ -89,7 +97,9 @@ class TestCallersResolveAnInterpreter:
 
     def test_upgrade_version_resolves_before_both_ensure_venv_calls(self) -> None:
         lines = UPGRADE_SH.read_text().splitlines()
-        calls = [i for i, line in enumerate(lines) if "ensure_venv " in line and "VENV_PATH=$(" in line]
+        calls = [
+            i for i, line in enumerate(lines) if "ensure_venv " in line and "VENV_PATH=$(" in line
+        ]
         assert len(calls) == 2
         for i in calls:
             assert '"$BUILD_PYTHON"' in lines[i]
@@ -127,9 +137,7 @@ echo "PICKED=$BUILD_PYTHON"
         assert "FAIL_FAST: No Python >= 3.11" in result.stderr
         assert "PICKED=" not in result.stdout
 
-    def test_upgrade_build_python_reports_the_interpreter_it_picked(
-        self, tmp_path: Path
-    ) -> None:
+    def test_upgrade_build_python_reports_the_interpreter_it_picked(self, tmp_path: Path) -> None:
         import sys
 
         script = f"""

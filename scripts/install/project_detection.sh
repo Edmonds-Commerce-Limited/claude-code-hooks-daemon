@@ -346,7 +346,9 @@ Make sure you're running this from within a Claude Code project."
     validate_project_structure "$PROJECT_ROOT"
 
     # Detect install mode
-    INSTALL_MODE=$(detect_install_mode "$PROJECT_ROOT")
+    if ! INSTALL_MODE=$(detect_install_mode "$PROJECT_ROOT"); then
+        fail_fast "Could not determine the install mode for $PROJECT_ROOT (see the detect_install_mode message above)."
+    fi
     print_verbose "Install mode: $INSTALL_MODE"
 
     # Set derived paths

@@ -1,0 +1,8 @@
+# Callout: install, upgrade and support scripts run the resolved interpreter, or fail with a named reason
+
+**Plan**: 00546
+**Audience**: everyone
+
+The shipped install, upgrade and support scripts no longer fall back to a bare `python3` from `PATH`, which could be older than the declared minimum. `scripts/install/venv.sh` (`ensure_venv`, `ensure_venv_locked`), `scripts/install/python_fingerprint.sh`, `install_version.sh`, `upgrade_version.sh`, `setup_worktree.sh`, `health_check.sh`, `detect_location.sh`, `scripts/install/prerequisites.sh`, `scripts/venv-include.bash`, the v2 upgrade scripts under `CLAUDE/UPGRADES/v2/` and the acceptance-test `invoke.sh` now run the interpreter the project resolved (the daemon venv's `bin/python`, `$HOOKS_DAEMON_PYTHON`, or one found by `find_latest_python` against the declared floor). When none can be found they stop with a message naming what was missing instead of silently carrying on or crashing on old syntax. A new QA check, `scripts/qa/check_bare_python_invocation.py`, keeps shell scripts from reintroducing the pattern; the remaining bare `python3` calls in `init.sh` and `install.sh` are version-checked bootstrap or stdlib-only forwarder snippets proven to run on Python 3.8 and 3.9.
+
+`detect_install_mode` (`scripts/install/project_detection.sh`) now fails loudly with exit code 1 and a stderr diagnostic when it cannot read the config (no resolved interpreter, or no PyYAML), where it used to answer `normal` silently. Its caller in `detect_and_validate_project` stops with a named error. The v2.11-to-v2.12 `verification.sh` also no longer aborts after its first check under `set -e`.
