@@ -130,6 +130,24 @@ class TestRender:
         assert "usage-pause record unreadable" in segment
         assert "usage-pause" in caplog.text
 
+    def test_a_pause_record_that_cannot_be_read_is_a_named_error(
+        self, untracked: Path, daemon_mode: Mock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A read error (here: the record path is a directory) must never read as "no mode"."""
+        usage_pause.pause_path(untracked, _SID).mkdir(parents=True)
+        with caplog.at_level(logging.WARNING):
+            [segment] = _render(SessionModeIndicatorHandler())
+        assert "usage-pause record unreadable" in segment
+        assert "\033[31m" in segment
+        assert "usage-pause" in caplog.text
+
+    def test_a_pause_record_whose_stat_fails_is_a_named_error(
+        self, untracked: Path, daemon_mode: Mock
+    ) -> None:
+        with patch.object(Path, "stat", side_effect=PermissionError("denied")):
+            [segment] = _render(SessionModeIndicatorHandler())
+        assert "usage-pause record unreadable" in segment
+
     def test_an_unreadable_registry_is_a_named_error(
         self, untracked: Path, caplog: pytest.LogCaptureFixture
     ) -> None:

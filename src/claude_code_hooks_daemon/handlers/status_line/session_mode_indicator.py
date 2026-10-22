@@ -116,7 +116,7 @@ class SessionModeIndicatorHandler(StatusLineHandlerBase):
             tags=[HandlerTag.STATUSLINE, HandlerTag.DISPLAY, HandlerTag.NON_TERMINAL],
         )
         self._pauses: MtimeCachedFile[UsagePause | _Malformed | None] = MtimeCachedFile(
-            _parse_pause, None
+            _parse_pause, None, strict_io=True
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
@@ -134,7 +134,10 @@ class SessionModeIndicatorHandler(StatusLineHandlerBase):
             logger.warning("session mode segment: the registry could not be read: %s", error)
             return AdvisoryResult(context=[f"| {_error(_REGISTRY_ERROR)}"])
         now = time.time()
-        pause = self._read_pause(session_id, now)
+        try:
+            pause = self._read_pause(session_id, now)
+        except OSError as error:
+            pause = _Malformed(f"cannot read it: {error}")
         if isinstance(pause, _Malformed):
             logger.warning("session mode segment: usage-pause record unreadable: %s", pause.error)
             return AdvisoryResult(context=[f"| {_error(_PAUSE_ERROR)}"])
@@ -151,7 +154,11 @@ class SessionModeIndicatorHandler(StatusLineHandlerBase):
         return AdvisoryResult(context=[f"| {_badge(policy)}"])
 
     def _read_pause(self, session_id: str, now: float) -> UsagePauseView | _Malformed | None:
-        """The session's live usage pause, a malformed record, or None."""
+        """The session's live usage pause, a malformed record, or None.
+
+        Raises:
+            OSError: the record exists but could not be read (only "not found" is None).
+        """
         record = self._pauses.read(pause_path(ProjectContext.daemon_untracked_dir(), session_id))
         if record is None or isinstance(record, _Malformed):
             return record

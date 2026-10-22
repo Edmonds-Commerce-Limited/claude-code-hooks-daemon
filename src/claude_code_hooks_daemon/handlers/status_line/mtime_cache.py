@@ -41,11 +41,16 @@ class MtimeCachedFile(Generic[T]):
         parse: Turns the file's text into the value the caller wants. May raise;
             a failure is reported as ``default`` and is NOT cached.
         default: Returned whenever the file is absent, unreadable, or unparseable.
+        strict_io: When True, only an absent file is ``default``: any other
+            ``OSError`` from the ``stat`` or the read (permission denied, a
+            directory, I/O) is raised, for a caller that must name an
+            unreadable source rather than show it as empty.
     """
 
-    def __init__(self, parse: Callable[[str], T], default: T) -> None:
+    def __init__(self, parse: Callable[[str], T], default: T, *, strict_io: bool = False) -> None:
         self._parse = parse
         self._default = default
+        self._strict_io = strict_io
         # path string -> (mtime_ns, parsed value). One entry per distinct path.
         self._cache: dict[str, tuple[int, T]] = {}
 
@@ -54,10 +59,14 @@ class MtimeCachedFile(Generic[T]):
         self._cache.clear()
 
     def read(self, path: Path) -> T:
-        """Return the parsed value for ``path``, re-parsing only on mtime change."""
+        """Return the parsed value for ``path``, re-parsing only on mtime change.
+
+        Raises:
+            OSError: only with ``strict_io``, for any failure but "not found".
+        """
         try:
             mtime_ns = path.stat().st_mtime_ns
-        except OSError:
+        except OSError as error:
             logger.debug("mtime_cache: not accessible: %s", path)
             # Plan 00319 F7: evict rather than leave a stale entry in place. A
             # single-fixed-path caller (settings.json, the account conf) never
@@ -69,6 +78,8 @@ class MtimeCachedFile(Generic[T]):
             # the cache bounded by currently-live sessions rather than every
             # session the daemon has ever rendered a line for.
             self._cache.pop(str(path), None)
+            if self._strict_io and not isinstance(error, FileNotFoundError):
+                raise
             return self._default
 
         path_key = str(path)
@@ -77,7 +88,17 @@ class MtimeCachedFile(Generic[T]):
             return cached[1]
 
         try:
-            value = self._parse(path.read_text())
+            text = path.read_text()
+        except FileNotFoundError:
+            logger.debug("mtime_cache: gone before it could be read: %s", path)
+            return self._default
+        except OSError as exc:
+            if self._strict_io:
+                raise
+            logger.debug("mtime_cache: cannot read %s: %s", path, exc)
+            return self._default
+        try:
+            value = self._parse(text)
         except Exception as exc:
             # Deliberately NOT cached. These files are written by other
             # processes (the ccy supervisor among them), so a failure here is
