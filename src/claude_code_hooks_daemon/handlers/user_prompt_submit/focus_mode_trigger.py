@@ -61,8 +61,8 @@ def _usage_pause_view(session_id: str) -> UsagePauseView | None:
     return UsagePauseView(paused_at=pause.paused_at, until=pause.expires_at, reason=pause.reason)
 
 
-def _daemon_is_unattended() -> bool:
-    """Whether the daemon-wide mode is ``unattended``."""
+def daemon_is_unattended() -> bool:
+    """Whether the daemon-wide mode is ``unattended`` (also read by ``usage_pause_gate``)."""
     mode = get_controller().get_mode().get(ModeConstant.KEY_MODE)
     return bool(mode == DaemonMode.UNATTENDED.value)
 
@@ -102,7 +102,7 @@ class FocusModeTriggerHandler(UserPromptSubmitHandlerBase):
                 registry,
                 session_id,
                 usage_pause=lambda: _usage_pause_view(session_id),
-                unattended=_daemon_is_unattended,
+                unattended=daemon_is_unattended,
             )
         except (RuntimeError, OSError) as error:
             log_and_continue(

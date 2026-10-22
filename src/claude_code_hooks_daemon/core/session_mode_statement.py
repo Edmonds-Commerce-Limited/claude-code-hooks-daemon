@@ -3,8 +3,12 @@
 The registry queues one-time notices (an expiry; after a daemon restart, each
 mode that survived it or was cleared by it) and hands each out once
 (:meth:`SessionModeRegistry.take_notices` is pop-once). This module is their
-only reader: ``focus_mode_trigger`` calls it on every prompt, command or not,
-so the news is stated whatever the prompt is.
+only reader: ``focus_mode_trigger`` calls it on every prompt that reaches it,
+command or not, so the news is stated whatever the prompt is. A usage-paused
+session's prompts are denied before they reach the trigger, so
+``usage_pause_gate`` calls it on the one prompt it lets through while the pause
+continues (the still-over resume tick), passing the record from before that
+tick.
 
 After a restart the line also restates what the registry does not own: a usage
 pause recorded before the restart (checked once per session, at its first
