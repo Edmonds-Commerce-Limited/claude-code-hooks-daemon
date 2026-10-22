@@ -364,6 +364,63 @@ class SessionPolicy:
         return max(actions, key=lambda action: action.rank, default=TickAction.DELIVER)
 
 
+#: How long a shown-only ``unattended`` entry claims to last. It is built for one
+#: render and never stored, so it needs a valid interval and nothing more.
+_SHOWN_ONLY_SECONDS: Final[float] = 1.0
+
+
+@dataclass(frozen=True, slots=True)
+class UsagePauseView:
+    """The part of a live usage-pause record the session-mode display needs."""
+
+    paused_at: float
+    until: float
+    reason: str
+
+
+def displayed_policy(
+    session_id: str,
+    registry_entries: Iterable[SessionModeEntry],
+    *,
+    usage_pause: UsagePauseView | None,
+    unattended: bool,
+    now: float,
+) -> SessionPolicy:
+    """Every mode a session shows: the registry's, plus usage-paused and unattended.
+
+    ``usage-paused`` keeps its own record and ``unattended`` is daemon-wide
+    state; neither is stored in the registry (plan Non-Goals), so both are
+    composed here for display. ``unattended`` never halts work.
+
+    Raises:
+        ValueError: the entries are not all ``session_id``'s, or a label repeats.
+    """
+    entries = list(registry_entries)
+    if usage_pause is not None:
+        entries.append(
+            SessionModeEntry(
+                mode=SessionMode.USAGE_PAUSED,
+                session_id=session_id,
+                entered_at=usage_pause.paused_at,
+                expires_at=usage_pause.until,
+                source=ModeSource.DAEMON,
+                detail=usage_pause.reason,
+            )
+        )
+    if unattended:
+        entries.append(
+            SessionModeEntry(
+                mode=SessionMode.UNATTENDED,
+                session_id=session_id,
+                entered_at=now,
+                expires_at=now + _SHOWN_ONLY_SECONDS,
+                source=ModeSource.DAEMON,
+                lifetime=Lifetime.DAEMON,
+            )
+        )
+    return SessionPolicy.from_entries(entries)
+
+
 def is_genuine_human_prompt(prompt: object) -> bool:
     """Whether a UserPromptSubmit prompt was typed by a human.
 

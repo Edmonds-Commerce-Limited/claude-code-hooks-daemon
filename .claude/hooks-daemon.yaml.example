@@ -1111,6 +1111,10 @@ handlers:
       enabled: true  # Hidden until a subagent has stopped or the live count is fresh
       priority: 17
 
+    session_mode_indicator:   # This session's modes: ⚑ <top mode> +N, focus with its task (Plan 00501)
+      enabled: true  # Hidden when the session has no mode
+      priority: 18
+
   worktree_create:  # WorktreeCreate event (isolation:worktree agents / --worktree sessions)
     worktree_create:  # Creates the git worktree at a semantic path and echoes it
       # MUST stay enabled: Claude Code parses this hook's stdout as the created

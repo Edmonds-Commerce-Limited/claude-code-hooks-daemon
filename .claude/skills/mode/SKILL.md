@@ -47,7 +47,8 @@ View or change the daemon's operating mode. Supports `default` (normal operation
 `/mode focus` is the same as typing `hooks-daemon focus <task>` at the start of a prompt: it
 changes only the current session, not the daemon-wide mode. It runs
 `hooks-daemon session-mode focus <task>` / `session-mode focus off`; `/mode get` also prints
-`session-mode get`.
+`session-mode get`. `hooks-daemon mode-history` lists every session's live modes and the recent
+mode transitions, each with what triggered it.
 
 ## Modes
 

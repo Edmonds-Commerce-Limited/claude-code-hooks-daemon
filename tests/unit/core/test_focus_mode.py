@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.core.focus_mode import (
     focus_reminder,
     parse_focus_command,
 )
+from claude_code_hooks_daemon.core.session_mode_log import TransitionLog
 from claude_code_hooks_daemon.core.session_mode_registry import SessionModeRegistry
 from claude_code_hooks_daemon.utils.session_modes import (
     FOCUS_TTL_SECONDS,
@@ -203,6 +204,16 @@ class TestExitFocus:
         change = exit_focus(registry, _SESSION)
         assert change.outcome is FocusOutcome.NOT_FOCUSED
         assert "was not on" in change.line()
+
+
+class TestEvidence:
+    def test_entry_and_exit_carry_their_evidence_to_the_log(self, tmp_path: Path) -> None:
+        log = TransitionLog(tmp_path / "t.jsonl")
+        registry = SessionModeRegistry(tmp_path / "modes", clock=lambda: _NOW, transition_log=log)
+        registry.load()
+        enter_focus(registry, _SESSION, "task", clear_goal=_GoalClearer(), evidence="came in")
+        exit_focus(registry, _SESSION, evidence="went out")
+        assert [t.evidence for t in log.recent(5)] == ["came in", "went out"]
 
 
 class TestWording:

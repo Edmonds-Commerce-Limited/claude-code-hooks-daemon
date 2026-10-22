@@ -35,7 +35,22 @@ class SessionModeIPC:
     ACTION_GET_SESSION_MODES = "get_session_modes"
     ACTION_ENTER_FOCUS = "enter_focus"
     ACTION_EXIT_FOCUS = "exit_focus"
-    ACTIONS = frozenset({ACTION_GET_SESSION_MODES, ACTION_ENTER_FOCUS, ACTION_EXIT_FOCUS})
+    #: Every session's live modes and the recent transitions (Task 4.3).
+    ACTION_GET_MODE_HISTORY = "get_mode_history"
+    ACTIONS = frozenset(
+        {
+            ACTION_GET_SESSION_MODES,
+            ACTION_ENTER_FOCUS,
+            ACTION_EXIT_FOCUS,
+            ACTION_GET_MODE_HISTORY,
+        }
+    )
+
+    KEY_LIMIT = "limit"
+    KEY_SESSIONS = "sessions"
+    KEY_TRANSITIONS = "transitions"
+    #: Transitions ``mode-history`` shows when no limit is given.
+    DEFAULT_HISTORY_LIMIT = 20
 
     KEY_SESSION_ID = "session_id"
     KEY_TASK = "task"

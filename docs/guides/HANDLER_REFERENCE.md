@@ -5026,6 +5026,19 @@ handlers:
 
 ---
 
+#### session_mode_indicator
+
+| Property       | Value                    |
+| -------------- | ------------------------ |
+| **Config key** | `session_mode_indicator` |
+| **Priority**   | 18                       |
+| **Type**       | Advisory                 |
+| **Event**      | StatusLine               |
+
+**Description:** This session's session modes (Plan 00501): `| ⚑ focus: <task>` or `| ⚑ awaiting-human +1`. It shows the top mode by precedence (usage-paused > goal-blocked > awaiting-human > focus > unattended) and how many more are active, and nothing when no mode is. A red `⚑ modes unreadable` or `⚑ usage-pause record unreadable` means the mode state could not be read. `hooks-daemon mode-history` lists every session's modes and recent transitions.
+
+---
+
 ## Quick Reference Table
 
 ### All Blocking Handlers

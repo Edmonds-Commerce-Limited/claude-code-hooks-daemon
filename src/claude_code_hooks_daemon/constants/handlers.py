@@ -214,6 +214,12 @@ class HandlerID:
         config_key="spend_meter",
         display_name="status-spend-meter",
     )
+    # Plan 00501 Task 4.1: this session's active session mode(s).
+    SESSION_MODE_INDICATOR = HandlerIDMeta(
+        class_name="SessionModeIndicatorHandler",
+        config_key="session_mode_indicator",
+        display_name="status-session-mode-indicator",
+    )
     USAGE_INDICATOR = HandlerIDMeta(
         class_name="UsageIndicatorHandler",
         config_key="usage_indicator",

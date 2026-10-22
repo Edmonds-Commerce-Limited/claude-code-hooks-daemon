@@ -141,6 +141,7 @@ def enter_focus(
     task: str,
     *,
     clear_goal: Callable[[str], bool],
+    evidence: str | None = None,
 ) -> FocusChange:
     """Focus ``session_id`` on ``task``, clearing an existing goal on first entry.
 
@@ -149,6 +150,7 @@ def enter_focus(
         session_id: The session to focus.
         task: The task; a blank one is refused and no mode is entered.
         clear_goal: Signals the goal clear for a session; False when it failed.
+        evidence: What asked for focus, for the transition log.
 
     Raises:
         OSError: the registry write failed.
@@ -167,7 +169,8 @@ def enter_focus(
             source=ModeSource.HUMAN,
             detail=stripped,
             lifetime=Lifetime.SESSION,
-        )
+        ),
+        evidence=evidence,
     )
     if already:
         logger.info("focus mode: session %s changed its task", session_id)
@@ -182,13 +185,15 @@ def enter_focus(
     return FocusChange(FocusOutcome.ENTERED, task=stripped, goal_cleared=cleared)
 
 
-def exit_focus(registry: SessionModeRegistry, session_id: str) -> FocusChange:
-    """End ``session_id``'s focus.
+def exit_focus(
+    registry: SessionModeRegistry, session_id: str, *, evidence: str | None = None
+) -> FocusChange:
+    """End ``session_id``'s focus; ``evidence`` (what asked) goes to the transition log.
 
     Raises:
         OSError: the registry write failed.
     """
-    removed = registry.exit(session_id, ModeLabel.FOCUS)
+    removed = registry.exit(session_id, ModeLabel.FOCUS, evidence=evidence)
     if removed is None:
         return FocusChange(FocusOutcome.NOT_FOCUSED)
     logger.info("focus mode: session %s left focus", session_id)

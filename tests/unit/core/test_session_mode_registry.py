@@ -10,11 +10,17 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.core.session_mode_log import (
+    ModeTransition,
+    TransitionAction,
+    TransitionLog,
+)
 from claude_code_hooks_daemon.core.session_mode_registry import (
     CORRUPT_SUFFIX,
     FIELD_DETAIL,
@@ -668,3 +674,142 @@ class TestImportLegacyBlockageMarker:
             record.levelno == logging.WARNING and str(marker) in record.getMessage()
             for record in caplog.records
         )
+
+
+# --- Plan 00501 Phase 4: transition log, snapshot, first-prompt claim -------
+
+
+@pytest.fixture
+def logged(state_dir: Path, clock: FakeClock, tmp_path: Path) -> SessionModeRegistry:
+    reg = SessionModeRegistry(
+        state_dir, clock=clock, transition_log=TransitionLog(tmp_path / "transitions.jsonl")
+    )
+    reg.load()
+    return reg
+
+
+def _log(tmp_path: Path) -> list[ModeTransition]:
+    return TransitionLog(tmp_path / "transitions.jsonl").recent(100)
+
+
+class TestTransitionLogging:
+    def test_enter_is_logged_with_its_evidence(
+        self, logged: SessionModeRegistry, tmp_path: Path
+    ) -> None:
+        logged.enter(focus(), evidence="prompt command `hooks-daemon focus`")
+        [record] = _log(tmp_path)
+        assert record.action is TransitionAction.ENTER
+        assert record.label is ModeLabel.FOCUS
+        assert record.evidence == "prompt command `hooks-daemon focus`"
+        assert record.detail == "fix the parser"
+        assert record.at == T0
+
+    def test_enter_without_evidence_names_the_source(
+        self, logged: SessionModeRegistry, tmp_path: Path
+    ) -> None:
+        logged.enter(blocked())
+        assert _log(tmp_path)[0].evidence == "entered by the agent"
+
+    def test_exit_is_logged(self, logged: SessionModeRegistry, tmp_path: Path) -> None:
+        logged.enter(focus(), evidence="cli")
+        logged.exit(SID, ModeLabel.FOCUS, evidence="`hooks-daemon focus off`")
+        record = _log(tmp_path)[-1]
+        assert record.action is TransitionAction.EXIT
+        assert record.evidence == "`hooks-daemon focus off`"
+
+    def test_exit_of_an_absent_mode_logs_nothing(
+        self, logged: SessionModeRegistry, tmp_path: Path
+    ) -> None:
+        logged.exit(SID, ModeLabel.FOCUS, evidence="x")
+        assert _log(tmp_path) == []
+
+    def test_exit_without_evidence_says_so(
+        self, logged: SessionModeRegistry, tmp_path: Path
+    ) -> None:
+        logged.enter(focus(), evidence="cli")
+        logged.exit(SID, ModeLabel.FOCUS)
+        assert _log(tmp_path)[-1].evidence == "exited (no evidence given)"
+
+    def test_expiry_is_logged(
+        self, logged: SessionModeRegistry, clock: FakeClock, tmp_path: Path
+    ) -> None:
+        logged.enter(focus(ttl=10), evidence="cli")
+        clock.now = T0 + 20
+        logged.active(SID)
+        record = _log(tmp_path)[-1]
+        assert record.action is TransitionAction.EXPIRE
+        assert record.at == T0 + 20
+
+    def test_restart_clear_and_load_expiry_are_logged(
+        self, state_dir: Path, clock: FakeClock, tmp_path: Path
+    ) -> None:
+        write_raw(
+            state_dir,
+            f"{SID}{SESSION_MODES_SUFFIX}",
+            file_payload(SID, blocked(lifetime=Lifetime.DAEMON), focus(ttl=5)),
+        )
+        clock.now = T0 + 10
+        reg = SessionModeRegistry(
+            state_dir, clock=clock, transition_log=TransitionLog(tmp_path / "transitions.jsonl")
+        )
+        reg.load()
+        actions = {(t.label, t.action) for t in _log(tmp_path)}
+        assert actions == {
+            (ModeLabel.AWAITING_HUMAN, TransitionAction.RESTART_CLEAR),
+            (ModeLabel.FOCUS, TransitionAction.EXPIRE),
+        }
+
+    def test_a_failed_log_write_is_warned_and_the_mode_still_changes(
+        self,
+        state_dir: Path,
+        clock: FakeClock,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        class BrokenLog(TransitionLog):
+            def append(self, transitions: Sequence[ModeTransition]) -> None:
+                raise OSError("disk full")
+
+        reg = SessionModeRegistry(
+            state_dir, clock=clock, transition_log=BrokenLog(tmp_path / "x.jsonl")
+        )
+        reg.load()
+        with caplog.at_level(logging.WARNING):
+            reg.enter(focus(), evidence="cli")
+        assert reg.policy(SID).focus_task == "fix the parser"
+        assert "transition" in caplog.text
+        assert "disk full" in caplog.text
+
+    def test_no_log_configured_records_nothing(
+        self, registry: SessionModeRegistry, tmp_path: Path
+    ) -> None:
+        registry.enter(focus(), evidence="cli")
+        assert not (tmp_path / "transitions.jsonl").exists()
+        assert registry.transition_log is None
+
+
+class TestSnapshot:
+    def test_snapshot_holds_every_session_with_a_live_mode(
+        self, registry: SessionModeRegistry, clock: FakeClock
+    ) -> None:
+        registry.enter(focus())
+        registry.enter(blocked(OTHER, ttl=10))
+        clock.now = T0 + 20
+        snapshot = registry.snapshot()
+        assert list(snapshot) == [SID]
+        assert [e.label for e in snapshot[SID]] == [ModeLabel.FOCUS]
+
+
+class TestFirstPromptClaim:
+    def test_loaded_at_is_the_load_time(self, registry: SessionModeRegistry) -> None:
+        assert registry.loaded_at == T0
+
+    def test_loaded_at_before_load_is_an_error(self, state_dir: Path) -> None:
+        registry = SessionModeRegistry(state_dir)
+        with pytest.raises(RuntimeError, match="load"):
+            _ = registry.loaded_at
+
+    def test_each_session_claims_its_first_prompt_once(self, registry: SessionModeRegistry) -> None:
+        assert registry.claim_first_prompt(SID) is True
+        assert registry.claim_first_prompt(SID) is False
+        assert registry.claim_first_prompt(OTHER) is True

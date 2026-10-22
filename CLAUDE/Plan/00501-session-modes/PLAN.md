@@ -160,9 +160,9 @@ All CLEAR; rationale and code citations in
 
 ### Phase 4: Visibility
 
-- [ ] ⬜ **Task 4.1**: TDD the status-line segment and its explanation entry.
-- [ ] ⬜ **Task 4.2**: Restart re-statement of surviving modes (one context line on the next prompt), unconditional.
-- [ ] ⬜ **Task 4.3**: Transition log and a CLI printing active modes and recent transitions with evidence.
+- [x] ✅ **Task 4.1**: TDD the status-line segment and its explanation entry.
+- [x] ✅ **Task 4.2**: Restart re-statement of surviving modes (one context line on the next prompt), unconditional.
+- [x] ✅ **Task 4.3**: Transition log and a CLI printing active modes and recent transitions with evidence.
 
 ### Phase 5: Supervisor
 

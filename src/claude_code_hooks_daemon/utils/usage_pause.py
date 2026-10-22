@@ -200,6 +200,22 @@ def _parse(data: object) -> UsagePause | None:
     return pause if _validation_error(pause) is None else None
 
 
+def parse_usage_pause(text: str) -> UsagePause:
+    """A record's text as a validated pause, for a caller that read the file itself.
+
+    Raises:
+        ValueError: the text is not a valid usage pause record.
+    """
+    try:
+        data: object = json.loads(text)
+    except ValueError as error:
+        raise ValueError(f"usage pause record is not JSON: {error}") from error
+    pause = _parse(data)
+    if pause is None:
+        raise ValueError("usage pause record is malformed")
+    return pause
+
+
 def read_usage_pause(
     daemon_untracked_dir: Path, session_id: str, *, now: float
 ) -> UsagePause | None:

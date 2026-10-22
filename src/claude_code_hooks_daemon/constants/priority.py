@@ -639,6 +639,9 @@ class Priority:
     USAGE_INDICATOR = 16
     # Plan 00471 L7: subagent spend reads next to the usage it drives.
     SPEND_METER = 17
+    # Plan 00501 Task 4.1: the session's modes read beside the usage and agent
+    # spend that they gate.
+    SESSION_MODE_INDICATOR = 18
     WORKING_DIRECTORY = 25
     STARTUP_CLEANUP = 28  # Between working_directory (25) and daemon_stats (30)
 

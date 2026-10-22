@@ -473,6 +473,7 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "CurrentTimeHandler": "status-line renderer, no agent-facing action",
     "PromptCacheIndicatorHandler": "status-line renderer, no agent-facing action",
     "SpendMeterHandler": "status-line renderer, no agent-facing action",
+    "SessionModeIndicatorHandler": "status-line renderer, no agent-facing action",
     "UsageIndicatorHandler": "status-line renderer, no agent-facing action",
     "SubagentCacheAggregatorHandler": "observe-only sensor, no agent-facing action",
     "BackgroundTaskRecorderHandler": "observe-only sensor, no agent-facing action",

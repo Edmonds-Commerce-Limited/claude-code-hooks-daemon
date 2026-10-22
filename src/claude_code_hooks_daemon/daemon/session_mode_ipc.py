@@ -3,8 +3,9 @@
 ``get_session_modes`` lists one session's modes; ``enter_focus`` and
 ``exit_focus`` change its focus through the same operations the prompt command
 uses (``core.focus_mode``), so entering focus clears an existing goal once on
-every route. The daemon-wide ``get_mode``/``set_mode`` actions are separate and
-unchanged.
+every route. ``get_mode_history`` (Task 4.3) lists every session's live modes
+and the newest transitions with their evidence. The daemon-wide
+``get_mode``/``set_mode`` actions are separate and unchanged.
 
 A request naming no session is refused; a registry failure is logged at
 WARNING and returned as an error, never read as "no modes".
@@ -18,11 +19,15 @@ from typing import Any
 from claude_code_hooks_daemon.constants.modes import SessionModeIPC
 from claude_code_hooks_daemon.core.data_layer import get_data_layer
 from claude_code_hooks_daemon.core.focus_mode import FocusChange, enter_focus, exit_focus
+from claude_code_hooks_daemon.core.session_mode_log import TransitionLogError
 from claude_code_hooks_daemon.core.session_mode_registry import SessionModeRegistry
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.session_modes import SessionModeEntry
 
 logger = logging.getLogger(__name__)
+
+#: The transition log's evidence for a focus change made through IPC.
+_IPC_EVIDENCE = "the session-mode CLI or /mode skill"
 
 
 def clear_goal_signal(session_id: str) -> bool:
@@ -55,6 +60,8 @@ def handle_session_mode_action(action: str, hook_input: dict[str, Any]) -> dict[
     """
     if action not in SessionModeIPC.ACTIONS:
         raise ValueError(f"{action!r} is not a session-mode action")
+    if action == SessionModeIPC.ACTION_GET_MODE_HISTORY:
+        return _mode_history(hook_input)
     session_id = hook_input.get(SessionModeIPC.KEY_SESSION_ID)
     if not isinstance(session_id, str) or not session_id.strip():
         return {"error": f"'{SessionModeIPC.KEY_SESSION_ID}' must name the session"}
@@ -85,8 +92,59 @@ def _answer(
             SessionModeIPC.KEY_MODES: [_entry(entry) for entry in policy.entries],
         }
     if action == SessionModeIPC.ACTION_ENTER_FOCUS:
-        return _change(enter_focus(registry, session_id, str(task), clear_goal=clear_goal_signal))
-    return _change(exit_focus(registry, session_id))
+        return _change(
+            enter_focus(
+                registry,
+                session_id,
+                str(task),
+                clear_goal=clear_goal_signal,
+                evidence=_IPC_EVIDENCE,
+            )
+        )
+    return _change(exit_focus(registry, session_id, evidence=_IPC_EVIDENCE))
+
+
+def _mode_history(hook_input: dict[str, Any]) -> dict[str, Any]:
+    """Every session's live modes (or one session's) and the newest transitions.
+
+    An absent or unreadable transition log is an error, never an empty history.
+    """
+    session_id = hook_input.get(SessionModeIPC.KEY_SESSION_ID)
+    if session_id is not None and (not isinstance(session_id, str) or not session_id.strip()):
+        return {"error": f"'{SessionModeIPC.KEY_SESSION_ID}' must name a session when given"}
+    limit = hook_input.get(SessionModeIPC.KEY_LIMIT, SessionModeIPC.DEFAULT_HISTORY_LIMIT)
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+        return {"error": f"'{SessionModeIPC.KEY_LIMIT}' must be a positive whole number"}
+    try:
+        registry = get_data_layer().session_modes
+        log = registry.transition_log
+        if log is None:
+            return {"error": "the session-modes registry has no transition log"}
+        snapshot = registry.snapshot()
+        transitions = log.recent(limit, session_id=session_id)
+    except (RuntimeError, OSError, TransitionLogError) as error:
+        log_and_continue(
+            logger,
+            error,
+            reason="mode-history could not be answered; the caller gets the error",
+        )
+        kind = (
+            "transition log unreadable"
+            if isinstance(error, TransitionLogError)
+            else "session modes unavailable"
+        )
+        return {"error": f"{kind}: {error}"}
+    sessions = {
+        sid: [_entry(entry) for entry in entries]
+        for sid, entries in snapshot.items()
+        if session_id is None or sid == session_id
+    }
+    return {
+        "result": {
+            SessionModeIPC.KEY_SESSIONS: sessions,
+            SessionModeIPC.KEY_TRANSITIONS: [t.to_record() for t in transitions],
+        }
+    }
 
 
 def _entry(entry: SessionModeEntry) -> dict[str, Any]:

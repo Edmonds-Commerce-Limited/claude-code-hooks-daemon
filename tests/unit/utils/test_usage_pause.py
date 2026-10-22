@@ -359,3 +359,16 @@ class TestSyntheticSessionExemption:
 
 def _raise_permission_error(*_args: Any, **_kwargs: Any) -> str:
     raise PermissionError("denied")
+
+
+class TestParseUsagePause:
+    """Plan 00501 Task 4.1: the status segment parses a record's text it read itself."""
+
+    def test_a_written_record_parses_back(self, tmp_path: Path) -> None:
+        path = usage_pause.write_usage_pause(tmp_path, _pause())
+        assert usage_pause.parse_usage_pause(path.read_text(encoding="utf-8")) == _pause()
+
+    @pytest.mark.parametrize("text", ["{not json", "[]", '{"session_id": "x"}'])
+    def test_malformed_text_is_a_value_error(self, text: str) -> None:
+        with pytest.raises(ValueError, match="usage pause"):
+            usage_pause.parse_usage_pause(text)

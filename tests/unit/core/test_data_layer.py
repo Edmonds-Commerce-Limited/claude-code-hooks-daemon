@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.core.data_layer import (
 from claude_code_hooks_daemon.core.disclosure_tracker import DisclosureTracker
 from claude_code_hooks_daemon.core.handler_history import HandlerHistory
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.session_mode_log import TRANSITION_LOG_FILENAME
 from claude_code_hooks_daemon.core.session_mode_registry import NoticeKind, SessionModeRegistry
 from claude_code_hooks_daemon.core.session_state import SessionState
 from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader
@@ -231,6 +232,19 @@ class TestSessionModesProperty:
         assert registry.policy("sid").is_blocked is True
         assert not marker.exists()
         assert DaemonDataLayer().session_modes.policy("sid").is_blocked is True
+
+    def test_the_registry_logs_transitions_under_the_untracked_dir(self, untracked: Path) -> None:
+        registry = DaemonDataLayer().session_modes
+        log = registry.transition_log
+        assert log is not None
+        assert log.path == untracked / TRANSITION_LOG_FILENAME
+
+    def test_the_legacy_import_is_logged_with_its_evidence(self, untracked: Path) -> None:
+        assert write_marker(untracked / MARKER_FILENAME, "sid") is True
+        log = DaemonDataLayer().session_modes.transition_log
+        assert log is not None
+        [record] = log.recent(5)
+        assert "legacy" in record.evidence
 
     def test_reset_drops_the_registry(self, untracked: Path) -> None:
         dl = DaemonDataLayer()

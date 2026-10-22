@@ -29,6 +29,11 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.core.session_mode_log import (
+    ModeTransition,
+    TransitionAction,
+    TransitionLog,
+)
 from claude_code_hooks_daemon.utils.blockage_marker import read_marker
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.session_modes import (
@@ -82,6 +87,9 @@ _RECORD_FIELDS: Final[frozenset[str]] = frozenset(
 
 _SECONDS_PER_HOUR: Final[int] = 3600
 
+#: The transition log's evidence for a mode whose expiry passed.
+_EXPIRY_EVIDENCE: Final[str] = "its expiry time passed"
+
 
 class NoticeKind(StrEnum):
     """What a one-time statement to the agent reports."""
@@ -128,24 +136,72 @@ class SessionModeRegistry:
         clock: Epoch-seconds source (injectable for tests).
     """
 
-    def __init__(self, state_dir: Path, *, clock: Callable[[], float] = time.time) -> None:
+    def __init__(
+        self,
+        state_dir: Path,
+        *,
+        clock: Callable[[], float] = time.time,
+        transition_log: TransitionLog | None = None,
+    ) -> None:
         self._state_dir = state_dir
         self._clock = clock
+        self._transition_log = transition_log
         self._lock = threading.RLock()
         self._entries: dict[str, _Entries] = {}
         self._notices: dict[str, list[ModeNotice]] = {}
-        self._loaded = False
+        self._first_prompt_claimed: set[str] = set()
+        self._loaded_at: float | None = None
 
     def now(self) -> float:
         """The registry's clock reading, the time its entries are judged against."""
         return self._clock()
 
+    @property
+    def transition_log(self) -> TransitionLog | None:
+        """The log every enter, exit, expiry and restart clear is appended to, if any."""
+        return self._transition_log
+
+    @property
+    def loaded_at(self) -> float:
+        """When :meth:`load` ran: the start of this daemon process's view of the sessions.
+
+        Raises:
+            RuntimeError: ``load`` has not run.
+        """
+        if self._loaded_at is None:
+            raise RuntimeError("SessionModeRegistry.loaded_at is unknown until load() runs")
+        return self._loaded_at
+
+    def claim_first_prompt(self, session_id: str) -> bool:
+        """True exactly once per session in this registry: its first prompt since load."""
+        with self._lock:
+            if session_id in self._first_prompt_claimed:
+                return False
+            self._first_prompt_claimed.add(session_id)
+            return True
+
+    def snapshot(self) -> dict[str, tuple[SessionModeEntry, ...]]:
+        """Every session holding a live mode, with its entries in precedence order."""
+        with self._lock:
+            sessions = list(self._entries)
+        snapshot: dict[str, tuple[SessionModeEntry, ...]] = {}
+        for session_id in sessions:
+            entries = self.active(session_id)
+            if entries:
+                snapshot[session_id] = entries
+        return snapshot
+
     def path_for(self, session_id: str) -> Path:
         """The file holding ``session_id``'s entries."""
         return self._state_dir / f"{session_stem(session_id)}{SESSION_MODES_SUFFIX}"
 
-    def enter(self, entry: SessionModeEntry) -> None:
+    def enter(self, entry: SessionModeEntry, *, evidence: str | None = None) -> None:
         """Store ``entry``, replacing any entry with the same label for its session.
+
+        Args:
+            entry: The mode to enter.
+            evidence: What triggered it, for the transition log; without it
+                the log names the entry's source.
 
         Raises:
             ValueError: the mode is not one this registry stores.
@@ -157,9 +213,22 @@ class SessionModeRegistry:
             live, expired = self._partition(entry.session_id)
             live[entry.label] = entry
             self._commit(entry.session_id, live, expired)
+            self._record(
+                entry,
+                TransitionAction.ENTER,
+                evidence or f"entered by the {entry.source}",
+                at=self._clock(),
+            )
 
-    def exit(self, session_id: str, label: ModeLabel) -> SessionModeEntry | None:
+    def exit(
+        self, session_id: str, label: ModeLabel, *, evidence: str | None = None
+    ) -> SessionModeEntry | None:
         """Remove ``label`` from ``session_id``; the removed entry, or None if it was not live.
+
+        Args:
+            session_id: The session.
+            label: The mode to end.
+            evidence: What ended it, for the transition log.
 
         Raises:
             OSError: the write failed; memory is unchanged.
@@ -169,6 +238,13 @@ class SessionModeRegistry:
             removed = live.pop(label, None)
             if removed is not None or expired:
                 self._commit(session_id, live, expired)
+            if removed is not None:
+                self._record(
+                    removed,
+                    TransitionAction.EXIT,
+                    evidence or "exited (no evidence given)",
+                    at=self._clock(),
+                )
             return removed
 
     def active(self, session_id: str) -> tuple[SessionModeEntry, ...]:
@@ -230,9 +306,9 @@ class SessionModeRegistry:
             OSError: a file could not be read or rewritten.
         """
         with self._lock:
-            if self._loaded:
+            if self._loaded_at is not None:
                 raise RuntimeError("SessionModeRegistry.load() runs once per registry")
-            self._loaded = True
+            self._loaded_at = self._clock()
             if not self._state_dir.is_dir():
                 return
             for path in sorted(self._state_dir.glob(f"*{SESSION_MODES_SUFFIX}")):
@@ -269,6 +345,16 @@ class SessionModeRegistry:
         if len(kept) != len(entries):
             self._write(session_id, kept)
         self._set(session_id, kept, notices)
+        for notice in notices:
+            if notice.kind is NoticeKind.CLEARED_BY_RESTART:
+                self._record(
+                    notice.entry,
+                    TransitionAction.RESTART_CLEAR,
+                    "daemon restart (the mode lasts only as long as the daemon)",
+                    at=now,
+                )
+            elif notice.kind is NoticeKind.EXPIRED:
+                self._record(notice.entry, TransitionAction.EXPIRE, _EXPIRY_EVIDENCE, at=now)
 
     def _partition(self, session_id: str) -> tuple[_Entries, list[SessionModeEntry]]:
         """A copy of ``session_id``'s live entries, and the expired ones."""
@@ -294,7 +380,38 @@ class SessionModeRegistry:
     ) -> None:
         """Write ``entries`` through, then adopt them and queue an expiry notice per entry."""
         self._write(session_id, entries)
-        self._set(session_id, entries, [ModeNotice(NoticeKind.EXPIRED, entry) for entry in expired])
+        ended = list(expired)
+        self._set(session_id, entries, [ModeNotice(NoticeKind.EXPIRED, entry) for entry in ended])
+        now = self._clock()
+        for entry in ended:
+            self._record(entry, TransitionAction.EXPIRE, _EXPIRY_EVIDENCE, at=now)
+
+    def _record(
+        self, entry: SessionModeEntry, action: TransitionAction, evidence: str, *, at: float
+    ) -> None:
+        """Append one transition; a failed append is logged at WARNING, never raised.
+
+        The mode change it describes is already committed, so failing it now
+        would leave the caller believing nothing changed.
+        """
+        if self._transition_log is None:
+            return
+        transition = ModeTransition(
+            at=at,
+            session_id=entry.session_id,
+            label=entry.label,
+            action=action,
+            evidence=evidence,
+            detail=entry.detail,
+        )
+        try:
+            self._transition_log.append([transition])
+        except OSError as error:
+            log_and_continue(
+                logger,
+                error,
+                reason=f"the session-mode transition '{action} {entry.label}' could not be logged; the mode change itself stands",
+            )
 
     def _set(self, session_id: str, entries: _Entries, notices: list[ModeNotice]) -> None:
         """Adopt ``entries`` in memory and queue ``notices``."""
@@ -355,7 +472,9 @@ def import_legacy_blockage_marker(registry: SessionModeRegistry, marker_path: Pa
         else:
             entry = declared_blocked_entry(marker.session_id, entered_at=marker.recorded_at)
             if entry.is_live(now):
-                registry.enter(entry)
+                registry.enter(
+                    entry, evidence=f"imported from the legacy awaiting-human marker {marker_path}"
+                )
                 imported = True
             else:
                 logger.info("legacy awaiting-human marker %s has expired; deleting it", marker_path)

@@ -3792,7 +3792,7 @@ class TestHumanBlockedMarker:
     ) -> None:
         registry = pin_session_modes(monkeypatch, tmp_path / "untracked")
 
-        def refuse(entry: object) -> None:
+        def refuse(entry: object, *, evidence: str | None = None) -> None:
             raise OSError("read-only filesystem")
 
         monkeypatch.setattr(registry, "enter", refuse)

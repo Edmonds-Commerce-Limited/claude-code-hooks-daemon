@@ -1031,7 +1031,9 @@ class AutoContinueStopHandler(StopHandlerBase):
             return False
         entry = declared_blocked_entry(session_id, entered_at=time.time())
         try:
-            get_data_layer().session_modes.enter(entry)
+            get_data_layer().session_modes.enter(
+                entry, evidence="the agent's stop declared it is blocked on the human"
+            )
         except (RuntimeError, OSError) as e:
             log_and_continue(
                 logger,

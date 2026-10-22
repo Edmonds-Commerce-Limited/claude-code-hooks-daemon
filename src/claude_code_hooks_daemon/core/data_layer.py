@@ -23,6 +23,7 @@ import time
 from claude_code_hooks_daemon.core.disclosure_tracker import DisclosureTracker
 from claude_code_hooks_daemon.core.handler_history import HandlerHistory
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.session_mode_log import TRANSITION_LOG_FILENAME, TransitionLog
 from claude_code_hooks_daemon.core.session_mode_registry import (
     SessionModeRegistry,
     import_legacy_blockage_marker,
@@ -129,7 +130,10 @@ class DaemonDataLayer:
         with self._session_modes_lock:
             if self._session_modes is None:
                 untracked = ProjectContext.daemon_untracked_dir()
-                registry = SessionModeRegistry(untracked / SIGNAL_SUBDIR)
+                registry = SessionModeRegistry(
+                    untracked / SIGNAL_SUBDIR,
+                    transition_log=TransitionLog(untracked / TRANSITION_LOG_FILENAME),
+                )
                 registry.load()
                 import_legacy_blockage_marker(registry, untracked / MARKER_FILENAME)
                 self._session_modes = registry
