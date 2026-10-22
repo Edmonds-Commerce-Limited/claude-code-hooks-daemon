@@ -163,9 +163,9 @@ def _pending_mode_news(
         log_and_continue(
             logger,
             error,
-            reason="the session-modes registry could not be used, so the still-over directive goes out without the session's pending mode news",
+            reason="the session-modes registry could not be used, so the still-over directive goes out with a note in place of the session's pending mode news",
         )
-        return None
+        return f"SESSION MODE: the daemon could not read this session's pending mode news ({error})."
 
 
 class UsagePauseGateHandler(InitialThreadExemption, UserPromptSubmitHandlerBase):

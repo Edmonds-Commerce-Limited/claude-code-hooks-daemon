@@ -10,6 +10,7 @@ this one runs both real handlers in one ``HandlerChain``.
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -36,6 +37,7 @@ from claude_code_hooks_daemon.utils.usage_pause_gate import USAGE_RESUME_PROMPT
 _SESSION = "sess-paused"
 _HOST = "runner"
 _TRIGGER = "claude_code_hooks_daemon.handlers.user_prompt_submit.focus_mode_trigger"
+_GATE = "claude_code_hooks_daemon.handlers.user_prompt_submit.usage_pause_gate"
 _REASON = "five_hour window at 91% (ceiling 80%)"
 
 
@@ -124,6 +126,21 @@ class TestARestartedPausedSession:
         _chain(used=91.0).execute(_input(USAGE_RESUME_PROMPT))
         later = _chain(used=10.0).execute(_input(USAGE_RESUME_PROMPT))
         assert _mode_lines(later.result.context) == []
+
+    def test_an_unusable_registry_is_stated_beside_the_directive(
+        self, restarted_while_paused: Mock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with (
+            patch(f"{_GATE}.get_data_layer", side_effect=OSError("disk gone")),
+            caplog.at_level(logging.WARNING),
+        ):
+            result = _gate(time.time(), 91.0).handle(_input(USAGE_RESUME_PROMPT))
+        assert result.decision is Decision.ALLOW
+        assert any("STILL OVER" in line for line in result.context)
+        [line] = _mode_lines(result.context)
+        assert "could not read" in line
+        assert "disk gone" in line
+        assert "disk gone" in caplog.text
 
     def test_a_lift_does_not_claim_the_pause_still_applies(
         self, restarted_while_paused: Mock

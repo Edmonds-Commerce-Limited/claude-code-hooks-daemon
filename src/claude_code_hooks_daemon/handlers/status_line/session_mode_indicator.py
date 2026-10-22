@@ -137,7 +137,8 @@ class SessionModeIndicatorHandler(StatusLineHandlerBase):
         try:
             pause = self._read_pause(session_id, now)
         except OSError as error:
-            pause = _Malformed(f"cannot read it: {error}")
+            logger.warning("session mode segment: usage-pause record cannot be read: %s", error)
+            return AdvisoryResult(context=[f"| {_error(_PAUSE_ERROR)}"])
         if isinstance(pause, _Malformed):
             logger.warning("session mode segment: usage-pause record unreadable: %s", pause.error)
             return AdvisoryResult(context=[f"| {_error(_PAUSE_ERROR)}"])

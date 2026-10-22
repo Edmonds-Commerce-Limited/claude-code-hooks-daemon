@@ -42,7 +42,6 @@ from claude_code_hooks_daemon.core.session_mode_registry import (
     import_legacy_blockage_marker,
 )
 from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, write_marker
-from claude_code_hooks_daemon.utils.usage_pause import MAX_PAUSE_SPAN_SECONDS, PAUSE_GRACE_SECONDS
 from claude_code_hooks_daemon.utils.session_modes import (
     DECLARED_BLOCKED_TTL_SECONDS,
     FOCUS_TTL_SECONDS,
@@ -54,6 +53,7 @@ from claude_code_hooks_daemon.utils.session_modes import (
     SessionModeEntry,
     declared_blocked_entry,
 )
+from claude_code_hooks_daemon.utils.usage_pause import MAX_PAUSE_SPAN_SECONDS, PAUSE_GRACE_SECONDS
 
 SID = "session-a"
 OTHER = "session-b"
