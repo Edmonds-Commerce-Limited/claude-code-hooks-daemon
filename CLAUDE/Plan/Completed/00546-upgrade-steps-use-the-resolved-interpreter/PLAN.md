@@ -1,6 +1,6 @@
 # Plan 00546: upgrade steps use the resolved interpreter
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-21
 **Owner**: dev
 **Priority**: Medium
@@ -57,7 +57,7 @@ the resolved interpreter.
 - [x] ✅ **Task 3.1**: Run the `dbf` skill for the class "a shipped script runs a bare python3/python". The detector
   rule comes first, then the sweep.
   - Q1 to Q3 ruled by the delegated adviser ([OWNER-QUESTIONS.md](OWNER-QUESTIONS.md)); `scripts/debug_info.py` guarded.
-- [ ] **Task 3.2**: Merge to main, then flip to Complete and archive into `Completed/` in one commit (coordinator).
+- [x] ✅ **Task 3.2**: Merge to main, then flip to Complete and archive into `Completed/` in one commit (coordinator).
 
 ## Success Criteria
 
@@ -74,4 +74,5 @@ the resolved interpreter.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/ — see CLAUDE/PlanJournalling.md. -->
 
-- Not yet delivered.
+- Release note 014: `CLAUDE/UPGRADES/UNRELEASED/release-notes/014-upgrade-stale-venv-cleanup-uses-the-resolved-interpreter.md`.
+- Release note 017: `CLAUDE/UPGRADES/UNRELEASED/release-notes/017-install-and-upgrade-scripts-run-the-resolved-interpreter.md`.

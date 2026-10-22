@@ -1,6 +1,6 @@
 # Plan 00529: owner decision on rust helpers from 00495 assessment
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-16
 **Owner**: dev
 **Priority**: Medium
@@ -11,7 +11,7 @@
 ## Overview
 
 Plan 00495 Task 3.2 asked whether particular heavy paths justify a Rust helper (owner ruling A3). It answered from the
-measured numbers in [RUST-HELPERS-ASSESSMENT.md](../Completed/00495-performance-improvement-programme/RUST-HELPERS-ASSESSMENT.md):
+measured numbers in [RUST-HELPERS-ASSESSMENT.md](../00495-performance-improvement-programme/RUST-HELPERS-ASSESSMENT.md):
 no path passes the cost test, one path is heavy for a Python reason, and the one helper that was justified (the transport
 relay) already exists, opt-in. The choice is the owner's, so this plan holds it until they make it, and carries the work
 that follows whichever way they decide.
@@ -50,7 +50,7 @@ a helper. That fix is a Python change tracked as ledger N465 and fixed separatel
 
 ### Phase 2: Act on the decision
 
-- [ ] 🔄 **Task 2**: The relay becomes default-on.
+- [x] ✅ **Task 2**: The relay becomes default-on.
   - [x] Install and upgrade put the binary in place: build with `rustc` and the musl target when present, otherwise the
     digest-verified release asset. Where neither works, the failure is loud and names the fix. Merged `59320d842`:
     - `relay_source: auto`;
@@ -95,8 +95,8 @@ a helper. That fix is a Python change tracked as ledger N465 and fixed separatel
 ## Success Criteria
 
 - [x] The owner's decision on (a) and (b) is recorded in this plan.
-- [ ] The relay is default-on, and a configured-but-missing relay fails loudly with the fix named.
-- [ ] A missing or broken relay binary never changes a verdict and never lets a tool call run unguarded (tested with
+- [x] The relay is default-on, and a configured-but-missing relay fails loudly with the fix named.
+- [x] A missing or broken relay binary never changes a verdict and never lets a tool call run unguarded (tested with
   a corrupt executable); a release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` records it.
 
 ## Delivery & Milestones
@@ -106,3 +106,10 @@ a helper. That fix is a Python change tracked as ledger N465 and fixed separatel
      JOURNAL/00529-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Filed by Plan 00495 Task 3.2.
+- Relay default-on, install and upgrade provisioning: `59320d842`.
+- Status line uses the relay (Plan 00542): `901e59a7a`.
+- Loud report of a missing relay binary: `376612d38`.
+- Task 2c, the fail-open of a broken relay binary closed: release note 019
+  (`CLAUDE/UPGRADES/UNRELEASED/release-notes/019-a-broken-relay-binary-never-runs-a-call-unguarded.md`).
+- CI follow-up fixes (relay exec moved into a function for shellcheck SC2093, `relay_repair` uses
+  `unique_temp_path`): merged in `95aba97b5`.
