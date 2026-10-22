@@ -51,6 +51,7 @@ from claude_code_hooks_daemon.utils.session_modes import (
 )
 from claude_code_hooks_daemon.utils.session_signal_paths import session_stem
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
+from claude_code_hooks_daemon.utils.usage_pause import MAX_PAUSE_SPAN_SECONDS, PAUSE_GRACE_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,11 @@ _RECORD_FIELDS: Final[frozenset[str]] = frozenset(
 )
 
 _SECONDS_PER_HOUR: Final[int] = 3600
+
+#: How long after :meth:`SessionModeRegistry.load` a first-prompt claim can
+#: matter: the claim gates the one check for a usage pause recorded before the
+#: load, and no such record can still be live past its longest span plus grace.
+FIRST_PROMPT_WINDOW_SECONDS: Final[float] = MAX_PAUSE_SPAN_SECONDS + PAUSE_GRACE_SECONDS
 
 #: The transition log's evidence for a mode whose expiry passed.
 _EXPIRY_EVIDENCE: Final[str] = "its expiry time passed"
@@ -173,12 +179,25 @@ class SessionModeRegistry:
         return self._loaded_at
 
     def claim_first_prompt(self, session_id: str) -> bool:
-        """True exactly once per session in this registry: its first prompt since load."""
+        """True exactly once per session: its first prompt since load, within the window.
+
+        Past :data:`FIRST_PROMPT_WINDOW_SECONDS` after load nothing from before
+        the load can still apply, so no session claims and :meth:`reap` drops
+        every claim: the set never outlives the window.
+        """
         with self._lock:
+            if self._first_prompt_window_closed():
+                return False
             if session_id in self._first_prompt_claimed:
                 return False
             self._first_prompt_claimed.add(session_id)
             return True
+
+    def _first_prompt_window_closed(self) -> bool:
+        """Whether the first-prompt window after load has passed (False before load)."""
+        if self._loaded_at is None:
+            return False
+        return self._clock() > self._loaded_at + FIRST_PROMPT_WINDOW_SECONDS
 
     def snapshot(self) -> dict[str, tuple[SessionModeEntry, ...]]:
         """Every session holding a live mode, with its entries in precedence order."""
@@ -278,9 +297,11 @@ class SessionModeRegistry:
         return True
 
     def reap(self) -> int:
-        """Drop every expired entry across sessions; the number dropped."""
+        """Drop every expired entry (and spent first-prompt claims); the entries dropped."""
         dropped = 0
         with self._lock:
+            if self._first_prompt_window_closed():
+                self._first_prompt_claimed.clear()
             for session_id in list(self._entries):
                 live, expired = self._partition(session_id)
                 if expired:

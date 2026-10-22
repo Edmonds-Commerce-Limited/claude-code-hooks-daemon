@@ -33,6 +33,7 @@ from claude_code_hooks_daemon.core.session_mode_registry import (
     FIELD_SESSION_ID,
     FIELD_SOURCE,
     FIELD_VERSION,
+    FIRST_PROMPT_WINDOW_SECONDS,
     SCHEMA_VERSION,
     SESSION_MODES_SUFFIX,
     ModeNotice,
@@ -41,6 +42,7 @@ from claude_code_hooks_daemon.core.session_mode_registry import (
     import_legacy_blockage_marker,
 )
 from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, write_marker
+from claude_code_hooks_daemon.utils.usage_pause import MAX_PAUSE_SPAN_SECONDS, PAUSE_GRACE_SECONDS
 from claude_code_hooks_daemon.utils.session_modes import (
     DECLARED_BLOCKED_TTL_SECONDS,
     FOCUS_TTL_SECONDS,
@@ -813,3 +815,24 @@ class TestFirstPromptClaim:
         assert registry.claim_first_prompt(SID) is True
         assert registry.claim_first_prompt(SID) is False
         assert registry.claim_first_prompt(OTHER) is True
+
+    def test_a_claim_inside_the_window_is_kept_by_reap(
+        self, registry: SessionModeRegistry, clock: FakeClock
+    ) -> None:
+        registry.claim_first_prompt(SID)
+        clock.now = T0 + FIRST_PROMPT_WINDOW_SECONDS
+        registry.reap()
+        assert registry.claim_first_prompt(SID) is False
+
+    def test_past_the_window_no_session_claims_and_reap_drops_every_claim(
+        self, registry: SessionModeRegistry, clock: FakeClock
+    ) -> None:
+        """Nothing from before the load can still be live, so the set is pruned to empty."""
+        registry.claim_first_prompt(SID)
+        clock.now = T0 + FIRST_PROMPT_WINDOW_SECONDS + 1
+        assert registry.claim_first_prompt(OTHER) is False
+        registry.reap()
+        assert registry._first_prompt_claimed == set()
+
+    def test_the_window_covers_the_longest_pause_a_record_can_hold(self) -> None:
+        assert FIRST_PROMPT_WINDOW_SECONDS == MAX_PAUSE_SPAN_SECONDS + PAUSE_GRACE_SECONDS
