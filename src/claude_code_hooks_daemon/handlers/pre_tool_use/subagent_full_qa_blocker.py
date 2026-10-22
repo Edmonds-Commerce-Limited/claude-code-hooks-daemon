@@ -3347,13 +3347,20 @@ class _TreeIndex(NamedTuple):
     """One parsed tree swept once: its nodes in :func:`ast.walk`'s order, and each one's children.
 
     Marker leaves (:data:`_MARKER_NODES`) are left out; every other node is
-    in both. Both are shared with every reader, which only reads them. Nodes
-    are keyed by themselves (an AST node hashes by identity), so the index
-    holds them alive and a key never stands for another node.
+    in both. ``nodes`` is shared with every reader, which only reads it.
+    Nodes are keyed by themselves (an AST node hashes by identity), so the
+    index holds them alive and a key never stands for another node.
+
+    A node's children sit side by side in ``nodes`` (the sweep appends them
+    together), so each is held as the span ``nodes[first[n]:end[n]]``: whole
+    numbers, which the garbage collector does not track. A list per node made
+    the collector run a full collection of the host process's heap inside
+    nearly every large judgement (N526).
     """
 
     nodes: list[ast.AST]
-    children: dict[ast.AST, list[ast.AST]]
+    first: dict[ast.AST, int]
+    end: dict[ast.AST, int]
 
 
 #: The indexes of the judgement in progress, by the tree's id, set per call
@@ -3373,17 +3380,27 @@ def _tree_index(tree: ast.AST) -> _TreeIndex:
     if held is not None and held[0] is tree:
         return held[1]
     nodes: list[ast.AST] = [tree]
-    children: dict[ast.AST, list[ast.AST]] = {}
+    first: dict[ast.AST, int] = {}
+    end: dict[ast.AST, int] = {}
     index = 0
+    # ast.iter_child_nodes, inlined: its two generator layers per node were most of this sweep.
     while index < len(nodes):
         node = nodes[index]
-        below = [
-            child for child in ast.iter_child_nodes(node) if not isinstance(child, _MARKER_NODES)
-        ]
-        children[node] = below
-        nodes.extend(below)
+        first[node] = len(nodes)
+        for field in node._fields:
+            value = getattr(node, field, None)
+            if isinstance(value, ast.AST):
+                if not isinstance(value, _MARKER_NODES):
+                    nodes.append(value)
+            elif isinstance(value, list):
+                nodes.extend(
+                    item
+                    for item in value
+                    if isinstance(item, ast.AST) and not isinstance(item, _MARKER_NODES)
+                )
+        end[node] = len(nodes)
         index += 1
-    found = _TreeIndex(nodes, children)
+    found = _TreeIndex(nodes, first, end)
     if indexes is not None:
         indexes[id(tree)] = (tree, found)
     return found
@@ -3395,8 +3412,13 @@ def _walk(tree: ast.AST) -> list[ast.AST]:
 
 
 def _child_lister(tree: ast.AST) -> Callable[[ast.AST], list[ast.AST]]:
-    """The children of each node under ``tree``; a node from elsewhere raises KeyError."""
-    return _tree_index(tree).children.__getitem__
+    """The children of each node under ``tree``, a fresh list; a node from elsewhere raises KeyError."""
+    nodes, first, end = _tree_index(tree)
+
+    def children(node: ast.AST) -> list[ast.AST]:
+        return nodes[first[node] : end[node]]
+
+    return children
 
 
 def _constant_names(tree: ast.Module) -> dict[str, list[str]]:
@@ -3839,7 +3861,7 @@ def _spend(words: int) -> bool:
     return _charge("." * words)
 
 
-@dataclass
+@dataclass(slots=True)
 class _Reading:
     """One call that reads named lists: which lists, and where in each it reads."""
 
@@ -5033,6 +5055,12 @@ def _operands_run_in_process(
     an ``if`` ran, and where a function defined earlier is called, are not
     modelled (N415): that needs flow analysis beyond this one walk.
     """
+    if not any(
+        isinstance(node, ast.Call) and _runs_in_process(node, modules, members)
+        for node in _walk(tree)
+    ):
+        # Only such a call yields an operand; the tracking walk below is for its file names.
+        return []
     opened: dict[str, ast.expr] = {}
     texts: dict[str, ast.expr] = {}
     loops: dict[str, ast.expr] = {}
@@ -5077,10 +5105,10 @@ def _operands_run_in_process(
                 texts.pop(node.id, None)
             if id(node) not in loop_targets:
                 loops.pop(node.id, None)
-        elif isinstance(node, ast.Call) and node.args:
+        elif isinstance(node, ast.Call) and _runs_in_process(node, modules, members):
             if _callee_name(node) == _EXEC_BUILTIN and isinstance(node.func, ast.Name):
                 operands.extend(_alternatives(_file_read_by(node.args[0], opened, texts), loops))
-            elif _is_run_path(node, modules, members):
+            else:
                 operands.extend(_alternatives(node.args[0], loops))
         if isinstance(node, _SCOPES):
             shadowed.append([])
@@ -5138,6 +5166,15 @@ def _put_file_name_back(names: dict[str, ast.expr], name: str, value: ast.expr |
         names.pop(name, None)
     else:
         names[name] = value
+
+
+def _runs_in_process(call: ast.Call, modules: set[str], members: Mapping[str, str]) -> bool:
+    """Whether the call is ``<exec>(x, ...)`` by the builtin's name, or ``runpy.run_path(p, ...)``."""
+    if not call.args:
+        return False
+    if isinstance(call.func, ast.Name) and call.func.id == _EXEC_BUILTIN:
+        return True
+    return _is_run_path(call, modules, members)
 
 
 def _is_run_path(call: ast.Call, modules: set[str], members: Mapping[str, str]) -> bool:
