@@ -1,7 +1,7 @@
 # Mapping: daemon hook events → opencode counterparts (Plan 00549 Task 2.1)
 
 Research only. Modelled on Plan 00292's
-[`MAPPING-events.md`](../Completed/00292-codex-cli-dual-host-research/MAPPING-events.md), which asked the same question
+[`MAPPING-events.md`](../00292-codex-cli-dual-host-research/MAPPING-events.md), which asked the same question
 of Codex CLI.
 
 **Inputs.** The four Phase 1 documents in this folder (`RESEARCH-opencode-extension-surface.md`, called "SURFACE"

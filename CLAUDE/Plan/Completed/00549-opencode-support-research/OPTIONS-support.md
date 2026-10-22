@@ -16,7 +16,7 @@ the product version).
 - SYNC: `RESEARCH-multi-agent-config-sync.md`
 - MAP: `MAPPING-events.md`
 - PLANWF: `ANALYSIS-plan-workflow.md`
-- 00292: `../Completed/00292-codex-cli-dual-host-research/OPTIONS-abstraction.md` (the Codex precedent)
+- 00292: `../00292-codex-cli-dual-host-research/OPTIONS-abstraction.md` (the Codex precedent)
 - PERF: `CLAUDE/Performance/README.md` (this repository's measured hook latencies)
 
 **Owner constraints this paper is written against** (from the Task 2.3 brief):

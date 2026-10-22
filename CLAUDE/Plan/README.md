@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00549: opencode support research](00549-opencode-support-research/PLAN.md) - 🔄 In Progress (#136; research only: opencode's plugin/event surface, plan-workflow enforcement, dual-tool repos with Claude Code, same/different comparison; foundation for a new epic)
-
 - [00548: python entry point shebang detector](00548-python-entry-point-shebang-detector/PLAN.md) - Not Started (follow-up to 00546 Q2: a detector for client-run Python entry points that do 3.11-only work before any floor guard; probe results recorded as a known gap)
 
 - [00546: upgrade steps use the resolved interpreter](00546-upgrade-steps-use-the-resolved-interpreter/PLAN.md) - In Progress (#130: the stale-venv cleanup runs a bare `python3`, crashes on 3.9 and the upgrade still reports success; use the resolved interpreter, guard the entry points, DBF the class)
@@ -213,6 +211,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00549: opencode support research](Completed/00549-opencode-support-research/PLAN.md) - Complete, research only (#136: opencode V2 has in-process TS plugins, not command hooks, with `tool.execute.before` the only blocking hook and no stop veto; Codex is the easier second host; Claude Code's `AGENTS.md` is a fallback, workable AGENTS-only under an opt-in multi-harness mode; `FINDINGS.md` holds the answers and the epic proposal; open owner question M5 on naming, non-blocking)
+
 - [00547: ansible lint runs under the governing config](Completed/00547-ansible-lint-runs-under-the-governing-config/PLAN.md) - Complete at merge `acf6bbcc3` (green CI run 39741211708) + the archiving commit (#128: `layout.ansible_configs` declares a play's governing `ansible.cfg`, applied in `module_context` for both lint gates with `ANSIBLE_CONFIG` set; both gates now share the no-root working directory; a failure with no config in effect still denies and names the option; release note 018)
 
 - [00545: spend meter agents only segment](Completed/00545-spend-meter-agents-only-segment/PLAN.md) - Complete at merge `3503b65ad` (green CI on `9f7ad510e`) + the archiving commit (#133, a coordinator ruling the owner delegated: the spend segment shows only while sub-agents run, as count, families and largest context; the cumulative total leaves the bar; start-up transcripts are no longer unmeasured and real failures show red only when non-zero; release note 012)
@@ -271,8 +271,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00504: remote docs refresh keeps recorded fidelity](Completed/00504-remote-docs-refresh-keeps-recorded-fidelity/PLAN.md) - Complete at merge `78f03e21e` + the archiving commit (#73: `remote-docs refresh` re-fetches each document in the fidelity its provenance records, so verbatim stays verbatim; `--verbatim` still forces verbatim for every target; release note 026 in UNRELEASED)
 
-- [00503: remove upgrade owner approval](Completed/00503-remove-upgrade-owner-approval/PLAN.md) - Complete at merge `6976bf009` + the archiving commit (owner request, #112: the exit-4 owner approval, `approve-upgrade`, the approval markers and `upgrade_approval_guard` removed; breaking items lead the exit-3 reading, large jumps get phasing advice, and an old config naming the guard still validates; release note 022 in UNRELEASED)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -326,9 +324,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 549 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 464 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 465 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 62 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 61 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

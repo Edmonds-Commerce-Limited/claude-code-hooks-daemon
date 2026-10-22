@@ -1,6 +1,6 @@
 # Plan 00549: opencode support research
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-22
 **Owner**: dev
 **Priority**: Medium
@@ -90,13 +90,13 @@ and refreshed rather than re-derived. Plan 00169's prior-art survey touched open
 
 ### Phase 4: Owner follow-ups
 
-- [ ] ⬜ **Task 4.1**: opencode vs Codex CLI comparison, including model and subscription lock-in: can an OpenAI
+- [x] ✅ **Task 4.1**: opencode vs Codex CLI comparison, including model and subscription lock-in: can an OpenAI
   (ChatGPT) subscription drive opencode, and can Codex use other providers? → `RESEARCH-opencode-vs-codex.md`.
-- [ ] ⬜ **Task 4.2**: The owner's layout: `AGENTS.md` ONLY, with no `CLAUDE.md` anywhere, so Claude Code takes its
+- [x] ✅ **Task 4.2**: The owner's layout: `AGENTS.md` ONLY, with no `CLAUDE.md` anywhere, so Claude Code takes its
   `AGENTS.md` fallback. Establish exactly what is lost against the shim layout, using the Task 1.5 probes. Recast the
   enforcement as an explicit opt-in "multi-harness" mode: projects that do not opt in see no change; projects that do
   get the layout checks → `ANALYSIS-multi-harness-mode.md`.
-- [ ] ⬜ **Task 4.3**: Update `FINDINGS.md` (answers, decisions and the epic's plan 2) and comment the delta on #136.
+- [x] ✅ **Task 4.3**: Update `FINDINGS.md` (answers, decisions and the epic's plan 2) and comment the delta on #136.
 
 ## Success Criteria
 
@@ -112,4 +112,7 @@ and refreshed rather than re-derived. Plan 00169's prior-art survey touched open
 - Phase 2: `MAPPING-events.md`, `ANALYSIS-plan-workflow.md`, `OPTIONS-support.md`.
 - Phase 3: `FINDINGS.md`. Fact-checks in `subagent-reports/` (research: 1 minor refuted and fixed; findings: 8
   refuted and fixed). Delegated rulings: all CLEAR except M5 (naming), non-blocking, posted on #136.
-- The epic proposal (plans 0-7) is in `FINDINGS.md` §5. No epic plans are filed yet: research only, per the owner.
+- Phase 4 (owner follow-ups): `RESEARCH-opencode-vs-codex.md`, `ANALYSIS-multi-harness-mode.md`, `FINDINGS.md`
+  updated; fact-check 22/26 verified, 2 citation lines fixed; delta posted on #136.
+- The epic proposal is in `FINDINGS.md` §5 (plan 2 recast as the opt-in multi-harness mode; a Codex adapter added).
+  No epic plans are filed yet: research only, per the owner.

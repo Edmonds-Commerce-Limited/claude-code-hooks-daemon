@@ -4,9 +4,9 @@ Plan 00549, Task 1.4. Research only. Read from this repository at `main` commit 
 below is relative to `/workspace`; `src/` means `src/claude_code_hooks_daemon/`. Line numbers are from that commit.
 
 Starting material: Plan 00292's
-[`RESEARCH-daemon-couplings.md`](../Completed/00292-codex-cli-dual-host-research/RESEARCH-daemon-couplings.md) (ten
+[`RESEARCH-daemon-couplings.md`](../00292-codex-cli-dual-host-research/RESEARCH-daemon-couplings.md) (ten
 couplings, ranked easy/medium/hard/fundamental) and its
-[`OPTIONS-abstraction.md`](../Completed/00292-codex-cli-dual-host-research/OPTIONS-abstraction.md) (recommendation:
+[`OPTIONS-abstraction.md`](../00292-codex-cli-dual-host-research/OPTIONS-abstraction.md) (recommendation:
 build toward a host-adapter layer at the front controller, Option A, with a verdict-degradation mode, Option D, from
 day one; lines 429-466). This document does not research opencode. Other Phase 1 documents cover it.
 
