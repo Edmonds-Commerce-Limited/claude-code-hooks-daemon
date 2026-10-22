@@ -120,10 +120,10 @@ def test_the_goal_clear_writes_the_real_clear_signal(tmp_path: Path) -> None:
 
 
 class TestServerDispatch:
-    def _server(self) -> HooksDaemon:
+    def _server(self, controller: Mock | None = None) -> HooksDaemon:
         server = HooksDaemon.__new__(HooksDaemon)
         server.config = Mock()
-        server.controller = Mock(spec=Controller)
+        server.controller = controller if controller is not None else Mock(spec=Controller)
         server._is_new_controller = True
         return server
 
@@ -136,7 +136,7 @@ class TestServerDispatch:
         assert response["result"][SessionModeIPC.KEY_BADGE] == "focus"
 
     def test_the_daemon_mode_actions_are_unchanged(self) -> None:
-        server = self._server()
-        server.controller.get_mode.return_value = {ModeConstant.KEY_MODE: "default"}
-        response = server._handle_system_request({"action": ModeConstant.ACTION_GET_MODE}, None)
+        controller = Mock(spec=Controller)
+        controller.get_mode.return_value = {ModeConstant.KEY_MODE: "default"}
+        response = self._server(controller)._handle_system_request({"action": ModeConstant.ACTION_GET_MODE}, None)
         assert response["result"][ModeConstant.KEY_MODE] == "default"
