@@ -1267,6 +1267,10 @@ handlers:
       enabled: true  # Never denies; never terminal
       priority: 39
 
+    focus_mode_trigger:  # `hooks-daemon focus <task>` / `focus off` at the start of a prompt turns the session's focus mode on or off (Plan 00501)
+      enabled: true  # Never denies; never terminal
+      priority: 41
+
     critical_thinking_advisory:  # Periodic advisory encouraging critical evaluation
       enabled: true
       priority: 55

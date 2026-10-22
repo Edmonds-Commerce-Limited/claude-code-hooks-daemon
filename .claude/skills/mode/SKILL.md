@@ -1,7 +1,7 @@
 ---
 name: mode
-description: Get or set daemon operating mode - switch between default and unattended (blocks Stop events)
-argument-hint: "[get|unattended|default] [message]"
+description: Get or set daemon operating mode - switch between default and unattended (blocks Stop events) - and turn this session's focus mode on or off
+argument-hint: "[get|unattended|default|focus] [message|task|off]"
 ---
 
 # /mode - Daemon Mode Management
@@ -36,7 +36,18 @@ View or change the daemon's operating mode. Supports `default` (normal operation
 
 # Switch back to default mode
 /mode default
+
+# Focus THIS session on one task (session mode; see focus_mode_trigger)
+/mode focus <task>
+
+# End focus (aliases: done, end, disable)
+/mode focus off
 ```
+
+`/mode focus` is the same as typing `hooks-daemon focus <task>` at the start of a prompt: it
+changes only the current session, not the daemon-wide mode. It runs
+`hooks-daemon session-mode focus <task>` / `session-mode focus off`; `/mode get` also prints
+`session-mode get`.
 
 ## Modes
 
@@ -93,6 +104,14 @@ The skill communicates with the daemon via Unix socket system requests:
 
 ```json
 {"event": "_system", "hook_input": {"action": "set_mode", "mode": "unattended", "custom_message": "optional"}}
+```
+
+**Session modes (one session):**
+
+```json
+{"event": "_system", "hook_input": {"action": "get_session_modes", "session_id": "<id>"}}
+{"event": "_system", "hook_input": {"action": "enter_focus", "session_id": "<id>", "task": "<task>"}}
+{"event": "_system", "hook_input": {"action": "exit_focus", "session_id": "<id>"}}
 ```
 
 ## Output

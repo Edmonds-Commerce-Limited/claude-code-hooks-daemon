@@ -173,6 +173,10 @@ class Priority:
     QUOTA_RESUME_RECORDER = 50
     LIMIT_REBRIEF = 39
 
+    # Plan 00501 Task 3.1: the focus command. After usage_pause_gate (9), whose
+    # terminal deny holds a paused session's prompt; never terminal itself.
+    FOCUS_MODE_TRIGGER = 41
+
     # Plan 00419 Task 1.7: the last free slot BELOW AUTO_CONTINUE_STOP's 10 in
     # this project's config, for the same shadowing reason as the pair above.
     # 9 rather than 6: this handler never denies, so it has no claim to run

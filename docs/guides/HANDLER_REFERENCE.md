@@ -4771,6 +4771,31 @@ handlers:
 
 ---
 
+#### focus_mode_trigger
+
+| Property       | Value                |
+| -------------- | -------------------- |
+| **Config key** | `focus_mode_trigger` |
+| **Priority**   | 41                   |
+| **Type**       | Advisory             |
+| **Event**      | UserPromptSubmit     |
+
+**Description:** The focus command (Plan 00501 Task 3.1). A genuine human prompt that STARTS with `hooks-daemon focus <task>` (any case; the speech-to-text spellings `hooks daemon` and `hooks demon` also work) puts that session, and only that session, into the `focus` session mode; `hooks-daemon focus off` (or `done`, `end`, `disable`) ends it. Each states one context line, and the prompt still reaches the model with its task. A line the ccy supervisor typed, a cron tick or a notification never toggles focus.
+
+While focused, every `drives_autonomy` handler is skipped for the session (so `goal_injection` writes no `.goal-intent`), declared `persistent_crons` ticks are dropped, the failsafe tick is delivered with the line "focus mode: the active task is <task>; other plans are out of scope" (`failsafe_cron_blockage_suppressor`), and `auto_continue_stop` gives a one-line focus reminder instead of the goal-ledger challenge. Entering focus clears an existing goal once: the goal-clear signal is written, so the ccy supervisor types `/goal clear` at its next idle; without the supervisor, a human must type it. Focus lasts 12 hours, renewed by each genuine human prompt, and its expiry is stated once at the next prompt.
+
+The same operations are available as `/mode focus <task>`, `/mode focus off`, `hooks-daemon session-mode get|focus <task>|focus off` and the `get_session_modes`, `enter_focus` and `exit_focus` IPC actions. Never denies, never gated by autonomy, never terminal. A registry failure is logged at WARNING and, on a command, stated to the agent. No options.
+
+```yaml
+handlers:
+  user_prompt_submit:
+    focus_mode_trigger:
+      enabled: true
+      priority: 41
+```
+
+---
+
 #### standing_authorisations
 
 | Property       | Value                     |

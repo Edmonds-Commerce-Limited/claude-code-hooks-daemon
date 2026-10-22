@@ -90,6 +90,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputF
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.data_layer import get_data_layer
+from claude_code_hooks_daemon.core.focus_mode import failsafe_focus_line
 from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
@@ -159,12 +160,22 @@ _BACKOFF_RULE: Final[Rule] = Rule(
 
 _DECLARED_RULE: Final[Rule] = Rule(
     rule_id=RuleID.DECLARED_CRON_SUPPRESSED,
-    blocked="A delivered persistent_crons tick, while the session is in the awaiting-human mode",
-    why="A declared job's tick against a session blocked only on human input costs a full model turn",
-    fix="Nothing to do -- this is expected. Send a real message to end the mode and resume ticks",
+    blocked=(
+        "A delivered persistent_crons tick, while the session is in the awaiting-human, "
+        "goal-blocked or focus mode"
+    ),
+    why=(
+        "A declared job's tick against a session blocked only on human input, or focused on "
+        "one task, costs a full model turn"
+    ),
+    fix=(
+        "Nothing to do -- this is expected. Send a real message (or `hooks-daemon focus off`) "
+        "to end the mode and resume ticks"
+    ),
     verbose=(
-        "This session is in a blocked session mode (awaiting-human, or "
-        "goal-loop blocked) still within its lifetime, and this tick carries a "
+        "This session is in a focus mode (the human pointed it at one task; "
+        "every declared job is dropped, Plan 00501), or in a blocked session "
+        "mode (awaiting-human, or goal-loop blocked) still within its lifetime, and this tick carries a "
         "declared persistent_crons job's [tick:job:<id>] sentinel, so it was "
         "dropped before reaching the model -- no turn spent (Plan 00388). Only "
         "ticks the daemon supplied the prompt for are recognised; a real user "
@@ -367,6 +378,15 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
         failsafe = tick if tick is not None else DaemonTick(TickKind.FAILSAFE)
         action = policy.tick_action(failsafe, runs_while_blocked=False, work_owed=owed)
 
+        focus_task = policy.focus_task
+        if action is TickAction.DELIVER_NAMING_FOCUS and focus_task is not None:
+            # Ruling 04: a focused session still gets its safety net, told which
+            # task it is on. Never thinned: focus is the human's, not idleness.
+            reset_cadence(cadence_path)
+            return BlockingResult(
+                decision=Decision.ALLOW, context=[failsafe_focus_line(focus_task)]
+            )
+
         if action is TickAction.THIN:
             # Row 2: the session is blocked, but the ledger still holds live
             # work. Suppressing outright would be unsafe and hourly would be
@@ -480,7 +500,10 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             tick.job_id,
             session_id,
         )
-        reason = f"{RuleFormatter().verbose(_DECLARED_RULE)}\n\nDeclared job: {tick.job_id}"
+        reason = (
+            f"{RuleFormatter().verbose(_DECLARED_RULE)}\n\nDeclared job: {tick.job_id}\n"
+            f"Session mode: {policy.explain_clause()}"
+        )
         return BlockingResult(decision=Decision.DENY, reason=reason, rule=_DECLARED_RULE.rule_id)
 
     def _apply_backoff(self, cadence_path: Path, session_id: str) -> BlockingResult:
@@ -534,8 +557,10 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             "model — genuinely zero-token, not just cheaper. A real (non-cron) "
             "user prompt ends the mode; the mode also expires "
             "(24 hours after it was entered) so an extended silence restores "
-            "full hourly coverage automatically. A focus mode alone never "
-            "suppresses a tick. Never terminal: other "
+            "full hourly coverage automatically. A focus mode "
+            "(`hooks-daemon focus <task>`) never drops the failsafe tick: it "
+            "arrives with the line `focus mode: the active task is <task>; "
+            "other plans are out of scope`. Never terminal: other "
             "handlers keyed on the same canonical prompt still run.\n\n"
             "**Several crons in one session** (Plan 00388). Every cron prompt "
             "the daemon hands you starts with a sentinel line — "
@@ -544,7 +569,8 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             "is never mistaken for the owner, so it leaves the mode and the "
             "cadence alone. A declared `persistent_crons` job's tick is also "
             "dropped while the mode is live (`R-DECLARED-CRON-SUPPRESSED`) "
-            "unless the job sets `runs_while_awaiting_human: true`; "
+            "unless the job sets `runs_while_awaiting_human: true`, and every "
+            "declared job's tick is dropped while the session is focused; "
             "the watchdog's is always delivered. A cron prompt you composed "
             "yourself carries no sentinel and still reads as the owner.\n\n"
             "**A session that declares nothing is backed off, not left at "

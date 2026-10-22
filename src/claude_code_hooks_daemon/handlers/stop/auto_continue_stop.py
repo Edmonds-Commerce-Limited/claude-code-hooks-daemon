@@ -45,6 +45,7 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import BlockingResult, Decision, get_data_layer
+from claude_code_hooks_daemon.core.focus_mode import focus_reminder
 from claude_code_hooks_daemon.core.handler_bases import StopHandlerBase
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
 from claude_code_hooks_daemon.core.project_context import ProjectContext
@@ -58,7 +59,7 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     VERDICT_SYNTHETIC_FIELD,
     event_synthetic_source,
 )
-from claude_code_hooks_daemon.utils.autonomy import autonomy_allowed, autonomy_verdict
+from claude_code_hooks_daemon.utils.autonomy import autonomy_verdict
 from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.goal_ledger import (
@@ -959,6 +960,10 @@ class AutoContinueStopHandler(StopHandlerBase):
     def _goal_ledger_challenge(self, hook_input: dict[str, Any]) -> str | None:
         """Return a challenge naming every still-live ledgered goal, or None.
 
+        A focused session gets the one-line focus reminder instead, in every
+        environment (Plan 00501 Task 3.2): the human named one task, so other
+        plans are out of scope and listing them would push against that.
+
         None, without consulting the ledger, where the project's ``autonomy:``
         config turns autonomy off for this session: a challenge on behalf of
         other plans is exactly the push towards unrequested work it exists to
@@ -970,7 +975,11 @@ class AutoContinueStopHandler(StopHandlerBase):
         slot has forgotten. Fail-open: any failure (no project context,
         unreadable ledger) returns None and the default reason stands.
         """
-        if not autonomy_allowed(hook_input):
+        autonomy = autonomy_verdict(hook_input)
+        focus_task = autonomy.session.focus_task
+        if focus_task is not None:
+            return focus_reminder(focus_task)
+        if not autonomy.allowed:
             return None
         try:
             ledger_path = ProjectContext.daemon_untracked_dir() / LEDGER_FILENAME
