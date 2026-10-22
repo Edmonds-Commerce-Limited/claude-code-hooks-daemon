@@ -1,0 +1,145 @@
+name: Full gate trial
+
+# Plan 00476 Tasks 1.1 and 1.2: a TRIAL, not the release gate. It runs each
+# llm_qa.py check as its own job on a runner, so the run shows which checks
+# pass there and how long each takes. It never runs on main.
+on:
+  workflow_dispatch:
+  push:
+    branches: [worktree-476-ci-gate-trial]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: check ${{ matrix.check }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        # Literal copy of llm_qa.ALL_TOOL_NAMES (43 checks, `all` order).
+        check:
+          - magic_values
+          - format
+          - lint
+          - type_check
+          - pyright
+          - security
+          - dependencies
+          - shell_check
+          - error_hiding
+          - shell_audit
+          - skill_refs
+          - github_urls
+          - inline_suppressions
+          - released_changelog
+          - canonical_callers
+          - python_var_guidance
+          - eacces_safe
+          - authored_path_stat
+          - install_mode_marker
+          - signal_targets
+          - skip_list_substring
+          - unreachable_handle_branch
+          - declared_invariant_pairs
+          - fail_open_inventory
+          - dangerous_invocation_corpus
+          - security_downgrade_flags
+          - semgrep
+          - capture_corruption
+          - repo_hygiene
+          - doc_truth
+          - doc_snippets
+          - plan_qa
+          - docs_qa
+          - sensitive_content
+          - git_history
+          - handler_reference
+          - generated_doc_drift
+          - british_english
+          - hook_contract
+          - input_contract
+          - project_handlers
+          - tests
+          - smoke_test
+    env:
+      CHECK: ${{ matrix.check }}
+    steps:
+      # Full history and tags, as the qa job needs them (acceptance conftest
+      # runs git describe on a clone; git_history reads the log).
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The `tests` check runs the suite under every Python in the qa.yml
+      # matrix; 3.11 is listed first so it is the default `python`.
+      - name: Set up Python 3.11
+        if: matrix.check != 'tests'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Set up Python 3.11, 3.12 and 3.13
+        if: matrix.check == 'tests'
+        uses: actions/setup-python@v5
+        with:
+          python-version: |
+            3.11
+            3.12
+            3.13
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install --user uv
+          export PATH="$HOME/.local/bin:$PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          VENV_DIR="$(HOOKS_DAEMON_PYTHON="$(command -v python)" \
+            bash scripts/lib/resolve_venv.sh dir "$PWD" --fallback-target)"
+          UV_PROJECT_ENVIRONMENT="$VENV_DIR" \
+            uv sync --frozen --all-extras --python "$(command -v python)"
+          test "$(bash scripts/lib/resolve_venv.sh python "$PWD")" = "$VENV_DIR/bin/python"
+          echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
+
+      - name: Install shellcheck
+        if: matrix.check == 'shell_check' || matrix.check == 'shell_audit'
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      # Same daemon provisioning as the qa job, for every check: the daemon is
+      # cheap and any check may probe it.
+      - name: Start daemon
+        run: |
+          echo "HOOKS_DAEMON_RELEASE_GATE=1" >> "$GITHUB_ENV"
+          printf 'HOOKS_DAEMON_ROOT_DIR="%s"\n' "$GITHUB_WORKSPACE" \
+            > .claude/hooks-daemon.env
+          ./bin/hooks-daemon restart
+          ./bin/hooks-daemon status
+
+      - name: Build the relay
+        if: matrix.check == 'tests' || matrix.check == 'smoke_test'
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          bash relay/build.sh
+          install -D -m 755 \
+            untracked/relay-build/hooks-relay-x86_64-unknown-linux-musl \
+            untracked/bin/hooks-relay
+
+      - name: Run the check
+        run: |
+          start="$(date +%s)"
+          rc=0
+          ./scripts/qa/llm_qa.py "$CHECK" || rc=$?
+          echo "check=$CHECK exit=$rc seconds=$(( $(date +%s) - start ))"
+          exit "$rc"
+
+      - name: Upload QA output
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-${{ matrix.check }}
+          path: untracked/qa/
+          if-no-files-found: warn
