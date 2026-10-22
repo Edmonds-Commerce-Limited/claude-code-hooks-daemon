@@ -659,6 +659,43 @@ class TestRelayProvisioning:
         assert ensure_relay_binary(project) == RelayProvision(route="build", binary=str(binary))
         assert calls == ["deploy"]
 
+    def test_ensure_relay_binary_replaces_a_binary_that_cannot_run(
+        self, project: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Plan 00529: the fix the warning names must actually repair a corrupt file."""
+        from claude_code_hooks_daemon.install.relay_deploy import RelayDeployResult
+
+        binary = project / ".claude" / "hooks-daemon" / "untracked" / "bin" / "hooks-relay"
+        binary.write_bytes(b"garbage, no shebang\n")
+        binary.chmod(0o755)
+        config_path = _config_path(project)
+        config_path.write_text(
+            config_path.read_text().replace(
+                "timeout_seconds: 30", "timeout_seconds: 30\n    relay_source: build"
+            )
+        )
+        calls: list[str] = []
+
+        def fake_deploy(*_a: object, **_k: object) -> RelayDeployResult:
+            calls.append("deploy")
+            binary.write_text("#!/bin/bash\necho '{}'\n")
+            return RelayDeployResult(True, "build", ("built",))
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.install.transport_toggle.deploy_relay_if_configured",
+            fake_deploy,
+        )
+
+        assert ensure_relay_binary(project) == RelayProvision(route="build", binary=str(binary))
+        assert calls == ["deploy"]
+
+    def test_ensure_relay_binary_null_source_names_the_defect(self, project: Path) -> None:
+        binary = project / ".claude" / "hooks-daemon" / "untracked" / "bin" / "hooks-relay"
+        binary.write_bytes(b"garbage, no shebang\n")
+        provision = ensure_relay_binary(project)
+        assert provision.failure is not None
+        assert "neither an ELF executable nor a #! script" in provision.failure
+
     def test_ensure_relay_binary_reports_route_failure(
         self, project: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

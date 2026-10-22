@@ -73,7 +73,7 @@ class TestRelayBinaryChecker:
         text = "\n".join(result.context)
         assert result.decision == Decision.ALLOW
         assert str(expected) in text
-        assert "missing or not executable" in text
+        assert "missing or cannot run" in text
         assert "fallback transport" in text
         assert "transport on" in text
 

@@ -1,12 +1,12 @@
 """RelayBinaryCheckerHandler - a configured relay whose binary is unusable (Plan 00474 N523).
 
 With ``daemon.transport.relay_enabled: true`` the forwarders hand relay-eligible
-hooks to the Rust relay binary. When that binary is missing or not executable,
-those hooks run on the fallback transport, and only ``transport on`` and the
-status line used to say so. This handler says it at session start, naming the
-path and the command that provisions the binary.
+hooks to the Rust relay binary. When that binary is missing or cannot run
+(``relay_deploy.relay_binary_defect``), those hooks run on the fallback
+transport. This handler says it at session start, naming the path and the
+command that provisions the binary.
 
-Silent when the relay is disabled or the binary is an executable file (Lean
+Silent when the relay is disabled or the binary can run (Lean
 SessionStart, Plan 00128). A config this handler cannot read is reported, not
 treated as "relay disabled": whether the relay works is then unknown, and the
 owner's rule for this repository is no silent fallbacks (Plan 00529).
@@ -32,7 +32,7 @@ from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 
 
 class RelayBinaryCheckerHandler(SessionStartHandlerBase):
-    """Warn when the relay is enabled but its binary is missing or not executable."""
+    """Warn when the relay is enabled but its binary is missing or cannot run."""
 
     def __init__(self) -> None:
         """Initialise as a non-terminal, silent-when-clean advisory."""
@@ -95,12 +95,12 @@ class RelayBinaryCheckerHandler(SessionStartHandlerBase):
                 command='echo "test"',
                 description=(
                     "With daemon.transport.relay_enabled true and the relay binary "
-                    "missing or not executable, session start prints one WARNING "
+                    "missing or unable to run, session start prints one WARNING "
                     "naming the binary path and the fix command (transport on). "
-                    "Silent when the relay is disabled or the binary is executable."
+                    "Silent when the relay is disabled or the binary can run."
                 ),
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"binary is missing or not executable"],
+                expected_message_patterns=[r"binary is missing or cannot run"],
                 safety_notes="Advisory only - never builds or deletes the binary.",
                 test_type=TestType.CONTEXT,
                 recommended_model=RecommendedModel.HAIKU,

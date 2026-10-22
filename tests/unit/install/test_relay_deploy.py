@@ -16,6 +16,10 @@ from claude_code_hooks_daemon.config.models import TransportConfig
 from claude_code_hooks_daemon.install import relay_deploy
 from claude_code_hooks_daemon.install.relay_deploy import (
     RELAY_ASSET_NAME,
+    RELAY_DEFECT_MISSING,
+    RELAY_DEFECT_NOT_A_FILE,
+    RELAY_DEFECT_NOT_EXECUTABLE,
+    RELAY_DEFECT_NOT_RUNNABLE,
     RELAY_PROVISION_FAILED_EXIT_CODE,
     SHA256SUMS_ASSET_NAME,
     RelayDeployResult,
@@ -28,6 +32,7 @@ from claude_code_hooks_daemon.install.relay_deploy import (
     provision_relay_for_install,
     read_deployed_digest,
     read_deployed_route,
+    relay_binary_defect,
     relay_binary_missing_warning,
     resolve_relay_binary_path,
 )
@@ -474,11 +479,70 @@ class TestMissingConfiguredRelayBinary:
         binary.mkdir()
         assert missing_configured_relay_binary(tmp_path, self._config(binary)) == binary
 
-    def test_executable_binary_is_silent(self, tmp_path: Path) -> None:
+    def test_executable_elf_binary_is_silent(self, tmp_path: Path) -> None:
+        binary = tmp_path / "hooks-relay"
+        binary.write_bytes(b"\x7fELF" + b"\x00" * 60)
+        binary.chmod(0o755)
+        assert missing_configured_relay_binary(tmp_path, self._config(binary)) is None
+
+    def test_executable_garbage_is_reported(self, tmp_path: Path) -> None:
+        """An executable file the guard would not run is as unusable as a missing one."""
         binary = tmp_path / "hooks-relay"
         binary.write_bytes(b"x")
         binary.chmod(0o755)
-        assert missing_configured_relay_binary(tmp_path, self._config(binary)) is None
+        assert missing_configured_relay_binary(tmp_path, self._config(binary)) == binary
+
+
+class TestRelayBinaryDefect:
+    """The one check of whether the relay guard will run a binary (Plan 00529).
+
+    It mirrors the generated guard: an executable regular file whose first
+    bytes are ELF magic or ``#!``. Anything else would reach bash's ENOEXEC
+    fallback and run as a shell script.
+    """
+
+    @pytest.mark.parametrize(
+        ("content", "mode", "expected"),
+        [
+            (b"\x7fELF" + b"\x00" * 60, 0o755, None),
+            (b"#!/bin/sh\necho '{}'\n", 0o755, None),
+            (b"echo '{}'\n", 0o755, RELAY_DEFECT_NOT_RUNNABLE),
+            (b"\x7fEL", 0o755, RELAY_DEFECT_NOT_RUNNABLE),
+            (b"#!", 0o755, RELAY_DEFECT_NOT_RUNNABLE),
+            (b"", 0o755, RELAY_DEFECT_NOT_RUNNABLE),
+            (b"\x7fELF" + b"\x00" * 60, 0o644, RELAY_DEFECT_NOT_EXECUTABLE),
+        ],
+        ids=["elf", "shebang", "text", "short", "bare-shebang", "empty", "not-executable"],
+    )
+    def test_file_contents_and_mode(
+        self, tmp_path: Path, content: bytes, mode: int, expected: str | None
+    ) -> None:
+        binary = tmp_path / "hooks-relay"
+        binary.write_bytes(content)
+        binary.chmod(mode)
+        assert relay_binary_defect(binary) == expected
+
+    def test_missing(self, tmp_path: Path) -> None:
+        assert relay_binary_defect(tmp_path / "hooks-relay") == RELAY_DEFECT_MISSING
+
+    def test_directory(self, tmp_path: Path) -> None:
+        binary = tmp_path / "hooks-relay"
+        binary.mkdir()
+        assert relay_binary_defect(binary) == RELAY_DEFECT_NOT_A_FILE
+
+    def test_the_generated_guard_checks_the_same_magic(self, tmp_path: Path) -> None:
+        """The bash guard and this predicate must accept exactly the same files."""
+        from claude_code_hooks_daemon.install.forwarder_generator import (
+            build_relay_guard_block,
+        )
+
+        guard = build_relay_guard_block(
+            "pre-tool-use", TransportConfig(relay_enabled=True), tmp_path, tmp_path
+        )
+        assert "read -r -N 4 _rl_magic" in guard
+        assert "\"$_rl_magic\" == $'\\x7fELF'" in guard
+        assert "\"$_rl_magic\" == '#!'*" in guard
+        assert relay_deploy.RELAY_RUNNABLE_MAGIC == (b"\x7fELF", b"#!")
 
 
 class TestRelayBinaryMissingWarning:
@@ -489,6 +553,11 @@ class TestRelayBinaryMissingWarning:
         assert "fallback" in line
         assert line.endswith("Fix: bin/hooks-daemon transport on")
         assert "\n" not in line
+
+    def test_covers_a_binary_that_exists_but_cannot_run(self, tmp_path: Path) -> None:
+        line = relay_binary_missing_warning(tmp_path / "hooks-relay", "x")
+        assert "missing or cannot run" in line
+        assert "not executable" not in line
 
 
 _MUSL_TARGETS = "x86_64-unknown-linux-musl\n"
@@ -748,7 +817,8 @@ class TestProvisionRelayForInstall:
     def test_enabled_without_source_but_binary_present_is_provisioned(self, tmp_path: Path) -> None:
         binary = tmp_path / "bin" / "hooks-relay"
         binary.parent.mkdir()
-        binary.write_bytes(b"x")
+        # A file the relay guard would run (relay_binary_defect is None).
+        binary.write_bytes(b"\x7fELF" + b"\x00" * 60)
         binary.chmod(0o755)
 
         result = provision_relay_for_install(
