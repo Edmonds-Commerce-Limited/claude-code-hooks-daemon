@@ -453,6 +453,7 @@ class ConfigTemplate:
             "    downgrade_indicator: {enabled: true, priority: 11}  # Warn on a silent model-family downgrade\n"
             "    context_sidecar: {enabled: false, priority: 12}  # Observe-only context sidecar for PTY supervisor (opt-in)\n"
             "    spend_meter: {enabled: true, priority: 17}      # Running subagents and unmeasured gate calls\n"
+            "    session_mode_indicator: {enabled: true, priority: 18}  # This session's session modes\n"
             "    git_branch: {enabled: true, priority: 20}       # Current git branch\n"
             "    startup_cleanup: {enabled: true, priority: 28}  # Stale file cleanup indicator\n"
             "    daemon_stats: {enabled: false, priority: 30}    # Daemon health metrics (opt-in; dev diagnostics)\n"

@@ -405,3 +405,31 @@ class TestDeclaredBlocked:
     def test_policy_is_not_blocked_under_focus_or_nothing(self) -> None:
         assert SessionPolicy.from_entries([]).is_blocked is False
         assert SessionPolicy.from_entries([_focus()]).is_blocked is False
+
+
+class TestDisplayedPolicy:
+    """Plan 00501 Task 4.1: the badge composes registry, usage-paused and unattended."""
+
+    def test_registry_entries_alone(self) -> None:
+        policy = session_modes.displayed_policy(
+            _SID, [_focus()], usage_pause=None, unattended=False, now=_T0
+        )
+        assert policy.labels == (ModeLabel.FOCUS,)
+
+    def test_usage_pause_and_unattended_are_shown_in_precedence_order(self) -> None:
+        policy = session_modes.displayed_policy(
+            _SID,
+            [_focus()],
+            usage_pause=session_modes.UsagePauseView(paused_at=_T0, until=_T0 + 9, reason="5h"),
+            unattended=True,
+            now=_T0 + 1,
+        )
+        assert policy.labels == (ModeLabel.USAGE_PAUSED, ModeLabel.FOCUS, ModeLabel.UNATTENDED)
+        assert policy.badge() == "usage-paused +2"
+        assert policy.entries[0].detail == "5h"
+        assert policy.entries[0].mode is SessionMode.USAGE_PAUSED
+
+    def test_unattended_alone_shows_but_does_not_halt_work(self) -> None:
+        policy = session_modes.displayed_policy(_SID, [], usage_pause=None, unattended=True, now=1.0)
+        assert policy.badge() == "unattended"
+        assert policy.drives_work is True
