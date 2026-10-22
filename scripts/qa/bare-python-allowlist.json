@@ -1,0 +1,4 @@
+{
+  "description": "Genuine bootstrap probes the bare-python-invocation check does not report: code whose whole job is to FIND or VALIDATE an interpreter before a venv exists, so no resolved interpreter can be run yet. `file` is repository-relative; `match` is a substring of the invoking line; `reason` says why the probe carries no hazard. An entry that matches nothing fails the check. Anything that merely could use the resolved interpreter is a defect to fix, not an entry to add.",
+  "entries": []
+}
