@@ -120,7 +120,7 @@ class TestIdentity:
         assert handler.matches(_input(None)) is True
 
     def test_validate_options_is_the_core_option_check(self) -> None:
-        options = {"mode": "act", "cycle_threshold": 0}
+        options = {"mode": "halt", "cycle_threshold": 0}
         assert GoalLoopDetectorHandler.validate_options(options) == option_problems(options)
         assert set(GoalLoopDetectorHandler.validate_options(options)) == {
             "mode",

@@ -48,6 +48,7 @@ from claude_code_hooks_daemon.utils.session_modes import is_genuine_human_prompt
 logger = logging.getLogger(__name__)
 
 _SECONDS_PER_MINUTE: Final[int] = 60
+_SECONDS_PER_HOUR: Final[int] = 3600
 
 #: Similarity is measured on at most this many characters of each stop text,
 #: which bounds its cost on a long stop message.
@@ -336,9 +337,10 @@ def read_new_lines(
 
 
 class DetectorMode(StrEnum):
-    """What the detector does at the threshold: ``observe`` only logs."""
+    """What the detector does at the threshold: ``observe`` only logs, ``act`` enters."""
 
     OBSERVE = "observe"
+    ACT = "act"
 
 
 def _positive_int_problem(key: str, value: object) -> str | None:
@@ -424,6 +426,11 @@ class GoalLoopConfig:
         """The cycle window in seconds."""
         return self.window_minutes * _SECONDS_PER_MINUTE
 
+    @property
+    def blocked_seconds(self) -> float:
+        """How long a goal-loop entry lasts, in seconds."""
+        return self.blocked_hours * _SECONDS_PER_HOUR
+
     def threshold_for(self, cycles: Iterable[Cycle]) -> int:
         """The declared threshold when every cycle is declared, else the plain one."""
         items = list(cycles)
@@ -507,6 +514,16 @@ class CycleRing:
         self._pending = None
         self._fingerprint = None
         return RingReset(cause=cause, dropped=dropped, at=at) if dropped else None
+
+    def restart_count(self) -> None:
+        """Start counting afresh after an entry or a would-enter.
+
+        Empties the cycles and the pending stop but keeps the fingerprint, so a
+        later repository change is still seen. Logs nothing: the enter or
+        would-enter line is the record.
+        """
+        self._cycles.clear()
+        self._pending = None
 
     def feed(self, events: Iterable[LoopEvent]) -> FeedResult:
         """Apply events in order; return the cycles added and any resets."""
