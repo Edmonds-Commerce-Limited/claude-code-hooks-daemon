@@ -172,7 +172,8 @@ All CLEAR; rationale and code citations in
   logging. Similarity is logged but not a fire condition.
 - [ ] ⬜ **Task 6.3**: TDD `act` mode: enter BLOCKED(goal-loop), clear the goal signal, one-time context line, and
   the lever spike 0.3 proves (halt once per entry, logged, or the queued clear); if neither works, document that
-  the only backstop is `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`, which this loop does not reach.
+  the only backstop is Claude Code's built-in cap of 8 consecutive stop-hook continuations (reset by each tool call,
+  raised by `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`), which a loop that makes tool calls between stops does not reach.
 - [ ] ⬜ **Task 6.4**: TDD exits: human prompt, repo change, timer, explicit clear.
 
 ### Phase 7: Docs and acceptance
