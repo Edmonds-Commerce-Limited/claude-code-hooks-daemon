@@ -179,9 +179,15 @@ Report: `subagent-reports/261021-n526-fix-opus.md`.
 
 **Recurrence**: main CI run 39781695414 at `a7adea3eb` failed the same job on Python 3.11, on the `a=a+['x{i}']`
 case at 1.605 s against 1.5, with both fixes on main. It passed at `ac24e09b6`. Whether this is a regression or runner
-variance is under investigation in `worktree-n526-perf-again`; the bound stays.
+variance was investigated in `worktree-n526-perf-again`; the bound stays.
 
-**Status**: 🔄 reopened. Fixed earlier by b7d2275fd (N526c) and a75f800cc (N526a/b); the recurrence is open.
+**Finding (recurrence)**: not a regression. A full garbage collection fell inside the timed window: one judgement
+tripped a gen2 collection over the whole test-process heap. `cba846ee3` makes the tree index allocate untracked int
+spans, skips the in-process operand walk when no such call exists, and has the test collect garbage before starting
+the clock, with the bound still 1.5. Report: `subagent-reports/261022-n526-recurrence-opus.md`. The isolated
+Performance sweeps job passed on main at `95aba97b5` (run 39819035114).
+
+**Status**: ✅ Fixed. b7d2275fd (N526c), a75f800cc (N526a/b), cba846ee3 (recurrence); green on CI at 95aba97b5.
 
 ### N525 — `transport on` builds a missing relay binary and then reports "nothing to do"
 
