@@ -117,12 +117,13 @@ from claude_code_hooks_daemon.utils.goal_ledger import (
     GoalLedger,
     resolve_plan_dir,
 )
-from claude_code_hooks_daemon.utils.session_modes import is_genuine_human_prompt
+from claude_code_hooks_daemon.utils.session_modes import (
+    DECLARED_BLOCKED_TTL_SECONDS,
+    is_genuine_human_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_EXPIRY_HOURS: Final[float] = 24.0
-_SECONDS_PER_HOUR: Final[int] = 3600
 _UNKNOWN_SESSION: Final[str] = "unknown"
 
 _RULE: Final[Rule] = Rule(
@@ -206,9 +207,6 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
                 HandlerTag.PLANNING,
             ],
         )
-        # Config option (hours); overridden by the registry from handler
-        # options via setattr.
-        self._expiry_hours: float = _DEFAULT_EXPIRY_HOURS
         # Injectable wall clock (tests substitute a fake). Not a config option.
         self._clock: Callable[[], float] = time.time
         # Injectable config source (tests substitute a fixed Config).
@@ -325,8 +323,7 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
 
         marker = read_marker(marker_path)
         now = self._clock()
-        expiry_seconds = self._expiry_hours * _SECONDS_PER_HOUR
-        declared = marker_is_valid(marker, session_id, now, expiry_seconds)
+        declared = marker_is_valid(marker, session_id, now, DECLARED_BLOCKED_TTL_SECONDS)
 
         if not is_failsafe_tick and tick is not None:
             # Another daemon cron's tick is never the owner, so it touches
@@ -516,7 +513,7 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             "for the session, blocks the tick before it reaches the model — "
             "genuinely zero-token, not just cheaper. A real (non-cron) user "
             "prompt clears the marker; the marker also expires "
-            "(`expiry_hours`, default 24) so an extended silence restores "
+            "(24 hours after it was recorded) so an extended silence restores "
             "full hourly coverage automatically. Never terminal: other "
             "handlers keyed on the same canonical prompt still run.\n\n"
             "**Several crons in one session** (Plan 00388). Every cron prompt "

@@ -23,7 +23,10 @@ import time
 from claude_code_hooks_daemon.core.disclosure_tracker import DisclosureTracker
 from claude_code_hooks_daemon.core.handler_history import HandlerHistory
 from claude_code_hooks_daemon.core.project_context import ProjectContext
-from claude_code_hooks_daemon.core.session_mode_registry import SessionModeRegistry
+from claude_code_hooks_daemon.core.session_mode_registry import (
+    SessionModeRegistry,
+    import_legacy_blockage_marker,
+)
 from claude_code_hooks_daemon.core.session_state import SessionState
 from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader
 from claude_code_hooks_daemon.core.usage_snapshot import (
@@ -31,6 +34,7 @@ from claude_code_hooks_daemon.core.usage_snapshot import (
     UsageTracker,
     resolve_usage_state_file,
 )
+from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME
 from claude_code_hooks_daemon.utils.session_signal_paths import SIGNAL_SUBDIR
 
 logger = logging.getLogger(__name__)
@@ -124,10 +128,10 @@ class DaemonDataLayer:
         """
         with self._session_modes_lock:
             if self._session_modes is None:
-                registry = SessionModeRegistry(
-                    ProjectContext.daemon_untracked_dir() / SIGNAL_SUBDIR
-                )
+                untracked = ProjectContext.daemon_untracked_dir()
+                registry = SessionModeRegistry(untracked / SIGNAL_SUBDIR)
                 registry.load()
+                import_legacy_blockage_marker(registry, untracked / MARKER_FILENAME)
                 self._session_modes = registry
             return self._session_modes
 

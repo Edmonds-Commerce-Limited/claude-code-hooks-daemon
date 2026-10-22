@@ -173,3 +173,54 @@ Not run yet.
 
 Tasks 2.2 and 2.3, the release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`, PLAN.md ticks for 2.2/2.3,
 targeted QA, and filling in this report's QA section with the QA line, head sha and unmapped files.
+
+## Third agent (Task 2.2 part A): built, not ticked
+
+Built, test-first:
+
+- `tests/conftest.py`: autouse `no_session_modes_registry_outlives_a_test` sets the singleton's `_session_modes`
+  to None for every test.
+- `utils/session_modes.py`: `DECLARED_BLOCKED_TTL_SECONDS` (24 h), `BLOCKED_LABELS`, `SessionPolicy.is_blocked`,
+  `declared_blocked_entry(session_id, *, entered_at)`.
+- `core/session_mode_registry.py`: `SessionModeRegistry.now()` (the registry clock) and
+  `import_legacy_blockage_marker(registry, marker_path)`. A live marker is imported. An expired, future-dated or
+  blank-session marker is logged at INFO. A corrupt one is logged at WARNING. The file is deleted after it is
+  judged. If `enter` raises OSError, the exception propagates and the file stays.
+  `DaemonDataLayer.session_modes` calls the import after `load()`.
+- `auto_continue_stop._maybe_record_human_blocked_marker` now calls `session_modes.enter(declared_blocked_entry(...))`.
+  RuntimeError and OSError are logged at WARNING and return False. It no longer writes the legacy file. Only DECLARED
+  (awaiting-human) is written here, because no stop declares goal-blocked.
+- `_stand_in_block` now uses `autonomy_verdict` (it returns None when the environment is not allowed or focus is on).
+  This step from part B had to come in early: once the stop writes BLOCKED, `autonomy_allowed` went False and the
+  stand-in deny stopped firing (5 stand-in tests went red).
+- Removed the `_expiry_hours`, `_DEFAULT_EXPIRY_HOURS`, `_marker_expiry_hours` and `DEFAULT_MARKER_EXPIRY_HOURS`
+  attributes and constants. Both handlers use `DECLARED_BLOCKED_TTL_SECONDS` for now. `HANDLER_REFERENCE.md` and the
+  idle gate's explainer are updated.
+- These tests now check the registry instead of the legacy marker file: `test_auto_continue_stop.py`,
+  `test_auto_continue_stop_stand_in.py` (3 asserts), `test_awaiting_human_marker_scope.py` (the single-writer check
+  now looks for `declared_blocked_entry` calls), and `tests/integration/test_handlers_do_not_match_prose.py`
+  (`_arms_suppression`).
+
+Red: `untracked/scratch/p2a-red.txt` in the worktree (3 import errors at collection, then 7 failed / 150 passed).
+Green: `untracked/scratch/p2a-green.txt` (999 passed across `tests/unit/handlers/stop/`, `user_prompt_submit/`,
+the session-modes, registry, data-layer and autonomy tests, and the prose integration test). mypy is clean on
+`src/` (757 files) and ruff is clean on the touched files. The commit sha is in the commit that adds this section
+(`git log -1 -- <this file>`).
+
+**Interim state, so merge only after part B**: the stop now writes only the registry, but the suppressor and the
+idle gate still read the legacy marker file. On this branch a declared awaiting-human therefore drops no ticks yet.
+
+Part B must:
+
+1. Suppressor: add the `_policy(session_id)` helper, compute `tick_action`, and send `_note_untagged_prompt` exits
+   through the registry, as pinned above. Migrate `test_failsafe_cron_blockage_suppressor.py` and
+   `test_failsafe_cron_multi_cron_ticks.py` to `pin_session_modes` + `awaiting_human_entry`. The
+   `TestStandInTickDelivered` cases in `test_auto_continue_stop_stand_in.py` still use `write_marker` and also need
+   migrating.
+2. Idle gate `_awaiting_human`: `session_policy(hook_input).is_blocked`, or this stop declares it. Migrate
+   `test_idle_workable_issue_stop_gate.py`.
+3. Add the stand-in tests (b) desktop `containers-only` gives no deny, and (c) focus gives no deny. The code is in
+   place, the tests are not.
+4. Delete the now-unused `write_marker` / `marker_is_valid` callers' imports. Keep `blockage_marker` for `read_marker`
+   (used by the import) and `cron_pause`.
+5. Write the release note (expiry options removed, legacy marker imported once), tick 2.2, and run targeted QA.

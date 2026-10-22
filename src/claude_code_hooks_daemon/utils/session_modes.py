@@ -35,6 +35,10 @@ _SECONDS_PER_HOUR: Final[int] = 3600
 #: prompt (ruling 02).
 FOCUS_TTL_SECONDS: Final[int] = 12 * _SECONDS_PER_HOUR
 
+#: A declared BLOCKED entry (awaiting-human) ends this long after it is
+#: entered, so a forgotten declaration costs at most a day of ticks.
+DECLARED_BLOCKED_TTL_SECONDS: Final[int] = 24 * _SECONDS_PER_HOUR
+
 
 class SessionMode(StrEnum):
     """The closed set of session modes."""
@@ -118,6 +122,11 @@ _EXIT_HINTS: Final[dict[ModeLabel, str]] = {
     ModeLabel.FOCUS: "type `hooks-daemon focus off` to end focus",
 }
 
+#: The BLOCKED family's labels: a session holding either is blocked.
+BLOCKED_LABELS: Final[frozenset[ModeLabel]] = frozenset(
+    {ModeLabel.AWAITING_HUMAN, ModeLabel.GOAL_BLOCKED}
+)
+
 #: The labels that halt work outright, beating the unattended stop-block.
 _HALTS_STOP_BLOCK: Final[frozenset[ModeLabel]] = frozenset(
     {ModeLabel.USAGE_PAUSED, ModeLabel.GOAL_BLOCKED, ModeLabel.AWAITING_HUMAN}
@@ -191,6 +200,26 @@ class SessionModeEntry:
         if ttl is None:
             raise ValueError(f"a {self.label} mode is not renewed by a prompt")
         return replace(self, expires_at=now + ttl)
+
+
+def declared_blocked_entry(session_id: str, *, entered_at: float) -> SessionModeEntry:
+    """The awaiting-human entry an agent's own stop declares, expiring a day later.
+
+    The stop writer and the legacy-marker import both build the entry here, so
+    the two can never disagree on its source, lifetime or expiry.
+
+    Raises:
+        ValueError: ``session_id`` is blank.
+    """
+    return SessionModeEntry(
+        mode=SessionMode.BLOCKED,
+        session_id=session_id,
+        entered_at=entered_at,
+        expires_at=entered_at + DECLARED_BLOCKED_TTL_SECONDS,
+        source=ModeSource.AGENT,
+        reason=BlockReason.DECLARED,
+        lifetime=Lifetime.SESSION,
+    )
 
 
 def _clock_text(epoch: float) -> str:
@@ -283,6 +312,11 @@ class SessionPolicy:
     def unattended_block_applies(self) -> bool:
         """Whether the daemon ``unattended`` stop-block may still apply (halting beats driving)."""
         return not any(label in _HALTS_STOP_BLOCK for label in self.labels)
+
+    @property
+    def is_blocked(self) -> bool:
+        """Whether a BLOCKED-family mode (awaiting-human or goal-blocked) is active."""
+        return any(label in BLOCKED_LABELS for label in self.labels)
 
     @property
     def focus_task(self) -> str | None:

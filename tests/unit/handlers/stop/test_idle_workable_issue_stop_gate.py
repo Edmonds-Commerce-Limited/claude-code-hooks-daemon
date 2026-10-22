@@ -177,6 +177,10 @@ class TestItDeniesAnIdleStopWithWorkableIssues:
         assert handler.handler_id is HandlerID.IDLE_WORKABLE_ISSUE_STOP_GATE
         assert handler.get_default_enabled() is True
 
+    def test_marker_expiry_is_not_an_option(self) -> None:
+        """Expiry lives in the registry entry now (Task 2.2), so the option is gone."""
+        assert not hasattr(IdleWorkableIssueStopGateHandler(), "_marker_expiry_hours")
+
 
 class TestItStandsAside:
     def test_when_nothing_is_declared(self, state: Path) -> None:

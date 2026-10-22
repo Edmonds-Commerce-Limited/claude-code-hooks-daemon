@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.session_mode_registry import NoticeKind, SessionModeRegistry
 from claude_code_hooks_daemon.core.session_state import SessionState
 from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader
+from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, write_marker
 from claude_code_hooks_daemon.utils.session_modes import (
     ModeSource,
     SessionMode,
@@ -222,6 +223,14 @@ class TestSessionModesProperty:
         dl = DaemonDataLayer()
         with pytest.raises(RuntimeError, match="not initialized"):
             _ = dl.session_modes
+
+    def test_imports_the_legacy_marker_once(self, untracked: Path) -> None:
+        marker = untracked / MARKER_FILENAME
+        assert write_marker(marker, "sid") is True
+        registry = DaemonDataLayer().session_modes
+        assert registry.policy("sid").is_blocked is True
+        assert not marker.exists()
+        assert DaemonDataLayer().session_modes.policy("sid").is_blocked is True
 
     def test_reset_drops_the_registry(self, untracked: Path) -> None:
         dl = DaemonDataLayer()

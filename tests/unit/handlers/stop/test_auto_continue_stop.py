@@ -12,10 +12,15 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from tests.support.autonomy import pin_session_modes
 
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, HookResult
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.session_mode_registry import (
+    SESSION_MODES_SUFFIX,
+    SessionModeRegistry,
+)
 from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     MANUAL_PROBE,
     PROBE_AS_FIELD,
@@ -26,6 +31,21 @@ from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
     AutoContinueStopHandler,
     _declares_human_blocked,
 )
+from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME
+from claude_code_hooks_daemon.utils.session_modes import ModeLabel, declared_blocked_entry
+from claude_code_hooks_daemon.utils.session_signal_paths import SIGNAL_SUBDIR
+
+
+def is_declared_blocked(untracked: Path, session_id: str) -> bool:
+    """Whether the on-disk registry under ``untracked`` holds awaiting-human for ``session_id``."""
+    registry = SessionModeRegistry(untracked / SIGNAL_SUBDIR)
+    registry.load()
+    return ModeLabel.AWAITING_HUMAN in registry.policy(session_id).labels
+
+
+def mode_files(untracked: Path) -> list[Path]:
+    """Every session-modes file written under ``untracked``."""
+    return sorted((untracked / SIGNAL_SUBDIR).glob(f"*{SESSION_MODES_SUFFIX}"))
 
 
 @pytest.fixture(autouse=True)
@@ -2881,8 +2901,6 @@ class TestExplicitAwaitingHumanToken:
             f.write(json.dumps(msg) + "\n")
 
     def _arms_marker(self, handler: AutoContinueStopHandler, tmp_path: Path, text: str) -> bool:
-        from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME
-
         transcript = tmp_path / "t.jsonl"
         self._write_assistant_text(transcript, text)
         marker_dir = tmp_path / "untracked"
@@ -2899,7 +2917,7 @@ class TestExplicitAwaitingHumanToken:
             result = handler.handle(hook_input)
 
         assert result.decision == Decision.ALLOW
-        return (marker_dir / MARKER_FILENAME).exists()
+        return is_declared_blocked(marker_dir, "sess-token")
 
     def test_the_token_arms_the_marker(
         self, handler: AutoContinueStopHandler, tmp_path: Path
@@ -3570,11 +3588,6 @@ class TestHumanBlockedMarker:
         with path.open("w") as f:
             f.write(json.dumps(msg) + "\n")
 
-    def _marker_path(self, tmp_path: Path) -> Path:
-        from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME
-
-        return tmp_path / MARKER_FILENAME
-
     def test_narrow_pattern_writes_marker_and_still_allows(
         self, handler: AutoContinueStopHandler, tmp_path: Path
     ) -> None:
@@ -3598,12 +3611,8 @@ class TestHumanBlockedMarker:
             result = handler.handle(hook_input)
 
         assert result.decision == Decision.ALLOW
-
-        from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, read_marker
-
-        marker = read_marker(marker_dir / MARKER_FILENAME)
-        assert marker is not None
-        assert marker.session_id == "sess-1"
+        assert is_declared_blocked(marker_dir, "sess-1")
+        assert not (marker_dir / MARKER_FILENAME).exists()
 
     def test_a_probe_never_writes_the_marker(
         self, handler: AutoContinueStopHandler, tmp_path: Path
@@ -3634,7 +3643,7 @@ class TestHumanBlockedMarker:
             result = handler.handle(hook_input)
 
         assert result.decision == Decision.ALLOW
-        assert not self._marker_path(marker_dir).exists()
+        assert mode_files(marker_dir) == []
 
     def test_ordinary_stopping_because_does_not_write_marker(
         self, handler: AutoContinueStopHandler, tmp_path: Path
@@ -3657,7 +3666,7 @@ class TestHumanBlockedMarker:
             result = handler.handle(hook_input)
 
         assert result.decision == Decision.ALLOW
-        assert not self._marker_path(marker_dir).exists()
+        assert mode_files(marker_dir) == []
 
     def test_a_stop_mentioning_human_input_but_not_narrow_shape_does_not_write_marker(
         self, handler: AutoContinueStopHandler, tmp_path: Path
@@ -3684,7 +3693,7 @@ class TestHumanBlockedMarker:
             result = handler.handle(hook_input)
 
         assert result.decision == Decision.ALLOW
-        assert not self._marker_path(marker_dir).exists()
+        assert mode_files(marker_dir) == []
 
     def test_need_user_input_shape_writes_marker(
         self, handler: AutoContinueStopHandler, tmp_path: Path
@@ -3707,7 +3716,7 @@ class TestHumanBlockedMarker:
             result = handler.handle(hook_input)
 
         assert result.decision == Decision.ALLOW
-        assert self._marker_path(marker_dir).exists()
+        assert is_declared_blocked(marker_dir, "sess-1")
 
     def test_waiting_on_owner_decision_shape_writes_marker(
         self, handler: AutoContinueStopHandler, tmp_path: Path
@@ -3730,7 +3739,7 @@ class TestHumanBlockedMarker:
             result = handler.handle(hook_input)
 
         assert result.decision == Decision.ALLOW
-        assert self._marker_path(marker_dir).exists()
+        assert is_declared_blocked(marker_dir, "sess-1")
 
     def test_no_project_context_still_allows(
         self, handler: AutoContinueStopHandler, tmp_path: Path
@@ -3754,6 +3763,57 @@ class TestHumanBlockedMarker:
             result = handler.handle(hook_input)
 
         assert result.decision == Decision.ALLOW
+
+    def test_no_project_context_is_a_warning_and_records_false(
+        self, handler: AutoContinueStopHandler, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A matched shape that cannot reach the registry is loud, not DEBUG."""
+        hook_input = {"session_id": "sess-1"}
+        with (
+            patch(
+                "claude_code_hooks_daemon.handlers.stop.auto_continue_stop."
+                "ProjectContext.daemon_untracked_dir",
+                side_effect=RuntimeError("no project context"),
+            ),
+            caplog.at_level(logging.WARNING),
+        ):
+            written = handler._maybe_record_human_blocked_marker(
+                hook_input, "STOPPING BECAUSE: blocked only on human input."
+            )
+        assert written is False
+        assert any(record.levelno == logging.WARNING for record in caplog.records)
+
+    def test_unwritable_registry_is_a_warning_and_records_false(
+        self,
+        handler: AutoContinueStopHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        registry = pin_session_modes(monkeypatch, tmp_path / "untracked")
+
+        def refuse(entry: object) -> None:
+            raise OSError("read-only filesystem")
+
+        monkeypatch.setattr(registry, "enter", refuse)
+        with caplog.at_level(logging.WARNING):
+            written = handler._maybe_record_human_blocked_marker(
+                {"session_id": "sess-1"}, "STOPPING BECAUSE: blocked only on human input."
+            )
+        assert written is False
+        assert any("read-only filesystem" in record.getMessage() for record in caplog.records)
+
+    def test_the_entry_is_the_shared_declared_blocked_shape(
+        self, handler: AutoContinueStopHandler, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        registry = pin_session_modes(monkeypatch, tmp_path / "untracked")
+        written = handler._maybe_record_human_blocked_marker(
+            {"session_id": "sess-1"}, "STOPPING BECAUSE: [awaiting-human] pick A or B."
+        )
+        assert written is True
+        (entry,) = registry.active("sess-1")
+        assert entry == declared_blocked_entry("sess-1", entered_at=entry.entered_at)
+        assert not (tmp_path / "untracked" / MARKER_FILENAME).exists()
 
     def test_live_0128_shape_writes_marker(
         self, handler: AutoContinueStopHandler, tmp_path: Path
@@ -3808,14 +3868,10 @@ class TestHumanBlockedMarker:
 
         assert result.decision == Decision.ALLOW
 
-        from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, read_marker
-
-        marker = read_marker(marker_dir / MARKER_FILENAME)
-        assert marker is not None, (
-            "Marker file must exist after a matching STOPPING BECAUSE: stop "
-            "(Plan 00314 defect 1: marker write silently failed on a matching phrase)"
+        assert is_declared_blocked(marker_dir, "sess-live-0128"), (
+            "The registry must hold awaiting-human after a matching STOPPING BECAUSE: stop "
+            "(Plan 00314 defect 1: the marker write silently failed on a matching phrase)"
         )
-        assert marker.session_id == "sess-live-0128"
 
     def test_missing_session_id_still_allows_and_skips_marker(
         self, handler: AutoContinueStopHandler, tmp_path: Path
@@ -3834,7 +3890,7 @@ class TestHumanBlockedMarker:
             result = handler.handle(hook_input)
 
         assert result.decision == Decision.ALLOW
-        assert not self._marker_path(marker_dir).exists()
+        assert mode_files(marker_dir) == []
 
     def _read_last_stop_event(self, marker_dir: Path) -> dict[str, Any]:
         log_path = marker_dir / "stop-events.jsonl"
@@ -3930,11 +3986,6 @@ class TestHumanBlockedPatternWidening:
         with path.open("w") as f:
             f.write(json.dumps(msg) + "\n")
 
-    def _marker_path(self, tmp_path: Path) -> Path:
-        from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME
-
-        return tmp_path / MARKER_FILENAME
-
     def test_waiting_on_human_response_shape_writes_marker(
         self, handler: AutoContinueStopHandler, tmp_path: Path
     ) -> None:
@@ -3956,7 +4007,7 @@ class TestHumanBlockedPatternWidening:
             result = handler.handle(hook_input)
 
         assert result.decision == Decision.ALLOW
-        assert self._marker_path(marker_dir).exists()
+        assert is_declared_blocked(marker_dir, "sess-1")
 
     def test_waiting_for_human_decision_shape_writes_marker(
         self, handler: AutoContinueStopHandler, tmp_path: Path
@@ -3979,7 +4030,7 @@ class TestHumanBlockedPatternWidening:
             result = handler.handle(hook_input)
 
         assert result.decision == Decision.ALLOW
-        assert self._marker_path(marker_dir).exists()
+        assert is_declared_blocked(marker_dir, "sess-1")
 
     def test_blocked_on_human_input_without_only_does_not_write_marker(
         self, handler: AutoContinueStopHandler, tmp_path: Path
@@ -4007,7 +4058,7 @@ class TestHumanBlockedPatternWidening:
             result = handler.handle(hook_input)
 
         assert result.decision == Decision.ALLOW
-        assert not self._marker_path(marker_dir).exists()
+        assert mode_files(marker_dir) == []
 
 
 class TestCitingAPhraseIsNotDeclaringIt:

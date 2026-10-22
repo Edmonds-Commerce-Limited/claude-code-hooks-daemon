@@ -58,8 +58,7 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     VERDICT_SYNTHETIC_FIELD,
     event_synthetic_source,
 )
-from claude_code_hooks_daemon.utils.autonomy import autonomy_allowed
-from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, write_marker
+from claude_code_hooks_daemon.utils.autonomy import autonomy_allowed, autonomy_verdict
 from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.goal_ledger import (
@@ -69,6 +68,7 @@ from claude_code_hooks_daemon.utils.goal_ledger import (
 )
 from claude_code_hooks_daemon.utils.private_io import make_private_dir, open_private_append
 from claude_code_hooks_daemon.utils.retention import cap_log_file
+from claude_code_hooks_daemon.utils.session_modes import declared_blocked_entry
 from claude_code_hooks_daemon.utils.stand_in_cron import (
     DEFAULT_STAND_IN_DELAY_HOURS,
     delay_hours_problem,
@@ -717,9 +717,12 @@ class AutoContinueStopHandler(StopHandlerBase):
         Gated on the same ``persistent_crons.enabled`` master switch as the
         declared-cron enforcers, so a project that has not opted into session
         crons is never told to create one. Silent too where the project's
-        ``autonomy:`` config turns autonomy off for this session (Plan 00498).
+        ``autonomy:`` config turns autonomy off for this session (Plan 00498),
+        and under focus. A BLOCKED mode does not silence it: this very stop
+        enters awaiting-human, and the stand-in is what answers it (Plan 00501).
         """
-        if not autonomy_allowed(hook_input):
+        autonomy = autonomy_verdict(hook_input)
+        if not autonomy.environment_allowed or autonomy.session.focus_task is not None:
             return None
         if not self._config_loader().persistent_crons.enabled:
             return None
@@ -987,10 +990,11 @@ class AutoContinueStopHandler(StopHandlerBase):
     def _maybe_record_human_blocked_marker(
         self, hook_input: dict[str, Any], text: str
     ) -> bool | None:
-        """Record the Plan 00298 blockage marker when ``text`` matches a
-        narrow 'blocked only on human input' shape. Best-effort: any failure
-        to resolve project context or write the marker is logged and
-        swallowed -- this must never affect the Stop decision itself.
+        """Enter the declared awaiting-human mode when ``text`` matches a
+        narrow 'blocked only on human input' shape (Plan 00298, now the
+        session-modes registry, Plan 00501). A failure to reach the registry
+        is logged at WARNING and reported as False -- it never changes the
+        Stop decision itself.
 
         Args:
             hook_input: The Stop event's hook input (for session_id).
@@ -1001,8 +1005,8 @@ class AutoContinueStopHandler(StopHandlerBase):
             applicable -- Branch 2 ALLOWed for an unrelated reason). Otherwise
             True/False for whether the marker was actually written -- Plan
             00314 field observability: a matching text that ends up False
-            (a synthetic event, missing session_id, no project context, or a
-            swallowed OSError inside ``write_marker``) is exactly the "matched but not armed"
+            (a synthetic event, missing session_id, no project context, or an
+            OSError from the registry write) is exactly the "matched but not armed"
             case that was previously invisible outside the volatile log ring.
         """
         if not _declares_human_blocked(text):
@@ -1016,17 +1020,17 @@ class AutoContinueStopHandler(StopHandlerBase):
         if not isinstance(session_id, str) or not session_id:
             logger.debug("human-blocked marker: no session_id, skipping")
             return False
+        entry = declared_blocked_entry(session_id, entered_at=time.time())
         try:
-            marker_path = ProjectContext.daemon_untracked_dir() / MARKER_FILENAME
-        except RuntimeError as e:
+            get_data_layer().session_modes.enter(entry)
+        except (RuntimeError, OSError) as e:
             log_and_continue(
                 logger,
                 e,
-                reason="without a project context there is no human-blocked marker, so False (not blocked)",
-                level=logging.DEBUG,
+                reason="the session-modes registry could not record awaiting-human, so this stop is reported as not armed (False) and the session's cron ticks keep arriving",
             )
             return False
-        return write_marker(marker_path, session_id)
+        return True
 
     def _is_qa_failure(self, reader: TranscriptReader) -> bool:
         """Return True if the last QA Bash command's OWN result indicates failure.

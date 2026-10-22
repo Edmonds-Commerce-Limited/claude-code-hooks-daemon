@@ -30,6 +30,7 @@ from claude_code_hooks_daemon.utils.cron_cadence import (
     read_cadence,
     write_cadence,
 )
+from claude_code_hooks_daemon.utils.session_modes import DECLARED_BLOCKED_TTL_SECONDS
 
 _OWED_PATCH_TARGET = (
     "claude_code_hooks_daemon.handlers.user_prompt_submit."
@@ -112,20 +113,14 @@ class TestHandle:
     def test_expired_marker_allows(self, tmp_path: Path) -> None:
         write_marker(tmp_path / MARKER_FILENAME, "sess-1", now=0.0)
         handler = FailsafeCronBlockageSuppressorHandler()
-        handler._expiry_hours = 24.0
-        handler._clock = lambda: (24.0 * 3600.0) + 1.0  # just past expiry
+        handler._clock = lambda: DECLARED_BLOCKED_TTL_SECONDS + 1.0  # just past expiry
         with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
             result = handler.handle(_cron_hook_input("sess-1"))
         assert result.decision == Decision.ALLOW
 
-    def test_configured_expiry_is_honoured(self, tmp_path: Path) -> None:
-        write_marker(tmp_path / MARKER_FILENAME, "sess-1", now=0.0)
-        handler = FailsafeCronBlockageSuppressorHandler()
-        handler._expiry_hours = 1.0
-        handler._clock = lambda: 3601.0  # 1 second past a 1h expiry
-        with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
-            result = handler.handle(_cron_hook_input("sess-1"))
-        assert result.decision == Decision.ALLOW
+    def test_expiry_is_the_shared_ttl_not_an_option(self) -> None:
+        """Expiry lives in the registry entry now (Task 2.2), so the option is gone."""
+        assert not hasattr(FailsafeCronBlockageSuppressorHandler(), "_expiry_hours")
 
     def test_corrupt_marker_allows(self, tmp_path: Path) -> None:
         (tmp_path / MARKER_FILENAME).write_text("{not json", encoding="utf-8")

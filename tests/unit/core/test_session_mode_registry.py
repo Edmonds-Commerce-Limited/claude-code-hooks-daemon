@@ -32,8 +32,11 @@ from claude_code_hooks_daemon.core.session_mode_registry import (
     ModeNotice,
     NoticeKind,
     SessionModeRegistry,
+    import_legacy_blockage_marker,
 )
+from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, write_marker
 from claude_code_hooks_daemon.utils.session_modes import (
+    DECLARED_BLOCKED_TTL_SECONDS,
     FOCUS_TTL_SECONDS,
     BlockReason,
     Lifetime,
@@ -41,6 +44,7 @@ from claude_code_hooks_daemon.utils.session_modes import (
     ModeSource,
     SessionMode,
     SessionModeEntry,
+    declared_blocked_entry,
 )
 
 SID = "session-a"
@@ -609,3 +613,58 @@ def test_a_failed_corrupt_rename_is_logged_at_error(
         for record in caplog.records
     )
     assert reg.active(SID) == ()
+
+
+class TestImportLegacyBlockageMarker:
+    """The pre-registry awaiting-human marker becomes a registry entry once (Task 2.2)."""
+
+    def test_missing_marker_imports_nothing(
+        self, registry: SessionModeRegistry, tmp_path: Path
+    ) -> None:
+        assert import_legacy_blockage_marker(registry, tmp_path / MARKER_FILENAME) is False
+        assert registry.active(SID) == ()
+
+    def test_live_marker_becomes_declared_blocked_and_is_deleted(
+        self, registry: SessionModeRegistry, clock: FakeClock, tmp_path: Path
+    ) -> None:
+        marker = tmp_path / MARKER_FILENAME
+        assert write_marker(marker, SID, now=T0 - 60.0) is True
+        assert import_legacy_blockage_marker(registry, marker) is True
+        assert registry.active(SID) == (declared_blocked_entry(SID, entered_at=T0 - 60.0),)
+        assert not marker.exists()
+
+    @pytest.mark.parametrize(
+        "recorded_at",
+        [T0 - DECLARED_BLOCKED_TTL_SECONDS - 1.0, T0 + 60.0],
+        ids=["expired", "future"],
+    )
+    def test_dead_marker_is_logged_at_info_and_deleted(
+        self,
+        registry: SessionModeRegistry,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+        recorded_at: float,
+    ) -> None:
+        marker = tmp_path / MARKER_FILENAME
+        assert write_marker(marker, SID, now=recorded_at) is True
+        with caplog.at_level(logging.INFO):
+            assert import_legacy_blockage_marker(registry, marker) is False
+        assert registry.active(SID) == ()
+        assert not marker.exists()
+        assert any(
+            record.levelno == logging.INFO and str(marker) in record.getMessage()
+            for record in caplog.records
+        )
+
+    def test_corrupt_marker_is_a_warning_and_deleted(
+        self, registry: SessionModeRegistry, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        marker = tmp_path / MARKER_FILENAME
+        marker.write_text("{not json", encoding="utf-8")
+        with caplog.at_level(logging.WARNING):
+            assert import_legacy_blockage_marker(registry, marker) is False
+        assert not marker.exists()
+        assert any(
+            record.levelno == logging.WARNING and str(marker) in record.getMessage()
+            for record in caplog.records
+        )

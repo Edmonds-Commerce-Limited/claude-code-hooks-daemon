@@ -65,6 +65,7 @@ from claude_code_hooks_daemon.utils.blockage_marker import (
 from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.session_modes import DECLARED_BLOCKED_TTL_SECONDS
 from claude_code_hooks_daemon.utils.stop_hook_helpers import (
     get_transcript_reader,
     has_running_background_task,
@@ -88,8 +89,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_JOB_ID: Final[str] = "issue-sdlc"
 #: How old the workable-issues cache may be before the gate stops trusting it.
 DEFAULT_MAX_CACHE_AGE_HOURS: Final[float] = 2.0
-#: How long an awaiting-human marker holds; matches the marker's own default expiry.
-DEFAULT_MARKER_EXPIRY_HOURS: Final[float] = 24.0
 _SECONDS_PER_HOUR: Final[float] = 3600.0
 #: The release runbook's state file, in the daemon's state directory. Its presence
 #: means a release is in progress. Same name the project's ``release_blocker`` Stop
@@ -131,7 +130,6 @@ class IdleWorkableIssueStopGateHandler(InitialThreadExemption, StopHandlerBase):
         # Options, injected by the registry from ``options.<name>``.
         self._job_id: str = DEFAULT_JOB_ID
         self._max_cache_age_hours: float = DEFAULT_MAX_CACHE_AGE_HOURS
-        self._marker_expiry_hours: float = DEFAULT_MARKER_EXPIRY_HOURS
         # Injectable wall clock; not a config option.
         self._clock: Callable[[], float] = time.time
 
@@ -225,7 +223,7 @@ class IdleWorkableIssueStopGateHandler(InitialThreadExemption, StopHandlerBase):
         """Whether this session is blocked only on a human: a live marker, or this stop says so."""
         session_id = str(hook_input.get(HookInputField.SESSION_ID) or "")
         marker = read_marker(state / MARKER_FILENAME)
-        if marker_is_valid(marker, session_id, now, self._marker_expiry_hours * _SECONDS_PER_HOUR):
+        if marker_is_valid(marker, session_id, now, DECLARED_BLOCKED_TTL_SECONDS):
             return True
         # The marker is written by auto_continue_stop, which runs after this handler.
         reader = get_transcript_reader(hook_input)
@@ -269,7 +267,7 @@ class IdleWorkableIssueStopGateHandler(InitialThreadExemption, StopHandlerBase):
             "and a stop that re-enters after the deny (`stop_hook_active`), so a session is "
             "never trapped. It reads local files only and never calls GitHub.\n\n"
             "Options (`handlers.stop.idle_workable_issue_stop_gate.options`): `job_id` "
-            "(default `issue-sdlc`), `max_cache_age_hours`, `marker_expiry_hours`."
+            "(default `issue-sdlc`), `max_cache_age_hours`."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

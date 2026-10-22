@@ -4730,11 +4730,7 @@ The backoff thins ticks to hourly, then every 2 hours, then every 4, and **never
 
 **Never terminal:** `idle_housekeeping_advisory` and `standing_authorisations` also key off the same canonical cron prompt and must keep running on every non-suppressed tick. A non-terminal DENY still survives later handlers regardless of registration order.
 
-**Options:**
-
-| Option         | Type  | Default | Description                                                                                                                                          |
-| -------------- | ----- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `expiry_hours` | float | `24`    | How long a recorded marker stays valid without re-confirmation. Past this, cron ticks resume normally even if the session never sent another prompt. |
+**Options:** none. A declaration expires 24 hours after it is recorded; the expiry is fixed, so the former `expiry_hours` option no longer has any effect.
 
 **Config example:**
 
@@ -4744,8 +4740,6 @@ handlers:
     failsafe_cron_blockage_suppressor:
       enabled: true
       priority: 37
-      options:
-        expiry_hours: 24
 ```
 
 **On by default** (dogfooding purpose, Plan 00298). Set `enabled: false` to restore unconditional hourly cron delivery.

@@ -236,16 +236,19 @@ def _arms_suppression(
     session's recovery cron — the exact failure Plan 00342 exists to catch,
     which is worse than a wrong DENY precisely because it is SILENT.
     """
+    from claude_code_hooks_daemon.core import data_layer
     from claude_code_hooks_daemon.core.project_context import ProjectContext
-    from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME
+    from claude_code_hooks_daemon.core.session_mode_registry import SESSION_MODES_SUFFIX
+    from claude_code_hooks_daemon.utils.session_signal_paths import SIGNAL_SUBDIR
 
     monkeypatch.setattr(ProjectContext, "daemon_untracked_dir", staticmethod(lambda: marker_dir))
-    marker = marker_dir / MARKER_FILENAME
-    if marker.exists():
-        marker.unlink()
+    monkeypatch.setattr(data_layer.get_data_layer(), "_session_modes", None)
+    state = marker_dir / SIGNAL_SUBDIR
+    for path in state.glob(f"*{SESSION_MODES_SUFFIX}"):
+        path.unlink()
     if handler.matches(hook_input):
         handler.handle(hook_input)
-    return marker.exists()
+    return any(state.glob(f"*{SESSION_MODES_SUFFIX}"))
 
 
 def _denies(handler: Handler, hook_input: dict[str, Any]) -> bool:
