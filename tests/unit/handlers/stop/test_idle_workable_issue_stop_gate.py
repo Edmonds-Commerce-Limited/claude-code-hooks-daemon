@@ -10,11 +10,13 @@ workable-issues cache. It never calls GitHub.
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.support.autonomy import awaiting_human_entry, focus_entry, pin_session_modes
 
 from claude_code_hooks_daemon.config.models import (
     Config,
@@ -25,7 +27,9 @@ from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.data_layer import get_data_layer
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
+from claude_code_hooks_daemon.handlers.stop import idle_workable_issue_stop_gate as gate_module
 from claude_code_hooks_daemon.handlers.stop.idle_workable_issue_stop_gate import (
     RELEASE_STATE_FILENAME,
     IdleWorkableIssueStopGateHandler,
@@ -111,6 +115,12 @@ def _transcript(tmp_path: Path, text: str) -> str:
     }
     path.write_text(json.dumps(message) + "\n", encoding="utf-8")
     return str(path)
+
+
+@pytest.fixture(autouse=True)
+def _registry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Bind the session-modes registry the gate reads to this test's tmp dir."""
+    pin_session_modes(monkeypatch, tmp_path / "modes")
 
 
 @pytest.fixture
@@ -315,25 +325,44 @@ class TestOtherInFlightSources:
 
 
 class TestTheAwaitingHumanDeclaration:
-    def test_a_live_marker_for_this_session(self, state: Path) -> None:
+    def test_an_awaiting_human_mode_for_this_session(self, state: Path) -> None:
         _cache(state, [5])
-        write_marker(state / MARKER_FILENAME, SESSION, now=NOW - 60)
+        get_data_layer().session_modes.enter(awaiting_human_entry(SESSION))
         assert _judge(_handler(state), _stop()) is Decision.ALLOW
 
-    def test_a_marker_for_another_session_does_not_count(self, state: Path) -> None:
+    def test_a_mode_for_another_session_does_not_count(self, state: Path) -> None:
         _cache(state, [5])
-        write_marker(state / MARKER_FILENAME, "other", now=NOW - 60)
+        get_data_layer().session_modes.enter(awaiting_human_entry("other"))
         assert _judge(_handler(state), _stop()) is Decision.DENY
 
-    def test_an_expired_marker_does_not_count(self, state: Path) -> None:
+    def test_focus_is_not_awaiting_human(self, state: Path) -> None:
         _cache(state, [5])
-        write_marker(state / MARKER_FILENAME, SESSION, now=NOW - 48 * 3600)
+        get_data_layer().session_modes.enter(focus_entry(SESSION))
         assert _judge(_handler(state), _stop()) is Decision.DENY
 
-    def test_this_very_stop_declaring_it_counts_before_the_marker_is_written(
+    def test_the_legacy_marker_file_is_no_longer_read(self, state: Path) -> None:
+        _cache(state, [5])
+        write_marker(state / MARKER_FILENAME, SESSION, now=NOW - 60)
+        assert _judge(_handler(state), _stop()) is Decision.DENY
+
+    def test_an_unreadable_registry_stands_aside_and_warns(
+        self, state: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """It cannot show the session is NOT awaiting a human, so it never traps it."""
+
+        def unreadable(_hook_input: object) -> object:
+            raise OSError("registry unreadable")
+
+        monkeypatch.setattr(gate_module, "session_policy", unreadable)
+        _cache(state, [5])
+        with caplog.at_level(logging.WARNING):
+            assert _judge(_handler(state), _stop()) is Decision.ALLOW
+        assert "session-modes registry" in caplog.text
+
+    def test_this_very_stop_declaring_it_counts_before_the_mode_is_entered(
         self, state: Path, tmp_path: Path
     ) -> None:
-        """auto_continue_stop writes the marker AFTER this handler runs."""
+        """auto_continue_stop enters the mode AFTER this handler runs."""
         _cache(state, [5])
         path = _transcript(
             tmp_path, "STOPPING BECAUSE: [awaiting-human] the owner must choose A or B."

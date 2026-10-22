@@ -28,7 +28,7 @@ one-shot Stop block follows. A sub-agent stop never reaches it (``MAIN`` scope).
 **Ordering.** Priority 4 puts it ahead of ``usage_pause_stop_gate`` (6),
 ``cron_stop_enforcer`` (7) and ``auto_continue_stop``; it is non-terminal for the
 reason those are (see ``cron_stop_enforcer``'s "Ordering note"). Because it runs
-BEFORE ``auto_continue_stop``, which writes the awaiting-human marker, it also
+BEFORE ``auto_continue_stop``, which enters the awaiting-human mode, it also
 reads the current message for the declaration, or the stop that declares it
 would be refused one step too early.
 """
@@ -47,7 +47,6 @@ from claude_code_hooks_daemon.config.models import Config, PersistentCronConfig
 from claude_code_hooks_daemon.constants import HandlerTag
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
-from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import StopHandlerBase
@@ -57,15 +56,10 @@ from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import _declares_
 from claude_code_hooks_daemon.handlers.utils.initial_thread_exemption import (
     InitialThreadExemption,
 )
-from claude_code_hooks_daemon.utils.blockage_marker import (
-    MARKER_FILENAME,
-    marker_is_valid,
-    read_marker,
-)
+from claude_code_hooks_daemon.utils.autonomy import session_policy
 from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
-from claude_code_hooks_daemon.utils.session_modes import DECLARED_BLOCKED_TTL_SECONDS
 from claude_code_hooks_daemon.utils.stop_hook_helpers import (
     get_transcript_reader,
     has_running_background_task,
@@ -198,7 +192,7 @@ class IdleWorkableIssueStopGateHandler(InitialThreadExemption, StopHandlerBase):
             or self._queue_holds_the_gate_back(state)
         ):
             return BlockingResult(decision=Decision.ALLOW)
-        if self._awaiting_human(hook_input, state, now):
+        if self._awaiting_human(hook_input):
             return BlockingResult(decision=Decision.ALLOW)
         return BlockingResult.deny(self._render(cache.numbers)).under_rule(_RULE)
 
@@ -219,13 +213,24 @@ class IdleWorkableIssueStopGateHandler(InitialThreadExemption, StopHandlerBase):
             )
             return True
 
-    def _awaiting_human(self, hook_input: dict[str, Any], state: Path, now: float) -> bool:
-        """Whether this session is blocked only on a human: a live marker, or this stop says so."""
-        session_id = str(hook_input.get(HookInputField.SESSION_ID) or "")
-        marker = read_marker(state / MARKER_FILENAME)
-        if marker_is_valid(marker, session_id, now, DECLARED_BLOCKED_TTL_SECONDS):
+    @staticmethod
+    def _awaiting_human(hook_input: dict[str, Any]) -> bool:
+        """Whether this session is blocked only on a human: its mode says so, or this stop does.
+
+        An unreadable session-modes registry cannot show the session is NOT
+        awaiting a human, so the gate stands aside (True) rather than trap it.
+        """
+        try:
+            if session_policy(hook_input).is_blocked:
+                return True
+        except (RuntimeError, OSError) as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="the session-modes registry cannot be read, so the gate cannot rule out awaiting-human and stands aside (True)",
+            )
             return True
-        # The marker is written by auto_continue_stop, which runs after this handler.
+        # The mode is entered by auto_continue_stop, which runs after this handler.
         reader = get_transcript_reader(hook_input)
         text = reader.get_last_assistant_text() if reader is not None else ""
         return bool(text) and _declares_human_blocked(text)
