@@ -63,12 +63,17 @@ a helper. That fix is a Python change tracked as ledger N465 and fixed separatel
   - [x] A configured relay that is missing or not executable is reported loudly: `transport on` reports a provisioned
     binary (N525), and `status` and the new SessionStart `relay_binary_checker` name the path and the fix (N523).
     Merged `376612d38`.
-  - [ ] **Open owner question**: what a relay-eligible SAFETY forwarder (PreToolUse and similar) does when the binary is
-    missing. Today its guard falls through to the bash path, which still enforces every rule but is slower and silent
-    at the moment of the call. Denying every tool call would also deny the commands that rebuild the relay. The
-    coordinator's recommendation, held until the owner rules: repair automatically at session start and upgrade; if
-    that fails, deny every tool call except the repair command, naming it; never a silent bash path. The SessionStart
-    and `status` warnings above already make the missing binary loud.
+  - [x] **Ruled** (Fable adviser, delegated by the owner; CLEAR): what a relay-eligible SAFETY forwarder does when
+    the binary is missing or broken. Adopted: no deny-all lockout. The call falls through to the bash path, where every
+    guard still judges it, and every answer carries a warning naming the binary and `transport on`. Repair runs
+    detached at session start, once per cause. The adviser also found that a BROKEN binary (executable but corrupt)
+    fails OPEN today: the failed `exec` exits 126 with nothing on stdout, so the tool runs unguarded. Ruling and
+    evidence: [subagent-reports/261022-forwarder-failure-advice-fable.md](subagent-reports/261022-forwarder-failure-advice-fable.md).
+  - [ ] **Task 2c**: Implement the ruling (the report's tasks 1-6): close the fail-open with `shopt -s execfail` and
+    an unused-relay marker in the generated guard; carry the marker through `init.sh` into the request; the daemon
+    adds one warning line to every relay-eligible answer without changing a verdict; detached session-start repair,
+    once per cause; tests red first (an executable file of garbage bytes is the safety regression test); docs and a
+    release note.
 - [x] ✅ **Task 3**: Measure the default-on relay against bash on the hot hooks, under many concurrent sessions, and list
   further Rust candidates with their numbers for the owner. Report:
   [subagent-reports/261021-task-3-measurements-opus.md](subagent-reports/261021-task-3-measurements-opus.md).
@@ -87,6 +92,8 @@ a helper. That fix is a Python change tracked as ledger N465 and fixed separatel
 
 - [x] The owner's decision on (a) and (b) is recorded in this plan.
 - [ ] The relay is default-on, and a configured-but-missing relay fails loudly with the fix named.
+- [ ] A missing or broken relay binary never changes a verdict and never lets a tool call run unguarded (tested with
+  a corrupt executable); a release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` records it.
 
 ## Delivery & Milestones
 
