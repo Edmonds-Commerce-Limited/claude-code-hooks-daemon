@@ -48,7 +48,10 @@ class TestActions:
         _act(SessionModeIPC.ACTION_EXIT_FOCUS, session_id=_SESSION)
         history = _act(SessionModeIPC.ACTION_GET_MODE_HISTORY)["result"]
         evidence = [t["evidence"] for t in history[SessionModeIPC.KEY_TRANSITIONS]]
-        assert evidence == ["the session-mode CLI or /mode skill", "the session-mode CLI or /mode skill"]
+        assert evidence == [
+            "the session-mode CLI or /mode skill",
+            "the session-mode CLI or /mode skill",
+        ]
 
 
 class TestModeHistory:

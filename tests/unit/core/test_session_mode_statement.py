@@ -111,9 +111,7 @@ class TestRestartRestatement:
         assert _statement(registry, sources) is None
         assert sources.pause_reads == 1
 
-    def test_a_usage_pause_started_after_the_restart_is_not_restated(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_usage_pause_started_after_the_restart_is_not_restated(self, tmp_path: Path) -> None:
         registry = _loaded(tmp_path)
         sources = _Sources(pause=UsagePauseView(paused_at=_T0 + 5, until=_T0 + 3600, reason="5h"))
         assert _statement(registry, sources) is None
@@ -147,4 +145,3 @@ class TestRestartRestatement:
 
     def test_nothing_pending_is_no_line(self, tmp_path: Path) -> None:
         assert _statement(_loaded(tmp_path), _Sources()) is None
-

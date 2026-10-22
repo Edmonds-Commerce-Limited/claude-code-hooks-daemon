@@ -27,8 +27,6 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputF
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.data_layer import get_data_layer
-from claude_code_hooks_daemon.core.session_mode_statement import pending_mode_statement
-from claude_code_hooks_daemon.daemon.controller import get_controller
 from claude_code_hooks_daemon.core.focus_mode import (
     FocusCommand,
     enter_focus,
@@ -37,6 +35,8 @@ from claude_code_hooks_daemon.core.focus_mode import (
 )
 from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
 from claude_code_hooks_daemon.core.session_mode_registry import SessionModeRegistry
+from claude_code_hooks_daemon.core.session_mode_statement import pending_mode_statement
+from claude_code_hooks_daemon.daemon.controller import get_controller
 from claude_code_hooks_daemon.handlers.post_tool_use.goal_injection import clear_goal_signal
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.session_modes import UsagePauseView

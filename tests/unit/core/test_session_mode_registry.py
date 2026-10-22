@@ -21,7 +21,6 @@ from claude_code_hooks_daemon.core.session_mode_log import (
     TransitionAction,
     TransitionLog,
 )
-
 from claude_code_hooks_daemon.core.session_mode_registry import (
     CORRUPT_SUFFIX,
     FIELD_DETAIL,
@@ -802,18 +801,15 @@ class TestSnapshot:
 
 
 class TestFirstPromptClaim:
-    def test_loaded_at_is_the_load_time(
-        self, registry: SessionModeRegistry
-    ) -> None:
+    def test_loaded_at_is_the_load_time(self, registry: SessionModeRegistry) -> None:
         assert registry.loaded_at == T0
 
     def test_loaded_at_before_load_is_an_error(self, state_dir: Path) -> None:
+        registry = SessionModeRegistry(state_dir)
         with pytest.raises(RuntimeError, match="load"):
-            SessionModeRegistry(state_dir).loaded_at
+            _ = registry.loaded_at
 
-    def test_each_session_claims_its_first_prompt_once(
-        self, registry: SessionModeRegistry
-    ) -> None:
+    def test_each_session_claims_its_first_prompt_once(self, registry: SessionModeRegistry) -> None:
         assert registry.claim_first_prompt(SID) is True
         assert registry.claim_first_prompt(SID) is False
         assert registry.claim_first_prompt(OTHER) is True

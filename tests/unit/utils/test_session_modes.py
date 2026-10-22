@@ -430,6 +430,8 @@ class TestDisplayedPolicy:
         assert policy.entries[0].mode is SessionMode.USAGE_PAUSED
 
     def test_unattended_alone_shows_but_does_not_halt_work(self) -> None:
-        policy = session_modes.displayed_policy(_SID, [], usage_pause=None, unattended=True, now=1.0)
+        policy = session_modes.displayed_policy(
+            _SID, [], usage_pause=None, unattended=True, now=1.0
+        )
         assert policy.badge() == "unattended"
         assert policy.drives_work is True
