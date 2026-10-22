@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.install import relay_repair
 from claude_code_hooks_daemon.install.background_sync import (
     SyncRecord,
@@ -39,6 +40,8 @@ from claude_code_hooks_daemon.install.transport_toggle import RelayProvision
 
 _VERSION = "3.99.0"
 _DEFECT = "missing"
+# How long the lock test watches a repair stay blocked behind a held lock.
+_STILL_BLOCKED_OBSERVATION_SECONDS = Timeout.SOCKET_LIVENESS_PROBE_SEC
 
 
 class _Spawner:
@@ -317,11 +320,11 @@ class TestRunRelayRepair:
             fcntl.flock(held, fcntl.LOCK_EX)
             worker = threading.Thread(target=lambda: result.append(_run(tmp_path, repair)[0]))
             worker.start()
-            worker.join(timeout=0.5)
+            worker.join(timeout=_STILL_BLOCKED_OBSERVATION_SECONDS)
             assert worker.is_alive()
             assert repair.provisioned == 0
             fcntl.flock(held, fcntl.LOCK_UN)
-        worker.join(timeout=10)
+        worker.join(timeout=Timeout.FILE_LOCK)
 
         assert result == [0]
         assert repair.provisioned == 1
