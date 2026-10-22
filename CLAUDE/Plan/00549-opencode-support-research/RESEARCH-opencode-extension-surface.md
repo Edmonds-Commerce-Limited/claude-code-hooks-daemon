@@ -1,7 +1,7 @@
 # RESEARCH: opencode's extension surface (Plan 00549 Task 1.1)
 
 Source of truth: `/workspace/untracked/repos/opencode` at commit `c93aaae37157d785f76a8e9a9243a6560e286468`
-(`git describe`: `github-v1.2.27-52-gc93aaae371`, committed 2026-10-21). Freshness checked with
+(`git describe --tags --match 'github-v*'`: `github-v1.2.27-52-gc93aaae371`, committed 2026-10-21). Freshness checked with
 `bin/hooks-daemon reference-repos` before reading (clone up to date with upstream). Every path below is relative to
 that clone. Line numbers refer to that commit.
 

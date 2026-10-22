@@ -52,12 +52,12 @@ and refreshed rather than re-derived. Plan 00169's prior-art survey touched open
 
 ### Phase 1: Parallel research sweep
 
-- [ ] ⬜ **Task 1.1**: opencode extension surface → `RESEARCH-opencode-extension-surface.md`.
-- [ ] ⬜ **Task 1.2**: opencode architecture and lifecycle: client/server split, sessions, agents and sub-agents,
+- [x] ✅ **Task 1.1**: opencode extension surface → `RESEARCH-opencode-extension-surface.md`.
+- [x] ✅ **Task 1.2**: opencode architecture and lifecycle: client/server split, sessions, agents and sub-agents,
   modes, compaction, providers, headless and SDK use → `RESEARCH-opencode-architecture.md`.
-- [ ] ⬜ **Task 1.3**: dual-tool repositories: instruction files, config files, skills, commands, agents, MCP and
+- [x] ✅ **Task 1.3**: dual-tool repositories: instruction files, config files, skills, commands, agents, MCP and
   permissions; what each tool reads and where they collide → `RESEARCH-dual-tool-repos.md`.
-- [ ] ⬜ **Task 1.4**: daemon couplings refresh. Start from Plan 00292's inventory and re-check it against today's
+- [x] ✅ **Task 1.4**: daemon couplings refresh. Start from Plan 00292's inventory and re-check it against today's
   tree. List every Claude Code assumption: event names, payload shapes, response JSON, forwarders, settings,
   transcripts, plan workflow and status line → `RESEARCH-daemon-couplings.md`.
 
