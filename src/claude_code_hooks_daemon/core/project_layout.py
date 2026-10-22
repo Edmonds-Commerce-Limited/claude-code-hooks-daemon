@@ -39,7 +39,7 @@ the option it governs).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from typing import TYPE_CHECKING, Final
 
@@ -250,6 +250,10 @@ class ProjectLayout:
     #: handler that hardcodes ``CLAUDE/PlanWorkflow.md`` instead sends the
     #: reader somewhere the daemon did not put it.
     workflow_docs: str = _DEFAULT_WORKFLOW_DOCS
+    #: Play path glob -> repo-relative ``ansible.cfg`` (``layout.ansible_configs``).
+    #: The one declaration both lint gates read through ``module_context``.
+    #: ``hash=False``: a dict is unhashable and nothing hashes a layout by it.
+    ansible_configs: dict[str, str] = field(default_factory=dict, hash=False)
 
     def is_source_path(self, rel_path: str) -> bool:
         """True when ``rel_path`` has a declared/built-in source dir component."""
@@ -359,6 +363,7 @@ class ProjectLayout:
             plan_dir=doc_axes.plan_dir,
             plan_archive_dirs=doc_axes.plan_archive_dirs,
             workflow_docs=doc_axes.workflow_docs,
+            ansible_configs=dict(layout_config.ansible_configs) if layout_config else {},
         )
 
     @classmethod
@@ -389,6 +394,7 @@ class ProjectLayout:
             plan_dir=config.plan_workflow.directory,
             plan_archive_dirs=archive_dirs,
             workflow_docs=config.plan_workflow.workflow_docs,
+            ansible_configs=dict(config.layout.ansible_configs),
         )
 
 

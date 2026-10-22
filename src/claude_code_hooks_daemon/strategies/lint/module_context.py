@@ -9,11 +9,18 @@ module root, and a correct nested-module package was denied for it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.path_exclusion import path_matches_globs
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
+
+#: The config option naming a play's governing ``ansible.cfg``; quoted in the
+#: denial so the author knows where to declare it.
+ANSIBLE_CONFIGS_OPTION: Final[str] = "layout.ansible_configs"
+_ANSIBLE_CONFIG_ENV: Final[str] = "ANSIBLE_CONFIG"
 
 #: Language name -> the marker file whose directory is that language's root.
 #:
@@ -35,6 +42,7 @@ MODULE_ROOT_MARKERS: Final[dict[str, str]] = {
 }
 
 _GO_LANGUAGE: Final[str] = "Go"
+_ANSIBLE_LANGUAGE: Final[str] = "Ansible"
 
 
 @dataclass(frozen=True)
@@ -47,6 +55,60 @@ class ModuleContext:
 
     module_root: str | None
     effective_path: str
+    #: The ``ansible.cfg`` in effect, declared or found by the marker walk.
+    governing_config: str | None = None
+    #: Extra environment for the command: ``ANSIBLE_CONFIG`` when declared.
+    env: dict[str, str] = field(default_factory=dict, hash=False)
+
+    def working_dir(self, workspace_root: str | Path) -> str:
+        """The directory the command runs from: the module root, else the workspace root.
+
+        The single answer both lint gates use, so a file with no module root is
+        never run from one directory by one gate and another by the other.
+        """
+        return self.module_root or str(workspace_root)
+
+
+class GoverningConfigError(ValueError):
+    """A declared governing config that cannot be used (it does not exist)."""
+
+
+def missing_config_note(language_name: str, context: ModuleContext) -> str | None:
+    """The line a FAILED Ansible check adds when no ``ansible.cfg`` governed it.
+
+    A check run with no config can fail for the context rather than for the
+    play, so the denial says so and names the option that fixes it. The
+    denial itself is unchanged: nothing is silently allowed.
+    """
+    if language_name != _ANSIBLE_LANGUAGE or context.governing_config is not None:
+        return None
+    return (
+        "Note: no ansible.cfg was in effect for this check, so a failure that mentions "
+        "the config, the inventory or CONFIG_FILE may be a missing context rather than a "
+        "defect in this file. Declare the governing config for this play with "
+        f"{ANSIBLE_CONFIGS_OPTION}: {{'<play glob>': '<path/to/ansible.cfg>'}}."
+    )
+
+
+def _declared_config(
+    file_path: str, project_root: Path, ansible_configs: Mapping[str, str]
+) -> Path | None:
+    """The declared ``ansible.cfg`` for ``file_path``, or None when no glob matches.
+
+    Raises:
+        GoverningConfigError: The matching entry names a file that does not exist.
+    """
+    for glob, config_rel in ansible_configs.items():
+        if not path_matches_globs(file_path, [glob], project_root=project_root):
+            continue
+        config = project_root / config_rel
+        if not path_exists(config, unreadable_means=False):
+            raise GoverningConfigError(
+                f"{ANSIBLE_CONFIGS_OPTION}[{glob!r}] names {config_rel}, which does not "
+                f"exist under {project_root}. Fix the path or remove the entry."
+            )
+        return config
+    return None
 
 
 def find_module_root(file_path: str, marker_file: str) -> str | None:
@@ -66,8 +128,23 @@ def find_module_root(file_path: str, marker_file: str) -> str | None:
     return None
 
 
-def resolve_module_context(file_path: str, language_name: str) -> ModuleContext:
+def resolve_module_context(
+    file_path: str,
+    language_name: str,
+    *,
+    project_root: Path | None = None,
+    ansible_configs: Mapping[str, str] | None = None,
+) -> ModuleContext:
     """Resolve the module root and the path a lint command should be given.
+
+    For Ansible, a project-declared governing config (``ansible_configs``: play
+    glob -> repo-relative ``ansible.cfg``, read against ``project_root``) wins
+    over the marker walk: the module root is that config's directory and the
+    command's environment carries ``ANSIBLE_CONFIG``. This is the one place
+    that decision is made; both lint gates call it.
+
+    Raises:
+        GoverningConfigError: A declared config file does not exist.
 
     For Go, vet the package directory (not the single file): Go packages span
     multiple files and single-file vetting cannot resolve cross-file
@@ -76,6 +153,20 @@ def resolve_module_context(file_path: str, language_name: str) -> ModuleContext:
     "cannot find main module" without reading the file. The single-file form
     needs no module and still reports real findings, so it is the fallback.
     """
+    if language_name == _ANSIBLE_LANGUAGE:
+        declared = (
+            _declared_config(file_path, project_root, ansible_configs)
+            if project_root is not None and ansible_configs
+            else None
+        )
+        if declared is not None:
+            return ModuleContext(
+                module_root=str(declared.parent),
+                effective_path=file_path,
+                governing_config=str(declared),
+                env={_ANSIBLE_CONFIG_ENV: str(declared)},
+            )
+
     marker = MODULE_ROOT_MARKERS.get(language_name)
     module_root = find_module_root(file_path, marker) if marker else None
 
@@ -84,4 +175,13 @@ def resolve_module_context(file_path: str, language_name: str) -> ModuleContext:
         pkg_dir = str(Path(file_path).parent)
         if pkg_dir.startswith(module_root):
             effective_path = "./" + pkg_dir[len(module_root) :].lstrip("/") + "/"
-    return ModuleContext(module_root=module_root, effective_path=effective_path)
+    governing_config = (
+        str(Path(module_root) / MODULE_ROOT_MARKERS[_ANSIBLE_LANGUAGE])
+        if language_name == _ANSIBLE_LANGUAGE and module_root is not None
+        else None
+    )
+    return ModuleContext(
+        module_root=module_root,
+        effective_path=effective_path,
+        governing_config=governing_config,
+    )
