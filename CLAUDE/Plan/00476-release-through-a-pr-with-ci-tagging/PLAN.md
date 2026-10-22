@@ -83,7 +83,7 @@ modules only.
 
 ### Phase 1: Prove the gate runs in CI
 
-- [ ] ⬜ **Task 1.1**: Run each of the 40 `llm_qa.py` checks on a CI runner in a
+- [ ] ⬜ **Task 1.1**: Run each of the 43 `llm_qa.py` checks on a CI runner in a
   trial workflow. List the ones that need changes to run there.
 - [ ] ⬜ **Task 1.2**: Time each check's job on the runner against the local
   `llm_qa.py` timing summary, and choose the per-Python jobs and shards from it

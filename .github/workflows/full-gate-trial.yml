@@ -5,6 +5,11 @@ name: Full gate trial
 # pass there and how long each takes. It never runs on main.
 on:
   workflow_dispatch:
+    inputs:
+      checks:
+        description: "Space-separated llm_qa checks to run, or 'all'"
+        required: false
+        default: all
   push:
     branches: [worktree-476-ci-gate-trial]
 
@@ -12,58 +17,49 @@ permissions:
   contents: read
 
 jobs:
+  # Chooses the matrix: every check on a push or when `checks` is `all`,
+  # otherwise only the named ones.
+  plan:
+    name: choose checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      checks: ${{ steps.pick.outputs.checks }}
+    env:
+      REQUESTED: ${{ github.event.inputs.checks || 'all' }}
+      # Literal copy of llm_qa.ALL_TOOL_NAMES (43 checks, `all` order).
+      ALL_CHECKS: >-
+        magic_values format lint type_check pyright security dependencies
+        shell_check error_hiding shell_audit skill_refs github_urls
+        inline_suppressions released_changelog canonical_callers
+        python_var_guidance eacces_safe authored_path_stat install_mode_marker
+        signal_targets skip_list_substring unreachable_handle_branch
+        declared_invariant_pairs fail_open_inventory dangerous_invocation_corpus
+        security_downgrade_flags semgrep capture_corruption repo_hygiene
+        doc_truth doc_snippets plan_qa docs_qa sensitive_content git_history
+        handler_reference generated_doc_drift british_english hook_contract
+        input_contract project_handlers tests smoke_test
+    steps:
+      - id: pick
+        run: |
+          if [ "$REQUESTED" = "all" ]; then
+            chosen="$ALL_CHECKS"
+          else
+            chosen="$REQUESTED"
+          fi
+          json="$(printf '%s\n' $chosen | jq -R . | jq -sc .)"
+          echo "checks=$json" >> "$GITHUB_OUTPUT"
+          echo "matrix: $json"
+
   check:
     name: check ${{ matrix.check }}
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
-        # Literal copy of llm_qa.ALL_TOOL_NAMES (43 checks, `all` order).
-        check:
-          - magic_values
-          - format
-          - lint
-          - type_check
-          - pyright
-          - security
-          - dependencies
-          - shell_check
-          - error_hiding
-          - shell_audit
-          - skill_refs
-          - github_urls
-          - inline_suppressions
-          - released_changelog
-          - canonical_callers
-          - python_var_guidance
-          - eacces_safe
-          - authored_path_stat
-          - install_mode_marker
-          - signal_targets
-          - skip_list_substring
-          - unreachable_handle_branch
-          - declared_invariant_pairs
-          - fail_open_inventory
-          - dangerous_invocation_corpus
-          - security_downgrade_flags
-          - semgrep
-          - capture_corruption
-          - repo_hygiene
-          - doc_truth
-          - doc_snippets
-          - plan_qa
-          - docs_qa
-          - sensitive_content
-          - git_history
-          - handler_reference
-          - generated_doc_drift
-          - british_english
-          - hook_contract
-          - input_contract
-          - project_handlers
-          - tests
-          - smoke_test
+        check: ${{ fromJSON(needs.plan.outputs.checks) }}
     env:
       CHECK: ${{ matrix.check }}
     steps:
@@ -127,6 +123,36 @@ jobs:
           install -D -m 755 \
             untracked/relay-build/hooks-relay-x86_64-unknown-linux-musl \
             untracked/bin/hooks-relay
+
+      # The daemon is started above, but it exits after
+      # daemon.idle_timeout_seconds (600) without a connection, and the
+      # suite's primary run reaches its acceptance tests long after that
+      # (trial run 39702691821: daemon RUNNING at job start, "no live socket"
+      # at test time). scripts/qa/run_test_matrix.py restarts an idled-out
+      # daemon before each extra interpreter's serial run only. This loop
+      # opens a connection every 60 s, which counts as activity, and starts
+      # the daemon if no live socket answers. Bounded by `timeout`.
+      - name: Keep the daemon alive during the run
+        if: matrix.check == 'tests'
+        run: |
+          timeout 18000 bash -c '
+            while true; do
+              sleep 60
+              python -c "
+          import glob, socket, sys
+          alive = False
+          for path in glob.glob(\"untracked/daemon-*.sock\"):
+              try:
+                  with socket.socket(socket.AF_UNIX) as s:
+                      s.settimeout(5)
+                      s.connect(path)
+                  alive = True
+              except OSError:
+                  pass
+          sys.exit(0 if alive else 1)
+          " || ./bin/hooks-daemon start
+            done
+          ' > untracked/daemon-keepalive.log 2>&1 &
 
       - name: Run the check
         run: |
