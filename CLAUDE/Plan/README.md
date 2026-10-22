@@ -6,8 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00546: upgrade steps use the resolved interpreter](00546-upgrade-steps-use-the-resolved-interpreter/PLAN.md) - In Progress (#130: the stale-venv cleanup runs a bare `python3`, crashes on 3.9 and the upgrade still reports success; use the resolved interpreter, guard the entry points, DBF the class)
 
-- [00545: spend meter agents only segment](00545-spend-meter-agents-only-segment/PLAN.md) - In Progress (#133: the spend segment shows only running agents, drops the cumulative total, and stops counting start-up transcripts as unmeasured)
-
 - [00538: supervisor auto refocus and focus signal](00538-supervisor-auto-refocus-and-focus-signal/PLAN.md) - Not Started (#125 follow-up: a spike for a non-screen focus signal; auto-refocus and the mods route are owner decisions)
 
 - [00536: persistent daemon saturation log](00536-persistent-daemon-saturation-log/PLAN.md) - Not Started (#124 follow-up: a bounded journal of saturation episodes, straggler restarts and forced stops that survives a daemon restart, with a verb to print it)
@@ -211,6 +209,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00545: spend meter agents only segment](Completed/00545-spend-meter-agents-only-segment/PLAN.md) - Complete at merge `3503b65ad` (green CI on `9f7ad510e`) + the archiving commit (#133, a coordinator ruling the owner delegated: the spend segment shows only while sub-agents run, as count, families and largest context; the cumulative total leaves the bar; start-up transcripts are no longer unmeasured and real failures show red only when non-zero; release note 012)
+
 - [00544: issue validity claim without author list](Completed/00544-issue-validity-claim-without-author-list/PLAN.md) - Complete at merge `15127181d` (green CI) + the archiving commit (#129: `issue-validity N --claim` and a plain judge run with no author list, printing the author check as not applicable; only `--list-eligible` still refuses)
 
 - [00543: journal file per entry](Completed/00543-journal-file-per-entry/PLAN.md) - Complete at merge `c127d7356` + `c05b91eeb` (green CI on `15127181d`) + the archiving commit (#135, owner-directed: one journal file per entry under `JOURNAL/YYYY-MM-DD/`, so concurrent branches never conflict; legacy day-files read alongside; any change to an existing journal file is denied except conflict-marker removal or an exact restore)
@@ -230,8 +230,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00532: docs optimisation skill](Completed/00532-docs-optimisation-skill/PLAN.md) - Complete at merges `bb3eb552b`, `92c07d7bb` and `36b63400c` + the archiving commit (#123: a versioned Claude Code instruction-loading contract with a re-audit advisory, `docs-qa --footprint`, and the `docs-optimise` proposal skill; release note 001, truth change v3.71.0; follow-ups are ledger 00474 N513 to N515 and the deferred items F1 to F4 in RULINGS-fable.md)
 
 - [00531: project tuned plan fact checker](Completed/00531-project-tuned-plan-fact-checker/PLAN.md) - Complete at `37dfd0b11` + the archiving commit (owner request during the v3.70.0 release: the feed dispatches the project's `tuned_agent`, the generic agent tells a project once how to tune it, and `deployed_artefact_drift` reports a tuned copy whose derived-from marker is behind the shipped template; release note 081, post-upgrade task 03)
-
-- [00495: performance improvement programme](Completed/00495-performance-improvement-programme/PLAN.md) - Complete at merges `25616d385`, `34a754e02`, `03ad00d3d` and `9b04a7e72` + the archiving commit (owner report: daemon startup and the status bar at session start got much slower; the ranked causes are fixed, a start-up budget gate guards against regression, and the Rust question is re-answered from new numbers with the owner decision filed as Plan 00529; release notes 066 to 070)
 
 - [00528: worktree guard stale binding](Completed/00528-worktree-guard-stale-binding/PLAN.md) - Complete at the fix commit + the archiving commit (md-viewer field report via the desktop team: a sub-agent bound to a probe worktree it had already removed was denied its report write into the main checkout; a binding whose worktree is gone is now dropped; release note 064)
 
@@ -324,9 +322,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 546 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 462 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 463 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 61 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 60 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

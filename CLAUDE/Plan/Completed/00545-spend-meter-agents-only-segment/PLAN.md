@@ -1,6 +1,6 @@
 # Plan 00545: spend meter agents only segment
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-21
 **Owner**: dev
 **Priority**: Medium
@@ -47,13 +47,14 @@ agents only.
 
 ### Phase 2: Ship
 
-- [ ] ⬜ **Task 2.1**: Targeted QA, merge, CI green, close #133.
+- [x] ✅ **Task 2.1**: Targeted QA, merge, CI green, close #133.
 
 ## Success Criteria
 
-- [ ] With no agents running, the segment renders nothing; with agents running it renders the agents-only form (tested).
-- [ ] A start-up transcript is never counted as unmeasured; real failures render red only when non-zero (tested).
-- [ ] A release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (the pending-release holding area).
+- [x] With no agents running, the segment renders nothing; with agents running it renders the agents-only form (tested).
+- [x] A start-up transcript is never counted as unmeasured; real failures render red only when non-zero (tested).
+- [x] A release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (the pending-release holding area):
+  `012-spend-meter-shows-running-agents-only.md`.
 
 ## Delivery & Milestones
 
@@ -61,4 +62,4 @@ agents only.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/ — see CLAUDE/PlanJournalling.md. -->
 
-- Not yet delivered.
+- Merged to main in `3503b65ad`; main CI run 39690989972 green on `9f7ad510e`.
