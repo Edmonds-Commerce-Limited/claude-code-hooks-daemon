@@ -86,11 +86,13 @@ modules only.
 - [x] ✅ **Task 1.1**: Run each of the 43 `llm_qa.py` checks on a CI runner in a
   trial workflow. List the ones that need changes to run there. Delivered:
   `subagent-reports/261022-task-1.1-trial-workflow-sonnet.md`; 42 of 43 ran
-  unchanged, `tests` needed a daemon keepalive.
+  unchanged; `tests` failed on the daemon idling out, and the keepalive added to
+  the gate's test jobs held in run 39728713370.
 - [x] ✅ **Task 1.2**: Time each check's job on the runner against the local
   `llm_qa.py` timing summary, and choose the per-Python jobs and shards from it
   (Design 5). Delivered: `subagent-reports/261022-task-1.1-1.2-findings-sonnet.md`;
-  4 check groups and 8 test shards (`scripts/qa/test_shards.yaml`).
+  4 check groups and 8 test jobs in `release-gate.yml`, drawing on the 7 shards
+  in `scripts/qa/test_shards.yaml`.
 
 ### Phase 2: Workflows
 
