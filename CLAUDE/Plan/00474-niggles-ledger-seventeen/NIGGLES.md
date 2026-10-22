@@ -109,6 +109,29 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N529 — the dispatch-declaration advisory does not recognise a plan folder under `Completed/`
+
+**Source**: Plan 00546 follow-up dispatches after its archival. A `Task` prompt naming
+`CLAUDE/Plan/Completed/00546-…/` as its plan folder was reported as declaring no plan folder.
+
+- **Expected**: an archived plan's folder is still a plan folder; a post-archive CI fix belongs to it.
+- **Fix direction**: resolve the declared folder through the same lookup `find-plan` uses, which searches `Completed/`.
+
+**Status**: ⬜ open.
+
+### N528 — targeted QA never runs `test_paths_import_under_310.py` for a change to an import chain under `daemon/paths.py`
+
+**Source**: the Plan 00501 Phase 1 merge (acfe4932d) turned main CI red. `daemon/paths.py` reaches `core.data_layer`, then
+`core.session_mode_registry`, then `utils.session_modes`, then the `skill_scan` package `__init__`, then the pipeline and
+`mdformat`, which imports `tomllib` (3.11+). The guard test `tests/unit/daemon/test_paths_import_under_310.py` fails on
+that, but `llm_qa.py changed` mapped none of the changed modules to it, so targeted QA was green. Fixed forward by
+55e5521c1 (the package `__init__` imports nothing).
+
+- **Fix direction**: map any change under `core/`, `utils/` or `daemon/` to that test, or add a tomllib-blocked import
+  test on `core.data_layer` that the mapper already selects for `core/` changes.
+
+**Status**: ⬜ open.
+
 ### N527 — the status-line loading tests error at teardown: `Directory not empty` removing the sandbox
 
 **Source**: release-gate run 39722497026, job "tests py3.12 rest":
