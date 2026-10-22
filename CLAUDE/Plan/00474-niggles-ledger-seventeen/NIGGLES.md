@@ -116,8 +116,9 @@ Follow-ups, not defects in the reviewers' judgement:
 The child `python -m pytest -p no:xdist -q <polluter> <victim>` printed `2 passed in 0.43s`, then was killed by
 `TimeoutExpired` after 60 s (`Timeout.REQUEST_LONG`). It ran at 99% of an 85-minute run with coverage on.
 
-- **Not reproduced**: three local runs of the same child command (Python 3.11) exit with rc 0 in about 0.45 s. The
-  same run passed on 3.11 and 3.13, and the test file has not changed in recent history.
+- **Not reproduced**: three local runs of the same child command (Python 3.11) exited with rc 0 (printed by the run
+  loop) in about 0.45 s. The run's own job list (`gh run view 39853605423 --json jobs`) shows QA (Python3.11) and QA
+  (Python3.13) succeeding. The test body is unchanged since 292aa14d2 (the file itself changed later, elsewhere).
 - **Hypothesis to establish first**: exit-time work in the child that a loaded runner stretches, such as coverage
   inherited from the parent run being flushed or combined at exit. Measure the child's exit phase on CI before
   changing anything; raising the timeout is not a fix until the cause is known.
