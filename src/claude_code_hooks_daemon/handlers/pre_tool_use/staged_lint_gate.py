@@ -28,6 +28,7 @@ to deny anything.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 import subprocess  # nosec B404 - subprocess used for lint validation only (trusted tools)
@@ -51,7 +52,11 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.strategies.lint.common import build_lint_argv, matches_skip_path
-from claude_code_hooks_daemon.strategies.lint.module_context import resolve_module_context
+from claude_code_hooks_daemon.strategies.lint.module_context import (
+    GoverningConfigError,
+    missing_config_note,
+    resolve_module_context,
+)
 from claude_code_hooks_daemon.strategies.lint.protocol import (
     ClassifiesToolUnavailable,
     LintStrategy,
@@ -67,6 +72,7 @@ from claude_code_hooks_daemon.utils.commit_location import commit_runs_in_foreig
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_commit_parsing import read_commit_form
 from claude_code_hooks_daemon.utils.git_facts import commit_facts
+from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 from claude_code_hooks_daemon.utils.staging_simulation import (
@@ -348,7 +354,22 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         # The root and target come from the same resolver lint_on_edit uses, so
         # a Go file in a nested module is vetted as its package from its
         # go.mod directory rather than as a loose file from the daemon's cwd.
-        module_context = resolve_module_context(file_path, strategy.language_name)
+        # The file's own directory stands in only where no ProjectContext is
+        # initialised (a unit test driving this method directly), the same
+        # notional root lint_on_edit uses, so the two gates cannot disagree.
+        resolved_root = resolve_project_root()
+        project_root = Path(resolved_root) if resolved_root else Path(file_path).parent
+        try:
+            module_context = resolve_module_context(
+                file_path,
+                strategy.language_name,
+                project_root=project_root,
+                ansible_configs=self.layout_for(file_path).ansible_configs,
+            )
+        except GoverningConfigError as exc:
+            # A declared config that is not there is a configuration defect;
+            # it fails the commit loudly rather than linting around it.
+            return str(exc)
         parts = build_lint_argv(
             strategy.default_lint_command,
             file_path,
@@ -368,7 +389,8 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
                     capture_output=True,
                     text=True,
                     timeout=Timeout.LINT_CHECK,
-                    cwd=module_context.module_root,
+                    cwd=module_context.working_dir(project_root),
+                    env=({**os.environ, **module_context.env} if module_context.env else None),
                 )
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
@@ -411,7 +433,9 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
                 parts[0],
             )
             return None
-        return output.strip() or f"exit code {result.returncode}"
+        diagnosis = output.strip() or f"exit code {result.returncode}"
+        config_note = missing_config_note(strategy.language_name, module_context)
+        return f"{diagnosis}\n\n{config_note}" if config_note else diagnosis
 
     def _resolve_executable(self, executable: str) -> str | None:
         """Resolve a lint tool name to a runnable path, or None if absent.

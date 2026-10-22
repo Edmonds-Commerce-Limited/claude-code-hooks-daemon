@@ -5,6 +5,7 @@ implementations. The handler itself has ZERO language awareness.
 """
 
 import logging
+import os
 import shlex
 import shutil
 import subprocess  # nosec B404 - subprocess used for lint validation only (trusted tools)
@@ -28,7 +29,11 @@ from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_written_file_paths
 from claude_code_hooks_daemon.core.workspace import Workspace, resolve_workspace
 from claude_code_hooks_daemon.strategies.lint.common import build_lint_argv, matches_skip_path
-from claude_code_hooks_daemon.strategies.lint.module_context import resolve_module_context
+from claude_code_hooks_daemon.strategies.lint.module_context import (
+    GoverningConfigError,
+    missing_config_note,
+    resolve_module_context,
+)
 from claude_code_hooks_daemon.strategies.lint.protocol import (
     ClassifiesMidEditOutput,
     ClassifiesToolUnavailable,
@@ -422,8 +427,19 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         # MODULE_ROOT_MARKERS). Every other language falls through to the
         # file's own workspace, which is where its config actually lives.
         workspace = self._workspace_for(file_path)
-        module_context = resolve_module_context(file_path, language_name)
-        working_dir = module_context.module_root or str(workspace.root)
+        resolved_root = resolve_project_root()
+        try:
+            module_context = resolve_module_context(
+                file_path,
+                language_name,
+                project_root=Path(resolved_root) if resolved_root else workspace.root,
+                ansible_configs=self.layout_for(file_path).ansible_configs,
+            )
+        except GoverningConfigError as exc:
+            # A declared config that is not there is a configuration defect,
+            # reported loudly rather than linted around.
+            return BlockingResult(decision=Decision.DENY, reason=str(exc))
+        working_dir = module_context.working_dir(workspace.root)
         effective_path = module_context.effective_path
 
         # SECURITY: the PATH is whatever the agent just wrote, so the template
@@ -463,6 +479,7 @@ class LintOnEditHandler(PostToolUseHandlerBase):
                 text=True,
                 timeout=timeout_seconds,
                 cwd=working_dir,
+                env=({**os.environ, **module_context.env} if module_context.env else None),
             )
 
             if result.returncode != 0:
@@ -518,6 +535,9 @@ class LintOnEditHandler(PostToolUseHandlerBase):
                     f"{error_output}\n\n"
                     f"Command: {command}"
                 )
+                config_note = missing_config_note(language_name, module_context)
+                if config_note:
+                    dynamic_detail = f"{dynamic_detail}\n\n{config_note}"
                 return BlockingResult(
                     decision=Decision.DENY,
                     reason=self._deny_reason(hook_input, dynamic_detail),
@@ -672,6 +692,14 @@ language's `default`/`extended` command (set `extended: null` to run only the
 syntax check), and `exclude_paths` exempts paths entirely via gitignore-style
 globs. The project-wide `daemon.exclude_paths` applies here too; the two are
 additive and neither overrides the other.
+
+**Ansible needs its `ansible.cfg` in effect.** The nearest `ansible.cfg` above
+a play is used automatically. A play kept OUTSIDE that config's tree is declared
+once, project-wide, under `layout.ansible_configs` (play glob -> repo-relative
+`ansible.cfg`, e.g. `{"plays/**": "infra/ansible.cfg"}`); this handler and
+`staged_lint_gate` then both run the check from the config's directory with
+`ANSIBLE_CONFIG` set. A declared file that does not exist is denied as a
+configuration error. A failed Ansible check that ran with no config says so.
 
 **The extended-lint timeout is 15s by default, and configurable per
 language.** `options.timeouts.<Language>: <seconds>` (language name matches
