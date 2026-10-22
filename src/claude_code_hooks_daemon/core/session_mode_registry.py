@@ -29,6 +29,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.session_modes import (
     FOCUS_TTL_SECONDS,
     BlockReason,
@@ -236,8 +237,18 @@ class SessionModeRegistry:
         try:
             session_id, entries = _parse_file(path)
         except _CorruptRecordError as error:
-            _quarantine(path, str(error))
-            return
+            corrupt = path.with_name(path.name + CORRUPT_SUFFIX)
+            log_and_continue(
+                logger,
+                error,
+                reason=f"Malformed session-modes file {path}; renaming to {corrupt}",
+            )
+            _quarantine(path, corrupt)
+        else:
+            self._apply_restart_rules(session_id, entries)
+
+    def _apply_restart_rules(self, session_id: str, entries: list[SessionModeEntry]) -> None:
+        """Keep a loaded file's surviving live entries, with one notice per entry."""
         now = self._clock()
         kept: _Entries = {}
         notices: list[ModeNotice] = []
@@ -323,14 +334,17 @@ def _record(entry: SessionModeEntry) -> dict[str, object]:
     }
 
 
-def _quarantine(path: Path, reason: str) -> None:
-    """Log a malformed file at WARNING and rename it ``*.corrupt`` (ERROR if that fails)."""
-    corrupt = path.with_name(path.name + CORRUPT_SUFFIX)
-    logger.warning("Malformed session-modes file %s (%s); renaming to %s", path, reason, corrupt)
+def _quarantine(path: Path, corrupt: Path) -> None:
+    """Rename a malformed file to ``corrupt``; a failed rename is logged at ERROR."""
     try:
         path.rename(corrupt)
     except OSError as error:
-        logger.error("Could not rename malformed session-modes file %s: %s", path, error)
+        log_and_continue(
+            logger,
+            error,
+            reason=f"Could not rename malformed session-modes file {path}",
+            level=logging.ERROR,
+        )
 
 
 def _parse_file(path: Path) -> tuple[str, list[SessionModeEntry]]:
