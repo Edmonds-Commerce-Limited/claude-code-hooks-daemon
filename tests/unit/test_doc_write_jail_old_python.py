@@ -33,7 +33,14 @@ from tests.old_python import OLD_VERSIONS, old_python_or_skip
 
 JAIL_SITE = Path(jail.__file__).resolve().parent
 CHILD_SIDE_MODULES = sorted(JAIL_SITE.glob("*.py"))
-OLDEST = min(tuple(int(part) for part in version.split(".")) for version in OLD_VERSIONS)
+
+
+def _major_minor(version: str) -> tuple[int, int]:
+    major, minor = version.split(".")
+    return int(major), int(minor)
+
+
+OLDEST = min(_major_minor(version) for version in OLD_VERSIONS)
 _TYPE_CHECKS = frozenset({"isinstance", "issubclass"})
 
 #: Driven inside the old child: each audit path, protected and unprotected.

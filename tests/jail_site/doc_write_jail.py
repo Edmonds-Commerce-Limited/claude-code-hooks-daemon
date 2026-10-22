@@ -106,7 +106,7 @@ def _resolve(path: str, dir_fd: object, follow_link: bool) -> str:
     """
     candidate = Path(path)
     if dir_fd is not None and dir_fd != -1 and not candidate.is_absolute():
-        candidate = Path(os.readlink(f"/proc/self/fd/{dir_fd}")) / candidate
+        candidate = Path(f"/proc/self/fd/{dir_fd}").resolve() / candidate
     if follow_link:
         return str(candidate.resolve())
     return str(candidate.absolute().parent.resolve() / candidate.name)
