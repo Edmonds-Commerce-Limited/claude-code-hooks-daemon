@@ -407,6 +407,23 @@ class TestDeclaredBlocked:
         assert SessionPolicy.from_entries([_focus()]).is_blocked is False
 
 
+class TestGoalLoopBlocked:
+    """The entry the goal-loop detector enters in act mode (Plan 00501 Task 6.3)."""
+
+    def test_factory_builds_a_detector_goal_loop_session_entry(self) -> None:
+        entry = session_modes.goal_loop_blocked_entry(_SID, entered_at=_T0, ttl_seconds=7200)
+        assert entry.mode is SessionMode.BLOCKED
+        assert entry.reason is BlockReason.GOAL_LOOP
+        assert entry.source is ModeSource.DETECTOR
+        assert entry.lifetime is Lifetime.SESSION
+        assert entry.label is ModeLabel.GOAL_BLOCKED
+        assert (entry.entered_at, entry.expires_at) == (_T0, _T0 + 7200)
+
+    def test_a_non_positive_ttl_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="expires_at"):
+            session_modes.goal_loop_blocked_entry(_SID, entered_at=_T0, ttl_seconds=0)
+
+
 class TestDisplayedPolicy:
     """Plan 00501 Task 4.1: the badge composes registry, usage-paused and unattended."""
 
