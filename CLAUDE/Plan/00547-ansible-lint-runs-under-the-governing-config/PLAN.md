@@ -51,13 +51,17 @@ so it is a neighbour and not a duplicate.
 
 ### Phase 1: Build (TDD)
 
-- [ ] ⬜ **Task 1.1**: Write failing tests that reproduce #128: no root found,
+- [x] ✅ **Task 1.1**: Write failing tests that reproduce #128: no root found,
   and the two gates use different working directories.
-- [ ] ⬜ **Task 1.2**: Add the declared governing config, applied in
-  `module_context` and read by both gates. Document the option.
-- [ ] ⬜ **Task 1.3**: When a failure ran with no governing config, the deny
+- [x] ✅ **Task 1.2**: Add the declared governing config, applied in
+  `module_context` and read by both gates. Document the option. Delivered:
+  `layout.ansible_configs` (play glob -> repo-relative `ansible.cfg`); a
+  matching play runs from the config's directory with `ANSIBLE_CONFIG` set; a
+  declared file that does not exist is denied as a configuration error.
+- [x] ✅ **Task 1.3**: When a failure ran with no governing config, the deny
   reason names the missing context and the option.
-- [ ] ⬜ **Task 1.4**: Release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] ✅ **Task 1.4**: Release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
+  (`018-ansible-lint-runs-under-the-governing-config.md`).
 
 ### Phase 2: Ship
 
@@ -74,4 +78,6 @@ so it is a neighbour and not a duplicate.
 
 ## Delivery & Milestones
 
-- Not started.
+- Merged to main in `acf6bbcc3` (branch head `51b0fd878`); targeted QA 40/40.
+  `ansible-playbook` is not installed on the dev host, so the gates' tests fake
+  the tool and assert the working directory and environment it is given.
