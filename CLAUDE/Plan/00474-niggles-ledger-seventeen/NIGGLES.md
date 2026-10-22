@@ -109,6 +109,19 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N532 — implementation sub-agents spend their context budget before writing code
+
+**Source**: Plan 00501 Phase 6. Three consecutive `python-developer` (Opus) dispatches stopped at the 150k soft
+budget: the first after reading only (it measured about 60k as injected guidance), part A after the core module, part
+B after reading only. Each left a clean handoff, so nothing was lost but a dispatch each.
+
+- **Expected**: a sub-agent with a scoped brief has most of its budget for the work itself.
+- **Fix direction**: measure what a fresh sub-agent's context holds before its first tool call (injected guidance,
+  CLAUDE.md block, rules) and cut what an implementation sub-agent does not need. Separately, briefs should name a
+  handoff section to read in place of history, which is what made parts A2 and B1 workable.
+
+**Status**: ⬜ open.
+
 ### N531 — a subprocess test's child pytest passes, then does not exit within 60 s on CI
 
 **Source**: main CI run 39853605423 at `cc49aebbb`, job QA (Python3.12), 1 failed of 52,074:
