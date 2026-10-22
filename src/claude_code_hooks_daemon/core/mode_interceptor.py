@@ -11,6 +11,7 @@ from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.utils.autonomy import session_policy
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
 
 logger = logging.getLogger(__name__)
@@ -100,8 +101,13 @@ class UnattendedModeInterceptor:
         try:
             return not session_policy(hook_input).unattended_block_applies
         except (RuntimeError, OSError) as exc:
-            logger.warning(
-                "Unattended mode: session modes unreadable (%s); keeping the stop-block", exc
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    "Unattended mode: session modes unreadable; keeping the stop-block, "
+                    "because blocking a stop that should have been allowed is the safe failure"
+                ),
             )
             return False
 
