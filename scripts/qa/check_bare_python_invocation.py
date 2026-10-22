@@ -610,7 +610,9 @@ def scan(root: Path, allowlist: list[AllowEntry]) -> tuple[list[Violation], int,
                 pinned[entry].append(number)
                 continue
             violations.append(
-                Violation(file=relative, line=number, message=f"runs a bare python from PATH; {_FIX}")
+                Violation(
+                    file=relative, line=number, message=f"runs a bare python from PATH; {_FIX}"
+                )
             )
     for entry, numbers in pinned.items():
         violations.extend(_reconcile(entry, numbers))

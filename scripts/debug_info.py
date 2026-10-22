@@ -16,7 +16,9 @@ import sys
 from pathlib import Path
 
 # `datetime.UTC` (3.11+) is imported next; refuse an older interpreter in one line first.
-_FLOOR = Path(__file__).resolve().parent.parent / "src" / "claude_code_hooks_daemon" / "python_floor.py"
+_FLOOR = (
+    Path(__file__).resolve().parent.parent / "src" / "claude_code_hooks_daemon" / "python_floor.py"
+)
 runpy.run_path(str(_FLOOR))["require_min_python"]("debug_info.py")
 
 import os
