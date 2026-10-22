@@ -109,6 +109,19 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N530 — `plan_number_helper` denies an `ls` of a folder inside an existing plan as a next-number scan
+
+**Source**: the coordinator during Plan 00501 Phase 6 preparation. The command
+`ls CLAUDE/Plan/00501-session-modes/subagent-reports/ | grep -iE "spike|loop"` was denied as R-PLAN-NUMBER-DISCOVERY.
+
+- **Expected**: listing the contents of a named plan's own folder (its `subagent-reports/`, `JOURNAL/`) discovers
+  nothing about plan numbers; only a listing of the plan ROOT (or `Completed/`) can. The deny names the next number
+  (00550), which is no help for this command.
+- **Fix direction**: judge the listed path. Deny only when its target is the plan root or an archive directory, not
+  a path below an `NNNNN-name/` plan folder. TDD the reported command as the allowed case.
+
+**Status**: ⬜ open.
+
 ### N529 — the dispatch-declaration advisory does not recognise a plan folder under `Completed/`
 
 **Source**: Plan 00546 follow-up dispatches after its archival. A `Task` prompt naming
