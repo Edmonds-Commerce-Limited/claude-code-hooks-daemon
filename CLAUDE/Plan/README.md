@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00547: ansible lint runs under the governing config](00547-ansible-lint-runs-under-the-governing-config/PLAN.md) - In Progress (#128: a play outside its `ansible.cfg` tree is syntax-checked with no config, so valid plays are denied; declare the governing config and make both gates agree)
-
 - [00546: upgrade steps use the resolved interpreter](00546-upgrade-steps-use-the-resolved-interpreter/PLAN.md) - In Progress (#130: the stale-venv cleanup runs a bare `python3`, crashes on 3.9 and the upgrade still reports success; use the resolved interpreter, guard the entry points, DBF the class)
 
 - [00538: supervisor auto refocus and focus signal](00538-supervisor-auto-refocus-and-focus-signal/PLAN.md) - Not Started (#125 follow-up: a spike for a non-screen focus signal; auto-refocus and the mods route are owner decisions)
@@ -211,6 +209,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00547: ansible lint runs under the governing config](Completed/00547-ansible-lint-runs-under-the-governing-config/PLAN.md) - Complete at merge `acf6bbcc3` (green CI run 39741211708) + the archiving commit (#128: `layout.ansible_configs` declares a play's governing `ansible.cfg`, applied in `module_context` for both lint gates with `ANSIBLE_CONFIG` set; both gates now share the no-root working directory; a failure with no config in effect still denies and names the option; release note 018)
+
 - [00545: spend meter agents only segment](Completed/00545-spend-meter-agents-only-segment/PLAN.md) - Complete at merge `3503b65ad` (green CI on `9f7ad510e`) + the archiving commit (#133, a coordinator ruling the owner delegated: the spend segment shows only while sub-agents run, as count, families and largest context; the cumulative total leaves the bar; start-up transcripts are no longer unmeasured and real failures show red only when non-zero; release note 012)
 
 - [00544: issue validity claim without author list](Completed/00544-issue-validity-claim-without-author-list/PLAN.md) - Complete at merge `15127181d` (green CI) + the archiving commit (#129: `issue-validity N --claim` and a plain judge run with no author list, printing the author check as not applicable; only `--list-eligible` still refuses)
@@ -269,8 +269,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00503: remove upgrade owner approval](Completed/00503-remove-upgrade-owner-approval/PLAN.md) - Complete at merge `6976bf009` + the archiving commit (owner request, #112: the exit-4 owner approval, `approve-upgrade`, the approval markers and `upgrade_approval_guard` removed; breaking items lead the exit-3 reading, large jumps get phasing advice, and an old config naming the guard still validates; release note 022 in UNRELEASED)
 
-- [00500: full qa timing and speed](Completed/00500-full-qa-timing-and-speed/PLAN.md) - Complete at merge `c02cf9838` + the archiving commit (owner request: per-step timing, a resumable and sharded gate, and the measured hot spots cut; total wall-clock deferred to the Actions runs, #107)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -324,9 +322,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 547 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 463 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 464 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 61 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 60 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
