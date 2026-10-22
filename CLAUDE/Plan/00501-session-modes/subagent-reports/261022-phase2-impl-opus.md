@@ -280,3 +280,46 @@ Left for the next agent, in this order:
    Then regenerate any guidance that depends on that text.
 4. Write the release note, using the next free number from `git ls-tree origin/main CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
    Then tick Task 2.2 in PLAN.md and run targeted QA.
+
+## Fifth agent (Task 2.2 parts C-E): idle gate, config compatibility, wording; stopped at the context soft budget
+
+Built, test-first:
+
+- **Idle gate** (`c7087bbaa`). `_awaiting_human` is now a staticmethod: `session_policy(hook_input).is_blocked`, or this stop
+  declares `[awaiting-human]`. An unreadable registry (RuntimeError/OSError) stands aside (True) and logs a WARNING, so the gate
+  never traps. The legacy marker file is no longer read. Tests: autouse `pin_session_modes(monkeypatch, tmp_path / "modes")`;
+  new cases cover the mode for this session, another session's mode, focus alone (still denies), the legacy marker being ignored,
+  and an unreadable registry. Red: `untracked/scratch/p2c-red-idle-gate.txt` (3 failed, 44 passed). Green:
+  `untracked/scratch/p2c-green-idle-gate.txt` (382 passed, `tests/unit/handlers/stop/`). `marker_is_valid` is now used only by
+  `cron_pause`.
+- **Config compatibility** (`d664b5831`). Probe `untracked/scratch/p2c-probe-retired-options.txt`: a config that still set
+  `expiry_hours` or `marker_expiry_hours` passed both validators, with no errors and no warnings. The key was silently ignored.
+  New `RETIRED_HANDLER_OPTIONS` (in `constants/handlers.py`, exported from `constants`) maps each handler to its removed options.
+  `config.validator.ConfigValidator.retired_option_messages(config)` names each one by its full dotted path. Startup `validate`
+  logs those messages at WARNING. `install.config_validator` (`config-validate`) lists them as warnings, and the config stays
+  valid. Tests: `tests/unit/config/test_retired_handler_options.py`. Red: `untracked/scratch/p2c-red-retired-options.txt`
+  (collection error, the constant was missing). Green: `untracked/scratch/p2c-green-retired-options.txt` (2469 passed across
+  `tests/unit/config/` and `tests/unit/install/`).
+- **Wording** (`a8ce146ef`). The suppressor's module docstring, `_RULE`, `_DECLARED_RULE`, `get_claude_md`, the method
+  docstrings and the first acceptance test now describe the awaiting-human or blocked session mode, not a marker. Tests: 398
+  passed (`user_prompt_submit/` plus the stand-in test). mypy, ruff and black are clean on every touched source file.
+
+Not done, for the next agent:
+
+1. `docs/guides/HANDLER_REFERENCE.md` still carries the old "marker is live" rule text. The worktree's own
+   `python -m claude_code_hooks_daemon.daemon.cli regenerate-docs` changed no tracked file, so leave this to the QA autofix or
+   `generated_doc_drift`, and check it there.
+
+2. Write the release note: run `git fetch`, then `git ls-tree origin/main CLAUDE/UPGRADES/UNRELEASED/release-notes/` for the
+   next number. It should cover:
+
+   - the awaiting-human state is now a 24-hour session mode;
+   - the suppressor and the idle gate read the registry;
+   - `expiry_hours` and `marker_expiry_hours` are retired, and they warn instead of being silently ignored.
+
+   Consider a `config-changes` manifest entry for the two retired options.
+
+3. Tick Task 2.2 in PLAN.md.
+
+Task 2.3 needs: no marker readers remain outside `cron_pause`. `blockage_marker`'s write side is still imported wherever part A
+left it; check `auto_continue_stop` before deleting the module.
