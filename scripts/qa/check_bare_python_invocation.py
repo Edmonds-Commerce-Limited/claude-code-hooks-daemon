@@ -18,6 +18,17 @@ command on (``VAR=x``, ``exec``, ``env``, ``sudo``, ``nohup``, ``timeout N``,
 every other use as an ARGUMENT or in prose; a heredoc body (data); a comment;
 a pinned ``python3.12``; a resolved path or ``"$interpreter"``.
 
+**A bare name stored as a VALUE to be run later is the same hazard**, so it is
+reported too: a default ``${VAR:-python3}`` / ``${VAR:=python3}`` / ``${1:-python3}``
+(also nested), and an assignment ``VAR=python3`` / ``VAR="python3"`` (also after
+``local`` / ``export`` / ``declare`` ...). A default that quietly picks the PATH
+interpreter is a silent fallback. Not reported: the word in an ``echo`` / ``printf``
+argument, ``${VAR:+python3}``, ``command -v python3``, a pinned or resolved value.
+
+**Scope.** ``CLAUDE/Plan/`` is not scanned: plan prototypes and benchmarks are never
+run on a client host nor by install, upgrade or dispatch, so they do not carry the
+hazard. Fixture trees, gitignored state and other checkouts are skipped as well.
+
 **Genuine bootstrap probes** (code whose job is to find or validate an
 interpreter before a venv exists) are listed in ``bare-python-allowlist.json``,
 one entry per probe with the REASON it carries no hazard. An entry that
@@ -75,12 +86,40 @@ _KEYWORDS: Final[frozenset[str]] = frozenset(
 )
 #: Commands that run their first non-option argument as a command.
 _PREFIXES: Final[frozenset[str]] = frozenset(
-    {"exec", "env", "sudo", "nohup", "nice", "setsid", "stdbuf", "timeout", "xargs", "command"}
+    {
+        "exec",
+        "env",
+        "sudo",
+        "nohup",
+        "nice",
+        "setsid",
+        "stdbuf",
+        "timeout",
+        "xargs",
+        "command",
+        # Declaration builtins hand the next word on as an assignment (``local x=python3``).
+        "local",
+        "export",
+        "declare",
+        "readonly",
+        "typeset",
+    }
 )
 #: ``command -v python3`` asks where it is; it does not run it.
 _LOOKUP_FLAGS: Final[frozenset[str]] = frozenset({"-v", "-V"})
 _DURATION: Final[re.Pattern[str]] = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
 _ASSIGNMENT: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\+?=")
+#: ``VAR=python3`` / ``VAR="python3"``: a bare name stored to be run later.
+_BARE_ASSIGNMENT: Final[re.Pattern[str]] = re.compile(
+    r"^[A-Za-z_][A-Za-z0-9_]*\+?=(?:python3?)$"
+)
+#: The inside of ``${...}``: ``VAR:-python3`` / ``VAR:=python3`` / ``1:-python3``, possibly
+#: nested in another default. ``:+`` is not a default, and ``python3.12`` is a pin.
+_DEFAULT_BARE: Final[re.Pattern[str]] = re.compile(
+    r"""(?:^|\{)(?:[A-Za-z_]\w*|\d+):?[-=]\s*["']?python3?["']?(?:\}|$)"""
+)
+#: Commands whose arguments are text shown to a person, never a value that is run.
+_DISPLAY_COMMANDS: Final[frozenset[str]] = frozenset({"echo", "printf"})
 _HEREDOC_DELIMITER: Final[re.Pattern[str]] = re.compile(r"""^(-?)\s*(?:'([^']*)'|"([^"]*)"|\\?(\w+))""")
 
 _SHELL_SUFFIXES: Final[frozenset[str]] = frozenset({".sh", ".bash"})
@@ -106,6 +145,8 @@ _SKIP_DIRS: Final[frozenset[str]] = frozenset(
 )
 #: Fixture trees hold deliberately-defective sample files, never run.
 _FIXTURE_PARTS: Final[tuple[str, ...]] = ("tests", "fixtures")
+#: Plan prototypes and benchmarks are never run on client hosts, by install, upgrade or dispatch.
+_PLAN_PARTS: Final[tuple[str, ...]] = ("CLAUDE", "Plan")
 
 _REMEDIATION: Final[str] = (
     "Each site above runs a bare python3/python, so it runs whatever PATH resolves,\n"
@@ -180,6 +221,7 @@ class _Scanner:
         self._word_literal = True
         self._word_line = 1
         self._prefix: str | None = None
+        self._cmd_name = ""
         self._redirect_target = False
         self._depth = 0
 
@@ -202,6 +244,8 @@ class _Scanner:
             if word.startswith("-") or (self._prefix == "timeout" and _DURATION.match(word)):
                 return
         if _ASSIGNMENT.match(word) and not word.startswith("="):
+            if _BARE_ASSIGNMENT.match(word):
+                self.found.append(self._word_line)
             return
         if literal and word in _KEYWORDS:
             return
@@ -209,6 +253,7 @@ class _Scanner:
             self._prefix = word
             return
         self._prefix = None
+        self._cmd_name = word if literal else ""
         if literal and word in _BARE_NAMES and not (followed_by_close_paren and self._depth == 0):
             self.found.append(self._word_line)
         self._cmd = False
@@ -275,6 +320,7 @@ class _Scanner:
 
     def _braces(self) -> None:
         depth = 1
+        start = self._i
         self._add("${", literal=False)
         while self._i < len(self._s) and depth:
             ch = self._s[self._i]
@@ -282,11 +328,18 @@ class _Scanner:
             depth += (ch == "{") - (ch == "}")
             self._line += ch == "\n"
         self._word_literal = False
+        if _DEFAULT_BARE.search(self._s[start : self._i]) and not self._is_display_text():
+            self.found.append(self._line)
+
+    def _is_display_text(self) -> bool:
+        """Whether the word being read is an argument of ``echo`` / ``printf``: text, not a value."""
+        return not self._cmd and self._cmd_name in _DISPLAY_COMMANDS
 
     def _substitution(self, closer: str) -> None:
         """Scan a ``$( ... )`` or backtick body as its own command context."""
         saved = (self._word, self._word_quoted, self._word_literal, self._word_line)
         saved_state = (self._cmd, self._prefix, self._redirect_target, self._depth)
+        saved_name = self._cmd_name
         self._word, self._word_quoted, self._word_literal = "", False, True
         self._cmd, self._prefix, self._redirect_target = True, None, False
         self._depth = 1 if closer == ")" else 0
@@ -294,6 +347,7 @@ class _Scanner:
         self._end_word()
         self._word, self._word_quoted, self._word_literal, self._word_line = saved
         self._cmd, self._prefix, self._redirect_target, self._depth = saved_state
+        self._cmd_name = saved_name
         self._word_literal = False
 
     # -- main loop
@@ -470,8 +524,10 @@ def _is_shell(path: Path, head: str) -> bool:
 
 
 def _is_unscanned(parts: tuple[str, ...]) -> bool:
-    return any(part in _SKIP_DIRS for part in parts) or parts[: len(_FIXTURE_PARTS)] == (
-        _FIXTURE_PARTS
+    return (
+        any(part in _SKIP_DIRS for part in parts)
+        or parts[: len(_FIXTURE_PARTS)] == _FIXTURE_PARTS
+        or parts[: len(_PLAN_PARTS)] == _PLAN_PARTS
     )
 
 

@@ -132,6 +132,61 @@ class TestCommandPosition:
     def test_non_invocation_is_clean(self, checker: ModuleType, source: str) -> None:
         assert _lines(checker, source) == []
 
+    @pytest.mark.parametrize(
+        "source",
+        [
+            'python_bin="${HOOKS_DAEMON_PYTHON:-python3}"',
+            'local python_bin="${3:-python3}"',
+            'ensure_venv "$d" "$v" "${HOOKS_DAEMON_PYTHON:-python3}"',
+            'x="${VAR:=python3}"',
+            "x=${VAR:-python}",
+            "x=${VAR-python3}",
+            "x=${VAR:-'python3'}",
+            'x=${A:-${B:-"python3"}}',
+            "PYTHON_BIN=python3",
+            'PYTHON_BIN="python3"',
+            "PYTHON_BIN='python3'",
+            'local python_bin="python3"',
+            "export PYTHON_BIN=python3",
+            "declare -r PY=python",
+            'if [ -z "$x" ]; then\n  PYTHON_BIN="python3"\nfi',
+        ],
+    )
+    def test_a_bare_name_used_as_a_value_to_be_run_is_found(
+        self, checker: ModuleType, source: str
+    ) -> None:
+        assert _lines(checker, source) != []
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            'x="${VAR:-python3.12}"',
+            'x="${VAR:-$HOME/bin/python3}"',
+            'x="${VAR:-}"',
+            'x="${VAR:-python3-config}"',
+            'x="${python3:-1}"',
+            "x=python3.12",
+            "x=/usr/bin/python3",
+            'x="$(command -v python3)"',
+            'x="use python3 here"',
+            'x="${VAR:-use python3}"',
+            "x=${VAR:+python3}",
+            "echo x=python3",
+            "echo ${VAR:-python3}",
+            "# x=python3",
+            "cat <<'EOF'\nPYTHON_BIN=python3\nEOF",
+            "cat <<EOF\n${VAR:-python3}\nEOF",
+        ],
+    )
+    def test_prose_lookups_and_pinned_values_stay_clean(
+        self, checker: ModuleType, source: str
+    ) -> None:
+        assert _lines(checker, source) == []
+
+    def test_a_default_reports_the_line_it_sits_on(self, checker: ModuleType) -> None:
+        source = 'a=1\nb="${X:-python3}"\n'
+        assert _lines(checker, source) == [2]
+
     def test_script_text_in_a_single_quoted_string_after_the_command_is_not_scanned(
         self, checker: ModuleType
     ) -> None:
@@ -183,6 +238,22 @@ class TestScan:
         _write(tmp_path, "tests/fixtures/x/bad.sh", "python3 a.py\n")
         _write(tmp_path, "ok.sh", "echo fine\n")
         assert checker.scan_tree(tmp_path, allowlist=[]) == []
+
+    def test_plan_prototypes_are_not_scanned_but_other_claude_files_are(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        _write(tmp_path, "CLAUDE/Plan/00001-x/bench.sh", "python3 a.py\n")
+        _write(tmp_path, "CLAUDE/Plan/Completed/00002-y/run.sh", 'P="${X:-python3}"\n')
+        _write(tmp_path, "CLAUDE/UPGRADES/v2/migrate.sh", "python3 a.py\n")
+        found = checker.scan_tree(tmp_path, allowlist=[])
+        assert [v.file for v in found] == ["CLAUDE/UPGRADES/v2/migrate.sh"]
+
+    def test_a_value_default_is_reported_in_a_file(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        _write(tmp_path, "s.sh", 'x=1\nPY="${HOOKS_DAEMON_PYTHON:-python3}"\n')
+        found = checker.scan_tree(tmp_path, allowlist=[])
+        assert [(v.file, v.line) for v in found] == [("s.sh", 2)]
 
     def test_an_allowlisted_probe_is_not_reported(
         self, checker: ModuleType, tmp_path: Path
