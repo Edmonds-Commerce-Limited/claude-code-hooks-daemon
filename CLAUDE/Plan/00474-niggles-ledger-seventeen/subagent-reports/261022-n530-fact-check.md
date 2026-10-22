@@ -38,3 +38,19 @@ What this changes in the plan: the N530 entry's Source line says the reported co
 | 8   | N526 recurrence (cba846ee3, 95aba97b5, run 39819035114, report 261022-n526-recurrence-opus.md) | Out of scope                      | The diff changes it, but you asked for N530 only. Not checked.                                                                                                                                                           |
 
 Totals for the N530 claims (rows 1-7): 4 verified, 1 refuted, 1 unverifiable (row 6), plus one caveat on row 7.
+
+## Re-check
+
+Scope: the corrected N530 entry and its STATUS-INDEX row. Probe: untracked/scratch/n530_probe2.py, which runs `matches()` with plan dir `CLAUDE/Plan`.
+
+| # | Claim | Verdict | Evidence |
+| - | ----- | ------- | -------- |
+| 1 | `ls CLAUDE/Plan/00501-session-modes/subagent-reports/ \| grep -iE "spike\|loop\|0\.[0-9]"` is denied | VERIFIED | Probe `matches()` is True for the exact command. |
+| 2 | The `ls \| grep` rule fires on a `[0-9]` class in the grep pattern | VERIFIED | Rule 5, plan_number_helper.py:647-650, needs the literal `0-9` after `grep`. The same command with `0\.3` and the original `spike\|loop` both give False. |
+| 3 | The rule never looks at the listed path | VERIFIED | Line 647 only requires `ls\s+.*CLAUDE/Plan` somewhere in the command. A path below a plan folder passes it. `ls /tmp \| grep "[0-9]"` gives False, so the dependency is on the plan-dir text, not on the target. |
+| 4 | Fix direction: allow whatever the grep pattern holds | UNVERIFIABLE-HERE (design) | The change belongs in Rule 5. |
+| 5 | The `0.3` in the pattern is a spike number | UNVERIFIABLE-HERE | Parenthetical, no file to check. |
+| 6 | The fact-check file exists at that path | VERIFIED | This file. |
+| 7 | STATUS-INDEX row: `subagent-reports/` piped to a grep holding `[0-9]`; the rule ignores the listed path | VERIFIED | Same evidence as rows 2 and 3. |
+
+Totals: 5 verified, 0 refuted, 2 unverifiable. The earlier R1 refutation is resolved by the corrected command text.
