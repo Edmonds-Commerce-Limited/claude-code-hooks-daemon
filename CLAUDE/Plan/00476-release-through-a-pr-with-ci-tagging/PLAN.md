@@ -96,8 +96,9 @@ modules only.
 - [x] ✅ **Task 2.2**: A separate performance-sweep job (Design 6). Delivered:
   `perf_sweep` marker on the 7 `scaled_cpu_seconds` tests (11 cases), deselected
   from the fallback and matrix steps, run alone by the `perf-sweep` CI job.
-- [ ] ⬜ **Task 2.3**: The release state file records the CI run and `/release`
-  checks it on resume (Design 7).
+- [x] ✅ **Task 2.3**: The release state file records the CI run and `/release`
+  checks it on resume (Design 7). Delivered: optional `ci` record in the state
+  file and `scripts/release/check_release_ci.py` (strict schema, live `gh run view` check behind a seam, one-line named failure, exit 1).
 
 ### Phase 3: Procedure
 
