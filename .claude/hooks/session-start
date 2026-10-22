@@ -43,9 +43,12 @@ if [[ "${1:-}" != "--no-relay" && "${BASH_SOURCE[0]}" == "/workspace/.claude/hoo
             _rl_opts="$-"
             shopt -s execfail
             set +e
-            HOOKS_DAEMON_RELAY_DAEMON_ROOT="/workspace" \
-                exec "$_rl_bin" "$_rl_sock" --fallback "${BASH_SOURCE[0]}" \
-                --timeout-ms "30000"
+            _rl_exec_relay() {
+                HOOKS_DAEMON_RELAY_DAEMON_ROOT="/workspace" \
+                    exec "$_rl_bin" "$_rl_sock" --fallback "$1" \
+                    --timeout-ms "30000"
+            }
+            _rl_exec_relay "${BASH_SOURCE[0]}"
             shopt -u execfail
             if [[ "$_rl_opts" == *e* ]]; then set -e; fi
         fi

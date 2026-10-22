@@ -40,6 +40,7 @@ from claude_code_hooks_daemon.install.background_sync import (
     SyncStatus,
     read_state_file,
 )
+from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.install.transport_toggle import RelayProvision
@@ -112,7 +113,7 @@ def _state_text(status: SyncStatus, *, detail: str, pid: int | None = None) -> s
 
 def _write_state(path: Path, status: SyncStatus, *, detail: str, pid: int | None = None) -> None:
     """Replace the state file atomically, so a reader never sees half of it."""
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp = unique_temp_path(path)
     tmp.write_text(_state_text(status, detail=detail, pid=pid))
     tmp.replace(path)
 

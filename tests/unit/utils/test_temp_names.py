@@ -29,6 +29,7 @@ _WRITER_MODULES = (
     "handlers/session_start/model_fallback_detector.py",
     "handlers/status_line/downgrade_state.py",
     "utils/model_downgrade_signal.py",
+    "install/relay_repair.py",
 )
 
 _HAND_ROLLED = re.compile(r"getpid\(\)}[^\"']*\.tmp")

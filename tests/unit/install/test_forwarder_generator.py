@@ -451,7 +451,24 @@ def test_guard_block_execs_with_fallback_and_stdin_intact() -> None:
     block = build_relay_guard_block(
         "pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u"), Path("/p")
     )
-    assert 'exec "$_rl_bin" "$_rl_sock" --fallback "${BASH_SOURCE[0]}"' in block
+    assert 'exec "$_rl_bin" "$_rl_sock" --fallback "$1"' in block
+    assert '_rl_exec_relay "${BASH_SOURCE[0]}"' in block
+
+
+def test_guard_block_exec_is_the_last_command_of_its_function() -> None:
+    """shellcheck SC2093 fires on any command after an `exec` in the same list.
+
+    The execfail fallback is deliberate, so the exec sits alone in a function:
+    nothing follows it there, and the fallback runs after the call returns.
+    """
+    block = build_relay_guard_block(
+        "pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u"), Path("/p")
+    )
+    body = block.split("_rl_exec_relay() {\n", 1)[1].split("            }\n", 1)[0]
+    assert body.count("exec ") == 1
+    assert body.rstrip().endswith('--timeout-ms "30000"')
+    assert block.index("shopt -s execfail") < block.index('_rl_exec_relay "${BASH_SOURCE[0]}"')
+    assert block.index('_rl_exec_relay "${BASH_SOURCE[0]}"') < block.index("shopt -u execfail")
 
 
 def test_guard_block_hands_the_relay_its_daemon_root() -> None:
@@ -461,7 +478,10 @@ def test_guard_block_hands_the_relay_its_daemon_root() -> None:
     block = build_relay_guard_block(
         "pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u"), Path("/p")
     )
-    assert f'            {RELAY_DAEMON_ROOT_ENV}="/p" \\\n                exec "$_rl_bin"' in block
+    assert (
+        f'                {RELAY_DAEMON_ROOT_ENV}="/p" \\\n                    exec "$_rl_bin"'
+        in block
+    )
 
 
 def test_the_daemon_root_variable_is_the_relays() -> None:
