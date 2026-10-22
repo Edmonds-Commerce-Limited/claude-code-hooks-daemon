@@ -112,13 +112,16 @@ Follow-ups, not defects in the reviewers' judgement:
 ### N530 — `plan_number_helper` denies an `ls` of a folder inside an existing plan as a next-number scan
 
 **Source**: the coordinator during Plan 00501 Phase 6 preparation. The command
-`ls CLAUDE/Plan/00501-session-modes/subagent-reports/ | grep -iE "spike|loop"` was denied as R-PLAN-NUMBER-DISCOVERY.
+`ls CLAUDE/Plan/00501-session-modes/subagent-reports/ | grep -iE "spike|loop|0\.[0-9]"` was denied as
+R-PLAN-NUMBER-DISCOVERY: the `ls | grep` rule fires on a `[0-9]` class in the grep pattern (here a spike number,
+`0.3`) and never looks at what is being listed (fact-check: `subagent-reports/261022-n530-fact-check.md`).
 
 - **Expected**: listing the contents of a named plan's own folder (its `subagent-reports/`, `JOURNAL/`) discovers
   nothing about plan numbers; only a listing of the plan ROOT (or `Completed/`) can. The deny names the next number
   (00550), which is no help for this command.
 - **Fix direction**: judge the listed path. Deny only when its target is the plan root or an archive directory, not
-  a path below an `NNNNN-name/` plan folder. TDD the reported command as the allowed case.
+  a path below an `NNNNN-name/` plan folder, whatever the grep pattern holds. TDD the exact reported command
+  (with its `0\.[0-9]`) as the allowed case.
 
 **Status**: ⬜ open.
 
