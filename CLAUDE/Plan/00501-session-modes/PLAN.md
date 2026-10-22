@@ -146,7 +146,7 @@ All CLEAR; rationale and code citations in
   `continue`, because the supervisor also reads `compacting` from the context sidecar. It would also break the
   supervisor's wait after a `/compact` it typed: that wait never ends, and each wasted wait counts towards the
   injection fuse. The only daemon-side part is writing BLOCKED to the session-modes file, which Task 2.2 does.
-- [ ] ⬜ **Task 2.3**: TDD the unattended stop-block interceptor standing down while BLOCKED or usage-paused.
+- [x] ✅ **Task 2.3**: TDD the unattended stop-block interceptor standing down while BLOCKED or usage-paused.
 
 ### Phase 3: Focus
 

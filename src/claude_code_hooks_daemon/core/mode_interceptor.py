@@ -10,6 +10,8 @@ from typing import Any, Protocol
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
+from claude_code_hooks_daemon.utils.autonomy import session_policy
+from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +42,12 @@ class UnattendedModeInterceptor:
 
     Only intercepts EventType.STOP (not SubagentStop per user preference).
     Checks re-entry protection to prevent infinite loops.
+
+    Halting beats driving (Plan 00501): the block stands down for a session
+    that is usage-paused or in a BLOCKED mode (awaiting-human or goal-blocked),
+    because forcing such a session on is exactly what those modes exist to
+    stop. Focus does not stand it down. A registry that cannot be read asserts
+    no mode, so the operator's unattended setting holds (logged at WARNING).
     """
 
     __slots__ = ("_custom_message",)
@@ -72,6 +80,10 @@ class UnattendedModeInterceptor:
             logger.debug("Unattended mode: stop_hook_active detected, skipping to prevent loop")
             return None
 
+        if self._session_halts_work(hook_input):
+            logger.info("Unattended mode: session is usage-paused or blocked, stop allowed")
+            return None
+
         # Build block reason
         reason = ModeConstant.UNATTENDED_BLOCK_REASON
         if self._custom_message:
@@ -79,6 +91,19 @@ class UnattendedModeInterceptor:
 
         logger.info("Unattended mode: blocking Stop event")
         return HookResult(decision=Decision.DENY, reason=reason)
+
+    @staticmethod
+    def _session_halts_work(hook_input: dict[str, Any]) -> bool:
+        """Whether this stop's session is usage-paused or in a mode that halts the stop-block."""
+        if hook_is_usage_paused(hook_input):
+            return True
+        try:
+            return not session_policy(hook_input).unattended_block_applies
+        except (RuntimeError, OSError) as exc:
+            logger.warning(
+                "Unattended mode: session modes unreadable (%s); keeping the stop-block", exc
+            )
+            return False
 
 
 def get_interceptor_for_mode(
