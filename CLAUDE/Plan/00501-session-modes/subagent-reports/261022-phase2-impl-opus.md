@@ -323,3 +323,27 @@ Not done, for the next agent:
 
 Task 2.3 needs: no marker readers remain outside `cron_pause`. `blockage_marker`'s write side is still imported wherever part A
 left it; check `auto_continue_stop` before deleting the module.
+
+## Sixth agent (Task 2.2 wrap-up, Task 2.3): both ticked
+
+- **Task 2.2 wrap-up** (`9d6fcef0b`). `docs/guides/HANDLER_REFERENCE.md` is hand-maintained (`scripts/qa/check_handler_reference.py`
+  only checks it), so the `auto_continue_stop` and `failsafe_cron_blockage_suppressor` sections were fixed in place: the awaiting-human
+  session mode (24 hours) replaces the marker, only a genuine same-session human prompt ends it, the legacy file is not read, and the
+  retired `expiry_hours`/`marker_expiry_hours` warn. Release note `CLAUDE/UPGRADES/UNRELEASED/release-notes/020-awaiting-human-is-a-session-mode.md`
+  (019 was the highest on `origin/main`). No `config-changes` manifest entry was added; the coordinator may want one for the two
+  retired options.
+- **Task 2.3** (`6118d89f5`). `UnattendedModeInterceptor._session_halts_work`: when `hook_is_usage_paused(hook_input)` or
+  `not session_policy(hook_input).unattended_block_applies`, `intercept` returns None and the stop goes to the chain. An unreadable
+  registry (RuntimeError/OSError) keeps the block and logs a WARNING: no mode can be asserted, so the operator's unattended setting
+  holds, and `stop_hook_active` still bounds it to one block per stop. Tests in `tests/unit/core/test_mode_interceptor.py`: no mode
+  blocks; awaiting-human, goal-blocked and usage-paused allow; focus blocks; another session's modes block; an unreadable registry
+  blocks. Red: `untracked/scratch/p2-3-red-interceptor.txt` (7 errors, the module had no `hook_is_usage_paused`). Green:
+  `untracked/scratch/p2-3-green-wide.txt` (every test file naming unattended mode plus `tests/unit/daemon/`: 3540 passed, 1 failed,
+  see Left 1). mypy, ruff and black are clean on both files.
+
+Left:
+
+1. `tests/unit/daemon/test_paths_import_under_310.py::test_paths_imports_when_tomllib_unavailable` fails. It predates this work: the
+   failing chain is `core/__init__` -> `data_layer` -> `session_mode_registry` -> `utils/session_modes` -> `skill_scan`, and
+   `session_modes` already imports `skill_scan` on `origin/main`. Check it before the full QA gate.
+2. `blockage_marker`'s write side and `import_legacy_blockage_marker` remain; `marker_is_valid` is used only by `cron_pause`. Not touched.
