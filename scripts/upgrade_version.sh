@@ -400,6 +400,20 @@ _target_release() {
 GATE_PYTHON_FLOOR="3.11"
 GATE_PYTHON=""
 
+# _resolve_build_python() - Set BUILD_PYTHON to the interpreter the venv is
+# built with: $HOOKS_DAEMON_PYTHON when valid, else the newest compatible one
+# on PATH (find_latest_python, the same ladder venv_bootstrap.sh uses). Never
+# a bare python3: with none found it stops, naming the floor.
+BUILD_PYTHON=""
+_resolve_build_python() {
+    local found
+    if ! found="$(find_latest_python "$GATE_PYTHON_FLOOR" "$DAEMON_DIR/pyproject.toml")"; then
+        fail_fast "No Python >= $GATE_PYTHON_FLOOR found to build the venv with (set HOOKS_DAEMON_PYTHON to a valid interpreter or install one on PATH)"
+    fi
+    BUILD_PYTHON="$found"
+    print_info "Building the venv with $BUILD_PYTHON"
+}
+
 # _pick_gate_python() - Set GATE_PYTHON to a Python found only in a trusted
 # GATE_SAFE_PATH location (review2 MAJOR 2: root-owned, not group- or
 # world-writable); returns 1 when there is none.
@@ -917,7 +931,8 @@ if [ "$ROLLBACK_REF" = "$TARGET_VERSION" ] || { [ -n "$TARGET_COMMIT" ] && [ "$T
     # Plan 00099: ensure_venv uses a fingerprint-keyed venv path so concurrent
     # environments (container vs host, different Pythons) don't clobber each
     # other. Handles stale/missing stamps internally (recreate+restamp).
-    VENV_PATH=$(ensure_venv "$DAEMON_DIR" "$INSTALL_STAMP" "${HOOKS_DAEMON_PYTHON:-python3}")
+    _resolve_build_python
+    VENV_PATH=$(ensure_venv "$DAEMON_DIR" "$INSTALL_STAMP" "$BUILD_PYTHON")
     if [ -z "$VENV_PATH" ]; then
         fail_fast "ensure_venv returned empty path"
     fi
@@ -1286,7 +1301,8 @@ log_step "7" "Recreating virtual environment"
 # Plan 00099: use fingerprint-keyed venv so concurrent environments (container
 # vs host, different Pythons) each keep their own healthy venv. ensure_venv
 # rebuilds when the stamp is missing/stale and handles creation atomically.
-VENV_PATH=$(ensure_venv "$DAEMON_DIR" "$INSTALL_STAMP" "${HOOKS_DAEMON_PYTHON:-python3}")
+_resolve_build_python
+VENV_PATH=$(ensure_venv "$DAEMON_DIR" "$INSTALL_STAMP" "$BUILD_PYTHON")
 if [ -z "$VENV_PATH" ]; then
     fail_fast "ensure_venv returned empty path"
 fi

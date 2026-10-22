@@ -42,11 +42,31 @@ source "${SCRIPT_DIR}/install/python_fingerprint.sh"
 source "${SCRIPT_DIR}/install/venv.sh"
 # shellcheck source=install/venv_resolver.sh
 source "${SCRIPT_DIR}/install/venv_resolver.sh"
+# shellcheck source=lib/python_discovery.sh
+source "${SCRIPT_DIR}/lib/python_discovery.sh"
+
+# The oldest Python this script runs on; pyproject's requires-python may raise it.
+SETUP_PYTHON_FLOOR="3.11"
+SETUP_PYTHON=""
+
+# _resolve_setup_python() - Set SETUP_PYTHON to the resolved interpreter every
+# step below runs (version read, socket-path measure, venv build). Honours
+# $HOOKS_DAEMON_PYTHON, else the newest compatible one on PATH. Never a bare
+# python3: with none found the script stops and names the floor.
+_resolve_setup_python() {
+    local found
+    if ! found="$(find_latest_python "${SETUP_PYTHON_FLOOR}" "${PROJECT_ROOT}/pyproject.toml")"; then
+        echo -e "${RED}ERROR${NC}: no Python >= ${SETUP_PYTHON_FLOOR} found to run worktree setup." >&2
+        echo "  Set HOOKS_DAEMON_PYTHON to a valid interpreter or install one on PATH." >&2
+        return 1
+    fi
+    SETUP_PYTHON="${found}"
+}
 
 # Read the daemon version string so ensure_venv can stamp the venv with it.
 _read_daemon_version() {
     local version_file="$1"
-    python3 - "$version_file" <<'PY'
+    "${SETUP_PYTHON}" - "$version_file" <<'PY'
 import sys, re, pathlib
 path = pathlib.Path(sys.argv[1])
 match = re.search(r'__version__\s*=\s*"([^"]+)"', path.read_text())
@@ -187,7 +207,7 @@ preflight_socket_path() {
         self_install="true"
     fi
 
-    # Measured under the SYSTEM python3, with paths.py loaded by FILE rather
+    # Measured under the resolved SETUP_PYTHON, with paths.py loaded by FILE rather
     # than imported by package path. Both halves are load-bearing (Plan 00431):
     #
     #   - a venv is not required, so the check still runs in a worktree created
@@ -205,14 +225,9 @@ preflight_socket_path() {
         echo "  Proceeding anyway — a broken check must not block worktree creation."
         return 0
     fi
-    if ! command -v python3 >/dev/null; then
-        echo -e "${YELLOW}WARNING${NC}: could not find a python3 to measure the socket path."
-        echo "  Proceeding anyway — a broken check must not block worktree creation."
-        return 0
-    fi
 
     local report
-    if ! report="$(python3 - "${paths_module}" "${worktree_dir}" "${self_install}" <<'PY'
+    if ! report="$("${SETUP_PYTHON}" - "${paths_module}" "${worktree_dir}" "${self_install}" <<'PY'
 import importlib.util
 import sys
 from pathlib import Path
@@ -255,6 +270,10 @@ PY
     return 0
 }
 
+if ! _resolve_setup_python; then
+    exit 1
+fi
+
 if ! preflight_socket_path "${WORKTREE_DIR}"; then
     exit 1
 fi
@@ -284,7 +303,7 @@ echo -e "${GREEN}✓${NC} Worktree created"
 # with the same Python share one venv, and distinct Pythons don't collide.
 DAEMON_VERSION="$(_read_daemon_version "${WORKTREE_DIR}/src/claude_code_hooks_daemon/version.py")"
 echo -e "${YELLOW}→${NC} Creating Python venv (fingerprint-keyed)..."
-WT_VENV_PATH="$(ensure_venv "${WORKTREE_DIR}" "v${DAEMON_VERSION}" python3)"
+WT_VENV_PATH="$(ensure_venv "${WORKTREE_DIR}" "v${DAEMON_VERSION}" "${SETUP_PYTHON}")"
 if [[ -z "${WT_VENV_PATH}" ]] || [[ ! -x "${WT_VENV_PATH}/bin/python" ]]; then
     echo -e "${RED}✗${NC} Failed to create venv via ensure_venv"
     exit 1

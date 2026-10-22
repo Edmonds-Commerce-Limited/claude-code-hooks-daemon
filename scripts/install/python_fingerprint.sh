@@ -20,16 +20,15 @@
 #
 # Usage:
 #   source "$(dirname "$0")/python_fingerprint.sh"
-#   fp="$(python_venv_fingerprint)"                                 # bare fingerprint
-#   fp="$(python_venv_fingerprint /usr/bin/python3.11)"              # explicit interpreter
-#   fp="$(python_venv_fingerprint python3 /workspace)"               # slug-prefixed
-#   HOOKS_DAEMON_ROOT_DIR=/workspace fp="$(python_venv_fingerprint)" # slug from env
+#   fp="$(python_venv_fingerprint /usr/bin/python3.11)"              # bare fingerprint
+#   fp="$(python_venv_fingerprint "$py" /workspace)"                 # slug-prefixed
+#   HOOKS_DAEMON_ROOT_DIR=/workspace fp="$(python_venv_fingerprint "$py")" # slug from env
 #
 
 # python_venv_fingerprint() - Compute fingerprint via the target Python itself
 #
 # Args:
-#   $1 - python interpreter to fingerprint (optional, default: python3)
+#   $1 - python interpreter to fingerprint (REQUIRED, no default; empty => return 1)
 #   $2 - project root for slug prefix (optional; falls back to
 #        $HOOKS_DAEMON_ROOT_DIR; absent = bare fingerprint, no slug)
 #
@@ -40,7 +39,11 @@
 #   invocation's own error message propagates to stderr and the exit code
 #   from Python (or shell ENOENT=127) is returned to the caller.
 python_venv_fingerprint() {
-    local python_bin="${1:-python3}"
+    local python_bin="${1:-}"
+    if [ -z "$python_bin" ]; then
+        echo "python_venv_fingerprint: interpreter (argument 1) is required - pass the resolved Python; there is no bare python3 fallback" >&2
+        return 1
+    fi
     local root="${2:-${HOOKS_DAEMON_ROOT_DIR:-}}"
 
     "$python_bin" -c '

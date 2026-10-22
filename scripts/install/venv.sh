@@ -1102,6 +1102,17 @@ _venv_is_fresh() {
     return 1
 }
 
+# _require_venv_python_bin() - fail loudly when no interpreter was passed.
+#
+# Args: $1 - calling function name (for the message), $2 - python_bin value.
+_require_venv_python_bin() {
+    if [ -z "${2:-}" ]; then
+        print_error "$1: python_bin (argument 3) is required - pass the resolved interpreter (find_latest_python / HOOKS_DAEMON_PYTHON); there is no bare python3 fallback"
+        return 1
+    fi
+    return 0
+}
+
 #
 # ensure_venv() - Auto-bootstrap venv for current Python environment fingerprint
 #
@@ -1121,7 +1132,8 @@ _venv_is_fresh() {
 # Args:
 #   $1 - daemon_dir: Path to daemon installation directory
 #   $2 - target_version: Daemon version to stamp into the venv (e.g. v3.7.0)
-#   $3 - python_bin (optional, default: python3): Target Python to fingerprint
+#   $3 - python_bin (REQUIRED): resolved Python to fingerprint and build with.
+#        There is no default: an empty value fails loudly (return 1).
 #
 # Side effect:
 #   Prints the computed venv path to stdout on success so callers can
@@ -1134,7 +1146,8 @@ _venv_is_fresh() {
 ensure_venv() {
     local daemon_dir="$1"
     local target_version="$2"
-    local python_bin="${3:-python3}"
+    local python_bin="${3:-}"
+    _require_venv_python_bin ensure_venv "$python_bin" || return 1
 
     local fingerprint rc=0
     fingerprint="$(_ensure_venv_fingerprint "$daemon_dir" "$target_version" "$python_bin")" || rc=$?
@@ -1173,7 +1186,8 @@ ensure_venv() {
 ensure_venv_locked() {
     local daemon_dir="$1"
     local target_version="$2"
-    local python_bin="${3:-python3}"
+    local python_bin="${3:-}"
+    _require_venv_python_bin ensure_venv_locked "$python_bin" || return 1
 
     local fingerprint rc=0
     fingerprint="$(_ensure_venv_fingerprint "$daemon_dir" "$target_version" "$python_bin")" || rc=$?
