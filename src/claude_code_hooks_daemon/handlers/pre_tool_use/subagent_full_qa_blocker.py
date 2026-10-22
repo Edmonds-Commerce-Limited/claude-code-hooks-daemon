@@ -3387,8 +3387,8 @@ def _tree_index(tree: ast.AST) -> _TreeIndex:
     while index < len(nodes):
         node = nodes[index]
         first[node] = len(nodes)
-        for field in node._fields:
-            value = getattr(node, field, None)
+        for attribute in node._fields:
+            value = getattr(node, attribute, None)
             if isinstance(value, ast.AST):
                 if not isinstance(value, _MARKER_NODES):
                     nodes.append(value)
