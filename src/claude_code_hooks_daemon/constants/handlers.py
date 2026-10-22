@@ -1168,6 +1168,12 @@ class HandlerID:
         config_key="usage_pause_stop_gate",
         display_name="usage-pause-stop-gate",
     )
+    # Goal-loop detector (Stop handler) -- Plan 00501 Phase 6.
+    GOAL_LOOP_DETECTOR = HandlerIDMeta(
+        class_name="GoalLoopDetectorHandler",
+        config_key="goal_loop_detector",
+        display_name="goal-loop-detector",
+    )
     # Subagent cron-delete blocker (PreToolUse handler) -- Plan 00423 Task 3.2,
     # issue #40's reported incident: a finished subagent deleted the session's
     # single failsafe recovery cron on its own initiative to stop the nudges,

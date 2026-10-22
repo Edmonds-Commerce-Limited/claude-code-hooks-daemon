@@ -72,6 +72,11 @@ class TransitionAction(StrEnum):
     EXIT = "exit"
     EXPIRE = "expire"
     RESTART_CLEAR = "restart-clear"
+    # The goal-loop detector's observations (Plan 00501 Phase 6): a ring one cycle
+    # short of its threshold, a ring at it, and a ring emptied by an exit cause.
+    NEAR_MISS = "near-miss"
+    WOULD_ENTER = "would-enter"
+    LOOP_RESET = "loop-reset"
 
 
 @dataclass(frozen=True, slots=True)
