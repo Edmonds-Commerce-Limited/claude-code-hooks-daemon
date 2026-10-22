@@ -166,12 +166,13 @@ All CLEAR; rationale and code citations in
 
 ### Phase 5: Supervisor
 
-- [ ] ⬜ **Task 5.1**: TDD the supervisor reader for the session-modes file (field-pin test) and the gate skipping
+- [x] ✅ **Task 5.1**: TDD the supervisor reader for the session-modes file (field-pin test) and the gate skipping
   goal, session-action and standing-auth prompts, plus the post-compact `continue` (`WOULD_CONTINUE`) under BLOCKED,
-  logged as a named noop reason.
-- [ ] ⬜ **Task 5.2**: TDD goal-clear outranking goal-intent under BLOCKED, and a BLOCKED clear not refused by the
+  logged as a named noop reason. An unreadable file closes the gate (documented in `CcySupervisor.md`).
+- [x] ✅ **Task 5.2**: TDD goal-clear outranking goal-intent under BLOCKED, and a BLOCKED clear not refused by the
   5-per-process clear cap (spike 0.3: the cap has been hit); no busy-session rule is needed, the clear already types
-  into a running turn. Run the supervisor hot-reload check from `.claude/rules/ccy-supervisor-dogfooding.md`.
+  into a running turn. The live hot-reload check is the coordinator's after merge; its recipe is in
+  `subagent-reports/261022-phase5-impl-opus.md`.
 
 ### Phase 6: Goal-loop detector
 

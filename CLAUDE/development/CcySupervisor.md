@@ -167,6 +167,60 @@ cost one wasted compact at worst, never a nudge.
 Ship it like any other supervisor change: the worker hot-reload below, verified
 by the `ps` check, never a session restart.
 
+## Session modes: a BLOCKED session gets no work-driving prompt
+
+Plan 00501 Phase 5. The daemon writes one `<stem>.session-modes` file per
+session in the same `context-sidecar` directory (the registry is
+`src/claude_code_hooks_daemon/core/session_mode_registry.py`; the stem rule is
+`utils/session_signal_paths.session_stem`). `load_session_modes` in
+`.claude/ccy/claude-supervise.py` keeps its own copy of the format, and
+`tests/unit/supervise/test_session_modes_gate.py` pins every field name, closed
+value set, the blocked labels and the stem rule to the daemon's, and reads files
+the daemon's own registry wrote. Only the files named for the supervisor's own
+sessions are opened; a foreign session's file is never judged.
+
+**The gate.** While a live `blocked` entry exists (label `awaiting-human` for
+reason `declared`, `goal-blocked` for `goal-loop`), `decide_once` skips, each as
+a deduped `noop:` line naming the label:
+
+- the post-compact `continue` (Ruling 07): `noop: post-compact continue skipped: session BLOCKED (awaiting-human)`. The machine has already latched the compaction as
+  handled, so the skip is not retried, and the compaction signal is left to
+  expire;
+- the goal (`goal injection skipped: ...`). The `.goal-intent` signal is
+  withheld, not consumed, and ages out on its own TTL;
+- the standing-authorisation reminder and the session-actions directive.
+
+`/compact` itself, the ESC flush, the model restore, operator and plugin
+notices and the cron-reconcile prompt are unchanged. Focus alone does not close
+this gate. The usage pause runs ahead of all of it and still decides its own
+ticks.
+
+**The goal clear under BLOCKED** (Task 5.2). Because the goal is skipped, a
+pending `.goal-clear` wins the tick instead of waiting behind it, and
+`_MAX_GOAL_CLEAR_INJECTIONS` does not refuse it: that cap guards against
+unrelated clears, and the clear of a blocked loop is the one that must land
+(spike 0.3 saw the cap reached). The clear still waits for `can_inject` and an
+empty own line, and needs no busy-session rule: it already types into a running
+turn and takes effect at once.
+
+**An unreadable or malformed file closes the gate.** Unlike the other signal
+readers this one does not fail open. A file that cannot be read back as the
+daemon's record (not JSON, wrong `version`, a field missing or extra, a value
+outside its closed set, a session id that does not match the file name) is
+treated as BLOCKED for the skips above, `decision.log` gets
+`noop: session-modes file unreadable, work-driving prompts withheld: <file>: <error>`, and every tick it persists posts a status-line WARNING. The reasoning:
+the bad file may be the BLOCKED entry the gate exists to honour, and withholding
+a prompt costs a turn the human can restart, where typing into a blocked loop
+is exactly what the mode stops. The cap exemption above is NOT granted on an
+unreadable file, because it is earned only by a confirmed BLOCKED entry. The
+daemon renames a malformed file `*.corrupt` when it next loads its registry.
+
+**Edit-to-live.** All of this is WORKER code (`decide_once` and the reader), so
+it ships by the worker hot reload; no ccy relaunch. The host's in-process
+fallback (`_poll_once`) runs the host's own copy of `decide_once`, so until the
+next relaunch a tick decided there while the worker is silent does not apply
+the gate.
+
 ## The focus hold: nothing is typed while focus may be off the main prompt
 
 Plan 00537 (issue #125). The supervisor cannot see the screen. Text it types
