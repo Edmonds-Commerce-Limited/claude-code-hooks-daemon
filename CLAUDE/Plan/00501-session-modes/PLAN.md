@@ -1,6 +1,6 @@
 # Plan 00501: session modes
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-08
 **Owner**: dev
 **Priority**: Medium
@@ -38,8 +38,13 @@ plan does not repeat them. The earlier code fact-check is in `subagent-reports/2
 - While focused, every `drives_autonomy` handler is skipped for that session through the same
   `autonomy_verdict` Plan 00498 built (both the central chain gate and the direct `autonomy_allowed` callers see
   it), and the goal-ledger stop challenge is replaced by a one-line focus reminder.
-- Delivered cron ticks are dropped before the model; the ccy supervisor injects no goals or prompts.
-- Focus is stated back to the agent once when set and when cleared.
+- Declared `persistent_crons` ticks are dropped before the model; the watchdog is delivered; the failsafe tick is
+  delivered with a prepended line naming the focus task (Q4). The ccy supervisor injects no goals or prompts.
+- Focus is stated back to the agent once when set, when cleared, when it expires (TTL 12 hours, renewed by each
+  genuine human prompt, classified from the prompt text with no file read) and when it survives a daemon restart
+  (Q1, Q2). An unreadable session-modes file is logged at WARNING and renamed `*.corrupt`, never read as "no modes".
+- Entering focus clears an existing goal once and, while focused, `goal_injection` writes no `.goal-intent`; the
+  one-time context line says the supervisor clears it at the next idle, or a human must type `/goal clear` (Q6).
 
 ### BLOCKED: awaiting-human and goal-blocked (closes ledger N378)
 
@@ -51,18 +56,21 @@ plan does not repeat them. The earlier code fact-check is in `subagent-reports/2
 - **Detection (goal-blocked).** A new Stop handler, separate from `auto_continue_stop` and running on Stop-hook
   re-entry, reads the transcript's structured goal-evaluation records. A cycle is a `STOPPING BECAUSE:` stop followed
   by an unmet goal evaluation with no genuine human prompt between. It fires on consecutive cycles within a window,
-  near-identical stop text and no repository change (journal files and untracked scratch excluded from the
-  fingerprint).
-- **Loop break.** Reuse the existing goal-clear signal so the supervisor types the goal-clearing command; a spike
-  decides whether a Stop `continue:false` can also end the turn.
+  no repository change (journal files and untracked scratch excluded from the fingerprint). Stop-text similarity is
+  logged as evidence only, not a firing condition (Q8).
+- **Loop break.** Reuse the existing goal-clear signal so the supervisor types the goal-clearing command; use a Stop
+  `continue:false` halt once per entry, logged, if spike 0.3 proves it (Q9). Without a proven lever, say so in docs.
 - **No re-arm.** While BLOCKED, goal injection writes no goal signal, the goal-ledger challenge is suppressed, the
-  supervisor skips goal and session-action prompts, and declared and failsafe ticks are dropped. Nothing sets a goal
+  supervisor skips goal, session-action and post-compact `continue` prompts (`/compact` still runs; the suppression
+  is logged as a named noop reason), and declared and failsafe ticks are dropped. Nothing sets a goal
   again on exit; the next plan status flip does that normally.
 - **Unblock conditions.** A genuine human prompt in the session, a repository change a blocked input could have
   produced, a capped timer, or an explicit clear.
 - **Log-only first.** The detector ships in `observe` mode, recording every transition and near miss (counts,
   window, similarities, repo fingerprints, thresholds, exit cause) so a false positive is visible and thresholds
-  can be tuned before `act` becomes the default.
+  can be tuned. `act` becomes the default after three true positives and no false positive, or after two releases,
+  whichever is first. Thresholds: 3 cycles (2 if every stop declared awaiting-human), 30 minute window, 4 hour timer.
+  The fingerprint runs only when the Stop carries a `met:false` record and the transcript is read from a checkpoint.
 
 ### Usage-paused and display
 
@@ -80,24 +88,28 @@ plan does not repeat them. The earlier code fact-check is in `subagent-reports/2
 - Replacing `autonomy:`: it stays the persistent per-environment switch and feeds the same verdict.
 - Migrating usage-pause, cron-pause or goal-signal storage.
 
-## Open questions for the owner (recommended default in each; change them on the issue)
+## Rulings (adviser, delegated by the owner)
 
-01. **Does a daemon restart clear focus?** Default: no. Focus is session-lifetime: cleared by `off`, a new session
-    or the TTL below; the only record is a per-session runtime file. Restarts follow most merges, so clearing on
-    restart would silently drop focus mid-task. If the owner keeps "restart clears", it is a one-line lifetime change
-    and the restart notice becomes mandatory.
-02. **Focus TTL?** Default: 12 hours, renewed by each genuine human prompt in the session.
-03. **Merge goal-blocked into awaiting-human?** Default: yes, one `BLOCKED` family with two reasons and two badges.
-04. **Does focus drop the failsafe tick?** Default: yes (its prompt is the distraction).
-05. **Should `unattended` become per session?** Default: not in this plan; show it on the badge.
-06. **Does entering focus also clear an existing goal?** Default: yes, once.
-07. **Under BLOCKED, suppress the supervisor's post-compact `continue`?** Default: yes; `/compact` still runs.
-08. **Goal-loop rollout.** Default: `observe` for one release; thresholds 3 cycles (2 if every stop declared
-    awaiting-human), 30 minute window, similarity 0.75, repo unchanged excluding journal files, 4 hour timer.
-09. **Use a Stop `continue:false` halt if the spike shows it works?** Default: yes, once per entry, logged.
-10. **Rename the plan to "session modes"?** Approved by the owner; done.
-11. **Manual goals (#106):** what exits the mode, whether it also suppresses the post-compaction `continue`, and how
-    small the first mod section may be. Listed in [MANUAL-GOALS.md](MANUAL-GOALS.md).
+All CLEAR; rationale and code citations in
+[subagent-reports/261022-owner-questions-advice-fable.md](subagent-reports/261022-owner-questions-advice-fable.md).
+
+01. **Restart clears focus?** No. Focus is session-lifetime; a surviving focus is re-stated once after a restart.
+02. **Focus TTL?** 12 hours, renewed by each genuine human prompt (prompt-text classifier); expiry is stated once.
+03. **Merge goal-blocked into awaiting-human?** Yes, one `BLOCKED` family with two reasons; a declared stop counts as
+    2 cycles toward the detector.
+04. **Focus drops the failsafe tick?** No (reversed). Declared ticks are dropped, the failsafe tick is delivered
+    naming the focus task.
+05. **`unattended` per session?** Not in this plan; shown on the badge.
+06. **Focus clears an existing goal?** Yes, once and stated; no `.goal-intent` is written while focused.
+07. **BLOCKED suppresses post-compact `continue`?** Yes; `/compact` still runs; logged as a named noop reason.
+08. **Goal-loop rollout?** `observe` first; similarity dropped from the fire rule (kept as evidence); flip to `act`
+    on three true positives and no false positive, or two releases.
+09. **Stop `continue:false` halt?** Yes, once per entry, logged; spike 0.3 is load-bearing and also tests the
+    busy-session typing alternative.
+10. **Rename to "session modes"?** Approved by the owner; done.
+11. **Manual goals (#106)?** Exit by explicit switch-back or new session (a typed `/goal` does not exit; no TTL);
+    does not suppress `continue`; first mod section is a read-only display. Detail in
+    [MANUAL-GOALS.md](MANUAL-GOALS.md).
 
 ## Tasks
 
@@ -107,14 +119,16 @@ plan does not repeat them. The earlier code fact-check is in `subagent-reports/2
 - [ ] ⬜ **Task 0.2**: Spike: capture real Stop payloads and record order during a goal re-arm (including
   `stop_hook_active`) from existing transcripts and stop events.
 - [ ] ⬜ **Task 0.3**: Spike: does a Stop `continue:false` end a turn while a goal is active; is a goal clear typed
-  mid-turn queued or rejected?
+  mid-turn queued or rejected? Also test the busy-session typing alternative (the supervisor queuing `/goal clear`
+  with its existing Enter/ESC machinery); the result decides the lever for Task 6.3.
 
 ### Phase 1: The model (pure, no behaviour change)
 
 - [ ] ⬜ **Task 1.1**: TDD `utils/session_modes.py`: mode enum, frozen entries, policy union and precedence, tick-drop
   truth table.
 - [ ] ⬜ **Task 1.2**: TDD the thread-safe registry with write-through per-session file: lifetime classes on load,
-  TTL, reaping, restart note.
+  TTL with prompt-text renewal (`is_genuine_text`, no file read), one-time expiry statement, reaping, restart note;
+  a malformed file is logged at WARNING and renamed `*.corrupt`.
 - [ ] ⬜ **Task 1.3**: TDD `autonomy_verdict`/`autonomy_allowed` honouring session modes with `explain()` wording;
   cover the chain route and each direct-call route.
 
@@ -128,54 +142,67 @@ plan does not repeat them. The earlier code fact-check is in `subagent-reports/2
 
 ### Phase 3: Focus
 
-- [ ] ⬜ **Task 3.1**: TDD the UserPromptSubmit trigger (spellings, `off` aliases, start-anchored, one context line).
-- [ ] ⬜ **Task 3.2**: TDD focus tick-drop through the suppressor and the focus reminder replacing the goal-ledger
-  challenge.
+- [ ] ⬜ **Task 3.1**: TDD the UserPromptSubmit trigger (spellings, `off` aliases, start-anchored, one context line),
+  reusing the Task 1.2 prompt classifier.
+- [ ] ⬜ **Task 3.2**: TDD focus tick-drop through the suppressor (declared ticks dropped, watchdog delivered,
+  failsafe tick delivered with the prepended "focus mode: the active task is <task>; other plans are out of scope"
+  line), the focus reminder replacing the goal-ledger challenge, the once-only goal clear on entry, no
+  `.goal-intent` while focused, and the context-line wording about the supervisor clearing at next idle.
 - [ ] ⬜ **Task 3.3**: TDD the `/mode focus` verbs, a session-mode CLI and the IPC actions.
 
 ### Phase 4: Visibility
 
 - [ ] ⬜ **Task 4.1**: TDD the status-line segment and its explanation entry.
-- [ ] ⬜ **Task 4.2**: Restart notice (only if question 1 keeps "restart clears").
+- [ ] ⬜ **Task 4.2**: Restart re-statement of surviving modes (one context line on the next prompt), unconditional.
 - [ ] ⬜ **Task 4.3**: Transition log and a CLI printing active modes and recent transitions with evidence.
 
 ### Phase 5: Supervisor
 
 - [ ] ⬜ **Task 5.1**: TDD the supervisor reader for the session-modes file (field-pin test) and the gate skipping
-  goal, session-action and standing-auth prompts.
+  goal, session-action and standing-auth prompts, plus the post-compact `continue` (`WOULD_CONTINUE`) under BLOCKED,
+  logged as a named noop reason.
 - [ ] ⬜ **Task 5.2**: TDD goal-clear outranking goal-intent under BLOCKED, per spike 0.3; run the supervisor
   hot-reload check from `.claude/rules/ccy-supervisor-dogfooding.md`.
 
 ### Phase 6: Goal-loop detector
 
-- [ ] ⬜ **Task 6.1**: TDD transcript extraction from scrubbed fixture records.
-- [ ] ⬜ **Task 6.2**: TDD the cycle ring, similarity, repo fingerprint, thresholds, `observe` mode, near-miss logging.
-- [ ] ⬜ **Task 6.3**: TDD `act` mode: enter BLOCKED(goal-loop), clear the goal signal, one-time context line,
-  optional halt per spike 0.3.
+- [ ] ⬜ **Task 6.1**: TDD transcript extraction from scrubbed fixture records, including a reworded-stops run.
+- [ ] ⬜ **Task 6.2**: TDD the cycle ring, repo fingerprint (conditional, `git status --porcelain -uno` plus HEAD),
+  thresholds (a declared `[awaiting-human]` stop counts toward the 2-cycle threshold), `observe` mode, near-miss
+  logging. Similarity is logged but not a fire condition.
+- [ ] ⬜ **Task 6.3**: TDD `act` mode: enter BLOCKED(goal-loop), clear the goal signal, one-time context line, and
+  the lever spike 0.3 proves (halt once per entry, logged, or the queued clear); if neither works, document that
+  the only backstop is Claude Code's built-in cap of 8 consecutive stop-hook continuations (reset by each tool call,
+  raised by `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`), which a loop that makes tool calls between stops does not reach.
 - [ ] ⬜ **Task 6.4**: TDD exits: human prompt, repo change, timer, explicit clear.
 
 ### Phase 7: Docs and acceptance
 
 - [ ] ⬜ **Task 7.1**: Handler guidance, a "Session modes" section in the autonomy docs, release note in the
   UNRELEASED holding area.
-- [ ] ⬜ **Task 7.2**: Acceptance: focus on, tick dropped, focus off; awaiting-human in one session not cleared by
-  another; a live goal loop caught in observe mode, then act mode.
-- [ ] ⬜ **Task 7.3**: After a release in `observe`, tune thresholds from the log and flip the default in a
-  follow-up.
+- [ ] ⬜ **Task 7.2**: Acceptance: focus on (with a live goal), a declared tick dropped, a rewritten failsafe tick
+  delivered, focus off; awaiting-human in one session not cleared by another; a live goal loop caught in observe
+  mode, then in act mode (requires the lever proven by spike 0.3).
+- [ ] ⬜ **Task 7.3**: Tune thresholds from the observe log and flip the default to `act` after three true positives
+  and no false positive, or after two releases, whichever is first.
 
-### Phase 8: Manual goals (#106; blocked on question 11)
+### Phase 8: Manual goals (#106)
 
-- [ ] ⬜ **Task 8.1**: Spike: does `UserPromptSubmit` fire for a typed `/goal clear` and its aliases?
+- [ ] ⬜ **Task 8.1**: Spike: does `UserPromptSubmit` fire for a typed `/goal clear` and its aliases? If not,
+  detection moves to the next Stop's transcript read.
 - [ ] ⬜ **Task 8.2**: TDD the supervisor's side-channel record before a clearing `/goal`, and the daemon's
-  attribution (fresh matching record = supervisor, none = human, unreadable = supervisor).
-- [ ] ⬜ **Task 8.3**: TDD the `manual-goals` mode: no goal-intent signal written, added to the precedence list,
-  status-line label, exit per question 11.
+  attribution (fresh matching record = supervisor, none = human, unreadable = supervisor, logged at WARNING with one
+  context line telling the human to repeat the clear if it was theirs).
+- [ ] ⬜ **Task 8.3**: TDD the `manual-goals` mode: only `.goal-intent` writing is suppressed (not `continue`), added
+  to the precedence list, status-line label, stated once on entry; exit by explicit switch-back (`hooks-daemon goals on`, `/mode goals auto`, CLI) or a new session, no TTL, a typed `/goal <condition>` does not exit it.
+  The first mod section is a read-only display (Plan 00497 Task 3.5 scoped to it).
   Design and questions: [MANUAL-GOALS.md](MANUAL-GOALS.md). The control-panel mod section is Plan 00497's.
 
 ## Success Criteria
 
-- [ ] A focused session receives no cron tick, no goal-ledger plan list and no work-driving advisory or supervisor
-  prompt; `focus off`, a new session or the TTL restores normal behaviour.
+- [ ] A focused session receives no declared cron tick, no goal-ledger plan list and no work-driving advisory or
+  supervisor prompt, and its failsafe tick names the focus task; `focus off`, a new session or the TTL restores
+  normal behaviour, and expiry and restart survival are stated to the agent.
 - [ ] An awaiting-human declaration in one session is not cleared by a prompt in another or by a supervisor line
   (ledger N378 closed).
 - [ ] A goal tight loop is detected, logged with its evidence, broken and not re-armed; every unblock condition
