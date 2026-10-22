@@ -128,7 +128,7 @@ All CLEAR; rationale and code citations in
 
 ### Phase 1: The model (pure, no behaviour change)
 
-- [ ] ⬜ **Task 1.1**: TDD `utils/session_modes.py`: mode enum, frozen entries, policy union and precedence, tick-drop
+- [x] ✅ **Task 1.1**: TDD `utils/session_modes.py`: mode enum, frozen entries, policy union and precedence, tick-drop
   truth table.
 - [ ] ⬜ **Task 1.2**: TDD the thread-safe registry with write-through per-session file: lifetime classes on load,
   TTL with prompt-text renewal (`is_genuine_text`, no file read), one-time expiry statement, reaping, restart note;
