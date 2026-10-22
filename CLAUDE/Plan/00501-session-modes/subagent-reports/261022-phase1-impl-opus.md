@@ -130,8 +130,64 @@ Commit `6d847a63c` (pushed).
   test, `tests/unit/supervise` and the usage-pause integration chain: 13115 passed, 1 skipped. mypy --strict, ruff
   and black are clean on the changed files.
 
+## Task 1.3: delivered (third Opus sub-agent)
+
+Commit `8d0a65a6a` (Task 1.3) and `b1c6f81ad` (QA fix to the Task 1.2 registry), both pushed. PLAN.md ticks 1.3.
+
+- `utils/autonomy.py`: `AutonomyVerdict` holds `environment_allowed`, `environment`, `hostname` and
+  `session: SessionPolicy`; `allowed` is a property, `environment_allowed and session.drives_work`.
+  `autonomy_verdict(..., session=None)` reads the policy through the new `session_policy(hook_input)`, which is
+  `get_data_layer().session_modes.policy(session_id)` for the payload's `session_id`. A payload with no session id
+  (absent, non-string or blank) has no session that could hold a mode (entries refuse a blank id), so its policy is
+  empty and no registry is read.
+- `explain()`: with no work-halting mode it is today's text, pinned byte for byte by an equality test. Environment
+  allowed but a mode halts work: "AUTONOMY PAUSED FOR THIS SESSION: \<explain_clause>, so no crons, ... run in this
+  session. Guards are unaffected. To resume, \<exit_clause>." Both: today's text + " This session is also in
+  <clause>. To resume, \<exit_clause>." The exit wording lives in the model: `SessionPolicy.exit_clause()` in
+  `utils/session_modes.py` (one hint per halting label, a shared hint stated once, precedence order).
+- `handlers/status_line/environment_indicator.py` uses `.environment_allowed`, so "no autonomy" still names the
+  environment; a focused container session shows no "no autonomy".
+- No-data-layer decision (coordinator correction): option (a), let it raise. Every verdict is computed inside the
+  daemon: the chain gate, the five handlers and the status line all run there, `DaemonController.__init__`
+  initialises `ProjectContext` before it registers a handler, and `hooks-daemon probe` sends its payload through
+  the daemon's own entry point. No CLI path calls the verdict (checked: only those six modules import it). So a
+  payload that names a session with no `ProjectContext` is a defect and raises `RuntimeError` (tested); nothing logs
+  it at DEBUG or reads it as "no modes". In tests, `tests/support/autonomy.py` gives the gate a real, loaded,
+  empty registry (`pin_autonomy` now calls `pin_no_session_modes`), and `pin_session_modes(monkeypatch, dir, *entries)` puts a registry on a fresh data layer (restored after the test) so the real lookup path is used.
+  `test_background_process_tracker.py` (which passes session ids without pinning) gained an autouse
+  `pin_no_session_modes` fixture: its 14 tests failed on the raise, which is the intended fail-loud behaviour.
+- Route tests, each with no mode giving the same result as before and a mode suppressing: chain gate
+  (`test_chain_autonomy_gate.py`: driver skipped by focus in a container, guard still runs, another session's mode
+  changes nothing); `auto_continue_stop` `_goal_ledger_challenge` and `_stand_in_block`
+  (`test_auto_continue_stop_autonomy.py`); `background_process_tracker` (protective advisory, no cron);
+  `autonomy_notice` (paused text, and both-reasons text once); status line (above).
+- RED: 14 failed (`AttributeError: environment_allowed` / `exit_clause`, `TypeError` on `session=`, `DID NOT RAISE`),
+  then the status-line test failed until the indicator switched. GREEN: 168 passed across the route files;
+  2959 passed over `post_tool_use`, `session_start`, `stop`, `status_line` and the chain gate; core+utils 11386
+  passed. Coverage 100% on `autonomy.py`, `session_modes.py` and `session_mode_registry.py`.
+- Noticed, not changed: under `--cov=claude_code_hooks_daemon.utils.autonomy`, two untouched tests in
+  `TestAutonomyAllowedLoadsTheProjectConfig` fail; they fail the same way at the parent commit `0e0431210`, and pass
+  without `--cov` and in QA.
+- For Phase 2: `AWAITING_HUMAN` is work-halting, so once `auto_continue_stop` writes that mode (Task 2.2),
+  `_stand_in_block` will stop demanding the stand-in cron, which exists precisely for awaiting-human stops. Task 2.2
+  has to exempt the stand-in demand from the session half of the verdict (for example, gate it on
+  `environment_allowed` plus focus only).
+
+## QA
+
+Targeted run at code head `b1c6f81ad` (`llm_qa.py changed --range origin/main..HEAD --allow-unmapped`):
+`QA: 41/41 PASSED`, `changed_tests: 13215 passed, 0 failed, 79 skipped`, and no autofix changes. The first run (at
+`8d0a65a6a`) failed only `error_hiding`, on the two deliberate swallows in `session_mode_registry.load()`. That was
+fixed in `b1c6f81ad`, and the re-run is the one reported here.
+
+QA could not map 13 files (allowed; the full gate must cover them): `.claude/HOOKS-DAEMON.md`,
+`.claude/hooks/notification`, `.claude/hooks/pre-tool-use`, `.claude/hooks/session-start`, `.claude/hooks/setup`,
+`init.sh`, `constants/protocol.py`, `core/data_layer.py`, `daemon/controller.py`, `install/relay_deploy.py`,
+`install/transport_toggle.py`, `utils/usage_pause.py`, `tests/conftest.py`. The `origin/main..HEAD` range covers 115
+files, more than this branch's Phase 1 commits touch: the hooks, `init.sh` and `install/` changes come from the
+history this branch was cut from. Of the 13, only `core/data_layer.py` and `utils/usage_pause.py` are Phase 1 (Task
+1.2).
+
 ## Left
 
-Task 1.3 (design above; use `get_data_layer().session_modes`, catching `RuntimeError` at DEBUG), then the one targeted QA run
-(`FULL_QA_LOCK_WAIT_SECONDS=3600 ./scripts/qa/llm_qa.py changed --range origin/main..HEAD --allow-unmapped > untracked/scratch/qa-501-p1.txt 2>&1`),
-commit any autofix output, tick 1.2 and 1.3 in PLAN.md, and complete this report with the QA line and head sha.
+Nothing in Phase 1. The coordinator merges; the daemon is not restarted.
