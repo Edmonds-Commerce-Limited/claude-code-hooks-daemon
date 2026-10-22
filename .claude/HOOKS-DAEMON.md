@@ -146,7 +146,7 @@
 | 70 | failsafe_cron_session_advisor | ADVISORY | Advise establishing the failsafe recovery cron at session start |
 | 70 | persistent_cron_assertor | ADVISORY | State the project's declared crons and instruct a CronList reconcile |
 | 71 | reference_repo_sweep | ADVISORY | Fetch, safely fast-forward and record every governed reference repo |
-| 72 | relay_binary_checker | ADVISORY | Warn when the relay is enabled but its binary is missing or not executable |
+| 72 | relay_binary_checker | ADVISORY | Warn when the relay is enabled but its binary is missing or cannot run |
 | 72 | routine_qa_sweep | ADVISORY | Advisory SessionStart sweep over the Routine tree (silent when clean) |
 | 72 | unproven_venv_advisor | ADVISORY | Name a running venv built for another lock, and list venvs not proven stale |
 | 73 | session_actions_directive | ADVISORY | Signal the ccy supervisor when a session starts with must-do items |

@@ -71,9 +71,7 @@ def _run(
         relay_bin.chmod(0o755)
     # nc is enabled too, so the forwarder hands init.sh the per-event socket
     # and the nc rung WOULD run but for the marker.
-    transport = TransportConfig(
-        relay_enabled=True, nc_enabled=True, relay_binary=str(relay_bin)
-    )
+    transport = TransportConfig(relay_enabled=True, nc_enabled=True, relay_binary=str(relay_bin))
     forwarder = _write_generated_forwarder(
         tmp_path, "pre-tool-use", "PreToolUse", transport, tmp_path / "untracked"
     )
