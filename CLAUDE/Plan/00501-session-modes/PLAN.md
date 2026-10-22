@@ -130,7 +130,7 @@ All CLEAR; rationale and code citations in
 
 - [x] ✅ **Task 1.1**: TDD `utils/session_modes.py`: mode enum, frozen entries, policy union and precedence, tick-drop
   truth table.
-- [ ] ⬜ **Task 1.2**: TDD the thread-safe registry with write-through per-session file: lifetime classes on load,
+- [x] ✅ **Task 1.2**: TDD the thread-safe registry with write-through per-session file: lifetime classes on load,
   TTL with prompt-text renewal (`is_genuine_text`, no file read), one-time expiry statement, reaping, restart note;
   a malformed file is logged at WARNING and renamed `*.corrupt`.
 - [ ] ⬜ **Task 1.3**: TDD `autonomy_verdict`/`autonomy_allowed` honouring session modes with `explain()` wording;

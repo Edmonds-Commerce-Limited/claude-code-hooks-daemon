@@ -32,7 +32,6 @@ from __future__ import annotations
 import json
 import logging
 import math
-import re
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -40,19 +39,14 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.session_signal_paths import SIGNAL_SUBDIR, session_stem
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
 
-#: Beside the context sidecar and the other signals the supervisor watches.
-SIGNAL_SUBDIR: Final[str] = "context-sidecar"
-
 #: Deliberately NOT ``.json``: the supervisor's sidecar reader globs that
 #: extension and would otherwise mistake this record for a context sidecar.
 SIGNAL_SUFFIX: Final[str] = ".usage-paused"
-
-_SESSION_ID_FALLBACK: Final[str] = "unknown"
-_UNSAFE_SESSION_CHARS: Final[re.Pattern[str]] = re.compile(r"[^A-Za-z0-9_.-]")
 
 FIELD_SESSION_ID: Final[str] = "session_id"
 FIELD_PAUSED_AT: Final[str] = "paused_at"
@@ -114,15 +108,9 @@ class UsagePause:
         return self.paused_at <= now <= self.expires_at
 
 
-def _session_stem(session_id: str) -> str:
-    """A filesystem-safe stem: separators and traversal dots cannot leave the directory."""
-    stem = _UNSAFE_SESSION_CHARS.sub("_", session_id.strip())
-    return stem or _SESSION_ID_FALLBACK
-
-
 def pause_path(daemon_untracked_dir: Path, session_id: str) -> Path:
     """The record's path for ``session_id``."""
-    return daemon_untracked_dir / SIGNAL_SUBDIR / f"{_session_stem(session_id)}{SIGNAL_SUFFIX}"
+    return daemon_untracked_dir / SIGNAL_SUBDIR / f"{session_stem(session_id)}{SIGNAL_SUFFIX}"
 
 
 def _as_number(value: object) -> float | None:
@@ -260,7 +248,7 @@ FIELD_UNTIL: Final[str] = "until"
 
 def override_path(daemon_untracked_dir: Path, session_id: str) -> Path:
     """The override marker's path for ``session_id``."""
-    return daemon_untracked_dir / SIGNAL_SUBDIR / f"{_session_stem(session_id)}{OVERRIDE_SUFFIX}"
+    return daemon_untracked_dir / SIGNAL_SUBDIR / f"{session_stem(session_id)}{OVERRIDE_SUFFIX}"
 
 
 def write_usage_override(

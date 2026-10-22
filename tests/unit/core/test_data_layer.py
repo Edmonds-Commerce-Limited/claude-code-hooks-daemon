@@ -3,6 +3,12 @@
 TDD RED phase: These tests define the expected API for DaemonDataLayer.
 """
 
+import threading
+import time
+from pathlib import Path
+
+import pytest
+
 from claude_code_hooks_daemon.constants import ToolName
 from claude_code_hooks_daemon.core.data_layer import (
     DaemonDataLayer,
@@ -11,8 +17,16 @@ from claude_code_hooks_daemon.core.data_layer import (
 )
 from claude_code_hooks_daemon.core.disclosure_tracker import DisclosureTracker
 from claude_code_hooks_daemon.core.handler_history import HandlerHistory
+from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.session_mode_registry import NoticeKind, SessionModeRegistry
 from claude_code_hooks_daemon.core.session_state import SessionState
 from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader
+from claude_code_hooks_daemon.utils.session_modes import (
+    ModeSource,
+    SessionMode,
+    SessionModeEntry,
+)
+from claude_code_hooks_daemon.utils.session_signal_paths import SIGNAL_SUBDIR
 
 
 class TestDaemonDataLayerInit:
@@ -153,3 +167,64 @@ class TestDaemonDataLayerIntegration:
         )
         assert dl.history.was_blocked(ToolName.BASH) is True
         assert dl.history.count_blocks() == 1
+
+
+class TestSessionModesProperty:
+    """The session-modes registry is built lazily from the daemon untracked dir (Plan 00501)."""
+
+    @pytest.fixture
+    def untracked(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        monkeypatch.setattr(
+            ProjectContext, "daemon_untracked_dir", classmethod(lambda cls: tmp_path)
+        )
+        return tmp_path
+
+    def _surviving_file(self, untracked: Path) -> SessionModeEntry:
+        entry = SessionModeEntry(
+            mode=SessionMode.FOCUS,
+            session_id="sid",
+            entered_at=time.time(),
+            expires_at=time.time() + 3600,
+            source=ModeSource.HUMAN,
+            detail="the task",
+        )
+        writer = SessionModeRegistry(untracked / SIGNAL_SUBDIR)
+        writer.load()
+        writer.enter(entry)
+        return entry
+
+    def test_builds_once_and_loads_the_state_dir(self, untracked: Path) -> None:
+        entry = self._surviving_file(untracked)
+        dl = DaemonDataLayer()
+        registry = dl.session_modes
+        assert registry is dl.session_modes
+        assert registry.path_for("sid").parent == untracked / SIGNAL_SUBDIR
+        assert registry.active("sid") == (entry,)
+        assert [notice.kind for notice in registry.take_notices("sid")] == [
+            NoticeKind.SURVIVED_RESTART
+        ]
+
+    def test_concurrent_first_access_builds_one_registry(self, untracked: Path) -> None:
+        dl = DaemonDataLayer()
+        seen: list[SessionModeRegistry] = []
+        threads = [threading.Thread(target=lambda: seen.append(dl.session_modes)) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        assert len({id(registry) for registry in seen}) == 1
+
+    def test_no_project_context_raises_runtime_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def uninitialised(cls: type[ProjectContext]) -> Path:
+            raise RuntimeError("ProjectContext not initialized")
+
+        monkeypatch.setattr(ProjectContext, "daemon_untracked_dir", classmethod(uninitialised))
+        dl = DaemonDataLayer()
+        with pytest.raises(RuntimeError, match="not initialized"):
+            _ = dl.session_modes
+
+    def test_reset_drops_the_registry(self, untracked: Path) -> None:
+        dl = DaemonDataLayer()
+        first = dl.session_modes
+        dl.reset()
+        assert dl.session_modes is not first

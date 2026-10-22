@@ -93,8 +93,43 @@ Task 1.3 logs it at DEBUG and treats the session as having no modes (same conven
   (protective advisory instead of the driving one), `autonomy_notice` (fires and explains the mode). Inject modes
   through a tmp-dir registry on the data layer (`reset_data_layer()` in teardown) so the real lookup path is tested.
 
+## Task 1.2: delivered (second Opus sub-agent)
+
+- `src/claude_code_hooks_daemon/core/session_mode_registry.py`: `SessionModeRegistry(state_dir, *, clock)` behind an
+  `RLock`, with `path_for`, `enter`, `exit`, `active`, `policy`, `note_prompt`, `reap`, `take_notices` and `load`
+  (once; a second call raises `RuntimeError`). `ModeNotice`/`NoticeKind` (EXPIRED, SURVIVED_RESTART,
+  CLEARED_BY_RESTART) with `text()`; the focus expiry reads "focus expired after 12 h (task: '...'); type
+  `hooks-daemon focus <task>` to renew". File `<stem>.session-modes`, JSON
+  `{"version": 1, "session_id", "modes": [{mode, reason, source, lifetime, entered_at, expires_at, detail}]}` in
+  precedence order, with the field names as `FIELD_*` constants. The file is written atomically BEFORE memory
+  changes, a session left with no entries has its file deleted, and an `OSError` propagates with memory unchanged.
+  Expiry happens lazily on every read or mutation and in `reap`, with one EXPIRED notice each. `note_prompt` uses
+  `is_genuine_human_prompt` (prompt text only) and renews only entries that have a `renewal_ttl` (focus); an
+  expired focus is not revived. In `load`, a malformed file (bad JSON, wrong version/types, unknown or
+  non-registry mode, session id not matching the file stem, an entry the model refuses, a duplicate label) is
+  logged at WARNING and renamed `*.corrupt`; a failed rename is logged at ERROR. An unreadable file (`OSError`)
+  propagates, which is the fail-loud choice.
+- `src/claude_code_hooks_daemon/utils/session_signal_paths.py`: `SIGNAL_SUBDIR`, `SESSION_ID_FALLBACK` and
+  `session_stem`, now the one stem rule; `utils/usage_pause.py` uses it in place of its private copy. Seven other
+  modules still carry their own copy (`session_actions_signal`, `operator_signal`, `model_downgrade_signal`,
+  `context_sidecar`, `compaction_signal`, `goal_injection`, `standing_authorisations`, plus `thread_registry`'s
+  public `safe_session_stem`). Their blank-id handling differs slightly (some do not strip), so moving them over
+  is a separate change and was out of scope here.
+- `core/data_layer.py`: a lazy `session_modes` property, built once under its own lock from
+  `ProjectContext.daemon_untracked_dir() / "context-sidecar"` and loaded on first use. A `RuntimeError` (no project
+  context) propagates, and `reset()` drops the registry.
+- Tests: `tests/unit/core/test_session_mode_registry.py`, `tests/unit/utils/test_session_signal_paths.py`, and a
+  `TestSessionModesProperty` class in `tests/unit/core/test_data_layer.py`. The tests run as root, so the
+  write-failure test monkeypatches `Path.replace`/`unlink` because `chmod` does not stop root.
+- RED: all three test modules failed collection with `ModuleNotFoundError` (`core.session_mode_registry`,
+  `utils.session_signal_paths`), pytest exit 2.
+- GREEN: 146 passed. Coverage is 100% on the registry and the stem helper; `data_layer.py` is at 96.97%, and its two
+  uncovered lines were already uncovered. A wider run over `tests/unit/core`, `tests/unit/utils`, every usage-pause
+  test, `tests/unit/supervise` and the usage-pause integration chain: 13115 passed, 1 skipped. mypy --strict, ruff
+  and black are clean on the changed files.
+
 ## Left
 
-Tasks 1.2 and 1.3, then the one targeted QA run
+Task 1.3 (design above; use `get_data_layer().session_modes`, catching `RuntimeError` at DEBUG), then the one targeted QA run
 (`FULL_QA_LOCK_WAIT_SECONDS=3600 ./scripts/qa/llm_qa.py changed --range origin/main..HEAD --allow-unmapped > untracked/scratch/qa-501-p1.txt 2>&1`),
 commit any autofix output, tick 1.2 and 1.3 in PLAN.md, and complete this report with the QA line and head sha.
