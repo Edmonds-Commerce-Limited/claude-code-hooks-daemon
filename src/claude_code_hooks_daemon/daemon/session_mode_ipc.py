@@ -6,6 +6,8 @@ uses (``core.focus_mode``), so entering focus clears an existing goal once on
 every route. ``get_mode_history`` (Task 4.3) lists every session's live modes
 and the newest transitions with their evidence. The daemon-wide
 ``get_mode``/``set_mode`` actions are separate and unchanged.
+``exit_blocked`` (Task 6.3) ends a goal-loop block; when only the declared
+awaiting-human block is live it is refused with a named error.
 
 A request naming no session is refused; a registry failure is logged at
 WARNING and returned as an error, never read as "no modes".
@@ -19,6 +21,10 @@ from typing import Any
 from claude_code_hooks_daemon.constants.modes import SessionModeIPC
 from claude_code_hooks_daemon.core.data_layer import get_data_layer
 from claude_code_hooks_daemon.core.focus_mode import FocusChange, enter_focus, exit_focus
+from claude_code_hooks_daemon.core.goal_loop_block import (
+    DeclaredBlockRefusedError,
+    unblock_goal_loop,
+)
 from claude_code_hooks_daemon.core.session_mode_log import TransitionLogError
 from claude_code_hooks_daemon.core.session_mode_registry import SessionModeRegistry
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
@@ -28,6 +34,8 @@ logger = logging.getLogger(__name__)
 
 #: The transition log's evidence for a focus change made through IPC.
 _IPC_EVIDENCE = "the session-mode CLI or /mode skill"
+#: The transition log's evidence for an unblock made through IPC (exit 6.4: explicit clear).
+_UNBLOCK_EVIDENCE = f"cause=explicit-clear ({_IPC_EVIDENCE})"
 
 
 def clear_goal_signal(session_id: str) -> bool:
@@ -71,6 +79,9 @@ def handle_session_mode_action(action: str, hook_input: dict[str, Any]) -> dict[
     try:
         registry = get_data_layer().session_modes
         return {"result": _answer(registry, action, session_id, task)}
+    except DeclaredBlockRefusedError as error:
+        # unblock_goal_loop has already logged the refusal at WARNING.
+        return {"error": str(error)}
     except (RuntimeError, OSError) as error:
         log_and_continue(
             logger,
@@ -101,6 +112,12 @@ def _answer(
                 evidence=_IPC_EVIDENCE,
             )
         )
+    if action == SessionModeIPC.ACTION_EXIT_BLOCKED:
+        change = unblock_goal_loop(registry, session_id, evidence=_UNBLOCK_EVIDENCE)
+        return {
+            SessionModeIPC.KEY_OUTCOME: str(change.outcome),
+            SessionModeIPC.KEY_LINE: change.line(),
+        }
     return _change(exit_focus(registry, session_id, evidence=_IPC_EVIDENCE))
 
 
