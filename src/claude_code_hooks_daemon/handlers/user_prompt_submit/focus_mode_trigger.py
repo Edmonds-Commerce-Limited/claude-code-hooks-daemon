@@ -14,8 +14,10 @@ or was cleared, a usage pause included) is stated in one line by
 
 Never gated by autonomy (``drives_autonomy`` stays False): focus itself halts
 every work-driving handler, so a gated trigger could never turn it off. Never
-denies. A registry failure is logged at WARNING; on a command it is also stated
-to the agent, since the human asked for something that did not happen.
+denies. A registry that cannot be reached is logged at WARNING (and stated on a
+command, since the human asked for something that did not happen). A failed
+registry WRITE is logged and stated on any prompt, and never holds back the
+pending news, which is read in its own step.
 """
 
 from __future__ import annotations
@@ -97,13 +99,6 @@ class FocusModeTriggerHandler(UserPromptSubmitHandlerBase):
             )
         try:
             registry = get_data_layer().session_modes
-            line = self._apply(registry, session_id, command, prompt)
-            statement = pending_mode_statement(
-                registry,
-                session_id,
-                usage_pause=lambda: _usage_pause_view(session_id),
-                unattended=daemon_is_unattended,
-            )
         except (RuntimeError, OSError) as error:
             log_and_continue(
                 logger,
@@ -116,10 +111,39 @@ class FocusModeTriggerHandler(UserPromptSubmitHandlerBase):
                 decision=Decision.ALLOW,
                 context=[f"FOCUS MODE NOT CHANGED: the daemon could not record it ({error})."],
             )
+        # The change and the news are independent: a write that keeps failing
+        # must not hold back every queued notice, so each has its own try.
+        line = self._apply_or_report(registry, session_id, command, prompt)
+        statement = pending_mode_statement(
+            registry,
+            session_id,
+            usage_pause=lambda: _usage_pause_view(session_id),
+            unattended=daemon_is_unattended,
+        )
         context = [] if statement is None else [statement]
         if line is not None:
             context.append(line)
         return BlockingResult(decision=Decision.ALLOW, context=context)
+
+    def _apply_or_report(
+        self,
+        registry: SessionModeRegistry,
+        session_id: str,
+        command: FocusCommand | None,
+        prompt: object,
+    ) -> str | None:
+        """:meth:`_apply`, or the line stating that its registry write failed."""
+        try:
+            return self._apply(registry, session_id, command, prompt)
+        except (RuntimeError, OSError) as error:
+            log_and_continue(
+                logger,
+                error,
+                reason="the session-modes registry write failed, so focus was neither changed nor renewed; the agent is told so",
+            )
+            if command is None:
+                return f"FOCUS MODE NOT RENEWED: the daemon could not record it ({error})."
+            return f"FOCUS MODE NOT CHANGED: the daemon could not record it ({error})."
 
     @staticmethod
     def _apply(
