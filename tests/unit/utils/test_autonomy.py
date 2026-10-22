@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import claude_code_hooks_daemon.core.data_layer as data_layer
 from claude_code_hooks_daemon.config.models import AutonomyConfig, Config
 from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.core import ProjectContext
@@ -16,6 +17,8 @@ from claude_code_hooks_daemon.utils.autonomy import (
     current_environment,
     environment_label,
 )
+from claude_code_hooks_daemon.utils.session_modes import SessionPolicy
+from tests.support.autonomy import awaiting_human_entry, focus_entry, pin_session_modes
 
 _CONTAINERS_ONLY = Config(
     autonomy=AutonomyConfig(environments=["docker", "podman", "lxc", "generic"])
@@ -146,3 +149,129 @@ class TestAutonomyAllowedLoadsTheProjectConfig:
         ProjectContext.reset()
         monkeypatch.setattr(autonomy, "detect_container_runtime", lambda: None)
         assert autonomy_allowed() is True
+
+
+#: ``explain()`` for an environment the config does not list, byte for byte as it
+#: read before session modes existed (Plan 00501 Phase 1 changes no verdict).
+_TODAYS_OFF_TEXT = (
+    "AUTONOMY OFF: this session runs in the 'host' environment (hostname 'h1'), which "
+    "this project's `autonomy:` config does not list, so no crons, failsafe-recovery "
+    "advice, goal injection, goal-ledger stop challenges or stand-in crons run here. Do "
+    "only what you were asked in this conversation, and stop when it is done. Guards are "
+    "unaffected. To change it, list this environment under `autonomy.environments` in "
+    ".claude/hooks-daemon.yaml, or name a role alias under `autonomy.hosts`."
+)
+
+_SID = "session-1"
+
+
+class TestSessionModes:
+    """The verdict honours the session's modes (Plan 00501 Task 1.3)."""
+
+    @pytest.fixture(autouse=True)
+    def _pinned_hostname(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("HOOKS_DAEMON_HOSTNAME", "h1")
+        monkeypatch.delenv("CCY_HOST_HOSTNAME", raising=False)
+
+    @staticmethod
+    def _payload(session_id: str = _SID) -> dict[str, str]:
+        return {HookInputField.SESSION_ID: session_id}
+
+    def test_no_mode_keeps_todays_verdicts_and_text(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pin_session_modes(monkeypatch, tmp_path)
+        for config, environment, expected in (
+            (Config(), "host", True),
+            (_CONTAINERS_ONLY, "host", False),
+            (_CONTAINERS_ONLY, "docker", True),
+        ):
+            verdict = autonomy_verdict(self._payload(), config=config, environment=environment)
+            assert verdict.allowed is expected
+            assert verdict.environment_allowed is expected
+            assert verdict.session.entries == ()
+        off = autonomy_verdict(self._payload(), config=_CONTAINERS_ONLY, environment="host")
+        assert off.explain() == _TODAYS_OFF_TEXT
+
+    def test_no_mode_matches_a_payload_with_no_session(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pin_session_modes(monkeypatch, tmp_path)
+        with_session = autonomy_verdict(
+            self._payload(), config=_CONTAINERS_ONLY, environment="host"
+        )
+        without = autonomy_verdict({}, config=_CONTAINERS_ONLY, environment="host")
+        assert with_session == without
+
+    def test_a_focus_mode_pauses_autonomy_where_the_environment_allows_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pin_session_modes(monkeypatch, tmp_path, focus_entry(_SID, "ship 1.3"))
+        verdict = autonomy_verdict(self._payload(), config=Config(), environment="host")
+        assert verdict.environment_allowed is True
+        assert verdict.allowed is False
+        assert autonomy_allowed(self._payload()) is False
+
+    def test_a_blocked_mode_pauses_autonomy(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pin_session_modes(monkeypatch, tmp_path, awaiting_human_entry(_SID))
+        assert (
+            autonomy_verdict(self._payload(), config=Config(), environment="docker").allowed
+            is False
+        )
+
+    def test_another_sessions_mode_changes_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pin_session_modes(monkeypatch, tmp_path, focus_entry("someone-else"))
+        assert (
+            autonomy_verdict(self._payload(), config=Config(), environment="host").allowed is True
+        )
+
+    def test_the_paused_text_names_the_mode_its_exit_and_the_guards(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pin_session_modes(monkeypatch, tmp_path, focus_entry(_SID, "ship 1.3"))
+        text = autonomy_verdict(self._payload(), config=Config(), environment="host").explain()
+        assert text.startswith("AUTONOMY PAUSED FOR THIS SESSION: focus mode on 'ship 1.3', ")
+        assert "no crons, failsafe-recovery advice, goal injection" in text
+        assert "Guards are unaffected." in text
+        assert "`hooks-daemon focus off`" in text
+        assert "AUTONOMY OFF" not in text
+
+    def test_both_reasons_keep_todays_text_and_add_the_mode(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pin_session_modes(monkeypatch, tmp_path, focus_entry(_SID, "ship 1.3"))
+        text = autonomy_verdict(
+            self._payload(), config=_CONTAINERS_ONLY, environment="host"
+        ).explain()
+        assert text.startswith(
+            _TODAYS_OFF_TEXT + " This session is also in focus mode on 'ship 1.3'"
+        )
+        assert "`hooks-daemon focus off`" in text
+
+    def test_an_explicit_policy_is_used_without_reading_the_registry(self) -> None:
+        ProjectContext.reset()
+        policy = SessionPolicy.from_entries((focus_entry(_SID),))
+        verdict = autonomy_verdict(
+            self._payload(), config=Config(), environment="host", session=policy
+        )
+        assert verdict.allowed is False
+        assert verdict.session is policy
+
+    def test_a_payload_with_no_session_reads_no_registry(self) -> None:
+        ProjectContext.reset()
+        for payload in ({}, {HookInputField.SESSION_ID: None}, {HookInputField.SESSION_ID: "  "}):
+            verdict = autonomy_verdict(payload, config=Config(), environment="host")
+            assert verdict.allowed is True
+            assert verdict.session.entries == ()
+
+    def test_a_session_with_no_project_context_fails_loud(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ProjectContext.reset()
+        monkeypatch.setattr(data_layer, "_data_layer", data_layer.DaemonDataLayer())
+        with pytest.raises(RuntimeError, match="ProjectContext"):
+            autonomy_verdict(self._payload(), config=Config(), environment="host")

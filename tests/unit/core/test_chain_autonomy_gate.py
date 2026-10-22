@@ -9,6 +9,7 @@ is untouched, whatever the environment.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
@@ -17,7 +18,12 @@ from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
-from tests.support.autonomy import pin_container_containers_only, pin_desktop_containers_only
+from tests.support.autonomy import (
+    focus_entry,
+    pin_container_containers_only,
+    pin_desktop_containers_only,
+    pin_session_modes,
+)
 
 
 class _Recorder(Handler):
@@ -90,3 +96,50 @@ def test_a_driver_runs_unchanged_where_autonomy_is_on(monkeypatch: pytest.Monkey
     result = _run(driver)
     assert driver.matches_called is True
     assert "ran:driver" in result.result.context
+
+
+class TestSessionModes:
+    """The same gate honours the session's modes (Plan 00501 Task 1.3).
+
+    The modes are read through the real registry on the data layer. With no mode
+    every verdict above is unchanged; a work-halting mode skips a driver even
+    where the environment allows autonomy, and never touches a guard.
+    """
+
+    def test_no_mode_leaves_a_driver_running_in_a_container(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pin_container_containers_only(monkeypatch)
+        pin_session_modes(monkeypatch, tmp_path)
+        driver = _Driver("driver")
+        assert "ran:driver" in _run(driver).result.context
+        assert driver.matches_called is True
+
+    def test_no_mode_leaves_a_driver_skipped_on_a_desktop(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pin_desktop_containers_only(monkeypatch)
+        pin_session_modes(monkeypatch, tmp_path)
+        driver = _Driver("driver")
+        assert "ran:driver" not in _run(driver).result.context
+        assert driver.matches_called is False
+
+    def test_focus_skips_a_driver_where_the_environment_allows_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pin_container_containers_only(monkeypatch)
+        pin_session_modes(monkeypatch, tmp_path, focus_entry(_EVENT["session_id"]))
+        guard = _Guard("guard")
+        driver = _Driver("driver")
+        result = _run(guard, driver)
+        assert driver.matches_called is False
+        assert "ran:driver" not in result.result.context
+        assert "ran:guard" in result.result.context
+
+    def test_another_sessions_mode_leaves_this_driver_running(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pin_container_containers_only(monkeypatch)
+        pin_session_modes(monkeypatch, tmp_path, focus_entry("another-session"))
+        driver = _Driver("driver")
+        assert "ran:driver" in _run(driver).result.context

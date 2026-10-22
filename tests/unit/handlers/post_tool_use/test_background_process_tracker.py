@@ -10,6 +10,7 @@ PostToolUse advisory that fires when a Bash tool call backgrounds a process
 import json
 
 import pytest
+from tests.support.autonomy import pin_no_session_modes
 
 from claude_code_hooks_daemon.config.models import (
     Config,
@@ -27,6 +28,12 @@ from claude_code_hooks_daemon.handlers.post_tool_use.background_process_tracker 
     write_state_record,
 )
 from claude_code_hooks_daemon.utils.cron_tick import DaemonTick, TickKind, classify_tick
+
+
+@pytest.fixture(autouse=True)
+def _no_session_modes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The payloads name a session, so the autonomy gate reads its modes: give it none."""
+    pin_no_session_modes(monkeypatch)
 
 
 def _bash(command="echo hi", *, run_in_background=False, session_id="s1"):

@@ -110,6 +110,14 @@ _WORK_HALTING: Final[frozenset[ModeLabel]] = frozenset(
     {ModeLabel.USAGE_PAUSED, ModeLabel.GOAL_BLOCKED, ModeLabel.AWAITING_HUMAN, ModeLabel.FOCUS}
 )
 
+#: How each work-halting mode ends, as the explanation tells the session.
+_EXIT_HINTS: Final[dict[ModeLabel, str]] = {
+    ModeLabel.USAGE_PAUSED: "usage-paused lifts by itself when the usage window resets",
+    ModeLabel.GOAL_BLOCKED: "the next message the human types clears it",
+    ModeLabel.AWAITING_HUMAN: "the next message the human types clears it",
+    ModeLabel.FOCUS: "type `hooks-daemon focus off` to end focus",
+}
+
 #: The labels that halt work outright, beating the unattended stop-block.
 _HALTS_STOP_BLOCK: Final[frozenset[ModeLabel]] = frozenset(
     {ModeLabel.USAGE_PAUSED, ModeLabel.GOAL_BLOCKED, ModeLabel.AWAITING_HUMAN}
@@ -297,6 +305,11 @@ class SessionPolicy:
         return "; ".join(
             describe_entry(entry) for entry in self.entries if entry.label in _WORK_HALTING
         )
+
+    def exit_clause(self) -> str:
+        """How the work-halting modes end, each way stated once; empty when none halts work."""
+        hints = (_EXIT_HINTS[entry.label] for entry in self.entries if entry.label in _EXIT_HINTS)
+        return "; ".join(dict.fromkeys(hints))
 
     def tick_action(
         self, tick: DaemonTick, *, runs_while_blocked: bool, work_owed: bool | None

@@ -235,6 +235,33 @@ class TestPolicy:
     def test_explain_clause_is_empty_without_a_halting_mode(self) -> None:
         assert SessionPolicy.from_entries((_unattended(),)).explain_clause() == ""
 
+    def test_exit_clause_names_how_focus_ends(self) -> None:
+        clause = SessionPolicy.from_entries((_focus(),)).exit_clause()
+        assert "`hooks-daemon focus off`" in clause
+
+    def test_exit_clause_names_how_a_blocked_mode_ends(self) -> None:
+        for reason in BlockReason:
+            clause = SessionPolicy.from_entries((_blocked(reason),)).exit_clause()
+            assert "the next message the human types" in clause
+
+    def test_exit_clause_names_how_usage_pause_ends(self) -> None:
+        clause = SessionPolicy.from_entries((_usage_paused(),)).exit_clause()
+        assert "usage window resets" in clause
+
+    def test_exit_clause_states_a_shared_exit_once(self) -> None:
+        both = SessionPolicy.from_entries(
+            (_blocked(BlockReason.GOAL_LOOP), _blocked(BlockReason.DECLARED))
+        ).exit_clause()
+        assert both.count("the next message the human types") == 1
+
+    def test_exit_clause_covers_every_halting_mode_in_precedence_order(self) -> None:
+        clause = SessionPolicy.from_entries((_focus(), _usage_paused())).exit_clause()
+        assert clause.index("usage window") < clause.index("focus off")
+
+    def test_exit_clause_is_empty_without_a_halting_mode(self) -> None:
+        assert SessionPolicy.from_entries((_unattended(),)).exit_clause() == ""
+        assert SessionPolicy.from_entries(()).exit_clause() == ""
+
 
 _FAILSAFE = DaemonTick(TickKind.FAILSAFE)
 _WATCHDOG = DaemonTick(TickKind.WATCHDOG)

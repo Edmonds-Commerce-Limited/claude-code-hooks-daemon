@@ -7,14 +7,17 @@ protective, not work-driving: it is never gated.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 from tests.support.autonomy import (
     CONTAINERS_ONLY,
+    focus_entry,
     pin_autonomy,
     pin_container_containers_only,
     pin_desktop_containers_only,
+    pin_session_modes,
 )
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
@@ -82,3 +85,41 @@ class TestWhereAutonomyIsOn:
         )
         monkeypatch.setenv("HOOKS_DAEMON_HOSTNAME", "cchd-sdlc-runner")
         assert _run(AutonomyNoticeHandler()).context == []
+
+
+class TestSessionModes:
+    """The notice also explains a session paused by a mode (Plan 00501 Task 1.3)."""
+
+    def test_no_mode_leaves_it_silent_in_a_listed_container(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pin_container_containers_only(monkeypatch)
+        pin_session_modes(monkeypatch, tmp_path)
+        assert _run(AutonomyNoticeHandler()).context == []
+
+    def test_no_mode_leaves_the_desktop_text_unchanged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pin_desktop_containers_only(monkeypatch)
+        pin_session_modes(monkeypatch, tmp_path)
+        (line,) = _run(AutonomyNoticeHandler()).context
+        assert line.startswith("AUTONOMY OFF")
+        assert "This session is also" not in line
+
+    def test_a_focused_session_is_told_autonomy_is_paused_and_how_to_resume(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pin_container_containers_only(monkeypatch)
+        pin_session_modes(monkeypatch, tmp_path, focus_entry(_EVENT["session_id"], "ship it"))
+        (line,) = _run(AutonomyNoticeHandler()).context
+        assert line.startswith("AUTONOMY PAUSED FOR THIS SESSION: focus mode on 'ship it'")
+        assert "`hooks-daemon focus off`" in line
+
+    def test_a_focused_desktop_session_is_told_both_reasons_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pin_desktop_containers_only(monkeypatch)
+        pin_session_modes(monkeypatch, tmp_path, focus_entry(_EVENT["session_id"], "ship it"))
+        (line,) = _run(AutonomyNoticeHandler()).context
+        assert line.startswith("AUTONOMY OFF")
+        assert "This session is also in focus mode on 'ship it'" in line

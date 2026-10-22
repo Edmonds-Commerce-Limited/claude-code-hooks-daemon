@@ -133,7 +133,7 @@ All CLEAR; rationale and code citations in
 - [x] ✅ **Task 1.2**: TDD the thread-safe registry with write-through per-session file: lifetime classes on load,
   TTL with prompt-text renewal (`is_genuine_text`, no file read), one-time expiry statement, reaping, restart note;
   a malformed file is logged at WARNING and renamed `*.corrupt`.
-- [ ] ⬜ **Task 1.3**: TDD `autonomy_verdict`/`autonomy_allowed` honouring session modes with `explain()` wording;
+- [x] ✅ **Task 1.3**: TDD `autonomy_verdict`/`autonomy_allowed` honouring session modes with `explain()` wording;
   cover the chain route and each direct-call route.
 
 ### Phase 2: Awaiting-human folds in, with the bug fixes (shippable alone)
