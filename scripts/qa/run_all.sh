@@ -453,7 +453,7 @@ echo ""
 echo "========================================"
 echo "QA Summary"
 echo "========================================"
-python3 << 'EOF'
+"${VENV_PYTHON}" << 'EOF'
 import json
 from pathlib import Path
 

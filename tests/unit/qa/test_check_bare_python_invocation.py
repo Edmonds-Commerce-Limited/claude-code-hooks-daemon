@@ -190,7 +190,7 @@ class TestCommandPosition:
     def test_script_text_in_a_single_quoted_string_after_the_command_is_not_scanned(
         self, checker: ModuleType
     ) -> None:
-        source = 'python3 -c "$py"\'\nimport json\npython3 -c x\n\'\n'
+        source = "python3 -c \"$py\"'\nimport json\npython3 -c x\n'\n"
         assert _lines(checker, source) == [1]
 
     def test_line_numbers_follow_continuations_and_heredocs(self, checker: ModuleType) -> None:
@@ -258,7 +258,7 @@ class TestScan:
     def test_an_allowlisted_probe_is_not_reported(
         self, checker: ModuleType, tmp_path: Path
     ) -> None:
-        _write(tmp_path, "probe.sh", 'found="$(python3 -c \'import sys\')"\n')
+        _write(tmp_path, "probe.sh", "found=\"$(python3 -c 'import sys')\"\n")
         entry = checker.AllowEntry(file="probe.sh", match="python3 -c", reason="finds the version")
         assert checker.scan_tree(tmp_path, allowlist=[entry]) == []
 

@@ -44,7 +44,7 @@ _TIMEOUT_SECONDS = 120
 
 # The embedded parser in run_lint.sh, delimited by a quoted heredoc.
 _PARSER_BLOCK = re.compile(
-    r"python3\s*<<\s*'EOF'\s*>\s*\"\$\{OUTPUT_FILE\}\"\n(?P<body>.*?)\nEOF\n",
+    r"\"\$\{VENV_PYTHON\}\"\s*<<\s*'EOF'\s*>\s*\"\$\{OUTPUT_FILE\}\"\n(?P<body>.*?)\nEOF\n",
     re.DOTALL,
 )
 

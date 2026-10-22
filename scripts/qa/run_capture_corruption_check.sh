@@ -25,21 +25,30 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 OUTPUT_FILE="${PROJECT_ROOT}/untracked/qa/capture_corruption.json"
 
+# Run on the interpreter the project resolved, never a bare python3 from PATH.
+# shellcheck source=../venv-include.bash
+source "${PROJECT_ROOT}/scripts/venv-include.bash"
+
 cd "${PROJECT_ROOT}"
+
+if [ ! -x "${VENV_PYTHON}" ]; then
+    echo "ERROR: the project interpreter is missing: ${VENV_PYTHON}" >&2
+    echo "       Create the venv (scripts/qa/run_lint.sh does) and run this again." >&2
+    exit 1
+fi
 
 mkdir -p "$(dirname "${OUTPUT_FILE}")"
 
 echo "Running capture-corruption audit..."
 
-# The audit is pure stdlib — no venv required.
-if python3 scripts/qa/audit_capture_corruption.py --json --output "${OUTPUT_FILE}"; then
+if "${VENV_PYTHON}" scripts/qa/audit_capture_corruption.py --json --output "${OUTPUT_FILE}"; then
     audit_exit=0
 else
     audit_exit=$?
 fi
 
 # Print summary from the JSON the audit just produced.
-python3 - "${OUTPUT_FILE}" <<'PYEOF'
+"${VENV_PYTHON}" - "${OUTPUT_FILE}" <<'PYEOF'
 import json
 import sys
 from pathlib import Path

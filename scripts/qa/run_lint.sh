@@ -111,7 +111,7 @@ fi
 # end to end by tests/unit/qa/test_run_lint.py) read a planted/overridden raw
 # capture; unset, it defaults to the path this script itself just wrote to.
 export QA_LINT_RAW_FILE="${OUTPUT_FILE}.raw"
-python3 << 'EOF' > "${OUTPUT_FILE}"
+"${VENV_PYTHON}" << 'EOF' > "${OUTPUT_FILE}"
 import json
 import os
 import sys

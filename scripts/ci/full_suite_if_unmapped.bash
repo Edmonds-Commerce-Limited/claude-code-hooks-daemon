@@ -7,8 +7,16 @@
 # --select-only, so no test runs here for the question itself.
 set -euo pipefail
 
+# The interpreter the Install step provisioned (the same resolver call it checks),
+# not a python found on PATH. A missing venv fails here, loudly.
+python="$(bash scripts/lib/resolve_venv.sh python "${PWD}")"
+if [ ! -x "${python}" ]; then
+  echo "the provisioned interpreter is missing: '${python}'" >&2
+  exit 1
+fi
+
 selection="$(mktemp)"
-python scripts/qa/run_changed_tests.py --range "${RANGE}" --select-only > "${selection}"
+"${python}" scripts/qa/run_changed_tests.py --range "${RANGE}" --select-only > "${selection}"
 unmapped="$(jq '.unmapped | length' "${selection}")"
 echo "unmapped files: ${unmapped}"
 if [ "${unmapped}" = "0" ]; then
