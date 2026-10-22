@@ -40,8 +40,65 @@ def _act(action: str, **fields: Any) -> dict[str, Any]:
 class TestActions:
     def test_the_action_names(self) -> None:
         assert SessionModeIPC.ACTIONS == frozenset(
-            {"get_session_modes", "enter_focus", "exit_focus"}
+            {"get_session_modes", "enter_focus", "exit_focus", "get_mode_history"}
         )
+
+    def test_focus_changes_record_ipc_evidence(self, tmp_path: Path) -> None:
+        _act(SessionModeIPC.ACTION_ENTER_FOCUS, session_id=_SESSION, task="a task")
+        _act(SessionModeIPC.ACTION_EXIT_FOCUS, session_id=_SESSION)
+        history = _act(SessionModeIPC.ACTION_GET_MODE_HISTORY)["result"]
+        evidence = [t["evidence"] for t in history[SessionModeIPC.KEY_TRANSITIONS]]
+        assert evidence == ["the session-mode CLI or /mode skill", "the session-mode CLI or /mode skill"]
+
+
+class TestModeHistory:
+    def test_lists_every_sessions_modes_and_the_transitions(
+        self, registry: SessionModeRegistry
+    ) -> None:
+        registry.enter(focus_entry(_SESSION, "fix the parser"), evidence="typed")
+        registry.enter(awaiting_human_entry("other"), evidence="stopped")
+        result = _act(SessionModeIPC.ACTION_GET_MODE_HISTORY)["result"]
+        sessions = result[SessionModeIPC.KEY_SESSIONS]
+        assert sorted(sessions) == ["other", _SESSION]
+        assert sessions[_SESSION][0][SessionModeIPC.KEY_LABEL] == "focus"
+        assert [t["evidence"] for t in result[SessionModeIPC.KEY_TRANSITIONS]] == [
+            "typed",
+            "stopped",
+        ]
+
+    def test_a_session_and_limit_narrow_the_answer(self, registry: SessionModeRegistry) -> None:
+        registry.enter(focus_entry(_SESSION, "one"), evidence="first")
+        registry.enter(focus_entry(_SESSION, "two"), evidence="second")
+        registry.enter(awaiting_human_entry("other"), evidence="elsewhere")
+        result = _act(SessionModeIPC.ACTION_GET_MODE_HISTORY, session_id=_SESSION, limit=1)[
+            "result"
+        ]
+        assert list(result[SessionModeIPC.KEY_SESSIONS]) == [_SESSION]
+        assert [t["evidence"] for t in result[SessionModeIPC.KEY_TRANSITIONS]] == ["second"]
+
+    @pytest.mark.parametrize("limit", [0, -1, "5", True])
+    def test_a_bad_limit_is_an_error(self, limit: object) -> None:
+        assert "limit" in _act(SessionModeIPC.ACTION_GET_MODE_HISTORY, limit=limit)["error"]
+
+    def test_a_blank_session_is_an_error(self) -> None:
+        response = _act(SessionModeIPC.ACTION_GET_MODE_HISTORY, session_id=" ")
+        assert "session_id" in response["error"]
+
+    def test_an_unreadable_log_is_a_named_error(
+        self, registry: SessionModeRegistry, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        log = registry.transition_log
+        assert log is not None
+        log.path.write_text("{broken\n", encoding="utf-8")
+        with caplog.at_level(logging.WARNING):
+            response = _act(SessionModeIPC.ACTION_GET_MODE_HISTORY)
+        assert "transition log unreadable" in response["error"]
+        assert any(r.levelno == logging.WARNING for r in caplog.records)
+
+    def test_no_transition_log_is_a_named_error(self, registry: SessionModeRegistry) -> None:
+        with patch.object(type(registry), "transition_log", None):
+            response = _act(SessionModeIPC.ACTION_GET_MODE_HISTORY)
+        assert "no transition log" in response["error"]
 
     def test_get_lists_the_sessions_modes_in_precedence_order(
         self, registry: SessionModeRegistry

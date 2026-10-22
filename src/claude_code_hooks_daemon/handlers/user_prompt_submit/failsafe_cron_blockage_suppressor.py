@@ -436,7 +436,9 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
         try:
             registry = get_data_layer().session_modes
             for label in BLOCKED_LABELS:
-                registry.exit(session_id, label)
+                registry.exit(
+                    session_id, label, evidence="a prompt the human typed in this session"
+                )
         except (RuntimeError, OSError) as e:
             log_and_continue(
                 logger,
