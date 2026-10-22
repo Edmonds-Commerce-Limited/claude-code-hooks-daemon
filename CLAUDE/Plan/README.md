@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00549: opencode support research](00549-opencode-support-research/PLAN.md) - 🔄 In Progress (#136; research only: opencode's plugin/event surface, plan-workflow enforcement, dual-tool repos with Claude Code, same/different comparison; foundation for a new epic)
+
 - [00548: python entry point shebang detector](00548-python-entry-point-shebang-detector/PLAN.md) - Not Started (follow-up to 00546 Q2: a detector for client-run Python entry points that do 3.11-only work before any floor guard; probe results recorded as a known gap)
 
 - [00546: upgrade steps use the resolved interpreter](00546-upgrade-steps-use-the-resolved-interpreter/PLAN.md) - In Progress (#130: the stale-venv cleanup runs a bare `python3`, crashes on 3.9 and the upgrade still reports success; use the resolved interpreter, guard the entry points, DBF the class)
@@ -322,11 +324,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 548 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 549 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 464 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 61 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 62 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
