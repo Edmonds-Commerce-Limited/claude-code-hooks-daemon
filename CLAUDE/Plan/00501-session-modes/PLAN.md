@@ -152,7 +152,7 @@ All CLEAR; rationale and code citations in
 
 - [x] ✅ **Task 3.1**: TDD the UserPromptSubmit trigger (spellings, `off` aliases, start-anchored, one context line),
   reusing the Task 1.2 prompt classifier.
-- [ ] ⬜ **Task 3.2**: TDD focus tick-drop through the suppressor (declared ticks dropped, watchdog delivered,
+- [x] ✅ **Task 3.2**: TDD focus tick-drop through the suppressor (declared ticks dropped, watchdog delivered,
   failsafe tick delivered with the prepended "focus mode: the active task is <task>; other plans are out of scope"
   line), the focus reminder replacing the goal-ledger challenge, the once-only goal clear on entry, no
   `.goal-intent` while focused, and the context-line wording about the supervisor clearing at next idle.

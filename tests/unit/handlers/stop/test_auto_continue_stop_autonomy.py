@@ -28,6 +28,7 @@ from tests.support.autonomy import (
 from claude_code_hooks_daemon.config.models import Config, PersistentCronsConfig
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.chain import HandlerChain
+from claude_code_hooks_daemon.core.focus_mode import focus_reminder
 from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import AutoContinueStopHandler
 from claude_code_hooks_daemon.utils.goal_ledger import LEDGER_FILENAME, GoalLedger
 
@@ -154,6 +155,35 @@ class TestSessionModes:
         assert "STOPPING BECAUSE" in result.reason
         assert _PLAN not in result.reason
         assert "GOAL LEDGER" not in result.reason
+
+    def test_a_focus_reminder_replaces_the_goal_ledger_challenge(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Task 3.2: one line naming the focus task stands where the plan list stood."""
+        pin_container_containers_only(monkeypatch)
+        pin_session_modes(monkeypatch, tmp_path / "modes", focus_entry(_SESSION, "fix the parser"))
+        _ledgered_plan(tmp_path)
+        result = _stop(tmp_path, _UNEXPLAINED)
+        assert result.decision is Decision.DENY
+        assert focus_reminder("fix the parser") in result.reason
+        assert "GOAL LEDGER" not in result.reason
+
+    def test_the_focus_reminder_needs_no_ledgered_plan(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pin_container_containers_only(monkeypatch)
+        pin_session_modes(monkeypatch, tmp_path / "modes", focus_entry(_SESSION, "fix the parser"))
+        result = _stop(tmp_path, _UNEXPLAINED)
+        assert focus_reminder("fix the parser") in result.reason
+
+    def test_the_focus_reminder_also_applies_on_a_desktop(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Focus is the human's intent, not autonomy: it is stated wherever it is set."""
+        pin_desktop_containers_only(monkeypatch)
+        pin_session_modes(monkeypatch, tmp_path / "modes", focus_entry(_SESSION, "fix the parser"))
+        result = _stop(tmp_path, _UNEXPLAINED)
+        assert focus_reminder("fix the parser") in result.reason
 
     def test_focus_drops_the_stand_in_demand(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
