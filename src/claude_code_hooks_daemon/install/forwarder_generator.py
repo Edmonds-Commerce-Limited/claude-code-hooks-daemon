@@ -374,9 +374,7 @@ def build_relay_guard_block(
     # it, with the rule init.sh's carve-out applies (Plan 00466 round 4, P3-2).
     daemon_root = _escape_for_double_quotes(str(untracked_dir.parent))
     lines.append(f'            {RELAY_DAEMON_ROOT_ENV}="{daemon_root}" \\\n')
-    lines.append(
-        '                exec "$_rl_bin" "$_rl_sock" --fallback "${BASH_SOURCE[0]}" \\\n'
-    )
+    lines.append('                exec "$_rl_bin" "$_rl_sock" --fallback "${BASH_SOURCE[0]}" \\\n')
     lines.append(f'                --timeout-ms "{timeout_ms}"\n')
     lines.append("            shopt -u execfail\n")
     lines.append('            if [[ "$_rl_opts" == *e* ]]; then set -e; fi\n')

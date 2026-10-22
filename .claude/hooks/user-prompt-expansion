@@ -22,10 +22,21 @@ if [[ "${1:-}" != "--no-relay" && "${BASH_SOURCE[0]}" == "/workspace/.claude/hoo
     _rl_events_dir="${HOOKS_DAEMON_EVENTS_DIR:-$_rl_dir/events$_rl_sfx}"
     _rl_bin="${HOOKS_DAEMON_RELAY_BINARY:-/workspace/untracked/bin/hooks-relay}"
     _rl_sock="$_rl_events_dir/user-prompt-expansion.sock"
-    if [[ -x "$_rl_bin" && -S "$_rl_sock" ]]; then
-        HOOKS_DAEMON_RELAY_DAEMON_ROOT="/workspace" \
-            exec "$_rl_bin" "$_rl_sock" --fallback "${BASH_SOURCE[0]}" \
-            --timeout-ms "30000"
+    if [[ -S "$_rl_sock" ]]; then
+        _rl_magic=""
+        if [[ -x "$_rl_bin" && -f "$_rl_bin" ]] \
+            && read -r -N 4 _rl_magic < "$_rl_bin" \
+            && [[ "$_rl_magic" == $'\x7fELF' || "$_rl_magic" == '#!'* ]]; then
+            _rl_opts="$-"
+            shopt -s execfail
+            set +e
+            HOOKS_DAEMON_RELAY_DAEMON_ROOT="/workspace" \
+                exec "$_rl_bin" "$_rl_sock" --fallback "${BASH_SOURCE[0]}" \
+                --timeout-ms "30000"
+            shopt -u execfail
+            if [[ "$_rl_opts" == *e* ]]; then set -e; fi
+        fi
+        HOOKS_DAEMON_RELAY_UNUSED="$_rl_bin"
     fi
 fi
 # --- end relay hot path ---
