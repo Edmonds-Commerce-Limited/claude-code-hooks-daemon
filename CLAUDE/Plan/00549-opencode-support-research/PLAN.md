@@ -78,7 +78,7 @@ and refreshed rather than re-derived. Plan 00169's prior-art survey touched open
 
 - [x] ✅ **Task 2.1**: Event and capability mapping → `MAPPING-events.md`.
 - [x] ✅ **Task 2.2**: Plan-workflow and enforcement feasibility under opencode → `ANALYSIS-plan-workflow.md`.
-- [ ] ⬜ **Task 2.3**: Abstraction options and a recommendation → `OPTIONS-support.md`.
+- [x] ✅ **Task 2.3**: Abstraction options and a recommendation → `OPTIONS-support.md`.
 
 ### Phase 3: Synthesis and gate
 
