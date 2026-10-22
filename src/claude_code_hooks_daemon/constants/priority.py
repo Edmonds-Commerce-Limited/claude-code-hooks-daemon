@@ -158,6 +158,10 @@ class Priority:
     # non-terminal so auto_continue_stop still runs behind it.
     IDLE_WORKABLE_ISSUE_STOP_GATE = 4
 
+    # Plan 00501 Phase 6: an observer that must see every main-thread stop, so
+    # it runs ahead of the terminal auto_continue_stop (10); non-terminal.
+    GOAL_LOOP_DETECTOR = 5
+
     # Stop failure pair (Plan 00470 Task 3.1). The recorder is alone on
     # StopFailure, so 50 is free. The resolver is a UserPromptSubmit handler
     # and runs after usage_pause_gate (9), whose terminal deny ends the chain:

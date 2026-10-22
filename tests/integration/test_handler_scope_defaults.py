@@ -79,6 +79,8 @@ _EXPECTED_MAIN: frozenset[str] = frozenset(
         "usage-pause-stop-gate",
         # Plan 00470 Phase 7: judges the coordinator's own idle stop.
         "idle-workable-issue-stop-gate",
+        # Plan 00501 Phase 6: goals are set and evaluated on the coordinator's session.
+        "goal-loop-detector",
     }
 )
 

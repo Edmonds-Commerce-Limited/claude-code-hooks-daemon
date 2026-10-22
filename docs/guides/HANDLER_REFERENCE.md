@@ -4492,6 +4492,40 @@ None ship today. `cleanup`, the only one, was removed in Plan 00237: it reaped a
 
 These handlers run when Claude stops generating a response.
 
+#### goal_loop_detector
+
+| Property       | Value                |
+| -------------- | -------------------- |
+| **Config key** | `goal_loop_detector` |
+| **Priority**   | 5                    |
+| **Type**       | Advisory (observer)  |
+| **Event**      | Stop                 |
+
+**Description:** Watches for a goal loop: a session that keeps stopping with `STOPPING BECAUSE:` while the goal evaluator keeps answering "not met", with no human prompt in between. On each main-thread Stop it reads only the transcript lines added since its last read (a session it has not seen before is read from its last 2 MiB only), counts stop-then-unmet cycles inside the window, and appends to the session-mode transition log: `near-miss` one cycle short of the threshold, `would-enter` at it, and `loop-reset` when a human prompt, a goal met or cleared, or a repository change (HEAD plus tracked changes, plan journals and `untracked/` excluded) empties the count. Stop-text similarity is recorded as evidence only. It never blocks and never enters a mode. An unreadable transcript, a changed or shrunk transcript (re-anchored at its end), a failed git read and a failed log append are each logged as a WARNING and the Stop is allowed. Main thread only; never terminal.
+
+**Options:** `mode` accepts only its default, `observe`; any other value is reported at session start and withheld.
+
+| Option                     | Default | Description                                                       |
+| -------------------------- | ------- | ----------------------------------------------------------------- |
+| `cycle_threshold`          | `3`     | Cycles in the window that count as a loop (positive integer)      |
+| `declared_cycle_threshold` | `2`     | The threshold when every cycle's stop declares `[awaiting-human]` |
+| `window_minutes`           | `30`    | Cycles older than this, measured back from the newest, drop out   |
+| `blocked_hours`            | `4`     | Positive number; read by no code in `observe` mode                |
+
+**Config example:**
+
+```yaml
+handlers:
+  stop:
+    goal_loop_detector:
+      enabled: true   # default
+      priority: 5
+      options:
+        cycle_threshold: 3
+```
+
+---
+
 #### usage_pause_stop_gate
 
 | Property       | Value                   |
