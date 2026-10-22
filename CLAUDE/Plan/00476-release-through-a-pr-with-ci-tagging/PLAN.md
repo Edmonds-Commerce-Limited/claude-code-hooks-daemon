@@ -83,16 +83,20 @@ modules only.
 
 ### Phase 1: Prove the gate runs in CI
 
-- [ ] ⬜ **Task 1.1**: Run each of the 40 `llm_qa.py` checks on a CI runner in a
-  trial workflow. List the ones that need changes to run there.
-- [ ] ⬜ **Task 1.2**: Time each check's job on the runner against the local
+- [x] ✅ **Task 1.1**: Run each of the 43 `llm_qa.py` checks on a CI runner in a
+  trial workflow. List the ones that need changes to run there. Delivered:
+  `subagent-reports/261022-task-1.1-trial-workflow-sonnet.md`; 42 of 43 ran
+  unchanged, `tests` needed a daemon keepalive.
+- [x] ✅ **Task 1.2**: Time each check's job on the runner against the local
   `llm_qa.py` timing summary, and choose the per-Python jobs and shards from it
-  (Design 5).
+  (Design 5). Delivered: `subagent-reports/261022-task-1.1-1.2-findings-sonnet.md`;
+  4 check groups and 8 test shards (`scripts/qa/test_shards.yaml`).
 
 ### Phase 2: Workflows
 
-- [ ] ⬜ **Task 2.1**: A release pull request workflow that runs the whole gate,
-  one job per Python, sharded where measured to need it (Design 5).
+- [x] ✅ **Task 2.1**: A release pull request workflow that runs the whole gate,
+  one job per Python, sharded where measured to need it (Design 5). Delivered:
+  `.github/workflows/release-gate.yml`; green on main in run 39728713370.
 - [x] ✅ **Task 2.2**: A separate performance-sweep job (Design 6). Delivered:
   `perf_sweep` marker on the 7 `scaled_cpu_seconds` tests (11 cases), deselected
   from the fallback and matrix steps, run alone by the `perf-sweep` CI job.
@@ -120,4 +124,7 @@ modules only.
 
 ## Delivery & Milestones
 
-- Not started. Follows Plan 00475's first batch.
+- All tasks merged to main (`c7637cf1c` Task 2.1, `1ad2e3618` Task 3.1); the
+  release-gate workflow ran green on main in run 39728713370.
+- Open: the success criterion needs the first real release through the new
+  procedure, which only a human-invoked `/release` can start.
