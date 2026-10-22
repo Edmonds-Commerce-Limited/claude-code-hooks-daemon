@@ -140,7 +140,7 @@ Evidence already seen in this session (2026-10-06), not yet explained:
   [RUST-HELPERS-ASSESSMENT.md](RUST-HELPERS-ASSESSMENT.md) names six paths. None passes the cost test; the one path over
   the budget (the secret-file guard, 1.2 s per 115 KB Write before N465, which halved it; a large write is still over
   the 100 ms target, ledger N467) is a Python algorithm problem. The owner's decision is put
-  to them in [Plan 00529](../../00529-owner-decision-on-rust-helpers-from-00495-assessment/PLAN.md).
+  to them in [Plan 00529](../00529-owner-decision-on-rust-helpers-from-00495-assessment/PLAN.md).
 
 ## Success Criteria
 
