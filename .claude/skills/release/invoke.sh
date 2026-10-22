@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# /release skill - Automated release management orchestration
+# /release skill - prints the orchestration prompt. The procedure itself lives
+# in CLAUDE/development/RELEASING.md and is not restated here.
 
 set -euo pipefail
 
@@ -15,13 +16,21 @@ fi
 cat <<PROMPT
 # Release Orchestration for Version: ${VERSION}
 
-Execute the release management process in stages using agent orchestration.
+**The procedure is CLAUDE/development/RELEASING.md. Read its "Pipeline
+Overview", "The release state file" and "The Release Pull Request and the
+Merge Freeze" now, then follow its numbered steps in order.** This prompt adds
+only what depends on this invocation.
 
-**CRITICAL:** Agents cannot spawn nested agents. You (main Claude) will orchestrate this workflow by invoking agents sequentially.
+## Resuming?
 
-## Stage 0: Slate-Clean Gate (Plan 00359) — BEFORE any agent is spawned
+If \`untracked/release-state.json\` exists, a release is already authorised and
+in flight: do NOT run Stage 0 again and do not open a second pull request.
+Resume from its \`last_completed_step\` per RELEASING.md "The release state
+file".
 
-Run this yourself, in the main thread, first:
+## Stage 0: Slate-Clean Gate (RELEASING.md Step 1a) — before anything else
+
+Run this yourself, in the main thread:
 
 \`\`\`bash
 bin/hooks-daemon release-slate-check ${SLATE_ACCEPT_FLAG}
@@ -29,7 +38,8 @@ bin/hooks-daemon release-slate-check ${SLATE_ACCEPT_FLAG}
 
 Read the exit code, not the prose:
 
-- **0** — clean. Continue to Stage 1 with no further prompt.
+- **0** — clean. Write the state file now (RELEASING.md, "The release state
+  file"), then continue at Step 1b.
 - **2** — something is in flight. **STOP HERE.** Show the human the report
   verbatim and end your turn with \`STOPPING BECAUSE: [awaiting-human] the
   release slate is not clean\`. Do NOT proceed, do NOT ask "shall I continue?".
@@ -38,325 +48,18 @@ Read the exit code, not the prose:
 - **1** — the check could not be made. **ABORT** the release. \`accept-wip\`
   does not rescue this.
 
-See RELEASING.md Step 1a for what each section of the report means.
-
-## Stage 1: Release Preparation & Execution
-
-First, YOU (main Claude) run the full QA gate on this clean HEAD:
-\`./scripts/qa/llm_qa.py all\`. The Release Agent is a sub-agent and cannot run
-the full suite; it confirms this run with \`--read-only all\`, which fails a
-result recorded for any other tree (RELEASING.md Step 1b).
-
-Then use the Task tool to spawn the Release Agent (Sonnet 4.5):
-
-**Agent Spec:** .claude/agents/release-agent.md
-**Target Version:** ${VERSION}
-
-**Task for Release Agent:**
-\`\`\`
-Execute release preparation and file updates for version ${VERSION}.
-
-Follow the Release Agent specification (.claude/agents/release-agent.md) for:
-
-1. Pre-Release Validation (ABORT on ANY failure)
-   - Verify clean git state (no uncommitted changes)
-   - Run ALL QA checks: Format, Lint, Type Check, Tests, Security
-   - Verify version consistency across all files
-   - Check GitHub CLI authentication
-   - CRITICAL: Do NOT auto-fix issues. User must fix and retry.
-
-2. Version Detection
-   - If version="${VERSION}" is not "auto", use it
-   - Otherwise auto-detect from commits (semantic versioning)
-   - Present proposal to user and get confirmation
-
-3. Version Updates
-   - pyproject.toml (line 7)
-   - src/claude_code_hooks_daemon/version.py
-   - README.md (badge line 3)
-   - CLAUDE.md
-   - CLAUDE/CLAUDE.md
-
-4. Changelog Generation
-   - Parse commits since last tag
-   - Categorize (Added/Changed/Fixed/Removed)
-   - Update CHANGELOG.md with Keep a Changelog format
-
-5. Release Notes Creation
-   - Create RELEASES/vX.Y.Z.md
-   - Include summary, highlights, full changelog
-   - Fold every CLAUDE/UPGRADES/UNRELEASED/release-notes/NNN-*.md callout into
-     the highlights (RELEASING.md Step 5); Step 6 moves the files out
-   - Add installation/upgrade instructions
-
-**DO NOT:**
-- Do not commit changes yet
-- Do not spawn nested agents
-- Do not push to git
-
-**Output Required:**
-- List all files modified
-- Show version number determined
-- Display changelog entry preview
-- Display release notes preview
-- Confirm ready for review
-
-Stop and return results. Next stages (code review, acceptance tests, then Opus review) will be handled by main Claude.
-\`\`\`
-
-## Stage 1.5: Code Review Gate (You Handle This) - 🚨 BLOCKING
-
-After Stage 1 completes, YOU (main Claude) MUST review the actual code changes before proceeding.
-
-\`\`\`bash
-LAST_TAG=\$(git describe --tags --abbrev=0)
-git log --oneline "\${LAST_TAG}..HEAD"
-git diff "\${LAST_TAG}..HEAD" -- src/
-\`\`\`
-
-**Review checklist:**
-- [ ] No obvious bugs in handler \`matches()\` / \`handle()\` logic
-- [ ] No security anti-patterns (shell injection, hardcoded secrets, unvalidated input)
-- [ ] Handler priority ranges correct (10-20 safety, 25-35 quality, 36-55 workflow)
-- [ ] Tests exist alongside every handler change
-- [ ] No magic strings/numbers (named constants used)
-- [ ] SOLID principles — no \`if/elif\` chains on language/type names
-- [ ] No debug code, workarounds, or leftover TODOs
-
-**If code looks correct**: Proceed to Stage 2 (Acceptance Testing).
-**If issues found**: ABORT, fix issues, re-run \`/release\`.
-
-## Stage 2: Acceptance Test Gate (You Handle This) - 🚨 BLOCKING
-
-**CRITICAL BLOCKING GATE - MANDATORY - NO SHORTCUTS ALLOWED**
-
-After Stage 1.5 (code review passed), YOU (main Claude) MUST determine acceptance testing scope based on bump type.
-
-**STEP 2.0: Determine Acceptance Testing Scope**
-
-\`\`\`bash
-LAST_TAG=\$(git describe --tags --abbrev=0)
-HANDLER_CHANGES=\$(git diff "\${LAST_TAG}..HEAD" --name-only -- src/claude_code_hooks_daemon/handlers/)
-echo "Handler changes: \${HANDLER_CHANGES:-none}"
-\`\`\`
-
-| Bump Type | Handler Changes? | Action |
-|-----------|-----------------|--------|
-| MAJOR | Any | Full acceptance test suite (Steps 2.1+) |
-| MINOR | Any | Full acceptance test suite (Steps 2.1+) |
-| PATCH | Yes | Targeted tests for changed handlers only |
-| PATCH | No | Skip — document reason in release notes, go to Stage 3 |
-
-**PATCH + no handler changes**: Add to release notes:
-\`"PATCH release — no handler changes, acceptance testing not required"\`
-Then skip to Stage 3 (Opus Review).
-
-**PATCH + handler changes**: Run \`generate-playbook\`, execute only tests for changed handlers, document results. Then proceed to Stage 3.
-
-**MAJOR/MINOR — continue with full suite below:**
-
-**STEP 2.1: Invoke Acceptance Test Skill**
-
-Use the Skill tool to invoke the acceptance-test skill:
-
-\`\`\`
-Skill tool:
-- skill: "acceptance-test"
-- args: "all"
-\`\`\`
-
-This is MANDATORY. You MUST invoke the skill, not just mention it or suggest it to the user.
-
-**What this does**:
-- Restarts daemon with latest code
-- Generates complete test playbook from ALL handler definitions (no filtering)
-- Runs every test by the routing in RELEASING.md Step 12 (each test's \`Requires Main Thread\` field in the playbook): main-thread tests run sequentially in the main thread; never one parallel batch of all tests
-- Executes EVERY test (blocking, advisory, context types)
-- Reports comprehensive pass/fail/skip results
-
-**STEP 2.2: Verify Results**
-
-Check the output summary:
-
-**✅ SUCCESS CRITERIA** (all must be true):
-- \`failed: 0\` (zero failures)
-- \`errors: 0\` (zero errors)
-- \`skipped: N\` (lifecycle events only - this is normal)
-- Message: "All tests passed! Handlers working correctly."
-
-**❌ FAILURE CRITERIA** (any of these = ABORT):
-- \`failed: > 0\` (any test failures)
-- \`errors: > 0\` (any test errors)
-- No output (skill failed to run)
-- Daemon not running
-
-**STEP 2.3: Decision Point**
-
-**If ALL tests passed (failed=0, errors=0)**:
-- ✅ Proceed to Stage 3 (Opus Review)
-- Document total test count in release notes
-
-**If ANY test failed (failed>0 OR errors>0)**:
-- ❌ **ABORT RELEASE IMMEDIATELY**
-- ❌ **DO NOT PROCEED TO OPUS REVIEW**
-- ❌ **DO NOT SKIP THIS GATE**
-- Enter FAIL-FAST cycle:
-  1. Review failed test details from output
-  2. Investigate root cause
-  3. Fix handler bug using TDD
-  4. Main Claude runs full QA: \`./scripts/qa/llm_qa.py all\` (a sub-agent fixing the bug runs \`llm_qa.py changed\`)
-  5. Restart daemon
-  6. **Re-run \`/acceptance-test all\` from scratch**
-  7. Repeat until passed=100%, failed=0, errors=0
-
-**NO SHORTCUTS**:
-- ⛔ Cannot skip acceptance testing
-- ⛔ Cannot use partial test filters (must use \`all\`)
-- ⛔ Cannot ignore failures
-- ⛔ Cannot proceed with errors
-- ⛔ Cannot use manual testing as substitute for automated
-
-**VERIFICATION CHECKPOINT**:
-
-Before proceeding to Stage 3, you MUST confirm:
-
-1. [ ] Ran \`/acceptance-test all\` (not filtered subset)
-2. [ ] Reviewed complete results output
-3. [ ] Verified failed=0, errors=0
-4. [ ] Total test count documented: ___ tests
-5. [ ] No handler bugs found
-
-**If you cannot check ALL boxes above, you MUST NOT proceed.**
-
-**Time Investment**: 4-6 minutes for full automated suite. This is NON-NEGOTIABLE.
-
-**Reference:** \`CLAUDE/development/RELEASING.md\` "Acceptance Testing Gate" section
-
-## Stage 3: Opus Review (You Handle This)
-
-After the Release Agent completes, YOU (main Claude) will:
-
-1. Review the Release Agent's output
-2. Use Task tool to spawn an ad-hoc Opus 4.5 agent for final review:
-
-**Task for Opus Agent:**
-\`\`\`
-model: opus
-description: Release documentation validation (NOT code review)
-
-CRITICAL: Review DOCUMENTATION ONLY. Do NOT review code, QA, tests, or security.
-All QA checks (tests, lint, types, security) ALREADY PASSED in validation stage.
-
-Review the following release DOCUMENTATION for version X.Y.Z:
-
-Files to review:
-- pyproject.toml (version line)
-- src/claude_code_hooks_daemon/version.py
-- README.md (badge)
-- CLAUDE.md (version section)
-- CHANGELOG.md (new entry) - CRITICAL: verify accuracy
-- RELEASES/vX.Y.Z.md - CRITICAL: verify completeness
-
-Documentation verification checklist:
-- [ ] All version numbers consistent (X.Y.Z)
-- [ ] Changelog categorization correct (Added/Changed/Fixed/Removed)
-- [ ] Release notes comprehensive and accurate
-- [ ] No grammatical errors or typos
-- [ ] Technical descriptions accurate
-- [ ] No missing critical changes in changelog
-- [ ] Security/breaking changes properly marked
-- [ ] Upgrade instructions clear (if breaking changes)
-
-Do NOT check:
-- Code quality (already validated by QA)
-- Test coverage (already validated by pytest)
-- Type safety (already validated by mypy)
-- Security vulnerabilities (already validated by bandit)
-
-Respond with JSON:
-{
-  "approved": true/false,
-  "confidence": "percentage",
-  "issues": ["documentation issue 1", "documentation issue 2"] or [],
-  "summary": "brief documentation validation summary"
-}
-\`\`\`
-
-3. If Opus rejects: Invoke Release Agent again to fix DOCUMENTATION issues only
-4. If Opus approves: Proceed to Stage 4
-
-## Stage 4: Finalization (You Handle This)
-
-After Opus approval, YOU (main Claude) will:
-
-1. Commit changes:
-\`\`\`bash
-git add pyproject.toml src/claude_code_hooks_daemon/version.py README.md CLAUDE.md CLAUDE/CLAUDE.md CHANGELOG.md RELEASES/vX.Y.Z.md
-
-git commit -m "Release vX.Y.Z: [Title]
-
-- Updated version to X.Y.Z across all files
-- Added comprehensive changelog entry
-- Generated release notes
-
-Full changelog: RELEASES/vX.Y.Z.md
-
-Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
-
-git push origin main
-\`\`\`
-
-2. Create tag and GitHub release:
-\`\`\`bash
-# BEFORE the tag: build the GitHub body. GitHub rejects a release body over
-# 125,000 characters (HTTP 422) AFTER the tag is pushed; this step substitutes
-# the verbatim Highlights when needed and exits non-zero if it still cannot fit.
-scripts/release/build_github_release_body.py vX.Y.Z
-
-git tag -a vX.Y.Z -m "\$(cat RELEASES/vX.Y.Z.md)"
-git push origin vX.Y.Z
-
-gh release create vX.Y.Z \\
-  --title "vX.Y.Z - [Title]" \\
-  --notes-file untracked/release-artifacts/github-release-body.md \\
-  --latest
-
-# REQUIRED: attach the self-bootstrap bundle (bootstrap-checksums.txt plus
-# the four skill scripts). Every client skill wrapper fetches this manifest
-# from releases/latest/download/ — a release without it 404s them all.
-scripts/release/publish_bootstrap_assets.sh vX.Y.Z
-\`\`\`
-
-3. Verify:
-\`\`\`bash
-git tag -l vX.Y.Z
-gh release view vX.Y.Z --json assets --jq '.assets[].name'
-# Expected: upgrade.sh daemon-cli.sh health-check.sh init-handlers.sh bootstrap-checksums.txt
-\`\`\`
-
-4. Display success summary:
-\`\`\`
-✅ Release vX.Y.Z Complete!
-
-📦 Version: X.Y.Z (MAJOR/MINOR/PATCH release)
-🏷️  Tag: vX.Y.Z
-📝 Changelog: CHANGELOG.md
-📋 Release Notes: RELEASES/vX.Y.Z.md
-🔗 GitHub Release: https://github.com/.../releases/tag/vX.Y.Z
-
-Installation command:
-git clone -b vX.Y.Z https://github.com/.../hooks-daemon.git
-\`\`\`
-
----
-
-**Error Handling:**
-- If Stage 1 fails: Abort, show error
-- If Stage 2 fails: Fix handler bugs, re-run acceptance tests
-- If Stage 3 rejects: Re-run Stage 1 with documentation fixes
-- If Stage 4 fails: Provide rollback instructions
-
-**Documentation:** CLAUDE/development/RELEASING.md
-
-Begin Stage 1 now by invoking the Release Agent.
+## Then: RELEASING.md Steps 1b to 15
+
+- Target version: **${VERSION}** (\`auto\` = the release agent proposes the
+  bump from the commits since the last tag, RELEASING.md Step 2).
+- The release branch is \`release/<version>\`; every preparation commit goes on
+  it, never on \`main\`.
+- There is NO local full QA run: the release pull request's CI is the gate
+  (RELEASING.md Step 8). Targeted checks are fine.
+- Spawn the release agent (\`.claude/agents/release-agent.md\`) with the Task
+  tool for the preparation it owns; you orchestrate everything else.
+- Acceptance testing (RELEASING.md Step 12) routes each test by the playbook's
+  \`Requires Main Thread\` field and batches the rest by \`Recommended Model\`;
+  invoke the \`acceptance-test\` skill for it.
+- Update \`last_completed_step\` in the state file as each step completes.
 PROMPT

@@ -26,7 +26,7 @@ release *would be sound*, never that it is *wanted now*.
 human confirmation before tagging or publishing (owner ruling, v3.57.0
 release — an earlier revision of this document invented one and it was
 wrong). The release process is gated ONLY by the factors that confirm the
-release is ready: the pipeline's blocking gates (Steps 6, 8–12). It
+release is ready: the pipeline's blocking gates (Steps 6, 8–13). It
 ultimately passes — and publishes — or it fails and is aborted.
 
 | Situation                                                              | Allowed to tag/publish?             |
@@ -69,17 +69,25 @@ update it as each numbered step completes:
 }
 ```
 
-When the release goes through a pull request (Plan 00476), the file also gains
-an optional `ci` record of that pull request's CI run:
+Once Step 8 opens the release pull request, the file also carries a `ci`
+record of that pull request's CI run:
 
 ```json
 "ci": {"pr_number": 12, "run_id": 987654, "head_sha": "<40-hex sha>", "conclusion": "success"}
 ```
 
-All four fields are required and no others are allowed. Before tagging, run
-`scripts/release/check_release_ci.py`: it exits non-zero with one named reason
-unless the conclusion is `success`, `head_sha` equals the commit at HEAD, and
-`gh run view <run_id>` still reports the same conclusion and head commit.
+All four fields are required and no others are allowed; while the run is still
+going, `conclusion` is `pending`. The record is written as soon as the pull
+request and its run exist (Step 8), and rewritten whenever a new commit on the
+release branch starts a new run. Two things read it:
+
+- `release_merge_freeze` (rule R-RELEASE-MERGE-FREEZE) takes `pr_number` as the
+  open release pull request and freezes every other merge and push to `main`
+  ([The merge freeze](#the-release-pull-request-and-the-merge-freeze)).
+- `scripts/release/check_release_ci.py` (Step 13) exits non-zero with one named
+  reason unless the conclusion is `success`, `head_sha` equals the commit at
+  HEAD, and `gh run view <run_id>` still reports the same conclusion and head
+  commit.
 
 Rules for reading it:
 
@@ -88,11 +96,17 @@ Rules for reading it:
 - **State file present ⇒ a release IS authorised.** Resume from
   `last_completed_step`; do not restart it and do not re-litigate whether it
   should happen. That authorisation covers the WHOLE pipeline, tagging and
-  publishing included — once the blocking gates pass, proceed to Steps 14–15
-  without asking again. (A `publish_authorised` field in an old state file is
-  legacy; ignore it.)
+  publishing included — once the blocking gates pass, proceed through the
+  merge (Step 13) and Steps 14–15 without asking again. (A
+  `publish_authorised` field in an old state file is legacy; ignore it.)
+- **Resuming past Step 8** means the release branch and pull request already
+  exist: `git switch release/<version>` (it is on `origin` if the checkout was
+  lost), read `ci.pr_number`, and carry on from `last_completed_step`. A run
+  recorded `pending` is waited for again (Step 8); never re-open a second pull
+  request for the same version.
 - **Delete the file** once Step 15 verification succeeds, so a later session
-  cannot mistake a finished release for an in-flight one.
+  cannot mistake a finished release for an in-flight one. Deleting it also
+  lifts the merge freeze.
 
 **Step 1a runs BEFORE the state file, and that is not a contradiction of
 "first".** The state file is the first thing `/release` writes; the slate-clean
@@ -140,9 +154,10 @@ gh release delete vX.Y.Z --yes
 
 ## Prerequisites
 
-- Clean git state, all QA passing
+- Clean git state on `main`, whose HEAD passed CI (Step 1a checks it)
 - `gh auth status` authenticated
-- Write access to GitHub repository
+- Write access to GitHub repository (push a branch, open and merge a pull
+  request, push a tag, create a release)
 
 ## Quick Release
 
@@ -155,36 +170,101 @@ gh release delete vX.Y.Z --yes
 ## Pipeline Overview
 
 ```
-1.  Pre-Release Validation (Agent)     1a slate gate, 1H Housekeeping phase, 1b full QA, 1c Claude Code review
+PREPARE (in session, on branch release/<version>)
+1.  Pre-Release Validation             1a slate gate, 1b release branch + agent validation, 1H Housekeeping phase, 1c Claude Code review
 2.  Version Detection
 3.  Version Update (Agent)
 4.  Changelog Generation (Agent)
 5.  Release Notes Creation (Agent)
 6.  Move UNRELEASED Post-Upgrade Tasks   <- BLOCKING
-7.  Opus Documentation Review
-8.  QA Verification Gate                 <- BLOCKING   8b Start-up Budget Gate <- BLOCKING
+7.  Opus Documentation Review          7.1 commit on the release branch
+WAIT (CI on the pull request)
+8.  Release Pull Request + CI Gate      <- BLOCKING   8a push + open PR, 8b Start-up Budget Gate <- BLOCKING, 8c wait for `Release gate`
 9.  Breaking Changes Check               <- BLOCKING
 10. Code Review Gate                     <- BLOCKING
 11. CLAUDE.md Guidance Audit             <- BLOCKING
 12. Acceptance Testing Gate              <- BLOCKING
-13. Commit & Push
-14. Tag & GitHub Release
+RELEASE (in session, local daemon)
+13. Verify CI & Merge the Pull Request   <- BLOCKING
+14. Tag the Merge Commit & GitHub Release
 15. Post-Release Verification         15.1 Housekeeping phase, post-release items
 ```
+
+There is **no local full QA run** anywhere in this pipeline. The whole gate
+(`llm_qa.py`'s every check, every supported Python, the performance sweeps)
+runs in CI on the release pull request (workflow `release-gate.yml`, summary
+check `Release gate`), and that run is the release's recorded QA result (the
+state file's `ci` record). Targeted checks the session can run cheaply
+(`llm_qa.py changed`, a single test file) are still fine at any step.
+
+Steps 9–12 do not need the CI run to have finished: run them while Step 8c
+waits. Any commit they add goes onto the release branch and is pushed, which
+starts a new CI run; Step 8c then waits for THAT run and rewrites the `ci`
+record. Step 13 refuses to merge anything CI did not pass on the exact head.
 
 The **Housekeeping phase** ([below](#housekeeping-phase-every-release)) hooks into every release: chores that are not
 about what is being released but need doing regularly, with the release as the checkpoint.
 
 **ANY blocking gate failure = ABORT release immediately. No exceptions.**
+Aborting after Step 8a also means closing the pull request (see
+[Rollback](#rollback)).
 
 Agents cannot spawn nested agents. Main Claude orchestrates by invoking agents sequentially.
 
+## The Release Pull Request and the Merge Freeze
+
+**Why a pull request.** The tag must land on a commit the whole gate passed.
+Running the gate locally held the host lock for the entire suite, and no check
+tied the gated tree to the tagged one: v3.67.0's tag carried a stale
+UNRELEASED index (Plan 00474 ledger N263). The release pull request's CI tests
+the exact commit that is then merged, and Step 13 proves it before merging
+(Plan 00476).
+
+**Why the tagged merge commit is the gated tree.** Step 14 tags the merge
+commit `gh pr merge --merge` creates on `main`, not the pull request's head.
+A merge commit's tree is the combination of its two parents. When the release
+branch already contains every commit on `main` (it is up to date), the
+combination adds nothing from `main`, so the merge commit's tree is
+byte-for-byte the head's tree, the tree CI passed. Step 13 therefore requires
+the branch to be up to date before merging, and Step 14 compares the two trees
+before tagging.
+
+**The freeze.** While the state file's `ci` record names a pull request,
+project handler `release_merge_freeze` (rule **R-RELEASE-MERGE-FREEZE**) denies
+every command in this project that would move `main` other than the release
+itself: `git merge` on `main`, `git push` to `main` (including `HEAD:main`,
+`--all` and `--mirror`), and `gh pr merge` of any pull request other than
+`ci.pr_number` (or of none named). An unreadable or malformed state file denies
+those same commands too (fail closed). Pushing the release branch, pushing the
+tag, and `git pull` on `main` are not frozen.
+
+**If `main` moves anyway** (another clone, the GitHub UI, a merge queued before
+the freeze), the release branch is no longer up to date and the merge commit
+would carry trees CI never saw. Update the branch, never `main`:
+
+```bash
+git -C /workspace fetch origin
+git -C /workspace switch release/X.Y.Z
+git -C /workspace merge --no-edit origin/main      # on the release branch: not frozen
+git -C /workspace push origin release/X.Y.Z
+```
+
+The push starts a new `Release gate` run (the workflow cancels the superseded
+one). Go back to Step 8c: wait for it, rewrite the `ci` record with the new
+run id and head, and re-enter Step 13. If the merged-in commits change `src/`,
+the Step 10 review and the Step 12 acceptance run cover them as well.
+
+**Finishing or aborting lifts the freeze.** Finishing: Step 15 deletes the
+state file. Aborting: close the pull request, then delete the state file
+([Rollback](#rollback)). Never edit `ci.pr_number` to let another merge through.
+
 ## 🚨 Review Early, Never Drop Findings (Plan 00157)
 
-The Code Review Gate (Step 10) and CLAUDE.md Guidance Audit (Step 11) currently
-run **after** the QA (Step 8) and just **before** the Acceptance gate (Step 12).
-That ordering has a cost: any fix applied to a review finding forces a full
-FAIL-FAST restart of the QA + acceptance gates (code changes can regress earlier
+The Code Review Gate (Step 10) and CLAUDE.md Guidance Audit (Step 11) run
+**after** the pull request is opened (Step 8) and just **before** the
+Acceptance gate (Step 12). That ordering has a cost: any fix applied to a
+review finding is a new commit on the release branch, so CI runs the whole gate
+again and the acceptance run restarts (code changes can regress earlier
 tests). So **blocking** findings are expensive to fix in place, and there is
 pressure to defer **non-blocking** findings — which risks losing review value as
 silent tech debt.
@@ -192,9 +272,9 @@ silent tech debt.
 Two non-negotiable rules close that gap:
 
 1. **Prefer reviewing early.** When practical, run the code review + guidance
-   audit against the diff *before* the QA/acceptance gates, so findings can be
-   fixed and re-verified in one pass rather than triggering a downstream
-   FAIL-FAST re-run.
+   audit against the diff *before* Step 8a opens the pull request, so findings
+   can be fixed and committed before CI's one run rather than triggering a
+   second run and a FAIL-FAST restart.
 
 2. **A release carries no known defect.** Every review finding that describes
    a DEFECT — wrong behaviour, a fail-open gap, a leak, a contract the code
@@ -205,8 +285,9 @@ Two non-negotiable rules close that gap:
    parked is a release that knowingly ships broken.
 
    **Fix it in the release session, before the tag.** With rule 1 the review
-   runs before the QA and acceptance gates, so fixing in place costs one pass,
-   not a FAIL-FAST restart. Fix the defect, run QA, continue the pipeline.
+   runs before the CI and acceptance gates, so fixing in place costs one pass,
+   not a FAIL-FAST restart. Fix the defect on the release branch, run targeted
+   QA, continue the pipeline.
 
    **Deferral is the human's call, never the agent's.** A defect may ship
    only if the human, asked in the release session, explicitly accepts it
@@ -280,8 +361,8 @@ What the report shows, and how each is read:
   `gh run view`, and a `gh` failure or unreadable output is exit `1`, never
   green. Trigger the matrix with `gh workflow run qa.yml --ref main` (a manual
   dispatch has no base to diff, so it classifies as the full tier) and wait
-  ([../QA.md](../QA.md), "CI tiers"). The full gate itself, `llm_qa.py all`, is
-  required only here, at Step 1b and Step 8.
+  ([../QA.md](../QA.md), "CI tiers"). The full gate itself never runs on this
+  host: it runs in CI on the release pull request (Step 8).
 - **In flight** — plans with `**Status**: In Progress`. These block.
 - **Waiting for this release** — In Progress plans whose status line names
   `/release` as what they are waiting on. Shown, never blocking: they are the
@@ -297,13 +378,30 @@ prints and the exit becomes `0`, so the decision is in the invocation record.
 `--accept` does NOT rescue exit `1` — acknowledging WIP is not acknowledging
 blindness.
 
-**1H. Housekeeping phase — runs after 1a, before 1b.** See
-[Housekeeping Phase](#housekeeping-phase-every-release). Its commits land before 1b, so the full QA run and every
-later gate cover them.
+Once 1a returns `0`, write the state file (see "The release state file").
 
-**1b. Full QA on this HEAD, then agent validation.** The release agent is a sub-agent, and the full suite is the main thread's gate (Plan 00463), so main Claude runs `./scripts/qa/llm_qa.py all` on the clean HEAD first. Then the agent verifies: clean git state, all QA passes (`llm_qa.py --read-only all`, which fails any result recorded for a tree other than this HEAD as `STALE`), version consistency across the files listed in Step 3 "Version Update", no existing tag, gh CLI authenticated. (`CLAUDE.md` carries no version string — it is a daemon-regenerated doc, not a version-bump target.)
+**1b. Cut the release branch, then agent validation.** Main Claude creates the
+release branch from the clean, CI-green `main` HEAD that 1a just checked. The
+name is exactly `release/<version>` (no `v`): `release-gate.yml` gates only a
+pull request whose head branch starts with `release/`.
+
+```bash
+git -C /workspace switch -c release/X.Y.Z main
+```
+
+Every commit of Steps 1H to 12 goes on this branch; `main` does not move until
+Step 13 merges the pull request. Then the release agent verifies: clean git
+state, on `release/<version>`, version consistency across the files listed in
+Step 3 "Version Update", no existing tag, gh CLI authenticated. It runs no
+full QA (CI does, Step 8); a targeted check it can run cheaply is fine.
+(`CLAUDE.md` carries no version string — it is a daemon-regenerated doc, not a
+version-bump target.)
 
 **ANY failure = IMMEDIATE ABORT. NO auto-fixing.**
+
+**1H. Housekeeping phase — runs after 1b, before 1c.** See
+[Housekeeping Phase](#housekeeping-phase-every-release). Its commits land on
+the release branch, so CI and every later gate cover them.
 
 **1c. Claude Code version record and changelog review (Plan 00486).** The daemon is
 built on Claude Code, and nothing else notices what Claude Code added between two daemon
@@ -321,7 +419,7 @@ what changed since the previous one.
    `review_date`, `reviewed_through` (TO again; the `contract_staleness` SessionStart
    advisory compares the running Claude Code against the newest of these) and
    `review_report` (the path above). Every adopt, redundant or conflict
-   row in the report becomes a plan or ledger entry before Step 13; the report is copied
+   row in the report becomes a plan or ledger entry before Step 8a; the report is copied
    into that plan's folder, because `untracked/` does not survive a container restart.
 5. The same review flags instruction-loading changes against the contract in
    `contracts/claude-code-instructions/` (the agent brief names the topics). When it does,
@@ -363,9 +461,9 @@ there is nothing to sync from `.claude/HOOKS-DAEMON.md`; an earlier version of
 this step named both, sending the reader hunting for figures that are not
 there.
 
-**Regenerate `.claude/HOOKS-DAEMON.md` after the version bump**: run `./bin/hooks-daemon generate-docs`. This tracked, generated doc embeds the daemon version in its header (`> Generated on YYYY-MM-DD (vX.Y.Z) …`), so without regenerating it the header ships stale one version behind (v3.43.1 shipped with a v3.43.0 header before this step existed). Stage `.claude/HOOKS-DAEMON.md` with the release commit (add it to the Step 13 `git add` list).
+**Regenerate `.claude/HOOKS-DAEMON.md` after the version bump**: run `./bin/hooks-daemon generate-docs`. This tracked, generated doc embeds the daemon version in its header (`> Generated on YYYY-MM-DD (vX.Y.Z) …`), so without regenerating it the header ships stale one version behind (v3.43.1 shipped with a v3.43.0 header before this step existed). Stage `.claude/HOOKS-DAEMON.md` with the release commit (Step 7.1).
 
-**Re-lock `uv.lock` after the `pyproject.toml` version bump** (self-install mode tracks `uv.lock`): run `uv lock`. The dependency QA check runs `uv lock --check` and will FAIL the Step 8 gate with a lockfile-out-of-date error until the lock is regenerated. Stage `uv.lock` with the release commit.
+**Re-lock `uv.lock` after the `pyproject.toml` version bump** (self-install mode tracks `uv.lock`): run `uv lock`. The dependency QA check runs `uv lock --check` and will FAIL the Step 8 CI gate with a lockfile-out-of-date error until the lock is regenerated. Stage `uv.lock` with the release commit (Step 7.1).
 
 ### 4. Changelog Generation
 
@@ -553,7 +651,7 @@ ls CLAUDE/UPGRADES/UNRELEASED/config-changes/
 # Expected: README.md  (nothing else)
 
 grep -l 'UNRELEASED' CLAUDE/UPGRADES/config-changes/v*.yaml
-# Expected: no output (the Step 8 QA gate enforces this too)
+# Expected: no output (the Step 8 CI gate enforces this too)
 ```
 
 **ABORT condition**: any `v*.yaml` file remains in `UNRELEASED/config-changes/` when moving to the next step.
@@ -581,16 +679,61 @@ Opus reviews **documentation only** (not code/QA):
 
 Approved -> proceed. Issues found -> agent fixes docs, re-submit until approved.
 
+### Step 7.1: Commit on the release branch
+
+Every release-preparation change is committed on `release/<version>`; nothing
+is pushed to `main`.
+
+**🚨 Stage source changes too — the file list below is NOT sufficient.** Any
+step can modify `src/`, `scripts/` or `tests/` (a review fix in Step 10, a
+`get_claude_md()` fix in Step 11, a FAIL-FAST fix in Step 12). The `git add`
+list below names only version/doc artifacts, so such a fix is silently left
+uncommitted unless you stage it explicitly. The daemon's own auto-commit hook
+commits the *regenerated* `CLAUDE.md` on restart, so the GENERATED artifact
+lands in git while its SOURCE handler does not, and the tagged tree ships
+guidance no handler in it produces (caught by the Opus gate during v3.49.1).
+
+**Always run this before staging** and add anything it reports:
+
+```bash
+git status --porcelain -- src/ scripts/ tests/
+```
+
+```bash
+git add pyproject.toml version.py README.md CLAUDE.md CHANGELOG.md RELEASES/vX.Y.Z.md \
+  .claude/HOOKS-DAEMON.md uv.lock .claude/ccy/claude-supervise.py \
+  CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/ \
+  CLAUDE/UPGRADES/UNRELEASED/
+# Plus EVERY src/, scripts/ and tests/ path reported above.
+git commit -m "Release vX.Y.Z: [Title]
+
+- Updated version to X.Y.Z across all files
+- Added comprehensive changelog entry
+- Generated release notes
+
+Full changelog: RELEASES/vX.Y.Z.md"
+```
+
+A later fix (Steps 9–12) is its own commit on the same branch, staged the same
+way. Before Step 8a and again before Step 13 the check below must be empty:
+
+```bash
+git status --porcelain -- src/ scripts/ tests/
+# Expected: empty.
+```
+
 ---
 
-## Step 8: QA Verification Gate (BLOCKING)
+## Step 8: Release Pull Request + CI Gate (BLOCKING)
 
-Main Claude runs: `./scripts/qa/llm_qa.py all`
-
-Every check the script runs must pass. ANY failure = ABORT.
-
-The script is the single source of truth for which checks exist — do not
-restate the count here. It previously said "10" while the suite ran 13.
+The whole QA gate runs in CI on the release pull request, not on this host.
+Workflow `.github/workflows/release-gate.yml` runs every `llm_qa.py` check
+(one job per supported Python, sharded where long, the performance sweeps
+alone on a runner) and ends in one summary check, **`Release gate`**, which is
+green only if every other job succeeded. That summary is this gate. The
+workflow is the single source of truth for which checks exist, and its own
+`layout` job fails if they drift from `llm_qa.py`'s list — do not restate them
+here.
 
 The `hooks-daemon` skill's coherence with the shipped daemon is part of this
 gate, not a separate step: `tests/integration/test_skill_surface_coherence.py`
@@ -599,9 +742,34 @@ registered handler is invisible to `optimise`, when the skill documents a CLI
 verb that does not exist, names a retired handler, or references a config key
 the schema does not define.
 
+### Step 8a: Push the branch and open the pull request
+
+```bash
+git -C /workspace push -u origin release/X.Y.Z
+gh pr create --base main --head release/X.Y.Z \
+  --title "Release vX.Y.Z" \
+  --body-file /workspace/untracked/release-artifacts/pr-body.md
+```
+
+Write the body file first (a short pointer to `RELEASES/vX.Y.Z.md`; never
+pipe a body on stdin, which the sensitive-content guard cannot read). Then
+find the run the push started and write the `ci` record into the state file
+at once, because that record is what arms the merge freeze:
+
+```bash
+gh pr view <N> --json number,headRefOid --jq '{number, head: .headRefOid}'
+gh run list --workflow release-gate.yml --branch release/X.Y.Z \
+  --json databaseId,headSha,status,conclusion --limit 5
+```
+
+Take the run whose `headSha` equals the pull request's head, and record
+`{"pr_number": <N>, "run_id": <id>, "head_sha": "<head>", "conclusion": "pending"}`
+under `ci`. If no run for that head is listed yet, wait a minute and list again;
+a run that never appears is an ABORT (the workflow did not trigger).
+
 ### Step 8b: Start-up Budget Gate (BLOCKING, Plan 00495)
 
-Main Claude runs, after Step 8:
+Main Claude runs, on the release branch:
 
 ```bash
 source scripts/lib/resolve_venv.sh
@@ -617,6 +785,42 @@ pass), 2 means the measurement itself failed.
 It is a release step, not part of `llm_qa.py all`, because a sample costs about a CPU-second and five are taken. It
 measures CPU seconds, so other agents running tests on the host do not flake it. The budget and why it has that value
 are in [../Performance/README.md](../Performance/README.md#start-up-budget).
+
+### Step 8c: Wait for the `Release gate` check
+
+The run takes the better part of an hour. Wait on it with a bound, in the
+background so Steps 9–12 can proceed meanwhile — never an unbounded polling
+loop:
+
+```bash
+# Bash tool with run_in_background; the timeout is the cap (2 hours).
+timeout 7200 gh run watch <run_id> --interval 60 --exit-status
+```
+
+`gh pr checks <N> --watch --interval 60` under the same `timeout` works too.
+When it ends, read the result rather than the exit code alone (`timeout`
+exits 124 when the cap is hit, which is NOT a CI failure — look again):
+
+```bash
+gh run view <run_id> --json status,conclusion,headSha
+gh pr checks <N>      # the `Release gate` row must read pass
+```
+
+Rewrite the state file's `ci` record with the run's real `conclusion` (and
+its `headSha`, which must still equal `head_sha`), then set
+`last_completed_step` to 8.
+
+| Result                                         | Action                                                                                                                             |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `success` on the recorded head                 | Gate passed                                                                                                                        |
+| `failure` / `cancelled` / `timed_out`          | **ABORT**, or fix on the release branch: commit, push, record the NEW run (`pending`), wait again. `gh run view <id> --log-failed` |
+| `cancelled` because a newer push superseded it | Not a failure: record the newer run and wait for it                                                                                |
+| Still running at the cap                       | Wait again (same command); the cap only bounds one wait                                                                            |
+
+**Every push to the release branch starts a new run**, and the record must
+always name the run for the branch's current head. A fix made in Steps 9–12
+is therefore followed by: push, record the new run as `pending`, wait,
+record its conclusion.
 
 ---
 
@@ -685,7 +889,7 @@ deferral needs the human's explicit acceptance in this session.
 `get_claude_md()` is enforced continuously by
 `tests/integration/test_claude_md_guidance_coverage.py`, which enumerates every
 handler and fails unless each carries a recorded verdict — covered, or exempt
-with a reason. Step 8's QA run already executes it, so if Step 8 passed, this
+with a reason. Step 8's CI run already executes it, so if Step 8 passed, this
 gate has passed.
 
 Confirm explicitly:
@@ -708,8 +912,9 @@ by hand every release. The table records them once.
 **If the gate fails**, it names the handler and what to do. Apply the four
 tests in `CLAUDE/HANDLER_DEVELOPMENT.md`, then either implement
 `get_claude_md()` or record the exemption with its reason. If you change
-`src/`: run QA, restart the daemon, update the changelog, and make sure Step 13
-stages the source file — the daemon auto-commits the regenerated `CLAUDE.md`,
+`src/`: run targeted QA, restart the daemon, update the changelog, and commit
+the source file on the release branch (Step 7.1), then push and wait for the
+new CI run (Step 8c) — the daemon auto-commits the regenerated `CLAUDE.md`,
 so a guidance fix can otherwise ship as a generated artifact with no source
 behind it.
 
@@ -900,65 +1105,71 @@ into the skip list with its reason attached; it never disappears.
 ### FAIL-FAST Cycle
 
 1. STOP testing immediately
-2. Fix bug with TDD
-3. Run full QA: `./scripts/qa/llm_qa.py all`
-4. Restart daemon
-5. **RESTART ALL tests from Step 12.1** (code changes can regress earlier tests)
-6. Repeat until zero failures
+2. Fix bug with TDD, on the release branch
+3. Run targeted QA (`./scripts/qa/llm_qa.py changed`), commit (Step 7.1), push
+4. Record the new CI run and wait for it (Step 8c); the whole gate re-runs there
+5. Restart daemon
+6. **RESTART ALL tests from Step 12.1** (code changes can regress earlier tests)
+7. Repeat until zero failures and the new run is green
 
 ---
 
-## Step 13: Commit & Push
+## Step 13: Verify CI & Merge the Pull Request (BLOCKING)
 
-### 🚨 Stage source changes too — the file list below is NOT sufficient
+Run in the main thread, on `release/X.Y.Z`, after Steps 8–12 have all passed.
 
-**Steps 10 (Code Review) and 11 (CLAUDE.md Guidance Audit) are both expected to
-modify `src/`.** Step 11 exists precisely to fix `get_claude_md()` bodies. The
-`git add` list below names only version/doc artifacts, so a guidance fix is
-silently left uncommitted unless you stage it explicitly.
+**13.1 Nothing left behind.** `git status --porcelain -- src/ scripts/ tests/`
+is empty and the local branch equals `origin/release/X.Y.Z`
+(`git -C /workspace status -sb` shows no `ahead`). A non-empty result is a fix
+that never reached CI: commit, push, and go back to Step 8c.
 
-**Why this is silent and dangerous**: the daemon's own auto-commit hook commits
-the *regenerated* `CLAUDE.md` on restart. So the GENERATED artifact lands in
-git while its SOURCE handler does not. The tagged tree then ships resident
-CLAUDE.md guidance that no handler in that tree produces — and the next
-`generate-docs` or daemon restart in any client project silently reverts it.
-This was caught by the Opus gate during v3.49.1; it would otherwise have
-shipped.
-
-**Always run this before staging** and add anything it reports:
+**13.2 CI passed this exact head.** Non-zero exit = ABORT (or fix and go back
+to Step 8c); it prints one line naming the reason:
 
 ```bash
-git status --porcelain -- src/ scripts/ tests/
+scripts/release/check_release_ci.py
 ```
+
+**13.3 The branch is up to date with `main`**, so the merge commit's tree is
+the gated tree ([why](#the-release-pull-request-and-the-merge-freeze)):
 
 ```bash
-git add pyproject.toml version.py README.md CLAUDE.md CHANGELOG.md RELEASES/vX.Y.Z.md \
-  .claude/HOOKS-DAEMON.md uv.lock .claude/ccy/claude-supervise.py \
-  CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/ \
-  CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/
-# Plus EVERY src/, scripts/ and tests/ path reported above (Steps 10/11 edits).
-git commit -m "Release vX.Y.Z: [Title]
-
-- Updated version to X.Y.Z across all files
-- Added comprehensive changelog entry
-- Generated release notes
-
-Full changelog: RELEASES/vX.Y.Z.md
-
-Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
-git push origin main
+git -C /workspace fetch origin
+git -C /workspace merge-base --is-ancestor origin/main HEAD
+# Exit 0 = up to date. Non-zero = main moved: update the branch as described
+# in "The Release Pull Request and the Merge Freeze", then back to Step 8c.
 ```
 
-**Verify nothing was left behind before tagging** — a non-empty result means a
-Step 10/11 source edit did not make it into the release commit. Fix and amend
-BEFORE Step 14; once tagged, the divergence is published:
+**13.4 Merge**, with a merge commit — never squash or rebase (both are denied,
+and either would tag a commit whose ancestry and tree CI never saw):
 
 ```bash
-git status --porcelain -- src/ scripts/ tests/
-# Expected: empty.
+gh pr merge <N> --merge --match-head-commit <head_sha>
 ```
 
-## Step 14: Tag & GitHub Release
+`--match-head-commit` makes GitHub refuse the merge if the branch head is not
+the commit CI passed. Then bring the merge commit into the local `main`
+(`git pull` is not frozen):
+
+```bash
+git -C /workspace switch main
+git -C /workspace pull --ff-only origin main
+```
+
+Set `last_completed_step` to 13.
+
+## Step 14: Tag the Merge Commit & GitHub Release
+
+**14.0 The merge commit is the gated tree.** `main`'s HEAD must be the merge
+commit of the release pull request, its second parent the CI-passed head, and
+its tree identical to that head's. Any mismatch = STOP and tell the human;
+do not tag:
+
+```bash
+git -C /workspace rev-parse HEAD^2                 # must equal ci.head_sha
+git -C /workspace rev-parse 'HEAD^{tree}'          # these two must be equal
+git -C /workspace rev-parse '<head_sha>^{tree}'
+```
 
 The release bundle MUST include `bootstrap-checksums.txt` alongside ALL FOUR
 self-bootstrapping skill scripts: `upgrade.sh`, `daemon-cli.sh`,
@@ -994,6 +1205,7 @@ The committed `RELEASES/vX.Y.Z.md` is never modified.
 ```bash
 scripts/release/build_github_release_body.py vX.Y.Z
 
+# On main, HEAD = the merge commit checked in 14.0. The tag push is not frozen.
 git tag -a vX.Y.Z -m "[Full release notes from RELEASES/vX.Y.Z.md]"
 git push origin vX.Y.Z
 
@@ -1077,7 +1289,12 @@ git tag -l vX.Y.Z
 gh release view vX.Y.Z --json tagName,isDraft,isPrerelease,url \
   --jq '{tag: .tagName, draft: .isDraft, prerelease: .isPrerelease, url: .url}'
 # Expected: draft=false, prerelease=false
+git -C /workspace push origin --delete release/X.Y.Z   # merged, so allowed
+git -C /workspace branch -d release/X.Y.Z
 ```
+
+Then delete `untracked/release-state.json`: the release is finished, and the
+merge freeze lifts with it.
 
 ### Step 15.1: Housekeeping phase, post-release items
 
@@ -1089,10 +1306,10 @@ Owner rulings 2026-10-05 (D3) and 2026-10-06. Every release is also a checkpoint
 being released but need doing regularly. They are listed here and run each time, in two halves. Add a chore here when
 it is agreed; a chore that would change what the release contains goes in the pre-gate half, so the gates cover it.
 
-### Pre-gate items (Step 1H: after the 1a slate gate, before 1b full QA)
+### Pre-gate items (Step 1H: after 1b cuts the release branch, before 1c)
 
-Each item that changes tracked files is committed and pushed before 1b, so the full QA run and every later gate judge
-the result.
+Each item that changes tracked files is committed on the release branch, so the pull request's CI run and every later
+gate judge the result.
 
 - [ ] **Refetch and resave every vendored remote doc.** Run `bin/hooks-daemon remote-docs refresh --all`, then
   `bin/hooks-daemon remote-docs check`. Commit the refreshed files under `remote-docs/` and `.claude/REMOTE-DOCS.md`;
@@ -1109,30 +1326,38 @@ the result.
 
 ## Rollback
 
-| State                    | Action                                                                                     |
-| ------------------------ | ------------------------------------------------------------------------------------------ |
-| Before commit            | `git restore .`                                                                            |
-| After commit, not pushed | `git reset HEAD~1`                                                                         |
-| After push               | Create immediate patch release (NEVER force-push tags)                                     |
-| Tag created              | `git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z && gh release delete vX.Y.Z --yes` |
+An abort is reported to the human with the gate that failed; the actions below
+only undo what was done.
+
+| State                            | Action                                                                                                                                           |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Before Step 8a (branch is local) | `git switch main`; delete the state file; the local `release/X.Y.Z` branch may stay for inspection (`git branch -d` needs the human if unmerged) |
+| Pull request open, not merged    | `gh pr close <N> --comment "Release vX.Y.Z aborted: <gate>"`, then delete the state file (this lifts the merge freeze). `main` never moved       |
+| Merged, not tagged               | Do not tag. Tell the human: `main` now carries the release commit; the next release supersedes it, or they revert the merge                      |
+| Tag created                      | `git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z && gh release delete vX.Y.Z --yes` (ONLY on explicit human instruction)                  |
+| Published                        | Create an immediate patch release (NEVER force-push tags)                                                                                        |
 
 ## Manual Release (Bypass Skill)
 
 ```bash
-# 1. Edit versions: pyproject.toml, version.py, README.md
-# 2. Update CHANGELOG.md (Keep a Changelog format)
-# 3. Create RELEASES/vX.Y.Z.md
+# 1. git switch -c release/X.Y.Z main   (after release-slate-check exits 0)
+# 2. Edit versions: pyproject.toml, version.py, README.md
+# 3. Update CHANGELOG.md (Keep a Changelog format) and create RELEASES/vX.Y.Z.md
 # 4. Move UNRELEASED/post-upgrade-tasks/NN-*.md and UNRELEASED/pre-upgrade-tasks/NN-*.md
 #    into the versioned upgrade guide and populate each directory's README.md
 #    task index; fold every
 #    UNRELEASED/release-notes/NNN-*.md callout into RELEASES/vX.Y.Z.md and move
 #    the files into the guide's release-notes/
-# 5. Run QA: ./scripts/qa/llm_qa.py all, then scripts/release/check_startup_budget.py (Step 8b; non-zero = do not release)
-# 6. Commit and push
-# 7. Body: scripts/release/build_github_release_body.py vX.Y.Z   (BEFORE the tag; non-zero = do not tag)
-# 8. Tag: git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z
-# 9. gh release create vX.Y.Z --title "vX.Y.Z - [Title]" --notes-file untracked/release-artifacts/github-release-body.md --latest
-# 10. scripts/release/publish_bootstrap_assets.sh vX.Y.Z   (the release is NOT done until this exits 0)
+# 5. Commit on the branch; scripts/release/check_startup_budget.py (Step 8b; non-zero = do not release)
+# 6. git push -u origin release/X.Y.Z && gh pr create --base main --head release/X.Y.Z
+#    and record the ci block in untracked/release-state.json (Step 8a)
+# 7. Wait for the `Release gate` check (Step 8c); acceptance tests (Step 12)
+# 8. scripts/release/check_release_ci.py, branch up to date with origin/main,
+#    gh pr merge <N> --merge --match-head-commit <head_sha>, then pull main (Step 13)
+# 9. Body: scripts/release/build_github_release_body.py vX.Y.Z   (BEFORE the tag; non-zero = do not tag)
+# 10. Tag the merge commit: git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z
+# 11. gh release create vX.Y.Z --title "vX.Y.Z - [Title]" --notes-file untracked/release-artifacts/github-release-body.md --latest
+# 12. scripts/release/publish_bootstrap_assets.sh vX.Y.Z   (the release is NOT done until this exits 0)
 ```
 
 ## Semver Guidelines
@@ -1147,7 +1372,10 @@ No fixed schedule. Critical bugs = immediate patch. Features = minor when stable
 
 ## Related
 
-- Skill spec: `.claude/skills/release/skill.md`
+- Skill spec: `.claude/skills/release/SKILL.md` (and its `invoke.sh`)
 - Release agent: `.claude/agents/release-agent.md`
-- QA pipeline: `CLAUDE/development/QA.md`
+- Release gate workflow: `.github/workflows/release-gate.yml`
+- CI record check: `scripts/release/check_release_ci.py`
+- Merge freeze: `.claude/project-handlers/pre_tool_use/release_merge_freeze.py`
+- QA pipeline: `CLAUDE/QA.md`
 - Acceptance tests: `CLAUDE/AcceptanceTests/GENERATING.md`

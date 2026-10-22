@@ -25,50 +25,26 @@ Prepare release files including version updates, changelog generation, and relea
 
 ## Orchestration Context
 
-**CRITICAL:** This agent is part of a multi-stage orchestration:
-
-1. **Stage 1 (This Agent)**: Prepare release files
-2. **Stage 2 (Main Claude + Opus)**: Review changes
-3. **Stage 3 (Main Claude)**: Commit, tag, publish
-
-This agent **CANNOT spawn nested agents**. The main Claude instance orchestrates the workflow and invokes the Opus review agent separately.
+**CRITICAL:** This agent owns the file preparation of RELEASING.md Steps 1b
+(validation) to 5, on the `release/<version>` branch main Claude has already
+cut. Main Claude owns every other step — the Opus review, the commit, the pull
+request and its CI wait, the gates, the merge, the tag and the publish — as
+RELEASING.md lays them out. This agent **CANNOT spawn nested agents**.
 
 ## Process Overview
 
 ### 1. Pre-Release Validation
 
-**CRITICAL: ALL validation failures result in IMMEDIATE ABORT. NO attempts to fix issues.**
+**CRITICAL: ALL validation failures result in IMMEDIATE ABORT. NO attempts to
+fix issues.** The checks are RELEASING.md Step 1b's agent validation: clean
+git state, on `release/<version>`, version consistency across the files in
+Step 3 "Version Update", no existing `vX.Y.Z` tag, `gh auth status`.
 
-Run these checks in order:
-
-1. **Clean git state**: `git status` - NO uncommitted changes, NO untracked files in src/
-
-   - **ABORT if dirty**: User must commit or stash ALL changes manually
-
-2. **QA checks** (ALL must pass): `./scripts/qa/llm_qa.py --read-only all`
-
-   - Reads the results of the full run main Claude makes on this clean HEAD
-     before dispatching this agent (RELEASING.md Step 1b), without re-running
-     anything. This agent is a sub-agent, so it never starts the full suite
-     itself; see `CLAUDE/QA.md`, "Full QA Is the Coordinator's Gate"
-   - A result recorded for any other tree reads `STALE` and fails, so an old
-     green run cannot pass this gate
-   - **ABORT if any check fails, is STALE, or has no recorded result**: main
-     Claude must run the full gate on this HEAD, fix issues, and re-run release
-
-3. **Version consistency**: All version strings in files match current version
-
-   - every file listed in RELEASING.md Step 3 "Version Update"
-   - **ABORT if inconsistent**: User must manually fix version mismatches
-
-4. **Tag existence**: Target version tag must NOT exist
-
-   - `git tag -l vX.Y.Z`
-   - **ABORT if exists**: User must choose different version
-
-5. **GitHub CLI auth**: `gh auth status`
-
-   - **ABORT if not authenticated**: User must run `gh auth login`
+This agent runs **no full QA**: the release pull request's CI is the whole
+gate (RELEASING.md Step 8), and a sub-agent never runs the full suite
+(`CLAUDE/QA.md`, "Full QA Is the Coordinator's Gate"). A targeted check that
+is cheap — such as `pytest tests/unit/qa/test_version_bump_completeness.py`
+after the bump — is fine.
 
 **DO NOT**:
 
@@ -595,13 +571,7 @@ This agent's job ends here. Output a comprehensive summary:
 
 **Status:** ✅ Ready for Opus review
 
-**Next Steps (Main Claude will handle):**
-1. Invoke Opus agent for validation
-2. [If breaking changes] Verify upgrade guide completeness (Step 6.5 gate)
-3. If approved: Run QA verification gate (Step 7)
-4. If approved: Run acceptance testing gate (Step 8)
-5. If all gates pass: commit, tag, and publish
-6. If rejected: re-invoke this agent with fixes
+**Next Steps:** main Claude continues at RELEASING.md Step 6.
 ```
 
 **STOP HERE**
@@ -609,158 +579,26 @@ This agent's job ends here. Output a comprehensive summary:
 This agent does not:
 
 - Commit changes
+
 - Create tags
+
 - Push to GitHub
+
 - Spawn other agents (including Opus)
 
----
+- Push, open the pull request, merge, or touch `main`
 
-## Post-Agent Orchestration (For Main Claude Reference)
-
-After this agent completes successfully, the main Claude instance should:
-
-### Stage 2: Opus Review
-
-Invoke an ad-hoc Opus agent:
-
-```
-model: opus
-task: Review release files for vX.Y.Z and validate 100% accuracy
-
-Files: [list files from agent output]
-Checklist: [validation criteria]
-
-Return JSON with approved/issues
-```
-
-### Stage 3: Finalization
-
-If Opus approves, main Claude executes:
-
-1. **Commit:**
-
-```bash
-git add [files]
-git commit -m "Release vX.Y.Z: [Title]"
-git push origin main
-```
-
-2. **Tag & Release:**
-
-```bash
-# BEFORE the tag: GitHub rejects a release body over 125,000 characters, and
-# only after the tag is pushed. Non-zero exit = do not tag.
-scripts/release/build_github_release_body.py vX.Y.Z
-git tag -a vX.Y.Z -m "$(cat RELEASES/vX.Y.Z.md)"
-git push origin vX.Y.Z
-gh release create vX.Y.Z --title "vX.Y.Z" --notes-file untracked/release-artifacts/github-release-body.md --latest
-# REQUIRED: attach bootstrap-checksums.txt + the four skill scripts. Every
-# client skill wrapper fetches the manifest from releases/latest/download/.
-scripts/release/publish_bootstrap_assets.sh vX.Y.Z
-```
-
-3. **Verify & Report:**
-
-```bash
-git tag -l vX.Y.Z
-gh release view vX.Y.Z --json assets --jq '.assets[].name'
-# Expected: upgrade.sh daemon-cli.sh health-check.sh init-handlers.sh bootstrap-checksums.txt
-# Display success summary
-```
-
-### Error Recovery
-
-If Opus rejects: Main Claude re-invokes this Release Agent with issue list
-
-- Verify tag exists: `git tag -l vX.Y.Z`
-- Check GitHub release page
-- Test installation from tag: `git clone -b vX.Y.Z ...`
-- Verify badge updates on README.md (GitHub renders)
-- Update any external documentation/announcements
-
-## Usage from /release Skill
-
-The skill orchestrates:
-
-1. Invokes this Release Agent (Stage 1)
-2. Main Claude invokes Opus review (Stage 2)
-3. Main Claude commits/tags/publishes (Stage 3)
-
-This agent only handles Stage 1.
+Everything after this agent — the Opus review, the commit, the pull request,
+the gates, the merge, the tag and the publish — is RELEASING.md, run by main
+Claude. This file deliberately does not restate it.
 
 ## Error Handling (This Agent Only)
 
-**Pre-Validation Errors (IMMEDIATE ABORT):**
-
-- **Dirty git state** → ABORT with message: "Commit all changes before releasing"
-- **QA failures** → ABORT with message: "Fix QA issues (main Claude runs ./scripts/qa/llm_qa.py all), then retry"
-  - Never attempt to fix QA issues (formatting, lint, tests, security)
-  - User must manually fix and re-run release
-- **Version inconsistency** → ABORT with message: "Fix version mismatches manually"
-- **Tag exists** → ABORT with message: "Tag vX.Y.Z already exists, choose different version"
-- **GitHub auth failure** → ABORT with message: "Run: gh auth login"
-
-**Pre-Commit Errors (This Agent Handles):**
-
-- Version detection issues → prompt user for clarification
-- File update errors → report and abort with clear error message
-
-**Post-Commit Errors (Main Claude Handles):**
-
-- **Opus rejection** → main Claude re-invokes this agent to fix DOCUMENTATION issues
-  - Opus ONLY reviews release documentation (changelog, release notes)
-  - Opus does NOT review code or fix QA issues
-  - Examples: typos, missing changelog entries, incorrect categorization
-- Git/GitHub errors → main Claude handles rollback
-- Tag conflicts → main Claude handles resolution
-
-**Rollback Strategy:**
-Since this agent doesn't commit, rollback is simple: `git restore .`
-
-**NEVER**:
-
-- Auto-fix QA failures
-- Auto-commit dirty git state
-- Skip validation checks
-- Continue after validation failures
-
-## Output Summary
-
-After successful release:
-
-```
-✅ Release vX.Y.Z Complete!
-
-📦 Version: X.Y.Z (MAJOR/MINOR/PATCH release)
-🏷️  Tag: vX.Y.Z
-📝 Changelog: CHANGELOG.md
-📋 Release Notes: RELEASES/vX.Y.Z.md
-🔗 GitHub Release: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/releases/tag/vX.Y.Z
-
-Next steps:
-1. Review release at: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/releases
-2. Update any external documentation
-3. Announce release (if applicable)
-4. Monitor for issues
-
-Installation command for users:
-git clone -b vX.Y.Z https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon.git
-```
-
-## Configuration
-
-No configuration required - fully automated based on:
-
-- Git commit history
-- Semantic versioning rules
-- Keep a Changelog format
-- Project file structure
-
-## Notes
-
-- This agent always creates annotated tags (not lightweight)
-- Release notes are preserved in RELEASES/ directory
-- Changelog is cumulative (all versions in one file)
-- Opus review is mandatory (cannot be skipped)
-- All QA must pass before release
-- Clean git state is required
+- **Validation failure** (dirty tree, wrong branch, version mismatch, tag
+  exists, `gh` not authenticated) → ABORT and report which check failed.
+  Never auto-fix, never commit or stash on the user's behalf.
+- **Version detection unclear** → report the candidates and the evidence;
+  main Claude asks the human.
+- **File update error** → report and abort with the error.
+- **Re-invoked after an Opus rejection** → fix the DOCUMENTATION issues listed,
+  nothing else (Opus reviews release documentation only).
