@@ -71,12 +71,13 @@ a helper. That fix is a Python change tracked as ledger N465 and fixed separatel
     ELF, 127 for text garbage, which bash runs as a script) with nothing on stdout, so the tool runs unguarded
     (corrected by [subagent-reports/261022-fact-check-ruling-sonnet.md](subagent-reports/261022-fact-check-ruling-sonnet.md)). Ruling and
     evidence: [subagent-reports/261022-forwarder-failure-advice-fable.md](subagent-reports/261022-forwarder-failure-advice-fable.md).
-  - [ ] **Task 2c**: Implement the ruling (the report's tasks 1-6): close the fail-open in the generated guard with an
+  - [x] **Task 2c**: Implement the ruling (the report's tasks 1-6): close the fail-open in the generated guard with an
     explicitly handled failed `exec` (`shopt -s execfail` alone does not survive `set -e`) that sets an unused-relay
     marker; carry the marker through `init.sh` into the request; the daemon
     adds one warning line to every relay-eligible answer without changing a verdict; detached session-start repair,
     once per cause; tests red first (an executable file of garbage bytes is the safety regression test); docs and a
-    release note.
+    release note. Reports: `261022-task-2c-impl-opus.md` through
+    [subagent-reports/261022-task-2c-impl-5-opus.md](subagent-reports/261022-task-2c-impl-5-opus.md); release note 019.
 - [x] ✅ **Task 3**: Measure the default-on relay against bash on the hot hooks, under many concurrent sessions, and list
   further Rust candidates with their numbers for the owner. Report:
   [subagent-reports/261021-task-3-measurements-opus.md](subagent-reports/261021-task-3-measurements-opus.md).
