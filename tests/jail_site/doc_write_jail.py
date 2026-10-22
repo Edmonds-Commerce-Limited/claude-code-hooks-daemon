@@ -13,7 +13,12 @@ directory arms each child from it, so a CLI the test spawns is covered with no
 change to production code.
 
 Standard library only: ``sitecustomize`` imports this file as a top-level module
-before anything else in the child is importable.
+before anything else in the child is importable. It also runs inside the
+deliberately old interpreters the entry-point tests spawn, so everything executed
+at runtime must work on the oldest of ``tests.old_python.OLD_VERSIONS`` (tuple
+``isinstance`` arguments, no ``Path.readlink``); annotations are exempt because
+of the ``__future__`` import. ``tests/unit/test_doc_write_jail_old_python.py``
+enforces it.
 
 Limits, stated rather than hidden: a child started with ``python -I`` or
 ``-S`` ignores ``PYTHONPATH``, a test that clears the environment passes none of
@@ -70,7 +75,7 @@ class _Jail:
         doc leaves the doc alone. ``dir_fd`` is the directory a relative
         ``target`` is relative to, as ``shutil.rmtree`` passes it.
         """
-        if not isinstance(target, str | bytes | os.PathLike):
+        if not isinstance(target, (str, bytes, os.PathLike)):
             return
         try:
             resolved = _resolve(os.fsdecode(target), dir_fd, follow_link)
@@ -101,7 +106,7 @@ def _resolve(path: str, dir_fd: object, follow_link: bool) -> str:
     """
     candidate = Path(path)
     if dir_fd is not None and dir_fd != -1 and not candidate.is_absolute():
-        candidate = Path(f"/proc/self/fd/{dir_fd}").readlink() / candidate
+        candidate = Path(os.readlink(f"/proc/self/fd/{dir_fd}")) / candidate
     if follow_link:
         return str(candidate.resolve())
     return str(candidate.absolute().parent.resolve() / candidate.name)
