@@ -309,6 +309,10 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "StandingAuthorisationsHandler": "T3 replaying a recorded request is the whole point",
     # -- Test 3, session-scoped: state the agent must hold all session ---
     "CcySupervisorIntegrityHandler": "T3 remediation spans a restart, not one call",
+    "FocusModeTriggerHandler": (
+        "T3 the command must be known BEFORE anyone types it, and focus then governs "
+        "every tick, goal and stop for the rest of the session"
+    ),
     "GitUpstreamCheckerHandler": "T3 the rewritten-upstream case must never be 'fixed' by pulling",
     "ReferenceRepoSweepHandler": (
         "T3 the reading is what the agent must hold all session: which reference "

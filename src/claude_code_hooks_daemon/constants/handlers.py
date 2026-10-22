@@ -783,6 +783,13 @@ class HandlerID:
         config_key="limit_rebrief",
         display_name="limit-rebrief",
     )
+    # Plan 00501 Task 3.1: `hooks-daemon focus <task>` / `focus off` at the
+    # start of a human prompt turns the session's focus mode on or off.
+    FOCUS_MODE_TRIGGER = HandlerIDMeta(
+        class_name="FocusModeTriggerHandler",
+        config_key="focus_mode_trigger",
+        display_name="focus-mode-trigger",
+    )
 
     # Advisory handlers (Priority: 55-60)
     CRITICAL_THINKING_ADVISORY = HandlerIDMeta(

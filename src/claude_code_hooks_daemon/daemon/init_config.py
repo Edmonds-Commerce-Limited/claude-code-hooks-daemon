@@ -370,6 +370,7 @@ class ConfigTemplate:
             "    failsafe_cron_blockage_suppressor: {enabled: true, priority: 37}  # Suppress a delivered failsafe-cron tick while the session is blocked only on human input\n"
             "    stop_failure_resolver: {enabled: true, priority: 38}  # A later prompt resolves the session's recorded StopFailure, so the status line drops its chip\n"
             "    limit_rebrief: {enabled: true, priority: 39}  # One-shot re-brief after a usage-limit resume; names a background/teammate agent a limit killed\n"
+            "    focus_mode_trigger: {enabled: true, priority: 41}  # `hooks-daemon focus <task>` / `focus off` at the start of a prompt turns the session's focus mode on or off\n"
             "    idle_housekeeping_advisory: {enabled: false, priority: 56}  # Report-first idle housekeeping (beta, opt-in)\n"
             "\n"
             "  # SessionStart - Initialize environment\n"
