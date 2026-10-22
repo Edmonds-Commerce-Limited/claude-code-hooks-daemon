@@ -1,14 +1,11 @@
 # FINDINGS: opencode support (Plan 00549 Task 3.1)
 
-The harness refused a Write to the canonical `FINDINGS.md` path, so this is the fallback location. Move it to
-`../FINDINGS.md` when landing it; the relative pointers below assume that location.
-
 The owner-facing synthesis of this plan folder. It answers, compares, records what is decided, and proposes the epic.
 Detail lives in the supporting documents; each finding points at the section that holds its evidence.
 
 **Baseline.** opencode clone at `c93aaae37157d785f76a8e9a9243a6560e286468`, product version **OpenCode V2 2.1.2**
 (the `github-v1.2.27` tag is not the product version; SURFACE §0). Claude Code **2.1.308** for the `AGENTS.md` probes
-(AMD §1). Fact-checked: 33 of 35 claims verified, one minor count corrected, none load-bearing refuted
+(AMD §1). Fact-checked: 33 verified, 1 refuted and fixed, 1 unverifiable without a live run
 (`subagent-reports/261022-fact-check-research-sonnet.md`).
 
 **Short names.** SURFACE `RESEARCH-opencode-extension-surface.md`; ARCH `RESEARCH-opencode-architecture.md`; DUAL
@@ -62,7 +59,7 @@ Detail lives in the supporting documents; each finding points at the section tha
 | Shared config     | Reads `.claude/skills` and `.agents/skills` only                | `.claude/*`                                     | Skills are the one shared format       |
 | Tool names        | `shell`, `edit`, `write`, `patch`, `subagent`, `question`       | `Bash`, `Edit`, `Write`, `Task`, ...            | Different; needs a map; `patch` is new |
 | Transcripts       | SQLite, event-sourced                                           | JSONL per session                               | Different; parsers do not port         |
-| Status line, cron | Neither                                                         | Both                                            | Absent in opencode                     |
+| Status line, cron | None found in core, schema or cli; plugin/TUI not checked       | Both                                            | Not found in opencode (UNVERIFIED)     |
 | MCP, headless SDK | Built in; open HTTP/OpenAPI server                              | Built in; `claude -p`, Agent SDK                | Same                                   |
 | API stability     | V2.1 broke plugin contracts in a minor release                  | Stable hook protocol, copied by other tools     | **opencode churns**                    |
 
@@ -81,17 +78,20 @@ Full 26-row comparison: ARCH §8.
 - **Architecture.** A shared long-lived server means the plugin must route by project and sessions must be keyed by
   `sessionID`, not peer pid or transcript path (ARCH §1.2, §8.1; OPTIONS §2 B).
 - **Plan workflow.** Provisionable now vs needs plugin vs needs driver vs impossible, ranked (PLANWF §5). A synthetic
-  message does restart the loop, so a stop re-drive works (PLANWF §1 fact 1).
+  message does restart the loop, so a stop re-drive is possible; re-drive timing is untested and it can restart the
+  loop (PLANWF §1 fact 1, Gaps).
 - **Dual-tool repos.** What each tool reads, collisions (agents' frontmatter is incompatible; a loose
-  `.claude/skills/CLAUDE.md` becomes a phantom skill in opencode), and the item-by-item list for this repo (DUAL §2-§5).
-- **Claude Code and `AGENTS.md`.** Equivalence table from ~40 probes; the shim in every directory is the only layout
-  that restores native behaviour, including nested loads and `InstructionsLoaded` (AMD §4, §5).
+  `.claude/skills/CLAUDE.md` becomes a phantom skill in opencode; both derived from code reading, not observed by
+  running opencode), and the item-by-item list for this repo (DUAL §2-§5, §8).
+- **Claude Code and `AGENTS.md`.** Equivalence table from about 40 local probe runs (no model calls) plus source and
+  docs rows; the shim in every directory is the recommended layout (symlinks also work but fail on Windows), and the
+  Write, Edit and Bash nested loads are source-derived, not observed (AMD §4, §5.1, §6).
 - **Config-sync SOTA.** rulesync and ruler generate; hook registration is translated, hook semantics are not; nobody
   gates an agent editing a generated file (SYNC §1, §4, §6).
-- **Performance.** A resident plugin removes the per-event process spawn; expected faster than Claude Code's 4.3 ms
+- **Performance.** A resident plugin removes the per-event process spawn; INFERENCE: expected faster than Claude Code's 4.3 ms
   relay path, to be measured (OPTIONS §2 B "Performance").
-- **Fail-loud.** Every handler is enforced, degraded or unsupported per host, visibly. A missing plugin is made loud
-  by an `ask` permission baseline that only the plugin can relax (OPTIONS §4).
+- **Fail-loud.** Every handler is enforced, degraded or unsupported per host, visibly. A missing plugin is designed to
+  be loud via an `ask` permission baseline that only the plugin can relax; unproven until plan 0 (OPTIONS §4).
 
 ---
 
@@ -128,7 +128,8 @@ Deliverable: findings note and a go/no-go for plan 3 onward. *Depends on:* nothi
 UNVERIFIED in OPTIONS §2 B "Open unknowns" and fact-check claim 35.
 
 **Plan 1: tool-neutral commit gates (Option A, git half; small-medium).** CLI entry points for the conflict-marker,
-staged-lint and sensitive-content commit scans (the others are already CLIs); a `core.hooksPath` installer that is
+staged-lint and sensitive-content commit scans (CLI entry points were not checked for the other gates; plan-qa and
+issue-validity are the confirmed CLIs); a `core.hooksPath` installer that is
 opt-in for existing clients and chains existing frameworks (M1); a staged-tree-hash stamp so Claude Code does not run
 gates twice; a "git hooks not installed" startup report; `--no-verify` deny in provisioned `opencode.json`; a hook
 that exits non-zero naming the repair when the venv is missing. *Depends on:* nothing. *Evidence:* no git hooks
@@ -157,7 +158,7 @@ for, in this order:
 7. **Dogfood** in this repository, including its 12 nested `CLAUDE.md` files, before offering it to clients.
 
 *Depends on:* nothing (plan 1 is independent). *Evidence:* opencode reads only `AGENTS.md` (DUAL §1); Claude Code's
-fallback is not a peer and the shim is the only full layout (AMD §4-§5); nobody enforces the canonical file (SYNC §6).
+fallback is not a peer and the shim is the recommended layout (AMD §4-§5); nobody enforces the canonical file (SYNC §6).
 
 **Plan 3: host abstraction in the daemon (Option B, Python half; large).** Request-envelope `host` field;
 host-neutral verdict beside the Claude serializer; per-host capability table with the enforced/degraded/unsupported
@@ -200,7 +201,7 @@ All UNVERIFIED in the inputs; no live opencode run was made in this plan.
    (SURFACE §3; OPTIONS §2 B).
 2. What a rejected or failing non-`execute.before` hook does to a turn (SURFACE §5; ARCH Gaps).
 3. Whether every mutating tool calls `permission.assert`, which the `ask` fail-closed baseline relies on (OPTIONS §4
-   item 3; MAP Gaps).
+   item 3; MAP Table 2).
 4. Whether plugin-sent `synthetic` messages re-enter `session.prompt` (a re-drive loop risk), and re-drive timing
    (MAP Gaps; PLANWF Gaps).
 5. Whether a project-local plugin is instantiated per location on a shared server; child-session filtering on
