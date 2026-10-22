@@ -12,6 +12,12 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from tests.support.autonomy import (
+    awaiting_human_entry,
+    focus_entry,
+    pin_desktop_containers_only,
+    pin_session_modes,
+)
 
 from claude_code_hooks_daemon.config.models import Config, PersistentCronsConfig
 from claude_code_hooks_daemon.core import Decision
@@ -21,7 +27,7 @@ from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import AutoContin
 from claude_code_hooks_daemon.handlers.user_prompt_submit.failsafe_cron_blockage_suppressor import (
     FailsafeCronBlockageSuppressorHandler,
 )
-from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, write_marker
+from claude_code_hooks_daemon.utils.session_modes import ModeLabel
 from claude_code_hooks_daemon.utils.session_signal_paths import SIGNAL_SUBDIR
 from claude_code_hooks_daemon.utils.stand_in_cron import stand_in_prompt
 
@@ -178,26 +184,52 @@ class TestDelayOption:
 
 
 class TestTheStandInTickIsNotSuppressed:
-    """It must fire precisely while the marker is live."""
+    """It must fire precisely while the session is blocked on the human."""
 
-    def _tick(self, tmp_path: Path, prompt: str) -> Decision:
-        write_marker(tmp_path / MARKER_FILENAME, "lead")
+    @pytest.fixture
+    def registry(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SessionModeRegistry:
+        return pin_session_modes(monkeypatch, tmp_path, awaiting_human_entry("lead"))
+
+    def _tick(self, prompt: str) -> Decision:
         handler = FailsafeCronBlockageSuppressorHandler()
         handler._config_loader = lambda: Config()
-        with patch(
-            "claude_code_hooks_daemon.handlers.user_prompt_submit."
-            "failsafe_cron_blockage_suppressor.ProjectContext.daemon_untracked_dir",
-            return_value=tmp_path,
-        ):
-            decision = handler.handle({"prompt": prompt, "session_id": "lead"}).decision
-        return decision
+        return handler.handle({"prompt": prompt, "session_id": "lead"}).decision
 
-    def test_delivered_under_a_live_marker(self, tmp_path: Path) -> None:
-        assert self._tick(tmp_path, stand_in_prompt()) is Decision.ALLOW
+    def test_delivered_while_awaiting_human(self, registry: SessionModeRegistry) -> None:
+        assert self._tick(stand_in_prompt()) is Decision.ALLOW
 
-    def test_the_marker_survives_it(self, tmp_path: Path) -> None:
-        self._tick(tmp_path, stand_in_prompt())
-        assert (tmp_path / MARKER_FILENAME).exists()
+    def test_the_mode_survives_it(self, registry: SessionModeRegistry) -> None:
+        self._tick(stand_in_prompt())
+        assert registry.policy("lead").is_blocked
 
-    def test_sensitivity_a_declared_tick_is_still_dropped(self, tmp_path: Path) -> None:
-        assert self._tick(tmp_path, "[tick:job:other]\nbody") is Decision.DENY
+    def test_sensitivity_a_declared_tick_is_still_dropped(
+        self, registry: SessionModeRegistry
+    ) -> None:
+        assert self._tick("[tick:job:other]\nbody") is Decision.DENY
+
+
+class TestTheStandInIsOnlyDemandedWhereAutonomyRuns:
+    """Plan 00501 Task 2.2: the stand-in deny follows the autonomy verdict."""
+
+    def test_after_the_stop_the_registry_holds_awaiting_human_and_the_deny_fires(
+        self, tmp_path: Path
+    ) -> None:
+        result = _stop(tmp_path, session_crons=[])
+        assert result.decision is Decision.DENY
+        assert "[tick:stand-in]" in result.reason
+        assert _registry(tmp_path).policy("lead").labels == (ModeLabel.AWAITING_HUMAN,)
+
+    def test_a_desktop_containers_only_stop_is_not_asked_for_one(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        pin_desktop_containers_only(monkeypatch)
+        pin_session_modes(monkeypatch, tmp_path)
+        result = _stop(tmp_path, session_crons=[])
+        assert result.decision is not Decision.DENY or "stand-in" not in (result.reason or "")
+
+    def test_a_stop_under_focus_is_not_asked_for_one(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        pin_session_modes(monkeypatch, tmp_path, focus_entry("lead"))
+        result = _stop(tmp_path, session_crons=[])
+        assert result.decision is not Decision.DENY or "stand-in" not in (result.reason or "")

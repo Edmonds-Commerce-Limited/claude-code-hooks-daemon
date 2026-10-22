@@ -224,3 +224,59 @@ Part B must:
 4. Delete the now-unused `write_marker` / `marker_is_valid` callers' imports. Keep `blockage_marker` for `read_marker`
    (used by the import) and `cron_pause`.
 5. Write the release note (expiry options removed, legacy marker imported once), tick 2.2, and run targeted QA.
+
+## Fourth agent (Task 2.2 part B): suppressor migrated, the rest left
+
+I stopped early because I passed the context soft budget. Of the part B list, only steps 1 and 3 are delivered.
+
+Built, test-first:
+
+- `failsafe_cron_blockage_suppressor.py` now reads the registry. It no longer touches the legacy marker.
+
+  - New module-level helpers: `_policy(session_id)` and `_session_of(hook_input)`. On RuntimeError or OSError, `_policy` returns
+    an empty policy and logs a WARNING through `log_and_continue`.
+  - Failsafe ticks: the action is `policy.tick_action(tick or DaemonTick(FAILSAFE), runs_while_blocked=False, work_owed=owed)`.
+    THIN backs the tick off, DROP denies it with `_RULE`, and anything else falls to rows 1 and 4.
+  - Declared-job ticks: `runs` holds only when the session is blocked and the job sets `runs_while_awaiting_human`. DROP denies
+    with `_DECLARED_RULE`. That includes a declared tick under FOCUS, whose wording is Task 3.2's job.
+  - `_note_untagged_prompt`: a genuine prompt exits every `BLOCKED_LABELS` label for the session. A RuntimeError or OSError is
+    logged at WARNING and the prompt is still allowed.
+  - `matches()`: true for a cron prompt, when a cadence file exists, or when `_policy(session).is_blocked`.
+  - `_clock` is removed because nothing reads it now.
+
+- `test_failsafe_cron_blockage_suppressor.py` is migrated to an autouse `pin_session_modes` fixture. New cases:
+
+  - goal-blocked drops the tick, and a reply clears it;
+  - focus alone delivers the failsafe tick;
+  - a reply leaves focus in place;
+  - an unreadable registry allows the tick and warns;
+  - an `exit` OSError allows the prompt and warns.
+
+- `test_failsafe_cron_multi_cron_ticks.py` is migrated (autouse registry, `_declare_blocked`), as is the
+  `TestTheStandInTickIsNotSuppressed` class in `test_auto_continue_stop_stand_in.py`.
+
+- New stand-in tests are in `TestTheStandInIsOnlyDemandedWhereAutonomyRuns`:
+
+  - (a) after the stop, the registry holds AWAITING_HUMAN and the deny fires;
+  - (b) a desktop `containers-only` stop gets no deny;
+  - (c) a stop under focus gets no deny.
+
+  These passed on their first run because part A had already landed the code. They pin that behaviour; they were never red.
+
+Red: `untracked/scratch/p2b-red-suppressor.txt` in the worktree (26 failed, 48 passed).
+
+Green: `untracked/scratch/p2b-green-suppressor.txt` (774 passed across `tests/unit/handlers/user_prompt_submit/`,
+`tests/unit/handlers/stop/` and the prose integration test). mypy is clean on the suppressor, and ruff and black are clean on
+the four touched files. The sha is the commit that adds this section.
+
+Left for the next agent, in this order:
+
+1. Idle gate `_awaiting_human`: make it `session_policy(hook_input).is_blocked`, or true when this stop declares it. Migrate
+   `test_idle_workable_issue_stop_gate.py`. The gate is the last user of `marker_is_valid` outside `cron_pause`.
+2. Config compatibility, NOT checked yet: does a client config that still sets `expiry_hours` (suppressor) or
+   `marker_expiry_hours` (idle gate) now fail validation? Follow Plan 00503's precedent: the old config still loads, the dead
+   key is named loudly (a WARNING or a config-validate message), and a test covers it.
+3. Reword the suppressor's `get_claude_md`, `_RULE` and `_DECLARED_RULE` verbose text from "marker" to "awaiting-human mode".
+   Then regenerate any guidance that depends on that text.
+4. Write the release note, using the next free number from `git ls-tree origin/main CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+   Then tick Task 2.2 in PLAN.md and run targeted QA.

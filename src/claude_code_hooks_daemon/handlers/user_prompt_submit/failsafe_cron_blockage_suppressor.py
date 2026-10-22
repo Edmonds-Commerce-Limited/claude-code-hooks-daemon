@@ -77,7 +77,6 @@ staying non-terminal costs nothing on the suppressed path either.
 """
 
 import logging
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final
@@ -88,18 +87,13 @@ from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import BlockingResult, Decision
+from claude_code_hooks_daemon.core.data_layer import get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor import (
     CANONICAL_CRON_PROMPT_MARKER,
     is_failsafe_prompt,
-)
-from claude_code_hooks_daemon.utils.blockage_marker import (
-    MARKER_FILENAME,
-    clear_marker,
-    marker_is_valid,
-    read_marker,
 )
 from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
 from claude_code_hooks_daemon.utils.cron_cadence import (
@@ -118,7 +112,9 @@ from claude_code_hooks_daemon.utils.goal_ledger import (
     resolve_plan_dir,
 )
 from claude_code_hooks_daemon.utils.session_modes import (
-    DECLARED_BLOCKED_TTL_SECONDS,
+    BLOCKED_LABELS,
+    SessionPolicy,
+    TickAction,
     is_genuine_human_prompt,
 )
 
@@ -178,6 +174,28 @@ _DECLARED_RULE: Final[Rule] = Rule(
 )
 
 
+def _session_of(hook_input: dict[str, Any]) -> str:
+    """The payload's session id, or the shared fallback bucket the writer also uses."""
+    return str(hook_input.get(HookInputField.SESSION_ID, "") or _UNKNOWN_SESSION)
+
+
+def _policy(session_id: str) -> SessionPolicy:
+    """``session_id``'s mode policy from the registry; empty when it cannot be read.
+
+    An unreadable registry delivers the tick (suppression is never the
+    default), and the WARNING makes the lost suppression visible.
+    """
+    try:
+        return get_data_layer().session_modes.policy(session_id)
+    except (RuntimeError, OSError) as e:
+        log_and_continue(
+            logger,
+            e,
+            reason="the session-modes registry cannot be read, so no mode suppresses this tick",
+        )
+        return SessionPolicy.from_entries(())
+
+
 class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
     """Suppress a delivered failsafe-cron tick while the session is stably
     blocked only on human input (Plan 00298)."""
@@ -207,8 +225,6 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
                 HandlerTag.PLANNING,
             ],
         )
-        # Injectable wall clock (tests substitute a fake). Not a config option.
-        self._clock: Callable[[], float] = time.time
         # Injectable config source (tests substitute a fixed Config).
         self._config_loader: Callable[[], Config] = self._default_config_loader
         # Injected by the registry for planning-tagged handlers. Self-defaulted
@@ -237,9 +253,9 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             untracked_dir = ProjectContext.daemon_untracked_dir()
         except RuntimeError:
             return False
-        return (untracked_dir / MARKER_FILENAME).exists() or (
-            untracked_dir / CADENCE_FILENAME
-        ).exists()
+        if (untracked_dir / CADENCE_FILENAME).exists():
+            return True
+        return _policy(_session_of(hook_input)).is_blocked
 
     def _work_is_owed(self) -> bool | None:
         """Whether the goal ledger still holds live work for this project.
@@ -302,13 +318,12 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             failure mode -- a real prompt that fails to clear the marker
             (e.g. an unlink error) still gets through unchanged.
         """
-        session_id = str(hook_input.get(HookInputField.SESSION_ID, "") or _UNKNOWN_SESSION)
+        session_id = _session_of(hook_input)
         try:
             untracked_dir = ProjectContext.daemon_untracked_dir()
         except RuntimeError as e:
             logger.debug("failsafe_cron_blockage_suppressor: no project context: %s", e)
             return BlockingResult(decision=Decision.ALLOW)
-        marker_path = untracked_dir / MARKER_FILENAME
         cadence_path = untracked_dir / CADENCE_FILENAME
 
         prompt = hook_input.get(HookInputField.PROMPT)
@@ -318,19 +333,17 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
         is_failsafe_tick = isinstance(prompt, str) and is_failsafe_prompt(prompt)
 
         if tick is None and not is_failsafe_tick:
-            self._note_untagged_prompt(prompt, session_id, marker_path, cadence_path)
+            self._note_untagged_prompt(prompt, session_id, cadence_path)
             return BlockingResult(decision=Decision.ALLOW)
 
-        marker = read_marker(marker_path)
-        now = self._clock()
-        declared = marker_is_valid(marker, session_id, now, DECLARED_BLOCKED_TTL_SECONDS)
+        policy = _policy(session_id)
 
         if not is_failsafe_tick and tick is not None:
             # Another daemon cron's tick is never the owner, so it touches
-            # neither the marker nor the cadence (Plan 00388).
+            # neither the session's modes nor the cadence (Plan 00388).
             return self._handle_other_tick(
                 tick,
-                declared=declared,
+                policy=policy,
                 session_id=session_id,
                 hostname=effective_hostname(hook_input),
             )
@@ -348,7 +361,16 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             )
             owed = None
 
-        if not declared:
+        failsafe = tick if tick is not None else DaemonTick(TickKind.FAILSAFE)
+        action = policy.tick_action(failsafe, runs_while_blocked=False, work_owed=owed)
+
+        if action is TickAction.THIN:
+            # Row 2: the session is blocked, but the ledger still holds live
+            # work. Suppressing outright would be unsafe and hourly would be
+            # wasteful, so thin out instead of choosing either extreme.
+            return self._apply_backoff(cadence_path, session_id)
+
+        if action is not TickAction.DROP:
             # Rows 1 and 4. With work owed -- or unresolvable, which must read
             # as owed -- this is the case the cron exists for and must never be
             # thinned. Only a confident "nothing owed" earns a backoff.
@@ -357,15 +379,9 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
                 return BlockingResult(decision=Decision.ALLOW)
             return self._apply_backoff(cadence_path, session_id)
 
-        if owed is True:
-            # Row 2: the agent says it is blocked, but the ledger still holds
-            # live work. Suppressing outright would be unsafe and hourly would
-            # be wasteful, so thin out instead of choosing either extreme.
-            return self._apply_backoff(cadence_path, session_id)
-
-        # Row 3: declared, and nothing owed -- Plan 00298's behaviour, kept
-        # bit-for-bit. `owed is None` lands here too, deliberately: the
-        # declaration alone justified suppression before Phase 4, and the
+        # Row 3: blocked, and nothing owed -- Plan 00298's suppression. `owed
+        # is None` lands here too (the policy thins only on a confident "owed"):
+        # the declaration alone justified suppression before Phase 4, and the
         # ledger's blind spot must not make this path LESS safe than it was.
         reset_cadence(cadence_path)
         logger.info(
@@ -377,35 +393,33 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
         )
 
     @staticmethod
-    def _note_untagged_prompt(
-        prompt: object, session_id: str, marker_path: Path, cadence_path: Path
-    ) -> None:
-        """Clear this session's marker and cadence when the prompt is its owner.
+    def _note_untagged_prompt(prompt: object, session_id: str, cadence_path: Path) -> None:
+        """End this session's BLOCKED modes and cadence when the prompt is its owner.
 
         Only a genuine human prompt in the SAME session is the owner coming back
         (Plan 00501 Task 2.1, ledger N378). A line the ccy supervisor typed, a
         task notification or other machine traffic is not, and a prompt in
-        another session of the project says nothing about this one: both leave
-        the marker and the cadence alone. Clearing is fail-open (the helpers
-        log and swallow OSError), so this never blocks the prompt.
+        another session touches only that session's registry entries: both
+        leave this session's modes and the cadence alone. A registry write
+        failure is logged at WARNING and the prompt is still allowed.
         """
         if not is_genuine_human_prompt(prompt):
             logger.info(
                 "failsafe_cron_blockage_suppressor: machine-typed prompt in session %s "
-                "is not the owner; marker and cadence kept",
+                "is not the owner; modes and cadence kept",
                 session_id,
             )
             return
-        marker = read_marker(marker_path)
-        if marker is not None and marker.session_id != session_id:
-            logger.info(
-                "failsafe_cron_blockage_suppressor: a prompt in session %s keeps the "
-                "awaiting-human marker of session %s",
-                session_id,
-                marker.session_id,
+        try:
+            registry = get_data_layer().session_modes
+            for label in BLOCKED_LABELS:
+                registry.exit(session_id, label)
+        except (RuntimeError, OSError) as e:
+            log_and_continue(
+                logger,
+                e,
+                reason="the owner's prompt could not end the session's blocked mode, so ticks stay suppressed until it expires; the prompt itself is allowed",
             )
-        elif marker is not None:
-            clear_marker(marker_path)
         cadence = read_cadence(cadence_path)
         if cadence is None or cadence.session_id == session_id:
             reset_cadence(cadence_path)
@@ -424,7 +438,7 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             return default_config()
 
     def _handle_other_tick(
-        self, tick: DaemonTick, *, declared: bool, session_id: str, hostname: str
+        self, tick: DaemonTick, *, policy: SessionPolicy, session_id: str, hostname: str
     ) -> BlockingResult:
         """Decide a recognised tick from a cron other than the failsafe.
 
@@ -439,22 +453,24 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
 
         Args:
             tick: The recognised tick, never the failsafe.
-            declared: Whether a still-valid marker exists for this session.
+            policy: This session's mode policy.
             session_id: The current session.
             hostname: The session's effective hostname; a job declared only for
                 other hosts is not vouched for here (Plan 00470 Task 6.1).
 
         Returns:
-            DENY for a declared job's tick under a live marker, else ALLOW.
+            DENY when the session's modes drop the tick, else ALLOW.
         """
-        if tick.kind is not TickKind.DECLARED or not declared:
-            return BlockingResult(decision=Decision.ALLOW)
-        if (
-            tick.job_id is not None
+        runs = (
+            tick.kind is TickKind.DECLARED
+            and policy.is_blocked
+            and tick.job_id is not None
             and self._config_loader().persistent_crons.runs_while_awaiting_human(
                 tick.job_id, hostname
             )
-        ):
+        )
+        action = policy.tick_action(tick, runs_while_blocked=runs, work_owed=None)
+        if action is not TickAction.DROP:
             return BlockingResult(decision=Decision.ALLOW)
         logger.info(
             "failsafe_cron_blockage_suppressor: suppressing declared cron %s for session %s",
