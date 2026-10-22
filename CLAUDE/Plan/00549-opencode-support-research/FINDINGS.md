@@ -11,7 +11,8 @@ Detail lives in the supporting documents; each finding points at the section tha
 **Short names.** SURFACE `RESEARCH-opencode-extension-surface.md`; ARCH `RESEARCH-opencode-architecture.md`; DUAL
 `RESEARCH-dual-tool-repos.md`; COUP `RESEARCH-daemon-couplings.md`; AMD `RESEARCH-claude-code-agents-md.md`; SYNC
 `RESEARCH-multi-agent-config-sync.md`; MAP `MAPPING-events.md`; PLANWF `ANALYSIS-plan-workflow.md`; OPTIONS
-`OPTIONS-support.md`; RULINGS `subagent-reports/261022-open-questions-advice-fable.md`.
+`OPTIONS-support.md`; RULINGS `subagent-reports/261022-open-questions-advice-fable.md`; VS
+`RESEARCH-opencode-vs-codex.md` (Codex CLI `rust-v0.163.0` / clone `b337fe06`); MH `ANALYSIS-multi-harness-mode.md`.
 
 ---
 
@@ -28,13 +29,29 @@ Detail lives in the supporting documents; each finding points at the section tha
 4. **Can we force the plan workflow?** Partly now, without a plugin: git hooks, agent permissions, provisioned
    commands. Edit-time guards need the plugin. Stop gates become re-drives. Crons need a plugin scheduler or an
    external driver (PLANWF §5).
-5. **One repo, both tools?** Yes, with `AGENTS.md` canonical and a `CLAUDE.md` shim (`@AGENTS.md`). **Today an
+5. **One repo, both tools?** Yes, with `AGENTS.md` as the only instruction file (owner's direction), behind an
+   explicit opt-in `multi_harness` mode; projects that do not opt in see zero change (MH §2.3, §3.2). **Today an
    opencode session in a daemon-managed repo gets no instructions and no guards**: opencode V2 reads `AGENTS.md`
    only, never `CLAUDE.md`, despite its docs (DUAL §1 findings 1, 5).
-6. **Does Claude Code read `AGENTS.md` without `CLAUDE.md`?** Yes, from 2.1.277. **Fully equivalent?** No: it is a
-   fallback plugin. One `CLAUDE.md` anywhere at or above cwd switches off every `AGENTS.md`, nested ones load only on
-   Read or `@`, `InstructionsLoaded` does not fire, and there is no user, local or managed `AGENTS.md` (AMD §4).
-7. **SOTA for config in sync?** `AGENTS.md` (Linux Foundation AAIF) for instructions, Agent Skills for skills, and
+6. **Does Claude Code read `AGENTS.md` without `CLAUDE.md`?** Yes, from 2.1.277; the owner's understanding is right,
+   and an AGENTS-only repo works. **What works:** root load at launch, nested load on Read and `@`-mention (2.1.290+),
+   `@` imports, subagents. **A user `~/.claude/CLAUDE.md` does NOT switch it off**, even for repos under `$HOME`
+   (new probe H1). **What is lost:** nested load on Write/Edit/Bash (SOURCE-DERIVED, not observed), the
+   `InstructionsLoaded` hook (no handler uses it today), `--add-dir`. **What silently switches it off:** any
+   `CLAUDE.md`/`.claude/CLAUDE.md`/`CLAUDE.local.md` in the repo or above it (incl. `~/CLAUDE.md`, H2), a user or
+   managed `claude-md` mode, `/init` or `/memory` creating a `CLAUDE.md` (docs only, not probed), versions before
+   2.1.277 (2.1.281 on Bedrock/Vertex/gateways). Fragile, not broken: every trigger is a file, setting or version the
+   daemon can read at SessionStart and report loudly, and the nested gap is closable by a daemon handler (unprobed)
+   (MH §1.3, §2.2).
+7. **Codex vs opencode; does OpenAI lock you in?** No. "Sign in with ChatGPT" for third-party tools (launched about
+   2026-09-29) is built into opencode core, and Plus/Pro usage counts against the same Codex allowance (Plus/Pro-only
+   eligibility is from search extracts, UNVERIFIED; treat Team as unsupported). Anthropic is the opposite: Claude
+   subscription login in third-party tools is prohibited by its terms and removed from opencode; opencode reaches
+   Claude by API key only. Codex itself is Apache-2.0 but OpenAI-shaped: non-OpenAI providers only via the Responses
+   API (VS §1.4). **For the daemon, Codex is the easier second host**: stable, default-on command hooks that near-port
+   Claude Code's schema, `apply_patch` matched as `Write|Edit`, and a real `Stop` veto. Source-read only, no live run
+   (VS §3.1).
+8. **SOTA for config in sync?** `AGENTS.md` (Linux Foundation AAIF) for instructions, Agent Skills for skills, and
    generators (rulesync, ruler) for the rest. **Nobody enforces the canonical file or hook semantics** at edit time.
    That gap is this daemon's opening (SYNC §1, §6).
 
@@ -63,7 +80,13 @@ Detail lives in the supporting documents; each finding points at the section tha
 | MCP, headless SDK | Built in; open HTTP/OpenAPI server                              | Built in; `claude -p`, Agent SDK                | Same                                   |
 | API stability     | V2.1 broke plugin contracts in a minor release                  | Stable hook protocol, copied by other tools     | **opencode churns**                    |
 
-Full 26-row comparison: ARCH §8.
+Full 26-row comparison: ARCH §8. Three-way table with Codex CLI: VS §2.2. Where Codex sharpens the picture (source at
+`b337fe06`, no live run): it sits on Claude Code's side of every **Fundamentally different** row above (one process
+per session, out-of-process command hooks with Claude-shaped JSON, real `Stop`/`SubagentStop` veto, per-hook timeout,
+JSONL rollouts), and differs in small, precise ways: no `ask` from hooks, `allow` valid only with `updatedInput`,
+nullable `transcript_path`, edits only via `apply_patch` (the same envelope as opencode's `patch`, so one parser serves
+both), reads via the shell, hooks run only after the user trusts the exact definition, an OS sandbox as a stronger
+floor, and a 32 KiB default `AGENTS.md` cap (VS §2.1, §3.1).
 
 ---
 
@@ -84,8 +107,9 @@ Full 26-row comparison: ARCH §8.
   `.claude/skills/CLAUDE.md` becomes a phantom skill in opencode; both derived from code reading, not observed by
   running opencode), and the item-by-item list for this repo (DUAL §2-§5, §8).
 - **Claude Code and `AGENTS.md`.** Equivalence table from about 40 local probe runs (no model calls) plus source and
-  docs rows; the shim in every directory is the recommended layout (symlinks also work but fail on Windows), and the
-  Write, Edit and Bash nested loads are source-derived, not observed (AMD §4, §5.1, §6).
+  docs rows; AMD recommended the shim in every directory (symlinks also work but fail on Windows), and the Write, Edit
+  and Bash nested loads are source-derived, not observed (AMD §4, §5.1, §6). Superseded by the owner's direction:
+  AGENTS-only is the mode's default, the shim a declared alternative (MH §2.3; §4 Q1.3).
 - **Config-sync SOTA.** rulesync and ruler generate; hook registration is translated, hook semantics are not; nobody
   gates an agent editing a generated file (SYNC §1, §4, §6).
 - **Performance.** A resident plugin removes the per-event process spawn; INFERENCE: expected faster than Claude Code's 4.3 ms
@@ -97,75 +121,111 @@ Full 26-row comparison: ARCH §8.
 
 ## 4. Decisions taken, and the one open question
 
-Decided (CLEAR rulings, RULINGS; engineering decisions, OPTIONS §6):
+Decided (CLEAR rulings, RULINGS; engineering decisions, OPTIONS §6). Rows marked owner-directed were amended after the
+owner's follow-up on the opt-in `multi_harness` mode (MH §4); Q2, Q3, Q4 and M3 are unchanged:
 
-| #   | Decision                                                                                                                                                        |
-| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Q1  | Migrate `CLAUDE.md` into `AGENTS.md` by an explicit, opt-in, dry-run-first command per project; new installs default to `AGENTS.md` plus shims; this repo first |
-| Q2  | rulesync is an optional detected integration (`generate --check` only), never a dependency or a recommendation; the daemon's own renderer (D1) comes first      |
-| Q3  | The daemon does not read opencode's `service.json` password in this epic; the question returns to the owner only with the external driver                       |
-| Q4  | Target is **guarded** opencode sessions, with Stop at declared "degraded: re-drive" fidelity; unattended is a go/no-go after plan 6, on evidence                |
-| M1  | Git hooks: opt-in for existing clients, local `core.hooksPath` only, chain existing husky/pre-commit                                                            |
-| M2  | Fail closed on an unsupported opencode version; pin a range; a Routine tracks opencode releases                                                                 |
-| M3  | Bun/TypeScript toolchain: CI only, confined to the plugin and its contracts, never on clients                                                                   |
-| M4  | A `hosts:` key in `hooks-daemon.yaml`; default `claude-code` only                                                                                               |
-| D   | Translation lives in Python; plugin is a dumb pipe; V2 plugin API only; discovery file for the socket; general config generator (D3) rejected                   |
+| #      | Decision                                                                                                                                                                                                                                                                                                                                                            |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Q1     | **Amended (owner-directed, MH §4):** enabling `multi_harness` mode is the only route; `multi-harness enable` is that command (dry run by default, `--apply` to act, a `disable` inverse); this repo first                                                                                                                                                           |
+| Q1.2   | **Retracted (owner-directed):** new installs are unchanged (`CLAUDE.md`); the installer offers the mode, never defaults to it; `layout: claude-md-only` dropped (mode off is that)                                                                                                                                                                                  |
+| Q1.3   | **Rewritten (owner-directed):** `instruction_layout: agents-only` (default in the mode: no CLAUDE files anywhere, Claude-only content in `.claude/rules/`, nested Write/Edit gap closed by a daemon handler) or `shim` (declared alternative). Never mixed. H1: user `~/.claude/CLAUDE.md` is harmless; H2/g2/i: ancestor `CLAUDE.md` and `CLAUDE.local.md` are not |
+| Q1.4   | **Rewritten:** Claude-only content stays in the shim (S) or moves to `.claude/rules/hooks-daemon.md` / project rule files (A); one token-list classifier                                                                                                                                                                                                            |
+| Q1.5   | **Rewritten (owner-directed):** checks run **only** when the mode is on; off = zero output. Per-layout check table in MH §3.3 (incl. ancestor, `CLAUDE.local.md`, `instructionFiles` mode and version checks)                                                                                                                                                       |
+| Q1.6-7 | Unchanged, plus: Claude-only remainder of the guidance goes to `.claude/rules/hooks-daemon.md` (A); the command also refuses on an unplaceable classifier result and a dirty tree                                                                                                                                                                                   |
+| Q2     | rulesync is an optional detected integration (`generate --check` only), never a dependency or a recommendation; the daemon's own renderer (D1) comes first                                                                                                                                                                                                          |
+| Q3     | The daemon does not read opencode's `service.json` password in this epic; the question returns to the owner only with the external driver                                                                                                                                                                                                                           |
+| Q4     | Target is **guarded** opencode sessions, with Stop at declared "degraded: re-drive" fidelity; unattended is a go/no-go after plan 6, on evidence                                                                                                                                                                                                                    |
+| M1     | Git hooks: local `core.hooksPath` only, chain existing husky/pre-commit. **Amended (owner-directed):** part of the mode, offered by `multi-harness enable`, never installed with the mode off; the "commit gates are Claude-Code-only" line shows only in the mode                                                                                                  |
+| M2     | Fail closed on an unsupported opencode version; pin a range; a Routine tracks opencode releases. Proposed extension to Codex, pinned to stable `rust-v*` tags (VS §3.3 item 5)                                                                                                                                                                                      |
+| M3     | Bun/TypeScript toolchain: CI only, confined to the plugin and its contracts, never on clients                                                                                                                                                                                                                                                                       |
+| M4     | **Amended (owner-directed):** `hosts` lives inside the `multi_harness:` block (`claude-code` implicit and irremovable; `codex` may be listed before an adapter exists, reported as "instructions but no guards"); a top-level `hosts:` is a config error; the "no opencode protection" line fires only in the mode                                                  |
+| D      | Translation lives in Python; plugin is a dumb pipe; V2 plugin API only; discovery file for the socket; general config generator (D3) rejected                                                                                                                                                                                                                       |
 
 **Open, for the owner (non-blocking): M5, naming and positioning.** Is the product (a) "a Claude Code hooks daemon that
 also covers opencode", or (b) "a multi-host enforcement daemon", with a rename and repositioning as a later epic of its
 own? (b) would also bring SYNC §7 E6 into scope (publishing the canonical event/decision model). **Adviser default if
-no answer: (a), E6 out of scope.** Nothing in the epic waits on this.
+no answer: (a), E6 out of scope.** Nothing in the epic waits on this. New data points: Codex as a third host, and
+the owner's own term "multi harness", both lean towards (b)'s vocabulary without requiring the rename (VS §3.3 item 7;
+MH §4).
 
 ---
 
 ## 5. Epic proposal: candidate plans, in order
 
-Sequence from OPTIONS §5, adjusted by the rulings. Plans 0, 1 and 2 can start in parallel; the spike gates 3 onwards.
+Sequence from OPTIONS §5, adjusted by the rulings and the owner's follow-ups (MH; VS §3.3). Plans 0, 1 and 2 can start
+in parallel; the spike gates 3 onwards. Everything below except plan 1's CLI entry points deploys only into a project
+with `multi_harness.enabled: true`; a non-opted project gets zero change (MH §3.2).
 
-**Plan 0: opencode spike (small, throwaway).** A live opencode 2.1.x server with a minimal V2 plugin talking to a
-stub socket. Settles the known unknowns in §6 and measures plugin-to-daemon latency against the 4.3 ms relay.
-Deliverable: findings note and a go/no-go for plan 3 onward. *Depends on:* nothing. *Evidence:* every B-risk listed as
-UNVERIFIED in OPTIONS §2 B "Open unknowns" and fact-check claim 35.
+**Plan 0: spike, two legs (small, throwaway).** *opencode leg:* a live opencode 2.1.x server with a minimal V2 plugin
+talking to a stub socket; settles the opencode unknowns in §6 and measures plugin-to-daemon latency against the 4.3 ms
+relay. *Codex leg* (cheap: no Bun, no TypeScript): a pinned Codex stable release with a command hook to the daemon
+socket; confirms `apply_patch` `Write|Edit` matching, `Stop` block continuation, trust-review friction and
+`additionalContext` spilling behave as the source reads (VS §3.3 item 1). Deliverable: findings note and a go/no-go per
+host for plan 3 onward. *Depends on:* nothing. *Evidence:* every B-risk listed as UNVERIFIED in OPTIONS §2 B "Open
+unknowns", fact-check claim 35, VS Gaps.
 
 **Plan 1: tool-neutral commit gates (Option A, git half; small-medium).** CLI entry points for the conflict-marker,
 staged-lint and sensitive-content commit scans (CLI entry points were not checked for the other gates; plan-qa and
 issue-validity are the confirmed CLIs); a `core.hooksPath` installer that is
-opt-in for existing clients and chains existing frameworks (M1); a staged-tree-hash stamp so Claude Code does not run
-gates twice; a "git hooks not installed" startup report; `--no-verify` deny in provisioned `opencode.json`; a hook
+offered only by `multi-harness enable` and chains existing frameworks (M1); a staged-tree-hash stamp so Claude Code
+does not run gates twice; a "git hooks not installed" startup report (in the mode only); `--no-verify` deny in
+provisioned `opencode.json` (and the Codex equivalent once plan 4b exists); a hook
 that exits non-zero naming the repair when the venv is missing. *Depends on:* nothing. *Evidence:* no git hooks
 installed today and every commit gate is a Claude-only `PreToolUse` (DUAL §1 finding 5, §7; PLANWF §4).
 
-**Plan 2: `AGENTS.md` canonical and its enforcement (Option A, instruction half; medium).** The plan the owner asked
-for, in this order:
+**Plan 2: the opt-in `multi_harness` mode (Option A, instruction half; medium; owner-directed).** In this order (MH §3):
 
-1. **Compact neutral guidance.** Shrink the generated `<hooksdaemon>` section (118,604-byte `CLAUDE.md` today) to a
-   compact, host-neutral form under a size budget below Codex's 32 KiB cap, depth behind `explain-rule` and a skill.
-   Done before any migration, or the dogfood proves nothing (RULINGS Q1.6; OPTIONS §2 A "Size").
-2. **`AGENTS.md` target** for the guidance injector, with neutral tool vocabulary (COUP B3, B12).
-3. **Shims.** New installs write `AGENTS.md` plus a `CLAUDE.md` whose first line is `@AGENTS.md`, in every directory
-   with an `AGENTS.md`; a `layout: claude-md-only` key keeps the old shape (RULINGS Q1.2-Q1.3; AMD §5 design 1).
-4. **Drift checks** (AMD §5 design 2 (a)-(e); SYNC §7 E3-E4): an `AGENTS.md` invisible to Claude Code, a `CLAUDE.md`
-   that does not import its sibling, shared content in a shim, a committed `CLAUDE.local.md`, instruction files above
-   the git root. SessionStart report plus commit gate; enforced only where the project has the layout, else a one-line
-   advisory (RULINGS Q1.5).
-5. **Editing guards** (SYNC §7 E1-E2): deny edits to generated or shim files naming the canonical source; a content
-   guard keeping Claude-only constructs (Claude tool names, `CLAUDE_*`, Claude-specific `@` imports) out of
-   `AGENTS.md`. One token-list classifier serves both this guard and the migrate command.
-6. **Opt-in migrate command** (`bin/hooks-daemon migrate-agents-md` or similar): dry run by default; moves shared
-   content to `AGENTS.md`, leaves Claude-only content in the shim; refuses loudly on a committed `CLAUDE.local.md`, a
-   shadowing `CLAUDE.md` above the git root, or a size-budget breach; never drops content; never run by an upgrade
-   (RULINGS Q1.1, Q1.7).
-7. **Dogfood** in this repository, including its 12 nested `CLAUDE.md` files, before offering it to clients.
+1. **Config block and zero-change contract.** `multi_harness: {enabled, hosts, instruction_layout, agents_md_max_bytes}`
+   with M4's `hosts` inside it; a top-level `hosts:` fails config load. New handlers registered disabled and gated on
+   the flag. An integration test installs with the mode off and asserts a byte-identical tree and SessionStart output
+   against the previous release (MH §3.1-§3.2).
+2. **Compact neutral guidance.** Shrink the generated `<hooksdaemon>` section (118,604-byte `CLAUDE.md` today) to a
+   compact, host-neutral form under the size budget (below Codex's 32 KiB cap), depth behind `explain-rule` and a
+   skill. The injector refuses, never truncates, if it would not fit. Done before any migration, or the dogfood proves
+   nothing (RULINGS Q1.6; OPTIONS §2 A "Size").
+3. **Layout per MH §2.3.** `agents-only` by default: shared guidance into `AGENTS.md`, the Claude-only remainder into a
+   generated `.claude/rules/hooks-daemon.md`, installer's `CLAUDE/Plan/CLAUDE.md` becomes `AGENTS.md`. `shim` as the
+   declared alternative for teams on old/Bedrock versions or with a `~/CLAUDE.md`. Never mixed (Q1.3).
+4. **Layout checks** (MH §3.3 table; SessionStart error and commit gate): tracked CLAUDE files (A); unimported or
+   unshimmed siblings and shared content in a shim (S); untracked `CLAUDE.local.md`/`CLAUDE.md`; CLAUDE files above the
+   git root; a `claude-md`/`managed-only` `instructionFiles` mode; version < 2.1.290 and the disabling env vars; size
+   budget; generated-file drift. Errors that turn instructions off are loud in the banner and `status`, not advisories.
+   No silent compensation unless `on_fallback_disabled: inject` is set (MH §3.6).
+5. **Editing guards:** (A) deny creating any CLAUDE file, naming the right target; (S) deny shared content in a shim
+   and edits to generated files; (both) the Claude-only content guard on `AGENTS.md` (SYNC §7 E1-E2), one token-list
+   classifier shared with the command; `validate_instruction_content` extended to `AGENTS.md`. Whether `/init` and
+   `/memory` write through the tools (and so hit the guard) is UNVERIFIED; the SessionStart and commit checks catch
+   them otherwise.
+6. **Nested gap closure (A):** a PostToolUse handler on Write/Edit (and single-file Bash reads) attaching unseen
+   `AGENTS.md` files as `additionalContext`, with a per-session given set cleared on compaction; plus an
+   `InstructionsLoaded`-based load confirmation via the rules file. Designs only, unprobed (MH §3.4, §5).
+7. **`multi-harness enable` / `disable`** (replaces `migrate-agents-md`): dry run by default, `--apply` to act; moves
+   shared content to `AGENTS.md`, Claude-only content to `.claude/rules/` (A) or the shim (S); offers M1 git hooks and
+   per-host renders; refuses on `CLAUDE.local.md` (A), an ancestor `CLAUDE.md` (A), a budget breach, an unplaceable
+   classifier result or a dirty tree; never drops content; never run by an upgrade (Q1, Q1.7; MH §3.5).
+8. **Dogfood** in this repository, including its 12 nested `CLAUDE.md` files (the two under `.claude/` become
+   `.claude/rules/` files or `README.md`, not `AGENTS.md`; MH §3.4 item 5), before offering it to clients.
 
-*Depends on:* nothing (plan 1 is independent). *Evidence:* opencode reads only `AGENTS.md` (DUAL §1); Claude Code's
-fallback is not a peer and the shim is the recommended layout (AMD §4-§5); nobody enforces the canonical file (SYNC §6).
+*Depends on:* nothing (plan 1 is independent). *Evidence:* opencode reads only `AGENTS.md` (DUAL §1); AGENTS-only works
+in Claude Code and every failure trigger is detectable (MH §1.3, §2.2; probes H1, H2); nobody enforces the canonical
+file (SYNC §6).
 
-**Plan 3: host abstraction in the daemon (Option B, Python half; large).** Request-envelope `host` field;
-host-neutral verdict beside the Claude serializer; per-host capability table with the enforced/degraded/unsupported
-report in `status` and guidance; `hosts:` key (M4); tool-name and field maps; the `patch` parser; identity re-keyed
-from `transcript_path` and peer pid to a host-supplied session key; socket discovery file. Testable without opencode;
-Claude Code behaviour unchanged. *Depends on:* plan 0 go. *Evidence:* COUP R2-R4, R7, B2, B21; MAP Table 3; OPTIONS §4
-item 1.
+**Plan 3: host abstraction in the daemon (Option B, Python half; large).** Designed for **N hosts**, not opencode alone:
+request-envelope `host` field; host-neutral verdict beside the Claude serializer; per-host capability table with the
+enforced/degraded/unsupported report in `status` and guidance, including Codex's `ask→?` and `allow`-requires-rewrite
+cells; `hosts` values `claude-code`, `opencode`, `codex` (M4); tool-name and field maps; one `apply_patch`-envelope
+parser for opencode `patch` and Codex `apply_patch`; identity re-keyed from `transcript_path` (nullable in Codex) and
+peer pid to a host-supplied session key; socket discovery file. Codex is the first non-Claude consumer in its tests,
+being reachable with no new transport. Claude Code behaviour unchanged. *Depends on:* plan 0 go. *Evidence:* COUP R2-R4,
+R7, B2, B21; MAP Table 3; OPTIONS §4 item 1; VS §3.2.
+
+**Plan 4b: Codex adapter (Option B, transport half for Codex; small-medium). Proposed to run before plan 4.** Generate
+`.codex/hooks.json` pointing at the existing forwarder; a Codex serializer (emit nothing rather than a bare `allow`;
+declare whether a Claude-side `ask` degrades to `deny` or to the approval policy); a fail-loud "hook trust pending"
+report; `workspace-write` plus an approval policy as the baseline; declared degradations (no `ask`, hosted tools
+unhooked, Read-keyed handlers become shell-command handlers, no status line per 00292, not re-checked). Before plan 4
+because it delivers a second host sooner at lower risk and validates plan 3's neutrality before any TypeScript work.
+*Depends on:* plan 3 only. *Evidence:* VS §2.1, §3.1, §3.3 item 3.
 
 **Plan 4: opencode bridge plugin (Option B, TypeScript half; medium).** V2 Promise plugin registering the hooks listed
 in OPTIONS §2 B; fail closed when the daemon is unreachable; the `ask` permission baseline for a missing plugin;
@@ -178,13 +238,16 @@ Summary; OPTIONS §2 B, §4.
 **Plan 5: config rendering (Option D1, then D2; small-medium, alongside plan 4).** Render `.opencode/agents` from
 `.claude/agents`, `.opencode/commands` (`plan-new`, `journal`, `issue-sdlc`, `plan-qa`), the daemon's own
 `opencode.json` keys (plugin entry, translated deny rules); a per-host config-dir twin; md5 ownership ledger
-namespace; never regenerate over a human edit. Follow-on D2: detect `.rulesync/`, run `rulesync generate --check` at
+namespace; never regenerate over a human edit; a Codex target (`.codex/hooks.json`, `config.toml` sandbox, approval and
+`project_doc_max_bytes` keys; VS §3.2); renders only for hosts listed in `hosts`. Follow-on D2: detect `.rulesync/`, run `rulesync generate --check` at
 SessionStart and commit; report loudly if the binary is missing (Q2). *Depends on:* plan 2 (guidance channel), plan 4
 for the plugin entry. *Evidence:* DUAL §3.2, §6; PLANWF §3; SYNC §4, §7.
 
 **Plan 6: autonomy at re-drive fidelity (Option B; medium).** Stop and SubagentStop re-drive in the plugin with its
 own re-entry counter; sub-agent result rewrite; stop-explanation contract; compaction re-brief; each degraded state
-declared. Ends with the findings note that decides unattended operation (Q4.3). *Depends on:* plan 4. *Evidence:*
+declared. Ends with the findings note that decides unattended operation (Q4.3). For Codex, autonomy is mostly a port
+(real `Stop`/`SubagentStop` veto with `stop_hook_active`); the re-drive design stays opencode-only (VS §3.3 item 6).
+*Depends on:* plan 4 (opencode), plan 4b (Codex). *Evidence:*
 PLANWF §1 facts 1-2, §2.4; MAP Stop and SubagentStop rows.
 
 **Plan 7 (not proposed now): external driver (Option C).** Daemon-owned crons, failsafe ticks, `/goal` equivalent.
@@ -195,21 +258,30 @@ Only on the owner's go after plan 6, together with the `service.json` trust deci
 
 ## 6. Known unknowns (for plan 0, the spike)
 
-All UNVERIFIED in the inputs; no live opencode run was made in this plan.
+All UNVERIFIED in the inputs; no live opencode or Codex run was made in this plan.
 
-1. Bun `node:net` Unix-socket I/O from inside a V2 plugin, and the plugin-to-daemon latency (p50, p95)
-   (SURFACE §3; OPTIONS §2 B).
-2. What a rejected or failing non-`execute.before` hook does to a turn (SURFACE §5; ARCH Gaps).
-3. Whether every mutating tool calls `permission.assert`, which the `ask` fail-closed baseline relies on (OPTIONS §4
-   item 3; MAP Table 2).
-4. Whether plugin-sent `synthetic` messages re-enter `session.prompt` (a re-drive loop risk), and re-drive timing
-   (MAP Gaps; PLANWF Gaps).
-5. Whether a project-local plugin is instantiated per location on a shared server; child-session filtering on
-   `parentID` (OPTIONS §5 step 0).
-6. Subdirectory sessions and edit-permission resources; the `{shell, "*>*", deny}` rule; `default_agent` with a mode
-   file (PLANWF Gaps).
-7. Whether the V2 plugin design plan (`packages/plugin/src/effect/PLAN.md`) announces hook renames (SURFACE Gaps;
-   OPTIONS Gaps).
-8. Whether the live opencode website has been updated past the V1 plugin docs (SURFACE §0).
-9. Claude Code side (not for the spike, but open): nested `AGENTS.md` behaviour on Write/Edit/Bash comes from source
-   and docs, not a model-backed run; HTML-comment stripping and `claudeMdExcludes` on `AGENTS.md` unprobed (AMD §6).
+01. Bun `node:net` Unix-socket I/O from inside a V2 plugin, and the plugin-to-daemon latency (p50, p95)
+    (SURFACE §3; OPTIONS §2 B).
+02. What a rejected or failing non-`execute.before` hook does to a turn (SURFACE §5; ARCH Gaps).
+03. Whether every mutating tool calls `permission.assert`, which the `ask` fail-closed baseline relies on (OPTIONS §4
+    item 3; MAP Table 2).
+04. Whether plugin-sent `synthetic` messages re-enter `session.prompt` (a re-drive loop risk), and re-drive timing
+    (MAP Gaps; PLANWF Gaps).
+05. Whether a project-local plugin is instantiated per location on a shared server; child-session filtering on
+    `parentID` (OPTIONS §5 step 0).
+06. Subdirectory sessions and edit-permission resources; the `{shell, "*>*", deny}` rule; `default_agent` with a mode
+    file (PLANWF Gaps).
+07. Whether the V2 plugin design plan (`packages/plugin/src/effect/PLAN.md`) announces hook renames (SURFACE Gaps;
+    OPTIONS Gaps).
+08. Whether the live opencode website has been updated past the V1 plugin docs (SURFACE §0).
+09. Codex leg: the hook behaviours in VS §3.1 (all source-read); plan-mode enforcement, Windows hooks, rollout schema
+    stability, the shared `app-server-daemon` mode, the undocumented `Pre`/`PostModelRequest` events, and whether a
+    Responses-API gateway can serve Claude models (VS Gaps).
+10. Claude Code side (not for the spike, but open; needs a model, so not probed): nested `AGENTS.md` on Write/Edit/Bash
+    in an AGENTS-only repo (expected absent, SOURCE-DERIVED); root `AGENTS.md` after `/compact` (expected present,
+    SOURCE-DERIVED); what `/init` writes, and whether `/init` and `/memory` create `CLAUDE.md` through the tools or
+    natively; HTML-comment stripping and `claudeMdExcludes` on `AGENTS.md` (AMD §6; MH §1.3, §5). **Auth-free method:**
+    point `ANTHROPIC_BASE_URL` at a local stub server that logs request bodies and returns canned replies; the body
+    shows which instruction text reached the model (UNVERIFIED that `-p` accepts it with `ANTHROPIC_API_KEY=dummy`;
+    MH §1.4 item 2). Also open: the MH §3.4 nested-attach handler and `InstructionsLoaded` verification (MH §1.4 item
+    5). Settled by probe H1: a user `~/.claude/CLAUDE.md` does not disable `AGENTS.md`.
