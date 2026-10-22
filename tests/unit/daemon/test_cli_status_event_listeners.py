@@ -94,7 +94,8 @@ class TestCmdStatusPerEventListeners:
         from claude_code_hooks_daemon.constants.events import wired_event_metas
 
         relay_binary = tmp_path / "hooks-relay"
-        relay_binary.write_bytes(b"x")
+        # A file the relay guard would run (relay_binary_defect is None).
+        relay_binary.write_bytes(b"\x7fELF" + b"\x00" * 60)
         relay_binary.chmod(0o755)
         transport_yaml = (
             f"  transport:\n    relay_enabled: true\n    relay_binary: {relay_binary}\n"

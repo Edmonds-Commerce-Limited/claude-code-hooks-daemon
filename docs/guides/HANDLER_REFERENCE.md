@@ -152,7 +152,9 @@ daemon:
 the permanent bash+python3 transport. The last rung is never removed and
 carries every existing guarantee (`ensure_daemon` auto-start, fail-open JSON
 error emission on any failure) — enabling a faster rung only adds an
-earlier successful exit, it never removes the safety net.
+earlier successful exit, it never removes the safety net. A relay that is
+enabled but cannot run is the exception to "one rung down": the call goes
+straight to the bash+python3 transport, loudly (see below).
 
 **`timeout_seconds` is capped at 45.** When the relay gets no verdict for a
 `PreToolUse` call, it hands the call to the bash forwarder for up to 10
@@ -173,9 +175,56 @@ explicit, decisions** — nothing about this block acts implicitly:
   faster rungs at all.
 - `relay_source: build|download` (both default `null`) separately governs
   **how the relay binary gets onto disk** at install/upgrade time. Leaving
-  it `null` with `relay_enabled: true` means the ladder simply has nothing
-  to exec at rung 1 and starts one rung down — that combination is valid,
-  not an error.
+  it `null` with `relay_enabled: true` is a valid config, but with no binary
+  on disk every relay-eligible hook answer carries the warning described
+  below until a binary is provisioned, and the session-start repair records
+  a failure because it has no route to provision by.
+
+**A missing or broken relay binary never changes a verdict, and never lets
+a call run unguarded.** The generated guard in each `.claude/hooks/<event>`
+runs the relay only when the event's socket exists AND the binary is an
+executable regular file starting with an ELF header or `#!`; it runs it
+with `shopt -s execfail` under `set +e`, so a failed `exec` returns to the
+script instead of killing it with no output. Whenever the socket exists
+but the relay did not take the call — binary missing, not executable, not
+a regular file, unreadable, garbage bytes, or an `exec` that failed — the
+guard sets `HOOKS_DAEMON_RELAY_UNUSED` to the binary path and falls through
+to `init.sh`. That path judges the call with every handler, skips the
+`nc -U` rung (nc cannot carry the marker) and sends the marker in the
+request envelope as `relay_unused`. The daemon then appends one line to the
+answer of every relay-eligible event:
+
+```text
+WARNING: relay is enabled but its binary is missing or cannot run: <path> - relay-eligible hooks run on the fallback transport. Fix: bin/hooks-daemon transport on
+```
+
+This is the same text `status`, the status line and the SessionStart
+`relay_binary_checker` print. The line goes in
+`hookSpecificOutput.additionalContext` where the event's response schema
+has that field, otherwise in `systemMessage`. It is added to the serialised
+answer as text only, never as handler context, because context on a
+`PermissionRequest` "no opinion" would serialise as an approval. Removing the
+text keys leaves the answer identical to the one without the marker. On a
+`PreToolUse` `defer` Claude Code ignores `additionalContext`, so there the
+line is carried but not shown. No socket at all is not this case: there is no
+daemon, and the bash path starts it and reports loudly. A worktree's copy of
+the forwarders, and a `--no-relay` hand-off, decline the relay by design and
+set no marker.
+
+**Session start repairs the binary in the background, once per cause.**
+When `relay_binary_checker` finds the binary unusable, it starts the
+`transport on` provisioning without the toggle (`ensure_relay_binary`, then
+forwarder regeneration) as a detached process (`install/relay_repair.py`)
+and never waits for it. A state file under `{untracked}/relay-repair/`,
+keyed by binary path, defect and daemon version, is claimed before the
+spawn, so each cause is attempted at most once however many sessions
+start; a lock in the same directory keeps two repairs from building at
+once. The checker's warning carries a second line: the repair was started
+(with its log path), is running, or FAILED with its reason and log. A
+failed repair is not retried automatically and is reported at every
+session start; run `bin/hooks-daemon transport on`, or delete the named
+state file to let the next session retry. A spawn that fails is reported in
+the same line.
 
 **Build-from-source is the first-class route.** `relay_source: build` runs
 `relay/build.sh` — a single `rustc --edition 2021 -O -C strip=symbols --target x86_64-unknown-linux-musl` invocation, no cargo, no crates, no

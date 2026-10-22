@@ -106,23 +106,65 @@ def resolve_relay_binary_path(project_root: Path, transport: TransportConfig) ->
     return untracked_dir / "bin" / "hooks-relay"
 
 
+#: The leading bytes of a file the generated relay guard will exec: an ELF
+#: executable (the musl relay) or a ``#!`` script, which the kernel runs. The
+#: guard's bash test (``forwarder_generator.build_relay_guard_block``) checks
+#: the same two, pinned by a test.
+RELAY_RUNNABLE_MAGIC: tuple[bytes, bytes] = (b"\x7fELF", b"#!")
+_MAGIC_READ_BYTES = 4
+
+#: Why the guard will not run the relay binary (:func:`relay_binary_defect`).
+RELAY_DEFECT_MISSING = "missing"
+RELAY_DEFECT_NOT_A_FILE = "not a regular file"
+RELAY_DEFECT_NOT_EXECUTABLE = "not executable"
+RELAY_DEFECT_UNREADABLE = "unreadable"
+RELAY_DEFECT_NOT_RUNNABLE = "neither an ELF executable nor a #! script"
+
+
+def relay_binary_defect(binary: Path) -> str | None:
+    """Why the generated relay guard would NOT run ``binary``, or None when it would.
+
+    The one check shared by every caller that judges a relay binary: the
+    SessionStart checker, ``status`` and ``transport on``'s provisioning, so
+    ``transport on`` replaces a defective file instead of keeping it.
+    """
+    if not binary.exists():
+        return RELAY_DEFECT_MISSING
+    if not binary.is_file():
+        return RELAY_DEFECT_NOT_A_FILE
+    if not os.access(binary, os.X_OK):
+        return RELAY_DEFECT_NOT_EXECUTABLE
+    try:
+        with binary.open("rb") as handle:
+            head = handle.read(_MAGIC_READ_BYTES)
+    except OSError:
+        return RELAY_DEFECT_UNREADABLE
+    # The guard's `read -N 4` fails on a shorter file, so this requires all four.
+    if len(head) == _MAGIC_READ_BYTES and (
+        head == RELAY_RUNNABLE_MAGIC[0] or head.startswith(RELAY_RUNNABLE_MAGIC[1])
+    ):
+        return None
+    return RELAY_DEFECT_NOT_RUNNABLE
+
+
 def missing_configured_relay_binary(project_root: Path, transport: TransportConfig) -> Path | None:
     """The relay binary path when the relay is configured on but unusable.
 
-    Returns None when the relay is disabled or the binary is an executable file.
+    Returns None when the relay is disabled or :func:`relay_binary_defect`
+    finds nothing wrong with the binary.
     """
     if not transport.relay_enabled:
         return None
     binary = resolve_relay_binary_path(project_root, transport)
-    if binary.is_file() and os.access(binary, os.X_OK):
+    if relay_binary_defect(binary) is None:
         return None
     return binary
 
 
 def relay_binary_missing_warning(binary: Path, fix_command: str) -> str:
-    """One-line warning for a configured relay whose binary is missing or not executable."""
+    """One-line warning for a configured relay whose binary is missing or cannot run."""
     return (
-        f"relay is enabled but its binary is missing or not executable: {binary} "
+        f"relay is enabled but its binary is missing or cannot run: {binary} "
         f"- relay-eligible hooks run on the fallback transport. Fix: {fix_command}"
     )
 

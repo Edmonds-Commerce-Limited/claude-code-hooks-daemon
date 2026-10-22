@@ -89,7 +89,8 @@ class TestStatusRelayBinaryWarning:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         binary = tmp_path / "hooks-relay"
-        binary.write_bytes(b"x")
+        # A file the relay guard would run (relay_binary_defect is None).
+        binary.write_bytes(b"\x7fELF" + b"\x00" * 60)
         binary.chmod(0o755)
         socket_path = _make_project(tmp_path, binary)
 

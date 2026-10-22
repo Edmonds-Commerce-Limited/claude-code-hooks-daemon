@@ -120,6 +120,17 @@ checkout (Claude Code itself always invokes them absolutely, via
 `$CLAUDE_PROJECT_DIR`). A slower answer from the right daemon is the trade
 being made.
 
+This declined relay is deliberate, so it sets no marker and the answers carry
+no warning. The main checkout's guard behaves differently when the relay is
+enabled and its socket exists but the binary is missing or cannot run: it
+falls through to `init.sh` with `HOOKS_DAEMON_RELAY_UNUSED` set, every handler
+still judges the call (a broken binary never runs a call unguarded and never
+changes a verdict), the daemon appends one `WARNING:` line naming the binary
+and `bin/hooks-daemon transport on` to every relay-eligible answer, and session
+start repairs the binary in the background, once per cause, reporting a failed
+repair at every session start. Full behaviour: the transport section of
+[docs/guides/HANDLER_REFERENCE.md](../docs/guides/HANDLER_REFERENCE.md).
+
 Verify with a probe rather than by inspection — the wrong-daemon failure is
 silent, and its answer looks exactly like the right one:
 

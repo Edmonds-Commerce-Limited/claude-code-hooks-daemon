@@ -75,8 +75,15 @@ def read_sync_record(untracked_dir: Path, version: str) -> SyncRecord | None:
     only because a sync was attempted, and staying silent about it would hide
     that attempt's outcome. A RUNNING record whose process is gone is FAILED too.
     """
-    path = state_path(untracked_dir, version)
-    logs = log_path(untracked_dir, version)
+    return read_state_file(state_path(untracked_dir, version), log_path(untracked_dir, version))
+
+
+def read_state_file(path: Path, logs: Path) -> SyncRecord | None:
+    """Read one ``key=value`` background-job state file, as :func:`read_sync_record` does.
+
+    Shared with the detached relay repair (``relay_repair``), which records its
+    progress in the same format so one reader judges both.
+    """
     if not path.exists():
         return None
     try:

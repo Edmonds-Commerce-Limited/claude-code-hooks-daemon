@@ -42,6 +42,7 @@ from claude_code_hooks_daemon.install.forwarder_generator import (
 )
 from claude_code_hooks_daemon.install.relay_deploy import (
     deploy_relay_if_configured,
+    relay_binary_defect,
     resolve_relay_binary_path,
 )
 from claude_code_hooks_daemon.install.transport_verify import (
@@ -327,14 +328,17 @@ def ensure_relay_binary(project_root: Path) -> RelayProvision:
     """
     transport = load_transport_config(project_root)
     binary = resolve_relay_binary_path(project_root, transport)
-    if binary.is_file() and os.access(binary, os.X_OK):
+    # Plan 00529: the same check the relay guard applies, so a file that is
+    # present but cannot run is replaced rather than kept.
+    defect = relay_binary_defect(binary)
+    if defect is None:
         return RelayProvision()
     if transport.relay_source is None:
         return RelayProvision(
             failure=(
-                f"relay-binary: {binary} is absent and daemon.transport.relay_source "
-                "is null — set relay_source: build|download (or put a relay binary "
-                "at that path) before enabling the relay rung"
+                f"relay-binary: {binary} is {defect} and daemon.transport.relay_source "
+                "is null — set relay_source: build|download (or put a working relay "
+                "binary at that path) before enabling the relay rung"
             )
         )
     # Self-install: the daemon checkout IS the project root; client install:

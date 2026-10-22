@@ -54,6 +54,11 @@ INIT_SH_ANCHOR: str = 'source "$SCRIPT_DIR/../init.sh"\n'
 #: relay/hooks_relay.rs.
 RELAY_DAEMON_ROOT_ENV: Final[str] = "HOOKS_DAEMON_RELAY_DAEMON_ROOT"
 
+#: Set by the relay guard when a daemon is listening but the relay binary
+#: cannot run, naming that binary; init.sh captures it into the request so the
+#: daemon warns on the answer (Plan 00529 Task 2c).
+RELAY_UNUSED_ENV: Final[str] = "HOOKS_DAEMON_RELAY_UNUSED"
+
 _GUARD_HEADER = "# --- relay hot path (generated; Plan 00290) ---\n"
 _GUARD_FOOTER = "# --- end relay hot path ---\n"
 
@@ -347,14 +352,34 @@ def build_relay_guard_block(
     ]
     lines.append(f'    _rl_bin="${{HOOKS_DAEMON_RELAY_BINARY:-{relay_binary}}}"\n')
     lines.append(f'    _rl_sock="$_rl_events_dir/{event_file_name}.sock"\n')
-    lines.append('    if [[ -x "$_rl_bin" && -S "$_rl_sock" ]]; then\n')
+    # No socket means no daemon: the bash path below is the start-up path and
+    # reports loudly itself. With a socket, a relay that cannot run falls
+    # through with RELAY_UNUSED_ENV set, so every answer names it (Plan 00529
+    # Task 2c). Only what the kernel's execve itself runs (an ELF file or a `#!`
+    # script) is exec'd: on ENOEXEC bash runs the file as a shell script
+    # instead. errexit is lifted around the exec because
+    # under `set -e` a failed exec exits 1 even with execfail and inside `if`.
+    lines.append('    if [[ -S "$_rl_sock" ]]; then\n')
+    lines.append('        _rl_magic=""\n')
+    lines.append('        if [[ -x "$_rl_bin" && -f "$_rl_bin" ]] \\\n')
+    lines.append('            && read -r -N 4 _rl_magic < "$_rl_bin" \\\n')
+    lines.append(
+        "            && [[ \"$_rl_magic\" == $'\\x7fELF' || \"$_rl_magic\" == '#!'* ]]; then\n"
+    )
+    lines.append('            _rl_opts="$-"\n')
+    lines.append("            shopt -s execfail\n")
+    lines.append("            set +e\n")
     # The daemon root is the untracked dir's parent in both install modes
     # (paths.get_untracked_dir). The relay names this install's launcher by
     # it, with the rule init.sh's carve-out applies (Plan 00466 round 4, P3-2).
     daemon_root = _escape_for_double_quotes(str(untracked_dir.parent))
-    lines.append(f'        {RELAY_DAEMON_ROOT_ENV}="{daemon_root}" \\\n')
-    lines.append('            exec "$_rl_bin" "$_rl_sock" --fallback "${BASH_SOURCE[0]}" \\\n')
-    lines.append(f'            --timeout-ms "{timeout_ms}"\n')
+    lines.append(f'            {RELAY_DAEMON_ROOT_ENV}="{daemon_root}" \\\n')
+    lines.append('                exec "$_rl_bin" "$_rl_sock" --fallback "${BASH_SOURCE[0]}" \\\n')
+    lines.append(f'                --timeout-ms "{timeout_ms}"\n')
+    lines.append("            shopt -u execfail\n")
+    lines.append('            if [[ "$_rl_opts" == *e* ]]; then set -e; fi\n')
+    lines.append("        fi\n")
+    lines.append(f'        {RELAY_UNUSED_ENV}="$_rl_bin"\n')
     lines.append("    fi\n")
     lines.append("fi\n")
     lines.append(_GUARD_FOOTER)
