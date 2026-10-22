@@ -4,7 +4,10 @@ With ``daemon.transport.relay_enabled: true`` the forwarders hand relay-eligible
 hooks to the Rust relay binary. When that binary is missing or cannot run
 (``relay_deploy.relay_binary_defect``), those hooks run on the fallback
 transport. This handler says it at session start, naming the path and the
-command that provisions the binary.
+command that provisions the binary, and starts the ``transport on``
+provisioning detached (``install.relay_repair``), once per cause. The repair
+never runs in the hook: the answer reports that it started, is running, or
+what it recorded, and a repair that failed is reported at every session start.
 
 Silent when the relay is disabled or the binary can run (Lean
 SessionStart, Plan 00128). A config this handler cannot read is reported, not
@@ -24,11 +27,56 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.daemon.paths import get_untracked_dir
+from claude_code_hooks_daemon.install.background_sync import SyncStatus
 from claude_code_hooks_daemon.install.relay_deploy import (
     missing_configured_relay_binary,
+    relay_binary_defect,
     relay_binary_missing_warning,
 )
+from claude_code_hooks_daemon.install.relay_repair import (
+    RepairNotice,
+    SpawnFn,
+    spawn_detached,
+    start_relay_repair,
+)
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+from claude_code_hooks_daemon.version import __version__
+
+
+def _repair_line(notice: RepairNotice, fix: str) -> str:
+    """The second line of the warning: what the background repair of this cause did."""
+    if notice.failure is not None:
+        return f"WARNING: {notice.failure}. Run: {fix}"
+    if notice.started:
+        return (
+            f"Relay repair started in the background (log: {notice.log_path}); "
+            f"if the next session still warns, run: {fix}"
+        )
+    record = notice.record
+    if record is None:
+        return (
+            f"WARNING: the relay repair state file {notice.state_path} vanished while "
+            f"it was read. Run: {fix}"
+        )
+    retry = (
+        f"It is not retried automatically for this cause. Run: {fix} "
+        f"(or delete {record.state_path} to have it retried at the next session start)."
+    )
+    if record.status is SyncStatus.RUNNING:
+        return (
+            f"Relay repair is running in the background (log: {record.log_path}); "
+            f"if the next session still warns, run: {fix}"
+        )
+    if record.status is SyncStatus.SYNCED:
+        return (
+            f"WARNING: a background relay repair of this cause recorded success "
+            f"({record.detail}), yet the binary is unusable again. {retry}"
+        )
+    return (
+        f"WARNING: the background relay repair FAILED: {record.detail} "
+        f"(log: {record.log_path}). {retry}"
+    )
 
 
 class RelayBinaryCheckerHandler(SessionStartHandlerBase):
@@ -48,6 +96,8 @@ class RelayBinaryCheckerHandler(SessionStartHandlerBase):
         )
         #: Set in tests so the check needs no initialised ProjectContext.
         self.workspace_root: Path | None = None
+        #: Starts the detached repair; replaced in tests so nothing builds.
+        self.spawn_repair: SpawnFn = spawn_detached
 
     def _project_root(self) -> Path | None:
         """The project root, or None when the daemon has not initialised one."""
@@ -82,8 +132,24 @@ class RelayBinaryCheckerHandler(SessionStartHandlerBase):
         binary = missing_configured_relay_binary(root, transport)
         if binary is None:
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
-        warning = relay_binary_missing_warning(binary, daemon_cli_command("transport", "on"))
-        return AdvisoryResult(decision=Decision.ALLOW, context=[f"WARNING: {warning}"])
+        fix = daemon_cli_command("transport", "on")
+        defect = relay_binary_defect(binary)
+        if defect is None:
+            # Repaired between the two checks: nothing to report.
+            return AdvisoryResult(decision=Decision.ALLOW, context=[])
+        warning = relay_binary_missing_warning(binary, fix)
+        notice = start_relay_repair(
+            root,
+            binary,
+            defect,
+            untracked_dir=get_untracked_dir(root),
+            version=__version__,
+            spawn_fn=self.spawn_repair,
+        )
+        return AdvisoryResult(
+            decision=Decision.ALLOW,
+            context=[f"WARNING: {warning}", _repair_line(notice, fix)],
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """One CONTEXT case: an enabled relay with no binary is reported at session start."""
@@ -96,12 +162,17 @@ class RelayBinaryCheckerHandler(SessionStartHandlerBase):
                 description=(
                     "With daemon.transport.relay_enabled true and the relay binary "
                     "missing or unable to run, session start prints one WARNING "
-                    "naming the binary path and the fix command (transport on). "
+                    "naming the binary path and the fix command (transport on), and "
+                    "a second line saying the repair was started in the background "
+                    "(once per cause) or what that repair recorded. "
                     "Silent when the relay is disabled or the binary can run."
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"binary is missing or cannot run"],
-                safety_notes="Advisory only - never builds or deletes the binary.",
+                safety_notes=(
+                    "Advisory only - the repair runs detached, never in the hook, "
+                    "and never deletes the binary."
+                ),
                 test_type=TestType.CONTEXT,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_event="SessionStart event (new session only)",

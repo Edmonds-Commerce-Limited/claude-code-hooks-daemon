@@ -803,6 +803,25 @@ def no_protected_file_index_builds_outlive_a_test():
 
 
 @pytest.fixture(autouse=True)
+def no_relay_repair_builds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep ``relay_binary_checker`` from starting a real detached relay build.
+
+    A checkout with the relay enabled and no binary (this repository's default)
+    would otherwise start ``relay_repair`` for every test that runs the
+    SessionStart handlers against the real project. A test that needs the spawn
+    sets ``handler.spawn_repair`` itself.
+    """
+
+    def refuse(argv: list[str], log: Path) -> int:
+        raise OSError(f"relay repair spawn disabled under pytest: {argv[:3]}")
+
+    monkeypatch.setattr(
+        "claude_code_hooks_daemon.handlers.session_start.relay_binary_checker.spawn_detached",
+        refuse,
+    )
+
+
+@pytest.fixture(autouse=True)
 def reset_project_context():
     """Reset ProjectContext singleton after each test.
 
