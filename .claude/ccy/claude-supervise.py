@@ -2818,6 +2818,242 @@ def load_usage_pause(
 
 
 # ---------------------------------------------------------------------------
+# Session modes (Plan 00501 Phase 5).
+#
+# The daemon writes one ``<stem>.session-modes`` file per session holding its
+# focus/blocked entries. While this supervisor's session is BLOCKED
+# (awaiting-human or goal-blocked) the work-DRIVING prompts are skipped, each
+# as a named noop: the post-compact `continue`, the goal, the standing-auth
+# reminder and the session-actions directive. `/compact` still runs (Ruling
+# 07). The names below are copies of ``core.session_mode_registry`` and
+# ``utils.session_modes``, pinned by tests/unit/supervise/test_session_modes_gate.py.
+#
+# Unlike the other readers this one does NOT fail open: a file that cannot be
+# read back as the daemon's record is a named error in decision.log and on the
+# status line, and the gate closes, because the file it replaces may be the
+# BLOCKED entry the gate exists to honour. Withholding a prompt costs a turn the
+# human can restart; typing into a blocked loop is what the mode stops.
+# ---------------------------------------------------------------------------
+
+_SESSION_MODES_SUFFIX = ".session-modes"
+_SESSION_MODES_SCHEMA_VERSION = 1
+_SESSION_MODES_FIELD_VERSION = "version"
+_SESSION_MODES_FIELD_SESSION_ID = "session_id"
+_SESSION_MODES_FIELD_MODES = "modes"
+_SESSION_MODES_FIELD_MODE = "mode"
+_SESSION_MODES_FIELD_REASON = "reason"
+_SESSION_MODES_FIELD_SOURCE = "source"
+_SESSION_MODES_FIELD_LIFETIME = "lifetime"
+_SESSION_MODES_FIELD_ENTERED_AT = "entered_at"
+_SESSION_MODES_FIELD_EXPIRES_AT = "expires_at"
+_SESSION_MODES_FIELD_DETAIL = "detail"
+_SESSION_MODES_RECORD_FIELDS = frozenset(
+    {
+        _SESSION_MODES_FIELD_MODE,
+        _SESSION_MODES_FIELD_REASON,
+        _SESSION_MODES_FIELD_SOURCE,
+        _SESSION_MODES_FIELD_LIFETIME,
+        _SESSION_MODES_FIELD_ENTERED_AT,
+        _SESSION_MODES_FIELD_EXPIRES_AT,
+        _SESSION_MODES_FIELD_DETAIL,
+    }
+)
+_SESSION_MODES_BLOCKED = "blocked"
+_SESSION_MODES_STORED_MODES = frozenset({"focus", _SESSION_MODES_BLOCKED})
+# A blocked entry's reason -> the label the daemon shows for it.
+_SESSION_MODES_BLOCKED_LABELS = {"declared": "awaiting-human", "goal-loop": "goal-blocked"}
+_SESSION_MODES_SOURCES = frozenset({"human", "agent", "detector", "daemon"})
+_SESSION_MODES_LIFETIMES = frozenset({"daemon", "session"})
+_SESSION_MODES_UNSAFE_CHARS = re.compile(r"[^A-Za-z0-9_.-]")
+_SESSION_MODES_STEM_FALLBACK = "unknown"
+# The status-line warning for an unreadable file is re-posted every tick it
+# persists, so it only has to outlive the gap between two ticks.
+_SESSION_MODES_ERROR_STATUS_TTL_SECONDS = 30.0
+
+
+class _SessionModesError(ValueError):
+    """A session-modes file is not a record the daemon could have written."""
+
+
+@dataclass(frozen=True)
+class SessionModesReading:
+    """What this supervisor's own session-modes files say.
+
+    ``blocked_labels`` holds the live BLOCKED labels (``awaiting-human``,
+    ``goal-blocked``); ``errors`` names each own file that could not be read.
+    """
+
+    blocked_labels: tuple[str, ...] = ()
+    errors: tuple[str, ...] = ()
+
+    @property
+    def is_blocked(self) -> bool:
+        """True when a live BLOCKED entry was read."""
+        return bool(self.blocked_labels)
+
+    @property
+    def gate_closed(self) -> bool:
+        """True when the work-driving prompts are withheld: BLOCKED, or a file is unreadable."""
+        return self.is_blocked or bool(self.errors)
+
+    def skip_reason(self) -> str:
+        """Why the gate is closed, for a noop line. Only meaningful when ``gate_closed``."""
+        if self.is_blocked:
+            return f"session BLOCKED ({', '.join(self.blocked_labels)})"
+        return "session-modes file unreadable, treated as BLOCKED"
+
+
+def _session_modes_stem(session_id: str) -> str:
+    """The daemon's ``session_stem``: the filename stem a session's file is written under."""
+    stem = _SESSION_MODES_UNSAFE_CHARS.sub("_", session_id.strip())
+    return stem or _SESSION_MODES_STEM_FALLBACK
+
+
+def _session_modes_number(value: object, name: str) -> float:
+    """``value`` as a finite float (never a bool). Raises ``_SessionModesError``."""
+    number = _usage_pause_number(value)
+    if number is None:
+        raise _SessionModesError(f"{name} is not a finite number")
+    return number
+
+
+def _session_modes_member(value: object, allowed: frozenset[str], name: str) -> str:
+    """``value`` when it is one of ``allowed``. Raises ``_SessionModesError``.
+
+    The ``isinstance`` check comes first: a list or object is unhashable, and a
+    membership test on it would escape as ``TypeError`` instead of the named error.
+    """
+    if not isinstance(value, str) or value not in allowed:
+        raise _SessionModesError(f"{name} {value!r} is unknown")
+    return value
+
+
+def _parse_session_modes_record(record: object) -> tuple[str | None, float]:
+    """Validate one mode record the way the daemon's reader does.
+
+    Returns:
+        The record's BLOCKED label (None for focus) and its expiry.
+
+    Raises:
+        _SessionModesError: the record is not one the daemon could have written.
+    """
+    if not isinstance(record, dict):
+        raise _SessionModesError("a mode record is not an object")
+    if set(record) != _SESSION_MODES_RECORD_FIELDS:
+        raise _SessionModesError(f"a mode record has fields {sorted(record)}")
+    mode = _session_modes_member(
+        record[_SESSION_MODES_FIELD_MODE], _SESSION_MODES_STORED_MODES, _SESSION_MODES_FIELD_MODE
+    )
+    reason = record[_SESSION_MODES_FIELD_REASON]
+    label: str | None = None
+    if mode == _SESSION_MODES_BLOCKED:
+        label = _SESSION_MODES_BLOCKED_LABELS.get(reason) if isinstance(reason, str) else None
+        if label is None:
+            raise _SessionModesError(f"blocked reason {reason!r} is not declared or goal-loop")
+    elif reason is not None:
+        raise _SessionModesError(f"only a blocked mode takes a reason, not {mode!r}")
+    _session_modes_member(
+        record[_SESSION_MODES_FIELD_SOURCE], _SESSION_MODES_SOURCES, _SESSION_MODES_FIELD_SOURCE
+    )
+    _session_modes_member(
+        record[_SESSION_MODES_FIELD_LIFETIME],
+        _SESSION_MODES_LIFETIMES,
+        _SESSION_MODES_FIELD_LIFETIME,
+    )
+    if not isinstance(record[_SESSION_MODES_FIELD_DETAIL], str):
+        raise _SessionModesError(f"{_SESSION_MODES_FIELD_DETAIL} is not a string")
+    entered_at = _session_modes_number(
+        record[_SESSION_MODES_FIELD_ENTERED_AT], _SESSION_MODES_FIELD_ENTERED_AT
+    )
+    expires_at = _session_modes_number(
+        record[_SESSION_MODES_FIELD_EXPIRES_AT], _SESSION_MODES_FIELD_EXPIRES_AT
+    )
+    if expires_at <= entered_at:
+        raise _SessionModesError(
+            f"{_SESSION_MODES_FIELD_EXPIRES_AT} is not after {_SESSION_MODES_FIELD_ENTERED_AT}"
+        )
+    return label, expires_at
+
+
+def _parse_session_modes_file(
+    path: Path, *, now: float, own_sessions: frozenset[str] | None
+) -> tuple[str, ...] | None:
+    """The live BLOCKED labels one file holds, or None when the file is not this session's.
+
+    Raises:
+        _SessionModesError: the file is unreadable or not a valid record.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return ()
+    except (OSError, UnicodeDecodeError) as error:
+        raise _SessionModesError(f"unreadable ({type(error).__name__})") from error
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise _SessionModesError(f"not JSON ({error.msg})") from error
+    if not isinstance(data, dict):
+        raise _SessionModesError("the top level is not an object")
+    version = data.get(_SESSION_MODES_FIELD_VERSION)
+    if isinstance(version, bool) or version != _SESSION_MODES_SCHEMA_VERSION:
+        raise _SessionModesError(f"unsupported {_SESSION_MODES_FIELD_VERSION} {version!r}")
+    session_id = data.get(_SESSION_MODES_FIELD_SESSION_ID)
+    if not isinstance(session_id, str):
+        raise _SessionModesError(f"{_SESSION_MODES_FIELD_SESSION_ID} is not a string")
+    if f"{_session_modes_stem(session_id)}{_SESSION_MODES_SUFFIX}" != path.name:
+        raise _SessionModesError(
+            f"{_SESSION_MODES_FIELD_SESSION_ID} {session_id!r} does not match the file name"
+        )
+    if not _session_in_scope(session_id, own_sessions):
+        # Another session whose id shares this one's stem: not ours to judge.
+        return None
+    records = data.get(_SESSION_MODES_FIELD_MODES)
+    if not isinstance(records, list):
+        raise _SessionModesError(f"{_SESSION_MODES_FIELD_MODES} is not a list")
+    labels: list[str] = []
+    for record in records:
+        label, expires_at = _parse_session_modes_record(record)
+        if label is not None and now < expires_at:
+            labels.append(label)
+    if len(set(labels)) != len(labels):
+        raise _SessionModesError("a blocked label appears twice")
+    return tuple(labels)
+
+
+def load_session_modes(
+    directory: Path, *, now: float, own_sessions: frozenset[str] | None
+) -> SessionModesReading:
+    """Read this supervisor's own session-modes files (Plan 00501 Phase 5).
+
+    Only the files named for ``own_sessions`` are opened, so another session's
+    file, readable or not, is never judged. ``None`` disables the filter (every
+    ``*.session-modes`` file counts; unit tests) and the empty set reads
+    nothing. A missing file is no mode. An unreadable or malformed own file is
+    returned as a named error, never as "no modes".
+    """
+    if not directory.is_dir():
+        return SessionModesReading()
+    if own_sessions is None:
+        paths = sorted(directory.glob(f"*{_SESSION_MODES_SUFFIX}"))
+    else:
+        stems = {_session_modes_stem(session_id) for session_id in own_sessions}
+        paths = [directory / f"{stem}{_SESSION_MODES_SUFFIX}" for stem in sorted(stems)]
+    blocked: list[str] = []
+    errors: list[str] = []
+    for path in paths:
+        try:
+            labels = _parse_session_modes_file(path, now=now, own_sessions=own_sessions)
+        except _SessionModesError as error:
+            errors.append(f"{path.name}: {error}")
+            continue
+        for label in labels or ():
+            if label not in blocked:
+                blocked.append(label)
+    return SessionModesReading(blocked_labels=tuple(blocked), errors=tuple(errors))
+
+
+# ---------------------------------------------------------------------------
 # Goal-intent signal (Plan 00269) — structural validation gate (Decision 2).
 #
 # The member allowlist ({'/compact', 'continue'}) cannot express per-plan
@@ -2881,6 +3117,10 @@ _DRY_RUN_GOAL_BODY_PREFIX = "would inject /goal (dry-run — no real /goal sent)
 _GOAL_CLEAR_GLOB = "*.goal-clear"
 _GOAL_CLEAR_COMMAND = "/goal clear"
 _MAX_GOAL_CLEAR_INJECTIONS = 5
+# Plan 00501 Task 5.2: a BLOCKED clear is exempt from the cap above, but a trigger
+# whose delete keeps failing would otherwise be retyped every idle tick for its
+# whole TTL. This higher ceiling still bounds that storm.
+_MAX_BLOCKED_GOAL_CLEAR_INJECTIONS = 3 * _MAX_GOAL_CLEAR_INJECTIONS
 _DRY_RUN_GOAL_CLEAR_BODY = "would inject /goal clear (dry-run — no real /goal clear sent)"
 
 
@@ -7277,6 +7517,28 @@ def decide_once(
     if machine.pause_compacted_for is not None:
         machine.clear_pause_compacted()
         pause_lifted_log = f"{_NOOP_LOG_PREFIX}: usage pause lifted -> normal behaviour resumed"
+    # Plan 00501 Phase 5: while this session is BLOCKED the work-driving prompts
+    # below are skipped as named noops; an unreadable modes file closes the same
+    # gate and is said out loud on every tick it persists (see load_session_modes).
+    session_modes = load_session_modes(sidecar_dir, now=facts.now_wall, own_sessions=own_sessions)
+    modes_gate_closed = session_modes.gate_closed
+    modes_skip_reason = session_modes.skip_reason()
+    modes_error_log: str | None = None
+    if session_modes.errors:
+        modes_error_log = (
+            f"{_NOOP_LOG_PREFIX}: session-modes file unreadable, work-driving prompts withheld: "
+            f"{'; '.join(session_modes.errors)}"
+        )
+        write_status_message(
+            status_dir,
+            text=(
+                "supervisor: session-modes file unreadable -- goal, continue and reminder "
+                "prompts withheld; see decision.log"
+            ),
+            expires_at=facts.now_wall + _SESSION_MODES_ERROR_STATUS_TTL_SECONDS,
+            level=_STATUS_LEVEL_WARNING,
+            now=facts.now_wall,
+        )
     # Plan 00328: adopt the platform's OWN record of a safety downgrade before
     # the reading is tracked, because that is the tick on which the drop is
     # first observed and the episode would open. Nothing else opens one.
@@ -7309,6 +7571,17 @@ def decide_once(
         now_wall=facts.now_wall,
         abandoned_box_flush=evaluation.abandoned_box_flush,
     )
+    # Plan 00501 Ruling 07: under BLOCKED the post-compact `continue` is not
+    # typed. The machine has already latched this compaction as handled, so the
+    # skip is not retried; the compaction signal is left to expire, as the usage
+    # pause leaves it. Applied before the dry-run latch so no marker is spent.
+    continue_skipped_log: str | None = None
+    if evaluation.decision is Decision.WOULD_CONTINUE and modes_gate_closed:
+        payload = None
+        evaluation = Evaluation(
+            Decision.NOOP, f"post-compact continue skipped: {modes_skip_reason}"
+        )
+        continue_skipped_log = f"{_NOOP_LOG_PREFIX}: {evaluation.reason}"
     # Additional confirming Enters for a /model injection (set by the manual
     # switch branch and the auto-restore branch below); every other decision
     # leaves this at 0, which is a no-op in _perform_injection.
@@ -7668,7 +7941,11 @@ def decide_once(
             # is dropped and the reason is logged (deduped by write_noop).
             noop_reason_log = f"{_NOOP_LOG_PREFIX}: {goal_reject}"
         elif goal_path is not None and goal_line is not None:
-            if own_line_blocks_text:
+            if modes_gate_closed:
+                # Plan 00501: withheld, not consumed. The signal ages out on its
+                # own TTL, and the goal clear below is free to run this tick.
+                noop_reason_log = f"{_NOOP_LOG_PREFIX}: goal injection skipped: {modes_skip_reason}"
+            elif own_line_blocks_text:
                 noop_reason_log = (
                     f"{_NOOP_LOG_PREFIX}: goal signal pending but {_OWN_LINE_NOOP_PREFIX} "
                     "still in the input box"
@@ -7720,6 +7997,10 @@ def decide_once(
     # trigger are somehow present, the goal wins and the clear waits a tick.
     # In practice they are mutually exclusive -- the daemon removes the
     # `.goal-intent` file in the same call that writes the clear trigger.
+    # Plan 00501 Task 5.2: under BLOCKED the goal is skipped above, so the clear
+    # wins instead, and the per-process cap does not refuse it: the cap exists
+    # against unrelated clears, and a blocked loop is the clear that must land.
+    # The higher BLOCKED ceiling still bounds a trigger that cannot be deleted.
     if (
         payload is None
         and evaluation.decision is Decision.NOOP
@@ -7745,8 +8026,13 @@ def decide_once(
                     deferred_log = f"{_DEFERRED_LOG_PREFIX} (goal clear pending)"
                 else:
                     noop_reason_log = f"{_NOOP_LOG_PREFIX}: goal clear pending but session busy"
-            elif machine.goal_clear_injections >= _MAX_GOAL_CLEAR_INJECTIONS:
+            elif (
+                machine.goal_clear_injections >= _MAX_GOAL_CLEAR_INJECTIONS
+                and not session_modes.is_blocked
+            ):
                 noop_reason_log = f"{_NOOP_LOG_PREFIX}: goal clear cap reached"
+            elif machine.goal_clear_injections >= _MAX_BLOCKED_GOAL_CLEAR_INJECTIONS:
+                noop_reason_log = f"{_NOOP_LOG_PREFIX}: goal clear ceiling reached while BLOCKED"
             else:
                 decision_value = Decision.WOULD_GOAL_CLEAR.value
                 reason = "goal clear trigger -> would inject /goal clear"
@@ -7951,7 +8237,11 @@ def decide_once(
             # the reason logged (deduped by write_noop).
             noop_reason_log = f"{_NOOP_LOG_PREFIX}: {sa_reject}"
         elif sa_path is not None and sa_line is not None:
-            if own_line_blocks_text:
+            if modes_gate_closed:
+                noop_reason_log = (
+                    f"{_NOOP_LOG_PREFIX}: standing-auth reminder skipped: {modes_skip_reason}"
+                )
+            elif own_line_blocks_text:
                 noop_reason_log = (
                     f"{_NOOP_LOG_PREFIX}: standing-auth signal pending but "
                     f"{_OWN_LINE_NOOP_PREFIX} still in the input box"
@@ -8015,7 +8305,11 @@ def decide_once(
             # reason logged.
             noop_reason_log = f"{_NOOP_LOG_PREFIX}: {actions_reject}"
         elif actions_path is not None and actions_message is not None:
-            if own_line_blocks_text:
+            if modes_gate_closed:
+                noop_reason_log = (
+                    f"{_NOOP_LOG_PREFIX}: session-actions directive skipped: {modes_skip_reason}"
+                )
+            elif own_line_blocks_text:
                 noop_reason_log = (
                     f"{_NOOP_LOG_PREFIX}: session-actions directive pending but "
                     f"{_OWN_LINE_NOOP_PREFIX} still in the input box"
@@ -8151,7 +8445,9 @@ def decide_once(
         consume_signal_path=consume_signal_path,
         deferred_log=deferred_log,
         machine_state=machine.export_state(),
-        noop_reason_log=pause_lifted_log or noop_reason_log,
+        noop_reason_log=(
+            pause_lifted_log or modes_error_log or continue_skipped_log or noop_reason_log
+        ),
         confirm_enters=confirm_enters,
         model_switch_family=model_switch_family,
         model_switch_session=model_switch_session,
