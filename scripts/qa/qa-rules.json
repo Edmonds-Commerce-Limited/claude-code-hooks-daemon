@@ -25,8 +25,8 @@
       "checks": ["audit_error_hiding.py"]
     },
     "bare-python-allowlist-stale": {
-      "statement": "An entry in `scripts/qa/bare-python-allowlist.json` matches no bare python invocation in its file, so the list has drifted from the code.",
-      "fix": "Delete the entry. An entry is only valid while the probe it names exists.",
+      "statement": "An entry in `scripts/qa/bare-python-allowlist.json` pins a whole line that fewer lines of its file now carry than its `occurrences` count, so the list has drifted from the code.",
+      "fix": "Correct the entry's `line` or `occurrences` to the probe as it now stands, or delete the entry if the probe is gone. An entry is only valid while the exact lines it names exist.",
       "checks": ["check_bare_python_invocation.py"],
       "meta": true
     },

@@ -1,44 +1,45 @@
 {
-  "description": "Genuine bootstrap probes the bare-python-invocation check does not report: (1) code whose whole job is to FIND or VALIDATE an interpreter before a venv exists, so no resolved interpreter can be run yet; (2) stdlib-only forwarder code that runs with no venv resolved, is written to the old-Python floor, is pinned by an old-interpreter test, and has a static fallback. `file` is repository-relative; `match` is a substring of the invoking line; `reason` says why the probe carries no hazard. An entry that matches nothing fails the check. Anything that merely could use the resolved interpreter is a defect to fix, not an entry to add.",
+  "description": "Genuine bootstrap probes the bare-python-invocation check does not report: (1) code whose whole job is to FIND or VALIDATE an interpreter before a venv exists, so no resolved interpreter can be run yet; (2) stdlib-only forwarder code that runs with no venv resolved, is written to the old-Python floor, is pinned by an old-interpreter test, and has a static fallback. `file` is repository-relative; `line` is the WHOLE invoking line exactly as written (indentation included, trailing whitespace dropped), never a substring; `occurrences` (default 1) is how many invoking lines in that file equal it, so a new or copied line is reported and a missing one makes the entry stale; `reason` says why the probe carries no hazard. Every entry here awaits the owner's approval (CLAUDE/Plan/00546-upgrade-steps-use-the-resolved-interpreter/OWNER-QUESTIONS.md, Q1). Anything that merely could use the resolved interpreter is a defect to fix, not an entry to add.",
   "entries": [
     {
       "file": "init.sh",
-      "match": "python3 -c \"$recovery_py\"",
+      "line": "    python3 -c \"$recovery_py\"'",
+      "occurrences": 4,
       "reason": "Recovery-command snippets (_hooks_daemon_stdin_is_recovery_command, _hooks_daemon_recovery_command, _hooks_daemon_recovery_advice, _hooks_daemon_root_is_this_install). Forwarder hot-path code that runs when the daemon or venv is wedged, absent or not yet trusted, so no venv interpreter exists to run (root_is_this_install decides whether the venv may be run at all). Stdlib only (os, shlex, json, sys), written to the Python 3.8 floor, any failure answers deny-by-default or a static message. Proven on 3.8 and 3.9 by tests/integration/test_init_sh_hot_path_runs_on_old_python.py."
     },
     {
       "file": "init.sh",
-      "match": "    python3 -c '",
+      "line": "    python3 -c '",
       "reason": "_hooks_daemon_stdin_is_provision_command: recognises the single provision command in an unprovisioned checkout, where no venv exists yet. Stdlib only, written to the Python 3.8 floor; a parse failure means 'not exempt' (deny-by-default). Proven on 3.8 and 3.9 by tests/integration/test_init_sh_hot_path_runs_on_old_python.py (test_provision_command_is_recognised)."
     },
     {
       "file": "init.sh",
-      "match": "if python3 -c '",
+      "line": "    if python3 -c '",
       "reason": "_hooks_daemon_emit_needs_provision: JSON encoder used only when jq is absent, in a checkout that is unprovisioned (no venv); the next fallback is a constant printf answer. Stdlib only, written to the Python 3.8 floor. Proven on 3.8 and 3.9 by test_needs_provision_answer_without_jq in tests/integration/test_init_sh_hot_path_runs_on_old_python.py."
     },
     {
       "file": "init.sh",
-      "match": "        python3 -c '",
+      "line": "        python3 -c '",
       "reason": "emit_hook_error jq-less branch: fail-open/closed JSON encoder reached because the daemon or venv is missing, so no resolved interpreter exists. Stdlib only, written to the Python 3.8 floor. Proven on 3.8 and 3.9 (SessionStart, Stop, SessionEnd) by test_hook_error_encoder_without_jq in tests/integration/test_init_sh_hot_path_runs_on_old_python.py."
     },
     {
       "file": "init.sh",
-      "match": "found=\"$(python3 -c 'import sys; v = sys.version_info",
+      "line": "    found=\"$(python3 -c 'import sys; v = sys.version_info; print(\"%d.%d.%d\" % (v[0], v[1], v[2]))')\" || found=\"\"",
       "reason": "_detect_unsupported_python: an interpreter VERSION PROBE. Its whole job is to report that the PATH python3 is below requires-python so the advice says 'upgrade Python'; it prints a version with %-formatting valid on any 3.x and is fail-open by design (missing or unparseable means not shown as unsupported). Covered by tests/integration/test_init_sh_unsupported_python.py."
     },
     {
       "file": "init.sh",
-      "match": "_hd_answer=\"$(python3 -c \"",
+      "line": "    _hd_answer=\"$(python3 -c \"",
       "reason": "send_request_stdin socket-transport rung: the transport itself (stdlib socket, sys, json; no venv packages needed), reached only after the nc rung fails or is unavailable. Resolving a venv interpreter here would add a lookup to every hook. Written to the Python 3.8 floor; every failure path emits a JSON deny/block or a fixed deny. Proven on 3.8 and 3.9 by test_transport_reports_a_missing_socket_as_a_deny in tests/integration/test_init_sh_hot_path_runs_on_old_python.py."
     },
     {
       "file": "init.sh",
-      "match": "    python3 -c \"",
+      "line": "    python3 -c \"",
       "reason": "forward_stop_event response reader: turns decision=block into exit 2 by reading the file the transport wrote; runs with no venv resolved, unparseable input allows the stop. Stdlib only, written to the Python 3.8 floor. Proven on 3.8 and 3.9 (exit 2) by test_forward_stop_event_blocks_when_daemon_is_down in tests/integration/test_init_sh_hot_path_runs_on_old_python.py."
     },
     {
       "file": "install.sh",
-      "match": "python3 \"$DAEMON_DIR/install.py\"",
+      "line": "        python3 \"$DAEMON_DIR/install.py\" --force",
       "reason": "Version-checked bootstrap: install.py is the first thing the bare python3 runs and it begins with the python_floor guard (require_min_python via runpy of python_floor.py) before any import tomllib, using only stdlib imports that parse on 3.8. Verified: python3.8 and python3.9 install.py --force each print one line ('needs Python 3.11 or newer') and exit 1."
     }
   ]

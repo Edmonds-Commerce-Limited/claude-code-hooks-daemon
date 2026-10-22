@@ -54,15 +54,17 @@ the resolved interpreter.
 
 ### Phase 3: Defence Before Fix
 
-- [x] ✅ **Task 3.1**: Run the `dbf` skill for the class "a shipped script runs a bare python3/python". The detector
+- [ ] 🔄 **Task 3.1**: Run the `dbf` skill for the class "a shipped script runs a bare python3/python". The detector
   rule comes first, then the sweep.
+  - Open until the owner rules on [OWNER-QUESTIONS.md](OWNER-QUESTIONS.md) (allowlist, rule scope, next wider rule).
 
 ## Success Criteria
 
 - [x] A stale-venv cleanup on a host whose `python3` is too old either works on the resolved interpreter or warns loudly
   (tested).
 - [x] No entry point raises a traceback under an interpreter below the minimum (tested).
-- [x] A QA rule finds the class, and every remaining instance is fixed or allowlisted with a reason.
+- [ ] A QA rule finds the class, and every remaining instance is fixed or allowlisted with the owner's approval
+  ([OWNER-QUESTIONS.md](OWNER-QUESTIONS.md) Q1).
 - [x] A release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (the pending-release holding area).
 
 ## Delivery & Milestones

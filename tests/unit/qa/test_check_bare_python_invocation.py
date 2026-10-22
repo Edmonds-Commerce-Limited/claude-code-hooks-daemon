@@ -201,6 +201,10 @@ class TestCommandPosition:
         assert _lines(checker, 'echo "result: $(python3 -c "1")"') == [1]
 
 
+#: A multi-line ``python3 -c "`` reader shaped like init.sh's forward_stop_event one.
+_READER: Final[str] = '    python3 -c "\nimport sys\n"\n'
+
+
 def _write(root: Path, relative: str, text: str) -> None:
     path = root / relative
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -248,6 +252,19 @@ class TestScan:
         found = checker.scan_tree(tmp_path, allowlist=[])
         assert [v.file for v in found] == ["CLAUDE/UPGRADES/v2/migrate.sh"]
 
+    def test_the_plan_tooling_agents_execute_is_still_scanned(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """mkplan.bash and _planlib.inc.bash sit in CLAUDE/Plan/ itself and ARE run."""
+        _write(tmp_path, "CLAUDE/Plan/mkplan.bash", "python3 a.py\n")
+        _write(tmp_path, "CLAUDE/Plan/_planlib.inc.bash", 'P="${X:-python3}"\n')
+        _write(tmp_path, "CLAUDE/Plan/00001-x/bench.sh", "python3 a.py\n")
+        found = checker.scan_tree(tmp_path, allowlist=[])
+        assert [v.file for v in found] == [
+            "CLAUDE/Plan/_planlib.inc.bash",
+            "CLAUDE/Plan/mkplan.bash",
+        ]
+
     def test_a_value_default_is_reported_in_a_file(
         self, checker: ModuleType, tmp_path: Path
     ) -> None:
@@ -259,20 +276,123 @@ class TestScan:
         self, checker: ModuleType, tmp_path: Path
     ) -> None:
         _write(tmp_path, "probe.sh", "found=\"$(python3 -c 'import sys')\"\n")
-        entry = checker.AllowEntry(file="probe.sh", match="python3 -c", reason="finds the version")
+        entry = checker.AllowEntry(
+            file="probe.sh", line="found=\"$(python3 -c 'import sys')\"", reason="finds the version"
+        )
         assert checker.scan_tree(tmp_path, allowlist=[entry]) == []
+
+    def test_an_entry_covers_only_the_whole_line_it_names(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """A new line that merely CONTAINS an entry's text is still reported (review finding 2)."""
+        _write(tmp_path, "init.sh", _READER + '    python3 -c "import tomllib; print(1)"\n')
+        entry = checker.AllowEntry(file="init.sh", line='    python3 -c "', reason="reader")
+        found = checker.scan_tree(tmp_path, allowlist=[entry])
+        assert [(v.line, v.rule) for v in found] == [(4, "bare-python-invocation")]
+
+    def test_indentation_is_part_of_the_pinned_line(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        _write(tmp_path, "init.sh", "        python3 -c 'print(1)'\n")
+        entry = checker.AllowEntry(file="init.sh", line="    python3 -c 'print(1)'", reason="r")
+        found = checker.scan_tree(tmp_path, allowlist=[entry])
+        assert sorted(v.rule for v in found) == [
+            "bare-python-allowlist-stale",
+            "bare-python-invocation",
+        ]
+
+    def test_a_duplicate_identical_line_needs_its_own_occurrence(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """A second identical line is never silently covered by the first one's entry."""
+        _write(tmp_path, "init.sh", _READER + "x=1\n" + _READER)
+        entry = checker.AllowEntry(file="init.sh", line='    python3 -c "', reason="reader")
+        found = checker.scan_tree(tmp_path, allowlist=[entry])
+        assert [(v.line, v.rule) for v in found] == [
+            (1, "bare-python-invocation"),
+            (5, "bare-python-invocation"),
+        ]
+        assert "covers 1" in found[0].message
+
+    def test_occurrences_covers_that_many_identical_lines(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        _write(tmp_path, "init.sh", _READER + "x=1\n" + _READER)
+        entry = checker.AllowEntry(
+            file="init.sh", line='    python3 -c "', reason="reader", occurrences=2
+        )
+        assert checker.scan_tree(tmp_path, allowlist=[entry]) == []
+
+    def test_fewer_lines_than_occurrences_is_stale(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        _write(tmp_path, "init.sh", _READER)
+        entry = checker.AllowEntry(
+            file="init.sh", line='    python3 -c "', reason="reader", occurrences=2
+        )
+        found = checker.scan_tree(tmp_path, allowlist=[entry])
+        assert [v.rule for v in found] == ["bare-python-allowlist-stale"]
 
     def test_an_allowlist_entry_that_matches_nothing_is_a_violation(
         self, checker: ModuleType, tmp_path: Path
     ) -> None:
         _write(tmp_path, "probe.sh", "echo fine\n")
-        entry = checker.AllowEntry(file="probe.sh", match="python3 -c", reason="finds the version")
+        entry = checker.AllowEntry(file="probe.sh", line="python3 -c x", reason="finds the version")
         found = checker.scan_tree(tmp_path, allowlist=[entry])
         assert [v.rule for v in found] == ["bare-python-allowlist-stale"]
 
     def test_an_allowlist_entry_without_a_reason_is_refused(self, checker: ModuleType) -> None:
         with pytest.raises(ValueError, match="reason"):
-            checker.load_allowlist_entries([{"file": "a.sh", "match": "python3", "reason": " "}])
+            checker.load_allowlist_entries([{"file": "a.sh", "line": "python3", "reason": " "}])
+
+    def test_a_substring_match_key_is_refused(self, checker: ModuleType) -> None:
+        with pytest.raises(ValueError, match="line"):
+            checker.load_allowlist_entries([{"file": "a.sh", "match": "python3", "reason": "r"}])
+
+    def test_a_non_positive_occurrence_count_is_refused(self, checker: ModuleType) -> None:
+        with pytest.raises(ValueError, match="occurrences"):
+            checker.load_allowlist_entries(
+                [{"file": "a.sh", "line": "python3 x", "reason": "r", "occurrences": 0}]
+            )
+
+    def test_two_entries_for_the_same_line_are_refused(self, checker: ModuleType) -> None:
+        item = {"file": "a.sh", "line": "python3 x", "reason": "r"}
+        with pytest.raises(ValueError, match="duplicate"):
+            checker.load_allowlist_entries([item, dict(item)])
+
+    def test_the_repository_allowlist_pins_eleven_lines_in_eight_entries(
+        self, checker: ModuleType
+    ) -> None:
+        entries = checker.load_allowlist_entries(
+            json.loads(
+                (_REPO_ROOT / "scripts" / "qa" / "bare-python-allowlist.json").read_text("utf-8")
+            )["entries"]
+        )
+        assert len(entries) == 8
+        assert sum(e.occurrences for e in entries) == 11
+
+    @pytest.mark.parametrize(
+        "added",
+        [
+            '    python3 -c "import tomllib; print(1)"\n',
+            _READER,
+            "    python3 -c 'import sys'\n",
+        ],
+    )
+    def test_a_new_line_in_the_real_init_sh_is_reported_despite_the_real_entries(
+        self, checker: ModuleType, tmp_path: Path, added: str
+    ) -> None:
+        real = (_REPO_ROOT / "init.sh").read_text("utf-8")
+        _write(tmp_path, "init.sh", real + added)
+        entries = [
+            entry
+            for entry in checker._load_allowlist(checker._ALLOWLIST_FILE)
+            if entry.file == "init.sh"
+        ]
+        found = checker.scan_tree(tmp_path, allowlist=entries)
+        assert found, "a new bare python line in init.sh passed unreported"
+        assert {v.rule for v in found} == {"bare-python-invocation"}
+        assert real.count("\n") + 1 in {v.line for v in found}
 
 
 class TestCommandLine:

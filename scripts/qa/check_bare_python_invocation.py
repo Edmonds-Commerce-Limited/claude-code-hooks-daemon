@@ -25,14 +25,18 @@ reported too: a default ``${VAR:-python3}`` / ``${VAR:=python3}`` / ``${1:-pytho
 interpreter is a silent fallback. Not reported: the word in an ``echo`` / ``printf``
 argument, ``${VAR:+python3}``, ``command -v python3``, a pinned or resolved value.
 
-**Scope.** ``CLAUDE/Plan/`` is not scanned: plan prototypes and benchmarks are never
-run on a client host nor by install, upgrade or dispatch, so they do not carry the
-hazard. Fixture trees, gitignored state and other checkouts are skipped as well.
+**Scope.** Files inside a plan folder (``CLAUDE/Plan/<folder>/...``) are not
+scanned: they are prototypes, benchmarks and archived copies that no install,
+upgrade, dispatch, QA or CI step executes, so they do not carry the hazard. The
+plan tooling directly in ``CLAUDE/Plan/`` is executed by agents and is scanned.
+Fixture trees, gitignored state and other checkouts are skipped as well.
 
 **Genuine bootstrap probes** (code whose job is to find or validate an
 interpreter before a venv exists) are listed in ``bare-python-allowlist.json``,
-one entry per probe with the REASON it carries no hazard. An entry that
-matches nothing is itself a failure, so the list cannot rot.
+each entry pinning a WHOLE line of one file (indentation included) and the
+number of such lines, with the REASON it carries no hazard. A new line is never
+covered, not even an identical copy, and an entry whose count is not met is
+itself a failure, so the list cannot rot.
 
 There is no inline exemption marker.
 
@@ -145,7 +149,9 @@ _SKIP_DIRS: Final[frozenset[str]] = frozenset(
 )
 #: Fixture trees hold deliberately-defective sample files, never run.
 _FIXTURE_PARTS: Final[tuple[str, ...]] = ("tests", "fixtures")
-#: Plan prototypes and benchmarks are never run on client hosts, by install, upgrade or dispatch.
+#: Files INSIDE a plan folder (``CLAUDE/Plan/<folder>/...``) are prototypes, benchmarks
+#: and archived copies that nothing executes. The plan tooling directly in
+#: ``CLAUDE/Plan/`` (mkplan.bash, _planlib.inc.bash) is run by agents and IS scanned.
 _PLAN_PARTS: Final[tuple[str, ...]] = ("CLAUDE", "Plan")
 
 _REMEDIATION: Final[str] = (
@@ -173,26 +179,43 @@ class Violation:
 
 @dataclass(frozen=True)
 class AllowEntry:
-    """A genuine bootstrap probe: ``match`` is a substring of the invoking line."""
+    """A genuine bootstrap probe, pinned to whole lines of one file.
+
+    ``line`` is the invoking line exactly as written, indentation included and
+    trailing whitespace dropped. The file must hold exactly ``occurrences``
+    invoking lines equal to it: one more is a new instance, reported; fewer
+    makes the entry stale.
+    """
 
     file: str
-    match: str
+    line: str
     reason: str
+    occurrences: int = 1
 
 
-def load_allowlist_entries(raw: list[dict[str, str]]) -> list[AllowEntry]:
-    """Validate the allowlist: every entry names a file, a match and a REASON."""
+def load_allowlist_entries(raw: list[dict[str, object]]) -> list[AllowEntry]:
+    """Validate the allowlist: every entry names a file, a whole line and a REASON."""
     entries: list[AllowEntry] = []
+    seen: set[tuple[str, str]] = set()
     for item in raw:
+        if "match" in item or not isinstance(item.get("line"), str):
+            raise ValueError(f"allowlist entry must pin a whole `line`, not a match: {item!r}")
+        occurrences = item.get("occurrences", 1)
+        if not isinstance(occurrences, int) or isinstance(occurrences, bool) or occurrences < 1:
+            raise ValueError(f"allowlist entry occurrences must be a positive int: {item!r}")
         entry = AllowEntry(
-            file=item.get("file", "").strip(),
-            match=item.get("match", ""),
-            reason=item.get("reason", "").strip(),
+            file=str(item.get("file", "")).strip(),
+            line=str(item["line"]).rstrip(),
+            reason=str(item.get("reason", "")).strip(),
+            occurrences=occurrences,
         )
-        if not entry.file or not entry.match.strip():
-            raise ValueError(f"allowlist entry needs a file and a match: {item!r}")
+        if not entry.file or not entry.line.strip():
+            raise ValueError(f"allowlist entry needs a file and a line: {item!r}")
         if not entry.reason:
             raise ValueError(f"allowlist entry for {entry.file} has no reason: {item!r}")
+        if (entry.file, entry.line) in seen:
+            raise ValueError(f"duplicate allowlist entry for {entry.file}: {entry.line!r}")
+        seen.add((entry.file, entry.line))
         entries.append(entry)
     return entries
 
@@ -527,7 +550,7 @@ def _is_unscanned(parts: tuple[str, ...]) -> bool:
     return (
         any(part in _SKIP_DIRS for part in parts)
         or parts[: len(_FIXTURE_PARTS)] == _FIXTURE_PARTS
-        or parts[: len(_PLAN_PARTS)] == _PLAN_PARTS
+        or (parts[: len(_PLAN_PARTS)] == _PLAN_PARTS and len(parts) > len(_PLAN_PARTS) + 1)
     )
 
 
@@ -572,8 +595,9 @@ def _scan_file(path: Path, relative: str) -> tuple[bool, list[tuple[int, str]], 
 def scan(root: Path, allowlist: list[AllowEntry]) -> tuple[list[Violation], int, int]:
     """``(violations, files examined, files seen)`` below ``root``."""
     seen = walk_files(root)
+    by_line = {(entry.file, entry.line): entry for entry in allowlist}
+    pinned: dict[AllowEntry, list[int]] = {entry: [] for entry in allowlist}
     violations: list[Violation] = []
-    used: set[int] = set()
     examined = 0
     for path in _candidate_files(root):
         relative = path_relative_to(path, root).as_posix()
@@ -581,31 +605,49 @@ def scan(root: Path, allowlist: list[AllowEntry]) -> tuple[list[Violation], int,
         examined += was_examined
         violations.extend(unreadable)
         for number, text in hits:
-            allowed = [
-                i
-                for i, entry in enumerate(allowlist)
-                if entry.file == relative and entry.match in text
-            ]
-            used.update(allowed)
-            if not allowed:
-                violations.append(
-                    Violation(
-                        file=relative,
-                        line=number,
-                        message=f"runs a bare python from PATH; {_FIX}",
-                    )
-                )
-    violations.extend(
-        Violation(
-            file=entry.file,
-            line=0,
-            rule=_STALE_RULE,
-            message=f"allowlist entry matches no bare python ({entry.match!r}); delete it",
-        )
-        for i, entry in enumerate(allowlist)
-        if i not in used
-    )
+            entry = by_line.get((relative, text.rstrip()))
+            if entry is not None:
+                pinned[entry].append(number)
+                continue
+            violations.append(
+                Violation(file=relative, line=number, message=f"runs a bare python from PATH; {_FIX}")
+            )
+    for entry, numbers in pinned.items():
+        violations.extend(_reconcile(entry, numbers))
     return sorted(violations, key=lambda v: (v.file, v.line)), examined, len(seen)
+
+
+def _reconcile(entry: AllowEntry, numbers: list[int]) -> list[Violation]:
+    """Violations for one entry whose pinned line was found on ``numbers``.
+
+    More lines than the entry covers cannot be told apart, so every one is
+    reported: a copied line never rides on the original's reason.
+    """
+    if len(numbers) > entry.occurrences:
+        return [
+            Violation(
+                file=entry.file,
+                line=number,
+                message=(
+                    f"runs a bare python from PATH; {len(numbers)} lines read exactly like an "
+                    f"allowlist entry that covers {entry.occurrences}; {_FIX}"
+                ),
+            )
+            for number in numbers
+        ]
+    if len(numbers) < entry.occurrences:
+        return [
+            Violation(
+                file=entry.file,
+                line=0,
+                rule=_STALE_RULE,
+                message=(
+                    f"allowlist entry covers {entry.occurrences} line(s) {entry.line!r} but "
+                    f"{len(numbers)} invoke a bare python; correct or delete it"
+                ),
+            )
+        ]
+    return []
 
 
 def scan_tree(root: Path, allowlist: list[AllowEntry] | None = None) -> list[Violation]:

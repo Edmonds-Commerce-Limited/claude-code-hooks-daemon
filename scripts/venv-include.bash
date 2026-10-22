@@ -143,7 +143,7 @@ ensure_venv() {
         echo -e "${RED}✗${NC} Python discovery helper missing: ${discovery_lib}" >&2
         return 1
     fi
-    # shellcheck disable=SC1090  # path is computed at runtime from PROJECT_ROOT
+    # shellcheck source=scripts/lib/python_discovery.sh
     source "${discovery_lib}"
     local venv_base_python
     if ! venv_base_python="$(find_latest_python "3.11" "${PROJECT_ROOT}/pyproject.toml")"; then

@@ -793,6 +793,36 @@ other checkers still take directories only.
   committed alongside it**. The `> Generated on … (vX.Y.Z)` marker line is
   excluded from the comparison (it records the deployed-from version
   `scripts/upgrade.sh` reads) but its absence fails
+- **Bare Python Invocation** (`check_bare_python_invocation.py`, rule
+  `bare-python-invocation`; meta rules `bare-python-allowlist-stale`,
+  `bare-python-unreadable`) — a first-party shell script that runs
+  `python3`/`python` by its bare name runs whatever PATH resolves first, which
+  may be older than `requires-python`. Fix it by running the interpreter the
+  caller resolved (the venv's `bin/python`, `"$HOOKS_DAEMON_PYTHON"`, the
+  `"$interpreter"` a function was given). There is no inline exemption marker.
+  - **Width:** the bare word as the COMMAND of a simple command (after `;`,
+    `&&`, `|`, `$(`, `then`, `VAR=x`, `exec`, `env`, `sudo`, `timeout N`,
+    `xargs` and similar), and a bare name stored as a VALUE to run later
+    (`${VAR:-python3}`, `${VAR:=python3}`, `VAR=python3`, also after `local`,
+    `export`, `declare`).
+  - **Scope:** git-visible `.sh`/`.bash` files and extensionless files with a
+    sh/bash shebang, anywhere in the repository, including QA and CI scripts
+    (they run on developer hosts whose PATH python may be older). Not scanned:
+    files inside a plan folder (`CLAUDE/Plan/<folder>/...`), because nothing
+    executes those prototypes, benchmarks and archived copies; the plan
+    tooling directly in `CLAUDE/Plan/` IS scanned. Also skipped: fixture
+    trees, gitignored state, other checkouts.
+  - **Not covered (known gaps, referred to the owner):** a `#!/usr/bin/env python3` shebang, a `command -v python3` probe whose result is run later,
+    the bare word as an argument to a wrapper that runs it, a heredoc body
+    that generates shell, and `.github/workflows/*.yml` `run:` lines (every
+    one follows `actions/setup-python` in its job, so PATH python there is
+    the interpreter the job pinned).
+  - **Allowlist** (`scripts/qa/bare-python-allowlist.json`): each entry pins
+    a WHOLE line of one file, indentation included, plus an `occurrences`
+    count, and a REASON. A new line is never covered, not even a copy of an
+    allowlisted one; an entry whose count is not met fails as
+    `bare-python-allowlist-stale`. Adding an entry accepts an instance unfixed,
+    so it needs the owner's approval.
 
 ### Success Criteria
 
