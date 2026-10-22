@@ -290,6 +290,18 @@ class TestCommandLine:
         assert report["summary"]["total_violations"] == 1
         assert report["violations"][0]["line"] == 4
 
+    def test_json_report_carries_the_examined_file_count(self, tmp_path: Path) -> None:
+        _write(tmp_path, "clean.sh", "#!/bin/bash\necho fine\n")
+        result = subprocess.run(
+            [sys.executable, str(_CHECKER), "--json", "--path", str(tmp_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0
+        report = json.loads((tmp_path / "bare_python_invocation.json").read_text("utf-8"))
+        assert report["summary"]["files_scanned"] == 1
+
     def test_the_repository_registers_the_rule_with_documentation(self) -> None:
         rules = json.loads((_REPO_ROOT / "scripts" / "qa" / "qa-rules.json").read_text("utf-8"))
         entry = rules["rules"]["bare-python-invocation"]

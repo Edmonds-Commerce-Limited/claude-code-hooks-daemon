@@ -50,6 +50,7 @@ HOSTILE_LOCATION = (
 WALKERS: dict[str, tuple[str, str]] = {
     "audit_shell.py": ("shell_audit.json", "files_scanned"),
     "check_authored_path_stat.py": ("authored_path_stat.json", "files_scanned"),
+    "check_bare_python_invocation.py": ("bare_python_invocation.json", "files_scanned"),
     "check_british_english.py": ("british_english.json", "files_scanned"),
     "check_daemon_dir_cd_in_docs.py": ("daemon_dir_cd_in_docs.json", "files_scanned"),
     "check_doc_snippets.py": ("doc_snippets.json", "documents_scanned"),
@@ -279,6 +280,7 @@ ROOT_OPTIONS: dict[str, str] = {
     "audit_capture_corruption.py": "--scan-dir",
     "audit_shell.py": "--scan-dir",
     "check_authored_path_stat.py": "--path",
+    "check_bare_python_invocation.py": "--path",
     "check_british_english.py": "--root",
     "check_daemon_dir_cd_in_docs.py": "--path",
     "check_doc_snippets.py": "--root",
