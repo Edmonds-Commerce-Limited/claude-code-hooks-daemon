@@ -177,7 +177,11 @@ skipped every grown argv the parse meter could not afford, so `b=['./scripts/qa/
 `too-much-code-to-judge`. The slowest shape at 2000 lines went from 0.415 s to 0.179 s of CPU, with the bound unchanged.
 Report: `subagent-reports/261021-n526-fix-opus.md`.
 
-**Status**: ✅ b7d2275fd (N526c), a75f800cc (N526a/b).
+**Recurrence**: main CI run 39781695414 at `a7adea3eb` failed the same job on Python 3.11, on the `a=a+['x{i}']`
+case at 1.605 s against 1.5, with both fixes on main. It passed at `ac24e09b6`. Whether this is a regression or runner
+variance is under investigation in `worktree-n526-perf-again`; the bound stays.
+
+**Status**: 🔄 reopened. Fixed earlier by b7d2275fd (N526c) and a75f800cc (N526a/b); the recurrence is open.
 
 ### N525 — `transport on` builds a missing relay binary and then reports "nothing to do"
 
