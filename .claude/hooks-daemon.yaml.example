@@ -888,6 +888,10 @@ handlers:
         stale_scratch_days: 14        # a scratch file not modified for this many days is old (integer >= 1)
         report_gone_branch_refs: true # false drops the refs/integration/changed-green/* of deleted branches
 
+    focus_mode_trigger:  # `hooks-daemon focus <task>` / `focus off` at the start of a prompt turns the session's focus mode on or off (Plan 00501)
+      enabled: true  # Never denies; never terminal
+      priority: 41
+
     standing_authorisations:  # Replay a standing request THIS project recorded (Plan 00223)
       # The HANDLER ships on so the options are discoverable; every
       # AUTHORISATION below ships off, so this is inert until you opt in.

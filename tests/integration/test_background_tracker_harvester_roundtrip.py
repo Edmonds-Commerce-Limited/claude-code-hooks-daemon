@@ -20,6 +20,8 @@ change to either schema fails here rather than silently disabling a feature.
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from claude_code_hooks_daemon.daemon.background_harvester import (
     find_breaches,
     parse_ps_output,
@@ -28,6 +30,19 @@ from claude_code_hooks_daemon.daemon.background_harvester import (
 from claude_code_hooks_daemon.handlers.post_tool_use.background_process_tracker import (
     BackgroundProcessTrackerHandler,
 )
+
+
+
+@pytest.fixture(autouse=True)
+def _daemon_project_context(project_context: Path) -> Path:
+    """Every real daemon initialises ProjectContext before any handler runs.
+
+    The tracker's autonomy gate reads the per-session mode registry through it
+    and fails fast when it is missing, so the seam is exercised under the same
+    precondition production has.
+    """
+    return project_context
+
 
 _BACKGROUNDED_COMMAND = "./scripts/qa/llm_qa.py all > untracked/qa.txt 2>&1"
 
