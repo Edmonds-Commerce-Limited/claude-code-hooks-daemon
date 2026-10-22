@@ -195,14 +195,22 @@ _run_venv_free_verb() {
                 echo "   needs one." >&2
                 exit 5
             fi
-            # No stderr redirect: if this probe itself crashes (a corrupt
-            # interpreter, a bad shebang -- anything other than a clean
-            # "too old"), the real reason must reach the caller, not be
-            # thrown away in favour of a generic "too old" message.
-            if ! "$system_python" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)'; then
-                echo "❌ hooks-daemon signal: $system_python is older than the Python 3.8 this entry" >&2
-                echo "   point needs. Use a newer system python3, or set up a venv for this project" >&2
-                echo "   ($BIN_DIR/hooks-daemon repair)." >&2
+            # signal_standalone.py cannot even parse on a very old python3, so
+            # the minimum is checked HERE, by python_floor.py -- the one place
+            # the minimum is declared -- run as a script (it is written in
+            # syntax every python3 parses). Its output is kept, not discarded:
+            # a probe that crashes for any other reason (a corrupt interpreter,
+            # a bad shebang) must still show the caller the real reason.
+            local floor_script floor_output
+            floor_script="$DAEMON_DIR/src/claude_code_hooks_daemon/python_floor.py"
+            if [ ! -f "$floor_script" ]; then
+                echo "❌ hooks-daemon signal: version guard missing at $floor_script" >&2
+                echo "   The clone is incomplete. A same-version upgrade (hooks-daemon skill: upgrade)" >&2
+                echo "   restores its tracked files." >&2
+                exit 5
+            fi
+            if ! floor_output="$("$system_python" "$floor_script" "hooks-daemon signal" 2>&1)"; then
+                echo "❌ ${floor_output:-hooks-daemon signal: $system_python could not report its Python version.} Use a newer system python3, or set up a venv for this project ($BIN_DIR/hooks-daemon repair)." >&2
                 exit 5
             fi
             # Unlike cli.py's argparse subparsers (which consume "repair" as

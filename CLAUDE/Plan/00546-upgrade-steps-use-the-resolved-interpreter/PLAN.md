@@ -49,7 +49,7 @@ the resolved interpreter.
 
 ### Phase 2: One minimum, checked at the entry points
 
-- [ ] ⬜ **Task 2.1**: Guard `paths.py`, `signal_standalone.py`, `install.py` and `bin/hooks-daemon` (with its template)
+- [x] ✅ **Task 2.1**: Guard `paths.py`, `signal_standalone.py`, `install.py` and `bin/hooks-daemon` (with its template)
   against an interpreter below `requires-python`; fix `_MIN_PYTHON`.
 
 ### Phase 3: Defence Before Fix

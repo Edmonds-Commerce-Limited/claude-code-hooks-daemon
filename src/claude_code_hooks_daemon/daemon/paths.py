@@ -29,6 +29,17 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+if __name__ == "__main__":
+    # Run as a script, the first 3.10+ construct below (`functools.cache`, `str | Path`)
+    # fails at import with a traceback on an older interpreter; refuse first, in one line.
+    # A deployed tree always carries the sibling; a lone copy of this file (a
+    # relocated resolver, a test fixture) has nothing to check against and runs as before.
+    import runpy
+
+    _floor = Path(__file__).resolve().parent.parent / "python_floor.py"
+    if _floor.is_file():
+        runpy.run_path(str(_floor))["require_min_python"]("daemon/paths.py")
+
 logger = logging.getLogger(__name__)
 
 # AF_UNIX socket path limit (108 bytes on Linux, 104 bytes on macOS)

@@ -32,7 +32,6 @@ import json
 import os
 import runpy
 import subprocess
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -41,7 +40,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT_PATH = REPO_ROOT / "src" / "claude_code_hooks_daemon" / "daemon" / "signal_standalone.py"
 _CLI_PY = REPO_ROOT / "src" / "claude_code_hooks_daemon" / "daemon" / "cli.py"
 _UTILS_DIR = REPO_ROOT / "src" / "claude_code_hooks_daemon" / "utils"
-_SYNTAX_FLOOR = (3, 8)  # see TestSyntaxFloor -- operator_signal.py's `typing.Final` import
+_SYNTAX_FLOOR = (3, 8)  # see TestSyntaxFloor -- the files must PARSE here so the guard can run
 _SYSTEM_PYTHON = Path("/usr/bin/python3")
 
 pytestmark = pytest.mark.skipif(
@@ -147,45 +146,22 @@ class TestSyntaxFloor:
 
 
 class TestVersionFloorEnforcement:
-    """A python3 below ``_MIN_PYTHON`` gets a clear message, not an
-    ImportError from deep inside ``operator_signal.py``.
-
-    ``_check_python_version`` takes the version to check as a parameter
-    (default: the real running interpreter) specifically so this is
-    testable without spawning an interpreter below the floor --
-    ``sys.version_info`` itself is a read-only structseq and cannot be
-    monkeypatched.
+    """The minimum is the package's single declaration (``python_floor``),
+    not a literal repeated here; the refusal itself is tested in
+    ``tests/unit/test_python_floor.py`` against real old interpreters.
     """
 
-    def _load_check_fn(self) -> Callable[[tuple[int, int]], bool]:
-        # Loaded via runpy (not a dotted import) for consistency with the
-        # rest of this file -- irrelevant here since the dev venv always
-        # satisfies the floor, so the module-level check never exits.
-        namespace = runpy.run_path(str(SCRIPT_PATH), run_name="test_version_floor_enforcement")
-        check_fn: Callable[[tuple[int, int]], bool] = namespace["_check_python_version"]
-        return check_fn
-
-    def test_accepts_the_floor_version(self, capsys: pytest.CaptureFixture[str]) -> None:
-        check = self._load_check_fn()
-
-        assert check((3, 8)) is True
-        assert capsys.readouterr().err == ""
-
-    def test_accepts_a_newer_version(self, capsys: pytest.CaptureFixture[str]) -> None:
-        check = self._load_check_fn()
-
-        assert check((3, 11)) is True
-        assert capsys.readouterr().err == ""
-
-    def test_rejects_an_older_version_with_a_clear_message(
+    def test_loading_under_a_new_enough_interpreter_prints_nothing(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        check = self._load_check_fn()
+        runpy.run_path(str(SCRIPT_PATH), run_name="test_version_floor_enforcement")
 
-        assert check((3, 7)) is False
-        err = capsys.readouterr().err
-        assert "3.8" in err
-        assert "3.7" in err
+        assert capsys.readouterr().err == ""
+
+    def test_the_module_keeps_no_floor_of_its_own(self) -> None:
+        namespace = runpy.run_path(str(SCRIPT_PATH), run_name="test_version_floor_enforcement")
+
+        assert "_MIN_PYTHON" not in namespace
 
 
 class TestEndToEndWithoutVenv:

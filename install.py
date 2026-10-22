@@ -25,11 +25,18 @@ This script:
 import argparse
 import json
 import os
+import runpy
 import subprocess
 import sys
+from pathlib import Path
+
+# `tomllib` (3.11+) is imported next; refuse an older interpreter in one line first.
+runpy.run_path(
+    str(Path(__file__).resolve().parent / "src" / "claude_code_hooks_daemon" / "python_floor.py")
+)["require_min_python"]("install.py")
+
 import tomllib
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 # The [project].name this repository declares in its own pyproject.toml. Used as

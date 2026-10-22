@@ -12,9 +12,9 @@ this host-side tool was refused on the exact deployment it exists for.
 Unlike ``repair``, ``signal`` never builds a venv. Its arm execs
 ``daemon/signal_standalone.py`` -- standard-library-only, loaded by file path
 rather than package import (see that module's own docstring) -- directly
-under a system ``python3``, gated on Python >= 3.8 first so an old
-interpreter gets a clear message instead of an ``ImportError`` from inside
-``operator_signal.py``.
+under a system ``python3``, gated first on the declared minimum
+(``python_floor.py``) so an old interpreter gets a clear message instead of
+an ``ImportError`` from inside ``operator_signal.py``.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.old_python import OLD_VERSIONS, old_python_or_skip
 from tests.venv_bootstrap_sandbox import Sandbox
 
 #: bin/hooks-daemon's "no venv resolves" exit status.
@@ -103,7 +104,31 @@ class TestSignalWithNoVenv:
         )
 
         assert result.returncode == _NO_VENV_EXIT
-        assert "3.8" in result.stderr
+        assert "could not report its Python version" in result.stderr
+        assert sandbox.uv_calls() == []
+
+    @pytest.mark.parametrize("version", OLD_VERSIONS)
+    def test_a_real_old_python3_gets_one_line_naming_both_versions(
+        self, sandbox: Sandbox, version: str
+    ) -> None:
+        """The wrapper runs the shared guard under the old python3 itself:
+        signal_standalone.py need not parse there for the refusal to work."""
+        old = old_python_or_skip(version)
+        tool = sandbox.root / "tools" / "python3"
+        tool.unlink()
+        tool.symlink_to(old)
+
+        result = sandbox.wrapper(
+            "signal", "reboot-cancelled", "--all-sessions", "--project-root", str(sandbox.project)
+        )
+
+        assert result.returncode == _NO_VENV_EXIT
+        assert "Traceback" not in result.stderr
+        # The venv resolver's own trace precedes it; the refusal is one line.
+        refusals = [line for line in result.stderr.splitlines() if "needs Python" in line]
+        assert len(refusals) == 1, result.stderr
+        assert version in refusals[0]
+        assert "3.11" in refusals[0]
         assert sandbox.uv_calls() == []
 
     def test_a_broken_python3s_own_stderr_is_not_swallowed(self, sandbox: Sandbox) -> None:
