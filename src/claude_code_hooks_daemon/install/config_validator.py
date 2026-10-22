@@ -136,7 +136,7 @@ class ConfigValidator:
         # accepted there (warning here), a typo or wrong-event name puts the
         # daemon into degraded mode there (error here).
         key_errors: list[str] = []
-        warnings: list[str] = []
+        warnings: list[str] = _BusinessRuleValidator.retired_option_messages(config)
         for finding in audit_handler_keys(config):
             if finding.kind in ("relocated", "retired"):
                 warnings.append(finding.message)

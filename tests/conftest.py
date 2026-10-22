@@ -16,6 +16,7 @@ import pytest
 
 from claude_code_hooks_daemon.config.models import LayoutConfig
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
+from claude_code_hooks_daemon.core import data_layer
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.project_layout import ProjectLayout
 from claude_code_hooks_daemon.core.response_schemas import (
@@ -819,6 +820,17 @@ def no_relay_repair_builds(monkeypatch: pytest.MonkeyPatch) -> None:
         "claude_code_hooks_daemon.handlers.session_start.relay_binary_checker.spawn_detached",
         refuse,
     )
+
+
+@pytest.fixture(autouse=True)
+def no_session_modes_registry_outlives_a_test(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Start every test with no session-modes registry on the data-layer singleton.
+
+    The registry is built once, bound to whatever ``daemon_untracked_dir`` the
+    first caller saw. Without this a registry built in one test stays bound to
+    that test's tmp dir, and a later test reads and writes modes there.
+    """
+    monkeypatch.setattr(data_layer.get_data_layer(), "_session_modes", None)
 
 
 @pytest.fixture(autouse=True)

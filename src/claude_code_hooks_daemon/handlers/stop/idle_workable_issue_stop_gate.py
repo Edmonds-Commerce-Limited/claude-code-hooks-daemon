@@ -28,7 +28,7 @@ one-shot Stop block follows. A sub-agent stop never reaches it (``MAIN`` scope).
 **Ordering.** Priority 4 puts it ahead of ``usage_pause_stop_gate`` (6),
 ``cron_stop_enforcer`` (7) and ``auto_continue_stop``; it is non-terminal for the
 reason those are (see ``cron_stop_enforcer``'s "Ordering note"). Because it runs
-BEFORE ``auto_continue_stop``, which writes the awaiting-human marker, it also
+BEFORE ``auto_continue_stop``, which enters the awaiting-human mode, it also
 reads the current message for the declaration, or the stop that declares it
 would be refused one step too early.
 """
@@ -47,7 +47,6 @@ from claude_code_hooks_daemon.config.models import Config, PersistentCronConfig
 from claude_code_hooks_daemon.constants import HandlerTag
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
-from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import StopHandlerBase
@@ -57,11 +56,7 @@ from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import _declares_
 from claude_code_hooks_daemon.handlers.utils.initial_thread_exemption import (
     InitialThreadExemption,
 )
-from claude_code_hooks_daemon.utils.blockage_marker import (
-    MARKER_FILENAME,
-    marker_is_valid,
-    read_marker,
-)
+from claude_code_hooks_daemon.utils.autonomy import session_policy
 from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
@@ -88,8 +83,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_JOB_ID: Final[str] = "issue-sdlc"
 #: How old the workable-issues cache may be before the gate stops trusting it.
 DEFAULT_MAX_CACHE_AGE_HOURS: Final[float] = 2.0
-#: How long an awaiting-human marker holds; matches the marker's own default expiry.
-DEFAULT_MARKER_EXPIRY_HOURS: Final[float] = 24.0
 _SECONDS_PER_HOUR: Final[float] = 3600.0
 #: The release runbook's state file, in the daemon's state directory. Its presence
 #: means a release is in progress. Same name the project's ``release_blocker`` Stop
@@ -131,7 +124,6 @@ class IdleWorkableIssueStopGateHandler(InitialThreadExemption, StopHandlerBase):
         # Options, injected by the registry from ``options.<name>``.
         self._job_id: str = DEFAULT_JOB_ID
         self._max_cache_age_hours: float = DEFAULT_MAX_CACHE_AGE_HOURS
-        self._marker_expiry_hours: float = DEFAULT_MARKER_EXPIRY_HOURS
         # Injectable wall clock; not a config option.
         self._clock: Callable[[], float] = time.time
 
@@ -200,7 +192,7 @@ class IdleWorkableIssueStopGateHandler(InitialThreadExemption, StopHandlerBase):
             or self._queue_holds_the_gate_back(state)
         ):
             return BlockingResult(decision=Decision.ALLOW)
-        if self._awaiting_human(hook_input, state, now):
+        if self._awaiting_human(hook_input):
             return BlockingResult(decision=Decision.ALLOW)
         return BlockingResult.deny(self._render(cache.numbers)).under_rule(_RULE)
 
@@ -221,13 +213,24 @@ class IdleWorkableIssueStopGateHandler(InitialThreadExemption, StopHandlerBase):
             )
             return True
 
-    def _awaiting_human(self, hook_input: dict[str, Any], state: Path, now: float) -> bool:
-        """Whether this session is blocked only on a human: a live marker, or this stop says so."""
-        session_id = str(hook_input.get(HookInputField.SESSION_ID) or "")
-        marker = read_marker(state / MARKER_FILENAME)
-        if marker_is_valid(marker, session_id, now, self._marker_expiry_hours * _SECONDS_PER_HOUR):
+    @staticmethod
+    def _awaiting_human(hook_input: dict[str, Any]) -> bool:
+        """Whether this session is blocked only on a human: its mode says so, or this stop does.
+
+        An unreadable session-modes registry cannot show the session is NOT
+        awaiting a human, so the gate stands aside (True) rather than trap it.
+        """
+        try:
+            if session_policy(hook_input).is_blocked:
+                return True
+        except (RuntimeError, OSError) as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="the session-modes registry cannot be read, so the gate cannot rule out awaiting-human and stands aside (True)",
+            )
             return True
-        # The marker is written by auto_continue_stop, which runs after this handler.
+        # The mode is entered by auto_continue_stop, which runs after this handler.
         reader = get_transcript_reader(hook_input)
         text = reader.get_last_assistant_text() if reader is not None else ""
         return bool(text) and _declares_human_blocked(text)
@@ -269,7 +272,7 @@ class IdleWorkableIssueStopGateHandler(InitialThreadExemption, StopHandlerBase):
             "and a stop that re-enters after the deny (`stop_hook_active`), so a session is "
             "never trapped. It reads local files only and never calls GitHub.\n\n"
             "Options (`handlers.stop.idle_workable_issue_stop_gate.options`): `job_id` "
-            "(default `issue-sdlc`), `max_cache_age_hours`, `marker_expiry_hours`."
+            "(default `issue-sdlc`), `max_cache_age_hours`."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

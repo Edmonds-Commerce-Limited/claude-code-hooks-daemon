@@ -32,8 +32,9 @@ import pytest
 
 from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
+from claude_code_hooks_daemon.core.session_mode_registry import SessionModeRegistry
 from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import AutoContinueStopHandler
-from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME
+from claude_code_hooks_daemon.utils.session_signal_paths import SIGNAL_SUBDIR
 
 _AWAITING_HUMAN_STOP = (
     "STOPPING BECAUSE: [awaiting-human] the owner has to choose between A and B "
@@ -48,17 +49,27 @@ _HANDLERS_DIR = (
 )
 
 
-def _calls_write_marker(path: Path) -> bool:
-    """Whether the module CALLS ``write_marker`` (a docstring mention is not a writer)."""
+_WRITER_CALL = "declared_blocked_entry"
+
+
+def _calls_the_writer(path: Path) -> bool:
+    """Whether the module CALLS ``declared_blocked_entry`` (a docstring mention is not a writer)."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
     return any(
         isinstance(node, ast.Call)
         and (
-            (isinstance(node.func, ast.Name) and node.func.id == "write_marker")
-            or (isinstance(node.func, ast.Attribute) and node.func.attr == "write_marker")
+            (isinstance(node.func, ast.Name) and node.func.id == _WRITER_CALL)
+            or (isinstance(node.func, ast.Attribute) and node.func.attr == _WRITER_CALL)
         )
         for node in ast.walk(tree)
     )
+
+
+def _armed(untracked: Path) -> bool:
+    """Whether the session-modes files under ``untracked`` hold awaiting-human for the lead."""
+    registry = SessionModeRegistry(untracked / SIGNAL_SUBDIR)
+    registry.load()
+    return registry.policy(_SESSION_ID).is_blocked
 
 
 def _transcript(tmp_path: Path) -> Path:
@@ -74,8 +85,8 @@ def _transcript(tmp_path: Path) -> Path:
     return path
 
 
-def _stop_through_the_chain(tmp_path: Path, **extra: Any) -> Path:
-    """Dispatch an `[awaiting-human]` Stop and return where the marker would be."""
+def _stop_through_the_chain(tmp_path: Path, **extra: Any) -> bool:
+    """Dispatch an `[awaiting-human]` Stop and say whether it armed awaiting-human."""
     marker_dir = tmp_path / "untracked"
     chain = HandlerChain()
     chain.add(AutoContinueStopHandler())
@@ -92,28 +103,25 @@ def _stop_through_the_chain(tmp_path: Path, **extra: Any) -> Path:
         return_value=marker_dir,
     ):
         chain.execute(hook_input)
-    return marker_dir / MARKER_FILENAME
+    return _armed(marker_dir)
 
 
 class TestOnlyTheLeadsOwnStopArmsTheMarker:
     def test_a_main_thread_stop_arms_it(self, tmp_path: Path) -> None:
         """Positive control: without it, the negative cases below prove nothing."""
-        assert _stop_through_the_chain(tmp_path).exists()
+        assert _stop_through_the_chain(tmp_path)
 
     def test_a_teammate_stop_does_not(self, tmp_path: Path) -> None:
-        marker = _stop_through_the_chain(tmp_path, agent_id=_TEAMMATE_AGENT_ID)
-        assert not marker.exists()
+        assert not _stop_through_the_chain(tmp_path, agent_id=_TEAMMATE_AGENT_ID)
 
     def test_a_sub_agent_stop_does_not(self, tmp_path: Path) -> None:
-        marker = _stop_through_the_chain(tmp_path, agent_id=_SUBAGENT_AGENT_ID)
-        assert not marker.exists()
+        assert not _stop_through_the_chain(tmp_path, agent_id=_SUBAGENT_AGENT_ID)
 
     def test_a_subagent_stop_event_does_not(self, tmp_path: Path) -> None:
         """A `SubagentStop` always carries `agent_id`; even offered to the writer it is refused."""
-        marker = _stop_through_the_chain(
+        assert not _stop_through_the_chain(
             tmp_path, hook_event_name="SubagentStop", agent_id=_SUBAGENT_AGENT_ID
         )
-        assert not marker.exists()
 
 
 class TestTheScopeIsWhatProtectsTheMarker:
@@ -137,7 +145,7 @@ class TestTheScopeIsWhatProtectsTheMarker:
             return_value=marker_dir,
         ):
             chain.execute(hook_input)
-        assert (marker_dir / MARKER_FILENAME).exists()
+        assert _armed(marker_dir)
 
 
 class TestTheWriterStaysSingleAndMainScoped:
@@ -148,7 +156,7 @@ class TestTheWriterStaysSingleAndMainScoped:
         writers = sorted(
             str(path.relative_to(_HANDLERS_DIR))
             for path in _HANDLERS_DIR.rglob("*.py")
-            if _calls_write_marker(path)
+            if _calls_the_writer(path)
         )
         assert writers == ["stop/auto_continue_stop.py"], (
             "A second writer of the human-input blockage marker exists. It must be "

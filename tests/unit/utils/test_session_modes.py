@@ -11,6 +11,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
+from claude_code_hooks_daemon.utils import session_modes
 from claude_code_hooks_daemon.utils.cron_tick import DaemonTick, TickKind
 from claude_code_hooks_daemon.utils.session_modes import (
     FOCUS_TTL_SECONDS,
@@ -365,3 +366,42 @@ class TestGenuineHumanPrompt:
     )
     def test_machine_traffic_is_not(self, prompt: object) -> None:
         assert is_genuine_human_prompt(prompt) is False
+
+
+class TestDeclaredBlocked:
+    """The one 24 h expiry and factory every BLOCKED writer shares (Task 2.2)."""
+
+    def test_ttl_is_a_day(self) -> None:
+        assert session_modes.DECLARED_BLOCKED_TTL_SECONDS == 24 * 3600
+
+    def test_blocked_labels_are_the_blocked_family(self) -> None:
+        assert session_modes.BLOCKED_LABELS == frozenset(
+            {ModeLabel.AWAITING_HUMAN, ModeLabel.GOAL_BLOCKED}
+        )
+
+    def test_factory_builds_a_declared_agent_session_entry(self) -> None:
+        entry = session_modes.declared_blocked_entry(_SID, entered_at=_T0)
+        assert entry.mode is SessionMode.BLOCKED
+        assert entry.reason is BlockReason.DECLARED
+        assert entry.source is ModeSource.AGENT
+        assert entry.lifetime is Lifetime.SESSION
+        assert entry.label is ModeLabel.AWAITING_HUMAN
+        assert entry.entered_at == _T0
+        assert entry.expires_at == _T0 + session_modes.DECLARED_BLOCKED_TTL_SECONDS
+
+    def test_policy_is_blocked_for_either_blocked_label(self) -> None:
+        declared = session_modes.declared_blocked_entry(_SID, entered_at=_T0)
+        goal = SessionModeEntry(
+            mode=SessionMode.BLOCKED,
+            session_id=_SID,
+            entered_at=_T0,
+            expires_at=_T0 + 60,
+            source=ModeSource.DETECTOR,
+            reason=BlockReason.GOAL_LOOP,
+        )
+        assert SessionPolicy.from_entries([declared]).is_blocked is True
+        assert SessionPolicy.from_entries([goal]).is_blocked is True
+
+    def test_policy_is_not_blocked_under_focus_or_nothing(self) -> None:
+        assert SessionPolicy.from_entries([]).is_blocked is False
+        assert SessionPolicy.from_entries([_focus()]).is_blocked is False

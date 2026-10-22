@@ -4545,7 +4545,7 @@ handlers:
 
 **Goal-ledger Stop defence (Plan 00276):** on the default explain-or-continue denial, the handler consults the daemon-side goal ledger (`goal-ledger.json`, written by `goal_injection`) and appends a challenge naming EVERY ledgered plan still `In Progress` — including plans whose `/goal` condition was displaced by a later goal (the upstream slot is last-writer-wins). Entries retire when their plan reaches a terminal status or is archived, after which stops are no longer challenged on their behalf. Fail-open: a missing or unreadable ledger leaves the default message unchanged.
 
-**Human-input blockage marker (Plan 00298, declaration token added by Plan 00337):** when the explicit-stop-explanation branch ALLOWs a stop declaring that the human is the only thing blocking it, the handler records a session-scoped marker (`human-input-blockage-marker.json` under the daemon's untracked dir). `failsafe_cron_blockage_suppressor` reads it to drop the next delivered failsafe-cron tick before it reaches the model. Fail-open: a missing `session_id` or unresolvable project context skips the write silently and never affects the Stop decision.
+**Awaiting-human session mode (Plan 00298, declaration token added by Plan 00337, session mode since Plan 00501):** when the explicit-stop-explanation branch ALLOWs a stop declaring that the human is the only thing blocking it, the handler puts the session into the `awaiting-human` session mode in the daemon's session-modes registry, for 24 hours. `failsafe_cron_blockage_suppressor` reads that mode to drop delivered failsafe-cron ticks before they reach the model. Fail-open: a missing `session_id` or a registry that cannot be written leaves the session out of the mode (logged at WARNING) and never affects the Stop decision.
 
 Two routes arm it, and only the first is the supported one:
 
@@ -4711,9 +4711,9 @@ handlers:
 | **Type**       | Blocking                            |
 | **Event**      | UserPromptSubmit                    |
 
-**Description:** Zero-token cadence for a session that is stably blocked only on human input (Plan 00298). When `auto_continue_stop` allows a Stop that declares this — `STOPPING BECAUSE: [awaiting-human] …`, or one of the legacy prose shapes it keeps as a fallback — it records a session-scoped marker (`human-input-blockage-marker.json` under the daemon's untracked dir). This handler recognises a DELIVERED failsafe-cron tick — the canonical prompt from `recovery_cron_advisor` — and, while a still-valid marker exists for the session, blocks the prompt before it ever reaches the model (Claude Code's documented `UserPromptSubmit` block behaviour). This is genuinely zero-token, unlike a convention/prompt-text backoff that still costs a full turn to read and act on.
+**Description:** Zero-token cadence for a session that is stably blocked only on human input (Plan 00298). When `auto_continue_stop` allows a Stop that declares this — `STOPPING BECAUSE: [awaiting-human] …`, or one of the legacy prose shapes it keeps as a fallback — it puts the session into the `awaiting-human` session mode (the daemon's session-modes registry, 24 hours). This handler recognises a DELIVERED failsafe-cron tick — the canonical prompt from `recovery_cron_advisor` — and, while the session is in a blocked mode (`awaiting-human`, or blocked on a goal), blocks the prompt before it ever reaches the model (Claude Code's documented `UserPromptSubmit` block behaviour). This is genuinely zero-token, unlike a convention/prompt-text backoff that still costs a full turn to read and act on.
 
-**Backoff for a session that declares nothing (Plan 00337 Phase 4):** the marker only ever covered sessions that said something, leaving every other session at a full model turn per hour indefinitely. The handler now also asks the daemon-side goal ledger whether work is owed — a state signal, rather than the agent's self-report, because a false "done" is the commonest way an agent stops wrongly and the cron is the net that catches it. Four cases:
+**Backoff for a session that declares nothing (Plan 00337 Phase 4):** the declaration only ever covered sessions that said something, leaving every other session at a full model turn per hour indefinitely. The handler now also asks the daemon-side goal ledger whether work is owed — a state signal, rather than the agent's self-report, because a false "done" is the commonest way an agent stops wrongly and the cron is the net that catches it. Four cases:
 
 | work owed | declared | outcome                                         |
 | --------- | -------- | ----------------------------------------------- |
@@ -4724,17 +4724,13 @@ handlers:
 
 The backoff thins ticks to hourly, then every 2 hours, then every 4, and **never sparser** (`R-FAILSAFE-CRON-BACKED-OFF`), so a session interrupted by a rate limit still recovers once the limit lifts. Any genuine user prompt resets it to hourly. "Could not determine whether work is owed" is a third value, not a synonym for "no": on the undeclared path it counts as owed, so an unresolvable plan directory costs a wasted tick rather than a silently withdrawn safety net. Adding the ledger consult means this handler carries `HandlerTag.PLANNING` — a project that disables that tag now disables this handler too.
 
-**Fails open everywhere:** no marker, a marker for a different session, an expired marker, a corrupt/unreadable marker, an unreadable cadence file, or no resolvable project context all ALLOW the tick through unchanged — suppression is a positive assertion made only when every condition is individually verified, never the default. Any genuine (non-cron) user prompt clears the marker immediately (a different handler-independent behaviour of `auto_continue_stop`'s narrow write conditions never re-arming outside a new matching stop).
+**Fails open everywhere:** no blocked mode, a mode recorded for a different session, an expired mode, an unreadable registry, an unreadable cadence file, or no resolvable project context all ALLOW the tick through unchanged — suppression is a positive assertion made only when every condition is individually verified, never the default. Only a genuine human prompt in the SAME session ends the blocked mode; a prompt in another session leaves it alone, and nothing but a new matching stop enters it again. The legacy `human-input-blockage-marker.json` file is no longer read.
 
-**Several crons in one session (Plan 00388):** a prompt is the owner, and clears the marker and the cadence, only if it carries no daemon tick sentinel. Every cron prompt the daemon supplies starts with one — `[tick:failsafe]` (the canonical prompt), `[tick:watchdog]` (`background_process_tracker`, now supplied verbatim) and `[tick:job:<id>]` (every `persistent_crons` job, as the assertor and the Stop enforcer render it) — so another cron's tick no longer wipes the marker. A declared job's tick is also dropped while the marker is live (`R-DECLARED-CRON-SUPPRESSED`, no backoff); the watchdog's is always delivered, because reaping runaway processes is not blocked on the human. A cron whose prompt the daemon never wrote — agent-composed, `/loop`, `ScheduleWakeup`, or one created before this change — still reads as the owner, which fails toward clearing. The old `FAILSAFE RECOVERY CHECK` literal stays recognised for failsafe crons created before the sentinel.
+**Several crons in one session (Plan 00388):** a prompt is the owner, and ends the blocked mode and resets the cadence, only if it carries no daemon tick sentinel. Every cron prompt the daemon supplies starts with one — `[tick:failsafe]` (the canonical prompt), `[tick:watchdog]` (`background_process_tracker`, now supplied verbatim) and `[tick:job:<id>]` (every `persistent_crons` job, as the assertor and the Stop enforcer render it) — so another cron's tick never ends the mode. A declared job's tick is also dropped while the session is in a blocked mode (`R-DECLARED-CRON-SUPPRESSED`, no backoff); the watchdog's is always delivered, because reaping runaway processes is not blocked on the human. A cron whose prompt the daemon never wrote — agent-composed, `/loop`, `ScheduleWakeup`, or one created before this change — still reads as the owner, which fails toward clearing. The old `FAILSAFE RECOVERY CHECK` literal stays recognised for failsafe crons created before the sentinel.
 
 **Never terminal:** `idle_housekeeping_advisory` and `standing_authorisations` also key off the same canonical cron prompt and must keep running on every non-suppressed tick. A non-terminal DENY still survives later handlers regardless of registration order.
 
-**Options:**
-
-| Option         | Type  | Default | Description                                                                                                                                          |
-| -------------- | ----- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `expiry_hours` | float | `24`    | How long a recorded marker stays valid without re-confirmation. Past this, cron ticks resume normally even if the session never sent another prompt. |
+**Options:** none. A declaration expires 24 hours after it is recorded; the expiry is fixed. The retired `expiry_hours` option (and `auto_continue_stop`'s `marker_expiry_hours`) has no effect, and a config that still sets either gets a WARNING from startup validation and `config-validate`.
 
 **Config example:**
 
@@ -4744,8 +4740,6 @@ handlers:
     failsafe_cron_blockage_suppressor:
       enabled: true
       priority: 37
-      options:
-        expiry_hours: 24
 ```
 
 **On by default** (dogfooding purpose, Plan 00298). Set `enabled: false` to restore unconditional hourly cron delivery.

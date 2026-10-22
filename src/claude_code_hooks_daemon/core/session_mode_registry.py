@@ -29,6 +29,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.blockage_marker import read_marker
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.session_modes import (
     FOCUS_TTL_SECONDS,
@@ -39,6 +40,7 @@ from claude_code_hooks_daemon.utils.session_modes import (
     SessionMode,
     SessionModeEntry,
     SessionPolicy,
+    declared_blocked_entry,
     describe_entry,
     is_genuine_human_prompt,
 )
@@ -133,6 +135,10 @@ class SessionModeRegistry:
         self._entries: dict[str, _Entries] = {}
         self._notices: dict[str, list[ModeNotice]] = {}
         self._loaded = False
+
+    def now(self) -> float:
+        """The registry's clock reading, the time its entries are judged against."""
+        return self._clock()
 
     def path_for(self, session_id: str) -> Path:
         """The file holding ``session_id``'s entries."""
@@ -319,6 +325,42 @@ class SessionModeRegistry:
         except OSError:
             tmp_path.unlink(missing_ok=True)
             raise
+
+
+def import_legacy_blockage_marker(registry: SessionModeRegistry, marker_path: Path) -> bool:
+    """Move a pre-registry awaiting-human marker into ``registry``, then delete the file.
+
+    A live marker becomes :func:`declared_blocked_entry` entered at its
+    ``recorded_at``. An expired or future-dated one is logged at INFO, a corrupt
+    one at WARNING, and neither is imported. The file is deleted once judged,
+    so the import happens at most once.
+
+    Returns:
+        Whether an entry was imported.
+
+    Raises:
+        OSError: the registry write or the deletion failed; a marker whose
+            entry could not be written is left in place.
+    """
+    if not marker_path.exists():
+        return False
+    marker = read_marker(marker_path)
+    imported = False
+    if marker is None:
+        logger.warning("legacy awaiting-human marker %s is unreadable; deleting it", marker_path)
+    else:
+        now = registry.now()
+        if not marker.session_id.strip() or marker.recorded_at > now:
+            logger.info("legacy awaiting-human marker %s is not valid; deleting it", marker_path)
+        else:
+            entry = declared_blocked_entry(marker.session_id, entered_at=marker.recorded_at)
+            if entry.is_live(now):
+                registry.enter(entry)
+                imported = True
+            else:
+                logger.info("legacy awaiting-human marker %s has expired; deleting it", marker_path)
+    marker_path.unlink(missing_ok=True)
+    return imported
 
 
 def _record(entry: SessionModeEntry) -> dict[str, object]:

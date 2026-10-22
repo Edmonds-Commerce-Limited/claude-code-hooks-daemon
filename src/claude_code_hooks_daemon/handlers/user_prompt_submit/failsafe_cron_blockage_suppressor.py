@@ -9,16 +9,17 @@ against it is a guaranteed no-op that still costs one full model turn (prompt
 in, generation out, transcript write, stop-hook round trip) for nothing.
 
 This handler is the ``UserPromptSubmit`` half of the design: it recognises a
-DELIVERED canonical-cron-prompt tick and, when ``auto_continue_stop`` has
-recorded a still-valid "blocked only on human input" marker for THIS session,
-blocks the prompt before it ever reaches the model (Claude Code's documented
+DELIVERED canonical-cron-prompt tick and, while THIS session holds a live
+blocked session mode (awaiting-human, entered by ``auto_continue_stop``, or
+goal-loop blocked) in the daemon's session-modes registry, blocks the prompt
+before it ever reaches the model (Claude Code's documented
 ``UserPromptSubmit`` "block" behaviour -- the prompt is dropped, not
 forwarded). That is genuinely zero-token, unlike a convention/prompt-text
 backoff which still costs a turn to read and act on.
 
 **Minimal by design (owner ruling, Plan 00298 BRAINSTORM.md: "sounds complex
-and brittle to me").** One marker, one session-scoped validity check, no
-fallback chains. See ``blockage_marker`` for the shared primitive and
+and brittle to me").** One registry lookup, one session-scoped policy, no
+fallback chains. See ``utils.session_modes`` for the policy and
 ``auto_continue_stop._HUMAN_BLOCKED_PATTERNS`` for the narrow write-side
 pattern set.
 
@@ -51,20 +52,21 @@ justified suppression before Phase 4 and this must not become less safe.
 The backoff is capped (``cron_cadence.MAX_CADENCE_HOURS``) and so is never
 silence: hourly, then every 2 hours, then every 4, and no sparser.
 
-**Fails open everywhere**: no marker, wrong session, expired marker, corrupt
-marker, or no resolvable project context all ALLOW the tick through
-unchanged -- suppression is a positive assertion made only when every
+**Fails open everywhere**: no mode, another session's mode, an expired mode,
+or an unreadable registry all ALLOW the tick through unchanged (the last with a
+WARNING) -- suppression is a positive assertion made only when every
 condition is individually verified, never the default. A genuine external
 interruption during the blocked window is still bounded by "however long the
-owner takes to respond" (BRAINSTORM.md), and the expiry itself further bounds
-an unresponsive owner's silence.
+owner takes to respond" (BRAINSTORM.md), and the mode's fixed lifetime further
+bounds an unresponsive owner's silence.
 
-**Which prompt is the owner (Plan 00388).** A prompt clears the marker and the
-cadence only if it carries no daemon tick sentinel (``utils.cron_tick``). Every
+**Which prompt is the owner (Plan 00388).** A prompt exits the blocked modes and
+resets the cadence only if it carries no daemon tick sentinel
+(``utils.cron_tick``). Every
 cron prompt the daemon supplies has one -- the failsafe, the background
 watchdog, every ``persistent_crons`` job -- so in a multi-cron session another
-cron's tick no longer reads as the owner coming back. A declared job's tick is
-dropped under a live marker too unless the job sets
+cron's tick never reads as the owner coming back. A declared job's tick is
+dropped under a blocked mode too unless the job sets
 ``runs_while_awaiting_human``; the watchdog's never is. A cron whose prompt
 the daemon never wrote still reads as the owner, which fails toward clearing.
 
@@ -77,7 +79,6 @@ staying non-terminal costs nothing on the suppressed path either.
 """
 
 import logging
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final
@@ -88,18 +89,13 @@ from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import BlockingResult, Decision
+from claude_code_hooks_daemon.core.data_layer import get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor import (
     CANONICAL_CRON_PROMPT_MARKER,
     is_failsafe_prompt,
-)
-from claude_code_hooks_daemon.utils.blockage_marker import (
-    MARKER_FILENAME,
-    clear_marker,
-    marker_is_valid,
-    read_marker,
 )
 from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
 from claude_code_hooks_daemon.utils.cron_cadence import (
@@ -117,25 +113,30 @@ from claude_code_hooks_daemon.utils.goal_ledger import (
     GoalLedger,
     resolve_plan_dir,
 )
+from claude_code_hooks_daemon.utils.session_modes import (
+    BLOCKED_LABELS,
+    SessionPolicy,
+    TickAction,
+    is_genuine_human_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_EXPIRY_HOURS: Final[float] = 24.0
-_SECONDS_PER_HOUR: Final[int] = 3600
 _UNKNOWN_SESSION: Final[str] = "unknown"
 
 _RULE: Final[Rule] = Rule(
     rule_id=RuleID.FAILSAFE_CRON_SUPPRESSED,
-    blocked="A delivered failsafe-cron tick, while a 'blocked only on human input' marker is live",
+    blocked="A delivered failsafe-cron tick, while the session is in the awaiting-human mode",
     why="Every tick against a session blocked only on human input is a guaranteed no-op model turn",
-    fix="Nothing to do -- this is expected. Send a real message to clear the marker and resume ticks",
+    fix="Nothing to do -- this is expected. Send a real message to end the mode and resume ticks",
     verbose=(
-        "This session recorded a 'blocked only on human input' marker (Plan "
-        "00298) still within its expiry window, so this failsafe-cron tick "
-        "was dropped before reaching the model -- no turn spent. A real "
-        "(non-cron) user prompt clears the marker immediately; the marker's "
-        "own expiry restores full hourly cron coverage automatically if the "
-        "owner stays silent for longer."
+        "This session is in a blocked session mode -- awaiting-human, entered "
+        "when a stop declared it was blocked only on human input (Plan 00298), "
+        "or goal-loop blocked -- and the mode is still within its lifetime, so "
+        "this failsafe-cron tick was dropped before reaching the model -- no "
+        "turn spent. A real (non-cron) user prompt ends the mode immediately; "
+        "the mode's own expiry restores full hourly cron coverage "
+        "automatically if the owner stays silent for longer."
     ),
 )
 
@@ -158,22 +159,44 @@ _BACKOFF_RULE: Final[Rule] = Rule(
 
 _DECLARED_RULE: Final[Rule] = Rule(
     rule_id=RuleID.DECLARED_CRON_SUPPRESSED,
-    blocked="A delivered persistent_crons tick, while a 'blocked only on human input' marker is live",
+    blocked="A delivered persistent_crons tick, while the session is in the awaiting-human mode",
     why="A declared job's tick against a session blocked only on human input costs a full model turn",
-    fix="Nothing to do -- this is expected. Send a real message to clear the marker and resume ticks",
+    fix="Nothing to do -- this is expected. Send a real message to end the mode and resume ticks",
     verbose=(
-        "This session recorded a 'blocked only on human input' marker still "
-        "within its expiry window, and this tick carries a declared "
-        "persistent_crons job's [tick:job:<id>] sentinel, so it was dropped "
-        "before reaching the model -- no turn spent (Plan 00388). Only ticks "
-        "the daemon supplied the prompt for are recognised; a real user prompt "
-        "clears the marker and every cron resumes, and the marker's own expiry "
+        "This session is in a blocked session mode (awaiting-human, or "
+        "goal-loop blocked) still within its lifetime, and this tick carries a "
+        "declared persistent_crons job's [tick:job:<id>] sentinel, so it was "
+        "dropped before reaching the model -- no turn spent (Plan 00388). Only "
+        "ticks the daemon supplied the prompt for are recognised; a real user "
+        "prompt ends the mode and every cron resumes, and the mode's own expiry "
         "restores them if the owner stays silent for longer. A job whose "
         "declaration sets `runs_while_awaiting_human: true` is exempt and its "
-        "ticks are delivered under a live marker (Plan 00470); the failsafe "
-        "and every job without the option are still dropped."
+        "ticks are delivered under an awaiting-human mode (Plan 00470); the "
+        "failsafe and every job without the option are still dropped."
     ),
 )
+
+
+def _session_of(hook_input: dict[str, Any]) -> str:
+    """The payload's session id, or the shared fallback bucket the writer also uses."""
+    return str(hook_input.get(HookInputField.SESSION_ID, "") or _UNKNOWN_SESSION)
+
+
+def _policy(session_id: str) -> SessionPolicy:
+    """``session_id``'s mode policy from the registry; empty when it cannot be read.
+
+    An unreadable registry delivers the tick (suppression is never the
+    default), and the WARNING makes the lost suppression visible.
+    """
+    try:
+        return get_data_layer().session_modes.policy(session_id)
+    except (RuntimeError, OSError) as e:
+        log_and_continue(
+            logger,
+            e,
+            reason="the session-modes registry cannot be read, so no mode suppresses this tick",
+        )
+        return SessionPolicy.from_entries(())
 
 
 class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
@@ -205,11 +228,6 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
                 HandlerTag.PLANNING,
             ],
         )
-        # Config option (hours); overridden by the registry from handler
-        # options via setattr.
-        self._expiry_hours: float = _DEFAULT_EXPIRY_HOURS
-        # Injectable wall clock (tests substitute a fake). Not a config option.
-        self._clock: Callable[[], float] = time.time
         # Injectable config source (tests substitute a fixed Config).
         self._config_loader: Callable[[], Config] = self._default_config_loader
         # Injected by the registry for planning-tagged handlers. Self-defaulted
@@ -222,9 +240,9 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
         """Match a delivered canonical-cron-prompt tick, OR any real prompt
         while there is session state a genuine reply should clear.
 
-        The cadence file is checked as well as the marker, and that is not
+        The cadence file is checked as well as the mode, and that is not
         belt-and-braces: in the row this backoff exists for ("nothing owed,
-        nothing declared") there is by definition NO marker, so a marker-only
+        nothing declared") there is by definition NO blocked mode, so a mode-only
         test would refuse to match the owner's reply, ``handle()`` would never
         run, and the cadence would never reset. The symptom would be invisible
         -- ticks simply staying sparse after the owner came back.
@@ -238,9 +256,9 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             untracked_dir = ProjectContext.daemon_untracked_dir()
         except RuntimeError:
             return False
-        return (untracked_dir / MARKER_FILENAME).exists() or (
-            untracked_dir / CADENCE_FILENAME
-        ).exists()
+        if (untracked_dir / CADENCE_FILENAME).exists():
+            return True
+        return _policy(_session_of(hook_input)).is_blocked
 
     def _work_is_owed(self) -> bool | None:
         """Whether the goal ledger still holds live work for this project.
@@ -291,25 +309,24 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             return None
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
-        """Suppress a cron tick when a still-valid marker exists for this
-        session; clear the marker on any genuine (non-cron) prompt.
+        """Suppress a cron tick while this session is in a blocked mode;
+        exit the blocked modes on any genuine (non-cron) prompt.
 
         Args:
             hook_input: The UserPromptSubmit event's hook input.
 
         Returns:
-            DENY (blocks/erases the prompt) only for a cron-prompt tick with
-            a valid marker. ALLOW in every other case, including every
-            failure mode -- a real prompt that fails to clear the marker
-            (e.g. an unlink error) still gets through unchanged.
+            DENY (blocks/erases the prompt) only for a cron-prompt tick the
+            session's mode policy drops or thins. ALLOW in every other case,
+            including every failure mode -- a real prompt that fails to exit
+            the mode (e.g. a registry write error) still gets through unchanged.
         """
-        session_id = str(hook_input.get(HookInputField.SESSION_ID, "") or _UNKNOWN_SESSION)
+        session_id = _session_of(hook_input)
         try:
             untracked_dir = ProjectContext.daemon_untracked_dir()
         except RuntimeError as e:
             logger.debug("failsafe_cron_blockage_suppressor: no project context: %s", e)
             return BlockingResult(decision=Decision.ALLOW)
-        marker_path = untracked_dir / MARKER_FILENAME
         cadence_path = untracked_dir / CADENCE_FILENAME
 
         prompt = hook_input.get(HookInputField.PROMPT)
@@ -319,26 +336,17 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
         is_failsafe_tick = isinstance(prompt, str) and is_failsafe_prompt(prompt)
 
         if tick is None and not is_failsafe_tick:
-            # A prompt carrying no daemon tick sentinel is the owner -- clear
-            # any stale marker now instead of waiting up to expiry_hours for it
-            # to lapse on its own, and reset the cadence to hourly for the same
-            # reason. Both are fail-open (they log and swallow OSError), so
-            # this never blocks the prompt.
-            clear_marker(marker_path)
-            reset_cadence(cadence_path)
+            self._note_untagged_prompt(prompt, session_id, cadence_path)
             return BlockingResult(decision=Decision.ALLOW)
 
-        marker = read_marker(marker_path)
-        now = self._clock()
-        expiry_seconds = self._expiry_hours * _SECONDS_PER_HOUR
-        declared = marker_is_valid(marker, session_id, now, expiry_seconds)
+        policy = _policy(session_id)
 
         if not is_failsafe_tick and tick is not None:
             # Another daemon cron's tick is never the owner, so it touches
-            # neither the marker nor the cadence (Plan 00388).
+            # neither the session's modes nor the cadence (Plan 00388).
             return self._handle_other_tick(
                 tick,
-                declared=declared,
+                policy=policy,
                 session_id=session_id,
                 hostname=effective_hostname(hook_input),
             )
@@ -356,7 +364,16 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             )
             owed = None
 
-        if not declared:
+        failsafe = tick if tick is not None else DaemonTick(TickKind.FAILSAFE)
+        action = policy.tick_action(failsafe, runs_while_blocked=False, work_owed=owed)
+
+        if action is TickAction.THIN:
+            # Row 2: the session is blocked, but the ledger still holds live
+            # work. Suppressing outright would be unsafe and hourly would be
+            # wasteful, so thin out instead of choosing either extreme.
+            return self._apply_backoff(cadence_path, session_id)
+
+        if action is not TickAction.DROP:
             # Rows 1 and 4. With work owed -- or unresolvable, which must read
             # as owed -- this is the case the cron exists for and must never be
             # thinned. Only a confident "nothing owed" earns a backoff.
@@ -365,15 +382,9 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
                 return BlockingResult(decision=Decision.ALLOW)
             return self._apply_backoff(cadence_path, session_id)
 
-        if owed is True:
-            # Row 2: the agent says it is blocked, but the ledger still holds
-            # live work. Suppressing outright would be unsafe and hourly would
-            # be wasteful, so thin out instead of choosing either extreme.
-            return self._apply_backoff(cadence_path, session_id)
-
-        # Row 3: declared, and nothing owed -- Plan 00298's behaviour, kept
-        # bit-for-bit. `owed is None` lands here too, deliberately: the
-        # declaration alone justified suppression before Phase 4, and the
+        # Row 3: blocked, and nothing owed -- Plan 00298's suppression. `owed
+        # is None` lands here too (the policy thins only on a confident "owed"):
+        # the declaration alone justified suppression before Phase 4, and the
         # ledger's blind spot must not make this path LESS safe than it was.
         reset_cadence(cadence_path)
         logger.info(
@@ -383,6 +394,38 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
         return BlockingResult(
             decision=Decision.DENY, reason=RuleFormatter().verbose(_RULE), rule=_RULE.rule_id
         )
+
+    @staticmethod
+    def _note_untagged_prompt(prompt: object, session_id: str, cadence_path: Path) -> None:
+        """End this session's BLOCKED modes and cadence when the prompt is its owner.
+
+        Only a genuine human prompt in the SAME session is the owner coming back
+        (Plan 00501 Task 2.1, ledger N378). A line the ccy supervisor typed, a
+        task notification or other machine traffic is not, and a prompt in
+        another session touches only that session's registry entries: both
+        leave this session's modes and the cadence alone. A registry write
+        failure is logged at WARNING and the prompt is still allowed.
+        """
+        if not is_genuine_human_prompt(prompt):
+            logger.info(
+                "failsafe_cron_blockage_suppressor: machine-typed prompt in session %s "
+                "is not the owner; modes and cadence kept",
+                session_id,
+            )
+            return
+        try:
+            registry = get_data_layer().session_modes
+            for label in BLOCKED_LABELS:
+                registry.exit(session_id, label)
+        except (RuntimeError, OSError) as e:
+            log_and_continue(
+                logger,
+                e,
+                reason="the owner's prompt could not end the session's blocked mode, so ticks stay suppressed until it expires; the prompt itself is allowed",
+            )
+        cadence = read_cadence(cadence_path)
+        if cadence is None or cadence.session_id == session_id:
+            reset_cadence(cadence_path)
 
     def _default_config_loader(self) -> Config:
         """The project's daemon config; defaults when it cannot be loaded.
@@ -398,11 +441,11 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             return default_config()
 
     def _handle_other_tick(
-        self, tick: DaemonTick, *, declared: bool, session_id: str, hostname: str
+        self, tick: DaemonTick, *, policy: SessionPolicy, session_id: str, hostname: str
     ) -> BlockingResult:
         """Decide a recognised tick from a cron other than the failsafe.
 
-        A declared ``persistent_crons`` job stands down with the marker (Task
+        A declared ``persistent_crons`` job stands down with a blocked mode (Task
         2.4, Plan 00392 N1): the session said it is blocked only on the human,
         and the observed case was an ``issue-sdlc`` tick finding every issue
         parked on one. A job that sets ``runs_while_awaiting_human`` is
@@ -413,22 +456,24 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
 
         Args:
             tick: The recognised tick, never the failsafe.
-            declared: Whether a still-valid marker exists for this session.
+            policy: This session's mode policy.
             session_id: The current session.
             hostname: The session's effective hostname; a job declared only for
                 other hosts is not vouched for here (Plan 00470 Task 6.1).
 
         Returns:
-            DENY for a declared job's tick under a live marker, else ALLOW.
+            DENY when the session's modes drop the tick, else ALLOW.
         """
-        if tick.kind is not TickKind.DECLARED or not declared:
-            return BlockingResult(decision=Decision.ALLOW)
-        if (
-            tick.job_id is not None
+        runs = (
+            tick.kind is TickKind.DECLARED
+            and policy.is_blocked
+            and tick.job_id is not None
             and self._config_loader().persistent_crons.runs_while_awaiting_human(
                 tick.job_id, hostname
             )
-        ):
+        )
+        action = policy.tick_action(tick, runs_while_blocked=runs, work_owed=None)
+        if action is not TickAction.DROP:
             return BlockingResult(decision=Decision.ALLOW)
         logger.info(
             "failsafe_cron_blockage_suppressor: suppressing declared cron %s for session %s",
@@ -480,23 +525,25 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             "## failsafe_cron_blockage_suppressor — zero-token cadence for "
             "human-input blockage\n\n"
             "When a Stop is allowed with a narrow 'blocked only on human "
-            "input' STOPPING BECAUSE: shape, `auto_continue_stop` records a "
-            "session-scoped marker. This handler recognises a DELIVERED "
+            "input' STOPPING BECAUSE: shape, `auto_continue_stop` puts the "
+            "session into the awaiting-human mode in the daemon's session-modes "
+            "registry. This handler recognises a DELIVERED "
             "failsafe-cron tick (the canonical prompt from "
-            "`recovery_cron_advisor`) and, while a still-valid marker exists "
-            "for the session, blocks the tick before it reaches the model — "
-            "genuinely zero-token, not just cheaper. A real (non-cron) user "
-            "prompt clears the marker; the marker also expires "
-            "(`expiry_hours`, default 24) so an extended silence restores "
-            "full hourly coverage automatically. Never terminal: other "
+            "`recovery_cron_advisor`) and, while the session is in that mode "
+            "(or goal-loop blocked), blocks the tick before it reaches the "
+            "model — genuinely zero-token, not just cheaper. A real (non-cron) "
+            "user prompt ends the mode; the mode also expires "
+            "(24 hours after it was entered) so an extended silence restores "
+            "full hourly coverage automatically. A focus mode alone never "
+            "suppresses a tick. Never terminal: other "
             "handlers keyed on the same canonical prompt still run.\n\n"
             "**Several crons in one session** (Plan 00388). Every cron prompt "
             "the daemon hands you starts with a sentinel line — "
             "`[tick:failsafe]`, `[tick:watchdog]` or `[tick:job:<id>]` — so "
             "paste it verbatim and never drop that line. A tick carrying one "
-            "is never mistaken for the owner, so it leaves the marker and the "
+            "is never mistaken for the owner, so it leaves the mode and the "
             "cadence alone. A declared `persistent_crons` job's tick is also "
-            "dropped while the marker is live (`R-DECLARED-CRON-SUPPRESSED`) "
+            "dropped while the mode is live (`R-DECLARED-CRON-SUPPRESSED`) "
             "unless the job sets `runs_while_awaiting_human: true`; "
             "the watchdog's is always delivered. A cron prompt you composed "
             "yourself carries no sentinel and still reads as the owner.\n\n"
@@ -528,10 +575,10 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
 
         return [
             AcceptanceTest(
-                title="No marker: a delivered cron tick is allowed through unchanged",
+                title="No blocked mode: a delivered cron tick is allowed through unchanged",
                 command='echo "test"',
                 description=(
-                    "Default state check. With no blockage marker recorded, "
+                    "Default state check. With no blocked session mode, "
                     "submitting the canonical failsafe-cron prompt must be "
                     "allowed through unchanged (ALLOW, no suppression)."
                 ),
@@ -539,7 +586,7 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
                 expected_message_patterns=[],
                 safety_notes=(
                     "Advisory-adjacent handler; this test asserts the SAFE default "
-                    "(no suppression without a marker)."
+                    "(no suppression without a blocked mode)."
                 ),
                 test_type=TestType.CONTEXT,
                 requires_event="UserPromptSubmit event (cannot be triggered by subagent)",

@@ -14,9 +14,14 @@ Claude Code delivered them -- because the suite's old gap was that it only
 ever drove the canonical prompt and an ordinary sentence.
 """
 
+import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 from unittest.mock import patch
+
+import pytest
+from tests.support.autonomy import awaiting_human_entry, pin_session_modes
 
 from claude_code_hooks_daemon.config.models import (
     Config,
@@ -24,7 +29,8 @@ from claude_code_hooks_daemon.config.models import (
     PersistentCronsConfig,
 )
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
-from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core import Decision, ProjectContext
+from claude_code_hooks_daemon.core.data_layer import get_data_layer
 from claude_code_hooks_daemon.handlers.post_tool_use.background_process_tracker import (
     watchdog_cron_prompt,
 )
@@ -34,7 +40,6 @@ from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor impor
 from claude_code_hooks_daemon.handlers.user_prompt_submit.failsafe_cron_blockage_suppressor import (
     FailsafeCronBlockageSuppressorHandler,
 )
-from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, write_marker
 from claude_code_hooks_daemon.utils.cron_cadence import (
     CADENCE_FILENAME,
     CadenceState,
@@ -42,6 +47,10 @@ from claude_code_hooks_daemon.utils.cron_cadence import (
     write_cadence,
 )
 from claude_code_hooks_daemon.utils.cron_enforcement import declared_tick_prompt
+from claude_code_hooks_daemon.utils.session_modes import (
+    DECLARED_BLOCKED_TTL_SECONDS,
+    declared_blocked_entry,
+)
 
 _DAEMON_UNTRACKED_DIR_PATCH_TARGET = (
     "claude_code_hooks_daemon.handlers.user_prompt_submit."
@@ -115,15 +124,31 @@ def _config(*jobs: PersistentCronConfig) -> Config:
 def _handler(config: Config | None = None) -> FailsafeCronBlockageSuppressorHandler:
     """A handler whose config is fixed, never read from the real project."""
     handler = FailsafeCronBlockageSuppressorHandler()
-    handler._clock = lambda: 1100.0
     handler._config_loader = lambda: config if config is not None else Config()
     return handler
 
 
-def _arm_marker(untracked: Path, session_id: str = _SESSION) -> Path:
-    path = untracked / MARKER_FILENAME
-    write_marker(path, session_id, now=1000.0)
-    return path
+@pytest.fixture(autouse=True)
+def _registry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Bind the session-modes registry the handler reads to this test's tmp dir."""
+    pin_session_modes(monkeypatch, tmp_path)
+
+
+@dataclass(frozen=True)
+class _Declaration:
+    """A session's awaiting-human declaration, as the registry holds it."""
+
+    session_id: str
+
+    def is_live(self) -> bool:
+        return get_data_layer().session_modes.policy(self.session_id).is_blocked
+
+
+def _declare_blocked(untracked: Path, session_id: str = _SESSION) -> _Declaration:
+    """Enter awaiting-human for ``session_id`` (``untracked`` is the registry's tmp dir)."""
+    assert ProjectContext.daemon_untracked_dir() == untracked
+    get_data_layer().session_modes.enter(awaiting_human_entry(session_id))
+    return _Declaration(session_id)
 
 
 def _arm_cadence(untracked: Path) -> Path:
@@ -149,31 +174,31 @@ class TestTheDaemonSuppliesEveryTickPrompt:
 
 class TestAnotherCronsTickLeavesTheMarkerArmed:
     def test_the_watchdog_tick_does_not_clear_the_marker(self, tmp_path: Path) -> None:
-        marker = _arm_marker(tmp_path)
+        marker = _declare_blocked(tmp_path)
         with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
             result = _handler().handle(_input(watchdog_cron_prompt()))
         assert result.decision == Decision.ALLOW
-        assert marker.exists()
+        assert marker.is_live()
 
     def test_the_issue_sdlc_tick_does_not_clear_the_marker(self, tmp_path: Path) -> None:
-        marker = _arm_marker(tmp_path)
+        marker = _declare_blocked(tmp_path)
         with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
             _handler().handle(_input(_issue_sdlc_tick()))
-        assert marker.exists()
+        assert marker.is_live()
 
     def test_a_genuine_human_prompt_still_clears_it(self, tmp_path: Path) -> None:
-        marker = _arm_marker(tmp_path)
+        marker = _declare_blocked(tmp_path)
         with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
             result = _handler().handle(_input("ok, go with option B"))
         assert result.decision == Decision.ALLOW
-        assert not marker.exists()
+        assert not marker.is_live()
 
     def test_the_failsafe_tick_is_still_suppressed_after_another_cron_fired(
         self, tmp_path: Path
     ) -> None:
         """The observed sequence end to end: marker armed, a different cron
         fires, then the failsafe tick arrives and must be dropped."""
-        _arm_marker(tmp_path)
+        _declare_blocked(tmp_path)
         handler = _handler()
         with (
             patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path),
@@ -213,7 +238,7 @@ class TestADeclaredCronStandsDownWithTheMarker:
     hour against a backlog parked entirely on a human."""
 
     def test_a_live_marker_drops_the_issue_sdlc_tick(self, tmp_path: Path) -> None:
-        _arm_marker(tmp_path)
+        _declare_blocked(tmp_path)
         with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
             result = _handler().handle(_input(_issue_sdlc_tick()))
         assert result.decision == Decision.DENY
@@ -226,16 +251,16 @@ class TestADeclaredCronStandsDownWithTheMarker:
         assert result.decision == Decision.ALLOW
 
     def test_another_sessions_marker_delivers_it(self, tmp_path: Path) -> None:
-        marker = _arm_marker(tmp_path, _OTHER_SESSION)
+        marker = _declare_blocked(tmp_path, _OTHER_SESSION)
         with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
             result = _handler().handle(_input(_issue_sdlc_tick()))
         assert result.decision == Decision.ALLOW
-        assert marker.exists()
+        assert marker.is_live()
 
     def test_an_expired_marker_delivers_it(self, tmp_path: Path) -> None:
-        _arm_marker(tmp_path)
+        recorded = time.time() - DECLARED_BLOCKED_TTL_SECONDS - 1.0
+        get_data_layer().session_modes.enter(declared_blocked_entry(_SESSION, entered_at=recorded))
         handler = _handler()
-        handler._clock = lambda: 1000.0 + 25 * 3600.0
         with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
             result = handler.handle(_input(_issue_sdlc_tick()))
         assert result.decision == Decision.ALLOW
@@ -248,7 +273,7 @@ class TestADeclaredCronStandsDownWithTheMarker:
     def test_the_watchdog_is_never_stood_down(self, tmp_path: Path) -> None:
         """Its job -- reaping runaway background processes -- is not blocked
         on the human, and an idle wait is exactly the window it covers."""
-        _arm_marker(tmp_path)
+        _declare_blocked(tmp_path)
         with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
             result = _handler().handle(_input(watchdog_cron_prompt()))
         assert result.decision == Decision.ALLOW
@@ -270,20 +295,20 @@ class TestAJobMayRunWhileTheSessionAwaitsTheHuman:
         assert _ISSUE_SDLC_JOB.runs_while_awaiting_human is False
 
     def test_an_opted_in_job_is_delivered_under_a_live_marker(self, tmp_path: Path) -> None:
-        marker = _arm_marker(tmp_path)
+        marker = _declare_blocked(tmp_path)
         with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
             result = _handler(_config(_RUNS_WHILE_AWAITING_JOB)).handle(_input(_issue_sdlc_tick()))
         assert result.decision == Decision.ALLOW
-        assert marker.exists()
+        assert marker.is_live()
 
     def test_a_job_without_the_option_is_still_suppressed(self, tmp_path: Path) -> None:
-        _arm_marker(tmp_path)
+        _declare_blocked(tmp_path)
         with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
             result = _handler(_config(_ISSUE_SDLC_JOB)).handle(_input(_issue_sdlc_tick()))
         assert result.decision == Decision.DENY
 
     def test_another_job_stays_suppressed_when_only_one_opts_in(self, tmp_path: Path) -> None:
-        _arm_marker(tmp_path)
+        _declare_blocked(tmp_path)
         other = PersistentCronConfig(id="other", schedule="5 * * * *", prompt="do the other thing")
         tick = declared_tick_prompt(other)
         with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
@@ -291,7 +316,7 @@ class TestAJobMayRunWhileTheSessionAwaitsTheHuman:
         assert result.decision == Decision.DENY
 
     def test_the_failsafe_is_suppressed_even_beside_an_opted_in_job(self, tmp_path: Path) -> None:
-        _arm_marker(tmp_path)
+        _declare_blocked(tmp_path)
         with (
             patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path),
             patch(_OWED_PATCH_TARGET, return_value=False),
@@ -305,7 +330,7 @@ class TestAJobMayRunWhileTheSessionAwaitsTheHuman:
         self, tmp_path: Path
     ) -> None:
         """An unloaded declaration is not a declaration: fail toward suppress."""
-        _arm_marker(tmp_path)
+        _declare_blocked(tmp_path)
         config = Config(
             persistent_crons=PersistentCronsConfig(enabled=False, jobs=[_RUNS_WHILE_AWAITING_JOB])
         )
@@ -319,7 +344,7 @@ class TestAStoodDownIssueLoopResumesOnTheHuman:
     working, which is worse than an hourly no-op."""
 
     def test_both_crons_resume_after_a_genuine_prompt(self, tmp_path: Path) -> None:
-        _arm_marker(tmp_path)
+        _declare_blocked(tmp_path)
         handler = _handler()
         with (
             patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path),
@@ -340,7 +365,7 @@ class TestPromptsTheDaemonNeverWrote:
     ) -> None:
         """Live sessions keep the crons they already have, so the old literal
         stays a belt: an upgrade must not make the failsafe less recognisable."""
-        _arm_marker(tmp_path)
+        _declare_blocked(tmp_path)
         with (
             patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path),
             patch(_OWED_PATCH_TARGET, return_value=False),
@@ -356,16 +381,16 @@ class TestPromptsTheDaemonNeverWrote:
         watchdog cron created before this change still clears the marker until
         the session ends and the next one is created from the verbatim prompt.
         Clearing is the safe direction -- it costs a turn, never a safety net."""
-        marker = _arm_marker(tmp_path)
+        marker = _declare_blocked(tmp_path)
         with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
             _handler().handle(_input(_REAL_AGENT_COMPOSED_WATCHDOG))
-        assert not marker.exists()
+        assert not marker.is_live()
 
     def test_a_human_quoting_the_word_tick_is_still_the_human(self, tmp_path: Path) -> None:
-        marker = _arm_marker(tmp_path)
+        marker = _declare_blocked(tmp_path)
         with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
             _handler().handle(_input("the [tick] box in the issue template is wrong"))
-        assert not marker.exists()
+        assert not marker.is_live()
 
 
 class TestTheAwaitingHumanOptOutFollowsTheHost:
@@ -380,7 +405,7 @@ class TestTheAwaitingHumanOptOutFollowsTheHost:
     )
 
     def _run(self, tmp_path: Path, hostname: str) -> Decision:
-        _arm_marker(tmp_path)
+        _declare_blocked(tmp_path)
         payload = {
             **_input(declared_tick_prompt(self._RUNNER_JOB)),
             "hooks_daemon_hostname": hostname,
@@ -399,7 +424,7 @@ class TestEachDroppedTickNamesItsRule:
     """N393: the verdict log counts dropped ticks by the rule ID the result carries."""
 
     def test_a_suppressed_failsafe_tick_carries_its_rule(self, tmp_path: Path) -> None:
-        _arm_marker(tmp_path)
+        _declare_blocked(tmp_path)
         with (
             patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path),
             patch(_OWED_PATCH_TARGET, return_value=False),
@@ -409,7 +434,7 @@ class TestEachDroppedTickNamesItsRule:
         assert result.rule == RuleID.FAILSAFE_CRON_SUPPRESSED
 
     def test_a_suppressed_declared_tick_carries_its_rule(self, tmp_path: Path) -> None:
-        _arm_marker(tmp_path)
+        _declare_blocked(tmp_path)
         with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
             result = _handler().handle(_input(_issue_sdlc_tick()))
         assert result.decision == Decision.DENY
