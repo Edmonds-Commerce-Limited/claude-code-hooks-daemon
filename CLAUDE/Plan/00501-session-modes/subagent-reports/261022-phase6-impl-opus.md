@@ -413,3 +413,85 @@ Split the rest across two agents and give each only this section:
 - **B2**: items 5 to 8 (IPC, CLI, handler, docs, note, QA).
 
 The injected guidance is about 60k tokens on its own, so each agent has about 90k tokens of working room.
+
+## Part B1 (pinned design items 1 to 4): core done, nothing wired
+
+Brief `untracked/scratch/brief-501-phase6b1.md`, worktree `worktree-501-phase6b-act`, base `1f3324c12`. Each item was
+TDD'd and committed on its own (commits `651b2c309`, `f1440c35b`, `d6b2e2afa`, `401245655`). **6.3 and 6.4 stay
+unticked** because B2 owns the wiring, the docs and QA.
+
+### Per item
+
+1. **`core/goal_loop.py`** (`651b2c309`)
+   - Added `DetectorMode.ACT`, `GoalLoopConfig.blocked_seconds` (a float, `blocked_hours * 3600`) and
+     `CycleRing.restart_count()`. It empties the cycles and the pending stop, keeps the fingerprint, and logs nothing.
+   - Tests: `mode: act` is valid, `blocked_seconds` is correct, and `restart_count` keeps the fingerprint and drops
+     the pending stop (a later UNMET makes no cycle).
+   - The invalid-mode parametrize case and the handler's `test_validate_options_is_the_core_option_check` now use
+     `"halt"`.
+   - Red: 3 failed (`act` rejected, plus two AttributeErrors). Green: 83 passed across
+     `test_goal_loop.py` and `test_goal_loop_detector.py`.
+2. **`utils/session_modes.goal_loop_blocked_entry(session_id, *, entered_at, ttl_seconds)`** (`f1440c35b`)
+   - Builds BLOCKED, GOAL_LOOP, DETECTOR and SESSION. A ttl of 0 or less is refused by the entry's own
+     `expires_at` check.
+   - Red: 2 failed. Green: 96 passed.
+3. **`core/session_mode_registry.py`** (`d6b2e2afa`)
+   - Added `NoticeKind.GOAL_LOOP_ENTERED`, `ModeNotice.goal_cleared: bool | None = None`, and a public
+     `queue_notice(notice)` (under the lock, appended after any notice already pending).
+   - The `GOAL_LOOP_ENTERED` text begins `GOAL-LOOP BLOCKED:`. It mirrors the `FocusChange.line` wording for both the
+     cleared case and the failed-clear case, and names all four exits. Its hours come from the entry
+     (`expires_at - entered_at`, formatted `:g`).
+   - Added the docstring sentence to `session_mode_statement` naming the new notice source.
+   - Red: 5 failed. Green: 95 passed, `test_session_mode_statement.py` included.
+   - **No new exit method was needed.** Entries are keyed by `ModeLabel`, so
+     `registry.exit(sid, ModeLabel.GOAL_BLOCKED, ...)` already ends only the goal-loop entry. The test
+     `test_exiting_goal_blocked_leaves_awaiting_human` pins this, and it passed at red as expected.
+     `DeclaredBlockRefusedError` lives in `core/goal_loop_block.py`, as the pinned design put it, not in the registry.
+4. **New `core/goal_loop_block.py`**, with the test file written first (`401245655`)
+   - `enter_goal_loop(...) -> bool` and `DeclaredBlockRefusedError(ValueError)`.
+   - `UnblockOutcome` is `unblocked` or `not-blocked`.
+   - `UnblockChange(outcome, declared_remains=False).line()` gives one sentence per outcome. When both entries were
+     live, the line says the awaiting-human mode still applies.
+   - `unblock_goal_loop(...)`: a WARNING and the raise when only AWAITING_HUMAN is live. The message contains
+     "genuine prompt from the human" and "Plan 00501 Phase 2".
+   - The tests use a real registry with an injected clock and a real `TransitionLog`, not `pin_session_modes`,
+     because the timer exit needs the clock. They cover:
+     - entry fields and the ENTER log;
+     - one clear and one notice;
+     - a failed clear giving a WARNING and the failed-clear text;
+     - a re-entry renewing the TTL and signalling again;
+     - the timer exit, with EXPIRE and "its expiry time passed";
+     - an unblock logging EXIT with its evidence;
+     - **the refusal, with the entry still live afterwards**;
+     - both live;
+     - not-blocked, which logs nothing.
+   - Red: a collection error (no module). Green: 12 passed, with 100% line and branch coverage of the module.
+
+### Targeted QA
+
+- The six touched test files: 286 passed.
+- `mypy --strict` on the five changed source modules: no issues.
+- `ruff check` on the changed source and test files: clean.
+- `black --check`: clean after it reformatted `goal_loop_block.py` and the registry test file.
+
+No full QA was run (B2 owns it).
+
+### Deviations from the pinned design
+
+- `UnblockChange.declared_remains` defaults to False, so a `not-blocked` result is just `UnblockChange(NOT_BLOCKED)`.
+- `blocked_seconds` is a float, because `blocked_hours` may be fractional.
+- Otherwise none.
+
+### What B2 must wire
+
+- **IPC** (`daemon/session_mode_ipc._answer`), for the `exit_blocked` action:
+  - call `unblock_goal_loop(registry, sid, evidence="cause=explicit-clear (the session-mode CLI or /mode skill)")`;
+  - return `{"outcome": str(change.outcome), "line": change.line()}`;
+  - catch `DeclaredBlockRefusedError` in `handle_session_mode_action`, giving `{"error": str(error)}`.
+- **Handler**: in ACT, on WOULD_ENTER, call
+  `enter_goal_loop(registry, sid, ttl_seconds=config.blocked_seconds, evidence=assessment.evidence(config, fp), clear_goal=self._clear_goal)`.
+  Then, in both modes, call `state.ring.restart_count()`. The repo-change exit is
+  `registry.exit(sid, ModeLabel.GOAL_BLOCKED, evidence=f"cause=repo-change fingerprint={old}->{new}")`.
+- `enter_goal_loop` raises `ValueError` or `OSError`, not `RuntimeError`. The handler's catch should cover `OSError`
+  (plus `RuntimeError` from `get_data_layer()`).
+- Items 5 to 8 are otherwise unchanged from the pinned design above.
