@@ -11,14 +11,16 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 from tests.support.autonomy import focus_entry, pin_session_modes
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
+from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.session_mode_registry import SessionModeRegistry
 from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor import (
@@ -27,13 +29,16 @@ from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor impor
 from claude_code_hooks_daemon.handlers.user_prompt_submit.focus_mode_trigger import (
     FocusModeTriggerHandler,
 )
+from claude_code_hooks_daemon.utils import usage_pause
 from claude_code_hooks_daemon.utils.session_modes import (
     FOCUS_TTL_SECONDS,
     ModeSource,
     SessionMode,
     SessionModeEntry,
 )
+from claude_code_hooks_daemon.utils.session_signal_paths import SIGNAL_SUBDIR
 
+_MODULE = "claude_code_hooks_daemon.handlers.user_prompt_submit.focus_mode_trigger"
 _SESSION = "sess-1"
 _CLEAR_TARGET = (
     "claude_code_hooks_daemon.handlers.user_prompt_submit.focus_mode_trigger.clear_goal_signal"
@@ -201,6 +206,82 @@ class TestRenewalAndNotices:
         result, _ = _run(_prompt("hooks-daemon focus again"))
         assert any("focus expired" in line for line in result.context)
         assert sum("FOCUS MODE ON" in line for line in result.context) == 1
+
+
+class TestRestartRestatement:
+    """Plan 00501 Task 4.2: one line on the next prompt after a restart, command or not."""
+
+    @pytest.fixture
+    def restarted(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Mock]:
+        """A daemon that restarted with a live focus on disk for the session."""
+        writer = SessionModeRegistry(tmp_path / SIGNAL_SUBDIR)
+        writer.load()
+        writer.enter(focus_entry(_SESSION, "the survivor"))
+        pin_session_modes(monkeypatch, tmp_path)
+        controller = Mock()
+        controller.get_mode.return_value = {ModeConstant.KEY_MODE: DaemonMode.DEFAULT.value}
+        with patch(f"{_MODULE}.get_controller", return_value=controller):
+            yield controller
+
+    @staticmethod
+    def _mode_lines(context: list[str]) -> list[str]:
+        return [line for line in context if line.startswith("SESSION MODE:")]
+
+    def test_a_plain_prompt_gets_one_line_once(self, restarted: Mock) -> None:
+        first, _ = _run(_prompt("carry on"))
+        [line] = self._mode_lines(first.context)
+        assert "focus mode on 'the survivor' survived a daemon restart" in line
+        second, _ = _run(_prompt("carry on"))
+        assert second.context == []
+
+    def test_a_focus_command_gets_the_line_too(self, restarted: Mock) -> None:
+        result, _ = _run(_prompt("hooks-daemon focus off"))
+        assert len(self._mode_lines(result.context)) == 1
+        assert sum("FOCUS MODE OFF" in line for line in result.context) == 1
+
+    def test_a_machine_prompt_gets_the_line_too(self, restarted: Mock) -> None:
+        result, _ = _run(_prompt(CANONICAL_CRON_PROMPT))
+        assert len(self._mode_lines(result.context)) == 1
+
+    def test_unattended_is_named_beside_the_restart(self, restarted: Mock) -> None:
+        restarted.get_mode.return_value = {ModeConstant.KEY_MODE: DaemonMode.UNATTENDED.value}
+        result, _ = _run(_prompt("carry on"))
+        [line] = self._mode_lines(result.context)
+        assert "the daemon is in unattended mode" in line
+
+    def test_a_usage_pause_from_before_the_restart_is_restated(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        now = time.time()
+        usage_pause.write_usage_pause(
+            tmp_path,
+            usage_pause.UsagePause(
+                session_id=_SESSION,
+                paused_at=now - 60,
+                resume_at=now + 3600,
+                window=usage_pause.WINDOW_FIVE_HOUR,
+                used_percentage=91.0,
+                ceiling=90.0,
+                reason="five_hour at 91%",
+            ),
+        )
+        pin_session_modes(monkeypatch, tmp_path)
+        with patch(f"{_MODULE}.get_controller") as controller:
+            controller.return_value.get_mode.return_value = {}
+            result, _ = _run(_prompt("carry on"))
+        [line] = self._mode_lines(result.context)
+        assert "usage-paused (five_hour at 91%) survived a daemon restart" in line
+
+
+def test_the_statement_is_the_only_reader_of_the_pop_once_notices() -> None:
+    """``take_notices`` is pop-once: a second reader would steal the other's lines."""
+    src = Path(__file__).resolve().parents[4] / "src" / "claude_code_hooks_daemon"
+    readers = sorted(
+        str(path.relative_to(src))
+        for path in src.rglob("*.py")
+        if ".take_notices(" in path.read_text(encoding="utf-8")
+    )
+    assert readers == ["core/session_mode_statement.py"]
 
 
 class TestFailsLoud:

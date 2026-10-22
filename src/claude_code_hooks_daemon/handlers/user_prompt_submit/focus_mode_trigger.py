@@ -7,8 +7,10 @@ on for this session only; ``hooks-daemon focus off`` (aliases ``done``, ``end``,
 and the prompt still reaches the model, so the task it names is the stated task.
 
 Every other genuine human prompt renews the session's focus (TTL, ruling 02),
-classified from the prompt text alone. The registry's pending one-time notices
-for the session (an expiry) are stated at the same prompt.
+classified from the prompt text alone. On EVERY prompt, command or not, the
+session's pending mode news (an expiry; after a daemon restart, what survived
+or was cleared, a usage pause included) is stated in one line by
+``core.session_mode_statement``, the registry notices' only reader (Task 4.2).
 
 Never gated by autonomy (``drives_autonomy`` stays False): focus itself halts
 every work-driving handler, so a gated trigger could never turn it off. Never
@@ -22,8 +24,11 @@ import logging
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.data_layer import get_data_layer
+from claude_code_hooks_daemon.core.session_mode_statement import pending_mode_statement
+from claude_code_hooks_daemon.daemon.controller import get_controller
 from claude_code_hooks_daemon.core.focus_mode import (
     FocusCommand,
     enter_focus,
@@ -34,13 +39,32 @@ from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerB
 from claude_code_hooks_daemon.core.session_mode_registry import SessionModeRegistry
 from claude_code_hooks_daemon.handlers.post_tool_use.goal_injection import clear_goal_signal
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.session_modes import UsagePauseView
+from claude_code_hooks_daemon.utils.usage_pause_gate import active_usage_pause
 
 logger = logging.getLogger(__name__)
+
+#: The transition log's evidence for a focus change typed at the prompt.
+_COMMAND_EVIDENCE = "the human's `hooks-daemon focus` prompt command"
 
 
 def _session_id(hook_input: dict[str, Any]) -> str:
     value = hook_input.get(HookInputField.SESSION_ID)
     return value.strip() if isinstance(value, str) else ""
+
+
+def _usage_pause_view(session_id: str) -> UsagePauseView | None:
+    """The session's live usage pause, as the restatement needs it."""
+    pause = active_usage_pause(session_id)
+    if pause is None:
+        return None
+    return UsagePauseView(paused_at=pause.paused_at, until=pause.expires_at, reason=pause.reason)
+
+
+def _daemon_is_unattended() -> bool:
+    """Whether the daemon-wide mode is ``unattended``."""
+    mode = get_controller().get_mode().get(ModeConstant.KEY_MODE)
+    return bool(mode == DaemonMode.UNATTENDED.value)
 
 
 class FocusModeTriggerHandler(UserPromptSubmitHandlerBase):
@@ -74,7 +98,12 @@ class FocusModeTriggerHandler(UserPromptSubmitHandlerBase):
         try:
             registry = get_data_layer().session_modes
             line = self._apply(registry, session_id, command, prompt)
-            notices = [notice.text() for notice in registry.take_notices(session_id)]
+            statement = pending_mode_statement(
+                registry,
+                session_id,
+                usage_pause=lambda: _usage_pause_view(session_id),
+                unattended=_daemon_is_unattended,
+            )
         except (RuntimeError, OSError) as error:
             log_and_continue(
                 logger,
@@ -87,7 +116,7 @@ class FocusModeTriggerHandler(UserPromptSubmitHandlerBase):
                 decision=Decision.ALLOW,
                 context=[f"FOCUS MODE NOT CHANGED: the daemon could not record it ({error})."],
             )
-        context = [f"SESSION MODE: {text}." for text in notices]
+        context = [] if statement is None else [statement]
         if line is not None:
             context.append(line)
         return BlockingResult(decision=Decision.ALLOW, context=context)
@@ -104,8 +133,14 @@ class FocusModeTriggerHandler(UserPromptSubmitHandlerBase):
             registry.note_prompt(session_id, prompt)
             return None
         if command.is_off:
-            return exit_focus(registry, session_id).line()
-        return enter_focus(registry, session_id, command.task, clear_goal=clear_goal_signal).line()
+            return exit_focus(registry, session_id, evidence=_COMMAND_EVIDENCE).line()
+        return enter_focus(
+            registry,
+            session_id,
+            command.task,
+            clear_goal=clear_goal_signal,
+            evidence=_COMMAND_EVIDENCE,
+        ).line()
 
     def get_claude_md(self) -> str | None:
         """Document the focus command."""
