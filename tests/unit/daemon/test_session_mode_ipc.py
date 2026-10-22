@@ -138,5 +138,7 @@ class TestServerDispatch:
     def test_the_daemon_mode_actions_are_unchanged(self) -> None:
         controller = Mock(spec=Controller)
         controller.get_mode.return_value = {ModeConstant.KEY_MODE: "default"}
-        response = self._server(controller)._handle_system_request({"action": ModeConstant.ACTION_GET_MODE}, None)
+        response = self._server(controller)._handle_system_request(
+            {"action": ModeConstant.ACTION_GET_MODE}, None
+        )
         assert response["result"][ModeConstant.KEY_MODE] == "default"
