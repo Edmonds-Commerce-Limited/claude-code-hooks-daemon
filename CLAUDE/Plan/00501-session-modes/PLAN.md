@@ -138,7 +138,7 @@ All CLEAR; rationale and code citations in
 
 ### Phase 2: Awaiting-human folds in, with the bug fixes (shippable alone)
 
-- [ ] ⬜ **Task 2.1**: TDD the suppressor clearing only on a genuine human prompt in the same session; regression
+- [x] ✅ **Task 2.1**: TDD the suppressor clearing only on a genuine human prompt in the same session; regression
   tests for cross-session prompts and supervisor-typed lines.
 - [ ] ⬜ **Task 2.2**: TDD `auto_continue_stop` writing the registry, one-time legacy marker import, suppressor
   reading the policy.

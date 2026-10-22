@@ -117,6 +117,7 @@ from claude_code_hooks_daemon.utils.goal_ledger import (
     GoalLedger,
     resolve_plan_dir,
 )
+from claude_code_hooks_daemon.utils.session_modes import is_genuine_human_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -319,13 +320,7 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
         is_failsafe_tick = isinstance(prompt, str) and is_failsafe_prompt(prompt)
 
         if tick is None and not is_failsafe_tick:
-            # A prompt carrying no daemon tick sentinel is the owner -- clear
-            # any stale marker now instead of waiting up to expiry_hours for it
-            # to lapse on its own, and reset the cadence to hourly for the same
-            # reason. Both are fail-open (they log and swallow OSError), so
-            # this never blocks the prompt.
-            clear_marker(marker_path)
-            reset_cadence(cadence_path)
+            self._note_untagged_prompt(prompt, session_id, marker_path, cadence_path)
             return BlockingResult(decision=Decision.ALLOW)
 
         marker = read_marker(marker_path)
@@ -383,6 +378,40 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
         return BlockingResult(
             decision=Decision.DENY, reason=RuleFormatter().verbose(_RULE), rule=_RULE.rule_id
         )
+
+    @staticmethod
+    def _note_untagged_prompt(
+        prompt: object, session_id: str, marker_path: Path, cadence_path: Path
+    ) -> None:
+        """Clear this session's marker and cadence when the prompt is its owner.
+
+        Only a genuine human prompt in the SAME session is the owner coming back
+        (Plan 00501 Task 2.1, ledger N378). A line the ccy supervisor typed, a
+        task notification or other machine traffic is not, and a prompt in
+        another session of the project says nothing about this one: both leave
+        the marker and the cadence alone. Clearing is fail-open (the helpers
+        log and swallow OSError), so this never blocks the prompt.
+        """
+        if not is_genuine_human_prompt(prompt):
+            logger.info(
+                "failsafe_cron_blockage_suppressor: machine-typed prompt in session %s "
+                "is not the owner; marker and cadence kept",
+                session_id,
+            )
+            return
+        marker = read_marker(marker_path)
+        if marker is not None and marker.session_id != session_id:
+            logger.info(
+                "failsafe_cron_blockage_suppressor: a prompt in session %s keeps the "
+                "awaiting-human marker of session %s",
+                session_id,
+                marker.session_id,
+            )
+        elif marker is not None:
+            clear_marker(marker_path)
+        cadence = read_cadence(cadence_path)
+        if cadence is None or cadence.session_id == session_id:
+            reset_cadence(cadence_path)
 
     def _default_config_loader(self) -> Config:
         """The project's daemon config; defaults when it cannot be loaded.

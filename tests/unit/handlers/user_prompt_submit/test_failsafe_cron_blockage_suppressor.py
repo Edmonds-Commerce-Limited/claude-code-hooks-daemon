@@ -394,3 +394,65 @@ class TestCadenceFailsOpen:
         ):
             result = handler.handle(_cron_hook_input("sess-1"))
         assert result.decision == Decision.ALLOW
+
+
+class TestOnlyTheSameSessionsHumanClears:
+    """Plan 00501 Task 2.1 (ledger N378): only a genuine human prompt in the
+    SAME session clears the awaiting-human declaration."""
+
+    def test_a_prompt_in_another_session_leaves_the_marker(self, tmp_path: Path) -> None:
+        marker_path = tmp_path / MARKER_FILENAME
+        write_marker(marker_path, "sess-1", now=1000.0)
+        handler = FailsafeCronBlockageSuppressorHandler()
+        handler._clock = lambda: 1100.0
+        with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
+            result = handler.handle(_real_hook_input("sess-2"))
+            tick = handler.handle(_cron_hook_input("sess-1"))
+        assert result.decision == Decision.ALLOW
+        assert read_marker(marker_path) is not None
+        assert tick.decision == Decision.DENY
+
+    def test_a_line_the_supervisor_typed_leaves_the_marker(self, tmp_path: Path) -> None:
+        marker_path = tmp_path / MARKER_FILENAME
+        write_marker(marker_path, "sess-1", now=1000.0)
+        handler = FailsafeCronBlockageSuppressorHandler()
+        handler._clock = lambda: 1100.0
+        supervisor_line = "🤖 [ccy-supervisor 12:00] continue"
+        with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
+            result = handler.handle(_real_hook_input("sess-1", prompt=supervisor_line))
+            tick = handler.handle(_cron_hook_input("sess-1"))
+        assert result.decision == Decision.ALLOW
+        assert read_marker(marker_path) is not None
+        assert tick.decision == Decision.DENY
+
+    def test_the_same_sessions_human_still_clears(self, tmp_path: Path) -> None:
+        marker_path = tmp_path / MARKER_FILENAME
+        write_marker(marker_path, "sess-1", now=1000.0)
+        handler = FailsafeCronBlockageSuppressorHandler()
+        handler._clock = lambda: 1100.0
+        with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
+            result = handler.handle(_real_hook_input("sess-1"))
+        assert result.decision == Decision.ALLOW
+        assert read_marker(marker_path) is None
+
+    def test_a_supervisor_line_does_not_reset_the_cadence(self, tmp_path: Path) -> None:
+        cadence_path = tmp_path / CADENCE_FILENAME
+        write_cadence(
+            cadence_path,
+            CadenceState(session_id="sess-1", dropped_since_allowed=1, cadence_hours=4),
+        )
+        handler = FailsafeCronBlockageSuppressorHandler()
+        with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
+            handler.handle(_real_hook_input("sess-1", prompt="🤖 [ccy-supervisor 12:00] continue"))
+        assert read_cadence(cadence_path) is not None
+
+    def test_a_prompt_in_another_session_keeps_the_cadence(self, tmp_path: Path) -> None:
+        cadence_path = tmp_path / CADENCE_FILENAME
+        write_cadence(
+            cadence_path,
+            CadenceState(session_id="sess-1", dropped_since_allowed=1, cadence_hours=4),
+        )
+        handler = FailsafeCronBlockageSuppressorHandler()
+        with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
+            handler.handle(_real_hook_input("sess-2"))
+        assert read_cadence(cadence_path) is not None
