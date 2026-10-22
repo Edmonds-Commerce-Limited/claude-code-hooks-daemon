@@ -81,6 +81,90 @@ Stop before the chain. Make it stand down when `hook_is_usage_paused(hook_input)
 awaiting-human and goal-blocked each allow the stop; focus and no mode still block; another session's mode changes
 nothing.
 
+## Second agent (Task 2.2): Ruling 07 settled, the rest designed and not built
+
+This agent went past the soft context budget before writing any code: the injected guidance is about 60k tokens on
+its own. It settled Ruling 07 and pinned the open design decisions below, then committed and stopped. No production
+or test code was changed, so there is no red/green evidence yet. Task 2.2 is NOT ticked.
+
+### Ruling 07: no daemon lever, so it moves to Task 5.1 (recorded in PLAN.md under Task 2.2)
+
+`handlers/pre_compact/compaction_signal.py` writes `<stem>.compacting` at PreCompact. The supervisor decides
+`WOULD_CONTINUE` from `reading.compacting`, which comes from that signal OR from the context sidecar's own
+`compacting` field (`claude-supervise.py` about line 2649, and 7215-7240). Withholding the signal under BLOCKED would
+therefore not reliably stop the `continue`. It would also leave the supervisor's AWAIT_COMPACTING wait after a
+`/compact` it typed without the signal it needs, so the wait times out, and failed injections keep counting towards
+`max_injections` (the reset happens only on a confirmed compaction, about line 6300). Neither is a small, safe
+change. Task 5.1 already names the `WOULD_CONTINUE` skip, so the daemon's whole part of Ruling 07 is the BLOCKED entry
+in `<stem>.session-modes`, which Task 2.2 step 1 writes.
+
+### Decisions pinned for the next agent (they refine steps 1-4 above)
+
+- **Constants** (`utils/session_modes.py`): add `DECLARED_BLOCKED_TTL_SECONDS = 24 h`, a `BLOCKED_LABELS` frozenset
+  (AWAITING_HUMAN, GOAL_BLOCKED), a `SessionPolicy.is_blocked` property, and a `declared_blocked_entry(session_id, *, entered_at)` factory (BLOCKED, DECLARED, AGENT, SESSION lifetime, expires `entered_at + TTL`). The writer, the
+  legacy import and the tests all use this one factory.
+
+- **Expiry options**: the suppressor's `expiry_hours` and the idle gate's `marker_expiry_hours` stop meaning anything,
+  because expiry now lives in the entry. Remove both attributes (`_expiry_hours`, `_marker_expiry_hours`,
+  `DEFAULT_MARKER_EXPIRY_HOURS`). Update `docs/guides/HANDLER_REFERENCE.md` (about line 4737) and say so in the
+  release note. This repository's own `.claude/hooks-daemon.yaml` sets neither option.
+
+- **Legacy import**: add `import_legacy_blockage_marker(registry, marker_path) -> bool` in
+  `core/session_mode_registry.py`. It uses `blockage_marker.read_marker`. Check `exists()` first, so that a corrupt
+  file is told apart from a missing one: corrupt means a WARNING and delete. A live marker becomes
+  `declared_blocked_entry(entered_at=recorded_at)`; an expired or future-dated one is logged at INFO and deleted. In
+  every case the file is unlinked. Call it in `DaemonDataLayer.session_modes` right after `registry.load()`, with
+  `ProjectContext.daemon_untracked_dir() / MARKER_FILENAME`. The data layer builds the registry once and the file is
+  deleted, so a second load never re-imports. Test both cases in `tests/unit/core/test_session_mode_registry.py` and
+  `test_data_layer.py`.
+
+- **Writer** (`auto_continue_stop._maybe_record_human_blocked_marker`, about line 987): stop writing the legacy file
+  and call `get_data_layer().session_modes.enter(declared_blocked_entry(...))`. A RuntimeError (no project context)
+  and an OSError both go through `log_and_continue` at WARNING (the RuntimeError is DEBUG today; raise it) and
+  return False. Keep the stop-events key `marker_written`.
+
+- **Stand-in exemption** (`_stand_in_block`, about line 722): replace `autonomy_allowed` with
+  `v = autonomy_verdict(hook_input)` and return None when `not v.environment_allowed or v.session.focus_task is not None`. Tests in `test_auto_continue_stop_stand_in.py`: after the stop, (a) the registry holds AWAITING_HUMAN and
+  the deny still fires; (b) a desktop `containers-only` stop gives no deny (`pin_desktop_containers_only`); (c) a
+  stop under focus (`focus_entry`) gives no deny. The goal-ledger challenge (about line 970) keeps
+  `autonomy_allowed`, so it is suppressed while BLOCKED, as the plan's "No re-arm" requires.
+
+- **Suppressor**: add a `_policy(session_id)` helper that reads `get_data_layer().session_modes.policy(...)`. On
+  RuntimeError or OSError it logs a WARNING and returns an empty policy, so the tick is delivered. Compute
+  `failsafe = tick or DaemonTick(TickKind.FAILSAFE)` (this covers the pre-sentinel heading) and then
+  `action = policy.tick_action(failsafe, runs_while_blocked=False, work_owed=owed)`:
+
+  - DROP means row 3: deny with `_RULE`.
+  - THIN means row 2: `_apply_backoff`.
+  - Anything else falls to rows 1 and 4.
+
+  For other ticks, `runs` is true only when the tick is DECLARED, `policy.is_blocked` holds and the config says
+  `runs_while_awaiting_human`. DROP then denies with `_DECLARED_RULE`. Focus wording for a dropped declared tick is
+  Task 3.2's job. `_note_untagged_prompt` exits AWAITING_HUMAN and GOAL_BLOCKED for this session. An OSError there
+  is a WARNING, and the prompt is still allowed. `matches()` returns True when the canonical marker is present, or
+  a cadence file exists, or `_policy(session).is_blocked`.
+
+- **Idle gate** `_awaiting_human` (about line 224): `session_policy(hook_input).is_blocked`, or this stop declares
+  it.
+
+- **Test isolation (do this first)**: `tests/conftest.py` never resets the data-layer singleton. A registry built in
+  one test therefore stays bound to that test's tmp dir. Add an autouse fixture:
+  `monkeypatch.setattr(data_layer.get_data_layer(), "_session_modes", None)`.
+
+- **Tests to migrate** off `write_marker`/`MARKER_FILENAME` (the suppressor's tests use fake clocks of about 1000 s,
+  which the registry's real clock reads as expired, so use `pin_session_modes` + `awaiting_human_entry`):
+
+  - `test_failsafe_cron_blockage_suppressor.py` (21 sites; the Task 2.1 tests become registry assertions with the
+    same scenarios);
+  - `test_failsafe_cron_multi_cron_ticks.py`;
+  - `test_auto_continue_stop.py` (10);
+  - `test_auto_continue_stop_stand_in.py` (6);
+  - `test_awaiting_human_marker_scope.py`;
+  - `test_idle_workable_issue_stop_gate.py`;
+  - `tests/integration/test_handlers_do_not_match_prose.py`.
+
+  `utils/cron_pause.py` uses only `marker_is_valid`; leave it as it is.
+
 ## QA
 
 Not run yet.
