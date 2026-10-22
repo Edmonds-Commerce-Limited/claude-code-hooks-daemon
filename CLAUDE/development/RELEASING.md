@@ -69,6 +69,18 @@ update it as each numbered step completes:
 }
 ```
 
+When the release goes through a pull request (Plan 00476), the file also gains
+an optional `ci` record of that pull request's CI run:
+
+```json
+"ci": {"pr_number": 12, "run_id": 987654, "head_sha": "<40-hex sha>", "conclusion": "success"}
+```
+
+All four fields are required and no others are allowed. Before tagging, run
+`scripts/release/check_release_ci.py`: it exits non-zero with one named reason
+unless the conclusion is `success`, `head_sha` equals the commit at HEAD, and
+`gh run view <run_id>` still reports the same conclusion and head commit.
+
 Rules for reading it:
 
 - **No state file ⇒ no release is in progress.** A dirty tree, a bumped
