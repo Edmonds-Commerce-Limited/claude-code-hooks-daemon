@@ -84,18 +84,32 @@ and refreshed rather than re-derived. Plan 00169's prior-art survey touched open
 
 - [x] ✅ **Task 3.1**: `FINDINGS.md`: answers to the four questions, the same/different comparison, and an epic
   proposal broken into candidate plans.
-- [ ] ⬜ **Task 3.2**: A fact-check of the findings against opencode's source and docs and this repository. Fix
+- [x] ✅ **Task 3.2**: A fact-check of the findings against opencode's source and docs and this repository. Fix
   anything refuted.
-- [ ] ⬜ **Task 3.3**: Comment the findings on #136. Owner questions go up only where an adviser cannot rule.
+- [x] ✅ **Task 3.3**: Comment the findings on #136. Owner questions go up only where an adviser cannot rule.
+
+### Phase 4: Owner follow-ups
+
+- [ ] ⬜ **Task 4.1**: opencode vs Codex CLI comparison, including model and subscription lock-in: can an OpenAI
+  (ChatGPT) subscription drive opencode, and can Codex use other providers? → `RESEARCH-opencode-vs-codex.md`.
+- [ ] ⬜ **Task 4.2**: The owner's layout: `AGENTS.md` ONLY, with no `CLAUDE.md` anywhere, so Claude Code takes its
+  `AGENTS.md` fallback. Establish exactly what is lost against the shim layout, using the Task 1.5 probes. Recast the
+  enforcement as an explicit opt-in "multi-harness" mode: projects that do not opt in see no change; projects that do
+  get the layout checks → `ANALYSIS-multi-harness-mode.md`.
+- [ ] ⬜ **Task 4.3**: Update `FINDINGS.md` (answers, decisions and the epic's plan 2) and comment the delta on #136.
 
 ## Success Criteria
 
-- [ ] Each of the four questions has a cited answer in `FINDINGS.md`.
-- [ ] Every Claude Code event the daemon handles appears in `MAPPING-events.md` with a capability verdict.
-- [ ] The options paper gives the owner enough to decide whether to start the epic, and in what shape.
-- [ ] No release-bound consequences: research only, with no change a client sees, so nothing goes to
+- [x] Each of the four questions has a cited answer in `FINDINGS.md`.
+- [x] Every Claude Code event the daemon handles appears in `MAPPING-events.md` with a capability verdict.
+- [x] The options paper gives the owner enough to decide whether to start the epic, and in what shape.
+- [x] No release-bound consequences: research only, with no change a client sees, so nothing goes to
   `CLAUDE/UPGRADES/UNRELEASED/` (the pending-release holding area).
 
 ## Delivery & Milestones
 
-- Plan filed; Phase 1 dispatched.
+- Phase 1: six research documents (Tasks 1.1-1.6), including the owner's added AGENTS.md and config-sync questions.
+- Phase 2: `MAPPING-events.md`, `ANALYSIS-plan-workflow.md`, `OPTIONS-support.md`.
+- Phase 3: `FINDINGS.md`. Fact-checks in `subagent-reports/` (research: 1 minor refuted and fixed; findings: 8
+  refuted and fixed). Delegated rulings: all CLEAR except M5 (naming), non-blocking, posted on #136.
+- The epic proposal (plans 0-7) is in `FINDINGS.md` §5. No epic plans are filed yet: research only, per the owner.
