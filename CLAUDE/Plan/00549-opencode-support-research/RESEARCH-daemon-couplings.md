@@ -206,7 +206,7 @@ moved), or **GONE** (the 00292 claim no longer holds).
   - Workflow, TaskCreate/Update/Get/List/Output/Stop, SendMessage, Skill
   - EnterPlanMode/ExitPlanMode, AskUserQuestion, NotebookEdit, LSP, Artifact
   - CronCreate/Delete/List, ToolSearch
-- 74 handler modules match a tool by name or field, including 59 of 82 PreToolUse modules.
+- 74 handler modules match a tool by name or field, including 59 of the 81 PreToolUse modules (a file-level grep count; `__init__.py` excluded).
 - `ToolInput` field names are Claude's: `command`, `file_path`, `content`, `old_string`, `new_string`.
 - Why A: the core guards (destructive git, sed, pipe, secret file, TDD, QA suppression, sensitive content, plan
   number) need only "shell command" and "file write/edit with path and content". A host whose file-edit tool uses a
@@ -484,7 +484,7 @@ Ranked by how much of the daemon stops working if the coupling cannot be met.
 01. **R5, hook registration** (`install.py:756`, `hook_registration.py:337`). Nothing runs without a host-side "run
     this command for this event" surface.
 02. **A blocking pre-tool hook carrying tool name and input** (R3 PreToolUse `hook_result.py:676-713`; B2
-    `tools.py:25-102`). This feeds 59 of the 82 PreToolUse handlers, which are the daemon's core value. The host
+    `tools.py:25-102`). This feeds 59 of the 81 PreToolUse handler modules, which are the daemon's core value. The host
     must be able to deny, and ideally rewrite (`updatedInput`).
 03. **R3, the response serializers** (`hook_result.py:565-1021`). Every verdict passes through them. A second host
     needs its own serializer.

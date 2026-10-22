@@ -79,7 +79,9 @@ Both are more exact than a model's self-report:
 Fixtures were built under `mktemp -d /tmp/agentsmd-probe-XXXX` (`/tmp/agentsmd-probe-iFFs`), each one a `git init`
 repository. There was no `/etc/claude-code`, no `~/.claude/CLAUDE.md` and no user hooks. Each file held a unique
 `CANARY_*` token. Scripts: `untracked/scratch/agentsmd-probe/run.sh` and `run2.sh`. Raw outputs:
-`untracked/scratch/agentsmd-probe-out/` (`summary.txt`, `summary2.txt` and the per-case files).
+`untracked/scratch/agentsmd-probe-out/` (`summary.txt`, `summary2.txt` and the per-case files). The nested-load
+evidence (e.g. case k) is in the probe sessions' transcripts under `/root/.claude/projects/-tmp-agentsmd-probe-*/`;
+the per-case output files for model-asking runs only hold "Not logged in".
 
 `and-mode` means `--settings '{"pluginConfigs":{"cc-plugin-agents-md@builtin":{"options":{"instructionFiles":"claude-md-and-agents-md"}}}}'`.
 
