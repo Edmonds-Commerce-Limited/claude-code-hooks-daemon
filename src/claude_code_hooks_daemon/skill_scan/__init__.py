@@ -5,21 +5,11 @@ points of confusion, and files a human-reviewed report of skill-creation
 suggestions. Three stages: deterministic extraction, deterministic
 condense/redact aggregation, one bounded model call. Never auto-creates a
 skill.
+
+This package init deliberately imports nothing. ``utils.session_modes`` imports
+the light ``constants`` / ``extraction`` submodules and sits on
+``daemon/paths.py``'s import chain (via ``core.data_layer``), which must load
+on a pre-3.11 interpreter. Re-exporting
+``pipeline`` here would pull ``digest`` -> ``mdformat`` -> ``tomllib`` into that
+chain. Import from the submodules directly.
 """
-
-from claude_code_hooks_daemon.skill_scan.models import (
-    Cluster,
-    Prompt,
-    ScanStats,
-    SkillScanOptions,
-)
-from claude_code_hooks_daemon.skill_scan.pipeline import ScanResult, run_scan
-
-__all__ = [
-    "Cluster",
-    "Prompt",
-    "ScanResult",
-    "ScanStats",
-    "SkillScanOptions",
-    "run_scan",
-]
