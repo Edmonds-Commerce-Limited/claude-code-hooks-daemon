@@ -321,7 +321,7 @@ fi
 # Print summary
 echo ""
 echo "Test Results:"
-python3 -c "
+"${VENV_PYTHON}" -c "
 import json
 with open('${OUTPUT_FILE}') as f:
     data = json.load(f)

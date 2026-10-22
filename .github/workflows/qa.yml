@@ -62,6 +62,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The classifier scripts run on the interpreter set up here, passed to
+      # emit_tier.bash as HOOKS_DAEMON_PYTHON, never on a PATH python3.
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       # Values arrive through env, never interpolated into the script text.
       # push: base is the head sha of the newest main run of this workflow that
       # reached a verdict, NOT github.event.before: a run superseded while
@@ -76,7 +83,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: bash scripts/ci/emit_tier.bash | tee -a "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          HOOKS_DAEMON_PYTHON="$(command -v python)" bash scripts/ci/emit_tier.bash \
+            | tee -a "$GITHUB_OUTPUT"
 
   # The docs and code tiers: one Python, the change's own checks. A full-suite
   # run on that one Python replaces the mapped tests when the mapper cannot map

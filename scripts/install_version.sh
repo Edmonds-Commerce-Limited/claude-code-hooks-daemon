@@ -372,7 +372,10 @@ for _prior_venv in "$DAEMON_DIR"/untracked/venv*; do
     PRIOR_VENV_STAMP="$(get_venv_version "$_prior_venv")"
     [ -z "$PRIOR_VENV_STAMP" ] || break
 done
-VENV_PATH=$(ensure_venv "$DAEMON_DIR" "$INSTALLED_VERSION" "${HOOKS_DAEMON_PYTHON:-python3}")
+if [ -z "${HOOKS_DAEMON_PYTHON:-}" ]; then
+    fail_fast "HOOKS_DAEMON_PYTHON is unset: check_python3 should have exported the resolved interpreter"
+fi
+VENV_PATH=$(ensure_venv "$DAEMON_DIR" "$INSTALLED_VERSION" "$HOOKS_DAEMON_PYTHON")
 if [ -z "$VENV_PATH" ]; then
     fail_fast "ensure_venv returned empty path"
 fi

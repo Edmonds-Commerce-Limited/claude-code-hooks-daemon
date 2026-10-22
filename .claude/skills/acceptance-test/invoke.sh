@@ -69,7 +69,7 @@ esac
 
 Verify JSON is valid and count tests:
 \`\`\`bash
-TOTAL_TESTS=\$(python3 -c "import json; print(len(json.load(open('untracked/scratch/acceptance_tests.json'))))")
+TOTAL_TESTS=\$(jq length untracked/scratch/acceptance_tests.json)
 echo "Total tests: \$TOTAL_TESTS"
 \`\`\`
 

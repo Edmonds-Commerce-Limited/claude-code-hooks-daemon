@@ -354,6 +354,16 @@ else
 fi
 echo ""
 
+echo "25c. Running Bare-Python-Invocation Check..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_bare_python_invocation.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Bare-python-invocation check FAILED"
+else
+    echo "✅ Bare-python-invocation check PASSED"
+fi
+echo ""
+
 echo "26. Running Declared-Invariant-Pairs Check..."
 echo "----------------------------------------"
 if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_declared_invariant_pairs.py" --json; then
@@ -443,7 +453,7 @@ echo ""
 echo "========================================"
 echo "QA Summary"
 echo "========================================"
-python3 << 'EOF'
+"${VENV_PYTHON}" << 'EOF'
 import json
 from pathlib import Path
 
@@ -479,6 +489,7 @@ results = {
     "Input Contract": "untracked/qa/input_contract.json",
     "Authored Path Stat": "untracked/qa/authored_path_stat.json",
     "Install Mode Marker": "untracked/qa/install_mode_marker.json",
+    "Bare Python Invocation": "untracked/qa/bare_python_invocation.json",
     "Skip List Substring": "untracked/qa/skip_list_substring.json",
     "Unreachable Handle Branch": "untracked/qa/unreachable_handle_branch.json",
     "Declared Invariant Pairs": "untracked/qa/declared_invariant_pairs.json",

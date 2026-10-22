@@ -24,6 +24,27 @@ else
     VERSION_FILE=".claude/hooks-daemon/src/claude_code_hooks_daemon/version.py"
 fi
 
+# Resolve the daemon's interpreter (its venv bin/python via the canonical
+# resolver, else $HOOKS_DAEMON_PYTHON). Never a bare python3 from PATH, which
+# may be older than the daemon's floor or lack PyYAML. When none resolves,
+# PYTHON_BIN stays empty and the checks that need it FAIL loudly.
+RESOLVE_DAEMON_DIR=".claude/hooks-daemon"
+if [[ ! -d "$RESOLVE_DAEMON_DIR" ]]; then
+    RESOLVE_DAEMON_DIR="."
+fi
+RESOLVE_LIB="$RESOLVE_DAEMON_DIR/scripts/lib/resolve_venv.sh"
+PYTHON_BIN=""
+if [[ -f "$RESOLVE_LIB" ]]; then
+    # shellcheck source=scripts/lib/resolve_venv.sh
+    source "$RESOLVE_LIB"
+    PYTHON_BIN="$(resolve_venv_python "$(cd "$RESOLVE_DAEMON_DIR" && pwd)")" || PYTHON_BIN=""
+elif [[ -n "${HOOKS_DAEMON_PYTHON:-}" ]]; then
+    PYTHON_BIN="$HOOKS_DAEMON_PYTHON"
+fi
+if [[ -z "$PYTHON_BIN" ]]; then
+    echo "No daemon Python interpreter resolved (no venv under $RESOLVE_DAEMON_DIR, HOOKS_DAEMON_PYTHON unset)." >&2
+fi
+
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}v2.12.0 Upgrade Verification${NC}"
 echo -e "${BLUE}========================================${NC}"
@@ -42,30 +63,33 @@ if [[ -f "$VERSION_FILE" ]]; then
 
     if [[ "$VERSION_MAJOR_MINOR" == "$EXPECTED_MAJOR_MINOR" ]] || [[ "$VERSION" > "$EXPECTED_VERSION" ]]; then
         echo -e "${GREEN}✅ PASS: Version is $VERSION (>= $EXPECTED_VERSION)${NC}"
-        ((PASS_COUNT++))
+        PASS_COUNT=$((PASS_COUNT + 1))
     else
         echo -e "${RED}❌ FAIL: Version is $VERSION, expected >= $EXPECTED_VERSION${NC}"
-        ((FAIL_COUNT++))
+        FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 else
     echo -e "${RED}❌ FAIL: Version file not found: $VERSION_FILE${NC}"
-    ((FAIL_COUNT++))
+    FAIL_COUNT=$((FAIL_COUNT + 1))
 fi
 echo ""
 
 # Check 2: Config exists and is valid YAML
 echo -e "${BLUE}[2/5] Validating config file...${NC}"
 if [[ -f "$CONFIG_FILE" ]]; then
-    if python3 -c "import yaml; yaml.safe_load(open('$CONFIG_FILE'))" 2>/dev/null; then
+    if [[ -z "$PYTHON_BIN" ]]; then
+        echo -e "${RED}❌ FAIL: No daemon Python interpreter resolved to validate the config${NC}"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    elif "$PYTHON_BIN" -c "import sys, yaml; yaml.safe_load(open(sys.argv[1]))" "$CONFIG_FILE"; then
         echo -e "${GREEN}✅ PASS: Config file is valid YAML${NC}"
-        ((PASS_COUNT++))
+        PASS_COUNT=$((PASS_COUNT + 1))
     else
         echo -e "${RED}❌ FAIL: Config file has YAML syntax errors${NC}"
-        ((FAIL_COUNT++))
+        FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 else
     echo -e "${RED}❌ FAIL: Config file not found: $CONFIG_FILE${NC}"
-    ((FAIL_COUNT++))
+    FAIL_COUNT=$((FAIL_COUNT + 1))
 fi
 echo ""
 
@@ -77,10 +101,10 @@ if grep -q "$OLD_HANDLER" "$CONFIG_FILE" 2>/dev/null; then
     grep -n "$OLD_HANDLER" "$CONFIG_FILE"
     echo ""
     echo "Run migration script: bash CLAUDE/UPGRADES/v2/v2.11-to-v2.12/migration-script.sh"
-    ((FAIL_COUNT++))
+    FAIL_COUNT=$((FAIL_COUNT + 1))
 else
     echo -e "${GREEN}✅ PASS: No old handler name in config${NC}"
-    ((PASS_COUNT++))
+    PASS_COUNT=$((PASS_COUNT + 1))
 fi
 echo ""
 
@@ -90,63 +114,52 @@ if grep -q "post_tool_use:" "$CONFIG_FILE" 2>/dev/null; then
     if grep -q "$NEW_HANDLER" "$CONFIG_FILE" 2>/dev/null; then
         echo -e "${GREEN}✅ PASS: New handler name '$NEW_HANDLER' found in config${NC}"
         grep -n "$NEW_HANDLER" "$CONFIG_FILE" | head -3
-        ((PASS_COUNT++))
+        PASS_COUNT=$((PASS_COUNT + 1))
     else
         echo -e "${YELLOW}ℹ️  INFO: New handler name not found (may not be configured)${NC}"
         echo "This is OK if you never used the old handler."
-        ((PASS_COUNT++))
+        PASS_COUNT=$((PASS_COUNT + 1))
     fi
 else
     echo -e "${YELLOW}ℹ️  INFO: No PostToolUse handlers configured${NC}"
-    ((PASS_COUNT++))
+    PASS_COUNT=$((PASS_COUNT + 1))
 fi
 echo ""
 
 # Check 5: Daemon can load handler
 echo -e "${BLUE}[5/5] Checking handler loads successfully...${NC}"
-if command -v python3 &> /dev/null; then
+if [[ -z "$PYTHON_BIN" ]]; then
+    echo -e "${RED}❌ FAIL: No daemon Python interpreter resolved, cannot run the import check${NC}"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+else
     # Detect self-install mode vs normal install
     if [[ -d "src/claude_code_hooks_daemon" ]]; then
         # Self-install mode: running from project root
         DAEMON_DIR="."
-        if [[ -f "untracked/venv/bin/python" ]]; then
-            PYTHON_BIN="untracked/venv/bin/python"
-        else
-            PYTHON_BIN="python3"
-        fi
     else
-        # Normal install mode
+        # Normal install mode (PYTHON_BIN is absolute, so the cd is safe)
         DAEMON_DIR=".claude/hooks-daemon"
         if [[ -d "$DAEMON_DIR" ]]; then
             cd "$DAEMON_DIR"
-            if [[ -f "untracked/venv/bin/python" ]]; then
-                PYTHON_BIN="untracked/venv/bin/python"
-            else
-                PYTHON_BIN="python3"
-            fi
         else
             echo -e "${YELLOW}⚠️  WARNING: Daemon directory not found: $DAEMON_DIR${NC}"
-            ((FAIL_COUNT++))
+            FAIL_COUNT=$((FAIL_COUNT + 1))
             DAEMON_DIR=""
         fi
     fi
 
     if [[ -n "$DAEMON_DIR" ]]; then
-        if $PYTHON_BIN -c "from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import LintOnEditHandler; print('OK')" 2>/dev/null; then
+        if "$PYTHON_BIN" -c "from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import LintOnEditHandler; print('OK')"; then
             echo -e "${GREEN}✅ PASS: Handler imports successfully${NC}"
-            ((PASS_COUNT++))
+            PASS_COUNT=$((PASS_COUNT + 1))
         else
             echo -e "${RED}❌ FAIL: Handler import error${NC}"
-            $PYTHON_BIN -c "from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import LintOnEditHandler" 2>&1 || true
-            ((FAIL_COUNT++))
+            FAIL_COUNT=$((FAIL_COUNT + 1))
         fi
         if [[ "$DAEMON_DIR" != "." ]]; then
             cd - > /dev/null
         fi
     fi
-else
-    echo -e "${YELLOW}⚠️  WARNING: Python3 not found, skipping import check${NC}"
-    ((PASS_COUNT++))
 fi
 echo ""
 

@@ -168,21 +168,38 @@ detect_install_mode() {
         return 0
     fi
 
-    # Use python3 to parse YAML and check self_install_mode
-    if ! command -v python3 &>/dev/null; then
+    # Parse the YAML with the RESOLVED interpreter, never a bare python3 from
+    # PATH: the daemon's venv bin/python first (it always carries PyYAML),
+    # else the interpreter the prerequisite check validated and exported as
+    # HOOKS_DAEMON_PYTHON (a re-install whose venv is gone). The daemon dir is
+    # .claude/hooks-daemon for a normal install, the project root otherwise.
+    # No resolved interpreter, or one without PyYAML, is a loud failure:
+    # guessing "normal" would misclassify a self-install checkout.
+    local resolve_dir="$project_root"
+    if [ -d "$project_root/.claude/hooks-daemon" ]; then
+        resolve_dir="$project_root/.claude/hooks-daemon"
+    fi
+    local mode_python=""
+    if declare -F resolve_existing_venv_python > /dev/null; then
+        mode_python="$(resolve_existing_venv_python "$resolve_dir")" || mode_python=""
+    fi
+    if [ -z "$mode_python" ]; then
+        mode_python="${HOOKS_DAEMON_PYTHON:-}"
+    fi
+    if [ -z "$mode_python" ]; then
+        echo "detect_install_mode: no resolved Python interpreter under $resolve_dir and HOOKS_DAEMON_PYTHON is unset; cannot read self_install_mode." >&2
         echo "normal"
-        return 0
+        return 1
     fi
 
     local self_install
-    self_install=$(python3 -c "
+    self_install=$("$mode_python" -c "
 import sys
 try:
     import yaml
 except ImportError:
-    # yaml not available, assume normal mode
-    print('normal')
-    sys.exit(0)
+    print('PyYAML is not importable from ' + sys.executable, file=sys.stderr)
+    sys.exit(1)
 
 try:
     with open(sys.argv[1]) as f:
@@ -193,7 +210,11 @@ try:
         print('normal')
 except Exception:
     print('normal')
-" "$config_file" 2>/dev/null)
+" "$config_file") || {
+        echo "detect_install_mode: could not read $config_file with $mode_python." >&2
+        echo "normal"
+        return 1
+    }
 
     if [ -z "$self_install" ]; then
         echo "normal"
@@ -325,7 +346,9 @@ Make sure you're running this from within a Claude Code project."
     validate_project_structure "$PROJECT_ROOT"
 
     # Detect install mode
-    INSTALL_MODE=$(detect_install_mode "$PROJECT_ROOT")
+    if ! INSTALL_MODE=$(detect_install_mode "$PROJECT_ROOT"); then
+        fail_fast "Could not determine the install mode for $PROJECT_ROOT (see the detect_install_mode message above)."
+    fi
     print_verbose "Install mode: $INSTALL_MODE"
 
     # Set derived paths

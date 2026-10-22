@@ -24,6 +24,23 @@
       "fix": "Catch the specific exception types the call can raise, and handle or re-raise them.",
       "checks": ["audit_error_hiding.py"]
     },
+    "bare-python-allowlist-stale": {
+      "statement": "An entry in `scripts/qa/bare-python-allowlist.json` pins a whole line that fewer lines of its file now carry than its `occurrences` count, so the list has drifted from the code.",
+      "fix": "Correct the entry's `line` or `occurrences` to the probe as it now stands, or delete the entry if the probe is gone. An entry is only valid while the exact lines it names exist.",
+      "checks": ["check_bare_python_invocation.py"],
+      "meta": true
+    },
+    "bare-python-invocation": {
+      "statement": "A first-party shell script runs `python3` / `python` by its bare name, so it runs whatever PATH resolves first, which may be older than `requires-python`. The install, upgrade and hook-dispatch scripts have already resolved the interpreter the daemon runs on.",
+      "fix": "Run the interpreter the caller resolved: the venv's `bin/python`, `\"$HOOKS_DAEMON_PYTHON\"` during an upgrade, or the `\"$interpreter\"` your function was given. Code whose whole job is to find or validate an interpreter before a venv exists is listed with its reason in `scripts/qa/bare-python-allowlist.json`; anything else is a defect to fix, not an entry to add. There is no inline exemption marker.",
+      "checks": ["check_bare_python_invocation.py"]
+    },
+    "bare-python-unreadable": {
+      "statement": "The bare-python check could not read a shell file (unreadable or not UTF-8), so it cannot be shown free of a bare python invocation.",
+      "fix": "Make the file readable UTF-8, or remove it if it is not source.",
+      "checks": ["check_bare_python_invocation.py"],
+      "meta": true
+    },
     "bare-python-module": {
       "statement": "An agent-facing string contains `python -m claude_code_hooks_daemon`.",
       "fix": "Point the agent at the skill instead: `Skill tool: skill=hooks-daemon, args=<subcommand>`.",

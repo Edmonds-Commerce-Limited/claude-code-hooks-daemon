@@ -16,6 +16,7 @@ it as an unverified claim in a plan document.
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 from typing import Final
 
@@ -26,18 +27,32 @@ _OUTPUT_SH: Final[Path] = _REPO_ROOT / "scripts" / "install" / "output.sh"
 _TIMEOUT_SECONDS: Final[int] = 30
 
 
-def _run(project_root: Path, script: str) -> subprocess.CompletedProcess[str]:
+def _run(
+    project_root: Path,
+    script: str,
+    extra_env: dict[str, str] | None = None,
+    resolved_python: str | None = sys.executable,
+) -> subprocess.CompletedProcess[str]:
+    """Run ``script`` after sourcing a copy of project_detection.sh.
+
+    ``resolved_python`` becomes HOOKS_DAEMON_PYTHON, the interpreter the
+    prerequisite check would have exported; None leaves it unset.
+    """
     lib_dir = project_root / "lib"
     lib_dir.mkdir(exist_ok=True)
     guard_copy = lib_dir / "project_detection.sh"
     guard_copy.write_text(_PROJECT_DETECTION_SH.read_text(encoding="utf-8"), encoding="utf-8")
     (lib_dir / "output.sh").write_text(_OUTPUT_SH.read_text(encoding="utf-8"), encoding="utf-8")
+    env = {"PATH": "/usr/bin:/bin:/usr/local/bin", "HOME": str(project_root)}
+    if resolved_python is not None:
+        env["HOOKS_DAEMON_PYTHON"] = resolved_python
+    env.update(extra_env or {})
     return subprocess.run(
         ["bash", "-c", f'source "{guard_copy}"\n{script}'],
         capture_output=True,
         text=True,
         timeout=_TIMEOUT_SECONDS,
-        env={"PATH": "/usr/bin:/bin:/usr/local/bin", "HOME": str(project_root)},
+        env=env,
         check=False,
         cwd=str(project_root),
     )
@@ -102,3 +117,59 @@ class TestDetectInstallModeReadsOnlyTheConfig:
         result = _run(tmp_path, f'detect_install_mode "{tmp_path}"')
 
         assert result.stdout.strip() == "normal", result.stderr
+
+
+class TestDetectInstallModeUsesTheResolvedInterpreter:
+    def _write_self_install_config(self, root: Path) -> None:
+        (root / ".claude").mkdir()
+        (root / ".claude" / "hooks-daemon.yaml").write_text(
+            "daemon:\n  self_install_mode: true\n", encoding="utf-8"
+        )
+
+    def test_a_python3_first_on_path_is_never_run(self, tmp_path: Path) -> None:
+        self._write_self_install_config(tmp_path)
+        fake_bin = tmp_path / "fakebin"
+        fake_bin.mkdir()
+        marker = tmp_path / "fake-python3-ran"
+        fake = fake_bin / "python3"
+        fake.write_text(f"#!/bin/sh\ntouch {marker}\necho normal\n", encoding="utf-8")
+        fake.chmod(0o755)
+
+        result = _run(
+            tmp_path,
+            f'detect_install_mode "{tmp_path}"',
+            extra_env={"PATH": f"{fake_bin}:/usr/bin:/bin"},
+        )
+
+        assert result.stdout.strip() == "self-install", result.stderr
+        assert not marker.exists()
+
+    def test_no_resolved_interpreter_fails_loudly(self, tmp_path: Path) -> None:
+        self._write_self_install_config(tmp_path)
+
+        result = _run(
+            tmp_path,
+            f'detect_install_mode "{tmp_path}"; echo rc=$?',
+            resolved_python=None,
+        )
+
+        assert "rc=1" in result.stdout, result.stdout
+        assert "no resolved Python interpreter" in result.stderr
+
+    def test_interpreter_without_pyyaml_fails_loudly(self, tmp_path: Path) -> None:
+        self._write_self_install_config(tmp_path)
+        no_yaml = tmp_path / "no-yaml-python"
+        no_yaml.write_text(
+            "#!/bin/sh\necho 'PyYAML is not importable from stub' >&2\nexit 1\n",
+            encoding="utf-8",
+        )
+        no_yaml.chmod(0o755)
+
+        result = _run(
+            tmp_path,
+            f'detect_install_mode "{tmp_path}"; echo rc=$?',
+            resolved_python=str(no_yaml),
+        )
+
+        assert "rc=1" in result.stdout, result.stdout
+        assert "could not read" in result.stderr

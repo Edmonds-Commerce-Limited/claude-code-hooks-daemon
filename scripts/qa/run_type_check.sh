@@ -58,7 +58,7 @@ else
 fi
 
 # Parse mypy output and transform to JSON
-python3 << 'EOF' > "${OUTPUT_FILE}"
+"${VENV_PYTHON}" << 'EOF' > "${OUTPUT_FILE}"
 import json
 import re
 import sys
@@ -144,7 +144,7 @@ rm -f "${OUTPUT_FILE}.raw"
 # Print summary
 echo ""
 echo "Type Check Results:"
-python3 -c "
+"${VENV_PYTHON}" -c "
 import json
 with open('${OUTPUT_FILE}') as f:
     data = json.load(f)

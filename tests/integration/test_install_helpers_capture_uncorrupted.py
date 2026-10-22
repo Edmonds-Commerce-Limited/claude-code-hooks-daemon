@@ -158,7 +158,7 @@ class TestDetectInstallModeCapture:
             f'source "{INSTALL_DIR}/project_detection.sh"\n'
             f'CAPTURED=$(detect_install_mode "{tmp_path}")\n'
         )
-        captured = _run_capture(body)
+        captured = _run_capture(body, env={"HOOKS_DAEMON_PYTHON": sys.executable})
         assert captured == "self-install", (
             f"detect_install_mode (self-install) capture corrupted. " f"Got: {captured!r}"
         )
@@ -218,7 +218,7 @@ class TestPythonVersionCaptures:
             f'source "{INSTALL_DIR}/prerequisites.sh"\n'
             f"CAPTURED=$(get_python_version)\n"
         )
-        captured = _run_capture(body)
+        captured = _run_capture(body, env={"HOOKS_DAEMON_PYTHON": sys.executable})
         assert _VERSION_RE.match(captured), (
             f"get_python_version capture corrupted (expected M.m.p). " f"Got: {captured!r}"
         )
@@ -229,10 +229,46 @@ class TestPythonVersionCaptures:
             f'source "{INSTALL_DIR}/prerequisites.sh"\n'
             f"CAPTURED=$(get_python_major_minor)\n"
         )
-        captured = _run_capture(body)
+        captured = _run_capture(body, env={"HOOKS_DAEMON_PYTHON": sys.executable})
         assert _MAJOR_MINOR_RE.match(captured), (
             f"get_python_major_minor capture corrupted (expected M.m). " f"Got: {captured!r}"
         )
+
+    def test_reports_resolved_interpreter_not_path_python3(self, tmp_path: Path) -> None:
+        """A fake python3 first on PATH must NOT be what the helpers report."""
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        fake = fake_bin / "python3"
+        fake.write_text("#!/bin/sh\necho 2.7.18\n")
+        fake.chmod(0o755)
+        body = (
+            f'source "{INSTALL_DIR}/output.sh"\n'
+            f'source "{INSTALL_DIR}/prerequisites.sh"\n'
+            f"CAPTURED=$(get_python_major_minor)\n"
+        )
+        captured = _run_capture(
+            body,
+            env={
+                "HOOKS_DAEMON_PYTHON": sys.executable,
+                "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            },
+        )
+        assert captured == f"{sys.version_info.major}.{sys.version_info.minor}"
+
+    def test_unset_resolved_interpreter_fails_loudly(self) -> None:
+        script = (
+            f'source "{INSTALL_DIR}/output.sh"\n'
+            f'source "{INSTALL_DIR}/prerequisites.sh"\n'
+            "unset HOOKS_DAEMON_PYTHON\n"
+            "get_python_version\n"
+        )
+        env = {k: v for k, v in os.environ.items() if k != "HOOKS_DAEMON_PYTHON"}
+        result = subprocess.run(
+            [BASH, "-c", script], capture_output=True, text=True, check=False, env=env
+        )
+        assert result.returncode == 1
+        assert result.stdout == ""
+        assert "HOOKS_DAEMON_PYTHON is not set" in result.stderr
 
 
 class TestPythonVenvFingerprintCapture:

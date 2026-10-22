@@ -133,8 +133,26 @@ ensure_venv() {
     # Create venv directory structure
     mkdir -p "$(dirname "${VENV_DIR}")"
 
+    # Create venv with a DISCOVERED interpreter, never a bare python3 from
+    # PATH: that may be older than the daemon's floor and would bake a wrong
+    # interpreter into the venv. find_latest_python honours
+    # $HOOKS_DAEMON_PYTHON, raises the floor from pyproject.toml's
+    # requires-python, and prints its own diagnostic when nothing qualifies.
+    local discovery_lib="${PROJECT_ROOT}/scripts/lib/python_discovery.sh"
+    if [[ ! -f "${discovery_lib}" ]]; then
+        echo -e "${RED}✗${NC} Python discovery helper missing: ${discovery_lib}" >&2
+        return 1
+    fi
+    # shellcheck source=scripts/lib/python_discovery.sh
+    source "${discovery_lib}"
+    local venv_base_python
+    if ! venv_base_python="$(find_latest_python "3.11" "${PROJECT_ROOT}/pyproject.toml")"; then
+        echo -e "${RED}✗${NC} No compatible Python found to create the venv." >&2
+        return 1
+    fi
+
     # Create venv
-    python3 -m venv "${VENV_DIR}"
+    "${venv_base_python}" -m venv "${VENV_DIR}"
 
     if [[ ! -f "${VENV_PYTHON}" ]]; then
         echo -e "${RED}✗${NC} Failed to create venv at ${VENV_DIR}" >&2

@@ -13,6 +13,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 OUTPUT_FILE="${QA_SHELL_CHECK_OUTPUT_DIR:-${PROJECT_ROOT}/untracked/qa}/shell_check.json"
 
+# Run on the interpreter the project resolved, never a bare python3 from PATH.
+# shellcheck source=../venv-include.bash
+source "${PROJECT_ROOT}/scripts/venv-include.bash"
+if [ ! -x "${VENV_PYTHON}" ]; then
+    echo "ERROR: the project interpreter is missing: ${VENV_PYTHON}" >&2
+    echo "       Create the venv (scripts/qa/run_lint.sh does) and run this again." >&2
+    exit 1
+fi
+
 mkdir -p "$(dirname "${OUTPUT_FILE}")"
 
 echo "Running shellcheck on shell scripts..."
@@ -61,7 +70,7 @@ FILE_COUNT="${#SHELL_SCRIPTS[@]}"
 echo "Found ${FILE_COUNT} shell scripts"
 
 if [ "${FILE_COUNT}" -eq 0 ]; then
-    python3 - << 'PYEOF' > "${OUTPUT_FILE}"
+    "${VENV_PYTHON}" - << 'PYEOF' > "${OUTPUT_FILE}"
 import json, sys
 json.dump({"tool": "shellcheck", "summary": {"total_files_checked": 0, "total_issues": 0,
     "errors": 0, "warnings": 0, "passed": True}, "issues": [], "files": []}, sys.stdout, indent=2)
@@ -82,7 +91,7 @@ fi
 printf '%s\n' "${SHELL_SCRIPTS[@]}" > "${OUTPUT_FILE}.files"
 
 # Parse shellcheck JSON output to standard QA format
-python3 - << PYEOF > "${OUTPUT_FILE}"
+"${VENV_PYTHON}" - << PYEOF > "${OUTPUT_FILE}"
 import json, sys
 from pathlib import Path
 
@@ -154,7 +163,7 @@ rm -f "${OUTPUT_FILE}.raw" "${OUTPUT_FILE}.files"
 
 echo ""
 echo "Shell Check Results:"
-python3 - << PYEOF
+"${VENV_PYTHON}" - << PYEOF
 import json, sys
 with open("${OUTPUT_FILE}") as f:
     data = json.load(f)

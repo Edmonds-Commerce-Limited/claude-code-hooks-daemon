@@ -114,16 +114,29 @@ if [ "$CURRENT_DIR" = "$PROJECT_ROOT" ]; then
     # Check for self-install mode
     local_self_install="false"
     if [ -f "$PROJECT_ROOT/.claude/hooks-daemon.yaml" ]; then
-        if command -v python3 &>/dev/null; then
-            local_self_install=$(python3 -c "
+        # Read the YAML with the project's RESOLVED interpreter (venv
+        # bin/python or $HOOKS_DAEMON_PYTHON), never a bare python3 from PATH.
+        # Detection must still print its location word without a venv, so an
+        # unresolved interpreter is reported on stderr and treated as "not
+        # self-install" rather than aborting.
+        detect_daemon_dir="$PROJECT_ROOT"
+        if [ -d "$HOOKS_DAEMON_DIR" ]; then
+            detect_daemon_dir="$HOOKS_DAEMON_DIR"
+        fi
+        if declare -F resolve_existing_venv_python > /dev/null \
+            && detect_python="$(resolve_existing_venv_python "$detect_daemon_dir")"; then
+            local_self_install=$("$detect_python" -c "
+import sys
 import yaml
 try:
-    with open('$PROJECT_ROOT/.claude/hooks-daemon.yaml') as f:
+    with open(sys.argv[1]) as f:
         config = yaml.safe_load(f) or {}
     print('true' if config.get('daemon', {}).get('self_install_mode', False) else 'false')
-except Exception:
+except (OSError, yaml.YAMLError, AttributeError):
     print('false')
-" 2>/dev/null || echo "false")
+" "$PROJECT_ROOT/.claude/hooks-daemon.yaml")
+        else
+            echo "Warning: no resolved Python interpreter; cannot read self_install_mode (assuming false)." >&2
         fi
     fi
 

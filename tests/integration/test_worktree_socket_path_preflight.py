@@ -33,6 +33,7 @@ the same incident: the nesting is what made the path long enough to matter.
 from __future__ import annotations
 
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Final
@@ -69,6 +70,7 @@ def _run_preflight(project_root: Path, worktree_dir: Path) -> subprocess.Complet
         "set -uo pipefail\n"
         "RED=''\nGREEN=''\nYELLOW=''\nNC=''\n"
         f'PROJECT_ROOT="{project_root}"\n'
+        f'SETUP_PYTHON="{sys.executable}"\n'
         f"{_preflight_function_source()}"
         f"{_NO_VENV_STUB}"
         f'preflight_socket_path "{worktree_dir}"\n'

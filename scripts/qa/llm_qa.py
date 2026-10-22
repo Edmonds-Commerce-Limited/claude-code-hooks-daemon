@@ -723,6 +723,11 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="authored_path_stat.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
+    "bare_python_invocation": ToolConfig(
+        command=_python("check_bare_python_invocation.py", "--json"),
+        json_file="bare_python_invocation.json",
+        jq_hint="jq '.violations[] | {file, line, rule, message}'",
+    ),
     "install_mode_marker": ToolConfig(
         command=_python("check_install_mode_marker.py", "--json"),
         json_file="install_mode_marker.json",
@@ -942,6 +947,7 @@ CHANGED_TOOL_NAMES: Final[list[str]] = [
     "canonical_callers",
     "authored_path_stat",
     "install_mode_marker",
+    "bare_python_invocation",
     "signal_targets",
     "unreachable_handle_branch",
     "fail_open_inventory",
@@ -1303,6 +1309,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "eacces_safe": _summarize_violations,
     "authored_path_stat": _summarize_violations,
     "install_mode_marker": _summarize_violations,
+    "bare_python_invocation": _summarize_violations,
     "signal_targets": _summarize_violations,
     "skip_list_substring": _summarize_violations,
     "unreachable_handle_branch": _summarize_violations,
