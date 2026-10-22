@@ -39,6 +39,8 @@ and refreshed rather than re-derived. Plan 00169's prior-art survey touched open
 - A dual-tool repository guide: which files each tool reads, where they conflict, and what one repository needs in
   order to serve both.
 - A same/different architecture comparison.
+- The owner wants the ability to enforce `AGENTS.md`: establish exactly how far Claude Code's `AGENTS.md` support
+  matches `CLAUDE.md`, and the state of the art for keeping multi-agent project config in sync.
 - An options paper and an epic proposal: the candidate shapes of support, their trade-offs, a recommendation, and
   the open questions for the owner.
 
@@ -53,13 +55,24 @@ and refreshed rather than re-derived. Plan 00169's prior-art survey touched open
 ### Phase 1: Parallel research sweep
 
 - [x] ✅ **Task 1.1**: opencode extension surface → `RESEARCH-opencode-extension-surface.md`.
+
 - [x] ✅ **Task 1.2**: opencode architecture and lifecycle: client/server split, sessions, agents and sub-agents,
   modes, compaction, providers, headless and SDK use → `RESEARCH-opencode-architecture.md`.
+
 - [x] ✅ **Task 1.3**: dual-tool repositories: instruction files, config files, skills, commands, agents, MCP and
   permissions; what each tool reads and where they collide → `RESEARCH-dual-tool-repos.md`.
+
 - [x] ✅ **Task 1.4**: daemon couplings refresh. Start from Plan 00292's inventory and re-check it against today's
   tree. List every Claude Code assumption: event names, payload shapes, response JSON, forwarders, settings,
   transcripts, plan workflow and status line → `RESEARCH-daemon-couplings.md`.
+
+- [ ] ⬜ **Task 1.5**: Claude Code's `AGENTS.md` support, verified empirically: when Claude Code reads it, and whether
+  it is fully equivalent to `CLAUDE.md` (nested sub-folder files, lazy loading, `@` imports, user/global level,
+  `/init`, `/memory`, interaction when both exist) → `RESEARCH-claude-code-agents-md.md`.
+
+- [ ] ⬜ **Task 1.6**: State of the art in multi-agent project config that stays in sync: the AGENTS.md standard,
+  sync and generator tools, symlink and import strategies, and what enforcing one canonical instruction file would
+  take → `RESEARCH-multi-agent-config-sync.md`.
 
 ### Phase 2: Mapping and options
 
