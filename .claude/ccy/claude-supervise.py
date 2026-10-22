@@ -2934,8 +2934,10 @@ def _parse_session_modes_record(record: object) -> tuple[str | None, float]:
     if mode not in _SESSION_MODES_STORED_MODES:
         raise _SessionModesError(f"mode {mode!r} is not stored in a session-modes file")
     reason = record[_SESSION_MODES_FIELD_REASON]
+    label: str | None = None
     if mode == _SESSION_MODES_BLOCKED:
-        if reason not in _SESSION_MODES_BLOCKED_LABELS:
+        label = _SESSION_MODES_BLOCKED_LABELS.get(reason) if isinstance(reason, str) else None
+        if label is None:
             raise _SessionModesError(f"blocked reason {reason!r} is not declared or goal-loop")
     elif reason is not None:
         raise _SessionModesError(f"only a blocked mode takes a reason, not {mode!r}")
@@ -2955,9 +2957,7 @@ def _parse_session_modes_record(record: object) -> tuple[str | None, float]:
         raise _SessionModesError(
             f"{_SESSION_MODES_FIELD_EXPIRES_AT} is not after {_SESSION_MODES_FIELD_ENTERED_AT}"
         )
-    if mode != _SESSION_MODES_BLOCKED:
-        return None, expires_at
-    return _SESSION_MODES_BLOCKED_LABELS[reason], expires_at
+    return label, expires_at
 
 
 def _parse_session_modes_file(
@@ -7559,7 +7559,9 @@ def decide_once(
     continue_skipped_log: str | None = None
     if evaluation.decision is Decision.WOULD_CONTINUE and modes_gate_closed:
         payload = None
-        evaluation = Evaluation(Decision.NOOP, f"post-compact continue skipped: {modes_skip_reason}")
+        evaluation = Evaluation(
+            Decision.NOOP, f"post-compact continue skipped: {modes_skip_reason}"
+        )
         continue_skipped_log = f"{_NOOP_LOG_PREFIX}: {evaluation.reason}"
     # Additional confirming Enters for a /model injection (set by the manual
     # switch branch and the auto-restore branch below); every other decision
@@ -7923,9 +7925,7 @@ def decide_once(
             if modes_gate_closed:
                 # Plan 00501: withheld, not consumed. The signal ages out on its
                 # own TTL, and the goal clear below is free to run this tick.
-                noop_reason_log = (
-                    f"{_NOOP_LOG_PREFIX}: goal injection skipped: {modes_skip_reason}"
-                )
+                noop_reason_log = f"{_NOOP_LOG_PREFIX}: goal injection skipped: {modes_skip_reason}"
             elif own_line_blocks_text:
                 noop_reason_log = (
                     f"{_NOOP_LOG_PREFIX}: goal signal pending but {_OWN_LINE_NOOP_PREFIX} "
