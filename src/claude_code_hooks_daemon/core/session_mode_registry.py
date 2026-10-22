@@ -103,17 +103,47 @@ class NoticeKind(StrEnum):
     EXPIRED = "expired"
     SURVIVED_RESTART = "survived-restart"
     CLEARED_BY_RESTART = "cleared-by-restart"
+    GOAL_LOOP_ENTERED = "goal-loop-entered"
 
 
 @dataclass(frozen=True, slots=True)
 class ModeNotice:
-    """A one-time statement about one entry, taken once by the session it belongs to."""
+    """A one-time statement about one entry, taken once by the session it belongs to.
+
+    Attributes:
+        kind: What the statement reports.
+        entry: The entry it is about.
+        goal_cleared: For a goal-loop entry, whether the goal clear was
+            signalled; None for every other kind.
+    """
 
     kind: NoticeKind
     entry: SessionModeEntry
+    goal_cleared: bool | None = None
+
+    def _goal_loop_text(self) -> str:
+        hours = (self.entry.expires_at - self.entry.entered_at) / _SECONDS_PER_HOUR
+        if self.goal_cleared:
+            goal = (
+                " The goal is being cleared: the ccy supervisor types `/goal clear` at its "
+                "next idle; without the supervisor, a human must type `/goal clear`."
+            )
+        else:
+            goal = (
+                " The daemon could not signal the goal clear (see its log), so the goal is "
+                "still set: a human must type `/goal clear`."
+            )
+        return (
+            "GOAL-LOOP BLOCKED: this session is goal-blocked by the goal-loop detector, "
+            f"which saw it stop repeatedly on a goal that stayed unmet.{goal} The block ends "
+            f"after {hours:g} h, at the next message the human types, on a repository "
+            "change, or with `hooks-daemon session-mode unblock`."
+        )
 
     def text(self) -> str:
         """The sentence stated to the agent."""
+        if self.kind is NoticeKind.GOAL_LOOP_ENTERED:
+            return self._goal_loop_text()
         if self.kind is NoticeKind.EXPIRED:
             if self.entry.mode is SessionMode.FOCUS:
                 hours = FOCUS_TTL_SECONDS // _SECONDS_PER_HOUR
@@ -313,6 +343,11 @@ class SessionModeRegistry:
         """``session_id``'s pending one-time statements; each is returned once."""
         with self._lock:
             return tuple(self._notices.pop(session_id, []))
+
+    def queue_notice(self, notice: ModeNotice) -> None:
+        """Queue ``notice`` for its entry's session, after any already pending."""
+        with self._lock:
+            self._notices.setdefault(notice.entry.session_id, []).append(notice)
 
     def load(self) -> None:
         """Read every session file once, applying the restart rules.

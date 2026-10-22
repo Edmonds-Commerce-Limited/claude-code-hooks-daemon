@@ -1,7 +1,9 @@
 """The one line that states a session's pending mode news at its next prompt (Plan 00501 Task 4.2).
 
 The registry queues one-time notices (an expiry; after a daemon restart, each
-mode that survived it or was cleared by it) and hands each out once
+mode that survived it or was cleared by it; and, through
+:meth:`SessionModeRegistry.queue_notice`, the goal-loop detector's entry with
+whether its goal clear was signalled) and hands each out once
 (:meth:`SessionModeRegistry.take_notices` is pop-once). This module is their
 only reader: ``focus_mode_trigger`` calls it on every prompt that reaches it,
 command or not, so the news is stated whatever the prompt is. A usage-paused

@@ -52,6 +52,7 @@ from claude_code_hooks_daemon.utils.session_modes import (
     SessionMode,
     SessionModeEntry,
     declared_blocked_entry,
+    goal_loop_blocked_entry,
 )
 from claude_code_hooks_daemon.utils.usage_pause import MAX_PAUSE_SPAN_SECONDS, PAUSE_GRACE_SECONDS
 
@@ -836,3 +837,63 @@ class TestFirstPromptClaim:
 
     def test_the_window_covers_the_longest_pause_a_record_can_hold(self) -> None:
         assert FIRST_PROMPT_WINDOW_SECONDS == MAX_PAUSE_SPAN_SECONDS + PAUSE_GRACE_SECONDS
+
+
+class TestGoalLoopNotice:
+    """The one-time line a goal-loop entry queues (Plan 00501 Task 6.3)."""
+
+    @staticmethod
+    def _entry(ttl: float = 4 * 3600) -> SessionModeEntry:
+        return goal_loop_blocked_entry(SID, entered_at=T0, ttl_seconds=ttl)
+
+    def test_cleared_text_names_the_block_the_clear_and_every_exit(self) -> None:
+        text = ModeNotice(NoticeKind.GOAL_LOOP_ENTERED, self._entry(), goal_cleared=True).text()
+        assert text.startswith("GOAL-LOOP BLOCKED:")
+        assert "goal-blocked by the goal-loop detector" in text
+        assert "the ccy supervisor types `/goal clear`" in text
+        assert "without the supervisor, a human must type `/goal clear`" in text
+        assert "could not signal" not in text
+        assert "after 4 h" in text
+        assert "the next message the human types" in text
+        assert "repository change" in text
+        assert "`hooks-daemon session-mode unblock`" in text
+
+    def test_failed_clear_text_says_a_human_must_clear(self) -> None:
+        text = ModeNotice(
+            NoticeKind.GOAL_LOOP_ENTERED, self._entry(ttl=1800), goal_cleared=False
+        ).text()
+        assert "could not signal the goal clear" in text
+        assert "a human must type `/goal clear`" in text
+        assert "after 0.5 h" in text
+
+    def test_goal_cleared_defaults_to_none(self) -> None:
+        assert ModeNotice(NoticeKind.EXPIRED, self._entry()).goal_cleared is None
+
+    def test_queue_notice_is_taken_once_by_its_session(
+        self, registry: SessionModeRegistry
+    ) -> None:
+        notice = ModeNotice(NoticeKind.GOAL_LOOP_ENTERED, self._entry(), goal_cleared=True)
+        registry.queue_notice(notice)
+        assert registry.take_notices(OTHER) == ()
+        assert registry.take_notices(SID) == (notice,)
+        assert registry.take_notices(SID) == ()
+
+    def test_queued_notice_follows_any_already_pending(
+        self, registry: SessionModeRegistry, clock: FakeClock
+    ) -> None:
+        registry.enter(focus(ttl=10))
+        clock.now = T0 + 20
+        registry.reap()
+        notice = ModeNotice(NoticeKind.GOAL_LOOP_ENTERED, self._entry(), goal_cleared=True)
+        registry.queue_notice(notice)
+        kinds = [n.kind for n in registry.take_notices(SID)]
+        assert kinds == [NoticeKind.EXPIRED, NoticeKind.GOAL_LOOP_ENTERED]
+
+    def test_exiting_goal_blocked_leaves_awaiting_human(
+        self, registry: SessionModeRegistry
+    ) -> None:
+        registry.enter(declared_blocked_entry(SID, entered_at=T0))
+        registry.enter(self._entry())
+        removed = registry.exit(SID, ModeLabel.GOAL_BLOCKED, evidence="cause=test")
+        assert removed is not None and removed.label is ModeLabel.GOAL_BLOCKED
+        assert [e.label for e in registry.active(SID)] == [ModeLabel.AWAITING_HUMAN]
