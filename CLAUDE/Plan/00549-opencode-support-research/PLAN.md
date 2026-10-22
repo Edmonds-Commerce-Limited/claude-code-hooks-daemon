@@ -66,18 +66,18 @@ and refreshed rather than re-derived. Plan 00169's prior-art survey touched open
   tree. List every Claude Code assumption: event names, payload shapes, response JSON, forwarders, settings,
   transcripts, plan workflow and status line → `RESEARCH-daemon-couplings.md`.
 
-- [ ] ⬜ **Task 1.5**: Claude Code's `AGENTS.md` support, verified empirically: when Claude Code reads it, and whether
+- [x] ✅ **Task 1.5**: Claude Code's `AGENTS.md` support, verified empirically: when Claude Code reads it, and whether
   it is fully equivalent to `CLAUDE.md` (nested sub-folder files, lazy loading, `@` imports, user/global level,
   `/init`, `/memory`, interaction when both exist) → `RESEARCH-claude-code-agents-md.md`.
 
-- [ ] ⬜ **Task 1.6**: State of the art in multi-agent project config that stays in sync: the AGENTS.md standard,
+- [x] ✅ **Task 1.6**: State of the art in multi-agent project config that stays in sync: the AGENTS.md standard,
   sync and generator tools, symlink and import strategies, and what enforcing one canonical instruction file would
   take → `RESEARCH-multi-agent-config-sync.md`.
 
 ### Phase 2: Mapping and options
 
-- [ ] ⬜ **Task 2.1**: Event and capability mapping → `MAPPING-events.md`.
-- [ ] ⬜ **Task 2.2**: Plan-workflow and enforcement feasibility under opencode → `ANALYSIS-plan-workflow.md`.
+- [x] ✅ **Task 2.1**: Event and capability mapping → `MAPPING-events.md`.
+- [x] ✅ **Task 2.2**: Plan-workflow and enforcement feasibility under opencode → `ANALYSIS-plan-workflow.md`.
 - [ ] ⬜ **Task 2.3**: Abstraction options and a recommendation → `OPTIONS-support.md`.
 
 ### Phase 3: Synthesis and gate
