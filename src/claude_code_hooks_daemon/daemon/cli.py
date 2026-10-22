@@ -2239,12 +2239,108 @@ def _print_session_modes(result: dict[str, Any]) -> None:
         return
     print(f"Session modes: {result.get(SessionModeIPC.KEY_BADGE, '')}")
     for mode in modes:
-        expires = time.strftime(
-            "%Y-%m-%d %H:%M UTC", time.gmtime(float(mode.get(SessionModeIPC.KEY_EXPIRES_AT, 0)))
-        )
-        detail = mode.get(SessionModeIPC.KEY_DETAIL) or ""
-        suffix = f" -- {detail}" if detail else ""
-        print(f"  {mode.get(SessionModeIPC.KEY_LABEL)} (until {expires}){suffix}")
+        _print_mode_line(mode, indent="  ")
+
+
+def _print_mode_line(mode: dict[str, Any], *, indent: str) -> None:
+    """One mode as ``<label> (until <time>) -- <detail>``."""
+    expires = time.strftime(
+        "%Y-%m-%d %H:%M UTC", time.gmtime(float(mode.get(SessionModeIPC.KEY_EXPIRES_AT, 0)))
+    )
+    detail = mode.get(SessionModeIPC.KEY_DETAIL) or ""
+    suffix = f" -- {detail}" if detail else ""
+    print(f"{indent}{mode.get(SessionModeIPC.KEY_LABEL)} (until {expires}){suffix}")
+
+
+def _send_session_mode_ipc(
+    args: argparse.Namespace, hook_input: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Send one session-mode IPC request; its result, or None after printing why not."""
+    project_path = get_project_path(getattr(args, "project_root", None))
+    socket_path = _resolve_socket_path(args, project_path)
+    if read_pid_file(str(_resolve_pid_path(args, project_path))) is None:
+        print("Daemon not running", file=sys.stderr)
+        return None
+    response = send_daemon_request(socket_path, {"event": "_system", "hook_input": hook_input})
+    if response is None:
+        print("No response from daemon", file=sys.stderr)
+        return None
+    if "error" in response:
+        print(f"ERROR: {response['error']}", file=sys.stderr)
+        return None
+    result: dict[str, Any] = response.get("result", {})
+    return result
+
+
+def _positive_int(text: str) -> int:
+    """An argparse type: a whole number of at least 1."""
+    try:
+        value = int(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"expected a whole number, got {text!r}") from error
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"expected at least 1, got {value}")
+    return value
+
+
+def _print_mode_history(result: dict[str, Any]) -> None:
+    """Human-readable ``mode-history`` output.
+
+    Raises:
+        TransitionLogError: a transition in the answer is malformed.
+    """
+    from claude_code_hooks_daemon.core.session_mode_log import ModeTransition
+
+    sessions: dict[str, list[dict[str, Any]]] = result.get(SessionModeIPC.KEY_SESSIONS, {})
+    transitions = [
+        ModeTransition.from_record(record)
+        for record in result.get(SessionModeIPC.KEY_TRANSITIONS, [])
+    ]
+    if sessions:
+        print("Active session modes:")
+        for session_id, modes in sessions.items():
+            print(f"  {session_id}:")
+            for mode in modes:
+                _print_mode_line(mode, indent="    ")
+    else:
+        print("Active session modes: no session mode is active")
+    if transitions:
+        print(f"Recent transitions (newest last, {len(transitions)} shown):")
+        for transition in transitions:
+            print(f"  {transition.line()}")
+    else:
+        print("Recent transitions: no transitions recorded")
+
+
+def cmd_mode_history(args: argparse.Namespace) -> int:
+    """Print the live session modes and the recent mode transitions (Plan 00501 Task 4.3).
+
+    Every session by default, or ``--session``'s alone; ``--limit`` caps the
+    transitions. Each transition names its evidence: what triggered it.
+
+    Returns:
+        0 on success, 1 when the daemon is down, errs, or answers malformed data.
+    """
+    from claude_code_hooks_daemon.core.session_mode_log import TransitionLogError
+
+    hook_input: dict[str, Any] = {
+        "action": SessionModeIPC.ACTION_GET_MODE_HISTORY,
+        SessionModeIPC.KEY_LIMIT: args.limit,
+    }
+    if args.session:
+        hook_input[SessionModeIPC.KEY_SESSION_ID] = args.session
+    result = _send_session_mode_ipc(args, hook_input)
+    if result is None:
+        return 1
+    if args.json:
+        print(json.dumps(result, indent=2))
+        return 0
+    try:
+        _print_mode_history(result)
+    except TransitionLogError as error:
+        print(f"ERROR: the daemon returned a malformed transition: {error}", file=sys.stderr)
+        return 1
+    return 0
 
 
 def cmd_session_mode(args: argparse.Namespace) -> int:
@@ -2273,20 +2369,9 @@ def cmd_session_mode(args: argparse.Namespace) -> int:
         print("ERROR: focus needs a task: session-mode focus <task>", file=sys.stderr)
         return 1
 
-    project_path = get_project_path(getattr(args, "project_root", None))
-    socket_path = _resolve_socket_path(args, project_path)
-    if read_pid_file(str(_resolve_pid_path(args, project_path))) is None:
-        print("Daemon not running", file=sys.stderr)
+    result = _send_session_mode_ipc(args, hook_input)
+    if result is None:
         return 1
-    response = send_daemon_request(socket_path, {"event": "_system", "hook_input": hook_input})
-    if response is None:
-        print("No response from daemon", file=sys.stderr)
-        return 1
-    if "error" in response:
-        print(f"ERROR: {response['error']}", file=sys.stderr)
-        return 1
-
-    result: dict[str, Any] = response.get("result", {})
     if args.verb == "get":
         if getattr(args, "json", False):
             print(json.dumps(result, indent=2))
@@ -10933,6 +11018,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser_session_mode.add_argument("--json", action="store_true", help="get: output JSON")
     parser_session_mode.set_defaults(func=cmd_session_mode)
+
+    # mode-history command (Plan 00501 Task 4.3): live modes and transitions
+    parser_mode_history = subparsers.add_parser(
+        "mode-history",
+        help="Show every session's live session modes and the recent mode transitions",
+    )
+    parser_mode_history.add_argument("--session", help="Only this session (default: every one)")
+    parser_mode_history.add_argument(
+        "--limit",
+        type=_positive_int,
+        default=SessionModeIPC.DEFAULT_HISTORY_LIMIT,
+        help=f"Transitions to show (default {SessionModeIPC.DEFAULT_HISTORY_LIMIT})",
+    )
+    parser_mode_history.add_argument("--json", action="store_true", help="Output JSON")
+    parser_mode_history.set_defaults(func=cmd_mode_history)
 
     # handlers command
     parser_handlers = subparsers.add_parser("handlers", help="List registered handlers")
