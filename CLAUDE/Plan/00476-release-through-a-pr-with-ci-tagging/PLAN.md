@@ -102,9 +102,11 @@ modules only.
 
 ### Phase 3: Procedure
 
-- [ ] ⬜ **Task 3.1**: Rewrite `RELEASING.md`, the release skill and the release
+- [x] ✅ **Task 3.1**: Rewrite `RELEASING.md`, the release skill and the release
   agent: prepare, open the pull request, wait for CI green, then acceptance
-  tests, merge, tag and publish locally.
+  tests, merge, tag and publish locally. Delivered: `RELEASING.md` Steps 1b,
+  7.1, 8 (8a/8b/8c), 13 and 14 rewritten, step numbers otherwise kept, a merge
+  freeze section; the skill, its `invoke.sh` and the agent now point at it.
 - [x] ✅ **Task 3.2**: A freeze on merges to `main` while a release pull request
   is open. Delivered: project handler `release_merge_freeze` (R-RELEASE-MERGE-FREEZE)
   denies `git merge` on main, `git push` to main and `gh pr merge` of any pull
