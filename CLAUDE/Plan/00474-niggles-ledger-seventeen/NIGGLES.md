@@ -121,7 +121,7 @@ Follow-ups, not defects in the reviewers' judgement:
 
 ### N528 — targeted QA never runs `test_paths_import_under_310.py` for a change to an import chain under `daemon/paths.py`
 
-**Source**: the Plan 00501 Phase 1 merge (acfe4932d) turned main CI red. `daemon/paths.py` reaches `core.data_layer`, then
+**Source**: the Plan 00501 Phase 1 merge (acfe4932d) turned main CI red. `daemon/paths.py` reaches `core.data_layer` through the package `__init__` files, then
 `core.session_mode_registry`, then `utils.session_modes`, then the `skill_scan` package `__init__`, then the pipeline and
 `mdformat`, which imports `tomllib` (3.11+). The guard test `tests/unit/daemon/test_paths_import_under_310.py` fails on
 that, but `llm_qa.py changed` mapped none of the changed modules to it, so targeted QA was green. Fixed forward by
