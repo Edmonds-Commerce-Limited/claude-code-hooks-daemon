@@ -1,0 +1,193 @@
+# Plan 00501 Phase 1 implementation report and handoff (Opus sub-agent)
+
+Worktree `/workspace/untracked/worktrees/worktree-501-phase1-model`, branch `worktree-501-phase1-model` (pushed).
+Head at handoff: `9e53bbd21` (Task 1.1). Tasks 1.2 and 1.3 are NOT started; this agent stopped at the context budget.
+Targeted QA has NOT been run yet (run it once after 1.3, as the brief says).
+
+## Environment notes for the next agent
+
+- There is no `python` on PATH. Use `/workspace/.venv/bin/python` with `PYTHONPATH=$PWD/src:$PWD` from the worktree
+  root (verified: it then imports the worktree's `src`, not `/workspace/src`).
+- Black must be run as `/workspace/.venv/bin/python -m black -q <files>` (the Python 3.11 safety warning is benign).
+- Recursive greps must name explicit literal roots (`src/...`, `tests/unit`); a `$VAR` root or `.` trips the
+  flaggable-content guard.
+- Commits need `&&` chaining (bash safe-mode guard).
+
+## Task 1.1: delivered
+
+- `src/claude_code_hooks_daemon/utils/session_modes.py` (pure, no I/O):
+  `SessionMode` (focus, blocked, usage-paused, unattended; `registry_owned` true for focus and blocked only),
+  `BlockReason` (declared, goal-loop), `ModeSource`, `Lifetime` (daemon, session), `ModeLabel` (declared in the
+  precedence order usage-paused > goal-blocked > awaiting-human > focus > unattended; `rank`, `by_precedence()`),
+  frozen `SessionModeEntry` (validates: session id, expires_at > entered_at, blocked needs a reason, others refuse
+  one, focus needs its task; `label`, `renewal_ttl` (focus only, `FOCUS_TTL_SECONDS` = 12 h), `is_live`,
+  `renewed`), `describe_entry`, `TickAction` (deliver < deliver-naming-focus < thin < drop),
+  `SessionPolicy.from_entries` (one session, each label once, held in precedence order; `drives_work`,
+  `unattended_block_applies`, `focus_task`, `badge()`, `explain_clause()`, `tick_action()`), and
+  `is_genuine_human_prompt` (prompt text + `EXCLUDE_CONTENT_MARKERS`, no file read).
+- Tick truth table (`tick_action`, most suppressive mode wins): no mode = deliver (cadence stays the suppressor's);
+  focus drops declared jobs (even `runs_while_awaiting_human`), delivers the failsafe naming the task, delivers
+  watchdog/stand-in/usage-resume; blocked (either reason) drops declared jobs unless `runs_while_blocked`, thins the
+  failsafe when work is owed and drops it otherwise (today's rows 2/3), delivers the rest; usage-paused delivers only
+  the usage-resume tick (matches `usage_pause_gate`, which holds every other prompt); unattended changes nothing.
+- Tests: `tests/unit/utils/test_session_modes.py`.
+- RED evidence: `ModuleNotFoundError: No module named 'claude_code_hooks_daemon.utils.session_modes'` (pytest exit 2).
+  GREEN: 80 passed, module coverage 99.48% then the one missing branch was covered; mypy --strict and ruff clean.
+
+## Task 1.2: design to implement (TDD; test file first)
+
+Put the registry in `src/claude_code_hooks_daemon/core/session_mode_registry.py` (beside `disclosure_tracker.py`),
+tests in `tests/unit/core/test_session_mode_registry.py`. Wire into `DaemonDataLayer` as a lazily built
+`session_modes` property (add `_session_modes` to `__slots__`; reset in `reset()`), built from
+`ProjectContext.daemon_untracked_dir() / "context-sidecar"` and calling `load()` once on first build. A
+`RuntimeError` (no project context: CLI processes, most unit tests) propagates from the property; the caller in
+Task 1.3 logs it at DEBUG and treats the session as having no modes (same convention as `autonomy._project_config`).
+
+- `SessionModeRegistry(state_dir: Path, *, clock: Callable[[], float] = time.time)`, guarded by `threading.RLock`.
+- File per session: `<state_dir>/<stem>.session-modes` (suffix deliberately not `.json`; reuse the stem rule from
+  `utils/usage_pause._session_stem`, ideally by extracting a shared helper rather than copying it). JSON shape with
+  named field constants (Phase 5 pins them to the supervisor reader):
+  `{"version": 1, "session_id": ..., "modes": [{"mode", "reason", "source", "lifetime", "entered_at", "expires_at", "detail"}]}`.
+  Write atomically with `utils/temp_names.unique_temp_path` + `replace`, as `write_usage_pause` does. Write FIRST,
+  then update memory, so a failed write (OSError propagates: fail loud) never leaves memory and disk disagreeing.
+  A session with no entries left has its file deleted.
+- API: `enter(entry)` (refuses a non-`registry_owned` mode with ValueError; replaces the same label for that session),
+  `exit(session_id, label) -> SessionModeEntry | None`, `active(session_id) -> tuple[SessionModeEntry, ...]`
+  (expires lazily), `policy(session_id) -> SessionPolicy`, `note_prompt(session_id, prompt) -> bool` (renews
+  renewable entries only when `is_genuine_human_prompt`; returns whether it was genuine; no file read, one write
+  only when something renewed), `reap() -> int` (drops expired entries across sessions), `load()`,
+  `take_notices(session_id) -> tuple[ModeNotice, ...]` (pop-once).
+- One-time statements: `ModeNotice(kind, entry)` with `NoticeKind` EXPIRED / SURVIVED_RESTART / CLEARED_BY_RESTART
+  and a `text()` built from `describe_entry`. Expiry text for focus per ruling 02: "focus expired after 12 h; type
+  `hooks-daemon focus <task>` to renew". Every expiry (lazy in `active`, or in `reap`) queues exactly one EXPIRED
+  notice; `take_notices` returns it once.
+- `load()`: for every `*.session-modes` file: parse and validate (unknown mode, wrong types, a session id that does
+  not match the file's stem, a non-registry mode, an entry `SessionModeEntry` refuses) -> on failure log at WARNING
+  and rename to `<name>.corrupt` (never read as "no modes" silently; if the rename itself fails, log at ERROR and
+  continue). `daemon`-lifetime entries are dropped with a CLEARED_BY_RESTART notice; surviving live entries get a
+  SURVIVED_RESTART notice (ruling 01, consumed by Task 4.2); expired entries get an EXPIRED notice and are dropped;
+  the file is rewritten (or deleted) to match.
+- Tests to write: enter/exit/active round trip; write-through file content and field names; per-session isolation;
+  thread safety (many threads entering/exiting, final state consistent); lifetime on load; restart notices once;
+  TTL expiry with one EXPIRED notice; renewal by a genuine prompt and NOT by a tick / supervisor line; reap deletes
+  emptied files; malformed JSON, wrong schema and mismatched session id each logged at WARNING (caplog) and renamed
+  `*.corrupt`; a write failure (read-only dir) raises and leaves memory unchanged; data-layer property builds once
+  from a tmp `daemon_untracked_dir` (monkeypatch `ProjectContext.daemon_untracked_dir`).
+
+## Task 1.3: design to implement
+
+- `utils/autonomy.py`: `AutonomyVerdict` gains `environment_allowed: bool` and `session: SessionPolicy`;
+  `allowed = environment_allowed and session.drives_work`. `autonomy_verdict(..., session_modes: Iterable[SessionModeEntry] | None = None)`:
+  when None, read `get_data_layer().session_modes.active(session_id)` for the payload's `session_id` (no session id
+  or no project context -> no modes, DEBUG log). Usage-pause is NOT folded into the verdict in Phase 1 (it would
+  change today's behaviour for a usage-paused session; it is shown, not migrated).
+- `explain()`: with no mode, return today's exact text (pin it with an equality test against the current string).
+  Environment allowed but a mode halts work: "AUTONOMY PAUSED FOR THIS SESSION: \<policy.explain_clause()>, so no
+  crons, failsafe-recovery advice, goal injection, goal-ledger stop challenges or stand-in crons run in this session.
+  Guards are unaffected." plus the mode's exit. Both: today's text + " This session is also in <clause>."
+- `handlers/status_line/environment_indicator.py`: switch to `.environment_allowed` so "no autonomy" keeps meaning
+  the environment (modes get their own segment in Task 4.1); test that a focus mode does not add "no autonomy".
+- Route coverage tests (each with no mode = identical to today, and with a mode = suppressed): chain gate
+  (`core/chain.py` `autonomy_allowed`, extend `tests/unit/core/test_chain_autonomy_gate.py`),
+  `auto_continue_stop._stand_in_block` and `_goal_ledger_challenge` (two direct calls), `background_process_tracker`
+  (protective advisory instead of the driving one), `autonomy_notice` (fires and explains the mode). Inject modes
+  through a tmp-dir registry on the data layer (`reset_data_layer()` in teardown) so the real lookup path is tested.
+
+## Task 1.2: delivered (second Opus sub-agent)
+
+Commit `6d847a63c` (pushed).
+
+- `src/claude_code_hooks_daemon/core/session_mode_registry.py`: `SessionModeRegistry(state_dir, *, clock)` behind an
+  `RLock`, with `path_for`, `enter`, `exit`, `active`, `policy`, `note_prompt`, `reap`, `take_notices` and `load`
+  (once; a second call raises `RuntimeError`). `ModeNotice`/`NoticeKind` (EXPIRED, SURVIVED_RESTART,
+  CLEARED_BY_RESTART) with `text()`; the focus expiry reads "focus expired after 12 h (task: '...'); type
+  `hooks-daemon focus <task>` to renew". File `<stem>.session-modes`, JSON
+  `{"version": 1, "session_id", "modes": [{mode, reason, source, lifetime, entered_at, expires_at, detail}]}` in
+  precedence order, with the field names as `FIELD_*` constants. The file is written atomically BEFORE memory
+  changes, a session left with no entries has its file deleted, and an `OSError` propagates with memory unchanged.
+  Expiry happens lazily on every read or mutation and in `reap`, with one EXPIRED notice each. `note_prompt` uses
+  `is_genuine_human_prompt` (prompt text only) and renews only entries that have a `renewal_ttl` (focus); an
+  expired focus is not revived. In `load`, a malformed file (bad JSON, wrong version/types, unknown or
+  non-registry mode, session id not matching the file stem, an entry the model refuses, a duplicate label) is
+  logged at WARNING and renamed `*.corrupt`; a failed rename is logged at ERROR. An unreadable file (`OSError`)
+  propagates, which is the fail-loud choice.
+- `src/claude_code_hooks_daemon/utils/session_signal_paths.py`: `SIGNAL_SUBDIR`, `SESSION_ID_FALLBACK` and
+  `session_stem`, now the one stem rule; `utils/usage_pause.py` uses it in place of its private copy. Seven other
+  modules still carry their own copy (`session_actions_signal`, `operator_signal`, `model_downgrade_signal`,
+  `context_sidecar`, `compaction_signal`, `goal_injection`, `standing_authorisations`, plus `thread_registry`'s
+  public `safe_session_stem`). Their blank-id handling differs slightly (some do not strip), so moving them over
+  is a separate change and was out of scope here.
+- `core/data_layer.py`: a lazy `session_modes` property, built once under its own lock from
+  `ProjectContext.daemon_untracked_dir() / "context-sidecar"` and loaded on first use. A `RuntimeError` (no project
+  context) propagates, and `reset()` drops the registry.
+- Tests: `tests/unit/core/test_session_mode_registry.py`, `tests/unit/utils/test_session_signal_paths.py`, and a
+  `TestSessionModesProperty` class in `tests/unit/core/test_data_layer.py`. The tests run as root, so the
+  write-failure test monkeypatches `Path.replace`/`unlink` because `chmod` does not stop root.
+- RED: all three test modules failed collection with `ModuleNotFoundError` (`core.session_mode_registry`,
+  `utils.session_signal_paths`), pytest exit 2.
+- GREEN: 146 passed. Coverage is 100% on the registry and the stem helper; `data_layer.py` is at 96.97%, and its two
+  uncovered lines were already uncovered. A wider run over `tests/unit/core`, `tests/unit/utils`, every usage-pause
+  test, `tests/unit/supervise` and the usage-pause integration chain: 13115 passed, 1 skipped. mypy --strict, ruff
+  and black are clean on the changed files.
+
+## Task 1.3: delivered (third Opus sub-agent)
+
+Commit `8d0a65a6a` (Task 1.3) and `b1c6f81ad` (QA fix to the Task 1.2 registry), both pushed. PLAN.md ticks 1.3.
+
+- `utils/autonomy.py`: `AutonomyVerdict` holds `environment_allowed`, `environment`, `hostname` and
+  `session: SessionPolicy`; `allowed` is a property, `environment_allowed and session.drives_work`.
+  `autonomy_verdict(..., session=None)` reads the policy through the new `session_policy(hook_input)`, which is
+  `get_data_layer().session_modes.policy(session_id)` for the payload's `session_id`. A payload with no session id
+  (absent, non-string or blank) has no session that could hold a mode (entries refuse a blank id), so its policy is
+  empty and no registry is read.
+- `explain()`: with no work-halting mode it is today's text, pinned byte for byte by an equality test. Environment
+  allowed but a mode halts work: "AUTONOMY PAUSED FOR THIS SESSION: \<explain_clause>, so no crons, ... run in this
+  session. Guards are unaffected. To resume, \<exit_clause>." Both: today's text + " This session is also in
+  <clause>. To resume, \<exit_clause>." The exit wording lives in the model: `SessionPolicy.exit_clause()` in
+  `utils/session_modes.py` (one hint per halting label, a shared hint stated once, precedence order).
+- `handlers/status_line/environment_indicator.py` uses `.environment_allowed`, so "no autonomy" still names the
+  environment; a focused container session shows no "no autonomy".
+- No-data-layer decision (coordinator correction): option (a), let it raise. Every verdict is computed inside the
+  daemon: the chain gate, the five handlers and the status line all run there, `DaemonController.__init__`
+  initialises `ProjectContext` before it registers a handler, and `hooks-daemon probe` sends its payload through
+  the daemon's own entry point. No CLI path calls the verdict (checked: only those six modules import it). So a
+  payload that names a session with no `ProjectContext` is a defect and raises `RuntimeError` (tested); nothing logs
+  it at DEBUG or reads it as "no modes". In tests, `tests/support/autonomy.py` gives the gate a real, loaded,
+  empty registry (`pin_autonomy` now calls `pin_no_session_modes`), and `pin_session_modes(monkeypatch, dir, *entries)` puts a registry on a fresh data layer (restored after the test) so the real lookup path is used.
+  `test_background_process_tracker.py` (which passes session ids without pinning) gained an autouse
+  `pin_no_session_modes` fixture: its 14 tests failed on the raise, which is the intended fail-loud behaviour.
+- Route tests, each with no mode giving the same result as before and a mode suppressing: chain gate
+  (`test_chain_autonomy_gate.py`: driver skipped by focus in a container, guard still runs, another session's mode
+  changes nothing); `auto_continue_stop` `_goal_ledger_challenge` and `_stand_in_block`
+  (`test_auto_continue_stop_autonomy.py`); `background_process_tracker` (protective advisory, no cron);
+  `autonomy_notice` (paused text, and both-reasons text once); status line (above).
+- RED: 14 failed (`AttributeError: environment_allowed` / `exit_clause`, `TypeError` on `session=`, `DID NOT RAISE`),
+  then the status-line test failed until the indicator switched. GREEN: 168 passed across the route files;
+  2959 passed over `post_tool_use`, `session_start`, `stop`, `status_line` and the chain gate; core+utils 11386
+  passed. Coverage 100% on `autonomy.py`, `session_modes.py` and `session_mode_registry.py`.
+- Noticed, not changed: under `--cov=claude_code_hooks_daemon.utils.autonomy`, two untouched tests in
+  `TestAutonomyAllowedLoadsTheProjectConfig` fail; they fail the same way at the parent commit `0e0431210`, and pass
+  without `--cov` and in QA.
+- For Phase 2: `AWAITING_HUMAN` is work-halting, so once `auto_continue_stop` writes that mode (Task 2.2),
+  `_stand_in_block` will stop demanding the stand-in cron, which exists precisely for awaiting-human stops. Task 2.2
+  has to exempt the stand-in demand from the session half of the verdict (for example, gate it on
+  `environment_allowed` plus focus only).
+
+## QA
+
+Targeted run at code head `b1c6f81ad` (`llm_qa.py changed --range origin/main..HEAD --allow-unmapped`):
+`QA: 41/41 PASSED`, `changed_tests: 13215 passed, 0 failed, 79 skipped`, and no autofix changes. The first run (at
+`8d0a65a6a`) failed only `error_hiding`, on the two deliberate swallows in `session_mode_registry.load()`. That was
+fixed in `b1c6f81ad`, and the re-run is the one reported here.
+
+QA could not map 13 files (allowed; the full gate must cover them): `.claude/HOOKS-DAEMON.md`,
+`.claude/hooks/notification`, `.claude/hooks/pre-tool-use`, `.claude/hooks/session-start`, `.claude/hooks/setup`,
+`init.sh`, `constants/protocol.py`, `core/data_layer.py`, `daemon/controller.py`, `install/relay_deploy.py`,
+`install/transport_toggle.py`, `utils/usage_pause.py`, `tests/conftest.py`. The `origin/main..HEAD` range covers 115
+files, more than this branch's Phase 1 commits touch: the hooks, `init.sh` and `install/` changes come from the
+history this branch was cut from. Of the 13, only `core/data_layer.py` and `utils/usage_pause.py` are Phase 1 (Task
+1.2).
+
+## Left
+
+Nothing in Phase 1. The coordinator merges; the daemon is not restarted.

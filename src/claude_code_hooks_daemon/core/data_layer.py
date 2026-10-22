@@ -5,6 +5,7 @@ Single entry point for handlers to access session-wide data:
 - TranscriptReader: Conversation history from JSONL transcripts
 - HandlerHistory: Previous handler decisions within the session
 - UsageTracker: Latest subscription usage windows (Plan 00479); read via latest_usage()
+- SessionModeRegistry: Per-session focus/blocked modes (Plan 00501), built lazily
 
 Usage:
     from claude_code_hooks_daemon.core.data_layer import get_data_layer
@@ -16,10 +17,13 @@ Usage:
 """
 
 import logging
+import threading
 import time
 
 from claude_code_hooks_daemon.core.disclosure_tracker import DisclosureTracker
 from claude_code_hooks_daemon.core.handler_history import HandlerHistory
+from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.session_mode_registry import SessionModeRegistry
 from claude_code_hooks_daemon.core.session_state import SessionState
 from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader
 from claude_code_hooks_daemon.core.usage_snapshot import (
@@ -27,6 +31,7 @@ from claude_code_hooks_daemon.core.usage_snapshot import (
     UsageTracker,
     resolve_usage_state_file,
 )
+from claude_code_hooks_daemon.utils.session_signal_paths import SIGNAL_SUBDIR
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +43,15 @@ class DaemonDataLayer:
     Each component is created once and reused for the session lifetime.
     """
 
-    __slots__ = ("_disclosure", "_history", "_session", "_transcript", "_usage")
+    __slots__ = (
+        "_disclosure",
+        "_history",
+        "_session",
+        "_session_modes",
+        "_session_modes_lock",
+        "_transcript",
+        "_usage",
+    )
 
     def __init__(self) -> None:
         """Initialise with fresh component instances."""
@@ -47,6 +60,8 @@ class DaemonDataLayer:
         self._transcript = TranscriptReader()
         self._history = HandlerHistory()
         self._disclosure = DisclosureTracker()
+        self._session_modes: SessionModeRegistry | None = None
+        self._session_modes_lock = threading.Lock()
 
     @property
     def session(self) -> SessionState:
@@ -95,6 +110,27 @@ class DaemonDataLayer:
         """
         return self._disclosure
 
+    @property
+    def session_modes(self) -> SessionModeRegistry:
+        """Access the session-modes registry (Plan 00501), built and loaded on first use.
+
+        Returns:
+            The registry over ``<daemon untracked dir>/context-sidecar``.
+
+        Raises:
+            RuntimeError: no ProjectContext (CLI processes, most unit tests);
+                callers treat the session as having no modes.
+            OSError: a session-modes file could not be read or rewritten.
+        """
+        with self._session_modes_lock:
+            if self._session_modes is None:
+                registry = SessionModeRegistry(
+                    ProjectContext.daemon_untracked_dir() / SIGNAL_SUBDIR
+                )
+                registry.load()
+                self._session_modes = registry
+            return self._session_modes
+
     def reset(self) -> None:
         """Reset all data layer state.
 
@@ -105,6 +141,8 @@ class DaemonDataLayer:
         self._history.reset()
         self._transcript = TranscriptReader()
         self._disclosure = DisclosureTracker()
+        with self._session_modes_lock:
+            self._session_modes = None
 
 
 # Global singleton instance

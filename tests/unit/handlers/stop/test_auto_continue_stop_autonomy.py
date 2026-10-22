@@ -18,7 +18,12 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from tests.support.autonomy import pin_container_containers_only, pin_desktop_containers_only
+from tests.support.autonomy import (
+    focus_entry,
+    pin_container_containers_only,
+    pin_desktop_containers_only,
+    pin_session_modes,
+)
 
 from claude_code_hooks_daemon.config.models import Config, PersistentCronsConfig
 from claude_code_hooks_daemon.core import Decision
@@ -29,6 +34,7 @@ from claude_code_hooks_daemon.utils.goal_ledger import LEDGER_FILENAME, GoalLedg
 _AWAITING = "STOPPING BECAUSE: [awaiting-human] the owner has to choose between A and B."
 _UNEXPLAINED = "Here is the result of the work."
 _PLAN = "00274"
+_SESSION = "lead"
 
 
 def _transcript(tmp_path: Path, text: str) -> Path:
@@ -58,7 +64,7 @@ def _stop(tmp_path: Path, text: str, **extra: Any) -> Any:
     chain.add(handler)
     hook_input = {
         "hook_event_name": "Stop",
-        "session_id": "lead",
+        "session_id": _SESSION,
         "transcript_path": str(_transcript(tmp_path, text)),
         "stop_hook_active": False,
         **extra,
@@ -114,3 +120,45 @@ class TestStandInCron:
         result = _stop(tmp_path, _AWAITING, session_crons=[])
         assert result.decision is Decision.DENY
         assert "[tick:stand-in]" in result.reason
+
+
+class TestSessionModes:
+    """Both direct calls honour the session's modes (Plan 00501 Task 1.3).
+
+    Read through the real registry. With no mode a container behaves exactly as
+    above; a focus mode silences both work-driving parts there, while the plain
+    reason rule still applies.
+    """
+
+    def test_no_mode_keeps_the_challenge_and_the_stand_in(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pin_container_containers_only(monkeypatch)
+        pin_session_modes(monkeypatch, tmp_path / "modes")
+        _ledgered_plan(tmp_path)
+        challenged = _stop(tmp_path, _UNEXPLAINED)
+        assert _PLAN in challenged.reason
+        assert "GOAL LEDGER" in challenged.reason
+        demanded = _stop(tmp_path, _AWAITING, session_crons=[])
+        assert demanded.decision is Decision.DENY
+        assert "[tick:stand-in]" in demanded.reason
+
+    def test_focus_silences_the_goal_ledger_challenge(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pin_container_containers_only(monkeypatch)
+        pin_session_modes(monkeypatch, tmp_path / "modes", focus_entry(_SESSION))
+        _ledgered_plan(tmp_path)
+        result = _stop(tmp_path, _UNEXPLAINED)
+        assert result.decision is Decision.DENY
+        assert "STOPPING BECAUSE" in result.reason
+        assert _PLAN not in result.reason
+        assert "GOAL LEDGER" not in result.reason
+
+    def test_focus_drops_the_stand_in_demand(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pin_container_containers_only(monkeypatch)
+        pin_session_modes(monkeypatch, tmp_path / "modes", focus_entry(_SESSION))
+        result = _stop(tmp_path, _AWAITING, session_crons=[])
+        assert result.decision is Decision.ALLOW

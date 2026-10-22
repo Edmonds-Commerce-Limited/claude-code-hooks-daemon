@@ -82,8 +82,10 @@ class EnvironmentIndicatorHandler(StatusLineHandlerBase):
         segment = f"| {color}{icon} {label}{_COLOR_RESET}"
         # Plan 00498: say when the project's `autonomy:` config turned the
         # work-driving machinery off here. Judged on the runtime cached above,
-        # never a live probe.
-        if not autonomy_verdict(hook_input, environment=environment_label(runtime)).allowed:
+        # never a live probe. "no autonomy" names the ENVIRONMENT; a session's
+        # modes are not part of it (Plan 00501 gives them their own segment).
+        verdict = autonomy_verdict(hook_input, environment=environment_label(runtime))
+        if not verdict.environment_allowed:
             segment = f"{segment} {_COLOR_GREY}{_AUTONOMY_OFF_LABEL}{_COLOR_RESET}"
         return AdvisoryResult(context=[segment])
 
