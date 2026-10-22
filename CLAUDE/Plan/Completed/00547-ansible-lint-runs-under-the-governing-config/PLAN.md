@@ -1,6 +1,6 @@
 # Plan 00547: ansible lint runs under the governing config
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-22
 **Owner**: dev
 **Priority**: Medium
@@ -65,15 +65,16 @@ so it is a neighbour and not a duplicate.
 
 ### Phase 2: Ship
 
-- [ ] ⬜ **Task 2.1**: Targeted QA, merge, CI green, close #128.
+- [x] ✅ **Task 2.1**: Targeted QA, merge, CI green, close #128.
 
 ## Success Criteria
 
-- [ ] The reproduction from #128 (a play outside its config's tree that looks up
-  `CONFIG_FILE`) passes both gates once the config is declared (tested).
-- [ ] Without a declaration, both gates use the same working directory, and a
+- [x] The reproduction from #128 (a play outside its config's tree that looks up
+  `CONFIG_FILE`) passes both gates once the config is declared (tested, with the
+  tool faked).
+- [x] Without a declaration, both gates use the same working directory, and a
   failure's reason names the missing config (tested).
-- [ ] A release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (the
+- [x] A release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (the
   pending-release holding area).
 
 ## Delivery & Milestones
@@ -81,3 +82,4 @@ so it is a neighbour and not a duplicate.
 - Merged to main in `acf6bbcc3` (branch head `51b0fd878`); targeted QA 40/40.
   `ansible-playbook` is not installed on the dev host, so the gates' tests fake
   the tool and assert the working directory and environment it is given.
+- Main CI run 39741211708 green; #128 closed.
