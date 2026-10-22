@@ -869,9 +869,7 @@ class TestGoalLoopNotice:
     def test_goal_cleared_defaults_to_none(self) -> None:
         assert ModeNotice(NoticeKind.EXPIRED, self._entry()).goal_cleared is None
 
-    def test_queue_notice_is_taken_once_by_its_session(
-        self, registry: SessionModeRegistry
-    ) -> None:
+    def test_queue_notice_is_taken_once_by_its_session(self, registry: SessionModeRegistry) -> None:
         notice = ModeNotice(NoticeKind.GOAL_LOOP_ENTERED, self._entry(), goal_cleared=True)
         registry.queue_notice(notice)
         assert registry.take_notices(OTHER) == ()
