@@ -32,7 +32,6 @@ from claude_code_hooks_daemon.handlers.post_tool_use.background_process_tracker 
 )
 
 
-
 @pytest.fixture(autouse=True)
 def _daemon_project_context(project_context: Path) -> Path:
     """Every real daemon initialises ProjectContext before any handler runs.

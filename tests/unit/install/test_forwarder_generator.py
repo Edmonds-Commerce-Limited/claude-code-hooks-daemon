@@ -478,7 +478,10 @@ def test_guard_block_hands_the_relay_its_daemon_root() -> None:
     block = build_relay_guard_block(
         "pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u"), Path("/p")
     )
-    assert f'                {RELAY_DAEMON_ROOT_ENV}="/p" \\\n                    exec "$_rl_bin"' in block
+    assert (
+        f'                {RELAY_DAEMON_ROOT_ENV}="/p" \\\n                    exec "$_rl_bin"'
+        in block
+    )
 
 
 def test_the_daemon_root_variable_is_the_relays() -> None:
