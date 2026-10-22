@@ -23,6 +23,7 @@ without looking broken:
 
 from __future__ import annotations
 
+import gc
 import os
 import shlex
 import time
@@ -4490,8 +4491,16 @@ class TestListEditsAndExecRoutesReachAFullRun:
 
     @staticmethod
     def _timed(tmp_path: Path, code: str) -> float:
+        """Seconds one judgement of ``code`` as a script file takes.
+
+        The collector is settled first (N526): a full collection walks the
+        whole test process's heap, about 0.16 s at 300k objects, so the debt
+        earlier tests left must not land inside this window. Collections the
+        judgement's own allocations cause still count.
+        """
         script = tmp_path / "many.py"
         script.write_text(code, encoding="utf-8")
+        gc.collect()
         start = time.perf_counter()
         find_full_qa_invocation(f"python3 {script}", _patterns(), cwd=_REPO_ROOT)
         return time.perf_counter() - start
