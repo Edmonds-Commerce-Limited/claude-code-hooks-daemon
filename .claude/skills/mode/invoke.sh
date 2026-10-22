@@ -34,12 +34,18 @@ fi
 
 Parse the arguments to determine the action:
 
-1. **"get" or empty** -> Run: \`"\$DAEMON_CLI" get-mode\`
+1. **"get" or empty** -> Run: \`"\$DAEMON_CLI" get-mode\`, then \`"\$DAEMON_CLI" session-mode get\` (this session's modes)
 2. **"default"** -> Run: \`"\$DAEMON_CLI" set-mode default\`
 3. **"unattended"** -> Run: \`"\$DAEMON_CLI" set-mode unattended\`
 4. **"unattended <message...>"** -> Run: \`"\$DAEMON_CLI" set-mode unattended -m "<message>"\`
+5. **"focus off"**, or \`focus\` followed by exactly one of \`off\`, \`done\`, \`end\`, \`disable\` -> Run: \`"\$DAEMON_CLI" session-mode focus off\`
+6. **"focus <task...>"** -> Run: \`"\$DAEMON_CLI" session-mode focus <task words>\` (quote the task as one argument)
 
 If the first word is "unattended" and there are additional words, join them as the custom message with the -m flag.
+
+\`default\` and \`unattended\` change the DAEMON-WIDE mode. \`focus\` changes only THIS session: it
+reads \`CLAUDE_CODE_SESSION_ID\`, which the Bash tool sets. Print the one line \`session-mode focus\`
+outputs to the user verbatim.
 
 ## Execute
 

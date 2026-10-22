@@ -53,7 +53,7 @@ from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config, TransportConfig, handler_options
 from claude_code_hooks_daemon.constants import DaemonPath, HandlerID, Timeout
 from claude_code_hooks_daemon.constants.dbf import DefectClass, DefenceBeforeFix
-from claude_code_hooks_daemon.constants.modes import DaemonMode
+from claude_code_hooks_daemon.constants.modes import DaemonMode, SessionModeIPC
 from claude_code_hooks_daemon.constants.permissions import FileMode
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler_bases import StatusLineSegmentHandler
@@ -2207,6 +2207,94 @@ def cmd_set_mode(args: argparse.Namespace) -> int:
         print(f"Message: {custom_message}")
 
     return 0
+
+
+def _session_mode_request(args: argparse.Namespace, session_id: str) -> dict[str, Any] | None:
+    """The IPC request ``session-mode`` sends, or None when focus was given no task."""
+    words: list[str] = list(getattr(args, "words", []) or [])
+    if args.verb == "get":
+        return {
+            "action": SessionModeIPC.ACTION_GET_SESSION_MODES,
+            SessionModeIPC.KEY_SESSION_ID: session_id,
+        }
+    if not words:
+        return None
+    if len(words) == 1 and words[0].lower() in SessionModeIPC.FOCUS_OFF_ALIASES:
+        return {
+            "action": SessionModeIPC.ACTION_EXIT_FOCUS,
+            SessionModeIPC.KEY_SESSION_ID: session_id,
+        }
+    return {
+        "action": SessionModeIPC.ACTION_ENTER_FOCUS,
+        SessionModeIPC.KEY_SESSION_ID: session_id,
+        SessionModeIPC.KEY_TASK: " ".join(words),
+    }
+
+
+def _print_session_modes(result: dict[str, Any]) -> None:
+    """Human-readable ``session-mode get`` output."""
+    modes: list[dict[str, Any]] = result.get(SessionModeIPC.KEY_MODES, [])
+    if not modes:
+        print("Session modes: no session mode is active")
+        return
+    print(f"Session modes: {result.get(SessionModeIPC.KEY_BADGE, '')}")
+    for mode in modes:
+        expires = time.strftime(
+            "%Y-%m-%d %H:%M UTC", time.gmtime(float(mode.get(SessionModeIPC.KEY_EXPIRES_AT, 0)))
+        )
+        detail = mode.get(SessionModeIPC.KEY_DETAIL) or ""
+        suffix = f" -- {detail}" if detail else ""
+        print(f"  {mode.get(SessionModeIPC.KEY_LABEL)} (until {expires}){suffix}")
+
+
+def cmd_session_mode(args: argparse.Namespace) -> int:
+    """Show or change THIS session's session modes (Plan 00501 Task 3.3).
+
+    ``get`` (the default) lists the modes; ``focus <task>`` turns focus on and
+    ``focus off`` (or ``done``, ``end``, ``disable``) turns it off. The session
+    is ``--session`` or the ``CLAUDE_CODE_SESSION_ID`` a Bash tool call carries.
+    The daemon-wide ``get-mode``/``set-mode`` are separate and unchanged.
+
+    Returns:
+        0 on success, 1 on refusal or failure.
+    """
+    session_id = (
+        getattr(args, "session", None) or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    ).strip()
+    if not session_id:
+        print(
+            "ERROR: no session. Run this inside the Claude Code session (a Bash tool call "
+            "sets CLAUDE_CODE_SESSION_ID) or pass --session <id>.",
+            file=sys.stderr,
+        )
+        return 1
+    hook_input = _session_mode_request(args, session_id)
+    if hook_input is None:
+        print("ERROR: focus needs a task: session-mode focus <task>", file=sys.stderr)
+        return 1
+
+    project_path = get_project_path(getattr(args, "project_root", None))
+    socket_path = _resolve_socket_path(args, project_path)
+    if read_pid_file(str(_resolve_pid_path(args, project_path))) is None:
+        print("Daemon not running", file=sys.stderr)
+        return 1
+    response = send_daemon_request(socket_path, {"event": "_system", "hook_input": hook_input})
+    if response is None:
+        print("No response from daemon", file=sys.stderr)
+        return 1
+    if "error" in response:
+        print(f"ERROR: {response['error']}", file=sys.stderr)
+        return 1
+
+    result: dict[str, Any] = response.get("result", {})
+    if args.verb == "get":
+        if getattr(args, "json", False):
+            print(json.dumps(result, indent=2))
+        else:
+            _print_session_modes(result)
+        return 0
+    print(result.get(SessionModeIPC.KEY_LINE, ""))
+    return 1 if result.get(SessionModeIPC.KEY_OUTCOME) == "needs-task" else 0
 
 
 def cmd_handlers(args: argparse.Namespace) -> int:
@@ -10828,6 +10916,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Custom message for the mode (e.g., task instructions for unattended mode)",
     )
     parser_set_mode.set_defaults(func=cmd_set_mode)
+
+    # session-mode command (Plan 00501 Task 3.3): one session's modes
+    parser_session_mode = subparsers.add_parser(
+        "session-mode",
+        help="Show or change this session's session modes (get | focus <task> | focus off)",
+    )
+    parser_session_mode.add_argument(
+        "verb", nargs="?", default="get", choices=["get", "focus"], help="get (default) or focus"
+    )
+    parser_session_mode.add_argument(
+        "words", nargs="*", help="focus: the task, or off/done/end/disable"
+    )
+    parser_session_mode.add_argument(
+        "--session", help="Session id (default: $CLAUDE_CODE_SESSION_ID)"
+    )
+    parser_session_mode.add_argument("--json", action="store_true", help="get: output JSON")
+    parser_session_mode.set_defaults(func=cmd_session_mode)
 
     # handlers command
     parser_handlers = subparsers.add_parser("handlers", help="List registered handlers")

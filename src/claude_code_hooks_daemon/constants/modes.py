@@ -24,6 +24,38 @@ class DaemonMode(StrEnum):
     UNATTENDED = "unattended"
 
 
+class SessionModeIPC:
+    """The per-session mode IPC actions and their fields (Plan 00501 Task 3.3).
+
+    Separate from :class:`ModeConstant`: those actions get and set the
+    daemon-wide mode and stay unchanged; these read and change ONE session's
+    session modes (the ``hooks-daemon session-mode`` CLI and ``/mode focus``).
+    """
+
+    ACTION_GET_SESSION_MODES = "get_session_modes"
+    ACTION_ENTER_FOCUS = "enter_focus"
+    ACTION_EXIT_FOCUS = "exit_focus"
+    ACTIONS = frozenset({ACTION_GET_SESSION_MODES, ACTION_ENTER_FOCUS, ACTION_EXIT_FOCUS})
+
+    KEY_SESSION_ID = "session_id"
+    KEY_TASK = "task"
+    KEY_MODES = "modes"
+    KEY_BADGE = "badge"
+    KEY_OUTCOME = "outcome"
+    KEY_LINE = "line"
+    KEY_LABEL = "label"
+    KEY_MODE = "mode"
+    KEY_REASON = "reason"
+    KEY_SOURCE = "source"
+    KEY_DETAIL = "detail"
+    KEY_ENTERED_AT = "entered_at"
+    KEY_EXPIRES_AT = "expires_at"
+
+    #: Words that end focus when they are the whole argument; the prompt
+    #: command, the CLI and the ``/mode`` skill all read this one set.
+    FOCUS_OFF_ALIASES = frozenset({"off", "done", "end", "disable"})
+
+
 class ModeConstant:
     """Constants related to daemon modes.
 

@@ -156,7 +156,7 @@ All CLEAR; rationale and code citations in
   failsafe tick delivered with the prepended "focus mode: the active task is <task>; other plans are out of scope"
   line), the focus reminder replacing the goal-ledger challenge, the once-only goal clear on entry, no
   `.goal-intent` while focused, and the context-line wording about the supervisor clearing at next idle.
-- [ ] ⬜ **Task 3.3**: TDD the `/mode focus` verbs, a session-mode CLI and the IPC actions.
+- [x] ✅ **Task 3.3**: TDD the `/mode focus` verbs, a session-mode CLI and the IPC actions.
 
 ### Phase 4: Visibility
 

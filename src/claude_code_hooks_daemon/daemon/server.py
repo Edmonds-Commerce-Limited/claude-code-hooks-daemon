@@ -32,7 +32,7 @@ from typing import Any, Final, Protocol, Self, runtime_checkable
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.events import wired_event_metas
-from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
+from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant, SessionModeIPC
 from claude_code_hooks_daemon.constants.protocol import HookInputField, RawTextReply, SocketLimit
 from claude_code_hooks_daemon.core.debouncer import shutdown_debouncer
 from claude_code_hooks_daemon.core.hook_result import HookResult
@@ -47,6 +47,7 @@ from claude_code_hooks_daemon.daemon.paths import (
     socket_path_overflow,
 )
 from claude_code_hooks_daemon.daemon.payload_capture import capture_payload, resolve_capture_dir
+from claude_code_hooks_daemon.daemon.session_mode_ipc import handle_session_mode_action
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.cli_command import recovery_command
 from claude_code_hooks_daemon.utils.cron_hosts import (
@@ -2704,6 +2705,9 @@ class HooksDaemon:
                             **mode_info,
                         }
                     }
+
+        elif action in SessionModeIPC.ACTIONS:
+            response = handle_session_mode_action(str(action), hook_input)
 
         elif action == "log_marker":
             # Log a boundary marker message

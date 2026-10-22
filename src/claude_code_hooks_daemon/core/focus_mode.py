@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
+from claude_code_hooks_daemon.constants.modes import SessionModeIPC
 from claude_code_hooks_daemon.core.session_mode_registry import SessionModeRegistry
 from claude_code_hooks_daemon.utils.session_modes import (
     FOCUS_TTL_SECONDS,
@@ -34,7 +35,7 @@ from claude_code_hooks_daemon.utils.session_modes import (
 logger = logging.getLogger(__name__)
 
 #: Words that end focus when they are the whole argument.
-FOCUS_OFF_ALIASES: Final[frozenset[str]] = frozenset({"off", "done", "end", "disable"})
+FOCUS_OFF_ALIASES: Final[frozenset[str]] = SessionModeIPC.FOCUS_OFF_ALIASES
 
 _SECONDS_PER_HOUR: Final[int] = 3600
 
