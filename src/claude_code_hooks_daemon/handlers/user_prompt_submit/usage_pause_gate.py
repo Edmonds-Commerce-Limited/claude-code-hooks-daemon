@@ -53,17 +53,24 @@ from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import BlockingResult, Decision
+from claude_code_hooks_daemon.core.data_layer import get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.core.session_mode_statement import pending_mode_statement
 from claude_code_hooks_daemon.core.usage_snapshot import UsageSnapshot
 from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor import (
     CANONICAL_CRON_PROMPT,
     declares_failsafe_cron,
 )
+from claude_code_hooks_daemon.handlers.user_prompt_submit.focus_mode_trigger import (
+    daemon_is_unattended,
+)
 from claude_code_hooks_daemon.handlers.utils.initial_thread_exemption import (
     InitialThreadExemption,
 )
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.session_modes import UsagePauseView
 from claude_code_hooks_daemon.utils.usage_pause import UsagePause
 from claude_code_hooks_daemon.utils.usage_pause_gate import (
     PauseEnvironment,
@@ -123,6 +130,44 @@ _RULE: Final[Rule] = Rule(
         "record also expires on its own an hour after the resume time."
     ),
 )
+
+
+def _pending_mode_news(
+    session_id: str, *, survived: UsagePause | None, renewed: UsagePause
+) -> str | None:
+    """The session's pending mode news, stated on the still-over resume tick.
+
+    While a pause holds, every other prompt is denied here and never reaches
+    ``focus_mode_trigger``, and this tick re-starts the pause with a fresh
+    ``paused_at``, so the trigger could never tell that the pause predates a
+    daemon restart. The restatement is therefore taken here, from the record as
+    it was before this tick; the trigger later in the chain then finds nothing
+    left to state.
+    """
+
+    def pause_view() -> UsagePauseView | None:
+        if survived is None:
+            return None
+        return UsagePauseView(
+            paused_at=survived.paused_at, until=renewed.expires_at, reason=renewed.reason
+        )
+
+    try:
+        return pending_mode_statement(
+            get_data_layer().session_modes,
+            session_id,
+            usage_pause=pause_view,
+            unattended=daemon_is_unattended,
+        )
+    except (RuntimeError, OSError) as error:
+        log_and_continue(
+            logger,
+            error,
+            reason="the session-modes registry could not be used, so the still-over directive goes out with a note in place of the session's pending mode news",
+        )
+        return (
+            f"SESSION MODE: the daemon could not read this session's pending mode news ({error})."
+        )
 
 
 class UsagePauseGateHandler(InitialThreadExemption, UserPromptSubmitHandlerBase):
@@ -211,10 +256,11 @@ class UsagePauseGateHandler(InitialThreadExemption, UserPromptSubmitHandlerBase)
         pause = start_pause(session_id, breaches, env)
         if pause is not None:
             logger.warning("usage_pause_gate: still over the ceiling: %s", pause.reason)
-            return BlockingResult(
-                decision=Decision.ALLOW,
-                context=[render_still_over_directive(pause)],
-            )
+            context = [render_still_over_directive(pause)]
+            news = _pending_mode_news(session_id, survived=record, renewed=pause)
+            if news is not None:
+                context.append(news)
+            return BlockingResult(decision=Decision.ALLOW, context=context)
         # Still over, but no new pause could be kept (the owner's override, or the record
         # could not be written and read back): the pause ends without a fresh reading
         # showing usage under the ceiling, and the text must not say it does.

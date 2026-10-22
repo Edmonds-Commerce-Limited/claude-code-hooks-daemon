@@ -13,6 +13,7 @@ from claude_code_hooks_daemon.core.session_mode_log import (
     TransitionAction,
     TransitionLog,
     TransitionLogError,
+    TransitionLogReadError,
 )
 from claude_code_hooks_daemon.utils.session_modes import ModeLabel
 
@@ -160,7 +161,7 @@ class TestTransitionLog:
     def test_unreadable_log_is_a_named_error_on_read(self, tmp_path: Path) -> None:
         path = tmp_path / "log.jsonl"
         path.mkdir()
-        with pytest.raises(TransitionLogError, match="cannot read"):
+        with pytest.raises(TransitionLogReadError, match="cannot read"):
             TransitionLog(path).recent(5)
 
     def test_append_over_a_corrupt_log_quarantines_it(
@@ -170,9 +171,44 @@ class TestTransitionLog:
         path.write_text(json.dumps({"at": 1}) + "\n", encoding="utf-8")
         log = TransitionLog(path)
         log.append([_transition(1)])
-        assert (tmp_path / f"log.jsonl{CORRUPT_SUFFIX}").exists()
+        [quarantined] = tmp_path.glob(f"log.jsonl.*{CORRUPT_SUFFIX}")
+        assert quarantined.read_text(encoding="utf-8") == json.dumps({"at": 1}) + "\n"
         assert [t.at for t in log.recent(5)] == [1001.0]
         assert "corrupt" in caplog.text.lower()
+
+    def test_a_second_quarantine_never_overwrites_the_first(self, tmp_path: Path) -> None:
+        path = tmp_path / "log.jsonl"
+        log = TransitionLog(path)
+        path.write_text("{first bad\n", encoding="utf-8")
+        log.append([_transition(1)])
+        path.write_text("{second bad\n", encoding="utf-8")
+        log.append([_transition(2)])
+        kept = sorted(p.read_text(encoding="utf-8") for p in tmp_path.glob(f"*{CORRUPT_SUFFIX}"))
+        assert kept == ["{first bad\n", "{second bad\n"]
+
+    def test_an_unreadable_log_is_never_quarantined_by_an_append(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A read error says nothing about the content: the healthy log stays where it is."""
+        path = tmp_path / "log.jsonl"
+        log = TransitionLog(path)
+        log.append([_transition(1)])
+        real_read_text = Path.read_text
+
+        def refuse(self: Path, encoding: str | None = None, errors: str | None = None) -> str:
+            if self == path:
+                raise PermissionError("permission denied")
+            return real_read_text(self, encoding=encoding, errors=errors)
+
+        monkeypatch.setattr(Path, "read_text", refuse)
+        with pytest.raises(PermissionError):
+            log.append([_transition(2)])
+        monkeypatch.undo()
+        assert list(tmp_path.glob(f"*{CORRUPT_SUFFIX}")) == []
+        assert [t.at for t in log.recent(5)] == [1001.0]
+
+    def test_a_read_error_is_still_a_transition_log_error_for_readers(self) -> None:
+        assert issubclass(TransitionLogReadError, TransitionLogError)
 
     def test_failed_write_raises_and_leaves_no_temp_file(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

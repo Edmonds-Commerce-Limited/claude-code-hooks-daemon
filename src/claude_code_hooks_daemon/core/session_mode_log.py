@@ -7,10 +7,11 @@ the daemon's untracked directory, bounded to the newest ``max_records``
 records, and rewritten atomically on each append (``unique_temp_path`` then a
 rename), so a reader never sees half a record.
 
-A log that cannot be read is a named :class:`TransitionLogError`, never an
-empty history. An append over a corrupt log renames it ``*.corrupt`` (logged
-at WARNING) and starts a fresh one, so one bad line cannot stop every later
-transition being recorded.
+A log that cannot be read is a named :class:`TransitionLogReadError`, never an
+empty history. An append over a log whose content does not parse renames it to
+a unique ``*.<time>.<token>.corrupt`` name (logged at WARNING) and starts a
+fresh one, so one bad line cannot stop every later transition being recorded;
+an append over a log it cannot READ raises the ``OSError`` and moves nothing.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import secrets
 import threading
 import time
 from collections.abc import Sequence
@@ -57,6 +59,10 @@ _FIELDS: Final[frozenset[str]] = frozenset(
 
 class TransitionLogError(Exception):
     """The transition log, or one of its records, cannot be read."""
+
+
+class TransitionLogReadError(TransitionLogError):
+    """The log file itself could not be read (permissions, I/O): its content is unknown."""
 
 
 class TransitionAction(StrEnum):
@@ -169,16 +175,20 @@ class TransitionLog:
     def append(self, transitions: Sequence[ModeTransition]) -> None:
         """Add ``transitions`` after the existing records, keeping the newest ``max_records``.
 
+        Only a log whose content does not parse is quarantined; one that cannot
+        be READ is left where it is, since nothing is known about its content.
+
         Raises:
-            OSError: the log could not be written; no temporary file is left.
+            OSError: the log could not be read or written; no temporary file is left.
         """
         if not transitions:
             return
         with self._lock:
+            text = self._read_text()
             try:
-                existing = self._read()
+                existing = self._parse(text)
             except TransitionLogError as error:
-                corrupt = self._path.with_name(self._path.name + CORRUPT_SUFFIX)
+                corrupt = _quarantine_path(self._path)
                 logger.warning(
                     "session-mode transition log is corrupt (%s); renaming it to %s", error, corrupt
                 )
@@ -202,24 +212,30 @@ class TransitionLog:
 
         Raises:
             ValueError: ``limit`` is not positive.
-            TransitionLogError: the log cannot be read or holds a malformed record.
+            TransitionLogReadError: the log file cannot be read.
+            TransitionLogError: the log holds a malformed record.
         """
         if limit < 1:
             raise ValueError(f"limit must be positive, got {limit}")
         with self._lock:
-            records = self._read()
+            try:
+                text = self._read_text()
+            except OSError as error:
+                raise TransitionLogReadError(f"cannot read {self._path}: {error}") from error
+            records = self._parse(text)
         if session_id is not None:
             records = [t for t in records if t.session_id == session_id]
         return records[-limit:]
 
-    def _read(self) -> list[ModeTransition]:
-        """Every record in the log. Raises ``TransitionLogError``."""
+    def _read_text(self) -> str:
+        """The log's text; empty when it does not exist yet. Any other ``OSError`` propagates."""
         try:
-            text = self._path.read_text(encoding="utf-8")
+            return self._path.read_text(encoding="utf-8")
         except FileNotFoundError:
-            return []
-        except OSError as error:
-            raise TransitionLogError(f"cannot read {self._path}: {error}") from error
+            return ""
+
+    def _parse(self, text: str) -> list[ModeTransition]:
+        """Every record in ``text``. Raises ``TransitionLogError``."""
         transitions: list[ModeTransition] = []
         for number, raw in enumerate(text.splitlines(), start=1):
             try:
@@ -227,3 +243,13 @@ class TransitionLog:
             except (ValueError, TransitionLogError) as error:
                 raise TransitionLogError(f"{self._path} line {number}: {error}") from error
         return transitions
+
+
+def _quarantine_path(path: Path) -> Path:
+    """A name beside ``path`` for a corrupt copy that no earlier quarantine holds.
+
+    The UTC time and a random token make each name distinct, so a second
+    quarantine never replaces the evidence of the first.
+    """
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    return path.with_name(f"{path.name}.{stamp}.{secrets.token_hex(4)}{CORRUPT_SUFFIX}")

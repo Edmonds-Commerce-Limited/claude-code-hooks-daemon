@@ -299,7 +299,7 @@ class TestFailsLoud:
         assert "disk gone" in result.context[0]
         assert any(r.levelno == logging.WARNING for r in caplog.records)
 
-    def test_an_unreadable_registry_on_a_plain_prompt_warns(
+    def test_a_failed_renewal_on_a_plain_prompt_is_stated_and_warned(
         self, registry: SessionModeRegistry, caplog: pytest.LogCaptureFixture
     ) -> None:
         with (
@@ -308,8 +308,51 @@ class TestFailsLoud:
         ):
             result, _ = _run(_prompt("carry on"))
         assert result.decision is Decision.ALLOW
-        assert result.context == []
+        [line] = result.context
+        assert "FOCUS MODE NOT RENEWED" in line
+        assert "disk gone" in line
         assert any(r.levelno == logging.WARNING for r in caplog.records)
+
+    def test_a_failed_renewal_still_delivers_the_pending_news(
+        self, registry: SessionModeRegistry
+    ) -> None:
+        """A renewal write that keeps failing must not hold back every notice."""
+        entered = time.time() - FOCUS_TTL_SECONDS - 10.0
+        registry.enter(
+            SessionModeEntry(
+                mode=SessionMode.FOCUS,
+                session_id=_SESSION,
+                entered_at=entered,
+                expires_at=entered + FOCUS_TTL_SECONDS,
+                source=ModeSource.HUMAN,
+                detail="fix the parser",
+            )
+        )
+        registry.active(_SESSION)  # commits the expiry and queues its notice
+        with patch.object(registry, "note_prompt", side_effect=OSError("disk gone")):
+            result, _ = _run(_prompt("carry on"))
+        assert any("focus expired" in line for line in result.context)
+        assert any("FOCUS MODE NOT RENEWED" in line for line in result.context)
+
+    def test_a_failed_command_still_delivers_the_pending_news(
+        self, registry: SessionModeRegistry
+    ) -> None:
+        entered = time.time() - FOCUS_TTL_SECONDS - 10.0
+        registry.enter(
+            SessionModeEntry(
+                mode=SessionMode.FOCUS,
+                session_id=_SESSION,
+                entered_at=entered,
+                expires_at=entered + FOCUS_TTL_SECONDS,
+                source=ModeSource.HUMAN,
+                detail="fix the parser",
+            )
+        )
+        registry.active(_SESSION)
+        with patch.object(registry, "enter", side_effect=OSError("disk gone")):
+            result, _ = _run(_prompt("hooks-daemon focus x"))
+        assert any("focus expired" in line for line in result.context)
+        assert any("FOCUS MODE NOT CHANGED" in line for line in result.context)
 
     def test_a_command_without_a_session_is_stated(self) -> None:
         result, calls = _run(_prompt("hooks-daemon focus x", session_id=None))

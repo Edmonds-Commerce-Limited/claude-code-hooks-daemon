@@ -12,6 +12,9 @@ about, and a bug in it is one fix rather than four.
 """
 
 from pathlib import Path
+from unittest.mock import patch
+
+import pytest
 
 from claude_code_hooks_daemon.handlers.status_line.mtime_cache import MtimeCachedFile
 
@@ -68,6 +71,39 @@ class TestCachesUntilMtimeChanges:
         os.utime(target, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
 
         assert reader.read(target) == "beta"
+
+
+class TestStrictIo:
+    """``strict_io=True``: only "not found" is the default; any other OSError is raised."""
+
+    def _strict(self) -> MtimeCachedFile[str]:
+        return MtimeCachedFile(parse=lambda text: text.strip(), default=_MISSING, strict_io=True)
+
+    def test_a_missing_file_is_still_the_default(self, tmp_path: Path) -> None:
+        assert self._strict().read(tmp_path / "nope.conf") == _MISSING
+
+    def test_a_read_error_is_raised(self, tmp_path: Path) -> None:
+        target = tmp_path / "a-directory"
+        target.mkdir()
+        with pytest.raises(IsADirectoryError):
+            self._strict().read(target)
+
+    def test_a_stat_error_is_raised_and_evicts_the_entry(self, tmp_path: Path) -> None:
+        target = tmp_path / "f.conf"
+        target.write_text("alpha")
+        reader = self._strict()
+        assert reader.read(target) == "alpha"
+        with (
+            patch.object(Path, "stat", side_effect=PermissionError("denied")),
+            pytest.raises(PermissionError),
+        ):
+            reader.read(target)
+        assert reader._cache == {}
+
+    def test_the_default_mode_still_swallows_a_read_error(self, tmp_path: Path) -> None:
+        target = tmp_path / "a-directory"
+        target.mkdir()
+        assert _reader().read(target) == _MISSING
 
 
 class TestFailsSilently:
