@@ -36,7 +36,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00513: per model effort coverage check](00513-per-model-effort-coverage-check/PLAN.md) - Not Started, Medium (#87; awaiting owner decisions: a presence-only check naming every effort-capable model with no `modelSettings` level, which needs a maintained table of model IDs; the false OK text is ledger 00474 N439)
 
-- [00501: session modes](00501-session-modes/PLAN.md) - Not Started, Medium (#91; first-class per-session modes shown in the status line: focus (`hooks-daemon focus <task>`), BLOCKED (awaiting-human, goal-blocked loop breaker), usage-paused; per-session awaiting-human storage; guards never gated)
+- [00501: session modes](00501-session-modes/PLAN.md) - In Progress, Medium (#91; per-session modes: focus, BLOCKED, usage-paused; guards never gated)
 
 - [00496: upstream feature requests and issue kinds](00496-upstream-feature-requests-and-issue-kinds/PLAN.md) - Not Started (owner request: a formal process for project agents to file feature requests and other non-defect issues, mirroring the defect generator, guard and forms; security reports routed privately)
 
