@@ -7,7 +7,6 @@ paths and invented content (``tests/fixtures/goal_loop/``).
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 
@@ -99,7 +98,9 @@ class TestExtractEvents:
             "timestamp": "2026-01-05T10:00:00.000Z",
             "attachment": {"type": "goal_status", "met": True, "condition": "c", "reason": "ok"},
         }
-        result = extract_events([json.dumps(record)], stop_prefix=PREFIX, declares_blocked=_declares)
+        result = extract_events(
+            [json.dumps(record)], stop_prefix=PREFIX, declares_blocked=_declares
+        )
         assert _kinds(result.events) == [EventKind.GOAL_MET]
 
     def test_unparseable_and_untimed_lines_are_counted_not_raised(self) -> None:
@@ -118,7 +119,9 @@ class TestExtractEvents:
             "timestamp": "2026-01-05T10:00:00.000Z",
             "message": {"role": "user", "content": [{"type": "text", "text": "carry on please"}]},
         }
-        result = extract_events([json.dumps(record)], stop_prefix=PREFIX, declares_blocked=_declares)
+        result = extract_events(
+            [json.dumps(record)], stop_prefix=PREFIX, declares_blocked=_declares
+        )
         assert _kinds(result.events) == [EventKind.HUMAN]
 
     def test_assistant_text_without_prefix_is_not_a_stop(self) -> None:
@@ -127,7 +130,9 @@ class TestExtractEvents:
             "timestamp": "2026-01-05T10:00:00.000Z",
             "message": {"role": "assistant", "content": [{"type": "text", "text": "Done."}]},
         }
-        result = extract_events([json.dumps(record)], stop_prefix=PREFIX, declares_blocked=_declares)
+        result = extract_events(
+            [json.dumps(record)], stop_prefix=PREFIX, declares_blocked=_declares
+        )
         assert result.events == ()
 
 
@@ -452,5 +457,5 @@ def test_inode_is_os_stat_inode(tmp_path: Path) -> None:
     path = tmp_path / "t.jsonl"
     path.write_text("a\n", encoding="utf-8")
     _, checkpoint = read_new_lines(path, None, tail_bytes=10)
-    assert checkpoint.inode == os.stat(path).st_ino
+    assert checkpoint.inode == path.stat().st_ino
     assert checkpoint.path == str(path)

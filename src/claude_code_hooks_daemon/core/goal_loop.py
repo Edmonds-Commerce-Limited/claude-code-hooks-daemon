@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from difflib import SequenceMatcher
 from enum import StrEnum
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Final, Protocol
 
@@ -124,14 +125,16 @@ class Extraction:
     skipped: int
 
 
-def _timestamp(record: Mapping[str, Any]) -> float | None:
+def _timestamp(record: Mapping[str, Any]) -> float:
+    """The record's timestamp in epoch seconds.
+
+    Raises:
+        ValueError: The record has no timestamp string, or it is not ISO 8601.
+    """
     raw = record.get(_RECORD_TIMESTAMP)
     if not isinstance(raw, str):
-        return None
-    try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return None
+        raise ValueError(f"record has no timestamp string: {raw!r}")
+    return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
 
 
 def _text_blocks(content: object) -> str | None:
@@ -239,8 +242,9 @@ def extract_events(
         found = _classify(record, stop_prefix=stop_prefix, declares_blocked=declares_blocked)
         if found is None:
             continue
-        at = _timestamp(record)
-        if at is None:
+        try:
+            at = _timestamp(record)
+        except ValueError:
             skipped += 1
             continue
         kind, text, declared = found
@@ -518,7 +522,9 @@ class CycleRing:
                 self._pending = event
             elif event.kind is EventKind.UNMET and self._pending is not None:
                 self._cycles.append(
-                    Cycle(at=event.at, stop_text=self._pending.text, declared=self._pending.declared)
+                    Cycle(
+                        at=event.at, stop_text=self._pending.text, declared=self._pending.declared
+                    )
                 )
                 self._pending = None
                 new_cycles += 1
@@ -599,9 +605,7 @@ def assess(ring: CycleRing, config: GoalLoopConfig) -> Assessment:
         verdict = Verdict.NEAR_MISS
     else:
         verdict = Verdict.QUIET
-    similarities = tuple(
-        _similarity(a.stop_text, b.stop_text) for a, b in zip(cycles, cycles[1:], strict=False)
-    )
+    similarities = tuple(_similarity(a.stop_text, b.stop_text) for a, b in pairwise(cycles))
     span = cycles[-1].at - cycles[0].at if cycles else 0.0
     return Assessment(
         verdict=verdict,

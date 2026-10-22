@@ -227,7 +227,9 @@ class TestResets:
         transcript = tmp_path / "t.jsonl"
         shutil.copy(FIXTURES / "goal_cleared.jsonl", transcript)
         handler.handle(_input(transcript))
-        details = [t.detail for t in recorder.transitions if t.action is TransitionAction.LOOP_RESET]
+        details = [
+            t.detail for t in recorder.transitions if t.action is TransitionAction.LOOP_RESET
+        ]
         assert details == ["goal-cleared"]
 
     def test_repo_change_logs_a_loop_reset(

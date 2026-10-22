@@ -59,6 +59,7 @@ from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
     _STOP_EXPLANATION_PREFIX,
     _declares_human_blocked,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.session_modes import ModeLabel
 
 logger = logging.getLogger(__name__)
@@ -215,11 +216,13 @@ class GoalLoopDetectorHandler(StopHandlerBase):
         try:
             self._append_transition(transition)
         except (OSError, RuntimeError) as error:
-            logger.warning(
-                "goal-loop detector: transition not logged (%s %s): %s",
-                transition.action,
-                transition.session_id,
+            log_and_continue(
+                logger,
                 error,
+                reason=(
+                    f"goal-loop detector: transition not logged ({transition.action} "
+                    f"{transition.session_id}); the detector only observes, so the Stop proceeds"
+                ),
             )
 
     @staticmethod
