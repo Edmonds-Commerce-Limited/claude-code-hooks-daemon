@@ -18,7 +18,7 @@ Usage:
 """
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Final, Literal
 
 
 @dataclass(frozen=True)
@@ -1627,6 +1627,24 @@ RETIRED_HANDLERS: dict[str, str] = {
         "version) is now listed first in the reading the upgrade already "
         "stops on. Safe to delete this key from your config."
     ),
+}
+
+# Retired handler options, keyed config key -> {option: why it went}.
+#
+# The same reasoning as RETIRED_HANDLERS: the client's config still loads, and a
+# removed option must not be an error. Unlike a retired handler, though, an
+# unknown option is otherwise accepted with no report at all, so each entry here
+# is named by a WARNING at startup and by `config-validate` (see
+# `config.validator.ConfigValidator.retired_option_messages`). An entry is added
+# in the same commit that removes the option.
+_AWAITING_HUMAN_IS_A_SESSION_MODE: Final[str] = (
+    "removed in Plan 00501: the awaiting-human declaration is now a session mode "
+    "with a fixed lifetime, held in the daemon's session-modes registry, so this "
+    "option has no effect. Safe to delete this key from your config."
+)
+RETIRED_HANDLER_OPTIONS: dict[str, dict[str, str]] = {
+    "failsafe_cron_blockage_suppressor": {"expiry_hours": _AWAITING_HUMAN_IS_A_SESSION_MODE},
+    "idle_workable_issue_stop_gate": {"marker_expiry_hours": _AWAITING_HUMAN_IS_A_SESSION_MODE},
 }
 
 

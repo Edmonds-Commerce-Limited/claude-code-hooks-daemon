@@ -46,6 +46,7 @@ from claude_code_hooks_daemon.constants.events import (
 from claude_code_hooks_daemon.constants.formatting import FormatLimit
 from claude_code_hooks_daemon.constants.handlers import (
     RELOCATED_HANDLERS,
+    RETIRED_HANDLER_OPTIONS,
     RETIRED_HANDLERS,
     HandlerID,
     HandlerIDMeta,
@@ -75,6 +76,7 @@ __all__ = [
     "CORE_VENDORED_BUILD_DIR_NAMES",
     "RELOCATED_HANDLERS",
     "RETIRED_HANDLERS",
+    "RETIRED_HANDLER_OPTIONS",
     "SUBAGENT_DISPATCH_TOOL_NAMES",
     # Config key constants
     "ConfigKey",

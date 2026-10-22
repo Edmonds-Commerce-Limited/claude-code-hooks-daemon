@@ -19,6 +19,7 @@ from typing import Any, ClassVar
 
 from claude_code_hooks_daemon.config.models import LogLevel, handler_options
 from claude_code_hooks_daemon.constants import (
+    RETIRED_HANDLER_OPTIONS,
     RETIRED_HANDLERS,
     ConfigKey,
     ValidationLimit,
@@ -296,6 +297,41 @@ class ConfigValidator:
         return errors
 
     @staticmethod
+    def retired_option_messages(config: dict[str, Any]) -> list[str]:
+        """One message per retired handler option the config still sets.
+
+        A retired option (``RETIRED_HANDLER_OPTIONS``) is accepted, so the
+        config keeps loading, but it has no effect; these messages name each
+        such key by its full dotted path so it is never silently ignored.
+        Startup logs them at WARNING, and ``config-validate`` lists them as
+        warnings.
+
+        Args:
+            config: Configuration dictionary to check.
+
+        Returns:
+            The messages, empty when no retired option is set.
+        """
+        handlers = config.get(ConfigKey.HANDLERS)
+        if not isinstance(handlers, dict):
+            return []
+        messages: list[str] = []
+        for event_type, handler_configs in handlers.items():
+            if not isinstance(handler_configs, dict):
+                continue
+            for handler_name, handler_config in handler_configs.items():
+                retired = RETIRED_HANDLER_OPTIONS.get(handler_name)
+                if retired is None or not isinstance(handler_config, dict):
+                    continue
+                for option in handler_options(handler_config):
+                    if option in retired:
+                        messages.append(
+                            f"Retired option 'handlers.{event_type}.{handler_name}"
+                            f".options.{option}' has no effect: {retired[option]}"
+                        )
+        return messages
+
+    @staticmethod
     def validate(config: dict[str, Any], *, validate_handler_names: bool = True) -> list[str]:
         """Validate configuration and return list of error messages.
 
@@ -326,6 +362,10 @@ class ConfigValidator:
 
         # Validate plugins section (optional)
         errors.extend(ConfigValidator._validate_plugins(config))
+
+        # A retired option loads (never an error) but is always named.
+        for message in ConfigValidator.retired_option_messages(config):
+            logger.warning(message)
 
         return errors
 
