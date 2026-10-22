@@ -341,14 +341,49 @@ class LegCheckpoints:
         return LegCheckpoint(payload=payload, duration_seconds=float(duration))
 
 
+#: Select shards by name (repeatable): run only those, under this interpreter only.
+SHARD_ARG: Final[str] = "--shard"
+#: With ``--shard``: run as the coverage leg, keeping each shard's coverage data.
+COVERAGE_ARG: Final[str] = "--coverage"
+
+
+class MatrixArgs(NamedTuple):
+    """The stage's command line: ``--resume``, and the CI shard selection (Plan 00476)."""
+
+    resume: bool
+    shards: tuple[str, ...]
+    coverage: bool
+
+
+def parse_matrix_args(argv: Sequence[str]) -> MatrixArgs:
+    """Read ``argv``; anything unknown, or a malformed selection, fails fast."""
+    resume = False
+    coverage = False
+    shards: list[str] = []
+    remaining = list(argv)
+    while remaining:
+        argument = remaining.pop(0)
+        if argument == RESUME_ARG:
+            resume = True
+        elif argument == COVERAGE_ARG:
+            coverage = True
+        elif argument == SHARD_ARG:
+            if not remaining or remaining[0].startswith("--"):
+                raise SystemExit(f"run_test_matrix.py: {SHARD_ARG} needs a shard name")
+            shards.append(remaining.pop(0))
+        else:
+            raise SystemExit(
+                f"run_test_matrix.py: unknown argument {argument!r}; the options are "
+                f"{RESUME_ARG}, {SHARD_ARG} NAME and {COVERAGE_ARG}"
+            )
+    if coverage and not shards:
+        raise SystemExit(f"run_test_matrix.py: {COVERAGE_ARG} applies only with {SHARD_ARG}")
+    return MatrixArgs(resume=resume, shards=tuple(shards), coverage=coverage)
+
+
 def resume_requested(argv: Sequence[str]) -> bool:
-    """Whether ``argv`` asks to resume; any other argument fails fast."""
-    unknown = [argument for argument in argv if argument != RESUME_ARG]
-    if unknown:
-        raise SystemExit(
-            f"run_test_matrix.py: unknown arguments {unknown}; the only option is {RESUME_ARG}"
-        )
-    return RESUME_ARG in argv
+    """Whether ``argv`` asks to resume; any unknown argument fails fast."""
+    return parse_matrix_args(argv).resume
 
 
 class MatrixDeps(NamedTuple):
@@ -428,6 +463,44 @@ def plan_runs(
         for version in extras
     ]
     return plan
+
+
+def plan_selected(
+    version: str, shards: Sequence[Shard], selected: Sequence[str], *, coverage: bool
+) -> list[PlannedRun]:
+    """One leg running only the ``selected`` shards, under this interpreter (Plan 00476).
+
+    Shards run in the shards file's order. A leg with any ``rest`` shard is
+    serial, so the daemon is started before each shard if it has idled out.
+    With ``coverage`` the leg is the primary (``run_tests.sh``, shard coverage
+    data kept); otherwise it runs as an extra does, without coverage.
+
+    Raises:
+        MatrixError: a selected name is not a shard.
+    """
+    known = {shard.name for shard in shards}
+    unknown = [name for name in selected if name not in known]
+    if unknown:
+        raise MatrixError(f"unknown shard(s) {unknown}; the shards are {sorted(known)}")
+    chosen = [shard for shard in shards if shard.name in selected]
+    scopes = {shard.scope for shard in chosen}
+    scope = scopes.pop() if len(scopes) == 1 else SCOPE_FULL
+    phase = PHASE_PARALLEL if scope == SCOPE_UNIT else PHASE_SERIAL
+    return [PlannedRun(version, scope, phase, coverage, tuple(s.name for s in chosen))]
+
+
+def this_interpreter_only(version: str) -> Callable[[str], Path]:
+    """A ``provision`` that serves ``version`` from the running interpreter and nothing else."""
+
+    def provision_running(wanted: str) -> Path:
+        if wanted != version:
+            raise ProvisionError(
+                f"a {SHARD_ARG} run uses only this interpreter (Python {version}), "
+                f"not Python {wanted}"
+            )
+        return Path(sys.executable)
+
+    return provision_running
 
 
 def fully_covered_versions(plan: Sequence[PlannedRun]) -> set[str]:
@@ -1232,6 +1305,12 @@ def judge_primary(
     )
 
 
+def selected_primary_report(results: Sequence[RunResult]) -> dict[str, Any]:
+    """A ``--shard`` run's primary report: its shards' tests, with no coverage verdict."""
+    sharded = next((r for r in results if r.run.primary and r.shards), None)
+    return {} if sharded is None else primary_report_from_shards(sharded, {})
+
+
 def _refuse(reason: str) -> int:
     """Write a red report naming ``reason``, because no test run was attempted."""
     report = build_report([], {}, wall_seconds=0.0)
@@ -1243,7 +1322,8 @@ def _refuse(reason: str) -> int:
 
 
 def main() -> int:
-    resume = resume_requested(sys.argv[1:])
+    args = parse_matrix_args(sys.argv[1:])
+    resume = args.resume
     QA_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     primary_version = f"{sys.version_info.major}.{sys.version_info.minor}"
     began = time.monotonic()
@@ -1258,15 +1338,26 @@ def main() -> int:
     except ShardError as exc:
         return _refuse(f"test shards unreadable, so no test run was attempted: {exc}")
 
-    plan = plan_runs(ci_versions, primary_version, shards)
-    print(f"CI matrix {ci_versions}; primary interpreter {primary_version}")
+    if args.shards:
+        try:
+            plan = plan_selected(primary_version, shards, args.shards, coverage=args.coverage)
+        except MatrixError as exc:
+            return _refuse(f"shard selection refused, so no test run was attempted: {exc}")
+        # One CI job's slice of the stage: the other interpreters and shards
+        # run in their own jobs, and the coverage leg's data is combined there.
+        print(f"Selected shards {list(plan[0].shards)} under Python {primary_version} only")
+        provision_for = this_interpreter_only(primary_version)
+    else:
+        plan = plan_runs(ci_versions, primary_version, shards)
+        print(f"CI matrix {ci_versions}; primary interpreter {primary_version}")
+        provision_for = provision
     # Held for every child run: each is a whole-suite pytest the sink refuses
     # unless its ancestry holds this lock (Plan 00463).
     # Under `llm_qa.py` the parent already holds this lock and passes it down;
     # a second, fresh acquire would wait on its own parent for ever.
     with acquire_full_qa_lock(PROJECT_ROOT, reuse_inherited=True) as lock_fd:
         deps = MatrixDeps(
-            provision=provision,
+            provision=provision_for,
             launch=functools.partial(
                 launch, lock_fd=lock_fd, shards={shard.name: shard for shard in shards}
             ),
@@ -1277,9 +1368,14 @@ def main() -> int:
         )
         results = run_matrix(plan, Path(sys.executable), deps)
 
-    primary_report, coverage_failure = judge_primary(
-        results, Path(sys.executable), qa_dir=QA_OUTPUT_DIR, cwd=PROJECT_ROOT
-    )
+    if args.shards:
+        # A slice judges no coverage: its shards' data files are combined
+        # with the other slices' and judged where all of them are.
+        primary_report, coverage_failure = selected_primary_report(results), None
+    else:
+        primary_report, coverage_failure = judge_primary(
+            results, Path(sys.executable), qa_dir=QA_OUTPUT_DIR, cwd=PROJECT_ROOT
+        )
     report = build_report(
         results,
         primary_report,

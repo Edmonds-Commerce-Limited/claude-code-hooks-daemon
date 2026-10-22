@@ -109,6 +109,24 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N527 — the status-line loading tests error at teardown: `Directory not empty` removing the sandbox
+
+**Source**: release-gate run 39722497026, job "tests py3.12 rest":
+`test_init_sh_can_name_the_loading_text` ERRORED at teardown with `OSError: [Errno 39] Directory not empty: '/tmp/hd-status-ruqxn5gi'` from the `sandbox` fixture's `shutil.rmtree`.
+
+- **Mechanism**: these tests do not wait for the background start. The status hook's launcher
+  (`python -m ...daemon.cli --project-root P start`) is orphaned when the hook returns, and a probe showed it is the ONLY
+  matching process then (the daemon does not exist until the launcher forks). `stop_daemons_of` scanned once, so a
+  launcher stopped just after its first fork left the forked daemon unseen; that daemon outlives the teardown and
+  writes its PID file, socket and start log into the tree under `shutil.rmtree`. Not reproduced live (the window is
+  milliseconds; 11 probe runs, 8 under 16 busy loops, all clean), so the fork-after-scan ordering is inferred from the
+  code and the CI error, not observed.
+- **Fix**: `tests/daemon_teardown.py::stop_daemons_of` re-scans after each round of stops until a scan finds nothing it
+  has not already stopped, bounded by `Timeout.PROCESS_DEATH_WAIT`, and raises if daemons keep appearing. Unit tests
+  with scripted scans were RED before (`[10] == [10, 11]`, `DID NOT RAISE`) and are GREEN after.
+
+**Status**: ✅ 209283e73.
+
 ### N526 — the isolated perf-sweep CI job still fails: the full-QA script scan is linear but slow, and a large script is cut off
 
 **Source**: the coordinator, reading the first run of the new `Performance sweeps` CI job (Plan 00476 Task 2.2) on

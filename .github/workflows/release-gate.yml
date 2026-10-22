@@ -1,0 +1,490 @@
+name: Release gate
+
+# Plan 00476 Design 2, 5 and 6: the WHOLE QA gate (every llm_qa.py check in
+# ALL_TOOL_NAMES) on a release pull request, split over runners for wall
+# clock. A release pull request comes from a branch named `release/<version>`,
+# which `/release` creates (Design 1). The single required check is the
+# `Release gate` job at the bottom; it needs every other job.
+#
+# Layout, from the Task 1.2 timings (trial run 39702691821, one 10544 s job):
+#   - the 42 fast checks in four jobs, one shared setup each (`checks`);
+#   - the `tests` check as one job per (Python, unit|rest) slice, the 3.13
+#     coverage leg split four ways; each slice runs
+#     `run_test_matrix.py --shard ...` under its own interpreter only;
+#   - the 3.13 slices' coverage data combined and judged once (`coverage`);
+#   - the perf_sweep tests alone on a runner (`perf-sweep`, Design 6).
+# The `layout` job fails if these lists drift from llm_qa.ALL_TOOL_NAMES or
+# from scripts/qa/test_shards.yaml, so a new check or shard cannot go unrun.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# The fast checks, grouped by what they need. `tests` is not here: it is the
+# `tests` job's matrix below.
+env:
+  # Static code checks: no daemon, no extra tools.
+  CHECKS_STATIC: >-
+    magic_values format lint type_check security dependencies error_hiding
+    inline_suppressions canonical_callers python_var_guidance eacces_safe
+    authored_path_stat install_mode_marker signal_targets skip_list_substring
+    unreachable_handle_branch declared_invariant_pairs fail_open_inventory
+    dangerous_invocation_corpus security_downgrade_flags capture_corruption
+  # The slowest static check (118 s on the trial), alone so it extends no group.
+  CHECKS_PYRIGHT: pyright
+  # Shell, docs, plans and history: needs shellcheck.
+  CHECKS_DOCS: >-
+    shell_check shell_audit skill_refs github_urls released_changelog
+    repo_hygiene doc_truth doc_snippets plan_qa docs_qa sensitive_content
+    git_history handler_reference generated_doc_drift british_english semgrep
+  # Contracts and the live smoke test: needs the daemon and the relay.
+  CHECKS_CONTRACTS: hook_contract input_contract project_handlers smoke_test
+
+jobs:
+  # Only a release pull request (head branch release/...) or a manual run
+  # gates; every other job needs this one, so a non-release pull request skips
+  # the lot. `on.pull_request.branches` filters the BASE branch only, hence
+  # the `if` here.
+  layout:
+    name: Gate layout covers every check and shard
+    if: github.event_name != 'pull_request' || startsWith(github.head_ref, 'release/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install PyYAML
+        run: python -m pip install pyyaml
+
+      - name: Compare the workflow's lists with llm_qa and the shards file
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+          from pathlib import Path
+
+          import yaml
+
+          sys.path.insert(0, "scripts/qa")
+          import llm_qa
+
+          problems = []
+          groups = [
+              os.environ[name].split()
+              for name in ("CHECKS_STATIC", "CHECKS_PYRIGHT", "CHECKS_DOCS", "CHECKS_CONTRACTS")
+          ]
+          listed = [check for group in groups for check in group] + ["tests"]
+          if sorted(listed) != sorted(set(listed)):
+              problems.append(f"a check is listed twice: {sorted(listed)}")
+          wanted = set(llm_qa.ALL_TOOL_NAMES)
+          if set(listed) != wanted:
+              problems.append(
+                  f"missing {sorted(wanted - set(listed))}, unknown {sorted(set(listed) - wanted)}"
+              )
+
+          shards = yaml.safe_load(Path("scripts/qa/test_shards.yaml").read_text())["shards"]
+          names = {shard["name"] for shard in shards}
+          workflow = yaml.safe_load(Path(".github/workflows/release-gate.yml").read_text())
+          include = workflow["jobs"]["tests"]["strategy"]["matrix"]["include"]
+          by_python = {}
+          coverage_pythons = set()
+          for entry in include:
+              by_python.setdefault(entry["python"], []).extend(entry["shards"].split())
+              if entry["coverage"]:
+                  coverage_pythons.add(entry["python"])
+          for python, chosen in sorted(by_python.items()):
+              if sorted(chosen) != sorted(names):
+                  problems.append(f"Python {python} runs shards {sorted(chosen)}, not {sorted(names)}")
+          if len(coverage_pythons) != 1:
+              problems.append(f"coverage must be one Python's legs, got {sorted(coverage_pythons)}")
+          for entry in include:
+              if bool(entry["coverage"]) != (entry["python"] in coverage_pythons):
+                  problems.append(f"{entry['name']}: every slice of the coverage Python collects it")
+          combined = workflow["jobs"]["coverage"]["env"]["SHARDS"].split()
+          if sorted(combined) != sorted(names):
+              problems.append(f"the coverage job combines {sorted(combined)}, not {sorted(names)}")
+
+          for problem in problems:
+              print(f"::error::{problem}")
+          sys.exit(1 if problems else 0)
+          PY
+
+  checks:
+    name: checks ${{ matrix.group }}
+    needs: layout
+    runs-on: ubuntu-latest
+    # The groups measured 120 to 600 s of check time on the trial.
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [static, pyright, docs, contracts]
+    steps:
+      # Full history and tags: git_history reads the log, and the acceptance
+      # conftest and released_changelog read tags (see qa.yml's qa job).
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      # qa.yml's Install, unchanged: uv from --user, the venv at the
+      # fingerprint path the resolver globs for, built from uv.lock.
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install --user uv
+          export PATH="$HOME/.local/bin:$PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          VENV_DIR="$(HOOKS_DAEMON_PYTHON="$(command -v python)" \
+            bash scripts/lib/resolve_venv.sh dir "$PWD" --fallback-target)"
+          UV_PROJECT_ENVIRONMENT="$VENV_DIR" \
+            uv sync --frozen --all-extras --python "$(command -v python)"
+          test "$(bash scripts/lib/resolve_venv.sh python "$PWD")" = "$VENV_DIR/bin/python"
+          echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
+
+      - name: Install shellcheck
+        if: matrix.group == 'docs'
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      # qa.yml's daemon step. The trial started it for every check and 42 of
+      # 42 fast checks passed that way, so every group gets it.
+      - name: Start daemon
+        run: |
+          echo "HOOKS_DAEMON_RELEASE_GATE=1" >> "$GITHUB_ENV"
+          printf 'HOOKS_DAEMON_ROOT_DIR="%s"\n' "$GITHUB_WORKSPACE" \
+            > .claude/hooks-daemon.env
+          ./bin/hooks-daemon restart
+          ./bin/hooks-daemon status
+
+      - name: Build the relay
+        if: matrix.group == 'contracts'
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          bash relay/build.sh
+          install -D -m 755 \
+            untracked/relay-build/hooks-relay-x86_64-unknown-linux-musl \
+            untracked/bin/hooks-relay
+
+      # One llm_qa.py call per group: each check still reports its own result.
+      - name: Run the ${{ matrix.group }} checks
+        env:
+          GROUP: ${{ matrix.group }}
+        run: |
+          case "$GROUP" in
+            static) checks="$CHECKS_STATIC" ;;
+            pyright) checks="$CHECKS_PYRIGHT" ;;
+            docs) checks="$CHECKS_DOCS" ;;
+            contracts) checks="$CHECKS_CONTRACTS" ;;
+            *) echo "unknown group $GROUP"; exit 1 ;;
+          esac
+          read -r -a check_args <<< "$checks"
+          ./scripts/qa/llm_qa.py "${check_args[@]}"
+
+      - name: Upload QA output
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-checks-${{ matrix.group }}
+          path: untracked/qa/
+          if-no-files-found: warn
+
+  # The `tests` check, sliced. Each Python runs every shard of
+  # scripts/qa/test_shards.yaml exactly once across its slices (the layout job
+  # checks it). 3.13 is the coverage Python, as it is for the local stage's
+  # primary; coverage roughly doubles a unit run, so its unit leg is split.
+  tests:
+    name: tests ${{ matrix.name }}
+    needs: layout
+    runs-on: ubuntu-latest
+    # The longest slice is a `rest` leg: 2303 to 2392 s on the trial.
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: py3.11 unit
+            python: "3.11"
+            shards: unit-handlers unit-daemon unit-core unit-features unit-tooling
+            coverage: false
+            daemon: false
+          - name: py3.11 rest
+            python: "3.11"
+            shards: integration acceptance-and-other
+            coverage: false
+            daemon: true
+          - name: py3.12 unit
+            python: "3.12"
+            shards: unit-handlers unit-daemon unit-core unit-features unit-tooling
+            coverage: false
+            daemon: false
+          - name: py3.12 rest
+            python: "3.12"
+            shards: integration acceptance-and-other
+            coverage: false
+            daemon: true
+          - name: py3.13 unit-handlers (coverage)
+            python: "3.13"
+            shards: unit-handlers
+            coverage: true
+            daemon: false
+          - name: py3.13 unit other (coverage)
+            python: "3.13"
+            shards: unit-daemon unit-core unit-features unit-tooling
+            coverage: true
+            daemon: false
+          - name: py3.13 integration (coverage)
+            python: "3.13"
+            shards: integration
+            coverage: true
+            daemon: true
+          - name: py3.13 acceptance-and-other (coverage)
+            python: "3.13"
+            shards: acceptance-and-other
+            coverage: true
+            daemon: true
+    env:
+      SHARDS: ${{ matrix.shards }}
+      COVERAGE: ${{ matrix.coverage }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install --user uv
+          export PATH="$HOME/.local/bin:$PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          VENV_DIR="$(HOOKS_DAEMON_PYTHON="$(command -v python)" \
+            bash scripts/lib/resolve_venv.sh dir "$PWD" --fallback-target)"
+          UV_PROJECT_ENVIRONMENT="$VENV_DIR" \
+            uv sync --frozen --all-extras --python "$(command -v python)"
+          test "$(bash scripts/lib/resolve_venv.sh python "$PWD")" = "$VENV_DIR/bin/python"
+          echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
+
+      # The `rest` shards reach the live daemon and the relay (acceptance and
+      # transport gates); HOOKS_DAEMON_RELEASE_GATE turns a skipped gate red.
+      - name: Start daemon
+        if: matrix.daemon
+        run: |
+          echo "HOOKS_DAEMON_RELEASE_GATE=1" >> "$GITHUB_ENV"
+          printf 'HOOKS_DAEMON_ROOT_DIR="%s"\n' "$GITHUB_WORKSPACE" \
+            > .claude/hooks-daemon.env
+          ./bin/hooks-daemon restart
+          ./bin/hooks-daemon status
+
+      - name: Build the relay
+        if: matrix.daemon
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          bash relay/build.sh
+          install -D -m 755 \
+            untracked/relay-build/hooks-relay-x86_64-unknown-linux-musl \
+            untracked/bin/hooks-relay
+
+      # qa.yml's warm-ups for lint probes #144 (Swift) and #155 (Go): a cold
+      # toolchain can exceed lint_on_edit's 15 s budget on a busy runner.
+      - name: Warm the Swift and Go toolchains
+        if: matrix.daemon
+        run: |
+          if command -v swiftc >/dev/null 2>&1; then
+            printf 'let warm = 1\n' > "${RUNNER_TEMP}/warm.swift"
+            time swiftc -typecheck "${RUNNER_TEMP}/warm.swift"
+          fi
+          if command -v go >/dev/null 2>&1; then
+            mkdir -p "${RUNNER_TEMP}/warm-go"
+            printf 'module warm\n\ngo 1.21\n' > "${RUNNER_TEMP}/warm-go/go.mod"
+            printf 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("warm") }\n' \
+              > "${RUNNER_TEMP}/warm-go/main.go"
+            (cd "${RUNNER_TEMP}/warm-go" && time go vet ./...)
+          fi
+
+      # FALLBACK, not the preferred fix. The daemon exits after
+      # daemon.idle_timeout_seconds (600) with no connection, and the
+      # integration shard runs far longer than that between daemon uses.
+      # There is no environment or overlay route to that setting: it is read
+      # only from the TRACKED .claude/hooks-daemon.yaml, and editing that on
+      # the runner dirties the tree the tests and the leg checkpoints read.
+      # run_test_matrix.py restarts an idled-out daemon before each serial
+      # shard; this covers the time inside one. Every 60 s it opens a socket
+      # connection (which counts as activity) and starts the daemon if no
+      # socket answers. Bounded by `timeout`; it dies with the job.
+      - name: Keep the daemon alive during the run
+        if: matrix.daemon
+        run: |
+          timeout 10800 bash -c '
+            while true; do
+              sleep 60
+              python -c "
+          import glob, socket, sys
+          alive = False
+          for path in glob.glob(\"untracked/daemon-*.sock\"):
+              try:
+                  with socket.socket(socket.AF_UNIX) as s:
+                      s.settimeout(5)
+                      s.connect(path)
+                  alive = True
+              except OSError as exc:
+                  print(f\"{path}: {exc}\")
+          sys.exit(0 if alive else 1)
+          " || ./bin/hooks-daemon start
+            done
+          ' > untracked/daemon-keepalive.log 2>&1 &
+
+      # The perf_sweep tests are deselected here (pytest reads PYTEST_ADDOPTS
+      # in every shard run) and run alone in the perf-sweep job: under
+      # coverage their CPU bounds are missed (ledger 00474 N455).
+      - name: Run the shards
+        env:
+          PYTEST_ADDOPTS: -m "not perf_sweep"
+        run: |
+          args=()
+          for shard in $SHARDS; do
+            args+=(--shard "$shard")
+          done
+          if [ "$COVERAGE" = "true" ]; then
+            args+=(--coverage)
+          fi
+          python scripts/qa/run_test_matrix.py "${args[@]}"
+
+      - name: Upload test output
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-tests-${{ matrix.python }}-${{ strategy.job-index }}
+          path: |
+            untracked/qa/
+            untracked/daemon-keepalive.log
+          if-no-files-found: warn
+
+      # Each coverage shard's data file (untracked/qa/.coverage.<shard>),
+      # combined in the coverage job. Hidden files need opting in.
+      - name: Upload coverage data
+        if: matrix.coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-data-${{ strategy.job-index }}
+          path: untracked/qa/.coverage.*
+          include-hidden-files: true
+          if-no-files-found: error
+
+  # The coverage verdict over every shard of the coverage Python, held to
+  # pyproject's fail_under (95), as the local stage's combine does. A missing
+  # shard's file fails `coverage combine` by name.
+  coverage:
+    name: coverage (py3.13, all shards)
+    needs: tests
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SHARDS: >-
+        unit-handlers unit-daemon unit-core unit-features unit-tooling
+        integration acceptance-and-other
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install --user uv
+          export PATH="$HOME/.local/bin:$PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          VENV_DIR="$(HOOKS_DAEMON_PYTHON="$(command -v python)" \
+            bash scripts/lib/resolve_venv.sh dir "$PWD" --fallback-target)"
+          UV_PROJECT_ENVIRONMENT="$VENV_DIR" \
+            uv sync --frozen --all-extras --python "$(command -v python)"
+          test "$(bash scripts/lib/resolve_venv.sh python "$PWD")" = "$VENV_DIR/bin/python"
+          echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-data-*
+          path: untracked/qa/
+          merge-multiple: true
+
+      - name: Combine and judge
+        run: |
+          files=()
+          for shard in $SHARDS; do
+            files+=("untracked/qa/.coverage.$shard")
+          done
+          python -m coverage combine --keep --data-file=untracked/qa/coverage-combined.data "${files[@]}"
+          python -m coverage report --data-file=untracked/qa/coverage-combined.data
+
+  # Plan 00476 Design 6: qa.yml's perf-sweep job, unchanged in shape. The
+  # CPU-timing sweeps run alone on a runner, thresholds untouched.
+  perf-sweep:
+    name: Performance sweeps
+    needs: layout
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install --user uv
+          export PATH="$HOME/.local/bin:$PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          VENV_DIR="$(HOOKS_DAEMON_PYTHON="$(command -v python)" \
+            bash scripts/lib/resolve_venv.sh dir "$PWD" --fallback-target)"
+          UV_PROJECT_ENVIRONMENT="$VENV_DIR" \
+            uv sync --frozen --all-extras --python "$(command -v python)"
+          test "$(bash scripts/lib/resolve_venv.sh python "$PWD")" = "$VENV_DIR/bin/python"
+          echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
+
+      - name: Performance sweeps (perf_sweep tests only)
+        run: pytest tests/ -rs -m perf_sweep
+
+  # The one required check. Green only when every job above succeeded; a
+  # non-release pull request skips the whole gate, this job included.
+  release-gate:
+    name: Release gate
+    needs: [layout, checks, tests, coverage, perf-sweep]
+    if: ${{ !cancelled() && needs.layout.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every gate job passed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")' > /dev/null

@@ -1295,6 +1295,8 @@ class LayoutConfig(BaseModel):
         config_dirs: Extra config directory names, extending the built-in ``config``
         vendor_dirs: Extra vendored/build directory names, extending the
             canonical vendored/build set
+        ansible_configs: Play path glob -> repo-relative ``ansible.cfg`` for
+            plays kept outside that config's tree; read by both lint gates
         mode: ``additive`` (default — declared lists extend built-ins) or
             ``replace`` (a SET list stands alone; an unset list keeps its
             built-in)
@@ -1327,9 +1329,31 @@ class LayoutConfig(BaseModel):
             "name, e.g. a first-party library maintained in place"
         ),
     )
+    ansible_configs: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Governing ansible.cfg for plays kept outside that config's directory tree: "
+            "a mapping of play path glob to repo-relative ansible.cfg path, e.g. "
+            "{'plays/**': 'infra/ansible.cfg'}. A matching play is checked from the "
+            "config's directory with ANSIBLE_CONFIG set; a declared file that does "
+            "not exist is an error. Read by lint_on_edit and staged_lint_gate alike."
+        ),
+    )
     mode: Literal["additive", "replace"] = Field(
         default="additive", description="additive: extend built-ins; replace: SET lists stand alone"
     )
+
+    @field_validator("ansible_configs")
+    @classmethod
+    def _validate_ansible_configs(cls, value: dict[str, str]) -> dict[str, str]:
+        """Each config path is repository-relative, as every config path is."""
+        normalised: dict[str, str] = {}
+        for glob, config_path in value.items():
+            label = f"layout.ansible_configs[{glob!r}]"
+            if not glob or not config_path.strip():
+                raise ValueError(f"{label}: both the play glob and the config path are required")
+            normalised[glob] = _repo_relative_path(config_path, label)
+        return normalised
 
     @field_validator("vendor_exceptions")
     @classmethod

@@ -31,12 +31,12 @@ documents point here; they do not restate it.
 | ---------- | -------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
 | Targeted   | Every change, before its branch merges | The branch's agent; the coordinator checks | `./scripts/qa/llm_qa.py changed`                                                                                             |
 | Post-merge | After a merge to `main`                | CI, off the host                           | The CI tier the pushed change needs (see "CI tiers"); `llm_qa.py changed --range <old>..<new>` runs the same mapping locally |
-| Full       | Release preparation only               | The main thread, never a sub-agent         | `./scripts/qa/llm_qa.py all` on the clean release HEAD                                                                       |
+| Full       | Release preparation only               | CI on the release pull request             | Every `llm_qa.py` check, run by `release-gate.yml`; the `Release gate` check is its verdict                                  |
 
 Everyday work (a feature, a bug fix, a plan task, a merge to `main`) needs the
 Targeted tier and nothing more. The Full tier is a release step
-([development/RELEASING.md](development/RELEASING.md), Step 1b and Step 8), not a
-step of any other workflow.
+([development/RELEASING.md](development/RELEASING.md), Step 8: CI on the
+release pull request), not a step of any other workflow.
 
 ```bash
 ./scripts/qa/llm_qa.py changed     # TARGETED: static checks plus the tests the change maps to
@@ -123,9 +123,10 @@ before the run: an edit after it leaves the record on the older commit.
 
 ### Full QA Is the Coordinator's Gate; Sub-Agents Run Targeted QA
 
-The Full tier runs **once, on the main thread, when a release is prepared**
-([development/RELEASING.md](development/RELEASING.md)). A sub-agent never runs
-it. This is enforced: in a sub-agent,
+The Full tier runs **once per release, in CI on the release pull request**
+([development/RELEASING.md](development/RELEASING.md), Step 8), not on this
+host. A coordinator that decides to certify a batch in full may still run it on
+the main thread; a sub-agent never runs it. This is enforced: in a sub-agent,
 `subagent_full_qa_blocker` (Plan 00463) denies every command this repository
 declares as full, which is `llm_qa.py all`, `llm_qa.py tests`, `run_all.sh`,
 `run_tests.sh`, `scripts/validate_worktrees.sh`, and a `pytest` with no path
@@ -140,7 +141,7 @@ Workflow-tool agent's payload is UNMEASURED, so no deny is promised there. The
 split below applies to every kind of sub-agent all the same.
 
 **The one exemption: `qa-full-runner`.** When the coordinator is entitled to run
-the full gate (release preparation, or a batch it has decided to certify in full),
+the full gate (a batch it has decided to certify in full),
 it may hand the run to the `qa-full-runner` agent (`.claude/agents/qa-full-runner.md`)
 instead of holding its own context for 15-20 minutes. Dispatch it with the
 worktree path and a report file path, UNNAMED or by its type: a dispatch NAME is
@@ -176,9 +177,9 @@ integration worktree) and by CI. A red CI is a red `main`, handled at once.
 This is the mechanism for running the Full tier on an integration branch and
 moving `main` only to a head that run certified. Use it when a full gate is run
 on a branch that is not `main` itself, for example a release candidate assembled
-from several ready branches. The release steps
-([development/RELEASING.md](development/RELEASING.md)) run the same gate on the
-clean release HEAD. The everyday merge needs none of it: a green targeted run on
+from several ready branches. A release runs the whole gate in CI on its release
+pull request instead ([development/RELEASING.md](development/RELEASING.md),
+Step 8). The everyday merge needs none of it: a green targeted run on
 the branch or the combined head is enough.
 
 The coordinator, never a sub-agent:
@@ -374,8 +375,8 @@ the advanced base, or a gate on the same tree, already covers.
 
 **A `docs-only` or `targeted` landing leaves most tools unrecorded for the new
 head.** Only the recheck's tools carry provenance for it, so a later
-`llm_qa.py --read-only all` reads the rest STALE, and a release still needs its
-own full run (RELEASING.md, step 1b).
+`llm_qa.py --read-only all` reads the rest STALE. A release does not read these
+records: its full run is CI on the release pull request (RELEASING.md, Step 8).
 
 **CI on the pushed head is the second line, not a substitute.** The recheck has
 already run every test the mapper selects for a moved document: the tests that
@@ -1165,8 +1166,8 @@ Your fix might have affected earlier tests. Full re-run ensures no regressions.
 3. **If bug found**: STOP immediately
 4. Fix bug using TDD (write failing test, implement fix, verify)
 5. Run QA (must pass 100%): `./scripts/qa/llm_qa.py changed`. When the
-   acceptance run is part of a release preparation, the main thread runs the
-   Full tier instead (`./scripts/qa/llm_qa.py all`, RELEASING.md)
+   acceptance run is part of a release, the fix is also pushed to the release
+   branch so CI re-runs the Full tier (RELEASING.md, Step 12 FAIL-FAST)
 6. Restart daemon: `./bin/hooks-daemon restart`
 7. **Regenerate playbook** (to reflect fix)
 8. **RESTART from Test 1.1** (not from where you left off)

@@ -83,29 +83,41 @@ modules only.
 
 ### Phase 1: Prove the gate runs in CI
 
-- [ ] ⬜ **Task 1.1**: Run each of the 40 `llm_qa.py` checks on a CI runner in a
-  trial workflow. List the ones that need changes to run there.
-- [ ] ⬜ **Task 1.2**: Time each check's job on the runner against the local
+- [x] ✅ **Task 1.1**: Run each of the 43 `llm_qa.py` checks on a CI runner in a
+  trial workflow. List the ones that need changes to run there. Delivered:
+  `subagent-reports/261022-task-1.1-trial-workflow-sonnet.md`; 42 of 43 ran
+  unchanged; `tests` failed on the daemon idling out, and the keepalive added to
+  the gate's test jobs held in run 39728713370.
+- [x] ✅ **Task 1.2**: Time each check's job on the runner against the local
   `llm_qa.py` timing summary, and choose the per-Python jobs and shards from it
-  (Design 5).
+  (Design 5). Delivered: `subagent-reports/261022-task-1.1-1.2-findings-sonnet.md`;
+  4 check groups and 8 test jobs in `release-gate.yml`, drawing on the 7 shards
+  in `scripts/qa/test_shards.yaml`.
 
 ### Phase 2: Workflows
 
-- [ ] ⬜ **Task 2.1**: A release pull request workflow that runs the whole gate,
-  one job per Python, sharded where measured to need it (Design 5).
+- [x] ✅ **Task 2.1**: A release pull request workflow that runs the whole gate,
+  one job per Python, sharded where measured to need it (Design 5). Delivered:
+  `.github/workflows/release-gate.yml`; green on main in run 39728713370.
 - [x] ✅ **Task 2.2**: A separate performance-sweep job (Design 6). Delivered:
   `perf_sweep` marker on the 7 `scaled_cpu_seconds` tests (11 cases), deselected
   from the fallback and matrix steps, run alone by the `perf-sweep` CI job.
-- [ ] ⬜ **Task 2.3**: The release state file records the CI run and `/release`
-  checks it on resume (Design 7).
+- [x] ✅ **Task 2.3**: The release state file records the CI run and `/release`
+  checks it on resume (Design 7). Delivered: optional `ci` record in the state
+  file and `scripts/release/check_release_ci.py` (strict schema, live `gh run view` check behind a seam, one-line named failure, exit 1).
 
 ### Phase 3: Procedure
 
-- [ ] ⬜ **Task 3.1**: Rewrite `RELEASING.md`, the release skill and the release
+- [x] ✅ **Task 3.1**: Rewrite `RELEASING.md`, the release skill and the release
   agent: prepare, open the pull request, wait for CI green, then acceptance
-  tests, merge, tag and publish locally.
-- [ ] ⬜ **Task 3.2**: A freeze on merges to `main` while a release pull request
-  is open.
+  tests, merge, tag and publish locally. Delivered: `RELEASING.md` Steps 1b,
+  7.1, 8 (8a/8b/8c), 13 and 14 rewritten, step numbers otherwise kept, a merge
+  freeze section; the skill, its `invoke.sh` and the agent now point at it.
+- [x] ✅ **Task 3.2**: A freeze on merges to `main` while a release pull request
+  is open. Delivered: project handler `release_merge_freeze` (R-RELEASE-MERGE-FREEZE)
+  denies `git merge` on main, `git push` to main and `gh pr merge` of any pull
+  request but the one in the state file's `ci.pr_number`; a malformed state file
+  fails closed. Task 3.1 must document the freeze in `RELEASING.md`.
 
 ## Success Criteria
 
@@ -114,4 +126,7 @@ modules only.
 
 ## Delivery & Milestones
 
-- Not started. Follows Plan 00475's first batch.
+- All tasks merged to main (`c7637cf1c` Task 2.1, `1ad2e3618` Task 3.1); the
+  release-gate workflow ran green on main in run 39728713370.
+- Open: the success criterion needs the first real release through the new
+  procedure, which only a human-invoked `/release` can start.

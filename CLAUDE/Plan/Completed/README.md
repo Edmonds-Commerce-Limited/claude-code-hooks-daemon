@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00495: performance improvement programme](00495-performance-improvement-programme/PLAN.md) - Complete at merges `25616d385`, `34a754e02`, `03ad00d3d` and `9b04a7e72` + the archiving commit (owner report: daemon startup and the status bar at session start got much slower; the ranked causes are fixed, a start-up budget gate guards against regression, and the Rust question is re-answered from new numbers with the owner decision filed as Plan 00529; release notes 066 to 070)
+
 - [00499: write-protected paths, and the ccy.env.local.dist template](00499-write-protected-paths-and-ccy-env-local-dist/PLAN.md) - Complete at Phase 1b merge `64823600a` + the archiving commit (owner rulings: `ccy.env.local` is IaC-written only; an opt-in `write_protected_paths` guard denies every Write/Edit/Bash route onto a listed path, live-probed; the dist template was cancelled because ccy writes it)
 
 - [00498: autonomy only where allowed](00498-autonomy-only-where-allowed/PLAN.md) - Complete at merge `68dd20179` + the archiving commit (owner request after a desktop agent drifted off its one task: a top-level `autonomy:` block, keyed on the detected environment and role alias, decides whether crons, goal pressure and resume advice run; this repo allows them in containers only, and the owner's desktop session showed `no autonomy` with an empty CronList)

@@ -21,10 +21,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "release" / "build_github_release_body.py"
 TAG = "v9.9.9"
 
+# The skill and the release agent point at RELEASING.md and carry no copy of
+# the publish commands (pinned in test_publish_bootstrap_assets.py).
 RELEASE_PROCEDURE_DOCS = [
     REPO_ROOT / "CLAUDE" / "development" / "RELEASING.md",
-    REPO_ROOT / ".claude" / "skills" / "release" / "invoke.sh",
-    REPO_ROOT / ".claude" / "agents" / "release-agent.md",
 ]
 
 

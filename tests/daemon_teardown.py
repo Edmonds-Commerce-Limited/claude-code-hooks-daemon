@@ -46,12 +46,29 @@ def _is_exiting(pid: int) -> bool:
 def stop_daemons_of(project_root: Path | str, *, grace_seconds: float) -> None:
     """Stop every daemon serving ``project_root`` through the verified path.
 
+    A launcher stopped mid-start may already have forked the daemon it was
+    launching, which the scan that found the launcher could not see (N527). So
+    the project is scanned again after each round of stops, until a scan finds
+    nothing it has not already stopped.
+
     Raises:
         RefusedSignalTarget: A live process that is not this project's daemon.
+        RuntimeError: Daemons were still appearing after every round allowed.
     """
-    for pid in find_all_daemon_processes(project_root=project_root):
-        try:
-            stop_verified_daemon(pid, project_root=project_root, grace_seconds=grace_seconds)
-        except RefusedSignalTarget:
-            if not _is_exiting(pid):
-                raise
+    stopped: set[int] = set()
+    for _ in range(_POLLS):
+        new = [
+            pid
+            for pid in find_all_daemon_processes(project_root=project_root)
+            if pid not in stopped
+        ]
+        if not new:
+            return
+        for pid in new:
+            stopped.add(pid)
+            try:
+                stop_verified_daemon(pid, project_root=project_root, grace_seconds=grace_seconds)
+            except RefusedSignalTarget:
+                if not _is_exiting(pid):
+                    raise
+    raise RuntimeError(f"daemons of {project_root} kept appearing while they were stopped")

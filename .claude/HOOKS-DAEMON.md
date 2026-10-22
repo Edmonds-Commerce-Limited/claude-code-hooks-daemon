@@ -1,6 +1,6 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-10-21 (v3.70.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-10-22 (v3.70.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
@@ -259,7 +259,7 @@
 |----------|---------|----------|-------------|
 | 2 | DogfoodingReminderHandler | ADVISORY | Reminds developers of dogfooding workflow and bug handling protocol |
 
-### Project (6 handlers)
+### Project (7 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -268,6 +268,7 @@
 | 41 | EnforceLlmQaHandler | BLOCKING | Block run_all.sh and direct LLM agents to llm_qa.py |
 | 51 | PlanDoneRequiresHoldingAreaHandler | BLOCKING | Deny a Complete flip whose Success Criteria never mention the holding area |
 | 52 | RuffFormatBlockerHandler | BLOCKING | Deny `ruff format`; point at the project's actual formatter |
+| 54 | ReleaseMergeFreezeHandler | BLOCKING | Deny commands that move `main` while a release pull request is open |
 | 56 | OrchestratorSimulateHandler | ADVISORY | Record what orchestrator-only mode WOULD deny on the main thread; deny nothing |
 
 ### Pseudo Nitpick (2 handlers)

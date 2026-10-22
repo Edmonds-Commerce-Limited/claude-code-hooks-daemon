@@ -112,12 +112,20 @@ layout:
   test_dirs: ["e2e"] # extends the built-in tests/, test/, __tests__/, spec/
   config_dirs: [] # extends the built-in "config"
   vendor_dirs: ["proto-gen"] # extends the canonical vendored/build core
+  ansible_configs: { "plays/**": "infra/ansible.cfg" } # play glob -> governing ansible.cfg
   mode: additive # additive (default): extend built-ins; replace: a SET list stands alone
 ```
 
 **`mode: replace` only replaces a list the project actually SET** — an
 unset list still falls back to its built-in even under `replace` (the
 same scoping `secret_file_guard` already uses for its own `mode`).
+
+**`ansible_configs` names the `ansible.cfg` for plays kept outside its
+directory tree.** A play is normally found by walking up to the nearest
+`ansible.cfg`. A play matching a declared glob is instead checked from that
+config's directory with `ANSIBLE_CONFIG` set, by both `lint_on_edit` and
+`staged_lint_gate`. A declared file that does not exist is an error. A failed
+Ansible check that ran with no config says so and names this option.
 
 ---
 

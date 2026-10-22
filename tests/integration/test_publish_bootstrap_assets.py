@@ -45,7 +45,14 @@ _STANZA_MARKER = "# === SELF-BOOTSTRAP BEGIN"
 
 RELEASE_PROCEDURE_DOCS = [
     REPO_ROOT / "CLAUDE" / "development" / "RELEASING.md",
+]
+
+# Plan 00476 Task 3.1: the skill's prompt and the release agent POINT at
+# RELEASING.md instead of carrying their own copy of the publish commands; a
+# second copy is how v3.62.1's procedure came to omit the assets step.
+RELEASE_POINTER_DOCS = [
     REPO_ROOT / ".claude" / "skills" / "release" / "invoke.sh",
+    REPO_ROOT / ".claude" / "skills" / "release" / "SKILL.md",
     REPO_ROOT / ".claude" / "agents" / "release-agent.md",
 ]
 
@@ -261,4 +268,13 @@ class TestPipelineNamesTheStep:
         assert publish > create, (
             f"{doc.name}: the assets are uploaded to an existing release, so the "
             f"publish step must come after gh release create"
+        )
+
+    @pytest.mark.parametrize("doc", RELEASE_POINTER_DOCS, ids=lambda p: p.name)
+    def test_pointer_docs_defer_to_releasing_md(self, doc: Path) -> None:
+        text = doc.read_text(encoding="utf-8")
+        assert "RELEASING.md" in text, f"{doc.name} must point at RELEASING.md"
+        assert "gh release create" not in text, (
+            f"{doc.name} restates the publish commands; RELEASING.md is their only home, "
+            f"so a copy here can silently drop a step"
         )
