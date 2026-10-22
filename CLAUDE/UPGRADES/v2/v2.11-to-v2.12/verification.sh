@@ -35,7 +35,7 @@ fi
 RESOLVE_LIB="$RESOLVE_DAEMON_DIR/scripts/lib/resolve_venv.sh"
 PYTHON_BIN=""
 if [[ -f "$RESOLVE_LIB" ]]; then
-    # shellcheck disable=SC1090
+    # shellcheck disable=SC1090 -- the resolver path is computed at run time, so shellcheck cannot follow it
     source "$RESOLVE_LIB"
     PYTHON_BIN="$(resolve_venv_python "$(cd "$RESOLVE_DAEMON_DIR" && pwd)")" || PYTHON_BIN=""
 elif [[ -n "${HOOKS_DAEMON_PYTHON:-}" ]]; then

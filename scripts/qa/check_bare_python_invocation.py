@@ -110,9 +110,7 @@ _LOOKUP_FLAGS: Final[frozenset[str]] = frozenset({"-v", "-V"})
 _DURATION: Final[re.Pattern[str]] = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
 _ASSIGNMENT: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\+?=")
 #: ``VAR=python3`` / ``VAR="python3"``: a bare name stored to be run later.
-_BARE_ASSIGNMENT: Final[re.Pattern[str]] = re.compile(
-    r"^[A-Za-z_][A-Za-z0-9_]*\+?=(?:python3?)$"
-)
+_BARE_ASSIGNMENT: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\+?=(?:python3?)$")
 #: The inside of ``${...}``: ``VAR:-python3`` / ``VAR:=python3`` / ``1:-python3``, possibly
 #: nested in another default. ``:+`` is not a default, and ``python3.12`` is a pin.
 _DEFAULT_BARE: Final[re.Pattern[str]] = re.compile(
@@ -120,7 +118,9 @@ _DEFAULT_BARE: Final[re.Pattern[str]] = re.compile(
 )
 #: Commands whose arguments are text shown to a person, never a value that is run.
 _DISPLAY_COMMANDS: Final[frozenset[str]] = frozenset({"echo", "printf"})
-_HEREDOC_DELIMITER: Final[re.Pattern[str]] = re.compile(r"""^(-?)\s*(?:'([^']*)'|"([^"]*)"|\\?(\w+))""")
+_HEREDOC_DELIMITER: Final[re.Pattern[str]] = re.compile(
+    r"""^(-?)\s*(?:'([^']*)'|"([^"]*)"|\\?(\w+))"""
+)
 
 _SHELL_SUFFIXES: Final[frozenset[str]] = frozenset({".sh", ".bash"})
 _SHELL_INTERPRETERS: Final[frozenset[str]] = frozenset({"sh", "bash", "dash", "zsh"})
