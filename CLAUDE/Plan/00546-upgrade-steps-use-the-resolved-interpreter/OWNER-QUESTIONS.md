@@ -2,6 +2,21 @@
 
 The DBF conformance review found that three decisions were taken without the owner, and they are the owner's to make. Task 3.1 stays open until each is ruled on. The rule (`bare-python-invocation`) is blocking and reports 0 on this branch only because of Q1's allowlist.
 
+## Rulings
+
+The owner delegated Q1 to Q3 to an adviser (Fable). The adviser ruled every question CLEAR; the ruling is in
+[subagent-reports/261022-owner-questions-advice-fable.md](subagent-reports/261022-owner-questions-advice-fable.md). These are the adviser's rulings under
+the owner's delegation, not the owner's own words.
+
+- **Q1: approved, option A.** The 8 entries stand. Option C is replaced because `uv` has no interpreter below 3.8.2, so a 3.6 run cannot be done.
+  Instead: every allowlisted `init.sh` snippet must parse with `ast.parse(..., feature_version=(3, 6))` and import only stdlib modules
+  (`tests/unit/test_init_sh_snippets_parse_at_floor.py`), and the 3.8/3.9 runtime tests provision through `uv` rather than skip (`tests/old_python.py`).
+  A skip happens only when `uv` is absent and names that cause; a failed install fails the test.
+- **Q2: approved, option B.** CI stays out of scope: all 7 bare `python` lines follow `actions/setup-python` in their own job, so PATH `python` is the
+  pinned interpreter. Shebangs and probe-result sites are known gaps for a follow-up plan. The one real instance, `scripts/debug_info.py` importing
+  `datetime.UTC` before any guard, is fixed here (1 found, 1 fixed). Probe-result sites without a floor check: 0 instances.
+- **Q3: approved, option B.** Not built. Known gap, 0 instances today (the one historical instance, `acceptance-test/invoke.sh`, was fixed with `jq`).
+
 ## Q1: Approve the 8 allowlist entries (11 lines), or direct an alternative
 
 `scripts/qa/bare-python-allowlist.json` accepts 11 bare `python3` lines unfixed: 10 in `init.sh` (the hook forwarder hot path) and 1 in `install.sh` (bootstrap). Each entry now pins the whole line, indentation included, and an `occurrences` count, so a new or copied line is always reported.
