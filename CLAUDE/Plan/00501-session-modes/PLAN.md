@@ -58,8 +58,10 @@ plan does not repeat them. The earlier code fact-check is in `subagent-reports/2
   by an unmet goal evaluation with no genuine human prompt between. It fires on consecutive cycles within a window,
   no repository change (journal files and untracked scratch excluded from the fingerprint). Stop-text similarity is
   logged as evidence only, not a firing condition (Q8).
-- **Loop break.** Reuse the existing goal-clear signal so the supervisor types the goal-clearing command; use a Stop
-  `continue:false` halt once per entry, logged, if spike 0.3 proves it (Q9). Without a proven lever, say so in docs.
+- **Loop break.** Reuse the existing goal-clear signal so the supervisor types `/goal clear`; spike 0.3 showed a
+  `/goal clear` typed mid-turn takes effect at once. A Stop `continue:false` halt (Q9) stays out until a live test
+  proves it beats the goal evaluator and disarms the goal (spike 0.3: unproven). Without ccy, the docs name Claude
+  Code's own cap-and-pause as the only backstop.
 - **No re-arm.** While BLOCKED, goal injection writes no goal signal, the goal-ledger challenge is suppressed, the
   supervisor skips goal, session-action and post-compact `continue` prompts (`/compact` still runs; the suppression
   is logged as a named noop reason), and declared and failsafe ticks are dropped. Nothing sets a goal
@@ -105,7 +107,7 @@ All CLEAR; rationale and code citations in
 08. **Goal-loop rollout?** `observe` first; similarity dropped from the fire rule (kept as evidence); flip to `act`
     on three true positives and no false positive, or two releases.
 09. **Stop `continue:false` halt?** Yes, once per entry, logged; spike 0.3 is load-bearing and also tests the
-    busy-session typing alternative.
+    busy-session typing alternative. Spike 0.3 left the halt unproven, so Task 6.3 uses the goal clear only.
 10. **Rename to "session modes"?** Approved by the owner; done.
 11. **Manual goals (#106)?** Exit by explicit switch-back or new session (a typed `/goal` does not exit; no TTL);
     does not suppress `continue`; first mod section is a read-only display. Detail in
@@ -115,12 +117,14 @@ All CLEAR; rationale and code citations in
 
 ### Phase 0: Spikes and evidence (no production code)
 
-- [ ] ⬜ **Task 0.1**: Fold the design report's findings into the journal; correct the fact-check's open items.
-- [ ] ⬜ **Task 0.2**: Spike: capture real Stop payloads and record order during a goal re-arm (including
-  `stop_hook_active`) from existing transcripts and stop events.
-- [ ] ⬜ **Task 0.3**: Spike: does a Stop `continue:false` end a turn while a goal is active; is a goal clear typed
-  mid-turn queued or rejected? Also test the busy-session typing alternative (the supervisor queuing `/goal clear`
-  with its existing Enter/ESC machinery); the result decides the lever for Task 6.3.
+- [x] ✅ **Task 0.1**: Fold the design report's findings into the journal; correct the fact-check's open items.
+- [x] ✅ **Task 0.2**: Spike: capture real Stop payloads and record order during a goal re-arm (including
+  `stop_hook_active`) from existing transcripts and stop events. Report: [SPIKE-0.2-stop-payloads.md](SPIKE-0.2-stop-payloads.md).
+- [x] ✅ **Task 0.3**: Spike: does a Stop `continue:false` end a turn while a goal is active; is a goal clear typed
+  mid-turn queued or rejected? Also test the busy-session typing alternative (the supervisor typing `/goal clear`;
+  its gate is human-input idleness, not child output); the result decides the lever for Task 6.3. Report:
+  [SPIKE-0.3-continue-false.md](SPIKE-0.3-continue-false.md). The halt question stays unproven (no live test was
+  possible); the clear runs at once mid-turn.
 
 ### Phase 1: The model (pure, no behaviour change)
 
@@ -161,8 +165,9 @@ All CLEAR; rationale and code citations in
 - [ ] ⬜ **Task 5.1**: TDD the supervisor reader for the session-modes file (field-pin test) and the gate skipping
   goal, session-action and standing-auth prompts, plus the post-compact `continue` (`WOULD_CONTINUE`) under BLOCKED,
   logged as a named noop reason.
-- [ ] ⬜ **Task 5.2**: TDD goal-clear outranking goal-intent under BLOCKED, per spike 0.3; run the supervisor
-  hot-reload check from `.claude/rules/ccy-supervisor-dogfooding.md`.
+- [ ] ⬜ **Task 5.2**: TDD goal-clear outranking goal-intent under BLOCKED, and a BLOCKED clear not refused by the
+  5-per-process clear cap (spike 0.3: the cap has been hit); no busy-session rule is needed, the clear already types
+  into a running turn. Run the supervisor hot-reload check from `.claude/rules/ccy-supervisor-dogfooding.md`.
 
 ### Phase 6: Goal-loop detector
 
@@ -170,19 +175,22 @@ All CLEAR; rationale and code citations in
 - [ ] ⬜ **Task 6.2**: TDD the cycle ring, repo fingerprint (conditional, `git status --porcelain -uno` plus HEAD),
   thresholds (a declared `[awaiting-human]` stop counts toward the 2-cycle threshold), `observe` mode, near-miss
   logging. Similarity is logged but not a fire condition.
-- [ ] ⬜ **Task 6.3**: TDD `act` mode: enter BLOCKED(goal-loop), clear the goal signal, one-time context line, and
-  the lever spike 0.3 proves (halt once per entry, logged, or the queued clear); if neither works, document that
-  the only backstop is Claude Code's built-in cap of 8 consecutive stop-hook continuations (reset by each tool call,
-  raised by `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`), which a loop that makes tool calls between stops does not reach.
+- [ ] ⬜ **Task 6.3**: TDD `act` mode: enter BLOCKED(goal-loop), clear the goal signal (the lever spike 0.3
+  supports: the supervisor's `/goal clear` lands mid-turn), one-time context line. No `continue:false` halt unless
+  a later live test proves it. Document that without ccy the only backstop is Claude Code's built-in cap of 8
+  consecutive stop-hook continuations (reset by each tool call, raised by `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`), after
+  which it pauses the goal until the next message, including a tick; a loop that makes tool calls between stops
+  never reaches the cap.
 - [ ] ⬜ **Task 6.4**: TDD exits: human prompt, repo change, timer, explicit clear.
 
 ### Phase 7: Docs and acceptance
 
-- [ ] ⬜ **Task 7.1**: Handler guidance, a "Session modes" section in the autonomy docs, release note in the
-  UNRELEASED holding area.
+- [ ] ⬜ **Task 7.1**: Handler guidance, a "Session modes" section in the autonomy docs (no autonomy doc exists yet;
+  choose its home when this task starts), release note in the UNRELEASED holding area.
 - [ ] ⬜ **Task 7.2**: Acceptance: focus on (with a live goal), a declared tick dropped, a rewritten failsafe tick
   delivered, focus off; awaiting-human in one session not cleared by another; a live goal loop caught in observe
-  mode, then in act mode (requires the lever proven by spike 0.3).
+  mode, then in act mode, observing the supervisor's `/goal clear` landing during the stop loop itself (spike 0.3
+  saw it only in tool-calling turns).
 - [ ] ⬜ **Task 7.3**: Tune thresholds from the observe log and flip the default to `act` after three true positives
   and no false positive, or after two releases, whichever is first.
 
