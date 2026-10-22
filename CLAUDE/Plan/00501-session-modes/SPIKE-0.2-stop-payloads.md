@@ -74,7 +74,8 @@ Stop hook input (contract `Stop.json`, docs `hooks.md` "Stop input"): the common
 `background_tasks`, `session_crons` (both conditional: absent is not empty) and `effort` when the model supports it.
 
 `stop-events.jsonl` records `{timestamp, session_id, stop_hook_active, decision, reason_prefix, transcript_bytes}`
-only when `auto_continue_stop.matches()` is true (`auto_continue_stop.py:1260`, call sites 822-926). Totals:
+only when `auto_continue_stop.matches()` is true (`matches()` at `auto_continue_stop.py:731`; the writer
+`_log_stop_event` at line 1260, call sites 822-926). Totals:
 794 `true/allow`, 444 `true/deny`, 4,264 `false/allow`, 933 `false/deny`. In the 13:00-13:04 loop window the
 transcript shows about 25 Stop firings but the log has five lines, which matches `matches()` standing down on a
 re-entry whose transcript tail carries a block marker (`auto_continue_stop.py:765-779`). Two findings follow:
