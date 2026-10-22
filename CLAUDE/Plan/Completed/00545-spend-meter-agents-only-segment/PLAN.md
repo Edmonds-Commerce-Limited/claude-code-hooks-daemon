@@ -51,8 +51,10 @@ agents only.
 
 ## Success Criteria
 
-- [x] With no agents running, the segment renders nothing; with agents running it renders the agents-only form (tested).
-- [x] A start-up transcript is never counted as unmeasured; real failures render red only when non-zero (tested).
+- [x] With no agents running and no failures, the segment renders nothing (with failures, only the red count); with
+  agents running it renders the agents-only form (tested).
+- [x] A start-up transcript is never counted as unmeasured, tested since `bf01783be` (N516, N517); real failures render
+  red only when non-zero (tested).
 - [x] A release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (the pending-release holding area):
   `012-spend-meter-shows-running-agents-only.md`.
 

@@ -96,16 +96,20 @@ modules only.
 - [x] ✅ **Task 2.2**: A separate performance-sweep job (Design 6). Delivered:
   `perf_sweep` marker on the 7 `scaled_cpu_seconds` tests (11 cases), deselected
   from the fallback and matrix steps, run alone by the `perf-sweep` CI job.
-- [ ] ⬜ **Task 2.3**: The release state file records the CI run and `/release`
-  checks it on resume (Design 7).
+- [x] ✅ **Task 2.3**: The release state file records the CI run and `/release`
+  checks it on resume (Design 7). Delivered: optional `ci` record in the state
+  file and `scripts/release/check_release_ci.py` (strict schema, live `gh run view` check behind a seam, one-line named failure, exit 1).
 
 ### Phase 3: Procedure
 
 - [ ] ⬜ **Task 3.1**: Rewrite `RELEASING.md`, the release skill and the release
   agent: prepare, open the pull request, wait for CI green, then acceptance
   tests, merge, tag and publish locally.
-- [ ] ⬜ **Task 3.2**: A freeze on merges to `main` while a release pull request
-  is open.
+- [x] ✅ **Task 3.2**: A freeze on merges to `main` while a release pull request
+  is open. Delivered: project handler `release_merge_freeze` (R-RELEASE-MERGE-FREEZE)
+  denies `git merge` on main, `git push` to main and `gh pr merge` of any pull
+  request but the one in the state file's `ci.pr_number`; a malformed state file
+  fails closed. Task 3.1 must document the freeze in `RELEASING.md`.
 
 ## Success Criteria
 
