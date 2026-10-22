@@ -421,6 +421,7 @@ class ConfigTemplate:
             "  # deliberately, so it is not shadowed.\n"
             "  stop:\n"
             "    idle_workable_issue_stop_gate: {enabled: true, priority: 4}  # Refuse an idle stop while a workable issue is cached and nothing is in flight. Inert unless the project declares an issue-sdlc persistent cron\n"
+            "    goal_loop_detector: {enabled: true, priority: 5}  # Log a session looping on an unmet goal to the transition log. Observe only; never blocks\n"
             "    usage_pause_stop_gate: {enabled: true, priority: 6}  # A usage-paused session stops only once its crons are exactly the one resume cron. Inert unless a pause is recorded\n"
             "    cron_stop_enforcer: {enabled: true, priority: 7}  # Block a stop while a declared persistent_crons job is verified missing. Inert until persistent_crons.enabled is true AND a job is declared\n"
             "    teammate_reap_advisor: {enabled: true, priority: 9}  # Report the Stop payload's background_tasks count and name TaskStop. Advisory only, rate-limited; silent when the list is absent or empty\n"

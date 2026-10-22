@@ -281,6 +281,12 @@ _READ_OUTSIDE_THE_HANDLER: dict[tuple[str, str], str] = {
 #: arbitrary sentinel -- so each gets a VALID value that is not its default.
 _VALID_NON_DEFAULTS: dict[tuple[str, str], object] = {
     ("bash_safe_mode", "mode"): "warn",
+    # validate_options refuses anything but `observe` and positive numbers; `observe`
+    # is the only mode and the default, so the mode is compared on a str copy.
+    ("goal_loop_detector", "cycle_threshold"): 7,
+    ("goal_loop_detector", "declared_cycle_threshold"): 5,
+    ("goal_loop_detector", "window_minutes"): 41,
+    ("goal_loop_detector", "blocked_hours"): 2.5,
     ("bash_safe_mode", "exempt_patterns"): [r"^zzqx-exempt\b"],
     # validate_options refuses anything but a list of logins and a bool
     ("github_issue_assignment_guard", "approved_issue_authors"): ["zzqx-login"],

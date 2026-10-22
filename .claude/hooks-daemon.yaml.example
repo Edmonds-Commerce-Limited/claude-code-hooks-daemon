@@ -940,6 +940,16 @@ handlers:
       #   max_cache_age_hours: 2      # A workable-issues cache older than this is not trusted
       #   marker_expiry_hours: 24     # How long an [awaiting-human] marker keeps the gate aside
 
+    goal_loop_detector:  # Logs a session looping on an unmet goal to the transition log (Plan 00501 Phase 6)
+      enabled: true      # Observe only: never blocks, never enters a mode; never terminal
+      priority: 5
+      # options:
+      #   mode: observe                 # Only `observe` (log near-miss / would-enter / loop-reset)
+      #   cycle_threshold: 3            # Stop-then-unmet cycles in the window that count as a loop
+      #   declared_cycle_threshold: 2   # The threshold when every cycle declares [awaiting-human]
+      #   window_minutes: 30            # Cycles older than this (from the newest) drop out
+      #   blocked_hours: 4              # Reserved for the act mode's goal-blocked TTL
+
     usage_pause_stop_gate:  # A usage-paused session stops only once its crons are exactly the one resume cron (Plan 00479)
       enabled: true         # Inert unless a usage pause is recorded for the session; never terminal
       priority: 6

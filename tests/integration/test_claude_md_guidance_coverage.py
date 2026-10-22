@@ -477,6 +477,7 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "UsageIndicatorHandler": "status-line renderer, no agent-facing action",
     "SubagentCacheAggregatorHandler": "observe-only sensor, no agent-facing action",
     "BackgroundTaskRecorderHandler": "observe-only sensor, no agent-facing action",
+    "GoalLoopDetectorHandler": "observe-only: logs goal-loop cycles to the transition log, never blocks",
     "SpawnRateAdvisorHandler": (
         "T2: the advice arrives with the spawn it is about and governs the NEXT one; "
         "it never denies and holds no standing policy"
