@@ -1345,10 +1345,8 @@ handlers:
       priority: 4
 
     goal_loop_detector:  # Logs a session looping on an unmet goal to the transition log (Plan 00501 Phase 6)
-      enabled: true  # Act mode for the Plan 00501 Task 7.2 acceptance run: enters goal-blocked at the threshold; never terminal
+      enabled: true  # Observe only: never blocks, never enters a mode; never terminal
       priority: 5
-      options:
-        mode: act
 
     usage_pause_stop_gate:  # A usage-paused session stops only once its crons are exactly the one resume cron (Plan 00479)
       enabled: true  # Inert unless a usage pause is recorded for the session; never terminal
