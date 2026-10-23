@@ -7,9 +7,7 @@ implementations. The handler itself has ZERO language awareness.
 import logging
 import os
 import shlex
-import shutil
 import subprocess  # nosec B404 - subprocess used for lint validation only (trusted tools)
-import sys
 from pathlib import Path
 from typing import Any, ClassVar, Final
 
@@ -28,7 +26,12 @@ from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_written_file_paths
 from claude_code_hooks_daemon.core.workspace import Workspace, resolve_workspace
-from claude_code_hooks_daemon.strategies.lint.common import build_lint_argv, matches_skip_path
+from claude_code_hooks_daemon.strategies.lint.common import (
+    INTERPRETER_BIN_DIR,
+    build_lint_argv,
+    matches_skip_path,
+    resolve_lint_executable,
+)
 from claude_code_hooks_daemon.strategies.lint.module_context import (
     GoverningConfigError,
     missing_config_note,
@@ -49,11 +52,6 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 
 logger = logging.getLogger(__name__)
-
-# Directory holding the console scripts of the environment running the daemon.
-# ``sys.executable`` is the project venv's interpreter, and a venv's ``ruff`` /
-# ``black`` / ``mypy`` entry points sit beside it. Resolved once at import.
-_INTERPRETER_BIN_DIR: Final[Path] = Path(sys.executable).parent
 
 # Single rule (Plan 00116): the language dimension lives in the strategy
 # registry, not in a per-language RuleID -- every language's lint failure is
@@ -379,15 +377,9 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         checking": the guard silently inert, and the advice wrong, because ruff
         was already installed.
 
-        Search order: the edited file's OWN workspace bin dirs
-        (``vendor/bin``, ``node_modules/.bin``), then the interpreter's own
-        ``bin`` directory (that IS the project venv), then ``PATH`` for tools
-        installed system wide (``golangci-lint``, ``shellcheck``).
-
-        The workspace comes first deliberately (Plan 00296): a project pins a
-        linter VERSION in its own manifest, so a global copy that happens to
-        be on PATH is the wrong tool, and in a monorepo it may not exist at
-        all while the workspace's copy does.
+        Delegates to :func:`resolve_lint_executable`, the resolver
+        `staged_lint_gate` also uses, so both gates launch the same binary
+        (workspace bin dirs, then the interpreter's ``bin``, then ``PATH``).
 
         Returning None rather than guessing is deliberate: the caller turns it
         into an advisory ALLOW. Invoking a missing tool some other way — e.g.
@@ -395,24 +387,7 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         instead of raising, and a non-zero lint result DENIES the user's edit.
         A tool that is not installed must never block anyone.
         """
-        # An absolute path (e.g. sys.executable in the default Python command)
-        # is already resolved; do not second-guess it.
-        if Path(executable).is_absolute():
-            return executable
-
-        for bin_dir in workspace_bin_dirs:
-            workspace_candidate = bin_dir / executable
-            # eacces-safe-exempt: resolving the LINTER binary, not the file
-            # under lint. These bin dirs come from workspace config.
-            if workspace_candidate.is_file():
-                return str(workspace_candidate)
-
-        candidate = _INTERPRETER_BIN_DIR / executable
-        # eacces-safe-exempt: the daemon's own interpreter bin dir.
-        if candidate.is_file():
-            return str(candidate)
-
-        return shutil.which(executable)
+        return resolve_lint_executable(executable, workspace_bin_dirs)
 
     def _run_lint_command(
         self,
@@ -473,7 +448,7 @@ class LintOnEditHandler(PostToolUseHandlerBase):
                 decision=Decision.ALLOW,
                 context=[
                     f"⚠️ {language_name} lint tool not found ({command_parts[0]}) "
-                    f"- looked in {where}{_INTERPRETER_BIN_DIR} and on PATH. "
+                    f"- looked in {where}{INTERPRETER_BIN_DIR} and on PATH. "
                     f"Install it to enable lint checking."
                 ],
             )
