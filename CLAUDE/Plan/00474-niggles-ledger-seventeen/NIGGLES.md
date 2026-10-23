@@ -109,6 +109,33 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N536 — v3.71.0 release code review: defects fixed on the release branch
+
+**Source**: release v3.71.0 Step 10, three code reviewers over `v3.70.0..fd2cf727a` (reports under
+`subagent-reports/261023-r371-*.md` once each fix lands).
+
+- **Core**: one unreadable `*.session-modes` file breaks `SessionModeRegistry.load()` for every session; a goal
+  clear can be attributed twice across a restart (the second as a human's); timed-out exempt calls count against the
+  ordinary straggler cap in `bounded_dispatch`; `goal_loop.read_new_lines` can checkpoint mid-line; the manual-goals
+  message promises no automated clear while the goal-loop detector's clear is ungated.
+- **Install/relay**: `start_relay_repair` drops the spawned pid (a dead child reads as RUNNING for ever), and the
+  repair child is never reaped (a zombie passes `kill(pid, 0)`).
+- **Handlers**: `lint_on_edit` and the staged lint gate run the linter from different directories in a sub-project;
+  three helpers have no production caller.
+
+**Status**: 🔄 four fix branches off `release/3.71.0` in flight.
+
+### N535 — Claude Code 2.1.309: a nested CLAUDE.md over the size limit now loads its start, not skipped
+
+**Source**: release v3.71.0 Step 1c review, `subagent-reports/261023-claude-code-review-v3.71.0.md` (the one
+conflict row).
+
+- `docs_qa/footprint.py` (lines ~50-51 and ~467-468) still reports an over-limit file as "skipped by Claude Code",
+  and the instruction-loading contract FACTS G4-03 (nested files) and G1-05 say the same. The changelog does not
+  state the limit for nested files.
+
+**Status**: 🔄 contract refresh and footprint wording on the release branch.
+
 ### N534 — the supervisor focus hold outlives every sub-agent, and a human `/goal clear` can be credited to the supervisor
 
 **Source**: Plan 00501 Task 7.2 act-mode run (journal entry "Act-mode run", 26-10-23). Full write-up:
