@@ -200,9 +200,7 @@ class TestRead:
 
 def _rendered(queue: Path, *, now: float = _NOW, project_root: Path | None = None) -> str:
     root = queue.parent if project_root is None else project_root
-    return "\n".join(
-        render_rebrief(active_records(read_queue(queue)), now=now, project_root=root)
-    )
+    return "\n".join(render_rebrief(active_records(read_queue(queue)), now=now, project_root=root))
 
 
 class TestRender:

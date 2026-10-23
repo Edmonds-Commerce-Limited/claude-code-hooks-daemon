@@ -332,9 +332,7 @@ def queue_briefing(path: Path, *, now: float, project_root: Path) -> list[str]:
     reported rather than called empty: silence there would hide the lost agents.
     """
     try:
-        return render_rebrief(
-            active_records(read_queue(path)), now=now, project_root=project_root
-        )
+        return render_rebrief(active_records(read_queue(path)), now=now, project_root=project_root)
     except WorkQueueError as exc:
         return [
             "WORK QUEUE UNREADABLE",

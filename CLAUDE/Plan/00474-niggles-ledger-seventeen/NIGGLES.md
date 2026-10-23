@@ -109,6 +109,23 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N533 — the work-queue re-brief reports a live worktree recorded by relative path as MISSING
+
+**Source**: the coordinator's SessionStart WORK QUEUE re-brief printed
+`worktree: untracked/worktrees/worktree-n531-child-exit  [MISSING on disk]` while `git worktree list` showed that
+worktree present.
+
+- **Cause**: `utils/work_queue.py` `_render_record` checked `Path(record.worktree).is_dir()`, which resolves a
+  relative recorded path against the daemon process's cwd, not the project root. A false MISSING tells the
+  coordinator to abandon live work.
+- **Fix**: `render_rebrief` and `queue_briefing` take a required `project_root`, and a relative worktree is checked
+  under it (an absolute one is unchanged). Both callers, `work_queue_rebrief` (SessionStart) and `limit_rebrief`
+  (UserPromptSubmit), pass `ProjectContext.project_root()`, read only when a queue path exists. Red tests first: a
+  relative worktree present under the root with the cwd elsewhere is not MISSING, one absent under the root is,
+  at util and at both handlers.
+
+**Status**: ✅ fixed on branch `worktree-n533-work-queue-relpath` (not yet merged).
+
 ### N532 — implementation sub-agents spend their context budget before writing code
 
 **Source**: Plan 00501 Phase 6. Four of its seven `python-developer` dispatches (each given a `model: opus` override at
