@@ -233,8 +233,12 @@ All CLEAR; rationale and code citations in
 - [ ] A goal tight loop is detected, logged with its evidence, broken and not re-armed; every unblock condition
   exits the mode.
 - [x] ✅ The status line shows the active mode(s) and `status-line-explained` documents them (the
-  `session_mode_indicator` segment: top mode by precedence plus `+N`, every mode and its exit named).
-- [ ] Guards behave identically in every mode; no config change is needed.
+  `session_mode_indicator` segment: top mode by precedence plus `+N`, all six modes listed).
+- [x] ✅ Guards behave identically in every mode; no config change is needed:
+  `tests/integration/test_guards_identical_in_every_mode.py` dispatches guard-denied calls through the real
+  controller with the default config under every mode and matches the no-mode decisions (usage-paused only adds its
+  own deny in front); `tests/unit/handlers/test_session_mode_readers.py` pins which handlers may read mode state
+  ([report](subagent-reports/261023-guards-every-mode.md)).
 - [x] ✅ Full QA gate passes: the v3.71.0 `Release gate` run 40010977887 (whole gate, Python 3.11 to 3.13) passed
   on a tree carrying every merged task of this plan.
 
