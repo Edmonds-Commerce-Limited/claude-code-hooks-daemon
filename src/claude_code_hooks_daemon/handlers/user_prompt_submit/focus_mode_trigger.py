@@ -6,6 +6,10 @@ on for this session only; ``hooks-daemon focus off`` (aliases ``done``, ``end``,
 ``disable``) turns it off. Either is stated back in exactly one context line,
 and the prompt still reaches the model, so the task it names is the stated task.
 
+A prompt that is exactly ``hooks-daemon goals off`` (or ``manual``) enters the
+``manual-goals`` mode and ``hooks-daemon goals on`` (or ``auto``) leaves it
+(Plan 00501 Task 8.3), each stated in one line the same way.
+
 Every other genuine human prompt renews the session's focus (TTL, ruling 02),
 classified from the prompt text alone. On EVERY prompt, command or not, the
 session's pending mode news (an expiry; after a daemon restart, what survived
@@ -36,18 +40,36 @@ from claude_code_hooks_daemon.core.focus_mode import (
     parse_focus_command,
 )
 from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
+from claude_code_hooks_daemon.core.manual_goals import (
+    GoalsCommand,
+    enter_manual_goals,
+    exit_manual_goals,
+    parse_goals_command,
+)
 from claude_code_hooks_daemon.core.session_mode_registry import SessionModeRegistry
 from claude_code_hooks_daemon.core.session_mode_statement import pending_mode_statement
 from claude_code_hooks_daemon.daemon.controller import get_controller
 from claude_code_hooks_daemon.handlers.post_tool_use.goal_injection import clear_goal_signal
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
-from claude_code_hooks_daemon.utils.session_modes import UsagePauseView
+from claude_code_hooks_daemon.utils.session_modes import ModeSource, UsagePauseView
 from claude_code_hooks_daemon.utils.usage_pause_gate import active_usage_pause
 
 logger = logging.getLogger(__name__)
 
 #: The transition log's evidence for a focus change typed at the prompt.
 _COMMAND_EVIDENCE = "the human's `hooks-daemon focus` prompt command"
+
+#: The transition log's evidence for a manual-goals change typed at the prompt.
+_GOALS_EVIDENCE = "the human's `hooks-daemon goals` prompt command"
+
+#: A command this handler carries out: focus, or manual goals.
+PromptCommand = FocusCommand | GoalsCommand
+
+
+def _not_changed(command: PromptCommand, why: str) -> str:
+    """The line stating that ``command`` was not carried out, and why."""
+    subject = "MANUAL GOALS" if isinstance(command, GoalsCommand) else "FOCUS MODE"
+    return f"{subject} NOT CHANGED: {why}"
 
 
 def _session_id(hook_input: dict[str, Any]) -> str:
@@ -88,14 +110,14 @@ class FocusModeTriggerHandler(UserPromptSubmitHandlerBase):
         """Apply a focus command, or renew focus; state notices. Always ALLOW."""
         prompt = hook_input.get(HookInputField.PROMPT)
         session_id = _session_id(hook_input)
-        command = parse_focus_command(prompt)
+        command: PromptCommand | None = parse_focus_command(prompt) or parse_goals_command(prompt)
         if not session_id:
             if command is None:
                 return BlockingResult(decision=Decision.ALLOW)
-            logger.warning("focus_mode_trigger: a focus command arrived with no session id")
+            logger.warning("focus_mode_trigger: a mode command arrived with no session id")
             return BlockingResult(
                 decision=Decision.ALLOW,
-                context=["FOCUS MODE NOT CHANGED: the prompt carried no session id."],
+                context=[_not_changed(command, "the prompt carried no session id.")],
             )
         try:
             registry = get_data_layer().session_modes
@@ -103,13 +125,13 @@ class FocusModeTriggerHandler(UserPromptSubmitHandlerBase):
             log_and_continue(
                 logger,
                 error,
-                reason="the session-modes registry could not be used, so focus was neither changed nor renewed",
+                reason="the session-modes registry could not be used, so no mode was changed or renewed",
             )
             if command is None:
                 return BlockingResult(decision=Decision.ALLOW)
             return BlockingResult(
                 decision=Decision.ALLOW,
-                context=[f"FOCUS MODE NOT CHANGED: the daemon could not record it ({error})."],
+                context=[_not_changed(command, f"the daemon could not record it ({error}).")],
             )
         # The change and the news are independent: a write that keeps failing
         # must not hold back every queued notice, so each has its own try.
@@ -129,7 +151,7 @@ class FocusModeTriggerHandler(UserPromptSubmitHandlerBase):
         self,
         registry: SessionModeRegistry,
         session_id: str,
-        command: FocusCommand | None,
+        command: PromptCommand | None,
         prompt: object,
     ) -> str | None:
         """:meth:`_apply`, or the line stating that its registry write failed."""
@@ -139,23 +161,33 @@ class FocusModeTriggerHandler(UserPromptSubmitHandlerBase):
             log_and_continue(
                 logger,
                 error,
-                reason="the session-modes registry write failed, so focus was neither changed nor renewed; the agent is told so",
+                reason="the session-modes registry write failed, so no mode was changed or renewed; the agent is told so",
             )
             if command is None:
                 return f"FOCUS MODE NOT RENEWED: the daemon could not record it ({error})."
-            return f"FOCUS MODE NOT CHANGED: the daemon could not record it ({error})."
+            return _not_changed(command, f"the daemon could not record it ({error}).")
 
     @staticmethod
     def _apply(
         registry: SessionModeRegistry,
         session_id: str,
-        command: FocusCommand | None,
+        command: PromptCommand | None,
         prompt: object,
     ) -> str | None:
-        """Carry out ``command`` (or renew focus); the line to state, if any."""
+        """Renew what this prompt renews, then carry out ``command``; the line to state, if any.
+
+        Every prompt reaches ``note_prompt``, a command included, so a
+        ``manual-goals`` entry is renewed by every prompt the session receives.
+        """
+        registry.note_prompt(session_id, prompt)
         if command is None:
-            registry.note_prompt(session_id, prompt)
             return None
+        if isinstance(command, GoalsCommand):
+            if command.manual:
+                return enter_manual_goals(
+                    registry, session_id, source=ModeSource.HUMAN, evidence=_GOALS_EVIDENCE
+                ).line()
+            return exit_manual_goals(registry, session_id, evidence=_GOALS_EVIDENCE).line()
         if command.is_off:
             return exit_focus(registry, session_id, evidence=_COMMAND_EVIDENCE).line()
         return enter_focus(
@@ -177,7 +209,10 @@ class FocusModeTriggerHandler(UserPromptSubmitHandlerBase):
             "challenge are off, the failsafe tick still arrives naming the task, and an "
             "existing goal is cleared once on entry. Focus lasts 12 hours, renewed by each "
             "prompt the human types. Also: `/mode focus <task>`, `/mode focus off`, or "
-            "`hooks-daemon session-mode`. Every session mode, what each suppresses "
+            "`hooks-daemon session-mode`. `hooks-daemon goals off` (or `manual`) at the "
+            "start of a prompt puts the session in manual goals: no automated goal is set or "
+            "cleared for it until `hooks-daemon goals on` (or `auto`); also "
+            "`/mode goals manual|auto`. Every session mode, what each suppresses "
             "and how each ends: `CLAUDE/SessionModes.md`.\n"
         )
 

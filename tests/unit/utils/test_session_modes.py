@@ -15,6 +15,7 @@ from claude_code_hooks_daemon.utils import session_modes
 from claude_code_hooks_daemon.utils.cron_tick import DaemonTick, TickKind
 from claude_code_hooks_daemon.utils.session_modes import (
     FOCUS_TTL_SECONDS,
+    MANUAL_GOALS_RETENTION_SECONDS,
     BlockReason,
     Lifetime,
     ModeLabel,
@@ -24,6 +25,7 @@ from claude_code_hooks_daemon.utils.session_modes import (
     SessionPolicy,
     TickAction,
     is_genuine_human_prompt,
+    manual_goals_entry,
 )
 
 _SID = "session-a"
@@ -50,6 +52,10 @@ def _blocked(reason: BlockReason = BlockReason.DECLARED) -> SessionModeEntry:
         source=ModeSource.AGENT if reason is BlockReason.DECLARED else ModeSource.DETECTOR,
         reason=reason,
     )
+
+
+def _manual_goals() -> SessionModeEntry:
+    return manual_goals_entry(_SID, entered_at=_T0, source=ModeSource.HUMAN)
 
 
 def _usage_paused() -> SessionModeEntry:
@@ -130,9 +136,37 @@ class TestEntry:
         assert entry.is_live(entry.expires_at - 1) is True
         assert entry.is_live(entry.expires_at) is False
 
-    def test_only_focus_is_renewable(self) -> None:
+    def test_focus_and_manual_goals_are_renewable(self) -> None:
         assert _focus().renewal_ttl == FOCUS_TTL_SECONDS
         assert _blocked().renewal_ttl is None
+        assert _manual_goals().renewal_ttl == MANUAL_GOALS_RETENTION_SECONDS
+
+    def test_focus_is_renewed_only_by_a_genuine_prompt(self) -> None:
+        assert _focus().renewed_by(genuine=True) is True
+        assert _focus().renewed_by(genuine=False) is False
+
+    def test_manual_goals_is_renewed_by_every_prompt(self) -> None:
+        assert _manual_goals().renewed_by(genuine=True) is True
+        assert _manual_goals().renewed_by(genuine=False) is True
+
+    def test_blocked_is_renewed_by_no_prompt(self) -> None:
+        assert _blocked().renewed_by(genuine=True) is False
+
+    def test_manual_goals_entry_is_a_session_lifetime_registry_mode(self) -> None:
+        entry = _manual_goals()
+        assert entry.label is ModeLabel.MANUAL_GOALS
+        assert entry.lifetime is Lifetime.SESSION
+        assert entry.expires_at == _T0 + MANUAL_GOALS_RETENTION_SECONDS
+        assert SessionMode.MANUAL_GOALS.registry_owned is True
+
+    def test_manual_goals_suppresses_goal_intent_and_nothing_else(self) -> None:
+        policy = SessionPolicy.from_entries([_manual_goals()])
+        assert policy.goal_intent_suppressed is True
+        assert policy.drives_work is True
+        assert policy.is_blocked is False
+        assert policy.unattended_block_applies is True
+        assert policy.badge() == "manual-goals"
+        assert SessionPolicy.from_entries([_focus()]).goal_intent_suppressed is False
 
     def test_renewed_moves_the_expiry_from_now(self) -> None:
         renewed = _focus().renewed(_T0 + 100.0)

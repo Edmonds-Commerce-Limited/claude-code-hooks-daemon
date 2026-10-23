@@ -39,12 +39,22 @@ FOCUS_TTL_SECONDS: Final[int] = 12 * _SECONDS_PER_HOUR
 #: entered, so a forgotten declaration costs at most a day of ticks.
 DECLARED_BLOCKED_TTL_SECONDS: Final[int] = 24 * _SECONDS_PER_HOUR
 
+#: How long a ``manual-goals`` entry outlives the LAST prompt its session received.
+#:
+#: This is a liveness bound, not a clock that ends the mode: every prompt, cron
+#: ticks and supervisor lines included, pushes the expiry this far ahead, so it
+#: never arrives while the session runs. The mode ends at an explicit switch-back
+#: or with the session (a new session has a new id). The bound exists because
+#: every stored entry must expire, so a dead session's file is reaped.
+MANUAL_GOALS_RETENTION_SECONDS: Final[int] = 30 * 24 * _SECONDS_PER_HOUR
+
 
 class SessionMode(StrEnum):
     """The closed set of session modes."""
 
     FOCUS = "focus"
     BLOCKED = "blocked"
+    MANUAL_GOALS = "manual-goals"
     USAGE_PAUSED = "usage-paused"
     UNATTENDED = "unattended"
 
@@ -58,7 +68,19 @@ class SessionMode(StrEnum):
         return self in _REGISTRY_OWNED
 
 
-_REGISTRY_OWNED: Final[frozenset[SessionMode]] = frozenset({SessionMode.FOCUS, SessionMode.BLOCKED})
+_REGISTRY_OWNED: Final[frozenset[SessionMode]] = frozenset(
+    {SessionMode.FOCUS, SessionMode.BLOCKED, SessionMode.MANUAL_GOALS}
+)
+
+#: How far a prompt pushes each renewable mode's expiry.
+_RENEWAL_TTLS: Final[dict[SessionMode, int]] = {
+    SessionMode.FOCUS: FOCUS_TTL_SECONDS,
+    SessionMode.MANUAL_GOALS: MANUAL_GOALS_RETENTION_SECONDS,
+}
+
+#: The renewable modes that ANY prompt renews (machine traffic included), not
+#: only one the human typed.
+_RENEWED_BY_ANY_PROMPT: Final[frozenset[SessionMode]] = frozenset({SessionMode.MANUAL_GOALS})
 
 
 class BlockReason(StrEnum):
@@ -95,7 +117,6 @@ class ModeLabel(StrEnum):
     USAGE_PAUSED = "usage-paused"
     GOAL_BLOCKED = "goal-blocked"
     AWAITING_HUMAN = "awaiting-human"
-    # Plan 00501 Task 8.2 logs goal-clear attributions under it; Task 8.3 builds the mode.
     MANUAL_GOALS = "manual-goals"
     FOCUS = "focus"
     UNATTENDED = "unattended"
@@ -185,8 +206,18 @@ class SessionModeEntry:
 
     @property
     def renewal_ttl(self) -> int | None:
-        """How far a genuine human prompt pushes the expiry, or None if it does not."""
-        return FOCUS_TTL_SECONDS if self.mode is SessionMode.FOCUS else None
+        """How far a renewing prompt pushes the expiry, or None if no prompt does."""
+        return _RENEWAL_TTLS.get(self.mode)
+
+    def renewed_by(self, *, genuine: bool) -> bool:
+        """Whether a prompt renews this entry; ``genuine`` is whether the human typed it.
+
+        Focus is renewed only by the human's own prompts; ``manual-goals`` by every
+        prompt, so its expiry never arrives while the session is alive.
+        """
+        if self.renewal_ttl is None:
+            return False
+        return genuine or self.mode in _RENEWED_BY_ANY_PROMPT
 
     def is_live(self, now: float) -> bool:
         """Whether the entry still applies at ``now``."""
@@ -239,6 +270,27 @@ def goal_loop_blocked_entry(
         expires_at=entered_at + ttl_seconds,
         source=ModeSource.DETECTOR,
         reason=BlockReason.GOAL_LOOP,
+        lifetime=Lifetime.SESSION,
+    )
+
+
+def manual_goals_entry(
+    session_id: str, *, entered_at: float, source: ModeSource
+) -> SessionModeEntry:
+    """The ``manual-goals`` entry: automated goal injection is off for the session.
+
+    It survives a daemon restart and is kept alive by every prompt (see
+    :data:`MANUAL_GOALS_RETENTION_SECONDS`).
+
+    Raises:
+        ValueError: ``session_id`` is blank.
+    """
+    return SessionModeEntry(
+        mode=SessionMode.MANUAL_GOALS,
+        session_id=session_id,
+        entered_at=entered_at,
+        expires_at=entered_at + MANUAL_GOALS_RETENTION_SECONDS,
+        source=source,
         lifetime=Lifetime.SESSION,
     )
 
@@ -338,6 +390,11 @@ class SessionPolicy:
     def is_blocked(self) -> bool:
         """Whether a BLOCKED-family mode (awaiting-human or goal-blocked) is active."""
         return any(label in BLOCKED_LABELS for label in self.labels)
+
+    @property
+    def goal_intent_suppressed(self) -> bool:
+        """Whether automated goal injection is off (``manual-goals``); nothing else changes."""
+        return ModeLabel.MANUAL_GOALS in self.labels
 
     @property
     def focus_task(self) -> str | None:

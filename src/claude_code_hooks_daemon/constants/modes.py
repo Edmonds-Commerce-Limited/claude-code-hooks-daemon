@@ -39,6 +39,9 @@ class SessionModeIPC:
     ACTION_GET_MODE_HISTORY = "get_mode_history"
     #: End a goal-loop (detector) block; a declared awaiting-human block is refused (Task 6.3).
     ACTION_EXIT_BLOCKED = "exit_blocked"
+    #: Turn automated goal injection off / back on for one session (Task 8.3).
+    ACTION_ENTER_MANUAL_GOALS = "enter_manual_goals"
+    ACTION_EXIT_MANUAL_GOALS = "exit_manual_goals"
     ACTIONS = frozenset(
         {
             ACTION_GET_SESSION_MODES,
@@ -46,6 +49,8 @@ class SessionModeIPC:
             ACTION_EXIT_FOCUS,
             ACTION_GET_MODE_HISTORY,
             ACTION_EXIT_BLOCKED,
+            ACTION_ENTER_MANUAL_GOALS,
+            ACTION_EXIT_MANUAL_GOALS,
         }
     )
 
@@ -72,6 +77,10 @@ class SessionModeIPC:
     #: Words that end focus when they are the whole argument; the prompt
     #: command, the CLI and the ``/mode`` skill all read this one set.
     FOCUS_OFF_ALIASES = frozenset({"off", "done", "end", "disable"})
+
+    #: ``goals`` arguments: the prompt command, the CLI and ``/mode goals`` read these.
+    GOALS_AUTO_WORDS = frozenset({"on", "auto"})
+    GOALS_MANUAL_WORDS = frozenset({"off", "manual"})
 
 
 class ModeConstant:

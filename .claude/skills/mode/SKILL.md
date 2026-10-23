@@ -1,7 +1,7 @@
 ---
 name: mode
-description: Get or set daemon operating mode - switch between default and unattended (blocks Stop events) - and turn this session's focus mode on or off
-argument-hint: "[get|unattended|default|focus] [message|task|off]"
+description: Get or set daemon operating mode - switch between default and unattended (blocks Stop events) - and turn this session's focus mode or manual-goals mode on or off
+argument-hint: "[get|unattended|default|focus|goals] [message|task|off|manual|auto]"
 ---
 
 # /mode - Daemon Mode Management
@@ -42,7 +42,16 @@ View or change the daemon's operating mode. Supports `default` (normal operation
 
 # End focus (aliases: done, end, disable)
 /mode focus off
+
+# Manual goals for THIS session: no automated goal write or retirement clear (alias: off)
+/mode goals manual
+
+# Back to automated goals (alias: on)
+/mode goals auto
 ```
+
+`/mode goals manual|auto` runs `hooks-daemon goals off|on`, the same as typing
+`hooks-daemon goals manual` as a whole prompt; see `CLAUDE/SessionModes.md` (manual-goals).
 
 `/mode focus` is the same as typing `hooks-daemon focus <task>` at the start of a prompt: it
 changes only the current session, not the daemon-wide mode. It runs

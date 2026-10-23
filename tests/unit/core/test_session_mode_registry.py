@@ -45,6 +45,7 @@ from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, writ
 from claude_code_hooks_daemon.utils.session_modes import (
     DECLARED_BLOCKED_TTL_SECONDS,
     FOCUS_TTL_SECONDS,
+    MANUAL_GOALS_RETENTION_SECONDS,
     BlockReason,
     Lifetime,
     ModeLabel,
@@ -53,6 +54,7 @@ from claude_code_hooks_daemon.utils.session_modes import (
     SessionModeEntry,
     declared_blocked_entry,
     goal_loop_blocked_entry,
+    manual_goals_entry,
 )
 from claude_code_hooks_daemon.utils.usage_pause import MAX_PAUSE_SPAN_SECONDS, PAUSE_GRACE_SECONDS
 
@@ -435,6 +437,39 @@ class TestPromptRenewal:
         assert registry.note_prompt(SID, "hello") is True
         assert registry.active(SID) == ()
         assert [notice.kind for notice in registry.take_notices(SID)] == [NoticeKind.EXPIRED]
+
+    def test_a_tick_only_session_keeps_manual_goals(
+        self, registry: SessionModeRegistry, clock: FakeClock
+    ) -> None:
+        registry.enter(manual_goals_entry(SID, entered_at=T0, source=ModeSource.HUMAN))
+        for _ in range(3):
+            clock.now += MANUAL_GOALS_RETENTION_SECONDS - 10
+            assert registry.note_prompt(SID, "[tick:failsafe]\nFAILSAFE RECOVERY CHECK") is False
+        (kept,) = registry.active(SID)
+        assert kept.expires_at == clock.now + MANUAL_GOALS_RETENTION_SECONDS
+        assert read_file(registry)[FIELD_MODES][0][FIELD_EXPIRES_AT] == kept.expires_at
+
+    def test_machine_traffic_renews_manual_goals_but_not_focus(
+        self, registry: SessionModeRegistry, clock: FakeClock
+    ) -> None:
+        focused = focus()
+        registry.enter(focused)
+        registry.enter(manual_goals_entry(SID, entered_at=T0, source=ModeSource.HUMAN))
+        clock.now = T0 + 100
+        registry.note_prompt(SID, "🤖 [ccy-supervisor] continue")
+        by_label = {entry.label: entry for entry in registry.active(SID)}
+        assert by_label[ModeLabel.FOCUS] == focused
+        assert by_label[ModeLabel.MANUAL_GOALS].expires_at == (
+            clock.now + MANUAL_GOALS_RETENTION_SECONDS
+        )
+
+    def test_a_session_with_no_prompt_for_the_retention_loses_its_file(
+        self, registry: SessionModeRegistry, clock: FakeClock
+    ) -> None:
+        registry.enter(manual_goals_entry(SID, entered_at=T0, source=ModeSource.HUMAN))
+        clock.now = T0 + MANUAL_GOALS_RETENTION_SECONDS
+        assert registry.reap() == 1
+        assert not registry.path_for(SID).exists()
 
     def test_a_prompt_with_nothing_renewable_writes_nothing(
         self, registry: SessionModeRegistry

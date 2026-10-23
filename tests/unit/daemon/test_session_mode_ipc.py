@@ -52,6 +52,8 @@ class TestActions:
                 "exit_focus",
                 "get_mode_history",
                 "exit_blocked",
+                "enter_manual_goals",
+                "exit_manual_goals",
             }
         )
 
@@ -218,6 +220,40 @@ class TestExitBlocked:
     def test_unblock_with_nothing_blocked_is_not_blocked(self) -> None:
         result = _act(SessionModeIPC.ACTION_EXIT_BLOCKED, session_id=_SESSION)["result"]
         assert result[SessionModeIPC.KEY_OUTCOME] == "not-blocked"
+
+
+class TestManualGoals:
+    """``enter_manual_goals``/``exit_manual_goals`` run the prompt command's operations (Task 8.3)."""
+
+    def test_enter_then_exit_records_both_with_ipc_evidence(
+        self, registry: SessionModeRegistry
+    ) -> None:
+        entered = _act(SessionModeIPC.ACTION_ENTER_MANUAL_GOALS, session_id=_SESSION)
+        assert entered["result"][SessionModeIPC.KEY_OUTCOME] == "entered"
+        assert entered["result"][SessionModeIPC.KEY_LINE].startswith("MANUAL GOALS ON:")
+        assert [e.label for e in registry.active(_SESSION)] == [ModeLabel.MANUAL_GOALS]
+        exited = _act(SessionModeIPC.ACTION_EXIT_MANUAL_GOALS, session_id=_SESSION)
+        assert exited["result"][SessionModeIPC.KEY_OUTCOME] == "exited"
+        assert registry.active(_SESSION) == ()
+        assert entered["_clear_calls"] == exited["_clear_calls"] == 0
+        log = registry.transition_log
+        assert log is not None
+        evidence = [t.evidence for t in log.recent(2, session_id=_SESSION)]
+        assert evidence == ["the session-mode CLI or /mode skill"] * 2
+
+    def test_enter_twice_is_already_manual(self) -> None:
+        _act(SessionModeIPC.ACTION_ENTER_MANUAL_GOALS, session_id=_SESSION)
+        again = _act(SessionModeIPC.ACTION_ENTER_MANUAL_GOALS, session_id=_SESSION)
+        assert again["result"][SessionModeIPC.KEY_OUTCOME] == "already-manual"
+
+    def test_exit_when_not_manual_is_not_manual(self) -> None:
+        result = _act(SessionModeIPC.ACTION_EXIT_MANUAL_GOALS, session_id=_SESSION)["result"]
+        assert result[SessionModeIPC.KEY_OUTCOME] == "not-manual"
+
+    def test_a_missing_session_is_an_error(self) -> None:
+        response = _act(SessionModeIPC.ACTION_ENTER_MANUAL_GOALS)
+        assert "result" not in response
+        assert "session" in response["error"]
 
 
 def test_the_goal_clear_writes_the_real_clear_signal(tmp_path: Path) -> None:

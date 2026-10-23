@@ -22,16 +22,17 @@ identically in every mode; a mode only withholds things that DRIVE work.
 
 ## The modes
 
-| Label (status line) | Mode, reason       | Entered by                                                       | Ends on                                                                                            |
-| ------------------- | ------------------ | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `usage-paused`      | usage pause        | the usage-pause gate, when the session reaches its usage ceiling | the usage window resetting (or a human typing `! hooks-daemon usage-pause clear`)                  |
-| `goal-blocked`      | BLOCKED, goal-loop | `goal_loop_detector` in `act` mode                               | a genuine human prompt, a repository change, the `blocked_hours` timer, `session-mode unblock`     |
-| `awaiting-human`    | BLOCKED, declared  | a stop declaring `STOPPING BECAUSE: [awaiting-human] ...`        | a genuine human prompt in the SAME session, or its fixed 24-hour cap                               |
-| `focus`             | focus              | a human prompt starting `hooks-daemon focus <task>`              | `hooks-daemon focus off`, a new session, or its 12-hour TTL (renewed by each genuine human prompt) |
-| `unattended`        | daemon unattended  | the daemon-wide unattended mode (`/mode`), not a session mode    | that daemon mode being switched off                                                                |
+| Label (status line) | Mode, reason       | Entered by                                                            | Ends on                                                                                            |
+| ------------------- | ------------------ | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `usage-paused`      | usage pause        | the usage-pause gate, when the session reaches its usage ceiling      | the usage window resetting (or a human typing `! hooks-daemon usage-pause clear`)                  |
+| `goal-blocked`      | BLOCKED, goal-loop | `goal_loop_detector` in `act` mode                                    | a genuine human prompt, a repository change, the `blocked_hours` timer, `session-mode unblock`     |
+| `awaiting-human`    | BLOCKED, declared  | a stop declaring `STOPPING BECAUSE: [awaiting-human] ...`             | a genuine human prompt in the SAME session, or its fixed 24-hour cap                               |
+| `manual-goals`      | manual goals       | a human `/goal clear`, `hooks-daemon goals off`, `/mode goals manual` | `hooks-daemon goals on` (or `/mode goals auto`), or a new session                                  |
+| `focus`             | focus              | a human prompt starting `hooks-daemon focus <task>`                   | `hooks-daemon focus off`, a new session, or its 12-hour TTL (renewed by each genuine human prompt) |
+| `unattended`        | daemon unattended  | the daemon-wide unattended mode (`/mode`), not a session mode         | that daemon mode being switched off                                                                |
 
 **Precedence** (which label the status line shows first):
-`usage-paused > goal-blocked > awaiting-human > focus > unattended`.
+`usage-paused > goal-blocked > awaiting-human > manual-goals > focus > unattended`.
 
 ### BLOCKED: one family, two reasons
 
@@ -59,6 +60,24 @@ task attached. A supervisor line, a cron tick or a notification never toggles
 focus. Entering focus clears an existing goal ONCE: the ccy supervisor types
 `/goal clear` at its next idle; without the supervisor, a human must type it.
 Focus is a working mode, not a halt.
+
+### Manual goals
+
+`manual-goals` hands this session's goal to the human. It is entered when a
+human clears a goal (a `/goal clear` the Stop path attributes to the human, not
+to the supervisor), by `hooks-daemon goals off` (or `manual`) typed as the WHOLE
+prompt or run from the CLI, or by `/mode goals manual`. It ends only at an
+explicit switch-back, `hooks-daemon goals on` (or `auto`) or `/mode goals auto`,
+or with the session: its stored expiry is a liveness bound that every prompt
+renews, so a live session never times out of it.
+
+While it holds, the daemon makes no AUTOMATED goal change for the session: no
+`.goal-intent` is written, so the ccy supervisor types no `/goal`, and a plan
+retiring does not clear the goal. A `/goal <condition>` the human types still
+works and does not end the mode. Not suppressed: the goal-loop detector's clear,
+the clear on entering focus, `hooks-daemon clear-goal`, `continue`, cron ticks
+and every guard. A goals command that cannot be recorded is stated as
+`MANUAL GOALS NOT CHANGED` with the error.
 
 ## What each mode suppresses
 
@@ -149,11 +168,13 @@ Options and defaults: `hooks-daemon explain-handler goal_loop_detector`.
 | `hooks-daemon session-mode focus <task>`                        | enter focus (same as `/mode focus <task>`)                       |
 | `hooks-daemon session-mode focus off`                           | end focus (same as `/mode focus off`)                            |
 | `hooks-daemon session-mode unblock`                             | end a goal-loop block; REFUSES a declared `awaiting-human` block |
+| `hooks-daemon goals off` / `goals on` (`manual` / `auto`)       | enter / leave manual-goals (same as `/mode goals manual\|auto`)  |
 | `hooks-daemon mode-history [--session ID] [--limit N] [--json]` | every session's live modes and the recent transitions            |
 
 `session-mode` acts on `$CLAUDE_CODE_SESSION_ID` (set inside a Bash tool call)
-unless `--session <id>` is given. The IPC actions are `get_session_modes`,
-`enter_focus` and `exit_focus`.
+unless `--session <id>` is given; so does `goals`. The IPC actions are
+`get_session_modes`, `enter_focus`, `exit_focus`, `enter_manual_goals` and
+`exit_manual_goals`.
 
 **The transition log.** Every mode entered, exited, expired or cleared by a
 restart, with what triggered it, plus the detector's observe records, is

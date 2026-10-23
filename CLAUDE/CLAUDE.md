@@ -27,7 +27,7 @@ that owns the depth for every fact. The audience split (agent tree vs human
 | [QA.md](QA.md)                                                         | The QA pipeline — source of truth for QA workflow                                   |
 | [RemoteDocs.md](RemoteDocs.md)                                         | Vendoring upstream documentation: the provenance schema and the fidelity rule       |
 | [SELF_INSTALL.md](SELF_INSTALL.md)                                     | Self-install (dogfood) mode guide                                                   |
-| [SessionModes.md](SessionModes.md)                                     | Session modes (focus, BLOCKED, usage-paused): entry, exit, suppressions, display    |
+| [SessionModes.md](SessionModes.md)                                     | Session modes (focus, manual-goals, BLOCKED, usage-paused): entry, exit, display    |
 | [Worktree.md](Worktree.md)                                             | Git worktree workflow                                                               |
 | [AcceptanceTests/](AcceptanceTests/GENERATING.md)                      | Acceptance test generation and validation                                           |
 | [Architecture/](Architecture/StatusLine.md)                            | Component deep-dives (status line, operator signals)                                |

@@ -97,8 +97,10 @@ from typing import Any, ClassVar, Final
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import BlockingResult, Decision
+from claude_code_hooks_daemon.core.data_layer import get_data_layer
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
+from claude_code_hooks_daemon.core.manual_goals import goal_intent_suppressed
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.daemon.synthetic_traffic import is_synthetic_event
@@ -527,6 +529,64 @@ def write_goal_signal(
             reason="the goal signal file is a best-effort notification; None tells the caller it was not written",
         )
         return None
+
+
+def write_automated_goal_signal(
+    session_id: str, plan_number: str, joined_line: str, source: str
+) -> Path | None:
+    """:func:`write_goal_signal` for an AUTOMATED goal, unless the session is in manual goals.
+
+    The human's own ``inject-goal`` calls :func:`write_goal_signal` directly and
+    is never gated. A session-modes registry that cannot be read fails closed:
+    no goal is written and a WARNING names the error. ``None`` (not written)
+    tells every caller to retry on the next qualifying event, so a goal is set
+    again once the mode ends.
+    """
+    if not _automated_goal_allowed(session_id):
+        logger.info(
+            "goal_injection: automated goal for plan %s not written for %s", plan_number, session_id
+        )
+        return None
+    return write_goal_signal(session_id, plan_number, joined_line, source)
+
+
+def clear_automated_goal_signal(session_id: str) -> bool:
+    """:func:`clear_goal_signal` for an AUTOMATED retirement, unless the session is in manual goals.
+
+    While a session is in manual goals the human owns its goal, so a plan
+    retiring must not clear it either. An unreadable registry fails closed
+    (nothing is cleared, a WARNING names the error). The goal-loop detector's
+    loop-breaking clear and a human's focus or ``clear-goal`` call
+    :func:`clear_goal_signal` directly and are not gated. Returns True only
+    when the clear was written.
+    """
+    if not _automated_goal_allowed(session_id):
+        logger.info("goal_injection: automated goal clear not written for %s", session_id)
+        return False
+    return clear_goal_signal(session_id)
+
+
+def _automated_goal_allowed(session_id: str) -> bool:
+    """Whether an automated goal may be written or cleared for ``session_id``.
+
+    False while the session is in manual goals, and False (fail closed, logged
+    at WARNING) when the session-modes registry cannot be read.
+    """
+    try:
+        suppressed = goal_intent_suppressed(get_data_layer().session_modes, session_id)
+    except (RuntimeError, OSError) as error:
+        log_and_continue(
+            logger,
+            error,
+            reason=(
+                f"the session-modes registry could not be read for {session_id}, so no "
+                "automated goal is written for it (fail closed: it may be in manual goals)"
+            ),
+        )
+        return False
+    if suppressed:
+        logger.info("goal_injection: %s is in manual goals", session_id)
+    return not suppressed
 
 
 def clear_goal_signal(session_id: str) -> bool:
@@ -1350,7 +1410,7 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         refs = ledger.live_plan_refs(plan_dir)
         if not refs:
             for owner in owners:
-                clear_goal_signal(owner)
+                clear_automated_goal_signal(owner)
             return
         payload = self._render_combined(refs)
         if payload is None:
@@ -1362,7 +1422,7 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
             return
         plan_numbers_field, combined = payload
         for owner in owners:
-            write_goal_signal(owner, plan_numbers_field, combined, _SOURCE_STATUS_FLIP)
+            write_automated_goal_signal(owner, plan_numbers_field, combined, _SOURCE_STATUS_FLIP)
         # RV5-m4: register every refreshed owner as an owner of every plan
         # its own new combined text just named, in ONE batched mutation --
         # the fan-out equivalent of RV3-m3's `_extend_ownership` on the flip
@@ -1507,7 +1567,9 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
             return None
         plan_numbers_field, combined = payload
         self._extend_ownership(ledger, session_id, refs)
-        return write_goal_signal(session_id, plan_numbers_field, combined, _SOURCE_STATUS_FLIP)
+        return write_automated_goal_signal(
+            session_id, plan_numbers_field, combined, _SOURCE_STATUS_FLIP
+        )
 
     def _render_combined(self, refs: list[LivePlanRef]) -> tuple[str, str] | None:
         """Render the combined ``/goal`` payload from an already-fetched
@@ -1556,9 +1618,9 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
     @staticmethod
     def _write_fallback(session_id: str, fallback: str | None, plan_number: str) -> Path | None:
         if fallback is None:
-            clear_goal_signal(session_id)
+            clear_automated_goal_signal(session_id)
             return None
-        return write_goal_signal(session_id, plan_number, fallback, _SOURCE_STATUS_FLIP)
+        return write_automated_goal_signal(session_id, plan_number, fallback, _SOURCE_STATUS_FLIP)
 
     def _ledger_record(
         self, session_id: str, plan_number: str, joined: str, plan_md_path: Path
