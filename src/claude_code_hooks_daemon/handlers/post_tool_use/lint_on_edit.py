@@ -77,6 +77,14 @@ _LINT_FAILURE_RULE = Rule(
     ),
 )
 
+#: The opening of the advisory a linter timeout produces. Exported because the
+#: acceptance harnesses recognise a timed-out probe by THIS template rather
+#: than by a copy of its prose (N455): a timeout is an environment fact, so a
+#: probe that hit one reached no verdict to score. `{budget}` is in seconds.
+LINT_TIMEOUT_NOTICE: Final[str] = (
+    "⚠️ {language} lint check timed out after {budget}s for {file_name}"
+)
+
 
 class LintOnEditHandler(PostToolUseHandlerBase):
     """Run language-aware lint validation on files after Write/Edit.
@@ -558,9 +566,11 @@ class LintOnEditHandler(PostToolUseHandlerBase):
             # is unchanged), but "silently allows" stops being fully silent.
             budget = self._format_timeout(timeout_seconds)
             config_key = f"handlers.post_tool_use.lint_on_edit.options.timeouts.{language_name}"
+            notice = LINT_TIMEOUT_NOTICE.format(
+                language=language_name, budget=budget, file_name=Path(file_path).name
+            )
             message = (
-                f"⚠️ {language_name} lint check timed out after {budget}s for "
-                f"{Path(file_path).name} - the write was ALLOWED without this check "
+                f"{notice} - the write was ALLOWED without this check "
                 f"passing. Raise the budget via {config_key}: <seconds> if this "
                 f"language's linter is genuinely slower than {budget}s."
             )

@@ -38,9 +38,14 @@ from claude_code_hooks_daemon.daemon.playbook_harness import (
     PROBE_DISPATCH_TIMEOUT_SECONDS,
     ExecutableProbe,
     FixtureAction,
+    InconclusiveProbe,
     SkippedProbe,
     build_event,
     daemon_error,
+    inconclusive_probe,
+    inconclusive_skip_reason,
+    is_lint_probe,
+    lint_unusable_failure,
     split_playbook,
     verdict,
     wrapper_unreachable_reason,
@@ -205,8 +210,12 @@ def _perform(actions: list[FixtureAction]) -> None:
             raise AssertionError(f"unknown fixture action kind: {action.kind!r}")
 
 
-def _run_probe(probe: ExecutableProbe, env: dict[str, str]) -> str | None:
-    """Dispatch one probe, making the world match what its event claims."""
+def _run_probe(probe: ExecutableProbe, env: dict[str, str]) -> str | InconclusiveProbe | None:
+    """Dispatch one probe, making the world match what its event claims.
+
+    `None` is a pass, a string the failure, and an `InconclusiveProbe` a probe
+    whose linter timed out before the handler reached a verdict (N455).
+    """
     created: Path | None = None
     target = Path(probe.file_path) if probe.file_path else None
 
@@ -226,7 +235,7 @@ def _run_probe(probe: ExecutableProbe, env: dict[str, str]) -> str | None:
         decision, text, error = _dispatch(probe, env)
         if error is not None:
             return f"the daemon rejected the event, so no handler ran: {error}"
-        return verdict(probe, decision, text)
+        return inconclusive_probe(probe, decision, text) or verdict(probe, decision, text)
     finally:
         if created is not None and created.exists():
             created.unlink()
@@ -295,9 +304,10 @@ class TestTheDeclaredProbesBehaveAsDeclared:
         executable, _ = partitioned
         env = wrapper_subprocess_env(daemon_socket)
         failures = []
+        inconclusive: list[InconclusiveProbe] = []
         for probe in executable:
             try:
-                failure = _run_probe(probe, env)
+                outcome = _run_probe(probe, env)
             except _DaemonUnreachable as unreachable:
                 pytest.fail(
                     f"The wrapper could not reach a daemon, so probe "
@@ -305,10 +315,19 @@ class TestTheDeclaredProbesBehaveAsDeclared:
                     f"probe after it: {unreachable}. The socket these fixtures "
                     f"resolved and passed to it was {daemon_socket}."
                 )
-            if failure is not None:
-                failures.append(f"#{probe.test_number} {probe.handler_name}: {failure}")
+            if isinstance(outcome, InconclusiveProbe):
+                inconclusive.append(outcome)
+            elif outcome is not None:
+                failures.append(f"#{probe.test_number} {probe.handler_name}: {outcome}")
 
         assert not failures, (
             f"{len(failures)} of {len(executable)} declared probes did not "
             "behave as the playbook says:\n" + "\n".join(failures)
         )
+        unusable = lint_unusable_failure(
+            inconclusive, sum(1 for probe in executable if is_lint_probe(probe))
+        )
+        assert unusable is None, unusable
+        skip_reason = inconclusive_skip_reason(inconclusive)
+        if skip_reason is not None:
+            pytest.skip(skip_reason)
