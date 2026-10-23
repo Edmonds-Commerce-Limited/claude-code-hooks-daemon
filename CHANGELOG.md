@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.71.0] - 2026-10-23
+
+_A session-modes, relay-by-default and release-pipeline release. A session now has first-class modes (`awaiting-human`, `focus`, `goal-blocked`, `manual-goals`) that are visible on the status line, logged, and read by the ccy supervisor (Plan 00501); the Rust relay is on by default for new installs and a broken relay binary is reported instead of running a call unguarded (Plan 00529); the status line gets a cheap tick (Plan 00542); the dispatch pool is configurable and a saturated daemon can be restarted from inside a session (Plan 00533); a plan journal is one file per entry (Plan 00543); the daemon ships a `docs-optimise` skill (Plan 00532); and a release now goes through a pull request whose CI is the gate (Plan 00476). `breaking: false` in the config-changes manifest, and no pre-upgrade or post-upgrade task ships. Retired options are listed under Changed and still validate._
+
+### Added
+
+- Session modes: `awaiting-human` is a mode ended only by a human prompt in the same session (no marker file); `hooks-daemon focus <task>` (handler `focus_mode_trigger`, `/mode focus`, `hooks-daemon session-mode`) points one session at one task; `manual-goals` hands a session's goal to the human (`hooks-daemon goals off|on`, `/mode goals manual|auto`); the `session_mode_indicator` status segment shows the top mode; `hooks-daemon mode-history` prints the transition log (Plan 00501).
+- `goal_loop_detector` (Stop; observes by default, `mode: act` ends a loop) and attribution of every typed `/goal clear` to the supervisor or the human (Plan 00501).
+- The ccy supervisor reads session modes and types no work-driving prompt while a session is blocked (Plan 00501); holds every send while focus may be on a sub-agent (Plan 00537); writes a `restart-pending.json` record before a restart `/exit` (Plan 00539); and counts as its own only sessions in its child process tree (Plan 00551; Addresses #138).
+- `daemon.chain.max_inflight` and `daemon.chain.slot_wait_seconds` configure the dispatch pool; the exact restart command is judged without a pool slot, and sustained saturation is logged (Plan 00533; Addresses #124).
+- `daemon.transport.relay_source: auto`, one shared `scripts/install/relay_provision.sh` for install and upgrade, and the SessionStart `relay_binary_checker`; `hooks-daemon status` warns about a missing relay binary (Plan 00529; Addresses #131).
+- A status-line fast path built from bash builtins that asks the daemon for raw text (Plan 00542; Addresses #131).
+- The `docs-optimise` skill, the pinned instruction-loading contract and `docs-qa --footprint` (Plan 00532; Addresses #123).
+- `layout.ansible_configs` maps a play glob to the `ansible.cfg` both lint gates run under (Plan 00547; Addresses #128).
+- `src/claude_code_hooks_daemon/python_floor.py` declares the minimum Python once and every entry point refuses an older one in a single line; `scripts/qa/check_bare_python_invocation.py` keeps shell scripts from calling a bare `python3` (Plan 00546; Addresses #130).
+- `mkplan.bash --journal` writes one file per entry under `JOURNAL/YYYY-MM-DD/` (Plan 00543; Addresses #135).
+- The release pipeline: a `release-gate.yml` workflow runs the whole gate on a `release/<version>` pull request, the release state records that run, `scripts/release/check_release_ci.py` verifies it before tagging, and the `release_merge_freeze` project handler freezes other merges to `main` meanwhile (Plan 00476; Addresses #107).
+- An early usage-resume tick re-evaluates the pause against a fresh reading (Plan 00479; Addresses #132).
+
+### Changed
+
+- The example config and `init-config` enable the relay (`relay_enabled: true`, `relay_source: auto`); an explicit `false` and a partial `transport` block are kept (Plan 00529).
+- The `expiry_hours` option of `failsafe_cron_blockage_suppressor` and the `marker_expiry_hours` option of `auto_continue_stop` are retired (the lifetime is fixed at 24 hours); a config that sets either still validates and logs a warning (Plan 00501).
+- The spend-meter segment is `⚙ 1 agent (sonnet) · 127k`, shown only while sub-agents run, with a plain unit and fresh agents no longer counted as unmeasured (Plans 00545, 00474; Addresses #133).
+- The upgrade's stale-venv cleanup runs on the resolved interpreter and warns loudly when it cannot (Plan 00546).
+- Install, upgrade and support scripts run the resolved interpreter or stop with a named reason (Plan 00546).
+- `subagent_full_qa_blocker` judges a script it cannot finish as `too-much-code-to-judge`, and parses each script once per judgement (Plan 00474).
+- The `transcript_archiver` advisory names the leftover `untracked/transcripts/` directory (Plan 00541; Addresses #52).
+- A usage-pause lifts before its resume time when a fresh reading is under the ceiling (Plan 00479).
+- The CPU-timing sweeps run in their own CI job (Plan 00476), and a lint timeout is scored as an inconclusive probe (Plan 00474).
+
+### Fixed
+
+- A relay binary that is corrupt no longer lets a tool call run with no PreToolUse guard, and every relay-eligible answer names the fault (Plan 00529).
+- `issue-validity N --claim` works when no approved author list is configured (Plan 00544; Addresses #129).
+- A ccy wrapper written with an interpreter in front of the supervisor, broken by 3.69.0 and 3.70.0, is repaired by the next upgrade (Plan 00540; Addresses #126).
+- The doc-write jail runs under Python 3.8 and 3.9 (Plan 00546; Addresses #130).
+- A saturated daemon no longer escalates a stop to SIGKILL (Plan 00533).
+- A status-line fault is reported in red instead of silently taking the slow path (Plan 00542).
+- The ccy supervisor no longer acts on another terminal's sessions outside a private PID namespace (Plan 00551; Addresses #138).
+- Plan QA and docs QA read journal entry files and legacy day-files alike, and no handler message tells an agent to write to a day-file (Plan 00543).
+
 ## [3.70.0] - 2026-10-17
 
 _A start-up-speed, venv-hygiene and guard-precision release. The pre-deploy upgrade gate loses its owner-approval stop (Plan 00503); the daemon binds its socket before non-essential start-up work and parses its config once (Plan 00495); venvs are judged by one staleness rule and the ones it cannot prove stale are surfaced (Plan 00517); sub-agent spend and model tiers are measured and advised on (Plans 00471, 00472); and a new opt-in `write_protected_paths` handler keeps listed files read-only for agents (Plan 00499). `breaking: false` in the config-changes manifest, but the removals below are documented in the upgrade guide `CLAUDE/UPGRADES/v3/v3.69.0-to-v3.70.0/`. Three post-upgrade tasks apply (two recommended, one optional)._

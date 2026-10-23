@@ -1,7 +1,7 @@
 # Drafted by Plan 00533. The VERSION in the filename and the `version:` key are
 # a target, not a decision; the release agent confirms or renames this file.
 version: "3.71.0"
-date: "UNRELEASED"
+date: "2026-10-23"
 
 breaking: false
 
