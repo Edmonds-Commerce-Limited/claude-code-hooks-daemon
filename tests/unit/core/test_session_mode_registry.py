@@ -659,6 +659,60 @@ def test_a_failed_corrupt_rename_is_logged_at_error(
     assert reg.active(SID) == ()
 
 
+class TestOneBadFileAffectsOnlyItsSession:
+    """Plan 00474 review D1: an OSError on one file never aborts the whole load."""
+
+    def test_an_unreadable_file_is_logged_and_skipped_and_the_others_load(
+        self, state_dir: Path, clock: FakeClock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        cleared = focus("aaa", lifetime=Lifetime.DAEMON)
+        survivor = blocked("bbb")
+        write_raw(state_dir, f"aaa{SESSION_MODES_SUFFIX}", file_payload("aaa", cleared))
+        write_raw(state_dir, f"bbb{SESSION_MODES_SUFFIX}", file_payload("bbb", survivor))
+        unreadable = state_dir / f"zzz{SESSION_MODES_SUFFIX}"
+        unreadable.mkdir()
+        reg = SessionModeRegistry(state_dir, clock=clock)
+        with caplog.at_level(logging.WARNING):
+            reg.load()
+        assert [n.kind for n in reg.take_notices("aaa")] == [NoticeKind.CLEARED_BY_RESTART]
+        assert reg.active("bbb") == (survivor,)
+        assert unreadable.is_dir(), "a read failure is not corruption: the path is left alone"
+        assert any(
+            record.levelno == logging.ERROR and str(unreadable) in record.getMessage()
+            for record in caplog.records
+        )
+
+    def test_a_failed_rewrite_keeps_the_loaded_state_and_logs_an_error(
+        self,
+        state_dir: Path,
+        clock: FakeClock,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        cleared = focus(SID, lifetime=Lifetime.DAEMON)
+        survivor = blocked(SID)
+        write_raw(state_dir, f"{SID}{SESSION_MODES_SUFFIX}", file_payload(SID, cleared, survivor))
+        healthy = blocked(OTHER)
+        write_raw(state_dir, f"{OTHER}{SESSION_MODES_SUFFIX}", file_payload(OTHER, healthy))
+        reg = SessionModeRegistry(state_dir, clock=clock)
+
+        def refuse(session_id: str, entries: object) -> None:
+            raise PermissionError("read-only state dir")
+
+        monkeypatch.setattr(reg, "_write", refuse)
+        with caplog.at_level(logging.WARNING):
+            reg.load()
+        assert reg.active(SID) == (survivor,)
+        assert sorted(n.kind for n in reg.take_notices(SID)) == sorted(
+            [NoticeKind.CLEARED_BY_RESTART, NoticeKind.SURVIVED_RESTART]
+        )
+        assert reg.active(OTHER) == (healthy,)
+        assert any(
+            record.levelno == logging.ERROR and SID in record.getMessage()
+            for record in caplog.records
+        )
+
+
 class TestImportLegacyBlockageMarker:
     """The pre-registry awaiting-human marker becomes a registry entry once (Task 2.2)."""
 

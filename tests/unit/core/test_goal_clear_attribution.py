@@ -18,10 +18,13 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.core.goal_clear_attribution import (
+    ATTRIBUTED_CLEARS_FILENAME,
     CLEARING_TOKENS,
     CLOCK_TOLERANCE_SECONDS,
     FRESH_WINDOW_SECONDS,
     GOAL_CLEAR_RECORD_SUFFIX,
+    AttributedClears,
+    AttributedClearsError,
     Attribution,
     ClearRecord,
     ClearRecordUnreadableError,
@@ -290,3 +293,94 @@ class TestTransition:
             evidence="clear=u-9 but not a goal-clear action",
         )
         assert attributed_keys([verdict.transition(SESSION), other]) == frozenset({"u-1"})
+
+
+def _typed(key: str, at: float) -> TypedClear:
+    return TypedClear(key=key, at=at, argument="clear")
+
+
+class TestAttributedClears:
+    """A durable at-most-once mark per session, independent of the bounded transition log."""
+
+    def test_an_empty_store_covers_nothing(self, tmp_path: Path) -> None:
+        store = AttributedClears(tmp_path / ATTRIBUTED_CLEARS_FILENAME)
+        assert store.covers(SESSION, _typed("u-1", 10.0)) is False
+
+    def test_a_mark_survives_a_new_store_on_the_same_file(self, tmp_path: Path) -> None:
+        path = tmp_path / ATTRIBUTED_CLEARS_FILENAME
+        AttributedClears(path).mark(SESSION, _typed("u-1", 10.0))
+        assert AttributedClears(path).covers(SESSION, _typed("u-1", 10.0)) is True
+
+    def test_an_earlier_clear_is_covered_and_a_later_one_is_not(self, tmp_path: Path) -> None:
+        store = AttributedClears(tmp_path / ATTRIBUTED_CLEARS_FILENAME)
+        store.mark(SESSION, _typed("u-2", 20.0))
+        assert store.covers(SESSION, _typed("u-1", 10.0)) is True
+        assert store.covers(SESSION, _typed("u-3", 30.0)) is False
+
+    def test_clears_sharing_a_timestamp_are_told_apart_by_key(self, tmp_path: Path) -> None:
+        store = AttributedClears(tmp_path / ATTRIBUTED_CLEARS_FILENAME)
+        store.mark(SESSION, _typed("a", 10.0))
+        store.mark(SESSION, _typed("b", 10.0))
+        assert store.covers(SESSION, _typed("a", 10.0)) is True
+        assert store.covers(SESSION, _typed("b", 10.0)) is True
+        assert store.covers(SESSION, _typed("c", 10.0)) is False
+
+    def test_marking_an_older_clear_does_not_lower_the_mark(self, tmp_path: Path) -> None:
+        store = AttributedClears(tmp_path / ATTRIBUTED_CLEARS_FILENAME)
+        store.mark(SESSION, _typed("new", 20.0))
+        store.mark(SESSION, _typed("old", 10.0))
+        assert store.covers(SESSION, _typed("other", 15.0)) is True
+
+    def test_a_mark_is_per_session(self, tmp_path: Path) -> None:
+        store = AttributedClears(tmp_path / ATTRIBUTED_CLEARS_FILENAME)
+        store.mark(SESSION, _typed("u-1", 10.0))
+        assert store.covers("another-session", _typed("u-1", 10.0)) is False
+
+    def test_the_oldest_session_is_dropped_past_the_bound(self, tmp_path: Path) -> None:
+        store = AttributedClears(tmp_path / ATTRIBUTED_CLEARS_FILENAME, max_sessions=2)
+        store.mark("s1", _typed("k", 1.0))
+        store.mark("s2", _typed("k", 2.0))
+        store.mark("s3", _typed("k", 3.0))
+        assert store.covers("s1", _typed("k", 1.0)) is False
+        assert store.covers("s2", _typed("k", 2.0)) is True
+        assert store.covers("s3", _typed("k", 3.0)) is True
+
+    def test_a_bound_below_one_is_rejected(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="max_sessions"):
+            AttributedClears(tmp_path / ATTRIBUTED_CLEARS_FILENAME, max_sessions=0)
+
+    def test_a_mark_leaves_no_temp_file(self, tmp_path: Path) -> None:
+        AttributedClears(tmp_path / ATTRIBUTED_CLEARS_FILENAME).mark(SESSION, _typed("u", 1.0))
+        assert [p.name for p in tmp_path.iterdir()] == [ATTRIBUTED_CLEARS_FILENAME]
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "{not json",
+            "[]",
+            '{"version": 99, "sessions": {}}',
+            '{"version": 1, "sessions": []}',
+            '{"version": 1, "sessions": {"s": {"at": "x", "keys": []}}}',
+            '{"version": 1, "sessions": {"s": {"at": 1.0, "keys": [1]}}}',
+            '{"version": 1, "sessions": {"s": []}}',
+            '{"version": 1, "sessions": {"s": {"at": true, "keys": []}}}',
+        ],
+    )
+    def test_a_corrupt_store_is_quarantined_with_a_warning_and_raises(
+        self, tmp_path: Path, content: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        path = tmp_path / ATTRIBUTED_CLEARS_FILENAME
+        path.write_text(content, encoding="utf-8")
+        store = AttributedClears(path)
+        with caplog.at_level(logging.WARNING), pytest.raises(AttributedClearsError):
+            store.covers(SESSION, _typed("u", 1.0))
+        assert not path.exists()
+        assert path.with_name(path.name + ".corrupt").exists()
+        assert any(r.levelno == logging.WARNING for r in caplog.records)
+        assert store.covers(SESSION, _typed("u", 1.0)) is False
+
+    def test_a_store_that_cannot_be_read_raises_oserror(self, tmp_path: Path) -> None:
+        path = tmp_path / ATTRIBUTED_CLEARS_FILENAME
+        path.mkdir()
+        with pytest.raises(OSError):
+            AttributedClears(path).covers(SESSION, _typed("u", 1.0))

@@ -21,7 +21,10 @@ from tests.support.autonomy import pin_session_modes
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.core import Decision
-from claude_code_hooks_daemon.core.goal_clear_attribution import record_path
+from claude_code_hooks_daemon.core.goal_clear_attribution import (
+    ATTRIBUTED_CLEARS_FILENAME,
+    record_path,
+)
 from claude_code_hooks_daemon.core.goal_loop import FingerprintError, option_problems
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
 from claude_code_hooks_daemon.core.session_mode_log import ModeTransition, TransitionAction
@@ -812,6 +815,54 @@ class TestGoalClearAttribution:
         self._detector(record_dir).handle(_input(transcript))
         assert [t.detail for t in self._clears(modes)] == ["supervisor"]
 
+    def test_a_restart_after_the_log_record_is_evicted_does_not_attribute_again(
+        self, modes: SessionModeRegistry, tmp_path: Path
+    ) -> None:
+        """Plan 00474 review D2: a clear whose log record rotated out stays attributed once.
+
+        The supervisor's record was consumed by the first pass, so a second
+        pass would find none and call the clear the human's, turning manual
+        goals on uninvited.
+        """
+        record_dir = tmp_path / "records"
+        _write_supervisor_record(record_dir, ts=_epoch(10))
+        transcript = tmp_path / "t.jsonl"
+        _append_lines(transcript, [_typed_clear(10)])
+        self._detector(record_dir).handle(_input(transcript))
+        restarted = self._detector(record_dir)
+        restarted._recent_transitions = lambda _session: []
+        restarted.handle(_input(transcript))
+        assert [t.detail for t in self._clears(modes)] == ["supervisor"]
+        assert modes.policy(SESSION).goal_intent_suppressed is False
+
+    def test_a_failed_mark_leaves_the_clear_unattributed_and_the_stop_allowed(
+        self,
+        modes: SessionModeRegistry,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        detector = self._detector(tmp_path / "records")
+        detector._attributed_clears_path = lambda: tmp_path / "missing-dir" / "x" / "store"
+        (tmp_path / "missing-dir").write_text("a file, so the store cannot be made under it")
+        transcript = tmp_path / "t.jsonl"
+        _append_lines(transcript, [_typed_clear(10)])
+        with caplog.at_level(logging.WARNING):
+            result = detector.handle(_input(transcript))
+        assert result.decision == Decision.ALLOW
+        assert self._clears(modes) == []
+        assert modes.policy(SESSION).goal_intent_suppressed is False
+        assert "goal-clear attribution" in caplog.text
+
+    def test_default_attributed_clears_path_is_in_the_daemon_untracked_dir(
+        self, tmp_path: Path
+    ) -> None:
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.goal_loop_detector.ProjectContext"
+        ) as context:
+            context.daemon_untracked_dir.return_value = tmp_path
+            path = GoalLoopDetectorHandler()._attributed_clears_path()
+        assert path == tmp_path / ATTRIBUTED_CLEARS_FILENAME
+
     def test_a_later_stop_attributes_only_the_new_clear(
         self, modes: SessionModeRegistry, tmp_path: Path
     ) -> None:
@@ -864,6 +915,7 @@ class TestGoalClearAttribution:
         detector._fingerprint_repo = lambda: "fp"
         detector._clear_record_dir = MagicMock(side_effect=AssertionError("read"))
         detector._recent_transitions = MagicMock(side_effect=AssertionError("read"))
+        detector._attributed_clears_path = MagicMock(side_effect=AssertionError("read"))
         detector._append_transition = _Recorder()
         transcript = tmp_path / "t.jsonl"
         _append_lines(transcript, [_human(1)])

@@ -18,6 +18,8 @@ then attributed:
 
 The attribution is one ``goal-clear`` transition in the session-mode log, its
 ``detail`` the :class:`Attribution`, for Task 8.3's ``manual-goals`` mode.
+:class:`AttributedClears` keeps each clear attributed at most once across
+daemon restarts, independent of how long the bounded log keeps its record.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ import json
 import logging
 import math
 import re
+import threading
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
@@ -37,6 +40,7 @@ from claude_code_hooks_daemon.core.session_mode_log import ModeTransition, Trans
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.session_modes import ModeLabel
 from claude_code_hooks_daemon.utils.session_signal_paths import session_stem
+from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +79,19 @@ _FIELD_SESSION_ID: Final[str] = "session_id"
 _FIELD_TS: Final[str] = "ts"
 _FIELD_COMMAND: Final[str] = "command"
 _EVIDENCE_KEY_PREFIX: Final[str] = "clear="
+
+#: The daemon-owned store of clears already attributed, in the daemon untracked dir.
+ATTRIBUTED_CLEARS_FILENAME: Final[str] = "goal-clear-attributed.json"
+
+#: Sessions whose attributed-clears mark is kept; the one with the oldest mark is dropped.
+MAX_ATTRIBUTED_SESSIONS: Final[int] = 1024
+
+_STORE_VERSION: Final[int] = 1
+_FIELD_VERSION: Final[str] = "version"
+_FIELD_SESSIONS: Final[str] = "sessions"
+_FIELD_AT: Final[str] = "at"
+_FIELD_KEYS: Final[str] = "keys"
+_CORRUPT_SUFFIX: Final[str] = ".corrupt"
 
 
 class Attribution(StrEnum):
@@ -273,6 +290,134 @@ def attribute_clear(clear: TypedClear, *, session_id: str, directory: Path) -> C
         return ClearVerdict(clear, Attribution.HUMAN, f"{prefix} record=stale gap={gap:.1f}s")
     path.unlink(missing_ok=True)
     return ClearVerdict(clear, Attribution.SUPERVISOR, f"{prefix} record=fresh gap={gap:.1f}s")
+
+
+class AttributedClearsError(GoalClearAttributionError):
+    """The attributed-clears store was malformed; it has been quarantined."""
+
+
+@dataclass(frozen=True, slots=True)
+class _Mark:
+    """A session's high-water mark: the latest clear time, and every key at exactly that time."""
+
+    at: float
+    keys: frozenset[str]
+
+    def covers(self, clear: TypedClear) -> bool:
+        return clear.at < self.at or (clear.at == self.at and clear.key in self.keys)
+
+
+class AttributedClears:
+    """Which clears are already attributed, durable across restarts (at most once per clear).
+
+    The transition log alone cannot say so: it is bounded and shared by every
+    session, so a clear's record can rotate out, and re-reading the transcript
+    after a restart would attribute it again, with the supervisor's record
+    already consumed, as a human's. One small file holds, per session, a
+    high-water mark: the latest attributed clear's time and the keys at that
+    exact time. Transcript clears are chronological, so anything at or before
+    the mark is already done. Only the ``max_sessions`` sessions with the most
+    recent marks are kept.
+
+    Args:
+        path: The store file.
+        max_sessions: How many sessions' marks are kept.
+
+    Raises:
+        ValueError: ``max_sessions`` is below one.
+    """
+
+    def __init__(self, path: Path, *, max_sessions: int = MAX_ATTRIBUTED_SESSIONS) -> None:
+        if max_sessions < 1:
+            raise ValueError(f"max_sessions must be at least 1, got {max_sessions}")
+        self._path = path
+        self._max_sessions = max_sessions
+        self._lock = threading.Lock()
+
+    def covers(self, session_id: str, clear: TypedClear) -> bool:
+        """Whether ``clear`` in ``session_id`` is already attributed.
+
+        Raises:
+            AttributedClearsError: the store was malformed (now quarantined).
+            OSError: the store could not be read.
+        """
+        with self._lock:
+            mark = self._read().get(session_id)
+        return mark is not None and mark.covers(clear)
+
+    def mark(self, session_id: str, clear: TypedClear) -> None:
+        """Record ``clear`` in ``session_id`` as attributed, atomically.
+
+        Raises:
+            AttributedClearsError: the store was malformed (now quarantined).
+            OSError: the store could not be read or written.
+        """
+        with self._lock:
+            marks = self._read()
+            current = marks.get(session_id)
+            if current is None or clear.at > current.at:
+                marks[session_id] = _Mark(clear.at, frozenset({clear.key}))
+            elif clear.at == current.at:
+                marks[session_id] = _Mark(current.at, current.keys | {clear.key})
+            else:
+                return
+            kept = sorted(marks.items(), key=lambda item: item[1].at)[-self._max_sessions :]
+            self._write(dict(kept))
+
+    def _read(self) -> dict[str, _Mark]:
+        if not self._path.exists():
+            return {}
+        text = self._path.read_text(encoding="utf-8")
+        try:
+            return _parse_marks(text)
+        except ValueError as error:
+            corrupt = self._path.with_name(self._path.name + _CORRUPT_SUFFIX)
+            logger.warning(
+                "goal-clear attribution: store %s is malformed, renamed to %s: %s",
+                self._path,
+                corrupt,
+                error,
+            )
+            self._path.replace(corrupt)
+            raise AttributedClearsError(f"{self._path}: {error}") from error
+
+    def _write(self, marks: dict[str, _Mark]) -> None:
+        payload = {
+            _FIELD_VERSION: _STORE_VERSION,
+            _FIELD_SESSIONS: {
+                session: {_FIELD_AT: mark.at, _FIELD_KEYS: sorted(mark.keys)}
+                for session, mark in marks.items()
+            },
+        }
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = unique_temp_path(self._path)
+        try:
+            tmp_path.write_text(json.dumps(payload), encoding="utf-8")
+            tmp_path.replace(self._path)
+        except OSError:
+            tmp_path.unlink(missing_ok=True)
+            raise
+
+
+def _parse_marks(text: str) -> dict[str, _Mark]:
+    """The store's marks. Raises ``ValueError`` on anything but a valid store."""
+    data = json.loads(text)
+    if not isinstance(data, dict) or data.get(_FIELD_VERSION) != _STORE_VERSION:
+        raise ValueError("not a version-1 attributed-clears store")
+    sessions = data.get(_FIELD_SESSIONS)
+    if not isinstance(sessions, dict):
+        raise ValueError(f"{_FIELD_SESSIONS} is not an object")
+    marks: dict[str, _Mark] = {}
+    for session, raw in sessions.items():
+        if not isinstance(raw, dict):
+            raise ValueError(f"the mark for {session!r} is not an object")
+        at, keys = raw.get(_FIELD_AT), raw.get(_FIELD_KEYS)
+        if isinstance(at, bool) or not isinstance(at, (int, float)) or not math.isfinite(at):
+            raise ValueError(f"the mark for {session!r} has no finite {_FIELD_AT}")
+        if not isinstance(keys, list) or not all(isinstance(key, str) for key in keys):
+            raise ValueError(f"the mark for {session!r} has {_FIELD_KEYS} that are not strings")
+        marks[session] = _Mark(float(at), frozenset(keys))
+    return marks
 
 
 def attributed_keys(transitions: Iterable[ModeTransition]) -> frozenset[str]:
