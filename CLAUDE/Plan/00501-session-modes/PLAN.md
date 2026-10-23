@@ -210,8 +210,9 @@ All CLEAR; rationale and code citations in
 
 ### Phase 8: Manual goals (#106)
 
-- [ ] ⬜ **Task 8.1**: Spike: does `UserPromptSubmit` fire for a typed `/goal clear` and its aliases? If not,
-  detection moves to the next Stop's transcript read.
+- [x] ✅ **Task 8.1**: Spike: does `UserPromptSubmit` fire for a typed `/goal clear` and its aliases? If not,
+  detection moves to the next Stop's transcript read. It does not: see section 2 of
+  [the spike report](subagent-reports/261023-phase7-8-feasibility-advice-fable.md).
 - [ ] ⬜ **Task 8.2**: TDD the supervisor's side-channel record before a clearing `/goal`, and the daemon's
   attribution (fresh matching record = supervisor, none = human, unreadable = supervisor, logged at WARNING with one
   context line telling the human to repeat the clear if it was theirs).
