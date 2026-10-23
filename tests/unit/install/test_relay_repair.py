@@ -172,10 +172,8 @@ class TestStartRelayRepair:
         assert "status=synced" in text
         assert "status=running" not in text
 
-    def test_a_pid_that_cannot_be_recorded_still_reports_the_start(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """The repair is running; only its pid is missing, which the reader bounds."""
+    def test_a_pid_that_cannot_be_recorded_is_reported_with_the_start(self, tmp_path: Path) -> None:
+        """The repair is running; its missing pid is reported, not only logged."""
 
         def spawn_and_lose_state(argv: list[str], log: Path) -> int:
             Path(argv[argv.index("--state") + 1]).unlink()
@@ -184,7 +182,9 @@ class TestStartRelayRepair:
         notice = _start(tmp_path, spawn_and_lose_state)
 
         assert notice.started is True
-        assert f"pid {_Spawner.PID} not recorded" in caplog.text
+        assert notice.failure is not None
+        assert f"pid {_Spawner.PID}" in notice.failure
+        assert "could not be recorded" in notice.failure
 
     def test_a_child_that_dies_before_recording_its_pid_reads_as_failed(
         self, tmp_path: Path

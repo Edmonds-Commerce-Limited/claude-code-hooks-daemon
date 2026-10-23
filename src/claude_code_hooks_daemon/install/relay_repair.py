@@ -147,11 +147,12 @@ def _record_spawned_pid(path: Path, claim: str, pid: int, *, detail: str) -> Non
 
 
 def _reap(pid: int) -> None:
-    try:
-        _, status = os.waitpid(pid, 0)
-    except ChildProcessError:
-        logger.warning("relay repair child %d was reaped elsewhere", pid)
-        return
+    """Wait for the child so it never lingers as a zombie.
+
+    A ChildProcessError (someone else reaped it) is left to raise: the thread's
+    excepthook reports it.
+    """
+    _, status = os.waitpid(pid, 0)
     logger.info("relay repair child %d exited (%d)", pid, os.waitstatus_to_exitcode(status))
 
 
@@ -231,9 +232,15 @@ def start_relay_repair(
     try:
         _record_spawned_pid(state, claim, pid, detail=detail)
     except OSError as exc:
-        # The repair is running; only its pid is unrecorded, and the reader
-        # fails a pid-less claim once its grace has passed.
-        logger.error("relay repair of %s: pid %d not recorded in %s: %s", binary, pid, state, exc)
+        # The repair is running; only its pid is unrecorded. Reported, and the
+        # reader fails a pid-less claim once its grace has passed.
+        return notice(
+            started=True,
+            failure=(
+                f"the background repair started (pid {pid}) but its pid could not be "
+                f"recorded in {state} ({exc})"
+            ),
+        )
     return notice(started=True)
 
 
