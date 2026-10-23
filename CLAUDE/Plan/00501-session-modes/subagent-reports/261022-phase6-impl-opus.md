@@ -495,3 +495,74 @@ No full QA was run (B2 owns it).
 - `enter_goal_loop` raises `ValueError` or `OSError`, not `RuntimeError`. The handler's catch should cover `OSError`
   (plus `RuntimeError` from `get_data_layer()`).
 - Items 5 to 8 are otherwise unchanged from the pinned design above.
+
+## Part B2 (pinned design items 5 to 8): IPC, CLI and handler wired; docs and QA left
+
+Brief `untracked/scratch/brief-501-phase6b2.md`, base `2a2e04f9f`. The agent passed the 150k soft budget after item 6
+and stopped at a clean, pushed commit. **6.3 and 6.4 are still unticked.**
+
+### Done
+
+- **Item 5** (`6359f13e5`): `SessionModeIPC.ACTION_EXIT_BLOCKED = "exit_blocked"`.
+  - `session_mode_ipc._answer` calls `unblock_goal_loop` with the evidence
+    `cause=explicit-clear (the session-mode CLI or /mode skill)` and returns `{outcome, line}`.
+    `handle_session_mode_action` turns `DeclaredBlockRefusedError` into `{"error": ...}`.
+  - CLI: `session-mode unblock` (choices and help updated). `_session_mode_request` sends `exit_blocked` before the
+    `if not words` check. An error answer exits 1 through the existing `_send_session_mode_ipc` path.
+  - Tests:
+    - IPC: the action set; unblock ends goal-blocked and logs EXIT with the explicit-clear evidence; **an
+      awaiting-human-only unblock is a named error, logs a WARNING, and the entry stays**; not-blocked.
+    - CLI: the request shape, and an error answer exits 1. Two **end-to-end** tests route `send_daemon_request` into
+      the real `handle_session_mode_action` and a real registry. In the first, the refusal exits 1, names "genuine
+      prompt from the human", and the awaiting-human entry stays. In the second, the goal-loop block ends.
+  - Red: 4 failed (IPC), then 4 failed (CLI, argparse rejected `unblock`). Green: 49 passed.
+- **Item 6** (`a82b7434f`): `handlers/stop/goal_loop_detector.py`.
+  - Seams: `_registry` (default `get_data_layer().session_modes`) and `_clear_goal` (default: a deferred import of
+    `daemon.session_mode_ipc.clear_goal_signal`). Added `_SessionState.blocked_fingerprint`.
+  - The repository is fingerprinted when there are new cycles OR a block is being watched.
+    `_exit_on_repo_change` handles the watched block:
+    - it drops the watch when GOAL_BLOCKED is no longer live;
+    - otherwise it exits with `cause=repo-change fingerprint=<old>-><new>`;
+    - `OSError` and `RuntimeError` give the WARNING "the repo-change exit was not made".
+  - WOULD_ENTER:
+    - in ACT, `_enter` calls `enter_goal_loop` (the ENTER is logged by the registry with the assessment evidence,
+      which includes `mode=act`). `OSError` and `RuntimeError` give the WARNING "goal-blocked mode not entered";
+    - in OBSERVE, WOULD_ENTER is logged as before;
+    - in both, `ring.restart_count()` runs.
+  - The Stop is always ALLOW with empty context. The module docstring covers act mode, the four exits, the in-memory
+    watch caveat and the no-ccy backstop. `get_claude_md()` stays None, and the docstring records why.
+  - Tests (new class `TestActMode`, plus two production-seam tests):
+    - act enters, clears once, queues one `GOAL_LOOP_ENTERED` notice and adds no context;
+    - the TTL equals `blocked_hours`;
+    - act does not re-enter on a fourth cycle;
+    - observe logs WOULD_ENTER once and never touches the registry;
+    - a repo change exits with the cause logged, and an unchanged repo keeps the block;
+    - an entry ended by a human drops the watch;
+    - an enter failure (`OSError` and `RuntimeError`), an exit failure and a fingerprint failure while blocked are
+      each a WARNING and an allowed Stop.
+  - **Deviation**: `TestStandDowns::test_invalid_checkpoint_re_anchors_at_eof` assumed the ring kept counting after a
+    would-enter (`cycles=4`). With the pinned restart, it now expects a near miss after two appended cycles and
+    `cycles=3` at the third. That still proves the on-disk cycle is never counted.
+  - Red: 13 failed. Green: 39 passed in the handler file; 51 with `test_goal_loop_block.py`. `mypy --strict` is clean
+    on both changed modules.
+
+### Left (for the next agent, in order)
+
+1. Item 6 residue:
+   - restore the `mode` row (`observe` | `act`) in the `docs/guides/HANDLER_REFERENCE.md` goal_loop_detector options
+     table, and document the backstop there (wording is in the module docstring);
+   - add `("goal_loop_detector", "mode"): "act"` to `_VALID_NON_DEFAULTS` in `test_registry_option_injection.py`;
+   - add the human-prompt exit-logged assertion: extend
+     `tests/unit/handlers/user_prompt_submit/test_failsafe_cron_blockage_suppressor.py::TestHandle::test_real_prompt_clears_goal_blocked_too`
+     to check that `registry.transition_log.recent(...)` shows EXIT with its evidence. The timer, repo-change and
+     explicit-clear exits are already tested in `test_goal_loop_block.py`, `test_goal_loop_detector.py` and
+     `test_session_mode_ipc.py`.
+2. Item 7:
+   - add `act` to the commented options in `.claude/hooks-daemon.yaml.example`;
+   - write `CLAUDE/UPGRADES/UNRELEASED/release-notes/024-goal-loop-detector.md`. It covers: the detector observes by
+     default; `act` is opt-in; `session-mode unblock` and its refusal of awaiting-human; the backstop;
+   - tick 6.3 and 6.4 in PLAN.md.
+3. Item 8: `FULL_QA_LOCK_WAIT_SECONDS=3600 ./scripts/qa/llm_qa.py changed --range b2a25304d..HEAD --allow-unmapped > untracked/scratch/qa-501p6b.txt 2>&1`,
+   grep `^QA:` and `^❌`, fix and re-run until clean. Black and ruff have NOT been run on the B2 changes yet.
+
+Head at stop: `a82b7434f` (pushed), plus this report commit.
