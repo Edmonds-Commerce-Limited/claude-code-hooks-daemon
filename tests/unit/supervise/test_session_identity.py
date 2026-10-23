@@ -350,18 +350,14 @@ def _live_shape(root: Path) -> Path:
 @pytest.mark.usefixtures("_clean_cache")
 class TestLegacyHostFallback:
     def _child(self, root: Path) -> object:
-        return _mod.WorkerChildPid(
-            proc_root=root, host_pid=lambda: _HOST, own_pid=lambda: _WORKER
-        )
+        return _mod.WorkerChildPid(proc_root=root, host_pid=lambda: _HOST, own_pid=lambda: _WORKER)
 
     def test_live_shape_resolves_the_claude_grandchild(self, tmp_path: Path) -> None:
         child = self._child(_live_shape(tmp_path))
         assert child.learn(None) is None
         assert child.own_session_ids() == frozenset({_MINE})
 
-    def test_resolver_excludes_the_worker_subtree_and_foreign_trees(
-        self, tmp_path: Path
-    ) -> None:
+    def test_resolver_excludes_the_worker_subtree_and_foreign_trees(self, tmp_path: Path) -> None:
         root = _live_shape(tmp_path)
         assert _mod.resolve_host_session_ids(_HOST, _WORKER, root) == frozenset({_MINE})
 

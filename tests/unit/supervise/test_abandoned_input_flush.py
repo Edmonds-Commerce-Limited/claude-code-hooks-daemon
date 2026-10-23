@@ -193,6 +193,8 @@ class TestRunWorkerClearsOwnRecognizer:
             work_idle=True,
             human_raw_input=raw,
             input_line_abandoned=True,
+            # A current host sends the Claude child pid; tick2 keeps it.
+            child_pid=4242,
         )
         # Box now reads empty from the HOST's side (it cleared its own model
         # too) and no new bytes arrive -- only the worker's OWN (unless reset)

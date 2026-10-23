@@ -1431,9 +1431,10 @@ _CONTEXT_SIDECAR_GLOB = "*.json"
 # the Claude child the PTY host forked, or of a descendant of that child (by
 # `/proc/<pid>/stat` ppid). Every process `/proc` shows is NOT the rule: on a
 # host or a shared PID namespace that includes other users' and other
-# terminals' sessions (issue #138). The child pid is threaded explicitly; with
-# no child pid there is no scan at all. Fail safe: an empty set (no child pid
-# yet, child gone, non-Linux) means act on NOTHING.
+# terminals' sessions (issue #138). The child pid is threaded explicitly; a
+# worker under an older host that sends none walks the host's tree instead (see
+# `WorkerChildPid`). Fail safe: an empty set (child gone, host re-parented,
+# non-Linux) means act on NOTHING.
 # ---------------------------------------------------------------------------
 
 _PROC_ROOT = "/proc"
@@ -1445,8 +1446,9 @@ _SESSION_ENV_PREFIX = b"CLAUDE_CODE_SESSION_ID="
 # learned during active work available on later idle ticks (when no descendant
 # currently exposes the env var).
 _own_session_ids_cache: set[str] = set()
-# The child pid the cache above was learned under.
-_own_session_ids_child_pid: int | None = None
+# The scope the cache above was learned under: the child pid, or (host pid,
+# worker pid) for the hot-reload fallback.
+_own_session_ids_child_pid: int | tuple[int, int] | None = None
 # Plan 00182: throttle the expensive full-/proc environ scan. Once our session
 # ids are learned they persist in the accumulate-set above, so re-scanning every
 # worker tick (poll interval 2s) was the latency source that could push a tick
@@ -1514,6 +1516,33 @@ def _proc_parent_map(root: Path) -> dict[int, int]:
     return parents
 
 
+def _tree_session_ids(
+    proc_root: Path | None, starts: Callable[[dict[int, int]], list[int]], skip: int | None
+) -> frozenset[str]:
+    """Collect session ids from the subtrees rooted at ``starts(parents)``.
+
+    ``skip``'s whole subtree is never entered. Empty when there is no ``/proc``.
+    """
+    root = proc_root if proc_root is not None else Path(_PROC_ROOT)
+    if not root.is_dir():
+        return frozenset()
+    parents = _proc_parent_map(root)
+    children: dict[int, list[int]] = {}
+    for pid, ppid in parents.items():
+        children.setdefault(ppid, []).append(pid)
+    found: set[str] = set()
+    tree: set[int] = set()
+    pending = starts(parents)
+    while pending:
+        pid = pending.pop()
+        if pid in tree or pid == skip:
+            continue
+        tree.add(pid)
+        found |= _session_ids_from_environ(_read_proc_environ(root / str(pid) / "environ"))
+        pending.extend(children.get(pid, ()))
+    return frozenset(found)
+
+
 def resolve_own_session_ids(child_pid: int, proc_root: Path | None = None) -> frozenset[str]:
     """Collect ``CLAUDE_CODE_SESSION_ID`` from ``child_pid`` and its descendants.
 
@@ -1521,26 +1550,60 @@ def resolve_own_session_ids(child_pid: int, proc_root: Path | None = None) -> fr
     their environ read. Empty when the child is gone or there is no ``/proc``,
     so the caller fails safe.
     """
-    root = proc_root if proc_root is not None else Path(_PROC_ROOT)
-    if not root.is_dir():
+    return _tree_session_ids(
+        proc_root, lambda parents: [child_pid] if child_pid in parents else [], None
+    )
+
+
+def resolve_host_session_ids(
+    host_pid: int, worker_pid: int, proc_root: Path | None = None
+) -> frozenset[str]:
+    """Collect session ids from every descendant of ``host_pid`` but the worker's tree.
+
+    The hot-reload fallback for a host that sends no child pid: everything
+    below the host was started by this supervisor (Claude, its tool shells and
+    hooks, and siblings such as a pingbus seat). The host's own environ is not
+    read, nor is the worker's subtree. A host of pid 1 (the worker was
+    re-parented after the host died) or a host that is gone gives the empty set.
+    """
+    if host_pid == 1:
         return frozenset()
-    parents = _proc_parent_map(root)
-    if child_pid not in parents:
-        return frozenset()
-    children: dict[int, list[int]] = {}
-    for pid, ppid in parents.items():
-        children.setdefault(ppid, []).append(pid)
-    found: set[str] = set()
-    tree: set[int] = set()
-    pending = [child_pid]
-    while pending:
-        pid = pending.pop()
-        if pid in tree:
-            continue
-        tree.add(pid)
-        found |= _session_ids_from_environ(_read_proc_environ(root / str(pid) / "environ"))
-        pending.extend(children.get(pid, ()))
-    return frozenset(found)
+    return _tree_session_ids(
+        proc_root,
+        lambda parents: [pid for pid, ppid in parents.items() if ppid == host_pid],
+        worker_pid,
+    )
+
+
+def _cached_session_ids(
+    scope: int | tuple[int, int], resolve: Callable[[], frozenset[str]], now: float | None
+) -> frozenset[str]:
+    """Union-accumulate the ids ``resolve`` finds for ``scope`` (throttled rescan).
+
+    A scope different from the one the cache was learned under clears it first.
+
+    Plan 00182: the /proc scan is throttled to ``_OWN_SESSION_SCAN_TTL_SECONDS``
+    once at least one id is known -- most ticks then return the accumulated set
+    without touching /proc, keeping the worker tick well under its read timeout.
+    An EMPTY cache always re-scans so a supervisor that has not yet discovered
+    its own session is never starved. ``now`` (monotonic seconds) is injectable
+    for tests; production uses the monotonic clock.
+    """
+    global _own_session_ids_last_scan, _own_session_ids_child_pid
+    if scope != _own_session_ids_child_pid:
+        _own_session_ids_cache.clear()
+        _own_session_ids_last_scan = None
+        _own_session_ids_child_pid = scope
+    current = time.monotonic() if now is None else now
+    due = (
+        not _own_session_ids_cache
+        or _own_session_ids_last_scan is None
+        or (current - _own_session_ids_last_scan) >= _OWN_SESSION_SCAN_TTL_SECONDS
+    )
+    if due:
+        _own_session_ids_cache.update(resolve())
+        _own_session_ids_last_scan = current
+    return frozenset(_own_session_ids_cache)
 
 
 def cached_own_session_ids(
@@ -1551,31 +1614,23 @@ def cached_own_session_ids(
     ``None`` (child not known) returns the empty set without scanning and
     without exposing an earlier child's set. A child pid different from the one
     the cache was learned under clears the cache first.
-
-    Plan 00182: the /proc scan is throttled to ``_OWN_SESSION_SCAN_TTL_SECONDS``
-    once at least one id is known -- most ticks then return the accumulated set
-    without touching /proc, keeping the worker tick well under its read timeout.
-    An EMPTY cache always re-scans so a supervisor that has not yet discovered
-    its own session is never starved. ``now`` (monotonic seconds) is injectable
-    for tests; production uses the monotonic clock.
     """
-    global _own_session_ids_last_scan, _own_session_ids_child_pid
     if child_pid is None:
         return frozenset()
-    if child_pid != _own_session_ids_child_pid:
-        _own_session_ids_cache.clear()
-        _own_session_ids_last_scan = None
-        _own_session_ids_child_pid = child_pid
-    current = time.monotonic() if now is None else now
-    due = (
-        not _own_session_ids_cache
-        or _own_session_ids_last_scan is None
-        or (current - _own_session_ids_last_scan) >= _OWN_SESSION_SCAN_TTL_SECONDS
+    return _cached_session_ids(
+        child_pid, lambda: resolve_own_session_ids(child_pid, proc_root), now
     )
-    if due:
-        _own_session_ids_cache.update(resolve_own_session_ids(child_pid, proc_root))
-        _own_session_ids_last_scan = current
-    return frozenset(_own_session_ids_cache)
+
+
+def cached_host_session_ids(
+    host_pid: int, worker_pid: int, proc_root: Path | None = None, *, now: float | None = None
+) -> frozenset[str]:
+    """Union-accumulate the hot-reload fallback set (see ``resolve_host_session_ids``)."""
+    return _cached_session_ids(
+        (host_pid, worker_pid),
+        lambda: resolve_host_session_ids(host_pid, worker_pid, proc_root),
+        now,
+    )
 
 
 class WorkerChildPid:
@@ -1587,11 +1642,13 @@ class WorkerChildPid:
 
     Hot-reload fallback: a host started before ``child_pid`` existed sends none,
     and a reloaded worker would otherwise fail every tick to the empty set until
-    the next ccy relaunch. That host's children are exactly Claude and this
-    worker, so its single OTHER child is taken as Claude. Two or more other
-    children, none, or a host of pid 1 (the worker was re-parented after the
-    host died) yields no pid and so the empty set. This is a walk of the host's
-    children, never the scan of every process.
+    the next ccy relaunch. While no pid has been sent, the own set is taken from
+    every descendant of the host (this worker's parent) except this worker's own
+    subtree -- everything there was started by this supervisor. A host can have
+    other children beside Claude (a pingbus seat, say), so no single child is
+    picked. A host of pid 1 (the worker was re-parented after the host died)
+    gives the empty set. This is a walk of the host's tree, never the scan of
+    every process.
     """
 
     def __init__(
@@ -1612,28 +1669,16 @@ class WorkerChildPid:
         return self._pid
 
     def learn(self, sent: int | None) -> int | None:
-        """Take this tick's host-sent pid (or derive one from a legacy host)."""
+        """Take this tick's host-sent pid; a tick without one keeps the last."""
         if sent is not None:
             self._pid = sent
-        elif self._pid is None:
-            self._pid = self._legacy_host_child()
         return self._pid
 
     def own_session_ids(self) -> frozenset[str]:
-        """The own-session-id set of the learned child's tree (empty if unknown)."""
-        return cached_own_session_ids(self._pid)
-
-    def _legacy_host_child(self) -> int | None:
-        host = self._host_pid()
-        if host == 1 or not self._proc_root.is_dir():
-            return None
-        own = self._own_pid()
-        others = [
-            pid
-            for pid, ppid in _proc_parent_map(self._proc_root).items()
-            if ppid == host and pid != own
-        ]
-        return others[0] if len(others) == 1 else None
+        """The own-session-id set of the learned child's tree, else the host fallback."""
+        if self._pid is not None:
+            return cached_own_session_ids(self._pid)
+        return cached_host_session_ids(self._host_pid(), self._own_pid(), self._proc_root)
 
 
 def _session_in_scope(session_id: object, own_sessions: frozenset[str] | None) -> bool:
@@ -9173,7 +9218,7 @@ def run_worker(
                 reap_ttl_seconds=policy.reap_ttl_seconds,
                 foreground_margin_seconds=policy.foreground_margin_seconds,
                 # Plans 00166, 00551: only the sessions of our own child's tree.
-                own_sessions=cached_own_session_ids(child.pid),
+                own_sessions=child.own_session_ids(),
                 goal_signal_ttl_seconds=policy.goal_signal_ttl_seconds,
                 model_confirm_enters=policy.model_confirm_enters,
                 plugins=plugins,
