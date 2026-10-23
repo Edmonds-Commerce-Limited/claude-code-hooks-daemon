@@ -173,6 +173,34 @@ class TestReadNewLines:
         lines, _ = read_new_lines(path, checkpoint, tail_bytes=10)
         assert lines == ["n048", "n049"]
 
+    def test_a_tail_inside_one_unfinished_line_never_checkpoints_mid_line(
+        self, tmp_path: Path
+    ) -> None:
+        """A line longer than the tail must not leave its trailing fragment
+        to be returned later as if it were a whole line."""
+        path = tmp_path / "t.jsonl"
+        path.write_bytes(b'{"a":1}\n{"type":"x","pad":"' + b"y" * 50)
+        lines, checkpoint = read_new_lines(path, None, tail_bytes=20)
+        assert lines == []
+        assert checkpoint.offset == 0
+        with path.open("ab") as handle:
+            handle.write(b'"}\n{"b":2}\n')
+        lines, _ = read_new_lines(path, checkpoint, tail_bytes=1000)
+        assert all(not line.startswith("y") for line in lines)
+        assert lines[-1] == '{"b":2}'
+
+    def test_a_backlog_tail_inside_one_line_keeps_the_previous_checkpoint(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "t.jsonl"
+        path.write_bytes(b"a\n")
+        _, checkpoint = read_new_lines(path, None, tail_bytes=10)
+        with path.open("ab") as handle:
+            handle.write(b"z" * 50)
+        lines, after = read_new_lines(path, checkpoint, tail_bytes=10)
+        assert lines == []
+        assert after == checkpoint
+
     def test_a_shrunk_file_is_an_invalid_checkpoint_anchored_at_eof(self, tmp_path: Path) -> None:
         path = tmp_path / "t.jsonl"
         path.write_text("aaaa\nbbbb\n", encoding="utf-8")

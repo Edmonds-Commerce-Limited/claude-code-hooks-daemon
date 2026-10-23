@@ -765,6 +765,31 @@ class TestBoundedDispatcherCapacityExemptCalls:
         assert isinstance(while_stuck, DispatchSaturated)
         assert after == "judged"
 
+    def test_an_exempt_straggler_does_not_use_up_the_ordinary_straggler_cap(self) -> None:
+        """Its own exempt slot bounds it, so a wedged recovery command must
+        not refuse ordinary chains by filling the ordinary straggler cap."""
+        dispatcher: BoundedDispatcher[object] = BoundedDispatcher(
+            max_inflight=2, max_stragglers=1, slot_wait_seconds=0.0
+        )
+        release = threading.Event()
+        try:
+            stuck = dispatcher.run(
+                lambda: release.wait(timeout=DispatchTestTimeout.GENEROUS),
+                timeout=DispatchTestTimeout.VERY_SHORT,
+                label="exempt-straggler",
+                capacity_exempt=True,
+            )
+            health = dispatcher.straggler_health()
+            ordinary = dispatcher.run(
+                lambda: "ok", timeout=DispatchTestTimeout.NORMAL, label="ordinary"
+            )
+        finally:
+            release.set()
+            dispatcher.shutdown(wait=True)
+        assert isinstance(stuck, DispatchTimeout)
+        assert health.at_capacity is False
+        assert ordinary == "ok"
+
 
 class _FakeClock:
     """A monotonic clock the test advances by hand."""
