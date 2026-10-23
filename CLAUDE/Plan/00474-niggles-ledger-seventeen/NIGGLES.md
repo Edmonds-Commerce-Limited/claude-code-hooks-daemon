@@ -192,7 +192,7 @@ The child `python -m pytest -p no:xdist -q <polluter> <victim>` printed `2 passe
   `/tmp/pytest-of-<user>` that is no longer among the newest three and has no live lock. The deletion is `rm_rf`, and
   its cost depends on what the earlier child pytests left behind.
 
-- **Mitigation and diagnostics (branch `worktree-n531-child-exit`)**: every child pytest in the suite now goes through
+- **Mitigation and diagnostics (merged in 66cb8ea15)**: every child pytest in the suite now goes through
   `tests/support/child_pytest.py::run_child_pytest`. It gives the child its own `--basetemp` under the caller's
   `tmp_path`, so the child's exit cleanup never touches the shared `/tmp/pytest-of-<user>` tree (the lead above). It
   builds the child's environment from a short allowlist, and loads a `-p` watchdog plugin that arms
