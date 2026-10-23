@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.71.0] - 2026-10-23
 
-_A session-modes, relay-by-default and release-pipeline release. A session now has first-class modes (`awaiting-human`, `focus`, `goal-blocked`, `manual-goals`) that are visible on the status line, logged, and read by the ccy supervisor (Plan 00501); the Rust relay is on by default for new installs and a broken relay binary is reported instead of running a call unguarded (Plan 00529); the status line gets a cheap tick (Plan 00542); the dispatch pool is configurable and a saturated daemon can be restarted from inside a session (Plan 00533); a plan journal is one file per entry (Plan 00543); the daemon ships a `docs-optimise` skill (Plan 00532); and a release now goes through a pull request whose CI is the gate (Plan 00476). `breaking: false` in the config-changes manifest, and no pre-upgrade or post-upgrade task ships. Retired options are listed under Changed and still validate._
+_A session-modes, relay-by-default and release-pipeline release. A session now has first-class modes (`awaiting-human`, `focus`, `goal-blocked`, `manual-goals`) that are visible on the status line, logged, and read by the ccy supervisor (Plan 00501); the Rust relay is on by default for new installs and a broken relay binary is reported instead of running a call unguarded (Plan 00529); the status line gets a cheap tick (Plan 00542); the dispatch pool is configurable and a saturated daemon can be restarted from inside a session (Plan 00533); a plan journal is one file per entry (Plan 00543); the daemon ships a `docs-optimise` skill (Plan 00532); and a release now goes through a pull request whose CI is the gate (Plan 00476). `breaking: false` in the config-changes manifest, and no pre-upgrade or post-upgrade task ships. Two retired options are listed under Removed; a config that still sets them validates with a warning, so the removal is not breaking._
 
 ### Added
 
@@ -27,7 +27,6 @@ _A session-modes, relay-by-default and release-pipeline release. A session now h
 ### Changed
 
 - The example config and `init-config` enable the relay (`relay_enabled: true`, `relay_source: auto`); an explicit `false` and a partial `transport` block are kept (Plan 00529).
-- The `expiry_hours` option of `failsafe_cron_blockage_suppressor` and the `marker_expiry_hours` option of `auto_continue_stop` are retired (the lifetime is fixed at 24 hours); a config that sets either still validates and logs a warning (Plan 00501).
 - The spend-meter segment is `⚙ 1 agent (sonnet) · 127k`, shown only while sub-agents run, with a plain unit and fresh agents no longer counted as unmeasured (Plans 00545, 00474; Addresses #133).
 - The upgrade's stale-venv cleanup runs on the resolved interpreter and warns loudly when it cannot (Plan 00546).
 - Install, upgrade and support scripts run the resolved interpreter or stop with a named reason (Plan 00546).
@@ -35,6 +34,12 @@ _A session-modes, relay-by-default and release-pipeline release. A session now h
 - The `transcript_archiver` advisory names the leftover `untracked/transcripts/` directory (Plan 00541; Addresses #52).
 - A usage-pause lifts before its resume time when a fresh reading is under the ceiling (Plan 00479).
 - The CPU-timing sweeps run in their own CI job (Plan 00476), and a lint timeout is scored as an inconclusive probe (Plan 00474).
+- `docs-qa --footprint` marks an on-demand file (a nested `CLAUDE.md` and its imports) over Claude Code's per-file limit as `truncated` and says Claude Code loads only its start, instead of calling it skipped; a nested `CLAUDE.md`'s imports count as on-demand; the instruction-loading contract is re-audited against Claude Code 2.1.309 (Plan 00474 N535).
+- The goal-loop detector's manual-goals message no longer promises that no automated clear happens: the detector can still clear a goal to break a loop (Plan 00474).
+
+### Removed
+
+- The `expiry_hours` option of `failsafe_cron_blockage_suppressor` and the `marker_expiry_hours` option of `idle_workable_issue_stop_gate` (the awaiting-human lifetime is fixed at 24 hours). A config that still sets either validates and logs a WARNING naming the key; delete it to clear the warning. Not breaking (Plan 00501).
 
 ### Fixed
 
@@ -46,6 +51,14 @@ _A session-modes, relay-by-default and release-pipeline release. A session now h
 - A status-line fault is reported in red instead of silently taking the slow path (Plan 00542).
 - The ccy supervisor no longer acts on another terminal's sessions outside a private PID namespace (Plan 00551; Addresses #138).
 - Plan QA and docs QA read journal entry files and legacy day-files alike, and no handler message tells an agent to write to a day-file (Plan 00543).
+- One unreadable `*.session-modes` file no longer breaks the session-modes registry for every session: it is logged and skipped, and a failed legacy-marker import keeps the loaded modes (Plan 00474).
+- A `/goal clear` is attributed once even after a daemon restart has evicted its transition-log record (Plan 00474).
+- A timed-out capacity-exempt call (such as the restart command) no longer uses up the ordinary straggler cap of the dispatch pool, and the goal-loop detector never checkpoints a transcript mid-line (Plan 00474).
+- A relay repair started at session start records its child's pid at once and reaps the child, so a repair that died reads as FAILED instead of running for ever; the install/upgrade relay banner names the binary's actual defect (Plan 00474).
+- `lint_on_edit` and the staged lint gate run a sub-project file's linter from the same directory and resolve the same linter binary (the sub-project's own tool directories, such as `node_modules/.bin`, first) (Plan 00474 N538).
+- `docs-qa --footprint` no longer takes a backticked or fenced `<hooksdaemon>` mention for the daemon-owned block (Plan 00474).
+- The `session_mode_indicator` status segment shows a named error instead of failing when the usage-pause path cannot be resolved (Plan 00474).
+- ccy supervisor (HOST code, takes effect only when ccy is relaunched; the worker hot reload is not enough): an Alt/Meta chord (Esc followed by a printable key) no longer releases the focus hold, and a `/goal clear` the supervisor decided but did not type (held, or the terminal write failed) removes its attribution record, so a human clear soon after is not credited to the supervisor. Separately, a failed goal-clear record write no longer leaves a temp file behind (Plan 00474 N537).
 
 ## [3.70.0] - 2026-10-17
 

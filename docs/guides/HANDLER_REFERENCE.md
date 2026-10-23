@@ -4769,7 +4769,7 @@ The backoff thins ticks to hourly, then every 2 hours, then every 4, and **never
 
 **Never terminal:** `idle_housekeeping_advisory` and `standing_authorisations` also key off the same canonical cron prompt and must keep running on every non-suppressed tick. A non-terminal DENY still survives later handlers regardless of registration order.
 
-**Options:** none. A declaration expires 24 hours after it is recorded; the expiry is fixed. The retired `expiry_hours` option (and `auto_continue_stop`'s `marker_expiry_hours`) has no effect, and a config that still sets either gets a WARNING from startup validation and `config-validate`.
+**Options:** none. A declaration expires 24 hours after it is recorded; the expiry is fixed. The retired `expiry_hours` option (and `idle_workable_issue_stop_gate`'s `marker_expiry_hours`) has no effect, and a config that still sets either gets a WARNING from startup validation and `config-validate`.
 
 **Config example:**
 
