@@ -175,6 +175,14 @@ class TestExplanation:
             assert label in explanation.how_to_read
         assert "mode-history" in explanation.how_to_read
 
+    def test_explanation_names_the_supervisor_warning_and_its_fix(self) -> None:
+        """Adviser Q3: the operator learns the fix is the registry load, not a restart."""
+        how_to_read = SessionModeIndicatorHandler().explain_segment().how_to_read
+        assert "supervisor: session-modes file unreadable" in how_to_read
+        assert ".corrupt" in how_to_read
+        assert "not a restart" in how_to_read
+        assert "CLAUDE/SessionModes.md" in how_to_read
+
     def test_no_claude_md_and_one_acceptance_test(self) -> None:
         handler = SessionModeIndicatorHandler()
         assert handler.get_claude_md() is None

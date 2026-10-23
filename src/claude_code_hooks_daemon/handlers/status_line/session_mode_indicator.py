@@ -69,6 +69,10 @@ _ELLIPSIS: Final[str] = "…"
 _REGISTRY_ERROR: Final[str] = "modes unreadable"
 _PAUSE_ERROR: Final[str] = "usage-pause record unreadable"
 
+#: The prefix of the WARNING the ccy supervisor posts (`.claude/ccy/claude-supervise.py`,
+#: a separate process this module cannot import) when a session-modes file is unreadable.
+_SUPERVISOR_WARNING: Final[str] = "supervisor: session-modes file unreadable"
+
 
 @dataclass(frozen=True, slots=True)
 class _Malformed:
@@ -187,9 +191,15 @@ class SessionModeIndicatorHandler(StatusLineHandlerBase):
                 "(cyan, with its task: `hooks-daemon focus off` ends it) > unattended "
                 "(grey: the daemon-wide unattended mode). A red "
                 f"`{_ICON} {_REGISTRY_ERROR}` or `{_ICON} {_PAUSE_ERROR}` means the mode "
-                "state could not be read; see the daemon log. `hooks-daemon session-mode` "
-                "lists this session's modes and `hooks-daemon mode-history` every "
-                "session's modes and transitions."
+                "state could not be read; see the daemon log. A supervisor WARNING "
+                f"`{_SUPERVISOR_WARNING}` means the ccy supervisor could not read a "
+                "session-modes file and is withholding work-driving prompts: the daemon "
+                "renames an unreadable file `*.corrupt` the next time it loads its "
+                "registry, which reopens the gate, so the fix is to let the daemon load "
+                "it and inspect the `.corrupt` file, not a restart. "
+                "`hooks-daemon session-mode` lists this session's modes and "
+                "`hooks-daemon mode-history` every session's modes and transitions. "
+                "Full reference: CLAUDE/SessionModes.md."
             ),
             current_value=(
                 "Rendered per session from the session-modes registry, the usage-pause "

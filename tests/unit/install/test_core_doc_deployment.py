@@ -62,6 +62,11 @@ _GUIDANCE_NAMED_DOCS: tuple[tuple[str, str], ...] = (
     # path to resolve to nothing. The docs_qa engine enforces R1-R13 in every
     # client, so the ruleset had to become something a client actually holds.
     ("CLAUDE/DocumentationStrategy.md", "docs_qa/checks/rules_file_shape.py"),
+    # Session modes are on in every install (focus_mode_trigger, the
+    # awaiting-human declaration, the status-line segment), and their guidance
+    # and segment explanation name the reference unconditionally.
+    ("CLAUDE/SessionModes.md", "handlers/user_prompt_submit/focus_mode_trigger.py"),
+    ("CLAUDE/SessionModes.md", "handlers/status_line/session_mode_indicator.py"),
 )
 
 
@@ -304,6 +309,16 @@ class TestTheDeployIsNotGatedOnTheWrongSubsystem:
             "in every install, but the document was only deployed when the "
             "plan workflow — an opt-in that defaults to off — was enabled."
         )
+
+    def test_a_stock_install_gets_the_session_modes_document(self, tmp_path: Path) -> None:
+        """Focus, awaiting-human and the mode segment are on by default, so the
+        reference their guidance names cannot wait for an opt-in subsystem."""
+        config_path = self._config(tmp_path, "plan_workflow:\n  enabled: false\n")
+
+        deploy_core_docs_if_enabled(tmp_path, config_path)
+
+        assert (tmp_path / "CLAUDE" / "SessionModes.md").is_file()
+        assert (tmp_path / "CLAUDE" / "core" / "SessionModes.core.md").is_file()
 
     def test_the_plan_document_waits_for_its_own_subsystem(self, tmp_path: Path) -> None:
         """Nothing is scattered into a project that did not ask for it: the
