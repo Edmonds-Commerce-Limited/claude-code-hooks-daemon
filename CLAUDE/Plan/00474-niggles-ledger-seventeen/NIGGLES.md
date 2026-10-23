@@ -124,7 +124,8 @@ Follow-ups, not defects in the reviewers' judgement:
   ahead of a pending supervisor tick, was therefore credited to the supervisor (and in the double clear the code
   produces, the two verdicts swap). Fix: `CLOCK_TOLERANCE_SECONDS` is 1 ms, the transcript's flooring. Red tests first.
 
-**Status**: B ✅ fixed on branch `worktree-n534-focus-hold` (304a39289, not merged); A ⬜ open, owner decision.
+**Status**: B ✅ fixed, merged in 0008b17ec (post-merge QA 41/41); A ⬜ open, owner decision (Plan 00538 Task 1.1
+spike recommended first).
 
 ### N533 — the work-queue re-brief reports a live worktree recorded by relative path as MISSING
 
@@ -141,7 +142,7 @@ worktree present.
   relative worktree present under the root with the cwd elsewhere is not MISSING, one absent under the root is,
   at util and at both handlers.
 
-**Status**: ✅ fixed on branch `worktree-n533-work-queue-relpath` (not yet merged).
+**Status**: ✅ fixed, merged in 8a3d296f6.
 
 ### N532 — implementation sub-agents spend their context budget before writing code
 
