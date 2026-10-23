@@ -135,11 +135,15 @@ The child `python -m pytest -p no:xdist -q <polluter> <victim>` printed `2 passe
 - **Not reproduced**: three local runs of the same child command (Python 3.11) exited with rc 0 (printed by the run
   loop) in about 0.45 s. The run's own job list (`gh run view 39853605423 --json jobs`) shows QA (Python3.11) and QA
   (Python3.13) succeeding. The test body is unchanged since 292aa14d2 (the file itself changed later, elsewhere).
+
 - **Hypothesis to establish first**: exit-time work in the child that a loaded runner stretches, such as coverage
   inherited from the parent run being flushed or combined at exit. Measure the child's exit phase on CI before
   changing anything; raising the timeout is not a fix until the cause is known.
 
-**Status**: ⬜ open; the next main runs say whether it recurs.
+- **Recurred**: full-matrix run 39883575808 at `106d14543`, job QA (Python3.12) again, the same test and the same
+  60 s `TimeoutExpired`, at 99% of the run; Python 3.11 and 3.13 passed. Two of the last two full runs that reached it.
+
+**Status**: 🔄 in progress; recurring, so it is being investigated and fixed rather than watched.
 
 ### N530 — `plan_number_helper` denies an `ls` of a folder inside an existing plan as a next-number scan
 
