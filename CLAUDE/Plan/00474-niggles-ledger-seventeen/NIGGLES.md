@@ -111,7 +111,7 @@ Follow-ups, not defects in the reviewers' judgement:
 
 ### N532 — implementation sub-agents spend their context budget before writing code
 
-**Source**: Plan 00501 Phase 6. Four of its six `python-developer` dispatches (each given a `model: opus` override at
+**Source**: Plan 00501 Phase 6. Four of its seven `python-developer` dispatches (each given a `model: opus` override at
 dispatch; the agent definition defaults to sonnet) stopped at the 150k soft budget: the first after reading only (its
 report states about 60k of its context was injected guidance; that figure is its estimate, not a measurement), part A
 after the core module, part B after reading only, and part B2 after two of its four items. Parts A2, B1 and B3, each
