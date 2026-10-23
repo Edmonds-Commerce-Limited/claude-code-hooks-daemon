@@ -5,13 +5,14 @@ small JSON file recording that a session's most recent Stop was allowed
 because the agent is blocked ONLY on human input (a narrow, daemon-matched
 ``STOPPING BECAUSE:`` shape -- see ``auto_continue_stop._HUMAN_BLOCKED_PATTERNS``).
 
-Two callers, one marker:
+The awaiting-human state itself now lives in the session-modes registry, so
+nothing writes this marker any more. What remains here is:
 
-- ``auto_continue_stop.AutoContinueStopHandler`` writes it on a matching
-  Branch 2 ALLOW.
-- ``failsafe_cron_blockage_suppressor.FailsafeCronBlockageSuppressorHandler``
-  reads it to short-circuit a delivered failsafe-cron tick before the model
-  ever sees it, and any genuine (non-cron) user prompt clears it.
+- ``read_marker``, which ``session_mode_registry.import_legacy_blockage_marker``
+  uses to import a marker an older daemon left on disk;
+- ``marker_is_valid`` and ``write_json_atomically``, the expiry check and the
+  owner-only atomic JSON write that ``cron_pause`` and other record files
+  share.
 
 **Fail-open everywhere, deliberately minimal (owner ruling: "sounds complex
 and brittle to me" -- build the minimal version).** One marker file, one
@@ -26,7 +27,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,37 +51,6 @@ class BlockageMarker:
 
     session_id: str
     recorded_at: float
-
-
-def write_marker(path: Path, session_id: str, *, now: float | None = None) -> bool:
-    """Atomically (over)write the marker. Fail-open: logs, never raises.
-
-    Args:
-        path: Full path to the marker file.
-        session_id: The session this marker applies to.
-        now: Injectable clock for tests; defaults to ``time.time()``.
-
-    Returns:
-        True if the marker was written, False if an OSError was swallowed
-        (e.g. an unwritable parent directory) -- Plan 00314 field
-        observability: callers that log an outcome (e.g. ``stop-events.jsonl``
-        ``marker_written``) need this to tell "matched but not armed" apart
-        from "matched and armed" after the fact.
-    """
-    payload = {
-        _FIELD_SESSION_ID: session_id,
-        _FIELD_RECORDED_AT: now if now is not None else time.time(),
-    }
-    try:
-        write_json_atomically(path, payload)
-        return True
-    except OSError as e:
-        log_and_continue(
-            logger,
-            e,
-            reason=f"an unwritable blockage marker {path} is reported to the caller as False (not written); the marker only silences cron ticks, so the session proceeds without that saving",
-        )
-        return False
 
 
 def write_json_atomically(path: Path, payload: object) -> None:
@@ -132,25 +101,6 @@ def read_marker(path: Path) -> BlockageMarker | None:
     if not isinstance(recorded_at, (int, float)):
         return None
     return BlockageMarker(session_id=session_id, recorded_at=float(recorded_at))
-
-
-def clear_marker(path: Path) -> None:
-    """Remove the marker if present. Fail-open: never raises.
-
-    Args:
-        path: Full path to the marker file.
-    """
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        return
-    except OSError as e:
-        log_and_continue(
-            logger,
-            e,
-            reason=f"a marker {path} that cannot be cleared stays until it expires on its own, which only delays tick delivery; the caller has nothing else to do",
-            level=logging.DEBUG,
-        )
 
 
 def marker_is_valid(

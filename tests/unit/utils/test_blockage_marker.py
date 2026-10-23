@@ -1,59 +1,38 @@
 """Tests for the human-input blockage marker (Plan 00298).
 
-The marker is the shared primitive between ``auto_continue_stop`` (writer)
-and ``failsafe_cron_blockage_suppressor`` (reader): a small JSON file
-recording that a session stopped because it is blocked only on human input.
-Every public function fails OPEN -- a missing/corrupt/unwritable marker must
-never raise, only degrade to "no marker".
+Nothing writes the marker any more: the awaiting-human state lives in the
+session-modes registry, and the marker survives only as a file an older
+daemon may have left on disk, which ``read_marker`` reads so it can be
+imported. ``read_marker`` fails OPEN -- a missing or corrupt marker must
+never raise, only degrade to "no marker". ``write_json_atomically`` is the
+shared owner-only atomic write other record files use.
 """
 
 import json
 from pathlib import Path
 
+import pytest
+
 from claude_code_hooks_daemon.utils.blockage_marker import (
     MARKER_FILENAME,
     BlockageMarker,
-    clear_marker,
     marker_is_valid,
     read_marker,
-    write_marker,
+    write_json_atomically,
 )
 
 
-class TestWriteAndReadMarker:
-    def test_write_then_read_round_trips(self, tmp_path: Path) -> None:
+def _legacy_marker(path: Path, session_id: str, recorded_at: float) -> None:
+    """Write a marker in the on-disk shape an older daemon recorded."""
+    write_json_atomically(path, {"session_id": session_id, "recorded_at": recorded_at})
+
+
+class TestReadMarker:
+    def test_a_legacy_marker_reads_back(self, tmp_path: Path) -> None:
         path = tmp_path / MARKER_FILENAME
-        write_marker(path, "session-1", now=100.0)
+        _legacy_marker(path, "session-1", 100.0)
 
-        marker = read_marker(path)
-
-        assert marker == BlockageMarker(session_id="session-1", recorded_at=100.0)
-
-    def test_write_returns_true_on_success(self, tmp_path: Path) -> None:
-        path = tmp_path / MARKER_FILENAME
-        assert write_marker(path, "session-1", now=1.0) is True
-
-    def test_write_creates_missing_parent_dirs(self, tmp_path: Path) -> None:
-        path = tmp_path / "nested" / "dir" / MARKER_FILENAME
-        write_marker(path, "session-1", now=1.0)
-
-        assert path.exists()
-
-    def test_write_is_owner_only(self, tmp_path: Path) -> None:
-        path = tmp_path / MARKER_FILENAME
-        write_marker(path, "session-1", now=1.0)
-
-        mode = path.stat().st_mode & 0o777
-        assert mode == 0o600
-
-    def test_write_overwrites_existing_marker(self, tmp_path: Path) -> None:
-        path = tmp_path / MARKER_FILENAME
-        write_marker(path, "session-1", now=1.0)
-        write_marker(path, "session-2", now=2.0)
-
-        marker = read_marker(path)
-
-        assert marker == BlockageMarker(session_id="session-2", recorded_at=2.0)
+        assert read_marker(path) == BlockageMarker(session_id="session-1", recorded_at=100.0)
 
     def test_read_missing_file_returns_none(self, tmp_path: Path) -> None:
         assert read_marker(tmp_path / MARKER_FILENAME) is None
@@ -84,33 +63,35 @@ class TestWriteAndReadMarker:
 
         assert read_marker(path) is None
 
-    def test_write_failure_does_not_raise(self, tmp_path: Path) -> None:
-        # Parent is a FILE, not a directory: mkdir must fail, and write_marker
-        # must swallow it (fail-open logging only), never raise.
+
+class TestWriteJsonAtomically:
+    def test_creates_missing_parent_dirs(self, tmp_path: Path) -> None:
+        path = tmp_path / "nested" / "dir" / MARKER_FILENAME
+        write_json_atomically(path, {"k": 1})
+
+        assert json.loads(path.read_text(encoding="utf-8")) == {"k": 1}
+
+    def test_is_owner_only(self, tmp_path: Path) -> None:
+        path = tmp_path / MARKER_FILENAME
+        write_json_atomically(path, {"k": 1})
+
+        assert path.stat().st_mode & 0o777 == 0o600
+
+    def test_overwrites_an_existing_file(self, tmp_path: Path) -> None:
+        path = tmp_path / MARKER_FILENAME
+        _legacy_marker(path, "session-1", 1.0)
+        _legacy_marker(path, "session-2", 2.0)
+
+        assert read_marker(path) == BlockageMarker(session_id="session-2", recorded_at=2.0)
+
+    def test_a_failed_write_raises(self, tmp_path: Path) -> None:
+        # Parent is a FILE, not a directory: mkdir fails, and the caller is
+        # told -- swallowing is the caller's decision, not this helper's.
         blocker = tmp_path / "not-a-dir"
         blocker.write_text("x", encoding="utf-8")
-        path = blocker / MARKER_FILENAME
 
-        result = write_marker(path, "session-1", now=1.0)  # must not raise
-
-        assert result is False
-        assert not path.exists()
-
-
-class TestClearMarker:
-    def test_clear_removes_existing_marker(self, tmp_path: Path) -> None:
-        path = tmp_path / MARKER_FILENAME
-        write_marker(path, "session-1", now=1.0)
-
-        clear_marker(path)
-
-        assert not path.exists()
-
-    def test_clear_missing_marker_does_not_raise(self, tmp_path: Path) -> None:
-        clear_marker(tmp_path / MARKER_FILENAME)  # must not raise
-
-    def test_clear_unwritable_path_does_not_raise(self, tmp_path: Path) -> None:
-        clear_marker(tmp_path)  # a directory, not a file -- unlink() fails
+        with pytest.raises(OSError):
+            write_json_atomically(blocker / MARKER_FILENAME, {"k": 1})
 
 
 class TestMarkerIsValid:

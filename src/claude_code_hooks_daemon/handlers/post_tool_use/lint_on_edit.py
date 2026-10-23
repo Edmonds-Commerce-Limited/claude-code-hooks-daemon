@@ -447,7 +447,7 @@ class LintOnEditHandler(PostToolUseHandlerBase):
             # A declared config that is not there is a configuration defect,
             # reported loudly rather than linted around.
             return BlockingResult(decision=Decision.DENY, reason=str(exc))
-        working_dir = module_context.working_dir(workspace.root)
+        working_dir = module_context.working_dir(workspace)
         effective_path = module_context.effective_path
 
         # SECURITY: the PATH is whatever the agent just wrote, so the template

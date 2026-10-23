@@ -172,6 +172,21 @@ class TestRender:
             [segment] = _render(SessionModeIndicatorHandler())
         assert "usage-pause record unreadable" in segment
 
+    def test_a_pause_path_that_cannot_be_resolved_degrades_to_a_named_error(
+        self, untracked: Path, daemon_mode: Mock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """No ProjectContext: the pause read raises RuntimeError, which must not crash."""
+        with (
+            patch(
+                f"{_MODULE}.ProjectContext.daemon_untracked_dir",
+                side_effect=RuntimeError("ProjectContext not initialized"),
+            ),
+            caplog.at_level(logging.WARNING),
+        ):
+            [segment] = _render(SessionModeIndicatorHandler())
+        assert "usage-pause record unreadable" in segment
+        assert "ProjectContext not initialized" in caplog.text
+
     def test_an_unreadable_registry_is_a_named_error(
         self, untracked: Path, caplog: pytest.LogCaptureFixture
     ) -> None:

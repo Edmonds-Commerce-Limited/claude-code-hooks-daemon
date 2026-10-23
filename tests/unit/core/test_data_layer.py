@@ -22,13 +22,18 @@ from claude_code_hooks_daemon.core.session_mode_log import TRANSITION_LOG_FILENA
 from claude_code_hooks_daemon.core.session_mode_registry import NoticeKind, SessionModeRegistry
 from claude_code_hooks_daemon.core.session_state import SessionState
 from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader
-from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, write_marker
+from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, write_json_atomically
 from claude_code_hooks_daemon.utils.session_modes import (
     ModeSource,
     SessionMode,
     SessionModeEntry,
 )
 from claude_code_hooks_daemon.utils.session_signal_paths import SIGNAL_SUBDIR
+
+
+def _legacy_marker(path: Path) -> None:
+    """A live awaiting-human marker in the shape an older daemon left on disk."""
+    write_json_atomically(path, {"session_id": "sid", "recorded_at": time.time()})
 
 
 class TestDaemonDataLayerInit:
@@ -227,7 +232,7 @@ class TestSessionModesProperty:
 
     def test_imports_the_legacy_marker_once(self, untracked: Path) -> None:
         marker = untracked / MARKER_FILENAME
-        assert write_marker(marker, "sid") is True
+        _legacy_marker(marker)
         registry = DaemonDataLayer().session_modes
         assert registry.policy("sid").is_blocked is True
         assert not marker.exists()
@@ -240,7 +245,7 @@ class TestSessionModesProperty:
         assert log.path == untracked / TRANSITION_LOG_FILENAME
 
     def test_the_legacy_import_is_logged_with_its_evidence(self, untracked: Path) -> None:
-        assert write_marker(untracked / MARKER_FILENAME, "sid") is True
+        _legacy_marker(untracked / MARKER_FILENAME)
         log = DaemonDataLayer().session_modes.transition_log
         assert log is not None
         [record] = log.recent(5)

@@ -41,7 +41,7 @@ from claude_code_hooks_daemon.core.session_mode_registry import (
     SessionModeRegistry,
     import_legacy_blockage_marker,
 )
-from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, write_marker
+from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, write_json_atomically
 from claude_code_hooks_daemon.utils.session_modes import (
     DECLARED_BLOCKED_TTL_SECONDS,
     FOCUS_TTL_SECONDS,
@@ -672,7 +672,7 @@ class TestImportLegacyBlockageMarker:
         self, registry: SessionModeRegistry, clock: FakeClock, tmp_path: Path
     ) -> None:
         marker = tmp_path / MARKER_FILENAME
-        assert write_marker(marker, SID, now=T0 - 60.0) is True
+        write_json_atomically(marker, {"session_id": SID, "recorded_at": T0 - 60.0})
         assert import_legacy_blockage_marker(registry, marker) is True
         assert registry.active(SID) == (declared_blocked_entry(SID, entered_at=T0 - 60.0),)
         assert not marker.exists()
@@ -690,7 +690,7 @@ class TestImportLegacyBlockageMarker:
         recorded_at: float,
     ) -> None:
         marker = tmp_path / MARKER_FILENAME
-        assert write_marker(marker, SID, now=recorded_at) is True
+        write_json_atomically(marker, {"session_id": SID, "recorded_at": recorded_at})
         with caplog.at_level(logging.INFO):
             assert import_legacy_blockage_marker(registry, marker) is False
         assert registry.active(SID) == ()

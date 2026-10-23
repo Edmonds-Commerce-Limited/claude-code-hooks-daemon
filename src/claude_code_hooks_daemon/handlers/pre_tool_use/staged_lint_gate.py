@@ -51,6 +51,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.core.workspace import resolve_workspace
 from claude_code_hooks_daemon.strategies.lint.common import build_lint_argv, matches_skip_path
 from claude_code_hooks_daemon.strategies.lint.module_context import (
     GoverningConfigError,
@@ -356,9 +357,12 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         # go.mod directory rather than as a loose file from the daemon's cwd.
         # The file's own directory stands in only where no ProjectContext is
         # initialised (a unit test driving this method directly), the same
-        # notional root lint_on_edit uses, so the two gates cannot disagree.
+        # notional root lint_on_edit uses. The command runs from the file's
+        # resolved workspace (its declared sub-project, else the repository),
+        # exactly as lint_on_edit does, so the two gates cannot disagree.
         resolved_root = resolve_project_root()
         project_root = Path(resolved_root) if resolved_root else Path(file_path).parent
+        workspace = resolve_workspace(self._project_registry, Path(file_path), project_root)
         try:
             module_context = resolve_module_context(
                 file_path,
@@ -389,7 +393,7 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
                     capture_output=True,
                     text=True,
                     timeout=Timeout.LINT_CHECK,
-                    cwd=module_context.working_dir(project_root),
+                    cwd=module_context.working_dir(workspace),
                     env=({**os.environ, **module_context.env} if module_context.env else None),
                 )
             )

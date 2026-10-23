@@ -129,19 +129,14 @@ def names_deployed_file(line: str, deployed_ccy_dir: Path, file_name: str) -> bo
 
 
 def bare_script_lines(ccy_env: Path) -> list[str]:
-    """Active wrapper lines that still exec ``claude-supervise.py`` directly."""
-    return [line for line in _active_wrapper_lines(ccy_env) if _SCRIPT_TOKEN_RE.search(line)]
+    """Active wrapper lines that still exec ``claude-supervise.py`` directly.
 
-
-def wrapper_execs_bare_script(ccy_env: Path) -> bool:
-    """True when an active wrapper line still execs ``claude-supervise.py`` directly.
-
-    Such an install bypasses the version-gating launcher, so an unsupported
-    system Python crashes the supervisor and Claude Code cannot start. A daemon
-    upgrade repoints the line at the launcher only when ``upgrade_repoints_script``
-    holds for it; otherwise it must be fixed by hand.
+    Such a line bypasses the version-gating launcher, so an unsupported system
+    Python crashes the supervisor and Claude Code cannot start. A daemon upgrade
+    repoints the line at the launcher only when ``upgrade_repoints_script`` holds
+    for it; otherwise it must be fixed by hand.
     """
-    return bool(bare_script_lines(ccy_env))
+    return [line for line in _active_wrapper_lines(ccy_env) if _SCRIPT_TOKEN_RE.search(line)]
 
 
 # A command word may start only where a shell word starts in a wrapper value:

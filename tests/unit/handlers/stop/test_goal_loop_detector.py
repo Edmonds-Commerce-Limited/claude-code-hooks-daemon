@@ -143,6 +143,23 @@ class TestIdentity:
         assert handler.get_default_enabled() is True
 
 
+class TestAcceptanceTests:
+    def test_every_case_runs_where_the_handler_fires(
+        self, handler: GoalLoopDetectorHandler
+    ) -> None:
+        # The handler is MAIN-scoped: run from a sub-agent it never fires, and
+        # an ALLOW there would pass whatever the handler did.
+        cases = handler.get_acceptance_tests()
+        assert cases
+        assert all(case.requires_main_thread for case in cases)
+
+    def test_each_case_expects_what_the_handler_decides(
+        self, handler: GoalLoopDetectorHandler
+    ) -> None:
+        for case in handler.get_acceptance_tests():
+            assert handler.handle(case.hook_input).decision == case.expected_decision
+
+
 class TestDetection:
     def test_fixture_loop_logs_would_enter_and_allows(
         self, handler: GoalLoopDetectorHandler, recorder: _Recorder, tmp_path: Path
