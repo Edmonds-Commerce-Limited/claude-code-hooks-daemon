@@ -272,8 +272,9 @@ The child `python -m pytest -p no:xdist -q <polluter> <victim>` printed `2 passe
   `TimeoutExpired`. There are no retries and no longer timeout. The nine call sites from the investigation are moved,
   the N531 pair test first.
 
-**Status**: 🔄 in progress. The cause is still not proved: the change removes the leading suspect and adds the
-diagnostics a recurrence needs. Close it when a CI full run passes with it; if the test recurs, read the dumped stack.
+**Status**: ✅ closed by its own criterion: the v3.71.0 `Release gate` run 40010977887 (head `314c8ca93`) ran every
+test shard on Python 3.11, 3.12 and 3.13 green with the mitigation in place. The cause stays unproved; if the test
+recurs, the watchdog's dumped stack is the evidence to read.
 
 ### N530 — `plan_number_helper` denies an `ls` of a folder inside an existing plan as a next-number scan
 
