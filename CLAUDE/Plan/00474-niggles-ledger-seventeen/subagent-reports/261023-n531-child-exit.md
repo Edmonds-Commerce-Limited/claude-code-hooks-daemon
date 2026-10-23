@@ -79,3 +79,52 @@ Still to do: `tests/support/child_pytest.py` (`run_child_pytest`, `ChildPytestEr
 dups fd 2 at import, arms `dump_traceback_later` at configure and re-arms it at trylast unconfigure against a
 wall-clock deadline passed in an env var. Its `-p` and `--basetemp` go in through `PYTEST_ADDOPTS`, so launchers are
 covered as well. After that: move the 9 call sites, update N531, autofix, then targeted QA.
+
+## Part 2 (resumed after the reboot; done)
+
+**RED confirmed**: at 12e965cc6 the module failed to import (`No module named 'tests.support.child_pytest'`),
+which is the right reason. No RED assertion was changed. One literal was renamed: `timeout=0` became the named
+`_NON_POSITIVE_SECONDS`, because the `magic_values` QA check flagged it. The test still checks the same thing.
+
+**Helper** (`eedebf4f6`, all 19 helper tests pass):
+
+- `tests/support/child_pytest.py`: `run_child_pytest(args, *, cwd, tmp_path, timeout=Timeout.REQUEST_LONG, expected_returncode=0, explain, extra_env, pythonpath, launcher, pass_fds)`, plus `ChildPytestError` (an
+  `AssertionError` that carries the child's stdout and stderr), `HELPER_OWNED_ENV_KEYS` and
+  `WATCHDOG_FRACTION = 0.75`.
+- The child's environment has two parts. One is a fixed allowlist: PATH, HOME, USER, LOGNAME, LANG, LC_ALL, LC_CTYPE
+  and TMPDIR. The other is `extra_env`, which may not set a key the helper owns. The helper sets PYTEST_ADDOPTS
+  (`-p child_pytest_watchdog --basetemp=<tmp_path>/.child-XXXX`), PYTHONPATH (the plugin dir followed by the
+  caller's entries), PYTHONUNBUFFERED, and the watchdog deadline.
+- `tests/support/child_pytest_plugin/child_pytest_watchdog.py` duplicates fd 2 at import, before capture starts. It
+  then arms `faulthandler.dump_traceback_later` at the deadline, and arms it again at `pytest_configure` and at the
+  trylast `pytest_unconfigure`. The import has no side effects unless the deadline variable is set, so the helper can
+  import `DEADLINE_ENV` from it.
+- Two hang tests prove the dumped stacks reach the error message: a hang inside a test, and an atexit hang after the
+  summary, which is the N531 shape.
+
+**Call sites moved**:
+
+- `808c3d4f2`: the N531 pair test, `test_project_containment.py`, moved first. The same commit moved
+  `test_claude_code_hooks_daemon_full_qa_gate_loader.py` and every child pytest in `tests/unit/qa/test_full_qa_gate.py`.
+  That covers `_run_pytest_subprocess`, the bash and `python -c` launchers through `launcher=`, and the simulated
+  xdist `_run` with `pass_fds` and an extra PYTHONPATH entry.
+- `bb77f42b1`: `test_first_error_lines.py` (both sites), `test_run_test_matrix.py` (coverage measurement, with
+  COVERAGE_FILE passed through `extra_env`), `test_blocking_gate_skip_guard.py`, `test_relay_gate_skip_guard.py` and
+  `test_project_context_isolation.py`.
+- Every site now pins its exact expected exit code instead of `!= 0` or no check at all. The two xdist runs that
+  are not refused exit 5, because they collect nothing.
+- Sites that had no timeout before now get one: 60 s by default. `run_test_matrix` gets `scaled_seconds(60)` and the
+  context-isolation pairs get `scaled_seconds(120)`. No site's existing timeout was raised.
+- The python `-c` subprocess in the loader test is not a pytest child, so it was left alone.
+
+**N531 ledger** (`eb83aa16b`): NIGGLES.md records the change as a mitigation plus diagnostics, says the cause is not
+proved, and keeps the status at 🔄 until a CI full run passes. The STATUS-INDEX row is rewritten shorter and keeps the
+same column count as every other row. The large whitespace diff in that file comes from the table formatter
+narrowing the column.
+
+**QA**: `run_autofix.sh`, then
+`llm_qa.py changed --range c4a552d35..HEAD --allow-unmapped` at `0f5d7ee3a` gave `QA: 41/41 PASSED`
+(changed_tests: 442 passed). The first run failed only on the `magic_values` literal described above.
+Two files are unmapped: the two `__init__.py` files.
+
+**Head**: the commit that adds this section. Everything is pushed to `origin/worktree-n531-child-exit`.
