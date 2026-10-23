@@ -25,12 +25,21 @@ _NOW = 7_000_000.0
 class _Handler(WorkQueueRebriefHandler):
     """The handler with a fixed clock and a queue file under ``tmp_path``."""
 
-    def __init__(self, queue: Path | None) -> None:
+    def __init__(self, queue: Path | None, project_root: Path | None = None) -> None:
         super().__init__()
         self.queue = queue
+        self.root = project_root
 
     def _queue_path(self) -> Path | None:
         return self.queue
+
+    def _project_root(self) -> Path:
+        """The given root, else the queue's own directory; read only when a queue exists."""
+        if self.root is not None:
+            return self.root
+        if self.queue is None:
+            raise AssertionError("project root read with no queue file")
+        return self.queue.parent
 
     def _now(self) -> float:
         return _NOW
@@ -122,6 +131,20 @@ class TestHandle:
         queue = tmp_path / "q.json"
         _queue_one(queue, tmp_path)
         assert "not respawned" in _context(_Handler(queue).handle(_start()))
+
+    def test_a_relative_worktree_is_resolved_against_the_project_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = tmp_path / "project"
+        (root / "untracked" / "worktrees" / "builder").mkdir(parents=True)
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+        queue = tmp_path / "q.json"
+        _queue_one(queue, Path("untracked/worktrees/builder"))
+        text = _context(_Handler(queue, root).handle(_start()))
+        assert "untracked/worktrees/builder" in text
+        assert "MISSING" not in text
 
     def test_an_unreadable_queue_is_reported(self, tmp_path: Path) -> None:
         queue = tmp_path / "q.json"

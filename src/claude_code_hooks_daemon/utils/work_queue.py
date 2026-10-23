@@ -283,8 +283,10 @@ def _clip(text: str) -> str:
     return text if len(text) <= LISTING_BRIEF_CHARS else text[:LISTING_BRIEF_CHARS] + " [...]"
 
 
-def _render_record(record: WorkRecord, now: float) -> list[str]:
-    exists = Path(record.worktree).is_dir()
+def _render_record(record: WorkRecord, now: float, project_root: Path) -> list[str]:
+    # A relative worktree is recorded relative to the project, not the daemon's cwd:
+    # resolving it against the cwd reported live worktrees as MISSING.
+    exists = (project_root / record.worktree).is_dir()
     lines = [
         f"- {record.name} (dispatched {_age(now - record.created_at)} ago, "
         f"last update {_age(now - record.updated_at)} ago)",
@@ -299,8 +301,11 @@ def _render_record(record: WorkRecord, now: float) -> list[str]:
     return lines
 
 
-def render_rebrief(records: list[WorkRecord], *, now: float) -> list[str]:
-    """The advisory lines naming each running agent with its respawn facts; ``[]`` for none."""
+def render_rebrief(records: list[WorkRecord], *, now: float, project_root: Path) -> list[str]:
+    """The advisory lines naming each running agent with its respawn facts; ``[]`` for none.
+
+    A relative recorded worktree is checked for existence under ``project_root``.
+    """
     if not records:
         return []
     lines = [
@@ -315,21 +320,19 @@ def render_rebrief(records: list[WorkRecord], *, now: float) -> list[str]:
         "",
     ]
     for record in records:
-        lines += _render_record(record, now)
+        lines += _render_record(record, now, project_root)
     lines += ["", "Full briefs: `bin/hooks-daemon work-queue list --json`."]
     return lines
 
 
-def queue_briefing(path: Path | None, *, now: float) -> list[str]:
+def queue_briefing(path: Path, *, now: float, project_root: Path) -> list[str]:
     """What a session should be told about the queue at ``path``; ``[]`` when nothing.
 
     A missing file, or one with no running record, is silent. An unreadable one is
     reported rather than called empty: silence there would hide the lost agents.
     """
-    if path is None:
-        return []
     try:
-        return render_rebrief(active_records(read_queue(path)), now=now)
+        return render_rebrief(active_records(read_queue(path)), now=now, project_root=project_root)
     except WorkQueueError as exc:
         return [
             "WORK QUEUE UNREADABLE",

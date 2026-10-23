@@ -26,6 +26,7 @@ from typing import Any, Final
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils.work_queue import default_queue_path, queue_briefing
 
 _SOURCE_FIELD: Final[str] = "source"
@@ -54,11 +55,18 @@ class WorkQueueRebriefHandler(SessionStartHandlerBase):
         """Where the durable work queue lives; None without a project context."""
         return default_queue_path()
 
+    def _project_root(self) -> Path:
+        """What a relative recorded worktree is relative to; read only when a queue exists."""
+        return ProjectContext.project_root()
+
     def _now(self) -> float:
         return time.time()
 
     def _briefing(self) -> list[str]:
-        return queue_briefing(self._queue_path(), now=self._now())
+        path = self._queue_path()
+        if path is None:
+            return []
+        return queue_briefing(path, now=self._now(), project_root=self._project_root())
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """A resumed or compacted session, with something in the queue to say."""

@@ -50,6 +50,7 @@ from typing import Any, Final
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils.limit_events import (
     KIND_AGENT_KILLED,
     RESUME_KINDS,
@@ -226,6 +227,16 @@ class LimitRebriefHandler(UserPromptSubmitHandlerBase):
         """Where the durable work queue lives; None without a project context."""
         return default_queue_path()
 
+    def _project_root(self) -> Path:
+        """What a relative recorded worktree is relative to; read only when a queue exists."""
+        return ProjectContext.project_root()
+
+    def _queue_lines(self) -> list[str]:
+        path = self._queue_path()
+        if path is None:
+            return []
+        return queue_briefing(path, now=self._now(), project_root=self._project_root())
+
     def _now(self) -> float:
         return time.time()
 
@@ -285,8 +296,7 @@ class LimitRebriefHandler(UserPromptSubmitHandlerBase):
                 if stop_failures is not None
                 else None
             )
-            queue_lines = queue_briefing(self._queue_path(), now=self._now())
-            context.append(_rebrief(resumes, agents, last_hit, queue_lines))
+            context.append(_rebrief(resumes, agents, last_hit, self._queue_lines()))
             mark_delivered(path, session_id, now=self._now())
         return BlockingResult(decision=Decision.ALLOW, context=context)
 
