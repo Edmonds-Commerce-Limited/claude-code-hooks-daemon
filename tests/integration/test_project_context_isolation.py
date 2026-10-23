@@ -28,12 +28,13 @@ pair has to be forced.
 
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 from typing import Final
 
 import pytest
+
+from tests.load_scaling import scaled_seconds
+from tests.support.child_pytest import run_child_pytest
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 
@@ -52,23 +53,17 @@ _LEAKERS: Final[tuple[str, ...]] = (
 _LEAKER: Final[str] = _LEAKERS[0]
 
 
-def _run_pair(first: str, second: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            first,
-            second,
-            "-q",
-            "-p",
-            "no:randomly",
-            "--no-cov",
-        ],
-        cwd=str(_REPO_ROOT),
-        capture_output=True,
-        text=True,
-        check=False,
+#: Idle-host budget for one pair of real test files.
+_PAIR_BASE_SECONDS: Final[float] = 120.0
+
+
+def _run_pair(first: str, second: str, tmp_path: Path, explain: str) -> None:
+    run_child_pytest(
+        [first, second, "-q", "-p", "no:randomly", "--no-cov"],
+        cwd=_REPO_ROOT,
+        tmp_path=tmp_path,
+        timeout=scaled_seconds(_PAIR_BASE_SECONDS),
+        explain=explain,
     )
 
 
@@ -79,22 +74,21 @@ class TestTheHarnessIsNotVacuous:
         assert (_REPO_ROOT / _LEAKER).is_file()
         assert (_REPO_ROOT / _VICTIM).is_file()
 
-    def test_each_file_passes_on_its_own(self) -> None:
+    def test_each_file_passes_on_its_own(self, tmp_path: Path) -> None:
         """Establishes that neither file is simply broken. The defect is in the
         COMBINATION, and this is what makes that claim checkable."""
         for path in (_LEAKER, _VICTIM):
-            result = _run_pair(path, path)
-            assert result.returncode == 0, f"{path} does not pass alone:\n{result.stdout[-2000:]}"
+            _run_pair(path, path, tmp_path, f"{path} does not pass alone")
 
 
 class TestPatchedProjectContextDoesNotSurvive:
     @pytest.mark.parametrize("leaker", _LEAKERS)
-    def test_the_victim_passes_after_each_known_leaker(self, leaker: str) -> None:
-        result = _run_pair(leaker, _VICTIM)
-
-        assert result.returncode == 0, (
+    def test_the_victim_passes_after_each_known_leaker(self, leaker: str, tmp_path: Path) -> None:
+        _run_pair(
+            leaker,
+            _VICTIM,
+            tmp_path,
             f"ProjectContext is still patched after {leaker} finished, so "
-            f"{_VICTIM} sees another file's tmp_path. The failure below names "
-            "the victim, but the defect is in the leaker:\n"
-            f"{result.stdout[-3000:]}"
+            f"{_VICTIM} sees another file's tmp_path. The failure names "
+            "the victim, but the defect is in the leaker",
         )

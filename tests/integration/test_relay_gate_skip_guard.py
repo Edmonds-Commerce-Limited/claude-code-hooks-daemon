@@ -21,7 +21,6 @@ Task 1.2 left to the owner rather than making on its own.
 from __future__ import annotations
 
 import subprocess
-import sys
 import textwrap
 from pathlib import Path
 
@@ -32,6 +31,7 @@ from tests.relay_gate_guard import (
     relay_skip_failure_message,
     skip_is_a_provisioning_failure,
 )
+from tests.support.child_pytest import run_child_pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -88,7 +88,9 @@ class TestEndToEndInANestedPytestRun:
     """The predicate can be right while the hook is wired wrong."""
 
     @staticmethod
-    def _run_nested_pytest(tmp_path: Path, *, ci: str | None) -> subprocess.CompletedProcess[str]:
+    def _run_nested_pytest(
+        tmp_path: Path, *, ci: str | None, expected_returncode: int
+    ) -> subprocess.CompletedProcess[str]:
         (tmp_path / "conftest.py").write_text(
             textwrap.dedent(f"""
                 import sys
@@ -120,34 +122,22 @@ class TestEndToEndInANestedPytestRun:
         if ci is not None:
             env["CI"] = ci
 
-        return subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pytest",
-                "-p",
-                "no:cacheprovider",
-                f"--rootdir={tmp_path}",
-                "-rs",
-                str(tmp_path),
-            ],
+        return run_child_pytest(
+            ["-p", "no:cacheprovider", f"--rootdir={tmp_path}", "-rs", str(tmp_path)],
             cwd=tmp_path,
-            env=env,
-            check=False,
-            capture_output=True,
-            text=True,
+            tmp_path=tmp_path,
+            expected_returncode=expected_returncode,
+            extra_env=env,
         )
 
     def test_in_ci_the_relay_skip_fails_and_the_unrelated_one_does_not(
         self, tmp_path: Path
     ) -> None:
-        result = self._run_nested_pytest(tmp_path, ci="true")
-        assert result.returncode != 0, f"{result.stdout}\n{result.stderr}"
+        result = self._run_nested_pytest(tmp_path, ci="true", expected_returncode=1)
         assert "1 failed" in result.stdout
         assert "1 skipped" in result.stdout
         assert "relay/build.sh" in result.stdout
 
     def test_outside_ci_both_still_skip(self, tmp_path: Path) -> None:
-        result = self._run_nested_pytest(tmp_path, ci=None)
-        assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+        result = self._run_nested_pytest(tmp_path, ci=None, expected_returncode=0)
         assert "2 skipped" in result.stdout
