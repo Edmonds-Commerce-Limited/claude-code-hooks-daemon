@@ -369,7 +369,7 @@ The token is matched exactly, so any wording after it works. These older phrasin
 - `need user input`
 - `waiting on the user's decision`
 
-Either form in your `STOPPING BECAUSE:` line records a marker that makes the daemon drop the next hourly failsafe-cron tick, and every declared job's tick, before it reaches you, at zero token cost. Another cron's tick never clears it, provided its prompt still carries the daemon's `[tick:...]` first line. Without one, every tick costs a full turn to read and answer with nothing. The next real user message clears the marker and hourly ticks resume; it also expires on its own, so a mistake here costs you at most a day of ticks.
+Either form in your `STOPPING BECAUSE:` line records a marker that makes the daemon drop the next hourly failsafe-cron tick, and every declared job's tick, before it reaches you, at zero token cost. Another cron's tick never clears it, provided its prompt still carries the daemon's `[tick:...]` first line. Without one, every tick costs a full turn to read and answer with nothing. The next real user message clears the marker and hourly ticks resume; it also expires on its own, so a mistake here costs you at most a day of ticks. The marker is the `awaiting-human` session mode, ended only by a human prompt in THIS session; every mode and what it suppresses: `CLAUDE/SessionModes.md`.
 
 **Only when it is the ONLY thing blocking you.** A stop that merely mentions waiting on someone while other work remains must not use these shapes — that would silence a tick you could have used. If there is work you could still do, do it instead of stopping.
 
