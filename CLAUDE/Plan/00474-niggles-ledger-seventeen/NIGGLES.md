@@ -109,6 +109,29 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N538 — the commit lint gate resolves the linter binary without the sub-project's tool directories
+
+**Source**: worktree-r371-lint-deadcode report (`subagent-reports/261023-r371-lint-deadcode.md`).
+
+- `staged_lint_gate._resolve_executable` (~line 444) does not search a declared sub-project's own tool directories
+  (e.g. `node_modules/.bin`), while `lint_on_edit` does, so the two gates can run different linter binaries on the
+  same file.
+
+**Status**: ⬜ open, to fix on the release branch.
+
+### N537 — v3.71.0 release review, second pass: footprint and supervisor defects
+
+**Source**: the fourth Step 10 reviewer, over `docs_qa/`, `skills/docs-optimise/` and `.claude/ccy/claude-supervise.py`.
+
+- **Contract**: the remote-docs refresh on the release branch moved `memory.md`, so facts G2-01, G2-06, G3-03 and
+  G3-06 of the instruction-loading contract no longer resolve (folded into N535's fix).
+- **Footprint**: the daemon-block regex also matches a backticked `<hooksdaemon>` mention in prose or a fence.
+- **Supervisor**: ESC followed by a printable byte (a Meta chord) clears the focus hold; the goal-clear record stays
+  when the send is then held or the write fails, so a human clear within 120 s is credited to the supervisor; a failed
+  atomic write leaves its `.tmp` file behind.
+
+**Status**: 🔄 footprint with N535; supervisor on worktree-r371-supervisor.
+
 ### N536 — v3.71.0 release code review: defects fixed on the release branch
 
 **Source**: release v3.71.0 Step 10, three code reviewers over `v3.70.0..fd2cf727a` (reports under
