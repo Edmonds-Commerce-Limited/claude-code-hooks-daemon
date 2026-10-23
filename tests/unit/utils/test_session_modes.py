@@ -169,6 +169,7 @@ class TestLabels:
             ModeLabel.USAGE_PAUSED,
             ModeLabel.GOAL_BLOCKED,
             ModeLabel.AWAITING_HUMAN,
+            ModeLabel.MANUAL_GOALS,
             ModeLabel.FOCUS,
             ModeLabel.UNATTENDED,
         ]

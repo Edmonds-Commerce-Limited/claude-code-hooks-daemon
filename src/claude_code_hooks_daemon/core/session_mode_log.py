@@ -77,6 +77,8 @@ class TransitionAction(StrEnum):
     NEAR_MISS = "near-miss"
     WOULD_ENTER = "would-enter"
     LOOP_RESET = "loop-reset"
+    # A typed `/goal clear` and who it is attributed to (Plan 00501 Task 8.2; detail).
+    GOAL_CLEAR = "goal-clear"
 
 
 @dataclass(frozen=True, slots=True)

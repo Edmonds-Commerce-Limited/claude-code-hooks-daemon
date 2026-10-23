@@ -95,6 +95,8 @@ class ModeLabel(StrEnum):
     USAGE_PAUSED = "usage-paused"
     GOAL_BLOCKED = "goal-blocked"
     AWAITING_HUMAN = "awaiting-human"
+    # Plan 00501 Task 8.2 logs goal-clear attributions under it; Task 8.3 builds the mode.
+    MANUAL_GOALS = "manual-goals"
     FOCUS = "focus"
     UNATTENDED = "unattended"
 
