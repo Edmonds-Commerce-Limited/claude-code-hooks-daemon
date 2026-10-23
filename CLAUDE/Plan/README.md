@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00551: supervisor own session ids from child tree](00551-supervisor-own-session-ids-from-child-tree/PLAN.md) - In Progress (from issue #138: the supervisor adopts every session id visible in `/proc`, so outside a private PID namespace it can inject into another session; scope identity to its own child process tree)
-
 - [00550: per command bash task budget](00550-per-command-bash-task-budget/PLAN.md) - Not Started, BLOCKED ON THE OWNER (from issue #137: a `CLAUDE_CODE_SHELL_PREFIX` wrapper giving each Bash tool call its own task budget so one runaway fork chain cannot kill the session; it wraps every Bash call and hook, so shipping it and its default are owner decisions)
 
 - [00548: python entry point shebang detector](00548-python-entry-point-shebang-detector/PLAN.md) - Not Started (follow-up to 00546 Q2: a detector for client-run Python entry points that do 3.11-only work before any floor guard; probe results recorded as a known gap)
@@ -211,6 +209,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00551: supervisor own session ids from child tree](Completed/00551-supervisor-own-session-ids-from-child-tree/PLAN.md) - Complete at merges `e39f0ee88` + `77749bd36` (green CI run 39962905189) + the archiving commit (#138, closed: own session ids come only from the supervisor's own process tree, never a `/proc`-wide scan; the hot-reload fallback walks the host tree; release note 027 in UNRELEASED)
+
 - [00549: opencode support research](Completed/00549-opencode-support-research/PLAN.md) - Complete, research only (#136: opencode V2 has in-process TS plugins, not command hooks, with `tool.execute.before` the only blocking hook and no stop veto; Codex is the easier second host; Claude Code's `AGENTS.md` is a fallback, workable AGENTS-only under an opt-in multi-harness mode; `FINDINGS.md` holds the answers and the epic proposal; open owner question M5 on naming, non-blocking)
 
 - [00547: ansible lint runs under the governing config](Completed/00547-ansible-lint-runs-under-the-governing-config/PLAN.md) - Complete at merge `acf6bbcc3` (green CI run 39741211708) + the archiving commit (#128: `layout.ansible_configs` declares a play's governing `ansible.cfg`, applied in `module_context` for both lint gates with `ANSIBLE_CONFIG` set; both gates now share the no-root working directory; a failure with no config in effect still denies and names the option; release note 018)
@@ -268,9 +268,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00508: operator signal reaches a busy agent](Completed/00508-operator-signal-reaches-a-busy-agent/PLAN.md) - Complete at merge `a948217b4` + the archiving commit (#77: a pending reboot/shutdown warning reaches a busy agent as hook context at its next tool call, once per agent thread; the supervisor stays the signal's only consumer; release note 030 in UNRELEASED)
 
 - [00507: rust lint uses the owning crate context](Completed/00507-rust-lint-uses-the-owning-crate-context/PLAN.md) - Complete at merge `601ba02f9` + `b7552acfb` + the archiving commit (#76, duplicate #89: the Rust lint runs from the owning crate with its Cargo.toml edition; crate-context errors are could-not-analyse and allowed with an advisory, syntax errors still deny; release note 029 in UNRELEASED)
-
-- [00506: comment extractor ignores unterminated block openers](Completed/00506-comment-extractor-ignores-unterminated-block-openers/PLAN.md) - Complete at merge `65bdc7499` + the archiving commit (#75: a block/doc opener with no closer later in the content is not a comment, so a `/*` inside a string no longer swallows the file and `comment_size` stops denying comment-free code; the text-scanning limitation is stated in the handler guidance; release note 028 in UNRELEASED)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -324,9 +321,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 551 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 467 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 468 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 61 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 60 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00506: comment extractor ignores unterminated block openers](00506-comment-extractor-ignores-unterminated-block-openers/PLAN.md) - Complete at merge `65bdc7499` + the archiving commit (#75: a block/doc opener with no closer later in the content is not a comment, so a `/*` inside a string no longer swallows the file and `comment_size` stops denying comment-free code; the text-scanning limitation is stated in the handler guidance; release note 028 in UNRELEASED)
+
 - [00505: tdd test path map anchors at the worktree](00505-tdd-test-path-map-anchors-at-the-worktree/PLAN.md) - Complete at merge `c436dc918` + the archiving commit (#74, duplicate #102: a declared `test_path_map` `test_dir` and its `source_glob` anchor at the checkout holding the source, the nearest `.git` ancestor below the project root, so a Write in a git worktree anywhere in the project finds its own test; release note 027 in UNRELEASED)
 
 - [00504: remote docs refresh keeps recorded fidelity](00504-remote-docs-refresh-keeps-recorded-fidelity/PLAN.md) - Complete at merge `78f03e21e` + the archiving commit (#73: `remote-docs refresh` re-fetches each document in the fidelity its provenance records, so verbatim stays verbatim; `--verbatim` still forces verbatim for every target; release note 026 in UNRELEASED)

@@ -1,6 +1,6 @@
 # Plan 00551: supervisor own session ids from child tree
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-23
 **Owner**: dev
 **Priority**: High
@@ -49,7 +49,7 @@ on nothing.
 
 ### Phase 2: Land
 
-- [ ] ⬜ **Task 2.1**: Targeted QA, merge, verify the live supervisor's worker hot-reloads the change
+- [x] ✅ **Task 2.1**: Targeted QA, merge, verify the live supervisor's worker hot-reloads the change
   (`.claude/rules/ccy-supervisor-dogfooding.md`), comment and close #138.
 
 ## Success Criteria
@@ -66,4 +66,4 @@ on nothing.
 
 - Plan filed from issue #138 triage (actionable defect).
 - Merged e39f0ee88; live regression (fallback treated the pingbus child as ambiguity) fixed forward in 77749bd36.
-  Post-merge QA 41/41. Closing #138 waits on CI success for a head containing 77749bd36.
+  Post-merge QA 41/41. CI run 39962905189 on d022f1cd7 (contains 77749bd36) concluded success; #138 closed.
