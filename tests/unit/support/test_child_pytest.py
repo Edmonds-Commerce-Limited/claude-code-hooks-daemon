@@ -29,6 +29,9 @@ from tests.support.child_pytest import (
 #: to start, short enough that the two hang tests stay cheap.
 _HANG_BASE_SECONDS = 10.0
 
+#: A timeout the helper must refuse.
+_NON_POSITIVE_SECONDS = 0.0
+
 
 def _write(path: Path, source: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -80,7 +83,7 @@ class TestExitStatus:
 
     def test_a_non_positive_timeout_is_refused(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="timeout"):
-            run_child_pytest(["-q"], cwd=tmp_path, tmp_path=tmp_path, timeout=0)
+            run_child_pytest(["-q"], cwd=tmp_path, tmp_path=tmp_path, timeout=_NON_POSITIVE_SECONDS)
 
 
 class TestTheChildOwnsItsTemporaryTree:
