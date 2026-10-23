@@ -109,6 +109,18 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N539 — a check added to `llm_qa.py` but not to `release-gate.yml` is caught only on the release pull request
+
+**Source**: release v3.71.0 `Release gate` run 40010516593 failed at its layout job: `missing ['bare_python_invocation']`.
+The check was added to `llm_qa.py` (`ALL_TOOL_NAMES`) without a line in the workflow's `CHECKS_*` lists, and the
+comparison lives only inside the workflow, so nothing before the release pull request ran it.
+
+- **Fix**: `bare_python_invocation` added to `CHECKS_STATIC` on the release branch.
+- **Gap**: the layout comparison (and the shards comparison beside it) should also run locally, e.g. a unit test that
+  loads the workflow and `llm_qa.ALL_TOOL_NAMES`, so the drift fails the commit that causes it.
+
+**Status**: 🔄 workflow fixed on the release branch; the local test ⬜ open.
+
 ### N538 — the commit lint gate resolves the linter binary without the sub-project's tool directories
 
 **Source**: worktree-r371-lint-deadcode report (`subagent-reports/261023-r371-lint-deadcode.md`).
