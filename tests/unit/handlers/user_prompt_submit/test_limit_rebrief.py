@@ -79,12 +79,16 @@ def _context(result: Any) -> str:
 class _QueuedHandler(_Handler):
     """The handler with a work queue file under ``tmp_path``."""
 
-    def __init__(self, events: Path, queue: Path | None) -> None:
+    def __init__(self, events: Path, queue: Path, project_root: Path | None = None) -> None:
         super().__init__(events)
         self.queue = queue
+        self.root = queue.parent if project_root is None else project_root
 
     def _queue_path(self) -> Path | None:
         return self.queue
+
+    def _project_root(self) -> Path:
+        return self.root
 
 
 def _queue_one(queue: Path, worktree: Path, *, name: str = "builder") -> None:
@@ -115,6 +119,21 @@ class TestWorkQueueRebrief:
         assert "worktree-builder" in text
         assert "abc1234" in text
         assert "Implement the thing." in text
+
+    def test_a_relative_worktree_is_resolved_against_the_project_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = tmp_path / "project"
+        (root / "untracked" / "worktrees" / "builder").mkdir(parents=True)
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+        events, queue = tmp_path / "e.json", tmp_path / "q.json"
+        record_event(events, _resume())
+        _queue_one(queue, Path("untracked/worktrees/builder"))
+        text = _context(_QueuedHandler(events, queue, root).handle(_prompt()))
+        assert "untracked/worktrees/builder" in text
+        assert "MISSING" not in text
 
     def test_a_closed_agent_is_not_listed(self, tmp_path: Path) -> None:
         events, queue = tmp_path / "e.json", tmp_path / "q.json"

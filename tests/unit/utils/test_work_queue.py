@@ -198,8 +198,11 @@ class TestRead:
         assert [r.name for r in active_records(read_queue(queue))] == ["a"]
 
 
-def _rendered(queue: Path, *, now: float = _NOW) -> str:
-    return "\n".join(render_rebrief(active_records(read_queue(queue)), now=now))
+def _rendered(queue: Path, *, now: float = _NOW, project_root: Path | None = None) -> str:
+    root = queue.parent if project_root is None else project_root
+    return "\n".join(
+        render_rebrief(active_records(read_queue(queue)), now=now, project_root=root)
+    )
 
 
 class TestRender:
@@ -226,6 +229,30 @@ class TestRender:
         _add(queue, worktree=str(tmp_path / "gone"))
         assert "MISSING" in _rendered(queue)
 
+    def test_a_relative_worktree_is_found_under_the_project_root_not_the_cwd(
+        self, queue: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = tmp_path / "project"
+        (root / "untracked" / "worktrees" / "wt").mkdir(parents=True)
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+        _add(queue, worktree="untracked/worktrees/wt")
+        text = _rendered(queue, project_root=root)
+        assert "untracked/worktrees/wt" in text
+        assert "MISSING" not in text
+
+    def test_a_relative_worktree_absent_under_the_project_root_is_flagged(
+        self, queue: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = tmp_path / "project"
+        root.mkdir()
+        cwd = tmp_path / "elsewhere"
+        (cwd / "untracked" / "worktrees" / "wt").mkdir(parents=True)
+        monkeypatch.chdir(cwd)
+        _add(queue, worktree="untracked/worktrees/wt")
+        assert "MISSING" in _rendered(queue, project_root=root)
+
     def test_a_brief_file_is_named_not_inlined(self, queue: Path) -> None:
         _add(queue, brief="", brief_file="/repo/untracked/briefs/p470.md")
         assert "/repo/untracked/briefs/p470.md" in _rendered(queue)
@@ -237,25 +264,33 @@ class TestRender:
         assert "work-queue list --json" in text
 
     def test_no_active_record_renders_nothing(self) -> None:
-        assert render_rebrief([], now=_NOW) == []
+        assert render_rebrief([], now=_NOW, project_root=Path("/repo")) == []
 
 
 class TestQueueBriefing:
-    def test_no_path_and_no_file_are_silent(self, queue: Path) -> None:
-        assert queue_briefing(None, now=_NOW) == []
-        assert queue_briefing(queue, now=_NOW) == []
+    def test_no_file_is_silent(self, queue: Path, tmp_path: Path) -> None:
+        assert queue_briefing(queue, now=_NOW, project_root=tmp_path) == []
 
-    def test_running_records_are_briefed(self, queue: Path) -> None:
+    def test_running_records_are_briefed(self, queue: Path, tmp_path: Path) -> None:
         _add(queue)
-        assert "p470-queue" in "\n".join(queue_briefing(queue, now=_NOW))
+        assert "p470-queue" in "\n".join(queue_briefing(queue, now=_NOW, project_root=tmp_path))
 
-    def test_an_all_closed_queue_is_silent(self, queue: Path) -> None:
+    def test_a_relative_worktree_is_resolved_against_the_project_root(
+        self, queue: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = tmp_path / "project"
+        (root / "wt").mkdir(parents=True)
+        monkeypatch.chdir(queue.parent.parent)
+        _add(queue, worktree="wt")
+        assert "MISSING" not in "\n".join(queue_briefing(queue, now=_NOW, project_root=root))
+
+    def test_an_all_closed_queue_is_silent(self, queue: Path, tmp_path: Path) -> None:
         _add(queue)
         update_record(queue, "p470-queue", now=_NOW, status=STATUS_DONE)
-        assert queue_briefing(queue, now=_NOW) == []
+        assert queue_briefing(queue, now=_NOW, project_root=tmp_path) == []
 
-    def test_an_unreadable_queue_says_so(self, queue: Path) -> None:
+    def test_an_unreadable_queue_says_so(self, queue: Path, tmp_path: Path) -> None:
         queue.write_text("{oops", encoding="utf-8")
-        lines = queue_briefing(queue, now=_NOW)
+        lines = queue_briefing(queue, now=_NOW, project_root=tmp_path)
         assert lines[0] == "WORK QUEUE UNREADABLE"
         assert "unreadable" in "\n".join(lines)
