@@ -31,6 +31,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.daemon.playbook_harness import (
     MAX_LINT_TIMEOUT_SHARE,
@@ -693,7 +694,9 @@ class TestALintTimeoutIsInconclusive:
         """
         target = tmp_path / "app.py"
         target.write_text("x = 1")
-        mock_subprocess.run.side_effect = subprocess.TimeoutExpired(cmd="python", timeout=15)
+        mock_subprocess.run.side_effect = subprocess.TimeoutExpired(
+            cmd="python", timeout=Timeout.LINT_CHECK
+        )
         mock_subprocess.TimeoutExpired = subprocess.TimeoutExpired
 
         result = LintOnEditHandler().handle(
@@ -702,7 +705,7 @@ class TestALintTimeoutIsInconclusive:
 
         assert result.decision.value == "allow"
         assert lint_timeout("\n".join(result.context)) == LintTimeout(
-            language="Python", budget="15"
+            language="Python", budget=str(Timeout.LINT_CHECK)
         )
 
     def test_a_timeout_names_its_language_and_budget(self) -> None:
@@ -718,6 +721,7 @@ class TestALintTimeoutIsInconclusive:
         assert found == InconclusiveProbe(
             label="#222 LintOnEditHandler", timeout=LintTimeout(language="Swift", budget="15")
         )
+        assert found is not None
         assert "#222 LintOnEditHandler" in found.reason
         assert "Swift" in found.reason
         assert "15s" in found.reason
@@ -735,7 +739,9 @@ class TestALintTimeoutIsInconclusive:
 
     def test_another_handlers_probe_is_never_inconclusive(self) -> None:
         """Only lint_on_edit's verdict hangs on the linter finishing."""
-        assert inconclusive_probe(plan_probe(_block(), _ROOT), "", self._TIMED_OUT) is None
+        probe = plan_probe(_block(), _ROOT)
+        assert isinstance(probe, ExecutableProbe)
+        assert inconclusive_probe(probe, "", self._TIMED_OUT) is None
 
     def _inconclusive(self, count: int) -> list[InconclusiveProbe]:
         return [

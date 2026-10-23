@@ -74,6 +74,7 @@ import pytest
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants.paths import ProjectPath
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler_scope import scope_admits
 from claude_code_hooks_daemon.core.project_context import ProjectContext
@@ -552,7 +553,9 @@ class TestALintTimeoutIsNotTheHandlersVerdict:
         with patch(
             "claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess"
         ) as mock_subprocess:
-            mock_subprocess.run.side_effect = subprocess.TimeoutExpired(cmd="lint", timeout=15)
+            mock_subprocess.run.side_effect = subprocess.TimeoutExpired(
+                cmd="lint", timeout=Timeout.LINT_CHECK
+            )
             mock_subprocess.TimeoutExpired = subprocess.TimeoutExpired
             return _drive_executable_probe(
                 probe, instance, source=source, inconclusive=inconclusive
