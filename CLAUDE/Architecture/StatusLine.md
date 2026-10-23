@@ -201,6 +201,7 @@ Claude Code sends a JSON payload on every status-line call. The daemon accepts u
 
 - **An unreadable source is a named error, not an empty segment.** A registry failure renders a red `⚑ modes unreadable`; a pause record that exists but does not parse renders `⚑ usage-pause record unreadable`. Both are logged at WARNING. The bar itself never breaks.
 - **History is not on the bar.** `hooks-daemon mode-history` prints every session's live modes and the recent transitions with their evidence.
+- **The supervisor's WARNING is a different segment.** `supervisor: session-modes file unreadable -- ...` is the ccy supervisor's status message, not this segment; `explain_segment` names it and its fix. What the modes are and do: [SessionModes.md](../SessionModes.md).
 
 ### The running-subagents segment (`spend_meter`, issue #133)
 

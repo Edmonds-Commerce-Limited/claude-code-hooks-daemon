@@ -127,8 +127,8 @@ Options and defaults: `hooks-daemon explain-handler goal_loop_detector`.
 
 ## Being told
 
-- **On change.** Entering, leaving, renewing failure and expiry are each stated
-  to the agent once, in one line. A focus change or renewal that cannot be
+- **On change.** Entering, leaving and expiry are each stated to the agent
+  once, in one line. A focus change or renewal that cannot be
   recorded is stated as `FOCUS MODE NOT CHANGED` or `FOCUS MODE NOT RENEWED`
   with the error.
 - **After a daemon restart** the next prompt in each session gets one

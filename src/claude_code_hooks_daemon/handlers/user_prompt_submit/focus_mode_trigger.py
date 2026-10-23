@@ -177,7 +177,8 @@ class FocusModeTriggerHandler(UserPromptSubmitHandlerBase):
             "challenge are off, the failsafe tick still arrives naming the task, and an "
             "existing goal is cleared once on entry. Focus lasts 12 hours, renewed by each "
             "prompt the human types. Also: `/mode focus <task>`, `/mode focus off`, or "
-            "`hooks-daemon session-mode`.\n"
+            "`hooks-daemon session-mode`. Every session mode, what each suppresses "
+            "and how each ends: `CLAUDE/SessionModes.md`.\n"
         )
 
     def get_acceptance_tests(self) -> list[Any]:
