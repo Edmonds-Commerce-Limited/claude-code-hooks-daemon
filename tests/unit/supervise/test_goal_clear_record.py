@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 from typing import TYPE_CHECKING, Any
+
+import pytest
 
 from claude_code_hooks_daemon.core.goal_clear_attribution import (
     GOAL_CLEAR_RECORD_SUFFIX,
@@ -118,6 +121,169 @@ def test_unwritable_record_means_no_clear_is_typed(tmp_path: Path) -> None:
     assert outcome.noop_reason_log is not None
     assert "attribution record" in outcome.noop_reason_log
     assert trigger.exists()
+
+
+# ── A failed write leaves no temp file (review D5) ──────────────────────────
+
+
+def test_failed_temp_write_leaves_no_temp_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    trigger = _write_trigger(tmp_path)
+
+    def _partial_write(self: Path, data: str, encoding: str | None = None) -> int:
+        self.write_bytes(data[:3].encode("utf-8"))
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(pathlib.Path, "write_text", _partial_write)
+    with pytest.raises(OSError, match="No space left"):
+        _mod.write_goal_clear_record(tmp_path, trigger_path=trigger, now=_NOW)
+    assert not [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")]
+    assert not record_path(tmp_path, _SESSION).exists()
+
+
+def test_temp_file_that_cannot_be_removed_is_named_in_the_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    trigger = _write_trigger(tmp_path)
+
+    def _partial_write(self: Path, data: str, encoding: str | None = None) -> int:
+        self.write_bytes(b"{")
+        raise OSError(28, "No space left on device")
+
+    def _refuse_unlink(self: Path, missing_ok: bool = False) -> None:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(pathlib.Path, "write_text", _partial_write)
+    monkeypatch.setattr(pathlib.Path, "unlink", _refuse_unlink)
+    with pytest.raises(OSError) as raised:
+        _mod.write_goal_clear_record(tmp_path, trigger_path=trigger, now=_NOW)
+    message = str(raised.value)
+    assert "No space left" in message
+    assert ".tmp" in message
+    assert "Permission denied" in message
+
+
+# ── A clear that is not typed leaves no record (review D4) ──────────────────
+
+
+class _Writer:
+    def __init__(self, *, fail: bool = False, fail_after: int | None = None) -> None:
+        self.fail = fail
+        self.fail_after = fail_after
+        self.chunks: list[bytes] = []
+
+    def __call__(self, data: bytes) -> None:
+        if self.fail or (self.fail_after is not None and len(self.chunks) >= self.fail_after):
+            raise OSError(5, "Input/output error")
+        self.chunks.append(data)
+
+
+def _apply(outcome: Any, writer: _Writer, *, confirmed: bool = True) -> bool:
+    return bool(
+        _mod._apply_decision(
+            outcome, master_writer=writer, log=None, main_focus_confirmed=confirmed
+        )
+    )
+
+
+@pytest.fixture
+def _no_submit_delay(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_mod.time, "sleep", lambda _seconds: None)
+
+
+@pytest.mark.usefixtures("_no_submit_delay")
+def test_typed_clear_keeps_its_record(tmp_path: Path) -> None:
+    trigger = _write_trigger(tmp_path)
+    outcome = _decide(tmp_path)
+    writer = _Writer()
+    assert _apply(outcome, writer) is True
+    assert writer.chunks
+    assert record_path(tmp_path, _SESSION).exists()
+    assert not trigger.exists()
+
+
+def test_clear_held_at_apply_removes_its_record(tmp_path: Path) -> None:
+    """A human `/goal clear` after a held one must not be credited to the supervisor."""
+    trigger = _write_trigger(tmp_path)
+    outcome = _decide(tmp_path)
+    assert record_path(tmp_path, _SESSION).exists()
+    writer = _Writer()
+    assert _apply(outcome, writer, confirmed=False) is False
+    assert writer.chunks == []
+    assert not record_path(tmp_path, _SESSION).exists()
+    assert trigger.exists()
+
+
+def test_clear_held_in_the_worker_outcome_path_removes_its_record(tmp_path: Path) -> None:
+    _write_trigger(tmp_path)
+    outcome = _decide(tmp_path)
+    machine = _mod.CompactStateMachine(_mod.CompactPolicy())
+    injected = _mod._apply_worker_outcome(
+        outcome,
+        machine=machine,
+        line=_mod.HumanInputLine(),
+        master_writer=_Writer(),
+        log=None,
+        main_focus_confirmed=False,
+        now_wall=_NOW,
+    )
+    assert injected is False
+    assert not record_path(tmp_path, _SESSION).exists()
+
+
+@pytest.mark.usefixtures("_no_submit_delay")
+def test_failed_pty_write_removes_its_record(tmp_path: Path) -> None:
+    trigger = _write_trigger(tmp_path)
+    outcome = _decide(tmp_path)
+    with pytest.raises(OSError, match="Input/output error"):
+        _apply(outcome, _Writer(fail=True))
+    assert not record_path(tmp_path, _SESSION).exists()
+    assert trigger.exists()
+
+
+@pytest.mark.usefixtures("_no_submit_delay")
+def test_partial_pty_write_keeps_its_record(tmp_path: Path) -> None:
+    """The text reached the box and may still be submitted: it is the supervisor's."""
+    _write_trigger(tmp_path)
+    outcome = _decide(tmp_path)
+    writer = _Writer(fail_after=1)
+    with pytest.raises(OSError, match="Input/output error"):
+        _apply(outcome, writer)
+    assert writer.chunks
+    assert record_path(tmp_path, _SESSION).exists()
+
+
+def test_held_clear_whose_record_cannot_be_removed_is_logged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_trigger(tmp_path)
+    outcome = _decide(tmp_path)
+    lines: list[str] = []
+
+    class _Log:
+        def write(self, line: str) -> None:
+            lines.append(line)
+
+        def write_noop(self, line: str) -> None:
+            lines.append(line)
+
+    def _refuse_unlink(self: Path, missing_ok: bool = False) -> None:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(pathlib.Path, "unlink", _refuse_unlink)
+    injected = _mod._apply_decision(
+        outcome, master_writer=_Writer(), log=_Log(), main_focus_confirmed=False
+    )
+    assert injected is False
+    assert any("record" in line and "Permission denied" in line for line in lines)
+
+
+def test_held_dry_run_clear_touches_no_record(tmp_path: Path) -> None:
+    _write_trigger(tmp_path)
+    outcome = _decide(tmp_path, dry_run=True)
+    assert _apply(outcome, _Writer(), confirmed=False) is False
+    assert not record_path(tmp_path, _SESSION).exists()
 
 
 # ── Reaping ──────────────────────────────────────────────────────────────────

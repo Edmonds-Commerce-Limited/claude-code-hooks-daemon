@@ -664,6 +664,10 @@ _SS3_INTRODUCER = 0x4F  # 'O'
 # ESC followed by one of these starts a string sequence terminated by ST/BEL:
 # OSC ']' , DCS 'P', SOS 'X', PM '^', APC '_'.
 _STRING_INTRODUCERS = frozenset({0x5D, 0x50, 0x58, 0x5E, 0x5F})
+# ESC followed by one of these is an Alt/Meta chord (Alt+b arrives as `ESC b`,
+# Alt+Enter as `ESC CR`, Alt+Backspace as `ESC DEL`), which Claude Code reads
+# as a Meta key, not as Esc: printable ASCII, CR and DEL.
+_META_CHORD_BYTES = frozenset({*range(0x20, 0x7F), 0x0D, 0x7F})
 _BEL = 0x07
 _ST_TERMINATOR = 0x5C  # '\' completing ESC \ (ST)
 # CSI byte ranges (ECMA-48): parameter/intermediate 0x20-0x3F, final 0x40-0x7E.
@@ -975,16 +979,19 @@ class MainFocusModel:
     - Enter while latched keeps the latch (it may have opened a transcript);
     - only a bare Esc clears it. Ctrl-C, Ctrl-U, Enter and child output never do.
 
-    A bare Esc is an ESC that no CSI/SS3/string introducer follows within the
-    same read. A sequence still open when a read ends never reinterprets the
-    next read: an open string sequence is dropped (a terminal reply arrives
-    whole, and a human never types one), and an open ESC, ESC [ or ESC O is
-    kept PENDING, with any hold left in place. The next read resolves it: if
-    it completes an arrow (``ESC | [A``, a split key) that arrow is honoured,
-    a strict prefix of one keeps it pending, and anything else makes the ESC
-    a bare Esc, with the new read parsed from ground. A pending ESC that sees
-    no further byte within ``_FOCUS_ESC_SETTLE_SECONDS`` resolves as a bare
-    Esc at :meth:`settle`. Bytes inside a bracketed paste are text, never keys.
+    A bare Esc is an ESC followed by no CSI/SS3/string introducer and no
+    Meta-chord byte (``_META_CHORD_BYTES``: Alt+b arrives as ``ESC b`` and
+    Claude Code reads it as Meta-b, so a chord keeps the hold). A sequence
+    still open when a read ends never reinterprets the next read: an open
+    string sequence is dropped (a terminal reply arrives whole, and a human
+    never types one), and an open ESC, ESC [ or ESC O is kept PENDING, with
+    any hold left in place. The next read resolves it: if it completes an
+    arrow (``ESC | [A``, a split key) that arrow is honoured, a strict prefix
+    of one keeps it pending, a Meta-chord byte is that chord, and anything
+    else makes the ESC a bare Esc; after a chord or a bare Esc the rest of
+    the read is parsed from ground. A pending ESC that sees no further byte
+    within ``_FOCUS_ESC_SETTLE_SECONDS`` resolves as a bare Esc at
+    :meth:`settle`. Bytes inside a bracketed paste are text, never keys.
     """
 
     def __init__(self) -> None:
@@ -1036,15 +1043,20 @@ class MainFocusModel:
     def _resolve_pending(self, data: bytes) -> bytes:
         """Settle the carried-over sequence against this read; return what to parse.
 
-        A lone ESC followed by anything but ``[`` or ``O`` was a bare Esc, and
-        the read is parsed from ground. Otherwise the carried bytes and the
-        read are parsed together as the sequence they form.
+        A lone ESC followed by ``[`` or ``O``, or by anything after a longer
+        prefix, is parsed together with the read as the sequence they form.
+        A lone ESC followed by a Meta-chord byte was that chord: the hold
+        stays and the rest of the read is parsed from ground. A lone ESC
+        followed by anything else was a bare Esc, and the read is parsed from
+        ground.
         """
         pending, self._pending = self._pending, b""
-        if pending == bytes((_ESC,)) and data[0] not in (_CSI_INTRODUCER, _SS3_INTRODUCER):
-            self._hold = None
-            return data
-        return pending + data
+        if pending != bytes((_ESC,)) or data[0] in (_CSI_INTRODUCER, _SS3_INTRODUCER):
+            return pending + data
+        if data[0] in _META_CHORD_BYTES:
+            return data[1:]
+        self._hold = None
+        return data
 
     def _end_read(self, now: float) -> None:
         if self._in_paste:
@@ -1108,6 +1120,9 @@ class MainFocusModel:
         elif byte == _ESC:
             # The first ESC was bare; this one starts whatever follows.
             self._hold = None
+        elif byte in _META_CHORD_BYTES:
+            # An Alt/Meta chord: focus has not been asked to move, so any hold stays.
+            self._state = _ST_GROUND
         else:
             self._hold = None
             self._state = _ST_GROUND
@@ -3304,19 +3319,60 @@ def write_goal_clear_record(directory: Path, *, trigger_path: Path, now: float) 
     names the trigger with the same stem its attribution reader looks up.
     Written via a pid-qualified temp file and ``replace`` so the daemon sees
     no file or a complete one. ``OSError`` propagates: the caller must not
-    type a clear it could not record.
+    type a clear it could not record. A failed write or replace removes the
+    temp file, which the reaper never matches; if that removal fails too, the
+    raised error names the temp file and both causes.
     """
-    stem = trigger_path.name.removesuffix(_GOAL_CLEAR_TRIGGER_SUFFIX)
-    record_path = directory / f"{stem}{_GOAL_CLEAR_RECORD_SUFFIX}"
+    record_path = goal_clear_record_path(directory, trigger_path=trigger_path)
+    stem = record_path.name.removesuffix(_GOAL_CLEAR_RECORD_SUFFIX)
     payload = {"session_id": stem, "ts": now, "command": _GOAL_CLEAR_COMMAND}
     tmp_path = directory / f".{record_path.name}.{os.getpid()}.tmp"
-    tmp_path.write_text(json.dumps(payload), encoding="utf-8")
     try:
+        tmp_path.write_text(json.dumps(payload), encoding="utf-8")
         tmp_path.replace(record_path)
-    except OSError:
-        tmp_path.unlink(missing_ok=True)
+    except OSError as error:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError as cleanup_error:
+            raise OSError(
+                f"{error}; and the temp file {tmp_path} could not be removed: {cleanup_error}"
+            ) from error
         raise
     return record_path
+
+
+def goal_clear_record_path(directory: Path, *, trigger_path: Path) -> Path:
+    """Where the attribution record for the clear ``trigger_path`` asks for lives."""
+    stem = trigger_path.name.removesuffix(_GOAL_CLEAR_TRIGGER_SUFFIX)
+    return directory / f"{stem}{_GOAL_CLEAR_RECORD_SUFFIX}"
+
+
+def discard_untyped_goal_clear_record(outcome: TickOutcome, log: DecisionLog | None) -> None:
+    """Remove the attribution record of a ``/goal clear`` that was decided but not typed.
+
+    Review D4 (Plan 00474): the record is written when the clear is decided,
+    stamped before typing as the daemon's ``CLOCK_TOLERANCE_SECONDS`` needs.
+    A clear then held at apply time, or whose PTY write failed, must leave no
+    record, or a human ``/goal clear`` inside the daemon's fresh window would
+    be credited to the supervisor and automated goals would stay on. Only a
+    real (non dry-run) clear wrote one. A failed removal is logged.
+    """
+    if (
+        outcome.decision_value != Decision.WOULD_GOAL_CLEAR.value
+        or outcome.payload != _GOAL_CLEAR_COMMAND
+        or outcome.consume_signal_path is None
+    ):
+        return
+    trigger_path = Path(outcome.consume_signal_path)
+    record_path = goal_clear_record_path(trigger_path.parent, trigger_path=trigger_path)
+    try:
+        record_path.unlink(missing_ok=True)
+    except OSError as error:
+        if log is not None:
+            log.write(
+                f"warning: goal clear not typed, but its attribution record "
+                f"{record_path} could not be removed: {error}"
+            )
 
 
 def load_goal_clear_signal(
@@ -8724,6 +8780,7 @@ def _apply_decision(
                 f"{_FOCUS_HOLD_LOG_PREFIX} ({outcome.decision_value} decided before the "
                 "focus hold latched; not typed)"
             )
+        discard_untyped_goal_clear_record(outcome, log)
         return False
     if (
         host_state == SupervisorState.AWAIT_COMPACTING.value
@@ -8740,12 +8797,25 @@ def _apply_decision(
     if log is not None and outcome.audit_flush_log is not None:
         log.write_noop(outcome.audit_flush_log)
     if outcome.payload is not None:
-        _perform_injection(
-            master_writer,
-            outcome.payload,
-            submit=outcome.submit,
-            confirm_enters=outcome.confirm_enters,
-        )
+        # A write that fails before any byte reaches the PTY typed nothing, so a
+        # goal clear's record goes; a partial write left supervisor text in the
+        # box, which may yet be submitted, so its record stays.
+        written: list[bool] = []
+
+        def _tracked_writer(data: bytes) -> None:
+            master_writer(data)
+            written.append(True)
+
+        try:
+            _perform_injection(
+                _tracked_writer,
+                outcome.payload,
+                submit=outcome.submit,
+                confirm_enters=outcome.confirm_enters,
+            )
+        finally:
+            if not written:
+                discard_untyped_goal_clear_record(outcome, log)
         if log is not None:
             log.write(f"{outcome.decision_value}: {outcome.reason}; injected {outcome.payload!r}")
         if outcome.consume_signal_path is not None:
