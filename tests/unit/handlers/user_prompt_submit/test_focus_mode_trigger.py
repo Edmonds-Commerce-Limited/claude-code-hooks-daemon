@@ -32,9 +32,11 @@ from claude_code_hooks_daemon.handlers.user_prompt_submit.focus_mode_trigger imp
 from claude_code_hooks_daemon.utils import usage_pause
 from claude_code_hooks_daemon.utils.session_modes import (
     FOCUS_TTL_SECONDS,
+    MANUAL_GOALS_RETENTION_SECONDS,
     ModeSource,
     SessionMode,
     SessionModeEntry,
+    manual_goals_entry,
 )
 from claude_code_hooks_daemon.utils.session_signal_paths import SIGNAL_SUBDIR
 
@@ -206,6 +208,28 @@ class TestRenewalAndNotices:
         result, _ = _run(_prompt("hooks-daemon focus again"))
         assert any("focus expired" in line for line in result.context)
         assert sum("FOCUS MODE ON" in line for line in result.context) == 1
+
+
+class TestManualGoalsRenewal:
+    """Every prompt, a tick or a focus command included, keeps manual-goals alive."""
+
+    @staticmethod
+    def _enter_stale(registry: SessionModeRegistry) -> float:
+        entered = time.time() - 1000.0
+        registry.enter(manual_goals_entry(_SESSION, entered_at=entered, source=ModeSource.HUMAN))
+        return entered + MANUAL_GOALS_RETENTION_SECONDS
+
+    @pytest.mark.parametrize(
+        "prompt",
+        ["[tick:failsafe]\nFAILSAFE RECOVERY CHECK", "hooks-daemon focus the one task", "go on"],
+    )
+    def test_the_prompt_renews_manual_goals(
+        self, registry: SessionModeRegistry, prompt: str
+    ) -> None:
+        old_expiry = self._enter_stale(registry)
+        _run(_prompt(prompt))
+        [entry] = [e for e in registry.active(_SESSION) if e.mode is SessionMode.MANUAL_GOALS]
+        assert entry.expires_at > old_expiry
 
 
 class TestRestartRestatement:

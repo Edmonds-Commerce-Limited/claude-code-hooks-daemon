@@ -731,6 +731,76 @@ class TestGoalClearAttribution:
         [line] = modes.take_lines(SESSION)
         assert "type `/goal clear` again" in line
 
+    def test_a_human_clear_enters_manual_goals_and_states_it_once(
+        self, modes: SessionModeRegistry, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        _append_lines(transcript, [_typed_clear(10)])
+        self._detector(tmp_path / "records").handle(_input(transcript))
+        assert modes.policy(SESSION).goal_intent_suppressed is True
+        [line] = modes.take_lines(SESSION)
+        assert line.startswith("MANUAL GOALS ON:")
+
+    def test_a_second_human_clear_does_not_repeat_the_line(
+        self, modes: SessionModeRegistry, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        detector = self._detector(tmp_path / "records")
+        _append_lines(transcript, [_typed_clear(10, uuid="first")])
+        detector.handle(_input(transcript))
+        assert len(modes.take_lines(SESSION)) == 1
+        _append_lines(transcript, [_typed_clear(20, uuid="second")])
+        detector.handle(_input(transcript))
+        assert modes.take_lines(SESSION) == ()
+        assert modes.policy(SESSION).goal_intent_suppressed is True
+
+    def test_a_supervisor_clear_does_not_enter_manual_goals(
+        self, modes: SessionModeRegistry, tmp_path: Path
+    ) -> None:
+        record_dir = tmp_path / "records"
+        _write_supervisor_record(record_dir, ts=_epoch(10))
+        transcript = tmp_path / "t.jsonl"
+        _append_lines(transcript, [_typed_clear(10)])
+        self._detector(record_dir).handle(_input(transcript))
+        assert modes.policy(SESSION).goal_intent_suppressed is False
+
+    def test_a_supervisor_assumed_clear_does_not_enter_manual_goals(
+        self, modes: SessionModeRegistry, tmp_path: Path
+    ) -> None:
+        record_dir = tmp_path / "records"
+        record_dir.mkdir()
+        record_path(record_dir, SESSION).write_text("{not json", encoding="utf-8")
+        transcript = tmp_path / "t.jsonl"
+        _append_lines(transcript, [_typed_clear(10)])
+        self._detector(record_dir).handle(_input(transcript))
+        assert modes.policy(SESSION).goal_intent_suppressed is False
+
+    def test_a_typed_goal_condition_changes_nothing(
+        self, modes: SessionModeRegistry, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        _append_lines(transcript, [_typed_clear(10, argument="ship the parser")])
+        self._detector(tmp_path / "records").handle(_input(transcript))
+        assert modes.policy(SESSION).goal_intent_suppressed is False
+        assert modes.take_lines(SESSION) == ()
+
+    def test_a_failed_entry_is_a_warning_and_the_stop_is_allowed(
+        self,
+        modes: SessionModeRegistry,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        _append_lines(transcript, [_typed_clear(10)])
+        with (
+            patch.object(modes, "enter", side_effect=OSError("disk gone")),
+            caplog.at_level(logging.WARNING),
+        ):
+            result = self._detector(tmp_path / "records").handle(_input(transcript))
+        assert result.decision == Decision.ALLOW
+        assert "goal-clear attribution" in caplog.text
+        assert modes.policy(SESSION).goal_intent_suppressed is False
+
     def test_a_restart_rereading_the_transcript_does_not_attribute_twice(
         self, modes: SessionModeRegistry, tmp_path: Path
     ) -> None:

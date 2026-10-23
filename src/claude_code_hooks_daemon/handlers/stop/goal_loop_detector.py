@@ -69,6 +69,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext, get_data_layer
 from claude_code_hooks_daemon.core.goal_clear_attribution import (
+    Attribution,
     GoalClearAttributionError,
     attribute_clear,
     attributed_keys,
@@ -92,6 +93,7 @@ from claude_code_hooks_daemon.core.goal_loop import (
 from claude_code_hooks_daemon.core.goal_loop_block import enter_goal_loop
 from claude_code_hooks_daemon.core.handler_bases import StopHandlerBase
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
+from claude_code_hooks_daemon.core.manual_goals import GoalsOutcome, enter_manual_goals
 from claude_code_hooks_daemon.core.session_mode_log import (
     MAX_TRANSITIONS,
     ModeTransition,
@@ -104,7 +106,7 @@ from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
     _declares_human_blocked,
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
-from claude_code_hooks_daemon.utils.session_modes import ModeLabel
+from claude_code_hooks_daemon.utils.session_modes import ModeLabel, ModeSource
 from claude_code_hooks_daemon.utils.session_signal_paths import SIGNAL_SUBDIR
 
 logger = logging.getLogger(__name__)
@@ -340,6 +342,8 @@ class GoalLoopDetectorHandler(StopHandlerBase):
                 line = verdict.line()
                 if line is not None:
                     self._registry().queue_line(session_id, line)
+                if verdict.attribution is Attribution.HUMAN:
+                    self._enter_manual_goals(session_id, verdict.evidence)
         except (OSError, RuntimeError, GoalClearAttributionError, TransitionLogError) as error:
             log_and_continue(
                 logger,
@@ -350,6 +354,22 @@ class GoalLoopDetectorHandler(StopHandlerBase):
                     "proceeds"
                 ),
             )
+
+    def _enter_manual_goals(self, session_id: str, evidence: str) -> None:
+        """A human cleared the goal: enter manual goals, stating it once on entry.
+
+        Raises:
+            OSError: the registry write failed (the caller logs it).
+        """
+        registry = self._registry()
+        change = enter_manual_goals(
+            registry,
+            session_id,
+            source=ModeSource.HUMAN,
+            evidence=f"a human typed a goal clear ({evidence})",
+        )
+        if change.outcome is GoalsOutcome.ENTERED:
+            registry.queue_line(session_id, change.line())
 
     def _log_reset(self, session_id: str, reset: RingReset) -> None:
         self._log(

@@ -313,6 +313,17 @@ class TestReader:
         assert not reading.is_blocked
         assert not reading.gate_closed
 
+    def test_manual_goals_alone_is_not_blocked_and_keeps_the_gate_open(
+        self, sidecar_dir: Path
+    ) -> None:
+        _registry(sidecar_dir).enter(
+            modes_mod.manual_goals_entry(_SESSION, entered_at=_NOW - 60.0, source=ModeSource.HUMAN)
+        )
+        reading = _mod.load_session_modes(sidecar_dir, now=_NOW, own_sessions=frozenset({_SESSION}))
+        assert reading.blocked_labels == ()
+        assert reading.errors == ()
+        assert not reading.gate_closed
+
     def test_expired_block_is_not_blocked(self, sidecar_dir: Path) -> None:
         _write_raw(
             sidecar_dir,

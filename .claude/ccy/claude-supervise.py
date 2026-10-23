@@ -2859,7 +2859,9 @@ _SESSION_MODES_RECORD_FIELDS = frozenset(
     }
 )
 _SESSION_MODES_BLOCKED = "blocked"
-_SESSION_MODES_STORED_MODES = frozenset({"focus", _SESSION_MODES_BLOCKED})
+# Only "blocked" closes the gate; "focus" and "manual-goals" parse to label None, so
+# manual-goals never withholds `continue` (it suppresses only the daemon's goal intents).
+_SESSION_MODES_STORED_MODES = frozenset({"focus", "manual-goals", _SESSION_MODES_BLOCKED})
 # A blocked entry's reason -> the label the daemon shows for it.
 _SESSION_MODES_BLOCKED_LABELS = {"declared": "awaiting-human", "goal-loop": "goal-blocked"}
 _SESSION_MODES_SOURCES = frozenset({"human", "agent", "detector", "daemon"})

@@ -10,7 +10,7 @@ disagreeing. A session with no entries left has no file.
 Entries expire lazily on every read and in :meth:`SessionModeRegistry.reap`;
 each expiry queues exactly one notice for :meth:`SessionModeRegistry.take_notices`.
 A focus entry is renewed by a genuine human prompt, classified from the prompt
-text alone (no file read).
+text alone (no file read); a manual-goals entry is renewed by every prompt.
 
 A file that cannot be read back as a valid record is logged at WARNING and
 renamed ``*.corrupt``: it is never silently treated as "no modes".
@@ -308,24 +308,26 @@ class SessionModeRegistry:
         return SessionPolicy.from_entries(live.values())
 
     def note_prompt(self, session_id: str, prompt: object) -> bool:
-        """Renew ``session_id``'s renewable entries when ``prompt`` is a genuine human prompt.
+        """Renew ``session_id``'s entries that ``prompt`` renews.
+
+        A genuine human prompt renews every renewable entry. Machine traffic
+        (ticks, supervisor lines, notifications) renews only the entries any
+        prompt keeps alive (``manual-goals``), never focus.
 
         Returns:
-            Whether the prompt was genuine. Machine traffic (ticks, supervisor
-            lines, notifications) renews nothing.
+            Whether the prompt was genuine.
         """
-        if not is_genuine_human_prompt(prompt):
-            return False
+        genuine = is_genuine_human_prompt(prompt)
         with self._lock:
             live, expired = self._partition(session_id)
             now = self._clock()
             renewed: _Entries = {
-                label: entry.renewed(now) if entry.renewal_ttl is not None else entry
+                label: entry.renewed(now) if entry.renewed_by(genuine=genuine) else entry
                 for label, entry in live.items()
             }
             if renewed != live or expired:
                 self._commit(session_id, renewed, expired)
-        return True
+        return genuine
 
     def reap(self) -> int:
         """Drop every expired entry (and spent first-prompt claims); the entries dropped."""

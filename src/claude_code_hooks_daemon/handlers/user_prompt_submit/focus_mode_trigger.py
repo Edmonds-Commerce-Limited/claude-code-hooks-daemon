@@ -152,9 +152,13 @@ class FocusModeTriggerHandler(UserPromptSubmitHandlerBase):
         command: FocusCommand | None,
         prompt: object,
     ) -> str | None:
-        """Carry out ``command`` (or renew focus); the line to state, if any."""
+        """Renew what this prompt renews, then carry out ``command``; the line to state, if any.
+
+        Every prompt reaches ``note_prompt``, a command included, so a
+        ``manual-goals`` entry is renewed by every prompt the session receives.
+        """
+        registry.note_prompt(session_id, prompt)
         if command is None:
-            registry.note_prompt(session_id, prompt)
             return None
         if command.is_off:
             return exit_focus(registry, session_id, evidence=_COMMAND_EVIDENCE).line()
