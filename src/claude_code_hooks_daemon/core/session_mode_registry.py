@@ -13,7 +13,9 @@ A focus entry is renewed by a genuine human prompt, classified from the prompt
 text alone (no file read); a manual-goals entry is renewed by every prompt.
 
 A file that cannot be read back as a valid record is logged at WARNING and
-renamed ``*.corrupt``: it is never silently treated as "no modes".
+renamed ``*.corrupt``: it is never silently treated as "no modes". A file that
+cannot be read at all (``OSError``) is logged at ERROR and skipped, so one bad
+file never stops the other sessions loading.
 """
 
 from __future__ import annotations
@@ -374,11 +376,12 @@ class SessionModeRegistry:
         ``daemon``-lifetime entries are cleared, expired ones dropped, and
         surviving ones kept, each with one notice; the file is rewritten (or
         deleted) to match. A malformed file is logged at WARNING and renamed
-        ``*.corrupt``.
+        ``*.corrupt``; a file that cannot be read or rewritten is logged at
+        ERROR. Either way one file affects only its own session.
 
         Raises:
             RuntimeError: ``load`` already ran on this registry.
-            OSError: a file could not be read or rewritten.
+            OSError: the state directory itself could not be listed.
         """
         with self._lock:
             if self._loaded_at is not None:
@@ -390,9 +393,21 @@ class SessionModeRegistry:
                 self._load_file(path)
 
     def _load_file(self, path: Path) -> None:
-        """Apply the restart rules to one file, or quarantine it as corrupt."""
+        """Apply the restart rules to one file, or quarantine it as corrupt.
+
+        A file that cannot be READ is logged at ERROR and skipped, left where
+        it is (a read failure says nothing about its content): only its own
+        session loads without modes, and every other file still loads.
+        """
         try:
             session_id, entries = _parse_file(path)
+        except OSError as error:
+            log_and_continue(
+                logger,
+                error,
+                reason=f"Unreadable session-modes file {path}; its session loads with no modes",
+                level=logging.ERROR,
+            )
         except _CorruptRecordError as error:
             corrupt = path.with_name(path.name + CORRUPT_SUFFIX)
             log_and_continue(
@@ -405,7 +420,12 @@ class SessionModeRegistry:
             self._apply_restart_rules(session_id, entries)
 
     def _apply_restart_rules(self, session_id: str, entries: list[SessionModeEntry]) -> None:
-        """Keep a loaded file's surviving live entries, with one notice per entry."""
+        """Keep a loaded file's surviving live entries, with one notice per entry.
+
+        A failed rewrite is logged at ERROR and the loaded state is still
+        adopted: the file then holds a superset of memory (the dropped entries),
+        which the session's next write replaces and a later restart drops again.
+        """
         now = self._clock()
         kept: _Entries = {}
         notices: list[ModeNotice] = []
@@ -418,7 +438,18 @@ class SessionModeRegistry:
                 notices.append(ModeNotice(NoticeKind.SURVIVED_RESTART, entry))
                 kept[entry.label] = entry
         if len(kept) != len(entries):
-            self._write(session_id, kept)
+            try:
+                self._write(session_id, kept)
+            except OSError as error:
+                log_and_continue(
+                    logger,
+                    error,
+                    reason=(
+                        f"session-modes file for {session_id} could not be rewritten after "
+                        "the restart rules; memory holds the result and the next write replaces it"
+                    ),
+                    level=logging.ERROR,
+                )
         self._set(session_id, kept, notices)
         for notice in notices:
             if notice.kind is NoticeKind.CLEARED_BY_RESTART:

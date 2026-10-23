@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.core.usage_snapshot import (
     resolve_usage_state_file,
 )
 from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.session_signal_paths import SIGNAL_SUBDIR
 
 logger = logging.getLogger(__name__)
@@ -125,7 +126,12 @@ class DaemonDataLayer:
         Raises:
             RuntimeError: no ProjectContext (CLI processes, most unit tests);
                 callers treat the session as having no modes.
-            OSError: a session-modes file could not be read or rewritten.
+            OSError: the session-modes directory could not be listed (one bad
+                file is handled by the registry and affects only its session).
+
+        A loaded registry is kept even when the legacy-marker import fails: that
+        failure is logged at ERROR, and rebuilding would rewrite files a second
+        time and lose the first load's restart notices.
         """
         with self._session_modes_lock:
             if self._session_modes is None:
@@ -135,8 +141,20 @@ class DaemonDataLayer:
                     transition_log=TransitionLog(untracked / TRANSITION_LOG_FILENAME),
                 )
                 registry.load()
-                import_legacy_blockage_marker(registry, untracked / MARKER_FILENAME)
                 self._session_modes = registry
+                marker = untracked / MARKER_FILENAME
+                try:
+                    import_legacy_blockage_marker(registry, marker)
+                except OSError as error:
+                    log_and_continue(
+                        logger,
+                        error,
+                        reason=(
+                            f"the legacy awaiting-human marker {marker} was not imported; "
+                            "it is retried at the next daemon start"
+                        ),
+                        level=logging.ERROR,
+                    )
             return self._session_modes
 
     def reset(self) -> None:

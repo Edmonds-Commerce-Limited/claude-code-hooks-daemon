@@ -3,6 +3,7 @@
 TDD RED phase: These tests define the expected API for DaemonDataLayer.
 """
 
+import logging
 import threading
 import time
 from pathlib import Path
@@ -10,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.constants import ToolName
+from claude_code_hooks_daemon.core import data_layer as data_layer_module
 from claude_code_hooks_daemon.core.data_layer import (
     DaemonDataLayer,
     get_data_layer,
@@ -19,7 +21,11 @@ from claude_code_hooks_daemon.core.disclosure_tracker import DisclosureTracker
 from claude_code_hooks_daemon.core.handler_history import HandlerHistory
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.session_mode_log import TRANSITION_LOG_FILENAME
-from claude_code_hooks_daemon.core.session_mode_registry import NoticeKind, SessionModeRegistry
+from claude_code_hooks_daemon.core.session_mode_registry import (
+    SESSION_MODES_SUFFIX,
+    NoticeKind,
+    SessionModeRegistry,
+)
 from claude_code_hooks_daemon.core.session_state import SessionState
 from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader
 from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, write_json_atomically
@@ -250,6 +256,40 @@ class TestSessionModesProperty:
         assert log is not None
         [record] = log.recent(5)
         assert "legacy" in record.evidence
+
+    def test_an_unreadable_session_file_does_not_disable_the_registry(
+        self, untracked: Path
+    ) -> None:
+        """Plan 00474 review D1: one bad file must not fail every session's access."""
+        entry = self._surviving_file(untracked)
+        (untracked / SIGNAL_SUBDIR / f"zzz{SESSION_MODES_SUFFIX}").mkdir()
+        dl = DaemonDataLayer()
+        registry = dl.session_modes
+        assert registry.active("sid") == (entry,)
+        assert dl.session_modes is registry
+
+    def test_a_failed_legacy_import_keeps_the_loaded_registry_and_its_notices(
+        self,
+        untracked: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        self._surviving_file(untracked)
+        assert write_marker(untracked / MARKER_FILENAME, "other") is True
+
+        def refuse(registry: SessionModeRegistry, marker_path: Path) -> bool:
+            raise PermissionError("cannot delete the marker")
+
+        monkeypatch.setattr(data_layer_module, "import_legacy_blockage_marker", refuse)
+        dl = DaemonDataLayer()
+        with caplog.at_level(logging.WARNING):
+            registry = dl.session_modes
+        assert dl.session_modes is registry
+        assert [n.kind for n in registry.take_notices("sid")] == [NoticeKind.SURVIVED_RESTART]
+        assert any(
+            record.levelno == logging.ERROR and "legacy" in record.getMessage()
+            for record in caplog.records
+        )
 
     def test_reset_drops_the_registry(self, untracked: Path) -> None:
         dl = DaemonDataLayer()
