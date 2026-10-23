@@ -70,3 +70,12 @@ alive. It does NOT explain why only py3.12 fails, and I have no CI measurement o
 - The second job log (first failure) is saved as `untracked/scratch/n531/ci-first-312.log`. The probe
   and its outputs are in `untracked/scratch/n531/` (gitignored).
 - QA: not run. The commit changes only plan markdown.
+
+## Part 2 (interrupted by host reboot; WIP)
+
+Left: RED tests only, at `tests/unit/support/test_child_pytest.py`. They are not run yet and the helper does not exist.
+Still to do: `tests/support/child_pytest.py` (`run_child_pytest`, `ChildPytestError`, `HELPER_OWNED_ENV_KEYS`,
+`WATCHDOG_FRACTION`), plus a watchdog `-p` plugin in its own dir `tests/support/child_pytest_plugin/`. The plugin
+dups fd 2 at import, arms `dump_traceback_later` at configure and re-arms it at trylast unconfigure against a
+wall-clock deadline passed in an env var. Its `-p` and `--basetemp` go in through `PYTEST_ADDOPTS`, so launchers are
+covered as well. After that: move the 9 call sites, update N531, autofix, then targeted QA.
