@@ -179,7 +179,7 @@ def test_tab_completed_compact_is_recognised_from_the_record(
     compaction at once and the daemon records it. The worker must never type a
     second `/compact` over it, and must name the human as the origin when it
     resumes -- with the keystroke recogniser having seen nothing."""
-    monkeypatch.setattr(_mod, "cached_own_session_ids", lambda: frozenset({_SESSION}))
+    monkeypatch.setattr(_mod, "cached_own_session_ids", lambda *a, **k: frozenset({_SESSION}))
     sidecar_dir = tmp_path / "context-sidecar"
     _write_urgent_sidecar(sidecar_dir)
     _write_compaction_record(sidecar_dir, trigger="manual", origin="human")
