@@ -3122,6 +3122,36 @@ _MAX_GOAL_CLEAR_INJECTIONS = 5
 # whole TTL. This higher ceiling still bounds that storm.
 _MAX_BLOCKED_GOAL_CLEAR_INJECTIONS = 3 * _MAX_GOAL_CLEAR_INJECTIONS
 _DRY_RUN_GOAL_CLEAR_BODY = "would inject /goal clear (dry-run — no real /goal clear sent)"
+# Plan 00501 Task 8.2: the transcript records a typed `/goal clear` the same way
+# whoever typed it, so the daemon attributes a clear to this supervisor only by
+# a record written BEFORE typing. Must equal the daemon's
+# `core.goal_clear_attribution.GOAL_CLEAR_RECORD_SUFFIX` (a test pins it), and
+# must not end in `.goal-clear`, or `_GOAL_CLEAR_GLOB` would read it as a trigger.
+_GOAL_CLEAR_RECORD_SUFFIX = ".goal-clear-injected"
+_GOAL_CLEAR_RECORD_GLOB = f"*{_GOAL_CLEAR_RECORD_SUFFIX}"
+_GOAL_CLEAR_TRIGGER_SUFFIX = ".goal-clear"
+
+
+def write_goal_clear_record(directory: Path, *, trigger_path: Path, now: float) -> Path:
+    """Atomically record that this supervisor is about to type ``/goal clear``.
+
+    The session stem is the trigger's name minus ``.goal-clear``: the daemon
+    names the trigger with the same stem its attribution reader looks up.
+    Written via a pid-qualified temp file and ``replace`` so the daemon sees
+    no file or a complete one. ``OSError`` propagates: the caller must not
+    type a clear it could not record.
+    """
+    stem = trigger_path.name.removesuffix(_GOAL_CLEAR_TRIGGER_SUFFIX)
+    record_path = directory / f"{stem}{_GOAL_CLEAR_RECORD_SUFFIX}"
+    payload = {"session_id": stem, "ts": now, "command": _GOAL_CLEAR_COMMAND}
+    tmp_path = directory / f".{record_path.name}.{os.getpid()}.tmp"
+    tmp_path.write_text(json.dumps(payload), encoding="utf-8")
+    try:
+        tmp_path.replace(record_path)
+    except OSError:
+        tmp_path.unlink(missing_ok=True)
+        raise
+    return record_path
 
 
 def load_goal_clear_signal(
@@ -3914,7 +3944,8 @@ def reap_stale_sidecars(
     """Delete dead context-sidecar / compaction-signal files older than the TTL.
 
     Reaps ``*.json`` sidecars, ``*.compacting`` signals, ``*.goal-intent``
-    signals, ``*.goal-clear`` triggers, ``*.standing-auth-intent`` signals,
+    signals, ``*.goal-clear`` triggers, ``*.goal-clear-injected`` records,
+    ``*.standing-auth-intent`` signals,
     ``*.model-switch-intent`` signals, ``*.model-downgrade``
     signals, ``*.operator-signal`` signals and ``*.session-actions``
     directives whose FILE MTIME is older than
@@ -3941,6 +3972,7 @@ def reap_stale_sidecars(
         + list(directory.glob(_COMPACTION_SIGNAL_GLOB))
         + list(directory.glob(_GOAL_SIGNAL_GLOB))
         + list(directory.glob(_GOAL_CLEAR_GLOB))
+        + list(directory.glob(_GOAL_CLEAR_RECORD_GLOB))
         + list(directory.glob(_STANDING_AUTH_SIGNAL_GLOB))
         + list(directory.glob(_MODEL_SWITCH_SIGNAL_GLOB))
         + list(directory.glob(_MODEL_DOWNGRADE_SIGNAL_GLOB))
@@ -8034,19 +8066,35 @@ def decide_once(
             elif machine.goal_clear_injections >= _MAX_BLOCKED_GOAL_CLEAR_INJECTIONS:
                 noop_reason_log = f"{_NOOP_LOG_PREFIX}: goal clear ceiling reached while BLOCKED"
             else:
-                decision_value = Decision.WOULD_GOAL_CLEAR.value
-                reason = "goal clear trigger -> would inject /goal clear"
-                if dry_run:
-                    payload = f"{_format_bot_prefix(facts.now_wall)} {_DRY_RUN_GOAL_CLEAR_BODY}"
+                record_error: OSError | None = None
+                if not dry_run:
+                    try:
+                        write_goal_clear_record(
+                            sidecar_dir, trigger_path=clear_path, now=facts.now_wall
+                        )
+                    except OSError as error:
+                        record_error = error
+                if record_error is not None:
+                    # An unrecorded clear would be attributed to the human and
+                    # switch automated goals off, so it is not typed at all.
+                    noop_reason_log = (
+                        f"{_NOOP_LOG_PREFIX}: goal clear NOT typed: attribution record "
+                        f"could not be written: {record_error}"
+                    )
                 else:
-                    # Fixed literal: nothing from the trigger file reaches the
-                    # PTY, so this channel cannot type text of a writer's
-                    # choosing (see the note on _GOAL_CLEAR_GLOB).
-                    payload = _GOAL_CLEAR_COMMAND
-                submit = True
-                consume_signal_path = str(clear_path)
-                deferred_log = None
-                noop_reason_log = None
+                    decision_value = Decision.WOULD_GOAL_CLEAR.value
+                    reason = "goal clear trigger -> would inject /goal clear"
+                    if dry_run:
+                        payload = f"{_format_bot_prefix(facts.now_wall)} {_DRY_RUN_GOAL_CLEAR_BODY}"
+                    else:
+                        # Fixed literal: nothing from the trigger file reaches the
+                        # PTY, so this channel cannot type text of a writer's
+                        # choosing (see the note on _GOAL_CLEAR_GLOB).
+                        payload = _GOAL_CLEAR_COMMAND
+                    submit = True
+                    consume_signal_path = str(clear_path)
+                    deferred_log = None
+                    noop_reason_log = None
     # ── Flag-cleaning compaction on a REPEATED downgrade (Plan 00281) ───────
     # Checked JUST BEFORE the model restore: on a flip-flop (an open episode
     # AND a prior auto-restore that the classifier already undid) a re-restore
