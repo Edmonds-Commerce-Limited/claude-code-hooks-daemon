@@ -275,7 +275,9 @@ class TestSessionModesProperty:
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         self._surviving_file(untracked)
-        assert write_marker(untracked / MARKER_FILENAME, "other") is True
+        write_json_atomically(
+            untracked / MARKER_FILENAME, {"session_id": "other", "recorded_at": time.time()}
+        )
 
         def refuse(registry: SessionModeRegistry, marker_path: Path) -> bool:
             raise PermissionError("cannot delete the marker")
