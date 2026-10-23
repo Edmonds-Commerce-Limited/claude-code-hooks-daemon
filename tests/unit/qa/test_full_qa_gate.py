@@ -292,9 +292,7 @@ class TestNoconftestNoLongerDropsTheSink:
         """Baseline: without the forced plugin, `--noconftest` drops the
         sink entirely and the whole-suite-sized run is never refused."""
         _write_fixture_suite(tmp_path, file_count=4)
-        result = _run_pytest_subprocess(
-            tmp_path, ["--noconftest", "tests/"], expected_returncode=0
-        )
+        result = _run_pytest_subprocess(tmp_path, ["--noconftest", "tests/"], expected_returncode=0)
         assert "REFUSED" not in result.stdout
 
     def test_noconftest_with_the_forced_plugin_is_refused(self, tmp_path: Path) -> None:
@@ -382,7 +380,9 @@ class TestRunCollectedOutsideTheSuiteIsJudgedOnItsOwnSize:
         empty = tmp_path.parent / f"{tmp_path.name}-empty3"
         empty.mkdir()
         result = _run_pytest_subprocess(
-            tmp_path, [*_FORCED_PLUGIN_ARGS, f"--rootdir={empty}", "handlers"], expected_returncode=1
+            tmp_path,
+            [*_FORCED_PLUGIN_ARGS, f"--rootdir={empty}", "handlers"],
+            expected_returncode=1,
         )
         assert "REFUSED" in result.stdout, result.stdout + result.stderr
 

@@ -157,9 +157,17 @@ The child `python -m pytest -p no:xdist -q <polluter> <victim>` printed `2 passe
   `/tmp/pytest-of-<user>` that is no longer among the newest three and has no live lock. The deletion is `rm_rf`, and
   its cost depends on what the earlier child pytests left behind.
 
-**Status**: 🔄 in progress. The cause is not proved: exit-time basetemp cleanup is the lead. Left: arm a
-`faulthandler.dump_traceback_later` in the child so a CI recurrence prints its stack, and give the child its own
-`--basetemp` through one shared helper for all child-pytest call sites.
+- **Mitigation and diagnostics (branch `worktree-n531-child-exit`)**: every child pytest in the suite now goes through
+  `tests/support/child_pytest.py::run_child_pytest`. It gives the child its own `--basetemp` under the caller's
+  `tmp_path`, so the child's exit cleanup never touches the shared `/tmp/pytest-of-<user>` tree (the lead above). It
+  builds the child's environment from a short allowlist, and loads a `-p` watchdog plugin that arms
+  `faulthandler.dump_traceback_later` at 75% of the caller's timeout and re-arms it at the last `pytest_unconfigure`.
+  A recurrence therefore prints every thread's stack into the failure message, where before it showed only a bare
+  `TimeoutExpired`. There are no retries and no longer timeout. The nine call sites from the investigation are moved,
+  the N531 pair test first.
+
+**Status**: 🔄 in progress. The cause is still not proved: the change removes the leading suspect and adds the
+diagnostics a recurrence needs. Close it when a CI full run passes with it; if the test recurs, read the dumped stack.
 
 ### N530 — `plan_number_helper` denies an `ls` of a folder inside an existing plan as a next-number scan
 

@@ -19,6 +19,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from tests.support.child_pytest import run_child_pytest
 
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
@@ -28,7 +29,6 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.pre_tool_use.project_containment import (
     ProjectContainmentHandler,
 )
-from tests.support.child_pytest import run_child_pytest
 
 _ROOT = Path("/repo")
 
