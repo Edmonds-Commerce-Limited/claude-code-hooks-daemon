@@ -587,12 +587,6 @@
       "reason": "Plan 00298: standard tolerant-JSON-record pattern (same shape as goal_ledger._parse_entry). A missing, unreadable, or corrupt marker file all map to None -- the documented fail-open outcome consumed by failsafe_cron_blockage_suppressor as 'do not suppress', never a reason to raise out of a UserPromptSubmit handler."
     },
     {
-      "file": "utils/blockage_marker.py",
-      "function": "clear_marker",
-      "rule": "return-none-on-error",
-      "reason": "Plan 00298: clearing a marker that is already absent (FileNotFoundError) is not an error -- it is the exact state the caller wanted. An OSError removing an existing marker is logged at debug and swallowed: clear_marker is a best-effort cleanup helper, and a stale marker left behind only means suppression stays live until its own expiry, never an incorrect suppression."
-    },
-    {
       "file": "plan_qa/checks/same_commit_plan_doc.py",
       "function": "_plan_status",
       "rule": "return-none-on-error",

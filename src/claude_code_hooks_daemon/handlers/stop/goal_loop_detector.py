@@ -456,7 +456,9 @@ class GoalLoopDetectorHandler(StopHandlerBase):
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_event="Stop",
-                requires_main_thread=False,
+                # MAIN-scoped: a sub-agent's Stop never reaches this handler,
+                # so an ALLOW observed there would prove nothing about it.
+                requires_main_thread=True,
                 hook_input={"hook_event_name": "Stop", "stop_hook_active": False},
             ),
         ]

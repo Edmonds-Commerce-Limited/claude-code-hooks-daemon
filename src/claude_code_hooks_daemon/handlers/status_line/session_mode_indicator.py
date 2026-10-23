@@ -143,7 +143,7 @@ class SessionModeIndicatorHandler(StatusLineHandlerBase):
         now = time.time()
         try:
             pause = self._read_pause(session_id, now)
-        except OSError as error:
+        except (RuntimeError, OSError) as error:
             logger.warning("session mode segment: usage-pause record cannot be read: %s", error)
             return AdvisoryResult(context=[f"| {_error(_PAUSE_ERROR)}"])
         if isinstance(pause, _Malformed):
@@ -166,6 +166,7 @@ class SessionModeIndicatorHandler(StatusLineHandlerBase):
 
         Raises:
             OSError: the record exists but could not be read (only "not found" is None).
+            RuntimeError: no ProjectContext, so the record's path cannot be resolved.
         """
         record = self._pauses.read(pause_path(ProjectContext.daemon_untracked_dir(), session_id))
         if record is None or isinstance(record, _Malformed):

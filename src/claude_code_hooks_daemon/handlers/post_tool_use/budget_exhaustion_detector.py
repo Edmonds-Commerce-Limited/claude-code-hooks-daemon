@@ -684,10 +684,10 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
         Fail-open: any error (no ProjectContext, permissions, disk) is logged
         at WARNING here -- this is observability, not a gate, and must never
         turn a successful detection into a broken tool call. Returns True on
-        a successful append and False when the error was swallowed, mirroring
-        ``blockage_marker.write_marker``'s Plan 00314 contract: the caller can
-        tell "detected but not logged" apart from "detected and logged"
-        rather than the outcome vanishing silently into a log line.
+        a successful append and False when the error was swallowed (the Plan
+        00314 contract): the caller can tell "detected but not logged" apart
+        from "detected and logged" rather than the outcome vanishing silently
+        into a log line.
         """
         try:
             from claude_code_hooks_daemon.core.project_context import ProjectContext
