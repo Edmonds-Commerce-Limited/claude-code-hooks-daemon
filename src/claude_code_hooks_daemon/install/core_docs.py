@@ -148,6 +148,10 @@ CORE_DOCS: Final[tuple[CoreDoc, ...]] = (
     # in a runtime FINDING, and docs_qa runs on `documentation.enabled` --
     # independent of the plan workflow entirely.
     CoreDoc("DocumentationStrategy", lambda config: config.documentation.enabled),
+    # focus_mode_trigger's guidance and session_mode_indicator's segment
+    # explanation name CLAUDE/SessionModes.md, and both handlers are on by
+    # default with no config in hand -- so, like Worktree, unconditional.
+    CoreDoc("SessionModes", lambda _config: True),
 )
 
 #: Every shipped core document, gates ignored. The manifest for packaging

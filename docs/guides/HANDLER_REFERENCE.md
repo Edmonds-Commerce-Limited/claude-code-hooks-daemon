@@ -4503,7 +4503,7 @@ These handlers run when Claude stops generating a response.
 
 **Description:** Watches for a goal loop: a session that keeps stopping with `STOPPING BECAUSE:` while the goal evaluator keeps answering "not met", with no human prompt in between. On each main-thread Stop it reads only the transcript lines added since its last read (a session it has not seen before is read from its last 2 MiB only), counts stop-then-unmet cycles inside the window, and appends to the session-mode transition log: `near-miss` one cycle short of the threshold, `would-enter` at it, and `loop-reset` when a human prompt, a goal met or cleared, or a repository change (HEAD plus tracked changes, plan journals and `untracked/` excluded) empties the count. Stop-text similarity is recorded as evidence only. It never blocks and never enters a mode. An unreadable transcript, a changed or shrunk transcript (re-anchored at its end), a failed git read and a failed log append are each logged as a WARNING and the Stop is allowed. Main thread only; never terminal.
 
-In `observe` mode (the default) the detector only logs. With `mode: act` it also enters the `goal-blocked` session mode when a loop is detected and clears the goal; the block ends on a human prompt, the `blocked_hours` timer, a repository change, or `hooks-daemon session-mode unblock` (which refuses a declared `awaiting-human` block).
+In `observe` mode (the default) the detector only logs. With `mode: act` it also enters the `goal-blocked` session mode when a loop is detected and clears the goal; the block ends on a human prompt, the `blocked_hours` timer, a repository change, or `hooks-daemon session-mode unblock` (which refuses a declared `awaiting-human` block). How the block fits the other session modes: [CLAUDE/SessionModes.md](../../CLAUDE/SessionModes.md).
 
 **Backstop without ccy:** Claude Code itself caps consecutive stop-hook continuations at 8. Each tool call resets the count, and `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` raises the cap. After the cap Claude Code pauses the goal until the next message. A loop that makes tool calls between stops never reaches the cap, which is why the detector exists.
 
@@ -4823,7 +4823,7 @@ handlers:
 
 While focused, every `drives_autonomy` handler is skipped for the session (so `goal_injection` writes no `.goal-intent`), declared `persistent_crons` ticks are dropped, the failsafe tick is delivered with the line "focus mode: the active task is <task>; other plans are out of scope" (`failsafe_cron_blockage_suppressor`), and `auto_continue_stop` gives a one-line focus reminder instead of the goal-ledger challenge. Entering focus clears an existing goal once: the goal-clear signal is written, so the ccy supervisor types `/goal clear` at its next idle; without the supervisor, a human must type it. Focus lasts 12 hours, renewed by each genuine human prompt, and its expiry is stated once at the next prompt.
 
-The same operations are available as `/mode focus <task>`, `/mode focus off`, `hooks-daemon session-mode get|focus <task>|focus off` and the `get_session_modes`, `enter_focus` and `exit_focus` IPC actions. Never denies, never gated by autonomy, never terminal. A registry failure is logged at WARNING and, on a command, stated to the agent. No options.
+The same operations are available as `/mode focus <task>`, `/mode focus off`, `hooks-daemon session-mode get|focus <task>|focus off` and the `get_session_modes`, `enter_focus` and `exit_focus` IPC actions. Never denies, never gated by autonomy, never terminal. A registry failure is logged at WARNING and, on a command, stated to the agent. No options. Every session mode, what each suppresses and how each ends: [CLAUDE/SessionModes.md](../../CLAUDE/SessionModes.md).
 
 ```yaml
 handlers:
@@ -5074,7 +5074,7 @@ handlers:
 | **Type**       | Advisory                 |
 | **Event**      | StatusLine               |
 
-**Description:** This session's session modes (Plan 00501): `| ⚑ focus: <task>` or `| ⚑ awaiting-human +1`. It shows the top mode by precedence (usage-paused > goal-blocked > awaiting-human > focus > unattended) and how many more are active, and nothing when no mode is. A red `⚑ modes unreadable` or `⚑ usage-pause record unreadable` means the mode state could not be read. `hooks-daemon mode-history` lists every session's modes and recent transitions.
+**Description:** This session's session modes (Plan 00501): `| ⚑ focus: <task>` or `| ⚑ awaiting-human +1`. It shows the top mode by precedence (usage-paused > goal-blocked > awaiting-human > focus > unattended) and how many more are active, and nothing when no mode is. A red `⚑ modes unreadable` or `⚑ usage-pause record unreadable` means the mode state could not be read. `hooks-daemon mode-history` lists every session's modes and recent transitions. The modes themselves: [CLAUDE/SessionModes.md](../../CLAUDE/SessionModes.md).
 
 ---
 

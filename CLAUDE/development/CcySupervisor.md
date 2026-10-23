@@ -169,6 +169,9 @@ by the `ps` check, never a session restart.
 
 ## Session modes: a BLOCKED session gets no work-driving prompt
 
+What the modes are, from the operator's side: [SessionModes.md](../SessionModes.md).
+This section owns the supervisor's implementation of the gate.
+
 Plan 00501 Phase 5. The daemon writes one `<stem>.session-modes` file per
 session in the same `context-sidecar` directory (the registry is
 `src/claude_code_hooks_daemon/core/session_mode_registry.py`; the stem rule is

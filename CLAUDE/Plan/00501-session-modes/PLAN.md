@@ -193,8 +193,10 @@ All CLEAR; rationale and code citations in
 
 ### Phase 7: Docs and acceptance
 
-- [ ] ⬜ **Task 7.1**: Handler guidance, a "Session modes" section in the autonomy docs (no autonomy doc exists yet;
-  choose its home when this task starts), release note in the UNRELEASED holding area. The session-modes docs carry
+- [x] ✅ **Task 7.1**: Handler guidance, a "Session modes" section in the autonomy docs (no autonomy doc exists yet;
+  choose its home when this task starts), release note in the UNRELEASED holding area. Home chosen: the
+  daemon-owned core document `CLAUDE/core/SessionModes.core.md` (deployed to every install, so the handler guidance
+  that names `CLAUDE/SessionModes.md` resolves in a client); release notes 020-024 already cover the behaviour. The session-modes docs carry
   the Goals' focus sentence on what the supervisor does and does not type (adviser Q2,
   `subagent-reports/261022-phase5-merge-advice-fable.md`), and `status-line-explained` names the modes-file WARNING
   text so an operator knows the fix is to let the daemon load its registry / check the `.corrupt` file, not a
