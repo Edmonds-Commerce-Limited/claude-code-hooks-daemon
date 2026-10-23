@@ -1692,7 +1692,7 @@ class WorkerChildPid:
     def own_session_ids(self) -> frozenset[str]:
         """The own-session-id set of the learned child's tree, else the host fallback."""
         if self._pid is not None:
-            return cached_own_session_ids(self._pid)
+            return cached_own_session_ids(self._pid, self._proc_root)
         return cached_host_session_ids(self._host_pid(), self._own_pid(), self._proc_root)
 
 

@@ -10,6 +10,8 @@ place in Python that names those files and reads them.
 from __future__ import annotations
 
 import os
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -155,6 +157,60 @@ class TestRunningIsCheckedAgainstTheProcess:
         assert record.status is SyncStatus.FAILED
         assert str(dead) in record.detail
         assert "without recording a result" in record.detail
+
+    def test_a_zombie_pid_is_a_failure(self, tmp_path: Path) -> None:
+        """An exited child nobody reaped still answers kill(pid, 0); it is not running."""
+        pid = os.posix_spawn("/bin/true", ["/bin/true"], os.environ)
+        try:
+            _wait_for(lambda: _proc_state(pid) == "Z")
+            _write_state(tmp_path, f"status=running\npid={pid}\n")
+
+            record = read_sync_record(tmp_path, _VERSION)
+
+            assert record is not None
+            assert record.status is SyncStatus.FAILED
+            assert str(pid) in record.detail
+        finally:
+            os.waitpid(pid, 0)
+
+
+class TestAPidlessRunningRecord:
+    """Only a claim that never got its pid is pid-less; it must not read RUNNING for ever."""
+
+    def test_a_fresh_one_is_still_running(self, tmp_path: Path) -> None:
+        _write_state(tmp_path, "status=running\ndetail=starting\n")
+
+        record = read_sync_record(tmp_path, _VERSION)
+
+        assert record is not None and record.status is SyncStatus.RUNNING
+
+    def test_one_older_than_the_grace_is_a_failure(self, tmp_path: Path) -> None:
+        path = _write_state(tmp_path, "status=running\ndetail=starting\n")
+        stale = time.time() - background_sync.PIDLESS_RUNNING_GRACE_SECONDS - 1
+        os.utime(path, (stale, stale))
+
+        record = read_sync_record(tmp_path, _VERSION)
+
+        assert record is not None
+        assert record.status is SyncStatus.FAILED
+        assert "no process" in record.detail
+
+
+_WAIT_DEADLINE_SECONDS = 10.0
+_WAIT_POLL_SECONDS = 0.01
+
+
+def _wait_for(condition: Callable[[], bool]) -> None:
+    deadline = time.monotonic() + _WAIT_DEADLINE_SECONDS
+    while not condition():
+        if time.monotonic() > deadline:
+            raise AssertionError("condition not reached before the deadline")
+        time.sleep(_WAIT_POLL_SECONDS)
+
+
+def _proc_state(pid: int) -> str:
+    stat = Path(f"/proc/{pid}/stat").read_text()
+    return stat[stat.rindex(")") + 2]
 
 
 def _a_dead_pid() -> int:
