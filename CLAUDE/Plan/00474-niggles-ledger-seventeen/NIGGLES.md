@@ -119,7 +119,9 @@ comparison lives only inside the workflow, so nothing before the release pull re
 - **Gap**: the layout comparison (and the shards comparison beside it) should also run locally, e.g. a unit test that
   loads the workflow and `llm_qa.ALL_TOOL_NAMES`, so the drift fails the commit that causes it.
 
-**Status**: 🔄 workflow fixed on the release branch; the local test ⬜ open.
+**Status**: ✅ fixed on the release branch: the workflow lists the check, and
+`tests/unit/qa/test_release_gate_layout.py` runs the layout job's comparisons locally (it reports
+`bare_python_invocation` missing against the pre-fix workflow).
 
 ### N538 — the commit lint gate resolves the linter binary without the sub-project's tool directories
 
