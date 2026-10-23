@@ -201,11 +201,12 @@ All CLEAR; rationale and code citations in
   `subagent-reports/261022-phase5-merge-advice-fable.md`), and `status-line-explained` names the modes-file WARNING
   text so an operator knows the fix is to let the daemon load its registry / check the `.corrupt` file, not a
   restart (adviser Q3).
-- [ ] ⬜ **Task 7.2**: Acceptance: focus on (with a live goal), a declared tick dropped, a rewritten failsafe tick
+- [ ] 🚫 **Task 7.2** (blocked on the owner: needs a human-driven session with a live goal; see the 2026-10-23
+  `012659Z` finding): Acceptance: focus on (with a live goal), a declared tick dropped, a rewritten failsafe tick
   delivered, focus off; awaiting-human in one session not cleared by another; a live goal loop caught in observe
   mode, then in act mode, observing the supervisor's `/goal clear` landing during the stop loop itself (spike 0.3
   saw it only in tool-calling turns).
-- [ ] ⬜ **Task 7.3**: Tune thresholds from the observe log and flip the default to `act` after three true positives
+- [ ] 🚫 **Task 7.3** (blocked on time: three true positives or two releases; the count began 2026-10-23): Tune thresholds from the observe log and flip the default to `act` after three true positives
   and no false positive, or after two releases, whichever is first.
 
 ### Phase 8: Manual goals (#106)
