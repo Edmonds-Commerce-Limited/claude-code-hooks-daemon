@@ -20,6 +20,7 @@ runs it. That is what makes it safe to probe a destructive command at all.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
@@ -30,6 +31,10 @@ from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     PLAYBOOK_PROBE,
     SYNTHETIC_SOURCE_FIELD,
+)
+from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import (
+    LINT_TIMEOUT_NOTICE,
+    LintOnEditHandler,
 )
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 
@@ -592,3 +597,108 @@ def verdict(probe: ExecutableProbe, observed_decision: str, observed_text: str) 
             f"expected allow, observed deny (handler {probe.handler_name}): {observed_text[:300]!r}"
         )
     return None
+
+
+#: The largest share of a run's lint_on_edit probes that may time out and still
+#: leave the run meaningful. One slow toolchain on a loaded runner is an
+#: environment fact; past this share the linters as a whole did not run, and
+#: reporting that as a handful of skips would hide a handler that checks nothing.
+MAX_LINT_TIMEOUT_SHARE: Final = 0.2
+
+
+def _template_pattern(template: str) -> re.Pattern[str]:
+    """A regex matching `template` with each `{field}` captured by name."""
+    parts = re.split(r"\{(\w+)\}", template)
+    return re.compile(
+        "".join(
+            re.escape(part) if index % 2 == 0 else f"(?P<{part}>.+?)"
+            for index, part in enumerate(parts)
+        )
+    )
+
+
+#: Derived from the handler's own template, so the advisory and its
+#: recognition cannot drift apart: there is no second copy of the prose.
+_LINT_TIMEOUT_PATTERN = _template_pattern(LINT_TIMEOUT_NOTICE)
+
+
+@dataclass(frozen=True)
+class LintTimeout:
+    """A lint_on_edit advisory saying the linter overran its budget."""
+
+    language: str
+    budget: str
+
+
+def lint_timeout(observed_text: str) -> LintTimeout | None:
+    """The linter timeout `observed_text` reports, or `None` if it reports none."""
+    match = _LINT_TIMEOUT_PATTERN.search(observed_text)
+    if match is None:
+        return None
+    return LintTimeout(language=match["language"], budget=match["budget"])
+
+
+@dataclass(frozen=True)
+class InconclusiveProbe:
+    """A probe whose handler never reached a verdict, so none was scored (N455)."""
+
+    label: str
+    timeout: LintTimeout
+
+    @property
+    def reason(self) -> str:
+        return (
+            f"{self.label}: the {self.timeout.language} linter timed out after "
+            f"{self.timeout.budget}s, so the handler's verdict was never reached"
+        )
+
+
+def is_lint_probe(probe: ExecutableProbe) -> bool:
+    """Whether `probe`'s verdict depends on a linter finishing in time."""
+    return probe.handler_name == LintOnEditHandler.__name__
+
+
+def inconclusive_probe(
+    probe: ExecutableProbe, observed_decision: str, observed_text: str
+) -> InconclusiveProbe | None:
+    """`probe` as inconclusive when its linter timed out, else `None`.
+
+    Checked BEFORE `verdict`. `lint_on_edit` fails open on a timeout by design,
+    so a timed-out deny probe arrives as an allow; scoring it would report a
+    slow runner as a handler defect, and passing it would hide a handler that
+    stopped denying. Only a lint_on_edit probe that was NOT refused qualifies:
+    a refusal is an answer, whatever else the response carries.
+    """
+    if not is_lint_probe(probe):
+        return None
+    if (observed_decision or "").strip().lower() in _REFUSAL_SPELLINGS:
+        return None
+    timeout = lint_timeout(observed_text)
+    if timeout is None:
+        return None
+    return InconclusiveProbe(label=f"#{probe.test_number} {probe.handler_name}", timeout=timeout)
+
+
+def lint_unusable_failure(
+    inconclusive: Sequence[InconclusiveProbe], lint_probes: int
+) -> str | None:
+    """A failure when too many of a run's `lint_probes` timed out to trust it."""
+    if not inconclusive:
+        return None
+    if len(inconclusive) < lint_probes and len(inconclusive) / lint_probes <= (
+        MAX_LINT_TIMEOUT_SHARE
+    ):
+        return None
+    return (
+        f"linter unusable on this runner: {len(inconclusive)} of {lint_probes} "
+        f"lint_on_edit probes timed out (more than {MAX_LINT_TIMEOUT_SHARE:.0%} "
+        "is a failure, not an inconclusive result):\n"
+        + "\n".join(probe.reason for probe in inconclusive)
+    )
+
+
+def inconclusive_skip_reason(inconclusive: Sequence[InconclusiveProbe]) -> str | None:
+    """The skip reason for a run whose only shortfall is inconclusive probes."""
+    if not inconclusive:
+        return None
+    return "INCONCLUSIVE, not passed: " + "; ".join(probe.reason for probe in inconclusive)

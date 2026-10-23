@@ -61,17 +61,20 @@ import dataclasses
 import logging
 import re
 import shutil
+import subprocess
 import tempfile
 import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants.paths import ProjectPath
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler_scope import scope_admits
 from claude_code_hooks_daemon.core.project_context import ProjectContext
@@ -81,8 +84,13 @@ from claude_code_hooks_daemon.daemon.playbook_generator import PlaybookGenerator
 from claude_code_hooks_daemon.daemon.playbook_harness import (
     ExecutableProbe,
     FixtureAction,
+    InconclusiveProbe,
     SkippedProbe,
     build_event,
+    inconclusive_probe,
+    inconclusive_skip_reason,
+    is_lint_probe,
+    lint_unusable_failure,
     plan_probe,
 )
 from claude_code_hooks_daemon.handlers.project_loader import ProjectHandlerLoader
@@ -263,13 +271,23 @@ def _perform_fixture_actions(actions: list[FixtureAction]) -> None:
             raise AssertionError(f"unknown fixture action kind: {action.kind!r}")
 
 
-def _drive_executable_probe(probe: ExecutableProbe, instance: Any, *, source: str) -> list[str]:
+def _drive_executable_probe(
+    probe: ExecutableProbe,
+    instance: Any,
+    *,
+    source: str,
+    inconclusive: list[InconclusiveProbe] | None = None,
+) -> list[str]:
     """Dispatch ONE `ExecutableProbe` against `instance` directly, in-process.
 
     Mirrors `tests/acceptance/test_playbook_harness.py`'s `_run_probe`, with
     the daemon-socket half replaced by a direct handler call: same fixture
     discipline (PostToolUse claims a write already happened, so the target
     must exist first; setup/cleanup run as plain filesystem ops).
+
+    A probe whose linter timed out reached no verdict (N455); it is appended
+    to `inconclusive` instead of being scored. Without a collector it is
+    scored like any other result.
     """
     failures: list[str] = []
     identifier = f"{source}:{probe.event_type}/{probe.handler_name}::{probe.title}"
@@ -320,6 +338,12 @@ def _drive_executable_probe(probe: ExecutableProbe, instance: Any, *, source: st
 
         result = instance.handle(hook_input)
         actual_decision = str(getattr(result.decision, "value", result.decision)).lower()
+        if inconclusive is not None:
+            observed_text = "\n".join([result.reason or "", *result.context])
+            found = inconclusive_probe(probe, actual_decision, observed_text)
+            if found is not None:
+                inconclusive.append(found)
+                return failures
         if actual_decision != probe.expected_decision:
             failures.append(
                 f"{identifier}: expected decision {probe.expected_decision!r}, "
@@ -498,9 +522,54 @@ class TestEveryDeclaredInputProducesItsDeclaredVerdict:
     def test_every_blocking_test_with_a_declared_input_produces_its_declared_verdict(
         self,
     ) -> None:
-        failures, driven = _contract_failures()
-        assert driven > 0, "no test was actually driven -- the harness is checking nothing"
-        assert not failures, "Acceptance-test contract violated:\n\n" + "\n\n".join(failures)
+        run = _contract_failures()
+        assert run.driven > 0, "no test was actually driven -- the harness is checking nothing"
+        assert not run.failures, "Acceptance-test contract violated:\n\n" + "\n\n".join(
+            run.failures
+        )
+        run.settle_inconclusive()
+
+
+class TestALintTimeoutIsNotTheHandlersVerdict:
+    """N455: a deny probe whose linter timed out is inconclusive, not failed.
+
+    Driven through the real handler with its linter made to overrun, because
+    the recognition is only worth anything if it reads what the handler
+    actually emits.
+    """
+
+    def _timed_out_lint_deny_probe(self) -> tuple[ExecutableProbe, Any, str]:
+        instances = _handler_instances()
+        for test in _collect_all_blocking_tests():
+            if test["handler_name"] != "LintOnEditHandler" or test["expected_decision"] != "deny":
+                continue
+            probe = plan_probe(test, _repo_root())
+            if isinstance(probe, ExecutableProbe):
+                return probe, instances[(test["source"], test["handler_name"])], test["source"]
+        raise AssertionError("LintOnEditHandler declares no drivable deny probe")
+
+    def _drive_timed_out(self, inconclusive: list[InconclusiveProbe] | None) -> list[str]:
+        probe, instance, source = self._timed_out_lint_deny_probe()
+        with patch(
+            "claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess"
+        ) as mock_subprocess:
+            mock_subprocess.run.side_effect = subprocess.TimeoutExpired(
+                cmd="lint", timeout=Timeout.LINT_CHECK
+            )
+            mock_subprocess.TimeoutExpired = subprocess.TimeoutExpired
+            return _drive_executable_probe(
+                probe, instance, source=source, inconclusive=inconclusive
+            )
+
+    def test_a_timed_out_deny_probe_is_collected_as_inconclusive(self) -> None:
+        inconclusive: list[InconclusiveProbe] = []
+
+        assert self._drive_timed_out(inconclusive) == []
+        assert len(inconclusive) == 1
+        assert inconclusive[0].timeout.budget
+
+    def test_without_a_collector_the_same_probe_still_fails(self) -> None:
+        assert self._drive_timed_out(None)
 
 
 class TestDeclaredInputsAreIsolatedFromHostState:
@@ -523,10 +592,11 @@ class TestDeclaredInputsAreIsolatedFromHostState:
             ProjectContext, "_instance", dataclasses.replace(real, daemon_untracked_dir=host_state)
         )
 
-        failures, driven = _contract_failures()
+        run = _contract_failures()
 
-        assert driven > 0
-        assert not failures, "\n\n".join(failures)
+        assert run.driven > 0
+        assert not run.failures, "\n\n".join(run.failures)
+        run.settle_inconclusive()
 
     def test_the_host_state_directory_is_restored_after_the_run(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -563,26 +633,48 @@ def _isolated_state_dir() -> Iterator[None]:
             ProjectContext._instance = real
 
 
-def _contract_failures() -> tuple[list[str], int]:
-    """Drive every declared input in-process; return ``(failures, driven count)``."""
+@dataclasses.dataclass
+class _ContractRun:
+    """What driving every declared input produced."""
+
+    failures: list[str] = dataclasses.field(default_factory=list)
+    inconclusive: list[InconclusiveProbe] = dataclasses.field(default_factory=list)
+    driven: int = 0
+    lint_probes: int = 0
+
+    def settle_inconclusive(self) -> None:
+        """Fail a run whose linters mostly timed out; skip one with only a few.
+
+        Called after `failures` is asserted empty, so a skip never hides a
+        real mismatch (N455).
+        """
+        unusable = lint_unusable_failure(self.inconclusive, self.lint_probes)
+        assert unusable is None, unusable
+        skip_reason = inconclusive_skip_reason(self.inconclusive)
+        if skip_reason is not None:
+            pytest.skip(skip_reason)
+
+
+def _contract_failures() -> _ContractRun:
+    """Drive every declared input in-process, against an empty state directory."""
     with _isolated_state_dir():
         return _drive_declared_inputs()
 
 
-def _drive_declared_inputs() -> tuple[list[str], int]:
+def _drive_declared_inputs() -> _ContractRun:
     tests = _collect_all_blocking_tests()
     instances = _handler_instances()
     project_root = _repo_root()
 
-    failures: list[str] = []
-    driven = 0
+    run = _ContractRun()
+    failures = run.failures
     for test in tests:
         if test.get("hook_input"):
             instance = instances.get((test["source"], test["handler_name"]))
             if instance is None:
                 failures.append(f"{_identifier(test)}: no live handler instance found")
                 continue
-            driven += 1
+            run.driven += 1
             failures.extend(_drive_hook_input_test(test, instance))
             continue
 
@@ -600,6 +692,11 @@ def _drive_declared_inputs() -> tuple[list[str], int]:
             failures.append(f"{_identifier(test)}: no live handler instance found")
             continue
 
-        driven += 1
-        failures.extend(_drive_executable_probe(probe, instance, source=test["source"]))
-    return failures, driven
+        run.driven += 1
+        run.lint_probes += int(is_lint_probe(probe))
+        failures.extend(
+            _drive_executable_probe(
+                probe, instance, source=test["source"], inconclusive=run.inconclusive
+            )
+        )
+    return run

@@ -25,18 +25,28 @@ is what produced 18 of the 29.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.daemon.playbook_harness import (
+    MAX_LINT_TIMEOUT_SHARE,
     ExecutableProbe,
+    InconclusiveProbe,
+    LintTimeout,
     RefusedCommands,
     SkippedProbe,
     build_event,
     daemon_error,
     expand_project_dir,
+    inconclusive_probe,
+    inconclusive_skip_reason,
+    lint_timeout,
+    lint_unusable_failure,
     main_checkout_root,
     plan_probe,
     split_playbook,
@@ -45,6 +55,7 @@ from claude_code_hooks_daemon.daemon.playbook_harness import (
     wrapper_unreachable_reason,
 )
 from claude_code_hooks_daemon.daemon.synthetic_traffic import PLAYBOOK_PROBE
+from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import LintOnEditHandler
 
 _ROOT = Path("/repo")
 
@@ -642,3 +653,123 @@ class TestTheWrapperSaysWhenItCouldNotReachADaemon:
         """Real stderr is multi-line; the marker is rarely first."""
         stderr = "warming up\nHOOKS DAEMON ERROR [init_path_error]: no .claude found\ndone\n"
         assert wrapper_unreachable_reason(stderr) == "init_path_error: no .claude found"
+
+
+class TestALintTimeoutIsInconclusive:
+    """N455: a linter that timed out reached no verdict, so none is scored.
+
+    `lint_on_edit` fails OPEN on a timeout by design, and a loaded CI runner
+    makes the Swift linter overrun its budget. Scoring that allow as the
+    handler's answer to a deny probe reports an environment fact as a defect;
+    scoring it as a pass would hide a handler that stopped denying. Neither:
+    the probe is inconclusive, and a run where too many are is a failure.
+    """
+
+    _TIMED_OUT = (
+        "⚠️ Swift lint check timed out after 15s for invalid.swift - the write was "
+        "ALLOWED without this check passing."
+    )
+
+    def _lint_probe(self, **overrides: object) -> ExecutableProbe:
+        block = _block(
+            test_number=222,
+            handler_name=LintOnEditHandler.__name__,
+            title="Swift: invalid code blocked",
+            event_type="PostToolUse",
+            expected_message_patterns=[r"Swift lint FAILED"],
+            **overrides,
+        )
+        probe = plan_probe(block, _ROOT)
+        assert isinstance(probe, ExecutableProbe)
+        return probe
+
+    @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
+    def test_the_handlers_own_timeout_advisory_is_recognised(
+        self, mock_subprocess: MagicMock, tmp_path: Path
+    ) -> None:
+        """The recogniser and the handler share one template, so drive the handler.
+
+        A hand-typed sample here would let the two drift apart unnoticed --
+        exactly the prose-matching the recogniser exists to avoid.
+        """
+        target = tmp_path / "app.py"
+        target.write_text("x = 1")
+        mock_subprocess.run.side_effect = subprocess.TimeoutExpired(
+            cmd="python", timeout=Timeout.LINT_CHECK
+        )
+        mock_subprocess.TimeoutExpired = subprocess.TimeoutExpired
+
+        result = LintOnEditHandler().handle(
+            {"tool_name": "Write", "tool_input": {"file_path": str(target)}}
+        )
+
+        assert result.decision.value == "allow"
+        assert lint_timeout("\n".join(result.context)) == LintTimeout(
+            language="Python", budget=str(Timeout.LINT_CHECK)
+        )
+
+    def test_a_timeout_names_its_language_and_budget(self) -> None:
+        assert lint_timeout(self._TIMED_OUT) == LintTimeout(language="Swift", budget="15")
+
+    def test_other_advisories_are_not_a_timeout(self) -> None:
+        assert lint_timeout("⚠️ Swift lint tool not found (swiftc) - install") is None
+        assert lint_timeout("") is None
+
+    def test_a_timed_out_deny_probe_is_inconclusive_with_a_named_reason(self) -> None:
+        found = inconclusive_probe(self._lint_probe(), "", self._TIMED_OUT)
+
+        assert found == InconclusiveProbe(
+            label="#222 LintOnEditHandler", timeout=LintTimeout(language="Swift", budget="15")
+        )
+        assert found is not None
+        assert "#222 LintOnEditHandler" in found.reason
+        assert "Swift" in found.reason
+        assert "15s" in found.reason
+
+    def test_a_real_wrong_decision_is_not_inconclusive_and_still_fails(self) -> None:
+        """An allow with no timeout advisory is the handler's own answer."""
+        probe = self._lint_probe()
+
+        assert inconclusive_probe(probe, "", "") is None
+        assert verdict(probe, "", "") is not None
+
+    def test_a_deny_is_never_inconclusive(self) -> None:
+        """The handler answered; a timeout text elsewhere in the response is not its."""
+        assert inconclusive_probe(self._lint_probe(), "block", self._TIMED_OUT) is None
+
+    def test_another_handlers_probe_is_never_inconclusive(self) -> None:
+        """Only lint_on_edit's verdict hangs on the linter finishing."""
+        probe = plan_probe(_block(), _ROOT)
+        assert isinstance(probe, ExecutableProbe)
+        assert inconclusive_probe(probe, "", self._TIMED_OUT) is None
+
+    def _inconclusive(self, count: int) -> list[InconclusiveProbe]:
+        return [
+            InconclusiveProbe(label=f"#{n} LintOnEditHandler", timeout=LintTimeout("Swift", "15"))
+            for n in range(count)
+        ]
+
+    def test_one_timeout_among_many_lint_probes_is_a_skip_not_a_failure(self) -> None:
+        inconclusive = self._inconclusive(1)
+
+        assert lint_unusable_failure(inconclusive, lint_probes=20) is None
+        reason = inconclusive_skip_reason(inconclusive)
+        assert reason is not None
+        assert "#0 LintOnEditHandler" in reason and "Swift" in reason and "15s" in reason
+
+    def test_every_lint_probe_timing_out_is_a_failure(self) -> None:
+        failure = lint_unusable_failure(self._inconclusive(3), lint_probes=3)
+
+        assert failure is not None
+        assert "linter unusable on this runner" in failure
+
+    def test_more_than_the_declared_share_timing_out_is_a_failure(self) -> None:
+        lint_probes = 20
+        over = int(lint_probes * MAX_LINT_TIMEOUT_SHARE) + 1
+
+        assert lint_unusable_failure(self._inconclusive(over), lint_probes) is not None
+        assert lint_unusable_failure(self._inconclusive(over - 1), lint_probes) is None
+
+    def test_a_run_with_no_timeouts_has_nothing_to_report(self) -> None:
+        assert lint_unusable_failure([], lint_probes=20) is None
+        assert inconclusive_skip_reason([]) is None

@@ -1035,7 +1035,16 @@ passed in another leg of the same run and all pass re-run in isolation (179 pass
 missed `write_protected_paths`' 10 KB hostile-input bound (8.6s against 7.96s) and passes alone. Same class: load,
 not code.
 
-**Status**: ⬜ Open.
+**Recurrence, main CI run 39958669305** (code tier, full-suite fallback, 1 failed / 52526 passed):
+`test_playbook_harness.py:311`, probe #222 LintOnEditHandler, the same "Swift lint check timed out after 15s for
+invalid.swift - the write was ALLOWED" scored as "expected deny, observed no decision at all".
+
+**Status**: 🟡 Acceptance half fixed on branch `worktree-n455-lint-timeout-probe`. Both harnesses (the live playbook
+harness and the in-process acceptance contract) recognise a linter timeout through `LINT_TIMEOUT_NOTICE`, the
+template `lint_on_edit` now formats its timeout advisory from, and report such a lint_on_edit probe as an
+INCONCLUSIVE skip naming the probe, language and budget, never a pass. Every other mismatch still fails, and more
+than `MAX_LINT_TIMEOUT_SHARE` (20%) of a run's lint_on_edit probes timing out, or all of them, fails as "linter
+unusable on this runner". The timing-bound half (N376 class, Plan 00476 Design 6) is unchanged and still ⬜ Open.
 
 ### N454 — write_protected_paths denies a read-only grep loop as a write to `.claude/ccy/ccy.env.local`, a path the command never names
 
