@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.core.session_mode_log import ModeTransition, TransitionAction
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.session_modes import ModeLabel
 from claude_code_hooks_daemon.utils.session_signal_paths import session_stem
 
@@ -159,7 +160,13 @@ def find_typed_clears(lines: Iterable[str]) -> tuple[TypedClear, ...]:
             continue
         try:
             record = json.loads(line)
-        except ValueError:
+        except ValueError as error:
+            log_and_continue(
+                logger,
+                error,
+                reason="goal-clear attribution: a transcript line that is not JSON holds no clear",
+                level=logging.DEBUG,
+            )
             continue
         if isinstance(record, dict):
             clear = _clear_in(record)
@@ -174,10 +181,10 @@ def read_clear_record(path: Path) -> ClearRecord | None:
     Raises:
         ClearRecordUnreadableError: it exists but cannot be read or is malformed.
     """
+    if not path.exists():
+        return None
     try:
         text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return None
     except OSError as error:
         raise ClearRecordUnreadableError(f"{path}: {error}") from error
     try:

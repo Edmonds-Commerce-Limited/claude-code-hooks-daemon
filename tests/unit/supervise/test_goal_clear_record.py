@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from claude_code_hooks_daemon.core.goal_clear_attribution import (
     GOAL_CLEAR_RECORD_SUFFIX,
@@ -46,7 +46,8 @@ def _write_trigger(sidecar_dir: Path, *, session_id: str = _SESSION) -> Path:
     return path
 
 
-def _decide(sidecar_dir: Path, *, dry_run: bool = False) -> object:
+def _decide(sidecar_dir: Path, *, dry_run: bool = False) -> Any:
+    # Any: the supervisor is loaded from a script path, so its DecisionOutcome type is not importable.
     policy = _mod.CompactPolicy()
     return _mod.decide_once(
         _mod.CompactStateMachine(policy),
