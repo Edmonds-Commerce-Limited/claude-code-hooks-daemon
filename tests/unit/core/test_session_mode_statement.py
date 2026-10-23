@@ -145,3 +145,22 @@ class TestRestartRestatement:
 
     def test_nothing_pending_is_no_line(self, tmp_path: Path) -> None:
         assert _statement(_loaded(tmp_path), _Sources()) is None
+
+
+class TestQueuedLines:
+    """A line with no mode entry behind it (Plan 00501 Task 8.2) shares the one statement."""
+
+    def test_a_queued_line_is_stated_once(self, tmp_path: Path) -> None:
+        registry = _loaded(tmp_path)
+        registry.claim_first_prompt(_SID)
+        registry.queue_line(_SID, "type `/goal clear` again")
+        assert _statement(registry, _Sources()) == "SESSION MODE: type `/goal clear` again."
+        assert _statement(registry, _Sources()) is None
+
+    def test_a_queued_line_follows_the_notices_in_the_same_line(self, tmp_path: Path) -> None:
+        registry = _loaded(tmp_path, _focus())
+        registry.queue_line(_SID, "type `/goal clear` again")
+        line = _statement(registry, _Sources())
+        assert line is not None
+        assert line.count("SESSION MODE:") == 1
+        assert line.index("survived a daemon restart") < line.index("type `/goal clear` again")

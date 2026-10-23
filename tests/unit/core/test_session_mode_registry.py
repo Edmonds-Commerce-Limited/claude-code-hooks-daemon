@@ -839,6 +839,29 @@ class TestFirstPromptClaim:
         assert FIRST_PROMPT_WINDOW_SECONDS == MAX_PAUSE_SPAN_SECONDS + PAUSE_GRACE_SECONDS
 
 
+class TestQueuedLines:
+    """One-time lines with no mode entry behind them (Plan 00501 Task 8.2)."""
+
+    def test_a_line_is_taken_once_by_its_session_in_order(
+        self, registry: SessionModeRegistry
+    ) -> None:
+        registry.queue_line(SID, "first")
+        registry.queue_line(SID, "second")
+        assert registry.take_lines(OTHER) == ()
+        assert registry.take_lines(SID) == ("first", "second")
+        assert registry.take_lines(SID) == ()
+
+    def test_lines_and_notices_are_separate_queues(self, registry: SessionModeRegistry) -> None:
+        registry.queue_line(SID, "a line")
+        assert registry.take_notices(SID) == ()
+        assert registry.take_lines(SID) == ("a line",)
+
+    @pytest.mark.parametrize("text", ["", "   "])
+    def test_a_blank_line_is_refused(self, registry: SessionModeRegistry, text: str) -> None:
+        with pytest.raises(ValueError, match="blank"):
+            registry.queue_line(SID, text)
+
+
 class TestGoalLoopNotice:
     """The one-time line a goal-loop entry queues (Plan 00501 Task 6.3)."""
 

@@ -4,7 +4,9 @@ The registry queues one-time notices (an expiry; after a daemon restart, each
 mode that survived it or was cleared by it; and, through
 :meth:`SessionModeRegistry.queue_notice`, the goal-loop detector's entry with
 whether its goal clear was signalled) and hands each out once
-(:meth:`SessionModeRegistry.take_notices` is pop-once). This module is their
+(:meth:`SessionModeRegistry.take_notices` is pop-once), plus one-time lines with
+no mode entry behind them (:meth:`SessionModeRegistry.take_lines`, e.g. the
+goal-clear attribution's "clear again" line, Task 8.2). This module is their
 only reader: ``focus_mode_trigger`` calls it on every prompt that reaches it,
 command or not, so the news is stated whatever the prompt is. A usage-paused
 session's prompts are denied before they reach the trigger, so
@@ -76,6 +78,7 @@ def pending_mode_statement(
             restarted = True
     if restarted and unattended():
         parts.append(_UNATTENDED)
+    parts.extend(registry.take_lines(session_id))
     if not parts:
         return None
     return f"{_PREFIX}{'; '.join(parts)}."

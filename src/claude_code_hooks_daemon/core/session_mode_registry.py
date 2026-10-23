@@ -185,6 +185,7 @@ class SessionModeRegistry:
         self._lock = threading.RLock()
         self._entries: dict[str, _Entries] = {}
         self._notices: dict[str, list[ModeNotice]] = {}
+        self._lines: dict[str, list[str]] = {}
         self._first_prompt_claimed: set[str] = set()
         self._loaded_at: float | None = None
 
@@ -348,6 +349,22 @@ class SessionModeRegistry:
         """Queue ``notice`` for its entry's session, after any already pending."""
         with self._lock:
             self._notices.setdefault(notice.entry.session_id, []).append(notice)
+
+    def queue_line(self, session_id: str, text: str) -> None:
+        """Queue a one-time line that has no mode entry behind it, such as a goal-clear attribution.
+
+        Raises:
+            ValueError: ``text`` is blank.
+        """
+        if not text.strip():
+            raise ValueError("a queued session-mode line cannot be blank")
+        with self._lock:
+            self._lines.setdefault(session_id, []).append(text)
+
+    def take_lines(self, session_id: str) -> tuple[str, ...]:
+        """``session_id``'s pending one-time lines; each is returned once."""
+        with self._lock:
+            return tuple(self._lines.pop(session_id, []))
 
     def load(self) -> None:
         """Read every session file once, applying the restart rules.
