@@ -4,11 +4,60 @@ import stat
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from claude_code_hooks_daemon.strategies.lint.common import (
     COMMON_SKIP_PATHS,
+    INTERPRETER_BIN_DIR,
     lint_output_dir,
     matches_skip_path,
+    resolve_lint_executable,
 )
+
+
+def _make_tool(directory: Path, name: str) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    tool = directory / name
+    tool.write_text("#!/bin/sh\nexit 0\n")
+    tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
+    return tool
+
+
+class TestResolveLintExecutable:
+    """The one resolver both lint gates use to find a linter binary."""
+
+    def test_absolute_path_is_returned_unchanged(self) -> None:
+        assert resolve_lint_executable("/no/such/linter", ()) == "/no/such/linter"
+
+    def test_workspace_bin_dir_wins_over_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pinned = _make_tool(tmp_path / "ws" / "node_modules" / ".bin", "n538-tool")
+        _make_tool(tmp_path / "global", "n538-tool")
+        monkeypatch.setenv("PATH", str(tmp_path / "global"))
+        resolved = resolve_lint_executable("n538-tool", (pinned.parent,))
+        assert resolved == str(pinned)
+
+    def test_bin_dirs_are_searched_in_order(self, tmp_path: Path) -> None:
+        first = _make_tool(tmp_path / "a", "n538-tool")
+        _make_tool(tmp_path / "b", "n538-tool")
+        resolved = resolve_lint_executable("n538-tool", (first.parent, tmp_path / "b"))
+        assert resolved == str(first)
+
+    def test_interpreter_bin_dir_is_searched_before_path(self) -> None:
+        interpreter = Path(INTERPRETER_BIN_DIR)
+        python_name = next(
+            (p.name for p in sorted(interpreter.iterdir()) if p.name.startswith("python")),
+        )
+        assert resolve_lint_executable(python_name, ()) == str(interpreter / python_name)
+
+    def test_falls_back_to_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        tool = _make_tool(tmp_path / "global", "n538-only-on-path")
+        monkeypatch.setenv("PATH", str(tool.parent))
+        assert resolve_lint_executable("n538-only-on-path", (tmp_path / "missing",)) == str(tool)
+
+    def test_absent_tool_is_none(self, tmp_path: Path) -> None:
+        assert resolve_lint_executable("n538-no-such-linter-xyzzy", (tmp_path,)) is None
 
 
 class TestCommonSkipPaths:

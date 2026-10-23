@@ -1,7 +1,11 @@
 """Shared constants and utilities for lint strategies - DRY."""
 
+import shutil
+import sys
 import tempfile
 from functools import lru_cache
+from pathlib import Path
+from typing import Final
 
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.strategies.lint.protocol import ProvidesCommandValues
@@ -26,6 +30,47 @@ COMMON_SKIP_PATHS: tuple[str, ...] = tuple(
 
 
 FILE_PLACEHOLDER = "{file}"
+
+#: The running interpreter's own ``bin`` directory - the project venv, where a
+#: Python project's console-script linters (``ruff``, ``mypy``) live.
+INTERPRETER_BIN_DIR: Final[Path] = Path(sys.executable).parent
+
+
+def resolve_lint_executable(executable: str, bin_dirs: tuple[Path, ...]) -> str | None:
+    """Resolve a lint tool name to a runnable path, or None if absent.
+
+    The ONE resolver both lint gates use (`lint_on_edit` at Write/Edit time,
+    `staged_lint_gate` at commit time), so the two can never launch different
+    binaries for the same file. When the gate skipped the sub-project's tool
+    directories, a pinned ``node_modules/.bin`` copy linted the file at edit
+    time and a global ``PATH`` copy re-linted it at commit.
+
+    Search order: ``bin_dirs`` (the file's own workspace tool directories,
+    e.g. ``vendor/bin``, ``node_modules/.bin``) in order, then
+    :data:`INTERPRETER_BIN_DIR`, then ``PATH``. The workspace comes first
+    because a project pins its linter version in its own manifest
+    (Plan 00296). An absolute ``executable`` is returned unchanged.
+
+    Returning None rather than guessing is deliberate: callers treat an absent
+    tool as "not checked", never as a failure, because a tool that is not
+    installed must never block anyone.
+
+    Args:
+        executable: The command's first element, bare or absolute.
+        bin_dirs: The file's resolved workspace ``bin_dirs``.
+
+    Returns:
+        The absolute path to run, or None when the tool is not found.
+    """
+    if Path(executable).is_absolute():
+        return executable
+    for directory in (*bin_dirs, INTERPRETER_BIN_DIR):
+        candidate = directory / executable
+        # eacces-safe-exempt: resolving the LINTER binary from configured tool
+        # directories, not the file under lint.
+        if candidate.is_file():
+            return str(candidate)
+    return shutil.which(executable)
 
 
 def build_lint_argv(
