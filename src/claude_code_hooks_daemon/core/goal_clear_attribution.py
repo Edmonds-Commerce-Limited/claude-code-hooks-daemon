@@ -57,9 +57,12 @@ CLEARING_TOKENS: Final[frozenset[str]] = frozenset(
 #: clear typed later is not taken for an older supervisor clear that never landed.
 FRESH_WINDOW_SECONDS: Final[float] = 120.0
 
-#: How far a record may post-date the clear it attributes: both clocks are this host's,
-#: but the transcript stamps whole milliseconds.
-CLOCK_TOLERANCE_SECONDS: Final[float] = 2.0
+#: How far a record may post-date the clear it attributes. The supervisor stamps the
+#: record at the start of the tick that types the clear, so its own clear is never
+#: earlier; the only slack needed is the transcript flooring to whole milliseconds
+#: (both clocks are this host's). Anything wider takes a human clear typed just
+#: before the supervisor's tick for the supervisor's (Plan 00474 N534).
+CLOCK_TOLERANCE_SECONDS: Final[float] = 0.001
 
 _COMMAND_PREFIX: Final[str] = "/goal "
 _RECORD_TYPE_SYSTEM: Final[str] = "system"

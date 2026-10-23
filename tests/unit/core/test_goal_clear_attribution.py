@@ -199,6 +199,43 @@ class TestAttributeClear:
         verdict = attribute_clear(_clear(), session_id=SESSION, directory=tmp_path)
         assert verdict.attribution is Attribution.SUPERVISOR
 
+    def test_a_clear_stamped_before_the_record_is_a_human_and_keeps_the_record(
+        self, tmp_path: Path
+    ) -> None:
+        # Plan 00501 act-mode run: the owner's clear was stamped half a second before
+        # the supervisor's record. The record is written BEFORE the supervisor types,
+        # so a clear stamped earlier than it cannot be the supervisor's.
+        path = _write_record(tmp_path, ts=CLEAR_AT + 0.5)
+        verdict = attribute_clear(_clear(), session_id=SESSION, directory=tmp_path)
+        assert verdict.attribution is Attribution.HUMAN
+        assert "record=stale" in verdict.evidence
+        assert path.exists(), "the record still belongs to the supervisor's own clear"
+
+    def test_a_human_clear_then_the_supervisor_clear_are_each_attributed(
+        self, tmp_path: Path
+    ) -> None:
+        # The double clear: the human types, then the supervisor's pending tick types too.
+        _write_record(tmp_path, ts=CLEAR_AT + 0.5)
+        human = attribute_clear(_clear(), session_id=SESSION, directory=tmp_path)
+        supervisor = attribute_clear(
+            TypedClear(key="u-3", at=CLEAR_AT + 0.7, argument="clear"),
+            session_id=SESSION,
+            directory=tmp_path,
+        )
+        assert (human.attribution, supervisor.attribution) == (
+            Attribution.HUMAN,
+            Attribution.SUPERVISOR,
+        )
+
+    def test_a_stamp_truncated_to_the_millisecond_is_still_the_supervisor(
+        self, tmp_path: Path
+    ) -> None:
+        # The transcript floors to whole milliseconds, so the supervisor's own clear
+        # can read up to 1 ms earlier than the record written before it.
+        _write_record(tmp_path, ts=CLEAR_AT + 0.0009)
+        verdict = attribute_clear(_clear(), session_id=SESSION, directory=tmp_path)
+        assert verdict.attribution is Attribution.SUPERVISOR
+
     def test_a_different_command_is_a_human(self, tmp_path: Path) -> None:
         _write_record(tmp_path)
         verdict = attribute_clear(_clear("stop"), session_id=SESSION, directory=tmp_path)
