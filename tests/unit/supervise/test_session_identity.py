@@ -349,11 +349,10 @@ def _live_shape(root: Path) -> Path:
 
 @pytest.mark.usefixtures("_clean_cache")
 class TestLegacyHostFallback:
-    def _child(self, root: Path) -> object:
-        return _mod.WorkerChildPid(proc_root=root, host_pid=lambda: _HOST, own_pid=lambda: _WORKER)
-
     def test_live_shape_resolves_the_claude_grandchild(self, tmp_path: Path) -> None:
-        child = self._child(_live_shape(tmp_path))
+        child = _mod.WorkerChildPid(
+            proc_root=_live_shape(tmp_path), host_pid=lambda: _HOST, own_pid=lambda: _WORKER
+        )
         assert child.learn(None) is None
         assert child.own_session_ids() == frozenset({_MINE})
 
@@ -372,7 +371,9 @@ class TestLegacyHostFallback:
     def test_a_sent_pid_replaces_the_fallback(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        child = self._child(_live_shape(tmp_path))
+        child = _mod.WorkerChildPid(
+            proc_root=_live_shape(tmp_path), host_pid=lambda: _HOST, own_pid=lambda: _WORKER
+        )
         child.learn(None)
         seen: list[object] = []
         monkeypatch.setattr(
@@ -410,7 +411,11 @@ class TestLegacyHostFallback:
             dry_run=True,
             sidecar_dir=sidecars,
             policy=_mod.CompactPolicy(),
-            child=self._child(_live_shape(tmp_path / "proc")),
+            child=_mod.WorkerChildPid(
+                proc_root=_live_shape(tmp_path / "proc"),
+                host_pid=lambda: _HOST,
+                own_pid=lambda: _WORKER,
+            ),
         )
         assert seen == [frozenset({_MINE})]
 
