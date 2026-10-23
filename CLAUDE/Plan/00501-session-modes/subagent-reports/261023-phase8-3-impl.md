@@ -347,3 +347,42 @@ The code is at `92421a271`; this report is committed on top of it.
    - On a clean tree, run `FULL_QA_LOCK_WAIT_SECONDS=3600 ./scripts/qa/llm_qa.py changed --range 8ea9c88a8..HEAD --allow-unmapped > untracked/scratch/qa-501p83b.txt 2>&1`.
    - Fix what it reports and re-run until it is clean.
 5. Tick Task 8.3 in PLAN.md only once 1 to 4 hold.
+
+## Part 4 (part C)
+
+Brief: `untracked/scratch/brief-501-phase8-3c.md`. Every item on the Part 3 "Left" list is done. The code and docs
+are in commit `2c9c0de78`.
+
+### What changed
+
+- **`/mode` skill** (`.claude/skills/mode/SKILL.md`, `invoke.sh`):
+  - `goals manual|off` maps to `hooks-daemon goals off`, and `goals auto|on` maps to `hooks-daemon goals on`.
+  - The usage block, description and argument hint list both.
+  - No template copy of this skill exists under `src/`, and no test covers it.
+- **Docs**:
+  - `CLAUDE/core/SessionModes.core.md` and its template twin are byte-identical (`cmp` checked).
+  - They gain a `manual-goals` row in the modes table and the new precedence order
+    (`... awaiting-human > manual-goals > focus ...`).
+  - A "Manual goals" section covers entry, exit, what is suppressed (automated `.goal-intent` writes and retirement
+    clears) and what is not (the goal-loop clear, the clear on entering focus, `clear-goal`, `continue`, ticks and
+    guards). It also covers `MANUAL GOALS NOT CHANGED`.
+  - The `goals` CLI row and the two new IPC actions are documented.
+  - The `CLAUDE/CLAUDE.md` routing row now names manual-goals.
+- **Status-line defect, found and fixed test-first**:
+  - `session_mode_indicator._COLOURS` had no `ModeLabel.MANUAL_GOALS`, so `_badge` raised `KeyError` whenever
+    manual-goals was the top mode.
+  - Fix: manual-goals is now magenta, and the `explain_segment` text and module docstring list it in precedence.
+  - New tests: manual-goals shown, manual-goals outranks focus, every `ModeLabel` has a colour, and the explanation
+    names every `ModeLabel`.
+  - The tests failed before the fix (3 RED) and pass after it (20 passed).
+- **Release note**: `CLAUDE/UPGRADES/UNRELEASED/release-notes/026-manual-goals-mode.md`, in the same format as 025.
+
+### QA
+
+`run_autofix.sh` made no changes. `llm_qa.py changed --range 8ea9c88a8..HEAD --allow-unmapped` on the clean tree at
+`2c9c0de78` gave **`QA: 41/41 PASSED`**, with no failures.
+
+### Head
+
+Task 8.3 is ticked in PLAN.md, and this report is committed with it on top of `2c9c0de78`. The branch is pushed. It
+has not been merged.
