@@ -117,7 +117,8 @@ Follow-ups, not defects in the reviewers' judgement:
   (e.g. `node_modules/.bin`), while `lint_on_edit` does, so the two gates can run different linter binaries on the
   same file.
 
-**Status**: ⬜ open, to fix on the release branch.
+**Status**: ✅ fixed on `release/3.71.0` (merge ea8259cd0): one shared `resolve_lint_executable` for both gates,
+sub-project tool directories first (`subagent-reports/261023-r371-lint-resolver.md`).
 
 ### N537 — v3.71.0 release review, second pass: footprint and supervisor defects
 
@@ -130,7 +131,9 @@ Follow-ups, not defects in the reviewers' judgement:
   when the send is then held or the write fails, so a human clear within 120 s is credited to the supervisor; a failed
   atomic write leaves its `.tmp` file behind.
 
-**Status**: 🔄 footprint with N535; supervisor on worktree-r371-supervisor.
+**Status**: ✅ fixed on `release/3.71.0`: footprint with N535 (07e9583c2); supervisor 3878fa40d
+(`subagent-reports/261023-r371-supervisor.md`; the focus-hold and goal-clear record fixes are host code, live at the
+next ccy relaunch).
 
 ### N536 — v3.71.0 release code review: defects fixed on the release branch
 
@@ -146,7 +149,9 @@ Follow-ups, not defects in the reviewers' judgement:
 - **Handlers**: `lint_on_edit` and the staged lint gate run the linter from different directories in a sub-project;
   three helpers have no production caller.
 
-**Status**: 🔄 four fix branches off `release/3.71.0` in flight.
+**Status**: ✅ fixed on `release/3.71.0`: dispatch/goal-loop 17d1cce34, lint/dead code 047d41947, session modes
+d70563b52 (with 3ca1f16f7), relay repair f54941702. D5 (manual-goals message) was corrected rather than gating the
+detector, per Plan 00501 Task 8.3. Combined QA `llm_qa.py changed --range df6c44a3b..ea8259cd0`: 41/41.
 
 ### N535 — Claude Code 2.1.309: a nested CLAUDE.md over the size limit now loads its start, not skipped
 
@@ -157,7 +162,9 @@ conflict row).
   and the instruction-loading contract FACTS G4-03 (nested files) and G1-05 say the same. The changelog does not
   state the limit for nested files.
 
-**Status**: 🔄 contract refresh and footprint wording on the release branch.
+**Status**: ✅ fixed on `release/3.71.0` (07e9583c2): contract re-anchored and audited at 2.1.309, new FACTS G4-05
+(an on-demand file over the limit loads its start), footprint `truncated` flag
+(`subagent-reports/261023-r371-instructions-contract.md`).
 
 ### N534 — the supervisor focus hold outlives every sub-agent, and a human `/goal clear` can be credited to the supervisor
 
