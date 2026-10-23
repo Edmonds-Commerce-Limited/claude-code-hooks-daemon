@@ -29,6 +29,7 @@ import hashlib
 import logging
 import os
 import sys
+import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -56,6 +57,8 @@ REPAIR_MODULE: Final[str] = "claude_code_hooks_daemon.install.relay_repair"
 REPAIR_FAILED_EXIT_CODE: Final[int] = 1
 
 _LOCK_NAME: Final[str] = "repair.lock"
+#: Held only for the instant of a state write, never across the repair's work.
+_STATE_LOCK_NAME: Final[str] = "state.lock"
 _STATE_SUFFIX: Final[str] = ".state"
 _LOG_SUFFIX: Final[str] = ".log"
 _KEY_HEX_CHARS: Final[int] = 16
@@ -111,25 +114,65 @@ def _state_text(status: SyncStatus, *, detail: str, pid: int | None = None) -> s
     return "\n".join(lines) + "\n"
 
 
+def _state_lock(path: Path) -> Path:
+    return path.parent / _STATE_LOCK_NAME
+
+
 def _write_state(path: Path, status: SyncStatus, *, detail: str, pid: int | None = None) -> None:
-    """Replace the state file atomically, so a reader never sees half of it."""
+    """Replace the state file atomically, so a reader never sees half of it.
+
+    Every write holds the state lock, so the starter's pid record and the
+    child's own records never interleave.
+    """
+    with _exclusive(_state_lock(path)):
+        _replace_state(path, _state_text(status, detail=detail, pid=pid))
+
+
+def _replace_state(path: Path, text: str) -> None:
     tmp = unique_temp_path(path)
-    tmp.write_text(_state_text(status, detail=detail, pid=pid))
+    tmp.write_text(text)
     tmp.replace(path)
+
+
+def _record_spawned_pid(path: Path, claim: str, pid: int, *, detail: str) -> None:
+    """Put the child's pid on the claim, unless the child has written its own record.
+
+    Without a pid a dead child is indistinguishable from a live one. A child
+    that already recorded anything wrote its own pid, and a finished one wrote
+    its result, which must not be put back to running.
+    """
+    with _exclusive(_state_lock(path)):
+        if path.read_text() == claim:
+            _replace_state(path, _state_text(SyncStatus.RUNNING, detail=detail, pid=pid))
+
+
+def _reap(pid: int) -> None:
+    try:
+        _, status = os.waitpid(pid, 0)
+    except ChildProcessError:
+        logger.warning("relay repair child %d was reaped elsewhere", pid)
+        return
+    logger.info("relay repair child %d exited (%d)", pid, os.waitstatus_to_exitcode(status))
 
 
 def spawn_detached(argv: list[str], log: Path) -> int:
     """Start ``argv`` in a new session, stdin from /dev/null, stdout and stderr to ``log``.
 
     No shell and no PATH search: ``argv[0]`` must be a path. The caller does not
-    wait. Raises OSError when the program cannot be started.
+    wait; a daemon thread reaps the child, which otherwise stays a zombie for the
+    caller's lifetime and still answers ``kill(pid, 0)``. Raises OSError when the
+    program cannot be started.
     """
     file_actions = [
         (os.POSIX_SPAWN_OPEN, 0, os.devnull, os.O_RDONLY, 0),
         (os.POSIX_SPAWN_OPEN, 1, str(log), os.O_WRONLY | os.O_CREAT | os.O_APPEND, _FILE_MODE),
         (os.POSIX_SPAWN_DUP2, 1, 2),
     ]
-    return os.posix_spawn(argv[0], argv, os.environ, file_actions=file_actions, setsid=True)
+    pid = os.posix_spawn(argv[0], argv, os.environ, file_actions=file_actions, setsid=True)
+    threading.Thread(
+        target=_reap, args=(pid,), name=f"relay-repair-reap-{pid}", daemon=True
+    ).start()
+    return pid
 
 
 def start_relay_repair(
@@ -162,10 +205,10 @@ def start_relay_repair(
         return notice(record=read_state_file(state, log))
     except OSError as exc:
         return notice(failure=f"the repair state file {state} cannot be created ({exc})")
+    detail = f"repairing {binary} ({defect}), starting"
+    claim = _state_text(SyncStatus.RUNNING, detail=detail)
     with os.fdopen(fd, "w") as handle:
-        handle.write(
-            _state_text(SyncStatus.RUNNING, detail=f"repairing {binary} ({defect}), starting")
-        )
+        handle.write(claim)
 
     argv = [
         sys.executable,
@@ -179,12 +222,18 @@ def start_relay_repair(
         str(state),
     ]
     try:
-        spawn_fn(argv, log)
+        pid = spawn_fn(argv, log)
     except OSError as exc:
         failure = f"the background repair could not be started ({exc})"
         logger.error("relay repair of %s not started: %s", binary, exc)
         _write_state(state, SyncStatus.FAILED, detail=failure)
         return notice(failure=failure)
+    try:
+        _record_spawned_pid(state, claim, pid, detail=detail)
+    except OSError as exc:
+        # The repair is running; only its pid is unrecorded, and the reader
+        # fails a pid-less claim once its grace has passed.
+        logger.error("relay repair of %s: pid %d not recorded in %s: %s", binary, pid, state, exc)
     return notice(started=True)
 
 

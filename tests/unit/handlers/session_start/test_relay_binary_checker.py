@@ -8,6 +8,7 @@ and the fix, and says nothing when the relay is disabled or the binary is usable
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -41,7 +42,8 @@ class _Spawner:
         self.calls.append(argv)
         if self.error is not None:
             raise self.error
-        return 4242
+        # A live pid: the claim records it, and a dead one would read as failed.
+        return os.getpid()
 
 
 def _handler(root: Path, spawner: _Spawner | None = None) -> RelayBinaryCheckerHandler:

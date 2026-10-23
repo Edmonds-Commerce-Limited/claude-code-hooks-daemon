@@ -813,6 +813,48 @@ class TestProvisionRelayForInstall:
         text = "\n".join(result.lines)
         assert str(tmp_path / "bin" / "hooks-relay") in text
         assert "relay_source: auto" in text
+        assert f"its binary is {RELAY_DEFECT_MISSING}:" in text
+
+    def test_the_banner_names_the_actual_defect_of_a_present_executable(
+        self, tmp_path: Path
+    ) -> None:
+        """An executable that cannot run (a Git LFS pointer, say) is not 'missing'."""
+        binary = tmp_path / "bin" / "hooks-relay"
+        binary.parent.mkdir()
+        binary.write_text("version https://git-lfs.github.com/spec/v1\n")
+        binary.chmod(0o755)
+
+        result = provision_relay_for_install(
+            tmp_path,
+            tmp_path,
+            self._transport(tmp_path, relay_enabled=True, relay_source=None),
+            version_tag="v1.0.0",
+            fetch_fn=_failing_fetch,
+        )
+
+        assert result.status == "failed"
+        text = "\n".join(result.lines)
+        assert f"its binary is {RELAY_DEFECT_NOT_RUNNABLE}: {binary}" in text
+        assert "missing or not executable" not in text
+
+    def test_a_failed_route_over_a_usable_binary_claims_no_defect(self, tmp_path: Path) -> None:
+        """A failed download leaves the old, runnable file: the banner must not call it broken."""
+        binary = tmp_path / "bin" / "hooks-relay"
+        binary.parent.mkdir()
+        binary.write_bytes(b"\x7fELF" + b"\x00" * 60)
+        binary.chmod(0o755)
+
+        result = provision_relay_for_install(
+            tmp_path,
+            tmp_path,
+            self._transport(tmp_path, relay_enabled=True, relay_source="download"),
+            version_tag="v1.0.0",
+            fetch_fn=_failing_fetch,
+        )
+
+        assert result.status == "failed"
+        text = "\n".join(result.lines)
+        assert f"its binary could not be provisioned: {binary}" in text
 
     def test_enabled_without_source_but_binary_present_is_provisioned(self, tmp_path: Path) -> None:
         binary = tmp_path / "bin" / "hooks-relay"
