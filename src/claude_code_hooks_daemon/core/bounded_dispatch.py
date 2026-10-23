@@ -365,18 +365,19 @@ class BoundedDispatcher(Generic[T]):
             # abandoned calls used to deny every future dispatch permanently
             # (Plan 00466 N40 M2). An exempt call keeps its slot until it
             # really finishes (Plan 00533): that slot is what bounds exempt
-            # stragglers, which no straggler cap counts.
+            # stragglers, so they are never recorded in `_stragglers`, which
+            # the ordinary straggler cap counts.
             if not capacity_exempt:
                 permit.release()
-            # Recorded only while the call is still running, under the same
-            # lock the worker's `finally` pops under: a worker that finished
-            # after the timeout fired but before this point has already made
-            # its (then no-op) pop, so an entry added now would name a dead
-            # thread and never be removed. A worker still running here pops
-            # only after this block releases the lock.
-            with self._threads_lock:
-                if not future.done():
-                    self._stragglers[thread] = _StragglerInfo(label=label, started_at=start)
+                # Recorded only while the call is still running, under the
+                # same lock the worker's `finally` pops under: a worker that
+                # finished after the timeout fired but before this point has
+                # already made its (then no-op) pop, so an entry added now
+                # would name a dead thread and never be removed. A worker
+                # still running here pops only after this block releases it.
+                with self._threads_lock:
+                    if not future.done():
+                        self._stragglers[thread] = _StragglerInfo(label=label, started_at=start)
             logger.warning(
                 "%s exceeded its %.2fs dispatch budget -- treating as not "
                 "judged in time; it keeps running in the background",
@@ -492,8 +493,10 @@ class BoundedDispatcher(Generic[T]):
         )
 
     def straggler_health(self) -> StragglerHealth:
-        """Count and oldest age of calls currently running past their own
-        timeout (Plan 00466 N40 M2), for the daemon's health reporting.
+        """Count and oldest age of ordinary calls currently running past
+        their own timeout (Plan 00466 N40 M2), for the daemon's health
+        reporting. Capacity-exempt stragglers are bounded by their own pool
+        instead and are not counted here.
         """
         now = time.perf_counter()
         with self._threads_lock:

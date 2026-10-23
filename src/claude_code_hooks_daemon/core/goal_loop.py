@@ -323,7 +323,11 @@ def read_new_lines(
     if mid_line:
         handle_start = data.find(b"\n")
         if handle_start < 0:
-            return [], Checkpoint(path=str(path), inode=status.st_ino, offset=start)
+            # The whole tail is inside one unfinished line: ``start`` is not a
+            # boundary, so stay on the last known one (the file start on first
+            # sight) and let the next read skip to the tail again.
+            known_boundary = checkpoint.offset if checkpoint is not None else 0
+            return [], Checkpoint(path=str(path), inode=status.st_ino, offset=known_boundary)
         start += handle_start + 1
         data = data[handle_start + 1 :]
     end = data.rfind(b"\n") + 1
