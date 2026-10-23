@@ -944,11 +944,11 @@ handlers:
       enabled: true      # Observe only: never blocks, never enters a mode; never terminal
       priority: 5
       # options:
-      #   mode: observe                 # Only `observe` (log near-miss / would-enter / loop-reset)
+      #   mode: observe                 # `observe` (default) logs near-miss / would-enter / loop-reset; `act` also enters goal-blocked and clears the goal
       #   cycle_threshold: 3            # Stop-then-unmet cycles in the window that count as a loop
       #   declared_cycle_threshold: 2   # The threshold when every cycle declares [awaiting-human]
       #   window_minutes: 30            # Cycles older than this (from the newest) drop out
-      #   blocked_hours: 4              # Reserved for the act mode's goal-blocked TTL
+      #   blocked_hours: 4              # The goal-blocked TTL in act mode
 
     usage_pause_stop_gate:  # A usage-paused session stops only once its crons are exactly the one resume cron (Plan 00479)
       enabled: true         # Inert unless a usage pause is recorded for the session; never terminal

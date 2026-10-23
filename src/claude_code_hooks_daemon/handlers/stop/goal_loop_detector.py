@@ -266,9 +266,7 @@ class GoalLoopDetectorHandler(StopHandlerBase):
             return
         state.blocked_fingerprint = fingerprint
 
-    def _exit_on_repo_change(
-        self, session_id: str, state: _SessionState, fingerprint: str
-    ) -> None:
+    def _exit_on_repo_change(self, session_id: str, state: _SessionState, fingerprint: str) -> None:
         """End this detector's block when the repository changed; forget it once it has ended."""
         old = state.blocked_fingerprint
         try:

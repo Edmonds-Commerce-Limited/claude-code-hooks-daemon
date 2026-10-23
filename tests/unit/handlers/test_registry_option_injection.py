@@ -281,8 +281,8 @@ _READ_OUTSIDE_THE_HANDLER: dict[tuple[str, str], str] = {
 #: arbitrary sentinel -- so each gets a VALID value that is not its default.
 _VALID_NON_DEFAULTS: dict[tuple[str, str], object] = {
     ("bash_safe_mode", "mode"): "warn",
-    # validate_options refuses anything but `observe` and positive numbers; `observe`
-    # is the only mode and the default, so the mode is compared on a str copy.
+    # validate_options accepts `observe` (default) or `act` and positive numbers.
+    ("goal_loop_detector", "mode"): "act",
     ("goal_loop_detector", "cycle_threshold"): 7,
     ("goal_loop_detector", "declared_cycle_threshold"): 5,
     ("goal_loop_detector", "window_minutes"): 41,
