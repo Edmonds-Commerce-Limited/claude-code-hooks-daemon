@@ -145,10 +145,10 @@ All CLEAR; rationale and code citations in
   tests for cross-session prompts and supervisor-typed lines.
 - [x] ✅ **Task 2.2**: TDD `auto_continue_stop` writing the registry, one-time legacy marker import, suppressor
   reading the policy. Ruling 07 (post-compact `continue` under BLOCKED) is NOT part of this task: it is implemented
-  in Task 5.1. The daemon has no lever for it. Withholding the `.compacting` signal would not stop the
-  `continue`, because the supervisor also reads `compacting` from the context sidecar. It would also break the
-  supervisor's wait after a `/compact` it typed: that wait never ends, and each wasted wait counts towards the
-  injection fuse. The only daemon-side part is writing BLOCKED to the session-modes file, which Task 2.2 does.
+  in Task 5.1. Withholding the `.compacting` signal would stop the `continue`, but it would also leave the
+  supervisor's wait after a `/compact` it typed to run to its timeout, and each timed-out wait counts towards the
+  injection fuse, so the daemon does not use that lever. The only daemon-side part is writing BLOCKED to the
+  session-modes file, which Task 2.2 does.
 - [x] ✅ **Task 2.3**: TDD the unattended stop-block interceptor standing down while BLOCKED or usage-paused.
 
 ### Phase 3: Focus
