@@ -16,12 +16,12 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.qa.full_qa_gate import (
     WHOLE_SUITE_FRACTION,
     whole_suite_refusal_message,
 )
 from claude_code_hooks_daemon.qa.full_qa_lock import acquire_full_qa_lock
+from tests.support.child_pytest import run_child_pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SRC_ROOT = PROJECT_ROOT / "src"
@@ -62,18 +62,23 @@ def _write_fixture_suite(root: Path, file_count: int) -> None:
 
 
 def _run_pytest_subprocess(
-    root: Path, args: list[str], *, extra_fds: tuple[int, ...] = ()
+    root: Path,
+    args: list[str],
+    *,
+    expected_returncode: int,
+    extra_fds: tuple[int, ...] = (),
+    launcher: list[str] | None = None,
+    pythonpath: tuple[Path, ...] = (SRC_ROOT,),
 ) -> subprocess.CompletedProcess[str]:
-    env = {**os.environ, "PYTHONPATH": str(SRC_ROOT)}
-    return subprocess.run(
-        [sys.executable, "-m", "pytest", *args],
+    """The fixture suite's ``root`` is the caller's ``tmp_path``."""
+    return run_child_pytest(
+        args,
         cwd=root,
-        env=env,
-        capture_output=True,
-        text=True,
+        tmp_path=root,
+        expected_returncode=expected_returncode,
+        pythonpath=pythonpath,
+        launcher=launcher,
         pass_fds=extra_fds,
-        timeout=Timeout.REQUEST_LONG,
-        check=False,
     )
 
 
@@ -91,8 +96,7 @@ class TestThreshold:
 class TestSmallSelectionRunsNormally:
     def test_a_single_file_of_four_is_under_threshold_and_runs(self, tmp_path: Path) -> None:
         _write_fixture_suite(tmp_path, file_count=4)
-        result = _run_pytest_subprocess(tmp_path, ["tests/test_f0.py"])
-        assert result.returncode == 0, result.stdout + result.stderr
+        result = _run_pytest_subprocess(tmp_path, ["tests/test_f0.py"], expected_returncode=0)
         assert "REFUSED" not in result.stdout
 
 
@@ -102,8 +106,7 @@ class TestWholeSuiteSizedRunIsRefusedWithoutTheLock:
 
     def test_bare_pytest_over_threshold_is_refused(self, tmp_path: Path) -> None:
         _write_fixture_suite(tmp_path, file_count=4)
-        result = _run_pytest_subprocess(tmp_path, ["tests/"])
-        assert result.returncode == 1
+        result = _run_pytest_subprocess(tmp_path, ["tests/"], expected_returncode=1)
         assert "REFUSED" in result.stdout
         assert "full-QA lock" in result.stdout
 
@@ -113,15 +116,9 @@ class TestWholeSuiteSizedRunIsRefusedWithoutTheLock:
         wrapper = tmp_path / "run.sh"
         wrapper.write_text(f"#!/bin/bash\ncd {tmp_path}\n{sys.executable} -m pytest tests/\n")
         wrapper.chmod(0o755)
-        result = subprocess.run(
-            ["bash", str(wrapper)],
-            env={**os.environ, "PYTHONPATH": str(SRC_ROOT)},
-            capture_output=True,
-            text=True,
-            timeout=Timeout.REQUEST_LONG,
-            check=False,
+        result = _run_pytest_subprocess(
+            tmp_path, [], expected_returncode=1, launcher=["bash", str(wrapper)]
         )
-        assert result.returncode == 1
         assert "REFUSED" in result.stdout, result.stdout + result.stderr
 
     def test_a_python_c_exec_wrapper_invoking_pytest_is_still_refused(self, tmp_path: Path) -> None:
@@ -130,21 +127,18 @@ class TestWholeSuiteSizedRunIsRefusedWithoutTheLock:
         wrapper, but the sink does not need to: it only sees the real
         pytest process this eventually spawns."""
         _write_fixture_suite(tmp_path, file_count=4)
-        result = subprocess.run(
-            [
+        _run_pytest_subprocess(
+            tmp_path,
+            [],
+            expected_returncode=1,
+            launcher=[
                 sys.executable,
                 "-c",
                 "import subprocess, sys; "
                 f"sys.exit(subprocess.run([sys.executable, '-m', 'pytest', 'tests/'], "
                 f"cwd={str(tmp_path)!r}).returncode)",
             ],
-            env={**os.environ, "PYTHONPATH": str(SRC_ROOT)},
-            capture_output=True,
-            text=True,
-            timeout=Timeout.REQUEST_LONG,
-            check=False,
         )
-        assert result.returncode == 1
 
     def test_rootdir_pointed_at_an_empty_directory_is_still_refused(self, tmp_path: Path) -> None:
         """Review 10 B1: `--rootdir` repoints `config.rootpath`, but never
@@ -153,8 +147,9 @@ class TestWholeSuiteSizedRunIsRefusedWithoutTheLock:
         _write_fixture_suite(tmp_path, file_count=4)
         empty = tmp_path.parent / f"{tmp_path.name}-empty"
         empty.mkdir()
-        result = _run_pytest_subprocess(tmp_path, ["-q", f"--rootdir={empty}", "tests/"])
-        assert result.returncode == 1
+        result = _run_pytest_subprocess(
+            tmp_path, ["-q", f"--rootdir={empty}", "tests/"], expected_returncode=1
+        )
         assert "REFUSED" in result.stdout, result.stdout + result.stderr
 
     def test_config_file_dev_null_with_empty_rootdir_is_still_refused(self, tmp_path: Path) -> None:
@@ -163,9 +158,10 @@ class TestWholeSuiteSizedRunIsRefusedWithoutTheLock:
         empty = tmp_path.parent / f"{tmp_path.name}-empty2"
         empty.mkdir()
         result = _run_pytest_subprocess(
-            tmp_path, ["-q", "-c", "/dev/null", f"--rootdir={empty}", "tests/"]
+            tmp_path,
+            ["-q", "-c", "/dev/null", f"--rootdir={empty}", "tests/"],
+            expected_returncode=1,
         )
-        assert result.returncode == 1
         assert "REFUSED" in result.stdout, result.stdout + result.stderr
 
     def test_k_selecting_one_test_is_not_refused(self, tmp_path: Path) -> None:
@@ -173,8 +169,9 @@ class TestWholeSuiteSizedRunIsRefusedWithoutTheLock:
         runs, so the file count must be taken post-deselection
         (`trylast=True`) or a single selected test is wrongly refused."""
         _write_fixture_suite(tmp_path, file_count=4)
-        result = _run_pytest_subprocess(tmp_path, ["-q", "-k", "test_ok_0", "tests/"])
-        assert result.returncode == 0, result.stdout + result.stderr
+        result = _run_pytest_subprocess(
+            tmp_path, ["-q", "-k", "test_ok_0", "tests/"], expected_returncode=0
+        )
         assert "REFUSED" not in result.stdout
 
 
@@ -183,8 +180,9 @@ class TestWholeSuiteSizedRunSucceedsWithTheLock:
         _write_fixture_suite(tmp_path, file_count=4)
         with acquire_full_qa_lock(tmp_path) as fd:
             os.set_inheritable(fd, True)
-            result = _run_pytest_subprocess(tmp_path, ["tests/"], extra_fds=(fd,))
-        assert result.returncode == 0, result.stdout + result.stderr
+            result = _run_pytest_subprocess(
+                tmp_path, ["tests/"], expected_returncode=0, extra_fds=(fd,)
+            )
         assert "REFUSED" not in result.stdout
 
 
@@ -231,6 +229,7 @@ class TestXdistControllerIsJudgedToo:
         self,
         root: Path,
         *,
+        expected_returncode: int,
         glob: str = "test_*.py",
         with_spec: bool = True,
         extra_fds: tuple[int, ...] = (),
@@ -241,47 +240,32 @@ class TestXdistControllerIsJudgedToo:
         (root / "simxdist.py").write_text(plugin)
         # xdist registers its controller as the plugin named "dsession".
         (root / "dsession.py").write_text("")
-        env = {**os.environ, "PYTHONPATH": f"{SRC_ROOT}{os.pathsep}{root}"}
-        return subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pytest",
-                *_FORCED_PLUGIN_ARGS,
-                "-p",
-                "simxdist",
-                "-p",
-                "dsession",
-                "tests/",
-            ],
-            cwd=root,
-            env=env,
-            capture_output=True,
-            text=True,
-            pass_fds=extra_fds,
-            timeout=Timeout.REQUEST_LONG,
-            check=False,
+        return _run_pytest_subprocess(
+            root,
+            [*_FORCED_PLUGIN_ARGS, "-p", "simxdist", "-p", "dsession", "tests/"],
+            expected_returncode=expected_returncode,
+            extra_fds=extra_fds,
+            pythonpath=(SRC_ROOT, root),
         )
 
     def test_a_whole_suite_reported_by_workers_without_the_lock_is_refused(
         self, tmp_path: Path
     ) -> None:
         _write_fixture_suite(tmp_path, file_count=4)
-        result = self._run(tmp_path)
-        assert result.returncode == 1, result.stdout + result.stderr
+        result = self._run(tmp_path, expected_returncode=1)
         assert "REFUSED" in result.stdout
 
     def test_the_same_report_with_the_lock_held_is_not_refused(self, tmp_path: Path) -> None:
         _write_fixture_suite(tmp_path, file_count=4)
         with acquire_full_qa_lock(tmp_path) as fd:
             os.set_inheritable(fd, True)
-            result = self._run(tmp_path, extra_fds=(fd,))
+            result = self._run(tmp_path, expected_returncode=5, extra_fds=(fd,))
         assert "REFUSED" not in result.stdout, result.stdout + result.stderr
 
     def test_a_small_report_is_not_refused(self, tmp_path: Path) -> None:
         _write_fixture_suite(tmp_path, file_count=4)
         # One file of the four is under the threshold: only the ids differ.
-        result = self._run(tmp_path, glob="test_f0.py")
+        result = self._run(tmp_path, expected_returncode=5, glob="test_f0.py")
         assert "REFUSED" not in result.stdout, result.stdout + result.stderr
 
     def test_a_controller_whose_hook_does_not_exist_is_refused_not_ignored(
@@ -289,9 +273,8 @@ class TestXdistControllerIsJudgedToo:
     ) -> None:
         """If xdist stops offering the hook, an `optionalhook` impl would silently never run."""
         _write_fixture_suite(tmp_path, file_count=4)
-        result = self._run(tmp_path, with_spec=False, glob="test_f0.py")
+        result = self._run(tmp_path, expected_returncode=1, with_spec=False, glob="test_f0.py")
         output = result.stdout + result.stderr
-        assert result.returncode == 1, output
         assert "REFUSED" in output, output
         assert "pytest_xdist_node_collection_finished" in output
 
@@ -309,16 +292,16 @@ class TestNoconftestNoLongerDropsTheSink:
         """Baseline: without the forced plugin, `--noconftest` drops the
         sink entirely and the whole-suite-sized run is never refused."""
         _write_fixture_suite(tmp_path, file_count=4)
-        result = _run_pytest_subprocess(tmp_path, ["--noconftest", "tests/"])
-        assert result.returncode == 0, result.stdout + result.stderr
+        result = _run_pytest_subprocess(tmp_path, ["--noconftest", "tests/"], expected_returncode=0)
         assert "REFUSED" not in result.stdout
 
     def test_noconftest_with_the_forced_plugin_is_refused(self, tmp_path: Path) -> None:
         """The RED case this round closes: `--noconftest` can no longer
         drop the sink when it is also force-loaded via `-p`."""
         _write_fixture_suite(tmp_path, file_count=4)
-        result = _run_pytest_subprocess(tmp_path, ["--noconftest", *_FORCED_PLUGIN_ARGS, "tests/"])
-        assert result.returncode == 1
+        result = _run_pytest_subprocess(
+            tmp_path, ["--noconftest", *_FORCED_PLUGIN_ARGS, "tests/"], expected_returncode=1
+        )
         assert "REFUSED" in result.stdout, result.stdout + result.stderr
 
 
@@ -330,8 +313,9 @@ class TestDoubleRegistrationIsANoOp:
 
     def test_under_threshold_selection_still_runs_normally(self, tmp_path: Path) -> None:
         _write_fixture_suite(tmp_path, file_count=4)
-        result = _run_pytest_subprocess(tmp_path, [*_FORCED_PLUGIN_ARGS, "tests/test_f0.py"])
-        assert result.returncode == 0, result.stdout + result.stderr
+        result = _run_pytest_subprocess(
+            tmp_path, [*_FORCED_PLUGIN_ARGS, "tests/test_f0.py"], expected_returncode=0
+        )
         assert "REFUSED" not in result.stdout
         # The conftest imported the sink first; the loader must not then ask
         # pytest to rewrite an already-imported module.
@@ -344,8 +328,9 @@ class TestDoubleRegistrationIsANoOp:
         real N of M files) -- not the anchor-could-not-be-found message,
         which is what a wrong (self) anchor pick would produce."""
         _write_fixture_suite(tmp_path, file_count=4)
-        result = _run_pytest_subprocess(tmp_path, [*_FORCED_PLUGIN_ARGS, "tests/"])
-        assert result.returncode == 1
+        result = _run_pytest_subprocess(
+            tmp_path, [*_FORCED_PLUGIN_ARGS, "tests/"], expected_returncode=1
+        )
         assert "4 of 4 test files" in result.stdout, result.stdout + result.stderr
         assert "could not establish" not in result.stdout
 
@@ -368,22 +353,25 @@ class TestRunCollectedOutsideTheSuiteIsJudgedOnItsOwnSize:
     def test_a_small_run_outside_tests_is_allowed(self, tmp_path: Path) -> None:
         _write_fixture_suite(tmp_path, file_count=8)
         self._write_outside_tests(tmp_path, count=1)
-        result = _run_pytest_subprocess(tmp_path, [*_FORCED_PLUGIN_ARGS, "handlers"])
-        assert result.returncode == 0, result.stdout + result.stderr
+        result = _run_pytest_subprocess(
+            tmp_path, [*_FORCED_PLUGIN_ARGS, "handlers"], expected_returncode=0
+        )
         assert "REFUSED" not in result.stdout
 
     def test_a_whole_suite_sized_run_outside_tests_is_still_refused(self, tmp_path: Path) -> None:
         _write_fixture_suite(tmp_path, file_count=4)
         self._write_outside_tests(tmp_path, count=4)
-        result = _run_pytest_subprocess(tmp_path, [*_FORCED_PLUGIN_ARGS, "handlers"])
-        assert result.returncode == 1
+        result = _run_pytest_subprocess(
+            tmp_path, [*_FORCED_PLUGIN_ARGS, "handlers"], expected_returncode=1
+        )
         assert "REFUSED" in result.stdout, result.stdout + result.stderr
 
     def test_with_no_tests_directory_at_all_it_still_refuses(self, tmp_path: Path) -> None:
         _init_repo(tmp_path)
         self._write_outside_tests(tmp_path, count=1)
-        result = _run_pytest_subprocess(tmp_path, [*_FORCED_PLUGIN_ARGS, "handlers"])
-        assert result.returncode == 1
+        result = _run_pytest_subprocess(
+            tmp_path, [*_FORCED_PLUGIN_ARGS, "handlers"], expected_returncode=1
+        )
         assert "could not establish" in result.stdout, result.stdout + result.stderr
 
     def test_rootdir_pointed_away_cannot_shrink_the_suite(self, tmp_path: Path) -> None:
@@ -392,9 +380,10 @@ class TestRunCollectedOutsideTheSuiteIsJudgedOnItsOwnSize:
         empty = tmp_path.parent / f"{tmp_path.name}-empty3"
         empty.mkdir()
         result = _run_pytest_subprocess(
-            tmp_path, [*_FORCED_PLUGIN_ARGS, f"--rootdir={empty}", "handlers"]
+            tmp_path,
+            [*_FORCED_PLUGIN_ARGS, f"--rootdir={empty}", "handlers"],
+            expected_returncode=1,
         )
-        assert result.returncode == 1
         assert "REFUSED" in result.stdout, result.stdout + result.stderr
 
 

@@ -27,8 +27,11 @@ from typing import Any, ClassVar
 import pytest
 import yaml
 
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.qa.first_error_lines import OPTION, PLUGIN
 from claude_code_hooks_daemon_full_qa_gate_loader import GATE_PLUGIN as FULL_QA_GATE
+from tests.load_scaling import scaled_seconds
+from tests.support.child_pytest import run_child_pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = PROJECT_ROOT / "scripts" / "qa"
@@ -508,17 +511,8 @@ def _run_tests_sh_plugin_args(lines: Path) -> list[str]:
 def _missing_import_time_lines(plugin_args: list[str], tmp_path: Path) -> dict[str, int]:
     """Measure a small target with the given plugin arguments, as the QA stage does."""
     report = tmp_path / "coverage.json"
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith("COVERAGE_") and key != "PYTEST_ADDOPTS"
-    }
-    env["COVERAGE_FILE"] = str(tmp_path / ".coverage")
-    completed = subprocess.run(
+    run_child_pytest(
         [
-            sys.executable,
-            "-m",
-            "pytest",
             "-q",
             "-p",
             "no:cacheprovider",
@@ -530,12 +524,10 @@ def _missing_import_time_lines(plugin_args: list[str], tmp_path: Path) -> dict[s
             _SMALL_TARGET,
         ],
         cwd=PROJECT_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
+        tmp_path=tmp_path,
+        timeout=scaled_seconds(Timeout.REQUEST_LONG),
+        extra_env={"COVERAGE_FILE": str(tmp_path / ".coverage")},
     )
-    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
     files = json.loads(report.read_text(encoding="utf-8"))["files"]
     return {name: int(files[name]["summary"]["missing_lines"]) for name in _IMPORT_ONLY_MODULES}
 

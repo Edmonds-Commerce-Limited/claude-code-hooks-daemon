@@ -158,9 +158,33 @@ The child `python -m pytest -p no:xdist -q <polluter> <victim>` printed `2 passe
   changing anything; raising the timeout is not a fix until the cause is known.
 
 - **Recurred**: full-matrix run 39883575808 at `106d14543`, job QA (Python3.12) again, the same test and the same
-  60 s `TimeoutExpired`, at 99% of the run; Python 3.11 and 3.13 passed. Two of the last two full runs that reached it.
+  60 s `TimeoutExpired`; Python 3.11 and 3.13 passed. Two of the three full runs that reached it failed (run
+  39874461511 at `9939c7a20` reached it and its py3.12 job passed).
 
-**Status**: 🔄 in progress; recurring, so it is being investigated and fixed rather than watched.
+- **Investigation (subagent-reports/261023-n531-child-exit.md)**: the test runs at 43% of the suite, not at 99%. The
+  failure is only printed at the end. Proved from both job logs: the 60 s gap sits on that test's own progress line,
+  and `Popen returncode: -9` means the child was still alive when it was killed. A child that had already exited
+  would have been reaped with rc 0. The child wrote nothing to stderr.
+  Disproved locally, with the same pytest 9.0.3, pytest-cov 7.1.0 and coverage 7.13.5 that CI installs: the
+  coverage-inheritance hypothesis. pytest-cov 7 no longer sets any subprocess environment, and pyproject sets no
+  coverage `patch`. A probe in the child, run under the parent's `--cov=src`, showed no `COV*` variable, coverage not
+  imported, only the main thread alive at unconfigure, and two atexit callbacks: the jail's `shutil.rmtree` and
+  pytest's `cleanup_numbered_dir`.
+  Lead not yet proved: the child's exit-time `cleanup_numbered_dir` deletes every numbered basetemp in the shared
+  `/tmp/pytest-of-<user>` that is no longer among the newest three and has no live lock. The deletion is `rm_rf`, and
+  its cost depends on what the earlier child pytests left behind.
+
+- **Mitigation and diagnostics (branch `worktree-n531-child-exit`)**: every child pytest in the suite now goes through
+  `tests/support/child_pytest.py::run_child_pytest`. It gives the child its own `--basetemp` under the caller's
+  `tmp_path`, so the child's exit cleanup never touches the shared `/tmp/pytest-of-<user>` tree (the lead above). It
+  builds the child's environment from a short allowlist, and loads a `-p` watchdog plugin that arms
+  `faulthandler.dump_traceback_later` at 75% of the caller's timeout and re-arms it at the last `pytest_unconfigure`.
+  A recurrence therefore prints every thread's stack into the failure message, where before it showed only a bare
+  `TimeoutExpired`. There are no retries and no longer timeout. The nine call sites from the investigation are moved,
+  the N531 pair test first.
+
+**Status**: 🔄 in progress. The cause is still not proved: the change removes the leading suspect and adds the
+diagnostics a recurrence needs. Close it when a CI full run passes with it; if the test recurs, read the dumped stack.
 
 ### N530 — `plan_number_helper` denies an `ls` of a folder inside an existing plan as a next-number scan
 

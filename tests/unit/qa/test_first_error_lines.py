@@ -10,9 +10,6 @@ so the summary line for a failure says what went wrong.
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-import sys
 import textwrap
 from pathlib import Path
 from typing import Any, cast
@@ -27,6 +24,7 @@ from claude_code_hooks_daemon.qa.first_error_lines import (
     first_error_line,
     read_first_error_lines,
 )
+from tests.support.child_pytest import run_child_pytest
 
 
 class _Crash:
@@ -173,14 +171,9 @@ class TestThePluginInARealRun:
             encoding="utf-8",
         )
         lines_path = tmp_path / "lines.jsonl"
-        env = os.environ.copy()
-        env.pop("PYTEST_ADDOPTS", None)
 
-        result = subprocess.run(
+        run_child_pytest(
             [
-                sys.executable,
-                "-m",
-                "pytest",
                 "-p",
                 "no:cacheprovider",
                 "-p",
@@ -190,13 +183,10 @@ class TestThePluginInARealRun:
                 str(tmp_path),
             ],
             cwd=tmp_path,
-            env=env,
-            check=False,
-            capture_output=True,
-            text=True,
+            tmp_path=tmp_path,
+            expected_returncode=1,
         )
 
-        assert result.returncode == 1, f"{result.stdout}\n{result.stderr}"
         lines = read_first_error_lines(lines_path)
         assert lines == {
             "test_sample.py::test_fails": "AssertionError: one is not two",
@@ -206,25 +196,13 @@ class TestThePluginInARealRun:
     def test_without_the_option_nothing_is_written(self, tmp_path: Path) -> None:
         (tmp_path / "test_sample.py").write_text("def test_fails():\n    assert False\n")
 
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pytest",
-                "-p",
-                "no:cacheprovider",
-                "-p",
-                PLUGIN,
-                f"--rootdir={tmp_path}",
-                str(tmp_path),
-            ],
+        run_child_pytest(
+            ["-p", "no:cacheprovider", "-p", PLUGIN, f"--rootdir={tmp_path}", str(tmp_path)],
             cwd=tmp_path,
-            check=False,
-            capture_output=True,
-            text=True,
+            tmp_path=tmp_path,
+            expected_returncode=1,
         )
 
-        assert result.returncode == 1
         assert sorted(p.name for p in tmp_path.iterdir() if p.suffix == ".jsonl") == []
 
     def test_the_plugin_name_is_this_module(self) -> None:

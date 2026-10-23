@@ -17,9 +17,7 @@ nothing". Most of what follows is aimed at that.
 
 from __future__ import annotations
 
-import os
 import subprocess
-import sys
 import textwrap
 from pathlib import Path
 
@@ -32,6 +30,7 @@ from tests.acceptance.blocking_gate_guard import (
     parse_declared_blocking_gate_files,
     skip_is_an_abort_condition,
 )
+from tests.support.child_pytest import run_child_pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ACCEPTANCE_DIR = REPO_ROOT / "tests" / "acceptance"
@@ -138,7 +137,7 @@ class TestASkipInADeclaredGateBecomesAFailure:
 
     @staticmethod
     def _run_nested_pytest(
-        tmp_path: Path, env_extra: dict[str, str] | None = None
+        tmp_path: Path, *, expected_returncode: int, env_extra: dict[str, str] | None = None
     ) -> subprocess.CompletedProcess[str]:
         declared_name = declared_blocking_gate_files()[0]
 
@@ -167,33 +166,16 @@ class TestASkipInADeclaredGateBecomesAFailure:
         (tmp_path / declared_name).write_text(skipping_test, encoding="utf-8")
         (tmp_path / "test_not_declared.py").write_text(skipping_test, encoding="utf-8")
 
-        # Build the child's environment explicitly rather than inheriting
-        # ambient os.environ verbatim: this repo's own `run_tests.sh` exports
-        # HOOKS_DAEMON_RELEASE_GATE=1 (Plan 00466 N39 widened), so an outer
-        # invocation via that script would otherwise leak the signal into
-        # the "no signal set" case below and silently pass it for the wrong
-        # reason. Deleting it first, then layering env_extra on top, makes
-        # both cases deterministic regardless of how THIS test was invoked.
-        env = os.environ.copy()
-        env.pop("HOOKS_DAEMON_RELEASE_GATE", None)
-        env.update(env_extra or {})
-
-        return subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pytest",
-                "-p",
-                "no:cacheprovider",
-                f"--rootdir={tmp_path}",
-                "-rs",
-                str(tmp_path),
-            ],
+        # The helper builds the child's environment explicitly: this repo's
+        # own `run_tests.sh` exports HOOKS_DAEMON_RELEASE_GATE=1 (Plan 00466
+        # N39 widened), and an inherited copy would leak the signal into the
+        # "no signal set" case below and pass it for the wrong reason.
+        return run_child_pytest(
+            ["-p", "no:cacheprovider", f"--rootdir={tmp_path}", "-rs", str(tmp_path)],
             cwd=tmp_path,
-            env=env,
-            check=False,
-            capture_output=True,
-            text=True,
+            tmp_path=tmp_path,
+            expected_returncode=expected_returncode,
+            extra_env=env_extra,
         )
 
     def test_the_declared_gate_fails_and_the_undeclared_one_still_skips(
@@ -203,12 +185,10 @@ class TestASkipInADeclaredGateBecomesAFailure:
         both set it), a skip of the declared file still escalates to a
         failure — the pre-existing contract, now reached deliberately rather
         than unconditionally (Plan 00466 N39 widened)."""
-        result = self._run_nested_pytest(tmp_path, env_extra={"HOOKS_DAEMON_RELEASE_GATE": "1"})
-
-        assert result.returncode != 0, (
-            "a skip of a declared-blocking gate must fail the run when the "
-            f"release-gate signal is set\n{result.stdout}\n{result.stderr}"
+        result = self._run_nested_pytest(
+            tmp_path, expected_returncode=1, env_extra={"HOOKS_DAEMON_RELEASE_GATE": "1"}
         )
+
         assert "1 failed" in result.stdout
         assert "1 skipped" in result.stdout
         assert declared_blocking_gate_files()[0] in result.stdout
@@ -221,12 +201,8 @@ class TestASkipInADeclaredGateBecomesAFailure:
         """An ordinary ad hoc run with no daemon and no signal gets the same
         harmless skip every other daemon-dependent test in the suite gets —
         it must not ERROR (Plan 00466 N39 widened)."""
-        result = self._run_nested_pytest(tmp_path)
+        result = self._run_nested_pytest(tmp_path, expected_returncode=0)
 
-        assert result.returncode == 0, (
-            "a skip with no release-gate signal must not fail the run\n"
-            f"{result.stdout}\n{result.stderr}"
-        )
         assert "2 skipped" in result.stdout
         assert "failed" not in result.stdout
 
