@@ -55,7 +55,9 @@ on nothing.
 ## Success Criteria
 
 - [x] The issue's reproduction returns only the child tree's id.
-- [ ] A supervisor in this container still resolves its own session (verified after the hot reload).
+- [x] A supervisor in this container still resolves its own session (verified after the hot reload: worker
+  respawned 13:27:51 UTC on 77749bd36; `resolve_host_session_ids(2, <worker>)` on the live `/proc` returned exactly
+  this session's id, with the pingbus child and the worker excluded).
 - [x] Release-bound consequences: a release note in the pending-release holding area stating the supervisor is now
   safe outside a private PID namespace
   (`CLAUDE/UPGRADES/UNRELEASED/release-notes/027-supervisor-own-sessions-come-from-its-child-tree.md`).
@@ -63,3 +65,5 @@ on nothing.
 ## Delivery & Milestones
 
 - Plan filed from issue #138 triage (actionable defect).
+- Merged e39f0ee88; live regression (fallback treated the pingbus child as ambiguity) fixed forward in 77749bd36.
+  Post-merge QA 41/41. Closing #138 waits on CI success for a head containing 77749bd36.
