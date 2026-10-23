@@ -44,6 +44,10 @@ rules out.
 
 The status-line notice is unchanged, because no new way to clear the hold was added.
 
+**Plan 00538.** This work completes or changes none of 00538's tasks. Its Phase 1 spike (Task 1.1 and 1.2) is option
+(c) above, still open. Its owner items (auto-refocus, the mods route) were not touched. This run is new evidence for
+its Overview's "false hold" cost: the false hold now stops a goal-blocked clear, not only a banner.
+
 ## Defect B: what happened, and the fix
 
 **From the code** (`.claude/ccy/claude-supervise.py`):
