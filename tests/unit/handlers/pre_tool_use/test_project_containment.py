@@ -14,15 +14,12 @@ Two boundaries are load-bearing and are asserted here rather than assumed:
   durable.
 """
 
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 
-from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.chain import HandlerChain
@@ -31,6 +28,7 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.pre_tool_use.project_containment import (
     ProjectContainmentHandler,
 )
+from tests.support.child_pytest import run_child_pytest
 
 _ROOT = Path("/repo")
 
@@ -1340,7 +1338,7 @@ class TestProjectRootDoublePatchDoesNotLeakAcrossFiles:
     own suite, is what pins it.
     """
 
-    def test_the_polluter_and_a_victim_pass_together_in_one_process(self) -> None:
+    def test_the_polluter_and_a_victim_pass_together_in_one_process(self, tmp_path: Path) -> None:
         polluter = (
             "tests/unit/handlers/pre_tool_use/test_project_containment.py"
             "::TestEvaluationErrorIsAnAdvisory"
@@ -1351,16 +1349,11 @@ class TestProjectRootDoublePatchDoesNotLeakAcrossFiles:
             "::TestAbsolutePathHandler"
             "::test_handle_omits_the_example_rather_than_guessing_a_root"
         )
-        completed = subprocess.run(
-            [sys.executable, "-m", "pytest", "-p", "no:xdist", "-q", polluter, victim],
+        completed = run_child_pytest(
+            ["-p", "no:xdist", "-q", polluter, victim],
             cwd=Path(__file__).resolve().parents[4],
-            capture_output=True,
-            text=True,
-            timeout=Timeout.REQUEST_LONG,
-        )
-        assert completed.returncode == 0, (
-            "the polluter/victim pair failed together (Plan 00466 N39 "
-            f"regression) -- stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
+            tmp_path=tmp_path,
+            explain="the polluter/victim pair failed together (Plan 00466 N39 regression)",
         )
         assert "2 passed" in completed.stdout
 

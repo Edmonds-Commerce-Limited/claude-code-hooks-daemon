@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.constants import Timeout
+from tests.support.child_pytest import run_child_pytest
 
 LOADER = "claude_code_hooks_daemon_full_qa_gate_loader"
 PACKAGE = "claude_code_hooks_daemon"
@@ -47,15 +48,15 @@ class TestTheLoaderImportsNothingEarly:
         assert completed.stdout.strip() == "[]"
 
 
-def _run_one_test_without_conftest(tmp_path: Path, *plugin_args: str) -> str:
+def _run_one_test_without_conftest(
+    tmp_path: Path, *plugin_args: str, expected_returncode: int
+) -> str:
     (tmp_path / "test_one.py").write_text("def test_one() -> None:\n    assert True\n")
-    completed = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "--noconftest", *plugin_args, "test_one.py"],
+    completed = run_child_pytest(
+        ["-q", "--noconftest", *plugin_args, "test_one.py"],
         cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        timeout=Timeout.REQUEST_LONG,
-        check=False,
+        tmp_path=tmp_path,
+        expected_returncode=expected_returncode,
     )
     return completed.stdout + completed.stderr
 
@@ -63,18 +64,23 @@ def _run_one_test_without_conftest(tmp_path: Path, *plugin_args: str) -> str:
 class TestTheLoaderRegistersTheSink:
     def test_the_sink_is_active_under_noconftest(self, tmp_path: Path) -> None:
         """With no conftest the sink anchors on its own test-less directory and refuses."""
-        assert "REFUSED" in _run_one_test_without_conftest(tmp_path, "-p", LOADER)
+        output = _run_one_test_without_conftest(tmp_path, "-p", LOADER, expected_returncode=1)
+        assert "REFUSED" in output
 
     def test_blocking_the_sink_by_name_still_unloads_it(self, tmp_path: Path) -> None:
         """`hooks-daemon test-project-handlers` relies on `-p no:<sink>`."""
-        output = _run_one_test_without_conftest(tmp_path, "-p", LOADER, "-p", f"no:{GATE}")
+        output = _run_one_test_without_conftest(
+            tmp_path, "-p", LOADER, "-p", f"no:{GATE}", expected_returncode=0
+        )
         assert "REFUSED" not in output
         assert "1 passed" in output, output
 
     def test_naming_the_sink_directly_as_well_does_not_register_it_twice(
         self, tmp_path: Path
     ) -> None:
-        output = _run_one_test_without_conftest(tmp_path, "-p", GATE, "-p", LOADER)
+        output = _run_one_test_without_conftest(
+            tmp_path, "-p", GATE, "-p", LOADER, expected_returncode=1
+        )
         assert "already registered" not in output
         assert "REFUSED" in output, output
 
