@@ -61,4 +61,4 @@ Additional defects found beyond the checklist:
 ## Verification
 
 - The targeted run passed 473, with 1 skipped. Files: `test_config_changes_manifest_examples.py`, `test_config_migrations_integration.py`, `test_config_migrations.py`, `test_repo_hygiene_check.py`, `test_version_bump_completeness.py` and `test_retired_handler_options.py`.
-- QA: see the reply that hands this branch back (`untracked/scratch/qa-r371-docs.txt`).
+- QA on the clean tree at `c86a3fa94`: `FULL_QA_LOCK_WAIT_SECONDS=3600 ./scripts/qa/llm_qa.py changed --range ea8259cd0..HEAD --allow-unmapped` gave `QA: 41/41 PASSED`, no `❌` lines, exit 0 (`untracked/scratch/qa-r371-docs.txt`). The commit after it adds only this line.
