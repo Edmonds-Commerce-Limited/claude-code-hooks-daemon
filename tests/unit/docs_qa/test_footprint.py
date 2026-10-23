@@ -9,6 +9,7 @@ import pytest
 from claude_code_hooks_daemon.docs_qa.footprint import (
     CLAUDE_MD_LINE_TARGET,
     FILE_SKIP_BYTES,
+    ON_DEMAND_CHAR_LIMIT,
     Footprint,
     FootprintEntry,
     format_footprint,
@@ -68,7 +69,15 @@ class TestConstantsMatchContract:
     def test_skip_threshold_is_the_pinned_fact(self, contract: InstructionsContract) -> None:
         statement = next(f.statement for f in contract.facts if f.id == "G4-03")
         assert "4 MiB" in statement
+        assert "at launch" in statement
         assert FILE_SKIP_BYTES == 4 * 1024 * 1024
+
+    def test_on_demand_limit_is_the_pinned_fact(self, contract: InstructionsContract) -> None:
+        fact = next(f for f in contract.facts if f.id == "G4-05")
+        assert "40,000 characters" in fact.statement
+        assert "only its start" in fact.statement
+        assert fact.min_claude_code_version == "2.1.309"
+        assert ON_DEMAND_CHAR_LIMIT == 40_000
 
 
 class TestSessionStartSet:
@@ -145,6 +154,28 @@ class TestImports:
             2,
             True,
         )
+
+    def test_nested_claude_md_import_loads_on_demand_with_it(
+        self, root: Path, contract: InstructionsContract
+    ) -> None:
+        # G2-01: an import loads alongside the CLAUDE.md that references it.
+        _write(root / "pkg" / "CLAUDE.md", "@notes.md\n")
+        _write(root / "pkg" / "notes.md", "@deeper.md\n")
+        _write(root / "pkg" / "deeper.md", "d\n")
+        footprint = _measure(root, contract)
+        for path in ("pkg/notes.md", "pkg/deeper.md"):
+            entry = _entry(footprint, path)
+            assert (entry.loads, entry.role) == ("on-demand", "import")
+        assert footprint.totals.on_demand_files == 3
+        assert footprint.totals.launch_files == 0
+
+    def test_file_imported_at_launch_and_by_nested_file_counts_at_launch(
+        self, root: Path, contract: InstructionsContract
+    ) -> None:
+        _write(root / "CLAUDE.md", "@shared.md\n")
+        _write(root / "pkg" / "CLAUDE.md", "@../shared.md\n")
+        _write(root / "shared.md", "s\n")
+        assert _entry(_measure(root, contract), "shared.md").loads == "launch"
 
     def test_relative_import_resolves_against_importing_file(
         self, root: Path, contract: InstructionsContract
@@ -230,6 +261,32 @@ class TestCountedNeverProposed:
         assert footprint.totals.launch_daemon_block_lines == 4
         assert footprint.totals.launch_proposable_lines == 2
 
+    def test_tag_mentioned_in_prose_or_a_fence_is_not_the_daemon_block(
+        self, root: Path, contract: InstructionsContract
+    ) -> None:
+        # Only whole-line tags outside a code fence delimit the injected block.
+        _write(
+            root / "CLAUDE.md",
+            "See the `<hooksdaemon>` block below.\n"
+            "mine\n"
+            "```text\n"
+            "<hooksdaemon>\n"
+            "```\n"
+            "<hooksdaemon>\n"
+            "x\n"
+            "</hooksdaemon>\n",
+        )
+        footprint = _measure(root, contract)
+        assert _entry(footprint, "CLAUDE.md").daemon_block_lines == 3
+        assert footprint.totals.launch_daemon_block_lines == 3
+        assert footprint.totals.launch_proposable_lines == 5
+
+    def test_inline_tag_pair_in_prose_is_no_daemon_block(
+        self, root: Path, contract: InstructionsContract
+    ) -> None:
+        _write(root / "CLAUDE.md", "The `<hooksdaemon>` and `</hooksdaemon>` tags.\nmine\n")
+        assert _entry(_measure(root, contract), "CLAUDE.md").daemon_block_lines == 0
+
 
 class TestSizeGuidance:
     def test_claude_md_over_target_is_flagged(
@@ -250,6 +307,56 @@ class TestSizeGuidance:
         entry = _entry(footprint, "CLAUDE.md")
         assert entry.skipped is True
         assert footprint.totals.launch_bytes == 0
+
+    def test_launch_file_over_skip_threshold_is_reported_as_skipped(
+        self, root: Path, contract: InstructionsContract
+    ) -> None:
+        (root / "CLAUDE.md").write_bytes(b"a" * (FILE_SKIP_BYTES + 1))
+        assert "skipped by Claude Code" in format_footprint(_measure(root, contract))
+
+    def test_nested_claude_md_over_on_demand_limit_loads_its_start(
+        self, root: Path, contract: InstructionsContract
+    ) -> None:
+        # G4-05: an on-demand file over the per-file limit is truncated, not skipped.
+        _write(root / "pkg" / "CLAUDE.md", "x" * (ON_DEMAND_CHAR_LIMIT + 1))
+        footprint = _measure(root, contract)
+        entry = _entry(footprint, "pkg/CLAUDE.md")
+        assert (entry.skipped, entry.truncated) == (False, True)
+        assert footprint.totals.on_demand_files == 1
+        text = format_footprint(footprint)
+        assert "loads only its start" in text
+        assert "skipped" not in text
+
+    def test_nested_claude_md_over_skip_threshold_is_not_skipped(
+        self, root: Path, contract: InstructionsContract
+    ) -> None:
+        (root / "pkg").mkdir()
+        (root / "pkg" / "CLAUDE.md").write_bytes(b"a" * (FILE_SKIP_BYTES + 1))
+        footprint = _measure(root, contract)
+        entry = _entry(footprint, "pkg/CLAUDE.md")
+        assert (entry.skipped, entry.truncated) == (False, True)
+        text = format_footprint(footprint)
+        assert "its lines were not counted" in text
+        assert "skipped" not in text
+
+    def test_scoped_rule_over_on_demand_limit_is_truncated(
+        self, root: Path, contract: InstructionsContract
+    ) -> None:
+        body = "x" * ON_DEMAND_CHAR_LIMIT
+        _write(root / ".claude" / "rules" / "api.md", f'---\npaths:\n  - "src/**"\n---\n{body}\n')
+        assert _entry(_measure(root, contract), ".claude/rules/api.md").truncated is True
+
+    def test_launch_file_over_on_demand_limit_is_not_truncated(
+        self, root: Path, contract: InstructionsContract
+    ) -> None:
+        _write(root / "CLAUDE.md", "x" * (ON_DEMAND_CHAR_LIMIT + 1))
+        assert _entry(_measure(root, contract), "CLAUDE.md").truncated is False
+
+    def test_nested_claude_md_at_on_demand_limit_is_whole(
+        self, root: Path, contract: InstructionsContract
+    ) -> None:
+        _write(root / "pkg" / "CLAUDE.md", "x" * ON_DEMAND_CHAR_LIMIT)
+        assert _entry(_measure(root, contract), "pkg/CLAUDE.md").truncated is False
 
     def test_totals_split_launch_and_on_demand(
         self, root: Path, contract: InstructionsContract

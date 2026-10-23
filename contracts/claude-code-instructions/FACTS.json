@@ -43,7 +43,7 @@
     {
       "id": "G1-05",
       "group": "G1",
-      "statement": "A CLAUDE.md in a subdirectory of the working directory loads once Claude reads, writes or edits another file in that subdirectory.",
+      "statement": "A CLAUDE.md in a subdirectory of the working directory loads once Claude reads, writes or edits another file in that subdirectory; a Bash command that counts as a read (cat or head on a single file) also triggers it. One over the per-file on-demand limit loads only its start (G4-05).",
       "anchor": {
         "heading": "how-claude-md-files-load",
         "quote": "Instead of loading them at launch, Claude Code loads each one once Claude reads, writes, or edits another file in that subdirectory."
@@ -83,10 +83,10 @@
     {
       "id": "G2-01",
       "group": "G2",
-      "statement": "An @path import is expanded and loaded at launch alongside the CLAUDE.md that references it.",
+      "statement": "An @path import is expanded and loaded alongside the CLAUDE.md that references it: at launch for a file that loads at launch, on demand for a subdirectory CLAUDE.md.",
       "anchor": {
         "heading": "import-additional-files",
-        "quote": "Imported files are expanded and loaded into context at launch alongside the CLAUDE.md that references them."
+        "quote": "Imported files are expanded and loaded into context alongside the CLAUDE.md that references them."
       },
       "min_claude_code_version": null
     },
@@ -133,10 +133,10 @@
     {
       "id": "G2-06",
       "group": "G2",
-      "statement": "Imports help organisation but do not reduce context cost: imported files load at launch too.",
+      "statement": "Imports help organisation but do not reduce context cost: an imported file loads together with the CLAUDE.md that imports it.",
       "anchor": {
         "heading": "write-effective-instructions",
-        "quote": "help you organize a long file but don't reduce its context cost, because imported files also load at launch."
+        "quote": "help you organize a long file but don't reduce its context cost, because imported files load together with the CLAUDE.md that imports them."
       },
       "min_claude_code_version": null
     },
@@ -165,7 +165,7 @@
       "group": "G3",
       "statement": "`paths` is the only frontmatter field Claude Code reads from a rule; any other field (such as `description`) is ignored without an error.",
       "anchor": {
-        "heading": "path-specific-rules",
+        "heading": "rule-frontmatter-reference",
         "quote": "`paths` is the only field Claude Code reads from a rule; any other field is ignored without an error."
       },
       "min_claude_code_version": null
@@ -195,7 +195,7 @@
       "group": "G3",
       "statement": "Frontmatter that does not parse is ignored and the rule loads as if it had no `paths`, so it becomes unconditional.",
       "anchor": {
-        "heading": "path-specific-rules",
+        "heading": "rule-frontmatter-reference",
         "quote": "If the YAML between the markers doesn't parse, Claude Code ignores the frontmatter and loads the rule as if it had no `paths`."
       },
       "min_claude_code_version": null
@@ -253,12 +253,22 @@
     {
       "id": "G4-03",
       "group": "G4",
-      "statement": "A CLAUDE.md file over 4 MiB is skipped.",
+      "statement": "A CLAUDE.md file that loads at launch is loaded whole up to 4 MiB; one over 4 MiB is skipped and none of it loads. Files that load on demand follow G4-05 instead.",
       "anchor": {
-        "heading": "my-claude-md-is-too-large",
-        "quote": "Claude Code skips a file over 4 MiB."
+        "heading": "how-it-works",
+        "quote": "Claude gets the whole of each CLAUDE.md file that loads at launch, as long as the file is 4 MiB or smaller. Claude Code skips a file over 4 MiB and loads none of it."
       },
       "min_claude_code_version": null
+    },
+    {
+      "id": "G4-05",
+      "group": "G4",
+      "statement": "A file that loads on demand (a subdirectory CLAUDE.md or CLAUDE.local.md and its @path imports, a subdirectory's .claude/rules/ file, a path-scoped rule) over a per-file limit loads only its start, ending in a note to Read the rest. The limit is 40,000 characters with a 200K context window; with a 1M window it is 200,000 characters on Claude Opus 4.6 and Claude Sonnet 4.6 and 150,000 on later models.",
+      "anchor": {
+        "heading": "claude-ignores-the-end-of-my-subdirectory-claude-md",
+        "quote": "When a subdirectory `CLAUDE.md` or a rules file that loads on demand is over a per-file size limit, Claude receives only the start of it."
+      },
+      "min_claude_code_version": "2.1.309"
     },
     {
       "id": "G4-04",
