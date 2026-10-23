@@ -73,3 +73,60 @@ llm_qa `changed` run has NOT been done yet.
      attributed. The supervisor types only when idle, so its own clears are always pairs.
    - The aliases are inferred from the mechanism, not observed (spike gap).
    - With the goal-loop detector disabled, nothing attributes.
+
+## Part 2
+
+The Part 1 "Left" list is done. Task 8.2 is ticked.
+
+### What changed
+
+1. **Supervisor** (`.claude/ccy/claude-supervise.py`, commit `62aa79036`):
+   - Added `_GOAL_CLEAR_RECORD_SUFFIX` and `write_goal_clear_record(directory, *, trigger_path, now)`. The write is
+     atomic: a pid-qualified temp file, then `replace`. If the replace fails, the temp file is removed and the error is
+     raised again.
+   - `decide_once` writes the record in the armed, non-dry-run branch, before it sets `payload = _GOAL_CLEAR_COMMAND`.
+   - If the write raises `OSError`, no clear is typed. The trigger is left in place for the next tick, and
+     `noop_reason_log` reads `noop: goal clear NOT typed: attribution record could not be written: <error>`.
+   - `reap_stale_sidecars` also reaps `*.goal-clear-injected`.
+   - Tests are in `tests/unit/supervise/test_goal_clear_record.py`. They check that the suffix matches the daemon's,
+     that the record is not picked up by the `*.goal-clear` glob, and that the daemon's `read_clear_record` accepts
+     what the supervisor writes. They also cover the record being written before typing, no record on a dry run, no
+     clear when the write fails (a directory sits at the record path), and reaping.
+2. **Registry line channel** (commit `28497cdb0`):
+   - Added `SessionModeRegistry.queue_line` and `take_lines`, a pop-once queue separate from `_notices`. A blank line
+     raises `ValueError`.
+   - `pending_mode_statement` adds these lines to its single `SESSION MODE:` line, after the notices. It is still the
+     only consumer.
+3. **Stop wiring** (`handlers/stop/goal_loop_detector.py`, commit `b3ea769ba`):
+   - Added `_attribute_clears`, which runs straight after `read_new_lines`. It skips clears whose keys the transition
+     log already holds, then logs each new verdict as a `goal-clear` transition. When the verdict carries a line, the
+     line is queued with `registry.queue_line`.
+   - Added two seams, `_recent_transitions` and `_clear_record_dir`. The defaults are the data layer's log and
+     `ProjectContext.daemon_untracked_dir() / SIGNAL_SUBDIR`.
+   - Any of `OSError`, `RuntimeError`, `GoalClearAttributionError` or `TransitionLogError` is a `log_and_continue`
+     WARNING, and the Stop is still allowed. The module docstring is updated.
+   - New tests are in `TestGoalClearAttribution` in `tests/unit/handlers/stop/test_goal_loop_detector.py`. They run
+     the real `handle()` with a real registry and transition log, and cover supervisor, human, supervisor-assumed
+     (with the queued line), restart dedupe, only-new-clears, failure, a clear with no timestamp, the no-clear fast
+     path, and the defaults.
+4. **Release note**: `CLAUDE/UPGRADES/UNRELEASED/release-notes/025-goal-clear-attribution.md` (commit `b3ea769ba`).
+   It records the three known gaps above.
+5. **QA fixes** (commit `41fc4a8ae`):
+   - The first QA run flagged two `error_hiding` findings in the Part 1 module `core/goal_clear_attribution.py`.
+     - `read_clear_record` now checks `path.exists()` instead of catching `FileNotFoundError`. If the record vanishes
+       between the check and the read, the clear is treated as unreadable (supervisor-assumed), which is safe.
+     - A transcript line that is not JSON is passed through `log_and_continue` at DEBUG.
+   - It also flagged 7 pyright errors in the new supervisor test. The `_decide` return type is now `Any`, with a
+     comment: the supervisor is loaded from a script path, so its types cannot be imported.
+   - `run_autofix.sh` changed nothing.
+
+### Final QA
+
+`llm_qa.py changed --range 2c3ed0301..HEAD --allow-unmapped` on the clean tree at `41fc4a8ae`: `QA: 41/41 PASSED`.
+The full output is in `untracked/scratch/qa-501p8.txt`.
+
+### Head
+
+The head is the commit that adds this section and the PLAN.md tick, on top of `41fc4a8ae`. The branch is pushed. It
+is not merged, and the daemon was not restarted. The running supervisor picks up the new code when its worker
+hot-reloads; see `CLAUDE/development/CcySupervisor.md`.
