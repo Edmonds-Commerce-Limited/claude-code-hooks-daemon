@@ -1,8 +1,9 @@
-"""No automated ``.goal-intent`` is written for a session in manual goals (Plan 00501 Task 8.3).
+"""No automated goal is written OR cleared for a session in manual goals (Plan 00501 Task 8.3).
 
 The gate is per TARGET session (the retirement fan-out writes other sessions'
 signals), fails closed on an unreadable registry, and leaves the human's own
-``inject-goal`` (``write_goal_signal``) ungated.
+``inject-goal`` (``write_goal_signal``) ungated. The retirement clears are gated
+the same way; the goal-loop detector's loop-breaking clear is not.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from claude_code_hooks_daemon.core.data_layer import DaemonDataLayer
 from claude_code_hooks_daemon.handlers.post_tool_use import goal_injection
 from claude_code_hooks_daemon.handlers.post_tool_use.goal_injection import (
     GoalInjectionHandler,
+    clear_automated_goal_signal,
     write_automated_goal_signal,
 )
 from claude_code_hooks_daemon.plan_qa.model import TERMINAL_STATUSES
@@ -115,3 +117,63 @@ class TestCallers:
             plan_doc.parse.return_value = doc
             handler._maybe_refresh_on_retirement(_AUTO, "00501", tmp_path / "PLAN.md", "", {})
         assert _targets(writes) == [_AUTO]
+
+
+@pytest.fixture
+def clears(writes: MagicMock, monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """A recorder for the raw goal clears, beside the ``writes`` registry."""
+    recorder = MagicMock(return_value=True)
+    monkeypatch.setattr(goal_injection, "clear_goal_signal", recorder)
+    return recorder
+
+
+class TestAutomatedClears:
+    """The human owns a manual-goals session's goal, so no automated clear removes it."""
+
+    def test_the_helper_clears_only_an_auto_session(self, clears: MagicMock) -> None:
+        assert clear_automated_goal_signal(_MANUAL) is False
+        assert clear_automated_goal_signal(_AUTO) is True
+        assert _targets(clears) == [_AUTO]
+
+    def test_an_unreadable_registry_clears_nothing_with_a_warning(
+        self,
+        clears: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        monkeypatch.setattr(
+            DaemonDataLayer,
+            "session_modes",
+            property(lambda _self: (_ for _ in ()).throw(RuntimeError("no project context"))),
+        )
+        with caplog.at_level(logging.WARNING):
+            assert clear_automated_goal_signal(_AUTO) is False
+        clears.assert_not_called()
+        assert any(
+            r.levelno == logging.WARNING and "no project context" in r.getMessage()
+            for r in caplog.records
+        )
+
+    def test_the_fallback_clear_is_gated(self, clears: MagicMock) -> None:
+        assert GoalInjectionHandler._write_fallback(_MANUAL, None, "00501") is None
+        assert GoalInjectionHandler._write_fallback(_AUTO, None, "00501") is None
+        assert _targets(clears) == [_AUTO]
+
+    def test_the_retirement_clear_skips_only_the_manual_owner(
+        self, clears: MagicMock, tmp_path: Path
+    ) -> None:
+        handler = GoalInjectionHandler()
+        ledger = MagicMock()
+        ledger.owning_sessions.return_value = [_MANUAL, _AUTO]
+        ledger.live_plan_refs.return_value = []
+        doc = MagicMock()
+        doc.status = next(iter(TERMINAL_STATUSES))
+        with (
+            patch(f"{_MODULE}.PlanDoc") as plan_doc,
+            patch.object(handler, "_resolve_transition", return_value=(True, False)),
+            patch.object(handler, "_open_ledger", return_value=ledger),
+            patch.object(handler, "_plan_root", return_value=tmp_path),
+        ):
+            plan_doc.parse.return_value = doc
+            handler._maybe_refresh_on_retirement(_AUTO, "00501", tmp_path / "PLAN.md", "", {})
+        assert _targets(clears) == [_AUTO]

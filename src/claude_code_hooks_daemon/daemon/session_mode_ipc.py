@@ -8,6 +8,8 @@ and the newest transitions with their evidence. The daemon-wide
 ``get_mode``/``set_mode`` actions are separate and unchanged.
 ``exit_blocked`` (Task 6.3) ends a goal-loop block; when only the declared
 awaiting-human block is live it is refused with a named error.
+``enter_manual_goals``/``exit_manual_goals`` (Task 8.3) turn automated goals
+off and back on through ``core.manual_goals``, as the prompt command does.
 
 A request naming no session is refused; a registry failure is logged at
 WARNING and returned as an error, never read as "no modes".
@@ -25,10 +27,15 @@ from claude_code_hooks_daemon.core.goal_loop_block import (
     DeclaredBlockRefusedError,
     unblock_goal_loop,
 )
+from claude_code_hooks_daemon.core.manual_goals import (
+    GoalsChange,
+    enter_manual_goals,
+    exit_manual_goals,
+)
 from claude_code_hooks_daemon.core.session_mode_log import TransitionLogError
 from claude_code_hooks_daemon.core.session_mode_registry import SessionModeRegistry
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
-from claude_code_hooks_daemon.utils.session_modes import SessionModeEntry
+from claude_code_hooks_daemon.utils.session_modes import ModeSource, SessionModeEntry
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +125,14 @@ def _answer(
             SessionModeIPC.KEY_OUTCOME: str(change.outcome),
             SessionModeIPC.KEY_LINE: change.line(),
         }
+    if action == SessionModeIPC.ACTION_ENTER_MANUAL_GOALS:
+        return _goals_change(
+            enter_manual_goals(
+                registry, session_id, source=ModeSource.HUMAN, evidence=_IPC_EVIDENCE
+            )
+        )
+    if action == SessionModeIPC.ACTION_EXIT_MANUAL_GOALS:
+        return _goals_change(exit_manual_goals(registry, session_id, evidence=_IPC_EVIDENCE))
     return _change(exit_focus(registry, session_id, evidence=_IPC_EVIDENCE))
 
 
@@ -173,6 +188,13 @@ def _entry(entry: SessionModeEntry) -> dict[str, Any]:
         SessionModeIPC.KEY_DETAIL: entry.detail,
         SessionModeIPC.KEY_ENTERED_AT: entry.entered_at,
         SessionModeIPC.KEY_EXPIRES_AT: entry.expires_at,
+    }
+
+
+def _goals_change(change: GoalsChange) -> dict[str, Any]:
+    return {
+        SessionModeIPC.KEY_OUTCOME: str(change.outcome),
+        SessionModeIPC.KEY_LINE: change.line(),
     }
 
 

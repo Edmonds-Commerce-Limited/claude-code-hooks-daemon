@@ -22,6 +22,7 @@ from tests.support.autonomy import focus_entry, pin_session_modes
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.session_mode_log import TransitionAction
 from claude_code_hooks_daemon.core.session_mode_registry import SessionModeRegistry
 from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor import (
     CANONICAL_CRON_PROMPT,
@@ -387,3 +388,81 @@ class TestFailsLoud:
     def test_a_plain_prompt_without_a_session_adds_nothing(self) -> None:
         result, _ = _run(_prompt("carry on", session_id=None))
         assert result.context == []
+
+
+class TestGoalsCommand:
+    """``hooks-daemon goals off|manual`` enters manual goals; ``on|auto`` switches back."""
+
+    @staticmethod
+    def _manual(registry: SessionModeRegistry) -> bool:
+        return any(e.mode is SessionMode.MANUAL_GOALS for e in registry.active(_SESSION))
+
+    @pytest.mark.parametrize("word", ["off", "manual"])
+    def test_off_enters_manual_goals_with_one_line(
+        self, registry: SessionModeRegistry, word: str
+    ) -> None:
+        result, calls = _run(_prompt(f"hooks-daemon goals {word}"))
+        assert result.decision is Decision.ALLOW
+        [line] = result.context
+        assert line.startswith("MANUAL GOALS ON:")
+        assert self._manual(registry) is True
+        assert calls == []
+
+    @pytest.mark.parametrize("word", ["on", "auto"])
+    def test_on_switches_back_and_logs_the_exit(
+        self, registry: SessionModeRegistry, word: str
+    ) -> None:
+        registry.enter(
+            manual_goals_entry(_SESSION, entered_at=time.time(), source=ModeSource.HUMAN)
+        )
+        result, _ = _run(_prompt(f"Hooks Demon goals {word}"))
+        [line] = result.context
+        assert line.startswith("MANUAL GOALS OFF:")
+        assert self._manual(registry) is False
+        log = registry.transition_log
+        assert log is not None
+        [last] = log.recent(1, session_id=_SESSION)
+        assert last.action is TransitionAction.EXIT
+        assert "hooks-daemon goals" in last.evidence
+
+    def test_on_when_not_manual_says_so(self) -> None:
+        result, _ = _run(_prompt("hooks-daemon goals on"))
+        [line] = result.context
+        assert "nothing to end" in line
+
+    def test_a_supervisor_line_is_not_a_goals_command(self, registry: SessionModeRegistry) -> None:
+        result, _ = _run(_prompt("🤖 [ccy-supervisor] hooks-daemon goals off"))
+        assert result.context == []
+        assert self._manual(registry) is False
+
+    def test_a_failed_write_says_manual_goals_not_changed(
+        self, registry: SessionModeRegistry, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with (
+            patch.object(registry, "enter", side_effect=OSError("disk gone")),
+            caplog.at_level(logging.WARNING),
+        ):
+            result, _ = _run(_prompt("hooks-daemon goals off"))
+        [line] = result.context
+        assert line.startswith("MANUAL GOALS NOT CHANGED:")
+        assert "disk gone" in line
+        assert any(r.levelno == logging.WARNING for r in caplog.records)
+
+    def test_an_unreachable_registry_says_manual_goals_not_changed(self) -> None:
+        with patch(f"{_MODULE}.get_data_layer", side_effect=RuntimeError("no daemon")):
+            result, _ = _run(_prompt("hooks-daemon goals off"))
+        [line] = result.context
+        assert line.startswith("MANUAL GOALS NOT CHANGED:")
+        assert "no daemon" in line
+
+    def test_a_goals_command_without_a_session_is_stated(self) -> None:
+        result, _ = _run(_prompt("hooks-daemon goals off", session_id=None))
+        [line] = result.context
+        assert line.startswith("MANUAL GOALS NOT CHANGED:")
+        assert "session id" in line
+
+    def test_guidance_names_the_goals_command(self) -> None:
+        guidance = FocusModeTriggerHandler().get_claude_md()
+        assert guidance is not None
+        assert "hooks-daemon goals off" in guidance
+        assert "hooks-daemon goals on" in guidance

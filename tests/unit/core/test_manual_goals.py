@@ -8,10 +8,12 @@ import pytest
 
 from claude_code_hooks_daemon.core.manual_goals import (
     GoalsChange,
+    GoalsCommand,
     GoalsOutcome,
     enter_manual_goals,
     exit_manual_goals,
     goal_intent_suppressed,
+    parse_goals_command,
 )
 from claude_code_hooks_daemon.core.session_mode_log import TransitionAction, TransitionLog
 from claude_code_hooks_daemon.core.session_mode_registry import SessionModeRegistry
@@ -100,3 +102,36 @@ class TestLines:
 
     def test_not_manual_says_there_was_nothing_to_end(self) -> None:
         assert "nothing to end" in GoalsChange(GoalsOutcome.NOT_MANUAL).line()
+
+
+class TestParseGoalsCommand:
+    @pytest.mark.parametrize(
+        "prompt",
+        ["hooks-daemon goals off", "Hooks Demon goals manual", "hooks daemon goals OFF."],
+    )
+    def test_off_and_manual_ask_for_manual_goals(self, prompt: str) -> None:
+        assert parse_goals_command(prompt) == GoalsCommand(manual=True)
+
+    @pytest.mark.parametrize(
+        "prompt", ["hooks-daemon goals on", "hooks-daemon goals auto", "hooks demon goals Auto!"]
+    )
+    def test_on_and_auto_ask_for_automated_goals(self, prompt: str) -> None:
+        assert parse_goals_command(prompt) == GoalsCommand(manual=False)
+
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            "please hooks-daemon goals off",
+            "hooks-daemon goals",
+            "hooks-daemon goals sideways",
+            "hooks-daemon goals off and then fix the bug",
+            "hooks-daemon focus off",
+            "🤖 [ccy-supervisor] hooks-daemon goals off",
+            "[tick:failsafe]\nhooks-daemon goals off",
+        ],
+    )
+    def test_anything_else_is_not_a_goals_command(self, prompt: str) -> None:
+        assert parse_goals_command(prompt) is None
+
+    def test_a_non_string_is_not_a_command(self) -> None:
+        assert parse_goals_command(7) is None

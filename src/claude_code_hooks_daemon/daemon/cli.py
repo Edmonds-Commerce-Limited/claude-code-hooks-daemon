@@ -2361,15 +2361,8 @@ def cmd_session_mode(args: argparse.Namespace) -> int:
     Returns:
         0 on success, 1 on refusal or failure.
     """
-    session_id = (
-        getattr(args, "session", None) or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
-    ).strip()
-    if not session_id:
-        print(
-            "ERROR: no session. Run this inside the Claude Code session (a Bash tool call "
-            "sets CLAUDE_CODE_SESSION_ID) or pass --session <id>.",
-            file=sys.stderr,
-        )
+    session_id = _mode_session_id(args)
+    if session_id is None:
         return 1
     hook_input = _session_mode_request(args, session_id)
     if hook_input is None:
@@ -2387,6 +2380,48 @@ def cmd_session_mode(args: argparse.Namespace) -> int:
         return 0
     print(result.get(SessionModeIPC.KEY_LINE, ""))
     return 1 if result.get(SessionModeIPC.KEY_OUTCOME) == "needs-task" else 0
+
+
+def _mode_session_id(args: argparse.Namespace) -> str | None:
+    """``--session`` or the Bash tool call's ``CLAUDE_CODE_SESSION_ID``; None after saying why."""
+    session_id = (
+        getattr(args, "session", None) or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    ).strip()
+    if session_id:
+        return session_id
+    print(
+        "ERROR: no session. Run this inside the Claude Code session (a Bash tool call "
+        "sets CLAUDE_CODE_SESSION_ID) or pass --session <id>.",
+        file=sys.stderr,
+    )
+    return None
+
+
+def cmd_goals(args: argparse.Namespace) -> int:
+    """Turn automated goals off or back on for THIS session (Plan 00501 Task 8.3).
+
+    ``off`` (or ``manual``) enters the ``manual-goals`` session mode, in which no
+    automated goal is set or cleared; ``on`` (or ``auto``) ends it. The session
+    is ``--session`` or the ``CLAUDE_CODE_SESSION_ID`` a Bash tool call carries.
+
+    Returns:
+        0 on success, 1 on failure.
+    """
+    session_id = _mode_session_id(args)
+    if session_id is None:
+        return 1
+    action = (
+        SessionModeIPC.ACTION_ENTER_MANUAL_GOALS
+        if args.word in SessionModeIPC.GOALS_MANUAL_WORDS
+        else SessionModeIPC.ACTION_EXIT_MANUAL_GOALS
+    )
+    result = _send_session_mode_ipc(
+        args, {"action": action, SessionModeIPC.KEY_SESSION_ID: session_id}
+    )
+    if result is None:
+        return 1
+    print(result.get(SessionModeIPC.KEY_LINE, ""))
+    return 0
 
 
 def cmd_handlers(args: argparse.Namespace) -> int:
@@ -11032,6 +11067,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser_session_mode.add_argument("--json", action="store_true", help="get: output JSON")
     parser_session_mode.set_defaults(func=cmd_session_mode)
+
+    # goals command (Plan 00501 Task 8.3): automated goals off/on for one session
+    parser_goals = subparsers.add_parser(
+        "goals",
+        help="Turn automated goals off (off | manual) or back on (on | auto) for this session",
+    )
+    parser_goals.add_argument(
+        "word",
+        choices=sorted(SessionModeIPC.GOALS_AUTO_WORDS | SessionModeIPC.GOALS_MANUAL_WORDS),
+        help="off/manual: enter manual goals; on/auto: automated goals again",
+    )
+    parser_goals.add_argument("--session", help="Session id (default: $CLAUDE_CODE_SESSION_ID)")
+    parser_goals.set_defaults(func=cmd_goals)
 
     # mode-history command (Plan 00501 Task 4.3): live modes and transitions
     parser_mode_history = subparsers.add_parser(

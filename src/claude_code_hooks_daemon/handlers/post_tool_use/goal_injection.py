@@ -550,8 +550,24 @@ def write_automated_goal_signal(
     return write_goal_signal(session_id, plan_number, joined_line, source)
 
 
+def clear_automated_goal_signal(session_id: str) -> bool:
+    """:func:`clear_goal_signal` for an AUTOMATED retirement, unless the session is in manual goals.
+
+    While a session is in manual goals the human owns its goal, so a plan
+    retiring must not clear it either. An unreadable registry fails closed
+    (nothing is cleared, a WARNING names the error). The goal-loop detector's
+    loop-breaking clear and a human's focus or ``clear-goal`` call
+    :func:`clear_goal_signal` directly and are not gated. Returns True only
+    when the clear was written.
+    """
+    if not _automated_goal_allowed(session_id):
+        logger.info("goal_injection: automated goal clear not written for %s", session_id)
+        return False
+    return clear_goal_signal(session_id)
+
+
 def _automated_goal_allowed(session_id: str) -> bool:
-    """Whether an automated goal may be written for ``session_id``.
+    """Whether an automated goal may be written or cleared for ``session_id``.
 
     False while the session is in manual goals, and False (fail closed, logged
     at WARNING) when the session-modes registry cannot be read.
@@ -1394,7 +1410,7 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         refs = ledger.live_plan_refs(plan_dir)
         if not refs:
             for owner in owners:
-                clear_goal_signal(owner)
+                clear_automated_goal_signal(owner)
             return
         payload = self._render_combined(refs)
         if payload is None:
@@ -1602,7 +1618,7 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
     @staticmethod
     def _write_fallback(session_id: str, fallback: str | None, plan_number: str) -> Path | None:
         if fallback is None:
-            clear_goal_signal(session_id)
+            clear_automated_goal_signal(session_id)
             return None
         return write_automated_goal_signal(session_id, plan_number, fallback, _SOURCE_STATUS_FLIP)
 
