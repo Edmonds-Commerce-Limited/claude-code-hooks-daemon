@@ -336,19 +336,21 @@ a parent.
   Claude, so it cannot ride the worker's argv. The host sends it on every tick
   as `TickFacts.child_pid`; the worker's `WorkerChildPid` keeps the last one
   sent, and the plugins' `api.session_id()` reads the same record.
-- **Fail safe.** No child pid, a child that has exited, or no `/proc` gives the
-  empty set, and the empty set acts on nothing. There is no fallback to a scan
-  of every process.
+- **Fail safe.** A child that has exited, a re-parented worker, or no `/proc`
+  gives the empty set, and the empty set acts on nothing. There is no fallback
+  to a scan of every process.
 - **The union cache is per child.** Ids learned under one child pid accumulate
   (Plan 00182 throttles the rescan), and a different child pid starts a fresh
   set.
 - **Hot reload under an older host.** A host started before `child_pid`
-  existed sends none, and it is not reloaded with the worker. The reloaded
-  worker then takes the host's single OTHER child as Claude, since that host's
-  children are exactly Claude and the worker. Two or more other children, or a
-  host of pid 1 (the worker was re-parented after the host died), give no pid
-  and so the empty set. A ccy relaunch replaces the older host and ends this
-  case.
+  existed sends none, and it is not reloaded with the worker. Until a pid is
+  sent, the reloaded worker takes the own set from every descendant of the host
+  (its parent) except its own subtree: everything there was started by this
+  supervisor. No single child is picked, because the host can have children
+  beside Claude (a pingbus seat, for one), and Claude's own environ may lack the
+  id while its tool shells and hooks carry it. The host's own environ is not
+  read. A host of pid 1 (the worker was re-parented after the host died) gives
+  the empty set. A ccy relaunch replaces the older host and ends this case.
 
 ## Supported Python and the launcher
 

@@ -66,6 +66,8 @@ def _facts(*, idle: bool = True, raw: bytes = b"", now: float = _NOW) -> object:
         human_compact_submitted=False,
         work_idle=True,
         human_raw_input=base64.b64encode(raw).decode("ascii"),
+        # A current host sends the Claude child pid on every tick.
+        child_pid=4242,
     )
 
 

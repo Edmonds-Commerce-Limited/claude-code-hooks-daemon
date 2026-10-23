@@ -287,35 +287,13 @@ class TestWorkerChildPid:
         child = _mod.WorkerChildPid(proc_root=tmp_path, host_pid=lambda: 50, own_pid=lambda: 51)
         assert child.pid is None
 
-    def test_legacy_host_child_is_the_hosts_only_other_child(self, tmp_path: Path) -> None:
-        # A host started before TickFacts carried `child_pid` sends no pid. Its
-        # children are exactly the claude child and this worker.
-        root = _fake_proc(
-            tmp_path,
-            {
-                50: _p(1, comm="python3"),
-                51: _p(50, comm="python3"),
-                _CHILD: _p(50, _MINE, comm="claude"),
-                200: _p(1, _FOREIGN, comm="claude"),
-            },
-        )
-        child = _mod.WorkerChildPid(proc_root=root, host_pid=lambda: 50, own_pid=lambda: 51)
-        assert child.learn(None) == _CHILD
-
-    def test_legacy_host_with_ambiguous_children_fails_safe(self, tmp_path: Path) -> None:
-        root = _fake_proc(
-            tmp_path,
-            {50: _p(1), 51: _p(50), _CHILD: _p(50, _MINE), 101: _p(50, _FOREIGN)},
-        )
-        child = _mod.WorkerChildPid(proc_root=root, host_pid=lambda: 50, own_pid=lambda: 51)
-        assert child.learn(None) is None
-
     def test_reparented_worker_never_adopts_init_children(self, tmp_path: Path) -> None:
-        # The host died and the worker was re-parented to init: init's only
-        # other child must not become "the child".
+        # The host died and the worker was re-parented to init: init's
+        # descendants are the whole namespace, never this supervisor's tree.
         root = _fake_proc(tmp_path, {1: _p(0), 51: _p(1), 200: _p(1, _FOREIGN)})
         child = _mod.WorkerChildPid(proc_root=root, host_pid=lambda: 1, own_pid=lambda: 51)
         assert child.learn(None) is None
+        assert child.own_session_ids() == frozenset()
 
     def test_a_learned_pid_is_kept_when_a_later_tick_sends_none(self, tmp_path: Path) -> None:
         child = _mod.WorkerChildPid(proc_root=tmp_path, host_pid=lambda: 50, own_pid=lambda: 51)
@@ -335,6 +313,111 @@ class TestWorkerChildPid:
         child.learn(_CHILD)
         assert child.own_session_ids() == frozenset({_MINE})
         assert seen == [_CHILD]
+
+
+# ── hot-reload fallback: a host that sends no child pid ──────────────────────
+
+_HOST = 2
+_PINGBUS = 70
+_CLAUDE = 78
+_TOOL_SHELL = 900
+_WORKER = 114781
+_WORKER_CHILD = 114790
+
+
+def _live_shape(root: Path) -> Path:
+    """The live tree of the 00551 regression: the host has TWO other children.
+
+    tini (1) -> host (2) -> {pingbus (70, no id), claude (78, no id), worker}.
+    Claude's tool shell carries the session id; a foreign claude sits under
+    tini, and the worker's own subtree carries an id that must not be taken.
+    """
+    return _fake_proc(
+        root,
+        {
+            1: _p(0, comm="tini"),
+            _HOST: _p(1, comm="python3"),
+            _PINGBUS: _p(_HOST, comm="python3"),
+            _CLAUDE: _p(_HOST, comm="claude"),
+            _TOOL_SHELL: _p(_CLAUDE, _MINE, comm="bash"),
+            _WORKER: _p(_HOST, comm="python3"),
+            _WORKER_CHILD: _p(_WORKER, _SUBAGENT, comm="python3"),
+            200: _p(1, _FOREIGN, comm="claude"),
+        },
+    )
+
+
+@pytest.mark.usefixtures("_clean_cache")
+class TestLegacyHostFallback:
+    def test_live_shape_resolves_the_claude_grandchild(self, tmp_path: Path) -> None:
+        child = _mod.WorkerChildPid(
+            proc_root=_live_shape(tmp_path), host_pid=lambda: _HOST, own_pid=lambda: _WORKER
+        )
+        assert child.learn(None) is None
+        assert child.own_session_ids() == frozenset({_MINE})
+
+    def test_resolver_excludes_the_worker_subtree_and_foreign_trees(self, tmp_path: Path) -> None:
+        root = _live_shape(tmp_path)
+        assert _mod.resolve_host_session_ids(_HOST, _WORKER, root) == frozenset({_MINE})
+
+    def test_pid_one_host_resolves_nothing(self, tmp_path: Path) -> None:
+        root = _live_shape(tmp_path)
+        assert _mod.resolve_host_session_ids(1, _WORKER, root) == frozenset()
+
+    def test_host_gone_resolves_nothing(self, tmp_path: Path) -> None:
+        root = _fake_proc(tmp_path, {_WORKER: _p(1), 200: _p(1, _FOREIGN)})
+        assert _mod.resolve_host_session_ids(_HOST, _WORKER, root) == frozenset()
+
+    def test_a_sent_pid_replaces_the_fallback(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        child = _mod.WorkerChildPid(
+            proc_root=_live_shape(tmp_path), host_pid=lambda: _HOST, own_pid=lambda: _WORKER
+        )
+        child.learn(None)
+        seen: list[object] = []
+        monkeypatch.setattr(
+            _mod,
+            "cached_own_session_ids",
+            lambda child_pid, *a, **k: seen.append(child_pid) or frozenset({_MINE}),
+        )
+        assert child.learn(_CLAUDE) == _CLAUDE
+        assert child.own_session_ids() == frozenset({_MINE})
+        assert seen == [_CLAUDE]
+
+    def test_run_worker_on_a_legacy_line_uses_the_host_tree(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        seen: list[object] = []
+        real_decide = _mod.decide_once
+
+        def record(*args: object, **kwargs: object) -> object:
+            seen.append(kwargs["own_sessions"])
+            return real_decide(*args, **kwargs)
+
+        monkeypatch.setattr(_mod, "decide_once", record)
+        facts = _mod.TickFacts(
+            now_wall=_NOW,
+            idle=True,
+            input_line_empty=True,
+            human_compact_submitted=False,
+            work_idle=True,
+        )
+        sidecars = tmp_path / "sidecars"
+        sidecars.mkdir()
+        _mod.run_worker(
+            io.StringIO(_mod._facts_to_json(facts) + "\n"),
+            io.StringIO(),
+            dry_run=True,
+            sidecar_dir=sidecars,
+            policy=_mod.CompactPolicy(),
+            child=_mod.WorkerChildPid(
+                proc_root=_live_shape(tmp_path / "proc"),
+                host_pid=lambda: _HOST,
+                own_pid=lambda: _WORKER,
+            ),
+        )
+        assert seen == [frozenset({_MINE})]
 
 
 # ── the child pid crosses the host -> worker pipe ────────────────────────────
