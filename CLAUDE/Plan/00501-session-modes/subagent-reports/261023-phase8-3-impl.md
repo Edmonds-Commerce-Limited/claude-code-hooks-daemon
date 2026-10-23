@@ -269,3 +269,81 @@ registry read now returns a bool, so `None` is never returned from an `except`.
      too.
 8. **Wording the entry line already promises**: the `ENTERED` line names `hooks-daemon goals on` and
    `/mode goals auto`, which part B builds. Both must land in this branch before it merges.
+
+## Part 3 (part B)
+
+Brief: `untracked/scratch/brief-501-phase8-3b.md`. I stopped early at a clean commit because this agent went
+past the 150k context budget. Brief steps 1 and 2 are done; steps 3 to 6 are left (see "Left").
+
+### What changed (commit `92421a271`)
+
+All paths are under `src/claude_code_hooks_daemon/` unless stated otherwise. Every change was test-first.
+
+- **`constants/modes.py`**: `SessionModeIPC` gains:
+  - `ACTION_ENTER_MANUAL_GOALS` and `ACTION_EXIT_MANUAL_GOALS`, both added to `ACTIONS`;
+  - `GOALS_AUTO_WORDS` (`on`, `auto`) and `GOALS_MANUAL_WORDS` (`off`, `manual`), which the prompt parser and
+    the CLI both read.
+- **`core/manual_goals.py`**: adds `GoalsCommand(manual: bool)` and `parse_goals_command(prompt)`.
+  - Only a genuine human prompt is parsed. The WHOLE prompt must be `hooks-daemon goals <word>`; the
+    `hooks daemon` / `hooks demon` spellings, any case, and a trailing `.` or `!` are accepted.
+  - Trailing text, an unknown word or a bare `goals` gives None.
+  - The ENTERED line now reads "the human owns this session's goal ... no automated clear removes a goal".
+    It no longer says "a human cleared the goal", because the prompt and CLI routes enter the mode too.
+- **`handlers/user_prompt_submit/focus_mode_trigger.py`**:
+  - `command = parse_focus_command(prompt) or parse_goals_command(prompt)`.
+  - `_apply` branches on `GoalsCommand` after `note_prompt`, with the evidence "the human's
+    `hooks-daemon goals` prompt command".
+  - `_not_changed()` gives "MANUAL GOALS NOT CHANGED" or "FOCUS MODE NOT CHANGED". It is used when there is no
+    session id, when the registry is unreachable, and when a write fails.
+  - `get_claude_md` documents the goals command.
+- **`daemon/session_mode_ipc.py`**: `_answer` has enter and exit branches that call `core.manual_goals` with
+  source HUMAN and the IPC evidence. The result is `{outcome, line}`.
+- **`daemon/cli.py`**:
+  - `hooks-daemon goals {auto,manual,off,on} [--session]` (`cmd_goals`), with its subparser after
+    `session-mode`.
+  - The session-id lookup is pulled out into `_mode_session_id`, which `cmd_session_mode` now uses as well.
+- **`handlers/post_tool_use/goal_injection.py`** (the coordinator's ruling):
+  - New `clear_automated_goal_signal` checks `_automated_goal_allowed` for each session. An unreadable
+    registry fails closed with a WARNING.
+  - It replaces `clear_goal_signal` in the no-live-refs branch of `_maybe_refresh_on_retirement` and in
+    `_write_fallback(fallback=None)`.
+  - The goal-loop detector, focus entry and `clear-goal` still call `clear_goal_signal` directly and are not
+    gated.
+- **Tests**:
+  - `tests/unit/core/test_manual_goals.py` (`TestParseGoalsCommand`);
+  - `tests/unit/handlers/user_prompt_submit/test_focus_mode_trigger.py` (`TestGoalsCommand`);
+  - `tests/unit/daemon/test_session_mode_ipc.py` (`TestManualGoals`, the action set);
+  - new `tests/unit/daemon/test_cli_goals.py`, which includes an end-to-end run through the real IPC handler;
+  - `tests/unit/handlers/post_tool_use/test_goal_injection_manual_goals.py` (`TestAutomatedClears`).
+
+### QA
+
+Only targeted pytest has run, and it is green: the five test files above, `test_goal_loop_detector.py`,
+`test_cli_session_mode.py` and all goal_injection tests. **`llm_qa.py changed` has NOT been run on
+`92421a271`.**
+
+### Head
+
+The code is at `92421a271`; this report is committed on top of it.
+
+### Left
+
+1. **`/mode` skill**: in `.claude/skills/mode/SKILL.md` (usage) and the `invoke.sh` parse list, map
+   `goals auto|on` to `hooks-daemon goals on` and `goals manual|off` to `hooks-daemon goals off`.
+2. **Docs**:
+   - Add a manual-goals section to `CLAUDE/core/SessionModes.core.md` and its twin
+     `src/claude_code_hooks_daemon/install/templates/core/SessionModes.core.md`, keeping the two byte-identical.
+   - That section covers:
+     - entry: a human `/goal clear`, `hooks-daemon goals off`, or `/mode goals manual`;
+     - exit: a switch-back, or a new session;
+     - what it suppresses: automated goal writes AND retirement clears. The goal-loop clear is not suppressed.
+   - Add the label to the `status-line-explained` `session_mode_indicator` entry if that entry lists modes.
+   - Add manual-goals to the routing row in `CLAUDE/CLAUDE.md`, which currently reads "Session modes (focus,
+     BLOCKED, usage-paused)".
+   - A CLI-reference doc or test that lists every subcommand may need `goals`; QA will name it.
+3. **Release note**: `CLAUDE/UPGRADES/UNRELEASED/release-notes/026-manual-goals-mode.md`, in the same format as 025.
+4. **QA**:
+   - Run `./scripts/qa/run_autofix.sh`.
+   - On a clean tree, run `FULL_QA_LOCK_WAIT_SECONDS=3600 ./scripts/qa/llm_qa.py changed --range 8ea9c88a8..HEAD --allow-unmapped > untracked/scratch/qa-501p83b.txt 2>&1`.
+   - Fix what it reports and re-run until it is clean.
+5. Tick Task 8.3 in PLAN.md only once 1 to 4 hold.
