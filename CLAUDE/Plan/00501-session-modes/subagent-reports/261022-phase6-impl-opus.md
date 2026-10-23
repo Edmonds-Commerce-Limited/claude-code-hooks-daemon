@@ -566,3 +566,16 @@ and stopped at a clean, pushed commit. **6.3 and 6.4 are still unticked.**
    grep `^QA:` and `^❌`, fix and re-run until clean. Black and ruff have NOT been run on the B2 changes yet.
 
 Head at stop: `a82b7434f` (pushed), plus this report commit.
+
+## Part B3: docs, option-injection test, human-prompt exit test, release note, QA
+
+Base `b05d232c8`. Code was done; this was finishing work.
+
+- `docs/guides/HANDLER_REFERENCE.md`: restored the `mode` row (`observe` default, `act` opt-in), described act mode and its exits, and added the no-ccy backstop (cap of 8 consecutive stop-hook continuations, reset by each tool call, `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`, goal paused until the next message, a loop with tool calls between stops never reaches it).
+- `test_registry_option_injection.py`: added `("goal_loop_detector", "mode"): "act"`.
+- `test_failsafe_cron_blockage_suppressor.py`: new test that a human prompt ending a goal-loop block logs an EXIT with the cause. It passed immediately, so it was checked against a mutant: with the handler's evidence string replaced, it failed (1 failed, 43 passed); the string was then restored.
+- `.claude/hooks-daemon.yaml.example`: `mode` and `blocked_hours` comments describe `act`.
+- `CLAUDE/UPGRADES/UNRELEASED/release-notes/024-goal-loop-detector.md` added; Tasks 6.3 and 6.4 ticked in PLAN.md.
+- Autofix reformatted `goal_loop_detector.py` (black).
+- QA first flagged `error_hiding` (return-none-on-error) in `goal_loop_detector._enter`; fixed by moving the fingerprint assignment into a `try/else` instead of a `return` in the `except`. No suppressions.
+- Final QA line, run on the committed tree at code head `7d10af548`: `QA: 41/41 PASSED`.
