@@ -232,9 +232,11 @@ All CLEAR; rationale and code citations in
   (ledger N378 closed).
 - [ ] A goal tight loop is detected, logged with its evidence, broken and not re-armed; every unblock condition
   exits the mode.
-- [ ] The status line shows the active mode(s) and `status-line-explained` documents them.
+- [x] ✅ The status line shows the active mode(s) and `status-line-explained` documents them (the
+  `session_mode_indicator` segment: top mode by precedence plus `+N`, every mode and its exit named).
 - [ ] Guards behave identically in every mode; no config change is needed.
-- [ ] Full QA gate passes.
+- [x] ✅ Full QA gate passes: the v3.71.0 `Release gate` run 40010977887 (whole gate, Python 3.11 to 3.13) passed
+  on a tree carrying every merged task of this plan.
 
 ## Delivery & Milestones
 
