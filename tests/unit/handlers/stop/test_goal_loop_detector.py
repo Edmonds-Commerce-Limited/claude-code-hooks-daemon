@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -20,6 +21,7 @@ from tests.support.autonomy import pin_session_modes
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.goal_clear_attribution import record_path
 from claude_code_hooks_daemon.core.goal_loop import FingerprintError, option_problems
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
 from claude_code_hooks_daemon.core.session_mode_log import ModeTransition, TransitionAction
@@ -29,6 +31,7 @@ from claude_code_hooks_daemon.handlers.stop.goal_loop_detector import (
     GoalLoopDetectorHandler,
 )
 from claude_code_hooks_daemon.utils.session_modes import ModeLabel
+from claude_code_hooks_daemon.utils.session_signal_paths import SIGNAL_SUBDIR
 
 FIXTURES = Path(__file__).resolve().parents[3] / "fixtures" / "goal_loop"
 SESSION = "sess-goal-loop"
@@ -640,6 +643,177 @@ class TestProductionSeams:
             context.project_root.return_value = tmp_path
             assert detector._fingerprint_repo() == "abc"
         fingerprint.assert_called_once_with(tmp_path)
+
+
+def _typed_clear(second: int, uuid: str = "clear-uuid-1", argument: str = "clear") -> str:
+    return json.dumps(
+        {
+            "type": "system",
+            "subtype": "local_command",
+            "content": (
+                "<command-name>/goal</command-name>\n<command-message>goal</command-message>\n"
+                f"<command-args>{argument}</command-args>"
+            ),
+            "timestamp": _stamp(second),
+            "uuid": uuid,
+        }
+    )
+
+
+def _epoch(second: int) -> float:
+    return datetime.fromisoformat(_stamp(second).replace("Z", "+00:00")).timestamp()
+
+
+def _write_supervisor_record(directory: Path, *, ts: float) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    path = record_path(directory, SESSION)
+    path.write_text(
+        json.dumps({"session_id": SESSION, "ts": ts, "command": "/goal clear"}), encoding="utf-8"
+    )
+    return path
+
+
+class TestGoalClearAttribution:
+    """Each typed clear is attributed once on the real Stop path (Plan 00501 Task 8.2)."""
+
+    @staticmethod
+    def _detector(record_dir: Path) -> GoalLoopDetectorHandler:
+        """Production seams except the repository fingerprint and the record directory."""
+        detector = GoalLoopDetectorHandler()
+        detector._fingerprint_repo = lambda: "fp"
+        detector._clear_record_dir = lambda: record_dir
+        return detector
+
+    @staticmethod
+    def _clears(modes: SessionModeRegistry) -> list[ModeTransition]:
+        log = modes.transition_log
+        assert log is not None
+        return [
+            t for t in log.recent(50, session_id=SESSION) if t.action is TransitionAction.GOAL_CLEAR
+        ]
+
+    def test_a_clear_the_supervisor_recorded_is_its_and_consumes_the_record(
+        self, modes: SessionModeRegistry, tmp_path: Path
+    ) -> None:
+        record_dir = tmp_path / "records"
+        record = _write_supervisor_record(record_dir, ts=_epoch(10) - 0.5)
+        transcript = tmp_path / "t.jsonl"
+        _append_lines(transcript, [_typed_clear(10)])
+        result = self._detector(record_dir).handle(_input(transcript))
+        assert result.decision == Decision.ALLOW
+        [clear] = self._clears(modes)
+        assert clear.detail == "supervisor"
+        assert clear.label is ModeLabel.MANUAL_GOALS
+        assert not record.exists()
+        assert modes.take_lines(SESSION) == ()
+
+    def test_a_clear_with_no_record_is_the_humans(
+        self, modes: SessionModeRegistry, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        _append_lines(transcript, [_typed_clear(10)])
+        self._detector(tmp_path / "records").handle(_input(transcript))
+        [clear] = self._clears(modes)
+        assert clear.detail == "human"
+        assert "record=none" in clear.evidence
+
+    def test_an_unreadable_record_is_assumed_the_supervisors_and_queues_the_line(
+        self, modes: SessionModeRegistry, tmp_path: Path
+    ) -> None:
+        record_dir = tmp_path / "records"
+        record_dir.mkdir()
+        record_path(record_dir, SESSION).write_text("{not json", encoding="utf-8")
+        transcript = tmp_path / "t.jsonl"
+        _append_lines(transcript, [_typed_clear(10)])
+        self._detector(record_dir).handle(_input(transcript))
+        [clear] = self._clears(modes)
+        assert clear.detail == "supervisor-assumed"
+        [line] = modes.take_lines(SESSION)
+        assert "type `/goal clear` again" in line
+
+    def test_a_restart_rereading_the_transcript_does_not_attribute_twice(
+        self, modes: SessionModeRegistry, tmp_path: Path
+    ) -> None:
+        record_dir = tmp_path / "records"
+        _write_supervisor_record(record_dir, ts=_epoch(10))
+        transcript = tmp_path / "t.jsonl"
+        _append_lines(transcript, [_typed_clear(10)])
+        self._detector(record_dir).handle(_input(transcript))
+        self._detector(record_dir).handle(_input(transcript))
+        assert [t.detail for t in self._clears(modes)] == ["supervisor"]
+
+    def test_a_later_stop_attributes_only_the_new_clear(
+        self, modes: SessionModeRegistry, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        detector = self._detector(tmp_path / "records")
+        _append_lines(transcript, [_typed_clear(10, uuid="first")])
+        detector.handle(_input(transcript))
+        _append_lines(transcript, [_typed_clear(20, uuid="second", argument="off")])
+        detector.handle(_input(transcript))
+        evidence = [t.evidence.split(" ", 1)[0] for t in self._clears(modes)]
+        assert evidence == ["clear=first", "clear=second"]
+
+    def test_a_failed_attribution_is_a_warning_and_the_stop_is_allowed(
+        self,
+        modes: SessionModeRegistry,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        detector = self._detector(tmp_path / "records")
+
+        def _unreachable() -> Path:
+            raise OSError("record directory unreachable")
+
+        detector._clear_record_dir = _unreachable
+        transcript = tmp_path / "t.jsonl"
+        _append_lines(transcript, [_typed_clear(10)])
+        with caplog.at_level(logging.WARNING):
+            result = detector.handle(_input(transcript))
+        assert result.decision == Decision.ALLOW
+        assert self._clears(modes) == []
+        assert "goal-clear attribution" in caplog.text
+
+    def test_a_clear_with_no_timestamp_is_a_warning_and_the_stop_is_allowed(
+        self,
+        modes: SessionModeRegistry,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        record = json.loads(_typed_clear(10))
+        del record["timestamp"]
+        transcript = tmp_path / "t.jsonl"
+        _append_lines(transcript, [json.dumps(record)])
+        with caplog.at_level(logging.WARNING):
+            result = self._detector(tmp_path / "records").handle(_input(transcript))
+        assert result.decision == Decision.ALLOW
+        assert "goal-clear attribution" in caplog.text
+
+    def test_no_clear_reads_neither_the_log_nor_the_record_directory(self, tmp_path: Path) -> None:
+        detector = GoalLoopDetectorHandler()
+        detector._fingerprint_repo = lambda: "fp"
+        detector._clear_record_dir = MagicMock(side_effect=AssertionError("read"))
+        detector._recent_transitions = MagicMock(side_effect=AssertionError("read"))
+        detector._append_transition = _Recorder()
+        transcript = tmp_path / "t.jsonl"
+        _append_lines(transcript, [_human(1)])
+        assert detector.handle(_input(transcript)).decision == Decision.ALLOW
+
+    def test_default_record_dir_is_the_daemon_signal_directory(self, tmp_path: Path) -> None:
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.goal_loop_detector.ProjectContext"
+        ) as context:
+            context.daemon_untracked_dir.return_value = tmp_path
+            assert GoalLoopDetectorHandler()._clear_record_dir() == tmp_path / SIGNAL_SUBDIR
+
+    def test_default_recent_transitions_with_no_log_is_empty(self) -> None:
+        layer = MagicMock()
+        layer.session_modes.transition_log = None
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.goal_loop_detector.get_data_layer",
+            return_value=layer,
+        ):
+            assert GoalLoopDetectorHandler()._recent_transitions(SESSION) == []
 
 
 class TestTransitionActions:

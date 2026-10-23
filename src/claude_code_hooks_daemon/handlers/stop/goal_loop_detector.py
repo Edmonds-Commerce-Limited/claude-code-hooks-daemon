@@ -35,10 +35,20 @@ resets it; ``CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`` raises it), after which the goal
 pauses until the next message, a tick included. A loop that makes tool calls
 between stops never reaches that cap.
 
+**Goal-clear attribution (Task 8.2).** The same new lines are searched for a
+typed clearing ``/goal``; each is attributed once
+(:mod:`claude_code_hooks_daemon.core.goal_clear_attribution`) from the ccy
+supervisor's ``.goal-clear-injected`` record and logged as a ``goal-clear``
+transition whose ``detail`` names the supervisor or the human. A clear the log
+already attributes (a restart re-reads the transcript tail) is skipped. When the
+record was unreadable the clear is assumed the supervisor's and one line asking
+the human to clear again is queued with ``SessionModeRegistry.queue_line``, to be
+stated at the next prompt rather than as Stop context.
+
 **Never breaks a Stop.** An unreadable transcript, an invalid checkpoint, a
-failed repository fingerprint, a failed log append, and a registry failure
-(``OSError``, or ``RuntimeError`` from ``get_data_layer()``) on entry or on the
-repo-change exit are each a named WARNING, and the Stop is allowed. It never
+failed repository fingerprint, a failed log append, a failed attribution, and a
+registry failure (``OSError``, or ``RuntimeError`` from ``get_data_layer()``) on
+entry or on the repo-change exit are each a named WARNING, and the Stop is allowed. It never
 blocks and never returns ``continue: false``.
 
 **Ordering.** Priority 5 runs it ahead of the terminal ``auto_continue_stop``
@@ -58,6 +68,12 @@ from typing import Any, Final
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext, get_data_layer
+from claude_code_hooks_daemon.core.goal_clear_attribution import (
+    GoalClearAttributionError,
+    attribute_clear,
+    attributed_keys,
+    find_typed_clears,
+)
 from claude_code_hooks_daemon.core.goal_loop import (
     Checkpoint,
     CheckpointInvalidError,
@@ -76,7 +92,12 @@ from claude_code_hooks_daemon.core.goal_loop import (
 from claude_code_hooks_daemon.core.goal_loop_block import enter_goal_loop
 from claude_code_hooks_daemon.core.handler_bases import StopHandlerBase
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
-from claude_code_hooks_daemon.core.session_mode_log import ModeTransition, TransitionAction
+from claude_code_hooks_daemon.core.session_mode_log import (
+    MAX_TRANSITIONS,
+    ModeTransition,
+    TransitionAction,
+    TransitionLogError,
+)
 from claude_code_hooks_daemon.core.session_mode_registry import SessionModeRegistry
 from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
     _STOP_EXPLANATION_PREFIX,
@@ -84,6 +105,7 @@ from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.session_modes import ModeLabel
+from claude_code_hooks_daemon.utils.session_signal_paths import SIGNAL_SUBDIR
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +157,10 @@ class GoalLoopDetectorHandler(StopHandlerBase):
         self._clock: Callable[[], float] = time.time
         self._registry: Callable[[], SessionModeRegistry] = self._default_registry
         self._clear_goal: Callable[[str], bool] = self._default_clear_goal
+        self._recent_transitions: Callable[[str], list[ModeTransition]] = (
+            self._default_recent_transitions
+        )
+        self._clear_record_dir: Callable[[], Path] = self._default_clear_record_dir
         self._sessions: OrderedDict[str, _SessionState] = OrderedDict()
 
     validate_options = staticmethod(option_problems)
@@ -196,6 +222,7 @@ class GoalLoopDetectorHandler(StopHandlerBase):
         except OSError as error:
             logger.warning("goal-loop detector: transcript unreadable %s: %s", transcript, error)
             return allow
+        self._attribute_clears(session_id, lines)
         extraction = extract_events(
             lines, stop_prefix=_STOP_EXPLANATION_PREFIX, declares_blocked=_declares_human_blocked
         )
@@ -297,6 +324,33 @@ class GoalLoopDetectorHandler(StopHandlerBase):
                 ),
             )
 
+    def _attribute_clears(self, session_id: str, lines: list[str]) -> None:
+        """Log who typed each clearing ``/goal`` in ``lines``, once per clear; never break a Stop."""
+        try:
+            clears = find_typed_clears(lines)
+            if not clears:
+                return
+            seen = attributed_keys(self._recent_transitions(session_id))
+            directory = self._clear_record_dir()
+            for clear in clears:
+                if clear.key in seen:
+                    continue
+                verdict = attribute_clear(clear, session_id=session_id, directory=directory)
+                self._log(verdict.transition(session_id))
+                line = verdict.line()
+                if line is not None:
+                    self._registry().queue_line(session_id, line)
+        except (OSError, RuntimeError, GoalClearAttributionError, TransitionLogError) as error:
+            log_and_continue(
+                logger,
+                error,
+                reason=(
+                    f"goal-loop detector: goal-clear attribution not made for {session_id}; "
+                    "an unattributed clear leaves automated goals as they were, so the Stop "
+                    "proceeds"
+                ),
+            )
+
     def _log_reset(self, session_id: str, reset: RingReset) -> None:
         self._log(
             ModeTransition(
@@ -343,6 +397,17 @@ class GoalLoopDetectorHandler(StopHandlerBase):
         log = get_data_layer().session_modes.transition_log
         if log is not None:
             log.append([transition])
+
+    @staticmethod
+    def _default_recent_transitions(session_id: str) -> list[ModeTransition]:
+        log = get_data_layer().session_modes.transition_log
+        if log is None:
+            return []
+        return log.recent(MAX_TRANSITIONS, session_id=session_id)
+
+    @staticmethod
+    def _default_clear_record_dir() -> Path:
+        return ProjectContext.daemon_untracked_dir() / SIGNAL_SUBDIR
 
     def get_claude_md(self) -> str | None:
         """No resident guidance: it never blocks a tool, and act mode is opt-in.
