@@ -263,8 +263,8 @@ class GoalLoopDetectorHandler(StopHandlerBase):
                     "a Stop is never broken, and the would-be entry is in this warning"
                 ),
             )
-            return
-        state.blocked_fingerprint = fingerprint
+        else:
+            state.blocked_fingerprint = fingerprint
 
     def _exit_on_repo_change(self, session_id: str, state: _SessionState, fingerprint: str) -> None:
         """End this detector's block when the repository changed; forget it once it has ended."""
