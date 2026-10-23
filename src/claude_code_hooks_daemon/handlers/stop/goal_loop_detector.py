@@ -40,7 +40,9 @@ typed clearing ``/goal``; each is attributed once
 (:mod:`claude_code_hooks_daemon.core.goal_clear_attribution`) from the ccy
 supervisor's ``.goal-clear-injected`` record and logged as a ``goal-clear``
 transition whose ``detail`` names the supervisor or the human. A clear the log
-already attributes (a restart re-reads the transcript tail) is skipped. When the
+already attributes, or that the durable ``AttributedClears`` store covers (a
+restart re-reads the transcript tail, and the bounded log may have rotated the
+record out), is skipped; the store is marked before attributing. When the
 record was unreadable the clear is assumed the supervisor's and one line asking
 the human to clear again is queued with ``SessionModeRegistry.queue_line``, to be
 stated at the next prompt rather than as Stop context.
@@ -69,6 +71,8 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext, get_data_layer
 from claude_code_hooks_daemon.core.goal_clear_attribution import (
+    ATTRIBUTED_CLEARS_FILENAME,
+    AttributedClears,
     Attribution,
     GoalClearAttributionError,
     attribute_clear,
@@ -163,6 +167,8 @@ class GoalLoopDetectorHandler(StopHandlerBase):
             self._default_recent_transitions
         )
         self._clear_record_dir: Callable[[], Path] = self._default_clear_record_dir
+        self._attributed_clears_path: Callable[[], Path] = self._default_attributed_clears_path
+        self._attributed_store: AttributedClears | None = None
         self._sessions: OrderedDict[str, _SessionState] = OrderedDict()
 
     validate_options = staticmethod(option_problems)
@@ -334,9 +340,13 @@ class GoalLoopDetectorHandler(StopHandlerBase):
                 return
             seen = attributed_keys(self._recent_transitions(session_id))
             directory = self._clear_record_dir()
+            store = self._attributed_clears()
             for clear in clears:
-                if clear.key in seen:
+                if clear.key in seen or store.covers(session_id, clear):
                     continue
+                # Marked BEFORE attributing: a failure after this leaves the clear
+                # unattributed (goals as they were), never attributed twice.
+                store.mark(session_id, clear)
                 verdict = attribute_clear(clear, session_id=session_id, directory=directory)
                 self._log(verdict.transition(session_id))
                 line = verdict.line()
@@ -354,6 +364,16 @@ class GoalLoopDetectorHandler(StopHandlerBase):
                     "proceeds"
                 ),
             )
+
+    def _attributed_clears(self) -> AttributedClears:
+        """The durable attributed-clears store, built once per handler.
+
+        Raises:
+            RuntimeError: no ProjectContext for the default path.
+        """
+        if self._attributed_store is None:
+            self._attributed_store = AttributedClears(self._attributed_clears_path())
+        return self._attributed_store
 
     def _enter_manual_goals(self, session_id: str, evidence: str) -> None:
         """A human cleared the goal: enter manual goals, stating it once on entry.
@@ -429,6 +449,10 @@ class GoalLoopDetectorHandler(StopHandlerBase):
     def _default_clear_record_dir() -> Path:
         return ProjectContext.daemon_untracked_dir() / SIGNAL_SUBDIR
 
+    @staticmethod
+    def _default_attributed_clears_path() -> Path:
+        return ProjectContext.daemon_untracked_dir() / ATTRIBUTED_CLEARS_FILENAME
+
     def get_claude_md(self) -> str | None:
         """No resident guidance: it never blocks a tool, and act mode is opt-in.
 
@@ -456,7 +480,9 @@ class GoalLoopDetectorHandler(StopHandlerBase):
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_event="Stop",
-                requires_main_thread=False,
+                # MAIN-scoped: a sub-agent's Stop never reaches this handler,
+                # so an ALLOW observed there would prove nothing about it.
+                requires_main_thread=True,
                 hook_input={"hook_event_name": "Stop", "stop_hook_active": False},
             ),
         ]

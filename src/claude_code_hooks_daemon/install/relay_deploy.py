@@ -529,12 +529,13 @@ def _failure_banner(
 ) -> tuple[str, ...]:
     """The loud, multi-line failure text for a relay that could not be provisioned."""
     rule = "=" * 72
-    lines = [
-        rule,
-        "WARNING: RELAY BINARY NOT PROVISIONED",
-        rule,
-        f"The relay is enabled but its binary is missing or not executable: {binary}",
-    ]
+    defect = relay_binary_defect(binary)
+    headline = (
+        f"The relay is enabled but its binary is {defect}: {binary}"
+        if defect is not None
+        else f"The relay is enabled but its binary could not be provisioned: {binary}"
+    )
+    lines = [rule, "WARNING: RELAY BINARY NOT PROVISIONED", rule, headline]
     lines.extend(f"  - {reason}" for reason in reasons)
     lines.append(
         "Effect: relay-eligible hooks run on the slower bash transport; "

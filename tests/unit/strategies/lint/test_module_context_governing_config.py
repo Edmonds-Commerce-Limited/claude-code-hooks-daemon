@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.core.workspace import Workspace
 from claude_code_hooks_daemon.strategies.lint.module_context import (
     GoverningConfigError,
     missing_config_note,
@@ -99,13 +100,17 @@ class TestWorkingDir:
             ansible_configs={"plays/**": "infra/ansible.cfg"},
         )
 
-        assert context.working_dir(project) == str(project / "infra")
+        assert context.working_dir(_workspace(project)) == str(project / "infra")
 
     def test_falls_back_to_the_given_workspace_root(self, project: Path) -> None:
         context = resolve_module_context(str(project / "plays" / "site.yml"), "Ansible")
 
         assert context.module_root is None
-        assert context.working_dir(project) == str(project)
+        assert context.working_dir(_workspace(project)) == str(project)
+
+
+def _workspace(root: Path) -> Workspace:
+    return Workspace(root=root, kind="unknown", manifest=None, bin_dirs=())
 
 
 class TestMissingConfigNote:

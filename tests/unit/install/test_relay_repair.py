@@ -14,6 +14,8 @@ import fcntl
 import os
 import sys
 import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -28,6 +30,7 @@ from claude_code_hooks_daemon.install.background_sync import (
 from claude_code_hooks_daemon.install.relay_repair import (
     REPAIR_STATE_DIR_NAME,
     RepairNotice,
+    SpawnFn,
     cause_key,
     repair_lock_path,
     repair_log_path,
@@ -44,8 +47,15 @@ _DEFECT = "missing"
 _STILL_BLOCKED_OBSERVATION_SECONDS = Timeout.SOCKET_LIVENESS_PROBE_SEC
 
 
+_WAIT_DEADLINE_SECONDS = 10.0
+_WAIT_POLL_SECONDS = 0.01
+
+
 class _Spawner:
     """Records each detached spawn instead of starting a process."""
+
+    # A live pid: the claim records it, and a dead one would read as failed.
+    PID = os.getpid()
 
     def __init__(self, error: OSError | None = None) -> None:
         self.calls: list[tuple[list[str], Path]] = []
@@ -55,10 +65,35 @@ class _Spawner:
         self.calls.append((argv, log))
         if self.error is not None:
             raise self.error
-        return 4242
+        return self.PID
 
 
-def _start(tmp_path: Path, spawner: _Spawner, *, defect: str = _DEFECT) -> RepairNotice:
+class _FinishingSpawner(_Spawner):
+    """A child that records its result before the spawn call even returns."""
+
+    def __call__(self, argv: list[str], log: Path) -> int:
+        state = Path(argv[argv.index("--state") + 1])
+        state.write_text(f"status=synced\npid={self.PID}\ndetail=done\n")
+        return super().__call__(argv, log)
+
+
+def _wait_for(condition: Callable[[], bool]) -> None:
+    deadline = time.monotonic() + _WAIT_DEADLINE_SECONDS
+    while not condition():
+        if time.monotonic() > deadline:
+            raise AssertionError("condition not reached before the deadline")
+        time.sleep(_WAIT_POLL_SECONDS)
+
+
+def _gone(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    return False
+
+
+def _start(tmp_path: Path, spawner: SpawnFn, *, defect: str = _DEFECT) -> RepairNotice:
     return start_relay_repair(
         tmp_path / "project",
         tmp_path / "bin" / "hooks-relay",
@@ -120,6 +155,56 @@ class TestStartRelayRepair:
         record = read_state_file(notice.state_path, notice.log_path)
         assert record is not None
         assert record.status is SyncStatus.RUNNING
+
+    def test_the_spawned_pid_is_recorded_at_once(self, tmp_path: Path) -> None:
+        """The child may die before it records its own pid; the claim must carry it anyway."""
+        notice = _start(tmp_path, _Spawner())
+
+        text = notice.state_path.read_text()
+        assert "status=running" in text
+        assert f"pid={_Spawner.PID}" in text
+
+    def test_a_result_the_child_already_recorded_is_not_overwritten(self, tmp_path: Path) -> None:
+        """A child fast enough to finish before the parent records its pid keeps its result."""
+        notice = _start(tmp_path, _FinishingSpawner())
+
+        text = notice.state_path.read_text()
+        assert "status=synced" in text
+        assert "status=running" not in text
+
+    def test_a_pid_that_cannot_be_recorded_is_reported_with_the_start(self, tmp_path: Path) -> None:
+        """The repair is running; its missing pid is reported, not only logged."""
+
+        def spawn_and_lose_state(argv: list[str], log: Path) -> int:
+            Path(argv[argv.index("--state") + 1]).unlink()
+            return _Spawner.PID
+
+        notice = _start(tmp_path, spawn_and_lose_state)
+
+        assert notice.started is True
+        assert notice.failure is not None
+        assert f"pid {_Spawner.PID}" in notice.failure
+        assert "could not be recorded" in notice.failure
+
+    def test_a_child_that_dies_before_recording_its_pid_reads_as_failed(
+        self, tmp_path: Path
+    ) -> None:
+        pids: list[int] = []
+
+        def spawn_false(argv: list[str], log: Path) -> int:
+            pid = spawn_detached(["/bin/false"], log)
+            pids.append(pid)
+            return pid
+
+        notice = _start(tmp_path, spawn_false)
+
+        def failed() -> bool:
+            record = read_state_file(notice.state_path, notice.log_path)
+            return record is not None and record.status is SyncStatus.FAILED
+
+        _wait_for(failed)
+        record = read_state_file(notice.state_path, notice.log_path)
+        assert record is not None and record.pid == pids[0]
 
     def test_the_same_cause_is_attempted_once(self, tmp_path: Path) -> None:
         spawner = _Spawner()
@@ -340,12 +425,20 @@ class TestSpawnDetached:
         )
 
         pid = spawn_detached([sys.executable, "-c", program], log)
-        _, status = os.waitpid(pid, 0)
+        _wait_for(lambda: _gone(pid))
 
-        assert os.waitstatus_to_exitcode(status) == 0
         text = log.read_text()
         assert "True True" in text
         assert "to-stderr" in text
+
+    def test_the_child_is_reaped_when_it_exits(self, tmp_path: Path) -> None:
+        """The caller never waits, so an unreaped child would stay a zombie that looks alive."""
+        pid = spawn_detached(["/bin/true"], tmp_path / "repair.log")
+
+        _wait_for(lambda: _gone(pid))
+
+        with pytest.raises(ChildProcessError):
+            os.waitpid(pid, os.WNOHANG)
 
     def test_a_missing_program_raises(self, tmp_path: Path) -> None:
         with pytest.raises(OSError):

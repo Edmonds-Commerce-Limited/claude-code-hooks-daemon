@@ -12,10 +12,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from claude_code_hooks_daemon.utils.path_exclusion import path_matches_globs
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
+
+if TYPE_CHECKING:
+    from claude_code_hooks_daemon.core.workspace import Workspace
 
 #: The config option naming a play's governing ``ansible.cfg``; quoted in the
 #: denial so the author knows where to declare it.
@@ -60,13 +63,16 @@ class ModuleContext:
     #: Extra environment for the command: ``ANSIBLE_CONFIG`` when declared.
     env: dict[str, str] = field(default_factory=dict, hash=False)
 
-    def working_dir(self, workspace_root: str | Path) -> str:
+    def working_dir(self, workspace: Workspace) -> str:
         """The directory the command runs from: the module root, else the workspace root.
 
         The single answer both lint gates use, so a file with no module root is
-        never run from one directory by one gate and another by the other.
+        never run from one directory by one gate and another by the other. It
+        takes the file's resolved ``Workspace`` rather than a bare path because
+        a bare path let one gate pass the repository root where the other
+        passed the declared sub-project's root.
         """
-        return self.module_root or str(workspace_root)
+        return self.module_root or str(workspace.root)
 
 
 class GoverningConfigError(ValueError):

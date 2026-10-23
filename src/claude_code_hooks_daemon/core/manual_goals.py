@@ -80,7 +80,9 @@ class GoalsOutcome(StrEnum):
 _LINES: dict[GoalsOutcome, str] = {
     GoalsOutcome.ENTERED: (
         "MANUAL GOALS ON: the human owns this session's goal, so automated goal injection "
-        "is off for this session and no automated clear removes a goal. `continue`, cron ticks and guards are unaffected; a typed "
+        "is off for this session and no plan-driven clear removes a goal (the goal-loop "
+        "detector can still clear a goal to break a loop). `continue`, cron ticks and guards "
+        "are unaffected; a typed "
         "`/goal <condition>` still works and does not end this mode. "
         "`hooks-daemon goals on` (or `/mode goals auto`) turns automated goals back on."
     ),

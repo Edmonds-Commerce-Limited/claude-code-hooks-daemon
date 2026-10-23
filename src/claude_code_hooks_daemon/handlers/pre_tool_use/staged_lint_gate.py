@@ -30,9 +30,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-import shutil
 import subprocess  # nosec B404 - subprocess used for lint validation only (trusted tools)
-import sys
 from pathlib import Path
 from typing import Any, ClassVar, Final
 
@@ -51,7 +49,12 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
-from claude_code_hooks_daemon.strategies.lint.common import build_lint_argv, matches_skip_path
+from claude_code_hooks_daemon.core.workspace import resolve_workspace
+from claude_code_hooks_daemon.strategies.lint.common import (
+    build_lint_argv,
+    matches_skip_path,
+    resolve_lint_executable,
+)
 from claude_code_hooks_daemon.strategies.lint.module_context import (
     GoverningConfigError,
     missing_config_note,
@@ -107,11 +110,6 @@ _GIT_COMMIT_PATTERN: Final[re.Pattern[str]] = re.compile(
 # `git diff --name-status` letters: Added, Copied, Modified. A Deleted or
 # Renamed-away path has nothing left on disk to check.
 _RECORDED_STATUSES: Final[str] = "ACM"
-
-# Directory holding the console scripts of the environment running the
-# daemon, mirroring `lint_on_edit`'s resolution order: the project venv
-# first, `PATH` second.
-_INTERPRETER_BIN_DIR: Final[Path] = Path(sys.executable).parent
 
 
 def _is_git_commit_command(command: str) -> bool:
@@ -356,9 +354,12 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         # go.mod directory rather than as a loose file from the daemon's cwd.
         # The file's own directory stands in only where no ProjectContext is
         # initialised (a unit test driving this method directly), the same
-        # notional root lint_on_edit uses, so the two gates cannot disagree.
+        # notional root lint_on_edit uses. The command runs from the file's
+        # resolved workspace (its declared sub-project, else the repository),
+        # exactly as lint_on_edit does, so the two gates cannot disagree.
         resolved_root = resolve_project_root()
         project_root = Path(resolved_root) if resolved_root else Path(file_path).parent
+        workspace = resolve_workspace(self._project_registry, Path(file_path), project_root)
         try:
             module_context = resolve_module_context(
                 file_path,
@@ -377,7 +378,7 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
             effective_path=module_context.effective_path,
         )
 
-        resolved = self._resolve_executable(parts[0])
+        resolved = self._resolve_executable(parts[0], workspace.bin_dirs)
         if resolved is None:
             return None  # tool not installed: never block on absence
         parts[0] = resolved
@@ -389,7 +390,7 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
                     capture_output=True,
                     text=True,
                     timeout=Timeout.LINT_CHECK,
-                    cwd=module_context.working_dir(project_root),
+                    cwd=module_context.working_dir(workspace),
                     env=({**os.environ, **module_context.env} if module_context.env else None),
                 )
             )
@@ -437,21 +438,16 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         config_note = missing_config_note(strategy.language_name, module_context)
         return f"{diagnosis}\n\n{config_note}" if config_note else diagnosis
 
-    def _resolve_executable(self, executable: str) -> str | None:
+    def _resolve_executable(
+        self, executable: str, workspace_bin_dirs: tuple[Path, ...]
+    ) -> str | None:
         """Resolve a lint tool name to a runnable path, or None if absent.
 
-        Mirrors `lint_on_edit._resolve_executable`: the project venv's own
-        `bin/` is checked before `PATH`, since a Python project's tooling
-        (`ruff`, `mypy`, ...) lives there rather than on `PATH`.
+        Delegates to :func:`resolve_lint_executable`, the resolver
+        `lint_on_edit` also uses, with the staged file's own workspace bin
+        dirs, so a sub-project's pinned linter is the one both gates launch.
         """
-        if Path(executable).is_absolute():
-            return executable
-        candidate = _INTERPRETER_BIN_DIR / executable
-        # eacces-safe-exempt: the daemon's own interpreter bin dir, where the
-        # lint tooling lives -- not a staged file.
-        if candidate.is_file():
-            return str(candidate)
-        return shutil.which(executable)
+        return resolve_lint_executable(executable, workspace_bin_dirs)
 
     @staticmethod
     def _message(failures: list[tuple[str, str]]) -> str:

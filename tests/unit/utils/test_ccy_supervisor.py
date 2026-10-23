@@ -64,13 +64,15 @@ class TestIsArmed:
         _write(env, 'export CCY_CLAUDE_WRAPPER="/x/.claude/ccy/claude-supervise --arm --"\n')
         assert ccy_supervisor.is_armed(env) is True
         assert ccy_supervisor.wrapper_names_launcher(env) is True
-        assert ccy_supervisor.wrapper_execs_bare_script(env) is False
+        assert ccy_supervisor.bare_script_lines(env) == []
 
     def test_export_referencing_bare_script_is_detected_as_such(self, tmp_path: Path) -> None:
         env = tmp_path / "ccy.env"
         _write(env, 'export CCY_CLAUDE_WRAPPER="/x/.claude/ccy/claude-supervise.py --arm --"\n')
         assert ccy_supervisor.wrapper_names_launcher(env) is False
-        assert ccy_supervisor.wrapper_execs_bare_script(env) is True
+        assert ccy_supervisor.bare_script_lines(env) == [
+            'export CCY_CLAUDE_WRAPPER="/x/.claude/ccy/claude-supervise.py --arm --"'
+        ]
 
     @pytest.mark.parametrize(
         "name",
@@ -88,7 +90,7 @@ class TestIsArmed:
         env = tmp_path / "ccy.env"
         _write(env, f'export CCY_CLAUDE_WRAPPER="/x/.claude/ccy/{name} --arm --"\n')
         assert ccy_supervisor.wrapper_names_launcher(env) is False
-        assert ccy_supervisor.wrapper_execs_bare_script(env) is False
+        assert ccy_supervisor.bare_script_lines(env) == []
 
     @pytest.mark.parametrize(
         ("line", "repoints"),

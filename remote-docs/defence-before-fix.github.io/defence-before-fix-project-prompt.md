@@ -1,10 +1,10 @@
 ---
 source_url: https://defence-before-fix.github.io/defence-before-fix-project-prompt.md
-fetched_at: '2026-10-17T03:25:30.315145+00:00'
+fetched_at: '2026-10-23T16:45:38.903046+00:00'
 fidelity: converted
 source_sha256: f05d0a56779c08ced383f83d85b18825ff2bce924e0d7dfcc9655ec26c71fb53
 licence: CC-BY-4.0
-stale_after: '2027-01-15'
+stale_after: '2027-01-21'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 

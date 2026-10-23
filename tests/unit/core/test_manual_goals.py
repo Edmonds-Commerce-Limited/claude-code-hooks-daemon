@@ -92,6 +92,13 @@ class TestLines:
         assert "/goal <condition>" in line
         assert "hooks-daemon goals on" in line
 
+    def test_the_entry_line_does_not_promise_the_loop_breaker_is_gated(self) -> None:
+        """Plan 00474 review D5: only plan-driven clears are gated, not the goal-loop detector's."""
+        line = GoalsChange(GoalsOutcome.ENTERED).line()
+        assert "no automated clear removes a goal" not in line
+        assert "no plan-driven clear removes a goal" in line
+        assert "goal-loop detector" in line
+
     def test_already_manual_says_so(self) -> None:
         assert "already" in GoalsChange(GoalsOutcome.ALREADY_MANUAL).line()
 

@@ -109,6 +109,77 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N539 — a check added to `llm_qa.py` but not to `release-gate.yml` is caught only on the release pull request
+
+**Source**: release v3.71.0 `Release gate` run 40010516593 failed at its layout job: `missing ['bare_python_invocation']`.
+The check was added to `llm_qa.py` (`ALL_TOOL_NAMES`) without a line in the workflow's `CHECKS_*` lists, and the
+comparison lives only inside the workflow, so nothing before the release pull request ran it.
+
+- **Fix**: `bare_python_invocation` added to `CHECKS_STATIC` on the release branch.
+- **Gap**: the layout comparison (and the shards comparison beside it) should also run locally, e.g. a unit test that
+  loads the workflow and `llm_qa.ALL_TOOL_NAMES`, so the drift fails the commit that causes it.
+
+**Status**: ✅ fixed on the release branch: the workflow lists the check, and
+`tests/unit/qa/test_release_gate_layout.py` runs the layout job's comparisons locally (it reports
+`bare_python_invocation` missing against the pre-fix workflow).
+
+### N538 — the commit lint gate resolves the linter binary without the sub-project's tool directories
+
+**Source**: worktree-r371-lint-deadcode report (`subagent-reports/261023-r371-lint-deadcode.md`).
+
+- `staged_lint_gate._resolve_executable` (~line 444) does not search a declared sub-project's own tool directories
+  (e.g. `node_modules/.bin`), while `lint_on_edit` does, so the two gates can run different linter binaries on the
+  same file.
+
+**Status**: ✅ fixed on `release/3.71.0` (merge ea8259cd0): one shared `resolve_lint_executable` for both gates,
+sub-project tool directories first (`subagent-reports/261023-r371-lint-resolver.md`).
+
+### N537 — v3.71.0 release review, second pass: footprint and supervisor defects
+
+**Source**: the fourth Step 10 reviewer, over `docs_qa/`, `skills/docs-optimise/` and `.claude/ccy/claude-supervise.py`.
+
+- **Contract**: the remote-docs refresh on the release branch moved `memory.md`, so facts G2-01, G2-06, G3-03 and
+  G3-06 of the instruction-loading contract no longer resolve (folded into N535's fix).
+- **Footprint**: the daemon-block regex also matches a backticked `<hooksdaemon>` mention in prose or a fence.
+- **Supervisor**: ESC followed by a printable byte (a Meta chord) clears the focus hold; the goal-clear record stays
+  when the send is then held or the write fails, so a human clear within 120 s is credited to the supervisor; a failed
+  atomic write leaves its `.tmp` file behind.
+
+**Status**: ✅ fixed on `release/3.71.0`: footprint with N535 (07e9583c2); supervisor 3878fa40d
+(`subagent-reports/261023-r371-supervisor.md`; the focus-hold and goal-clear record fixes are host code, live at the
+next ccy relaunch).
+
+### N536 — v3.71.0 release code review: defects fixed on the release branch
+
+**Source**: release v3.71.0 Step 10, three code reviewers over `v3.70.0..fd2cf727a` (reports under
+`subagent-reports/261023-r371-*.md` once each fix lands).
+
+- **Core**: one unreadable `*.session-modes` file breaks `SessionModeRegistry.load()` for every session; a goal
+  clear can be attributed twice across a restart (the second as a human's); timed-out exempt calls count against the
+  ordinary straggler cap in `bounded_dispatch`; `goal_loop.read_new_lines` can checkpoint mid-line; the manual-goals
+  message promises no automated clear while the goal-loop detector's clear is ungated.
+- **Install/relay**: `start_relay_repair` drops the spawned pid (a dead child reads as RUNNING for ever), and the
+  repair child is never reaped (a zombie passes `kill(pid, 0)`).
+- **Handlers**: `lint_on_edit` and the staged lint gate run the linter from different directories in a sub-project;
+  three helpers have no production caller.
+
+**Status**: ✅ fixed on `release/3.71.0`: dispatch/goal-loop 17d1cce34, lint/dead code 047d41947, session modes
+d70563b52 (with 3ca1f16f7), relay repair f54941702. D5 (manual-goals message) was corrected rather than gating the
+detector, per Plan 00501 Task 8.3. Combined QA `llm_qa.py changed --range df6c44a3b..ea8259cd0`: 41/41.
+
+### N535 — Claude Code 2.1.309: a nested CLAUDE.md over the size limit now loads its start, not skipped
+
+**Source**: release v3.71.0 Step 1c review, `subagent-reports/261023-claude-code-review-v3.71.0.md` (the one
+conflict row).
+
+- `docs_qa/footprint.py` (lines ~50-51 and ~467-468) still reports an over-limit file as "skipped by Claude Code",
+  and the instruction-loading contract FACTS G4-03 (nested files) and G1-05 say the same. The changelog does not
+  state the limit for nested files.
+
+**Status**: ✅ fixed on `release/3.71.0` (07e9583c2): contract re-anchored and audited at 2.1.309, new FACTS G4-05
+(an on-demand file over the limit loads its start), footprint `truncated` flag
+(`subagent-reports/261023-r371-instructions-contract.md`).
+
 ### N534 — the supervisor focus hold outlives every sub-agent, and a human `/goal clear` can be credited to the supervisor
 
 **Source**: Plan 00501 Task 7.2 act-mode run (journal entry "Act-mode run", 26-10-23). Full write-up:

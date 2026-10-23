@@ -128,7 +128,7 @@ def clears(writes: MagicMock, monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 
 
 class TestAutomatedClears:
-    """The human owns a manual-goals session's goal, so no automated clear removes it."""
+    """The human owns a manual-goals session's goal, so no plan-driven clear removes it."""
 
     def test_the_helper_clears_only_an_auto_session(self, clears: MagicMock) -> None:
         assert clear_automated_goal_signal(_MANUAL) is False

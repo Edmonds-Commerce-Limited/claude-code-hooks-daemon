@@ -97,3 +97,16 @@ releases:
       version, so 2.1.302 is not recorded as the tested version. The review
       ran FROM 2.1.293 (v3.69.0's reviewed_through) to 2.1.302: one adopt row
       and four conflict rows, filed as ledger 00474 N479 to N483.
+  v3.71.0:
+    claude_code_version: unknown
+    evidence: ""
+    review_date: "2026-10-23"
+    reviewed_through: "2.1.309"
+    review_report: CLAUDE/Plan/00474-niggles-ledger-seventeen/subagent-reports/261023-claude-code-review-v3.71.0.md
+    note: >-
+      The release host ran Claude Code 2.1.309, but the hook contract
+      (contracts/claude-code-hooks/META.json) has not been re-audited at that
+      version, so 2.1.309 is not recorded as the tested version. The review
+      ran FROM 2.1.302 (v3.70.0's reviewed_through) to 2.1.309: one conflict
+      row (a nested CLAUDE.md over the size limit now loads its start rather
+      than being skipped), no adopt or redundant rows.

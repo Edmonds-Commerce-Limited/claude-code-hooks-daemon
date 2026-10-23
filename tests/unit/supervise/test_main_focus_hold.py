@@ -192,10 +192,53 @@ class TestMainFocusModel:
         model.feed(_ESC + _ESC, now=_NOW + 1)
         assert model.confirmed is True
 
-    def test_esc_followed_by_printable_releases(self) -> None:
+    @pytest.mark.parametrize(
+        "chord",
+        [
+            pytest.param(b"b", id="alt-b"),
+            pytest.param(b"x", id="alt-x"),
+            pytest.param(b" ", id="alt-space"),
+            pytest.param(b"\r", id="alt-enter"),
+            pytest.param(b"\x7f", id="alt-backspace"),
+        ],
+    )
+    def test_esc_followed_by_printable_is_a_meta_chord_and_keeps_the_hold(
+        self, chord: bytes
+    ) -> None:
+        # Review D3: a terminal sends Alt+b as `ESC b`, and Claude Code reads it
+        # as Meta-b, not Esc, so focus may still be on the sub-agent panel.
         model = MainFocusModel()
         model.feed(_UP, now=_NOW)
-        model.feed(_ESC + b"x", now=_NOW + 1)
+        model.feed(_ESC + chord, now=_NOW + 1)
+        model.settle(now=_NOW + 10)
+        assert model.confirmed is False
+        assert model.hold is not None
+        assert model.hold.since == _NOW
+
+    def test_meta_chord_split_across_reads_keeps_the_hold(self) -> None:
+        model = MainFocusModel()
+        model.feed(_UP, now=_NOW)
+        model.feed(_ESC, now=_NOW + 1)
+        model.feed(b"b", now=_NOW + 1.01)
+        model.settle(now=_NOW + 10)
+        assert model.confirmed is False
+
+    def test_meta_chord_neither_latches_nor_hides_a_later_arrow(self) -> None:
+        assert _after_reads([_ESC + b"b"]).confirmed is True
+        assert _after_reads([_ESC, b"b" + _UP]).confirmed is False
+
+    def test_bare_esc_after_a_meta_chord_releases(self) -> None:
+        model = MainFocusModel()
+        model.feed(_UP, now=_NOW)
+        model.feed(_ESC + b"b", now=_NOW + 1)
+        model.feed(_ESC, now=_NOW + 2)
+        model.settle(now=_NOW + 2 + _SETTLE)
+        assert model.confirmed is True
+
+    def test_esc_followed_by_a_control_byte_still_releases(self) -> None:
+        model = MainFocusModel()
+        model.feed(_UP, now=_NOW)
+        model.feed(_ESC + _CTRL_C, now=_NOW + 1)
         assert model.confirmed is True
 
     def test_trailing_esc_that_continues_an_arrow_keeps_the_hold(self) -> None:
@@ -258,11 +301,15 @@ class TestFocusModelAcrossReads:
             # by the bytes that arrive, never a bare Esc -- unsure means hold.
             pytest.param([_UP, _ESC, b"O", b"K"], False, id="C-up-esc-OK"),
             pytest.param([_UP, _ESC, b"[", b"x"], False, id="D-up-esc-[x"),
-            pytest.param([_UP, _ESC, b"P", b"lease"], True, id="E-up-esc-Please"),
+            # E: a pending ESC then a printable byte is a Meta chord (review D3),
+            # so the hold stays; the rest of the read is still parsed fresh.
+            pytest.param([_UP, _ESC, b"P", b"lease"], False, id="E-up-esc-Please"),
             pytest.param([_UP, _ESC], True, id="F-up-esc"),
+            pytest.param([_UP, _ESC, _ESC], True, id="up-esc-esc-split"),
+            pytest.param([_UP, _ESC, _CTRL_C], True, id="up-esc-ctrl-c-split"),
             pytest.param([_ESC, b"Please fix"], True, id="esc-then-text-one-read"),
             pytest.param([_UP, _ESC, b"OK"], False, id="up-esc-OK-one-read"),
-            pytest.param([_UP, _ESC, b"]x"], True, id="up-esc-string-introducer"),
+            pytest.param([_UP, _ESC, b"]x"], False, id="up-esc-string-introducer"),
             pytest.param([_ESC, b"_", _UP], False, id="esc-underscore-up"),
             pytest.param([_ESC, b"^X", _UP], False, id="esc-caret-up"),
         ],

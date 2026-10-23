@@ -314,6 +314,15 @@ class TestWorkerChildPid:
         assert child.own_session_ids() == frozenset({_MINE})
         assert seen == [_CHILD]
 
+    @pytest.mark.usefixtures("_clean_cache")
+    def test_a_learned_pid_is_resolved_under_the_injected_proc_root(self, tmp_path: Path) -> None:
+        """The learned-pid branch reads the same /proc as the host fallback does."""
+        root = _fake_proc(tmp_path, {_CHILD: _p(50, _MINE)})
+        child = _mod.WorkerChildPid(proc_root=root, host_pid=lambda: 50, own_pid=lambda: 51)
+        child.learn(_CHILD)
+
+        assert child.own_session_ids() == frozenset({_MINE})
+
 
 # ── hot-reload fallback: a host that sends no child pid ──────────────────────
 

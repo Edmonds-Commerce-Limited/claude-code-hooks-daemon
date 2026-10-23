@@ -251,12 +251,16 @@ arrow still counts as box content there. The rules fail toward holding:
   so it latches too.
 - Enter while latched keeps the hold, because it may have opened a transcript.
 - Only a bare Esc clears it: an ESC that no CSI, SS3 or string introducer
-  follows within the same read.
+  follows within the same read, and no Meta-chord byte either.
+- An ESC followed by a printable byte, CR or DEL is an Alt/Meta chord. A
+  terminal sends Alt+b as `ESC b`, and Claude Code reads that as Meta-b, not
+  Esc, so the chord keeps the hold.
 - A sequence still open when a read ends never reinterprets the next read.
   An open string sequence is dropped. An open ESC, `ESC [` or `ESC O` stays
   pending, and any hold stays in place until it resolves:
-  - a lone ESC followed by anything but `[` or `O` was a bare Esc, and the new
-    read is parsed fresh;
+  - a lone ESC followed by a Meta-chord byte (other than `[` or `O`) was that
+    chord and keeps the hold. A lone ESC followed by anything else but `[` or
+    `O` was a bare Esc. Either way the rest of the new read is parsed fresh;
   - otherwise the carried bytes and the new read are parsed together as the
     sequence they form, so a split arrow latches, a split paste marker opens a
     paste, and a split non-arrow sequence neither latches nor releases;
@@ -319,6 +323,10 @@ end it. After relaunching, verify the hold:
   it can under-report a started agent (Plan 00537 JOURNAL, Task 2.1).
 - Whether Esc also closes an OPEN transcript was not verified live. If it does
   not, an Esc pressed in that state releases the hold early.
+- An Esc that ends its read, with a letter typed before the next host tick
+  settles it, reads as a Meta chord and keeps the hold. The read time cannot
+  tell this apart from a split `ESC b`, so the model holds, and the banner asks
+  for one more Esc.
 
 ## Own-session identity: the child's process tree
 

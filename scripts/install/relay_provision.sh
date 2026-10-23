@@ -59,7 +59,7 @@ RELAY_PROVISION_BANNER=""
 #   $1 - venv_python: Path to the daemon's venv Python
 #   $2 - daemon_dir: Path to the daemon installation directory
 #   $3 - project_root: Path to project root
-#   $4 - version_tag: Release tag the downloaded asset must match (e.g. v3.71.0)
+#   $4 - version_tag: Release tag the downloaded asset must match (e.g. vX.Y.Z)
 #
 # Sets:
 #   RELAY_PROVISION_FAILED, RELAY_PROVISION_BANNER

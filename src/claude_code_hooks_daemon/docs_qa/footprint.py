@@ -11,7 +11,9 @@ daemon-injected ``<hooksdaemon>`` block, daemon-deployed artefacts,
 ``CLAUDE.local.md``, ancestor-directory files and user-scope files.
 
 Block-level HTML comments are stripped before counting (fact G1-06) and
-path-scoped user rules count as on-demand (facts G3-04, G3-09).
+path-scoped user rules count as on-demand (facts G3-04, G3-09). A launch file
+over 4 MiB is skipped and not totalled (G4-03); an on-demand file over the
+on-demand limit is flagged truncated, since only its start loads (G4-05).
 
 Not modelled (the contract's ``unmodelled`` list, printed with every report):
 ``claudeMdExcludes``, ``AGENTS.md`` selection, ``--add-dir`` and subagent
@@ -47,8 +49,12 @@ logger = logging.getLogger(__name__)
 
 #: Fact G4-01: the per-CLAUDE.md-file size target, in lines.
 CLAUDE_MD_LINE_TARGET: Final[int] = 200
-#: Fact G4-03: a file over this many bytes is skipped by Claude Code.
+#: Fact G4-03: a file that loads at launch over this many bytes is skipped by
+#: Claude Code. The footprint never reads a file this large, whenever it loads.
 FILE_SKIP_BYTES: Final[int] = 4 * 1024 * 1024
+#: Fact G4-05: an on-demand file over this many characters loads only its start.
+#: The smallest documented limit (a 200K context window); larger windows allow more.
+ON_DEMAND_CHAR_LIMIT: Final[int] = 40_000
 #: Fact G2-03: imports nest to this many hops from the file that starts them.
 MAX_IMPORT_HOPS: Final[int] = 4
 
@@ -60,11 +66,21 @@ _DOT_CLAUDE: Final[str] = ".claude"
 _RULES_DIR: Final[str] = "rules"
 _DAEMON_DEPLOYED_FILE: Final[str] = ".claude/HOOKS-DAEMON.md"
 _DAEMON_DEPLOYED_DIR: Final[str] = ".claude/hooks-daemon/"
+_NESTED_ROLE: Final[str] = "nested-claude-md"
+_IMPORT_ROLE: Final[str] = "import"
+#: On-demand roles whose ``@path`` imports are followed (fact G2-01).
+_ON_DEMAND_IMPORTERS: Final[frozenset[str]] = frozenset({_NESTED_ROLE, _IMPORT_ROLE})
 #: Directories never walked for nested CLAUDE.md files (dot-directories are skipped too).
 _UNWALKED_DIRS: Final[frozenset[str]] = frozenset({"node_modules", "untracked"})
 
 _FRONTMATTER_RE: Final[re.Pattern[str]] = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n", re.DOTALL)
-_DAEMON_BLOCK_RE: Final[re.Pattern[str]] = re.compile(r"<hooksdaemon>.*?</hooksdaemon>", re.DOTALL)
+#: The injected block, delimited by whole-line tags; a fence is matched first so a
+#: tag quoted inside one is not taken for the block.
+_FENCE_OR_DAEMON_BLOCK_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?P<fence>^(?P<ticks>```|~~~)[\s\S]*?^(?P=ticks)[^\n]*$)"
+    r"|(?P<block>^<hooksdaemon>[ \t]*\n[\s\S]*?^</hooksdaemon>[ \t]*$)",
+    re.MULTILINE,
+)
 #: A fenced block (kept verbatim) or a block-level HTML comment (stripped, fact G1-06).
 #: A comment shares its line with no other text; the tempered dot stops at the first
 #: close so a later ``-->`` cannot extend the match across prose.
@@ -92,7 +108,10 @@ class FootprintEntry:
     not_proposable_reason: str
     daemon_block_lines: int
     over_line_target: bool
+    #: A launch file over 4 MiB: Claude Code loads none of it (fact G4-03).
     skipped: bool
+    #: An on-demand file over the on-demand limit: only its start loads (fact G4-05).
+    truncated: bool
 
     def to_dict(self) -> dict[str, Any]:
         """JSON-ready form."""
@@ -107,12 +126,13 @@ class FootprintEntry:
             "daemon_block_lines": self.daemon_block_lines,
             "over_line_target": self.over_line_target,
             "skipped": self.skipped,
+            "truncated": self.truncated,
         }
 
 
 @dataclass(frozen=True)
 class FootprintTotals:
-    """Line and byte totals; skipped files (over the size limit) are not counted."""
+    """Line and byte totals; skipped launch files (over 4 MiB) are not counted."""
 
     launch_files: int
     launch_lines: int
@@ -156,6 +176,15 @@ class Footprint:
 def _strip_block_comments(text: str) -> str:
     """``text`` without the block-level HTML comments Claude Code strips (fact G1-06)."""
     return _COMMENT_OR_FENCE_RE.sub(lambda m: m.group("fence") or "", text)
+
+
+def _daemon_block_lines(text: str) -> int:
+    """Lines of the daemon-injected ``<hooksdaemon>`` block in ``text``, 0 when absent."""
+    for match in _FENCE_OR_DAEMON_BLOCK_RE.finditer(text):
+        block = match.group("block")
+        if block is not None:
+            return block.count("\n") + 1
+    return 0
 
 
 def _is_daemon_deployed(text: str) -> bool:
@@ -277,12 +306,13 @@ class _Collector:
             role, loads = scoped_role, "on-demand"
         display = _display(resolved, self.project_root)
         reason = forced_reason or self._reason_for(display, raw)
-        skipped = size > FILE_SKIP_BYTES
+        unread = size > FILE_SKIP_BYTES
+        skipped = unread and loads == "launch"
+        truncated = loads == "on-demand" and (unread or len(raw) > ON_DEMAND_CHAR_LIMIT)
         text = _strip_block_comments(raw)
         lines = len(text.splitlines())
-        if not skipped:
+        if not unread:
             size = len(text.encode("utf-8"))
-        block = _DAEMON_BLOCK_RE.search(text)
         self.entries.append(
             FootprintEntry(
                 path=display,
@@ -292,14 +322,18 @@ class _Collector:
                 size_bytes=size,
                 proposable=not reason,
                 not_proposable_reason=reason,
-                daemon_block_lines=block.group(0).count("\n") + 1 if block else 0,
+                daemon_block_lines=_daemon_block_lines(text),
                 over_line_target=is_claude_md and lines > CLAUDE_MD_LINE_TARGET,
                 skipped=skipped,
+                truncated=truncated,
             )
         )
-        if loads == "launch" and not skipped and hop < MAX_IMPORT_HOPS:
+        # Fact G2-01: imports load with the file that references them, so a nested
+        # CLAUDE.md's imports load on demand with it.
+        follows_imports = loads == "launch" or role in _ON_DEMAND_IMPORTERS
+        if follows_imports and not unread and hop < MAX_IMPORT_HOPS:
             for target in _import_targets(text, resolved, self.home_dir):
-                self.add(target, "import", "launch", hop + 1)
+                self.add(target, _IMPORT_ROLE, loads, hop + 1)
 
     def _reason_for(self, display: str, text: str) -> str:
         if display.startswith("/"):
@@ -431,7 +465,7 @@ def measure_footprint(
         )
 
     for nested in _nested_claude_mds(root, scopes, exclude_paths):
-        collector.add(nested, "nested-claude-md", "on-demand", is_claude_md=True)
+        collector.add(nested, _NESTED_ROLE, "on-demand", is_claude_md=True)
 
     entries = sorted(collector.entries, key=lambda entry: (entry.loads != "launch", entry.path))
     return Footprint(
@@ -466,6 +500,13 @@ def _entry_line(entry: FootprintEntry) -> str:
         notes.append(f"over the {CLAUDE_MD_LINE_TARGET}-line target")
     if entry.skipped:
         notes.append("over 4 MiB, skipped by Claude Code")
+    if entry.truncated:
+        notes.append(
+            f"over the {ON_DEMAND_CHAR_LIMIT:,}-character on-demand limit of a 200K context "
+            "window: Claude Code loads only its start"
+        )
+        if entry.size_bytes > FILE_SKIP_BYTES:
+            notes.append("over 4 MiB, so its lines were not counted")
     if entry.daemon_block_lines:
         notes.append(f"{entry.daemon_block_lines} lines are the daemon-owned block")
     if not entry.proposable:

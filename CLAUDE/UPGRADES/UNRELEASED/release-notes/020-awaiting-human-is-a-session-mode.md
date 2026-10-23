@@ -1,6 +1,0 @@
-# Callout: "awaiting human" is now a session mode, ended only by a human prompt in the same session
-
-**Plan**: 00501
-**Audience**: operators
-
-A stop that declares `STOPPING BECAUSE: [awaiting-human] ...` (or one of the four legacy phrasings) now puts the session into the `awaiting-human` session mode in the daemon's session-modes registry, for 24 hours, instead of writing `human-input-blockage-marker.json`. `failsafe_cron_blockage_suppressor` and the stop-idle gate both read the registry, so the failsafe tick and declared `persistent_crons` ticks are dropped while the session is in a blocked mode (`awaiting-human` or blocked on a goal). The mode ends only when a human types a genuine prompt in the SAME session; a cron tick, a supervisor line or a prompt in another session leaves it in place. The legacy marker file is no longer read. The `expiry_hours` option of `failsafe_cron_blockage_suppressor` and the `marker_expiry_hours` option of `auto_continue_stop` are retired: the 24-hour lifetime is fixed. A config that still sets either is valid, but startup validation logs a WARNING and `bin/hooks-daemon config-validate` lists it as a warning, naming the full dotted path; remove the key to clear it.

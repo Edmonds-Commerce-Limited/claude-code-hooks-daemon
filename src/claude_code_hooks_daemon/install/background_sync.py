@@ -19,6 +19,7 @@ also holds a lock while it runs, so two syncs never overlap.
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -34,6 +35,13 @@ BACKGROUND_FLAG: Final[str] = "--background"
 
 _STATE_SUFFIX: Final[str] = ".state"
 _LOG_SUFFIX: Final[str] = ".log"
+
+#: How long a RUNNING record may carry no pid before it reads as FAILED. Only a
+#: relay repair's claim is ever pid-less, and its starter records the pid
+#: moments after the spawn, so outliving this means the starter died first.
+PIDLESS_RUNNING_GRACE_SECONDS: Final[int] = 60
+
+_ZOMBIE_STATE: Final[str] = "Z"
 
 
 class SyncStatus(StrEnum):
@@ -111,6 +119,12 @@ def read_state_file(path: Path, logs: Path) -> SyncRecord | None:
             f"the sync process (pid {pid}) ended without recording a result "
             "(killed, or the machine restarted)"
         )
+    elif status is SyncStatus.RUNNING and pid is None and _older_than_grace(path):
+        status = SyncStatus.FAILED
+        detail = (
+            f"the job was claimed but no process was ever recorded for it within "
+            f"{PIDLESS_RUNNING_GRACE_SECONDS}s (the starter died before recording it)"
+        )
     return SyncRecord(
         status=status,
         from_version=fields.get("from", ""),
@@ -132,6 +146,15 @@ def _unreadable(path: Path, logs: Path, detail: str) -> SyncRecord:
     )
 
 
+def _older_than_grace(path: Path) -> bool:
+    try:
+        modified = path.stat().st_mtime
+    except OSError:
+        # Vanished or unreadable since the read: not evidence of a stale claim.
+        return False
+    return time.time() - modified > PIDLESS_RUNNING_GRACE_SECONDS
+
+
 def _process_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -140,4 +163,15 @@ def _process_alive(pid: int) -> bool:
     except PermissionError:
         # It exists and belongs to someone else: alive.
         return True
-    return True
+    # kill(pid, 0) succeeds on a zombie: an exited child nobody has reaped yet.
+    return not _is_zombie(pid)
+
+
+def _is_zombie(pid: int) -> bool:
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        # No procfs, or the process went meanwhile: kill() already said it exists.
+        return False
+    # The state letter follows the parenthesised command name, which may hold spaces.
+    return stat[stat.rindex(")") + 2 :].startswith(_ZOMBIE_STATE)

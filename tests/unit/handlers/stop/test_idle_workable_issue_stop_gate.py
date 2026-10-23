@@ -34,7 +34,7 @@ from claude_code_hooks_daemon.handlers.stop.idle_workable_issue_stop_gate import
     RELEASE_STATE_FILENAME,
     IdleWorkableIssueStopGateHandler,
 )
-from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, write_marker
+from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, write_json_atomically
 from claude_code_hooks_daemon.utils.session_thread_group import OtherHolder
 from claude_code_hooks_daemon.utils.work_queue import (
     WORK_QUEUE_FILENAME,
@@ -342,7 +342,9 @@ class TestTheAwaitingHumanDeclaration:
 
     def test_the_legacy_marker_file_is_no_longer_read(self, state: Path) -> None:
         _cache(state, [5])
-        write_marker(state / MARKER_FILENAME, SESSION, now=NOW - 60)
+        write_json_atomically(
+            state / MARKER_FILENAME, {"session_id": SESSION, "recorded_at": NOW - 60}
+        )
         assert _judge(_handler(state), _stop()) is Decision.DENY
 
     def test_an_unreadable_registry_stands_aside_and_warns(
