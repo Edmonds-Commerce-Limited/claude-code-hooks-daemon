@@ -111,9 +111,12 @@ Follow-ups, not defects in the reviewers' judgement:
 
 ### N532 — implementation sub-agents spend their context budget before writing code
 
-**Source**: Plan 00501 Phase 6. Three consecutive `python-developer` (Opus) dispatches stopped at the 150k soft
-budget: the first after reading only (it measured about 60k as injected guidance), part A after the core module, part
-B after reading only. Each left a clean handoff, so nothing was lost but a dispatch each.
+**Source**: Plan 00501 Phase 6. Four of its six `python-developer` dispatches (each given a `model: opus` override at
+dispatch; the agent definition defaults to sonnet) stopped at the 150k soft budget: the first after reading only (its
+report states about 60k of its context was injected guidance; that figure is its estimate, not a measurement), part A
+after the core module, part B after reading only, and part B2 after two of its four items. Parts A2, B1 and B3, each
+briefed to read only a handoff section, finished. Every stop left a clean handoff, so nothing was lost but dispatches
+(fact-check: `subagent-reports/261023-n532-fact-check.md`).
 
 - **Expected**: a sub-agent with a scoped brief has most of its budget for the work itself.
 - **Fix direction**: measure what a fresh sub-agent's context holds before its first tool call (injected guidance,
