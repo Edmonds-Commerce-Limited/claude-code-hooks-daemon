@@ -13,13 +13,33 @@ session-mode transition log:
 * ``loop-reset`` when a human prompt, a goal met or cleared, or a repository
   change empties a non-empty ring (the cause is the transition's ``detail``);
 * ``near-miss`` when the ring is one cycle short of its threshold;
-* ``would-enter`` when it has reached it.
+* ``would-enter`` when it has reached it (``observe``, the default).
 
-It never blocks and never enters a mode; ``act`` is not a valid ``mode`` yet.
+**Act mode (``mode: act``, opt-in; Task 6.3).** At the threshold it enters
+GOAL_BLOCKED for ``blocked_hours`` through ``core.goal_loop_block``, signals the
+goal clear once, and queues ONE registry notice that reaches the agent at its
+next prompt. The line is never Stop-result context: Claude Code reads that as
+"continue", which would prolong the loop being stopped. Either way the ring's
+count restarts, so a loop is logged or entered once, not on every further Stop.
+
+**Exits (Task 6.4)**, each logged with its cause: the timer (registry EXPIRE),
+the next message the human types (``failsafe_cron_blockage_suppressor``), a
+repository change (here, ``cause=repo-change``), and ``hooks-daemon
+session-mode unblock`` (``cause=explicit-clear``). The repo-change watch is in
+memory only, so a daemon restart loses it for an entry already live; the other
+three exits still apply.
+
+**Without the ccy supervisor** nothing types ``/goal clear``. The backstop is
+Claude Code's own cap of 8 consecutive stop-hook continuations (each tool call
+resets it; ``CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`` raises it), after which the goal
+pauses until the next message, a tick included. A loop that makes tool calls
+between stops never reaches that cap.
 
 **Never breaks a Stop.** An unreadable transcript, an invalid checkpoint, a
-failed repository fingerprint and a failed log append are each a named WARNING,
-and the Stop is allowed.
+failed repository fingerprint, a failed log append, and a registry failure
+(``OSError``, or ``RuntimeError`` from ``get_data_layer()``) on entry or on the
+repo-change exit are each a named WARNING, and the Stop is allowed. It never
+blocks and never returns ``continue: false``.
 
 **Ordering.** Priority 5 runs it ahead of the terminal ``auto_continue_stop``
 (10), so it sees every stop; it is non-terminal so every handler behind it runs.
@@ -42,6 +62,7 @@ from claude_code_hooks_daemon.core.goal_loop import (
     Checkpoint,
     CheckpointInvalidError,
     CycleRing,
+    DetectorMode,
     FingerprintError,
     GoalLoopConfig,
     RingReset,
@@ -52,9 +73,11 @@ from claude_code_hooks_daemon.core.goal_loop import (
     read_new_lines,
     repo_fingerprint,
 )
+from claude_code_hooks_daemon.core.goal_loop_block import enter_goal_loop
 from claude_code_hooks_daemon.core.handler_bases import StopHandlerBase
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
 from claude_code_hooks_daemon.core.session_mode_log import ModeTransition, TransitionAction
+from claude_code_hooks_daemon.core.session_mode_registry import SessionModeRegistry
 from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
     _STOP_EXPLANATION_PREFIX,
     _declares_human_blocked,
@@ -83,6 +106,8 @@ class _SessionState:
 
     ring: CycleRing
     checkpoint: Checkpoint | None = None
+    #: The repository fingerprint when act mode entered GOAL_BLOCKED; None when not watching.
+    blocked_fingerprint: str | None = None
 
 
 class GoalLoopDetectorHandler(StopHandlerBase):
@@ -108,6 +133,8 @@ class GoalLoopDetectorHandler(StopHandlerBase):
         self._fingerprint_repo: Callable[[], str] = self._default_fingerprint
         self._append_transition: Callable[[ModeTransition], None] = self._default_append
         self._clock: Callable[[], float] = time.time
+        self._registry: Callable[[], SessionModeRegistry] = self._default_registry
+        self._clear_goal: Callable[[str], bool] = self._default_clear_goal
         self._sessions: OrderedDict[str, _SessionState] = OrderedDict()
 
     validate_options = staticmethod(option_problems)
@@ -175,29 +202,102 @@ class GoalLoopDetectorHandler(StopHandlerBase):
         fed = state.ring.feed(extraction.events)
         for reset in fed.resets:
             self._log_reset(session_id, reset)
-        if fed.new_cycles == 0:
+        if fed.new_cycles == 0 and state.blocked_fingerprint is None:
             return allow
         try:
             fingerprint = self._fingerprint_repo()
         except FingerprintError as error:
             logger.warning("goal-loop detector: fingerprint failed: %s", error)
             return allow
+        if state.blocked_fingerprint is not None:
+            self._exit_on_repo_change(session_id, state, fingerprint)
+        if fed.new_cycles == 0:
+            return allow
         repo_reset = state.ring.note_fingerprint(fingerprint, new_cycles=fed.new_cycles)
         if repo_reset is not None:
             self._log_reset(session_id, repo_reset)
         assessment = assess(state.ring, config)
-        action = _VERDICT_ACTION.get(assessment.verdict)
-        if action is not None:
-            self._log(
-                ModeTransition(
-                    at=self._clock(),
-                    session_id=session_id,
-                    label=ModeLabel.GOAL_BLOCKED,
-                    action=action,
-                    evidence=assessment.evidence(config, state.ring.fingerprint),
+        evidence = assessment.evidence(config, state.ring.fingerprint)
+        if assessment.verdict is Verdict.WOULD_ENTER and config.mode is DetectorMode.ACT:
+            self._enter(session_id, state, config, evidence, fingerprint)
+        else:
+            action = _VERDICT_ACTION.get(assessment.verdict)
+            if action is not None:
+                self._log(
+                    ModeTransition(
+                        at=self._clock(),
+                        session_id=session_id,
+                        label=ModeLabel.GOAL_BLOCKED,
+                        action=action,
+                        evidence=evidence,
+                    )
                 )
-            )
+        if assessment.verdict is Verdict.WOULD_ENTER:
+            # Logged (or entered) once per loop, not on every further Stop of it.
+            state.ring.restart_count()
         return allow
+
+    def _enter(
+        self,
+        session_id: str,
+        state: _SessionState,
+        config: GoalLoopConfig,
+        evidence: str,
+        fingerprint: str,
+    ) -> None:
+        """Act mode: goal-block the session; a failure is a WARNING and the Stop proceeds."""
+        try:
+            enter_goal_loop(
+                self._registry(),
+                session_id,
+                ttl_seconds=config.blocked_seconds,
+                evidence=evidence,
+                clear_goal=self._clear_goal,
+            )
+        except (OSError, RuntimeError) as error:
+            log_and_continue(
+                logger,
+                error,
+                reason=(
+                    f"goal-loop detector: goal-blocked mode not entered for {session_id}; "
+                    "a Stop is never broken, and the would-be entry is in this warning"
+                ),
+            )
+            return
+        state.blocked_fingerprint = fingerprint
+
+    def _exit_on_repo_change(
+        self, session_id: str, state: _SessionState, fingerprint: str
+    ) -> None:
+        """End this detector's block when the repository changed; forget it once it has ended."""
+        old = state.blocked_fingerprint
+        try:
+            registry = self._registry()
+            if ModeLabel.GOAL_BLOCKED not in {e.label for e in registry.active(session_id)}:
+                logger.info(
+                    "goal-loop detector: %s is no longer goal-blocked (ended by timer, human "
+                    "or unblock); repo-change watch dropped",
+                    session_id,
+                )
+                state.blocked_fingerprint = None
+                return
+            if fingerprint == old:
+                return
+            registry.exit(
+                session_id,
+                ModeLabel.GOAL_BLOCKED,
+                evidence=f"cause=repo-change fingerprint={old}->{fingerprint}",
+            )
+            state.blocked_fingerprint = None
+        except (OSError, RuntimeError) as error:
+            log_and_continue(
+                logger,
+                error,
+                reason=(
+                    f"goal-loop detector: the repo-change exit was not made for {session_id}; "
+                    "the block still ends on its timer, a human prompt or an unblock"
+                ),
+            )
 
     def _log_reset(self, session_id: str, reset: RingReset) -> None:
         self._log(
@@ -226,6 +326,17 @@ class GoalLoopDetectorHandler(StopHandlerBase):
             )
 
     @staticmethod
+    def _default_registry() -> SessionModeRegistry:
+        return get_data_layer().session_modes
+
+    @staticmethod
+    def _default_clear_goal(session_id: str) -> bool:
+        # Deferred: daemon.session_mode_ipc imports daemon.server, which loads the handlers.
+        from claude_code_hooks_daemon.daemon.session_mode_ipc import clear_goal_signal
+
+        return clear_goal_signal(session_id)
+
+    @staticmethod
     def _default_fingerprint() -> str:
         return repo_fingerprint(ProjectContext.project_root())
 
@@ -236,7 +347,12 @@ class GoalLoopDetectorHandler(StopHandlerBase):
             log.append([transition])
 
     def get_claude_md(self) -> str | None:
-        """No resident guidance: the detector only observes and never blocks."""
+        """No resident guidance: it never blocks a tool, and act mode is opt-in.
+
+        Deliberate: guidance here would end its guidance-coverage exemption and
+        change the generated CLAUDE.md block for every project, while act mode's
+        one-time line already reaches the affected session as a registry notice.
+        """
         return None
 
     def get_acceptance_tests(self) -> list[Any]:
