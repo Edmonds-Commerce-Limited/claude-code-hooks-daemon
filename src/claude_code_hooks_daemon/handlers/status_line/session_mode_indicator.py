@@ -3,12 +3,13 @@
 ``| ⚑ focus: write the release note`` or ``| ⚑ awaiting-human +1``
 
 The top mode by precedence (usage-paused > goal-blocked > awaiting-human >
-focus > unattended) plus a ``+N`` count of the others; when focus is the top
-mode its task is shown, shortened. Nothing is shown when no mode is active.
+manual-goals > focus > unattended) plus a ``+N`` count of the others; when
+focus is the top mode its task is shown, shortened. Nothing is shown when no
+mode is active.
 
 Sources, all cheap on the render path:
 
-- focus, awaiting-human and goal-blocked from the daemon's in-memory
+- focus, manual-goals, awaiting-human and goal-blocked from the daemon's in-memory
   session-modes registry (no file read);
 - usage-paused from the session's own pause record, through ``MtimeCachedFile``
   (one ``stat()`` per render);
@@ -50,6 +51,7 @@ _ICON: Final[str] = "⚑"
 _RED: Final[str] = "\033[31m"
 _YELLOW: Final[str] = "\033[33m"
 _CYAN: Final[str] = "\033[36m"
+_MAGENTA: Final[str] = "\033[35m"
 _GREY: Final[str] = "\033[37m"
 _RESET: Final[str] = "\033[0m"
 
@@ -58,6 +60,7 @@ _COLOURS: Final[dict[ModeLabel, str]] = {
     ModeLabel.USAGE_PAUSED: _RED,
     ModeLabel.GOAL_BLOCKED: _YELLOW,
     ModeLabel.AWAITING_HUMAN: _YELLOW,
+    ModeLabel.MANUAL_GOALS: _MAGENTA,
     ModeLabel.FOCUS: _CYAN,
     ModeLabel.UNATTENDED: _GREY,
 }
@@ -187,7 +190,9 @@ class SessionModeIndicatorHandler(StatusLineHandlerBase):
                 f"`{_ICON} <mode> +N` shows the top mode by precedence and how many more "
                 "are active. Precedence: usage-paused (red: paused on the usage ceiling "
                 "until the window resets) > goal-blocked (yellow: a /goal loop was caught) "
-                "> awaiting-human (yellow: the agent declared it needs the human) > focus "
+                "> awaiting-human (yellow: the agent declared it needs the human) > "
+                "manual-goals (magenta: the human owns the goal and no automated goal write "
+                "or retirement clear happens; `hooks-daemon goals on` ends it) > focus "
                 "(cyan, with its task: `hooks-daemon focus off` ends it) > unattended "
                 "(grey: the daemon-wide unattended mode). A red "
                 f"`{_ICON} {_REGISTRY_ERROR}` or `{_ICON} {_PAUSE_ERROR}` means the mode "

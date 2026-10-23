@@ -40,12 +40,14 @@ Parse the arguments to determine the action:
 4. **"unattended <message...>"** -> Run: \`"\$DAEMON_CLI" set-mode unattended -m "<message>"\`
 5. **"focus off"**, or \`focus\` followed by exactly one of \`off\`, \`done\`, \`end\`, \`disable\` -> Run: \`"\$DAEMON_CLI" session-mode focus off\`
 6. **"focus <task...>"** -> Run: \`"\$DAEMON_CLI" session-mode focus <task words>\` (quote the task as one argument)
+7. **"goals manual"** or **"goals off"** -> Run: \`"\$DAEMON_CLI" goals off\` (enter manual-goals: the human owns this session's goal)
+8. **"goals auto"** or **"goals on"** -> Run: \`"\$DAEMON_CLI" goals on\` (switch back to automated goals)
 
 If the first word is "unattended" and there are additional words, join them as the custom message with the -m flag.
 
-\`default\` and \`unattended\` change the DAEMON-WIDE mode. \`focus\` changes only THIS session: it
-reads \`CLAUDE_CODE_SESSION_ID\`, which the Bash tool sets. Print the one line \`session-mode focus\`
-outputs to the user verbatim.
+\`default\` and \`unattended\` change the DAEMON-WIDE mode. \`focus\` and \`goals\` change only THIS
+session: they read \`CLAUDE_CODE_SESSION_ID\`, which the Bash tool sets. Print the one line
+\`session-mode focus\` or \`goals\` outputs to the user verbatim.
 
 ## Execute
 

@@ -1,7 +1,7 @@
 """The session-mode status segment (Plan 00501 Task 4.1).
 
 Shows this session's top mode by precedence (usage-paused > goal-blocked >
-awaiting-human > focus > unattended) plus a ``+N`` count, and the focus task
+awaiting-human > manual-goals > focus > unattended) plus a ``+N`` count, and the focus task
 when focus is the top mode. Registry modes come from the in-memory registry
 (no file read); usage-paused from its own record (mtime-gated); unattended from
 the daemon mode. A registry or record that cannot be read is shown as a named
@@ -24,9 +24,15 @@ from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
 from claude_code_hooks_daemon.core.data_layer import get_data_layer
 from claude_code_hooks_daemon.handlers.status_line.session_mode_indicator import (
+    _COLOURS,
     SessionModeIndicatorHandler,
 )
 from claude_code_hooks_daemon.utils import usage_pause
+from claude_code_hooks_daemon.utils.session_modes import (
+    ModeLabel,
+    ModeSource,
+    manual_goals_entry,
+)
 
 _MODULE = "claude_code_hooks_daemon.handlers.status_line.session_mode_indicator"
 _SID = "sess-status"
@@ -105,6 +111,24 @@ class TestRender:
         assert "⚑ awaiting-human +1" in segment
         assert "task" not in segment
 
+    def test_manual_goals_is_shown(self, untracked: Path) -> None:
+        get_data_layer().session_modes.enter(
+            manual_goals_entry(_SID, entered_at=time.time(), source=ModeSource.HUMAN)
+        )
+        [segment] = _render(SessionModeIndicatorHandler())
+        assert "⚑ manual-goals" in segment
+
+    def test_manual_goals_outranks_focus(self, untracked: Path) -> None:
+        registry = get_data_layer().session_modes
+        registry.enter(focus_entry(_SID, "task"))
+        registry.enter(manual_goals_entry(_SID, entered_at=time.time(), source=ModeSource.HUMAN))
+        [segment] = _render(SessionModeIndicatorHandler())
+        assert "⚑ manual-goals +1" in segment
+
+    def test_every_label_has_a_badge_colour(self) -> None:
+        """A label with no colour raises KeyError on the render path the day it leads."""
+        assert set(_COLOURS) == set(ModeLabel)
+
     def test_unattended_is_shown(self, untracked: Path, daemon_mode: Mock) -> None:
         daemon_mode.get_mode.return_value = {ModeConstant.KEY_MODE: DaemonMode.UNATTENDED.value}
         [segment] = _render(SessionModeIndicatorHandler())
@@ -171,8 +195,9 @@ class TestExplanation:
         explanation = SessionModeIndicatorHandler().explain_segment()
         assert explanation.glyphs == ("⚑",)
         assert explanation.name == "Session Mode"
-        for label in ("usage-paused", "goal-blocked", "awaiting-human", "focus", "unattended"):
-            assert label in explanation.how_to_read
+        for label in ModeLabel.by_precedence():
+            assert str(label) in explanation.how_to_read
+        assert "hooks-daemon goals on" in explanation.how_to_read
         assert "mode-history" in explanation.how_to_read
 
     def test_explanation_names_the_supervisor_warning_and_its_fix(self) -> None:

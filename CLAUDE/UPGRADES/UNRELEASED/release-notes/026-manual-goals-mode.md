@@ -1,0 +1,6 @@
+# Callout: `manual-goals` session mode hands a session's goal to the human
+
+**Plan**: 00501
+**Audience**: operators
+
+A new session mode, `manual-goals`, stops the daemon making automated goal changes for one session. It is entered when a human clears a goal (a `/goal clear` that `goal_loop_detector` attributes to the human), by `hooks-daemon goals off` (or `manual`) typed as the whole prompt or run from the CLI, or by `/mode goals manual`. While it holds, no `.goal-intent` is written for the session, so the ccy supervisor types no `/goal`, and a plan retiring no longer clears the goal. A `/goal <condition>` the human types still works and leaves the mode in place. The goal-loop detector's clear, the clear on entering focus, `hooks-daemon clear-goal`, `continue`, cron ticks and every guard are unaffected. The mode ends only at `hooks-daemon goals on` (or `auto`, or `/mode goals auto`) or with the session: every prompt renews its expiry, so a live session never times out of it, and it survives a daemon restart. The status line shows a magenta `⚑ manual-goals`, ranked below `awaiting-human` and above `focus`. The IPC actions are `enter_manual_goals` and `exit_manual_goals`. Full reference: `CLAUDE/SessionModes.md`.
