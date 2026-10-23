@@ -542,6 +542,20 @@ def write_automated_goal_signal(
     tells every caller to retry on the next qualifying event, so a goal is set
     again once the mode ends.
     """
+    if not _automated_goal_allowed(session_id):
+        logger.info(
+            "goal_injection: automated goal for plan %s not written for %s", plan_number, session_id
+        )
+        return None
+    return write_goal_signal(session_id, plan_number, joined_line, source)
+
+
+def _automated_goal_allowed(session_id: str) -> bool:
+    """Whether an automated goal may be written for ``session_id``.
+
+    False while the session is in manual goals, and False (fail closed, logged
+    at WARNING) when the session-modes registry cannot be read.
+    """
     try:
         suppressed = goal_intent_suppressed(get_data_layer().session_modes, session_id)
     except (RuntimeError, OSError) as error:
@@ -553,15 +567,10 @@ def write_automated_goal_signal(
                 "automated goal is written for it (fail closed: it may be in manual goals)"
             ),
         )
-        return None
+        return False
     if suppressed:
-        logger.info(
-            "goal_injection: %s is in manual goals; automated goal for plan %s not written",
-            session_id,
-            plan_number,
-        )
-        return None
-    return write_goal_signal(session_id, plan_number, joined_line, source)
+        logger.info("goal_injection: %s is in manual goals", session_id)
+    return not suppressed
 
 
 def clear_goal_signal(session_id: str) -> bool:
