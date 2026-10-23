@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/statusline
-fetched_at: '2026-10-17T03:25:28.346785+00:00'
+fetched_at: '2026-10-23T16:45:34.148596+00:00'
 fidelity: converted
-source_sha256: bbe651578fa8edf2ec5a1db3a0823c56d7708248c3d35dc7587b67c4246bb356
+source_sha256: 78c048e8072e040a69ab17a12c5090d1d5961278cf9295dc4fc526cd52cdc544
 licence: unreviewed
-stale_after: '2027-01-15'
+stale_after: '2027-01-21'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 value_swaps:
 - kind: session-uuid
@@ -30,13 +30,11 @@ Status lines are useful when you:
 * Work across multiple sessions and need to distinguish them
 * Want git branch and status always visible
 
-The status line renders in its own row above the built-in footer badges and does not replace them. With a custom status line configured, Claude Code stops showing most of the footer's keyboard hints, including `esc to interrupt`, the `? for shortcuts` fallback, and the `hold space to speak` [voice dictation](/docs/en/voice-dictation) hint. To add clickable link badges to the footer when an ID appears in the conversation, without writing a script, configure [`footerLinksRegexes`](/docs/en/settings-reference#footerlinksregexes) instead.
+The status line renders in its own row above the built-in footer badges and does not replace them. With a custom status line configured, Claude Code stops showing most of the footer's keyboard hints, including `esc to interrupt`, the `? for shortcuts` fallback, and the `hold space to speak` [voice dictation](/docs/en/voice-dictation.md) hint. To add clickable link badges to the footer when an ID appears in the conversation, without writing a script, configure [`footerLinksRegexes`](/docs/en/settings-reference#footerlinksregexes) instead.
 
 Here's an example of a [multi-line status line](#display-multiple-lines) that displays git info on the first line and a color-coded context bar on the second.
 
-<Frame>
-  <img src="https://mintcdn.com/claude-code/HDAmBwgbrZVk0pOt/images/statusline-multiline.png?fit=max&auto=format&n=HDAmBwgbrZVk0pOt&q=85&s=a9d0a2fe8e446d80b1abc46da3f93270" alt="A multi-line status line showing model name, directory, git branch on the first line, and a context usage progress bar with cost and duration on the second line" width="1224" height="262" data-path="images/statusline-multiline.png" />
-</Frame>
+![A multi-line status line showing model name, directory, git branch on the first line, and a context usage progress bar with cost and duration on the second line](https://mintcdn.com/claude-code/HDAmBwgbrZVk0pOt/images/statusline-multiline.png?fit=max\&auto=format\&n=HDAmBwgbrZVk0pOt\&q=85\&s=a9d0a2fe8e446d80b1abc46da3f93270)
 
 This page walks through [setting up a basic status line](#set-up-a-status-line), explains [how the data flows](#how-status-lines-work) from Claude Code to your script, lists [all the fields you can display](#available-data), and provides [ready-to-use examples](#examples) for common patterns like git status, cost tracking, and progress bars.
 
@@ -56,7 +54,7 @@ Approve the file edit prompts if Claude Code asks for permission during setup.
 
 ### Manually configure a status line
 
-Add a `statusLine` field to your user settings (`~/.claude/settings.json`, where `~` is your home directory) or [project settings](/docs/en/settings#where-settings-live). Set `type` to `"command"` and point `command` to a script path or an inline shell command. For a full walkthrough of creating a script, see [Build a status line step by step](#build-a-status-line-step-by-step).
+Add a `statusLine` field to your user settings (`~/.claude/settings.json`, where `~` is your home directory) or [project settings](/docs/en/settings.md#where-settings-live). Set `type` to `"command"` and point `command` to a script path or an inline shell command. For a full walkthrough of creating a script, see [Build a status line step by step](#build-a-status-line-step-by-step).
 
 ```json theme={null}
 {
@@ -93,65 +91,65 @@ Run `/statusline` and ask it to remove or clear your status line (for example, `
 
 This walkthrough shows what `/statusline` sets up for you by manually creating a status line that displays the current model, working directory, and context window usage percentage.
 
-<Note>Running [`/statusline`](#use-the-%2Fstatusline-command) with a description of what you want configures all of this for you automatically.</Note>
+> [!NOTE]
+>
+> Running [`/statusline`](#use-the-%2Fstatusline-command) with a description of what you want configures all of this for you automatically.
 
 These examples use Bash scripts, which work on macOS and Linux. On Windows, see [Windows configuration](#windows-configuration) for PowerShell and Git Bash examples.
 
-<Frame>
-  <img src="https://mintcdn.com/claude-code/HDAmBwgbrZVk0pOt/images/statusline-quickstart.png?fit=max&auto=format&n=HDAmBwgbrZVk0pOt&q=85&s=88a7eab9c1038dd098ee8e284d96b7e6" alt="A status line showing model name, directory, and context percentage" width="1224" height="224" data-path="images/statusline-quickstart.png" />
-</Frame>
+![A status line showing model name, directory, and context percentage](https://mintcdn.com/claude-code/HDAmBwgbrZVk0pOt/images/statusline-quickstart.png?fit=max\&auto=format\&n=HDAmBwgbrZVk0pOt\&q=85\&s=88a7eab9c1038dd098ee8e284d96b7e6)
 
-<Steps>
-  <Step title="Create a script that reads JSON and prints output">
-    Claude Code sends JSON data to your script via stdin. This script uses [`jq`](https://jqlang.org/), a command-line JSON parser you may need to install, to extract the model name, directory, and context percentage, then prints a formatted line.
+**1. Create a script that reads JSON and prints output**
 
-    Save this to `~/.claude/statusline.sh` (where `~` is your home directory, such as `/Users/username` on macOS or `/home/username` on Linux):
+Claude Code sends JSON data to your script via stdin. This script uses [`jq`](https://jqlang.org/), a command-line JSON parser you may need to install, to extract the model name, directory, and context percentage, then prints a formatted line.
 
-    ```bash theme={null}
-    #!/bin/bash
-    # Read JSON data that Claude Code sends to stdin
-    input=$(cat)
+Save this to `~/.claude/statusline.sh` (where `~` is your home directory, such as `/Users/username` on macOS or `/home/username` on Linux):
 
-    # Extract fields using jq
-    MODEL=$(echo "$input" | jq -r '.model.display_name')
-    DIR=$(echo "$input" | jq -r '.workspace.current_dir')
-    # The "// 0" provides a fallback if the field is null
-    PCT=$(echo "$input" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
+```bash theme={null}
+#!/bin/bash
+# Read JSON data that Claude Code sends to stdin
+input=$(cat)
 
-    # Output the status line - ${DIR##*/} extracts just the folder name
-    echo "[$MODEL] 📁 ${DIR##*/} | ${PCT}% context"
-    ```
-  </Step>
+# Extract fields using jq
+MODEL=$(echo "$input" | jq -r '.model.display_name')
+DIR=$(echo "$input" | jq -r '.workspace.current_dir')
+# The "// 0" provides a fallback if the field is null
+PCT=$(echo "$input" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
 
-  <Step title="Make it executable">
-    Mark the script as executable so your shell can run it:
+# Output the status line - ${DIR##*/} extracts just the folder name
+echo "[$MODEL] 📁 ${DIR##*/} | ${PCT}% context"
+```
 
-    ```bash theme={null}
-    chmod +x ~/.claude/statusline.sh
-    ```
-  </Step>
+**2. Make it executable**
 
-  <Step title="Add to settings">
-    Tell Claude Code to run your script as the status line. Add this configuration to `~/.claude/settings.json`, which sets `type` to `"command"` (meaning "run this shell command") and points `command` to your script:
+Mark the script as executable so your shell can run it:
 
-    ```json theme={null}
-    {
-      "statusLine": {
-        "type": "command",
-        "command": "~/.claude/statusline.sh"
-      }
-    }
-    ```
+```bash theme={null}
+chmod +x ~/.claude/statusline.sh
+```
 
-    Your status line appears at the bottom of the interface. Claude Code reloads settings automatically and runs your script as soon as you save the file.
-  </Step>
-</Steps>
+**3. Add to settings**
+
+Tell Claude Code to run your script as the status line. Add this configuration to `~/.claude/settings.json`, which sets `type` to `"command"` (meaning "run this shell command") and points `command` to your script:
+
+```json theme={null}
+{
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/statusline.sh"
+  }
+}
+```
+
+Your status line appears at the bottom of the interface. Claude Code reloads settings automatically and runs your script as soon as you save the file.
 
 ## How status lines work
 
 Claude Code runs your script with [JSON session data](#available-data) on stdin and displays whatever the script prints to stdout.
 
-<Note>The status line runs locally and does not consume API tokens. It temporarily hides during certain UI interactions, including the help menu and permission prompts.</Note>
+> [!NOTE]
+>
+> The status line runs locally and does not consume API tokens. It temporarily hides during certain UI interactions, including the help menu and permission prompts.
 
 ### When the status line updates
 
@@ -192,9 +190,9 @@ Claude Code sends the following JSON fields to your script via stdin:
 | `cwd`, `workspace.current_dir` | Current working directory. Both fields contain the same value; `workspace.current_dir` is preferred for consistency with `workspace.project_dir`. |
 | `workspace.project_dir` | Directory where Claude Code was launched, which may differ from `cwd` if the working directory changes during a session |
 | `workspace.added_dirs` | Additional directories added via `/add-dir` or `--add-dir`. Empty array if none have been added |
-| `workspace.git_worktree` | Git worktree name when the current directory is inside a linked worktree created with `git worktree add`. Absent in the main working tree. Populated for any git worktree, unlike `worktree.*`, which is present only while the session is in a [worktree session](/docs/en/worktrees) |
+| `workspace.git_worktree` | Git worktree name when the current directory is inside a linked worktree created with `git worktree add`. Absent in the main working tree. Populated for any git worktree, unlike `worktree.*`, which is present only while the session is in a [worktree session](/docs/en/worktrees.md) |
 | `workspace.repo.host`, `workspace.repo.owner`, `workspace.repo.name` | Repository identity parsed from the `origin` remote, for example, `"github.com"`, `"anthropics"`, `"claude-code"`. Absent outside a git repository or when no `origin` remote is configured. For a gitlab.com project nested in subgroups, `owner` is the full namespace path with slashes, such as `"group/subgroup"`. Before v2.1.260, `workspace.repo` was absent for these projects |
-| `cost.total_cost_usd` | Estimated session cost in USD, computed client-side at list price unless a [`modelPricing`](/docs/en/settings-reference#modelpricing) table is in effect. May differ from your actual bill. Resets to \$0 when `/clear` starts a new session. Before v2.1.211, the total carried over after `/clear` |
+| `cost.total_cost_usd` | Estimated session cost in USD, computed client-side at list price unless a [`modelPricing`](/docs/en/settings-reference#modelpricing) table is in effect. May differ from your actual bill. Resets to \$0 when `/clear` starts a new session |
 | `cost.total_duration_ms` | Total wall-clock time the session has been running, in milliseconds. Accumulates across resumes and doesn't include time while the session isn't running |
 | `cost.total_api_duration_ms` | Total time spent waiting for API responses in milliseconds |
 | `cost.total_lines_added`, `cost.total_lines_removed` | Lines of code changed |
@@ -204,169 +202,169 @@ Claude Code sends the following JSON fields to your script via stdin:
 | `context_window.remaining_percentage` | Pre-calculated percentage of context window remaining |
 | `context_window.current_usage` | Token counts from the last API call, described in [context window fields](#context-window-fields) |
 | `exceeds_200k_tokens` | Whether the total token count (input, cache, and output tokens combined) from the most recent API response exceeds 200k. This is a fixed threshold regardless of actual context window size. |
-| `fast_mode` | Whether [fast mode](/docs/en/fast-mode) is enabled for the session |
+| `fast_mode` | Whether [fast mode](/docs/en/fast-mode.md) is enabled for the session |
 | `effort.level` | Current reasoning effort (`low`, `medium`, `high`, `xhigh`, or `max`). Reflects the live session value, including mid-session `/effort` changes. Absent when the current model does not support the effort parameter |
 | `thinking.enabled` | Whether extended thinking is enabled for the session |
 | `rate_limits.five_hour.used_percentage`, `rate_limits.seven_day.used_percentage` | Percentage of the 5-hour or 7-day rate limit consumed, from 0 to 100 |
 | `rate_limits.five_hour.resets_at`, `rate_limits.seven_day.resets_at` | Unix epoch seconds when the 5-hour or 7-day rate limit window resets |
 | `rate_limits.spend_limit.used_percentage`, `rate_limits.spend_limit.resets_at` | Behind a Claude apps gateway, how much of your spend limit you have used and when its period resets. See [spend limit fields](#spend-limit-fields). Requires Claude Code v2.1.251 or later |
 | `rate_limits.spend_limit.used_usd`, `rate_limits.spend_limit.limit_usd`, `rate_limits.spend_limit.period` | Your estimated spend and your limit in US dollars, and the limit's period. These fields can be absent. See [spend limit fields](#spend-limit-fields). Requires v2.1.284 or later on both Claude Code and the gateway |
-| `prompt_cache` | The session's [prompt cache](/docs/en/prompt-caching) statistics for the main conversation: hit ratio, misses, and whether the cache is warm. See [prompt cache fields](#prompt-cache-fields) for every field. Absent until the main conversation's first API response. Requires Claude Code v2.1.251 or later |
+| `prompt_cache` | The session's [prompt cache](/docs/en/prompt-caching.md) statistics for the main conversation: hit ratio, misses, and whether the cache is warm. See [prompt cache fields](#prompt-cache-fields) for every field. Absent until the main conversation's first API response. Requires Claude Code v2.1.251 or later |
 | `session_id` | Unique session identifier |
-| `session_name` | Session name. Uses the custom name set with the `--name` flag or `/rename` when one exists, otherwise the AI-generated session title. The [default display name](/docs/en/sessions#name-your-sessions), such as `my-app-3f`, doesn't populate this field. Absent when the session has neither a custom name nor an AI-generated title |
+| `session_name` | Session name. Uses the custom name set with the `--name` flag or `/rename` when one exists, otherwise the AI-generated session title. The [default display name](/docs/en/sessions.md#name-your-sessions), such as `my-app-3f`, doesn't populate this field. Absent when the session has neither a custom name nor an AI-generated title |
 | `prompt_id` | UUID identifying the user prompt currently being processed. Matches the [`prompt.id` attribute on OpenTelemetry events](/docs/en/monitoring-usage#event-correlation-attributes). Absent until the first user input |
 | `transcript_path` | Path to conversation transcript file |
 | `version` | Claude Code version |
 | `output_style.name` | Name of the current output style |
-| `vim.mode` | Current vim mode (`NORMAL`, `INSERT`, `VISUAL`, or `VISUAL LINE`) when [vim mode](/docs/en/interactive-mode#vim-editor-mode) is enabled |
+| `vim.mode` | Current vim mode (`NORMAL`, `INSERT`, `VISUAL`, or `VISUAL LINE`) when [vim mode](/docs/en/interactive-mode.md#vim-editor-mode) is enabled |
 | `agent.name` | Agent name when running with the `--agent` flag or agent settings configured |
-| `pr.number`, `pr.url` | Open pull request for the current branch. Mirrors the PR badge in the footer. In a repository with a GitLab remote, Claude Code fills these fields from the branch's open [merge request](/docs/en/interactive-mode#gitlab-merge-requests) instead, so `pr.number` is the merge request number. Merge request data requires Claude Code v2.1.234 or later. Absent when not in a git repository, until a pull request or merge request is found, or once it merges or closes |
+| `pr.number`, `pr.url` | Open pull request for the current branch. Mirrors the PR badge in the footer. In a repository with a GitLab remote, Claude Code fills these fields from the branch's open [merge request](/docs/en/interactive-mode.md#gitlab-merge-requests) instead, so `pr.number` is the merge request number. Merge request data requires Claude Code v2.1.234 or later. Absent when not in a git repository, until a pull request or merge request is found, or once it merges or closes |
 | `pr.review_state` | Review status of the open PR: `approved`, `pending`, `changes_requested`, or `draft`. May be independently absent even when `pr` is present |
-| `pr.kind` | `mr` when `pr` describes a [GitLab merge request](/docs/en/interactive-mode#gitlab-merge-requests). Absent for GitHub pull requests, so scripts written before this field keep working. For a merge request, Claude Code sets `review_state` to `approved` when GitLab reports it mergeable, `pending` for any other open state, and `draft` for a draft. Requires Claude Code v2.1.234 or later |
-| `worktree.name` | Name of the active worktree. Present only while the session is in a [worktree session](/docs/en/worktrees) |
+| `pr.kind` | `mr` when `pr` describes a [GitLab merge request](/docs/en/interactive-mode.md#gitlab-merge-requests). Absent for GitHub pull requests, so scripts written before this field keep working. For a merge request, Claude Code sets `review_state` to `approved` when GitLab reports it mergeable, `pending` for any other open state, and `draft` for a draft. Requires Claude Code v2.1.234 or later |
+| `worktree.name` | Name of the active worktree. Present only while the session is in a [worktree session](/docs/en/worktrees.md) |
 | `worktree.path` | Absolute path to the worktree directory |
 | `worktree.branch` | Git branch name for the worktree (for example, `"worktree-my-feature"`). Absent for hook-based worktrees |
 | `worktree.original_cwd` | The directory Claude was in before entering the worktree |
 | `worktree.original_branch` | Git branch checked out before entering the worktree. Absent for hook-based worktrees |
 
-<Accordion title="Full JSON schema">
-  Your status line command receives this JSON structure via stdin:
-
-  ```json theme={null}
-  {
-    "cwd": "/current/working/directory",
-    "session_id": "abc123...",
-    "session_name": "my-session",
-    "prompt_id": "00000000-0000-0000-0000-000000000000",
-    "transcript_path": "/path/to/transcript.jsonl",
-    "model": {
-      "id": "claude-opus-5-5",
-      "display_name": "Opus"
-    },
-    "workspace": {
-      "current_dir": "/current/working/directory",
-      "project_dir": "/original/project/directory",
-      "added_dirs": [],
-      "git_worktree": "feature-xyz",
-      "repo": {
-        "host": "github.com",
-        "owner": "anthropics",
-        "name": "claude-code"
-      }
-    },
-    "version": "2.1.90",
-    "output_style": {
-      "name": "default"
-    },
-    "cost": {
-      "total_cost_usd": 0.01234,
-      "total_duration_ms": 45000,
-      "total_api_duration_ms": 2300,
-      "total_lines_added": 156,
-      "total_lines_removed": 23
-    },
-    "context_window": {
-      "total_input_tokens": 15500,
-      "total_output_tokens": 1200,
-      "context_window_size": 200000,
-      "used_percentage": 8,
-      "remaining_percentage": 92,
-      "current_usage": {
-        "input_tokens": 8500,
-        "output_tokens": 1200,
-        "cache_creation_input_tokens": 5000,
-        "cache_read_input_tokens": 2000
-      }
-    },
-    "exceeds_200k_tokens": false,
-    "prompt_cache": {
-      "warm": true,
-      "caching_observed": true,
-      "ttl": "1h",
-      "expires_at": 1738429200,
-      "requests": 14,
-      "misses": 2,
-      "expected_rebuilds": 1,
-      "hit_ratio": 0.91,
-      "cache_write_tokens": 352000,
-      "miss_recache_tokens": 310200,
-      "last_miss_at": 1738425230,
-      "last_miss_cause": {
-        "causes": ["tools_changed"],
-        "tools_added": 2,
-        "tools_removed": 0
-      },
-      "miss_causes": {
-        "tools_changed": 2
-      },
-      "recache_tokens_if_cold": 45000
-    },
-    "fast_mode": false,
-    "effort": {
-      "level": "high"
-    },
-    "thinking": {
-      "enabled": true
-    },
-    "rate_limits": {
-      "five_hour": {
-        "used_percentage": 23.5,
-        "resets_at": 1738425600
-      },
-      "seven_day": {
-        "used_percentage": 41.2,
-        "resets_at": 1738857600
-      },
-      "spend_limit": {
-        "used_percentage": 62.8,
-        "resets_at": 1740787200,
-        "used_usd": 314.12,
-        "limit_usd": 500,
-        "period": "monthly"
-      }
-    },
-    "vim": {
-      "mode": "NORMAL"
-    },
-    "agent": {
-      "name": "security-reviewer"
-    },
-    "pr": {
-      "number": 1234,
-      "url": "https://github.com/anthropics/claude-code/pull/1234",
-      "review_state": "pending"
-    },
-    "worktree": {
-      "name": "my-feature",
-      "path": "/path/to/.claude/worktrees/my-feature",
-      "branch": "worktree-my-feature",
-      "original_cwd": "/path/to/project",
-      "original_branch": "main"
-    }
-  }
-  ```
-
-  **Fields that may be absent** (not present in JSON):
-
-  * `session_name`: appears when a custom name has been set with `--name` or `/rename`, or once an AI-generated session title exists. The default display name, such as `my-app-3f`, doesn't populate it
-  * `prompt_id`: appears only after the first user input
-  * `workspace.git_worktree`: appears only when the current directory is inside a linked git worktree
-  * `workspace.repo`: appears only inside a git repository with an `origin` remote configured
-  * `effort`: appears only when the current model supports the reasoning effort parameter
-  * `vim`: appears only when vim mode is enabled
-  * `agent`: appears only when running with the `--agent` flag or agent settings configured
-  * `pr`: appears only while an open PR or GitLab merge request is found for the current branch, and is removed once it merges or closes. `pr.review_state` and `pr.kind` may be independently absent
-  * `worktree`: appears only while the session is in a [worktree session](/docs/en/worktrees). When present, `branch` and `original_branch` may also be absent for hook-based worktrees
-  * `rate_limits`: appears only for claude.ai Pro and Max subscribers, or behind a Claude apps gateway that sets a spend limit for you, and only after the first API response in the session. Each window (`five_hour`, `seven_day`, `spend_limit`) may be independently absent, and Claude Code drops a window once its `resets_at` time passes. Use `jq -r '.rate_limits.five_hour.used_percentage // empty'` to handle absence gracefully.
-  * `prompt_cache`: appears after the main conversation's first API response. See [prompt cache fields](#prompt-cache-fields)
-
-  **Fields that may be `null`**:
-
-  * `context_window.current_usage`: `null` before the first API call in a session, and again after `/compact` until the next API call repopulates it
-  * `context_window.used_percentage`, `context_window.remaining_percentage`: may be `null` early in the session
-
-  Handle missing fields with conditional access and null values with fallback defaults in your scripts.
-</Accordion>
+> **Full JSON schema**
+>
+> Your status line command receives this JSON structure via stdin:
+>
+> ```json theme={null}
+> {
+>   "cwd": "/current/working/directory",
+>   "session_id": "abc123...",
+>   "session_name": "my-session",
+>   "prompt_id": "00000000-0000-0000-0000-000000000000",
+>   "transcript_path": "/path/to/transcript.jsonl",
+>   "model": {
+>     "id": "claude-opus-5-5",
+>     "display_name": "Opus"
+>   },
+>   "workspace": {
+>     "current_dir": "/current/working/directory",
+>     "project_dir": "/original/project/directory",
+>     "added_dirs": [],
+>     "git_worktree": "feature-xyz",
+>     "repo": {
+>       "host": "github.com",
+>       "owner": "anthropics",
+>       "name": "claude-code"
+>     }
+>   },
+>   "version": "2.1.90",
+>   "output_style": {
+>     "name": "default"
+>   },
+>   "cost": {
+>     "total_cost_usd": 0.01234,
+>     "total_duration_ms": 45000,
+>     "total_api_duration_ms": 2300,
+>     "total_lines_added": 156,
+>     "total_lines_removed": 23
+>   },
+>   "context_window": {
+>     "total_input_tokens": 15500,
+>     "total_output_tokens": 1200,
+>     "context_window_size": 200000,
+>     "used_percentage": 8,
+>     "remaining_percentage": 92,
+>     "current_usage": {
+>       "input_tokens": 8500,
+>       "output_tokens": 1200,
+>       "cache_creation_input_tokens": 5000,
+>       "cache_read_input_tokens": 2000
+>     }
+>   },
+>   "exceeds_200k_tokens": false,
+>   "prompt_cache": {
+>     "warm": true,
+>     "caching_observed": true,
+>     "ttl": "1h",
+>     "expires_at": 1738429200,
+>     "requests": 14,
+>     "misses": 2,
+>     "expected_rebuilds": 1,
+>     "hit_ratio": 0.91,
+>     "cache_write_tokens": 352000,
+>     "miss_recache_tokens": 310200,
+>     "last_miss_at": 1738425230,
+>     "last_miss_cause": {
+>       "causes": ["tools_changed"],
+>       "tools_added": 2,
+>       "tools_removed": 0
+>     },
+>     "miss_causes": {
+>       "tools_changed": 2
+>     },
+>     "recache_tokens_if_cold": 45000
+>   },
+>   "fast_mode": false,
+>   "effort": {
+>     "level": "high"
+>   },
+>   "thinking": {
+>     "enabled": true
+>   },
+>   "rate_limits": {
+>     "five_hour": {
+>       "used_percentage": 23.5,
+>       "resets_at": 1738425600
+>     },
+>     "seven_day": {
+>       "used_percentage": 41.2,
+>       "resets_at": 1738857600
+>     },
+>     "spend_limit": {
+>       "used_percentage": 62.8,
+>       "resets_at": 1740787200,
+>       "used_usd": 314.12,
+>       "limit_usd": 500,
+>       "period": "monthly"
+>     }
+>   },
+>   "vim": {
+>     "mode": "NORMAL"
+>   },
+>   "agent": {
+>     "name": "security-reviewer"
+>   },
+>   "pr": {
+>     "number": 1234,
+>     "url": "https://github.com/anthropics/claude-code/pull/1234",
+>     "review_state": "pending"
+>   },
+>   "worktree": {
+>     "name": "my-feature",
+>     "path": "/path/to/.claude/worktrees/my-feature",
+>     "branch": "worktree-my-feature",
+>     "original_cwd": "/path/to/project",
+>     "original_branch": "main"
+>   }
+> }
+> ```
+>
+> **Fields that may be absent** (not present in JSON):
+>
+> * `session_name`: appears when a custom name has been set with `--name` or `/rename`, or once an AI-generated session title exists. The default display name, such as `my-app-3f`, doesn't populate it
+> * `prompt_id`: appears only after the first user input
+> * `workspace.git_worktree`: appears only when the current directory is inside a linked git worktree
+> * `workspace.repo`: appears only inside a git repository with an `origin` remote configured
+> * `effort`: appears only when the current model supports the reasoning effort parameter
+> * `vim`: appears only when vim mode is enabled
+> * `agent`: appears only when running with the `--agent` flag or agent settings configured
+> * `pr`: appears only while an open PR or GitLab merge request is found for the current branch, and is removed once it merges or closes. `pr.review_state` and `pr.kind` may be independently absent
+> * `worktree`: appears only while the session is in a [worktree session](/docs/en/worktrees.md). When present, `branch` and `original_branch` may also be absent for hook-based worktrees
+> * `rate_limits`: appears only for claude.ai Pro and Max subscribers, or behind a Claude apps gateway that sets a spend limit for you, and only after the first API response in the session. Each window (`five_hour`, `seven_day`, `spend_limit`) may be independently absent, and Claude Code drops a window once its `resets_at` time passes. Use `jq -r '.rate_limits.five_hour.used_percentage // empty'` to handle absence gracefully.
+> * `prompt_cache`: appears after the main conversation's first API response. See [prompt cache fields](#prompt-cache-fields)
+>
+> **Fields that may be `null`**:
+>
+> * `context_window.current_usage`: `null` before the first API call in a session, and again after `/compact` until the next API call repopulates it
+> * `context_window.used_percentage`, `context_window.remaining_percentage`: may be `null` early in the session
+>
+> Handle missing fields with conditional access and null values with fallback defaults in your scripts.
 
 ### Context window fields
 
@@ -382,7 +380,7 @@ The `current_usage` object contains:
 * `cache_creation_input_tokens`: tokens written to cache
 * `cache_read_input_tokens`: tokens read from cache
 
-For what the cache fields mean and how they're billed, see [check cache performance](/docs/en/prompt-caching#check-cache-performance).
+For what the cache fields mean and how they're billed, see [check cache performance](/docs/en/prompt-caching.md#check-cache-performance).
 
 The `used_percentage` field is calculated from input tokens only: `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`. It does not include `output_tokens`.
 
@@ -392,7 +390,7 @@ The `current_usage` object is `null` before the first API call in a session, and
 
 ### Spend limit fields
 
-Behind a [Claude apps gateway with spend limits](/docs/en/claude-apps-gateway-spend-limits#usage-warnings-in-claude-code), the `rate_limits.spend_limit` object describes the spend limit that applies to you. It appears after the session's first API response and requires Claude Code v2.1.251 or later. Your script receives its fields on separate schedules:
+Behind a [Claude apps gateway with spend limits](/docs/en/claude-apps-gateway-spend-limits.md#usage-warnings-in-claude-code), the `rate_limits.spend_limit` object describes the spend limit that applies to you. It appears after the session's first API response and requires Claude Code v2.1.251 or later. Your script receives its fields on separate schedules:
 
 * `used_percentage` and `resets_at`: come with every response, so they are present whenever `spend_limit` is. `used_percentage` runs from 0 to 100, or above 100 once you exceed the limit, and `resets_at` is the Unix epoch seconds when the limit's period resets.
 * `used_usd`, `limit_usd`, and `period`: your estimated spend so far and your limit in US dollars, and the period the limit covers, one of `daily`, `weekly`, or `monthly`. The gateway [computes `used_usd` from token counts](/docs/en/claude-apps-gateway-spend-limits#how-requests-are-priced), so it's an estimate and not a billed amount. Claude Code reads them from the gateway in a separate request, about every five minutes while you send requests. The dollar amounts can be about five minutes older than `used_percentage`, so the two may briefly disagree. Requires v2.1.284 or later on both Claude Code and the gateway.
@@ -401,7 +399,7 @@ Treat `used_usd`, `limit_usd`, and `period` as optional even when `spend_limit` 
 
 ### Prompt cache fields
 
-The `prompt_cache` object summarizes how the session's main conversation is using the [prompt cache](/docs/en/prompt-caching). Claude Code computes it from the cache token counts in the API's responses, so it works on every provider.
+The `prompt_cache` object summarizes how the session's main conversation is using the [prompt cache](/docs/en/prompt-caching.md). Claude Code computes it from the cache token counts in the API's responses, so it works on every provider.
 
 The object appears after the main conversation's first API response. Claude Code doesn't count subagent requests in these statistics. Requires Claude Code v2.1.251 or later.
 
@@ -411,7 +409,7 @@ The table lists each field with its meaning. Timestamps are Unix epoch seconds, 
 | - | - |
 | `warm` | Whether the cached prefix is still within its TTL. `false` when the last response reported no cache tokens, even while `caching_observed` is `true` |
 | `caching_observed` | Whether any response this session reported cache tokens. `false` means prompt caching is off, or your provider or gateway doesn't report it |
-| `ttl` | [Cache lifetime](/docs/en/prompt-caching#cache-lifetime) of the current cached prefix: `"5m"` or `"1h"` |
+| `ttl` | [Cache lifetime](/docs/en/prompt-caching.md#cache-lifetime) of the current cached prefix: `"5m"` or `"1h"` |
 | `expires_at` | When the cached prefix leaves its TTL and goes cold, in epoch seconds. `null` when the last response reported no cache tokens |
 | `requests` | API requests recorded for the main conversation this session |
 | `misses` | Requests that re-processed content the cache already held: more than 5% and at least 2,000 tokens of what the request could have read from cache, with no compaction or tool-result clearing to explain the shortfall in cache reads |
@@ -426,9 +424,7 @@ The table lists each field with its meaning. Timestamps are Unix epoch seconds, 
 
 Claude Code shows the same statistics in the terminal, on the [`/usage` command's `Prompt cache (main)` line](/docs/en/costs#prompt-cache-statistics).
 
-<h4 id="last-miss-cause">
-  Last miss cause
-</h4>
+#### Last miss cause
 
 The `last_miss_cause` object reports what Claude Code identified as the likely cause of the most recent miss. Its `causes` array holds one or more cause names, such as `tools_changed`, `system_prompt_changed`, `ttl_expired_5m`, or `likely_server_side`. The object is `null` until the session's first miss, and again whenever Claude Code couldn't identify a cause for the most recent miss. Requires Claude Code v2.1.260 or later.
 
@@ -451,162 +447,154 @@ The Bash examples use [`jq`](https://jqlang.org/) to parse JSON. Python and Node
 
 Display the current model and context window usage with a visual progress bar. Each script reads JSON from stdin, extracts the `used_percentage` field, and builds a 10-character bar where filled blocks (▓) represent usage:
 
-<Frame>
-  <img src="https://mintcdn.com/claude-code/HDAmBwgbrZVk0pOt/images/statusline-context-window-usage.png?fit=max&auto=format&n=HDAmBwgbrZVk0pOt&q=85&s=f3918a549912dc47e90f2b69e68bc847" alt="A status line showing model name and a progress bar with percentage" width="1224" height="224" data-path="images/statusline-context-window-usage.png" />
-</Frame>
+![A status line showing model name and a progress bar with percentage](https://mintcdn.com/claude-code/HDAmBwgbrZVk0pOt/images/statusline-context-window-usage.png?fit=max\&auto=format\&n=HDAmBwgbrZVk0pOt\&q=85\&s=f3918a549912dc47e90f2b69e68bc847)
 
-<CodeGroup>
-  ```bash Bash theme={null}
-  #!/bin/bash
-  # Read all of stdin into a variable
-  input=$(cat)
+```bash Bash theme={null}
+#!/bin/bash
+# Read all of stdin into a variable
+input=$(cat)
 
-  # Extract fields with jq, "// 0" provides fallback for null
-  MODEL=$(echo "$input" | jq -r '.model.display_name')
-  PCT=$(echo "$input" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
+# Extract fields with jq, "// 0" provides fallback for null
+MODEL=$(echo "$input" | jq -r '.model.display_name')
+PCT=$(echo "$input" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
 
-  # Build progress bar: printf -v creates a run of spaces, then
-  # ${var// /▓} replaces each space with a block character
-  BAR_WIDTH=10
-  FILLED=$((PCT * BAR_WIDTH / 100))
-  EMPTY=$((BAR_WIDTH - FILLED))
-  BAR=""
-  [ "$FILLED" -gt 0 ] && printf -v FILL "%${FILLED}s" && BAR="${FILL// /▓}"
-  [ "$EMPTY" -gt 0 ] && printf -v PAD "%${EMPTY}s" && BAR="${BAR}${PAD// /░}"
+# Build progress bar: printf -v creates a run of spaces, then
+# ${var// /▓} replaces each space with a block character
+BAR_WIDTH=10
+FILLED=$((PCT * BAR_WIDTH / 100))
+EMPTY=$((BAR_WIDTH - FILLED))
+BAR=""
+[ "$FILLED" -gt 0 ] && printf -v FILL "%${FILLED}s" && BAR="${FILL// /▓}"
+[ "$EMPTY" -gt 0 ] && printf -v PAD "%${EMPTY}s" && BAR="${BAR}${PAD// /░}"
 
-  echo "[$MODEL] $BAR $PCT%"
-  ```
+echo "[$MODEL] $BAR $PCT%"
+```
 
-  ```python Python theme={null}
-  #!/usr/bin/env python3
-  import json, sys
+```python Python theme={null}
+#!/usr/bin/env python3
+import json, sys
 
-  # json.load reads and parses stdin in one step
-  data = json.load(sys.stdin)
-  model = data['model']['display_name']
-  # "or 0" handles null values
-  pct = int(data.get('context_window', {}).get('used_percentage', 0) or 0)
+# json.load reads and parses stdin in one step
+data = json.load(sys.stdin)
+model = data['model']['display_name']
+# "or 0" handles null values
+pct = int(data.get('context_window', {}).get('used_percentage', 0) or 0)
 
-  # String multiplication builds the bar
-  filled = pct * 10 // 100
-  bar = '▓' * filled + '░' * (10 - filled)
+# String multiplication builds the bar
+filled = pct * 10 // 100
+bar = '▓' * filled + '░' * (10 - filled)
 
-  print(f"[{model}] {bar} {pct}%")
-  ```
+print(f"[{model}] {bar} {pct}%")
+```
 
-  ```javascript Node.js theme={null}
-  #!/usr/bin/env node
-  // Node.js reads stdin asynchronously with events
-  let input = '';
-  process.stdin.on('data', chunk => input += chunk);
-  process.stdin.on('end', () => {
-      const data = JSON.parse(input);
-      const model = data.model.display_name;
-      // Optional chaining (?.) safely handles null fields
-      const pct = Math.floor(data.context_window?.used_percentage || 0);
+```javascript Node.js theme={null}
+#!/usr/bin/env node
+// Node.js reads stdin asynchronously with events
+let input = '';
+process.stdin.on('data', chunk => input += chunk);
+process.stdin.on('end', () => {
+    const data = JSON.parse(input);
+    const model = data.model.display_name;
+    // Optional chaining (?.) safely handles null fields
+    const pct = Math.floor(data.context_window?.used_percentage || 0);
 
-      // String.repeat() builds the bar
-      const filled = Math.floor(pct * 10 / 100);
-      const bar = '▓'.repeat(filled) + '░'.repeat(10 - filled);
+    // String.repeat() builds the bar
+    const filled = Math.floor(pct * 10 / 100);
+    const bar = '▓'.repeat(filled) + '░'.repeat(10 - filled);
 
-      console.log(`[${model}] ${bar} ${pct}%`);
-  });
-  ```
-</CodeGroup>
+    console.log(`[${model}] ${bar} ${pct}%`);
+});
+```
 
 ### Git status with colors
 
 Show git branch with color-coded indicators for staged and modified files. This script uses [ANSI escape codes](https://en.wikipedia.org/wiki/ANSI_escape_code#Colors) for terminal colors: `\033[32m` is green, `\033[33m` is yellow, and `\033[0m` resets to default.
 
-<Frame>
-  <img src="https://mintcdn.com/claude-code/HDAmBwgbrZVk0pOt/images/statusline-git-context.png?fit=max&auto=format&n=HDAmBwgbrZVk0pOt&q=85&s=f13c190724d9ec7188c17cd2f98b7bf4" alt="A status line showing model, directory, git branch, and colored indicators for staged and modified files" width="1224" height="224" data-path="images/statusline-git-context.png" />
-</Frame>
+![A status line showing model, directory, git branch, and colored indicators for staged and modified files](https://mintcdn.com/claude-code/HDAmBwgbrZVk0pOt/images/statusline-git-context.png?fit=max\&auto=format\&n=HDAmBwgbrZVk0pOt\&q=85\&s=f13c190724d9ec7188c17cd2f98b7bf4)
 
 Each script checks if the current directory is a git repository, counts staged and modified files, and displays color-coded indicators:
 
-<CodeGroup>
-  ```bash Bash theme={null}
-  #!/bin/bash
-  input=$(cat)
+```bash Bash theme={null}
+#!/bin/bash
+input=$(cat)
 
-  MODEL=$(echo "$input" | jq -r '.model.display_name')
-  DIR=$(echo "$input" | jq -r '.workspace.current_dir')
+MODEL=$(echo "$input" | jq -r '.model.display_name')
+DIR=$(echo "$input" | jq -r '.workspace.current_dir')
 
-  GREEN='\033[32m'
-  YELLOW='\033[33m'
-  RESET='\033[0m'
+GREEN='\033[32m'
+YELLOW='\033[33m'
+RESET='\033[0m'
 
-  if git rev-parse --git-dir > /dev/null 2>&1; then
-      BRANCH=$(git branch --show-current 2>/dev/null)
-      STAGED=$(git diff --cached --numstat 2>/dev/null | wc -l | tr -d ' ')
-      MODIFIED=$(git diff --numstat 2>/dev/null | wc -l | tr -d ' ')
+if git rev-parse --git-dir > /dev/null 2>&1; then
+    BRANCH=$(git branch --show-current 2>/dev/null)
+    STAGED=$(git diff --cached --numstat 2>/dev/null | wc -l | tr -d ' ')
+    MODIFIED=$(git diff --numstat 2>/dev/null | wc -l | tr -d ' ')
 
-      GIT_STATUS=""
-      [ "$STAGED" -gt 0 ] && GIT_STATUS="${GREEN}+${STAGED}${RESET}"
-      [ "$MODIFIED" -gt 0 ] && GIT_STATUS="${GIT_STATUS}${YELLOW}~${MODIFIED}${RESET}"
+    GIT_STATUS=""
+    [ "$STAGED" -gt 0 ] && GIT_STATUS="${GREEN}+${STAGED}${RESET}"
+    [ "$MODIFIED" -gt 0 ] && GIT_STATUS="${GIT_STATUS}${YELLOW}~${MODIFIED}${RESET}"
 
-      echo -e "[$MODEL] 📁 ${DIR##*/} | 🌿 $BRANCH $GIT_STATUS"
-  else
-      echo "[$MODEL] 📁 ${DIR##*/}"
-  fi
-  ```
+    echo -e "[$MODEL] 📁 ${DIR##*/} | 🌿 $BRANCH $GIT_STATUS"
+else
+    echo "[$MODEL] 📁 ${DIR##*/}"
+fi
+```
 
-  ```python Python theme={null}
-  #!/usr/bin/env python3
-  import json, sys, subprocess, os
+```python Python theme={null}
+#!/usr/bin/env python3
+import json, sys, subprocess, os
 
-  data = json.load(sys.stdin)
-  model = data['model']['display_name']
-  directory = os.path.basename(data['workspace']['current_dir'])
+data = json.load(sys.stdin)
+model = data['model']['display_name']
+directory = os.path.basename(data['workspace']['current_dir'])
 
-  GREEN, YELLOW, RESET = '\033[32m', '\033[33m', '\033[0m'
+GREEN, YELLOW, RESET = '\033[32m', '\033[33m', '\033[0m'
 
-  try:
-      subprocess.check_output(['git', 'rev-parse', '--git-dir'], stderr=subprocess.DEVNULL)
-      branch = subprocess.check_output(['git', 'branch', '--show-current'], text=True).strip()
-      staged_output = subprocess.check_output(['git', 'diff', '--cached', '--numstat'], text=True).strip()
-      modified_output = subprocess.check_output(['git', 'diff', '--numstat'], text=True).strip()
-      staged = len(staged_output.split('\n')) if staged_output else 0
-      modified = len(modified_output.split('\n')) if modified_output else 0
+try:
+    subprocess.check_output(['git', 'rev-parse', '--git-dir'], stderr=subprocess.DEVNULL)
+    branch = subprocess.check_output(['git', 'branch', '--show-current'], text=True).strip()
+    staged_output = subprocess.check_output(['git', 'diff', '--cached', '--numstat'], text=True).strip()
+    modified_output = subprocess.check_output(['git', 'diff', '--numstat'], text=True).strip()
+    staged = len(staged_output.split('\n')) if staged_output else 0
+    modified = len(modified_output.split('\n')) if modified_output else 0
 
-      git_status = f"{GREEN}+{staged}{RESET}" if staged else ""
-      git_status += f"{YELLOW}~{modified}{RESET}" if modified else ""
+    git_status = f"{GREEN}+{staged}{RESET}" if staged else ""
+    git_status += f"{YELLOW}~{modified}{RESET}" if modified else ""
 
-      print(f"[{model}] 📁 {directory} | 🌿 {branch} {git_status}")
-  except:
-      print(f"[{model}] 📁 {directory}")
-  ```
+    print(f"[{model}] 📁 {directory} | 🌿 {branch} {git_status}")
+except:
+    print(f"[{model}] 📁 {directory}")
+```
 
-  ```javascript Node.js theme={null}
-  #!/usr/bin/env node
-  const { execSync } = require('child_process');
-  const path = require('path');
+```javascript Node.js theme={null}
+#!/usr/bin/env node
+const { execSync } = require('child_process');
+const path = require('path');
 
-  let input = '';
-  process.stdin.on('data', chunk => input += chunk);
-  process.stdin.on('end', () => {
-      const data = JSON.parse(input);
-      const model = data.model.display_name;
-      const dir = path.basename(data.workspace.current_dir);
+let input = '';
+process.stdin.on('data', chunk => input += chunk);
+process.stdin.on('end', () => {
+    const data = JSON.parse(input);
+    const model = data.model.display_name;
+    const dir = path.basename(data.workspace.current_dir);
 
-      const GREEN = '\x1b[32m', YELLOW = '\x1b[33m', RESET = '\x1b[0m';
+    const GREEN = '\x1b[32m', YELLOW = '\x1b[33m', RESET = '\x1b[0m';
 
-      try {
-          execSync('git rev-parse --git-dir', { stdio: 'ignore' });
-          const branch = execSync('git branch --show-current', { encoding: 'utf8' }).trim();
-          const staged = execSync('git diff --cached --numstat', { encoding: 'utf8' }).trim().split('\n').filter(Boolean).length;
-          const modified = execSync('git diff --numstat', { encoding: 'utf8' }).trim().split('\n').filter(Boolean).length;
+    try {
+        execSync('git rev-parse --git-dir', { stdio: 'ignore' });
+        const branch = execSync('git branch --show-current', { encoding: 'utf8' }).trim();
+        const staged = execSync('git diff --cached --numstat', { encoding: 'utf8' }).trim().split('\n').filter(Boolean).length;
+        const modified = execSync('git diff --numstat', { encoding: 'utf8' }).trim().split('\n').filter(Boolean).length;
 
-          let gitStatus = staged ? `${GREEN}+${staged}${RESET}` : '';
-          gitStatus += modified ? `${YELLOW}~${modified}${RESET}` : '';
+        let gitStatus = staged ? `${GREEN}+${staged}${RESET}` : '';
+        gitStatus += modified ? `${YELLOW}~${modified}${RESET}` : '';
 
-          console.log(`[${model}] 📁 ${dir} | 🌿 ${branch} ${gitStatus}`);
-      } catch {
-          console.log(`[${model}] 📁 ${dir}`);
-      }
-  });
-  ```
-</CodeGroup>
+        console.log(`[${model}] 📁 ${dir} | 🌿 ${branch} ${gitStatus}`);
+    } catch {
+        console.log(`[${model}] 📁 ${dir}`);
+    }
+});
+```
 
 ### Cost and duration tracking
 
@@ -614,247 +602,235 @@ Track your session's API costs and elapsed time. The `cost.total_cost_usd` field
 
 Each script formats cost as currency and converts milliseconds to minutes and seconds:
 
-<Frame>
-  <img src="https://mintcdn.com/claude-code/HDAmBwgbrZVk0pOt/images/statusline-cost-tracking.png?fit=max&auto=format&n=HDAmBwgbrZVk0pOt&q=85&s=925f7024c3b38be0f0eca63564bfb52f" alt="A status line showing model name, session cost, and duration" width="1224" height="224" data-path="images/statusline-cost-tracking.png" />
-</Frame>
+![A status line showing model name, session cost, and duration](https://mintcdn.com/claude-code/HDAmBwgbrZVk0pOt/images/statusline-cost-tracking.png?fit=max\&auto=format\&n=HDAmBwgbrZVk0pOt\&q=85\&s=925f7024c3b38be0f0eca63564bfb52f)
 
-<CodeGroup>
-  ```bash Bash theme={null}
-  #!/bin/bash
-  input=$(cat)
+```bash Bash theme={null}
+#!/bin/bash
+input=$(cat)
 
-  MODEL=$(echo "$input" | jq -r '.model.display_name')
-  COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
-  DURATION_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0')
+MODEL=$(echo "$input" | jq -r '.model.display_name')
+COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
+DURATION_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0')
 
-  COST_FMT=$(printf '$%.2f' "$COST")
-  DURATION_SEC=$((DURATION_MS / 1000))
-  MINS=$((DURATION_SEC / 60))
-  SECS=$((DURATION_SEC % 60))
+COST_FMT=$(printf '$%.2f' "$COST")
+DURATION_SEC=$((DURATION_MS / 1000))
+MINS=$((DURATION_SEC / 60))
+SECS=$((DURATION_SEC % 60))
 
-  echo "[$MODEL] 💰 $COST_FMT | ⏱️ ${MINS}m ${SECS}s"
-  ```
+echo "[$MODEL] 💰 $COST_FMT | ⏱️ ${MINS}m ${SECS}s"
+```
 
-  ```python Python theme={null}
-  #!/usr/bin/env python3
-  import json, sys
+```python Python theme={null}
+#!/usr/bin/env python3
+import json, sys
 
-  data = json.load(sys.stdin)
-  model = data['model']['display_name']
-  cost = data.get('cost', {}).get('total_cost_usd', 0) or 0
-  duration_ms = data.get('cost', {}).get('total_duration_ms', 0) or 0
+data = json.load(sys.stdin)
+model = data['model']['display_name']
+cost = data.get('cost', {}).get('total_cost_usd', 0) or 0
+duration_ms = data.get('cost', {}).get('total_duration_ms', 0) or 0
 
-  duration_sec = duration_ms // 1000
-  mins, secs = duration_sec // 60, duration_sec % 60
+duration_sec = duration_ms // 1000
+mins, secs = duration_sec // 60, duration_sec % 60
 
-  print(f"[{model}] 💰 ${cost:.2f} | ⏱️ {mins}m {secs}s")
-  ```
+print(f"[{model}] 💰 ${cost:.2f} | ⏱️ {mins}m {secs}s")
+```
 
-  ```javascript Node.js theme={null}
-  #!/usr/bin/env node
-  let input = '';
-  process.stdin.on('data', chunk => input += chunk);
-  process.stdin.on('end', () => {
-      const data = JSON.parse(input);
-      const model = data.model.display_name;
-      const cost = data.cost?.total_cost_usd || 0;
-      const durationMs = data.cost?.total_duration_ms || 0;
+```javascript Node.js theme={null}
+#!/usr/bin/env node
+let input = '';
+process.stdin.on('data', chunk => input += chunk);
+process.stdin.on('end', () => {
+    const data = JSON.parse(input);
+    const model = data.model.display_name;
+    const cost = data.cost?.total_cost_usd || 0;
+    const durationMs = data.cost?.total_duration_ms || 0;
 
-      const durationSec = Math.floor(durationMs / 1000);
-      const mins = Math.floor(durationSec / 60);
-      const secs = durationSec % 60;
+    const durationSec = Math.floor(durationMs / 1000);
+    const mins = Math.floor(durationSec / 60);
+    const secs = durationSec % 60;
 
-      console.log(`[${model}] 💰 $${cost.toFixed(2)} | ⏱️ ${mins}m ${secs}s`);
-  });
-  ```
-</CodeGroup>
+    console.log(`[${model}] 💰 $${cost.toFixed(2)} | ⏱️ ${mins}m ${secs}s`);
+});
+```
 
 ### Display multiple lines
 
 Your script can output multiple lines to create a richer display.
 
-<Frame>
-  <img src="https://mintcdn.com/claude-code/HDAmBwgbrZVk0pOt/images/statusline-multiline.png?fit=max&auto=format&n=HDAmBwgbrZVk0pOt&q=85&s=a9d0a2fe8e446d80b1abc46da3f93270" alt="A multi-line status line showing model name, directory, git branch on the first line, and a context usage progress bar with cost and duration on the second line" width="1224" height="262" data-path="images/statusline-multiline.png" />
-</Frame>
+![A multi-line status line showing model name, directory, git branch on the first line, and a context usage progress bar with cost and duration on the second line](https://mintcdn.com/claude-code/HDAmBwgbrZVk0pOt/images/statusline-multiline.png?fit=max\&auto=format\&n=HDAmBwgbrZVk0pOt\&q=85\&s=a9d0a2fe8e446d80b1abc46da3f93270)
 
 This example combines several techniques: threshold-based colors (green under 70%, yellow 70-89%, red 90%+), a progress bar, and git branch info. Each `print` or `echo` statement creates a separate row:
 
-<CodeGroup>
-  ```bash Bash theme={null}
-  #!/bin/bash
-  input=$(cat)
+```bash Bash theme={null}
+#!/bin/bash
+input=$(cat)
 
-  MODEL=$(echo "$input" | jq -r '.model.display_name')
-  DIR=$(echo "$input" | jq -r '.workspace.current_dir')
-  COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
-  PCT=$(echo "$input" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
-  DURATION_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0')
+MODEL=$(echo "$input" | jq -r '.model.display_name')
+DIR=$(echo "$input" | jq -r '.workspace.current_dir')
+COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
+PCT=$(echo "$input" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
+DURATION_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0')
 
-  CYAN='\033[36m'; GREEN='\033[32m'; YELLOW='\033[33m'; RED='\033[31m'; RESET='\033[0m'
+CYAN='\033[36m'; GREEN='\033[32m'; YELLOW='\033[33m'; RED='\033[31m'; RESET='\033[0m'
 
-  # Pick bar color based on context usage
-  if [ "$PCT" -ge 90 ]; then BAR_COLOR="$RED"
-  elif [ "$PCT" -ge 70 ]; then BAR_COLOR="$YELLOW"
-  else BAR_COLOR="$GREEN"; fi
+# Pick bar color based on context usage
+if [ "$PCT" -ge 90 ]; then BAR_COLOR="$RED"
+elif [ "$PCT" -ge 70 ]; then BAR_COLOR="$YELLOW"
+else BAR_COLOR="$GREEN"; fi
 
-  FILLED=$((PCT / 10)); EMPTY=$((10 - FILLED))
-  printf -v FILL "%${FILLED}s"; printf -v PAD "%${EMPTY}s"
-  BAR="${FILL// /█}${PAD// /░}"
+FILLED=$((PCT / 10)); EMPTY=$((10 - FILLED))
+printf -v FILL "%${FILLED}s"; printf -v PAD "%${EMPTY}s"
+BAR="${FILL// /█}${PAD// /░}"
 
-  MINS=$((DURATION_MS / 60000)); SECS=$(((DURATION_MS % 60000) / 1000))
+MINS=$((DURATION_MS / 60000)); SECS=$(((DURATION_MS % 60000) / 1000))
 
-  BRANCH=""
-  git rev-parse --git-dir > /dev/null 2>&1 && BRANCH=" | 🌿 $(git branch --show-current 2>/dev/null)"
+BRANCH=""
+git rev-parse --git-dir > /dev/null 2>&1 && BRANCH=" | 🌿 $(git branch --show-current 2>/dev/null)"
 
-  echo -e "${CYAN}[$MODEL]${RESET} 📁 ${DIR##*/}$BRANCH"
-  COST_FMT=$(printf '$%.2f' "$COST")
-  echo -e "${BAR_COLOR}${BAR}${RESET} ${PCT}% | ${YELLOW}${COST_FMT}${RESET} | ⏱️ ${MINS}m ${SECS}s"
-  ```
+echo -e "${CYAN}[$MODEL]${RESET} 📁 ${DIR##*/}$BRANCH"
+COST_FMT=$(printf '$%.2f' "$COST")
+echo -e "${BAR_COLOR}${BAR}${RESET} ${PCT}% | ${YELLOW}${COST_FMT}${RESET} | ⏱️ ${MINS}m ${SECS}s"
+```
 
-  ```python Python theme={null}
-  #!/usr/bin/env python3
-  import json, sys, subprocess, os
+```python Python theme={null}
+#!/usr/bin/env python3
+import json, sys, subprocess, os
 
-  data = json.load(sys.stdin)
-  model = data['model']['display_name']
-  directory = os.path.basename(data['workspace']['current_dir'])
-  cost = data.get('cost', {}).get('total_cost_usd', 0) or 0
-  pct = int(data.get('context_window', {}).get('used_percentage', 0) or 0)
-  duration_ms = data.get('cost', {}).get('total_duration_ms', 0) or 0
+data = json.load(sys.stdin)
+model = data['model']['display_name']
+directory = os.path.basename(data['workspace']['current_dir'])
+cost = data.get('cost', {}).get('total_cost_usd', 0) or 0
+pct = int(data.get('context_window', {}).get('used_percentage', 0) or 0)
+duration_ms = data.get('cost', {}).get('total_duration_ms', 0) or 0
 
-  CYAN, GREEN, YELLOW, RED, RESET = '\033[36m', '\033[32m', '\033[33m', '\033[31m', '\033[0m'
+CYAN, GREEN, YELLOW, RED, RESET = '\033[36m', '\033[32m', '\033[33m', '\033[31m', '\033[0m'
 
-  bar_color = RED if pct >= 90 else YELLOW if pct >= 70 else GREEN
-  filled = pct // 10
-  bar = '█' * filled + '░' * (10 - filled)
+bar_color = RED if pct >= 90 else YELLOW if pct >= 70 else GREEN
+filled = pct // 10
+bar = '█' * filled + '░' * (10 - filled)
 
-  mins, secs = duration_ms // 60000, (duration_ms % 60000) // 1000
+mins, secs = duration_ms // 60000, (duration_ms % 60000) // 1000
 
-  try:
-      branch = subprocess.check_output(['git', 'branch', '--show-current'], text=True, stderr=subprocess.DEVNULL).strip()
-      branch = f" | 🌿 {branch}" if branch else ""
-  except:
-      branch = ""
+try:
+    branch = subprocess.check_output(['git', 'branch', '--show-current'], text=True, stderr=subprocess.DEVNULL).strip()
+    branch = f" | 🌿 {branch}" if branch else ""
+except:
+    branch = ""
 
-  print(f"{CYAN}[{model}]{RESET} 📁 {directory}{branch}")
-  print(f"{bar_color}{bar}{RESET} {pct}% | {YELLOW}${cost:.2f}{RESET} | ⏱️ {mins}m {secs}s")
-  ```
+print(f"{CYAN}[{model}]{RESET} 📁 {directory}{branch}")
+print(f"{bar_color}{bar}{RESET} {pct}% | {YELLOW}${cost:.2f}{RESET} | ⏱️ {mins}m {secs}s")
+```
 
-  ```javascript Node.js theme={null}
-  #!/usr/bin/env node
-  const { execSync } = require('child_process');
-  const path = require('path');
+```javascript Node.js theme={null}
+#!/usr/bin/env node
+const { execSync } = require('child_process');
+const path = require('path');
 
-  let input = '';
-  process.stdin.on('data', chunk => input += chunk);
-  process.stdin.on('end', () => {
-      const data = JSON.parse(input);
-      const model = data.model.display_name;
-      const dir = path.basename(data.workspace.current_dir);
-      const cost = data.cost?.total_cost_usd || 0;
-      const pct = Math.floor(data.context_window?.used_percentage || 0);
-      const durationMs = data.cost?.total_duration_ms || 0;
+let input = '';
+process.stdin.on('data', chunk => input += chunk);
+process.stdin.on('end', () => {
+    const data = JSON.parse(input);
+    const model = data.model.display_name;
+    const dir = path.basename(data.workspace.current_dir);
+    const cost = data.cost?.total_cost_usd || 0;
+    const pct = Math.floor(data.context_window?.used_percentage || 0);
+    const durationMs = data.cost?.total_duration_ms || 0;
 
-      const CYAN = '\x1b[36m', GREEN = '\x1b[32m', YELLOW = '\x1b[33m', RED = '\x1b[31m', RESET = '\x1b[0m';
+    const CYAN = '\x1b[36m', GREEN = '\x1b[32m', YELLOW = '\x1b[33m', RED = '\x1b[31m', RESET = '\x1b[0m';
 
-      const barColor = pct >= 90 ? RED : pct >= 70 ? YELLOW : GREEN;
-      const filled = Math.floor(pct / 10);
-      const bar = '█'.repeat(filled) + '░'.repeat(10 - filled);
+    const barColor = pct >= 90 ? RED : pct >= 70 ? YELLOW : GREEN;
+    const filled = Math.floor(pct / 10);
+    const bar = '█'.repeat(filled) + '░'.repeat(10 - filled);
 
-      const mins = Math.floor(durationMs / 60000);
-      const secs = Math.floor((durationMs % 60000) / 1000);
+    const mins = Math.floor(durationMs / 60000);
+    const secs = Math.floor((durationMs % 60000) / 1000);
 
-      let branch = '';
-      try {
-          branch = execSync('git branch --show-current', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
-          branch = branch ? ` | 🌿 ${branch}` : '';
-      } catch {}
+    let branch = '';
+    try {
+        branch = execSync('git branch --show-current', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
+        branch = branch ? ` | 🌿 ${branch}` : '';
+    } catch {}
 
-      console.log(`${CYAN}[${model}]${RESET} 📁 ${dir}${branch}`);
-      console.log(`${barColor}${bar}${RESET} ${pct}% | ${YELLOW}$${cost.toFixed(2)}${RESET} | ⏱️ ${mins}m ${secs}s`);
-  });
-  ```
-</CodeGroup>
+    console.log(`${CYAN}[${model}]${RESET} 📁 ${dir}${branch}`);
+    console.log(`${barColor}${bar}${RESET} ${pct}% | ${YELLOW}$${cost.toFixed(2)}${RESET} | ⏱️ ${mins}m ${secs}s`);
+});
+```
 
 ### Clickable links
 
 This example creates a clickable link to your GitHub repository. Hold Cmd (macOS) or Ctrl (Windows/Linux) and click to open the link in your browser.
 
-<Frame>
-  <img src="https://mintcdn.com/claude-code/HDAmBwgbrZVk0pOt/images/statusline-links.png?fit=max&auto=format&n=HDAmBwgbrZVk0pOt&q=85&s=4778a144a28cb498c99d5fa018bb374a" alt="A status line showing a clickable link to a GitHub repository" width="1224" height="224" data-path="images/statusline-links.png" />
-</Frame>
+![A status line showing a clickable link to a GitHub repository](https://mintcdn.com/claude-code/HDAmBwgbrZVk0pOt/images/statusline-links.png?fit=max\&auto=format\&n=HDAmBwgbrZVk0pOt\&q=85\&s=4778a144a28cb498c99d5fa018bb374a)
 
 Each script gets the git remote URL, converts SSH format to HTTPS, and wraps the repo name in OSC 8 escape codes. The Bash version uses `printf '%b'` which interprets backslash escapes more reliably than `echo -e` across different shells:
 
-<CodeGroup>
-  ```bash Bash theme={null}
-  #!/bin/bash
-  input=$(cat)
+```bash Bash theme={null}
+#!/bin/bash
+input=$(cat)
 
-  MODEL=$(echo "$input" | jq -r '.model.display_name')
+MODEL=$(echo "$input" | jq -r '.model.display_name')
 
-  # Convert git SSH URL to HTTPS
-  REMOTE=$(git remote get-url origin 2>/dev/null | sed 's/git@github.com:/https:\/\/github.com\//' | sed 's/\.git$//')
+# Convert git SSH URL to HTTPS
+REMOTE=$(git remote get-url origin 2>/dev/null | sed 's/git@github.com:/https:\/\/github.com\//' | sed 's/\.git$//')
 
-  if [ -n "$REMOTE" ]; then
-      REPO_NAME=$(basename "$REMOTE")
-      # OSC 8 format: \e]8;;URL\a then TEXT then \e]8;;\a
-      # printf %b interprets escape sequences reliably across shells
-      printf '%b' "[$MODEL] 🔗 \e]8;;${REMOTE}\a${REPO_NAME}\e]8;;\a\n"
-  else
-      echo "[$MODEL]"
-  fi
-  ```
+if [ -n "$REMOTE" ]; then
+    REPO_NAME=$(basename "$REMOTE")
+    # OSC 8 format: \e]8;;URL\a then TEXT then \e]8;;\a
+    # printf %b interprets escape sequences reliably across shells
+    printf '%b' "[$MODEL] 🔗 \e]8;;${REMOTE}\a${REPO_NAME}\e]8;;\a\n"
+else
+    echo "[$MODEL]"
+fi
+```
 
-  ```python Python theme={null}
-  #!/usr/bin/env python3
-  import json, sys, subprocess, re, os
+```python Python theme={null}
+#!/usr/bin/env python3
+import json, sys, subprocess, re, os
 
-  data = json.load(sys.stdin)
-  model = data['model']['display_name']
+data = json.load(sys.stdin)
+model = data['model']['display_name']
 
-  # Get git remote URL
-  try:
-      remote = subprocess.check_output(
-          ['git', 'remote', 'get-url', 'origin'],
-          stderr=subprocess.DEVNULL, text=True
-      ).strip()
-      # Convert SSH to HTTPS format
-      remote = re.sub(r'^git@github\.com:', 'https://github.com/', remote)
-      remote = re.sub(r'\.git$', '', remote)
-      repo_name = os.path.basename(remote)
-      # OSC 8 escape sequences
-      link = f"\033]8;;{remote}\a{repo_name}\033]8;;\a"
-      print(f"[{model}] 🔗 {link}")
-  except:
-      print(f"[{model}]")
-  ```
+# Get git remote URL
+try:
+    remote = subprocess.check_output(
+        ['git', 'remote', 'get-url', 'origin'],
+        stderr=subprocess.DEVNULL, text=True
+    ).strip()
+    # Convert SSH to HTTPS format
+    remote = re.sub(r'^git@github\.com:', 'https://github.com/', remote)
+    remote = re.sub(r'\.git$', '', remote)
+    repo_name = os.path.basename(remote)
+    # OSC 8 escape sequences
+    link = f"\033]8;;{remote}\a{repo_name}\033]8;;\a"
+    print(f"[{model}] 🔗 {link}")
+except:
+    print(f"[{model}]")
+```
 
-  ```javascript Node.js theme={null}
-  #!/usr/bin/env node
-  const { execSync } = require('child_process');
-  const path = require('path');
+```javascript Node.js theme={null}
+#!/usr/bin/env node
+const { execSync } = require('child_process');
+const path = require('path');
 
-  let input = '';
-  process.stdin.on('data', chunk => input += chunk);
-  process.stdin.on('end', () => {
-      const data = JSON.parse(input);
-      const model = data.model.display_name;
+let input = '';
+process.stdin.on('data', chunk => input += chunk);
+process.stdin.on('end', () => {
+    const data = JSON.parse(input);
+    const model = data.model.display_name;
 
-      try {
-          let remote = execSync('git remote get-url origin', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
-          // Convert SSH to HTTPS format
-          remote = remote.replace(/^git@github\.com:/, 'https://github.com/').replace(/\.git$/, '');
-          const repoName = path.basename(remote);
-          // OSC 8 escape sequences
-          const link = `\x1b]8;;${remote}\x07${repoName}\x1b]8;;\x07`;
-          console.log(`[${model}] 🔗 ${link}`);
-      } catch {
-          console.log(`[${model}]`);
-      }
-  });
-  ```
-</CodeGroup>
+    try {
+        let remote = execSync('git remote get-url origin', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
+        // Convert SSH to HTTPS format
+        remote = remote.replace(/^git@github\.com:/, 'https://github.com/').replace(/\.git$/, '');
+        const repoName = path.basename(remote);
+        // OSC 8 escape sequences
+        const link = `\x1b]8;;${remote}\x07${repoName}\x1b]8;;\x07`;
+        console.log(`[${model}] 🔗 ${link}`);
+    } catch {
+        console.log(`[${model}]`);
+    }
+});
+```
 
 ### Rate limit usage
 
@@ -862,86 +838,84 @@ Display claude.ai subscription rate limit usage, or your spend against a Claude 
 
 The `rate_limits` object is only present for claude.ai Pro and Max subscribers, or behind a Claude apps gateway with spend limits, and only after the first API response. Each script handles the absent fields gracefully, and behind a gateway prints `spend: $314.12 / $500`, or `spend: 63%` while the dollar fields are absent:
 
-<CodeGroup>
-  ```bash Bash theme={null}
-  #!/bin/bash
-  input=$(cat)
+```bash Bash theme={null}
+#!/bin/bash
+input=$(cat)
 
-  MODEL=$(echo "$input" | jq -r '.model.display_name')
-  # "// empty" produces no output when rate_limits is absent
-  FIVE_H=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty')
-  WEEK=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty')
+MODEL=$(echo "$input" | jq -r '.model.display_name')
+# "// empty" produces no output when rate_limits is absent
+FIVE_H=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty')
+WEEK=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty')
 
-  LIMITS=""
-  [ -n "$FIVE_H" ] && LIMITS="5h: $(printf '%.0f' "$FIVE_H")%"
-  [ -n "$WEEK" ] && LIMITS="${LIMITS:+$LIMITS }7d: $(printf '%.0f' "$WEEK")%"
+LIMITS=""
+[ -n "$FIVE_H" ] && LIMITS="5h: $(printf '%.0f' "$FIVE_H")%"
+[ -n "$WEEK" ] && LIMITS="${LIMITS:+$LIMITS }7d: $(printf '%.0f' "$WEEK")%"
 
-  # Behind a Claude apps gateway: dollars when the gateway reports them, else the percentage
-  SPEND_PCT=$(echo "$input" | jq -r '.rate_limits.spend_limit.used_percentage // empty')
-  SPEND_USD=$(echo "$input" | jq -r '.rate_limits.spend_limit | select(.used_usd != null) | "$\(.used_usd) / $\(.limit_usd)"')
-  [ -n "$SPEND_PCT" ] && LIMITS="${LIMITS:+$LIMITS }spend: ${SPEND_USD:-$(printf '%.0f' "$SPEND_PCT")%}"
+# Behind a Claude apps gateway: dollars when the gateway reports them, else the percentage
+SPEND_PCT=$(echo "$input" | jq -r '.rate_limits.spend_limit.used_percentage // empty')
+SPEND_USD=$(echo "$input" | jq -r '.rate_limits.spend_limit | select(.used_usd != null) | "$\(.used_usd) / $\(.limit_usd)"')
+[ -n "$SPEND_PCT" ] && LIMITS="${LIMITS:+$LIMITS }spend: ${SPEND_USD:-$(printf '%.0f' "$SPEND_PCT")%}"
 
-  [ -n "$LIMITS" ] && echo "[$MODEL] | $LIMITS" || echo "[$MODEL]"
-  ```
+[ -n "$LIMITS" ] && echo "[$MODEL] | $LIMITS" || echo "[$MODEL]"
+```
 
-  ```python Python theme={null}
-  #!/usr/bin/env python3
-  import json, sys
+```python Python theme={null}
+#!/usr/bin/env python3
+import json, sys
 
-  data = json.load(sys.stdin)
-  model = data['model']['display_name']
+data = json.load(sys.stdin)
+model = data['model']['display_name']
 
-  parts = []
-  rate = data.get('rate_limits', {})
-  five_h = rate.get('five_hour', {}).get('used_percentage')
-  week = rate.get('seven_day', {}).get('used_percentage')
+parts = []
+rate = data.get('rate_limits', {})
+five_h = rate.get('five_hour', {}).get('used_percentage')
+week = rate.get('seven_day', {}).get('used_percentage')
 
-  if five_h is not None:
-      parts.append(f"5h: {five_h:.0f}%")
-  if week is not None:
-      parts.append(f"7d: {week:.0f}%")
+if five_h is not None:
+    parts.append(f"5h: {five_h:.0f}%")
+if week is not None:
+    parts.append(f"7d: {week:.0f}%")
 
-  # Behind a Claude apps gateway: dollars when the gateway reports them, else the percentage
-  spend = rate.get('spend_limit', {})
-  if spend.get('used_percentage') is not None:
-      if spend.get('used_usd') is not None:
-          parts.append(f"spend: ${spend['used_usd']} / ${spend['limit_usd']}")
-      else:
-          parts.append(f"spend: {spend['used_percentage']:.0f}%")
+# Behind a Claude apps gateway: dollars when the gateway reports them, else the percentage
+spend = rate.get('spend_limit', {})
+if spend.get('used_percentage') is not None:
+    if spend.get('used_usd') is not None:
+        parts.append(f"spend: ${spend['used_usd']} / ${spend['limit_usd']}")
+    else:
+        parts.append(f"spend: {spend['used_percentage']:.0f}%")
 
-  if parts:
-      print(f"[{model}] | {' '.join(parts)}")
-  else:
-      print(f"[{model}]")
-  ```
+if parts:
+    print(f"[{model}] | {' '.join(parts)}")
+else:
+    print(f"[{model}]")
+```
 
-  ```javascript Node.js theme={null}
-  #!/usr/bin/env node
-  let input = '';
-  process.stdin.on('data', chunk => input += chunk);
-  process.stdin.on('end', () => {
-      const data = JSON.parse(input);
-      const model = data.model.display_name;
+```javascript Node.js theme={null}
+#!/usr/bin/env node
+let input = '';
+process.stdin.on('data', chunk => input += chunk);
+process.stdin.on('end', () => {
+    const data = JSON.parse(input);
+    const model = data.model.display_name;
 
-      const parts = [];
-      const fiveH = data.rate_limits?.five_hour?.used_percentage;
-      const week = data.rate_limits?.seven_day?.used_percentage;
+    const parts = [];
+    const fiveH = data.rate_limits?.five_hour?.used_percentage;
+    const week = data.rate_limits?.seven_day?.used_percentage;
 
-      if (fiveH != null) parts.push(`5h: ${Math.round(fiveH)}%`);
-      if (week != null) parts.push(`7d: ${Math.round(week)}%`);
+    if (fiveH != null) parts.push(`5h: ${Math.round(fiveH)}%`);
+    if (week != null) parts.push(`7d: ${Math.round(week)}%`);
 
-      // Behind a Claude apps gateway: dollars when the gateway reports them, else the percentage
-      const spend = data.rate_limits?.spend_limit;
-      if (spend?.used_percentage != null) {
-          parts.push(spend.used_usd != null
-              ? `spend: $${spend.used_usd} / $${spend.limit_usd}`
-              : `spend: ${Math.round(spend.used_percentage)}%`);
-      }
+    // Behind a Claude apps gateway: dollars when the gateway reports them, else the percentage
+    const spend = data.rate_limits?.spend_limit;
+    if (spend?.used_percentage != null) {
+        parts.push(spend.used_usd != null
+            ? `spend: $${spend.used_usd} / $${spend.limit_usd}`
+            : `spend: ${Math.round(spend.used_percentage)}%`);
+    }
 
-      console.log(parts.length ? `[${model}] | ${parts.join(' ')}` : `[${model}]`);
-  });
-  ```
-</CodeGroup>
+    console.log(parts.length ? `[${model}] | ${parts.join(' ')}` : `[${model}]`);
+});
+```
 
 ### Cache expensive operations
 
@@ -951,131 +925,129 @@ The cache filename needs to be stable across status line invocations within a se
 
 Each script checks if the cache file is missing or older than 5 seconds before running git commands:
 
-<CodeGroup>
-  ```bash Bash theme={null}
-  #!/bin/bash
-  input=$(cat)
+```bash Bash theme={null}
+#!/bin/bash
+input=$(cat)
 
-  MODEL=$(echo "$input" | jq -r '.model.display_name')
-  DIR=$(echo "$input" | jq -r '.workspace.current_dir')
-  SESSION_ID=$(echo "$input" | jq -r '.session_id')
+MODEL=$(echo "$input" | jq -r '.model.display_name')
+DIR=$(echo "$input" | jq -r '.workspace.current_dir')
+SESSION_ID=$(echo "$input" | jq -r '.session_id')
 
-  CACHE_FILE="/tmp/statusline-git-cache-$SESSION_ID"
-  CACHE_MAX_AGE=5  # seconds
+CACHE_FILE="/tmp/statusline-git-cache-$SESSION_ID"
+CACHE_MAX_AGE=5  # seconds
 
-  cache_is_stale() {
-      [ ! -f "$CACHE_FILE" ] || \
-      # stat -c %Y (Linux) or stat -f %m (macOS) prints the file's last-modified
-      # time. The Linux form must run first: on Linux, the macOS form prints a
-      # filesystem report to stdout before failing, and that output would be
-      # captured by the command substitution and break the arithmetic.
-      [ $(($(date +%s) - $(stat -c %Y "$CACHE_FILE" 2>/dev/null || stat -f %m "$CACHE_FILE" 2>/dev/null || echo 0))) -gt $CACHE_MAX_AGE ]
-  }
+cache_is_stale() {
+    [ ! -f "$CACHE_FILE" ] || \
+    # stat -c %Y (Linux) or stat -f %m (macOS) prints the file's last-modified
+    # time. The Linux form must run first: on Linux, the macOS form prints a
+    # filesystem report to stdout before failing, and that output would be
+    # captured by the command substitution and break the arithmetic.
+    [ $(($(date +%s) - $(stat -c %Y "$CACHE_FILE" 2>/dev/null || stat -f %m "$CACHE_FILE" 2>/dev/null || echo 0))) -gt $CACHE_MAX_AGE ]
+}
 
-  if cache_is_stale; then
-      if git rev-parse --git-dir > /dev/null 2>&1; then
-          BRANCH=$(git branch --show-current 2>/dev/null)
-          STAGED=$(git diff --cached --numstat 2>/dev/null | wc -l | tr -d ' ')
-          MODIFIED=$(git diff --numstat 2>/dev/null | wc -l | tr -d ' ')
-          echo "$BRANCH|$STAGED|$MODIFIED" > "$CACHE_FILE"
-      else
-          echo "||" > "$CACHE_FILE"
-      fi
-  fi
+if cache_is_stale; then
+    if git rev-parse --git-dir > /dev/null 2>&1; then
+        BRANCH=$(git branch --show-current 2>/dev/null)
+        STAGED=$(git diff --cached --numstat 2>/dev/null | wc -l | tr -d ' ')
+        MODIFIED=$(git diff --numstat 2>/dev/null | wc -l | tr -d ' ')
+        echo "$BRANCH|$STAGED|$MODIFIED" > "$CACHE_FILE"
+    else
+        echo "||" > "$CACHE_FILE"
+    fi
+fi
 
-  IFS='|' read -r BRANCH STAGED MODIFIED < "$CACHE_FILE"
+IFS='|' read -r BRANCH STAGED MODIFIED < "$CACHE_FILE"
 
-  if [ -n "$BRANCH" ]; then
-      echo "[$MODEL] 📁 ${DIR##*/} | 🌿 $BRANCH +$STAGED ~$MODIFIED"
-  else
-      echo "[$MODEL] 📁 ${DIR##*/}"
-  fi
-  ```
+if [ -n "$BRANCH" ]; then
+    echo "[$MODEL] 📁 ${DIR##*/} | 🌿 $BRANCH +$STAGED ~$MODIFIED"
+else
+    echo "[$MODEL] 📁 ${DIR##*/}"
+fi
+```
 
-  ```python Python theme={null}
-  #!/usr/bin/env python3
-  import json, sys, subprocess, os, time
+```python Python theme={null}
+#!/usr/bin/env python3
+import json, sys, subprocess, os, time
 
-  data = json.load(sys.stdin)
-  model = data['model']['display_name']
-  directory = os.path.basename(data['workspace']['current_dir'])
-  session_id = data['session_id']
+data = json.load(sys.stdin)
+model = data['model']['display_name']
+directory = os.path.basename(data['workspace']['current_dir'])
+session_id = data['session_id']
 
-  CACHE_FILE = f"/tmp/statusline-git-cache-{session_id}"
-  CACHE_MAX_AGE = 5  # seconds
+CACHE_FILE = f"/tmp/statusline-git-cache-{session_id}"
+CACHE_MAX_AGE = 5  # seconds
 
-  def cache_is_stale():
-      if not os.path.exists(CACHE_FILE):
-          return True
-      return time.time() - os.path.getmtime(CACHE_FILE) > CACHE_MAX_AGE
+def cache_is_stale():
+    if not os.path.exists(CACHE_FILE):
+        return True
+    return time.time() - os.path.getmtime(CACHE_FILE) > CACHE_MAX_AGE
 
-  if cache_is_stale():
-      try:
-          subprocess.check_output(['git', 'rev-parse', '--git-dir'], stderr=subprocess.DEVNULL)
-          branch = subprocess.check_output(['git', 'branch', '--show-current'], text=True).strip()
-          staged = subprocess.check_output(['git', 'diff', '--cached', '--numstat'], text=True).strip()
-          modified = subprocess.check_output(['git', 'diff', '--numstat'], text=True).strip()
-          staged_count = len(staged.split('\n')) if staged else 0
-          modified_count = len(modified.split('\n')) if modified else 0
-          with open(CACHE_FILE, 'w') as f:
-              f.write(f"{branch}|{staged_count}|{modified_count}")
-      except:
-          with open(CACHE_FILE, 'w') as f:
-              f.write("||")
+if cache_is_stale():
+    try:
+        subprocess.check_output(['git', 'rev-parse', '--git-dir'], stderr=subprocess.DEVNULL)
+        branch = subprocess.check_output(['git', 'branch', '--show-current'], text=True).strip()
+        staged = subprocess.check_output(['git', 'diff', '--cached', '--numstat'], text=True).strip()
+        modified = subprocess.check_output(['git', 'diff', '--numstat'], text=True).strip()
+        staged_count = len(staged.split('\n')) if staged else 0
+        modified_count = len(modified.split('\n')) if modified else 0
+        with open(CACHE_FILE, 'w') as f:
+            f.write(f"{branch}|{staged_count}|{modified_count}")
+    except:
+        with open(CACHE_FILE, 'w') as f:
+            f.write("||")
 
-  with open(CACHE_FILE) as f:
-      branch, staged, modified = f.read().strip().split('|')
+with open(CACHE_FILE) as f:
+    branch, staged, modified = f.read().strip().split('|')
 
-  if branch:
-      print(f"[{model}] 📁 {directory} | 🌿 {branch} +{staged} ~{modified}")
-  else:
-      print(f"[{model}] 📁 {directory}")
-  ```
+if branch:
+    print(f"[{model}] 📁 {directory} | 🌿 {branch} +{staged} ~{modified}")
+else:
+    print(f"[{model}] 📁 {directory}")
+```
 
-  ```javascript Node.js theme={null}
-  #!/usr/bin/env node
-  const { execSync } = require('child_process');
-  const fs = require('fs');
-  const path = require('path');
+```javascript Node.js theme={null}
+#!/usr/bin/env node
+const { execSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
-  let input = '';
-  process.stdin.on('data', chunk => input += chunk);
-  process.stdin.on('end', () => {
-      const data = JSON.parse(input);
-      const model = data.model.display_name;
-      const dir = path.basename(data.workspace.current_dir);
-      const sessionId = data.session_id;
+let input = '';
+process.stdin.on('data', chunk => input += chunk);
+process.stdin.on('end', () => {
+    const data = JSON.parse(input);
+    const model = data.model.display_name;
+    const dir = path.basename(data.workspace.current_dir);
+    const sessionId = data.session_id;
 
-      const CACHE_FILE = `/tmp/statusline-git-cache-${sessionId}`;
-      const CACHE_MAX_AGE = 5; // seconds
+    const CACHE_FILE = `/tmp/statusline-git-cache-${sessionId}`;
+    const CACHE_MAX_AGE = 5; // seconds
 
-      const cacheIsStale = () => {
-          if (!fs.existsSync(CACHE_FILE)) return true;
-          return (Date.now() / 1000) - fs.statSync(CACHE_FILE).mtimeMs / 1000 > CACHE_MAX_AGE;
-      };
+    const cacheIsStale = () => {
+        if (!fs.existsSync(CACHE_FILE)) return true;
+        return (Date.now() / 1000) - fs.statSync(CACHE_FILE).mtimeMs / 1000 > CACHE_MAX_AGE;
+    };
 
-      if (cacheIsStale()) {
-          try {
-              execSync('git rev-parse --git-dir', { stdio: 'ignore' });
-              const branch = execSync('git branch --show-current', { encoding: 'utf8' }).trim();
-              const staged = execSync('git diff --cached --numstat', { encoding: 'utf8' }).trim().split('\n').filter(Boolean).length;
-              const modified = execSync('git diff --numstat', { encoding: 'utf8' }).trim().split('\n').filter(Boolean).length;
-              fs.writeFileSync(CACHE_FILE, `${branch}|${staged}|${modified}`);
-          } catch {
-              fs.writeFileSync(CACHE_FILE, '||');
-          }
-      }
+    if (cacheIsStale()) {
+        try {
+            execSync('git rev-parse --git-dir', { stdio: 'ignore' });
+            const branch = execSync('git branch --show-current', { encoding: 'utf8' }).trim();
+            const staged = execSync('git diff --cached --numstat', { encoding: 'utf8' }).trim().split('\n').filter(Boolean).length;
+            const modified = execSync('git diff --numstat', { encoding: 'utf8' }).trim().split('\n').filter(Boolean).length;
+            fs.writeFileSync(CACHE_FILE, `${branch}|${staged}|${modified}`);
+        } catch {
+            fs.writeFileSync(CACHE_FILE, '||');
+        }
+    }
 
-      const [branch, staged, modified] = fs.readFileSync(CACHE_FILE, 'utf8').trim().split('|');
+    const [branch, staged, modified] = fs.readFileSync(CACHE_FILE, 'utf8').trim().split('|');
 
-      if (branch) {
-          console.log(`[${model}] 📁 ${dir} | 🌿 ${branch} +${staged} ~${modified}`);
-      } else {
-          console.log(`[${model}] 📁 ${dir}`);
-      }
-  });
-  ```
-</CodeGroup>
+    if (branch) {
+        console.log(`[${model}] 📁 ${dir} | 🌿 ${branch} +${staged} ~${modified}`);
+    } else {
+        console.log(`[${model}] 📁 ${dir}`);
+    }
+});
+```
 
 ### Windows configuration
 
@@ -1085,56 +1057,52 @@ Git Bash treats unquoted backslashes as escape characters, so a Windows-style pa
 
 To run a PowerShell script as your status line, invoke it via `powershell`. This works whether Claude Code routes the command through Git Bash or PowerShell:
 
-<CodeGroup>
-  ```json settings.json theme={null}
-  {
-    "statusLine": {
-      "type": "command",
-      "command": "powershell -NoProfile -File C:/Users/username/.claude/statusline.ps1"
-    }
+```json settings.json theme={null}
+{
+  "statusLine": {
+    "type": "command",
+    "command": "powershell -NoProfile -File C:/Users/username/.claude/statusline.ps1"
   }
-  ```
+}
+```
 
-  ```powershell statusline.ps1 theme={null}
-  $input_json = $input | Out-String | ConvertFrom-Json
-  $cwd = $input_json.cwd
-  $model = $input_json.model.display_name
-  $used = $input_json.context_window.used_percentage
-  $dirname = Split-Path $cwd -Leaf
+```powershell statusline.ps1 theme={null}
+$input_json = $input | Out-String | ConvertFrom-Json
+$cwd = $input_json.cwd
+$model = $input_json.model.display_name
+$used = $input_json.context_window.used_percentage
+$dirname = Split-Path $cwd -Leaf
 
-  if ($used) {
-      Write-Host "$dirname [$model] ctx: $used%"
-  } else {
-      Write-Host "$dirname [$model]"
-  }
-  ```
-</CodeGroup>
+if ($used) {
+    Write-Host "$dirname [$model] ctx: $used%"
+} else {
+    Write-Host "$dirname [$model]"
+}
+```
 
 Or, when Git Bash is installed, run a Bash script directly:
 
-<CodeGroup>
-  ```json settings.json theme={null}
-  {
-    "statusLine": {
-      "type": "command",
-      "command": "~/.claude/statusline.sh"
-    }
+```json settings.json theme={null}
+{
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/statusline.sh"
   }
-  ```
+}
+```
 
-  ```bash statusline.sh theme={null}
-  #!/usr/bin/env bash
-  input=$(cat)
-  cwd=$(echo "$input" | grep -o '"cwd":"[^"]*"' | cut -d'"' -f4)
-  model=$(echo "$input" | grep -o '"display_name":"[^"]*"' | cut -d'"' -f4)
-  dirname="${cwd##*[/\\]}"
-  echo "$dirname [$model]"
-  ```
-</CodeGroup>
+```bash statusline.sh theme={null}
+#!/usr/bin/env bash
+input=$(cat)
+cwd=$(echo "$input" | grep -o '"cwd":"[^"]*"' | cut -d'"' -f4)
+model=$(echo "$input" | grep -o '"display_name":"[^"]*"' | cut -d'"' -f4)
+dirname="${cwd##*[/\\]}"
+echo "$dirname [$model]"
+```
 
 ## Subagent status lines
 
-The `subagentStatusLine` setting renders a custom row body for each [subagent](/docs/en/sub-agents) shown in the agent panel below the prompt. Use it to replace the default `name · description · token count` row with your own formatting.
+The `subagentStatusLine` setting renders a custom row body for each [subagent](/docs/en/sub-agents.md) shown in the agent panel below the prompt. Use it to replace the default `name · description · token count` row with your own formatting.
 
 ```json theme={null}
 {
@@ -1145,7 +1113,7 @@ The `subagentStatusLine` setting renders a custom row body for each [subagent](/
 }
 ```
 
-The command runs once per refresh tick and receives all visible subagent rows as a single JSON object on stdin. The input includes the [base hook fields](/docs/en/hooks#common-input-fields), a `columns` field with the usable row width, and a `tasks` array with one entry per row, described in [Task fields](#task-fields).
+The command runs once per refresh tick and receives all visible subagent rows as a single JSON object on stdin. The input includes the [base hook fields](/docs/en/hooks.md#common-input-fields), a `columns` field with the usable row width, and a `tasks` array with one entry per row, described in [Task fields](#task-fields).
 
 Write one JSON line to stdout per row you want to override, in the form `{"id": "<task id>", "content": "<row body>"}`. The `content` string is rendered as-is, including ANSI colors and OSC 8 hyperlinks. Omit a task's `id` to keep the default rendering for that row; emit an empty `content` string to hide it.
 
@@ -1158,7 +1126,7 @@ Each entry in the `tasks` array describes one subagent row with the fields below
 | Field | Type | Description |
 | :- | :- | :- |
 | `id` | string | Identifier of the task. Echo it as `id` in the line you write back for this row |
-| `name` | string, optional | Name the subagent is [addressed by](/docs/en/sub-agents#subagent-names), when it has one |
+| `name` | string, optional | Name the subagent is [addressed by](/docs/en/sub-agents.md#subagent-names), when it has one |
 | `type` | string | Kind of task: `local_agent` |
 | `agentType` | string | Subagent type the task runs as, such as the built-in [`Explore`](/docs/en/sub-agents#built-in-subagents) or a custom `code-reviewer`. Holds the same value that hooks receive as [`agent_type`](/docs/en/hooks#subagentstart). Requires Claude Code v2.1.293 or later |
 | `status` | string | State of the task, such as `running`, `completed`, `failed`, or `killed` |
@@ -1166,7 +1134,7 @@ Each entry in the `tasks` array describes one subagent row with the fields below
 | `label` | string | Short progress summary of the task when Claude Code has one, otherwise the same text as `description` |
 | `startTime` | number | When the task started, in milliseconds since the Unix epoch |
 | `model` | string, optional | ID of the resolved model the task runs on. Omitted until the model is resolved |
-| `effort` | string or number, optional | Reasoning effort set for the subagent in its [definition frontmatter](/docs/en/sub-agents#supported-frontmatter-fields) or on the individual invocation: `low`, `medium`, `high`, `xhigh`, `max`, or a numeric token budget. This is the configured value, and the effort Claude Code applies can differ when the model doesn't support that level. Omitted when no effort is set. Requires Claude Code v2.1.213 or later |
+| `effort` | string or number, optional | Reasoning effort set for the subagent in its [definition frontmatter](/docs/en/sub-agents.md#supported-frontmatter-fields) or on the individual invocation: `low`, `medium`, `high`, `xhigh`, `max`, or a numeric token budget. This is the configured value, and the effort Claude Code applies can differ when the model doesn't support that level. Omitted when no effort is set |
 | `contextWindowSize` | number, optional | Context window of `model` in tokens, computed the same way as the main status line's [`context_window.context_window_size`](#context-window-fields), so you can render a per-row percentage from `tokenCount`. Omitted when `model` is |
 | `tokenCount` | number | Running token count of the subagent, the figure the default row shows |
 | `tokenSamples` | array of numbers | Up to the last 16 `tokenCount` readings, one per refresh tick, oldest first and ending with the current one |
@@ -1192,7 +1160,7 @@ If you configured a status line and nothing shows at the bottom of the interface
 * Check that your script outputs to stdout, not stderr
 * Run your script manually to verify it produces output
 * On Windows with Git Bash installed, backslashes in the `command` path are likely being consumed as escape characters before the script runs. Use forward slashes in the path. See [Windows configuration](#windows-configuration).
-* If `disableAllHooks` is `true` outside managed settings after [settings precedence](/docs/en/hooks#disable-or-remove-hooks) applies, Claude Code runs only a `statusLine` from managed settings, and with no managed `statusLine` the status line is disabled. Remove the setting, or set it to `false` in the file that sets it, to re-enable. See [`disableAllHooks`](/docs/en/settings-reference#disableallhooks).
+* If `disableAllHooks` is `true` outside managed settings after [settings precedence](/docs/en/hooks.md#disable-or-remove-hooks) applies, Claude Code runs only a `statusLine` from managed settings, and with no managed `statusLine` the status line is disabled. Remove the setting, or set it to `false` in the file that sets it, to re-enable. See [`disableAllHooks`](/docs/en/settings-reference#disableallhooks).
 * If your organization sets `allowManagedHooksOnly` in managed settings, your custom status line disappears without warning: you can only get a status line from a `statusLine` value in those managed settings. See [what runs under `allowManagedHooksOnly`](/docs/en/settings-reference#what-runs-under-allowmanagedhooksonly) for the full behavior, and ask your administrator whether this setting applies to you.
 * Run `claude --debug` to log your script's stderr on every status line invocation, and its exit code on the first invocation in a session
 * Ask Claude to read your settings file and execute the `statusLine` command directly to surface errors
@@ -1237,7 +1205,7 @@ If you see corrupted text, try simplifying your script to plain text output.
 
 ### Workspace trust required
 
-Until you accept the workspace trust dialog, the status line stays blank. Because `statusLine` executes a shell command, Claude Code runs it under the same [workspace trust rule as hooks in settings files](/docs/en/permissions#what-runs-before-you-trust-a-folder). Accepting the dialog for the folder, or for a parent directory whose trust extends to it, is enough.
+Until you accept the workspace trust dialog, the status line stays blank. Because `statusLine` executes a shell command, Claude Code runs it under the same [workspace trust rule as hooks in settings files](/docs/en/permissions.md#what-runs-before-you-trust-a-folder). Accepting the dialog for the folder, or for a parent directory whose trust extends to it, is enough.
 
 Until then, `claude --debug` logs `Status line command skipped: workspace trust not accepted`. Restart Claude Code and accept the trust dialog to enable it.
 
@@ -1252,8 +1220,8 @@ Claude Code displays your script's output only after the script exits with code 
 
 ### Notifications share the status line row
 
-Outside [fullscreen rendering](/docs/en/fullscreen), Claude Code shows notifications on the same row as your status line. In fullscreen rendering, Claude Code gives notifications a row of their own.
+Outside [fullscreen rendering](/docs/en/fullscreen.md), Claude Code shows notifications on the same row as your status line. In fullscreen rendering, Claude Code gives notifications a row of their own.
 
 * System notifications like MCP server errors and auto-updates display on the right side of the row. Transient notifications such as the context-low warning also cycle through this area.
-* Enabling verbose mode adds a token counter to this area, showing the size of your context as the last API response reported it, not the [per-turn count beside the spinner](/docs/en/costs#read-the-token-count-beside-the-spinner)
+* Enabling verbose mode adds a token counter to this area, showing the size of your context as the last API response reported it, not the [per-turn count beside the spinner](/docs/en/costs.md#read-the-token-count-beside-the-spinner)
 * On narrow terminals, these notifications may truncate your status line output
