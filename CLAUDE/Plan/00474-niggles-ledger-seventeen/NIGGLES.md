@@ -109,6 +109,23 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N534 — the supervisor focus hold outlives every sub-agent, and a human `/goal clear` can be credited to the supervisor
+
+**Source**: Plan 00501 Task 7.2 act-mode run (journal entry "Act-mode run", 26-10-23). Full write-up:
+`subagent-reports/261023-focus-hold.md`.
+
+- **Defect A (focus hold)**: `MainFocusModel` latched on a bare Up/Down well before the run and only a bare Esc
+  releases it, so with only the main thread alive it blocked the supervisor's `/goal clear` and the stop loop cost a
+  turn per rejected stop. Not fixed: the only sub-agent signal the supervisor could read is the daemon's `live.json`
+  snapshot, which Plan 00537 Task 2.1 already showed can under-report a started agent (unchanged since). No other
+  trustworthy signal exists; the options are in the report for the owner.
+- **Defect B (attribution)**: the supervisor stamps its `.goal-clear-injected` record at tick start, before it types,
+  but the daemon accepted a clear stamped up to 2 s BEFORE the record as the supervisor's. The owner's clear, 0.5 s
+  ahead of a pending supervisor tick, was therefore credited to the supervisor (and in the double clear the code
+  produces, the two verdicts swap). Fix: `CLOCK_TOLERANCE_SECONDS` is 1 ms, the transcript's flooring. Red tests first.
+
+**Status**: B ✅ fixed on branch `worktree-n534-focus-hold` (304a39289, not merged); A ⬜ open, owner decision.
+
 ### N533 — the work-queue re-brief reports a live worktree recorded by relative path as MISSING
 
 **Source**: the coordinator's SessionStart WORK QUEUE re-brief printed
