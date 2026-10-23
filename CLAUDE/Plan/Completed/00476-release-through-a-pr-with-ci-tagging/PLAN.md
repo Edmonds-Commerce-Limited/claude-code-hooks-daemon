@@ -1,6 +1,6 @@
 # Plan 00476: release through a pr with ci tagging
 
-**Status**: In Progress
+**Status**: Complete (2026-10-23)
 **Created**: 2026-09-30
 **Owner**: dev
 **Priority**: Medium
@@ -121,12 +121,20 @@ modules only.
 
 ## Success Criteria
 
-- [ ] A release goes from `/release` to a published GitHub release with no
+- [x] ✅ A release goes from `/release` to a published GitHub release with no
   local full gate, and its tag is on a commit the pull request's CI passed.
+  Met by v3.71.0: release pull request #139, `Release gate` run 40010977887
+  green on head `314c8ca93`; tag `v3.71.0` on merge commit `c4bef1532`, whose
+  second parent is that head and whose tree is identical to it.
+- [x] ✅ This plan has no release-bound consequences: the procedure change
+  already shipped in v3.71.0, the release it carried out, so there is nothing
+  for the pending-release holding area (`CLAUDE/UPGRADES/UNRELEASED/`).
 
 ## Delivery & Milestones
 
 - All tasks merged to main (`c7637cf1c` Task 2.1, `1ad2e3618` Task 3.1); the
   release-gate workflow ran green on main in run 39728713370.
-- Open: the success criterion needs the first real release through the new
-  procedure, which only a human-invoked `/release` can start.
+- First real release through the procedure: v3.71.0 (owner-invoked
+  `/release minor accept-wip`). Its first `Release gate` run failed at the
+  layout job on a check missing from the workflow; fixed on the branch, with a
+  local unit test so that drift now fails the commit (ledger 00474 N539).
