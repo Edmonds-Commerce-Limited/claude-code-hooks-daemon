@@ -1419,35 +1419,34 @@ _CONTEXT_SIDECAR_GLOB = "*.json"
 
 
 # ---------------------------------------------------------------------------
-# Own-session identity (Plan 00166): namespace-broad session-id filtering.
+# Own-session identity (Plans 00166, 00551): child-tree session-id filtering.
 #
 # Two `ccy` terminals in the SAME repo share ONE context-sidecar dir (a
-# bind-mounted `untracked/`), but each runs in its OWN container / PID
-# namespace. Without a filter, this supervisor reads the freshest sidecar and
-# the first `*.compacting` signal in the shared dir REGARDLESS of which session
-# wrote them -- so a compaction in terminal B makes terminal A's supervisor
-# inject `continue` into A's PTY (the reported cross-injection bug).
+# bind-mounted `untracked/`). Without a filter, this supervisor reads the
+# freshest sidecar and the first `*.compacting` signal in the shared dir
+# REGARDLESS of which session wrote them -- so a compaction in terminal B makes
+# terminal A's supervisor inject `continue` into A's PTY.
 #
-# Fix (Decision 1, option B): a session id reachable in the supervisor's OWN
-# PID namespace belongs to the supervisor's own Claude instance -- a foreign
-# terminal is a separate container and never appears here. So we learn the
-# own-session-id SET by scanning the container's process environs for
-# `CLAUDE_CODE_SESSION_ID`, then act ONLY on sidecars/signals in that set. Fail
-# safe: an empty (not-yet-learned / non-Linux) set means act on NOTHING.
-#
-# Caveat: under a shared PID namespace (e.g. `podman run --pid=host`) the scan
-# could see a sibling terminal's ids. For that deployment give the session its
-# own runtime via CLAUDE_HOOKS_SOCKET_PATH / _PID_PATH / _LOG_PATH.
+# Rule: a session id is this supervisor's own ONLY if it is in the environ of
+# the Claude child the PTY host forked, or of a descendant of that child (by
+# `/proc/<pid>/stat` ppid). Every process `/proc` shows is NOT the rule: on a
+# host or a shared PID namespace that includes other users' and other
+# terminals' sessions (issue #138). The child pid is threaded explicitly; with
+# no child pid there is no scan at all. Fail safe: an empty set (no child pid
+# yet, child gone, non-Linux) means act on NOTHING.
 # ---------------------------------------------------------------------------
 
 _PROC_ROOT = "/proc"
 _SESSION_ENV_PREFIX = b"CLAUDE_CODE_SESSION_ID="
 
-# Accumulated own-session ids. Union-only: ids are stable per Claude process
-# and only ever come from this process's own namespace, so growth never admits
-# a foreign terminal. Keeps ids learned during active work available on later
-# idle ticks (when no descendant currently exposes the env var).
+# Accumulated own-session ids for ONE child pid. Union-only: ids are stable per
+# Claude process and only ever come from that child's tree, so growth never
+# admits a foreign session; a different child pid clears it first. Keeps ids
+# learned during active work available on later idle ticks (when no descendant
+# currently exposes the env var).
 _own_session_ids_cache: set[str] = set()
+# The child pid the cache above was learned under.
+_own_session_ids_child_pid: int | None = None
 # Plan 00182: throttle the expensive full-/proc environ scan. Once our session
 # ids are learned they persist in the accumulate-set above, so re-scanning every
 # worker tick (poll interval 2s) was the latency source that could push a tick
@@ -1479,37 +1478,94 @@ def _read_proc_environ(environ_path: Path) -> bytes:
         return b""
 
 
-def resolve_own_session_ids(proc_root: Path | None = None) -> frozenset[str]:
-    """Scan this container's process environs for ``CLAUDE_CODE_SESSION_ID``.
+def _proc_stat_ppid(stat_line: str) -> int | None:
+    """Parse the ppid from a ``/proc/<pid>/stat`` line; None if malformed.
 
-    Returns every session id found in the supervisor's OWN PID namespace
-    (namespace-broad identity, Plan 00166). Empty on a host without ``/proc``
+    The comm field is in parentheses and may itself hold spaces and
+    parentheses (it is chosen by the process), so the fields are taken after
+    the LAST ``)``: state, then ppid.
+    """
+    close = stat_line.rfind(")")
+    if close < 0:
+        return None
+    fields = stat_line[close + 1 :].split()
+    if len(fields) < 2:
+        return None
+    try:
+        return int(fields[1])
+    except ValueError:
+        return None
+
+
+def _proc_parent_map(root: Path) -> dict[int, int]:
+    """Map every readable pid under ``root`` to its ppid."""
+    parents: dict[int, int] = {}
+    for entry in root.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            stat_line = (entry / "stat").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            # The process exited between listdir and read: it is in no tree.
+            continue
+        ppid = _proc_stat_ppid(stat_line)
+        if ppid is not None:
+            parents[int(entry.name)] = ppid
+    return parents
+
+
+def resolve_own_session_ids(child_pid: int, proc_root: Path | None = None) -> frozenset[str]:
+    """Collect ``CLAUDE_CODE_SESSION_ID`` from ``child_pid`` and its descendants.
+
+    Only members of the child's process tree (by ``/proc/<pid>/stat`` ppid) have
+    their environ read. Empty when the child is gone or there is no ``/proc``,
     so the caller fails safe.
     """
     root = proc_root if proc_root is not None else Path(_PROC_ROOT)
     if not root.is_dir():
         return frozenset()
+    parents = _proc_parent_map(root)
+    if child_pid not in parents:
+        return frozenset()
+    children: dict[int, list[int]] = {}
+    for pid, ppid in parents.items():
+        children.setdefault(ppid, []).append(pid)
     found: set[str] = set()
-    for entry in root.iterdir():
-        if entry.name.isdigit():
-            found |= _session_ids_from_environ(_read_proc_environ(entry / "environ"))
+    tree: set[int] = set()
+    pending = [child_pid]
+    while pending:
+        pid = pending.pop()
+        if pid in tree:
+            continue
+        tree.add(pid)
+        found |= _session_ids_from_environ(_read_proc_environ(root / str(pid) / "environ"))
+        pending.extend(children.get(pid, ()))
     return frozenset(found)
 
 
 def cached_own_session_ids(
-    proc_root: Path | None = None, *, now: float | None = None
+    child_pid: int | None, proc_root: Path | None = None, *, now: float | None = None
 ) -> frozenset[str]:
-    """Union-accumulate and return the supervisor's own-session-id set.
+    """Union-accumulate and return the own-session-id set of ``child_pid``'s tree.
 
-    Plan 00182: the full /proc environ scan is throttled to
-    ``_OWN_SESSION_SCAN_TTL_SECONDS`` once at least one id is known -- most ticks
-    then return the accumulated set without touching /proc, keeping the worker
-    tick well under its read timeout. An EMPTY cache always re-scans so a
-    supervisor that has not yet discovered its own session is never starved.
-    ``now`` (monotonic seconds) is injectable for tests; production uses the
-    monotonic clock.
+    ``None`` (child not known) returns the empty set without scanning and
+    without exposing an earlier child's set. A child pid different from the one
+    the cache was learned under clears the cache first.
+
+    Plan 00182: the /proc scan is throttled to ``_OWN_SESSION_SCAN_TTL_SECONDS``
+    once at least one id is known -- most ticks then return the accumulated set
+    without touching /proc, keeping the worker tick well under its read timeout.
+    An EMPTY cache always re-scans so a supervisor that has not yet discovered
+    its own session is never starved. ``now`` (monotonic seconds) is injectable
+    for tests; production uses the monotonic clock.
     """
-    global _own_session_ids_last_scan
+    global _own_session_ids_last_scan, _own_session_ids_child_pid
+    if child_pid is None:
+        return frozenset()
+    if child_pid != _own_session_ids_child_pid:
+        _own_session_ids_cache.clear()
+        _own_session_ids_last_scan = None
+        _own_session_ids_child_pid = child_pid
     current = time.monotonic() if now is None else now
     due = (
         not _own_session_ids_cache
@@ -1517,9 +1573,67 @@ def cached_own_session_ids(
         or (current - _own_session_ids_last_scan) >= _OWN_SESSION_SCAN_TTL_SECONDS
     )
     if due:
-        _own_session_ids_cache.update(resolve_own_session_ids(proc_root))
+        _own_session_ids_cache.update(resolve_own_session_ids(child_pid, proc_root))
         _own_session_ids_last_scan = current
     return frozenset(_own_session_ids_cache)
+
+
+class WorkerChildPid:
+    """The Claude child pid as the ``--worker`` subprocess knows it (Plan 00551).
+
+    The worker starts before the host forks Claude, so the pid cannot ride its
+    argv; the host sends it on every tick as ``TickFacts.child_pid``. A sent pid
+    wins and is kept; a tick without one keeps the pid already learned.
+
+    Hot-reload fallback: a host started before ``child_pid`` existed sends none,
+    and a reloaded worker would otherwise fail every tick to the empty set until
+    the next ccy relaunch. That host's children are exactly Claude and this
+    worker, so its single OTHER child is taken as Claude. Two or more other
+    children, none, or a host of pid 1 (the worker was re-parented after the
+    host died) yields no pid and so the empty set. This is a walk of the host's
+    children, never the scan of every process.
+    """
+
+    def __init__(
+        self,
+        *,
+        proc_root: Path | None = None,
+        host_pid: Callable[[], int] = os.getppid,
+        own_pid: Callable[[], int] = os.getpid,
+    ) -> None:
+        self._proc_root = proc_root if proc_root is not None else Path(_PROC_ROOT)
+        self._host_pid = host_pid
+        self._own_pid = own_pid
+        self._pid: int | None = None
+
+    @property
+    def pid(self) -> int | None:
+        """The learned child pid, or None while it is unknown."""
+        return self._pid
+
+    def learn(self, sent: int | None) -> int | None:
+        """Take this tick's host-sent pid (or derive one from a legacy host)."""
+        if sent is not None:
+            self._pid = sent
+        elif self._pid is None:
+            self._pid = self._legacy_host_child()
+        return self._pid
+
+    def own_session_ids(self) -> frozenset[str]:
+        """The own-session-id set of the learned child's tree (empty if unknown)."""
+        return cached_own_session_ids(self._pid)
+
+    def _legacy_host_child(self) -> int | None:
+        host = self._host_pid()
+        if host == 1 or not self._proc_root.is_dir():
+            return None
+        own = self._own_pid()
+        others = [
+            pid
+            for pid, ppid in _proc_parent_map(self._proc_root).items()
+            if ppid == host and pid != own
+        ]
+        return others[0] if len(others) == 1 else None
 
 
 def _session_in_scope(session_id: object, own_sessions: frozenset[str] | None) -> bool:
@@ -1932,6 +2046,10 @@ class TickFacts:
     focus_hold_reason: str = ""
     focus_held_since: float = 0.0
     focus_latch_bytes: str = ""
+    # Plan 00551: the pid of the Claude child the host forked, which scopes the
+    # worker's own-session-id scan to that child's process tree. None from a
+    # host that predates it (see `WorkerChildPid` for that case).
+    child_pid: int | None = None
 
 
 @dataclass(frozen=True)
@@ -4694,7 +4812,7 @@ class PluginRuntime:
         state_root: Path,
         status_dir: Path,
         marker_path: Path,
-        session_ids: Callable[[], frozenset[str]] = cached_own_session_ids,
+        session_ids: Callable[[], frozenset[str]],
         allowed_uids: Collection[int] | None = None,
         hook_budget_seconds: float = _PLUGIN_HOOK_BUDGET_SECONDS,
         tick_budget_seconds: float = _PLUGIN_TICK_BUDGET_SECONDS,
@@ -8823,6 +8941,7 @@ def _facts_to_json(facts: TickFacts) -> str:
             "focus_hold_reason": facts.focus_hold_reason,
             "focus_held_since": facts.focus_held_since,
             "focus_latch_bytes": facts.focus_latch_bytes,
+            "child_pid": facts.child_pid,
         }
     )
 
@@ -8845,6 +8964,7 @@ def _facts_from_json(line: str) -> TickFacts:
         focus_hold_reason=str(data.get("focus_hold_reason", "")),
         focus_held_since=float(data.get("focus_held_since", 0.0)),
         focus_latch_bytes=str(data.get("focus_latch_bytes", "")),
+        child_pid=int(data["child_pid"]) if data.get("child_pid") is not None else None,
     )
 
 
@@ -8959,6 +9079,7 @@ def run_worker(
     sidecar_dir: Path,
     policy: CompactPolicy,
     plugins: PluginRuntime | None = None,
+    child: WorkerChildPid | None = None,
 ) -> int:
     """Policy-worker loop: read TickFacts lines, emit TickOutcome lines.
 
@@ -8988,7 +9109,12 @@ def run_worker(
     restart -- worse, indefinitely if no further human byte ever arrives to
     seed a fresh reading. The host's own long-lived model never has that gap,
     so its verdict is taken as-is.
+
+    ``child`` (Plan 00551) learns the Claude child pid from each tick's
+    ``child_pid``; own-session identity is scoped to that child's tree.
     """
+    if child is None:
+        child = WorkerChildPid()
     machine = CompactStateMachine(policy)
     line_recognizer = HumanInputLine()
     if plugins is not None:
@@ -9003,6 +9129,7 @@ def run_worker(
         except (ValueError, KeyError) as exc:
             append_worker_error(f"bad tick line: {exc}")
             continue
+        child.learn(facts.child_pid)
         if facts.human_raw_input:
             try:
                 line_recognizer.feed(base64.b64decode(facts.human_raw_input))
@@ -9045,7 +9172,8 @@ def run_worker(
                 compaction_signal_ttl_seconds=policy.compaction_signal_ttl_seconds,
                 reap_ttl_seconds=policy.reap_ttl_seconds,
                 foreground_margin_seconds=policy.foreground_margin_seconds,
-                own_sessions=cached_own_session_ids(),  # Plan 00166: only our own sessions
+                # Plans 00166, 00551: only the sessions of our own child's tree.
+                own_sessions=cached_own_session_ids(child.pid),
                 goal_signal_ttl_seconds=policy.goal_signal_ttl_seconds,
                 model_confirm_enters=policy.model_confirm_enters,
                 plugins=plugins,
@@ -10319,7 +10447,7 @@ def supervise(
                 write_master=_write_master,
                 log=log,
                 dry_run=dry_run,
-                session_ids=cached_own_session_ids(),
+                session_ids=cached_own_session_ids(pid),
                 plugin_host=plugin_host,
                 restart_worker=restart_worker,
                 focus_hold=activity.focus.hold,
@@ -10401,6 +10529,8 @@ def supervise(
                         machine_state=machine.export_state(),
                         input_line_abandoned=input_line_abandoned,
                         output_quiet_seconds=output_quiet_seconds,
+                        # Plan 00551: scopes the worker's identity scan.
+                        child_pid=pid,
                     ),
                     focus_hold,
                 )
@@ -10453,7 +10583,8 @@ def supervise(
                 work_idle=work_idle,
                 reap_ttl_seconds=policy.reap_ttl_seconds,
                 foreground_margin_seconds=policy.foreground_margin_seconds,
-                own_sessions=cached_own_session_ids(),  # Plan 00166: only our own sessions
+                # Plans 00166, 00551: only the sessions of our own child's tree.
+                own_sessions=cached_own_session_ids(pid),
                 goal_signal_ttl_seconds=policy.goal_signal_ttl_seconds,
                 input_line_abandoned=input_line_abandoned,
                 output_quiet_seconds=output_quiet_seconds,
@@ -10693,13 +10824,19 @@ def main(argv: list[str] | None = None) -> int:
             # pipes are made private BEFORE any plugin is loaded.
             requests, replies = _isolate_worker_channels()
             worker_sidecar_dir = _default_sidecar_dir()
+            # Plan 00551: one child-pid record feeds both the decision's
+            # identity filter and the plugins' `api.session_id()`.
+            child = WorkerChildPid()
             return run_worker(
                 requests,
                 replies,
                 dry_run="--arm" not in argv,
                 sidecar_dir=worker_sidecar_dir,
                 policy=CompactPolicy(),
-                plugins=_make_worker_plugin_runtime(argv, worker_sidecar_dir.parent),
+                plugins=_make_worker_plugin_runtime(
+                    argv, worker_sidecar_dir.parent, session_ids=child.own_session_ids
+                ),
+                child=child,
             )
         except Exception:
             # Plan 00361: an escaped exception (typically a half-edited source
@@ -10793,12 +10930,18 @@ def _make_plugin_host(
         return None
 
 
-def _make_worker_plugin_runtime(argv: Sequence[str], untracked_dir: Path) -> PluginRuntime | None:
+def _make_worker_plugin_runtime(
+    argv: Sequence[str],
+    untracked_dir: Path,
+    *,
+    session_ids: Callable[[], frozenset[str]],
+) -> PluginRuntime | None:
     """Build the ``--worker`` subprocess's plugin runtime from its argv, or None.
 
     The host passed the loadable plugins (``--plugin``) and the disabled set
     (``--disable-plugin``). The in-hook marker is keyed by the HOST's pid -- this
     process's parent -- so the host can find it when this worker stops answering.
+    ``session_ids`` is the worker's own-session-id source (its child's tree).
     """
     raw_specs, disabled = _parse_worker_plugin_flags(argv)
     if not raw_specs:
@@ -10807,6 +10950,7 @@ def _make_worker_plugin_runtime(argv: Sequence[str], untracked_dir: Path) -> Plu
         state_root=_plugin_state_root(),
         status_dir=untracked_dir,
         marker_path=_plugin_marker_path(untracked_dir, os.getppid()),
+        session_ids=session_ids,
     )
     specs: list[tuple[str, Path]] = []
     for raw in raw_specs:

@@ -39,12 +39,12 @@ on nothing.
 
 ### Phase 1: Fix (TDD)
 
-- [ ] ⬜ **Task 1.1**: RED tests with a fake `/proc` tree: an id in an unrelated process is NOT own; an id in the child
+- [x] ✅ **Task 1.1**: RED tests with a fake `/proc` tree: an id in an unrelated process is NOT own; an id in the child
   or in a grandchild IS own; a process that re-parented away (ppid not in the tree) is not own; an empty tree fails
   safe. Include the issue's two-environ reproduction.
-- [ ] ⬜ **Task 1.2**: GREEN: walk descendants of the child pid by `/proc/<pid>/stat` ppid; thread the child pid from
+- [x] ✅ **Task 1.2**: GREEN: walk descendants of the child pid by `/proc/<pid>/stat` ppid; thread the child pid from
   where the supervisor spawns Claude to every caller (no global lookup, no silent fallback to the broad scan).
-- [ ] ⬜ **Task 1.3**: Update the Plan 00166 comment block and `CLAUDE/development/CcySupervisor.md` where it states the
+- [x] ✅ **Task 1.3**: Update the Plan 00166 comment block and `CLAUDE/development/CcySupervisor.md` where it states the
   identity rule.
 
 ### Phase 2: Land
@@ -54,10 +54,11 @@ on nothing.
 
 ## Success Criteria
 
-- [ ] The issue's reproduction returns only the child tree's id.
+- [x] The issue's reproduction returns only the child tree's id.
 - [ ] A supervisor in this container still resolves its own session (verified after the hot reload).
-- [ ] Release-bound consequences: a release note in the pending-release holding area stating the supervisor is now
-  safe outside a private PID namespace.
+- [x] Release-bound consequences: a release note in the pending-release holding area stating the supervisor is now
+  safe outside a private PID namespace
+  (`CLAUDE/UPGRADES/UNRELEASED/release-notes/027-supervisor-own-sessions-come-from-its-child-tree.md`).
 
 ## Delivery & Milestones
 

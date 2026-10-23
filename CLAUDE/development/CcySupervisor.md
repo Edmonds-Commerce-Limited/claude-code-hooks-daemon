@@ -320,6 +320,36 @@ end it. After relaunching, verify the hold:
 - Whether Esc also closes an OPEN transcript was not verified live. If it does
   not, an Esc pressed in that state releases the hold early.
 
+## Own-session identity: the child's process tree
+
+Sessions in one checkout share one `context-sidecar/` directory, so the
+supervisor acts only on sidecars and signals whose session id is its own
+(`cached_own_session_ids(child_pid)`). A session id is its own only if it is in
+the environ of the Claude child the PTY host forked, or of a descendant of that
+child by `/proc/<pid>/stat` ppid (Plan 00551, issue #138). Processes outside
+that tree are never read, so the rule holds in a private container, on a host,
+and under a shared PID namespace alike. The comm field of a stat line is parsed
+from the LAST `)`, so a process name holding spaces or parentheses cannot forge
+a parent.
+
+- **How the pid reaches the worker.** The worker starts before the host forks
+  Claude, so it cannot ride the worker's argv. The host sends it on every tick
+  as `TickFacts.child_pid`; the worker's `WorkerChildPid` keeps the last one
+  sent, and the plugins' `api.session_id()` reads the same record.
+- **Fail safe.** No child pid, a child that has exited, or no `/proc` gives the
+  empty set, and the empty set acts on nothing. There is no fallback to a scan
+  of every process.
+- **The union cache is per child.** Ids learned under one child pid accumulate
+  (Plan 00182 throttles the rescan), and a different child pid starts a fresh
+  set.
+- **Hot reload under an older host.** A host started before `child_pid`
+  existed sends none, and it is not reloaded with the worker. The reloaded
+  worker then takes the host's single OTHER child as Claude, since that host's
+  children are exactly Claude and the worker. Two or more other children, or a
+  host of pid 1 (the worker was re-parented after the host died), give no pid
+  and so the empty set. A ccy relaunch replaces the older host and ends this
+  case.
+
 ## Supported Python and the launcher
 
 **Supported Python: 3.11 or later** — the canonical statement is
@@ -510,7 +540,8 @@ picks up a new version. `on_idle` returning `api.ExitForRestart(reason)` asks fo
 that. `reason` is short, logged only, and never typed into the chat. The host:
 
 1. **refuses** (a deduplicated `noop:` line in `decision.log`, nothing typed)
-   unless `cached_own_session_ids()` holds exactly one id. That set only ever
+   unless `cached_own_session_ids(child_pid)` (see "Own-session identity")
+   holds exactly one id. That set only ever
    grows, so a `/clear` or a resumed conversation that introduced a second id
    makes every later request refuse until the supervisor is relaunched;
 2. writes the **restart-pending record** (below), then types `/exit` through

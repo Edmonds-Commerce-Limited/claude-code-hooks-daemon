@@ -242,7 +242,7 @@ def test_a_human_typed_effort_through_the_raw_input_tap_is_never_echoed_or_corre
     Driven end to end through `run_worker`'s JSON tick stream, the path the
     live worker takes, with the typed bytes arriving on the raw-input tap.
     """
-    monkeypatch.setattr(_mod, "cached_own_session_ids", lambda: frozenset({_SESSION}))
+    monkeypatch.setattr(_mod, "cached_own_session_ids", lambda *a, **k: frozenset({_SESSION}))
     sidecar_dir = tmp_path / "cs"
     _write_sidecar(sidecar_dir, model_id="claude-fable-5-1", effort="max", ts=_NOW + 200.0)
     ticks = [_mod._facts_to_json(_facts(_NOW, raw=b"/effort max\r", idle=False))]
