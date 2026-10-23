@@ -1,4 +1,5 @@
 {
+  "autoCompactWindow": 480000,
   "permissions": {
     "deny": [
       "Edit(//tmp/**)",
