@@ -222,6 +222,25 @@ def declared_blocked_entry(session_id: str, *, entered_at: float) -> SessionMode
     )
 
 
+def goal_loop_blocked_entry(
+    session_id: str, *, entered_at: float, ttl_seconds: float
+) -> SessionModeEntry:
+    """The goal-blocked entry the goal-loop detector enters in act mode.
+
+    Raises:
+        ValueError: ``session_id`` is blank or ``ttl_seconds`` is not positive.
+    """
+    return SessionModeEntry(
+        mode=SessionMode.BLOCKED,
+        session_id=session_id,
+        entered_at=entered_at,
+        expires_at=entered_at + ttl_seconds,
+        source=ModeSource.DETECTOR,
+        reason=BlockReason.GOAL_LOOP,
+        lifetime=Lifetime.SESSION,
+    )
+
+
 def _clock_text(epoch: float) -> str:
     """``HH:MM UTC`` for an epoch time."""
     return time.strftime("%H:%M UTC", time.gmtime(epoch))

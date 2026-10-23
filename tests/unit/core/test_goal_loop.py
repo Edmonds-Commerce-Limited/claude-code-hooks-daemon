@@ -231,7 +231,7 @@ class TestGoalLoopConfig:
     @pytest.mark.parametrize(
         ("key", "value"),
         [
-            ("mode", "act"),
+            ("mode", "halt"),
             ("mode", "loud"),
             ("cycle_threshold", 0),
             ("cycle_threshold", True),
@@ -249,6 +249,14 @@ class TestGoalLoopConfig:
 
     def test_valid_options_have_no_problems(self) -> None:
         assert option_problems({"mode": "observe", "cycle_threshold": 4}) == {}
+
+    def test_act_is_a_valid_mode(self) -> None:
+        assert option_problems({"mode": "act"}) == {}
+        assert GoalLoopConfig.from_options({"mode": "act"}).mode is DetectorMode.ACT
+
+    def test_blocked_seconds_is_blocked_hours_in_seconds(self) -> None:
+        assert GoalLoopConfig().blocked_seconds == 4 * 3600
+        assert GoalLoopConfig(blocked_hours=0.5).blocked_seconds == 1800
 
 
 # --- 6.2 the ring and the verdict ----------------------------------------------
@@ -347,6 +355,18 @@ class TestCycleRing:
 
     def test_empty_ring_is_quiet(self) -> None:
         assert assess(CycleRing(window_seconds=60), GoalLoopConfig()).verdict is Verdict.QUIET
+
+    def test_restart_count_empties_cycles_and_pending_but_keeps_the_fingerprint(self) -> None:
+        ring = _ring("similar_stops.jsonl")
+        ring.note_fingerprint("fp-a", new_cycles=0)
+        ring.feed([LoopEvent(kind=EventKind.STOP, at=3e9, text="STOPPING BECAUSE: x")])
+        ring.restart_count()
+        assert ring.cycles == ()
+        assert ring.fingerprint == "fp-a"
+        result = ring.feed([LoopEvent(kind=EventKind.UNMET, at=3e9 + 1)])
+        assert result.new_cycles == 0
+        assert ring.note_fingerprint("fp-b", new_cycles=0) is None
+        assert ring.fingerprint == "fp-b"
 
 
 class TestFingerprintOnRing:

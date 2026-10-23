@@ -19,6 +19,7 @@ from tests.support.autonomy import awaiting_human_entry, focus_entry, pin_sessio
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.session_mode_log import TransitionAction
 from claude_code_hooks_daemon.core.session_mode_registry import SessionModeRegistry
 from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor import (
     CANONICAL_CRON_PROMPT,
@@ -207,6 +208,21 @@ class TestHandle:
         registry.enter(_goal_blocked_entry("sess-1"))
         FailsafeCronBlockageSuppressorHandler().handle(_real_hook_input("sess-1"))
         assert not _blocked(registry)
+
+    def test_real_prompt_exit_from_goal_loop_block_is_logged_with_its_cause(
+        self, registry: SessionModeRegistry
+    ) -> None:
+        """The human-prompt exit of a goal-loop block lands in the transition log
+        as an EXIT naming the human prompt as the cause."""
+        registry.enter(_goal_blocked_entry("sess-1"))
+        FailsafeCronBlockageSuppressorHandler().handle(_real_hook_input("sess-1"))
+        log = registry.transition_log
+        assert log is not None
+        exits = [
+            t for t in log.recent(10, session_id="sess-1") if t.action == TransitionAction.EXIT
+        ]
+        assert len(exits) == 1
+        assert "a prompt the human typed in this session" in exits[0].evidence
 
     def test_real_prompt_leaves_focus_alone(self, registry: SessionModeRegistry) -> None:
         """Only the BLOCKED family ends on a reply; focus has its own off switch."""

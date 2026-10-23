@@ -183,13 +183,13 @@ All CLEAR; rationale and code citations in
 - [x] ✅ **Task 6.2**: TDD the cycle ring, repo fingerprint (conditional, `git status --porcelain -uno` plus HEAD),
   thresholds (a declared `[awaiting-human]` stop counts toward the 2-cycle threshold), `observe` mode, near-miss
   logging. Similarity is logged but not a fire condition.
-- [ ] ⬜ **Task 6.3**: TDD `act` mode: enter BLOCKED(goal-loop), clear the goal signal (the lever spike 0.3
+- [x] ✅ **Task 6.3**: TDD `act` mode: enter BLOCKED(goal-loop), clear the goal signal (the lever spike 0.3
   supports: the supervisor's `/goal clear` lands mid-turn), one-time context line. No `continue:false` halt unless
   a later live test proves it. Document that without ccy the only backstop is Claude Code's built-in cap of 8
   consecutive stop-hook continuations (reset by each tool call, raised by `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`), after
   which it pauses the goal until the next message, including a tick; a loop that makes tool calls between stops
   never reaches the cap.
-- [ ] ⬜ **Task 6.4**: TDD exits: human prompt, repo change, timer, explicit clear.
+- [x] ✅ **Task 6.4**: TDD exits: human prompt, repo change, timer, explicit clear.
 
 ### Phase 7: Docs and acceptance
 

@@ -9,13 +9,18 @@ through the session-mode IPC actions. The session defaults to the
 from __future__ import annotations
 
 import argparse
+import time
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import pytest
+from tests.support.autonomy import awaiting_human_entry, pin_session_modes
 
 from claude_code_hooks_daemon.constants.modes import SessionModeIPC
 from claude_code_hooks_daemon.daemon.cli import build_parser, cmd_session_mode
+from claude_code_hooks_daemon.daemon.session_mode_ipc import handle_session_mode_action
+from claude_code_hooks_daemon.utils.session_modes import ModeLabel, goal_loop_blocked_entry
 
 _CLI = "claude_code_hooks_daemon.daemon.cli"
 
@@ -122,6 +127,72 @@ class TestRequests:
         }
         code, _ = _run(_args("focus", "  "), response)
         assert code == 1
+
+
+class TestUnblock:
+    """``session-mode unblock`` ends a goal-loop block; awaiting-human is refused (Task 6.3)."""
+
+    def test_unblock_sends_exit_blocked_and_prints_the_line(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        response = {
+            "result": {SessionModeIPC.KEY_OUTCOME: "unblocked", SessionModeIPC.KEY_LINE: "ENDED"}
+        }
+        code, sent = _run(_args("unblock"), response)
+        assert code == 0
+        assert sent[0]["hook_input"] == {
+            "action": SessionModeIPC.ACTION_EXIT_BLOCKED,
+            "session_id": "env-session",
+        }
+        assert "ENDED" in capsys.readouterr().out
+
+    def test_an_error_answer_exits_non_zero(self, capsys: pytest.CaptureFixture[str]) -> None:
+        code, _ = _run(_args("unblock"), {"error": "refused"})
+        assert code == 1
+        assert "ERROR: refused" in capsys.readouterr().err
+
+    def _run_through_the_daemon(self, args: argparse.Namespace) -> int:
+        def _send(_socket: object, request: dict[str, Any]) -> dict[str, Any]:
+            hook_input = request["hook_input"]
+            return handle_session_mode_action(str(hook_input["action"]), hook_input)
+
+        with (
+            patch(f"{_CLI}.get_project_path", return_value="/tmp/project"),
+            patch(f"{_CLI}._resolve_socket_path", return_value="/tmp/sock"),
+            patch(f"{_CLI}._resolve_pid_path", return_value="/tmp/pid"),
+            patch(f"{_CLI}.read_pid_file", return_value=123),
+            patch(f"{_CLI}.send_daemon_request", side_effect=_send),
+        ):
+            return cmd_session_mode(args)
+
+    def test_end_to_end_a_declared_block_is_refused_and_stays(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        registry = pin_session_modes(monkeypatch, tmp_path)
+        registry.enter(awaiting_human_entry("env-session"), evidence="stopped")
+        code = self._run_through_the_daemon(_args("unblock"))
+        assert code == 1
+        assert "genuine prompt from the human" in capsys.readouterr().err
+        assert [e.label for e in registry.active("env-session")] == [ModeLabel.AWAITING_HUMAN]
+
+    def test_end_to_end_a_goal_loop_block_ends(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        registry = pin_session_modes(monkeypatch, tmp_path)
+        registry.enter(
+            goal_loop_blocked_entry("env-session", entered_at=time.time(), ttl_seconds=3600.0),
+            evidence="cause=goal-loop",
+        )
+        code = self._run_through_the_daemon(_args("unblock"))
+        assert code == 0
+        assert "goal-blocked mode has ended" in capsys.readouterr().out
+        assert registry.active("env-session") == ()
 
 
 class TestRefusals:

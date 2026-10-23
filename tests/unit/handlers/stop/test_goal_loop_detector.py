@@ -16,12 +16,14 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from tests.support.autonomy import pin_session_modes
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.goal_loop import FingerprintError, option_problems
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
 from claude_code_hooks_daemon.core.session_mode_log import ModeTransition, TransitionAction
+from claude_code_hooks_daemon.core.session_mode_registry import NoticeKind, SessionModeRegistry
 from claude_code_hooks_daemon.handlers.stop.goal_loop_detector import (
     MAX_TRACKED_SESSIONS,
     GoalLoopDetectorHandler,
@@ -120,7 +122,7 @@ class TestIdentity:
         assert handler.matches(_input(None)) is True
 
     def test_validate_options_is_the_core_option_check(self) -> None:
-        options = {"mode": "act", "cycle_threshold": 0}
+        options = {"mode": "halt", "cycle_threshold": 0}
         assert GoalLoopDetectorHandler.validate_options(options) == option_problems(options)
         assert set(GoalLoopDetectorHandler.validate_options(options)) == {
             "mode",
@@ -307,11 +309,18 @@ class TestStandDowns:
             "checkpoint invalid, re-anchored at EOF" in r.getMessage() for r in caplog.records
         )
         # The anchor sits at EOF: the cycle already on disk is never counted, and
-        # only what is appended after it is.
-        _append_lines(transcript, _cycle(50))
+        # only what is appended after it is. The ring restarted at the first
+        # would-enter, so two appended cycles are a near miss, not a third cycle.
+        _append_lines(transcript, [*_cycle(50), *_cycle(60)])
         handler.handle(_input(transcript))
-        assert recorder.actions()[before:] == [TransitionAction.WOULD_ENTER]
-        assert "cycles=4" in recorder.transitions[-1].evidence
+        assert recorder.actions()[before:] == [TransitionAction.NEAR_MISS]
+        _append_lines(transcript, _cycle(70))
+        handler.handle(_input(transcript))
+        assert recorder.actions()[before:] == [
+            TransitionAction.NEAR_MISS,
+            TransitionAction.WOULD_ENTER,
+        ]
+        assert "cycles=3" in recorder.transitions[-1].evidence
 
     def test_fingerprint_failure_is_a_named_warning_and_skips_the_assessment(
         self,
@@ -368,7 +377,225 @@ class TestStandDowns:
         assert f"sess-{MAX_TRACKED_SESSIONS + 2}" in handler._sessions
 
 
+@pytest.fixture
+def modes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SessionModeRegistry:
+    return pin_session_modes(monkeypatch, tmp_path / "untracked")
+
+
+@pytest.fixture
+def clear_goal() -> MagicMock:
+    return MagicMock(return_value=True)
+
+
+@pytest.fixture
+def actor(
+    handler: GoalLoopDetectorHandler, modes: SessionModeRegistry, clear_goal: MagicMock
+) -> GoalLoopDetectorHandler:
+    """The handler in act mode on a real registry, with a counting goal clear."""
+    handler._mode = "act"
+    handler._registry = lambda: modes
+    handler._clear_goal = clear_goal
+    return handler
+
+
+def _registry_actions(modes: SessionModeRegistry) -> list[tuple[TransitionAction, str]]:
+    log = modes.transition_log
+    assert log is not None
+    return [(t.action, t.evidence) for t in log.recent(50, session_id=SESSION)]
+
+
+def _labels(modes: SessionModeRegistry) -> list[ModeLabel]:
+    return [entry.label for entry in modes.active(SESSION)]
+
+
+class TestActMode:
+    """Act mode enters GOAL_BLOCKED once, queues the one-time line, and exits (Tasks 6.3, 6.4)."""
+
+    def test_act_enters_clears_once_and_queues_one_notice(
+        self,
+        actor: GoalLoopDetectorHandler,
+        modes: SessionModeRegistry,
+        clear_goal: MagicMock,
+        recorder: _Recorder,
+        tmp_path: Path,
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        shutil.copy(FIXTURES / "similar_stops.jsonl", transcript)
+        result = actor.handle(_input(transcript))
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+        assert _labels(modes) == [ModeLabel.GOAL_BLOCKED]
+        clear_goal.assert_called_once_with(SESSION)
+        notices = modes.take_notices(SESSION)
+        assert [n.kind for n in notices] == [NoticeKind.GOAL_LOOP_ENTERED]
+        assert notices[0].goal_cleared is True
+        (action, evidence), *_ = _registry_actions(modes)
+        assert action is TransitionAction.ENTER
+        assert "mode=act" in evidence
+        assert recorder.actions() == []
+
+    def test_act_block_lasts_blocked_hours(
+        self, actor: GoalLoopDetectorHandler, modes: SessionModeRegistry, tmp_path: Path
+    ) -> None:
+        actor._blocked_hours = 2
+        transcript = tmp_path / "t.jsonl"
+        shutil.copy(FIXTURES / "similar_stops.jsonl", transcript)
+        actor.handle(_input(transcript))
+        (entry,) = modes.active(SESSION)
+        assert entry.expires_at - entry.entered_at == pytest.approx(7200.0)
+
+    def test_act_enters_once_not_on_every_further_stop(
+        self,
+        actor: GoalLoopDetectorHandler,
+        modes: SessionModeRegistry,
+        clear_goal: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        _append_lines(transcript, [*_cycle(10), *_cycle(20), *_cycle(30)])
+        actor.handle(_input(transcript))
+        _append_lines(transcript, _cycle(40))
+        actor.handle(_input(transcript))
+        assert clear_goal.call_count == 1
+        assert len(modes.take_notices(SESSION)) == 1
+
+    def test_observe_logs_would_enter_once_and_not_on_a_fourth_cycle(
+        self, handler: GoalLoopDetectorHandler, recorder: _Recorder, tmp_path: Path
+    ) -> None:
+        def _never() -> SessionModeRegistry:
+            raise AssertionError("observe mode must not touch the registry")
+
+        handler._registry = _never
+        transcript = tmp_path / "t.jsonl"
+        _append_lines(transcript, [*_cycle(10), *_cycle(20), *_cycle(30)])
+        handler.handle(_input(transcript))
+        _append_lines(transcript, _cycle(40))
+        handler.handle(_input(transcript))
+        assert recorder.actions() == [TransitionAction.WOULD_ENTER]
+
+    def test_a_repo_change_exits_with_the_cause_logged(
+        self, actor: GoalLoopDetectorHandler, modes: SessionModeRegistry, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        shutil.copy(FIXTURES / "similar_stops.jsonl", transcript)
+        actor.handle(_input(transcript))
+        actor._fingerprint_repo = lambda: "fp-changed"
+        _append_lines(transcript, [_stop(500)])
+        result = actor.handle(_input(transcript))
+        assert result.decision == Decision.ALLOW
+        assert _labels(modes) == []
+        assert _registry_actions(modes)[-1] == (
+            TransitionAction.EXIT,
+            "cause=repo-change fingerprint=fp-stable->fp-changed",
+        )
+        assert actor._sessions[SESSION].blocked_fingerprint is None
+
+    def test_an_unchanged_repo_keeps_the_block(
+        self, actor: GoalLoopDetectorHandler, modes: SessionModeRegistry, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        shutil.copy(FIXTURES / "similar_stops.jsonl", transcript)
+        actor.handle(_input(transcript))
+        _append_lines(transcript, [_stop(500)])
+        actor.handle(_input(transcript))
+        assert _labels(modes) == [ModeLabel.GOAL_BLOCKED]
+        assert actor._sessions[SESSION].blocked_fingerprint == "fp-stable"
+
+    def test_an_entry_already_ended_by_a_human_drops_the_fingerprint(
+        self, actor: GoalLoopDetectorHandler, modes: SessionModeRegistry, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        shutil.copy(FIXTURES / "similar_stops.jsonl", transcript)
+        actor.handle(_input(transcript))
+        modes.exit(SESSION, ModeLabel.GOAL_BLOCKED, evidence="cause=human-prompt")
+        actor._fingerprint_repo = lambda: "fp-changed"
+        _append_lines(transcript, [_stop(500)])
+        actor.handle(_input(transcript))
+        assert actor._sessions[SESSION].blocked_fingerprint is None
+        exits = [a for a in _registry_actions(modes) if a[0] is TransitionAction.EXIT]
+        assert exits == [(TransitionAction.EXIT, "cause=human-prompt")]
+
+    @pytest.mark.parametrize("error", [OSError("disk full"), RuntimeError("no data layer")])
+    def test_an_enter_failure_is_a_named_warning_and_the_stop_is_allowed(
+        self,
+        actor: GoalLoopDetectorHandler,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+        error: Exception,
+    ) -> None:
+        def _fail() -> SessionModeRegistry:
+            raise error
+
+        actor._registry = _fail
+        transcript = tmp_path / "t.jsonl"
+        shutil.copy(FIXTURES / "similar_stops.jsonl", transcript)
+        with caplog.at_level(logging.WARNING):
+            result = actor.handle(_input(transcript))
+        assert result.decision == Decision.ALLOW
+        assert actor._sessions[SESSION].blocked_fingerprint is None
+        assert any(
+            "goal-loop detector: goal-blocked mode not entered" in r.getMessage()
+            for r in caplog.records
+        )
+
+    def test_a_repo_change_exit_failure_is_a_named_warning(
+        self,
+        actor: GoalLoopDetectorHandler,
+        modes: SessionModeRegistry,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        shutil.copy(FIXTURES / "similar_stops.jsonl", transcript)
+        actor.handle(_input(transcript))
+        actor._fingerprint_repo = lambda: "fp-changed"
+        _append_lines(transcript, [_stop(500)])
+        with (
+            patch.object(modes, "exit", side_effect=OSError("disk full")),
+            caplog.at_level(logging.WARNING),
+        ):
+            result = actor.handle(_input(transcript))
+        assert result.decision == Decision.ALLOW
+        assert any(
+            "goal-loop detector: the repo-change exit was not made" in r.getMessage()
+            for r in caplog.records
+        )
+
+    def test_a_fingerprint_failure_while_blocked_is_a_named_warning(
+        self,
+        actor: GoalLoopDetectorHandler,
+        modes: SessionModeRegistry,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        shutil.copy(FIXTURES / "similar_stops.jsonl", transcript)
+        actor.handle(_input(transcript))
+
+        def _fail() -> str:
+            raise FingerprintError("git status failed: boom")
+
+        actor._fingerprint_repo = _fail
+        _append_lines(transcript, [_stop(500)])
+        with caplog.at_level(logging.WARNING):
+            result = actor.handle(_input(transcript))
+        assert result.decision == Decision.ALLOW
+        assert _labels(modes) == [ModeLabel.GOAL_BLOCKED]
+        assert any("fingerprint failed" in r.getMessage() for r in caplog.records)
+
+
 class TestProductionSeams:
+    def test_default_registry_is_the_data_layers(self, modes: SessionModeRegistry) -> None:
+        assert GoalLoopDetectorHandler()._registry() is modes
+
+    def test_default_clear_goal_is_the_ipc_clear_signal(self) -> None:
+        with patch(
+            "claude_code_hooks_daemon.daemon.session_mode_ipc.clear_goal_signal",
+            return_value=False,
+        ) as clear:
+            assert GoalLoopDetectorHandler()._clear_goal(SESSION) is False
+        clear.assert_called_once_with(SESSION)
+
     def test_default_append_writes_to_the_transition_log(self, tmp_path: Path) -> None:
         log = MagicMock()
         layer = MagicMock()

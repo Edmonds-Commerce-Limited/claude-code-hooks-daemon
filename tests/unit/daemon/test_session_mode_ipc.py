@@ -9,6 +9,7 @@ session-modes registry; the server dispatch is checked on a bare server.
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock, patch
@@ -20,6 +21,11 @@ from claude_code_hooks_daemon.constants.modes import ModeConstant, SessionModeIP
 from claude_code_hooks_daemon.core.session_mode_registry import SessionModeRegistry
 from claude_code_hooks_daemon.daemon.server import Controller, HooksDaemon
 from claude_code_hooks_daemon.daemon.session_mode_ipc import handle_session_mode_action
+from claude_code_hooks_daemon.utils.session_modes import (
+    ModeLabel,
+    SessionModeEntry,
+    goal_loop_blocked_entry,
+)
 
 _SESSION = "sess-ipc"
 _CLEAR_TARGET = "claude_code_hooks_daemon.daemon.session_mode_ipc.clear_goal_signal"
@@ -40,7 +46,13 @@ def _act(action: str, **fields: Any) -> dict[str, Any]:
 class TestActions:
     def test_the_action_names(self) -> None:
         assert SessionModeIPC.ACTIONS == frozenset(
-            {"get_session_modes", "enter_focus", "exit_focus", "get_mode_history"}
+            {
+                "get_session_modes",
+                "enter_focus",
+                "exit_focus",
+                "get_mode_history",
+                "exit_blocked",
+            }
         )
 
     def test_focus_changes_record_ipc_evidence(self, tmp_path: Path) -> None:
@@ -169,6 +181,43 @@ class TestModeHistory:
             response = _act(SessionModeIPC.ACTION_ENTER_FOCUS, session_id=_SESSION, task="x")
         assert "disk gone" in response["error"]
         assert any(r.levelno == logging.WARNING for r in caplog.records)
+
+
+def _goal_loop_entry(session_id: str) -> SessionModeEntry:
+    return goal_loop_blocked_entry(session_id, entered_at=time.time(), ttl_seconds=3600.0)
+
+
+class TestExitBlocked:
+    """``exit_blocked`` ends only a goal-loop entry; a declared entry is refused (Task 6.3)."""
+
+    def test_unblock_ends_goal_blocked_with_explicit_clear_evidence(
+        self, registry: SessionModeRegistry
+    ) -> None:
+        registry.enter(_goal_loop_entry(_SESSION), evidence="cause=goal-loop")
+        result = _act(SessionModeIPC.ACTION_EXIT_BLOCKED, session_id=_SESSION)["result"]
+        assert result[SessionModeIPC.KEY_OUTCOME] == "unblocked"
+        assert result[SessionModeIPC.KEY_LINE]
+        assert registry.active(_SESSION) == ()
+        log = registry.transition_log
+        assert log is not None
+        assert log.recent(1)[0].evidence == (
+            "cause=explicit-clear (the session-mode CLI or /mode skill)"
+        )
+
+    def test_unblock_with_only_a_declared_entry_is_a_named_error_and_the_entry_stays(
+        self, registry: SessionModeRegistry, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        registry.enter(awaiting_human_entry(_SESSION), evidence="stopped")
+        with caplog.at_level(logging.WARNING):
+            response = _act(SessionModeIPC.ACTION_EXIT_BLOCKED, session_id=_SESSION)
+        assert "result" not in response
+        assert "genuine prompt from the human" in response["error"]
+        assert [e.label for e in registry.active(_SESSION)] == [ModeLabel.AWAITING_HUMAN]
+        assert any(r.levelno == logging.WARNING for r in caplog.records)
+
+    def test_unblock_with_nothing_blocked_is_not_blocked(self) -> None:
+        result = _act(SessionModeIPC.ACTION_EXIT_BLOCKED, session_id=_SESSION)["result"]
+        assert result[SessionModeIPC.KEY_OUTCOME] == "not-blocked"
 
 
 def test_the_goal_clear_writes_the_real_clear_signal(tmp_path: Path) -> None:

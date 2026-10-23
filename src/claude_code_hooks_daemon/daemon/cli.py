@@ -2217,6 +2217,11 @@ def _session_mode_request(args: argparse.Namespace, session_id: str) -> dict[str
             "action": SessionModeIPC.ACTION_GET_SESSION_MODES,
             SessionModeIPC.KEY_SESSION_ID: session_id,
         }
+    if args.verb == "unblock":
+        return {
+            "action": SessionModeIPC.ACTION_EXIT_BLOCKED,
+            SessionModeIPC.KEY_SESSION_ID: session_id,
+        }
     if not words:
         return None
     if len(words) == 1 and words[0].lower() in SessionModeIPC.FOCUS_OFF_ALIASES:
@@ -2347,7 +2352,9 @@ def cmd_session_mode(args: argparse.Namespace) -> int:
     """Show or change THIS session's session modes (Plan 00501 Task 3.3).
 
     ``get`` (the default) lists the modes; ``focus <task>`` turns focus on and
-    ``focus off`` (or ``done``, ``end``, ``disable``) turns it off. The session
+    ``focus off`` (or ``done``, ``end``, ``disable``) turns it off. ``unblock``
+    (Task 6.3) ends a goal-loop block; the declared awaiting-human block is
+    refused with the daemon's named error and exit code 1. The session
     is ``--session`` or the ``CLAUDE_CODE_SESSION_ID`` a Bash tool call carries.
     The daemon-wide ``get-mode``/``set-mode`` are separate and unchanged.
 
@@ -11005,10 +11012,17 @@ def build_parser() -> argparse.ArgumentParser:
     # session-mode command (Plan 00501 Task 3.3): one session's modes
     parser_session_mode = subparsers.add_parser(
         "session-mode",
-        help="Show or change this session's session modes (get | focus <task> | focus off)",
+        help=(
+            "Show or change this session's session modes "
+            "(get | focus <task> | focus off | unblock)"
+        ),
     )
     parser_session_mode.add_argument(
-        "verb", nargs="?", default="get", choices=["get", "focus"], help="get (default) or focus"
+        "verb",
+        nargs="?",
+        default="get",
+        choices=["get", "focus", "unblock"],
+        help="get (default), focus, or unblock (end a goal-loop block; not awaiting-human)",
     )
     parser_session_mode.add_argument(
         "words", nargs="*", help="focus: the task, or off/done/end/disable"

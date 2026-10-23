@@ -37,12 +37,15 @@ class SessionModeIPC:
     ACTION_EXIT_FOCUS = "exit_focus"
     #: Every session's live modes and the recent transitions (Task 4.3).
     ACTION_GET_MODE_HISTORY = "get_mode_history"
+    #: End a goal-loop (detector) block; a declared awaiting-human block is refused (Task 6.3).
+    ACTION_EXIT_BLOCKED = "exit_blocked"
     ACTIONS = frozenset(
         {
             ACTION_GET_SESSION_MODES,
             ACTION_ENTER_FOCUS,
             ACTION_EXIT_FOCUS,
             ACTION_GET_MODE_HISTORY,
+            ACTION_EXIT_BLOCKED,
         }
     )
 
