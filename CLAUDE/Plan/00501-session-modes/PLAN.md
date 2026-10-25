@@ -206,7 +206,7 @@ All CLEAR; rationale and code citations in
   delivered, focus off; awaiting-human in one session not cleared by another; a live goal loop caught in observe
   mode, then in act mode, observing the supervisor's `/goal clear` landing during the stop loop itself (spike 0.3
   saw it only in tool-calling turns).
-- [ ] 🚫 **Task 7.3** (blocked on time: three true positives or two releases; the count began 2026-10-23): Tune thresholds from the observe log and flip the default to `act` after three true positives
+- [ ] 🚫 **Task 7.3** (blocked on organic evidence or a human-gated release: three true positives or two releases; the count began 2026-10-23): Tune thresholds from the observe log and flip the default to `act` after three true positives
   and no false positive, or after two releases, whichever is first.
 
 ### Phase 8: Manual goals (#106)
