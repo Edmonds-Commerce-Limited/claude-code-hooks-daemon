@@ -1,6 +1,6 @@
 # Plan 00501: session modes
 
-**Status**: Blocked on the owner (Task 7.2 needs an owner-driven live acceptance session; Task 7.3's flip needs a human-gated release or a third organic true positive; the observe-log dedup is the only agent-workable step)
+**Status**: Blocked on the owner (Task 7.2 needs an owner-driven live acceptance session; Task 7.3's flip needs a human-gated release or a third organic true positive; the observe-log dedup, the one agent-workable step, merged at b1c26ef4f)
 **Created**: 2026-10-08
 **Owner**: dev
 **Priority**: Medium
