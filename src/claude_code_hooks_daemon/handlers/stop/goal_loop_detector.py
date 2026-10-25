@@ -84,6 +84,7 @@ from claude_code_hooks_daemon.core.goal_loop import (
     CheckpointInvalidError,
     CycleRing,
     DetectorMode,
+    EventKind,
     FingerprintError,
     GoalLoopConfig,
     RingReset,
@@ -128,6 +129,12 @@ _VERDICT_ACTION: Final[dict[Verdict, TransitionAction]] = {
 }
 
 
+#: Transcript events that end a loop: a human prompt, or the goal met or cleared.
+_RESET_EVENTS: Final[frozenset[EventKind]] = frozenset(
+    {EventKind.HUMAN, EventKind.GOAL_CLEARED, EventKind.GOAL_MET}
+)
+
+
 @dataclass(slots=True)
 class _SessionState:
     """What the detector remembers about one session between Stops."""
@@ -136,6 +143,9 @@ class _SessionState:
     checkpoint: Checkpoint | None = None
     #: The repository fingerprint when act mode entered GOAL_BLOCKED; None when not watching.
     blocked_fingerprint: str | None = None
+    #: The fingerprint observe mode last logged ``would-enter`` for; None when not latched.
+    #: While it matches, no further near-miss or would-enter is logged for that loop.
+    observed_fingerprint: str | None = None
 
 
 class GoalLoopDetectorHandler(StopHandlerBase):
@@ -237,6 +247,10 @@ class GoalLoopDetectorHandler(StopHandlerBase):
         fed = state.ring.feed(extraction.events)
         for reset in fed.resets:
             self._log_reset(session_id, reset)
+        # A reset event ends the loop even when the ring was already empty (so no
+        # logged reset): the next loop may be logged again.
+        if any(event.kind in _RESET_EVENTS for event in extraction.events):
+            state.observed_fingerprint = None
         if fed.new_cycles == 0 and state.blocked_fingerprint is None:
             return allow
         try:
@@ -251,13 +265,17 @@ class GoalLoopDetectorHandler(StopHandlerBase):
         repo_reset = state.ring.note_fingerprint(fingerprint, new_cycles=fed.new_cycles)
         if repo_reset is not None:
             self._log_reset(session_id, repo_reset)
+        if state.observed_fingerprint != fingerprint:
+            state.observed_fingerprint = None
         assessment = assess(state.ring, config)
         evidence = assessment.evidence(config, state.ring.fingerprint)
         if assessment.verdict is Verdict.WOULD_ENTER and config.mode is DetectorMode.ACT:
             self._enter(session_id, state, config, evidence, fingerprint)
-        else:
+        elif state.observed_fingerprint is None:
             action = _VERDICT_ACTION.get(assessment.verdict)
             if action is not None:
+                if assessment.verdict is Verdict.WOULD_ENTER:
+                    state.observed_fingerprint = fingerprint
                 self._log(
                     ModeTransition(
                         at=self._clock(),
@@ -268,7 +286,8 @@ class GoalLoopDetectorHandler(StopHandlerBase):
                     )
                 )
         if assessment.verdict is Verdict.WOULD_ENTER:
-            # Logged (or entered) once per loop, not on every further Stop of it.
+            # Counted afresh; observe mode's ``observed_fingerprint`` latch (and act
+            # mode's ``blocked_fingerprint``) keeps the loop to one entry.
             state.ring.restart_count()
         return allow
 
