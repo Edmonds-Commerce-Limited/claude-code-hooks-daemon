@@ -332,17 +332,16 @@ class TestStandDowns:
             "checkpoint invalid, re-anchored at EOF" in r.getMessage() for r in caplog.records
         )
         # The anchor sits at EOF: the cycle already on disk is never counted, and
-        # only what is appended after it is. The ring restarted at the first
-        # would-enter, so two appended cycles are a near miss, not a third cycle.
-        _append_lines(transcript, [*_cycle(50), *_cycle(60)])
+        # only what is appended after it is counted (the ring restarted at the
+        # first would-enter). The loop is latched on the same fingerprint, so
+        # those cycles log nothing; a human prompt re-arms it, and three fresh
+        # cycles are then a new loop.
+        _append_lines(transcript, [*_cycle(50), *_cycle(60), *_cycle(70)])
         handler.handle(_input(transcript))
-        assert recorder.actions()[before:] == [TransitionAction.NEAR_MISS]
-        _append_lines(transcript, _cycle(70))
+        assert recorder.actions()[before:] == []
+        _append_lines(transcript, [_human(80), *_cycle(90), *_cycle(100), *_cycle(110)])
         handler.handle(_input(transcript))
-        assert recorder.actions()[before:] == [
-            TransitionAction.NEAR_MISS,
-            TransitionAction.WOULD_ENTER,
-        ]
+        assert recorder.actions()[before:] == [TransitionAction.WOULD_ENTER]
         assert "cycles=3" in recorder.transitions[-1].evidence
 
     def test_fingerprint_failure_is_a_named_warning_and_skips_the_assessment(
@@ -495,6 +494,74 @@ class TestActMode:
         _append_lines(transcript, _cycle(40))
         handler.handle(_input(transcript))
         assert recorder.actions() == [TransitionAction.WOULD_ENTER]
+
+    def test_observe_logs_one_would_enter_per_loop_across_many_stops(
+        self, handler: GoalLoopDetectorHandler, recorder: _Recorder, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        _append_lines(transcript, [*_cycle(10), *_cycle(20), *_cycle(30)])
+        handler.handle(_input(transcript))
+        for start in (40, 50, 60, 70, 80, 90):
+            _append_lines(transcript, _cycle(start))
+            handler.handle(_input(transcript))
+        assert recorder.actions() == [TransitionAction.WOULD_ENTER]
+
+    def test_a_human_prompt_re_arms_the_would_enter(
+        self, handler: GoalLoopDetectorHandler, recorder: _Recorder, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        _append_lines(transcript, [*_cycle(10), *_cycle(20), *_cycle(30)])
+        handler.handle(_input(transcript))
+        _append_lines(transcript, [_human(40), *_cycle(50), *_cycle(60), *_cycle(70)])
+        handler.handle(_input(transcript))
+        assert recorder.actions() == [TransitionAction.WOULD_ENTER, TransitionAction.WOULD_ENTER]
+
+    def test_a_goal_cleared_re_arms_the_would_enter(
+        self, handler: GoalLoopDetectorHandler, recorder: _Recorder, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        _append_lines(transcript, [*_cycle(10), *_cycle(20), *_cycle(30)])
+        handler.handle(_input(transcript))
+        cleared = json.dumps(
+            {
+                "type": "attachment",
+                "attachment": {"type": "goal_status", "met": True, "condition": "done"},
+                "timestamp": _stamp(40),
+            }
+        )
+        _append_lines(transcript, [cleared, *_cycle(50), *_cycle(60), *_cycle(70)])
+        handler.handle(_input(transcript))
+        assert recorder.actions() == [TransitionAction.WOULD_ENTER, TransitionAction.WOULD_ENTER]
+
+    def test_a_changed_fingerprint_re_arms_the_would_enter(
+        self, handler: GoalLoopDetectorHandler, recorder: _Recorder, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        _append_lines(transcript, [*_cycle(10), *_cycle(20), *_cycle(30)])
+        handler.handle(_input(transcript))
+        handler._fingerprint_repo = lambda: "fp-changed"
+        _append_lines(transcript, [*_cycle(40), *_cycle(50), *_cycle(60)])
+        handler.handle(_input(transcript))
+        assert recorder.actions() == [TransitionAction.WOULD_ENTER, TransitionAction.WOULD_ENTER]
+        assert "fingerprint=fp-changed" in recorder.transitions[-1].evidence
+
+    def test_near_misses_stop_for_a_latched_fingerprint(
+        self, handler: GoalLoopDetectorHandler, recorder: _Recorder, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        _append_lines(transcript, [*_cycle(10), *_cycle(20), *_cycle(30)])
+        handler.handle(_input(transcript))
+        _append_lines(transcript, [*_cycle(40), *_cycle(50)])
+        handler.handle(_input(transcript))
+        assert recorder.actions() == [TransitionAction.WOULD_ENTER]
+
+    def test_would_enter_records_the_latched_fingerprint(
+        self, handler: GoalLoopDetectorHandler, recorder: _Recorder, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        _append_lines(transcript, [*_cycle(10), *_cycle(20), *_cycle(30)])
+        handler.handle(_input(transcript))
+        assert handler._sessions[SESSION].observed_fingerprint == "fp-stable"
 
     def test_a_repo_change_exits_with_the_cause_logged(
         self, actor: GoalLoopDetectorHandler, modes: SessionModeRegistry, tmp_path: Path
