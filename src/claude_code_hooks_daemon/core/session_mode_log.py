@@ -77,6 +77,9 @@ class TransitionAction(StrEnum):
     NEAR_MISS = "near-miss"
     WOULD_ENTER = "would-enter"
     LOOP_RESET = "loop-reset"
+    # A loop that stays latched (observe) or blocked (act) across further threshold
+    # crossings; carries the cycles, crossings and first-seen time.
+    LOOP_PERSISTING = "loop-persisting"
     # A typed `/goal clear` and who it is attributed to (Plan 00501 Task 8.2; detail).
     GOAL_CLEAR = "goal-clear"
 

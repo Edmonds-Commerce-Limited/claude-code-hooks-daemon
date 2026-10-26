@@ -125,14 +125,23 @@ The focus failsafe line reads: `focus mode: the active task is <task>; other pla
 `goal_loop_detector` (Stop, main thread) catches a session that keeps stopping
 with `STOPPING BECAUSE:` while the goal evaluator keeps answering "not met",
 with no human prompt in between. It counts cycles inside a window and resets on
-a human prompt, a met or cleared goal, or a repository change (HEAD plus
-tracked changes; plan journals and `untracked/` excluded). A stop declaring
+a human prompt, a met or cleared goal, or a repository change (the committed
+tree plus tracked changes; plan journals and `untracked/` excluded, so a
+journal-only commit is not a change). A stop declaring
 `[awaiting-human]` counts toward a lower threshold. Stop-text similarity is
 logged as evidence only, never a firing condition.
 
-- **`observe` (default)** only logs `near-miss`, `would-enter` and
-  `loop-reset` records to the transition log. It never blocks and never enters
-  a mode.
+- **`observe` (default)** only logs `near-miss`, `would-enter`, `loop-reset`
+  and `loop-persisting` records to the transition log. It never blocks and
+  never enters a mode.
+- **`loop-persisting`** (both modes) is logged every `persist_every_crossings`
+  (default 5) further threshold crossings of a loop that is already latched
+  (observe) or blocked (act), with `cycles`, `crossings` and `since` (when the
+  loop was first seen). The first one for a loop queues one line for the agent
+  at its next prompt: say plainly to the human that the goal is unsatisfiable
+  and that `/goal clear` or `bin/hooks-daemon clear-goal` ends it. The agent is
+  not told to clear the goal itself. A fingerprint change, a human prompt, or a
+  goal met or cleared starts the counters over.
 - **`act` (opt-in, `mode: act`)** at the threshold enters `goal-blocked` and
   clears the goal, so the supervisor types `/goal clear` and stops driving the
   loop. The session is told once at its next prompt.
