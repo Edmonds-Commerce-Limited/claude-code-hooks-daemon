@@ -558,8 +558,11 @@ class AutoContinueStopHandler(StopHandlerBase):
         rf"should I {_CONTINUE_VERBS}",
         rf"shall I {_CONTINUE_VERBS}",
         rf"(?:do you )?want me to {_CONTINUE_VERBS}",
-        rf"may I {_CONTINUE_VERBS}",
-        rf"can I {_CONTINUE_VERBS}",
+        # "may I"/"can I" followed by a verb and an inline code span ("May I
+        # run `cmd`?") asks for authority to run a named command, which is a
+        # genuine owner question, not a request to continue.
+        rf"may I {_CONTINUE_VERBS}\b(?!\s*`)",
+        rf"can I {_CONTINUE_VERBS}\b(?!\s*`)",
         rf"ready (?:for me )?to {_CONTINUE_VERBS}",
         rf"shall we {_CONTINUE_VERBS}",
         r"continue with (?:batch|phase|step)",
