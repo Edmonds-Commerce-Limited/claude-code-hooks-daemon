@@ -34,7 +34,9 @@ CONFLICTED_INIT = "echo before\n<<<<<<< HEAD\necho ours\n=======\necho theirs\n>
 HEALTHY_INIT = "echo INIT_SOURCED\nexit 0\n"
 STATUS_LINE = "status-line"
 RAW_STDOUT_KEYS = raw_stdout_bash_keys()
-EVENTS: dict[str, str] = {bash_key: json_key for json_key, bash_key in HOOK_EVENTS_IN_SETTINGS.items()}
+EVENTS: dict[str, str] = {
+    bash_key: json_key for json_key, bash_key in HOOK_EVENTS_IN_SETTINGS.items()
+}
 
 
 def _stub(tmp_path: Path, hook_name: str, *, relay: bool = False) -> Path:

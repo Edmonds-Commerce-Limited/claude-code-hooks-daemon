@@ -50,6 +50,16 @@ from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 #: makes generation a pure text transform rather than a bash-shape assumption.
 INIT_SH_ANCHOR: str = 'source "$SCRIPT_DIR/../init.sh"\n'
 
+INIT_PARSE_GUARD_HEADER: Final[str] = "# --- init.sh parse guard (generated; Plan 00552) ---\n"
+INIT_PARSE_GUARD_FOOTER: Final[str] = "# --- end init.sh parse guard ---\n"
+_INIT_PARSE_GUARD_PATTERN = re.compile(
+    re.escape(INIT_PARSE_GUARD_HEADER) + r".*?" + re.escape(INIT_PARSE_GUARD_FOOTER), re.DOTALL
+)
+
+#: What the parse guard tells the user to do. Plan 00552 Phase 3 replaces this
+#: with the repair verb once it exists.
+INIT_REPAIR_HINT: Final[str] = "restore it from the daemon install or rerun the installer"
+
 #: Carries the daemon root to hooks-relay. Twin of ``DAEMON_ROOT_ENV`` in
 #: relay/hooks_relay.rs.
 RELAY_DAEMON_ROOT_ENV: Final[str] = "HOOKS_DAEMON_RELAY_DAEMON_ROOT"
@@ -206,6 +216,62 @@ def apply_raw_stdout_daemon_down(source_content: str, event_file_name: str) -> s
         return source_content
     rendered = _render_raw_stdout_daemon_down_block(event_file_name)
     return _ENSURE_DAEMON_BLOCK_PATTERN.sub(lambda _m: rendered, source_content, count=1)
+
+
+def build_init_parse_guard_block(event_file_name: str) -> str:
+    """The block that makes a forwarder fail open when ``init.sh`` does not parse.
+
+    A conflicted or truncated ``init.sh`` makes ``source`` die with bash's
+    syntax-error status 2, which Claude Code reads as BLOCK for every event.
+    ``bash -n`` checks the file first; on failure the forwarder answers
+    non-blocking (exit 0, or the event's own ``daemon_down_exit_code`` for a
+    ``raw_stdout`` event) and names the file and the repair step.
+
+    The answer is built from bash builtins only, because ``init.sh`` and its
+    ``emit_hook_error`` are exactly what cannot be trusted here. A JSON event
+    gets ``{"systemMessage": ...}``; a ``raw_stdout`` display line gets the
+    text; a ``raw_stdout`` value gets nothing on stdout. The ``bash -n``
+    diagnostic is captured into a variable and sent to stderr, never discarded.
+    """
+    meta = _METAS_BY_BASH_KEY[event_file_name]
+    message = (
+        f"hooks daemon: $_ip_file does not parse (merge conflict markers?), "
+        f"so hooks are not running. Repair: {INIT_REPAIR_HINT}."
+    )
+    if not meta.raw_stdout:
+        answer = (
+            r'    _ip_json="${_ip_msg//\\/\\\\}"; _ip_json="${_ip_json//\"/\\\"}"' + "\n"
+            r"""    printf '{"systemMessage":"%s"}\n' "$_ip_json" """.rstrip() + "\n"
+        )
+    elif meta.daemon_down_stdout:
+        answer = r"""    printf '⚠ %s\n' "$_ip_msg" """.rstrip() + "\n"
+    else:
+        answer = "    # This stdout is parsed as a VALUE, so nothing may be printed.\n"
+    return (
+        INIT_PARSE_GUARD_HEADER
+        + '_ip_file="$SCRIPT_DIR/../init.sh"\n'
+        + 'if ! _ip_err="$(bash -n "$_ip_file" 2>&1)"; then\n'
+        + f'    _ip_msg="{message}"\n'
+        + '    echo "HOOKS DAEMON ERROR [init_sh_unparseable]: $_ip_msg $_ip_err" >&2\n'
+        + answer
+        + f"    exit {meta.daemon_down_exit_code if meta.raw_stdout else 0}\n"
+        + "fi\n"
+        + "unset _ip_file _ip_err\n"
+        + INIT_PARSE_GUARD_FOOTER
+    )
+
+
+def apply_init_parse_guard(source_content: str, event_file_name: str) -> str:
+    """Strip any parse guard, then insert a fresh one directly above the ``init.sh`` source line.
+
+    Idempotent. A source without the anchor (a non-standard forwarder shape) is
+    returned without a guard rather than guessing an insertion point.
+    """
+    stripped = _INIT_PARSE_GUARD_PATTERN.sub("", source_content)
+    if INIT_SH_ANCHOR not in stripped:
+        return stripped
+    guard = build_init_parse_guard_block(event_file_name)
+    return stripped.replace(INIT_SH_ANCHOR, guard + INIT_SH_ANCHOR, 1)
 
 
 def _default_relay_binary_path(untracked_dir: Path) -> str:
@@ -909,13 +975,16 @@ def generate_forwarder_content(
     the catalogue's per-event ``daemon_down_stdout`` text, if any.
     """
     result = apply_raw_stdout_daemon_down(strip_relay_guard_block(source_content), event_file_name)
+    result = apply_init_parse_guard(result, event_file_name)
+    # The relay hot path goes ABOVE the parse guard: a relayed hook never
+    # sources init.sh, so it must not pay for `bash -n` on it.
     if (
         transport.relay_enabled
         and event_file_name not in RELAY_EXCLUDED_EVENT_FILE_NAMES
-        and INIT_SH_ANCHOR in result
+        and INIT_PARSE_GUARD_HEADER in result
     ):
         guard = build_relay_guard_block(event_file_name, transport, untracked_dir, project_root)
-        result = result.replace(INIT_SH_ANCHOR, guard + INIT_SH_ANCHOR, 1)
+        result = result.replace(INIT_PARSE_GUARD_HEADER, guard + INIT_PARSE_GUARD_HEADER, 1)
     result = strip_status_fast_path_block(result)
     if (
         event_file_name == STATUS_FAST_PATH_EVENT_FILE_NAME

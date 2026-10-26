@@ -1,6 +1,6 @@
 # Plan 00552: conflict marker hook bricking
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-26
 **Owner**: dev
 **Priority**: High
@@ -44,8 +44,8 @@ The defence comes in layers:
 
 ### Phase 1: Fail open on a corrupt `init.sh`
 
-- [ ] ⬜ **Task 1.1**: Write failing tests first: a stub whose `init.sh` contains conflict markers must exit 0, emit a non-blocking error naming the file and the repair command, and never exit 2. Cover every event stub, and UserPromptSubmit and Stop in particular.
-- [ ] ⬜ **Task 1.2**: Add the `bash -n` guard to the stub template(s) and regenerate the deployed stubs. Measure the hot-path cost: the relay hot path runs before `init.sh`.
+- [x] ✅ **Task 1.1**: Write failing tests first: a stub whose `init.sh` contains conflict markers must exit 0, emit a non-blocking error naming the file and the repair command, and never exit 2. Cover every event stub, and UserPromptSubmit and Stop in particular.
+- [x] ✅ **Task 1.2**: Add the `bash -n` guard to the stub template(s) and regenerate the deployed stubs. Measure the hot-path cost: the relay hot path runs before `init.sh`.
 
 ### Phase 2: Prevent markers
 

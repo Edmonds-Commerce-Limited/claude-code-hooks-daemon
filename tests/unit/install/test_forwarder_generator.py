@@ -19,6 +19,7 @@ from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.install.forwarder_generator import (
     INIT_SH_ANCHOR,
     RELAY_DAEMON_ROOT_ENV,
+    apply_init_parse_guard,
     build_relay_guard_block,
     generate_forwarder_content,
     load_transport_config,
@@ -42,6 +43,10 @@ source "$SCRIPT_DIR/../init.sh"
 
 send_request_stdin "PreToolUse"
 """
+
+#: What a disabled-transport generation yields: the source plus the always-on
+#: init.sh parse guard (Plan 00552), which is not a transport option.
+_GUARDED_SAMPLE = apply_init_parse_guard(_SAMPLE_SOURCE, "pre-tool-use")
 
 #: The checkout most cases below generate for. Two constants, not two
 #: literals per call: the guard bakes BOTH the untracked dir and the checkout
@@ -67,7 +72,7 @@ def test_disabled_transport_returns_source_unchanged() -> None:
         _SAMPLE_SOURCE, "pre-tool-use", transport, _UNTRACKED, _ROOT
     )
 
-    assert result == _SAMPLE_SOURCE
+    assert result == _GUARDED_SAMPLE
 
 
 @pytest.mark.parametrize(
@@ -165,7 +170,7 @@ def test_f1_disabled_config_strips_a_foreign_guard_entirely() -> None:
 
     assert "relay hot path" not in result
     assert "/workspace/untracked" not in result
-    assert result == _SAMPLE_SOURCE
+    assert result == _GUARDED_SAMPLE
 
 
 def test_f2_enabled_config_replaces_foreign_guard_with_clients_own_paths() -> None:
@@ -199,7 +204,7 @@ def test_f4_disabling_transport_strips_a_previously_generated_guard() -> None:
         previously_generated, "pre-tool-use", disabled_transport, _UNTRACKED, _ROOT
     )
 
-    assert result == _SAMPLE_SOURCE
+    assert result == _GUARDED_SAMPLE
 
 
 @pytest.mark.parametrize("event_file_name", ["stop", "subagent-stop"])
@@ -218,7 +223,7 @@ def test_relay_guard_excludes_stop_events(event_file_name: str) -> None:
     result = generate_forwarder_content(source, event_file_name, transport, _UNTRACKED, _ROOT)
 
     assert "relay hot path" not in result
-    assert result == source
+    assert result == apply_init_parse_guard(source, event_file_name)
 
 
 def test_relay_guard_excluded_but_nc_still_applies_to_stop() -> None:
@@ -267,7 +272,7 @@ def test_relay_guard_excludes_raw_stdout_events(event_file_name: str) -> None:
 
     assert "relay hot path" not in result
     # The status line gets its own fast path (Plan 00542), which is not the relay guard.
-    assert strip_status_fast_path_block(result) == source
+    assert strip_status_fast_path_block(result) == apply_init_parse_guard(source, event_file_name)
 
 
 @pytest.mark.parametrize("hook_file", ["status-line", "worktree-create"])
@@ -530,7 +535,7 @@ def test_nc_disabled_leaves_call_site_unchanged() -> None:
     result = generate_forwarder_content(
         _SAMPLE_SOURCE, "pre-tool-use", transport, _UNTRACKED, _ROOT
     )
-    assert result == _SAMPLE_SOURCE
+    assert result == _GUARDED_SAMPLE
 
 
 def test_nc_enabled_appends_bash_key_to_send_request_stdin_call() -> None:
@@ -913,4 +918,4 @@ def test_stripping_still_removes_a_guard_that_carries_the_checkout_test() -> Non
     generated = generate_forwarder_content(
         _SAMPLE_SOURCE, "pre-tool-use", TransportConfig(relay_enabled=True), _UNTRACKED, _ROOT
     )
-    assert strip_relay_guard_block(generated) == _SAMPLE_SOURCE
+    assert strip_relay_guard_block(generated) == _GUARDED_SAMPLE
