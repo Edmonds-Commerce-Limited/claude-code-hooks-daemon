@@ -85,10 +85,12 @@ _OPTION_CYCLE_THRESHOLD: Final[str] = "cycle_threshold"
 _OPTION_DECLARED_THRESHOLD: Final[str] = "declared_cycle_threshold"
 _OPTION_WINDOW_MINUTES: Final[str] = "window_minutes"
 _OPTION_BLOCKED_HOURS: Final[str] = "blocked_hours"
+_OPTION_PERSIST_EVERY: Final[str] = "persist_every_crossings"
 _INT_OPTIONS: Final[tuple[str, ...]] = (
     _OPTION_CYCLE_THRESHOLD,
     _OPTION_DECLARED_THRESHOLD,
     _OPTION_WINDOW_MINUTES,
+    _OPTION_PERSIST_EVERY,
 )
 
 
@@ -390,6 +392,7 @@ class GoalLoopConfig:
     declared_cycle_threshold: int = 2
     window_minutes: int = 30
     blocked_hours: float = 4
+    persist_every_crossings: int = 5
 
     def __post_init__(self) -> None:
         """Refuse an invalid value. Raises ``ValueError`` naming the option."""
@@ -400,6 +403,7 @@ class GoalLoopConfig:
                 _OPTION_DECLARED_THRESHOLD: self.declared_cycle_threshold,
                 _OPTION_WINDOW_MINUTES: self.window_minutes,
                 _OPTION_BLOCKED_HOURS: self.blocked_hours,
+                _OPTION_PERSIST_EVERY: self.persist_every_crossings,
             }
         )
         if problems:
@@ -424,6 +428,9 @@ class GoalLoopConfig:
             ),
             window_minutes=options.get(_OPTION_WINDOW_MINUTES, defaults.window_minutes),
             blocked_hours=options.get(_OPTION_BLOCKED_HOURS, defaults.blocked_hours),
+            persist_every_crossings=options.get(
+                _OPTION_PERSIST_EVERY, defaults.persist_every_crossings
+            ),
         )
 
     @property

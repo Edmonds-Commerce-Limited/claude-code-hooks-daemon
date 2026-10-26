@@ -1066,3 +1066,154 @@ class TestTransitionActions:
         assert TransitionAction("near-miss") is TransitionAction.NEAR_MISS
         assert TransitionAction("would-enter") is TransitionAction.WOULD_ENTER
         assert TransitionAction("loop-reset") is TransitionAction.LOOP_RESET
+        assert TransitionAction("loop-persisting") is TransitionAction.LOOP_PERSISTING
+        assert TransitionAction("loop-persisting") is TransitionAction.LOOP_PERSISTING
+
+
+def _batches(
+    transcript: Path, handler: GoalLoopDetectorHandler, count: int, *, start: int = 10
+) -> None:
+    """Append ``count`` batches of three cycles (one threshold crossing each) and handle each."""
+    second = start
+    for _ in range(count):
+        _append_lines(transcript, [line for k in range(3) for line in _cycle(second + 10 * k)])
+        handler.handle(_input(transcript))
+        second += 40
+
+
+class TestLoopPersisting:
+    """A latched or blocked loop counts further crossings and escalates (D2, D3)."""
+
+    @pytest.fixture
+    def watcher(
+        self, handler: GoalLoopDetectorHandler, modes: SessionModeRegistry
+    ) -> GoalLoopDetectorHandler:
+        handler._registry = lambda: modes
+        handler._persist_every_crossings = 3
+        return handler
+
+    def test_ten_batches_give_one_would_enter_and_persisting_records_and_one_notice(
+        self,
+        watcher: GoalLoopDetectorHandler,
+        modes: SessionModeRegistry,
+        recorder: _Recorder,
+        tmp_path: Path,
+    ) -> None:
+        _batches(tmp_path / "t.jsonl", watcher, 10)
+        actions = recorder.actions()
+        assert actions.count(TransitionAction.WOULD_ENTER) == 1
+        # Nine further crossings with a record every third one.
+        persisting = [
+            t for t in recorder.transitions if t.action is TransitionAction.LOOP_PERSISTING
+        ]
+        assert len(persisting) == 3
+        first = persisting[0].evidence
+        assert "cycles=12" in first
+        assert "crossings=3" in first
+        assert "since=2026-01-05T10:00:11+00:00" in first
+        assert "fingerprint=fp-stable" in first
+        assert "crossings=9" in persisting[-1].evidence
+        lines = modes.take_lines(SESSION)
+        assert len(lines) == 1
+        assert "/goal clear" in lines[0]
+        assert "bin/hooks-daemon clear-goal" in lines[0]
+        assert "unsatisfiable" in lines[0]
+        assert "fp-stable" in lines[0]
+
+    def test_the_default_is_every_fifth_crossing(
+        self,
+        handler: GoalLoopDetectorHandler,
+        modes: SessionModeRegistry,
+        recorder: _Recorder,
+        tmp_path: Path,
+    ) -> None:
+        handler._registry = lambda: modes
+        _batches(tmp_path / "t.jsonl", handler, 10)
+        persisting = [
+            t for t in recorder.transitions if t.action is TransitionAction.LOOP_PERSISTING
+        ]
+        assert len(persisting) == 1
+        assert "crossings=5" in persisting[0].evidence
+
+    def test_the_notice_does_not_tell_the_agent_to_clear_the_goal_itself(
+        self, watcher: GoalLoopDetectorHandler, modes: SessionModeRegistry, tmp_path: Path
+    ) -> None:
+        _batches(tmp_path / "t.jsonl", watcher, 5)
+        (line,) = modes.take_lines(SESSION)
+        assert "say plainly to the human" in line.lower()
+        assert "run `bin/hooks-daemon clear-goal`" not in line
+        assert "you run" not in line.lower()
+
+    def test_a_fingerprint_change_resets_the_counters(
+        self,
+        watcher: GoalLoopDetectorHandler,
+        modes: SessionModeRegistry,
+        recorder: _Recorder,
+        tmp_path: Path,
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        _batches(transcript, watcher, 3)
+        watcher._fingerprint_repo = lambda: "fp-changed"
+        second = 1000
+        for _ in range(2):
+            _append_lines(transcript, [line for k in range(3) for line in _cycle(second + 10 * k)])
+            watcher.handle(_input(transcript))
+            second += 40
+        actions = recorder.actions()
+        assert actions.count(TransitionAction.WOULD_ENTER) == 2
+        # Two crossings before the change and one after: neither run reached three.
+        assert TransitionAction.LOOP_PERSISTING not in actions
+        assert modes.take_lines(SESSION) == ()
+
+    def test_a_human_prompt_resets_the_counters(
+        self,
+        watcher: GoalLoopDetectorHandler,
+        modes: SessionModeRegistry,
+        recorder: _Recorder,
+        tmp_path: Path,
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        _batches(transcript, watcher, 3)
+        _append_lines(transcript, [_human(500)])
+        watcher.handle(_input(transcript))
+        second = 1000
+        for _ in range(2):
+            _append_lines(transcript, [line for k in range(3) for line in _cycle(second + 10 * k)])
+            watcher.handle(_input(transcript))
+            second += 40
+        assert TransitionAction.LOOP_PERSISTING not in recorder.actions()
+
+    def test_act_mode_counts_crossings_while_blocked_and_notifies_once(
+        self,
+        actor: GoalLoopDetectorHandler,
+        modes: SessionModeRegistry,
+        clear_goal: MagicMock,
+        recorder: _Recorder,
+        tmp_path: Path,
+    ) -> None:
+        actor._persist_every_crossings = 2
+        _batches(tmp_path / "t.jsonl", actor, 7)
+        assert clear_goal.call_count == 1
+        persisting = [
+            t for t in recorder.transitions if t.action is TransitionAction.LOOP_PERSISTING
+        ]
+        assert len(persisting) == 3
+        assert len(modes.take_lines(SESSION)) == 1
+        assert [n.kind for n in modes.take_notices(SESSION)] == [NoticeKind.GOAL_LOOP_ENTERED]
+
+    def test_a_registry_failure_is_a_warning_and_the_notice_is_retried(
+        self,
+        watcher: GoalLoopDetectorHandler,
+        modes: SessionModeRegistry,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        with monkeypatch.context() as failing, caplog.at_level(logging.WARNING):
+            failing.setattr(modes, "queue_line", MagicMock(side_effect=OSError("disk full")))
+            _batches(transcript, watcher, 4)
+        assert any("persisting notice" in r.getMessage() for r in caplog.records)
+        assert modes.take_lines(SESSION) == ()
+        _batches(transcript, watcher, 3, start=1000)
+        assert len(modes.take_lines(SESSION)) == 1

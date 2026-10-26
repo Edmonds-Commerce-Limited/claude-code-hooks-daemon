@@ -13,7 +13,13 @@ session-mode transition log:
 * ``loop-reset`` when a human prompt, a goal met or cleared, or a repository
   change empties a non-empty ring (the cause is the transition's ``detail``);
 * ``near-miss`` when the ring is one cycle short of its threshold;
-* ``would-enter`` when it has reached it (``observe``, the default).
+* ``would-enter`` when it has reached it (``observe``, the default);
+* ``loop-persisting`` every ``persist_every_crossings`` further threshold
+  crossings of a loop already latched (observe) or blocked (act), carrying
+  ``cycles``, ``crossings`` and ``since`` (the loop's first-seen time). The first
+  one for a loop also queues ONE registry line telling the agent to say to the
+  human that the goal is unsatisfiable and that ``/goal clear`` or
+  ``hooks-daemon clear-goal`` ends it; ending the goal stays the human's call.
 
 **Act mode (``mode: act``, opt-in; Task 6.3).** At the threshold it enters
 GOAL_BLOCKED for ``blocked_hours`` through ``core.goal_loop_block``, signals the
@@ -64,6 +70,7 @@ import time
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
@@ -136,6 +143,16 @@ _RESET_EVENTS: Final[frozenset[EventKind]] = frozenset(
 
 
 @dataclass(slots=True)
+class _LoopTrack:
+    """A latched or blocked loop's persistence: first seen, cycles run, crossings since."""
+
+    since: float
+    cycles: int
+    crossings: int = 0
+    notified: bool = False
+
+
+@dataclass(slots=True)
 class _SessionState:
     """What the detector remembers about one session between Stops."""
 
@@ -146,6 +163,18 @@ class _SessionState:
     #: The fingerprint observe mode last logged ``would-enter`` for; None when not latched.
     #: While it matches, no further near-miss or would-enter is logged for that loop.
     observed_fingerprint: str | None = None
+    #: The persistence of the loop the latch or the block covers; None when neither is set.
+    loop: _LoopTrack | None = None
+
+    def release_observed(self) -> None:
+        """Re-arm observe mode's latch; the loop's persistence counters start over."""
+        self.observed_fingerprint = None
+        self.loop = None
+
+    def release_blocked(self) -> None:
+        """Forget the act-mode block; the loop's persistence counters start over."""
+        self.blocked_fingerprint = None
+        self.loop = None
 
 
 class GoalLoopDetectorHandler(StopHandlerBase):
@@ -167,6 +196,7 @@ class GoalLoopDetectorHandler(StopHandlerBase):
         self._declared_cycle_threshold: int = defaults.declared_cycle_threshold
         self._window_minutes: int = defaults.window_minutes
         self._blocked_hours: float = defaults.blocked_hours
+        self._persist_every_crossings: int = defaults.persist_every_crossings
         # Seams: tests substitute these so they need no git and no data layer.
         self._fingerprint_repo: Callable[[], str] = self._default_fingerprint
         self._append_transition: Callable[[ModeTransition], None] = self._default_append
@@ -199,6 +229,7 @@ class GoalLoopDetectorHandler(StopHandlerBase):
                 "declared_cycle_threshold": self._declared_cycle_threshold,
                 "window_minutes": self._window_minutes,
                 "blocked_hours": self._blocked_hours,
+                "persist_every_crossings": self._persist_every_crossings,
             }
         )
 
@@ -250,7 +281,7 @@ class GoalLoopDetectorHandler(StopHandlerBase):
         # A reset event ends the loop even when the ring was already empty (so no
         # logged reset): the next loop may be logged again.
         if any(event.kind in _RESET_EVENTS for event in extraction.events):
-            state.observed_fingerprint = None
+            state.release_observed()
         if fed.new_cycles == 0 and state.blocked_fingerprint is None:
             return allow
         try:
@@ -265,15 +296,17 @@ class GoalLoopDetectorHandler(StopHandlerBase):
         repo_reset = state.ring.note_fingerprint(fingerprint, new_cycles=fed.new_cycles)
         if repo_reset is not None:
             self._log_reset(session_id, repo_reset)
-        if state.observed_fingerprint != fingerprint:
-            state.observed_fingerprint = None
+        if state.observed_fingerprint is not None and state.observed_fingerprint != fingerprint:
+            state.release_observed()
         assessment = assess(state.ring, config)
         evidence = assessment.evidence(config, state.ring.fingerprint)
-        if assessment.verdict is Verdict.WOULD_ENTER and config.mode is DetectorMode.ACT:
+        act = config.mode is DetectorMode.ACT
+        latched = (state.blocked_fingerprint if act else state.observed_fingerprint) == fingerprint
+        if assessment.verdict is Verdict.WOULD_ENTER and act:
             # One entry per fingerprint: while the block this detector made is live
             # (``_exit_on_repo_change`` forgets it once it ends), a further
             # crossing neither re-signals the goal clear nor queues another notice.
-            if state.blocked_fingerprint != fingerprint:
+            if not latched:
                 self._enter(session_id, state, config, evidence, fingerprint)
         elif state.observed_fingerprint is None:
             action = _VERDICT_ACTION.get(assessment.verdict)
@@ -290,10 +323,84 @@ class GoalLoopDetectorHandler(StopHandlerBase):
                     )
                 )
         if assessment.verdict is Verdict.WOULD_ENTER:
+            self._track_persistence(
+                session_id,
+                state,
+                config,
+                latched=latched,
+                cycles=assessment.count,
+                fingerprint=fingerprint,
+            )
             # Counted afresh; observe mode's ``observed_fingerprint`` latch (and act
             # mode's ``blocked_fingerprint``) keeps the loop to one entry.
             state.ring.restart_count()
         return allow
+
+    def _track_persistence(
+        self,
+        session_id: str,
+        state: _SessionState,
+        config: GoalLoopConfig,
+        *,
+        latched: bool,
+        cycles: int,
+        fingerprint: str,
+    ) -> None:
+        """Count a further threshold crossing of a loop already latched or blocked.
+
+        The first crossing of a loop only starts the counters. Every
+        ``persist_every_crossings`` further crossings a ``loop-persisting`` record
+        is logged, and the first one for the loop queues one registry line for the
+        agent (never Stop context, which Claude Code reads as "continue").
+        """
+        loop = state.loop
+        if not latched or loop is None:
+            state.loop = _LoopTrack(since=state.ring.cycles[0].at, cycles=cycles)
+            return
+        loop.cycles += cycles
+        loop.crossings += 1
+        if loop.crossings % config.persist_every_crossings != 0:
+            return
+        since = datetime.fromtimestamp(loop.since, UTC).isoformat()
+        self._log(
+            ModeTransition(
+                at=self._clock(),
+                session_id=session_id,
+                label=ModeLabel.GOAL_BLOCKED,
+                action=TransitionAction.LOOP_PERSISTING,
+                evidence=(
+                    f"cycles={loop.cycles} crossings={loop.crossings} since={since} "
+                    f"fingerprint={fingerprint} mode={config.mode}"
+                ),
+            )
+        )
+        if not loop.notified:
+            loop.notified = self._queue_persisting_notice(session_id, loop, since, fingerprint)
+
+    def _queue_persisting_notice(
+        self, session_id: str, loop: _LoopTrack, since: str, fingerprint: str
+    ) -> bool:
+        """Queue the one persistence line; False (a WARNING) when the registry failed."""
+        try:
+            self._registry().queue_line(
+                session_id,
+                f"GOAL-LOOP PERSISTING: the goal evaluator has rejected {loop.cycles} of this "
+                f"session's stops since {since} (loop {fingerprint}) with no human prompt "
+                "between them, and it keeps rejecting them. Say plainly to the human that the "
+                "goal is unsatisfiable from inside this session, and that `/goal clear` or "
+                "`bin/hooks-daemon clear-goal` ends it. Ending the goal is the human's decision.",
+            )
+        except (OSError, RuntimeError) as error:
+            log_and_continue(
+                logger,
+                error,
+                reason=(
+                    f"goal-loop detector: persisting notice not queued for {session_id}; "
+                    "it is retried at the next record, and the Stop proceeds"
+                ),
+            )
+            return False
+        return True
 
     def _enter(
         self,
@@ -335,7 +442,7 @@ class GoalLoopDetectorHandler(StopHandlerBase):
                     "or unblock); repo-change watch dropped",
                     session_id,
                 )
-                state.blocked_fingerprint = None
+                state.release_blocked()
                 return
             if fingerprint == old:
                 return
@@ -344,7 +451,7 @@ class GoalLoopDetectorHandler(StopHandlerBase):
                 ModeLabel.GOAL_BLOCKED,
                 evidence=f"cause=repo-change fingerprint={old}->{fingerprint}",
             )
-            state.blocked_fingerprint = None
+            state.release_blocked()
         except (OSError, RuntimeError) as error:
             log_and_continue(
                 logger,

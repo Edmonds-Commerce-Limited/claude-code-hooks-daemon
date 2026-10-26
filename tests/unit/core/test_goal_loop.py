@@ -242,6 +242,7 @@ class TestGoalLoopConfig:
         assert (config.cycle_threshold, config.declared_cycle_threshold) == (3, 2)
         assert config.window_seconds == 30 * 60
         assert config.blocked_hours == 4
+        assert config.persist_every_crossings == 5
 
     def test_from_options_reads_each_option(self) -> None:
         config = GoalLoopConfig.from_options(
@@ -251,8 +252,10 @@ class TestGoalLoopConfig:
                 "declared_cycle_threshold": 3,
                 "window_minutes": 10,
                 "blocked_hours": 2,
+                "persist_every_crossings": 7,
             }
         )
+        assert config.persist_every_crossings == 7
         assert (config.cycle_threshold, config.declared_cycle_threshold) == (5, 3)
         assert config.window_seconds == 600
         assert config.blocked_hours == 2
@@ -268,6 +271,9 @@ class TestGoalLoopConfig:
             ("declared_cycle_threshold", -1),
             ("window_minutes", 0),
             ("blocked_hours", 0),
+            ("persist_every_crossings", 0),
+            ("persist_every_crossings", True),
+            ("persist_every_crossings", 2.5),
         ],
     )
     def test_invalid_options_are_named_problems(self, key: str, value: object) -> None:
