@@ -564,6 +564,37 @@ regenerate_forwarders_for_transport() {
 }
 
 #
+# deploy_gitattributes_block() - Write the managed .gitattributes block (Plan 00552)
+#
+# Adds `-merge` for .claude/hooks/** and .claude/init.sh so a conflicting
+# merge keeps one side intact instead of writing <<<<<<< markers into a bash
+# script (which exits 2 and blocks every hook). Idempotent; lines outside the
+# managed block are untouched.
+#
+# Args:
+#   $1 - project_root
+#   $2 - venv_python (may be empty/unset)
+#
+# Returns:
+#   Exit code 0 always (advisory only) — the install must not abort over it.
+#
+deploy_gitattributes_block() {
+    local project_root="$1"
+    local venv_python="${2:-}"
+
+    if [ -z "$venv_python" ] || [ ! -x "$venv_python" ]; then
+        print_verbose "No venv Python available — skipping .gitattributes block"
+        return 0
+    fi
+
+    if ! "$venv_python" -m claude_code_hooks_daemon.install.git_attributes \
+        --project-root "$project_root"; then
+        print_warning ".gitattributes block not written — a merge conflict can leave markers in .claude/hooks/*"
+    fi
+    return 0
+}
+
+#
 # deploy_all_hooks() - Complete hook deployment workflow
 #
 # Deploys all hooks, init script, and sets permissions.
@@ -627,6 +658,13 @@ deploy_all_hooks() {
     # truth from a generator would defeat the whole byte-identical contract.
     if [ "$install_mode" != "self-install" ]; then
         regenerate_forwarders_for_transport "$project_root" "$project_root/.claude/hooks" "$venv_python"
+    fi
+
+    # Plan 00552: stop git writing conflict markers into daemon-owned files.
+    # Not in self-install mode: this repository edits its own hooks on
+    # branches, and -merge there would silently keep one side of a real edit.
+    if [ "$install_mode" != "self-install" ]; then
+        deploy_gitattributes_block "$project_root" "$venv_python"
     fi
 
     # Ensure the echd-capture helper (recommended by pipe_blocker) is

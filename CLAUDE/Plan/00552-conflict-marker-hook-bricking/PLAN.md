@@ -49,7 +49,7 @@ The defence comes in layers:
 
 ### Phase 2: Prevent markers
 
-- [ ] ⬜ **Task 2.1**: The installer and upgrade write or merge a managed block in the project `.gitattributes` with `-merge` for `.claude/hooks/**` and `.claude/init.sh`. Decide on `settings.json` and record the decision. Tests: an install creates the block; a re-install is idempotent; any user lines already in the file survive.
+- [x] ✅ **Task 2.1**: The installer and upgrade write or merge a managed block in the project `.gitattributes` with `-merge` for `.claude/hooks/**` and `.claude/init.sh`. Decide on `settings.json` and record the decision. Tests: an install creates the block; a re-install is idempotent; any user lines already in the file survive.
 - [ ] ⬜ **Task 2.2**: Add an integration test with a real git repo: two branches change a stub, the merge conflicts, and the file on disk has no markers and passes `bash -n`.
 
 ### Phase 3: Repair verb
