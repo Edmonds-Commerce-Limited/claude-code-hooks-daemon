@@ -21,6 +21,7 @@ from install import create_forwarder_script, create_status_line_script
 
 from claude_code_hooks_daemon.config.models import TransportConfig
 from claude_code_hooks_daemon.constants.events import raw_stdout_bash_keys
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.install.forwarder_generator import (
     INIT_PARSE_GUARD_FOOTER,
     INIT_PARSE_GUARD_HEADER,
@@ -63,7 +64,12 @@ def _stub(tmp_path: Path, hook_name: str, *, relay: bool = False) -> Path:
 
 def _run(stub: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["bash", str(stub)], input="{}", capture_output=True, text=True, timeout=30, check=False
+        ["bash", str(stub)],
+        input="{}",
+        capture_output=True,
+        text=True,
+        timeout=Timeout.REQUEST_DEFAULT,
+        check=False,
     )
 
 
