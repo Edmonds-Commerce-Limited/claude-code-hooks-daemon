@@ -36,8 +36,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00501: session modes](00501-session-modes/PLAN.md) - Blocked on the owner, Medium (#91; per-session modes: focus, BLOCKED, usage-paused; guards never gated)
 
-- [00552: conflict marker hook bricking](00552-conflict-marker-hook-bricking/PLAN.md) - Not Started, High (git conflict markers in daemon-owned hook files brick a session: fail-open stubs, .gitattributes -merge, repair verb)
-
 - [00496: upstream feature requests and issue kinds](00496-upstream-feature-requests-and-issue-kinds/PLAN.md) - Not Started (owner request: a formal process for project agents to file feature requests and other non-defect issues, mirroring the defect generator, guard and forms; security reports routed privately)
 
 - [00497: hooks daemon mod](00497-hooks-daemon-mod/PLAN.md) - Not Started (owner-approved build from Plan 00494: daemon mod awareness with an exceptionally loud warning, a human task and question queue, one mod deployed by install and upgrade, suggested prompts, SessionStart messages, then session resilience)
@@ -209,6 +207,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00552: conflict marker hook bricking](Completed/00552-conflict-marker-hook-bricking/PLAN.md) - Complete at merges `a5a2e6970`, `b5c7d834c`, `5612cce6d` + the archiving commit (owner field report: hook stubs fail open on a corrupt `init.sh`, a `.gitattributes` `-merge` block, and `repair-install`; release note 003)
+
 - [00551: supervisor own session ids from child tree](Completed/00551-supervisor-own-session-ids-from-child-tree/PLAN.md) - Complete at merges `e39f0ee88` + `77749bd36` (green CI run 39962905189) + the archiving commit (#138, closed: own session ids come only from the supervisor's own process tree, never a `/proc`-wide scan; the hot-reload fallback walks the host tree; release note 027 in UNRELEASED)
 
 - [00549: opencode support research](Completed/00549-opencode-support-research/PLAN.md) - Complete, research only (#136: opencode V2 has in-process TS plugins, not command hooks, with `tool.execute.before` the only blocking hook and no stop veto; Codex is the easier second host; Claude Code's `AGENTS.md` is a fallback, workable AGENTS-only under an opt-in multi-harness mode; `FINDINGS.md` holds the answers and the epic proposal; open owner question M5 on naming, non-blocking)
@@ -267,7 +267,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00508: operator signal reaches a busy agent](Completed/00508-operator-signal-reaches-a-busy-agent/PLAN.md) - Complete at merge `a948217b4` + the archiving commit (#77: a pending reboot/shutdown warning reaches a busy agent as hook context at its next tool call, once per agent thread; the supervisor stays the signal's only consumer; release note 030 in UNRELEASED)
 
-- [00507: rust lint uses the owning crate context](Completed/00507-rust-lint-uses-the-owning-crate-context/PLAN.md) - Complete at merge `601ba02f9` + `b7552acfb` + the archiving commit (#76, duplicate #89: the Rust lint runs from the owning crate with its Cargo.toml edition; crate-context errors are could-not-analyse and allowed with an advisory, syntax errors still deny; release note 029 in UNRELEASED)
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -321,9 +320,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 551 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 469 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 470 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 60 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 59 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

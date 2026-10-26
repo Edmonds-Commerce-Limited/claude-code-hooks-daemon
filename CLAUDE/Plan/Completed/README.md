@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00507: rust lint uses the owning crate context](00507-rust-lint-uses-the-owning-crate-context/PLAN.md) - Complete at merge `601ba02f9` + `b7552acfb` + the archiving commit (#76, duplicate #89: the Rust lint runs from the owning crate with its Cargo.toml edition; crate-context errors are could-not-analyse and allowed with an advisory, syntax errors still deny; release note 029 in UNRELEASED)
+
 - [00506: comment extractor ignores unterminated block openers](00506-comment-extractor-ignores-unterminated-block-openers/PLAN.md) - Complete at merge `65bdc7499` + the archiving commit (#75: a block/doc opener with no closer later in the content is not a comment, so a `/*` inside a string no longer swallows the file and `comment_size` stops denying comment-free code; the text-scanning limitation is stated in the handler guidance; release note 028 in UNRELEASED)
 
 - [00505: tdd test path map anchors at the worktree](00505-tdd-test-path-map-anchors-at-the-worktree/PLAN.md) - Complete at merge `c436dc918` + the archiving commit (#74, duplicate #102: a declared `test_path_map` `test_dir` and its `source_glob` anchor at the checkout holding the source, the nearest `.git` ancestor below the project root, so a Write in a git worktree anywhere in the project finds its own test; release note 027 in UNRELEASED)

@@ -1,6 +1,6 @@
 # Plan 00552: conflict marker hook bricking
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-26
 **Owner**: dev
 **Priority**: High
@@ -55,7 +55,7 @@ The defence comes in layers:
 ### Phase 3: Repair verb
 
 - [x] ✅ **Task 3.1**: Add a `repair-install` verb, or extend `repair` (prior art: Plan 00456). It redeploys the stubs and `init.sh`, runs `bash -n` on every hook, and validates `settings.json` (`reconcile-settings` only with an explicit flag). It must run with no working session and no running daemon.
-- [x] ✅ **Task 3.2**: Make the Phase 1 error message and the status line's "settings.json is not valid JSON" both name the repair command.
+- [x] ✅ **Task 3.2**: Make the Phase 1 error message and the status line's "settings.json is not valid JSON" both name the repair command. The parse-guard message names `repair-install`. The "not valid JSON" text is not emitted by the daemon (it is Claude Code's own), so there was nothing to change; journalled as a decision.
 
 ### Phase 4: Docs
 
@@ -63,11 +63,14 @@ The defence comes in layers:
 
 ## Success Criteria
 
-- [ ] A conflict-marked `init.sh` gives a non-blocking hook result on every event, proven by tests.
-- [ ] A real-git merge conflict on a daemon-owned file leaves a file that parses, proven by an integration test.
-- [ ] The repair verb restores a corrupted install from a terminal, proven by a test.
-- [ ] Release-bound consequences (new `.gitattributes` block, new verb, stub change) are recorded in `CLAUDE/UPGRADES/UNRELEASED/`.
+- [x] A conflict-marked `init.sh` gives a non-blocking hook result on every event, proven by tests (`tests/unit/install/test_forwarder_init_parse_guard.py`, 135 cases).
+- [x] A real-git merge conflict on a daemon-owned file leaves a file that parses, proven by an integration test (`tests/integration/test_gitattributes_merge_conflict.py`).
+- [x] The repair verb restores a corrupted install from a terminal, proven by a test (`tests/unit/install/test_repair_install.py`).
+- [x] Release-bound consequences (new `.gitattributes` block, new verb, stub change) are recorded in `CLAUDE/UPGRADES/UNRELEASED/release-notes/003-conflict-marker-hook-bricking.md`.
 
 ## Delivery & Milestones
 
-- <!-- delivery commit hashes -->
+- Phase 1 (parse guard): merge `a5a2e6970`; magic-value fix `1b8c527bf`.
+- Phase 2 (`.gitattributes` block): merge `b5c7d834c`.
+- Phases 3-4 (`repair-install`, troubleshooting): merge `5612cce6d`.
+- Full gate on `65e8baf03`: 158631 passed. The only failures are the 8 `test_relay_repair` `setsid` cases, which pass alone and also failed on the gate before Phase 1 (ledger 00474 N541). The dependency check passed once the QA venv was synced to `uv.lock`.
