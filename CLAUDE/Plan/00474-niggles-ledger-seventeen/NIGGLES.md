@@ -119,11 +119,14 @@ Follow-ups, not defects in the reviewers' judgement:
   failed twice: once in the gate (pid 2518987) and once run alone (pid 2828024).
 - Both leftovers were real orphans: `sleep <bound>.5` re-parented to PID 1 and still alive (the first for 1h45m).
   They were killed by hand.
-- The same test passed on the gate's other Python legs, so the leak is intermittent.
-- Nothing touched `resolve_venv` that day, so this was not caused by the session-modes or Plan 00552 merges.
+- The same test passed on the gate's other Python legs. That fits an intermittent leak or a py3.12-specific cause,
+  and the per-leg results do not settle which.
+- Nothing touched `scripts/lib/resolve_venv.sh` or its test that day (last changed 2026-10-12 and 2026-10-11). That
+  rules out the day's merges as the cause, but not the host environment.
 
-**Status**: ⬜ open. Next step: find why killing the watchdog sometimes leaves its `sleep` behind (it may need to
-kill the process group, or kill the `sleep` before the watchdog subshell exits).
+**Status**: ⬜ open. The watchdog's TERM trap already kills its tracked `sleep` (dc1fb8fdc), so the leak is somewhere
+that trap does not reach: a race before the pid is recorded, or a kill path that skips the trap. Fact-check:
+`subagent-reports/261026-fact-check-n540.md`.
 
 ### N539 — a check added to `llm_qa.py` but not to `release-gate.yml` is caught only on the release pull request
 
