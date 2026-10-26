@@ -17,6 +17,7 @@ import pytest
 
 from claude_code_hooks_daemon.install.forwarder_generator import (
     INIT_SH_ANCHOR,
+    apply_init_parse_guard,
     regenerate_deployed_hooks,
 )
 from claude_code_hooks_daemon.install.transport_toggle import (
@@ -51,11 +52,12 @@ handlers:
   post_tool_use: {}
 """
 
-_FORWARDER_BODY = (
+_FORWARDER_BODY = apply_init_parse_guard(
     "#!/bin/bash\n"
     'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\n'
     + INIT_SH_ANCHOR
-    + 'send_request_stdin "PreToolUse"\n'
+    + 'send_request_stdin "PreToolUse"\n',
+    "pre-tool-use",
 )
 
 

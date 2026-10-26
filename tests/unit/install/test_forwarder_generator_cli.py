@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from claude_code_hooks_daemon.install.forwarder_generator import (
+    apply_init_parse_guard,
     main,
     regenerate_deployed_hooks,
 )
@@ -28,8 +29,10 @@ def _make_project(tmp_path: Path, *, config_yaml: str | None) -> Path:
     project_root = tmp_path / "project"
     hooks_dir = project_root / ".claude" / "hooks"
     hooks_dir.mkdir(parents=True)
-    (hooks_dir / "pre-tool-use").write_text(_SAMPLE)
-    (hooks_dir / "post-tool-use").write_text(_SAMPLE.replace("PreToolUse", "PostToolUse"))
+    (hooks_dir / "pre-tool-use").write_text(apply_init_parse_guard(_SAMPLE, "pre-tool-use"))
+    (hooks_dir / "post-tool-use").write_text(
+        apply_init_parse_guard(_SAMPLE.replace("PreToolUse", "PostToolUse"), "post-tool-use")
+    )
     if config_yaml is not None:
         (project_root / ".claude" / "hooks-daemon.yaml").write_text(config_yaml)
     return project_root
