@@ -109,6 +109,50 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N543 — the plan commit gate judges the index before a `git add` in the same command has run
+
+**Source**: archiving Plan 00552 (2026-10-26).
+
+**Evidence**:
+
+- `git add -A <plan paths> && git commit ...` as one Bash command was denied by R-PLAN-QA-COMMIT.
+- The gate read the index as it stood before the command's own `git add`, so it reported the archived PLAN.md as
+  "In Progress" and the README row as still under Active. Both were already fixed on disk.
+- Running `git add` and `git commit` as two separate commands committed cleanly.
+
+**Status**: ⬜ open. The gate should either model the in-command `git add` (as `-a` already is), or say in its deny
+message that a same-command `git add` has not run yet and the fix is to stage first.
+
+### N542 — `qa-full-runner` demands a report file path it has no tool to write
+
+**Source**: the 2026-10-26 Plan 00552 full gate.
+
+**Evidence**:
+
+- Dispatched without a report path, the agent refused to run: its protocol requires one.
+- Dispatched with one, the dispatch advisory (Plan 00460) warned that `qa-full-runner` has no `Write` tool and cannot
+  write a report there.
+- The run then went ahead, and the reply was auto-saved under `untracked/agent-reports/`.
+
+**Status**: ⬜ open. The agent definition should name the auto-saved reply as its report rather than require a path it
+cannot fill.
+
+### N541 — eight `test_relay_repair` cases fail with "setsid unavailable" only under the full gate
+
+**Source**: the full gates on ee25ea681 and 65e8baf03 (2026-10-26).
+
+**Evidence**:
+
+- `tests/unit/install/test_relay_repair.py`, the `TestStartRelayRepair` and `TestSpawnDetached` cases, failed on both
+  the py3.12 and py3.13 unit legs with `posix_spawn: setsid unavailable on this platform`, in both gates.
+- Run alone on main, all of them pass.
+- That fits test interference inside the full suite, for example a test in the same worker patching `os.setsid` or
+  the spawn attributes without restoring them. That cause is not confirmed.
+- It predates Plan 00552: it failed the same way on the ee25ea681 gate, before any 00552 code merged.
+
+**Status**: ⬜ open. Next step: run the unit leg with `-p xdist` disabled, or bisect the worker's test order, to find
+the polluting test.
+
 ### N540 — the venv resolver's probe watchdog can orphan its `sleep` after a good candidate answers
 
 **Source**: the 2026-10-26 full gate on ee25ea681 (the py3.12 integration shard), then a solo re-run on 1b8c527bf.
