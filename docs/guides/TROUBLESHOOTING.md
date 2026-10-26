@@ -747,6 +747,49 @@ When a handler blocks an operation, it provides an explanation and alternatives 
 
 If you believe the block is incorrect, see [Handler Blocking Too Much](#5-handler-blocking-too-much-false-positives).
 
+### Recovery: conflict markers in hook files (a session that blocks every prompt)
+
+**Symptoms**
+
+- Hooks fail with `syntax error near unexpected token '<<<'` (PostToolUse, PostToolBatch, UserPromptSubmit and others).
+- Claude Code or the status line reports `settings.json is not valid JSON`.
+- The session blocks every prompt, so you cannot ask Claude to fix it.
+
+**Why it happens.** A merge, rebase or stash pop that conflicts on a file the daemon owns (a hook stub in `.claude/hooks/`, `.claude/init.sh` or `.claude/settings.json`) writes `<<<<<<<` markers into it. A bash script that hits a marker fails to parse and exits 2, and Claude Code reads a hook's exit 2 as **block**. So every event is blocked instead of failing open. Stubs now skip a broken `init.sh` and say so (exit 0), but a stub that itself holds markers cannot run at all, and neither can a broken `settings.json`.
+
+**Recover from a terminal.** You need no Claude session and no running daemon. Run these from the project root.
+
+1. See what is conflicted:
+
+   ```bash
+   git status
+   ```
+
+2. Resolve the conflicted files. For daemon-owned files (`.claude/hooks/*`, `.claude/init.sh`) keep the **newer** side; step 3 regenerates them anyway. During a **rebase** the sides are inverted: `ours` is the branch you are rebasing onto and `theirs` is your own commit being replayed. During a merge `ours` is your current branch. Do not trust the word; check which side has the newer daemon version.
+
+3. Restore the stubs and `init.sh` from the installed templates and check everything. It reports each file `OK` or `BROKEN`, exits non-zero while anything is still broken, and `--check` reports without writing:
+
+   ```bash
+   .claude/hooks-daemon/bin/hooks-daemon repair-install --check
+   .claude/hooks-daemon/bin/hooks-daemon repair-install
+   ```
+
+4. `settings.json` is project-owned, so it is only checked, never rewritten, and a file with conflict markers is never touched. Resolve it **by hand**, keeping both sides' entries, then add `--reconcile-settings` if daemon registrations are missing (it never runs without that flag):
+
+   ```bash
+   .claude/hooks-daemon/bin/hooks-daemon repair-install --reconcile-settings
+   ```
+
+5. Verify yourself if you want to: `bash -n .claude/hooks/pre-tool-use` and `bash -n .claude/init.sh` print nothing when a script parses; `python3 -m json.tool .claude/settings.json` does the same for settings.
+
+6. Finish the operation: `git add` the resolved files, then `git rebase --continue` (or `git commit` for a merge), and `git stash drop` only after a stash pop.
+
+7. Resume the session with `claude --resume`.
+
+If `repair-install` itself cannot start because the daemon's virtualenv is missing, run `.claude/hooks-daemon/bin/hooks-daemon repair` first.
+
+**What now prevents it.** Install and upgrade write a managed block into the project `.gitattributes` that sets `-merge` for `.claude/hooks/**` and `.claude/init.sh`. A conflict on those files then keeps your side intact with no markers (git still reports the conflict), so the file still parses. `settings.json` is not covered, because it holds project-owned entries that `-merge` would silently drop. Commit the `.gitattributes`.
+
 ---
 
 ## 11. Getting Help
@@ -821,6 +864,7 @@ came from it.
 | `config-merge`      | Merge new defaults into your config                                                           |
 | `init-config`       | Generate a configuration template                                                             |
 | `repair`            | Repair broken virtual environment                                                             |
+| `repair-install`    | Redeploy hook stubs and init.sh, check them with `bash -n` (see Recovery above)               |
 | `generate-playbook` | Generate acceptance test playbook                                                             |
 | `defences`          | List the active Defences (content and commit gates), one record each (see below)              |
 

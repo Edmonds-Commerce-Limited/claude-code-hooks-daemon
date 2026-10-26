@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
+import subprocess  # nosec B404 - only ever runs the trusted system bash, list form, no shell
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
@@ -28,6 +28,7 @@ from claude_code_hooks_daemon.install.forwarder_generator import (
     generate_forwarder_content,
     load_transport_config,
 )
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 CONFLICT_MARKER_PREFIXES: Final[tuple[str, ...]] = ("<<<<<<<", "=======", ">>>>>>>")
 
@@ -82,7 +83,7 @@ def bash_syntax_error(path: Path) -> str | None:
 
 
 def _relative(path: Path, project_root: Path) -> str:
-    return path.relative_to(project_root).as_posix()
+    return path_relative_to(path, project_root).as_posix()
 
 
 def _make_executable(path: Path) -> None:

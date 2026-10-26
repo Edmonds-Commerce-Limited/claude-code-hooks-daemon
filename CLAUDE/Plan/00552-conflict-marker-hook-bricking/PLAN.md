@@ -59,7 +59,7 @@ The defence comes in layers:
 
 ### Phase 4: Docs
 
-- [ ] ⬜ **Task 4.1**: Write the TROUBLESHOOTING recovery section, covering terminal steps, rebase ours/theirs inversion, `claude --resume`, and the release-notes entry.
+- [x] ✅ **Task 4.1**: Write the TROUBLESHOOTING recovery section, covering terminal steps, rebase ours/theirs inversion, `claude --resume`, and the release-notes entry.
 
 ## Success Criteria
 
