@@ -20,8 +20,9 @@ Stop handler owns the per-session state and the logging.
   met or cleared, or a repository change empties it, with the cause.
 * :func:`assess` compares the ring with the thresholds. Stop-text similarity
   goes into the evidence only; it is never a fire condition (ruling 08).
-* :func:`repo_fingerprint` hashes ``HEAD`` plus ``git status --porcelain -uno``,
-  without journal files and untracked scratch.
+* :func:`repo_fingerprint` hashes the committed tree (``git ls-tree -r HEAD``)
+  plus ``git status --porcelain -uno``, without journal files and untracked
+  scratch, so a journal-only commit is not progress.
 """
 
 from __future__ import annotations
@@ -57,7 +58,7 @@ _SIMILARITY_CHARS: Final[int] = 2000
 #: Fingerprint hex digits kept; enough to tell trees apart in a log line.
 _FINGERPRINT_CHARS: Final[int] = 12
 
-#: Porcelain paths the fingerprint ignores: plan journals and untracked scratch
+#: Paths the fingerprint ignores: plan journals and untracked scratch
 #: change while an agent is looping without being progress (Plan 00501 Goals).
 _JOURNAL_SEGMENT: Final[str] = "/JOURNAL/"
 _UNTRACKED_PREFIX: Final[str] = "untracked/"
@@ -657,6 +658,11 @@ def _porcelain_path(line: str) -> str:
     return path.split(_RENAME_ARROW)[-1]
 
 
+def _tree_path(line: str) -> str:
+    """The path of a ``git ls-tree`` line (``<mode> <type> <sha>\\t<path>``)."""
+    return line.partition("\t")[2]
+
+
 def _counts(path: str) -> bool:
     return _JOURNAL_SEGMENT not in f"/{path}" and not path.startswith(_UNTRACKED_PREFIX)
 
@@ -664,19 +670,26 @@ def _counts(path: str) -> bool:
 def repo_fingerprint(
     root: Path, *, run: GitRunner = run_git, timeout: float = Timeout.GIT_CONTEXT
 ) -> str:
-    """A short hash of ``HEAD`` plus the tracked changes, journals and scratch excluded.
+    """A short hash of the committed tree plus the tracked changes, journals and scratch excluded.
+
+    The committed tree is hashed by content (``git ls-tree -r HEAD``) rather than
+    by the ``HEAD`` commit id, so a commit that touches only plan journals, or no
+    file at all, leaves the fingerprint unchanged.
 
     Raises:
         FingerprintError: Either git run failed or timed out.
     """
-    head = run(root, "rev-parse", "HEAD", timeout=timeout)
-    if head.returncode != 0:
-        raise FingerprintError(f"git rev-parse HEAD failed: {str(head.stderr).strip()}")
+    tree = run(root, "ls-tree", "-r", "HEAD", timeout=timeout)
+    if tree.returncode != 0:
+        raise FingerprintError(f"git ls-tree HEAD failed: {str(tree.stderr).strip()}")
     status = run(root, "status", "--porcelain", "-uno", timeout=timeout)
     if status.returncode != 0:
         raise FingerprintError(f"git status failed: {str(status.stderr).strip()}")
+    committed = (
+        line for line in str(tree.stdout).splitlines() if line and _counts(_tree_path(line))
+    )
     kept = sorted(
         line for line in str(status.stdout).splitlines() if line and _counts(_porcelain_path(line))
     )
-    digest = hashlib.sha256("\n".join([str(head.stdout).strip(), *kept]).encode("utf-8"))
+    digest = hashlib.sha256("\n".join([*committed, "--", *kept]).encode("utf-8"))
     return digest.hexdigest()[:_FINGERPRINT_CHARS]

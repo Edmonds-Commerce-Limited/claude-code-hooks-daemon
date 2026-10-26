@@ -125,8 +125,9 @@ The focus failsafe line reads: `focus mode: the active task is <task>; other pla
 `goal_loop_detector` (Stop, main thread) catches a session that keeps stopping
 with `STOPPING BECAUSE:` while the goal evaluator keeps answering "not met",
 with no human prompt in between. It counts cycles inside a window and resets on
-a human prompt, a met or cleared goal, or a repository change (HEAD plus
-tracked changes; plan journals and `untracked/` excluded). A stop declaring
+a human prompt, a met or cleared goal, or a repository change (the committed
+tree plus tracked changes; plan journals and `untracked/` excluded, so a
+journal-only commit is not a change). A stop declaring
 `[awaiting-human]` counts toward a lower threshold. Stop-text similarity is
 logged as evidence only, never a firing condition.
 

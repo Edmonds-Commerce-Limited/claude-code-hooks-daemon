@@ -19,6 +19,7 @@ from claude_code_hooks_daemon.core.goal_loop import (
     DetectorMode,
     EventKind,
     FingerprintError,
+    GitRunner,
     GoalLoopConfig,
     LoopEvent,
     ResetCause,
@@ -473,10 +474,44 @@ class TestRepoFingerprint:
         (repo / "code.py").write_text("x = 2\n", encoding="utf-8")
         assert repo_fingerprint(repo) != before
 
-    def test_a_commit_changes_it(self, repo: Path) -> None:
+    def test_a_commit_that_changes_code_changes_it(self, repo: Path) -> None:
+        before = repo_fingerprint(repo)
+        (repo / "code.py").write_text("x = 2\n", encoding="utf-8")
+        _git(repo, "commit", "-q", "-am", "next")
+        assert repo_fingerprint(repo) != before
+
+    def test_a_journal_only_commit_does_not_change_it(self, repo: Path) -> None:
+        before = repo_fingerprint(repo)
+        journal = repo / "CLAUDE" / "Plan" / "00999-x" / "JOURNAL"
+        (journal / "entry.md").write_text("two\n", encoding="utf-8")
+        (journal / "another.md").write_text("three\n", encoding="utf-8")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "journal only")
+        assert repo_fingerprint(repo) == before
+
+    def test_an_empty_commit_does_not_change_it(self, repo: Path) -> None:
         before = repo_fingerprint(repo)
         _git(repo, "commit", "-q", "--allow-empty", "-m", "next")
-        assert repo_fingerprint(repo) != before
+        assert repo_fingerprint(repo) == before
+
+    def test_a_fake_runner_journal_change_is_ignored_and_a_src_change_is_not(self) -> None:
+        def runner_for(tree: str) -> GitRunner:
+            def run(cwd: Path, *args: str, timeout: float) -> subprocess.CompletedProcess[str]:
+                out = tree if args[0] == "ls-tree" else ""
+                return subprocess.CompletedProcess(["git", *args], 0, out, "")
+
+            return run
+
+        base = "100644 blob aaa\tsrc/a.py\n100644 blob bbb\tCLAUDE/Plan/1-x/JOURNAL/e.md\n"
+        journal_moved = base.replace("bbb", "ccc")
+        src_moved = base.replace("aaa", "ddd")
+        root = Path("/fake")
+        assert repo_fingerprint(root, run=runner_for(base)) == repo_fingerprint(
+            root, run=runner_for(journal_moved)
+        )
+        assert repo_fingerprint(root, run=runner_for(base)) != repo_fingerprint(
+            root, run=runner_for(src_moved)
+        )
 
     def test_journal_edits_and_untracked_files_do_not(self, repo: Path) -> None:
         before = repo_fingerprint(repo)
