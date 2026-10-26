@@ -109,6 +109,22 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N540 — the venv resolver's probe watchdog can orphan its `sleep` after a good candidate answers
+
+**Source**: the 2026-10-26 full gate on ee25ea681 (the py3.12 integration shard), then a solo re-run on 1b8c527bf.
+
+**Evidence**:
+
+- `tests/integration/test_resolve_venv_runnability_probe.py::test_no_sleep_survives_a_good_candidates_answer`
+  failed twice: once in the gate (pid 2518987) and once run alone (pid 2828024).
+- Both leftovers were real orphans: `sleep <bound>.5` re-parented to PID 1 and still alive (the first for 1h45m).
+  They were killed by hand.
+- The same test passed on the gate's other Python legs, so the leak is intermittent.
+- Nothing touched `resolve_venv` that day, so this was not caused by the session-modes or Plan 00552 merges.
+
+**Status**: ⬜ open. Next step: find why killing the watchdog sometimes leaves its `sleep` behind (it may need to
+kill the process group, or kill the `sleep` before the watchdog subshell exits).
+
 ### N539 — a check added to `llm_qa.py` but not to `release-gate.yml` is caught only on the release pull request
 
 **Source**: release v3.71.0 `Release gate` run 40010516593 failed at its layout job: `missing ['bare_python_invocation']`.
