@@ -1578,6 +1578,14 @@ def main() -> int:
             print(f"      2. Mark executable: git update-index --chmod=+x {hook_paths}")
             print("      3. Commit: git commit -m 'chore: Add Claude hook dispatcher scripts'")
 
+    # Plan 00552: keep git from writing conflict markers into daemon-owned files.
+    # Skipped for self-install: this repo edits its own hooks on branches.
+    if not self_install:
+        from claude_code_hooks_daemon.install.git_attributes import ensure_managed_block
+
+        if ensure_managed_block(project_root):
+            print("   ✅ Wrote managed .gitattributes block (commit it)")
+
     # Create configuration files
     print("\n📝 Creating configuration files...")
     create_settings_json(project_root)
