@@ -139,12 +139,14 @@ from claude_code_hooks_daemon.daemon.validation import (
 from claude_code_hooks_daemon.daemon.venv_lock import VenvLockTimeout, venv_lock
 from claude_code_hooks_daemon.daemon.work_queue_cli import add_work_queue_parser
 from claude_code_hooks_daemon.docs_qa.comment_finder import DEFAULT_MIN_BLOCK_LINES
+from claude_code_hooks_daemon.install.forwarder_generator import REPAIR_INSTALL_VERB
 from claude_code_hooks_daemon.install.install_stamp import read_install_stamp
 from claude_code_hooks_daemon.install.relay_deploy import (
     missing_configured_relay_binary,
     relay_binary_missing_warning,
 )
 from claude_code_hooks_daemon.install.release_notes import load_release_notes_between
+from claude_code_hooks_daemon.install.repair_install import repair_install, settings_path
 from claude_code_hooks_daemon.issue_report.build import build_report
 from claude_code_hooks_daemon.issue_report.upstream import filing_command
 from claude_code_hooks_daemon.qa.full_qa_lock import host_lock_path as qa_host_lock_path
@@ -7968,6 +7970,60 @@ def cmd_reconcile_settings(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_repair_install(args: argparse.Namespace) -> int:
+    """Restore a broken hooks install from a terminal (Plan 00552).
+
+    Redeploys the hook stubs and ``.claude/init.sh`` from the installed
+    daemon's templates, runs ``bash -n`` on each, and checks that
+    ``.claude/settings.json`` parses. Needs no Claude session, no running
+    daemon and no venv build. ``settings.json`` is rewritten only with
+    ``--reconcile-settings`` (Plan 00175), and never while it carries
+    conflict markers or is not valid JSON.
+
+    Args:
+        args: Parsed CLI arguments with ``project_root`` (Path or None),
+            ``check`` (bool) and ``reconcile_settings`` (bool).
+
+    Returns:
+        0 when nothing is broken (and, with ``--check``, nothing would change);
+        1 otherwise.
+    """
+    project_root = (args.project_root or Path.cwd()).resolve()
+    try:
+        report = repair_install(project_root, check=args.check)
+    except FileNotFoundError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    for name in report.redeployed:
+        print(f"REDEPLOYED {name}")
+    for name in report.would_redeploy:
+        print(f"WOULD REDEPLOY {name}")
+    for name in report.ok:
+        print(f"OK {name}")
+    for name in report.broken:
+        print(f"BROKEN {name}")
+    for note in report.notes:
+        print(note)
+
+    if args.reconcile_settings:
+        settings = settings_path(project_root)
+        if settings.is_file() and ".claude/settings.json" not in report.broken:
+            reconcile_rc = cmd_reconcile_settings(
+                argparse.Namespace(path=settings, check=args.check)
+            )
+            if reconcile_rc != 0:
+                return 1
+        else:
+            print("settings.json was not reconciled: fix it first, then run this again")
+
+    if report.clean:
+        return 0
+    if report.broken:
+        print("Something is still broken; see the BROKEN lines above.")
+    return 1
+
+
 def cmd_deploy_plan_workflow(args: argparse.Namespace) -> int:
     """(Re)deploy plan-workflow assets on demand (Plan 00185).
 
@@ -12970,6 +13026,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="Dry-run: exit 1 if any wired registration is missing, do not modify the file",
     )
     parser_reconcile.set_defaults(func=cmd_reconcile_settings)
+
+    # repair-install (Plan 00552) — terminal-runnable restore of stubs + init.sh
+    parser_repair_install = subparsers.add_parser(
+        REPAIR_INSTALL_VERB,
+        help="Redeploy hook stubs and init.sh from the installed templates and check them "
+        "(works with no session and no daemon)",
+    )
+    parser_repair_install.add_argument(
+        "--project-root",
+        type=Path,
+        default=None,
+        help="Project root (default: current directory)",
+    )
+    parser_repair_install.add_argument(
+        "--check",
+        action="store_true",
+        help="Dry-run: report what is broken or would be redeployed; write nothing",
+    )
+    parser_repair_install.add_argument(
+        "--reconcile-settings",
+        action="store_true",
+        help="Also add missing hook registrations to .claude/settings.json "
+        "(never done without this flag; never on a conflicted file)",
+    )
+    parser_repair_install.set_defaults(func=cmd_repair_install)
 
     # deploy-plan-workflow (Plan 00185) — on-demand plan/journal asset (re)deploy
     parser_deploy_plan = subparsers.add_parser(

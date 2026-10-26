@@ -56,9 +56,15 @@ _INIT_PARSE_GUARD_PATTERN = re.compile(
     re.escape(INIT_PARSE_GUARD_HEADER) + r".*?" + re.escape(INIT_PARSE_GUARD_FOOTER), re.DOTALL
 )
 
-#: What the parse guard tells the user to do. Plan 00552 Phase 3 replaces this
-#: with the repair verb once it exists.
-INIT_REPAIR_HINT: Final[str] = "restore it from the daemon install or rerun the installer"
+#: The CLI verb that restores a broken install from a terminal (Plan 00552).
+REPAIR_INSTALL_VERB: Final[str] = "repair-install"
+
+#: What the parse guard tells the user to do. It sits inside a double-quoted
+#: bash string, so it must hold no quote, dollar, backtick or backslash. The
+#: client wrapper path is relative to the project root, where the user runs it.
+INIT_REPAIR_HINT: Final[str] = (
+    f"run .claude/hooks-daemon/bin/hooks-daemon {REPAIR_INSTALL_VERB} from the project root"
+)
 
 #: Carries the daemon root to hooks-relay. Twin of ``DAEMON_ROOT_ENV`` in
 #: relay/hooks_relay.rs.

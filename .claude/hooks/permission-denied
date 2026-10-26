@@ -46,7 +46,7 @@ fi
 # --- init.sh parse guard (generated; Plan 00552) ---
 _ip_file="$SCRIPT_DIR/../init.sh"
 if ! _ip_err="$(bash -n "$_ip_file" 2>&1)"; then
-    _ip_msg="hooks daemon: $_ip_file does not parse (merge conflict markers?), so hooks are not running. Repair: restore it from the daemon install or rerun the installer."
+    _ip_msg="hooks daemon: $_ip_file does not parse (merge conflict markers?), so hooks are not running. Repair: run .claude/hooks-daemon/bin/hooks-daemon repair-install from the project root."
     echo "HOOKS DAEMON ERROR [init_sh_unparseable]: $_ip_msg $_ip_err" >&2
     _ip_json="${_ip_msg//\\/\\\\}"; _ip_json="${_ip_json//\"/\\\"}"
     printf '{"systemMessage":"%s"}\n' "$_ip_json"

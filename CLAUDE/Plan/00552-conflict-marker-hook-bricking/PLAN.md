@@ -54,12 +54,12 @@ The defence comes in layers:
 
 ### Phase 3: Repair verb
 
-- [ ] ⬜ **Task 3.1**: Add a `repair-install` verb, or extend `repair` (prior art: Plan 00456). It redeploys the stubs and `init.sh`, runs `bash -n` on every hook, and validates `settings.json` (`reconcile-settings` only with an explicit flag). It must run with no working session and no running daemon.
-- [ ] ⬜ **Task 3.2**: Make the Phase 1 error message and the status line's "settings.json is not valid JSON" both name the repair command.
+- [x] ✅ **Task 3.1**: Add a `repair-install` verb, or extend `repair` (prior art: Plan 00456). It redeploys the stubs and `init.sh`, runs `bash -n` on every hook, and validates `settings.json` (`reconcile-settings` only with an explicit flag). It must run with no working session and no running daemon.
+- [x] ✅ **Task 3.2**: Make the Phase 1 error message and the status line's "settings.json is not valid JSON" both name the repair command.
 
 ### Phase 4: Docs
 
-- [ ] ⬜ **Task 4.1**: Write the TROUBLESHOOTING recovery section, covering terminal steps, rebase ours/theirs inversion, `claude --resume`, and the release-notes entry.
+- [x] ✅ **Task 4.1**: Write the TROUBLESHOOTING recovery section, covering terminal steps, rebase ours/theirs inversion, `claude --resume`, and the release-notes entry.
 
 ## Success Criteria
 
