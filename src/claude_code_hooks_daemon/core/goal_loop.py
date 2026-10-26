@@ -344,7 +344,7 @@ def read_new_lines(
 
 
 class DetectorMode(StrEnum):
-    """What the detector does at the threshold: ``observe`` only logs, ``act`` enters."""
+    """What the detector does at the threshold: ``act`` (the default) enters, ``observe`` only logs."""
 
     OBSERVE = "observe"
     ACT = "act"
@@ -387,7 +387,7 @@ def option_problems(options: Mapping[str, Any]) -> dict[str, str]:
 class GoalLoopConfig:
     """The detector's thresholds (Plan 00501 Goals: 3 cycles, 2 declared, 30 min, 4 h)."""
 
-    mode: DetectorMode = DetectorMode.OBSERVE
+    mode: DetectorMode = DetectorMode.ACT
     cycle_threshold: int = 3
     declared_cycle_threshold: int = 2
     window_minutes: int = 30

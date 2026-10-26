@@ -105,6 +105,8 @@ def recorder() -> _Recorder:
 @pytest.fixture
 def handler(recorder: _Recorder) -> GoalLoopDetectorHandler:
     detector = GoalLoopDetectorHandler()
+    # The shipped default is act; most cases here pin the logging-only observe mode.
+    detector._mode = "observe"
     detector._fingerprint_repo = lambda: "fp-stable"
     detector._append_transition = recorder
     return detector
@@ -135,8 +137,9 @@ class TestIdentity:
             "cycle_threshold",
         }
 
-    def test_default_options(self, handler: GoalLoopDetectorHandler) -> None:
-        assert handler._mode == "observe"
+    def test_default_options(self) -> None:
+        handler = GoalLoopDetectorHandler()
+        assert handler._mode == "act"
         assert handler._cycle_threshold == 3
         assert handler._declared_cycle_threshold == 2
         assert handler._window_minutes == 30
@@ -730,6 +733,7 @@ class TestProductionSeams:
         layer = MagicMock()
         layer.session_modes.transition_log = log
         detector = GoalLoopDetectorHandler()
+        detector._mode = "observe"
         detector._fingerprint_repo = lambda: "fp"
         transcript = tmp_path / "t.jsonl"
         shutil.copy(FIXTURES / "similar_stops.jsonl", transcript)
@@ -745,6 +749,7 @@ class TestProductionSeams:
         layer = MagicMock()
         layer.session_modes.transition_log = None
         detector = GoalLoopDetectorHandler()
+        detector._mode = "observe"
         detector._fingerprint_repo = lambda: "fp"
         transcript = tmp_path / "t.jsonl"
         shutil.copy(FIXTURES / "similar_stops.jsonl", transcript)
@@ -1115,9 +1120,8 @@ class TestLoopPersisting:
         assert "crossings=9" in persisting[-1].evidence
         lines = modes.take_lines(SESSION)
         assert len(lines) == 1
-        assert "/goal clear" in lines[0]
         assert "bin/hooks-daemon clear-goal" in lines[0]
-        assert "unsatisfiable" in lines[0]
+        assert "cannot be satisfied" in lines[0]
         assert "fp-stable" in lines[0]
 
     def test_the_default_is_every_fifth_crossing(
@@ -1135,14 +1139,15 @@ class TestLoopPersisting:
         assert len(persisting) == 1
         assert "crossings=5" in persisting[0].evidence
 
-    def test_the_notice_does_not_tell_the_agent_to_clear_the_goal_itself(
+    def test_the_notice_tells_the_agent_to_clear_the_goal_journal_and_stop(
         self, watcher: GoalLoopDetectorHandler, modes: SessionModeRegistry, tmp_path: Path
     ) -> None:
         _batches(tmp_path / "t.jsonl", watcher, 5)
         (line,) = modes.take_lines(SESSION)
-        assert "say plainly to the human" in line.lower()
-        assert "run `bin/hooks-daemon clear-goal`" not in line
-        assert "you run" not in line.lower()
+        assert "run `bin/hooks-daemon clear-goal`" in line
+        assert "mkplan.bash --journal" in line
+        assert "stop with the real blocker stated" in line
+        assert "human's decision" not in line
 
     def test_a_fingerprint_change_resets_the_counters(
         self,

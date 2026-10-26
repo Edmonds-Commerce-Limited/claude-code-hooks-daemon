@@ -928,6 +928,48 @@ class TestCombinedGoalSignal:
         assert "00296" not in joined
         assert "00298" in joined
 
+    def test_blocking_one_plan_refreshes_signal_to_drop_it(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """A plan moving to Blocked drops out of the combined goal like a retired one."""
+        handler.handle(self._hook_input(self._write_plan("00296-first")))
+        handler.handle(self._hook_input(self._write_plan("00298-second")))
+
+        blocked = self._write_plan("00296-first", status="Blocked - waiting on the release gate")
+        handler.handle(self._hook_input(blocked))
+
+        joined = self._signal()["rendered_lines"][0]
+        assert "00296" not in joined
+        assert "00298" in joined
+
+    def test_blocking_the_only_live_plan_removes_the_signal_and_writes_a_clear(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        signal_path = self._untracked / _SIGNAL_SUBDIR / f"{_SESSION}{_SIGNAL_SUFFIX}"
+        clear_path = self._untracked / _SIGNAL_SUBDIR / f"{_SESSION}{_CLEAR_SUFFIX}"
+        handler.handle(self._hook_input(self._write_plan("00296-only")))
+        assert signal_path.exists(), "precondition: the goal signal was written"
+
+        handler.handle(self._hook_input(self._write_plan("00296-only", status="Blocked")))
+
+        assert not signal_path.exists()
+        assert clear_path.exists()
+
+    def test_a_goal_whose_plans_are_all_complete_or_blocked_is_cleared(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        signal_path = self._untracked / _SIGNAL_SUBDIR / f"{_SESSION}{_SIGNAL_SUFFIX}"
+        clear_path = self._untracked / _SIGNAL_SUBDIR / f"{_SESSION}{_CLEAR_SUFFIX}"
+        handler.handle(self._hook_input(self._write_plan("00296-first")))
+        handler.handle(self._hook_input(self._write_plan("00298-second")))
+
+        handler.handle(self._hook_input(self._write_plan("00296-first", status="Complete")))
+        assert not clear_path.exists(), "precondition: 00298 is still live"
+        handler.handle(self._hook_input(self._write_plan("00298-second", status="Blocked")))
+
+        assert not signal_path.exists()
+        assert clear_path.exists()
+
     def test_terminal_write_for_unledgered_plan_is_a_no_op(
         self, handler: GoalInjectionHandler
     ) -> None:
@@ -2426,6 +2468,66 @@ class TestReview3Fixes(_ReassertionFixtures):
         assert not self._clear_path(
             "S1"
         ).exists(), "an edit that changed no status must not re-signal S1 at all"
+
+    def test_edit_moving_a_plan_into_blocked_retracts_its_owner(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        plan = self._plan_path("00296-first")
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "S1", "**Status**: Not Started", "**Status**: In Progress")
+        )
+        assert self._intent_path("S1").exists(), "precondition: S1 owns a goal"
+
+        plan.write_text(_plan_md("Blocked"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "S1", "**Status**: In Progress", "**Status**: Blocked")
+        )
+
+        assert not self._intent_path("S1").exists()
+        assert self._clear_path("S1").exists()
+
+    def test_a_blocked_plan_that_is_reopened_is_a_goal_again(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        plan = self._plan_path("00296-first")
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "S1", "**Status**: Not Started", "**Status**: In Progress")
+        )
+        plan.write_text(_plan_md("Blocked"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "S1", "**Status**: In Progress", "**Status**: Blocked")
+        )
+
+        # Another session unblocks it; the once-per-plan latch of S1 is not what is tested.
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "S2", "**Status**: Blocked", "**Status**: In Progress")
+        )
+
+        assert "00296" in self._signal("S2")["rendered_lines"][0]
+
+    def test_note_on_an_already_blocked_plan_signals_nobody(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """Only the write that moves the plan INTO Blocked refreshes, as for retirement."""
+        plan = self._plan_path("00296-first")
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "S1", "**Status**: Not Started", "**Status**: In Progress")
+        )
+        plan.write_text(_plan_md("Blocked"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "S1", "**Status**: In Progress", "**Status**: Blocked")
+        )
+        self._clear_path("S1").unlink()  # simulate the supervisor consuming it
+
+        handler.handle(
+            self._edit_input(plan, "X", "## Overview\n\nBody.", "## Overview\n\nBody.\n\nNote.")
+        )
+
+        assert not self._clear_path("S1").exists()
 
     def test_note_on_an_already_complete_plan_does_not_clear_a_manual_goal(
         self, handler: GoalInjectionHandler

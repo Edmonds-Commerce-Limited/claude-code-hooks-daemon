@@ -1,6 +1,6 @@
 # Plan 00501: session modes
 
-**Status**: Blocked on the owner (Task 7.2 needs an owner-driven live acceptance session; Task 7.3's flip needs a human-gated release or a third organic true positive; the observe-log dedup, the one agent-workable step, merged at b1c26ef4f)
+**Status**: Blocked on the owner (Task 7.2 needs an owner-driven live acceptance session; Task 7.3's default flipped to act on the owner's ruling of 2026-10-26)
 **Created**: 2026-10-08
 **Owner**: dev
 **Priority**: Medium
@@ -206,8 +206,12 @@ All CLEAR; rationale and code citations in
   delivered, focus off; awaiting-human in one session not cleared by another; a live goal loop caught in observe
   mode, then in act mode, observing the supervisor's `/goal clear` landing during the stop loop itself (spike 0.3
   saw it only in tool-calling turns).
-- [ ] 🚫 **Task 7.3** (blocked on organic evidence or a human-gated release: three true positives or two releases; the count began 2026-10-23): Tune thresholds from the observe log and flip the default to `act` after three true positives
-  and no false positive, or after two releases, whichever is first.
+- [x] ✅ **Task 7.3** (the default flipped to `act` on the owner's ruling of 2026-10-26; the owner accepted the
+  64-hour main-session goal loop as the trigger, in place of the three true positives or two releases): Tune
+  thresholds from the observe log and flip the default to `act` after three true positives and no false positive,
+  or after two releases, whichever is first. The same ruling lets an agent run `bin/hooks-daemon clear-goal`
+  itself when its goal cannot be satisfied (the loop notices say so), and makes a plan that moves to `Blocked`
+  drop out of the combined goal. Threshold tuning is not done: the thresholds are unchanged.
 
 ### Phase 8: Manual goals (#106)
 

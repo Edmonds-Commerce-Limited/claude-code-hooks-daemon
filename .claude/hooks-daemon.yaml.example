@@ -940,10 +940,10 @@ handlers:
       #   max_cache_age_hours: 2      # A workable-issues cache older than this is not trusted
 
     goal_loop_detector:  # Logs a session looping on an unmet goal to the transition log (Plan 00501 Phase 6)
-      enabled: true      # Observe only: never blocks, never enters a mode; never terminal
+      enabled: true      # Default mode is act: enters goal-blocked and clears the goal; never blocks a Stop, never terminal
       priority: 5
       # options:
-      #   mode: observe                 # `observe` (default) logs near-miss / would-enter / loop-reset; `act` also enters goal-blocked and clears the goal
+      #   mode: act                     # `act` (default) enters goal-blocked and clears the goal; `observe` only logs near-miss / would-enter / loop-reset
       #   cycle_threshold: 3            # Stop-then-unmet cycles in the window that count as a loop
       #   declared_cycle_threshold: 2   # The threshold when every cycle declares [awaiting-human]
       #   window_minutes: 30            # Cycles older than this (from the newest) drop out
