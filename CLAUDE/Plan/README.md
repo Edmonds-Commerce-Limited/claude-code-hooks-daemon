@@ -36,6 +36,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00501: session modes](00501-session-modes/PLAN.md) - Blocked on the owner, Medium (#91; per-session modes: focus, BLOCKED, usage-paused; guards never gated)
 
+- [00552: conflict marker hook bricking](00552-conflict-marker-hook-bricking/PLAN.md) - Not Started, High (git conflict markers in daemon-owned hook files brick a session: fail-open stubs, .gitattributes -merge, repair verb)
+
 - [00496: upstream feature requests and issue kinds](00496-upstream-feature-requests-and-issue-kinds/PLAN.md) - Not Started (owner request: a formal process for project agents to file feature requests and other non-defect issues, mirroring the defect generator, guard and forms; security reports routed privately)
 
 - [00497: hooks daemon mod](00497-hooks-daemon-mod/PLAN.md) - Not Started (owner-approved build from Plan 00494: daemon mod awareness with an exceptionally loud warning, a human task and question queue, one mod deployed by install and upgrade, suggested prompts, SessionStart messages, then session resilience)
