@@ -109,19 +109,21 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
-### N543 — the plan commit gate judges the index before a `git add` in the same command has run
+### N543 — the plan commit gate's deny gives no hint that the command's own `git add` would fail
 
-**Source**: archiving Plan 00552 (2026-10-26).
+**Source**: archiving Plan 00552 (2026-10-26); fact-check `subagent-reports/261026-plan-fact-checker-sonnet.md`.
 
 **Evidence**:
 
-- `git add -A <plan paths> && git commit ...` as one Bash command was denied by R-PLAN-QA-COMMIT.
-- The gate read the index as it stood before the command's own `git add`, so it reported the archived PLAN.md as
-  "In Progress" and the README row as still under Active. Both were already fixed on disk.
-- Running `git add` and `git commit` as two separate commands committed cleanly.
+- `git add -A <paths> && git commit ...` as one Bash command was denied by R-PLAN-QA-COMMIT. The gate reported the
+  archived PLAN.md as "In Progress" and its README row as still under Active.
+- The gate does simulate a preceding `git add` (`plan_qa_commit_gate.py:132`, `utils/staging_simulation.py`).
+- One pathspec was the plan's pre-move folder, which no longer existed. Run alone, that `git add` failed ("pathspec
+  did not match"). So the simulation was right to stage nothing, and the deny was correct. The mistake was the
+  command's, not the gate's.
 
-**Status**: ⬜ open. The gate should either model the in-command `git add` (as `-a` already is), or say in its deny
-message that a same-command `git add` has not run yet and the fix is to stage first.
+**Status**: ⬜ open, minor UX. When the simulated `git add` would itself fail, the deny could say so. As it is, the
+findings describe stale index content, and the real cause (the failing add) is not mentioned.
 
 ### N542 — `qa-full-runner` demands a report file path it has no tool to write
 
@@ -137,7 +139,7 @@ message that a same-command `git add` has not run yet and the fix is to stage fi
 **Status**: ⬜ open. The agent definition should name the auto-saved reply as its report rather than require a path it
 cannot fill.
 
-### N541 — eight `test_relay_repair` cases fail with "setsid unavailable" only under the full gate
+### N541 — four `test_relay_repair` tests (eight failures, two Python legs) fail with "setsid unavailable" only under the full gate
 
 **Source**: the full gates on ee25ea681 and 65e8baf03 (2026-10-26).
 
