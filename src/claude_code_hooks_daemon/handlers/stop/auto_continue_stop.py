@@ -839,7 +839,8 @@ class AutoContinueStopHandler(StopHandlerBase):
             current_msg = self._resolve_current_turn_message(reader)
             if current_msg is not None and self._message_has_stop_explanation(current_msg):
                 text = self._message_text(current_msg)
-                if self._contains_confirmation_pattern(text) and "?" in text:
+                asked = self._strip_mentioned_spans(text)
+                if self._contains_confirmation_pattern(asked) and "?" in asked:
                     logger.info(
                         "Rhetorical continue question inside STOPPING BECAUSE: stop - hard-blocking"
                     )
@@ -1359,6 +1360,20 @@ class AutoContinueStopHandler(StopHandlerBase):
                 reason="the stop-events log is a diagnostic trail; a lost line must never change the stop decision already made",
                 level=logging.DEBUG,
             )
+
+    # Double-quoted (straight or curly) and inline-code spans on one line.
+    _CODE_SPAN_RE: ClassVar[re.Pattern[str]] = re.compile(r"`[^`\n]*`")
+    _QUOTED_SPAN_RE: ClassVar[re.Pattern[str]] = re.compile(r'"[^"\n]*"|“[^”\n]*”')
+
+    @classmethod
+    def _strip_mentioned_spans(cls, text: str) -> str:
+        """Blank out quoted and inline-code spans, which mention phrases without asking.
+
+        Code spans keep an empty backtick pair so the "may I run `cmd`" lookahead
+        still sees a named command; quoted spans are dropped, along with any "?".
+        """
+        without_code = cls._CODE_SPAN_RE.sub("``", text)
+        return cls._QUOTED_SPAN_RE.sub("", without_code)
 
     def _contains_confirmation_pattern(self, text: str) -> bool:
         """Check if text contains a confirmation pattern.

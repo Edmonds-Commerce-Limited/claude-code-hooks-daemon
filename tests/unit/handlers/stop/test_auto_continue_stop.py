@@ -3490,6 +3490,45 @@ class TestRhetoricalContinueHardBlock:
         assert result.decision == Decision.DENY
         assert result.rule == RuleID.STOP_TAUTOLOGICAL_QUESTION
 
+    # ── quoted / inline-code asker phrases are mentions, not questions ──────
+
+    _QUOTING_MESSAGE = (
+        "STOPPING BECAUSE: fix committed.\n\n"
+        'The fix: an "May I" or "Can I" question that names a command in backticks '
+        'will no longer match. "May I proceed?" and "May I run the next phase?" '
+        "will still be blocked."
+    )
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            _QUOTING_MESSAGE,
+            'STOPPING BECAUSE: done. The phrase "Should I proceed?" is still blocked.',
+            "STOPPING BECAUSE: done. The phrase “Want me to build it?” is blocked.",
+            "STOPPING BECAUSE: done. The phrase `Should I proceed?` is still blocked.",
+        ],
+    )
+    def test_quoted_asker_phrases_are_mentions_and_allowed(
+        self, handler: AutoContinueStopHandler, tmp_path: Path, text: str
+    ) -> None:
+        """Asker phrases and '?' inside quotes or inline code ask nothing."""
+        path = tmp_path / "t.jsonl"
+        self._write_assistant_text(path, text)
+        result = self._handle(handler, path)
+        assert result.decision == Decision.ALLOW
+
+    def test_quoting_message_plus_unquoted_question_still_denied(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """A genuine unquoted continue question elsewhere still blocks."""
+        path = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            path, self._QUOTING_MESSAGE + "\n\nShould I proceed with the next task?"
+        )
+        result = self._handle(handler, path)
+        assert result.decision == Decision.DENY
+        assert result.rule == RuleID.STOP_TAUTOLOGICAL_QUESTION
+
     # ── unprefixed rhetorical questions keep auto-continuing (Branch 3) ─────
 
     def test_unprefixed_want_me_to_build_still_auto_continues(
