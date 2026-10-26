@@ -3425,6 +3425,110 @@ class TestRhetoricalContinueHardBlock:
         result = self._handle(handler, path)
         assert result.decision == Decision.ALLOW
 
+    # ── permission questions naming a specific command → ALLOW ──────────────
+
+    def test_numbered_owner_decisions_with_may_i_run_command_still_allowed(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """A permission request for a named command is a genuine owner question."""
+        path = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            path,
+            "STOPPING BECAUSE: the developer agent is still fixing ...\n\n"
+            "**Decisions I need from you:**\n"
+            "1. Should the goal-loop detector switch to act mode? Plan 00501 Task 7.3 "
+            "waits on either three real loops caught or two releases. This incident "
+            "plausibly counts as the third real loop. Do you accept it as one?\n"
+            "2. May I run `bin/hooks-daemon clear-goal` myself when a goal can't be "
+            "satisfied (D4)?\n"
+            "3. Should a plan marked Blocked drop out of the goal, or should its block "
+            "count as meeting it (D5)?\n\n"
+            "**On the GitHub SDLC:** all 25 eligible open issues are labelled "
+            "`agent-needs-human`, so I have nothing to pick up on my own. Name any you "
+            "want me to take.\n",
+        )
+        result = self._handle(handler, path)
+        assert result.decision == Decision.ALLOW
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "STOPPING BECAUSE: need user input. May I run `bin/hooks-daemon clear-goal` "
+            "myself when a goal cannot be satisfied?",
+            "STOPPING BECAUSE: need user input. Can I run `git push --force-with-lease` "
+            "on this branch?",
+        ],
+    )
+    def test_may_can_i_run_inline_command_allowed(
+        self, handler: AutoContinueStopHandler, tmp_path: Path, text: str
+    ) -> None:
+        """'May/Can I run `cmd`' asks for authority, not to continue."""
+        path = tmp_path / "t.jsonl"
+        self._write_assistant_text(path, text)
+        result = self._handle(handler, path)
+        assert result.decision == Decision.ALLOW
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "STOPPING BECAUSE: phase 1 done. Should I proceed?",
+            "STOPPING BECAUSE: slice 1 done. Want me to build slice 2 next?",
+            "STOPPING BECAUSE: task 3 done. Shall I continue with the next task?",
+            "STOPPING BECAUSE: phase 1 done. May I run the next phase?",
+            "STOPPING BECAUSE: phase 1 done. May I start Phase 2?",
+            "STOPPING BECAUSE: phase 1 done. Can I continue?",
+            "STOPPING BECAUSE: done. Should I run `pytest` next?",
+        ],
+    )
+    def test_rhetorical_continue_questions_still_denied(
+        self, handler: AutoContinueStopHandler, tmp_path: Path, text: str
+    ) -> None:
+        """True positives stay blocked; only may/can + inline code is exempt."""
+        path = tmp_path / "t.jsonl"
+        self._write_assistant_text(path, text)
+        result = self._handle(handler, path)
+        assert result.decision == Decision.DENY
+        assert result.rule == RuleID.STOP_TAUTOLOGICAL_QUESTION
+
+    # ── quoted / inline-code asker phrases are mentions, not questions ──────
+
+    _QUOTING_MESSAGE = (
+        "STOPPING BECAUSE: fix committed.\n\n"
+        'The fix: an "May I" or "Can I" question that names a command in backticks '
+        'will no longer match. "May I proceed?" and "May I run the next phase?" '
+        "will still be blocked."
+    )
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            _QUOTING_MESSAGE,
+            'STOPPING BECAUSE: done. The phrase "Should I proceed?" is still blocked.',
+            "STOPPING BECAUSE: done. The phrase “Want me to build it?” is blocked.",
+            "STOPPING BECAUSE: done. The phrase `Should I proceed?` is still blocked.",
+        ],
+    )
+    def test_quoted_asker_phrases_are_mentions_and_allowed(
+        self, handler: AutoContinueStopHandler, tmp_path: Path, text: str
+    ) -> None:
+        """Asker phrases and '?' inside quotes or inline code ask nothing."""
+        path = tmp_path / "t.jsonl"
+        self._write_assistant_text(path, text)
+        result = self._handle(handler, path)
+        assert result.decision == Decision.ALLOW
+
+    def test_quoting_message_plus_unquoted_question_still_denied(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """A genuine unquoted continue question elsewhere still blocks."""
+        path = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            path, self._QUOTING_MESSAGE + "\n\nShould I proceed with the next task?"
+        )
+        result = self._handle(handler, path)
+        assert result.decision == Decision.DENY
+        assert result.rule == RuleID.STOP_TAUTOLOGICAL_QUESTION
+
     # ── unprefixed rhetorical questions keep auto-continuing (Branch 3) ─────
 
     def test_unprefixed_want_me_to_build_still_auto_continues(
