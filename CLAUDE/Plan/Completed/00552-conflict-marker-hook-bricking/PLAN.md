@@ -55,7 +55,7 @@ The defence comes in layers:
 ### Phase 3: Repair verb
 
 - [x] ✅ **Task 3.1**: Add a `repair-install` verb, or extend `repair` (prior art: Plan 00456). It redeploys the stubs and `init.sh`, runs `bash -n` on every hook, and validates `settings.json` (`reconcile-settings` only with an explicit flag). It must run with no working session and no running daemon.
-- [x] ✅ **Task 3.2**: Make the Phase 1 error message and the status line's "settings.json is not valid JSON" both name the repair command. The parse-guard message names `repair-install`. The "not valid JSON" text is not emitted by the daemon (it is Claude Code's own), so there was nothing to change; journalled as a decision.
+- [x] ✅ **Task 3.2**: Make the Phase 1 error message and the status line's "settings.json is not valid JSON" both name the repair command. The parse-guard message names `repair-install`. No daemon status-line code emits "settings.json is not valid JSON", so it is most likely Claude Code's own text and there was nothing to change. The daemon does print "is not valid JSON" from `settings_merge.py` and the CLI, but not on the status line. Journalled as a decision.
 
 ### Phase 4: Docs
 
