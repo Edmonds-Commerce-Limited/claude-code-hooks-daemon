@@ -99,6 +99,18 @@ FIRST_PROMPT_WINDOW_SECONDS: Final[float] = MAX_PAUSE_SPAN_SECONDS + PAUSE_GRACE
 _EXPIRY_EVIDENCE: Final[str] = "its expiry time passed"
 
 
+#: What an agent in a goal loop is told to do. ``clear-goal`` retracts only the
+#: session's goal (it removes the goal-intent file and writes the goal-clear
+#: trigger the ccy supervisor types ``/goal clear`` from, at its next idle); it
+#: is idempotent and ends no session mode.
+GOAL_LOOP_SELF_CLEAR_INSTRUCTION: Final[str] = (
+    "The goal cannot be satisfied from inside this session: run `bin/hooks-daemon clear-goal` "
+    "(it retracts this session's goal and is safe to repeat), journal why the goal cannot be "
+    "satisfied with `CLAUDE/Plan/mkplan.bash --journal <plan> decision <body-file>`, then "
+    "stop with the real blocker stated in your `STOPPING BECAUSE:` line."
+)
+
+
 class NoticeKind(StrEnum):
     """What a one-time statement to the agent reports."""
 
@@ -137,7 +149,8 @@ class ModeNotice:
             )
         return (
             "GOAL-LOOP BLOCKED: this session is goal-blocked by the goal-loop detector, "
-            f"which saw it stop repeatedly on a goal that stayed unmet.{goal} The block ends "
+            f"which saw it stop repeatedly on a goal that stayed unmet.{goal} "
+            f"{GOAL_LOOP_SELF_CLEAR_INSTRUCTION} The block ends "
             f"after {hours:g} h, at the next message the human types, on a repository "
             "change, or with `hooks-daemon session-mode unblock`."
         )

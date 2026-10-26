@@ -978,6 +978,17 @@ class TestGoalLoopNotice:
         assert "a human must type `/goal clear`" in text
         assert "after 0.5 h" in text
 
+    @pytest.mark.parametrize("goal_cleared", [True, False])
+    def test_text_tells_the_agent_to_clear_the_goal_journal_and_stop(
+        self, goal_cleared: bool
+    ) -> None:
+        text = ModeNotice(
+            NoticeKind.GOAL_LOOP_ENTERED, self._entry(), goal_cleared=goal_cleared
+        ).text()
+        assert "run `bin/hooks-daemon clear-goal`" in text
+        assert "mkplan.bash --journal" in text
+        assert "stop with the real blocker stated" in text
+
     def test_goal_cleared_defaults_to_none(self) -> None:
         assert ModeNotice(NoticeKind.EXPIRED, self._entry()).goal_cleared is None
 

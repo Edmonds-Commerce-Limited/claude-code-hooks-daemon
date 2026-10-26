@@ -17,9 +17,9 @@ log. In ``observe`` mode that is all it does:
 * ``loop-persisting`` every ``persist_every_crossings`` further threshold
   crossings of a loop already latched (observe) or blocked (act), carrying
   ``cycles``, ``crossings`` and ``since`` (the loop's first-seen time). The first
-  one for a loop also queues ONE registry line telling the agent to say to the
-  human that the goal is unsatisfiable and that ``/goal clear`` or
-  ``hooks-daemon clear-goal`` ends it; ending the goal stays the human's call.
+  one for a loop also queues ONE registry line telling the agent to run
+  ``hooks-daemon clear-goal``, journal why the goal cannot be satisfied, and stop
+  with the real blocker stated.
 
 **Act mode (``mode: act``, the default; Task 6.3).** At the threshold it enters
 GOAL_BLOCKED for ``blocked_hours`` through ``core.goal_loop_block``, signals the
@@ -112,7 +112,10 @@ from claude_code_hooks_daemon.core.session_mode_log import (
     TransitionAction,
     TransitionLogError,
 )
-from claude_code_hooks_daemon.core.session_mode_registry import SessionModeRegistry
+from claude_code_hooks_daemon.core.session_mode_registry import (
+    GOAL_LOOP_SELF_CLEAR_INSTRUCTION,
+    SessionModeRegistry,
+)
 from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
     _STOP_EXPLANATION_PREFIX,
     _declares_human_blocked,
@@ -386,9 +389,7 @@ class GoalLoopDetectorHandler(StopHandlerBase):
                 session_id,
                 f"GOAL-LOOP PERSISTING: the goal evaluator has rejected {loop.cycles} of this "
                 f"session's stops since {since} (loop {fingerprint}) with no human prompt "
-                "between them, and it keeps rejecting them. Say plainly to the human that the "
-                "goal is unsatisfiable from inside this session, and that `/goal clear` or "
-                "`bin/hooks-daemon clear-goal` ends it. Ending the goal is the human's decision.",
+                f"between them, and it keeps rejecting them. {GOAL_LOOP_SELF_CLEAR_INSTRUCTION}",
             )
         except (OSError, RuntimeError) as error:
             log_and_continue(
