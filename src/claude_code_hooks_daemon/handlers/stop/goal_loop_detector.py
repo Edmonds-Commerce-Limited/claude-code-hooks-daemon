@@ -270,7 +270,11 @@ class GoalLoopDetectorHandler(StopHandlerBase):
         assessment = assess(state.ring, config)
         evidence = assessment.evidence(config, state.ring.fingerprint)
         if assessment.verdict is Verdict.WOULD_ENTER and config.mode is DetectorMode.ACT:
-            self._enter(session_id, state, config, evidence, fingerprint)
+            # One entry per fingerprint: while the block this detector made is live
+            # (``_exit_on_repo_change`` forgets it once it ends), a further
+            # crossing neither re-signals the goal clear nor queues another notice.
+            if state.blocked_fingerprint != fingerprint:
+                self._enter(session_id, state, config, evidence, fingerprint)
         elif state.observed_fingerprint is None:
             action = _VERDICT_ACTION.get(assessment.verdict)
             if action is not None:

@@ -481,6 +481,45 @@ class TestActMode:
         assert clear_goal.call_count == 1
         assert len(modes.take_notices(SESSION)) == 1
 
+    def test_act_enters_once_per_fingerprint_across_many_threshold_crossings(
+        self,
+        actor: GoalLoopDetectorHandler,
+        modes: SessionModeRegistry,
+        clear_goal: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        declared = "STOPPING BECAUSE: [awaiting-human] blocked on the fixture."
+        transcript = tmp_path / "t.jsonl"
+        second = 10
+        for _ in range(4):
+            lines = [
+                line
+                for offset in (0, 10)
+                for line in (_stop(second + offset, declared), _unmet(second + offset + 1))
+            ]
+            _append_lines(transcript, lines)
+            actor.handle(_input(transcript))
+            second += 20
+        assert clear_goal.call_count == 1
+        assert [n.kind for n in modes.take_notices(SESSION)] == [NoticeKind.GOAL_LOOP_ENTERED]
+        entries = [a for a, _ in _registry_actions(modes) if a is TransitionAction.ENTER]
+        assert len(entries) == 1
+
+    def test_act_enters_again_once_the_fingerprint_changes(
+        self,
+        actor: GoalLoopDetectorHandler,
+        modes: SessionModeRegistry,
+        clear_goal: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        _append_lines(transcript, [*_cycle(10), *_cycle(20), *_cycle(30)])
+        actor.handle(_input(transcript))
+        actor._fingerprint_repo = lambda: "fp-changed"
+        _append_lines(transcript, [*_cycle(40), *_cycle(50), *_cycle(60)])
+        actor.handle(_input(transcript))
+        assert clear_goal.call_count == 2
+
     def test_observe_logs_would_enter_once_and_not_on_a_fourth_cycle(
         self, handler: GoalLoopDetectorHandler, recorder: _Recorder, tmp_path: Path
     ) -> None:
