@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.plan_qa.model import (
+    GOAL_DROPPING_STATUSES,
     TERMINAL_STATUSES,
     PlanDoc,
     PlanLocation,
@@ -122,6 +123,10 @@ class TestPlanStatusEnum:
         assert TERMINAL_STATUSES == frozenset(
             {PlanStatus.COMPLETE, PlanStatus.CANCELLED, PlanStatus.SUPERSEDED}
         )
+
+    def test_goal_dropping_statuses_are_terminal_plus_blocked(self) -> None:
+        assert GOAL_DROPPING_STATUSES == TERMINAL_STATUSES | {PlanStatus.BLOCKED}
+        assert PlanStatus.DORMANT not in GOAL_DROPPING_STATUSES
 
     def test_blocked_and_dormant_are_not_terminal(self) -> None:
         assert PlanStatus.BLOCKED not in TERMINAL_STATUSES

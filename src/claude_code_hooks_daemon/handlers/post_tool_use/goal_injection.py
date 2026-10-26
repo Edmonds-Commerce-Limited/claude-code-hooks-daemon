@@ -26,7 +26,7 @@ Safety model (PLAN.md Decisions 2 and 3):
 Trigger semantics are TRANSITION-based (ledger 00466 N3): the handler fires
 only when THIS Write/Edit is what moved the Status line INTO a target
 classification -- into In Progress for the flip signal, into a terminal
-status for the retirement refresh -- never merely because the post-write
+status or Blocked (``GOAL_DROPPING_STATUSES``) for the retirement refresh -- never merely because the post-write
 file happens to already read that way. Both directions share one
 reconstruction (``_is_real_transition``): an Edit's pre-edit text is
 recovered by reversing this edit against the post-edit text already on
@@ -105,7 +105,7 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.daemon.synthetic_traffic import is_synthetic_event
 from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
-from claude_code_hooks_daemon.plan_qa.model import TERMINAL_STATUSES, PlanDoc, PlanStatus
+from claude_code_hooks_daemon.plan_qa.model import GOAL_DROPPING_STATUSES, PlanDoc, PlanStatus
 from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_facts import project_relative_head_text
@@ -820,7 +820,7 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
 
     @staticmethod
     def _is_terminal_status(status: PlanStatus | None) -> bool:
-        return status is not None and status in TERMINAL_STATUSES
+        return status is not None and status in GOAL_DROPPING_STATUSES
 
     @staticmethod
     def _is_transition_via_reconstruction(
@@ -1390,7 +1390,7 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         invented for this method.
         """
         doc = PlanDoc.parse(plan_text)
-        if doc.status is None or doc.status not in TERMINAL_STATUSES:
+        if doc.status is None or doc.status not in GOAL_DROPPING_STATUSES:
             return
         transition, _used_fallback = self._resolve_transition(
             hook_input, plan_md_path, plan_text, is_target=self._is_terminal_status

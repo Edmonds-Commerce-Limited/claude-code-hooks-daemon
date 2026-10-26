@@ -56,6 +56,11 @@ TERMINAL_STATUSES: Final[frozenset[PlanStatus]] = frozenset(
     {PlanStatus.COMPLETE, PlanStatus.CANCELLED, PlanStatus.SUPERSEDED}
 )
 
+# Statuses that take a plan out of a session's combined goal: the terminal ones,
+# plus Blocked (a goal that cannot be met while the plan is blocked is a valid
+# stop). Goal-ledger use only; the archive rule is TERMINAL_STATUSES.
+GOAL_DROPPING_STATUSES: Final[frozenset[PlanStatus]] = TERMINAL_STATUSES | {PlanStatus.BLOCKED}
+
 # Longest-first so e.g. "Not Started" can never be shadowed by a shorter token.
 _STATUS_TOKENS_LONGEST_FIRST: Final[tuple[PlanStatus, ...]] = tuple(
     sorted(PlanStatus, key=lambda status: len(status.value), reverse=True)

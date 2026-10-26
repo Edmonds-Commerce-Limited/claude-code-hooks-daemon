@@ -387,6 +387,21 @@ class TestLivePlanRefs:
         refs = ledger.live_plan_refs(plan_dir)
         assert [r.plan_number for r in refs] == [_PLAN_B]
 
+    def test_excludes_blocked_plans_and_keeps_their_owners(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        folder = _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        _make_plan(plan_dir, _PLAN_B, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+        ledger.record_emission(_SESSION, _PLAN_B, _GOAL_LINE, plan_dir)
+        (folder / "PLAN.md").write_text(
+            f"# Plan {_PLAN_A}: example plan\n\n**Status**: Blocked (2026-10-26) - waiting\n",
+            encoding="utf-8",
+        )
+        refs = ledger.live_plan_refs(plan_dir)
+        assert [r.plan_number for r in refs] == [_PLAN_B]
+        assert ledger.owning_sessions(_PLAN_A) == [_SESSION]
+
     def test_empty_ledger_yields_no_refs(self, tmp_path: Path) -> None:
         ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
         assert ledger.live_plan_refs(tmp_path / "CLAUDE" / "Plan") == []

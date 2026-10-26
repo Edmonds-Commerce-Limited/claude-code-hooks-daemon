@@ -34,7 +34,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
-from claude_code_hooks_daemon.plan_qa.model import TERMINAL_STATUSES, PlanDoc, PlanStatus
+from claude_code_hooks_daemon.plan_qa.model import GOAL_DROPPING_STATUSES, PlanDoc, PlanStatus
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 
@@ -299,7 +299,7 @@ def _plan_state(plan_dir: Path, plan_number: str) -> str:
         doc = PlanDoc.parse(text)
         if doc.status is None:
             return _STATE_UNREADABLE
-        if doc.status in TERMINAL_STATUSES:
+        if doc.status in GOAL_DROPPING_STATUSES:
             return _STATE_TERMINAL
         if doc.status is PlanStatus.IN_PROGRESS:
             return _STATE_IN_PROGRESS
