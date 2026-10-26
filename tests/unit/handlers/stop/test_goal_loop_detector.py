@@ -105,6 +105,8 @@ def recorder() -> _Recorder:
 @pytest.fixture
 def handler(recorder: _Recorder) -> GoalLoopDetectorHandler:
     detector = GoalLoopDetectorHandler()
+    # The shipped default is act; most cases here pin the logging-only observe mode.
+    detector._mode = "observe"
     detector._fingerprint_repo = lambda: "fp-stable"
     detector._append_transition = recorder
     return detector
@@ -135,8 +137,9 @@ class TestIdentity:
             "cycle_threshold",
         }
 
-    def test_default_options(self, handler: GoalLoopDetectorHandler) -> None:
-        assert handler._mode == "observe"
+    def test_default_options(self) -> None:
+        handler = GoalLoopDetectorHandler()
+        assert handler._mode == "act"
         assert handler._cycle_threshold == 3
         assert handler._declared_cycle_threshold == 2
         assert handler._window_minutes == 30
@@ -730,6 +733,7 @@ class TestProductionSeams:
         layer = MagicMock()
         layer.session_modes.transition_log = log
         detector = GoalLoopDetectorHandler()
+        detector._mode = "observe"
         detector._fingerprint_repo = lambda: "fp"
         transcript = tmp_path / "t.jsonl"
         shutil.copy(FIXTURES / "similar_stops.jsonl", transcript)
@@ -745,6 +749,7 @@ class TestProductionSeams:
         layer = MagicMock()
         layer.session_modes.transition_log = None
         detector = GoalLoopDetectorHandler()
+        detector._mode = "observe"
         detector._fingerprint_repo = lambda: "fp"
         transcript = tmp_path / "t.jsonl"
         shutil.copy(FIXTURES / "similar_stops.jsonl", transcript)

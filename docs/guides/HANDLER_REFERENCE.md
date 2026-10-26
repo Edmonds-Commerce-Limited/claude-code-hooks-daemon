@@ -4501,24 +4501,24 @@ These handlers run when Claude stops generating a response.
 | **Type**       | Advisory (observer)  |
 | **Event**      | Stop                 |
 
-**Description:** Watches for a goal loop: a session that keeps stopping with `STOPPING BECAUSE:` while the goal evaluator keeps answering "not met", with no human prompt in between. On each main-thread Stop it reads only the transcript lines added since its last read (a session it has not seen before is read from its last 2 MiB only), counts stop-then-unmet cycles inside the window, and appends to the session-mode transition log: `near-miss` one cycle short of the threshold, `would-enter` at it, and `loop-reset` when a human prompt, a goal met or cleared, or a repository change (the committed tree plus tracked changes, plan journals and `untracked/` excluded, so a journal-only commit is not a change) empties the count. Stop-text similarity is recorded as evidence only. It never blocks and never enters a mode. An unreadable transcript, a changed or shrunk transcript (re-anchored at its end), a failed git read and a failed log append are each logged as a WARNING and the Stop is allowed. Main thread only; never terminal.
+**Description:** Watches for a goal loop: a session that keeps stopping with `STOPPING BECAUSE:` while the goal evaluator keeps answering "not met", with no human prompt in between. On each main-thread Stop it reads only the transcript lines added since its last read (a session it has not seen before is read from its last 2 MiB only), counts stop-then-unmet cycles inside the window, and appends to the session-mode transition log: `near-miss` one cycle short of the threshold, `would-enter` at it, and `loop-reset` when a human prompt, a goal met or cleared, or a repository change (the committed tree plus tracked changes, plan journals and `untracked/` excluded, so a journal-only commit is not a change) empties the count. Stop-text similarity is recorded as evidence only. It never blocks a Stop; only `act` mode (the default) enters a mode. An unreadable transcript, a changed or shrunk transcript (re-anchored at its end), a failed git read and a failed log append are each logged as a WARNING and the Stop is allowed. Main thread only; never terminal.
 
 A loop that stays latched (`observe`) or blocked (`act`) logs `loop-persisting` every `persist_every_crossings` further crossings, with its cycles, crossings and first-seen time; the first one also queues one line telling the agent to say to the human that the goal is unsatisfiable and that `/goal clear` or `bin/hooks-daemon clear-goal` ends it.
 
-In `observe` mode (the default) the detector only logs. With `mode: act` it also enters the `goal-blocked` session mode when a loop is detected and clears the goal; the block ends on a human prompt, the `blocked_hours` timer, a repository change, or `hooks-daemon session-mode unblock` (which refuses a declared `awaiting-human` block). How the block fits the other session modes: [CLAUDE/SessionModes.md](../../CLAUDE/SessionModes.md).
+In `act` mode (the default) the detector enters the `goal-blocked` session mode when a loop is detected and clears the goal. With `mode: observe` it only logs. The block ends on a human prompt, the `blocked_hours` timer, a repository change, or `hooks-daemon session-mode unblock` (which refuses a declared `awaiting-human` block). How the block fits the other session modes: [CLAUDE/SessionModes.md](../../CLAUDE/SessionModes.md).
 
 **Backstop without ccy:** Claude Code itself caps consecutive stop-hook continuations at 8. Each tool call resets the count, and `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` raises the cap. After the cap Claude Code pauses the goal until the next message. A loop that makes tool calls between stops never reaches the cap, which is why the detector exists.
 
-**Options:** `mode` accepts `observe` (default) or `act`; any other value is reported at session start and withheld.
+**Options:** `mode` accepts `act` (default) or `observe`; any other value is reported at session start and withheld.
 
-| Option                     | Default   | Description                                                        |
-| -------------------------- | --------- | ------------------------------------------------------------------ |
-| `mode`                     | `observe` | `observe` logs only; `act` enters goal-blocked and clears the goal |
-| `cycle_threshold`          | `3`       | Cycles in the window that count as a loop (positive integer)       |
-| `declared_cycle_threshold` | `2`       | The threshold when every cycle's stop declares `[awaiting-human]`  |
-| `window_minutes`           | `30`      | Cycles older than this, measured back from the newest, drop out    |
-| `blocked_hours`            | `4`       | Positive number; the goal-blocked TTL in `act` mode                |
-| `persist_every_crossings`  | `5`       | A `loop-persisting` record every N further crossings of one loop   |
+| Option                     | Default | Description                                                        |
+| -------------------------- | ------- | ------------------------------------------------------------------ |
+| `mode`                     | `act`   | `act` enters goal-blocked and clears the goal; `observe` logs only |
+| `cycle_threshold`          | `3`     | Cycles in the window that count as a loop (positive integer)       |
+| `declared_cycle_threshold` | `2`     | The threshold when every cycle's stop declares `[awaiting-human]`  |
+| `window_minutes`           | `30`    | Cycles older than this, measured back from the newest, drop out    |
+| `blocked_hours`            | `4`     | Positive number; the goal-blocked TTL in `act` mode                |
+| `persist_every_crossings`  | `5`     | A `loop-persisting` record every N further crossings of one loop   |
 
 **Config example:**
 

@@ -6,14 +6,14 @@ met", with no human prompt in between. The pure logic lives in
 :mod:`claude_code_hooks_daemon.core.goal_loop`; this handler owns the
 per-session state (a transcript checkpoint and a cycle ring) and the logging.
 
-**Observe only.** On every main-thread Stop it reads the transcript lines
-appended since its checkpoint, feeds them to the ring, and appends to the
-session-mode transition log:
+On every main-thread Stop it reads the transcript lines appended since its
+checkpoint, feeds them to the ring, and appends to the session-mode transition
+log. In ``observe`` mode that is all it does:
 
 * ``loop-reset`` when a human prompt, a goal met or cleared, or a repository
   change empties a non-empty ring (the cause is the transition's ``detail``);
 * ``near-miss`` when the ring is one cycle short of its threshold;
-* ``would-enter`` when it has reached it (``observe``, the default);
+* ``would-enter`` when it has reached it (``observe``);
 * ``loop-persisting`` every ``persist_every_crossings`` further threshold
   crossings of a loop already latched (observe) or blocked (act), carrying
   ``cycles``, ``crossings`` and ``since`` (the loop's first-seen time). The first
@@ -21,7 +21,7 @@ session-mode transition log:
   human that the goal is unsatisfiable and that ``/goal clear`` or
   ``hooks-daemon clear-goal`` ends it; ending the goal stays the human's call.
 
-**Act mode (``mode: act``, opt-in; Task 6.3).** At the threshold it enters
+**Act mode (``mode: act``, the default; Task 6.3).** At the threshold it enters
 GOAL_BLOCKED for ``blocked_hours`` through ``core.goal_loop_block``, signals the
 goal clear once, and queues ONE registry notice that reaches the agent at its
 next prompt. The line is never Stop-result context: Claude Code reads that as

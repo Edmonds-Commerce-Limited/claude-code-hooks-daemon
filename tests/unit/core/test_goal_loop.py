@@ -238,7 +238,7 @@ class TestReadNewLines:
 class TestGoalLoopConfig:
     def test_defaults(self) -> None:
         config = GoalLoopConfig()
-        assert config.mode is DetectorMode.OBSERVE
+        assert config.mode is DetectorMode.ACT
         assert (config.cycle_threshold, config.declared_cycle_threshold) == (3, 2)
         assert config.window_seconds == 30 * 60
         assert config.blocked_hours == 4
@@ -445,7 +445,7 @@ class TestEvidence:
             "window=30m",
             "similarity=",
             "fingerprint=abc123",
-            "mode=observe",
+            "mode=act",
         ):
             assert part in text
 

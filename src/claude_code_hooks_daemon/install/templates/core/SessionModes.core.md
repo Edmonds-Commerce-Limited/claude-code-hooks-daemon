@@ -131,9 +131,12 @@ journal-only commit is not a change). A stop declaring
 `[awaiting-human]` counts toward a lower threshold. Stop-text similarity is
 logged as evidence only, never a firing condition.
 
-- **`observe` (default)** only logs `near-miss`, `would-enter`, `loop-reset`
-  and `loop-persisting` records to the transition log. It never blocks and
-  never enters a mode.
+- **`act` (default)** at the threshold enters `goal-blocked` and clears the
+  goal, so the supervisor types `/goal clear` and stops driving the loop. The
+  session is told once at its next prompt. `mode: observe` opts out.
+- **`observe` (`mode: observe`)** only logs `near-miss`, `would-enter`,
+  `loop-reset` and `loop-persisting` records to the transition log. It never
+  blocks and never enters a mode.
 - **`loop-persisting`** (both modes) is logged every `persist_every_crossings`
   (default 5) further threshold crossings of a loop that is already latched
   (observe) or blocked (act), with `cycles`, `crossings` and `since` (when the
@@ -142,9 +145,6 @@ logged as evidence only, never a firing condition.
   and that `/goal clear` or `bin/hooks-daemon clear-goal` ends it. The agent is
   not told to clear the goal itself. A fingerprint change, a human prompt, or a
   goal met or cleared starts the counters over.
-- **`act` (opt-in, `mode: act`)** at the threshold enters `goal-blocked` and
-  clears the goal, so the supervisor types `/goal clear` and stops driving the
-  loop. The session is told once at its next prompt.
 - **Without ccy** nothing types the clear. The only backstop is Claude Code's
   own cap of 8 consecutive stop-hook continuations (reset by each tool call,
   raised by `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`), after which it pauses the goal
