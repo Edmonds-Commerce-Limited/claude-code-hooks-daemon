@@ -1632,8 +1632,8 @@ def cmd_status(args: argparse.Namespace) -> int:
     _print_install_stamp_line()
 
     # Plan 00290: name active per-event listeners when the transport config
-    # needs them. Silent when the transport is disabled (default) — matches
-    # today's status output byte-for-byte.
+    # needs them. Silent when the transport is disabled (relay_enabled: false,
+    # or a host that cannot run the relay) — the legacy status output.
     _print_transport_status_warnings(project_path, transport)
     if transport_config is not None and (
         transport_config.relay_enabled or transport_config.nc_enabled

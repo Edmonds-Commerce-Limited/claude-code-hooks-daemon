@@ -12,11 +12,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.install.forwarder_generator import (
     strip_relay_guard_block,
     strip_status_fast_path_block,
 )
+from claude_code_hooks_daemon.utils.relay_host import relay_supported_by_host
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _HOOKS_DEPLOY_SH = _REPO_ROOT / "scripts" / "install" / "hooks_deploy.sh"
@@ -123,6 +126,34 @@ def test_relay_enabled_config_inserts_guard(tmp_path: Path) -> None:
     assert '_rl_sock="$_rl_events_dir/pre-tool-use.sock"' in deployed
     # The rest of the forwarder body is untouched.
     assert 'send_request_stdin "PreToolUse"' in deployed
+
+
+@pytest.mark.parametrize(
+    "config_body",
+    [
+        None,
+        "daemon:\n  transport:\n    nc_enabled: false\n",
+        "daemon:\n  log_level: INFO\n",
+    ],
+    ids=["no-config-file", "transport-block-without-relay-key", "no-transport-key"],
+)
+def test_config_without_relay_enabled_follows_the_host_default(
+    tmp_path: Path, config_body: str | None
+) -> None:
+    """No ``relay_enabled`` key: the guard is deployed exactly when the host
+    can run the relay (Plan 00554), and stripped on hosts that cannot."""
+    daemon_dir = tmp_path / "daemon"
+    project_root = tmp_path / "project"
+    _seed_daemon_dir(daemon_dir)
+    (project_root / ".claude").mkdir(parents=True)
+    if config_body is not None:
+        (project_root / ".claude" / "hooks-daemon.yaml").write_text(config_body)
+
+    result = _run_deploy(daemon_dir, project_root, "normal", venv_python=sys.executable)
+
+    assert result.returncode == 0, result.stderr
+    deployed = (project_root / ".claude" / "hooks" / "pre-tool-use").read_text()
+    assert ("relay hot path" in deployed) is relay_supported_by_host()
 
 
 def test_self_install_mode_never_regenerates_even_when_relay_enabled(tmp_path: Path) -> None:
