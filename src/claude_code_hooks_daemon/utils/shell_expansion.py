@@ -552,9 +552,7 @@ class _BashBraces:
     two differ, so a caller that must read every spelling reads both
     (:func:`_both_readings`)."""
 
-    def __init__(
-        self, word: str, *, max_depth: int, skip_invalid_sequences: bool = False
-    ) -> None:
+    def __init__(self, word: str, *, max_depth: int, skip_invalid_sequences: bool = False) -> None:
         self.word = word
         self.max_depth = max_depth
         self.skip_invalid_sequences = skip_invalid_sequences
