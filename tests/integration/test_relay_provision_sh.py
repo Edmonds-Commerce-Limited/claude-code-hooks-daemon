@@ -203,8 +203,11 @@ class TestCallSites:
 
     def test_upgrade_repeats_the_banner_before_both_exits(self) -> None:
         lines = _UPGRADE_SH.read_text(encoding="utf-8").splitlines()
+        # The early path ends in `exit 0`; the main path ends the script with
+        # the banner as its last command (no trailing `exit 0`, N547).
         exits = [i for i, line in enumerate(lines) if line.strip() == "exit 0"]
-        assert len(exits) >= 2
-        for index in (exits[-2], exits[-1]):
-            window = [line.strip() for line in lines[max(0, index - 4) : index]]
-            assert "report_relay_provision_failure" in window, lines[index - 4 : index + 1]
+        assert exits
+        window = [line.strip() for line in lines[max(0, exits[-1] - 4) : exits[-1]]]
+        assert "report_relay_provision_failure" in window, lines[exits[-1] - 4 : exits[-1] + 1]
+        code = [line.strip() for line in lines if line.strip() and not line.strip().startswith("#")]
+        assert code[-1] == "report_relay_provision_failure"
