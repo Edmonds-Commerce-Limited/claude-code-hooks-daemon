@@ -28,6 +28,7 @@ import fcntl
 import hashlib
 import logging
 import os
+import subprocess  # nosec B404 - argv list, no shell
 import sys
 import threading
 from collections.abc import Callable, Iterator
@@ -146,14 +147,9 @@ def _record_spawned_pid(path: Path, claim: str, pid: int, *, detail: str) -> Non
             _replace_state(path, _state_text(SyncStatus.RUNNING, detail=detail, pid=pid))
 
 
-def _reap(pid: int) -> None:
-    """Wait for the child so it never lingers as a zombie.
-
-    A ChildProcessError (someone else reaped it) is left to raise: the thread's
-    excepthook reports it.
-    """
-    _, status = os.waitpid(pid, 0)
-    logger.info("relay repair child %d exited (%d)", pid, os.waitstatus_to_exitcode(status))
+def _reap(child: subprocess.Popen[bytes]) -> None:
+    """Wait for the child so it never lingers as a zombie."""
+    logger.info("relay repair child %d exited (%d)", child.pid, child.wait())
 
 
 def spawn_detached(argv: list[str], log: Path) -> int:
@@ -163,17 +159,26 @@ def spawn_detached(argv: list[str], log: Path) -> int:
     wait; a daemon thread reaps the child, which otherwise stays a zombie for the
     caller's lifetime and still answers ``kill(pid, 0)``. Raises OSError when the
     program cannot be started.
+
+    ``start_new_session`` rather than ``os.posix_spawn(setsid=True)``: uv-managed
+    CPython builds lack ``POSIX_SPAWN_SETSID`` and raise NotImplementedError
+    (ledger 00474 N541).
     """
-    file_actions = [
-        (os.POSIX_SPAWN_OPEN, 0, os.devnull, os.O_RDONLY, 0),
-        (os.POSIX_SPAWN_OPEN, 1, str(log), os.O_WRONLY | os.O_CREAT | os.O_APPEND, _FILE_MODE),
-        (os.POSIX_SPAWN_DUP2, 1, 2),
-    ]
-    pid = os.posix_spawn(argv[0], argv, os.environ, file_actions=file_actions, setsid=True)
+    log_fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, _FILE_MODE)
+    try:
+        child = subprocess.Popen(  # nosec B603 - argv list, no shell
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=log_fd,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    finally:
+        os.close(log_fd)
     threading.Thread(
-        target=_reap, args=(pid,), name=f"relay-repair-reap-{pid}", daemon=True
+        target=_reap, args=(child,), name=f"relay-repair-reap-{child.pid}", daemon=True
     ).start()
-    return pid
+    return child.pid
 
 
 def start_relay_repair(

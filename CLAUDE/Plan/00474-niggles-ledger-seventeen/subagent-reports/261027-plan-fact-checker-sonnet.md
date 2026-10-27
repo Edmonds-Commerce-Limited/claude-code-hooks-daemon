@@ -1,17 +1,12 @@
-# Fact check: NIGGLES.md N544 (Plan 00474)
+# Fact check: N541 entry in NIGGLES.md
 
-(The requested path /workspace/subagent-reports/ is refused by the markdown-location guard, so the report is in the plan's subagent-reports/ folder.)
+| #   | Claim                                                                                                 | Verdict  | Evidence                                                                                                                                                                                                                      |
+| --- | ----------------------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `spawn_detached` now uses `subprocess.Popen(start_new_session=True)`                                  | VERIFIED | `src/claude_code_hooks_daemon/install/relay_repair.py:169-175`                                                                                                                                                                |
+| 2   | A regression test makes `posix_spawn` reject `setsid`                                                 | VERIFIED | `tests/unit/install/test_relay_repair.py:448-467`: `no_setsid` raises NotImplementedError when `setsid` is passed, patched over `os.posix_spawn`. The test asserts the child is a session leader. The test suite was not run. |
+| 3   | The release note exists                                                                               | VERIFIED | `ls` shows `CLAUDE/UPGRADES/UNRELEASED/release-notes/005-relay-repair-on-uv-managed-python.md` (untracked, as the task said). Its content was not read.                                                                       |
+| 4   | The session-start relay check calls `start_relay_repair`, which catches only OSError around the spawn | VERIFIED | `handlers/session_start/relay_binary_checker.py:141` calls it. `relay_repair.py:230-236` wraps `spawn_fn` in `except OSError` only. This is why the old NotImplementedError escaped.                                          |
 
-| #   | Claim                                                                                                      | Verdict             | Evidence                                                                                                                                                                        |
-| --- | ---------------------------------------------------------------------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | The assertion in tests/acceptance/test_playbook_harness.py already names each disagreeing probe            | VERIFIED            | test_playbook_harness.py:321 appends `#{test_number} {handler_name}: {outcome}` per mismatch; :323-326 asserts `not failures` with the joined list as the message               |
-| 2   | scripts/qa/run_changed_tests.py keeps a red run's pytest output tail as `pytest_output`                    | VERIFIED            | run_changed_tests.py:961-962: `if not tests_green: report["pytest_output"] = output[-KEPT_OUTPUT_MAX_CHARS:]` (negative slice = tail)                                           |
-| 3   | The cap is `KEPT_OUTPUT_MAX_CHARS`                                                                         | VERIFIED            | run_changed_tests.py:92 `KEPT_OUTPUT_MAX_CHARS: Final[int] = 200_000`                                                                                                           |
-| 4   | The docs-or-code tier in .github/workflows/qa.yml uploads `untracked/qa/` when the job fails               | VERIFIED            | qa.yml job `targeted` is named "QA (docs or code tier)"; step "Upload QA output" has `if: failure()`, `actions/upload-artifact@v4`, `path: untracked/qa/` (about lines 189-197) |
-| 5   | Before the change the run "kept only failing test names and CI kept nothing"                               | VERIFIED (narrowly) | The report's `tests` list holds only name and outcome; commit f6385c619 touches both files                                                                                      |
-| 6   | The handler #140 changed (`supervisor_indicator`) declares one trivial context probe accepting any message | UNVERIFIABLE-HERE   | A grep for `supervisor_indicator` under src/hooks_daemon found nothing; tests/fixtures/cyber-flag was not searched (guard-blocked)                                              |
-| 7   | CI run 40424574049 on 2234dc879 failed once and passed on re-run                                           | UNVERIFIABLE-HERE   | CI history not queried (no `gh` call)                                                                                                                                           |
+No REFUTED claims.
 
-## REFUTED
-
-None.
+Not checked: the ledger's statements about the uv 3.12.16/3.13.18 builds and the Debian 3.11 venv are external and UNVERIFIABLE-HERE.

@@ -17,6 +17,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -443,6 +444,27 @@ class TestSpawnDetached:
     def test_a_missing_program_raises(self, tmp_path: Path) -> None:
         with pytest.raises(OSError):
             spawn_detached([str(tmp_path / "no-such-program")], tmp_path / "repair.log")
+
+    def test_works_where_posix_spawn_has_no_setsid(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """uv-managed CPython builds raise for ``posix_spawn(setsid=True)`` (ledger 00474 N541)."""
+        real_spawn = os.posix_spawn
+
+        def no_setsid(*args: Any, **kwargs: Any) -> int:
+            if kwargs.get("setsid"):
+                raise NotImplementedError("posix_spawn: setsid unavailable on this platform")
+            return real_spawn(*args, **kwargs)
+
+        monkeypatch.setattr(os, "posix_spawn", no_setsid)
+        log = tmp_path / "repair.log"
+
+        pid = spawn_detached(
+            [sys.executable, "-c", "import os; print(os.getsid(0) == os.getpid())"], log
+        )
+        _wait_for(lambda: _gone(pid))
+
+        assert "True" in log.read_text()
 
 
 class TestMain:
