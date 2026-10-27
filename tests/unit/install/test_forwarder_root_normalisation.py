@@ -177,7 +177,10 @@ class TestALongRootChangesTheGuardsSHAPE:
         )
 
         return build_relay_guard_block(
-            "pre-tool-use", TransportConfig(relay_enabled=False), Path(root) / "untracked", Path(root)
+            "pre-tool-use",
+            TransportConfig(relay_enabled=False),
+            Path(root) / "untracked",
+            Path(root),
         )
 
     def test_a_short_root_bakes_only_the_root(self) -> None:
@@ -324,7 +327,10 @@ class TestTheRecordedRootIsHostnameIndependentInPractice:
         )
 
         return build_relay_guard_block(
-            "user-prompt-expansion", TransportConfig(relay_enabled=False), self._RECORDED, self._RECORDED.parent
+            "user-prompt-expansion",
+            TransportConfig(relay_enabled=False),
+            self._RECORDED,
+            self._RECORDED.parent,
         )
 
     @pytest.mark.parametrize(

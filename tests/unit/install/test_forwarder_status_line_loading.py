@@ -46,7 +46,11 @@ def _run_with_init_sh(
     """Generate the forwarder for ``event_file_name`` and run it against ``init_sh``."""
     source = (_HOOKS_DIR / event_file_name).read_text()
     generated = generate_forwarder_content(
-        source, event_file_name, TransportConfig(relay_enabled=False), tmp_path / "untracked", tmp_path
+        source,
+        event_file_name,
+        TransportConfig(relay_enabled=False),
+        tmp_path / "untracked",
+        tmp_path,
     )
     hooks_dir = tmp_path / ".claude" / "hooks"
     hooks_dir.mkdir(parents=True)

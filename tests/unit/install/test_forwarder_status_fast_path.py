@@ -86,7 +86,11 @@ class TestGeneratedText:
         )
         assert twice == once
         off = generate_forwarder_content(
-            once, "status-line", TransportConfig(relay_enabled=False), tmp_path / "untracked", tmp_path
+            once,
+            "status-line",
+            TransportConfig(relay_enabled=False),
+            tmp_path / "untracked",
+            tmp_path,
         )
         assert _HEADER not in off
         assert off == _generate(TransportConfig(relay_enabled=False), tmp_path)
@@ -314,7 +318,9 @@ class TestRelayFastPath:
 class TestNcFastPath:
     @pytest.fixture
     def nc_rig(self, tmp_path: Path, short_dir: Path) -> Generator[_Rig, None, None]:
-        made = _Rig(tmp_path, short_dir / "ev", TransportConfig(relay_enabled=False, nc_enabled=True))
+        made = _Rig(
+            tmp_path, short_dir / "ev", TransportConfig(relay_enabled=False, nc_enabled=True)
+        )
         made.install_client(f"{SENTINEL}from nc\n")
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()

@@ -189,7 +189,10 @@ class TestDeadlineAgainstTheConfiguredClientBudget:
 
     def test_the_transport_budget_is_ignored_while_no_per_event_rung_uses_it(self) -> None:
         """Only the python rung is live, so only its budget binds."""
-        assert _daemon({"relay_enabled": False, "timeout_seconds": 10}, 20).chain_deadline_problems == []
+        assert (
+            _daemon({"relay_enabled": False, "timeout_seconds": 10}, 20).chain_deadline_problems
+            == []
+        )
 
     def test_raising_the_relay_budget_does_not_lift_the_python_rung_floor(self) -> None:
         """The python rung is every forwarder's fallback, so its budget binds

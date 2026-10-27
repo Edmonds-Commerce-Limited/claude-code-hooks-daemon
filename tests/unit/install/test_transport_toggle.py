@@ -642,9 +642,7 @@ class TestRelayProvisioning:
         binary = self._remove_fixture_binary(project)
         config_path = _config_path(project)
         config_path.write_text(
-            config_path.read_text().replace(
-                "relay_source: null", "relay_source: build"
-            )
+            config_path.read_text().replace("relay_source: null", "relay_source: build")
         )
         calls: list[str] = []
 
@@ -674,9 +672,7 @@ class TestRelayProvisioning:
         binary.chmod(0o755)
         config_path = _config_path(project)
         config_path.write_text(
-            config_path.read_text().replace(
-                "relay_source: null", "relay_source: build"
-            )
+            config_path.read_text().replace("relay_source: null", "relay_source: build")
         )
         calls: list[str] = []
 
@@ -708,9 +704,7 @@ class TestRelayProvisioning:
         self._remove_fixture_binary(project)
         config_path = _config_path(project)
         config_path.write_text(
-            config_path.read_text().replace(
-                "relay_source: null", "relay_source: build"
-            )
+            config_path.read_text().replace("relay_source: null", "relay_source: build")
         )
         monkeypatch.setattr(
             "claude_code_hooks_daemon.install.transport_toggle.deploy_relay_if_configured",
