@@ -149,9 +149,16 @@ turns any build failure into a SKIP, so QA reported nothing. Separately, the QA 
 the vendored `unicode-width/scripts/unicode.py`, which also breaks the checksum.
 
 **Status**: autofix half ✅ (944981632: `screen/vendor` in black's and ruff's `extend-exclude`; `screen/*` mapped to the
-binary test). Missing files and skip-on-failure ⬜ in progress on the hooks-screen branch: a `.gitignore` negation, the
-six files committed, the test skipping only when there is no toolchain, and a guard that every file in each crate's
-checksum list is tracked.
+binary test). Missing files and skip-on-failure ✅ (merged in bf70cf2ee): a `!/screen/vendor/**` negation, the six files
+tracked, the test skipping only when there is no toolchain, a guard that every file in each crate's checksum list is
+tracked, a build from an export of tracked files only, and a `repo_hygiene` exemption scoped to `screen/vendor/`.
+
+A third fault of the same kind surfaced once that test ran on main: the global `core.autocrlf=input` had normalised the
+five `.raw` fixtures to LF when they were first committed, so `test_cursor_up_erase_line_redraw` failed on any fresh
+checkout. The authoring worktree still held the CRLF bytes on disk and git's stat cache reported it clean. Fixed in
+18bae1d25 (merged 09a4deeea): fixtures re-staged byte-exact, and `screen/vendor/**` is now `-text`. 401 tests pass on
+main. The class, an artefact that is only right in the checkout that wrote it, is what this entry records; the guard
+for it is the build test that builds from an export of the tracked files only.
 
 ### N551 — `test_parallel_runs_get_distinct_numbers` (mkroutine) failed on CI 3.12 and 3.13 on Ubuntu 26.04
 
