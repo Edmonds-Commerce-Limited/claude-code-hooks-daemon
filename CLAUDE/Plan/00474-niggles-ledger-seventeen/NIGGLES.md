@@ -124,6 +124,20 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N554 — a sub-agent that backgrounds its QA run and goes idle never learns it finished
+
+**Source**: 2026-10-27, `screen-vendor-fix` (QA done 19:24, agent idle until nudged at about 19:59) and
+`relay-default-7` (idle from 20:17 with its run finished). Both said "waiting for the completion notice".
+
+**Evidence**: each agent ran `llm_qa.py changed` with `run_in_background` and then stopped. The finished run woke
+neither agent; the coordinator found each result on disk and had to re-brief by message. The work was idle for between
+30 and 60 minutes each time.
+
+**Status**: ⬜ open. Workaround in briefs: tell implementation agents to run targeted QA in the foreground (it fits the
+600 s limit for a narrow range) or to wait on the output file's `QA:` line. Next step: check whether a sub-agent's
+background-task notification is delivered at all, and if not, say so in `CLAUDE/QA.md`'s sub-agent guidance and in the
+`python-developer` agent definition.
+
 ### N552 — the vendored hooks-screen crates reached main incomplete, and the build test skipped instead of failing
 
 **Source**: post-merge targeted QA over `50c4d1a1e..HEAD`, 2026-10-27, after Plan 00538's hooks-screen merge.
