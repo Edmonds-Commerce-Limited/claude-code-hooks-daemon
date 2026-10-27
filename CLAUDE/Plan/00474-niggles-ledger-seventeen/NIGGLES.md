@@ -109,6 +109,23 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N548 — the ccy focus hold held every send for 946 minutes while the main thread had focus
+
+**Source**: the owner, 2026-10-27 ("a lot of supervisor held due to not main thread - when we clearly are on main
+thread"), and `untracked/supervise/decision.log`.
+
+**Evidence**:
+
+- 133 `injection deferred: main-thread focus unconfirmed` lines from 2026-10-21 to 2026-10-27. One hold logged
+  `latched by Enter after panel navigation ... held 946 min; latching bytes \x1b[A`.
+- The Plan 00537 model reads only keys. A history recall (Up, then Enter at the main prompt) is the same bytes as
+  panel navigation, and only Esc ends a hold, so a recall holds until someone happens to press Esc.
+
+**Status**: mitigation ✅. The hold is now opt-in through `CCY_FOCUS_HOLD=1`. Disabled, the model still parses keys but
+never reports a hold. The change is host code, so it needs a ccy relaunch. The tracked `.claude/ccy/ccy.env` template
+does not mention the new variable; agents do not edit that file. Open ⬜: a focus signal that is not keys. The candidate
+is a main-session `UserPromptSubmit` recorded after the latch, which proves the Enter submitted at the main prompt.
+
 ### N547 — CI's shellcheck moved to 0.11 under us; local QA still runs 0.9, so the two disagree
 
 **Source**: the CI Shell job on `b31125512` and `10ee252b2`, 2026-10-27.

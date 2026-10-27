@@ -235,6 +235,14 @@ the gate.
 
 ## The focus hold: nothing is typed while focus may be off the main prompt
 
+**Off by default. Set `CCY_FOCUS_HOLD=1` in the ccy environment to turn it
+on.** Any other value, or no value, leaves the model parsing keys and never
+holding. Keystrokes cannot tell a history recall (Up, then Enter at the main
+prompt) from panel navigation, and only Esc ends a hold. So live, one recall
+latched a hold that deferred every send for 946 minutes while the main thread
+plainly had focus. The hold stays opt-in until focus can be read from a
+signal other than keys (see Known limits).
+
 Plan 00537 (issue #125). The supervisor cannot see the screen. Text it types
 while a sub-agent's panel row is selected, or while that sub-agent's transcript
 is open, goes to that sub-agent. Its Enter then opens the selected row, and its
@@ -298,19 +306,24 @@ main thread"). It is posted at WARNING because an INFO write yields to a live
 warning. `decision.log` gets an `injection deferred: main-thread focus unconfirmed` line naming the family and the latch reason, at most once per
 family per minute, and again at each escalation step.
 
-**The one option.** `CCY_FOCUS_HOLD_ESCALATE_SECONDS="<first>,<second>"`
-(default `300,900`). Past the first bound the banner turns louder and names the
-minutes held. Past the second, the log line also names the bytes that latched
-the hold. Any value other than `0 < first < second` keeps the default.
-Escalation never resumes typing, and there is no off switch: only the human's
-Esc ends a hold.
+**The options.**
+
+- `CCY_FOCUS_HOLD=1` enables the hold. It is read when the host starts.
+- `CCY_FOCUS_HOLD_ESCALATE_SECONDS="<first>,<second>"` (default `300,900`).
+  Past the first bound the banner turns louder and names the minutes held. Past
+  the second, the log line also names the bytes that latched the hold. Any
+  value other than `0 < first < second` keeps the default.
+
+While the hold is enabled, escalation never resumes typing: only the human's Esc
+ends a hold.
 
 **Edit-to-live: this one needs a ccy relaunch.** The model and the
 `TickFacts` it fills are HOST code, and the host never hot-reloads. A reloaded
 worker running under an older host receives no `main_focus_confirmed` key, and
 reads that as confirmed. Behaviour is then unchanged until the next ccy
 relaunch: holding with no host model would stop every send, with no Esc able to
-end it. After relaunching, verify the hold:
+end it. The same applies to the opt-in: a host started before it keeps holding
+until relaunched. After relaunching with `CCY_FOCUS_HOLD=1`, verify the hold:
 
 1. Press Up at an idle prompt while a send is due.
 2. Confirm the banner appears and `decision.log` shows the deferred line.
@@ -318,9 +331,12 @@ end it. After relaunching, verify the hold:
 
 **Known limits.**
 
-- A history-recall Up in a session with no panel holds until Esc. The daemon's
-  live sub-agent count was rejected as a second way to clear the hold, because
-  it can under-report a started agent (Plan 00537 JOURNAL, Task 2.1).
+- A history-recall Up in a session with no panel holds until Esc. That is why
+  the hold is off by default. The daemon's live sub-agent count was rejected as
+  a second way to clear the hold, because it can under-report a started agent
+  (Plan 00537 JOURNAL, Task 2.1). A candidate signal not yet built is a main
+  session `UserPromptSubmit` recorded after the latch. It would prove that the
+  Enter submitted at the main prompt and did not open a transcript.
 - Whether Esc also closes an OPEN transcript was not verified live. If it does
   not, an Esc pressed in that state releases the hold early.
 - An Esc that ends its read, with a letter typed before the next host tick

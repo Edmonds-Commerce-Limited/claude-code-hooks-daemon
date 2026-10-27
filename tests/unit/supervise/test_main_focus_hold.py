@@ -270,7 +270,8 @@ class TestMainFocusModel:
         line.feed(_UP, now=_NOW)
         assert line.is_empty is False
 
-    def test_input_activity_feeds_the_focus_model(self) -> None:
+    def test_input_activity_feeds_the_focus_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CCY_FOCUS_HOLD", "1")
         activity = _mod.InputActivity()
         activity.record(_UP, now=_NOW)
         assert activity.focus.confirmed is False
@@ -875,3 +876,44 @@ class TestEscalateOption:
         line = machine.focus_hold_log("goal", _hold(since=_NOW), now_wall=_NOW + 130)
         assert line is not None
         assert "\\x1b[A" in line
+
+
+class TestFocusHoldOptIn:
+    """The hold is OFF unless ``CCY_FOCUS_HOLD=1``.
+
+    Keystrokes cannot tell a history recall (Up, Enter at the main prompt)
+    from panel navigation, and only Esc ends a hold, so a live hold latched
+    by one Up+Enter deferred every send for 946 minutes. Until focus can be
+    read reliably the hold is opt-in.
+    """
+
+    def test_disabled_model_never_holds(self) -> None:
+        model = MainFocusModel(enabled=False)
+        model.feed(_UP + _ENTER, now=_NOW)
+        assert model.hold is None
+        assert model.confirmed
+
+    def test_enabled_model_still_holds(self) -> None:
+        model = MainFocusModel(enabled=True)
+        model.feed(_UP, now=_NOW)
+        assert model.hold is not None
+        assert not model.confirmed
+
+    def test_input_activity_defaults_to_disabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("CCY_FOCUS_HOLD", raising=False)
+        activity = _mod.InputActivity()
+        activity.record(_UP + _ENTER, now=_NOW)
+        assert activity.focus.confirmed
+
+    @pytest.mark.parametrize("raw", ["0", "", "no", "true", "2"])
+    def test_only_one_enables(self, monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
+        monkeypatch.setenv("CCY_FOCUS_HOLD", raw)
+        activity = _mod.InputActivity()
+        activity.record(_UP, now=_NOW)
+        assert activity.focus.confirmed
+
+    def test_env_one_enables(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CCY_FOCUS_HOLD", "1")
+        activity = _mod.InputActivity()
+        activity.record(_UP, now=_NOW)
+        assert not activity.focus.confirmed

@@ -953,6 +953,17 @@ def _fd_readable(fd: int) -> bool:
     return bool(readable)
 
 
+# The focus hold is opt-in: keystrokes cannot tell a history recall (Up,
+# Enter at the main prompt) from panel navigation, and only Esc ends a hold,
+# so a hold latched by one recall deferred every send for hours.
+_FOCUS_HOLD_ENV_VAR = "CCY_FOCUS_HOLD"
+
+
+def _focus_hold_enabled_from_env() -> bool:
+    """True only when ``CCY_FOCUS_HOLD`` is exactly ``1``."""
+    return os.environ.get(_FOCUS_HOLD_ENV_VAR) == "1"
+
+
 @dataclass(frozen=True)
 class FocusHold:
     """Why the supervisor cannot confirm the main prompt has focus (Plan 00537).
@@ -994,7 +1005,9 @@ class MainFocusModel:
     :meth:`settle`. Bytes inside a bracketed paste are text, never keys.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, enabled: bool = True) -> None:
+        # Disabled, the model still parses keys but never reports a hold.
+        self._enabled: bool = enabled
         self._state: int = _ST_GROUND
         self._csi_params: list[int] = []
         self._in_paste: bool = False
@@ -1008,12 +1021,14 @@ class MainFocusModel:
     @property
     def hold(self) -> FocusHold | None:
         """The current hold, or None when nothing suggests focus left the prompt."""
+        if not self._enabled:
+            return None
         return self._hold
 
     @property
     def confirmed(self) -> bool:
         """True when no hold is latched."""
-        return self._hold is None
+        return self.hold is None
 
     def settle(self, *, now: float) -> None:
         """Resolve a lone pending ESC as a bare Esc once nothing followed it in time.
@@ -1154,7 +1169,9 @@ class InputActivity:
     line: HumanInputLine = field(default_factory=HumanInputLine)
     # Plan 00537: host-side, long-lived like `line`, so a worker restart never
     # loses a hold.
-    focus: MainFocusModel = field(default_factory=MainFocusModel)
+    focus: MainFocusModel = field(
+        default_factory=lambda: MainFocusModel(enabled=_focus_hold_enabled_from_env())
+    )
 
     def record(self, data: bytes, *, now: float | None = None) -> None:
         """Record a chunk of stdin data that was forwarded to the child.
