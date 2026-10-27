@@ -109,6 +109,23 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N547 — CI's shellcheck moved to 0.11 under us; local QA still runs 0.9, so the two disagree
+
+**Source**: the CI Shell job on `b31125512` and `10ee252b2`, 2026-10-27.
+
+**Evidence**:
+
+- The job installs whatever `apt` has, and the runner image now ships shellcheck 0.11.0-2. 0.11 reports SC2329
+  ("function is never invoked") on `cleanup_on_failure` in `scripts/upgrade_version.sh`.
+- That function is invoked only by `trap ... EXIT`. 0.11 says so whenever the script ends in a top-level `exit 0`;
+  minimal scripts reproduce it, and an `exit 0` inside a conditional does not.
+- Local QA runs 0.9.0, which is clean. The file had not changed since 2026-10-22, so main went red on a tool upgrade,
+  not on a commit.
+
+**Status**: fix ✅, gap ⬜ open. The fix removed the redundant trailing `exit 0`: the last command always returns 0, so
+the exit status is unchanged and no suppression was added. The open part is the version gap. Either pin CI's
+shellcheck or move local QA to the same version, so the next upgrade fails locally first.
+
 ### N546 — the full gate took over three hours twice on 2026-10-27, against the 15-20 minutes `CLAUDE/QA.md` describes
 
 **Source**: the full gates on `b88334e4b` (3h10m) and `c1c68170f` (about 4h), both run by `qa-full-runner`.

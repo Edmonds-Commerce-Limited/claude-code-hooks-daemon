@@ -1765,5 +1765,7 @@ if [ "$LAYER2_SOURCE_CHANGED" = true ] && [ -z "${HOOKS_DAEMON_UPGRADE_SECOND_PA
     exec bash "$LAYER2_TARGET_SCRIPT" "$PROJECT_ROOT" "$DAEMON_DIR" "$TARGET_VERSION" "${@:4}"
 fi
 
+# Last command, and it always returns 0, so the script exits 0 without an
+# explicit `exit 0`: shellcheck 0.11 reads a trailing top-level exit as making
+# the EXIT-trap-only cleanup_on_failure unreachable (SC2329, ledger 00474 N547).
 report_relay_provision_failure
-exit 0
