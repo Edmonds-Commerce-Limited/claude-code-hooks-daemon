@@ -269,6 +269,10 @@ rules:
   - glob: "src/claude_code_hooks_daemon/install/transport_verify.py"
     tests: [tests/unit/qa/test_check_inline_suppressions.py]
     why: GENUINE_REASON_ABOVE reads this file for suppressions whose reason sits above them
+  - path_glob: ".gitignore"
+    tests: [tests/unit/screen/test_hooks_screen_binary.py]
+    why: its screen/vendor/ negation keeps every checksummed vendored file
+      tracked, which TestVendoredTreeIsTracked and the clean-export build check
   - path_glob: ".claude/hooks/session-start"
     tests:
       - tests/integration/test_provision_sh.py
