@@ -139,6 +139,11 @@ findings describe stale index content, and the real cause (the failing add) is n
 **Status**: ⬜ open. The agent definition should name the auto-saved reply as its report rather than require a path it
 cannot fill.
 
+The same mismatch shows up in `CLAUDE/development/IssueSdlc.md` Step 3. It tells the coordinator to give
+`hooks-daemon-plan-dedupe-scout` a report path under `untracked/agent-reports/`, but that agent also has no `Write`
+tool, and the dispatch advisory says so (seen on issue #140's scout, 2026-10-27). The runbook should point at the
+auto-saved reply instead.
+
 ### N541 — four `test_relay_repair` tests (eight failures, two Python legs) fail with "setsid unavailable" only under the full gate
 
 **Source**: the full gates on ee25ea681 and 65e8baf03 (2026-10-26).
