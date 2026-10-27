@@ -502,6 +502,66 @@ class TestCorrectionLoop:
         assert process_quiet_plan(root, FOLDER, state, trigger_count=1, now=160.0) is not None
 
 
+class TestRecordOutlivedByConfirmation:
+    """N553: a record stored before a confirmation is reconciled with it at delivery.
+
+    The debounce fire diffs against the checked content of that moment. If the
+    session then confirms an earlier offer, the stored diff still carries the
+    hunks that offer covered; handing it over asks for them to be checked again.
+    """
+
+    def _overtaken(self, tmp_path: Path, second: str) -> tuple[Path, PlanFactCheckState]:
+        """Offer A, store B (A plus ``second``) while A is offered, then confirm A."""
+        root, state = _seeded(tmp_path)
+        _edit(root, "a\n")
+        process_quiet_plan(root, FOLDER, state, trigger_count=1, now=1.0)
+        assert len(deliver_pending(state, now=2.0)) == 1
+        _edit(root, "a\n" + second)
+        assert process_quiet_plan(root, FOLDER, state, trigger_count=1, now=3.0) is not None
+        assert _confirm(state, now=4.0) == [FOLDER]
+        return root, state
+
+    def test_a_small_remainder_is_absorbed_as_a_correction(self, tmp_path: Path) -> None:
+        root, state = self._overtaken(tmp_path, "b\n")
+        assert deliver_pending(state, now=5.0) == []
+        assert not state.outstanding(FOLDER)
+        checked = state.read_checked(FOLDER)
+        assert checked is not None
+        assert checked.files == snapshot_plan(root)
+        assert checked.checked_at == 4.0
+
+    def test_a_large_remainder_is_offered_without_the_hunks_already_checked(
+        self, tmp_path: Path
+    ) -> None:
+        late = "new claim\n" * (CORRECTION_MAX_CHANGED_LINES + 1)
+        _, state = self._overtaken(tmp_path, late)
+        assert len(deliver_pending(state, now=5.0)) == 1
+        diff = state.diff_path(FOLDER).read_text(encoding="utf-8")
+        assert "+new claim" in diff
+        assert "+a\n" not in diff
+        offered = state.read_offered(FOLDER)
+        assert offered is not None
+        assert offered.diff == diff
+
+    def test_a_record_the_confirmation_already_covers_is_dropped(self, tmp_path: Path) -> None:
+        root, state = self._overtaken(tmp_path, "b\n")
+        state.record_checked(FOLDER, snapshot_plan(root), checked_at=4.0)
+        files = snapshot_plan(root)
+        state.store_pending(PendingFactCheck(FOLDER, "h", "stale", 1, 3.0, str(root), files))
+        assert deliver_pending(state, now=5.0) == []
+        assert not state.outstanding(FOLDER)
+
+    def test_a_re_offer_is_reconciled_too(self, tmp_path: Path) -> None:
+        root, state = _seeded(tmp_path)
+        late = "new claim\n" * (CORRECTION_MAX_CHANGED_LINES + 1)
+        _edit(root, "a\n" + late)
+        process_quiet_plan(root, FOLDER, state, trigger_count=1, now=1.0)
+        deliver_pending(state, now=2.0)
+        state.record_checked(FOLDER, snapshot_plan(root), checked_at=3.0)
+        assert deliver_pending(state, now=2.0 + REOFFER_AFTER_SECONDS + 1) == []
+        assert not state.outstanding(FOLDER)
+
+
 class TestCorruptState:
     def test_corrupt_checked_state_fails_loudly(self, tmp_path: Path) -> None:
         state = PlanFactCheckState(tmp_path)

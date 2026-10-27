@@ -109,6 +109,36 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N553 — the plan fact-check offer is re-offered after the check was taken up, with hunks already checked
+
+**Source**: lead report, 2026-10-27: "PLAN FACT-CHECK OWED for 00474" kept firing after the checker was dispatched.
+
+**Evidence**: the verdict log shows the dispatch's `PostToolUse Agent` at 19:01:33 (the `checked.json` mtime), so take-up
+detection matched (key names, path, `subagent_type` and event are all right). The record still re-offered (`offers: 3`) is a
+different one: `recorded_at` 19:01:30, stored by the debounce fire while the first offer was outstanding, three seconds
+before that confirmation. Its diff was taken against the checked content of that moment, so it still carried the hunks the
+confirmed check had just covered (the N548 to N552 hunks), and nothing recomputed it at delivery. Adding a report under
+`subagent-reports/` is not an edit (that subtree is excluded from the snapshot), so dac812cd5 did not re-arm it.
+
+**Root cause**: `_hand_over` handed over a stored record without measuring it against the checked content as it stood at
+delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
+remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
+
+### N552 — the vendored hooks-screen crates reached main incomplete, and the build test skipped instead of failing
+
+**Source**: post-merge targeted QA over `50c4d1a1e..HEAD`, 2026-10-27, after Plan 00538's hooks-screen merge.
+
+**Evidence**: `.gitignore`'s `*.orig` silently dropped the six `screen/vendor/<crate>/Cargo.toml.orig` files, so
+`cargo build --offline --locked` fails on any fresh checkout ("failed to calculate checksum of ... Cargo.toml.orig"). It
+built only in the authoring worktree, where the files sat untracked. `tests/unit/screen/test_hooks_screen_binary.py`
+turns any build failure into a SKIP, so QA reported nothing. Separately, the QA autofix (ruff UP035 plus black) rewrote
+the vendored `unicode-width/scripts/unicode.py`, which also breaks the checksum.
+
+**Status**: autofix half ✅ (944981632: `screen/vendor` in black's and ruff's `extend-exclude`; `screen/*` mapped to the
+binary test). Missing files and skip-on-failure ⬜ in progress on the hooks-screen branch: a `.gitignore` negation, the
+six files committed, the test skipping only when there is no toolchain, and a guard that every file in each crate's
+checksum list is tracked.
+
 ### N551 — `test_parallel_runs_get_distinct_numbers` (mkroutine) failed on CI 3.12 and 3.13 on Ubuntu 26.04
 
 **Source**: CI run 40498727782 on `10ee252b2`, 2026-10-27.
@@ -117,8 +147,11 @@ Follow-ups, not defects in the reviewers' judgement:
 hooksdaemon.latestRoutineNumber unset; bootstrapping from filesystem high-water mark (0)", and the CI log truncates the
 rest. It passed on the 3.11 leg of the same run.
 
-**Status**: ⬜ open. Not yet reproduced locally. Check whether the counter bootstrap under the lock races on the new
-image (bash 5.3, newer git), or is an ordinary flake.
+**Status**: ✅ fixed, merged in 801132dfb. The cause was git config lock contention: git does not retry
+`.git/config.lock`, so two concurrent counter writes could fail with "could not lock config file". `write_counter` in
+`mkroutine.bash`, `mkplan.bash` and the deployed `mkplan.bash` template now retries that one error (30 × 0.1 s), then
+dies naming the key. The new tests were red against the unfixed scripts. Which process held the lock on CI is
+unconfirmed.
 
 ### N550 — the shell guard reads fewer brace-expansion spellings than bash 5.3 produces
 
@@ -130,7 +163,9 @@ Under bash 5.3, `pass{}1..2{pass,..}}` also spells `pass{}1..2..}` and `pass{}1.
 produces neither. The guard must over-read every spelling bash can run (Plan 00466 N101/N115), so this is a bypass
 class, not a cosmetic diff.
 
-**Status**: ⬜ in progress in a worktree (bash 5.3 built locally, fix to read the union of 5.2 and 5.3 grouping).
+**Status**: ✅ fixed, merged in 9ea0ee9de (black fix 50c4d1a1e). The reader now spells both bash 5.2's reading and
+bash 5.3's skip of a group whose sequence term is invalid, and the guard takes the union of the two. The CI Shell job
+was green on 50c4d1a1e.
 
 ### N549 — shellcheck 0.11 reports SC2329 on `init.sh`, which ships into client repositories
 
@@ -141,7 +176,10 @@ reports SC2329 on the `send_request_stdin()` overrides that `init.sh` defines in
 2814). The existing `disable=SC2317` directives do not cover the new code. A client linting with 0.11 sees findings it
 can neither fix nor suppress.
 
-**Status**: ⬜ in progress in a worktree (a code fix, no changed directive).
+**Status**: ✅ fixed, merged in 34b5e934d. The passthrough no longer redefines `send_request_stdin`, and both
+`disable=SC2317` directives are gone. The stale registry anchors that the removal left in
+`tests/unit/qa/test_check_inline_suppressions.py` were the full gate's only failure on 50c4d1a1e; they were removed in
+5778d50ea.
 
 ### N548 — the ccy focus hold held every send for 946 minutes while the main thread had focus
 
