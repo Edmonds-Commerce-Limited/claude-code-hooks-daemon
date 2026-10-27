@@ -109,6 +109,40 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N551 — `test_parallel_runs_get_distinct_numbers` (mkroutine) failed on CI 3.12 and 3.13 on Ubuntu 26.04
+
+**Source**: CI run 40498727782 on `10ee252b2`, 2026-10-27.
+
+**Evidence**: two concurrent `mkroutine.bash` runs; at least one exited non-zero. Its stderr starts "counter
+hooksdaemon.latestRoutineNumber unset; bootstrapping from filesystem high-water mark (0)", and the CI log truncates the
+rest. It passed on the 3.11 leg of the same run.
+
+**Status**: ⬜ open. Not yet reproduced locally. Check whether the counter bootstrap under the lock races on the new
+image (bash 5.3, newer git), or is an ordinary flake.
+
+### N550 — the shell guard reads fewer brace-expansion spellings than bash 5.3 produces
+
+**Source**: CI run 40498727782 on `10ee252b2`, 2026-10-27. `ubuntu-latest` is now Ubuntu 26.04 (bash 5.3); local is
+bash 5.2.15.
+
+**Evidence**: `tests/unit/utils/test_shell_expansion_bash_differential.py:151` and `:182` fail on all three Python legs.
+Under bash 5.3, `pass{}1..2{pass,..}}` also spells `pass{}1..2..}` and `pass{}1..2pass}`, and the guard's reader
+produces neither. The guard must over-read every spelling bash can run (Plan 00466 N101/N115), so this is a bypass
+class, not a cosmetic diff.
+
+**Status**: ⬜ in progress in a worktree (bash 5.3 built locally, fix to read the union of 5.2 and 5.3 grouping).
+
+### N549 — shellcheck 0.11 reports SC2329 on `init.sh`, which ships into client repositories
+
+**Source**: CI run 40498727782 on `10ee252b2`, 2026-10-27. Same image move as N547 and N550.
+
+**Evidence**: `tests/integration/test_client_owned_asset_lint.py:315` fails on all three Python legs. Shellcheck 0.11
+reports SC2329 on the `send_request_stdin()` overrides that `init.sh` defines inside functions (about lines 2704 and
+2814). The existing `disable=SC2317` directives do not cover the new code. A client linting with 0.11 sees findings it
+can neither fix nor suppress.
+
+**Status**: ⬜ in progress in a worktree (a code fix, no changed directive).
+
 ### N548 — the ccy focus hold held every send for 946 minutes while the main thread had focus
 
 **Source**: the owner, 2026-10-27 ("a lot of supervisor held due to not main thread - when we clearly are on main
