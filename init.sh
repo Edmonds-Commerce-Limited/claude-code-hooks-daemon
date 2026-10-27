@@ -2699,19 +2699,36 @@ _passthrough_flag_path() {
 # silently pass through with no blocking and no context injection.
 #
 _enter_passthrough_mode() {
-    # Exported with `export -f` and called by the forwarder, so shellcheck sees the body as unreachable.
-    # shellcheck disable=SC2317
-    send_request_stdin() {
-        cat > /dev/null
-        # Status line ($2 == "status"): render the fallback text, not a raw JSON
-        # blob (Plan 00156 review finding 2). Other events: silent {} passthrough.
-        if [[ "${2:-}" == "status" ]]; then
-            echo '⚠️ NO STATUS DATA'
-        else
-            echo '{}'
-        fi
-    }
-    export -f send_request_stdin
+    # send_request_stdin answers from this exported mode before any transport.
+    export _HOOKS_DAEMON_PASSTHROUGH_MODE="silent"
+}
+
+#
+# _hooks_daemon_passthrough_response() - The canned answer for passthrough mode
+#
+# Drains stdin and prints the response for $1 (event name) / $2 (response mode)
+# according to _HOOKS_DAEMON_PASSTHROUGH_MODE ("silent" or "ci_advisory").
+#
+_hooks_daemon_passthrough_response() {
+    local event_name="${1:-Unknown}"
+    cat > /dev/null
+    # Status line ($2 == "status"): render the fallback text, not a raw JSON
+    # blob (Plan 00156 review finding 2).
+    if [[ "${2:-}" == "status" ]]; then
+        echo '⚠️ NO STATUS DATA'
+        return 0
+    fi
+    if [[ "$_HOOKS_DAEMON_PASSTHROUGH_MODE" == "silent" ]]; then
+        echo '{}'
+        return 0
+    fi
+    local ci_advisory="HOOKS DAEMON: Not installed in CI environment. Safety handlers are INACTIVE. All operations allowed without validation. This warning appears once."
+    if _hooks_daemon_event_takes_context "$event_name"; then
+        printf '{"hookSpecificOutput": {"hookEventName": "%s", "additionalContext": "%s"}}\n' \
+            "$event_name" "$ci_advisory"
+    else
+        printf '{"systemMessage": "%s"}\n' "$ci_advisory"
+    fi
 }
 
 #
@@ -2809,26 +2826,7 @@ ensure_daemon() {
         # Plan 00156: jq-free. The event name arrives as $1 (the wrapper passes
         # it); the hook_input payload on stdin is drained (this advisory is a
         # fixed template with no user-derived content).
-        # Exported with `export -f` and called by the forwarder, so shellcheck sees the body as unreachable.
-        # shellcheck disable=SC2317
-        send_request_stdin() {
-            local event_name="${1:-Unknown}"
-            cat > /dev/null
-            # Status line ($2 == "status"): render the fallback text, not a raw
-            # JSON blob (Plan 00156 review finding 2).
-            if [[ "${2:-}" == "status" ]]; then
-                echo '⚠️ NO STATUS DATA'
-                return 0
-            fi
-            local ci_advisory="HOOKS DAEMON: Not installed in CI environment. Safety handlers are INACTIVE. All operations allowed without validation. This warning appears once."
-            if _hooks_daemon_event_takes_context "$event_name"; then
-                printf '{"hookSpecificOutput": {"hookEventName": "%s", "additionalContext": "%s"}}\n' \
-                    "$event_name" "$ci_advisory"
-            else
-                printf '{"systemMessage": "%s"}\n' "$ci_advisory"
-            fi
-        }
-        export -f send_request_stdin
+        export _HOOKS_DAEMON_PASSTHROUGH_MODE="ci_advisory"
         return 0
     fi
 
@@ -2932,6 +2930,12 @@ ensure_daemon() {
 #   echo '{"key":"value"}' | send_request_stdin
 #
 send_request_stdin() {
+    # Passthrough mode (set by ensure_daemon / _enter_passthrough_mode) answers
+    # with a canned response instead of contacting the daemon.
+    if [[ -n "${_HOOKS_DAEMON_PASSTHROUGH_MODE:-}" ]]; then
+        _hooks_daemon_passthrough_response "$@"
+        return 0
+    fi
     # Plan 00156 (T2): jq-free transport. The event name arrives as $1; the raw
     # hook_input payload arrives on stdin. This inline python3 — already spawned
     # as the transport — wraps it into {"event": $1, "hook_input": <stdin>}
@@ -3795,5 +3799,6 @@ export -f _hooks_daemon_launch_settled
 export -f _hooks_daemon_end_launch
 export -f _hooks_daemon_is_down
 export -f ensure_daemon
+export -f _hooks_daemon_passthrough_response
 export -f send_request_stdin
 export -f forward_stop_event
