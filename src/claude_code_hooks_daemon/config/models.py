@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.core.handler_scope import (
 )
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname, hostname_matches
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.relay_host import relay_supported_by_host
 from claude_code_hooks_daemon.utils.repo_relative_path import (
     normalise_repo_relative_path as _normalise_repo_relative_path,
 )
@@ -1655,8 +1656,11 @@ class TransportConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     relay_enabled: bool = Field(
-        default=True,
-        description="Rung 1: exec the static relay binary (default on; false = legacy transport)",
+        default_factory=relay_supported_by_host,
+        description=(
+            "Rung 1: exec the static relay binary (default on where a relay binary "
+            "exists for the host, else off; false = legacy transport)"
+        ),
     )
     nc_enabled: bool = Field(
         default=False,

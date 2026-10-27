@@ -11,13 +11,34 @@ from claude_code_hooks_daemon.config.models import Config, DaemonConfig, Transpo
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.events import EventID
 from claude_code_hooks_daemon.utils.hook_registration import canonical_hook_entry
+from claude_code_hooks_daemon.utils.relay_host import relay_supported_by_host
 
 
 class TestDefaults:
-    def test_relay_defaults_on_and_nc_off(self) -> None:
+    def test_relay_defaults_to_host_support_and_nc_off(self) -> None:
         transport = TransportConfig()
-        assert transport.relay_enabled is True
+        assert transport.relay_enabled is relay_supported_by_host()
         assert transport.nc_enabled is False
+
+    @pytest.mark.parametrize(
+        ("platform_name", "machine", "expected"),
+        [
+            ("linux", "x86_64", True),
+            ("linux", "aarch64", True),
+            ("darwin", "arm64", False),
+            ("linux", "riscv64", False),
+        ],
+    )
+    def test_relay_default_follows_the_host(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        platform_name: str,
+        machine: str,
+        expected: bool,
+    ) -> None:
+        monkeypatch.setattr("sys.platform", platform_name)
+        monkeypatch.setattr("platform.machine", lambda: machine)
+        assert TransportConfig().relay_enabled is expected
 
     def test_explicit_relay_false_is_respected(self) -> None:
         assert TransportConfig.model_validate({"relay_enabled": False}).relay_enabled is False

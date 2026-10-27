@@ -551,8 +551,12 @@ class TestSeedRelayEnabled:
 
         assert "relay_enabled" in str(exc_info.value)
 
-    def test_run_toggle_on_a_fresh_config_is_a_seeded_no_op(self, project: Path) -> None:
-        """The shipped default is on, so a config with no key is already enabled."""
+    def test_run_toggle_on_a_fresh_config_is_a_seeded_no_op(
+        self, project: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """On a relay-capable host the default is on, so a config with no key is already enabled."""
+        monkeypatch.setattr("sys.platform", "linux")
+        monkeypatch.setattr("platform.machine", lambda: "x86_64")
         config_path = _config_path(project)
         config_path.write_text("daemon:\n  transport:\n    nc_enabled: false\nhandlers: {}\n")
 
@@ -560,6 +564,35 @@ class TestSeedRelayEnabled:
 
         assert outcome.changed is False
         assert read_relay_enabled(config_path) is True
+
+    @pytest.mark.parametrize(
+        ("platform_name", "machine", "expected"),
+        [
+            ("linux", "x86_64", "true"),
+            ("linux", "aarch64", "true"),
+            ("darwin", "arm64", "false"),
+        ],
+    )
+    def test_seed_value_follows_the_host(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        platform_name: str,
+        machine: str,
+        expected: str,
+    ) -> None:
+        monkeypatch.setattr("sys.platform", platform_name)
+        monkeypatch.setattr("platform.machine", lambda: machine)
+        for text, marker in (
+            ("daemon:\n  transport:\n    nc_enabled: false\n", "\n    relay_enabled: "),
+            ("daemon:\n  log_level: INFO\n", "  transport:\n    relay_enabled: "),
+        ):
+            config_path = tmp_path / "hooks-daemon.yaml"
+            config_path.write_text(text)
+
+            seed_relay_enabled_line(config_path)
+
+            assert f"{marker}{expected}\n" in config_path.read_text()
 
     def test_run_toggle_off_on_a_fresh_config_seeds_then_opts_out(self, project: Path) -> None:
         config_path = _config_path(project)
