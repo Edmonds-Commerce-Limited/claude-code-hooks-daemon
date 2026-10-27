@@ -109,6 +109,21 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N552 — the vendored hooks-screen crates reached main incomplete, and the build test skipped instead of failing
+
+**Source**: post-merge targeted QA over `50c4d1a1e..HEAD`, 2026-10-27, after Plan 00538's hooks-screen merge.
+
+**Evidence**: `.gitignore`'s `*.orig` silently dropped the six `screen/vendor/<crate>/Cargo.toml.orig` files, so
+`cargo build --offline --locked` fails on any fresh checkout ("failed to calculate checksum of ... Cargo.toml.orig"). It
+built only in the authoring worktree, where the files sat untracked. `tests/unit/screen/test_hooks_screen_binary.py`
+turns any build failure into a SKIP, so QA reported nothing. Separately, the QA autofix (ruff UP035 plus black) rewrote
+the vendored `unicode-width/scripts/unicode.py`, which also breaks the checksum.
+
+**Status**: autofix half ✅ (944981632: `screen/vendor` in black's and ruff's `extend-exclude`; `screen/*` mapped to the
+binary test). Missing files and skip-on-failure ⬜ in progress on the hooks-screen branch: a `.gitignore` negation, the
+six files committed, the test skipping only when there is no toolchain, and a guard that every file in each crate's
+checksum list is tracked.
+
 ### N551 — `test_parallel_runs_get_distinct_numbers` (mkroutine) failed on CI 3.12 and 3.13 on Ubuntu 26.04
 
 **Source**: CI run 40498727782 on `10ee252b2`, 2026-10-27.
