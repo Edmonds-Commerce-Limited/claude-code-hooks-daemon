@@ -138,6 +138,11 @@ venv.bak/
 *.rej
 *~
 
+# Vendored crates must stay byte-exact: cargo checksums every file listed in
+# each crate's .cargo-checksum.json (including Cargo.toml.orig), so no ignore
+# rule above may drop anything under screen/vendor/.
+!/screen/vendor/**
+
 # Spyder project settings
 .spyderproject
 .spyproject

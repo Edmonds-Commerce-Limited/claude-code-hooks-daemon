@@ -1,14 +1,17 @@
 """Plan 00538 Phase 2: the hooks-screen Rust binary, driven with byte streams.
 
 Builds the binary once with ``screen/build.sh`` (offline, locked cargo build
-against the vendored vt100 crate, musl) and skips when no musl-capable
-toolchain is present, the same fail-soft stance the provisioning takes.
+against the vendored vt100 crate, musl). The tests skip ONLY when the rust
+toolchain is genuinely absent; a build failure with a toolchain present is a
+test failure, never a skip.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import random
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -16,21 +19,49 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BUILD_SCRIPT = REPO_ROOT / "screen" / "build.sh"
+VENDOR_DIR = REPO_ROOT / "screen" / "vendor"
 BINARY = REPO_ROOT / "untracked" / "screen-build" / "hooks-screen-x86_64-unknown-linux-musl"
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "hooks_screen"
+CARGO = Path(os.environ.get("CARGO", Path.home() / ".cargo" / "bin" / "cargo"))
+TARGET = "x86_64-unknown-linux-musl"
 ESC = b"\x1b"
 RUN_TIMEOUT_SECONDS = 20
 COLD_BUILD_TIMEOUT_SECONDS = 300
 
 
+def toolchain_absence() -> str | None:
+    """Why the musl rust toolchain is missing, or None when it is present."""
+    if not CARGO.exists():
+        return f"cargo not found at {CARGO}"
+    rustc = shutil.which("rustc", path=str(CARGO.parent)) or shutil.which("rustc")
+    if rustc is None:
+        return "rustc not found"
+    libdir = subprocess.run(
+        [rustc, "--print", "target-libdir", "--target", TARGET],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if libdir.returncode != 0 or not Path(libdir.stdout.strip()).is_dir():
+        return f"rust target {TARGET} is not installed"
+    return None
+
+
 @pytest.fixture(scope="module")
-def binary() -> Path:
-    """Build hooks-screen from source; skip when the toolchain is absent."""
+def toolchain() -> None:
+    """Skip only when the toolchain is genuinely absent."""
+    absent = toolchain_absence()
+    if absent is not None:
+        pytest.skip(f"hooks-screen cannot be built here: {absent}")
+
+
+@pytest.fixture(scope="module")
+def binary(toolchain: None) -> Path:
+    """Build hooks-screen from source; fail loudly when the build fails."""
     result = subprocess.run(
         ["bash", str(BUILD_SCRIPT)], capture_output=True, text=True, check=False
     )
-    if result.returncode != 0:
-        pytest.skip(f"hooks-screen cannot be built here: {result.stderr.strip()[:200]}")
+    assert result.returncode == 0, f"hooks-screen build failed: {result.stderr[-500:]}"
     return BINARY
 
 
@@ -54,12 +85,67 @@ def dump(binary: Path, data: bytes, **kwargs: int) -> list[str]:
     return out.stdout.decode().split("\n")[:-1]
 
 
+def tracked_screen_files() -> list[str]:
+    """Repo-relative paths git tracks under screen/."""
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", "screen"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return [p for p in listed.stdout.split("\0") if p]
+
+
+class TestVendoredTreeIsTracked:
+    def test_every_checksummed_vendor_file_is_tracked(self) -> None:
+        """Cargo checksums each vendored file; one dropped by an ignore rule breaks the build."""
+        tracked = set(tracked_screen_files())
+        missing = []
+        for checksum_file in sorted(VENDOR_DIR.glob("*/.cargo-checksum.json")):
+            crate = checksum_file.parent
+            for name in json.loads(checksum_file.read_text())["files"]:
+                rel = (crate / name).relative_to(REPO_ROOT).as_posix()
+                if rel not in tracked:
+                    missing.append(rel)
+        assert not missing, f"vendored files not tracked by git: {missing}"
+
+
 class TestOfflineBuild:
+    def test_builds_from_clean_export_of_tracked_files(
+        self, toolchain: None, tmp_path: Path
+    ) -> None:
+        """Only git-tracked files are exported, as on a fresh checkout, then built offline."""
+        for rel in tracked_screen_files():
+            dest = tmp_path / "export" / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(REPO_ROOT / rel, dest)
+        result = subprocess.run(
+            [
+                str(CARGO),
+                "build",
+                "--release",
+                "--offline",
+                "--locked",
+                "--target",
+                TARGET,
+                "--target-dir",
+                str(tmp_path / "target"),
+            ],
+            cwd=tmp_path / "export" / "screen",
+            capture_output=True,
+            text=True,
+            check=False,
+            env={**os.environ, "CARGO_HOME": str(tmp_path / "cargo-home")},
+            timeout=COLD_BUILD_TIMEOUT_SECONDS,
+        )
+        assert result.returncode == 0, result.stderr[-500:]
+
     def test_builds_from_vendored_source_with_no_network(
         self, binary: Path, tmp_path: Path
     ) -> None:
         """A cold build with an empty CARGO_HOME and a dead proxy still succeeds."""
-        cargo = Path.home() / ".cargo" / "bin" / "cargo"
+        cargo = CARGO
         env = {
             **os.environ,
             "CARGO_HOME": str(tmp_path / "cargo-home"),
