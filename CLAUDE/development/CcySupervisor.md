@@ -329,6 +329,36 @@ until relaunched. After relaunching with `CCY_FOCUS_HOLD=1`, verify the hold:
 2. Confirm the banner appears and `decision.log` shows the deferred line.
 3. Press Esc and confirm the send goes out on the next tick.
 
+**The screen check (Plan 00538).** No signal outside the rendered screen says
+which thread is viewed, so with `CCY_FOCUS_HOLD=1` the keystroke latch is only
+a trigger and the screen decides. This is host code: relaunch ccy to pick it
+up.
+
+- The host keeps a bounded copy (256 KiB) of the child's raw output. The hot
+  path is a copy, with nothing parsed. Overflow drops from the front, and an
+  ED 2/3 or alternate-screen switch inside a read discards everything before
+  it, so a replay starts clean.
+- With no latch, nothing is rendered and nothing holds. With a latch,
+  `InputActivity.effective_focus_hold` spawns `hooks-screen` (a Rust binary,
+  `screen/hooks_screen.rs`, built by `bash screen/build.sh` to
+  `untracked/screen-build/`) with a 200 ms timeout. It feeds the buffer plus
+  the terminal size and reads one word. The render is rate-limited to once a
+  second and skipped while no new output arrived.
+- Only `transcript` and `panel-selected` hold. `main`, `unknown`, a missing
+  binary, a timeout, a non-zero exit and an unreadable word all release the
+  latch (FAIL OPEN). A failure is logged once per distinct reason. The built-in
+  marker table is empty until real captures exist, so every screen reads
+  `unknown` and nothing holds yet.
+- Binary lookup: `CCY_HOOKS_SCREEN`, then `untracked/bin/hooks-screen`, then
+  the built path.
+- `CCY_SCREEN_CAPTURE=1` (with `CCY_FOCUS_HOLD=1`) writes each render's raw
+  buffer, `--dump` rendering and verdict to `untracked/supervise/screen-capture/`
+  (newest 20 kept). Open a sub-agent transcript once with it on to give the
+  next slice real markers.
+- `hooks-screen --dump` prints the rows; `--markers FILE` swaps the marker
+  table (`<verdict> any|first:N|last:N <needle>` per line). Tests:
+  `tests/unit/screen/`, `tests/unit/supervise/test_screen_focus_check.py`.
+
 **Known limits.**
 
 - A history-recall Up in a session with no panel holds until Esc. That is why
