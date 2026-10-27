@@ -54,8 +54,9 @@ def _seed_daemon_dir(daemon_dir: Path) -> None:
 
 
 def test_default_config_deploy_is_byte_identical(tmp_path: Path) -> None:
-    """Default (disabled) client config must deploy the GUARD-FREE canonical
-    shape (Plan 00290 F1 fix). This repo dogfoods the relay (Plan 00290
+    """An explicit ``relay_enabled: false`` client config must deploy the
+    GUARD-FREE canonical shape (Plan 00290 F1 fix; the relay itself is the
+    default since Plan 00554). This repo dogfoods the relay (Plan 00290
     Phase 6+), so ``_SOURCE_HOOKS_DIR`` (this repo's own tracked
     ``.claude/hooks/*``, the deploy source) may already carry a guard block
     pointing at THIS repo's own paths — a disabled client config must strip
@@ -64,7 +65,10 @@ def test_default_config_deploy_is_byte_identical(tmp_path: Path) -> None:
     daemon_dir = tmp_path / "daemon"
     project_root = tmp_path / "project"
     _seed_daemon_dir(daemon_dir)
-    project_root.mkdir()
+    (project_root / ".claude").mkdir(parents=True)
+    (project_root / ".claude" / "hooks-daemon.yaml").write_text(
+        "daemon:\n  transport:\n    relay_enabled: false\n"
+    )
 
     result = _run_deploy(daemon_dir, project_root, "normal", venv_python=sys.executable)
 
@@ -172,11 +176,16 @@ def _seed_contaminated_daemon_dir(daemon_dir: Path, foreign_untracked_dir: str) 
     (daemon_dir / "provision.sh").write_text((_REPO_ROOT / "provision.sh").read_text())
 
 
-def test_f1_contaminated_source_deploy_strips_foreign_guard_by_default(tmp_path: Path) -> None:
+def test_f1_contaminated_source_deploy_strips_foreign_guard_when_relay_disabled(
+    tmp_path: Path,
+) -> None:
     daemon_dir = tmp_path / "daemon"
     project_root = tmp_path / "project"
     _seed_contaminated_daemon_dir(daemon_dir, "/some/other/project/untracked")
-    project_root.mkdir()
+    (project_root / ".claude").mkdir(parents=True)
+    (project_root / ".claude" / "hooks-daemon.yaml").write_text(
+        "daemon:\n  transport:\n    relay_enabled: false\n"
+    )
 
     result = _run_deploy(daemon_dir, project_root, "normal", venv_python=sys.executable)
 
