@@ -44,6 +44,8 @@ readonly MAX_NAME_LENGTH=80
 readonly LOCK_BASENAME=".mkroutine.lock"
 readonly LOCK_MAX_ATTEMPTS=100
 readonly LOCK_RETRY_SECONDS=0.1
+readonly CONFIG_LOCK_MAX_ATTEMPTS=30
+readonly CONFIG_LOCK_RETRY_SECONDS=0.1
 readonly RUNS_DIR_BASENAME="RUNS"
 readonly TEMPLATE_BASENAME="_TEMPLATE_.md"
 
@@ -104,6 +106,26 @@ acquire_lock() {
     done
     lock_held="$lock_dir"
     trap release_lock EXIT INT TERM
+}
+
+# Write the counter to the local git config. Git does not retry its own
+# .git/config.lock, so any concurrent git process (another tool, an IDE, a
+# parallel runner's git call) can make a single write fail. Retry ONLY that
+# failure, briefly; any other git error is fatal at once. stderr is captured
+# into a variable, never discarded.
+write_counter() {
+    local repo="$1" value="$2"
+    local attempts=0 err
+    while ! err="$(git -C "$repo" config --local "$COUNTER_KEY" "$value" 2>&1)"; do
+        if [[ "$err" != *"could not lock config file"* ]]; then
+            die "failed to write git counter $COUNTER_KEY: $err"
+        fi
+        attempts=$((attempts + 1))
+        if (( attempts >= CONFIG_LOCK_MAX_ATTEMPTS )); then
+            die "timed out waiting for the git config lock while writing $COUNTER_KEY (another git process holds config.lock, or it is stale -- remove it if no git is running). Last error: $err"
+        fi
+        sleep "$CONFIG_LOCK_RETRY_SECONDS"
+    done
 }
 
 # Highest existing routine number on disk:
@@ -346,7 +368,7 @@ new_counter="$next"
 if (( counter > new_counter )); then
     new_counter="$counter"
 fi
-git -C "$repo_root" config --local "$COUNTER_KEY" "$new_counter"
+write_counter "$repo_root" "$new_counter"
 
 # Lock is released by the EXIT trap (release_lock).
 
