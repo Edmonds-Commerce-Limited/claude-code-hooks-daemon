@@ -1,0 +1,3 @@
+## 23:51 · action · —
+
+Wrote the session-scope tests first (new test_supervisor_indicator_session_scope.py, test_process_tree_sessions.py). First run was red on import: ImportError cannot import name _MAX_TRACKED_SESSIONS from supervisor_indicator, and ModuleNotFoundError for utils.process_tree_sessions. Then implemented the helper (utils/process_tree_sessions.py, a read-only daemon copy of the Plan 00551 descendant-environ rule, not imported from claude-supervise.py) and per-session memo in the handler. Existing tests now pass a session_id and patch ownership true; 1181 status_line, utils and guidance-coverage tests green.

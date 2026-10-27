@@ -430,6 +430,20 @@ Under normal conditions, the full status line handler chain completes in **10-60
 
 ---
 
+## Supervisor Indicator: Session Scoping
+
+`supervisor_indicator` renders the top hat (green armed, yellow dry-run, orange down, nothing when never configured). One daemon serves every session of a project, and both the supervisor status file and `/proc` are per project or per host, so a supervisor is **never** counted for a session just because it exists.
+
+**Ownership rule.** A supervisor counts for the rendered session only when that session's id (the status-line input's `session_id`) is in `CLAUDE_CODE_SESSION_ID` in the environ of a process in the supervisor's own descendant tree (by `/proc/<pid>/stat` ppid). This is the rule the supervisor applies to its own sessions (Plan 00551); the daemon-side reader is `utils/process_tree_sessions.py`.
+
+- Both resolution paths are held to it: the status-file pid, and the `/proc` scan for a `claude-supervise` process.
+- No `session_id`, an unreadable environ, EPERM, or a vanished process means "not owned". The segment falls back to the existing orange (status file present) or nothing (never configured). It never raises.
+- Caches are per session (`_SessionMemo`, bounded by `_MAX_TRACKED_SESSIONS`): the memoised `(pid, armed)` identity, the negative cache (Plan 00171) and the `/proc` walk interval. One session's result never colours or suppresses another's.
+- Cost: an ownership check reads one `stat` per numeric `/proc` entry plus one `environ` per member of the candidate's subtree, so it is bounded by the process table. It runs only on a cache miss: a session that owns its supervisor pays it once and then only the `os.kill` liveness probe; a session that does not is held to the negative-cache TTL and the walk interval.
+- `explain_segment` runs in a one-shot CLI with no session, so it reports the unscoped orange/none decision.
+
+---
+
 ## Concurrency & Thread Safety (FIRST-CLASS CONCERN)
 
 Status-line code is **inherently concurrent** — treat thread/process safety as a design constraint, not an afterthought:

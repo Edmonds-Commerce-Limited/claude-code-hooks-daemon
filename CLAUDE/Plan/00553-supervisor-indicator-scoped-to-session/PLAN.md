@@ -36,14 +36,14 @@ So any supervisor visible in the host's process table turns every session's indi
 
 ### Phase 1: Fix
 
-- [ ] ⬜ **Task 1.1**: Write failing tests first:
+- [x] ✅ **Task 1.1**: Write failing tests first:
   - the issue's case: an unrelated `claude-supervise` process plus an unsupervised session gives no green;
   - a supervisor whose descendant carries the session id gives green;
   - two sessions on one handler instance get independent results;
   - an unreadable environ gives not green;
   - the status-file pid path is held to the same ownership rule.
-- [ ] ⬜ **Task 1.2**: Implement the ownership check and the per-session memo. Reuse or share the Plan 00551 descendant-environ logic rather than writing a second copy, if it can be imported from daemon code. Otherwise put a small shared helper under `utils/`.
-- [ ] ⬜ **Task 1.3**: Update the docs (`CLAUDE/Architecture/StatusLine.md` supervisor section, the handler guidance) and add a release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] ✅ **Task 1.2**: Implement the ownership check and the per-session memo. Reuse or share the Plan 00551 descendant-environ logic rather than writing a second copy, if it can be imported from daemon code. Otherwise put a small shared helper under `utils/`.
+- [x] ✅ **Task 1.3**: Update the docs (`CLAUDE/Architecture/StatusLine.md` supervisor section, the handler guidance) and add a release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
 ## Success Criteria
 

@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.handlers.status_line.supervisor_indicator import (
     _NEGATIVE_CACHE_TTL_SECONDS,
     _PROC_WALK_INTERVAL_SECONDS,
     SupervisorIndicatorHandler,
+    _SessionMemo,
     _SupervisorState,
 )
 
@@ -61,6 +62,19 @@ _DETECT_PATCH = (
 )
 
 
+_SESSION_ID = "fake-session-a"
+_INPUT = {"session_id": _SESSION_ID}
+_OWNS_PATCH = (
+    "claude_code_hooks_daemon.handlers.status_line.supervisor_indicator."
+    "SupervisorIndicatorHandler._supervisor_owns_session"
+)
+
+
+def _memo(handler: SupervisorIndicatorHandler) -> _SessionMemo:
+    """The test session's memo (empty when nothing was resolved yet)."""
+    return handler._memos.get(_SESSION_ID, _SessionMemo())
+
+
 def _write_message(
     tmp_path: Path, text: str, expires_at: float, level: str, *, countdown: bool = False
 ) -> Path:
@@ -91,6 +105,18 @@ def _no_ambient_message(tmp_path: Path) -> Iterator[None]:
     """
     missing = tmp_path / "no-such-message.json"
     with patch(_MESSAGE_PATH_PATCH, return_value=missing):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _supervisor_owns_the_session() -> Iterator[None]:
+    """These tests cover caching and rendering, not ownership.
+
+    Ownership against a process table is covered in
+    ``test_supervisor_indicator_session_scope.py``; here every candidate
+    supervisor is taken to own the rendered session.
+    """
+    with patch(_OWNS_PATCH, return_value=True):
         yield
 
 
@@ -133,7 +159,7 @@ class TestSupervisorIndicatorDetection:
             patch(_KILL_PATCH, return_value=None),
             patch(_CMDLINE_PATCH, return_value="python3 claude-supervise.py --arm"),
         ):
-            result = handler.handle({})
+            result = handler.handle(_INPUT)
         assert result.context
         assert _BG_GREEN in result.context[0]
         assert _ICON in result.context[0]
@@ -146,7 +172,7 @@ class TestSupervisorIndicatorDetection:
             patch(_KILL_PATCH, return_value=None),
             patch(_CMDLINE_PATCH, return_value="python3 claude-supervise.py"),
         ):
-            result = handler.handle({})
+            result = handler.handle(_INPUT)
         assert _BG_YELLOW in result.context[0]
         assert _ICON in result.context[0]
 
@@ -154,7 +180,7 @@ class TestSupervisorIndicatorDetection:
         missing = tmp_path / "nope.json"
         handler = SupervisorIndicatorHandler()
         with patch(_STATUS_PATH_PATCH, return_value=missing):
-            result = handler.handle({})
+            result = handler.handle(_INPUT)
         assert result.context == []
 
     def test_not_active_orange_when_pid_dead_but_file_present(self, tmp_path: Path) -> None:
@@ -170,7 +196,7 @@ class TestSupervisorIndicatorDetection:
             patch(_STATUS_PATH_PATCH, return_value=status_file),
             patch(_KILL_PATCH, side_effect=_raise_esrch),
         ):
-            result = handler.handle({})
+            result = handler.handle(_INPUT)
         assert _BG_ORANGE in result.context[0]
 
     def test_active_when_pid_alive_but_not_ours_eperm(self, tmp_path: Path) -> None:
@@ -187,7 +213,7 @@ class TestSupervisorIndicatorDetection:
             patch(_KILL_PATCH, side_effect=_raise_eperm),
             patch(_CMDLINE_PATCH, return_value="python3 claude-supervise.py --arm"),
         ):
-            result = handler.handle({})
+            result = handler.handle(_INPUT)
         assert _BG_GREEN in result.context[0]
 
     def test_orange_when_pid_reused_by_other_process(self, tmp_path: Path) -> None:
@@ -198,7 +224,7 @@ class TestSupervisorIndicatorDetection:
             patch(_KILL_PATCH, return_value=None),
             patch(_CMDLINE_PATCH, return_value="python3 some_unrelated_process.py"),
         ):
-            result = handler.handle({})
+            result = handler.handle(_INPUT)
         assert _BG_ORANGE in result.context[0]
 
     def test_orange_when_cmdline_unreadable(self, tmp_path: Path) -> None:
@@ -209,7 +235,7 @@ class TestSupervisorIndicatorDetection:
             patch(_KILL_PATCH, return_value=None),
             patch(_CMDLINE_PATCH, return_value=None),
         ):
-            result = handler.handle({})
+            result = handler.handle(_INPUT)
         assert _BG_ORANGE in result.context[0]
 
     def test_orange_when_status_json_malformed(self, tmp_path: Path) -> None:
@@ -217,7 +243,7 @@ class TestSupervisorIndicatorDetection:
         status_file.write_text("{not valid json")
         handler = SupervisorIndicatorHandler()
         with patch(_STATUS_PATH_PATCH, return_value=status_file):
-            result = handler.handle({})
+            result = handler.handle(_INPUT)
         assert _BG_ORANGE in result.context[0]
 
     def test_orange_when_pid_field_missing(self, tmp_path: Path) -> None:
@@ -225,7 +251,7 @@ class TestSupervisorIndicatorDetection:
         status_file.write_text(json.dumps({"version": "3.41.0"}))
         handler = SupervisorIndicatorHandler()
         with patch(_STATUS_PATH_PATCH, return_value=status_file):
-            result = handler.handle({})
+            result = handler.handle(_INPUT)
         assert _BG_ORANGE in result.context[0]
 
     def test_fail_safe_renders_nothing_on_unexpected_exception(self, tmp_path: Path) -> None:
@@ -235,7 +261,7 @@ class TestSupervisorIndicatorDetection:
             patch(_STATUS_PATH_PATCH, return_value=status_file),
             patch(_KILL_PATCH, side_effect=RuntimeError("boom")),
         ):
-            result = handler.handle({})
+            result = handler.handle(_INPUT)
         assert result.context == []
 
     def test_segment_has_separator_prefix(self, tmp_path: Path) -> None:
@@ -246,7 +272,7 @@ class TestSupervisorIndicatorDetection:
             patch(_KILL_PATCH, return_value=None),
             patch(_CMDLINE_PATCH, return_value="python3 claude-supervise.py --arm"),
         ):
-            result = handler.handle({})
+            result = handler.handle(_INPUT)
         assert result.context[0].startswith("|")
 
 
@@ -267,11 +293,11 @@ class TestSupervisorIndicatorProcessScanFallback:
             patch(_SCAN_PATCH, return_value=(4321, True)),
             patch(_KILL_PATCH, return_value=None),
         ):
-            result = handler.handle({})
+            result = handler.handle(_INPUT)
         assert result.context
         assert _BG_GREEN in result.context[0]
-        assert handler._cached_pid == 4321
-        assert handler._cached_armed is True
+        assert _memo(handler).pid == 4321
+        assert _memo(handler).armed is True
 
     def test_no_status_file_but_live_dryrun_process_is_yellow(self, tmp_path: Path) -> None:
         missing = tmp_path / "nope.json"
@@ -281,7 +307,7 @@ class TestSupervisorIndicatorProcessScanFallback:
             patch(_SCAN_PATCH, return_value=(4321, False)),
             patch(_KILL_PATCH, return_value=None),
         ):
-            result = handler.handle({})
+            result = handler.handle(_INPUT)
         assert _BG_YELLOW in result.context[0]
 
     def test_no_status_file_and_no_process_renders_nothing(self, tmp_path: Path) -> None:
@@ -291,7 +317,7 @@ class TestSupervisorIndicatorProcessScanFallback:
             patch(_STATUS_PATH_PATCH, return_value=missing),
             patch(_SCAN_PATCH, return_value=None),
         ):
-            result = handler.handle({})
+            result = handler.handle(_INPUT)
         assert result.context == []
 
     def test_status_file_dead_pid_but_live_process_is_green(self, tmp_path: Path) -> None:
@@ -309,9 +335,9 @@ class TestSupervisorIndicatorProcessScanFallback:
             patch(_KILL_PATCH, side_effect=_kill),
             patch(_SCAN_PATCH, return_value=(4321, True)),
         ):
-            result = handler.handle({})
+            result = handler.handle(_INPUT)
         assert _BG_GREEN in result.context[0]
-        assert handler._cached_pid == 4321
+        assert _memo(handler).pid == 4321
 
     def test_status_file_dead_pid_and_no_process_is_orange(self, tmp_path: Path) -> None:
         status_file = _write_status(tmp_path, pid=99999)
@@ -321,7 +347,7 @@ class TestSupervisorIndicatorProcessScanFallback:
             patch(_KILL_PATCH, side_effect=OSError(errno.ESRCH, "No such process")),
             patch(_SCAN_PATCH, return_value=None),
         ):
-            result = handler.handle({})
+            result = handler.handle(_INPUT)
         assert _BG_ORANGE in result.context[0]
 
 
@@ -345,7 +371,7 @@ class TestSupervisorIndicatorScanHelper:
             ),
             patch(_CMDLINE_PATCH, side_effect=_cmdline),
         ):
-            found = handler._scan_for_supervisor()
+            found = handler._scan_for_supervisor(_SESSION_ID)
         assert found == (200, True)
 
     def test_falls_back_to_worker_when_no_host(self) -> None:
@@ -363,7 +389,7 @@ class TestSupervisorIndicatorScanHelper:
             ),
             patch(_CMDLINE_PATCH, side_effect=_cmdline),
         ):
-            found = handler._scan_for_supervisor()
+            found = handler._scan_for_supervisor(_SESSION_ID)
         assert found == (100, False)
 
     def test_keeps_first_worker_when_multiple_workers_no_host(self) -> None:
@@ -383,7 +409,7 @@ class TestSupervisorIndicatorScanHelper:
             ),
             patch(_CMDLINE_PATCH, side_effect=_cmdline),
         ):
-            found = handler._scan_for_supervisor()
+            found = handler._scan_for_supervisor(_SESSION_ID)
         assert found == (100, True)
 
     def test_returns_none_when_no_supervisor_process(self) -> None:
@@ -395,7 +421,7 @@ class TestSupervisorIndicatorScanHelper:
             ),
             patch(_CMDLINE_PATCH, return_value="python3 unrelated.py"),
         ):
-            assert handler._scan_for_supervisor() is None
+            assert handler._scan_for_supervisor(_SESSION_ID) is None
 
     def test_returns_none_when_proc_unreadable(self) -> None:
         handler = SupervisorIndicatorHandler()
@@ -403,14 +429,14 @@ class TestSupervisorIndicatorScanHelper:
             "claude_code_hooks_daemon.handlers.status_line.supervisor_indicator.Path.iterdir",
             side_effect=OSError("boom"),
         ):
-            assert handler._scan_for_supervisor() is None
+            assert handler._scan_for_supervisor(_SESSION_ID) is None
 
     def test_scan_against_real_proc_returns_expected_shape(self) -> None:
         # Smoke test against the real /proc: whatever it finds (or None) must be
         # a well-formed (pid, armed) tuple. This host runs a live supervisor, so
         # this may legitimately return a tuple; assert only the shape.
         handler = SupervisorIndicatorHandler()
-        found = handler._scan_for_supervisor()
+        found = handler._scan_for_supervisor(_SESSION_ID)
         assert found is None or (
             isinstance(found, tuple) and isinstance(found[0], int) and isinstance(found[1], bool)
         )
@@ -430,13 +456,13 @@ class TestSupervisorIndicatorMemoisation:
             patch(_KILL_PATCH, return_value=None),
             patch(_CMDLINE_PATCH, return_value="python3 claude-supervise.py --arm") as cmdline_mock,
         ):
-            handler.handle({})  # first render resolves + memoises
+            handler.handle(_INPUT)  # first render resolves + memoises
             assert cmdline_mock.call_count == 1
-            result2 = handler.handle({})  # second render uses the fast path
+            result2 = handler.handle(_INPUT)  # second render uses the fast path
             assert cmdline_mock.call_count == 1  # cmdline NOT re-read
         assert _BG_GREEN in result2.context[0]
-        assert handler._cached_pid == 1234
-        assert handler._cached_armed is True
+        assert _memo(handler).pid == 1234
+        assert _memo(handler).armed is True
 
     def test_cache_dropped_and_reresolved_when_supervisor_dies(self, tmp_path: Path) -> None:
         status_file = _write_status(tmp_path, pid=1234)
@@ -446,9 +472,9 @@ class TestSupervisorIndicatorMemoisation:
             patch(_KILL_PATCH, return_value=None),
             patch(_CMDLINE_PATCH, return_value="python3 claude-supervise.py --arm"),
         ):
-            first = handler.handle({})
+            first = handler.handle(_INPUT)
         assert _BG_GREEN in first.context[0]
-        assert handler._cached_pid == 1234
+        assert _memo(handler).pid == 1234
 
         def _raise_esrch(pid: int, sig: int) -> None:
             import errno as errno_mod
@@ -459,9 +485,9 @@ class TestSupervisorIndicatorMemoisation:
             patch(_STATUS_PATH_PATCH, return_value=status_file),
             patch(_KILL_PATCH, side_effect=_raise_esrch),
         ):
-            after = handler.handle({})
+            after = handler.handle(_INPUT)
         assert _BG_ORANGE in after.context[0]  # crash -> orange
-        assert handler._cached_pid is None  # cache dropped
+        assert _memo(handler).pid is None  # cache dropped
 
 
 class TestSupervisorIndicatorNegativeCaching:
@@ -479,9 +505,9 @@ class TestSupervisorIndicatorNegativeCaching:
             patch(_SCAN_PATCH, return_value=None) as scan_mock,
             patch(_NOW_PATCH, return_value=1000.0),
         ):
-            first = handler.handle({})
+            first = handler.handle(_INPUT)
             assert scan_mock.call_count == 1
-            second = handler.handle({})
+            second = handler.handle(_INPUT)
             assert scan_mock.call_count == 1  # NOT re-walked within the window
         assert first.context == []
         assert second.context == []
@@ -497,8 +523,8 @@ class TestSupervisorIndicatorNegativeCaching:
             patch(_SCAN_PATCH, return_value=None) as scan_mock,
             patch(_NOW_PATCH, return_value=1000.0),
         ):
-            first = handler.handle({})
-            second = handler.handle({})
+            first = handler.handle(_INPUT)
+            second = handler.handle(_INPUT)
             assert scan_mock.call_count == 1
         assert _BG_ORANGE in first.context[0]
         assert _BG_ORANGE in second.context[0]
@@ -514,10 +540,10 @@ class TestSupervisorIndicatorNegativeCaching:
             patch(_SCAN_PATCH, return_value=None) as scan_mock,
             patch(_NOW_PATCH, side_effect=lambda: clock["t"]),
         ):
-            handler.handle({})
+            handler.handle(_INPUT)
             assert scan_mock.call_count == 1
             clock["t"] = 1000.0 + _PROC_WALK_INTERVAL_SECONDS + 1.0
-            handler.handle({})
+            handler.handle(_INPUT)
             assert scan_mock.call_count == 2  # walk interval elapsed -> re-walked
 
     def test_supervisor_appearing_with_no_status_file_is_detected_after_the_walk_interval(
@@ -534,17 +560,17 @@ class TestSupervisorIndicatorNegativeCaching:
         scan_result: dict[str, tuple[int, bool] | None] = {"value": None}
         with (
             patch(_STATUS_PATH_PATCH, return_value=missing),
-            patch(_SCAN_PATCH, side_effect=lambda: scan_result["value"]),
+            patch(_SCAN_PATCH, side_effect=lambda _session_id: scan_result["value"]),
             patch(_KILL_PATCH, return_value=None),
             patch(_NOW_PATCH, side_effect=lambda: clock["t"]),
         ):
-            first = handler.handle({})
+            first = handler.handle(_INPUT)
             assert first.context == []
             scan_result["value"] = (4321, True)
             clock["t"] = 1000.0 + _PROC_WALK_INTERVAL_SECONDS + 1.0
-            second = handler.handle({})
+            second = handler.handle(_INPUT)
         assert _BG_GREEN in second.context[0]
-        assert handler._cached_pid == 4321
+        assert _memo(handler).pid == 4321
 
     def test_positive_resolution_clears_negative_cache(self, tmp_path: Path) -> None:
         # A live supervisor found on the FIRST render must not leave a negative
@@ -557,12 +583,12 @@ class TestSupervisorIndicatorNegativeCaching:
             patch(_KILL_PATCH, return_value=None),
             patch(_NOW_PATCH, return_value=1000.0),
         ):
-            handler.handle({})
+            handler.handle(_INPUT)
             assert scan_mock.call_count == 1
-            second = handler.handle({})  # pid fast path, no scan
+            second = handler.handle(_INPUT)  # pid fast path, no scan
             assert scan_mock.call_count == 1
         assert _BG_GREEN in second.context[0]
-        assert handler._negative_cache_until is None
+        assert _memo(handler).negative_until is None
 
 
 class TestSupervisorIndicatorWalkThrottle:
@@ -592,14 +618,14 @@ class TestSupervisorIndicatorWalkThrottle:
             patch(_SCAN_PATCH, return_value=None) as scan_mock,
             patch(_NOW_PATCH, side_effect=lambda: clock["t"]),
         ):
-            handler.handle({})
+            handler.handle(_INPUT)
             assert scan_mock.call_count == 1
 
             # Several negative-cache windows elapse, all inside one walk window.
             elapsed = _NEGATIVE_CACHE_TTL_SECONDS + 1.0
             while elapsed < _PROC_WALK_INTERVAL_SECONDS:
                 clock["t"] = 1000.0 + elapsed
-                assert handler.handle({}).context == []
+                assert handler.handle(_INPUT).context == []
                 elapsed += _NEGATIVE_CACHE_TTL_SECONDS + 1.0
 
             assert scan_mock.call_count == 1
@@ -624,14 +650,14 @@ class TestSupervisorIndicatorWalkThrottle:
             patch(_CMDLINE_PATCH, return_value="python3 claude-supervise.py --arm"),
             patch(_NOW_PATCH, side_effect=lambda: clock["t"]),
         ):
-            assert handler.handle({}).context == []
+            assert handler.handle(_INPUT).context == []
 
             _write_status(tmp_path, pid=4321)
             clock["t"] = 1000.0 + _NEGATIVE_CACHE_TTL_SECONDS + 1.0
-            second = handler.handle({})
+            second = handler.handle(_INPUT)
 
         assert _BG_GREEN in second.context[0]
-        assert handler._cached_pid == 4321
+        assert _memo(handler).pid == 4321
 
     def test_a_dead_cached_supervisor_forces_an_immediate_walk(self, tmp_path: Path) -> None:
         """The walk throttle must not suppress the replacement scan.
@@ -652,25 +678,25 @@ class TestSupervisorIndicatorWalkThrottle:
 
         with (
             patch(_STATUS_PATH_PATCH, return_value=missing),
-            patch(_SCAN_PATCH, side_effect=lambda: scan_result["value"]) as scan_mock,
+            patch(_SCAN_PATCH, side_effect=lambda _session_id: scan_result["value"]) as scan_mock,
             patch(_KILL_PATCH, side_effect=kill),
             patch(_NOW_PATCH, side_effect=lambda: clock["t"]),
         ):
-            handler.handle({})  # walk 1: nothing found, stamp recorded
+            handler.handle(_INPUT)  # walk 1: nothing found, stamp recorded
             scan_result["value"] = (4321, True)
             clock["t"] = 1000.0 + _PROC_WALK_INTERVAL_SECONDS + 1.0
-            handler.handle({})  # walk 2: found -> memoised, stamp cleared
-            assert handler._cached_pid == 4321
+            handler.handle(_INPUT)  # walk 2: found -> memoised, stamp cleared
+            assert _memo(handler).pid == 4321
 
             # The supervisor dies one render later, well inside a walk window.
             alive["value"] = False
             scan_result["value"] = (9876, True)
             clock["t"] += 1.0
-            third = handler.handle({})
+            third = handler.handle(_INPUT)
 
             assert scan_mock.call_count == 3
         assert _BG_GREEN in third.context[0]
-        assert handler._cached_pid == 9876
+        assert _memo(handler).pid == 9876
 
     def test_the_walk_interval_is_far_longer_than_the_negative_cache_ttl(self) -> None:
         """Guard the split itself.
@@ -737,7 +763,7 @@ class TestSupervisorIndicatorMessage:
             patch(_WALL_NOW_PATCH, return_value=wall_now),
             patch(_DETECT_PATCH, return_value=state),
         ):
-            result = handler.handle({})
+            result = handler.handle(_INPUT)
         return result.context[0] if result.context else None
 
     def test_warning_attaches_to_single_tophat_orange_black(self, tmp_path: Path) -> None:
@@ -788,7 +814,7 @@ class TestSupervisorIndicatorMessage:
             patch(_WALL_NOW_PATCH, return_value=wall_now),
             patch(_DETECT_PATCH, return_value=_SupervisorState.ACTIVE_ARMED),
         ):
-            result = handler.handle({})
+            result = handler.handle(_INPUT)
         return result.context[0] if result.context else None
 
     def test_countdown_message_shows_seconds_remaining(self, tmp_path: Path) -> None:
@@ -855,7 +881,7 @@ class TestSupervisorIndicatorMessage:
             patch(_MESSAGE_PATH_PATCH, return_value=missing),
             patch(_DETECT_PATCH, return_value=_SupervisorState.ACTIVE_ARMED),
         ):
-            result = handler.handle({})
+            result = handler.handle(_INPUT)
         assert result.context == [f"| {_BG_GREEN} {_ICON} {_ANSI_RESET}"]
 
     def test_malformed_message_ignored_plain_tophat(self, tmp_path: Path) -> None:
@@ -866,7 +892,7 @@ class TestSupervisorIndicatorMessage:
             patch(_MESSAGE_PATH_PATCH, return_value=bad),
             patch(_DETECT_PATCH, return_value=_SupervisorState.ACTIVE_ARMED),
         ):
-            result = handler.handle({})
+            result = handler.handle(_INPUT)
         assert result.context == [f"| {_BG_GREEN} {_ICON} {_ANSI_RESET}"]
 
     def test_message_renders_even_if_state_detection_raises(self, tmp_path: Path) -> None:
@@ -879,7 +905,7 @@ class TestSupervisorIndicatorMessage:
             patch(_WALL_NOW_PATCH, return_value=95.0),
             patch(_DETECT_PATCH, side_effect=RuntimeError("boom")),
         ):
-            result = handler.handle({})
+            result = handler.handle(_INPUT)
         assert len(result.context) == 1
         assert "still shown" in result.context[0]
         assert _BG_ORANGE in result.context[0]

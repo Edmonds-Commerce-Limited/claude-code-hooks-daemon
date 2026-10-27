@@ -26,6 +26,16 @@ default: a project that never runs the ccy supervisor shows no icon, while a
 project whose supervisor died (a status file left behind, no live process) gets
 the orange alarm.
 
+Detection is SCOPED TO THE RENDERED SESSION. A supervisor counts for a session
+only when that session's id (the status-line input's ``session_id``) is in the
+environ of a process in the supervisor's own descendant tree — the rule the
+supervisor itself applies to its own sessions. One daemon serves every session
+of a project, and the status file and ``/proc`` are per project and per host,
+so without the rule any visible supervisor would turn every session green.
+Both resolution paths (status-file pid, ``/proc`` scan) are held to it. A
+missing ``session_id``, an unreadable environ or EPERM means "not owned": the
+decision falls back to orange/none and never raises.
+
 Detection is grounded in the live PROCESS, not merely the status file — the
 supervisor's status file was observed going missing while the supervisor was
 still running (``claude-supervise.py --arm``), which used to make the icon
@@ -35,7 +45,8 @@ live ``claude-supervise`` process, else (3) fall back to orange/none based on
 whether a status file is present at all.
 
 Three throttles keep the per-render cost low, because ``handle`` runs on EVERY
-status-line render:
+status-line render. Each is held PER SESSION (``_SessionMemo``), so one
+session's result never colours or suppresses another's:
 
 - POSITIVE cache: the resolved (pid, armed) identity is IMMUTABLE for the
   lifetime of a supervisor process, so once a supervisor is found it is
@@ -59,6 +70,12 @@ status-line render:
   missing while the supervisor is alive. Tying it to the negative-cache TTL
   priced the cheap, precise detector at the expensive fallback's rate.
 
+The ownership check walks the process table once per resolution (one ``stat``
+read per pid, one ``environ`` read per member of the candidate's subtree, so
+the same order of cost as the ``/proc`` scan). It runs only on a cache miss:
+a session that owns its supervisor pays it once, then only the liveness probe;
+a session that does not is bounded by the negative cache and walk interval.
+
 ANY unexpected failure fails safe to NO segment — this handler must never raise
 and never break the status line (mirrors the fail-silent pattern used by
 ``daemon_stats.py``).
@@ -69,7 +86,9 @@ import json
 import logging
 import math
 import os
+import threading
 import time
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -80,6 +99,7 @@ from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.process_tree_sessions import descendant_session_ids
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +153,11 @@ _NEGATIVE_CACHE_TTL_SECONDS = 5.0
 # measured interval, nowhere near the resonance band.
 _PROC_WALK_INTERVAL_SECONDS = 60.0
 
+# Upper bound on sessions with a live memo. One daemon serves every session of
+# a project for its whole life, so the per-session map must not grow without
+# bound; the oldest-inserted session is evicted (its next render re-resolves).
+_MAX_TRACKED_SESSIONS = 64
+
 # The top hat — the "Fat Controller" overseeing/directing the session. A single
 # glyph; state is carried by the ANSI BACKGROUND colour behind it (foreground
 # colour does not tint an emoji, but the cell background does render).
@@ -180,6 +205,23 @@ _STATE_BACKGROUND: dict[_SupervisorState, str] = {
 }
 
 
+@dataclass
+class _SessionMemo:
+    """Resolution caches for ONE session (all fields guarded by the handler lock)."""
+
+    # Memoised supervisor identity (immutable per supervisor process); the fast
+    # render path only re-checks pid liveness. Dropped when the pid dies.
+    pid: int | None = None
+    armed: bool | None = None
+    # Negative cache: a "no live supervisor for this session" resolution is
+    # reused until this monotonic deadline.
+    negative_state: _SupervisorState | None = None
+    negative_until: float | None = None
+    # Monotonic stamp of the last fruitless /proc walk, throttled separately and
+    # far harder than the negative cache.
+    last_walk_at: float | None = None
+
+
 class SupervisorIndicatorHandler(StatusLineHandlerBase):
     """Show whether the ccy PTY supervisor is overseeing the session."""
 
@@ -194,22 +236,10 @@ class SupervisorIndicatorHandler(StatusLineHandlerBase):
                 HandlerTag.NON_TERMINAL,
             ],
         )
-        # Memoised supervisor identity (immutable per supervisor process).
-        # Populated on the first successful resolution; the fast render path
-        # then only re-checks pid liveness. Dropped when the cached pid dies.
-        self._cached_pid: int | None = None
-        self._cached_armed: bool | None = None
-        # Negative cache: a "no live supervisor" resolution (NOT_ACTIVE or
-        # NOT_CONFIGURED) is reused until this monotonic deadline, so a non-ccy
-        # project does not re-resolve on every render. Cleared on any positive
-        # resolution and when a stale positive cache is dropped.
-        self._negative_cache_state: _SupervisorState | None = None
-        self._negative_cache_until: float | None = None
-        # Monotonic stamp of the last fruitless /proc walk, throttled separately
-        # and far harder than the negative cache above — it is the expensive,
-        # rarely-useful fallback. Cleared whenever a replacement scan must run
-        # immediately (a positive resolution, or a cached supervisor dying).
-        self._last_walk_at: float | None = None
+        # session_id -> its caches. Shared across render threads, so every
+        # access goes through ``_lock``.
+        self._memos: dict[str, _SessionMemo] = {}
+        self._lock = threading.Lock()
 
     def get_default_enabled(self) -> bool:
         """On by default.
@@ -240,7 +270,7 @@ class SupervisorIndicatorHandler(StatusLineHandlerBase):
         message = self._safe_active_message()
 
         try:
-            state = self._detect_state()
+            state = self._detect_state(self._session_id(hook_input))
         except Exception as e:
             # Fail silent: a false orange alarm would be more misleading than
             # simply omitting the segment on an unexpected error.
@@ -350,47 +380,85 @@ class SupervisorIndicatorHandler(StatusLineHandlerBase):
         """Monotonic clock reading (indirected for deterministic testing)."""
         return time.monotonic()
 
-    def _detect_state(self) -> _SupervisorState:
-        """Detect the supervisor state, using the memoised identity fast path."""
+    @staticmethod
+    def _session_id(hook_input: dict[str, Any]) -> str | None:
+        """Return the rendered session's id, or None when absent or unusable."""
+        value = hook_input.get("session_id")
+        if isinstance(value, str) and value.strip():
+            return value
+        return None
+
+    def _proc_root(self) -> Path:
+        """Return the process table root (indirected for deterministic testing)."""
+        return Path("/proc")
+
+    def _supervisor_owns_session(self, pid: int, session_id: str) -> bool:
+        """True when ``session_id`` is in the environ of ``pid``'s descendant tree."""
+        return session_id in descendant_session_ids(pid, self._proc_root())
+
+    def _unscoped_state(self) -> _SupervisorState:
+        """Orange/none decision for a render that has no session to scope by."""
+        if self._status_file_path().exists():
+            return _SupervisorState.NOT_ACTIVE
+        return _SupervisorState.NOT_CONFIGURED
+
+    def _detect_state(self, session_id: str | None = None) -> _SupervisorState:
+        """Detect the supervisor state for ``session_id``, memoised per session.
+
+        No session id means ownership cannot be established, so the result is
+        the unscoped orange/none decision and nothing is cached.
+        """
+        if session_id is None:
+            return self._unscoped_state()
+        with self._lock:
+            memo = self._memos.get(session_id)
+            if memo is None:
+                if len(self._memos) >= _MAX_TRACKED_SESSIONS:
+                    del self._memos[next(iter(self._memos))]
+                memo = _SessionMemo()
+                self._memos[session_id] = memo
+            return self._detect_state_locked(session_id, memo)
+
+    def _detect_state_locked(self, session_id: str, memo: _SessionMemo) -> _SupervisorState:
+        """Per-session detection. Caller holds ``self._lock``."""
         # Fast path: a previously-resolved supervisor. Only the cheap liveness
         # probe runs — no status-file or /proc/cmdline read.
-        if self._cached_pid is not None:
-            if self._pid_alive(self._cached_pid):
+        if memo.pid is not None:
+            if self._pid_alive(memo.pid):
                 return (
-                    _SupervisorState.ACTIVE_ARMED
-                    if self._cached_armed
-                    else _SupervisorState.ACTIVE_DRYRUN
+                    _SupervisorState.ACTIVE_ARMED if memo.armed else _SupervisorState.ACTIVE_DRYRUN
                 )
             # Cached supervisor died — drop the caches and re-resolve below so a
             # replacement supervisor (new pid) is picked up immediately. Neither
             # the negative cache NOR the walk throttle may suppress that
-            # replacement scan, which is why both are cleared here.
-            self._cached_pid = None
-            self._cached_armed = None
-            self._negative_cache_state = None
-            self._negative_cache_until = None
-            self._last_walk_at = None
+            # replacement scan, which is why they are all cleared here.
+            memo.pid = None
+            memo.armed = None
+            memo.negative_state = None
+            memo.negative_until = None
+            memo.last_walk_at = None
 
         # Negative fast path: a recent "no live supervisor" outcome is reused
         # within its TTL so non-ccy projects do not re-resolve every render.
         now = self._now()
-        if self._negative_cache_until is not None and now < self._negative_cache_until:
-            assert self._negative_cache_state is not None
-            return self._negative_cache_state
+        if memo.negative_until is not None and now < memo.negative_until:
+            assert memo.negative_state is not None
+            return memo.negative_state
 
-        return self._resolve_state(now)
+        return self._resolve_state(now, session_id, memo)
 
-    def _resolve_state(self, now: float) -> _SupervisorState:
-        """Full resolution, memoising the identity on success.
+    def _resolve_state(self, now: float, session_id: str, memo: _SessionMemo) -> _SupervisorState:
+        """Full resolution for one session, memoising the identity on success.
 
-        Ground truth is "is an armed supervisor PROCESS running", not "does a
-        status file exist": the supervisor's status file can go missing while
-        the supervisor is very much alive (observed live — the icon vanished
-        while ``claude-supervise.py --arm`` was still running). So:
+        Ground truth is "is an armed supervisor PROCESS running that OVERSEES
+        THIS SESSION", not "does a status file exist": the supervisor's status
+        file can go missing while the supervisor is very much alive. So:
 
-        1. Fast, precise: if the status file names a LIVE supervisor pid, use it.
-        2. Fallback: scan ``/proc`` for a live ``claude-supervise`` process, so a
-           missing/stale status file never hides an active safety net.
+        1. Fast, precise: if the status file names a LIVE supervisor pid whose
+           descendant tree carries this session id, use it.
+        2. Fallback: scan ``/proc`` for a live ``claude-supervise`` process that
+           owns this session, so a missing/stale status file never hides an
+           active safety net.
         3. Otherwise decide "down" vs "never configured" from whether a status
            file is present at all (keeps the handler silent for non-ccy projects).
         """
@@ -398,67 +466,74 @@ class SupervisorIndicatorHandler(StatusLineHandlerBase):
         status_present = status_path.exists()
         status = self._read_status(status_path)
 
-        # 1. Status file names a live, genuine supervisor -> use it directly.
+        # 1. Status file names a live, genuine supervisor of this session.
         if status is not None:
             pid = status.get("pid")
             if isinstance(pid, int) and self._pid_alive(pid):
                 cmdline = self._read_cmdline(pid)
-                if cmdline is not None and _SUPERVISOR_CMDLINE_MARKER in cmdline:
-                    return self._activate(pid, _SUPERVISOR_ARM_FLAG in cmdline)
+                if (
+                    cmdline is not None
+                    and _SUPERVISOR_CMDLINE_MARKER in cmdline
+                    and self._supervisor_owns_session(pid, session_id)
+                ):
+                    return self._activate(memo, pid, _SUPERVISOR_ARM_FLAG in cmdline)
 
         # 2. No usable status-file pid -> discover the supervisor by process.
         #    Throttled independently of (and far harder than) the negative cache:
         #    the walk is the expensive fallback, not the primary detector.
-        if self._may_walk(now):
-            self._last_walk_at = now
-            found = self._scan_for_supervisor()
+        if self._may_walk(memo, now):
+            memo.last_walk_at = now
+            found = self._scan_for_supervisor(session_id)
             if found is not None:
-                return self._activate(found[0], found[1])
+                return self._activate(memo, found[0], found[1])
 
-        # 3. Nothing live. Orange alarm if a supervisor was configured (status
-        #    file present) but is down; otherwise render nothing (never configured).
+        # 3. Nothing live for this session. Orange alarm if a supervisor was
+        #    configured (status file present) but is down or not this session's;
+        #    otherwise render nothing (never configured).
         state = _SupervisorState.NOT_ACTIVE if status_present else _SupervisorState.NOT_CONFIGURED
         # Throttle this negative outcome so the /proc walk is not repeated on
         # every render until the TTL elapses.
-        self._negative_cache_state = state
-        self._negative_cache_until = now + _NEGATIVE_CACHE_TTL_SECONDS
+        memo.negative_state = state
+        memo.negative_until = now + _NEGATIVE_CACHE_TTL_SECONDS
         return state
 
-    def _may_walk(self, now: float) -> bool:
-        """Return True when the /proc walk is due.
+    def _may_walk(self, memo: _SessionMemo, now: float) -> bool:
+        """Return True when this session's /proc walk is due.
 
         The walk is the fallback for a supervisor whose status file has gone
         missing. Throttling it separately means the cheap, precise status-file
         probe keeps running at the negative-cache rate while the expensive scan
         happens at most once per interval.
         """
-        if self._last_walk_at is None:
+        if memo.last_walk_at is None:
             return True
-        return now - self._last_walk_at >= _PROC_WALK_INTERVAL_SECONDS
+        return now - memo.last_walk_at >= _PROC_WALK_INTERVAL_SECONDS
 
-    def _activate(self, pid: int, armed: bool) -> _SupervisorState:
+    def _activate(self, memo: _SessionMemo, pid: int, armed: bool) -> _SupervisorState:
         """Memoise a resolved supervisor identity and return its active state."""
-        self._cached_pid = pid
-        self._cached_armed = armed
+        memo.pid = pid
+        memo.armed = armed
         # A positive resolution invalidates any pending negative throttle, and
         # the walk throttle with it: if this supervisor later dies, the
         # replacement scan must not be blocked by a stamp from before it.
-        self._negative_cache_state = None
-        self._negative_cache_until = None
-        self._last_walk_at = None
+        memo.negative_state = None
+        memo.negative_until = None
+        memo.last_walk_at = None
         return _SupervisorState.ACTIVE_ARMED if armed else _SupervisorState.ACTIVE_DRYRUN
 
-    def _scan_for_supervisor(self) -> tuple[int, bool] | None:
-        """Find a live ``claude-supervise`` process by scanning ``/proc``.
+    def _scan_for_supervisor(self, session_id: str) -> tuple[int, bool] | None:
+        """Find a live ``claude-supervise`` process that oversees ``session_id``.
 
         Returns ``(pid, armed)`` for the supervisor HOST when found (preferred
         over the ``--worker`` child, whose pid churns on worker restarts), or the
-        worker as a fallback, or None if no supervisor process is running. Only
-        runs on a cache miss (a missing status file, or a dead cached pid), so
-        the per-render cost stays the cheap ``os.kill`` liveness probe. Never
-        raises — an unreadable ``/proc`` yields None (fail-safe to no segment).
+        worker as a fallback, or None if no supervisor process owning the session
+        is running. A ``claude-supervise`` process whose descendant tree does not
+        carry ``session_id`` is some OTHER session's supervisor and is skipped.
+        Only runs on a cache miss, so the per-render cost stays the cheap
+        ``os.kill`` liveness probe. Never raises — an unreadable ``/proc``
+        yields None (fail-safe to no segment).
         """
-        proc_root = Path("/proc")
+        proc_root = self._proc_root()
         try:
             entries = list(proc_root.iterdir())
         except OSError as e:
@@ -477,6 +552,8 @@ class SupervisorIndicatorHandler(StatusLineHandlerBase):
             pid = int(entry.name)
             cmdline = self._read_cmdline(pid)
             if cmdline is None or _SUPERVISOR_CMDLINE_MARKER not in cmdline:
+                continue
+            if not self._supervisor_owns_session(pid, session_id):
                 continue
             armed = _SUPERVISOR_ARM_FLAG in cmdline
             if _SUPERVISOR_WORKER_FLAG not in cmdline:
@@ -520,7 +597,7 @@ class SupervisorIndicatorHandler(StatusLineHandlerBase):
 
     def _read_cmdline(self, pid: int) -> str | None:
         """Read /proc/{pid}/cmdline as a space-separated string, or None."""
-        cmdline_path = Path(f"/proc/{pid}/cmdline")
+        cmdline_path = self._proc_root() / str(pid) / "cmdline"
         try:
             raw = cmdline_path.read_bytes()
         except OSError as e:
@@ -579,7 +656,8 @@ class SupervisorIndicatorHandler(StatusLineHandlerBase):
             how_to_read=(
                 "🎩 green = active + armed (will auto-compact); 🎩 yellow = active + "
                 "dry-run (observes only); 🎩 orange = a status file exists but the "
-                "supervisor process is not live; no segment at all = never configured."
+                "supervisor process is not live or does not oversee this session; no "
+                "segment at all = never configured."
             ),
             current_value=current_value,
         )
