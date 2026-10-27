@@ -117,8 +117,11 @@ Follow-ups, not defects in the reviewers' judgement:
 hooksdaemon.latestRoutineNumber unset; bootstrapping from filesystem high-water mark (0)", and the CI log truncates the
 rest. It passed on the 3.11 leg of the same run.
 
-**Status**: ⬜ open. Not yet reproduced locally. Check whether the counter bootstrap under the lock races on the new
-image (bash 5.3, newer git), or is an ordinary flake.
+**Status**: ✅ fixed, merged in 801132dfb. The cause was git config lock contention: git does not retry
+`.git/config.lock`, so two concurrent counter writes could fail with "could not lock config file". `write_counter` in
+`mkroutine.bash`, `mkplan.bash` and the deployed `mkplan.bash` template now retries that one error (30 × 0.1 s), then
+dies naming the key. The new tests were red against the unfixed scripts. Which process held the lock on CI is
+unconfirmed.
 
 ### N550 — the shell guard reads fewer brace-expansion spellings than bash 5.3 produces
 
@@ -130,7 +133,9 @@ Under bash 5.3, `pass{}1..2{pass,..}}` also spells `pass{}1..2..}` and `pass{}1.
 produces neither. The guard must over-read every spelling bash can run (Plan 00466 N101/N115), so this is a bypass
 class, not a cosmetic diff.
 
-**Status**: ⬜ in progress in a worktree (bash 5.3 built locally, fix to read the union of 5.2 and 5.3 grouping).
+**Status**: ✅ fixed, merged in 9ea0ee9de (black fix 50c4d1a1e). The reader now spells both bash 5.2's reading and
+bash 5.3's skip of a group whose sequence term is invalid, and the guard takes the union of the two. The CI Shell job
+was green on 50c4d1a1e.
 
 ### N549 — shellcheck 0.11 reports SC2329 on `init.sh`, which ships into client repositories
 
@@ -141,7 +146,10 @@ reports SC2329 on the `send_request_stdin()` overrides that `init.sh` defines in
 2814). The existing `disable=SC2317` directives do not cover the new code. A client linting with 0.11 sees findings it
 can neither fix nor suppress.
 
-**Status**: ⬜ in progress in a worktree (a code fix, no changed directive).
+**Status**: ✅ fixed, merged in 34b5e934d. The passthrough no longer redefines `send_request_stdin`, and both
+`disable=SC2317` directives are gone. The stale registry anchors that the removal left in
+`tests/unit/qa/test_check_inline_suppressions.py` were the full gate's only failure on 50c4d1a1e; they were removed in
+5778d50ea.
 
 ### N548 — the ccy focus hold held every send for 946 minutes while the main thread had focus
 
