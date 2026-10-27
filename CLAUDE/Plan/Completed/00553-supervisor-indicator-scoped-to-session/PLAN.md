@@ -1,6 +1,6 @@
 # Plan 00553: supervisor indicator scoped to session
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-26
 **Owner**: dev
 **Priority**: Medium
@@ -47,10 +47,12 @@ So any supervisor visible in the host's process table turns every session's indi
 
 ## Success Criteria
 
-- [ ] The issue's reproduction renders no green top hat for an unsupervised session, proven by a test that failed before the fix.
-- [ ] A session genuinely under a supervisor still renders green, proven by a test.
-- [ ] The release note is recorded in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] The issue's reproduction renders no green top hat for an unsupervised session, proven by a test that failed before the fix. The unit tests' red run was import-level only. The behavioural red was shown separately on a live host: one handler instance on the old code rendered green for a session no supervisor owns, and on the fix rendered nothing.
+- [x] A session genuinely under a supervisor still renders green, proven by a test (`test_supervisor_indicator_session_scope.py`) and by the same live check.
+- [x] The release note is recorded in `CLAUDE/UPGRADES/UNRELEASED/release-notes/004-supervisor-indicator-scoped-to-session.md`.
 
 ## Delivery & Milestones
 
-- <!-- delivery commit hashes -->
+- Fix commit `41d00b61c`; `main` fast-forwarded to the tested head `2234dc879`.
+- Targeted QA 41/41 on the combined head. CI run 40424574049 green on attempt 2; attempt 1 failed one acceptance-harness probe, which passed locally and on the re-run (ledger 00474 N544).
+- Issue #140 closed.

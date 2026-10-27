@@ -109,6 +109,20 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N544 — the playbook-harness probe test failed once on CI and passed on a re-run of the same commit
+
+**Source**: CI run 40424574049 on `2234dc879` (the #140 merge), 2026-10-27.
+
+**Evidence**:
+
+- Attempt 1's code-tier targeted QA failed only on
+  `tests/acceptance/test_playbook_harness.py::TestTheDeclaredProbesBehaveAsDeclared::test_every_executable_probe_matches_its_expected_decision_and_reason`.
+- The CI log names the test but not which handler's probe disagreed, and the run kept no QA artefacts.
+- The test passed locally against a daemon restarted on the same code, and attempt 2 of the same run was green.
+- The handler #140 changed (`supervisor_indicator`) declares one trivial context probe that accepts any message.
+
+**Status**: ⬜ open. Two gaps. First, the failure should name the disagreeing probe in its assertion message, so a CI log alone identifies it. Second, the code tier could upload `untracked/qa/` as an artefact on failure.
+
 ### N543 — the plan commit gate's deny gives no hint that the command's own `git add` would fail
 
 **Source**: archiving Plan 00552 (2026-10-26); fact-check `subagent-reports/261026-plan-fact-checker-sonnet.md`.
