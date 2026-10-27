@@ -1,0 +1,2 @@
+tests/fixtures/hooks_screen/*.raw binary
+screen/vendor/** linguist-vendored -diff

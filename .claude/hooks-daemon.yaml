@@ -308,6 +308,11 @@ handlers:
             reason: >-
               This handler's own tests necessarily demonstrate the public patterns it
               implements: self-referential documentation of the feature, not a leak.
+          - pattern: 'screen/vendor/**'
+            reason: >-
+              Vendored third-party Rust crates behind hooks-screen (Plan 00538, owner ruling:
+              vt100, vendored). Pinned and checksummed by cargo, so never ours to edit; they
+              include a binary test fixture the content scan cannot read.
 
     # Plan 00272: protected files' CONTENTS never enter context. Default globs
     # (*.secret*, .vault-pass*, ...) cover .claude/block-words.secret; use
@@ -859,6 +864,7 @@ handlers:
         extra_allowed_markdown_paths:
           - "^\\.github/.*\\.md$"      # GitHub issue/PR templates, workflow docs
           - "^BUG_REPORTING\\.md$"     # Project root doc (not a standard repo file)
+          - "^screen/VENDORED\\.md$"   # Inventory of the vendored crates behind hooks-screen (Plan 00538)
           # Daemon-bundled markdown template assets deployed into client projects
           # (e.g. the plan _TEMPLATE_.md, Plan 00144 Phase 5) — code assets, not docs.
           - "^src/claude_code_hooks_daemon/install/templates/.*\\.md$"
