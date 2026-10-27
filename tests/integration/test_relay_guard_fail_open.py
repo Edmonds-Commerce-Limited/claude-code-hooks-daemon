@@ -980,7 +980,7 @@ def test_nc_rung_round_trip_completes_promptly(tmp_path: Path) -> None:
     short_root = Path(tempfile.mkdtemp(prefix="ncrt-"))
     try:
         untracked_dir = short_root / "untracked"
-        transport = TransportConfig(nc_enabled=True)
+        transport = TransportConfig(relay_enabled=False, nc_enabled=True)
         forwarder = _write_generated_forwarder(
             short_root, "pre-tool-use", "PreToolUse", transport, untracked_dir
         )
@@ -1061,7 +1061,7 @@ def test_nc_rung_honours_events_dir_env_override(tmp_path: Path) -> None:
     override_events_dir = Path(tempfile.mkdtemp(prefix="ncenv-override-"))
     try:
         untracked_dir = short_root / "untracked"
-        transport = TransportConfig(nc_enabled=True)
+        transport = TransportConfig(relay_enabled=False, nc_enabled=True)
         forwarder = _write_generated_forwarder(
             short_root, "pre-tool-use", "PreToolUse", transport, untracked_dir
         )

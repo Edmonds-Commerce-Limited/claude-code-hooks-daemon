@@ -131,21 +131,21 @@ Ansible check that ran with no config says so and names this option.
 
 ## Transport (`daemon.transport:`)
 
-**EXPERIMENTAL and opt-in for this release** (Plan 00290). A cross-cutting
-`daemon:` sub-block governing the client-side hook transport — the process
-that carries a hook's JSON payload from Claude Code to the daemon and back.
-Every default is off/null, so a project with no `daemon.transport:` block at
-all sees **zero behaviour change**: every hook still runs the existing
-`bash` + `python3` forwarder path.
+A cross-cutting `daemon:` sub-block governing the client-side hook transport —
+the process that carries a hook's JSON payload from Claude Code to the daemon
+and back. **The Rust relay is the default transport** (Plan 00554): a project
+with no `daemon.transport:` block gets the relay, provisioned at install and
+upgrade. The legacy `bash` + `python3` forwarder is the explicit opt-in:
+set `relay_enabled: false` (or run `bin/hooks-daemon transport off`).
 
 ```yaml
 daemon:
   transport:
-    relay_enabled: false # rung 1: exec the static Rust relay binary (opt-in)
+    relay_enabled: true # rung 1: exec the static Rust relay binary (false = legacy bash+python3)
     nc_enabled: false # rung 2: bash `nc -U` path, tried before python3 (opt-in)
     timeout_seconds: 30 # relay --timeout-ms source; also the nc -w budget (max 45)
     relay_binary: null # absolute-path override; null = {untracked}/bin/hooks-relay
-    relay_source: null # "build" | "download" | null — see below
+    relay_source: auto # "auto" | "build" | "download" | null — see below
 ```
 
 **The fallback ladder never loses its floor**: relay binary -> `nc -U` ->
@@ -168,13 +168,13 @@ the cap and the fix, and repeats it at every session start
 down denies every `PreToolUse` call, including the edit that would fix the
 config. `check-config-migrations` reports a larger value on upgrade.
 
-**`relay_enabled`/`nc_enabled` and `relay_source` are two SEPARATE, both
-explicit, decisions** — nothing about this block acts implicitly:
+**`relay_enabled`/`nc_enabled` and `relay_source` are two SEPARATE
+decisions**:
 
-- `relay_enabled`/`nc_enabled` opt a project's forwarders into trying the
-  faster rungs at all.
-- `relay_source: build|download` (both default `null`) separately governs
-  **how the relay binary gets onto disk** at install/upgrade time. Leaving
+- `relay_enabled`/`nc_enabled` decide whether a project's forwarders try the
+  faster rungs at all (`relay_enabled` defaults to true, `nc_enabled` to false).
+- `relay_source: auto|build|download` (default `auto`) separately governs
+  **how the relay binary gets onto disk** at install/upgrade time. Setting
   it `null` with `relay_enabled: true` is a valid config, but with no binary
   on disk every relay-eligible hook answer carries the warning described
   below until a binary is provisioned, and the session-start repair records
