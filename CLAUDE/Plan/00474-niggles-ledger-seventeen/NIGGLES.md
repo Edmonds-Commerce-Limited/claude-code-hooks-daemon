@@ -109,6 +109,21 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N545 — targeted QA did not select the repo-wide HookInputField single-source test for a handler that read a raw payload key
+
+**Source**: the 2026-10-27 full gate on `b88334e4b`.
+
+**Evidence**:
+
+- Plan 00553 (#140) added `hook_input.get("session_id")` in `handlers/status_line/supervisor_indicator.py`. That
+  breaks `tests/unit/constants/test_hook_input_field_single_source.py`, which scans every handler source.
+- The #140 merge passed targeted QA (41/41) and CI's code tier, because neither selected that test. Only the full gate
+  caught it, a day later.
+- Fixed in the same commit as this entry (`HookInputField.SESSION_ID`).
+
+**Status**: ⬜ open for the selection gap. A whole-tree invariant test like this one could be mapped from every
+`src/claude_code_hooks_daemon/handlers/**` change in `scripts/qa/changed_tests_map.yaml`.
+
 ### N544 — the playbook-harness probe test failed once on CI and passed on a re-run of the same commit
 
 **Source**: CI run 40424574049 on `2234dc879` (the #140 merge), 2026-10-27.
@@ -181,8 +196,15 @@ auto-saved reply instead.
   the spawn attributes without restoring them. That cause is not confirmed.
 - It predates Plan 00552: it failed the same way on the ee25ea681 gate, before any 00552 code merged.
 
-**Status**: ⬜ open. Next step: run the unit leg with `-p xdist` disabled, or bisect the worker's test order, to find
-the polluting test.
+**Status**: ✅ fixed. The cause was not test pollution. The full gate's py3.12 and py3.13 legs run uv-managed
+CPython builds (python-build-standalone), which lack `POSIX_SPAWN_SETSID`. On those builds, uv's 3.12.16 and 3.13.18
+both raise for `os.posix_spawn(..., setsid=True)`; the venv's Debian 3.11 does not, which is why "run alone" passed.
+
+That made it a real client defect: the session-start relay repair never started on such an interpreter.
+
+- `spawn_detached` now uses `subprocess.Popen(start_new_session=True)`.
+- A regression test makes `posix_spawn` reject `setsid` on any interpreter.
+- Release note: `CLAUDE/UPGRADES/UNRELEASED/release-notes/005-relay-repair-on-uv-managed-python.md`.
 
 ### N540 — the venv resolver's probe watchdog can orphan its `sleep` after a good candidate answers
 

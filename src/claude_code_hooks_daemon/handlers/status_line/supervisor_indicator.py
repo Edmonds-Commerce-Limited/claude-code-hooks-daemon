@@ -93,7 +93,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, ProjectContext
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
@@ -383,7 +383,7 @@ class SupervisorIndicatorHandler(StatusLineHandlerBase):
     @staticmethod
     def _session_id(hook_input: dict[str, Any]) -> str | None:
         """Return the rendered session's id, or None when absent or unusable."""
-        value = hook_input.get("session_id")
+        value = hook_input.get(HookInputField.SESSION_ID)
         if isinstance(value, str) and value.strip():
             return value
         return None
