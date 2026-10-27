@@ -539,7 +539,7 @@ class TestRelayBinaryDefect:
         guard = build_relay_guard_block(
             "pre-tool-use", TransportConfig(relay_enabled=True), tmp_path, tmp_path
         )
-        assert "read -r -N 4 _rl_magic" in guard
+        assert "read -r -n 4 _rl_magic" in guard
         assert "\"$_rl_magic\" == $'\\x7fELF'" in guard
         assert "\"$_rl_magic\" == '#!'*" in guard
         assert relay_deploy.RELAY_RUNNABLE_MAGIC == (b"\x7fELF", b"#!")

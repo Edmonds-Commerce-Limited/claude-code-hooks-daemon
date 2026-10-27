@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import logging
 import re
+import string
 import sys
 from collections.abc import Iterable
 from pathlib import Path
@@ -307,6 +308,10 @@ def _checkout_guard_open(project_root: Path, *, honour_no_relay: bool) -> str:
     return f'if [[ {no_relay}"${{BASH_SOURCE[0]}}" == "{hooks_dir}"* ]]; then\n'
 
 
+#: "Aa Bb ... Zz": the table the generated lowercase loop walks.
+_UPPER_LOWER_PAIRS = " ".join(f"{c.upper()}{c}" for c in string.ascii_lowercase)
+
+
 def _events_dir_lines(untracked_dir: Path) -> list[str]:
     """Bash lines that set ``_rl_dir`` and ``_rl_events_dir`` with no spawn.
 
@@ -322,10 +327,15 @@ def _events_dir_lines(untracked_dir: Path) -> list[str]:
         # expansion, zero spawns, so a test fixture can still redirect this.
         lines.append(f'    _rl_events_dir="${{HOOKS_DAEMON_EVENTS_DIR:-{resolved_events_dir}}}"\n')
     else:
-        lines.append(
-            '    _rl_sfx="-${HOSTNAME:-localhost}"; _rl_sfx="${_rl_sfx,,}"; '
-            '_rl_sfx="${_rl_sfx// /-}"\n'
-        )
+        # Lowercased with parameter expansion only, one upper/lower pair per
+        # pass: `${v,,}` is bash 4+ and macOS ships /bin/bash 3.2, where the
+        # bad substitution would exit the forwarder before it judges anything.
+        lines.append('    _rl_sfx="-${HOSTNAME:-localhost}"; _rl_sfx="${_rl_sfx// /-}"\n')
+        lines.append('    if [[ "$_rl_sfx" == *[[:upper:]]* ]]; then\n')
+        lines.append(f"        for _rl_c in {_UPPER_LOWER_PAIRS}; do\n")
+        lines.append('            _rl_sfx="${_rl_sfx//${_rl_c:0:1}/${_rl_c:1:1}}"\n')
+        lines.append("        done\n")
+        lines.append("    fi\n")
         lines.append('    _rl_events_dir="${HOOKS_DAEMON_EVENTS_DIR:-$_rl_dir/events$_rl_sfx}"\n')
     return lines
 
@@ -434,7 +444,9 @@ def build_relay_guard_block(
     lines.append('    if [[ -S "$_rl_sock" ]]; then\n')
     lines.append('        _rl_magic=""\n')
     lines.append('        if [[ -x "$_rl_bin" && -f "$_rl_bin" ]] \\\n')
-    lines.append('            && read -r -N 4 _rl_magic < "$_rl_bin" \\\n')
+    # `read -n` (bash 2.04+), not `-N` (bash 4): on 3.2 `-N` is an invalid option.
+    # IFS is emptied so a leading space is not stripped from the four bytes.
+    lines.append('            && IFS= read -r -n 4 _rl_magic < "$_rl_bin" \\\n')
     lines.append(
         "            && [[ \"$_rl_magic\" == $'\\x7fELF' || \"$_rl_magic\" == '#!'* ]]; then\n"
     )

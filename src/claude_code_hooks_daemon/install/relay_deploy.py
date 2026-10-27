@@ -138,7 +138,7 @@ def relay_binary_defect(binary: Path) -> str | None:
             head = handle.read(_MAGIC_READ_BYTES)
     except OSError:
         return RELAY_DEFECT_UNREADABLE
-    # The guard's `read -N 4` fails on a shorter file, so this requires all four.
+    # Four bytes, as the guard's `read -n 4` reads them.
     if len(head) == _MAGIC_READ_BYTES and (
         head == RELAY_RUNNABLE_MAGIC[0] or head.startswith(RELAY_RUNNABLE_MAGIC[1])
     ):
