@@ -178,6 +178,7 @@ def set_relay_enabled(config_path: Path, enabled: bool) -> bool:
 _TRANSPORT_BLOCK_LINE = re.compile(r"^(?P<indent>[ \t]*)transport:[ \t]*(?:#.*)?$", re.MULTILINE)
 _DAEMON_SECTION_LINE = re.compile(r"^daemon:[ \t]*(?:#.*)?$", re.MULTILINE)
 
+
 def _seed_value() -> str:
     """The YAML boolean seeded for a missing key: the host's shipped default."""
     return "true" if relay_supported_by_host() else "false"
