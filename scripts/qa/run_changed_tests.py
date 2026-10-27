@@ -86,6 +86,11 @@ _QA_OUTPUT_DIR_PARTS: Final[tuple[str, str]] = ("untracked", "qa")
 _OUTPUT_FILENAME: Final[str] = "changed_tests.json"
 _TOOL_NAME: Final[str] = "changed_tests"
 
+#: How much of a red run's pytest output the report keeps, from the end. The
+#: report names failing tests but not their messages, and CI keeps no console
+#: log beyond the step's own (ledger 00474 N544).
+KEPT_OUTPUT_MAX_CHARS: Final[int] = 200_000
+
 #: This repository's declared rules for what a name cannot map.
 DEFAULT_RULES_PATH: Final[Path] = Path(__file__).resolve().parent / "changed_tests_map.yaml"
 
@@ -938,7 +943,7 @@ def build_report(
     }
     if selection.selected and parsed["total"] == 0:
         summary["error"] = _executed_nothing_reason(len(selection.selected), exit_code, output)
-    return {
+    report: dict[str, Any] = {
         "tool": _TOOL_NAME,
         "base": base,
         "summary": summary,
@@ -953,6 +958,9 @@ def build_report(
             {"name": node_id, "outcome": _OUTCOME_FAILED} for node_id in parsed["failed_tests"]
         ],
     }
+    if not tests_green:
+        report["pytest_output"] = output[-KEPT_OUTPUT_MAX_CHARS:]
+    return report
 
 
 def failure_report(message: str) -> dict[str, Any]:

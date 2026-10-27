@@ -186,6 +186,16 @@ jobs:
         if: "!cancelled()"
         run: bash scripts/ci/full_suite_if_unmapped.bash
 
+      # The summary names a failing test but its message lives in the per-check
+      # JSON (ledger 00474 N544), so keep untracked/qa/ when the job fails.
+      - name: Upload QA output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-targeted-output
+          path: untracked/qa/
+          if-no-files-found: warn
+
       - name: Security (bandit)
         if: "!cancelled() && env.TIER == 'code'"
         run: bandit -r src/ .claude/ccy/claude-supervise.py -s B101

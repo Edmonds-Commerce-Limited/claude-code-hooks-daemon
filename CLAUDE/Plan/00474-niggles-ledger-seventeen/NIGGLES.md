@@ -121,7 +121,14 @@ Follow-ups, not defects in the reviewers' judgement:
 - The test passed locally against a daemon restarted on the same code, and attempt 2 of the same run was green.
 - The handler #140 changed (`supervisor_indicator`) declares one trivial context probe that accepts any message.
 
-**Status**: ⬜ open. Two gaps. First, the failure should name the disagreeing probe in its assertion message, so a CI log alone identifies it. Second, the code tier could upload `untracked/qa/` as an artefact on failure.
+**Status**: ✅ reporting gap closed; the flake's cause is still unknown. The assertion already names each disagreeing
+probe. The message was lost because `run_changed_tests.py` kept only failing test names and CI kept nothing.
+
+- A red targeted run's report now carries the tail of pytest's output (`pytest_output`, capped by
+  `KEPT_OUTPUT_MAX_CHARS`).
+- The docs-or-code tier in `.github/workflows/qa.yml` uploads `untracked/qa/` when the job fails.
+
+The next recurrence will name its probe.
 
 ### N543 — the plan commit gate's deny gives no hint that the command's own `git add` would fail
 

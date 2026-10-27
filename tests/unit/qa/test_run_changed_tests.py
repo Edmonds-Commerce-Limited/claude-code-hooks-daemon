@@ -683,6 +683,51 @@ class TestTheReport:
         assert report["summary"]["passed_all"] is False
         assert report["tests"] == [{"name": "tests/unit/test_a.py::test_x", "outcome": "failed"}]
 
+    def test_a_red_run_keeps_pytests_output_so_the_message_survives(self) -> None:
+        # Ledger 00474 N544: a CI log named the failing test but not its
+        # assertion message, and nothing kept the message anywhere.
+        output = (
+            "E   AssertionError: 1 of 140 declared probes did not behave\n"
+            "E   #57 SomeHandler: expected deny, got allow\n"
+            "=========================== short test summary info ============================\n"
+            "FAILED tests/unit/test_a.py::test_x - AssertionError\n"
+            "1 failed, 2 passed in 0.10s\n"
+        )
+        report = changed_tests.build_report(
+            base="main",
+            changed=["src/pkg/a.py"],
+            selection=changed_tests.Selection(selected=["tests/unit/test_a.py"]),
+            exit_code=1,
+            output=output,
+            allow_unmapped=False,
+        )
+        assert "#57 SomeHandler: expected deny, got allow" in report["pytest_output"]
+
+    def test_a_green_run_does_not_carry_pytests_output(self) -> None:
+        report = changed_tests.build_report(
+            base="main",
+            changed=["src/pkg/a.py"],
+            selection=changed_tests.Selection(selected=["tests/unit/test_a.py"]),
+            exit_code=0,
+            output="3 passed in 0.10s\n",
+            allow_unmapped=False,
+        )
+        assert "pytest_output" not in report
+
+    def test_the_kept_output_is_bounded_to_its_tail(self) -> None:
+        cap = changed_tests.KEPT_OUTPUT_MAX_CHARS
+        output = "x" * (cap * 2) + "\nFAILED tests/unit/test_a.py::test_x\n1 failed in 0.10s\n"
+        report = changed_tests.build_report(
+            base="main",
+            changed=["src/pkg/a.py"],
+            selection=changed_tests.Selection(selected=["tests/unit/test_a.py"]),
+            exit_code=1,
+            output=output,
+            allow_unmapped=False,
+        )
+        assert len(report["pytest_output"]) == cap
+        assert report["pytest_output"].endswith("1 failed in 0.10s\n")
+
     def test_selected_tests_that_collected_nothing_is_a_failure(self) -> None:
         report = changed_tests.build_report(
             base="main",
