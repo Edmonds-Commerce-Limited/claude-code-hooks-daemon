@@ -101,6 +101,22 @@ def test_flags_tracked_backup_file(tmp_path: Path) -> None:
     )
 
 
+def test_vendored_crate_manifest_orig_is_not_a_backup_artifact(tmp_path: Path) -> None:
+    """Cargo checksums ``Cargo.toml.orig``, so the vendored tree must track it."""
+    repo = _make_repo(
+        tmp_path,
+        {
+            "screen/vendor/vt100/Cargo.toml.orig": "[package]\n",
+            "other/Cargo.toml.orig": "[package]\n",
+        },
+    )
+
+    _, report = _run_checker(repo)
+
+    assert "screen/vendor/vt100/Cargo.toml.orig" not in _paths(report)
+    assert "other/Cargo.toml.orig" in _paths(report), "the exemption is scoped to screen/vendor/"
+
+
 def test_flags_test_script_stranded_at_repo_root(tmp_path: Path) -> None:
     """A ``test_*.sh`` at the repo root has no owning context."""
     repo = _make_repo(

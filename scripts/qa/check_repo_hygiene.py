@@ -311,6 +311,10 @@ _HTMLCOV_DIR: Final[str] = "htmlcov"
 # Suffixes that mark editor backups, merge detritus and manual copies.
 _ARTIFACT_SUFFIXES: Final[tuple[str, ...]] = (".bak", ".orig", ".rej", "~")
 
+# Vendored cargo crates are exempt from the artefact rules: cargo checksums every
+# file in each crate's .cargo-checksum.json, which includes Cargo.toml.orig.
+_VENDORED_CRATES_PREFIX: Final[str] = "screen/vendor/"
+
 # The daemon writes ``settings.json.bak.pre-registration-repair`` at runtime
 # (``utils/settings_repair.py:34``), so the marker can also appear mid-name.
 _BACKUP_INFIX: Final[str] = ".bak."
@@ -514,6 +518,8 @@ def _is_bytecode_cache(rel_path: str) -> bool:
 
 def _is_build_artifact(rel_path: str) -> str | None:
     """Describe why ``rel_path`` is a generated artifact, or ``None``."""
+    if rel_path.startswith(_VENDORED_CRATES_PREFIX):
+        return None
     parts = rel_path.split("/")
     basename = parts[-1]
 
