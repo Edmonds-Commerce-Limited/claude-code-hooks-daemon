@@ -224,10 +224,13 @@ def expand_braces(
         _raw_brace_expansions(word, depth=0, max_depth=max_depth), word, max_spellings
     )
     try:
-        braces = _BashBraces(word, max_depth=max_depth)
-        quote_aware = _capped(
-            braces.expansions(0, len(word), depth=0, region=None), word, max_spellings
-        )
+        quote_aware = [
+            spelling
+            for braces in _both_readings(word, max_depth=max_depth)
+            for spelling in _capped(
+                braces.expansions(0, len(word), depth=0, region=None), word, max_spellings
+            )
+        ]
     except UnresolvableBraceQuotingError:
         if _may_hold_a_group(word, 0):
             raise
@@ -495,8 +498,41 @@ def _substitution_end(text: str, open_paren: int, substitutions: list[str] | Non
 _BRACE_SCAN_BUDGET: Final[int] = 250_000
 
 
+def _sequence_term_kind(text: str, index: int, *, right: bool) -> str:
+    """Bash's ``valid_seqterm`` classification of the term at ``text[index]``:
+    ``"int"``, ``"char"`` or ``""`` for a term it throws out. A right-hand
+    letter may end at the group's closing ``}``; a left-hand one needs a
+    ``.`` after it."""
+    first = text[index : index + 1]
+    second = text[index + 1 : index + 2]
+    if first.isascii() and first.isdigit():
+        return "int"
+    if first in ("+", "-") and second.isascii() and second.isdigit():
+        return "int"
+    if first.isascii() and first.isalpha() and (second == "." or (right and second == "}")):
+        return "char"
+    return ""
+
+
+def _is_valid_sequence_term(body: str) -> bool:
+    """Bash 5.3's ``valid_seqterm`` over a group body: whether ``body`` could
+    be a sequence ``x..y`` (``..`` present, neither side empty, both sides
+    integers or both single letters). It is a cheap filter, not the full
+    check: ``1..2{a,b}`` passes. Bash 5.3 skips the ``{`` of a candidate
+    group that fails it and expands the groups after it; 5.2 expands the
+    candidate."""
+    text = body + "}"
+    dots = body.find("..")
+    if dots == -1:
+        return False
+    if text[0] == "." or text[dots + 2] == "}":
+        return False
+    left = _sequence_term_kind(text, 0, right=False)
+    return left != "" and left == _sequence_term_kind(text, dots + 2, right=True)
+
+
 class _BashBraces:
-    """Bash 5.2's brace expansion (``braces.c``: ``brace_expand``,
+    """Bash's brace expansion (``braces.c``: ``brace_expand``,
     ``expand_amble``, ``brace_gobbler``) over one word, lazily.
 
     Bash scans a word left to right for the first ``{`` that has a matching
@@ -508,11 +544,20 @@ class _BashBraces:
     already turned ``$'...'`` into a quoted string and ``$"..."`` into
     ``"..."``, so both are quoted here. A substitution whose extent cannot
     be established raises :class:`UnresolvableBraceQuotingError`
-    (:func:`_substitution_end`)."""
+    (:func:`_substitution_end`).
 
-    def __init__(self, word: str, *, max_depth: int) -> None:
+    This is bash 5.2's reading, and with ``skip_invalid_sequences`` bash
+    5.3's: it skips a candidate group that fails ``valid_seqterm``
+    (:func:`_is_valid_sequence_term`) and goes on to the next ``{``. The
+    two differ, so a caller that must read every spelling reads both
+    (:func:`_both_readings`)."""
+
+    def __init__(
+        self, word: str, *, max_depth: int, skip_invalid_sequences: bool = False
+    ) -> None:
         self.word = word
         self.max_depth = max_depth
+        self.skip_invalid_sequences = skip_invalid_sequences
         self.budget = _BRACE_SCAN_BUDGET
         self.events = self._syntax_events()
         self.positions = [position for position, _kind in self.events]
@@ -561,12 +606,20 @@ class _BashBraces:
 
     def _gobble(self, start: int, stop: int, satisfy: str) -> int | None:
         """``brace_gobbler`` over ``word[start:stop]``: the index of the
-        first ``satisfy`` it accepts, or ``None``. A ``}`` closes a group
+        first ``satisfy`` it accepts, or ``None``."""
+        return self._gobble_typed(start, stop, satisfy)[0]
+
+    def _gobble_typed(self, start: int, stop: int, satisfy: str) -> tuple[int | None, str]:
+        """:meth:`_gobble` and the kind of separator that made a ``}`` a
+        closer: ``","`` for a comma, ``"."`` for a ``..`` sequence that no
+        comma preceded (a later comma still makes it a comma group), or
+        ``""``. A ``}`` closes a group
         only after a ``,`` or a ``..`` not followed by ``}`` outside any
         inner group; before that it is text. A ``{`` with whitespace or the
         start before it and whitespace, the end or a ``}`` after it is
         text."""
         level = 0
+        kind_found = ""
         commas = 0 if satisfy == "}" else 1
         index = bisect.bisect_left(self.positions, start)
         while index < len(self.events) and self.events[index][0] < stop:
@@ -579,16 +632,20 @@ class _BashBraces:
             index += 1
             if kind == satisfy and level == 0 and commas > 0:
                 if not (kind == "{" and self._isolated(position, start, stop)):
-                    return position
+                    return position, kind_found
             elif kind in "{$":
                 level += 1
             elif kind == "}" and level:
                 level -= 1
             elif satisfy == "}" and level == 0 and kind in ",.":
                 after = self.word[position + 2] if position + 2 < stop else ""
-                if kind == "," or after != "}":
+                if kind == ",":
+                    kind_found = ","
                     commas += 1
-        return None
+                elif after != "}":
+                    kind_found = kind_found or "."
+                    commas += 1
+        return None, kind_found
 
     def _isolated(self, position: int, start: int, stop: int) -> bool:
         before = self.word[position - 1] if position > start else ""
@@ -607,8 +664,12 @@ class _BashBraces:
                 following = bisect.bisect_right(later, opened)
                 if following == len(later) or later[following] >= stop:
                     return None
-            closed = self._gobble(opened + 1, stop, "}")
-            if closed is not None:
+            closed, separator = self._gobble_typed(opened + 1, stop, "}")
+            if closed is not None and not (
+                self.skip_invalid_sequences
+                and separator == "."
+                and not _is_valid_sequence_term(self.word[opened + 1 : closed])
+            ):
                 return opened, closed
             start = opened + 1
 
@@ -685,6 +746,14 @@ class _BashBraces:
         return False
 
 
+def _both_readings(word: str, *, max_depth: int) -> list[_BashBraces]:
+    """The bash 5.2 and bash 5.3 readings of ``word``'s brace groups."""
+    return [
+        _BashBraces(word, max_depth=max_depth, skip_invalid_sequences=skip)
+        for skip in (False, True)
+    ]
+
+
 def shell_word_spellings(
     word: str,
     *,
@@ -700,18 +769,18 @@ def shell_word_spellings(
     piece between two such characters is expanded on its own, under the
     caps, and a piece holding no group adds nothing the other streams lack.
     A group holding quoted whitespace keeps its piece whole."""
-    braces = _BashBraces(word, max_depth=max_depth)
-    groups = list(braces.top_level_groups())
-    covered = [False] * len(word)
-    for start, end in groups:
-        covered[start : end + 1] = [True] * (end + 1 - start)
-    cuts = [i for i, char in enumerate(word) if char.isspace() and not covered[i]]
-    for low, high in itertools.pairwise([-1, *cuts, len(word)]):
-        if not any(low < start < high for start, _end in groups):
-            continue
-        expansions = braces.expansions(0, len(word), depth=0, region=(low + 1, high))
-        for spelling in _capped(expansions, word, max_spellings):
-            yield from normalise_word(spelling).split()
+    for braces in _both_readings(word, max_depth=max_depth):
+        groups = list(braces.top_level_groups())
+        covered = [False] * len(word)
+        for start, end in groups:
+            covered[start : end + 1] = [True] * (end + 1 - start)
+        cuts = [i for i, char in enumerate(word) if char.isspace() and not covered[i]]
+        for low, high in itertools.pairwise([-1, *cuts, len(word)]):
+            if not any(low < start < high for start, _end in groups):
+                continue
+            expansions = braces.expansions(0, len(word), depth=0, region=(low + 1, high))
+            for spelling in _capped(expansions, word, max_spellings):
+                yield from normalise_word(spelling).split()
 
 
 def iter_shell_brace_words(text: str) -> Iterator[str]:
@@ -1015,8 +1084,10 @@ def _holds_brace_syntax(word: str) -> bool:
     whose quoting cannot be read with certainty, or past the scan budget,
     counts as one that does."""
     try:
-        braces = _BashBraces(word, max_depth=DEFAULT_MAX_BRACE_DEPTH)
-        return next(braces.top_level_groups(), None) is not None
+        return any(
+            next(braces.top_level_groups(), None) is not None
+            for braces in _both_readings(word, max_depth=DEFAULT_MAX_BRACE_DEPTH)
+        )
     except TooManyToEnumerateError:
         return True
 
