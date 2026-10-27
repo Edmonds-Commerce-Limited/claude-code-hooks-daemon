@@ -22,6 +22,7 @@ neither of which a Python-level assertion could observe.
 from __future__ import annotations
 
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -344,3 +345,31 @@ class TestConcurrency:
             "00001-second-sweep",
             "00002-first-sweep",
         ]
+
+
+class TestConfigLockContention:
+    """Git never retries ``.git/config.lock``, so the counter write must."""
+
+    def test_brief_config_lock_is_waited_out(self, routine_repo: Path) -> None:
+        """A lock released after a moment must not fail the run."""
+        lock = routine_repo / ".git" / "config.lock"
+        lock.touch()
+        timer = threading.Timer(0.3, lock.unlink)
+        timer.start()
+        try:
+            result = _run(routine_repo, "contended-sweep")
+        finally:
+            timer.join()
+
+        assert result.returncode == 0, result.stderr
+        assert _git_config_or_none(routine_repo, _ROUTINE_COUNTER_KEY) == "1"
+
+    def test_persistent_config_lock_fails_with_a_clear_message(self, routine_repo: Path) -> None:
+        """A lock that never clears is reported by name, not as git's bare error."""
+        (routine_repo / ".git" / "config.lock").touch()
+
+        result = _run(routine_repo, "stuck-sweep")
+
+        assert result.returncode != 0
+        assert "git config lock" in result.stderr
+        assert _ROUTINE_COUNTER_KEY in result.stderr

@@ -176,6 +176,7 @@ extend-exclude = '''
   | build
   | tests/fixtures/project_handlers_error_cases
   | tests/fixtures/type_safety_violations
+  | screen/vendor
 )
 | tests/fixtures/plugins/syntax_error_handler\.py
 '''
@@ -184,7 +185,7 @@ extend-exclude = '''
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
-extend-exclude = ["tests/fixtures/plugins/syntax_error_handler.py", "tests/fixtures/project_handlers_error_cases/**/*.py", "tests/fixtures/type_safety_violations/**/*.py"]
+extend-exclude = ["tests/fixtures/plugins/syntax_error_handler.py", "tests/fixtures/project_handlers_error_cases/**/*.py", "tests/fixtures/type_safety_violations/**/*.py", "screen/vendor"]
 
 [tool.ruff.lint]
 select = [

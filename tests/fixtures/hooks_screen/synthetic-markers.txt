@@ -1,0 +1,3 @@
+# SYNTHETIC markers for tests only; real ones need captures (Plan 00538 Slice 2).
+transcript first:1 SYNTH-TRANSCRIPT
+panel-selected any SYNTH-PANEL

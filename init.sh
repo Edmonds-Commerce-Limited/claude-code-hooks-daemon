@@ -2693,7 +2693,7 @@ _passthrough_flag_path() {
 }
 
 #
-# _enter_passthrough_mode() - Override send_request_stdin to return empty JSON
+# _enter_passthrough_mode() - Make send_request_stdin answer with empty JSON
 #
 # When daemon is unavailable and ci_enabled is not set, hook events
 # silently pass through with no blocking and no context injection.

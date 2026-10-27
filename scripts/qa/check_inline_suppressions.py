@@ -81,6 +81,7 @@ _SKIP_DIRS: Final[frozenset[str]] = frozenset(
         "__pycache__",
         "node_modules",
         "untracked",
+        "vendor",
         "venv",
         ".venv",
         "worktrees",

@@ -57,7 +57,7 @@ PROJECT_FORM_SAMPLES: Final[tuple[str, ...]] = (
     "# my" + "py: disable-error-code=attr-defined",
 )
 
-#: The ten suppressions in the tree whose reason is the comment block above them, not
+#: The eight suppressions in the tree whose reason is the comment block above them, not
 #: their own line. Each names a code of the directive, or a tool, or opens with SECURITY:.
 #: A row is (path, the directive comment stripped, which occurrence of that comment in the
 #: file, counting from 0): an edit above a suppression moves its line number but not its
@@ -65,8 +65,6 @@ PROJECT_FORM_SAMPLES: Final[tuple[str, ...]] = (
 GENUINE_REASON_ABOVE: Final[tuple[tuple[str, str, int], ...]] = (
     (".claude/ccy/claude-supervise.py", f"{NOSEC} B606", 0),
     ("init.sh", f"{SHELLCHECK}=SC1091", 0),
-    ("init.sh", f"{SHELLCHECK}=SC2317", 0),
-    ("init.sh", f"{SHELLCHECK}=SC2317", 1),
     ("scripts/install/venv.sh", f"{SHELLCHECK}=SC1090", 0),
     ("scripts/install/venv.sh", f"{SHELLCHECK}=SC1090", 1),
     ("src/claude_code_hooks_daemon/constants/paths.py", f"{NOSEC} B108", 0),
@@ -365,8 +363,8 @@ class TestTheBlockAboveMustBeAboutTheSuppression:
             comments = checker._shell_comments(text) if shell else checker._python_comments(text)
             texts = {number: comment.text for number, comment in comments.items()}
             resolved.append(_anchored_line(texts, anchor, occurrence, relative))
-        assert len(resolved) == 10
-        assert len(set(zip((row[0] for row in GENUINE_REASON_ABOVE), resolved, strict=True))) == 10
+        assert len(resolved) == 8
+        assert len(set(zip((row[0] for row in GENUINE_REASON_ABOVE), resolved, strict=True))) == 8
 
     def test_a_change_to_any_anchored_file_selects_this_test(self) -> None:
         """Targeted QA maps no import or name to these files, so the map must (N426)."""

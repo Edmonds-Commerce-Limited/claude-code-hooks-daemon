@@ -82,7 +82,10 @@ _ARCHIVE_BASENAMES: Final[frozenset[str]] = frozenset({"CHANGELOG.md"})
 # anglicising one would corrupt the copy, make every later refresh show a
 # spurious diff, and silently misquote the upstream project. The fidelity rule
 # outranks the house style here.
-_VENDORED_PREFIXES: Final[tuple[str, ...]] = ("remote-docs/",)
+#
+# `screen/vendor/` is the same category: the vendored Rust crates behind
+# hooks-screen (Plan 00538), pinned and checksummed, never ours to restyle.
+_VENDORED_PREFIXES: Final[tuple[str, ...]] = ("remote-docs/", "screen/vendor/")
 
 # Directory names holding deliberate specimens of the thing being checked.
 _FIXTURE_DIRNAMES: Final[frozenset[str]] = frozenset({"fixtures", "test-files", "__fixtures__"})
