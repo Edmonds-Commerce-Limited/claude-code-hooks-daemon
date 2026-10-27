@@ -5,11 +5,10 @@ build-from-source is the FIRST-CLASS route — preferred whenever a musl-capable
 ``rustc`` is present, needs nothing but the plain compiler invocation
 documented in ``relay/build.sh`` (no cargo, no crates) — and the precompiled
 GitHub-release download is the convenience option. Source ships in the
-package either way. Both routes are explicit, deliberate config choices
-(``daemon.transport.relay_source: build|download|auto``, where ``auto`` builds
-when a musl toolchain is present and otherwise downloads); with the default
-``null`` neither route ever runs, so relaying stays opt-in on top of an
-explicit distribution choice rather than a side effect of ``relay_enabled``.
+package either way. The route is chosen by
+``daemon.transport.relay_source: build|download|auto`` (default ``auto``, which
+builds when a musl toolchain is present and otherwise downloads); an explicit
+``null`` runs neither route, leaving the binary to be supplied by hand.
 
 See ``CLAUDE/Plan/00290-rust-socket-relay-forwarder/DESIGN-socket-relay.md``
 §3.2/§6 for the distribution design this module implements.
