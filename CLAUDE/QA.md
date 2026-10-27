@@ -144,7 +144,8 @@ split below applies to every kind of sub-agent all the same.
 the full gate (a batch it has decided to certify in full),
 it may hand the run to the `qa-full-runner` agent (`.claude/agents/qa-full-runner.md`)
 instead of holding its own context for 15-20 minutes. Dispatch it with the
-worktree path and a report file path, UNNAMED or by its type: a dispatch NAME is
+worktree path (its reply is the report, auto-saved under
+`untracked/agent-reports/`; it has no `Write` tool), UNNAMED or by its type: a dispatch NAME is
 not the type, and `exempt_agent_types: [qa-full-runner]` in
 `.claude/hooks-daemon.yaml` matches the definition type only. It runs
 `llm_qa.py all` and reports; it never fixes (`qa-fixer` does). The host-wide

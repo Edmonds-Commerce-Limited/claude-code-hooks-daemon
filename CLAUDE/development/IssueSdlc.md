@@ -315,11 +315,11 @@ Dispatch the `hooks-daemon-plan-dedupe-scout` agent first. If a plan already
 covers it, update that plan rather than filing a second.
 
 **Declare where its output goes, in the dispatch prompt** (Plan 00307). At this
-point no plan folder exists yet, so the scout is not plan work: tell it to keep
-its answer short and inline, and to write to
-`untracked/agent-reports/{yymmdd}-{agent-name}-{model}.md` if it has more. Omit
-this and `dispatch_declaration` advises on every single tick — it did on this
-loop's own scout dispatch, which then needed a follow-up message to fix.
+point no plan folder exists yet, so the scout is not plan work: say "not plan
+work" and tell it to keep its answer short and inline. Do not give it a report
+path: the scout has no `Write` tool, and its reply is auto-saved under
+`untracked/agent-reports/` anyway. Omit the declaration and
+`dispatch_declaration` advises on every single tick.
 
 Otherwise `CLAUDE/Plan/mkplan.bash "<kebab name>"`, record
 `**GitHub Issue**: #N` in the header, add the index row, and update the Plan

@@ -157,8 +157,11 @@ findings describe stale index content, and the real cause (the failing add) is n
   write a report there.
 - The run then went ahead, and the reply was auto-saved under `untracked/agent-reports/`.
 
-**Status**: ⬜ open. The agent definition should name the auto-saved reply as its report rather than require a path it
-cannot fill.
+**Status**: ✅ fixed in the same commit as this status line. The fix covers three documents:
+
+- `.claude/agents/qa-full-runner.md` now needs only the worktree path, and names the auto-saved reply as its report.
+- `CLAUDE/QA.md` says the same.
+- `CLAUDE/development/IssueSdlc.md` Step 3 no longer gives the dedupe scout a report path.
 
 The same mismatch shows up in `CLAUDE/development/IssueSdlc.md` Step 3. It tells the coordinator to give
 `hooks-daemon-plan-dedupe-scout` a report path under `untracked/agent-reports/`, but that agent also has no `Write`
