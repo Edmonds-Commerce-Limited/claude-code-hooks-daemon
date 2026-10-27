@@ -496,6 +496,39 @@ class TestShellWordSpellings:
         assert list(shell_word_spellings('"a b" plain')) == []
 
 
+class TestBash53SkipsAGroupWhoseSequenceIsInvalid:
+    """Plan 00474 N550: bash 5.3 skips the ``{`` of a candidate group that
+    reads as a sequence (``..``) but is not a valid sequence term, and
+    expands the groups after it; bash 5.2 expands the candidate. The reader
+    spells both, so a spelling of either bash is one the guard reads."""
+
+    @pytest.mark.parametrize(
+        ("word", "expected"),
+        [
+            ("pass{}1..2{pass,..}}", {"pass{}1..2pass}", "pass{}1..2..}"}),
+            ("pass..{{}1..2{}},..a}", {"pass..{{}1..2}}", "pass..{{}1..2..a"}),
+            ("a{b..c{d,e}", {"a{b..cd", "a{b..ce"}),
+        ],
+    )
+    def test_the_5_3_spellings_are_read(self, word: str, expected: set[str]) -> None:
+        assert expected <= {normalise_word(s) for s in expand_braces(word)}
+        assert expected <= set(shell_word_spellings(word))
+
+    @pytest.mark.parametrize(
+        ("word", "expected"),
+        [
+            ("pass{}1..2{pass,..}}", {"pass}1..2pass", "pass}1..2.."}),
+            ("x{1..2{a,b}}", {"x1..2a", "x1..2b"}),
+        ],
+    )
+    def test_the_5_2_spellings_are_still_read(self, word: str, expected: set[str]) -> None:
+        assert expected <= {normalise_word(s) for s in expand_braces(word)}
+        assert expected <= set(shell_word_spellings(word))
+
+    def test_a_valid_sequence_is_still_a_group(self) -> None:
+        assert {"a1b", "a2b"} <= set(expand_braces("a{1..2}b"))
+
+
 class TestIterBraceWords:
     """The bounded brace-word finder shared by every caller -- replaces the
     catastrophically-backtracking ``\\S*\\{[^{}]*\\}\\S*`` regex shape."""
