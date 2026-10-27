@@ -43,6 +43,7 @@ from claude_code_hooks_daemon.install.relay_repair import (
     start_relay_repair,
 )
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+from claude_code_hooks_daemon.utils.relay_host import relay_fix_subcommand
 from claude_code_hooks_daemon.version import __version__
 
 
@@ -136,7 +137,7 @@ class RelayBinaryCheckerHandler(SessionStartHandlerBase):
         binary = missing_configured_relay_binary(root, transport)
         if binary is None:
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
-        fix = daemon_cli_command("transport", "on")
+        fix = daemon_cli_command("transport", relay_fix_subcommand())
         defect = relay_binary_defect(binary)
         if defect is None:
             # Repaired between the two checks: nothing to report.

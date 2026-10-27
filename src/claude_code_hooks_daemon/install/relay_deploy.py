@@ -32,8 +32,15 @@ from typing import Literal
 from claude_code_hooks_daemon.config.models import TransportConfig
 from claude_code_hooks_daemon.daemon.paths import get_untracked_dir
 from claude_code_hooks_daemon.install.forwarder_generator import load_transport_config
+from claude_code_hooks_daemon.utils.relay_host import (
+    host_elf_machine,
+    host_relay_target,
+    relay_fix_subcommand,
+    relay_supported_by_host,
+)
 
-#: The one relay target this project builds/ships today (design §3.2).
+#: The one relay target this project publishes a prebuilt asset for today (design §3.2).
+#: Other supported hosts (aarch64 Linux) build from source.
 RELAY_TARGET: str = "x86_64-unknown-linux-musl"
 RELAY_ASSET_NAME: str = f"hooks-relay-{RELAY_TARGET}"
 SHA256SUMS_ASSET_NAME: str = "SHA256SUMS"
@@ -118,6 +125,41 @@ RELAY_DEFECT_NOT_A_FILE = "not a regular file"
 RELAY_DEFECT_NOT_EXECUTABLE = "not executable"
 RELAY_DEFECT_UNREADABLE = "unreadable"
 RELAY_DEFECT_NOT_RUNNABLE = "neither an ELF executable nor a #! script"
+RELAY_DEFECT_WRONG_PLATFORM = "an executable built for another OS or architecture"
+
+#: ELF identification and header offsets (e_ident[EI_CLASS], e_ident[EI_DATA], e_machine).
+_ELF_HEADER_BYTES = 20
+_ELF_EI_CLASS = 4
+_ELF_EI_DATA = 5
+_ELF_E_MACHINE = 18
+_ELF_LITTLE_ENDIAN = 1
+_ELF_BIG_ENDIAN = 2
+_ELF_CLASSES = (1, 2)
+
+
+def _elf_is_for_another_platform(header: bytes) -> bool:
+    """True when an ELF ``header`` cannot run on this host.
+
+    A header whose class/data bytes are not valid (a stub or truncated file) is
+    not judged: only a well-formed header naming another machine is a mismatch.
+    Every ELF is foreign to a host the relay does not support.
+    """
+    if not relay_supported_by_host():
+        return True
+    if len(header) < _ELF_HEADER_BYTES:
+        return False
+    data = header[_ELF_EI_DATA]
+    if header[_ELF_EI_CLASS] not in _ELF_CLASSES or data not in (
+        _ELF_LITTLE_ENDIAN,
+        _ELF_BIG_ENDIAN,
+    ):
+        return False
+    raw_machine = header[_ELF_E_MACHINE : _ELF_E_MACHINE + 2]
+    if data == _ELF_LITTLE_ENDIAN:
+        machine = int.from_bytes(raw_machine, "little")
+    else:
+        machine = int.from_bytes(raw_machine, "big")
+    return machine != host_elf_machine()
 
 
 def relay_binary_defect(binary: Path) -> str | None:
@@ -125,7 +167,9 @@ def relay_binary_defect(binary: Path) -> str | None:
 
     The one check shared by every caller that judges a relay binary: the
     SessionStart checker, ``status`` and ``transport on``'s provisioning, so
-    ``transport on`` replaces a defective file instead of keeping it.
+    ``transport on`` replaces a defective file instead of keeping it. An ELF
+    for another OS or architecture is a defect: the kernel would refuse it
+    with "Exec format error" on every hook.
     """
     if not binary.exists():
         return RELAY_DEFECT_MISSING
@@ -135,13 +179,14 @@ def relay_binary_defect(binary: Path) -> str | None:
         return RELAY_DEFECT_NOT_EXECUTABLE
     try:
         with binary.open("rb") as handle:
-            head = handle.read(_MAGIC_READ_BYTES)
+            head = handle.read(_ELF_HEADER_BYTES)
     except OSError:
         return RELAY_DEFECT_UNREADABLE
     # Four bytes, as the guard's `read -n 4` reads them.
-    if len(head) == _MAGIC_READ_BYTES and (
-        head == RELAY_RUNNABLE_MAGIC[0] or head.startswith(RELAY_RUNNABLE_MAGIC[1])
-    ):
+    magic = head[:_MAGIC_READ_BYTES]
+    if len(magic) == _MAGIC_READ_BYTES and magic == RELAY_RUNNABLE_MAGIC[0]:
+        return RELAY_DEFECT_WRONG_PLATFORM if _elf_is_for_another_platform(head) else None
+    if len(magic) == _MAGIC_READ_BYTES and magic.startswith(RELAY_RUNNABLE_MAGIC[1]):
         return None
     return RELAY_DEFECT_NOT_RUNNABLE
 
@@ -227,10 +272,10 @@ def _resolve_rustc() -> str:
     return shutil.which("rustc") or str(Path.home() / ".cargo" / "bin" / "rustc")
 
 
-def check_musl_toolchain(*, run_fn: RunFn = subprocess.run) -> bool:
+def check_musl_toolchain(*, run_fn: RunFn = subprocess.run, target: str = RELAY_TARGET) -> bool:
     """True when a musl-capable ``rustc`` is available (Task 5.2).
 
-    Checked via ``rustc --print target-list`` naming :data:`RELAY_TARGET` —
+    Checked via ``rustc --print target-list`` naming ``target`` (default :data:`RELAY_TARGET`) —
     the same signal ``rustup target list`` itself derives from, and cheap
     enough to run on every install/upgrade. Does not attempt an actual
     compile (that is the build route's own job, and its own failure mode).
@@ -248,7 +293,40 @@ def check_musl_toolchain(*, run_fn: RunFn = subprocess.run) -> bool:
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
-    return result.returncode == 0 and RELAY_TARGET in result.stdout
+    return result.returncode == 0 and target in result.stdout
+
+
+def _unsupported_host_result(route: str | None) -> RelayDeployResult:
+    """The non-fatal result for a host no relay binary exists for."""
+    return RelayDeployResult(
+        False,
+        route,
+        (
+            "this host's OS/architecture has no relay binary (Linux x86_64 and aarch64 only), "
+            "so the relay is not provisioned and hooks stay on the legacy transport; "
+            "run `transport off` to stop this warning",
+        ),
+    )
+
+
+def _reject_if_defective(target: Path, result: RelayDeployResult) -> RelayDeployResult:
+    """Never leave a wrong-OS/arch binary in the guard's exec path.
+
+    A deploy that wrote one is turned into a failure and the file and its
+    markers are removed.
+    """
+    if not result.deployed:
+        return result
+    defect = relay_binary_defect(target)
+    if defect != RELAY_DEFECT_WRONG_PLATFORM:
+        return result
+    for stale in (target, _route_marker_path(target), _digest_marker_path(target)):
+        stale.unlink(missing_ok=True)
+    return RelayDeployResult(
+        False,
+        result.route,
+        (f"the {result.route} route produced a relay that is {defect}; it was removed",),
+    )
 
 
 def deploy_relay_from_build(
@@ -270,6 +348,9 @@ def deploy_relay_from_build(
         run_fn: Injectable ``subprocess.run``-shaped callable — a real build
             is never exercised in unit tests.
     """
+    host_target = host_relay_target()
+    if host_target is None:
+        return _unsupported_host_result("build")
     build_script = daemon_dir / "relay" / "build.sh"
     if not build_script.is_file():
         return RelayDeployResult(
@@ -279,7 +360,7 @@ def deploy_relay_from_build(
     try:
         result = run_fn(
             ["bash", str(build_script)],
-            env={**os.environ, "RELAY_TARGET": RELAY_TARGET, "RUSTC": _resolve_rustc()},
+            env={**os.environ, "RELAY_TARGET": host_target, "RUSTC": _resolve_rustc()},
             capture_output=True,
             text=True,
             timeout=_BUILD_TIMEOUT_SECONDS,
@@ -296,7 +377,7 @@ def deploy_relay_from_build(
             (f"relay build exited {result.returncode}: {stderr_tail}",),
         )
 
-    built = daemon_dir / "untracked" / "relay-build" / RELAY_ASSET_NAME
+    built = daemon_dir / "untracked" / "relay-build" / f"hooks-relay-{host_target}"
     if not built.is_file():
         return RelayDeployResult(
             False,
@@ -309,7 +390,10 @@ def deploy_relay_from_build(
     shutil.copyfile(built, target)
     target.chmod(0o755)
     _write_route_marker(target, "build")
-    return RelayDeployResult(True, "build", (f"Built relay from source, deployed to {target}",))
+    return _reject_if_defective(
+        target,
+        RelayDeployResult(True, "build", (f"Built relay from source, deployed to {target}",)),
+    )
 
 
 def _release_asset_url(version_tag: str, asset_name: str) -> str:
@@ -369,6 +453,15 @@ def deploy_relay_from_download(
         fetch_fn: Given a URL, returns the response body bytes or raises.
             Real network access is injected only outside unit tests.
     """
+    if host_relay_target() != RELAY_TARGET:
+        return RelayDeployResult(
+            False,
+            "download",
+            (
+                f"no prebuilt relay is published for this host (only {RELAY_TARGET}); "
+                "build it from source instead",
+            ),
+        )
     sums_url = _release_asset_url(version_tag, SHA256SUMS_ASSET_NAME)
     try:
         sums_bytes = fetch_fn(sums_url)
@@ -410,8 +503,11 @@ def deploy_relay_from_download(
     target.chmod(0o755)
     _write_route_marker(target, "download")
     _write_digest_marker(target, actual_digest)
-    return RelayDeployResult(
-        True, "download", (f"Downloaded and digest-verified relay, deployed to {target}",)
+    return _reject_if_defective(
+        target,
+        RelayDeployResult(
+            True, "download", (f"Downloaded and digest-verified relay, deployed to {target}",)
+        ),
     )
 
 
@@ -426,13 +522,18 @@ def deploy_relay_if_configured(
 ) -> RelayDeployResult:
     """Dispatch to the configured relay-provisioning route, or do nothing.
 
-    ``transport.relay_source`` is the single, explicit switch (Phase 5 owner
-    ruling — "neither ever happens implicitly"): ``None`` (the default) is a
-    genuine no-op regardless of ``relay_enabled``, so enabling the relay rung
-    never itself triggers a build or a download.
+    ``transport.relay_source`` selects the route: ``None`` is a genuine no-op
+    regardless of ``relay_enabled``. A host with no relay binary (not Linux
+    x86_64/aarch64) never builds or downloads and reports why instead.
     """
     if transport.relay_source is None:
         return RelayDeployResult(False, None, ())
+
+    host_target = host_relay_target()
+    if host_target is None:
+        return _unsupported_host_result(
+            None if transport.relay_source == "auto" else transport.relay_source
+        )
 
     if transport.relay_source == "auto":
         return _deploy_auto(
@@ -445,14 +546,14 @@ def deploy_relay_if_configured(
         )
 
     if transport.relay_source == "build":
-        if not check_musl_toolchain(run_fn=run_fn):
+        if not check_musl_toolchain(run_fn=run_fn, target=host_target):
             return RelayDeployResult(
                 False,
                 "build",
                 (
                     "relay_source: build requested but no musl-capable rustc "
                     "toolchain was found — install one "
-                    "(`rustup target add x86_64-unknown-linux-musl`), or switch "
+                    f"(`rustup target add {host_target}`), or switch "
                     "to relay_source: download",
                 ),
             )
@@ -476,12 +577,16 @@ def _deploy_auto(
     """``relay_source: auto`` - build when a musl toolchain exists, else download.
 
     The build is tried first (the first-class route). When it is not possible
-    or does not deploy, the digest-verified download is attempted. Messages
-    from every attempt are kept, so a failed build followed by a successful
-    download is still reported rather than hidden.
+    or does not deploy, the digest-verified download is attempted - but only on
+    a host the published asset runs on; any other supported host (aarch64) has
+    the build as its only route. Messages from every attempt are kept, so a
+    failed build followed by a successful download is still reported.
     """
+    host_target = host_relay_target()
+    if host_target is None:
+        return _unsupported_host_result(None)
     messages: list[str] = []
-    if check_musl_toolchain(run_fn=run_fn):
+    if check_musl_toolchain(run_fn=run_fn, target=host_target):
         built = deploy_relay_from_build(daemon_dir, project_root, transport, run_fn=run_fn)
         if built.deployed:
             return built
@@ -489,8 +594,14 @@ def _deploy_auto(
     else:
         messages.append(
             "no musl-capable rustc toolchain was found, so the relay was not built "
-            "from source (`rustup target add x86_64-unknown-linux-musl` enables it)"
+            f"from source (`rustup target add {host_target}` enables it)"
         )
+
+    if host_target != RELAY_TARGET:
+        messages.append(
+            f"no prebuilt relay is published for {host_target}, so there is no download fallback"
+        )
+        return RelayDeployResult(False, "build", tuple(messages))
 
     resolved_fetch: FetchFn = fetch_fn if fetch_fn is not None else _default_fetch
     downloaded = deploy_relay_from_download(
@@ -540,17 +651,24 @@ def _failure_banner(
         "Effect: relay-eligible hooks run on the slower bash transport; "
         "every rule is still enforced."
     )
+    if not relay_supported_by_host():
+        lines.extend(
+            [
+                "Fix: this host has no relay binary (Linux x86_64 and aarch64 only); "
+                "use the legacy transport:",
+                f"  run: {wrapper} transport {relay_fix_subcommand()}",
+                rule,
+            ]
+        )
+        return tuple(lines)
+    host_target = host_relay_target() or RELAY_TARGET
     lines.append("Fix, any one of:")
     if source_hint:
         lines.append("  - set daemon.transport.relay_source: auto in .claude/hooks-daemon.yaml")
-    lines.extend(
-        [
-            "  - install a musl-capable rustc: rustup target add x86_64-unknown-linux-musl",
-            "  - or allow network access to the GitHub release (digest-verified asset)",
-            f"Then run: {wrapper} transport on",
-            rule,
-        ]
-    )
+    lines.append(f"  - install a musl-capable rustc: rustup target add {host_target}")
+    if host_target == RELAY_TARGET:
+        lines.append("  - or allow network access to the GitHub release (digest-verified asset)")
+    lines.extend([f"Then run: {wrapper} transport on", rule])
     return tuple(lines)
 
 

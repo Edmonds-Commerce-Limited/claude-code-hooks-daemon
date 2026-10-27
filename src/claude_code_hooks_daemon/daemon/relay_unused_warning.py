@@ -22,6 +22,7 @@ from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.response_schemas import RESPONSE_SCHEMAS
 from claude_code_hooks_daemon.install.relay_deploy import relay_binary_missing_warning
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+from claude_code_hooks_daemon.utils.relay_host import relay_fix_subcommand
 
 RELAY_UNUSED_WARNING_PREFIX: Final[str] = "WARNING: "
 
@@ -47,7 +48,7 @@ def is_relay_eligible_event(event: EventType) -> bool:
 def relay_unused_warning_text(binary: str) -> str:
     """The warning line: the text ``status``, the status line and SessionStart use."""
     return RELAY_UNUSED_WARNING_PREFIX + relay_binary_missing_warning(
-        Path(binary), daemon_cli_command("transport", "on")
+        Path(binary), daemon_cli_command("transport", relay_fix_subcommand())
     )
 
 

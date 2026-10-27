@@ -171,6 +171,7 @@ from claude_code_hooks_daemon.utils.hook_registration import (
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_document
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 from claude_code_hooks_daemon.utils.plugin_hooks import ACKNOWLEDGED_PLUGINS_OPTION, health_lines
+from claude_code_hooks_daemon.utils.relay_host import relay_fix_subcommand
 from claude_code_hooks_daemon.utils.report_scrubbing import scrub_report
 from claude_code_hooks_daemon.utils.safe_signal import (
     DaemonStop,
@@ -1583,7 +1584,7 @@ def _print_transport_status_warnings(project_path: Path, transport: _StatusTrans
         return
     binary = missing_configured_relay_binary(project_path, transport.config)
     if binary is not None:
-        fix = daemon_cli_command("transport", "on")
+        fix = daemon_cli_command("transport", relay_fix_subcommand())
         print(f"WARNING: {relay_binary_missing_warning(binary, fix)}")
 
 
