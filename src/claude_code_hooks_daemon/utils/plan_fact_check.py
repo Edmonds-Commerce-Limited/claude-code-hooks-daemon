@@ -612,6 +612,39 @@ def _take(
         yield pending, claimed
 
 
+def _reconcile(
+    state: PlanFactCheckState, pending: PendingFactCheck, now: float
+) -> PendingFactCheck | None:
+    """``pending`` measured against the checked content as it stands now.
+
+    A record's diff was taken against the checked content of the moment it was
+    stored. A confirmation since then (of an earlier offer) has moved that
+    baseline, so the stored diff would ask for hunks that check already covered.
+    The diff is recomputed from the record's own content; nothing left owes
+    nothing, and a small remainder soon after the confirmation is a correction
+    (:func:`_is_correction`) and is absorbed.
+
+    Returns:
+        The record with its diff refreshed, or ``None`` when nothing is owed.
+    """
+    try:
+        checked = state.read_checked(pending.folder)
+    except PlanFactCheckStateError as exc:
+        logger.warning("plan_fact_check: %s; handing over the stored diff", exc)
+        return pending
+    if checked is None:
+        return pending
+    diff = snapshot_diff(checked.files, pending.files)
+    if not diff:
+        logger.info("plan_fact_check: %s already covered by the last check", pending.folder)
+        return None
+    if _is_correction(checked, diff, now):
+        state.record_checked(pending.folder, pending.files, checked_at=checked.checked_at)
+        logger.info("plan_fact_check: %s remainder is a correction; absorbed", pending.folder)
+        return None
+    return replace(pending, diff=diff)
+
+
 def _hand_over(
     state: PlanFactCheckState,
     pending: PendingFactCheck,
@@ -637,7 +670,12 @@ def _hand_over(
             pending.offers,
         )
     else:
-        offered = replace(pending, plan_root=str(root), offers=pending.offers + 1, offered_at=now)
+        current = _reconcile(state, pending, now)
+        if current is None:
+            claimed.unlink(missing_ok=True)
+            state.clear_offered(folder)
+            return None
+        offered = replace(current, plan_root=str(root), offers=pending.offers + 1, offered_at=now)
         diff_path = state.write_diff(folder, offered.diff)
         state.offer(offered)
         claimed.unlink(missing_ok=True)
