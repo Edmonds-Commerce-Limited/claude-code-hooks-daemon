@@ -115,6 +115,16 @@ class TestStrictValidation:
         with pytest.raises(ValidationError):
             TransportConfig.model_validate({"relay_source": "curl"})
 
+    def test_rejects_null_relay_enabled(self) -> None:
+        with pytest.raises(ValidationError):
+            TransportConfig.model_validate({"relay_enabled": None})
+
+    def test_load_or_default_rejects_null_relay_enabled(self, tmp_path: Path) -> None:
+        config_path = tmp_path / "hooks-daemon.yaml"
+        config_path.write_text("version: '2.0'\ndaemon:\n  transport:\n    relay_enabled: null\n")
+        with pytest.raises(ValidationError):
+            Config.load_or_default(config_path)
+
 
 _RELAY_SOURCE = Path(__file__).resolve().parents[3] / "relay" / "hooks_relay.rs"
 

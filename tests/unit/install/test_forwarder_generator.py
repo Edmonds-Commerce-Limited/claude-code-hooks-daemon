@@ -818,6 +818,24 @@ def test_load_transport_config_falls_back_to_legacy_on_malformed_yaml(
     assert any("hooks-daemon.yaml" in record.message for record in caplog.records)
 
 
+def test_load_transport_config_treats_null_relay_enabled_as_unusable_config(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """``relay_enabled`` is a bool, so an explicit null fails validation: the
+    relay is off and the unusable-config warning is logged."""
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir()
+    (claude_dir / "hooks-daemon.yaml").write_text(
+        "daemon:\n  transport:\n    relay_enabled: null\n"
+    )
+
+    with caplog.at_level("WARNING"):
+        transport = load_transport_config(tmp_path)
+
+    assert transport.relay_enabled is False
+    assert any("is unusable" in record.message for record in caplog.records)
+
+
 def test_load_transport_config_never_reads_an_enclosing_projects_config(
     tmp_path: Path,
 ) -> None:

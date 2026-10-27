@@ -1,4 +1,9 @@
-# Handoff: relay-default review fixes (findings 2, 3, 4 remain)
+# Handoff: relay-default review fixes (finding 4, release note 009 and targeted QA remain)
+
+Status: A (platform-aware default, commit 993cb0eab), B (`init_config.py` drops the literal
+`relay_enabled: true`, commit 3cdd0248c) and C (finding 3: null is invalid, tests, v3.72.0.yaml and
+PLAN.md reworded) are done. Open: finding 4, the UNRELEASED release note (Linux x86_64 and aarch64 only,
+macOS stays legacy by default) and targeted QA.
 
 Worktree: /workspace/untracked/worktrees/worktree-relay-default, branch worktree-relay-default.
 Python: `untracked/venv-*/bin/python` (no `python` on PATH). Run tests with `-p no:cacheprovider -o addopts=`.
@@ -60,7 +65,7 @@ computed and its stale comment) and the UNRELEASED release note. Fold these into
 4. Release note `CLAUDE/UPGRADES/UNRELEASED/` 009 (find with `find-plan`/ls): explain Linux x86_64 and
    aarch64 only, macOS stays on the legacy transport by default.
 
-## Finding 3 (not started)
+## Finding 3 (DONE; text below kept for reference)
 
 `relay_enabled: null` is a ValidationError. Decision: only `true`/`false` are valid. Edit
 `CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.72.0.yaml:17-18` and PLAN.md Overview to drop "or `null`";

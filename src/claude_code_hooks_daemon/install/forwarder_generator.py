@@ -1019,8 +1019,8 @@ def generate_forwarder_content(
 def load_transport_config(project_root: Path) -> TransportConfig:
     """Resolve the effective ``daemon.transport`` config for ``project_root``.
 
-    A missing config file resolves to the pure defaults (relay on, since the
-    relay is the shipped default). A key absent from an existing file also
+    A missing config file resolves to the pure defaults (relay on where the
+    host can run it, since the relay is the shipped default). A key absent from an existing file also
     takes the default; an explicit ``relay_enabled: false`` is respected.
     A config file that EXISTS but fails to parse (malformed YAML) or fails
     pydantic validation cannot show whether the client opted out, so it

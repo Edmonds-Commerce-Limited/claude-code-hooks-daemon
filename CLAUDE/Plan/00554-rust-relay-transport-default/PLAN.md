@@ -11,7 +11,7 @@
 
 Owner request: "in the next release, lets make the rust transport the default, with legacy left as an opt in (but please raise a ticket if you do need to revert)".
 
-The relay was already the default in the example config and `init-config` (Plan 00529), but the model default in code stayed off, so a config with no `transport` block, or a partial one, ran the legacy bash and python3 forwarder. This plan makes the code default match: `relay_enabled` is true and `relay_source` is `auto` when the key is absent. An explicit `false` or `null` is respected, so `relay_enabled: false` is the legacy opt-in.
+The relay was already the default in the example config and `init-config` (Plan 00529), but the model default in code stayed off, so a config with no `transport` block, or a partial one, ran the legacy bash and python3 forwarder. This plan makes the code default match: `relay_enabled` is true on hosts that can run the relay (Linux x86_64 and aarch64, else false) and `relay_source` is `auto` when the key is absent. An explicit `false` is respected, so `relay_enabled: false` is the legacy opt-in; an explicit `null` is invalid config (the field is a bool).
 
 No blocker to flipping the default was found, so no revert ticket is raised. The fallback ladder stays intact: provisioning never aborts an install, `relay_binary_checker` warns and starts a repair, and the forwarder guard falls through to nc and then bash when the binary is unusable.
 
