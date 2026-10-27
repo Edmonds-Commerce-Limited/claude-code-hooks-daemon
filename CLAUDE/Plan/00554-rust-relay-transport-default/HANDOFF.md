@@ -18,7 +18,17 @@ Shell notes: `sed` word is denied anywhere; a pipe to head/tail is denied; chain
   (Scrt1.o/crti.o missing, so gcc cannot link). Static scan only; say so in the final report.
   Also update the stale comment in `tests/integration/test_init_hot_path.py:11` only if it is wrong (it is not).
 
-## Finding 2 design (not started)
+## Finding 2: DONE (commit d1f28b999), design below kept for reference
+
+Done: `utils/relay_host.py`; `relay_deploy.py` (wrong-platform defect `RELAY_DEFECT_WRONG_PLATFORM`,
+download only for `RELAY_TARGET`, aarch64 builds, unsupported hosts skip with a `transport off` advisory,
+wrong-arch deploys removed, `check_musl_toolchain(target=)`, platform-aware failure banner); fix command
+via `relay_fix_subcommand()` in `cli.py`, `relay_unused_warning.py`, `relay_binary_checker.py`.
+Tests: `tests/unit/utils/test_relay_host.py`, `tests/unit/install/test_relay_platform.py`.
+
+Still open from the design below (items 3 and 4, deliberately not done in that commit): the platform-aware
+`relay_enabled` default (`default_factory=relay_supported_by_host`, `init_config.py` `_TRANSPORT_BLOCK`
+computed and its stale comment) and the UNRELEASED release note. Fold these into the finding 3/4 pass.
 
 1. New low-level module `src/claude_code_hooks_daemon/utils/relay_host.py` (no package imports):
    `host_relay_target() -> str | None`: Linux x86_64 -> `x86_64-unknown-linux-musl`,
