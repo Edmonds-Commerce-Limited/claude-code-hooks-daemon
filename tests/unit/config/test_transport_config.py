@@ -14,10 +14,13 @@ from claude_code_hooks_daemon.utils.hook_registration import canonical_hook_entr
 
 
 class TestDefaults:
-    def test_relay_and_nc_default_off(self) -> None:
+    def test_relay_defaults_on_and_nc_off(self) -> None:
         transport = TransportConfig()
-        assert transport.relay_enabled is False
+        assert transport.relay_enabled is True
         assert transport.nc_enabled is False
+
+    def test_explicit_relay_false_is_respected(self) -> None:
+        assert TransportConfig.model_validate({"relay_enabled": False}).relay_enabled is False
 
     def test_timeout_defaults_to_thirty_seconds(self) -> None:
         assert TransportConfig().timeout_seconds == 30
@@ -25,11 +28,14 @@ class TestDefaults:
     def test_relay_binary_defaults_to_none(self) -> None:
         assert TransportConfig().relay_binary is None
 
-    def test_relay_source_defaults_to_none(self) -> None:
-        assert TransportConfig().relay_source is None
+    def test_relay_source_defaults_to_auto(self) -> None:
+        assert TransportConfig().relay_source == "auto"
 
-    def test_per_event_sockets_needed_false_by_default(self) -> None:
-        assert TransportConfig().per_event_sockets_needed is False
+    def test_explicit_null_relay_source_is_respected(self) -> None:
+        assert TransportConfig.model_validate({"relay_source": None}).relay_source is None
+
+    def test_per_event_sockets_needed_true_by_default(self) -> None:
+        assert TransportConfig().per_event_sockets_needed is True
 
 
 class TestPerEventSocketsNeeded:
@@ -48,7 +54,7 @@ class TestDaemonConfigCarriesATransportBlock:
     def test_absent_block_gets_defaults(self) -> None:
         daemon_config = DaemonConfig()
         assert isinstance(daemon_config.transport, TransportConfig)
-        assert daemon_config.transport.relay_enabled is False
+        assert daemon_config.transport.relay_enabled is True
 
     def test_parses_full_block(self) -> None:
         raw = {
@@ -65,10 +71,10 @@ class TestDaemonConfigCarriesATransportBlock:
         assert config.daemon.transport.timeout_seconds == 5
         assert config.daemon.transport.relay_binary == "/opt/hooks-relay"
 
-    def test_default_config_behaviour_is_byte_identical(self) -> None:
-        """Default config never needs per-event sockets (PLAN.md Success Criteria)."""
+    def test_default_config_needs_per_event_sockets(self) -> None:
+        """The relay is on by default, so the per-event listeners are bound."""
         config = Config()
-        assert config.daemon.transport.per_event_sockets_needed is False
+        assert config.daemon.transport.per_event_sockets_needed is True
 
 
 class TestStrictValidation:

@@ -178,7 +178,7 @@ _TRANSPORT_BLOCK_LINE = re.compile(r"^(?P<indent>[ \t]*)transport:[ \t]*(?:#.*)?
 _DAEMON_SECTION_LINE = re.compile(r"^daemon:[ \t]*(?:#.*)?$", re.MULTILINE)
 
 #: The exact YAML an operator must add by hand when seeding cannot place it.
-_SEED_YAML = "daemon:\n  transport:\n    relay_enabled: false\n"
+_SEED_YAML = "daemon:\n  transport:\n    relay_enabled: true\n"
 
 
 def _insert_after_line(content: str, line_match_end: int, insertion: str) -> str:
@@ -190,12 +190,12 @@ def _insert_after_line(content: str, line_match_end: int, insertion: str) -> str
 
 
 def seed_relay_enabled_line(config_path: Path) -> bool:
-    """Seed a missing ``relay_enabled: false`` line (defect D3, canary run 4).
+    """Seed a missing ``relay_enabled: true`` line (defect D3, canary run 4).
 
     A fresh client config carries no ``daemon.transport`` block at all, so
     the targeted flip used to refuse with "found 0" — safe but unhelpful for
     the documented client-side toggle. This inserts the key with the shipped
-    default (``false``), comment-preservingly: under an existing
+    default (``true``), comment-preservingly: under an existing
     ``transport:`` line when there is exactly one, else as a new
     ``transport:`` block directly under a top-level ``daemon:`` section.
     Anything more ambiguous refuses with the exact YAML to add by hand.
@@ -212,7 +212,7 @@ def seed_relay_enabled_line(config_path: Path) -> bool:
     if len(transport_matches) == 1:
         match = transport_matches[0]
         child_indent = match.group("indent") + "  "
-        seeded = _insert_after_line(content, match.end(), f"{child_indent}relay_enabled: false\n")
+        seeded = _insert_after_line(content, match.end(), f"{child_indent}relay_enabled: true\n")
     elif not transport_matches:
         daemon_match = _DAEMON_SECTION_LINE.search(content)
         if daemon_match is None:
@@ -222,7 +222,7 @@ def seed_relay_enabled_line(config_path: Path) -> bool:
                 f"first:\n{_SEED_YAML}"
             )
         seeded = _insert_after_line(
-            content, daemon_match.end(), "  transport:\n    relay_enabled: false\n"
+            content, daemon_match.end(), "  transport:\n    relay_enabled: true\n"
         )
     else:
         raise TransportToggleError(
@@ -231,7 +231,7 @@ def seed_relay_enabled_line(config_path: Path) -> bool:
             f"daemon.transport yourself:\n{_SEED_YAML}"
         )
     config_path.write_text(seeded)
-    logger.info("seeded daemon.transport.relay_enabled: false into %s", config_path)
+    logger.info("seeded daemon.transport.relay_enabled: true into %s", config_path)
     return True
 
 

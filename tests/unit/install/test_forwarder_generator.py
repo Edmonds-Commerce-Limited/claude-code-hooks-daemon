@@ -65,7 +65,7 @@ _DEEP_ROOT = Path("/" + "a" * 90)
 
 
 def test_disabled_transport_returns_source_unchanged() -> None:
-    transport = TransportConfig()
+    transport = TransportConfig(relay_enabled=False)
     assert transport.relay_enabled is False
 
     result = generate_forwarder_content(
@@ -89,7 +89,7 @@ def test_every_real_deployed_hook_is_byte_identical_when_disabled(hook_file: str
     verbatim (that was F1: a client silently inheriting this repo's guard).
     """
     source = (_HOOKS_DIR / hook_file).read_text()
-    transport = TransportConfig()
+    transport = TransportConfig(relay_enabled=False)
 
     result = generate_forwarder_content(source, hook_file, transport, _UNTRACKED, _ROOT)
 
@@ -99,7 +99,7 @@ def test_every_real_deployed_hook_is_byte_identical_when_disabled(hook_file: str
 
 def test_disabled_transport_returns_source_unchanged_even_without_anchor() -> None:
     """No init.sh anchor line present: nothing to insert before, so unchanged."""
-    transport = TransportConfig()
+    transport = TransportConfig(relay_enabled=False)
     weird_source = "#!/bin/bash\necho hi\n"
 
     result = generate_forwarder_content(weird_source, "pre-tool-use", transport, _UNTRACKED, _ROOT)
@@ -164,7 +164,7 @@ def test_f1_disabled_config_strips_a_foreign_guard_entirely() -> None:
     """F1 repro: a client's default (disabled) config must never inherit
     another project's guard block — it must be stripped, not copied forward."""
     contaminated = _foreign_guard_source()
-    transport = TransportConfig()  # disabled — the client's real default
+    transport = TransportConfig(relay_enabled=False)  # disabled — the client's real default
 
     result = generate_forwarder_content(contaminated, "pre-tool-use", transport, _UNTRACKED, _ROOT)
 
@@ -199,7 +199,7 @@ def test_f4_disabling_transport_strips_a_previously_generated_guard() -> None:
     )
     assert "relay hot path" in previously_generated  # sanity: guard really is there
 
-    disabled_transport = TransportConfig()
+    disabled_transport = TransportConfig(relay_enabled=False)
     result = generate_forwarder_content(
         previously_generated, "pre-tool-use", disabled_transport, _UNTRACKED, _ROOT
     )
@@ -531,7 +531,7 @@ def test_generated_forwarder_is_syntactically_valid_bash() -> None:
 
 
 def test_nc_disabled_leaves_call_site_unchanged() -> None:
-    transport = TransportConfig(nc_enabled=False)
+    transport = TransportConfig(relay_enabled=False, nc_enabled=False)
     result = generate_forwarder_content(
         _SAMPLE_SOURCE, "pre-tool-use", transport, _UNTRACKED, _ROOT
     )
@@ -539,7 +539,7 @@ def test_nc_disabled_leaves_call_site_unchanged() -> None:
 
 
 def test_nc_enabled_appends_bash_key_to_send_request_stdin_call() -> None:
-    transport = TransportConfig(nc_enabled=True)
+    transport = TransportConfig(relay_enabled=False, nc_enabled=True)
     result = generate_forwarder_content(
         _SAMPLE_SOURCE, "pre-tool-use", transport, _UNTRACKED, _ROOT
     )
@@ -550,20 +550,20 @@ def test_nc_enabled_preserves_existing_response_mode_arg() -> None:
     source = _SAMPLE_SOURCE.replace(
         'send_request_stdin "PreToolUse"', 'send_request_stdin "Status" "status"'
     )
-    transport = TransportConfig(nc_enabled=True)
+    transport = TransportConfig(relay_enabled=False, nc_enabled=True)
     result = generate_forwarder_content(source, "status-line", transport, _UNTRACKED, _ROOT)
     assert 'send_request_stdin "Status" "status" "status-line"' in result
 
 
 def test_nc_enabled_appends_to_forward_stop_event_call() -> None:
     source = _SAMPLE_SOURCE.replace('send_request_stdin "PreToolUse"', 'forward_stop_event "Stop"')
-    transport = TransportConfig(nc_enabled=True)
+    transport = TransportConfig(relay_enabled=False, nc_enabled=True)
     result = generate_forwarder_content(source, "stop", transport, _UNTRACKED, _ROOT)
     assert 'forward_stop_event "Stop" "stop"' in result
 
 
 def test_nc_enabled_is_idempotent() -> None:
-    transport = TransportConfig(nc_enabled=True)
+    transport = TransportConfig(relay_enabled=False, nc_enabled=True)
     once = generate_forwarder_content(_SAMPLE_SOURCE, "pre-tool-use", transport, _UNTRACKED, _ROOT)
     twice = generate_forwarder_content(once, "pre-tool-use", transport, _UNTRACKED, _ROOT)
     assert twice == once
@@ -594,7 +594,7 @@ def test_both_rungs_enabled_together() -> None:
 def test_nc_enabled_short_path_appends_empty_events_dir_override() -> None:
     """The common case: untracked_dir is short enough that the natural
     dynamic path never overflows, so no baked override is needed."""
-    transport = TransportConfig(nc_enabled=True)
+    transport = TransportConfig(relay_enabled=False, nc_enabled=True)
     result = generate_forwarder_content(
         _SAMPLE_SOURCE, "pre-tool-use", transport, _UNTRACKED, _ROOT
     )
@@ -615,7 +615,7 @@ def test_nc_enabled_deep_path_bakes_resolved_events_dir_override() -> None:
     assert event_socket_dir_is_fallback(deep_untracked_dir) is True
     expected_fallback = str(get_event_socket_dir_from_untracked(deep_untracked_dir))
 
-    transport = TransportConfig(nc_enabled=True)
+    transport = TransportConfig(relay_enabled=False, nc_enabled=True)
     result = generate_forwarder_content(
         _SAMPLE_SOURCE, "pre-tool-use", transport, deep_untracked_dir, _DEEP_ROOT
     )
@@ -630,7 +630,7 @@ def test_nc_enabled_deep_path_forward_stop_event_bakes_override() -> None:
     expected_fallback = str(get_event_socket_dir_from_untracked(deep_untracked_dir))
 
     source = _SAMPLE_SOURCE.replace('send_request_stdin "PreToolUse"', 'forward_stop_event "Stop"')
-    transport = TransportConfig(nc_enabled=True)
+    transport = TransportConfig(relay_enabled=False, nc_enabled=True)
     result = generate_forwarder_content(source, "stop", transport, deep_untracked_dir, _DEEP_ROOT)
 
     assert f'forward_stop_event "Stop" "stop" "{expected_fallback}"' in result
@@ -638,7 +638,7 @@ def test_nc_enabled_deep_path_forward_stop_event_bakes_override() -> None:
 
 def test_nc_enabled_deep_path_is_still_idempotent() -> None:
     deep_untracked_dir = Path("/" + "a" * 90 + "/untracked")
-    transport = TransportConfig(nc_enabled=True)
+    transport = TransportConfig(relay_enabled=False, nc_enabled=True)
     once = generate_forwarder_content(
         _SAMPLE_SOURCE, "pre-tool-use", transport, deep_untracked_dir, _DEEP_ROOT
     )
@@ -675,7 +675,7 @@ def test_nc_enabled_is_idempotent_against_previous_release_three_arg_form() -> N
     """A forwarder generated before the events-dir arg existed must not grow
     a second copy of its bash_key."""
     legacy = _source_with_call('send_request_stdin "PreToolUse" "" "pre-tool-use"')
-    transport = TransportConfig(nc_enabled=True)
+    transport = TransportConfig(relay_enabled=False, nc_enabled=True)
 
     result = generate_forwarder_content(legacy, "pre-tool-use", transport, _UNTRACKED, _ROOT)
 
@@ -686,7 +686,7 @@ def test_nc_enabled_is_idempotent_against_previous_release_three_arg_form() -> N
 def test_nc_enabled_is_idempotent_against_previous_release_stop_form() -> None:
     """`forward_stop_event` carries the bash_key one position earlier."""
     legacy = _source_with_call('forward_stop_event "Stop" "stop"')
-    transport = TransportConfig(nc_enabled=True)
+    transport = TransportConfig(relay_enabled=False, nc_enabled=True)
 
     result = generate_forwarder_content(legacy, "stop", transport, _UNTRACKED, _ROOT)
 
@@ -697,7 +697,7 @@ def test_nc_enabled_is_idempotent_against_previous_release_stop_form() -> None:
 def test_nc_enabled_is_idempotent_against_previous_release_status_form() -> None:
     """A non-empty response_mode does not shift the bash_key's position."""
     legacy = _source_with_call('send_request_stdin "Status" "status" "status-line"')
-    transport = TransportConfig(nc_enabled=True)
+    transport = TransportConfig(relay_enabled=False, nc_enabled=True)
 
     result = generate_forwarder_content(legacy, "status-line", transport, _UNTRACKED, _ROOT)
 
@@ -711,7 +711,7 @@ def test_nc_enabled_repairs_a_doubled_call_site() -> None:
     doubled = _source_with_call(
         'send_request_stdin "PreToolUse" "" "pre-tool-use" "pre-tool-use" ""'
     )
-    transport = TransportConfig(nc_enabled=True)
+    transport = TransportConfig(relay_enabled=False, nc_enabled=True)
 
     result = generate_forwarder_content(doubled, "pre-tool-use", transport, _UNTRACKED, _ROOT)
 
@@ -725,7 +725,7 @@ def test_previous_release_form_gains_the_events_dir_override_on_a_deep_path() ->
     deep_untracked_dir = Path("/" + "a" * 90 + "/untracked")
     expected_fallback = str(get_event_socket_dir_from_untracked(deep_untracked_dir))
     legacy = _source_with_call('send_request_stdin "PreToolUse" "" "pre-tool-use"')
-    transport = TransportConfig(nc_enabled=True)
+    transport = TransportConfig(relay_enabled=False, nc_enabled=True)
 
     result = generate_forwarder_content(
         legacy, "pre-tool-use", transport, deep_untracked_dir, _DEEP_ROOT
@@ -739,7 +739,7 @@ def test_previous_release_form_gains_the_events_dir_override_on_a_deep_path() ->
 
 def test_previous_release_form_still_generates_valid_bash() -> None:
     legacy = _source_with_call('send_request_stdin "PreToolUse" "" "pre-tool-use"')
-    transport = TransportConfig(nc_enabled=True)
+    transport = TransportConfig(relay_enabled=False, nc_enabled=True)
 
     content = generate_forwarder_content(legacy, "pre-tool-use", transport, _UNTRACKED, _ROOT)
 
@@ -801,12 +801,12 @@ def test_regenerate_skips_unreadable_file_and_still_strips_siblings(
     assert bad_file.read_bytes() == b"\xff\xfe\x00bad-bytes-not-utf8"
 
 
-def test_load_transport_config_falls_back_to_defaults_on_malformed_yaml(
+def test_load_transport_config_falls_back_to_legacy_on_malformed_yaml(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Malformed client config (bad YAML / failed pydantic validation) must
-    resolve to pure defaults, matching the documented missing-config
-    contract — not abort the whole regeneration pass."""
+    """Malformed client config (bad YAML / failed pydantic validation) cannot
+    show whether the client opted out of the relay, so it resolves to the
+    legacy transport (the permanent rung) - not abort the regeneration pass."""
     claude_dir = tmp_path / ".claude"
     claude_dir.mkdir()
     (claude_dir / "hooks-daemon.yaml").write_text("daemon: [this is not valid: yaml: at all")
@@ -814,7 +814,7 @@ def test_load_transport_config_falls_back_to_defaults_on_malformed_yaml(
     with caplog.at_level("WARNING"):
         transport = load_transport_config(tmp_path)
 
-    assert transport == TransportConfig()
+    assert transport == TransportConfig(relay_enabled=False)
     assert any("hooks-daemon.yaml" in record.message for record in caplog.records)
 
 

@@ -143,12 +143,12 @@ class TestConfigTemplate:
             assert parsed.relay_enabled is True
             assert parsed.relay_source == "auto"
 
-    def test_the_model_default_keeps_the_relay_off(self) -> None:
-        """Only generated/example configs turn the relay on; the model default stays off."""
+    def test_the_model_default_turns_the_relay_on(self) -> None:
+        """The model default matches the generated config: relay on, provisioned by auto."""
         from claude_code_hooks_daemon.config.models import TransportConfig
 
-        assert TransportConfig().relay_enabled is False
-        assert TransportConfig().relay_source is None
+        assert TransportConfig().relay_enabled is True
+        assert TransportConfig().relay_source == "auto"
 
     def test_plugins_block_is_labelled_as_daemon_plugins(self) -> None:
         """Both templates say the `plugins:` block holds daemon plugins, so a

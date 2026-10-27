@@ -3,8 +3,8 @@
 The deployed ``.claude/hooks/<event>`` forwarder scripts are, today, a plain
 1:1 copy of this repository's own ``.claude/hooks/*`` (see
 ``install/client_owned_assets.py`` and ``scripts/install/hooks_deploy.sh``).
-Plan 00290 adds an opt-in relay hot path: when ``daemon.transport.relay_enabled``
-is set, each deployed forwarder gains a pure-builtin guard block (no subshell
+Plan 00290 adds a relay hot path, on by default: unless
+``daemon.transport.relay_enabled`` is false, each deployed forwarder gains a pure-builtin guard block (no subshell
 spawns) that execs the static Rust relay binary directly against its per-event
 socket, falling back to the untouched legacy body (``--no-relay`` re-entry) on
 any failure to connect.
@@ -12,9 +12,9 @@ any failure to connect.
 See ``CLAUDE/Plan/00290-rust-socket-relay-forwarder/DESIGN-socket-relay.md``
 §6.1 for the binding guard-block contract this module implements verbatim.
 
-With the config default (``relay_enabled: False``) :func:`generate_forwarder_content`
-returns its input completely unchanged — the deployed file is byte-identical
-to today's, which is the whole point of shipping this rung opt-in.
+With an explicit ``relay_enabled: false`` (and ``nc_enabled`` off)
+:func:`generate_forwarder_content` returns its input completely unchanged —
+the deployed file is the plain legacy forwarder, the opt-out transport.
 """
 
 from __future__ import annotations
@@ -1007,12 +1007,14 @@ def generate_forwarder_content(
 def load_transport_config(project_root: Path) -> TransportConfig:
     """Resolve the effective ``daemon.transport`` config for ``project_root``.
 
-    Missing/absent config file resolves to the pure defaults (relay
-    disabled) — the same fail-safe behaviour every other config-driven
-    installer step uses. A config file that EXISTS but fails to parse
-    (malformed YAML) or fails pydantic validation resolves the same way,
-    with the failure logged rather than aborting the caller — a client's
-    broken config must not take down forwarder regeneration entirely.
+    A missing config file resolves to the pure defaults (relay on, since the
+    relay is the shipped default). A key absent from an existing file also
+    takes the default; an explicit ``relay_enabled: false`` is respected.
+    A config file that EXISTS but fails to parse (malformed YAML) or fails
+    pydantic validation cannot show whether the client opted out, so it
+    resolves to the legacy transport (relay off), the permanent fallback
+    rung, with the failure logged rather than aborting the caller — a
+    client's broken config must not take down forwarder regeneration.
 
     Only ``project_root``'s own config is read: an upward search would hand a
     nested project the ENCLOSING repository's transport (Plan 00466 N24).
@@ -1028,13 +1030,14 @@ def load_transport_config(project_root: Path) -> TransportConfig:
         # ValueError (malformed YAML/JSON, from ConfigLoader.load) and
         # pydantic.ValidationError (from Config.model_validate) both land
         # here — neither is a case worth distinguishing from "no usable
-        # config", so both fall back to defaults with an explicit advisory.
+        # config", so both fall back to the legacy transport with an advisory.
         logger.warning(
-            "daemon.transport config at %s is unusable (%s); falling back to defaults",
+            "daemon.transport config at %s is unusable (%s); falling back to the "
+            "legacy transport (relay off)",
             project_root / ".claude" / "hooks-daemon.yaml",
             exc,
         )
-        return TransportConfig()
+        return TransportConfig(relay_enabled=False)
 
 
 def regenerate_deployed_hooks(project_root: Path, hooks_dir: Path) -> list[str]:

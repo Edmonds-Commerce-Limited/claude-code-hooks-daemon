@@ -1620,11 +1620,15 @@ class TransportConfig(BaseModel):
     Governs the whole transport-choice fallback ladder documented in
     ``CLAUDE/Plan/00290-rust-socket-relay-forwarder/DESIGN-socket-relay.md``
     §4-§5: relay binary -> ``nc -U`` -> the permanent bash+python3 rung.
-    Defaults produce behaviour BYTE-IDENTICAL to today — no per-event
-    listeners are bound, no relay is deployed, forwarders are unchanged.
+    The relay rung is ON by default and the legacy bash/python3 transport is
+    the explicit opt-in (``relay_enabled: false``). A missing or unusable
+    relay binary never breaks a hook: the forwarder guard falls through to
+    the next rung and the session-start checker says why.
 
     Attributes:
-        relay_enabled: Rung 1 opt-in — exec the static Rust relay binary.
+        relay_enabled: Rung 1, on by default — exec the static Rust relay
+            binary. ``false`` is the opt-out to the legacy transport and is
+            always respected; an absent key means the default.
         nc_enabled: Rung 2 opt-in — the bash ``nc -U`` path, tried before the
             python3 transport.
         timeout_seconds: Relay ``--timeout-ms`` source (converted at deploy
@@ -1644,16 +1648,15 @@ class TransportConfig(BaseModel):
             (fetch the digest-verified precompiled asset from the matching
             GitHub release), ``"auto"`` (build when a musl-capable toolchain
             is present, otherwise or on build failure download), or ``None``
-            (default — neither route runs; the
-            relay rung stays opt-in on top of an explicit distribution
-            choice, per Plan 00290 Phase 5's owner ruling: nothing implicit).
+            (an explicit ``null``: neither route runs and the binary must
+            already be in place). Default ``"auto"``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     relay_enabled: bool = Field(
-        default=False,
-        description="Rung 1: exec the static relay binary (opt-in)",
+        default=True,
+        description="Rung 1: exec the static relay binary (default on; false = legacy transport)",
     )
     nc_enabled: bool = Field(
         default=False,
@@ -1668,16 +1671,15 @@ class TransportConfig(BaseModel):
         description="Absolute-path override; null = {untracked}/bin/hooks-relay",
     )
     relay_source: Literal["build", "download", "auto"] | None = Field(
-        default=None,
+        default="auto",
         description=(
             "How the relay binary is provisioned at install/upgrade time: "
             "'build' (plain rustc, no cargo, preferred when a musl-capable "
             "toolchain is present), 'download' (digest-verified GitHub "
             "release asset) or 'auto' (build when a musl-capable toolchain "
             "is present, otherwise - or when the build fails - download). "
-            "Default null = neither route runs — an "
-            "explicit, deliberate choice, never an implicit side effect of "
-            "relay_enabled."
+            "Default auto; an explicit null = neither route runs and the "
+            "binary must already be in place."
         ),
     )
 
