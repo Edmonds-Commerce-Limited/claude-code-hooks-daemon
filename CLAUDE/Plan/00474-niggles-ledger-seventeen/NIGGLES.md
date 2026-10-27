@@ -109,6 +109,20 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N546 — the full gate took over three hours twice on 2026-10-27, against the 15-20 minutes `CLAUDE/QA.md` describes
+
+**Source**: the full gates on `b88334e4b` (3h10m) and `c1c68170f` (about 4h), both run by `qa-full-runner`.
+
+**Evidence**:
+
+- The first run also had to re-provision py3.12 and py3.13 after a host reboot. The second found them already
+  provisioned and was still slower.
+- Each leg (py3.11 full, then py3.12 and py3.13 unit and rest) ran one after another. The integration and acceptance
+  shards were the slowest per the `untracked/qa/` timestamps.
+
+**Status**: ⬜ open. Either `CLAUDE/QA.md`'s duration is stale, or something regressed. Next step: read the per-leg
+timing in `untracked/qa/tests.json` and the slowest-durations sections, and compare them with an older gate.
+
 ### N545 — targeted QA did not select the repo-wide HookInputField single-source test for a handler that read a raw payload key
 
 **Source**: the 2026-10-27 full gate on `b88334e4b`.
@@ -221,9 +235,16 @@ That made it a real client defect: the session-start relay repair never started 
 - Nothing touched `scripts/lib/resolve_venv.sh` or its test that day (last changed 2026-10-12 and 2026-10-11). That
   rules out the day's merges as the cause, but not the host environment.
 
-**Status**: ⬜ open. The watchdog's TERM trap already kills its tracked `sleep` (dc1fb8fdc), so the leak is somewhere
-that trap does not reach: a race before the pid is recorded, or a kill path that skips the trap. Fact-check:
-`subagent-reports/261026-fact-check-n540.md`.
+**Status**: ✅ fixed. It was the race before the pid is recorded. The main shell's TERM can land after `sleep "$1" &` has
+forked but before `sleeper=$!` runs. The trap then sees an empty `$sleeper` and exits, leaving the `sleep` behind.
+
+- A stress loop of 400 probes leaked 15 sleeps on one run and 14 on another. The new test
+  `test_no_sleep_survives_many_good_answers` failed with 41 leaks out of 300.
+- The trap now runs `kill $(jobs -p)`. The watchdog subshell's job table starts empty and holds the sleep from the
+  fork onward; this was checked on bash 5.2.
+- After the fix, 1200 stress probes leaked nothing.
+- Release note: `CLAUDE/UPGRADES/UNRELEASED/release-notes/006-venv-probe-no-orphaned-sleep.md`.
+- Earlier fact-check: `subagent-reports/261026-fact-check-n540.md`.
 
 ### N539 — a check added to `llm_qa.py` but not to `release-gate.yml` is caught only on the release pull request
 

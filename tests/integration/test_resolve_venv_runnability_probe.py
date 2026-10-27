@@ -19,7 +19,9 @@ probe logic.
 
 from __future__ import annotations
 
+import os
 import shutil
+import signal
 import subprocess
 import textwrap
 import time
@@ -253,6 +255,30 @@ def test_no_sleep_survives_a_good_candidates_answer(tmp_path: Path) -> None:
 
     assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
     assert _sleepers(bound) == []
+
+
+#: Enough probes to hit the TERM-before-``sleeper=$!`` window, which one probe
+#: in about 25 hit on the host where ledger 00474 N540 was diagnosed.
+_STRESS_PROBES = 300
+
+
+def test_no_sleep_survives_many_good_answers(tmp_path: Path) -> None:
+    """The watchdog's TERM can land after ``sleep &`` forks and before its pid is recorded."""
+    daemon_dir = tmp_path / "daemon"
+    candidate = _make_good_candidate(daemon_dir / "untracked" / "venv-py999-good")
+    bound = f"{time.time_ns() % 100000 + 200}.5"
+
+    result = _run_in_library(
+        f"_RV_PROBE_TIMEOUT_SECS={bound}\n"
+        f"for _ in $(seq {_STRESS_PROBES}); do _rv_candidate_runs '{candidate}'; done\n"
+    )
+    time.sleep(0.5)
+    leaked = _sleepers(bound)
+    for pid in leaked:
+        os.kill(pid, signal.SIGKILL)
+
+    assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert leaked == [], f"{len(leaked)} of {_STRESS_PROBES} probes orphaned their sleep"
 
 
 def _run_in_library(

@@ -166,13 +166,14 @@ _rv_wait_secs() {
     if command -v sleep > /dev/null; then
         # The watchdog is killed when the candidate answers; an external
         # `sleep` would outlive it, so it is started here and killed with it.
-        # The trap is set before the sleep starts, so a TERM cannot land in
-        # between and leave the sleep running.
-        local sleeper=""
-        trap '[ -z "$sleeper" ] || kill "$sleeper" 2> /dev/null; exit 143' TERM
+        # The trap is set before the sleep starts, and it finds the sleep
+        # through the job table rather than `$!`: a TERM can land after `&`
+        # has forked but before `$!` is stored, which orphaned one sleep in
+        # about 25 (ledger 00474 N540). This runs in the watchdog's own
+        # subshell, whose job table holds only that sleep.
+        trap 'kill $(jobs -p) 2> /dev/null; exit 143' TERM
         sleep "$1" &
-        sleeper=$!
-        wait "$sleeper"
+        wait "$!"
         return
     fi
     # One pipe is opened for the whole wait, so a read that returns at once
