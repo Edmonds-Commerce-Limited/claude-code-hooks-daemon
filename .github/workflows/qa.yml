@@ -153,6 +153,32 @@ jobs:
             untracked/relay-build/hooks-relay-x86_64-unknown-linux-musl \
             untracked/bin/hooks-relay
 
+      # The playbook probes' Swift and Go lint cases time out on a cold
+      # toolchain here exactly as they did in the qa job (see its warm steps
+      # below); this tier flaked on probes #221/#222 for it (ledger 00474 N544).
+      - name: Warm the Swift toolchain
+        if: ${{ !cancelled() }}
+        run: |
+          if command -v swiftc >/dev/null 2>&1; then
+            printf 'let warm = 1\n' > "${RUNNER_TEMP}/warm.swift"
+            time swiftc -typecheck "${RUNNER_TEMP}/warm.swift"
+          else
+            echo "swiftc not on this runner; the Swift lint probes skip via required_tools"
+          fi
+
+      - name: Warm the Go toolchain
+        if: ${{ !cancelled() }}
+        run: |
+          if command -v go >/dev/null 2>&1; then
+            mkdir -p "${RUNNER_TEMP}/warm-go"
+            printf 'module warm\n\ngo 1.21\n' > "${RUNNER_TEMP}/warm-go/go.mod"
+            printf 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("warm") }\n' \
+              > "${RUNNER_TEMP}/warm-go/main.go"
+            (cd "${RUNNER_TEMP}/warm-go" && time go vet ./...)
+          else
+            echo "go not on this runner; the Go lint probe skips via required_tools"
+          fi
+
       # Code tier: the same static gates as the qa job.
       - name: Format (black)
         if: "!cancelled() && env.TIER == 'code'"

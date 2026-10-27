@@ -129,7 +129,8 @@ timing in `untracked/qa/tests.json` and the slowest-durations sections, and comp
 
 **Evidence**:
 
-- Plan 00553 (#140) added `hook_input.get("session_id")` in `handlers/status_line/supervisor_indicator.py`. That
+- Plan 00553 (#140) added `hook_input.get("session_id")` in
+  `src/claude_code_hooks_daemon/handlers/status_line/supervisor_indicator.py`. That
   breaks `tests/unit/constants/test_hook_input_field_single_source.py`, which scans every handler source.
 - The #140 merge passed targeted QA (41/41) and CI's code tier, because neither selected that test. Only the full gate
   caught it, a day later.
@@ -158,6 +159,10 @@ probe. The message was lost because `run_changed_tests.py` kept only failing tes
 - The docs-or-code tier in `.github/workflows/qa.yml` uploads `untracked/qa/` when the job fails.
 
 The next recurrence will name its probe.
+
+It recurred on `c1c68170f` (CI run 40467219264), and the uploaded artefact named the cause. Probes #221 and #222
+(`LintOnEditHandler`, Swift) found the Swift linter timing out after 15s on a cold toolchain. The full-matrix job
+already warms Swift and Go for exactly this, and the docs-or-code tier job now runs the same two warm steps.
 
 ### N543 — the plan commit gate's deny gives no hint that the command's own `git add` would fail
 
