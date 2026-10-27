@@ -1,0 +1,19 @@
+[package]
+name = "hooks-screen"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "hooks-screen"
+path = "src/main.rs"
+
+[dependencies]
+vt100 = "=0.18.1"
+
+[lints.rust]
+warnings = "deny"
+
+[profile.release]
+opt-level = 3
+strip = "symbols"

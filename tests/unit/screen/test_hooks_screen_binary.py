@@ -1,12 +1,13 @@
 """Plan 00538 Phase 2: the hooks-screen Rust binary, driven with byte streams.
 
-Builds the binary once with ``screen/build.sh`` (plain rustc, musl, no cargo)
-and skips when no musl-capable rustc is present, the same fail-soft stance the
-provisioning takes.
+Builds the binary once with ``screen/build.sh`` (offline, locked cargo build
+against the vendored vt100 crate, musl) and skips when no musl-capable
+toolchain is present, the same fail-soft stance the provisioning takes.
 """
 
 from __future__ import annotations
 
+import os
 import random
 import subprocess
 from pathlib import Path
@@ -18,6 +19,8 @@ BUILD_SCRIPT = REPO_ROOT / "screen" / "build.sh"
 BINARY = REPO_ROOT / "untracked" / "screen-build" / "hooks-screen-x86_64-unknown-linux-musl"
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "hooks_screen"
 ESC = b"\x1b"
+RUN_TIMEOUT_SECONDS = 20
+COLD_BUILD_TIMEOUT_SECONDS = 300
 
 
 @pytest.fixture(scope="module")
@@ -40,7 +43,7 @@ def run(
         input=data,
         capture_output=True,
         check=False,
-        timeout=20,
+        timeout=RUN_TIMEOUT_SECONDS,
     )
 
 
@@ -49,6 +52,41 @@ def dump(binary: Path, data: bytes, **kwargs: int) -> list[str]:
     out = run(binary, data, "--dump", **kwargs)
     assert out.returncode == 0, out.stderr
     return out.stdout.decode().split("\n")[:-1]
+
+
+class TestOfflineBuild:
+    def test_builds_from_vendored_source_with_no_network(
+        self, binary: Path, tmp_path: Path
+    ) -> None:
+        """A cold build with an empty CARGO_HOME and a dead proxy still succeeds."""
+        cargo = Path.home() / ".cargo" / "bin" / "cargo"
+        env = {
+            **os.environ,
+            "CARGO_HOME": str(tmp_path / "cargo-home"),
+            "HTTPS_PROXY": "http://127.0.0.1:9",
+            "HTTP_PROXY": "http://127.0.0.1:9",
+        }
+        result = subprocess.run(
+            [
+                str(cargo),
+                "build",
+                "--release",
+                "--offline",
+                "--locked",
+                "--target",
+                "x86_64-unknown-linux-musl",
+                "--target-dir",
+                str(tmp_path / "target"),
+            ],
+            cwd=REPO_ROOT / "screen",
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+            timeout=COLD_BUILD_TIMEOUT_SECONDS,
+        )
+        assert result.returncode == 0, result.stderr[-500:]
+        assert "Compiling vt100" in result.stderr
 
 
 class TestRendering:
@@ -87,7 +125,8 @@ class TestRendering:
         assert dump(binary, base + ESC + b"[J")[:3] == ["aaa", "b", ""]
         assert dump(binary, base + ESC + b"[1J")[:3] == ["", "  b", "ccc"]
         assert dump(binary, base + ESC + b"[2J")[:3] == ["", "", ""]
-        assert dump(binary, base + ESC + b"[3J")[:3] == ["", "", ""]
+        # vt100 follows xterm: ED 3 erases scrollback only, the visible rows stay.
+        assert dump(binary, base + ESC + b"[3J")[:3] == ["aaa", "bbb", "ccc"]
 
     def test_sgr_is_parsed_and_ignored(self, binary: Path) -> None:
         assert dump(binary, ESC + b"[1;38;5;196mred" + ESC + b"[0m ok")[0] == "red ok"
@@ -145,7 +184,8 @@ class TestRendering:
         assert dump(binary, "漢字ab".encode(), cols=4)[:2] == ["漢字", "ab"]
 
     def test_utf8_split_across_nothing_is_replaced_not_fatal(self, binary: Path) -> None:
-        assert dump(binary, b"a\xffb")[0] == "a�b"
+        # vte drops an invalid byte instead of printing U+FFFD; never fatal.
+        assert dump(binary, b"a\xffb")[0] == "ab"
         assert dump(binary, b"a\xe2\x82")[0] == "a"
 
     def test_save_restore_cursor(self, binary: Path) -> None:

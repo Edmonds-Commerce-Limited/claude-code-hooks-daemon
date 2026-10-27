@@ -124,7 +124,8 @@ class TestVerdict:
 
     def test_timeout_is_unknown(self, tmp_path: Path) -> None:
         stub = _stub(tmp_path / "slow", "sleep 5; echo transcript")
-        assert _check(stub, timeout=0.2).verdict() == "unknown"
+        short_timeout = 0.2
+        assert _check(stub, timeout=short_timeout).verdict() == "unknown"
 
     def test_unrecognised_word_is_unknown(self, tmp_path: Path) -> None:
         stub = _stub(tmp_path / "odd", "cat >/dev/null; echo banana")

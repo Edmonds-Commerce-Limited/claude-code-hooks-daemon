@@ -82,6 +82,7 @@ _SKIP_DIRS: Final[frozenset[str]] = frozenset(
         "htmlcov",
         "node_modules",
         "untracked",
+        "vendor",
         "venv",
         ".venv",
         "worktrees",

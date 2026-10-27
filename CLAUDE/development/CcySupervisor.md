@@ -340,7 +340,7 @@ up.
   it, so a replay starts clean.
 - With no latch, nothing is rendered and nothing holds. With a latch,
   `InputActivity.effective_focus_hold` spawns `hooks-screen` (a Rust binary,
-  `screen/hooks_screen.rs`, built by `bash screen/build.sh` to
+  `screen/src/main.rs`, built by `bash screen/build.sh` to
   `untracked/screen-build/`) with a 200 ms timeout. It feeds the buffer plus
   the terminal size and reads one word. The render is rate-limited to once a
   second and skipped while no new output arrived.
@@ -349,6 +349,13 @@ up.
   latch (FAIL OPEN). A failure is logged once per distinct reason. The built-in
   marker table is empty until real captures exist, so every screen reads
   `unknown` and nothing holds yet.
+- The renderer is the vendored `vt100` crate (owner ruling, Plan 00538), chosen
+  because terminal emulation is a correctness problem and a hand-written
+  emulator got cases wrong. The crates live in `screen/vendor/` (inventory and
+  licenses in `screen/VENDORED.md`); `screen/build.sh` builds offline and locked
+  with cargo, so no network is touched. This relaxes the zero-crates rule for
+  `screen/` only: the relay stays std-only plain rustc. The marker classifier,
+  CLI and exit codes are ours and sit behind a two-method `Screen` boundary.
 - Binary lookup: `CCY_HOOKS_SCREEN`, then `untracked/bin/hooks-screen`, then
   the built path.
 - `CCY_SCREEN_CAPTURE=1` (with `CCY_FOCUS_HOLD=1`) writes each render's raw
