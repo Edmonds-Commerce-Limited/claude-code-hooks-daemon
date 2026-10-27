@@ -19,9 +19,7 @@ probe logic.
 
 from __future__ import annotations
 
-import os
 import shutil
-import signal
 import subprocess
 import textwrap
 import time
@@ -266,7 +264,8 @@ def test_no_sleep_survives_many_good_answers(tmp_path: Path) -> None:
     """The watchdog's TERM can land after ``sleep &`` forks and before its pid is recorded."""
     daemon_dir = tmp_path / "daemon"
     candidate = _make_good_candidate(daemon_dir / "untracked" / "venv-py999-good")
-    bound = f"{time.time_ns() % 100000 + 200}.5"
+    # Distinctive yet short, so a sleep this test leaks ends on its own.
+    bound = f"{30 + time.time_ns() % 1000 / 1000:.3f}"
 
     result = _run_in_library(
         f"_RV_PROBE_TIMEOUT_SECS={bound}\n"
@@ -274,8 +273,6 @@ def test_no_sleep_survives_many_good_answers(tmp_path: Path) -> None:
     )
     time.sleep(0.5)
     leaked = _sleepers(bound)
-    for pid in leaked:
-        os.kill(pid, signal.SIGKILL)
 
     assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
     assert leaked == [], f"{len(leaked)} of {_STRESS_PROBES} probes orphaned their sleep"

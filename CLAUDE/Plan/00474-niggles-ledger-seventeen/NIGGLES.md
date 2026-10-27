@@ -240,8 +240,9 @@ forked but before `sleeper=$!` runs. The trap then sees an empty `$sleeper` and 
 
 - A stress loop of 400 probes leaked 15 sleeps on one run and 14 on another. The new test
   `test_no_sleep_survives_many_good_answers` failed with 41 leaks out of 300.
-- The trap now runs `kill $(jobs -p)`. The watchdog subshell's job table starts empty and holds the sleep from the
-  fork onward; this was checked on bash 5.2.
+- The trap now runs `kill %1`. The watchdog subshell's job table starts empty and holds the sleep from the fork
+  onward; this was checked on bash 5.2. `%1` rather than `$(jobs -p)` because `check_signal_targets` accepts a job
+  spec as a proven target. The first cut was flagged by targeted QA and fixed forward.
 - After the fix, 1200 stress probes leaked nothing.
 - Release note: `CLAUDE/UPGRADES/UNRELEASED/release-notes/006-venv-probe-no-orphaned-sleep.md`.
 - Earlier fact-check: `subagent-reports/261026-fact-check-n540.md`.
