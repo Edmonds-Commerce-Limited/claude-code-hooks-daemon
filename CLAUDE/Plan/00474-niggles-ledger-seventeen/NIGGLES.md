@@ -109,6 +109,21 @@ Follow-ups, not defects in the reviewers' judgement:
 
 **Status**: N484 ✅ (2f171b1ef), N485 ✅ (f9e8c9d9c, with N478), N486 and N487 ✅ (64a2640ec); N488 to N492 ⬜ open.
 
+### N553 — the plan fact-check offer is re-offered after the check was taken up, with hunks already checked
+
+**Source**: lead report, 2026-10-27: "PLAN FACT-CHECK OWED for 00474" kept firing after the checker was dispatched.
+
+**Evidence**: the verdict log shows the dispatch's `PostToolUse Agent` at 19:01:33 (the `checked.json` mtime), so take-up
+detection matched (key names, path, `subagent_type` and event are all right). The record still re-offered (`offers: 3`) is a
+different one: `recorded_at` 19:01:30, stored by the debounce fire while the first offer was outstanding, three seconds
+before that confirmation. Its diff was taken against the checked content of that moment, so it still carried the hunks the
+confirmed check had just covered (the N548 to N552 hunks), and nothing recomputed it at delivery. Adding a report under
+`subagent-reports/` is not an edit (that subtree is excluded from the snapshot), so dac812cd5 did not re-arm it.
+
+**Root cause**: `_hand_over` handed over a stored record without measuring it against the checked content as it stood at
+delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
+remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
+
 ### N552 — the vendored hooks-screen crates reached main incomplete, and the build test skipped instead of failing
 
 **Source**: post-merge targeted QA over `50c4d1a1e..HEAD`, 2026-10-27, after Plan 00538's hooks-screen merge.
