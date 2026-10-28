@@ -130,7 +130,8 @@ remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedBy
 
 **Source**: issue #143 (approved author), triaged by the issue-sdlc loop on 2026-10-28.
 
-**Evidence** (from the report, mechanism read on main): a `.py` Write is scanned with the literal matcher only, and the
+**Evidence** (from the report, mechanism read on main): a `.py` Write is scanned with the literal matcher (the string
+arguments of known shell-exec calls are also rescanned with the bash matcher, which does not apply here), and the
 positional import-module-path exemption covers `import`, `from ... import`, `python -c` and `python -m`, not a string
 literal. So `importlib.import_module("pkg.<stem>_guard")`, a `mock.patch` target or a `logging.getLogger` name whose
 dotted text contains a protected stem is denied, under the shipped `*.secret*` default this includes the daemon's own
@@ -156,7 +157,10 @@ passed to any other call stay denied, or keep the guard as it is.
 **Evidence** (from the report, mechanism read on main): the protected-file index's `**` component recurses over every
 path suffix and returns before the leading-dot check, so `ls **` is denied whenever any protected file exists anywhere
 below the cwd, hidden directories included, while `ls *` and `**/*` are allowed in the same tree. Bash itself expands a
-bare `**` like `*` unless `globstar` is on, and never into hidden directories unless `dotglob` is on.
+bare `**` like `*` unless `globstar` is on, and never into hidden directories unless `dotglob` is on. Confirmed with
+`untracked/scratch/glob-probe.bash`: defaults give `a top`, `globstar` gives `a a/b a/b/f top`, and only `globstar`
+plus `dotglob` adds `.h .h/g`. It also fired live in this session: a probe command holding a bare `**`, run in a
+scratch directory with no protected file, was denied with R-SECRET-BASH-MENTION on the token `**`.
 
 **Why it is not a plain bug**: the Bash tool's shell sources a snapshot of the user's own profile, which records the
 user's `shopt` state (this host's snapshots carry `shopt -u globstar` and `shopt -u dotglob`). A client whose profile
