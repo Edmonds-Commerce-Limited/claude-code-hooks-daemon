@@ -124,6 +124,29 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N556 — secret_file_guard judges a bare unquoted `**` as a recursive, dot-matching globstar
+
+**GitHub Issue**: #142
+
+**Source**: issue #142 (approved author), triaged by the issue-sdlc loop on 2026-10-28.
+
+**Evidence** (from the report, mechanism read on main): the protected-file index's `**` component recurses over every
+path suffix and returns before the leading-dot check, so `ls **` is denied whenever any protected file exists anywhere
+below the cwd, hidden directories included, while `ls *` and `**/*` are allowed in the same tree. Bash itself expands a
+bare `**` like `*` unless `globstar` is on, and never into hidden directories unless `dotglob` is on.
+
+**Why it is not a plain bug**: the Bash tool's shell sources a snapshot of the user's own profile, which records the
+user's `shopt` state (this host's snapshots carry `shopt -u globstar` and `shopt -u dotglob`). A client whose profile
+sets `globstar` or `dotglob` really does expand `**` into nested and hidden files, so the conservative reading covers a
+real configuration. Narrowing it is a security trade-off.
+
+**Owner question**: (a) keep the conservative reading; (b) judge `**` as bash's defaults expand it, accepting the miss
+for clients with `globstar`/`dotglob` in their profile; or (c) read the effective `shopt` state from the session's
+shell snapshot and judge by it, falling back to (a) when it cannot be read. Independently of that, `**` and `**/*`
+should get one consistent verdict, which today they do not.
+
+**Status**: ⬜ open, `agent-needs-human` on #142.
+
 ### N555 — write_protected_paths denies read-only commands when a configured glob is wildcard-only (`dir/**`)
 
 **GitHub Issue**: #141
