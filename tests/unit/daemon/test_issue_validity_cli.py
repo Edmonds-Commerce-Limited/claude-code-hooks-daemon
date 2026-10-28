@@ -59,6 +59,8 @@ class FakeGh:
         if argv[:2] == ("issue", "edit"):
             if self.edit_error is not None:
                 raise self.edit_error
+            if "--add-label" in argv:
+                return ""
             current = self.issues[int(argv[2])]
             assert isinstance(current, dict)
             if "--remove-assignee" in argv:
@@ -94,6 +96,7 @@ def _run(
     list_eligible: bool = False,
     approved: Sequence[str] | None = ("lts-bob", "ltscommerce"),
     workable_cache: Path | None = None,
+    park: bool = False,
 ) -> tuple[int, str, str]:
     out, err = io.StringIO(), io.StringIO()
     code = run_issue_validity(
@@ -106,6 +109,7 @@ def _run(
         stdout=out,
         stderr=err,
         workable_cache=workable_cache,
+        park=park,
     )
     return code, out.getvalue(), err.getvalue()
 
@@ -348,3 +352,56 @@ class TestLoadApprovedAuthors:
         )
         with pytest.raises(ValueError, match="approved_issue_authors"):
             load_approved_authors(tmp_path)
+
+
+class TestPark:
+    """N558: parking an issue on the owner must also drop it from the Stop gate's cache."""
+
+    def test_it_labels_the_issue_and_removes_it_from_the_cache(
+        self, gh: FakeGh, tmp_path: Path
+    ) -> None:
+        cache = tmp_path / "workable-issues.json"
+        write_workable(cache, [4, 7, 9], now=123.0)
+        code, out, err = _run(gh, number=7, park=True, workable_cache=cache)
+        assert code == EXIT_OK, err
+        assert gh.calls == [
+            (
+                "issue",
+                "edit",
+                "7",
+                "--add-label",
+                "agent-triaged,agent-needs-human",
+            )
+        ]
+        recorded = read_workable(cache)
+        assert recorded is not None and recorded.numbers == (4, 9)
+        assert recorded.recorded_at == 123.0
+        assert "#7" in out
+
+    def test_a_missing_cache_is_left_missing(self, gh: FakeGh, tmp_path: Path) -> None:
+        cache = tmp_path / "workable-issues.json"
+        code, _, _ = _run(gh, number=7, park=True, workable_cache=cache)
+        assert code == EXIT_OK
+        assert not cache.exists()
+
+    def test_a_failed_label_edit_leaves_the_cache_alone(self, gh: FakeGh, tmp_path: Path) -> None:
+        cache = tmp_path / "workable-issues.json"
+        write_workable(cache, [7], now=1.0)
+        gh.edit_error = GhError("offline")
+        code, _, err = _run(gh, number=7, park=True, workable_cache=cache)
+        assert code == EXIT_UNKNOWN
+        assert "offline" in err
+        recorded = read_workable(cache)
+        assert recorded is not None and recorded.numbers == (7,)
+
+    def test_it_needs_an_issue_number(self, gh: FakeGh) -> None:
+        code, _, err = _run(gh, park=True)
+        assert code == EXIT_USAGE
+        assert "number" in err
+        assert gh.calls == []
+
+    def test_it_cannot_be_combined_with_claim(self, gh: FakeGh) -> None:
+        code, _, err = _run(gh, number=7, park=True, claim=True)
+        assert code == EXIT_USAGE
+        assert "--park" in err
+        assert gh.calls == []

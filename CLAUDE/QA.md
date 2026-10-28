@@ -155,6 +155,21 @@ option, its lock and its limits are in the `subagent_full_qa_blocker` guidance
 (`bin/hooks-daemon explain-handler subagent_full_qa_blocker`), the canonical
 description; this paragraph does not restate them.
 
+**Run targeted QA in the foreground.** A sub-agent that starts `llm_qa.py changed` with `run_in_background` and then stops is not woken when the run
+finishes (measured twice, each time idle for 30 to 60 minutes until the
+coordinator found the result on disk). Run it in the foreground with the Bash
+`timeout` raised to 600000 ms, which fits a narrow range. If it must be
+backgrounded, redirect its output to a file and wait for it before stopping:
+
+```bash
+timeout 900 bash -c 'until grep -q "^QA: " untracked/scratch/qa.txt; do sleep 10; done'
+```
+
+`llm_qa.py` prints the `QA: N/M PASSED` verdict after every tool's result, so
+its presence means the run is done; a timing summary may follow it. A run that
+dies on a usage or lock error prints no `QA:` line, so keep the `timeout` and
+read the file when it expires.
+
 **Why.** When the rule was made, five full runs were executing at once, one
 per worktree, each about 25,700 tests over 15-20 minutes on eight cores. Each
 agent re-ran the suite after every fix round, and the coordinator ran it again
