@@ -124,6 +124,22 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N558 — the idle-stop gate names an issue the loop has just parked on the owner
+
+**Source**: dogfood, 2026-10-28, straight after triaging #141 to #143.
+
+**Evidence**: all three were labelled `agent-triaged` and `agent-needs-human` with `gh issue edit`, and every open
+issue then carried `agent-needs-human`. The next main-thread stop was still denied with R-STOP-IDLE-WITH-WORKABLE-ISSUE
+("Issue #143 is workable … 2 more workable after it"). `untracked/workable-issues.json` had been written by the
+earlier `issue-validity --list-eligible` run, before the labels existed, and nothing rewrote it. A manual
+`issue-validity --list-eligible` rewrote it as `{"numbers": []}`, and the gate stood down.
+
+**Fix direction**: whatever parks an issue must refresh the cache, or the gate must not trust a cache older than the
+latest label change it can see. Candidates: have `issue-validity` grow a `--park` verb that labels and drops the issue
+from the cache in one step (and say so in `IssueSdlc.md`), or re-read labels for the cached numbers before denying.
+
+**Status**: ⬜ open.
+
 ### N557 — secret_file_guard refuses a dotted module path in a Python string literal, though the same path in an import is exempt
 
 **GitHub Issue**: #143
