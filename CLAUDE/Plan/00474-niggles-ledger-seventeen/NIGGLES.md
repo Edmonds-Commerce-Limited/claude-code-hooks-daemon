@@ -137,7 +137,8 @@ is denied with R-SECRET-BASH-MENTION. The trailing statement opens no file and n
 **Owner question**: judge a compound command statement by statement (allow only when every statement carries no
 protected mention or is itself grep-pattern-only, keep the expansion-character check whole-command so a pattern
 assigned in one statement and expanded in another still fails closed, and keep pipes into readers, redirects and `-f`
-values denied), or keep the guard as it is. A separate question: should the deny message say that the same search as
+values denied), or keep the guard as it is. A newline is in `_EXPANSION_CHARS`, so a multi-line compound is denied
+before the single-command test; a per-statement fix has to decide newline-separated statements too. A separate question: should the deny message say that the same search as
 one simple command is allowed? That wording tells a reader how to get past a secret block.
 
 **Status**: ⬜ open, `agent-needs-human` on #144.
