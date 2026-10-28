@@ -38,6 +38,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.daemon.paths import get_event_socket_dir_from_untracked
+from claude_code_hooks_daemon.utils.relay_host import relay_supported_by_host
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REAL_RELAY_BINARY = REPO_ROOT / "untracked" / "bin" / "hooks-relay"
@@ -331,15 +332,37 @@ class TestFreshClientConfig:
         result = _run_cli(client_project, "transport", "off")
 
         assert result.returncode == 0, f"stdout={result.stdout} stderr={result.stderr}"
-        assert "already" in result.stdout
+        # The seeded key follows the host default (Plan 00554): on a host that can
+        # run the relay it is true, so `off` genuinely flips it; elsewhere it is
+        # false and `off` is a no-op. The CLI runs in a subprocess, so the real
+        # host decides; the unit tests pin both host kinds.
+        if relay_supported_by_host():
+            assert "already" not in result.stdout, result.stdout
+        else:
+            assert "already" in result.stdout, result.stdout
         assert "relay_enabled: false" in config.read_text()
 
     def test_transport_on_with_absent_binary_and_null_source_refuses_untouched(
         self, client_project: Path
     ) -> None:
-        # The seeded config has no relay_binary override and no relay_source;
-        # the default resolved path has no binary.
+        # No relay_binary override and an EXPLICIT null relay_source (the default
+        # is "auto" since Plan 00554, which would provision the binary); the
+        # default resolved path has no binary, so the enable must refuse.
         config = client_project / ".claude" / "hooks-daemon.yaml"
+        config.write_text(
+            "version: '1.0'\n"
+            "daemon:\n"
+            "  idle_timeout_seconds: 600\n"
+            "  log_level: INFO\n"
+            "  self_install_mode: false\n"
+            "  transport:\n"
+            "    relay_enabled: false\n"
+            "    relay_source: null\n"
+            "handlers:\n"
+            "  stop:\n"
+            "    auto_continue_stop:\n"
+            "      enabled: true\n"
+        )
 
         result = _run_cli(client_project, "transport", "on")
 
