@@ -124,6 +124,24 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N559 — secret_file_guard's grep-pattern-only exemption is lost when the grep is one statement of a compound command
+
+**GitHub Issue**: #144
+
+**Source**: issue #144 (approved author), triaged by the issue-sdlc loop on 2026-10-28.
+
+**Evidence** (mechanism read on main): `is_grep_pattern_only_mention` returns False unless
+`_is_single_simple_command(words)` holds, so `grep -rn 'id_rsa' dir` is allowed and `grep -rn 'id_rsa' dir; echo done`
+is denied with R-SECRET-BASH-MENTION. The trailing statement opens no file and names no path.
+
+**Owner question**: judge a compound command statement by statement (allow only when every statement carries no
+protected mention or is itself grep-pattern-only, keep the expansion-character check whole-command so a pattern
+assigned in one statement and expanded in another still fails closed, and keep pipes into readers, redirects and `-f`
+values denied), or keep the guard as it is. A separate question: should the deny message say that the same search as
+one simple command is allowed? That wording tells a reader how to get past a secret block.
+
+**Status**: ⬜ open, `agent-needs-human` on #144.
+
 ### N558 — the idle-stop gate names an issue the loop has just parked on the owner
 
 **Source**: dogfood, 2026-10-28, straight after triaging #141 to #143.
