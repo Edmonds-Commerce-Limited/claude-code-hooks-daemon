@@ -7442,7 +7442,7 @@ def cmd_issue_validity(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_USAGE
     workable_cache: Path | None = None
-    if args.list_eligible:
+    if args.list_eligible or args.park:
         # The Stop gate reads this file instead of calling GitHub (Plan 00470 Phase 7).
         from claude_code_hooks_daemon.daemon.work_queue_cli import untracked_dir_for
         from claude_code_hooks_daemon.utils.workable_issues import WORKABLE_ISSUES_FILENAME
@@ -7461,6 +7461,7 @@ def cmd_issue_validity(args: argparse.Namespace) -> int:
         stdout=sys.stdout,
         stderr=sys.stderr,
         workable_cache=workable_cache,
+        park=args.park,
     )
 
 
@@ -12899,6 +12900,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--list-eligible",
         action="store_true",
         help="List open issues whose author is in approved_issue_authors",
+    )
+    parser_issue_validity.add_argument(
+        "--park",
+        action="store_true",
+        help=(
+            "Label the issue agent-triaged and agent-needs-human and drop it from the "
+            "Stop gate's workable-issues cache"
+        ),
     )
     parser_issue_validity.add_argument("--json", action="store_true", help="Emit JSON")
     parser_issue_validity.add_argument(

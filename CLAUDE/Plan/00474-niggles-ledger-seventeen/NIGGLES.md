@@ -138,7 +138,10 @@ earlier `issue-validity --list-eligible` run, before the labels existed, and not
 latest label change it can see. Candidates: have `issue-validity` grow a `--park` verb that labels and drops the issue
 from the cache in one step (and say so in `IssueSdlc.md`), or re-read labels for the cached numbers before denying.
 
-**Status**: ⬜ open.
+**Status**: ✅ fixed on branch `worktree-n558-park`: `issue-validity <N> --park` labels `agent-triaged` and
+`agent-needs-human` and removes N from the cache in one step; `IssueSdlc.md` ("Parking an issue" and the three
+needs-human outcomes) tells the loop to use it. The gate itself is unchanged and stays network-free; a label applied
+by hand with `gh issue edit` still leaves the cache stale until the next `--list-eligible`.
 
 ### N557 — secret_file_guard refuses a dotted module path in a Python string literal, though the same path in an import is exempt
 
@@ -225,10 +228,12 @@ text; (3) skip heredoc bodies before brace enumeration. Each with tests proving 
 neither agent; the coordinator found each result on disk and had to re-brief by message. The work was idle for between
 30 and 60 minutes each time.
 
-**Status**: ⬜ open. Workaround in briefs: tell implementation agents to run targeted QA in the foreground (it fits the
-600 s limit for a narrow range) or to wait on the output file's `QA:` line. Next step: check whether a sub-agent's
-background-task notification is delivered at all, and if not, say so in `CLAUDE/QA.md`'s sub-agent guidance and in the
-`python-developer` agent definition.
+**Status**: ✅ documented on branch `worktree-n558-park`: `CLAUDE/QA.md` ("Run targeted QA in the foreground") and
+`.claude/agents/python-developer.md` tell sub-agents to run targeted QA in the foreground, or to wait on the output
+file's `QA:` line with a bounded `timeout ... until grep` loop. The `QA:` line is not the last line (a timing summary
+may follow) and is absent on an early usage or lock error, so the docs say "present means done" and keep the timeout.
+Whether the harness delivers a background notification to a stopped sub-agent was not tested; the guidance rests on the
+two observed cases.
 
 ### N552 — the vendored hooks-screen crates reached main incomplete, and the build test skipped instead of failing
 

@@ -23,6 +23,7 @@ from claude_code_hooks_daemon.utils.workable_issues import (
     WORKABLE_ISSUES_FILENAME,
     read_workable,
     refresh_workable_cache,
+    remove_workable,
     workable_numbers,
     write_workable,
 )
@@ -101,6 +102,26 @@ class TestRoundTrip:
         path = tmp_path / "missing-dir" / WORKABLE_ISSUES_FILENAME
         write_workable(path, [1], now=1.0)
         assert read_workable(path) is not None
+
+
+class TestRemove:
+    def test_it_drops_the_number_and_keeps_the_stamp(self, tmp_path: Path) -> None:
+        path = tmp_path / WORKABLE_ISSUES_FILENAME
+        write_workable(path, [7, 9], now=1000.0)
+        remove_workable(path, 7)
+        cache = read_workable(path)
+        assert cache is not None and cache.numbers == (9,) and cache.recorded_at == 1000.0
+
+    def test_a_missing_cache_stays_missing(self, tmp_path: Path) -> None:
+        path = tmp_path / WORKABLE_ISSUES_FILENAME
+        remove_workable(path, 7)
+        assert not path.exists()
+
+    def test_an_unreadable_cache_is_not_rewritten(self, tmp_path: Path) -> None:
+        path = tmp_path / WORKABLE_ISSUES_FILENAME
+        path.write_text("not json", encoding="utf-8")
+        remove_workable(path, 7)
+        assert path.read_text(encoding="utf-8") == "not json"
 
 
 class TestFreshness:

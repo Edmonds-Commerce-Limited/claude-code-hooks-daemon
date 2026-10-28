@@ -202,7 +202,14 @@ For each feature:
 5. Verify coverage
 ```
 
-### 3. Code Review Checklist
+### 3. Targeted QA Runs in the Foreground
+
+Run `llm_qa.py changed` in the foreground (Bash `timeout` up to 600000 ms). A
+backgrounded run does not wake you when it finishes; if you must background it,
+wait for the output file's `QA:` line with a bounded `timeout ... until grep`
+loop before stopping. Detail: `CLAUDE/QA.md`, "Full QA Is the Coordinator's Gate".
+
+### 4. Code Review Checklist
 
 Before submitting code, verify:
 

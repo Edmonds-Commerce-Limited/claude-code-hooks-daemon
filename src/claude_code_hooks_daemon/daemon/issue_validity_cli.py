@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.utils.github_issue_validity import (
     CLAIM_FIX_NAME,
     AssigneeCheck,
     AuthorWhitelistCheck,
+    FixAction,
     GhError,
     IssueValidityService,
     ValidityCheck,
@@ -43,7 +44,12 @@ from claude_code_hooks_daemon.utils.github_issue_validity import (
     Verdict,
     approved_authors_from_options,
 )
-from claude_code_hooks_daemon.utils.workable_issues import workable_numbers, write_workable
+from claude_code_hooks_daemon.utils.workable_issues import (
+    NEEDS_HUMAN_LABEL,
+    remove_workable,
+    workable_numbers,
+    write_workable,
+)
 
 EXIT_OK: Final[int] = 0
 EXIT_BLOCKED: Final[int] = 1
@@ -57,6 +63,9 @@ _VERDICT_EXIT: Final[dict[Verdict, int]] = {
     Verdict.FIXABLE: EXIT_FIXABLE,
     Verdict.UNKNOWN: EXIT_UNKNOWN,
 }
+
+#: Applied by ``--park``: triaged, and waiting on the owner.
+PARK_LABELS: Final[str] = f"agent-triaged,{NEEDS_HUMAN_LABEL}"
 
 _CLAIM_COMMAND: Final[str] = "bin/hooks-daemon issue-validity {number} --claim"
 
@@ -159,6 +168,39 @@ def _list_eligible(
     return EXIT_OK
 
 
+def _park(
+    number: int,
+    service: IssueValidityService,
+    stdout: TextIO,
+    stderr: TextIO,
+    workable_cache: Path | None,
+) -> int:
+    """Label the issue as waiting on the owner, then drop it from the Stop gate's cache."""
+    try:
+        service.apply_fix(
+            FixAction(
+                name="park",
+                issue=number,
+                description="label the issue as waiting on the owner",
+                gh_args=("issue", "edit", str(number), "--add-label", PARK_LABELS),
+            )
+        )
+    except GhError as exc:
+        stderr.write(f"could not park #{number}: {exc}\n")
+        return EXIT_UNKNOWN
+    if workable_cache is not None:
+        try:
+            remove_workable(workable_cache, number)
+        except OSError as exc:
+            stderr.write(
+                f"parked #{number}, but could not update the workable-issues cache "
+                f"{workable_cache}: {exc}\n"
+            )
+            return EXIT_UNKNOWN
+    stdout.write(f"parked issue #{number}: labelled {PARK_LABELS}\n")
+    return EXIT_OK
+
+
 def run_issue_validity(
     *,
     number: int | None,
@@ -170,6 +212,7 @@ def run_issue_validity(
     stdout: TextIO,
     stderr: TextIO,
     workable_cache: Path | None = None,
+    park: bool = False,
 ) -> int:
     """Run the command; returns the process exit code.
 
@@ -182,6 +225,14 @@ def run_issue_validity(
     already chose, so it proceeds and reports the author check as not
     applicable, the same reading the PreToolUse handler takes.
     """
+    if park:
+        if number is None:
+            stderr.write("--park needs an issue number\n")
+            return EXIT_USAGE
+        if claim or list_eligible:
+            stderr.write("--park cannot be combined with --claim or --list-eligible\n")
+            return EXIT_USAGE
+        return _park(number, service, stdout, stderr, workable_cache)
     if list_eligible:
         if not AuthorWhitelistCheck(approved).is_configured:
             stderr.write(

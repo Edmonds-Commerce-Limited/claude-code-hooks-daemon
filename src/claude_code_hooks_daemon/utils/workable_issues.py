@@ -137,6 +137,22 @@ def read_workable(path: Path) -> WorkableIssues | None:
     return _parse(raw) or _NOTHING_KNOWN
 
 
+def remove_workable(path: Path, number: int) -> None:
+    """Drop ``number`` from the cache, keeping its ``recorded_at``.
+
+    A missing cache stays missing and an unreadable one is left for the next
+    ``--list-eligible`` to rewrite: only a cache that says something is edited.
+
+    Raises:
+        OSError: The cache could not be written.
+    """
+    cache = read_workable(path)
+    if cache is None or cache is _NOTHING_KNOWN:
+        return
+    remaining = [n for n in cache.numbers if n != number]
+    write_workable(path, remaining, now=cache.recorded_at)
+
+
 def refresh_workable_cache(
     path: Path,
     service: IssueValidityService,
