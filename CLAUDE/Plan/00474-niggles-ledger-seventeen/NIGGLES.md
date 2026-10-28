@@ -124,6 +124,23 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N560 — the stand-in re-rules an unchanged question every three hours
+
+**Source**: dogfood, 2026-10-28. Five stand-in ticks fired in one awaiting-human stretch (05:47, 08:47, 11:53,
+14:57, 17:58).
+
+**Evidence**: the third to fifth rulings were identical declines: every open item is reserved (safety-control narrowing
+or a release), and nothing changed between ticks. R-STOP-STAND-IN-MISSING still requires a fresh one-off stand-in on
+every `[awaiting-human]` stop, so each cycle costs a sub-agent dispatch (about 42k tokens), a journal entry, a commit
+and a new cron, and produces no decision.
+
+**Fix direction**: let the stop gate stand down when the last stand-in ruling declined everything as reserved and
+nothing has changed since (no new eligible issue, no owner message). Alternatively, let a stop declare that every
+open item is reserved, so no stand-in is owed. Either way the gate has to keep firing when a new engineering option
+appears.
+
+**Status**: ⬜ open.
+
 ### N559 — secret_file_guard's grep-pattern-only exemption is lost when the grep is one statement of a compound command
 
 **GitHub Issue**: #144
