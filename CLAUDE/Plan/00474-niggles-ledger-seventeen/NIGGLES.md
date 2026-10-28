@@ -129,10 +129,13 @@ remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedBy
 **Source**: dogfood, 2026-10-28. Five stand-in ticks fired in one awaiting-human stretch (05:47, 08:47, 11:53,
 14:57, 17:58).
 
-**Evidence**: the third to fifth rulings were identical declines: every open item is reserved (safety-control narrowing
-or a release), and nothing changed between ticks. R-STOP-STAND-IN-MISSING still requires a fresh one-off stand-in on
-every `[awaiting-human]` stop, so each cycle costs a sub-agent dispatch (about 42k tokens), a journal entry, a commit
-and a new cron, and produces no decision.
+**Evidence**: the fourth and fifth rulings were identical declines of an unchanged question: every open item is
+reserved (safety-control narrowing or a release). The third ruling had one new item to rule on (#144, filed after the
+second) and chose the status quo for it. `stand_in_verdict` (`utils/stand_in_cron.py`) denies whenever no live
+`[tick:stand-in]` cron exists and never looks at a prior ruling, so R-STOP-STAND-IN-MISSING requires a fresh one-off
+stand-in on every `[awaiting-human]` stop. Each cycle costs a sub-agent dispatch, a journal entry, a commit and a new
+cron, and produces no decision. The dispatch alone was 41.6k to 42.1k sub-agent tokens per round, from the task
+notifications' usage lines.
 
 **Fix direction**: let the stop gate stand down when the last stand-in ruling declined everything as reserved and
 nothing has changed since (no new eligible issue, no owner message). Alternatively, let a stop declare that every
