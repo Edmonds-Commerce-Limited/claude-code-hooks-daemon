@@ -124,6 +124,32 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N555 — write_protected_paths denies read-only commands when a configured glob is wildcard-only (`dir/**`)
+
+**GitHub Issue**: #141
+
+**Source**: issue #141 (approved author), triaged by the issue-sdlc loop on 2026-10-28.
+
+**Evidence**: reproduced on main `c59582a11` (`untracked/scratch/wpp-fp/repro_141.py`, `paths: ['protected/**']`):
+`awk 'NR>=1' app.log`, `awk 'NR>=35400 && NR<=35450' app.log | cut -c1-300` and a pipeline whose awk program holds
+`"fail|error|warn"` are all denied; `awk 'match($0, "single")'` and `grep -E 'a|b'` are allowed; the real writes
+`awk '{print > "protected/x"}'` and `echo hi > protected/x` are correctly denied. Three faults combine:
+
+1. The awk-program write check treats a `>=` comparison and a regex `|` alternation as an output redirect or pipe.
+2. `_name_pattern('protected/**')` returns `None`, and `_text_naming` then reports that glob for any text at all
+   (`_text_naming('hello')` returns `protected/**`). Every fail-closed caller inherits it, not only the awk check.
+3. The brace-spelling caller passes heredoc bodies to `brace_variants`; a body with nested quoted braces overflows the
+   enumeration, and the fallback is fault 2. Bash never brace-expands a heredoc body.
+
+Related: N454 (a read-only loop denied as a write to a literal path), a different route.
+
+**Owner question**: all three fixes narrow a fail-closed safety guard, which the issue-sdlc runbook reserves for a
+human. Proposed: (1) flag only real awk output (`print`/`printf` followed by `>`, `>>` or `|`, `getline` from a
+command, `system(`); (2) for a wildcard-only glob, match on its literal directory chain (`protected/`) instead of any
+text; (3) skip heredoc bodies before brace enumeration. Each with tests proving the real writes above stay denied.
+
+**Status**: ⬜ open, `agent-needs-human` on #141.
+
 ### N554 — a sub-agent that backgrounds its QA run and goes idle never learns it finished
 
 **Source**: 2026-10-27, `screen-vendor-fix` (QA done 19:24, agent idle until nudged at about 19:59) and
