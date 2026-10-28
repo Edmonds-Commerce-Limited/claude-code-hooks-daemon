@@ -124,6 +124,29 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N557 — secret_file_guard refuses a dotted module path in a Python string literal, though the same path in an import is exempt
+
+**GitHub Issue**: #143
+
+**Source**: issue #143 (approved author), triaged by the issue-sdlc loop on 2026-10-28.
+
+**Evidence** (from the report, mechanism read on main): a `.py` Write is scanned with the literal matcher only, and the
+positional import-module-path exemption covers `import`, `from ... import`, `python -c` and `python -m`, not a string
+literal. So `importlib.import_module("pkg.<stem>_guard")`, a `mock.patch` target or a `logging.getLogger` name whose
+dotted text contains a protected stem is denied, under the shipped `*.secret*` default this includes the daemon's own
+`...pre_tool_use.secret_file_guard` module.
+
+**The trap in the obvious fix**: a shape-only exemption ("identifier characters and dots, no `/`") would also exempt
+`open("app.secret")`, a real file path made of the same characters. Only an exemption scoped to the receiving call is
+safe.
+
+**Owner question**: exempt a dotted string only as the first argument of a closed list of module-name APIs
+(`importlib.import_module`, `importlib.util.find_spec`, `runpy.run_module`, `unittest.mock.patch`/`patch.object`
+targets, `logging.getLogger`), with tests proving `open("app.secret")`, `Path("x.secret")` and a module-shaped string
+passed to any other call stay denied, or keep the guard as it is.
+
+**Status**: ⬜ open, `agent-needs-human` on #143.
+
 ### N556 — secret_file_guard judges a bare unquoted `**` as a recursive, dot-matching globstar
 
 **GitHub Issue**: #142
