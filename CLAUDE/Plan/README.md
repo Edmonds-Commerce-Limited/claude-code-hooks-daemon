@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00555: self install venv python version lockout](00555-self-install-venv-python-version-lockout/PLAN.md) - Not Started, High (dogfooding incident: system Python moved 3.11→3.13 under the self-install venv, every start failed `ModuleNotFoundError`, and the fail-closed guard, `repair`, the background build and the stop hook together locked the session out for hours; evidence in INCIDENT.md)
+- [00555: self install venv python version lockout](00555-self-install-venv-python-version-lockout/PLAN.md) - In Progress, High (dogfooding incident: system Python moved 3.11→3.13 under the self-install venv, every start failed `ModuleNotFoundError`, and the fail-closed guard, `repair`, the background build and the stop hook together locked the session out for hours; evidence in INCIDENT.md)
 
 - [00554: rust relay transport default](00554-rust-relay-transport-default/PLAN.md) - In Progress (owner request: the Rust relay becomes the default hook transport when `relay_enabled` is absent, legacy bash and python3 stays as the explicit `relay_enabled: false` opt-in)
 

@@ -1,6 +1,6 @@
 # Plan 00555: self install venv python version lockout
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-29
 **Owner**: dev
 **Priority**: High
@@ -61,10 +61,13 @@ never be the reason the session cannot repair the daemon.
 - [ ] ⬜ **Task 1.1**: Failing test. Build a venv whose `pyvenv.cfg`
   `version_info` differs from the running interpreter. Assert that the
   resolver reports it stale, not live and not missing.
-- [ ] ⬜ **Task 1.2**: Trace why the background build never left a working
-  venv: the lock holder, the output path and the exit status. Record the
-  findings in this plan's JOURNAL/.
-- [ ] ⬜ **Task 1.3**: Map every venv resolver: the wrapper
+- [x] ✅ **Task 1.2**: Trace the background build during the drift. No hook
+  build ran. A venv that resolves but will not start was reported as "missing"
+  whenever any process held the build lock (`init.sh:2901-2911`). Even a build
+  that did run would have accepted py311 in its success check
+  (`venv_bootstrap.sh:279`). See the
+  [Phase 1 report](subagent-reports/261029-phase1-investigation.md).
+- [x] ✅ **Task 1.3**: Map every venv resolver: the wrapper
   `.claude/hooks-daemon/bin/hooks-daemon`, the hook-side health check, the
   builder and `repair`. Name the divergence.
 
