@@ -990,17 +990,13 @@ def venv_cfg_major_minor(venv_dir: Path) -> tuple[int, int] | None:
     uv writes ``version_info``, the stdlib ``venv`` writes ``version``; the
     first such line in the file wins (the bash twin reads it the same way).
     """
-    text = ""
-    try:
-        text = (venv_dir / "pyvenv.cfg").read_text()
-    except OSError as e:
-        log_and_continue(
-            logger,
-            e,
-            reason=f"a missing or unreadable {venv_dir / 'pyvenv.cfg'} records no version, so the venv cannot be judged drifted; callers treat that as 'cannot tell'",
-            level=logging.DEBUG,
-        )
-    match = _PYVENV_CFG_VERSION_RE.search(text)
+    cfg = venv_dir / "pyvenv.cfg"
+    # Precondition checks, not a swallowed exception: this file runs standalone
+    # during bootstrap, where the sanctioned log_and_continue helper's package
+    # source is not on disk, and a missing cfg is the ordinary "no record" case.
+    if not cfg.is_file() or not os.access(cfg, os.R_OK):
+        return None
+    match = _PYVENV_CFG_VERSION_RE.search(cfg.read_text())
     if match is None:
         return None
     return int(match.group(1)), int(match.group(2))
@@ -1031,33 +1027,38 @@ def venv_interpreter_drift(venv_dir: Path) -> str | None:
     interpreter that runs. An interpreter that does not run at all is a
     different defect, reported by :func:`_venv_interpreter_runs`.
     """
-    import subprocess  # nosec B404 — trusted: probing a resolved venv path, no user input
-
     if venv_cfg_major_minor(venv_dir) is None:
         return None
     for name in ("python", "python3"):
         candidate = venv_dir / "bin" / name
         if not candidate.is_file() or not os.access(candidate, os.X_OK):
             continue
-        try:
-            result = subprocess.run(  # nosec B603 — fixed argv, no shell, no user input
-                [str(candidate), "-c", _VENV_VERSION_PROBE_CODE],
-                capture_output=True,
-                text=True,
-                timeout=_VENV_RUN_PROBE_TIMEOUT_SECS,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError) as e:
-            log_and_continue(
-                logger,
-                e,
-                reason=f"{candidate} could not be probed, so the next interpreter name is tried; if none runs the venv cannot be judged drifted (that defect is reported by _venv_interpreter_runs)",
-                level=logging.DEBUG,
-            )
-            continue
-        if result.returncode == 0:
-            return _drift_reason(venv_dir, result.stdout)
+        stdout = _probe_version_stdout(candidate)
+        if stdout:
+            return _drift_reason(venv_dir, stdout)
     return None
+
+
+def _probe_version_stdout(candidate: Path) -> str:
+    """Stdout of the version probe run by ``candidate``; ``""`` when it does not run.
+
+    An empty answer means "this interpreter could not be asked", which the
+    caller treats as "try the next name". An interpreter that does not run at
+    all is reported by :func:`_venv_interpreter_runs`, not here.
+    """
+    import subprocess  # nosec B404 — trusted: probing a resolved venv path, no user input
+
+    try:
+        result = subprocess.run(  # nosec B603 — fixed argv, no shell, no user input
+            [str(candidate), "-c", _VENV_VERSION_PROBE_CODE],
+            capture_output=True,
+            text=True,
+            timeout=_VENV_RUN_PROBE_TIMEOUT_SECS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return result.stdout if result.returncode == 0 else ""
 
 
 _SCAN_RANK_LOCK_HASH_MATCH = 0
