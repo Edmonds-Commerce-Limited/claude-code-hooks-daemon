@@ -41,8 +41,8 @@ else
     exit 2
 fi
 
-if [ ! -f "$PYTHON" ]; then
-    echo -e "${RED}ERROR: Python not found at $PYTHON${NC}" >&2
+if ! venv_python_usable "$PYTHON"; then
+    echo -e "${RED}ERROR: Python not usable at $PYTHON${NC}" >&2
     exit 2
 fi
 

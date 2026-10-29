@@ -90,3 +90,59 @@ class TestSkillScriptsRefuseADriftedInterpreter:
 
         assert result.returncode == 1, result.stdout + result.stderr
         assert "not usable" in result.stdout, result.stdout + result.stderr
+
+
+def _stub_tree(tmp_path: Path, drifted_python: Path) -> Path:
+    """A fake repo whose resolvers hand back ``drifted_python`` but whose gate is real."""
+    root = tmp_path / "repo"
+    for sub in ("scripts/lib", "scripts/install", "scripts/qa", "untracked"):
+        (root / sub).mkdir(parents=True)
+    (root / "scripts" / "lib" / "resolve_venv.sh").write_text(
+        textwrap.dedent(
+            f"""\
+            . "{RESOLVE_VENV_SH}"
+            resolve_venv_python() {{ echo "{drifted_python}"; }}
+            resolve_existing_venv_python() {{ echo "{drifted_python}"; }}
+            """
+        )
+    )
+    (root / "scripts" / "install" / "venv_resolver.sh").write_text(
+        f'. "{root}/scripts/lib/resolve_venv.sh"\n'
+    )
+    return root
+
+
+def _install_script(root: Path, relative: str) -> Path:
+    target = root / relative
+    shutil.copy(REPO_ROOT / relative, target)
+    return target
+
+
+class TestQaAndDebugScriptsRefuseADriftedInterpreter:
+    @pytest.mark.parametrize(
+        "relative",
+        ["scripts/qa/run_canonical_callers_check.sh", "scripts/qa/run_strategy_pattern_check.sh"],
+    )
+    def test_qa_runners_refuse(self, tmp_path: Path, relative: str) -> None:
+        py = _venv(tmp_path / "v", _OTHER)
+        root = _stub_tree(tmp_path, py)
+        checker = root / "scripts" / "qa" / "check_canonical_callers.sh"
+        checker.write_text("#!/bin/bash\nexit 0\n")
+        checker.chmod(0o755)
+        script = _install_script(root, relative)
+
+        result = _run([BASH, str(script)], root)
+
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "not usable" in result.stderr, result.stdout + result.stderr
+
+    def test_debug_hooks_refuses(self, tmp_path: Path) -> None:
+        py = _venv(tmp_path / "v", _OTHER)
+        root = _stub_tree(tmp_path, py)
+        (root / "untracked" / "daemon-x.sock").write_text("")
+        script = _install_script(root, "scripts/debug_hooks.sh")
+
+        result = _run([BASH, str(script), "status"], root)
+
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "not usable" in result.stdout, result.stdout + result.stderr

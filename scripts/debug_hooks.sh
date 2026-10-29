@@ -67,8 +67,8 @@ if [[ -z "$SOCKET_PATH" ]]; then
     exit 1
 fi
 
-if [[ ! -f "$VENV_PYTHON" ]]; then
-    echo "ERROR: venv Python not found at $VENV_PYTHON"
+if ! venv_python_usable "$VENV_PYTHON"; then
+    echo "ERROR: venv Python not usable at $VENV_PYTHON"
     exit 1
 fi
 
