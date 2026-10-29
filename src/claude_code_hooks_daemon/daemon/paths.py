@@ -414,6 +414,12 @@ def _probe_python_version(candidate: Path) -> ProbeResult | None:
 
     if not candidate.is_file() or not os.access(candidate, os.X_OK):
         return None
+    # A venv interpreter on PATH whose version drifted from its pyvenv.cfg is not
+    # a sound base: its own site-packages is invisible to it.
+    if (candidate.parent.parent / _PYVENV_CFG_NAME).exists() and not venv_interpreter_usable(
+        candidate
+    ):
+        return None
     try:
         result = subprocess.run(  # nosec B603 — fixed argv, no shell
             [str(candidate), "--version"],
