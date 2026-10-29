@@ -37,6 +37,35 @@ if ! declare -F _hp_timestamp > /dev/null; then
     unset _rb_lib_dir
 fi
 
+# Ensure the interpreter gate (venv_python_usable, Plan 00555) is loaded: the
+# snapshot must not run an interpreter whose version has drifted from its venv.
+if ! declare -F venv_python_usable > /dev/null; then
+    _rb_lib_dir="$(dirname "${BASH_SOURCE[0]}")"
+    if [ -f "${_rb_lib_dir%/install}/lib/resolve_venv.sh" ]; then
+        # shellcheck source=../lib/resolve_venv.sh
+        source "${_rb_lib_dir%/install}/lib/resolve_venv.sh"
+    fi
+    unset _rb_lib_dir
+fi
+
+# _rb_cfg_python_version <venv_dir>
+#
+# Echoes the full version (e.g. 3.11.2) pyvenv.cfg records, from its
+# version_info (uv) or version (stdlib venv) line; echoes nothing and returns 1
+# when the file or such a line is absent.
+_rb_cfg_python_version() {
+    local cfg="${1}/pyvenv.cfg" line
+    local version_re='^(version_info|version)[[:space:]]*=[[:space:]]*([0-9][^[:space:]]*)'
+    [ -f "$cfg" ] || return 1
+    while IFS= read -r line || [ -n "$line" ]; do
+        if [[ "$line" =~ $version_re ]]; then
+            printf '%s\n' "${BASH_REMATCH[2]}"
+            return 0
+        fi
+    done < "$cfg"
+    return 1
+}
+
 # Snapshot directory structure
 readonly SNAPSHOT_BASE_DIR="untracked/upgrade-snapshots"
 
@@ -129,8 +158,22 @@ create_state_snapshot() {
         venv_python="$(resolve_existing_venv_python "$daemon_dir")"
     fi
 
-    if [ -n "$venv_python" ] && [ -f "$venv_python" ]; then
-        python_version=$("$venv_python" --version 2>&1 | awk '{print $2}')
+    # A venv whose interpreter drifted still gets a record -- it is the one a
+    # rollback most needs -- but the drifted interpreter is never run: the
+    # version comes from the venv's pyvenv.cfg, marked as drifted.
+    local venv_usable="no"
+    if [ -n "$venv_python" ] && declare -F venv_python_usable > /dev/null; then
+        if venv_python_usable "$venv_python"; then
+            venv_usable="yes"
+            python_version=$("$venv_python" --version 2>&1 | awk '{print $2}')
+        else
+            local cfg_version
+            if cfg_version="$(_rb_cfg_python_version "$(dirname "$(dirname "$venv_python")")")"; then
+                python_version="$cfg_version (interpreter drifted)"
+            else
+                python_version="unknown (interpreter drifted)"
+            fi
+        fi
     fi
 
     # Write manifest
@@ -206,8 +249,9 @@ EOF
 
     # Backup venv package list — best-effort. If pip freeze fails (broken venv
     # during upgrade rollback), we still want the snapshot to complete with the
-    # rest of the files; requirements.txt will just be empty.
-    if [ -f "$venv_python" ]; then
+    # rest of the files; requirements.txt will just be empty. A drifted venv is
+    # skipped for the same reason: its pip would not run against its own packages.
+    if [ "$venv_usable" = "yes" ]; then
         local venv_pip
         venv_pip="$(dirname "$venv_python")/pip"
         if [ -f "$venv_pip" ]; then
