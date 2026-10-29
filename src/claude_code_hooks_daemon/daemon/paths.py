@@ -953,19 +953,112 @@ def _venv_interpreter_runs(candidate: Path) -> bool:
     the kernel cannot load raises ``OSError`` before a process even
     starts; both are treated as "does not run", same as a clean non-zero
     exit.
+
+    Plan 00555: it also fails when the venv's ``pyvenv.cfg`` records a
+    ``major.minor`` the interpreter no longer runs (see
+    :func:`venv_interpreter_drift`). Such an interpreter starts fine, but the
+    venv's ``lib/pythonX.Y/site-packages`` is invisible to it.
     """
     import subprocess  # nosec B404 — trusted: probing a resolved venv path, no user input
 
     try:
         result = subprocess.run(  # nosec B603 — fixed argv, no shell, no user input
-            [str(candidate), "-c", "import sys"],
+            [str(candidate), "-c", _VENV_VERSION_PROBE_CODE],
             capture_output=True,
+            text=True,
             timeout=_VENV_RUN_PROBE_TIMEOUT_SECS,
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return False
-    return result.returncode == 0
+    if result.returncode != 0:
+        return False
+    return _drift_reason(candidate.parent.parent, result.stdout) is None
+
+
+# Prints "<major>.<minor>" on stdout's last line; the bash twin
+# (scripts/lib/resolve_venv.sh ``_rv_candidate_runs``) runs the same code.
+_VENV_VERSION_PROBE_CODE = 'import sys; print("%d.%d" % sys.version_info[:2])'
+
+_PYVENV_CFG_VERSION_RE = re.compile(r"^(?:version_info|version)\s*=\s*(\d+)\.(\d+)", re.MULTILINE)
+_MAJOR_MINOR_RE = re.compile(r"^(\d+)\.(\d+)$")
+
+
+def venv_cfg_major_minor(venv_dir: Path) -> tuple[int, int] | None:
+    """The ``major.minor`` ``pyvenv.cfg`` records, or ``None`` when it records none.
+
+    uv writes ``version_info``, the stdlib ``venv`` writes ``version``; the
+    first such line in the file wins (the bash twin reads it the same way).
+    """
+    cfg = venv_dir / "pyvenv.cfg"
+    # Precondition checks, not a swallowed exception: this file runs standalone
+    # during bootstrap, where the sanctioned log_and_continue helper's package
+    # source is not on disk, and a missing cfg is the ordinary "no record" case.
+    if not cfg.is_file() or not os.access(cfg, os.R_OK):
+        return None
+    match = _PYVENV_CFG_VERSION_RE.search(cfg.read_text())
+    if match is None:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def _drift_reason(venv_dir: Path, probe_stdout: str) -> str | None:
+    """Why the probed interpreter drifted from ``venv_dir``'s recorded version, or ``None``."""
+    recorded = venv_cfg_major_minor(venv_dir)
+    if recorded is None:
+        return None
+    lines = probe_stdout.strip().splitlines()
+    running = _MAJOR_MINOR_RE.match(lines[-1].strip()) if lines else None
+    if running is None:
+        return None
+    if (int(running.group(1)), int(running.group(2))) == recorded:
+        return None
+    return (
+        f"interpreter drift: {venv_dir / 'pyvenv.cfg'} records Python "
+        f"{recorded[0]}.{recorded[1]} but {venv_dir / 'bin' / 'python'} now runs "
+        f"{running.group(1)}.{running.group(2)}, so the venv's site-packages is invisible"
+    )
+
+
+def venv_interpreter_drift(venv_dir: Path) -> str | None:
+    """Return why ``venv_dir``'s interpreter drifted from its recorded version, else ``None``.
+
+    ``None`` also covers "cannot tell": no ``pyvenv.cfg`` version, or no
+    interpreter that runs. An interpreter that does not run at all is a
+    different defect, reported by :func:`_venv_interpreter_runs`.
+    """
+    if venv_cfg_major_minor(venv_dir) is None:
+        return None
+    for name in ("python", "python3"):
+        candidate = venv_dir / "bin" / name
+        if not candidate.is_file() or not os.access(candidate, os.X_OK):
+            continue
+        stdout = _probe_version_stdout(candidate)
+        if stdout:
+            return _drift_reason(venv_dir, stdout)
+    return None
+
+
+def _probe_version_stdout(candidate: Path) -> str:
+    """Stdout of the version probe run by ``candidate``; ``""`` when it does not run.
+
+    An empty answer means "this interpreter could not be asked", which the
+    caller treats as "try the next name". An interpreter that does not run at
+    all is reported by :func:`_venv_interpreter_runs`, not here.
+    """
+    import subprocess  # nosec B404 — trusted: probing a resolved venv path, no user input
+
+    try:
+        result = subprocess.run(  # nosec B603 — fixed argv, no shell, no user input
+            [str(candidate), "-c", _VENV_VERSION_PROBE_CODE],
+            capture_output=True,
+            text=True,
+            timeout=_VENV_RUN_PROBE_TIMEOUT_SECS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return result.stdout if result.returncode == 0 else ""
 
 
 _SCAN_RANK_LOCK_HASH_MATCH = 0
@@ -2990,7 +3083,9 @@ def classify_venv(
     - ``keep``: the venv is live (``live`` holds real directories), or its
       ``lock_hash`` matches the current source, or the current ``lock_hash``
       cannot be computed so nothing can be judged.
-    - ``stale``: the legacy bare ``venv/`` directory, or a venv whose slug is
+    - ``stale``: a venv whose interpreter now runs a ``major.minor`` other than
+      the one its ``pyvenv.cfg`` records (Plan 00555), checked once the slug is
+      this view's (or absent); the legacy bare ``venv/`` directory, or a venv whose slug is
       this view's (or absent), whose metadata is readable and whose
       ``lock_hash`` differs from ``current_hash``.
     - ``unproven``: the code cannot prove it stale, because its slug belongs to
@@ -3006,6 +3101,9 @@ def classify_venv(
     eligible, skip_reason = _venv_slug_eligible(venv_dir, current_slug)
     if not eligible:
         return VENV_UNPROVEN, skip_reason or "slug belongs to another view"
+    drift = venv_interpreter_drift(venv_dir)
+    if drift is not None:
+        return VENV_STALE, drift
     metadata = _read_venv_metadata_stdlib(venv_dir)
     if metadata is None:
         return VENV_UNPROVEN, f"no usable {_DAEMON_METADATA_FILENAME}"
