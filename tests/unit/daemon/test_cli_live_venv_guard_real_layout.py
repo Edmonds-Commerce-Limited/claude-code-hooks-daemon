@@ -28,6 +28,10 @@ def _make_real_layout_venv(path: Path) -> None:
     """Create a venv whose bin/python is a symlink to the real system interpreter."""
     (path / "bin").mkdir(parents=True)
     (path / "bin" / "python").symlink_to(Path(sys.executable).resolve())
+    (path / "pyvenv.cfg").write_text(
+        f"home = {Path(sys.executable).resolve().parent}\n"
+        f"version_info = {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}\n"
+    )
     (path / ".daemon-version").write_text("v3.5.0")
     # Readable metadata whose lock_hash differs from the project's: proven stale.
     (path / ".daemon-metadata.json").write_text(

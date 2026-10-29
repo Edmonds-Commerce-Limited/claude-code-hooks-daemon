@@ -24,6 +24,7 @@ def _make_venv(path: Path, stamp_version: str | None = None) -> None:
     (path / "bin").mkdir(parents=True)
     (path / "bin" / "python").write_text('#!/bin/sh\nexec /usr/bin/python3 "$@"\n')
     (path / "bin" / "python").chmod(0o755)
+    (path / "pyvenv.cfg").write_text("home = /usr/bin\n")  # what makes a directory a venv
     if stamp_version is not None:
         (path / ".daemon-version").write_text(stamp_version)
 

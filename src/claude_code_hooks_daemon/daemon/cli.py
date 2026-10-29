@@ -3335,11 +3335,9 @@ def _enumerate_venvs(project_root: Path, include_size: bool = True) -> list[dict
         else:
             continue
 
-        python_bin = child / "bin" / "python"
-        if not python_bin.exists():
-            python_alt = child / "bin" / "python3"
-            if not python_alt.exists():
-                continue
+        # pyvenv.cfg is the file that defines a venv; an interpreter file proves nothing.
+        if not (child / "pyvenv.cfg").is_file():
+            continue
 
         real_path = child.resolve()
         is_symlink = child.is_symlink()

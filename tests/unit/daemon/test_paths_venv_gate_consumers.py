@@ -102,7 +102,7 @@ class TestWriteVenvMetadataFollowsTheGate:
         venv = daemon_dir / "untracked" / "venv-py311-abcdef12"
         _venv(venv, _OTHER)
 
-        error = cli._write_venv_metadata(venv, "py311-abcdef12", "v1", daemon_dir)
+        error = cli._write_venv_metadata(venv, "py311-abcdef12", "v1.2.3", daemon_dir)
 
         assert error is not None and "unusable" in error
         assert not (venv / ".daemon-metadata.json").exists()
