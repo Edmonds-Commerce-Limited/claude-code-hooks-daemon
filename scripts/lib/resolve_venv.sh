@@ -209,16 +209,60 @@ _rv_parent_of() {
     printf '%s\n' "$parent"
 }
 
+# Plan 00555: `_rv_candidate_runs` below also has its probe print the
+# interpreter's major.minor, and refuses a venv whose pyvenv.cfg records a
+# different one: that interpreter runs, but the venv's
+# lib/pythonX.Y/site-packages is invisible to it. Mirrors paths.py's
+# `_venv_interpreter_runs`.
+#
+# _rv_cfg_major_minor <venv_dir>
+#
+# Echoes "<major>.<minor>" from the first version_info / version line of
+# <venv_dir>/pyvenv.cfg (uv writes the former, stdlib venv the latter); echoes
+# nothing and returns 1 when the file or such a line is absent.
+_rv_cfg_major_minor() {
+    local cfg="${1}/pyvenv.cfg" line
+    local version_re='^(version_info|version)[[:space:]]*=[[:space:]]*([0-9]+)\.([0-9]+)'
+    [ -f "$cfg" ] || return 1
+    while IFS= read -r line || [ -n "$line" ]; do
+        if [[ "$line" =~ $version_re ]]; then
+            printf '%s.%s\n' "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
+            return 0
+        fi
+    done < "$cfg"
+    return 1
+}
+
+# _rv_check_cfg_drift <candidate> <probe_logfile>
+#
+# Fails (setting _RV_PROBE_OUTPUT) when <candidate>'s venv records a
+# major.minor in pyvenv.cfg that differs from the one the probe printed as the
+# last line of <probe_logfile>. Passes when either side is unknown.
+_rv_check_cfg_drift() {
+    local venv_dir="${1%/bin/*}" recorded running line
+    local running_re='^[0-9]+\.[0-9]+$'
+    recorded="$(_rv_cfg_major_minor "$venv_dir")" || return 0
+    running=""
+    while IFS= read -r line || [ -n "$line" ]; do
+        running="$line"
+    done < "$2"
+    [[ "$running" =~ $running_re ]] || return 0
+    [ "$running" = "$recorded" ] && return 0
+    _RV_PROBE_OUTPUT="interpreter drift: ${venv_dir}/pyvenv.cfg records Python ${recorded} but ${1} now runs ${running}, so the venv's site-packages is invisible"
+    return 1
+}
+
 _rv_candidate_runs() {
     local candidate="$1" pid watchdog rc logfile
+    local probe_code='import sys; print("%d.%d" % sys.version_info[:2])'
     logfile="$(mktemp "${TMPDIR:-/tmp}/rv-probe.XXXXXX" 2>/dev/null)" || logfile=""
     if [ -n "$logfile" ]; then
-        "$candidate" -c 'import sys' > "$logfile" 2>&1 &
+        "$candidate" -c "$probe_code" > "$logfile" 2>&1 &
     else
         # mktemp itself is missing/failing (unusual, minimal image): fall
         # back to /dev/null rather than leak the caller's own fds to a
         # descendant -- correctness over a diagnostic snippet.
-        "$candidate" -c 'import sys' > /dev/null 2>/dev/null &
+        "$candidate" -c "$probe_code" > /dev/null 2>/dev/null &
     fi
     pid=$!
     # The candidate's parent, recorded the instant it starts, is this probing
@@ -252,6 +296,9 @@ _rv_candidate_runs() {
     fi
     if [ -n "$logfile" ]; then
         [ "$rc" -ne 0 ] && _RV_PROBE_OUTPUT="$(head -c 200 "$logfile" 2>/dev/null)"
+        if [ "$rc" -eq 0 ]; then
+            _rv_check_cfg_drift "$candidate" "$logfile" || rc=1
+        fi
         rm -f "$logfile"
     fi
     return "$rc"
