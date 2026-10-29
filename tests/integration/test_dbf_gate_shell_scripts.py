@@ -234,3 +234,25 @@ class TestVenvShAsksTheGate:
         assert result.returncode == 0
         assert "SKIPPED" in result.stderr, result.stdout + result.stderr
         assert not marker.exists()
+
+
+class TestWorktreeScriptsAskTheGate:
+    def test_validate_worktrees_calls_a_drifted_venv_no_venv(self, tmp_path: Path) -> None:
+        py = _venv(tmp_path / "v", _OTHER)
+        root = _stub_tree(tmp_path, py)
+        (root / "untracked" / "worktrees" / "wt1").mkdir(parents=True)
+        script = _install_script(root, "scripts/validate_worktrees.sh")
+
+        result = _run([BASH, str(script), "wt1"], root)
+
+        assert "NO VENV" in result.stdout + result.stderr, result.stdout + result.stderr
+        assert "not usable" in result.stdout, result.stdout + result.stderr
+
+    def test_setup_worktree_and_install_version_use_the_gate(self) -> None:
+        # Both scripts need git, uv and the network to run end to end; pin the contract.
+        for name, fragment in (
+            ("setup_worktree.sh", 'venv_python_usable "${WT_VENV_PATH}/bin/python"'),
+            ("install_version.sh", 'venv_python_usable "$VENV_PATH/bin/python"'),
+        ):
+            text = (REPO_ROOT / "scripts" / name).read_text()
+            assert fragment in text, name

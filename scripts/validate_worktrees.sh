@@ -70,8 +70,8 @@ validate_worktree() {
         return 1
     fi
 
-    if [[ ! -x "${wt_venv_python}" ]]; then
-        echo -e "${RED}ERROR${NC}: Venv not found. Run: ./scripts/setup_worktree.sh ${wt_name}"
+    if ! venv_python_usable "${wt_venv_python}"; then
+        echo -e "${RED}ERROR${NC}: Venv not usable. Run: ./scripts/setup_worktree.sh ${wt_name}"
         FAILED_WTS+=("${wt_name} (NO VENV)")
         return 1
     fi

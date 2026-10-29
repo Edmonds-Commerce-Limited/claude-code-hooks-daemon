@@ -40,6 +40,8 @@ source "$INSTALL_LIB_DIR/project_detection.sh"
 source "$INSTALL_LIB_DIR/venv.sh"
 # shellcheck source=install/python_fingerprint.sh
 source "$INSTALL_LIB_DIR/python_fingerprint.sh"
+# shellcheck source=install/venv_resolver.sh
+source "$INSTALL_LIB_DIR/venv_resolver.sh"
 # shellcheck source=install/hooks_deploy.sh
 source "$INSTALL_LIB_DIR/hooks_deploy.sh"
 # shellcheck source=install/gitignore.sh
@@ -802,7 +804,7 @@ echo ""
 # which git-ignored local files THIS project has, so anything it finds is
 # genuinely unconfigured. Exit 1 means "found something", which is normal here
 # and must not fail the install — hence the guarded call.
-if [ -x "$VENV_PATH/bin/python" ]; then
+if venv_python_usable "$VENV_PATH/bin/python"; then
     _seed_rc=0
     _seed_out="$("$VENV_PATH/bin/python" -m claude_code_hooks_daemon.daemon.cli \
         check-worktree-seed \
