@@ -88,8 +88,10 @@ never be the reason the session cannot repair the daemon.
 
 ### Phase 3: Clean up and document
 
-- [ ] ⬜ **Task 3.1**: Re-key the mislabelled live venv (named py311,
-  contains 3.13.5) and install the dev extras.
+- [ ] ⬜ **Task 3.1**: Prune the orphaned `venv-workspace-py311-2a519198`; the
+  live daemon venv is `venv-workspace-py313-0d6d49c6`. Make the self-install
+  bootstrap install the `dev` extras, which were installed by hand after the
+  incident.
 - [ ] ⬜ **Task 3.2**: Add an "interpreter changed under the venv" entry to
   SELF_INSTALL.md and TROUBLESHOOTING, with the `sys.path` probe as the first
   diagnostic.

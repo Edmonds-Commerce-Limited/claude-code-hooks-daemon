@@ -46,17 +46,22 @@ tasks cite it.
   - "clone present but venv missing for this project path — a venv build is
     running in the background — do not install/force".
 
-  Each build finished, yet the restart afterwards failed exactly the same way.
-  After the incident `untracked/` held only `lsp-venv` and the py311 venv, so
-  no 3.13 venv was ever left behind. The build log was "not recorded here
-  (another process … holds the venv build lock)". Why the build failed, or
-  where it wrote, is **unknown and must be investigated**.
+  At the time it looked as if each build finished and the restart still failed.
+  The Phase 1 investigation found something different: no hook build ran
+  during the drift at all. "Not recorded here" means the lock holder was not a
+  hook build. Even a build that did run would have picked the py311 venv in its
+  success check (`venv_bootstrap.sh:279`) and reported success. The "venv
+  missing" text came from `init.sh:2901-2911`, which reports a venv that
+  RESOLVES but will not START as "missing" whenever any process holds the build
+  lock. That explains the alternation.
 
-- **Two venv resolvers disagree.** The hook-side health check decided the venv
-  for this project path was MISSING, presumably because it keys or fingerprints
-  on the running Python (Plan 00099). Yet the wrapper kept launching the old
-  `py311` path. One component treated the venv as absent; the other used it
-  regardless.
+- **The resolvers disagree.** The wrapper, `init.sh`, `restart` and `repair`
+  share one resolver. It finds venvs by lock hash first (`paths.py:1197-1243`)
+  and only checks that `import sys` runs, so the drifted py311 venv kept
+  resolving. The builder and the Python `repair` key on the Python fingerprint
+  (Plan 00099). The wrapper takes its no-venv `repair` path only when
+  resolution fails (`bin/hooks-daemon:270`), so `repair` ran the broken
+  interpreter and the self-heal never triggered.
 
 - **The stop hook blocked every stop.** With the daemon down, every stop was
   blocked with "Hooks daemon not running - protection not active". The
@@ -101,14 +106,26 @@ python3 -m venv --clear /workspace/untracked/venv-workspace-py311-2a519198 \
 Result: "Daemon started successfully (PID: 510367)", with 31/31 per-event
 listeners active.
 
-**Residue left by the fix, to be cleaned up by this plan:**
+**Correction from the Phase 1 investigation** ([report](subagent-reports/261029-phase1-investigation.md)): the
+owner's command is NOT what brought the daemon back. PID 510367 runs
+`untracked/venv-workspace-py313-0d6d49c6/bin/python` (confirmed from
+`/proc/510367/cmdline`). A hook-started build, logged at
+`untracked/.venv-bootstrap-workspace-py313-0d6d49c6.log`, succeeded during
+the fix. Probably `venv --clear` briefly left the py311 path unresolvable, so
+the wrapper fell through to the build path. The real lesson: the self-heal
+works the moment the drifted venv stops resolving. During the drift, the
+resolver kept resolving it because its usability probe only checks that
+`import sys` runs.
 
-- The directory is still NAMED `py311` but now holds a **3.13.5** venv built by
-  stdlib `venv` rather than uv. Its `pyvenv.cfg` now records `version = 3.13.5`
-  and `executable = /usr/bin/python3.13`. The name is a lie.
-- Only runtime dependencies were installed. The `dev` extras (pytest, mypy,
-  black, ruff and so on) are not in this venv. QA may fail, or may fall back to
-  a different environment.
+**Residue, to be cleaned up by this plan:**
+
+- `untracked/venv-workspace-py311-2a519198` is an unused orphan. It was
+  rebuilt by stdlib `venv` under 3.13 and has no `.daemon-metadata.json`.
+  Prune it rather than re-key it.
+- The live py313 venv was built without the `dev` extras, so QA, which uses the
+  same resolved venv, had no pytest, mypy or black. They were installed by hand
+  with `uv pip install --python <venv>/bin/python -e '.[dev]'`. A self-install
+  bootstrap should install them itself.
 
 ## Related plans
 
