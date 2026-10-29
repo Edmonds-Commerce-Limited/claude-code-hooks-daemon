@@ -275,8 +275,11 @@ if ! PYTHON="$(resolve_venv_python "$DAEMON_DIR")"; then
     fi
 fi
 
-if [ ! -x "$PYTHON" ]; then
-    echo "❌ hooks-daemon: resolved interpreter is not executable: $PYTHON" >&2
+# The resolver already vets what it returns; this is the last gate before exec
+# (Plan 00555), so the same judgement that picked the interpreter backs it:
+# executable, runs on this host, and runs the major.minor its venv recorded.
+if ! venv_python_usable "$PYTHON"; then
+    echo "❌ hooks-daemon: resolved interpreter is not usable (not executable, cannot run, or its Python version no longer matches its venv): $PYTHON" >&2
     exit 5
 fi
 

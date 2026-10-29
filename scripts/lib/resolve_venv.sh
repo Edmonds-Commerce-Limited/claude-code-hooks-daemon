@@ -152,6 +152,7 @@ _rv_dir_mtime() {
 # steady-state per-hook path.
 _RV_PROBE_TIMEOUT_SECS="${HOOKS_DAEMON_VENV_PROBE_TIMEOUT:-5}"
 _RV_PROBE_OUTPUT=""
+_RV_PROBE_VERSION=""
 
 # Waits the given seconds; succeeds only if the full bound elapsed. `sleep`
 # is looked up on PATH, and the hostile or stripped PATH this resolver
@@ -209,11 +210,11 @@ _rv_parent_of() {
     printf '%s\n' "$parent"
 }
 
-# Plan 00555: `_rv_candidate_runs` below also has its probe print the
-# interpreter's major.minor, and refuses a venv whose pyvenv.cfg records a
-# different one: that interpreter runs, but the venv's
-# lib/pythonX.Y/site-packages is invisible to it. Mirrors paths.py's
-# `_venv_interpreter_runs`.
+# Plan 00555: `_rv_candidate_runs` below has its probe print the interpreter's
+# major.minor (into _RV_PROBE_VERSION), and `venv_python_usable` refuses a venv
+# whose pyvenv.cfg records a different one: that interpreter runs, but the
+# venv's lib/pythonX.Y/site-packages is invisible to it. Mirrors paths.py's
+# `venv_interpreter_usable`.
 #
 # _rv_cfg_major_minor <venv_dir>
 #
@@ -230,25 +231,6 @@ _rv_cfg_major_minor() {
             return 0
         fi
     done < "$cfg"
-    return 1
-}
-
-# _rv_check_cfg_drift <candidate> <probe_logfile>
-#
-# Fails (setting _RV_PROBE_OUTPUT) when <candidate>'s venv records a
-# major.minor in pyvenv.cfg that differs from the one the probe printed as the
-# last line of <probe_logfile>. Passes when either side is unknown.
-_rv_check_cfg_drift() {
-    local venv_dir="${1%/bin/*}" recorded running line
-    local running_re='^[0-9]+\.[0-9]+$'
-    recorded="$(_rv_cfg_major_minor "$venv_dir")" || return 0
-    running=""
-    while IFS= read -r line || [ -n "$line" ]; do
-        running="$line"
-    done < "$2"
-    [[ "$running" =~ $running_re ]] || return 0
-    [ "$running" = "$recorded" ] && return 0
-    _RV_PROBE_OUTPUT="interpreter drift: ${venv_dir}/pyvenv.cfg records Python ${recorded} but ${1} now runs ${running}, so the venv's site-packages is invisible"
     return 1
 }
 
@@ -292,7 +274,7 @@ _rv_cached_venv_current() {
 }
 
 _rv_candidate_runs() {
-    local candidate="$1" pid watchdog rc logfile
+    local candidate="$1" pid watchdog rc logfile line
     local probe_code='import sys; print("%d.%d" % sys.version_info[:2])'
     logfile="$(mktemp "${TMPDIR:-/tmp}/rv-probe.XXXXXX" 2>/dev/null)" || logfile=""
     if [ -n "$logfile" ]; then
@@ -326,6 +308,7 @@ _rv_candidate_runs() {
     kill "$watchdog" 2>/dev/null
     wait "$watchdog" 2>/dev/null
     _RV_PROBE_OUTPUT=""
+    _RV_PROBE_VERSION=""
     if [ "$rc" -gt 128 ]; then
         # Killed by a signal -- almost certainly our own watchdog's KILL,
         # since nothing else in this probe's process group sends one.
@@ -336,11 +319,46 @@ _rv_candidate_runs() {
     if [ -n "$logfile" ]; then
         [ "$rc" -ne 0 ] && _RV_PROBE_OUTPUT="$(head -c 200 "$logfile" 2>/dev/null)"
         if [ "$rc" -eq 0 ]; then
-            _rv_check_cfg_drift "$candidate" "$logfile" || rc=1
+            while IFS= read -r line || [ -n "$line" ]; do
+                _RV_PROBE_VERSION="$line"
+            done < "$logfile"
         fi
         rm -f "$logfile"
     fi
     return "$rc"
+}
+
+# ------------------------------------------------------------
+# venv_python_usable <python_path> -- THE gate: is a venv interpreter usable?
+# ------------------------------------------------------------
+# The single place a venv interpreter is judged usable (Plan 00555). Every
+# script that decides whether to RUN, REUSE or SELECT a venv interpreter calls
+# this instead of testing `[ -x ]` / `[ -f ]` itself: the exec bit proves the
+# file is marked executable, not that the venv works. Python twin:
+# `venv_interpreter_usable` in daemon/paths.py. Both are named in the
+# detector's GATES (scripts/qa/check_venv_interpreter_trust.py).
+#
+# Arguments:
+#   $1  path to <venv>/bin/python or <venv>/bin/python3
+# Returns:
+#   0  executable, runs on this host, and (when the venv's pyvenv.cfg records
+#      a version) runs the SAME major.minor the cfg records
+#   1  anything else; _RV_PROBE_OUTPUT then holds a one-line reason
+# Never prints: stdout and stderr stay empty, so it is safe inside `if` and
+# `$(...)`. The reason lands in _RV_PROBE_OUTPUT, which a caller reads only if
+# it called the gate directly rather than inside a subshell.
+# "Cannot tell" (no pyvenv.cfg, no recorded version, probe printed none) passes.
+venv_python_usable() {
+    local python="$1" venv_dir recorded_version
+    [ -x "$python" ] || return 1
+    _rv_candidate_runs "$python" || return 1
+    venv_dir="${python%/bin/*}"
+    [ -f "${venv_dir}/pyvenv.cfg" ] || return 0
+    recorded_version="$(_rv_cfg_major_minor "$venv_dir")" || return 0
+    [[ "$_RV_PROBE_VERSION" =~ ^[0-9]+\.[0-9]+$ ]] || return 0
+    [ "$_RV_PROBE_VERSION" = "$recorded_version" ] && return 0
+    _RV_PROBE_OUTPUT="interpreter drift: ${venv_dir}/pyvenv.cfg records Python ${recorded_version} but ${python} now runs ${_RV_PROBE_VERSION}, so the venv's site-packages is invisible"
+    return 1
 }
 
 # _rv_current_lock_hash <daemon_dir>
@@ -410,7 +428,7 @@ _rv_pick_ranked_scan() {
             [ -x "$candidate" ] || continue
             _rv_rank_scan_candidate "${candidate%/bin/*}" "$current_hash"
             [ "$_RV_SCAN_RANK" = "$rank" ] || continue
-            if _rv_candidate_runs "$candidate"; then
+            if venv_python_usable "$candidate"; then
                 echo "$candidate"
                 return 0
             fi
@@ -438,14 +456,12 @@ _rv_pick_python() {
     # _pick_interpreter (python preferred, python3 as fallback) so every
     # caller agrees on whether a venv is usable.
     if [ -n "${HOOKS_DAEMON_VENV_PATH:-}" ]; then
-        if [ -x "${HOOKS_DAEMON_VENV_PATH}/bin/python" ]; then
-            echo "${HOOKS_DAEMON_VENV_PATH}/bin/python"
-            return 0
-        fi
-        if [ -x "${HOOKS_DAEMON_VENV_PATH}/bin/python3" ]; then
-            echo "${HOOKS_DAEMON_VENV_PATH}/bin/python3"
-            return 0
-        fi
+        for candidate in "${HOOKS_DAEMON_VENV_PATH}/bin/python" "${HOOKS_DAEMON_VENV_PATH}/bin/python3"; do
+            if venv_python_usable "$candidate"; then
+                echo "$candidate"
+                return 0
+            fi
+        done
     fi
     # Plan 00466 N1: `[ -x ]` alone accepts a candidate that cannot actually
     # run on this host (container-built, wrong arch/libc). `_rv_candidate_runs`
@@ -663,14 +679,13 @@ resolve_venv_python_in_venv() {
     if [ -z "$venv_path" ] || [ ! -d "$venv_path" ]; then
         return 1
     fi
-    if [ -x "$venv_path/bin/python" ]; then
-        echo "$venv_path/bin/python"
-        return 0
-    fi
-    if [ -x "$venv_path/bin/python3" ]; then
-        echo "$venv_path/bin/python3"
-        return 0
-    fi
+    local name
+    for name in python python3; do
+        if venv_python_usable "$venv_path/bin/$name"; then
+            echo "$venv_path/bin/$name"
+            return 0
+        fi
+    done
     return 1
 }
 

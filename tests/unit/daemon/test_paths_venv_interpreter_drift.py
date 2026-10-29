@@ -15,9 +15,9 @@ from pathlib import Path
 
 from claude_code_hooks_daemon.daemon.paths import (
     VENV_STALE,
-    _venv_interpreter_runs,
     classify_venv,
     resolve_existing_venv_python_with_diagnostics,
+    venv_interpreter_usable,
 )
 
 _RUNNING = (sys.version_info.major, sys.version_info.minor)
@@ -54,23 +54,23 @@ def _with_metadata(daemon_dir: Path, venv_dir: Path, python_path: Path) -> None:
 class TestInterpreterRuns:
     def test_matching_version_info_runs(self, tmp_path: Path) -> None:
         py = _fake_venv(tmp_path / "v", _RUNNING)
-        assert _venv_interpreter_runs(py) is True
+        assert venv_interpreter_usable(py) is True
 
     def test_matching_stdlib_version_key_runs(self, tmp_path: Path) -> None:
         py = _fake_venv(tmp_path / "v", _RUNNING, key="version")
-        assert _venv_interpreter_runs(py) is True
+        assert venv_interpreter_usable(py) is True
 
     def test_drifted_version_info_does_not_run(self, tmp_path: Path) -> None:
         py = _fake_venv(tmp_path / "v", _OTHER)
-        assert _venv_interpreter_runs(py) is False
+        assert venv_interpreter_usable(py) is False
 
     def test_drifted_stdlib_version_key_does_not_run(self, tmp_path: Path) -> None:
         py = _fake_venv(tmp_path / "v", _OTHER, key="version")
-        assert _venv_interpreter_runs(py) is False
+        assert venv_interpreter_usable(py) is False
 
     def test_cfg_without_version_is_not_judged(self, tmp_path: Path) -> None:
         py = _fake_venv(tmp_path / "v", None)
-        assert _venv_interpreter_runs(py) is True
+        assert venv_interpreter_usable(py) is True
 
 
 class TestResolverFallsThroughOnDrift:

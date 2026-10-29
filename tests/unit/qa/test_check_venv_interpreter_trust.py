@@ -578,8 +578,8 @@ class TestGatesAreProvenFromTheirOwnBody:
 
     def test_the_gate_list_names_the_intended_gates(self, checker: ModuleType) -> None:
         assert dict(checker.GATES) == {
-            "_venv_interpreter_runs": "src/claude_code_hooks_daemon/daemon/paths.py",
-            "_rv_candidate_runs": "scripts/lib/resolve_venv.sh",
+            "venv_interpreter_usable": "src/claude_code_hooks_daemon/daemon/paths.py",
+            "venv_python_usable": "scripts/lib/resolve_venv.sh",
             "_rv_cached_venv_current": "scripts/lib/resolve_venv.sh",
         }
         for path in checker.GATES.values():

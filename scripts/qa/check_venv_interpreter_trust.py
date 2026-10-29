@@ -79,8 +79,8 @@ RULE_WEAK_PROBE: Final[str] = "venv-weak-liveness-probe"
 #: each. A gate is proof only when its own body passes the version test; see
 #: :func:`proven_gates`.
 GATES: Final[Mapping[str, str]] = {
-    "_venv_interpreter_runs": "src/claude_code_hooks_daemon/daemon/paths.py",
-    "_rv_candidate_runs": "scripts/lib/resolve_venv.sh",
+    "venv_interpreter_usable": "src/claude_code_hooks_daemon/daemon/paths.py",
+    "venv_python_usable": "scripts/lib/resolve_venv.sh",
     "_rv_cached_venv_current": "scripts/lib/resolve_venv.sh",
 }
 

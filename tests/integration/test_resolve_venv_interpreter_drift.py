@@ -1,8 +1,8 @@
 """Plan 00555 Task 2.2 -- the bash resolver agrees with paths.py on interpreter drift.
 
-``scripts/lib/resolve_venv.sh::_rv_candidate_runs`` must refuse a venv whose
+``scripts/lib/resolve_venv.sh::venv_python_usable`` must refuse a venv whose
 ``pyvenv.cfg`` ``version_info`` / ``version`` ``major.minor`` differs from the
-interpreter's, exactly as ``paths.py::_venv_interpreter_runs`` does.
+interpreter's, exactly as ``paths.py::venv_interpreter_usable`` does.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.constants import Timeout
-from claude_code_hooks_daemon.daemon.paths import _venv_interpreter_runs
+from claude_code_hooks_daemon.daemon.paths import venv_interpreter_usable
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RESOLVE_VENV_SH = REPO_ROOT / "scripts" / "lib" / "resolve_venv.sh"
@@ -43,7 +43,7 @@ def _bash_runs(candidate: Path) -> bool:
     harness = textwrap.dedent(f"""\
         unset HOOKS_DAEMON_PYTHON HOOKS_DAEMON_VENV_PATH
         . "{RESOLVE_VENV_SH}"
-        _rv_candidate_runs "{candidate}"
+        venv_python_usable "{candidate}"
         """)
     result = subprocess.run(
         [BASH, "-c", harness],
@@ -61,14 +61,14 @@ def test_bash_and_python_agree_on_drift(tmp_path: Path, key: str, drifted: bool)
     py = _fake_venv(tmp_path / "v", _OTHER if drifted else _RUNNING, key)
 
     assert _bash_runs(py) is (not drifted)
-    assert _venv_interpreter_runs(py) is (not drifted)
+    assert venv_interpreter_usable(py) is (not drifted)
 
 
 def test_bash_and_python_agree_when_cfg_has_no_version(tmp_path: Path) -> None:
     py = _fake_venv(tmp_path / "v", None, "version_info")
 
     assert _bash_runs(py) is True
-    assert _venv_interpreter_runs(py) is True
+    assert venv_interpreter_usable(py) is True
 
 
 def test_pick_python_skips_a_drifted_venv(tmp_path: Path) -> None:
