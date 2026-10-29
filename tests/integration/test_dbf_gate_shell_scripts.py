@@ -169,3 +169,68 @@ class TestUpgradeVersionAsksTheGate:
     def test_the_five_guards_use_the_gate(self) -> None:
         text = UPGRADE_VERSION_SH.read_text()
         assert text.count('venv_python_usable "$VENV_PYTHON"') >= 5
+
+
+OUTPUT_SH = REPO_ROOT / "scripts" / "install" / "output.sh"
+VENV_SH = REPO_ROOT / "scripts" / "install" / "venv.sh"
+_PATHS_REL = Path("src") / "claude_code_hooks_daemon" / "daemon" / "paths.py"
+
+
+def _venv_sh(script: str, env_extra: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    body = f'. "{OUTPUT_SH}"\n. "{VENV_SH}"\n{textwrap.dedent(script)}'
+    return _run([BASH, "-c", body], REPO_ROOT, env_extra)
+
+
+def _stub_paths(daemon_dir: Path, marker: Path) -> None:
+    """A paths.py that records it ran: the drifted interpreter must never run it."""
+    paths = daemon_dir / _PATHS_REL
+    paths.parent.mkdir(parents=True)
+    paths.write_text(f"import pathlib\npathlib.Path({str(marker)!r}).write_text('ran')\n")
+
+
+class TestVenvShAsksTheGate:
+    @pytest.mark.parametrize("drifted", [True, False])
+    def test_verify_venv(self, tmp_path: Path, drifted: bool) -> None:
+        py = _venv(tmp_path / "v", _OTHER if drifted else _RUNNING)
+
+        result = _venv_sh(f'verify_venv "{py}" ""')
+
+        assert (result.returncode != 0) is drifted, result.stdout + result.stderr
+
+    @pytest.mark.parametrize("drifted", [True, False])
+    def test_lock_hash_matches_never_runs_a_drifted_interpreter(
+        self, tmp_path: Path, drifted: bool
+    ) -> None:
+        venv = tmp_path / "v"
+        py = _venv(venv, _OTHER if drifted else _RUNNING)
+        (venv / "bin" / "python3").symlink_to(py)
+        daemon = tmp_path / "daemon"
+        marker = tmp_path / "marker"
+        _stub_paths(daemon, marker)
+
+        result = _venv_sh(f'venv_lock_hash_matches "{daemon}" "{venv}"')
+
+        assert (result.returncode != 0) is drifted, result.stdout + result.stderr
+        assert marker.exists() is not drifted
+
+    def test_install_package_editable_refuses_a_drifted_venv(self, tmp_path: Path) -> None:
+        py = _venv(tmp_path / "v", _OTHER)
+
+        result = _venv_sh(
+            f'_venv_uv() {{ echo UV_CALLED; }}\ninstall_package_editable "{py}" "{tmp_path}"\n'
+        )
+
+        assert result.returncode != 0
+        assert "UV_CALLED" not in result.stdout
+
+    def test_eager_cleanup_skips_with_a_drifted_current_venv(self, tmp_path: Path) -> None:
+        venv = tmp_path / "daemon" / "untracked" / "venv-x-py3-abc"
+        _venv(venv, _OTHER)
+        marker = tmp_path / "marker"
+        _stub_paths(tmp_path / "daemon", marker)
+
+        result = _venv_sh(f'eager_cleanup_stale_venvs "{tmp_path / "daemon"}" "{venv}"')
+
+        assert result.returncode == 0
+        assert "SKIPPED" in result.stderr, result.stdout + result.stderr
+        assert not marker.exists()

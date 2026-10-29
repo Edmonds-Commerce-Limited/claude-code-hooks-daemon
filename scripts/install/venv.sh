@@ -115,6 +115,27 @@ _venv_uv() {
 }
 
 #
+# _venv_load_gate() - Make venv_python_usable available (Plan 00555 DBF)
+#
+# The single gate for "is this venv interpreter usable?" lives in
+# scripts/lib/resolve_venv.sh. venv.sh has historical callers that source it
+# before that library is loaded, so load it lazily from this file's own
+# location. Returns 1 when the library is not on disk: the callers then treat
+# the interpreter as NOT usable (fail closed) rather than trusting the exec bit.
+#
+_venv_load_gate() {
+    if declare -F venv_python_usable > /dev/null; then
+        return 0
+    fi
+    local lib="${BASH_SOURCE[0]%/*}"
+    lib="${lib%/install}/lib/resolve_venv.sh"
+    [ -f "$lib" ] || return 1
+    # The path is computed from this script's own location.
+    # shellcheck disable=SC1090
+    source "$lib"
+}
+
+#
 # verify_venv() - Verify venv exists and can import daemon package
 #
 # Args:
@@ -133,21 +154,14 @@ verify_venv() {
         return 1
     fi
 
-    # Check if venv Python exists
-    if [ ! -f "$venv_python" ]; then
-        print_error "Virtual environment Python not found: $venv_python"
+    # Exists, executable, runs, and runs the Python its pyvenv.cfg records
+    if ! _venv_load_gate; then
+        print_error "Cannot judge the venv: scripts/lib/resolve_venv.sh is missing"
         return 1
     fi
-
-    # Check if Python is executable
-    if [ ! -x "$venv_python" ]; then
-        print_error "Virtual environment Python is not executable: $venv_python"
-        return 1
-    fi
-
-    # Verify Python runs
-    if ! "$venv_python" --version > /dev/null 2>&1; then
-        print_error "Virtual environment Python failed to run: $venv_python"
+    if ! venv_python_usable "$venv_python"; then
+        print_error "Virtual environment Python is not usable: $venv_python"
+        [ -z "${_RV_PROBE_OUTPUT:-}" ] || print_error "  ${_RV_PROBE_OUTPUT}"
         return 1
     fi
 
@@ -184,26 +198,6 @@ except ImportError as e:
 
     print_success "Virtual environment verified"
     return 0
-}
-
-#
-# get_venv_python_version() - Get Python version from venv
-#
-# Args:
-#   $1 - venv_python: Path to venv Python binary
-#
-# Returns:
-#   Prints version string to stdout (e.g., "3.11.2")
-#   Exit code 0 on success, 1 on failure
-#
-get_venv_python_version() {
-    local venv_python="$1"
-
-    if [ -z "$venv_python" ] || [ ! -x "$venv_python" ]; then
-        return 1
-    fi
-
-    "$venv_python" -c 'import sys; print(".".join(map(str, sys.version_info[:3])))' 2>/dev/null
 }
 
 # Version stamp file name — lives inside the venv directory
@@ -362,14 +356,10 @@ venv_lock_hash_matches() {
         source "$_vlhm_lib"
         venv_python="$(resolve_venv_python_in_venv "$venv_path")" || venv_python=""
     fi
+    # No gated interpreter (library missing, no interpreter, or one that fails
+    # venv_python_usable) means the venv is broken: rebuild it.
     if [ -z "$venv_python" ]; then
-        if [ -x "$venv_path/bin/python" ]; then
-            venv_python="$venv_path/bin/python"
-        elif [ -x "$venv_path/bin/python3" ]; then
-            venv_python="$venv_path/bin/python3"
-        else
-            return 1
-        fi
+        return 1
     fi
 
     # paths.py is invoked as a direct script (NOT `python -m ...`) so the
@@ -1590,8 +1580,8 @@ install_package_editable() {
         fail_fast "install_package_editable: daemon_dir parameter required"
     fi
 
-    if [ ! -f "$venv_python" ]; then
-        fail_fast "install_package_editable: venv Python not found: $venv_python"
+    if ! _venv_load_gate || ! venv_python_usable "$venv_python"; then
+        fail_fast "install_package_editable: venv Python not usable: $venv_python"
     fi
 
     print_info "Installing daemon package in editable mode..."
@@ -1690,14 +1680,15 @@ eager_cleanup_stale_venvs() {
     # interpreter, else the one the upgrade resolved (HOOKS_DAEMON_PYTHON) --
     # never a bare python3 from PATH, which may be too old to import it.
     local interpreter=""
-    if [ -x "$current_abs/bin/python" ]; then
+    if _venv_load_gate && venv_python_usable "$current_abs/bin/python"; then
         interpreter="$current_abs/bin/python"
     elif [ -n "${HOOKS_DAEMON_PYTHON:-}" ] && [ -x "${HOOKS_DAEMON_PYTHON}" ]; then
         interpreter="$HOOKS_DAEMON_PYTHON"
     fi
     if [ -z "$interpreter" ]; then
         echo "WARNING: stale venv-* cleanup SKIPPED: no usable interpreter." >&2
-        echo "  Not executable: $current_abs/bin/python" >&2
+        echo "  Not usable: $current_abs/bin/python" >&2
+        [ -z "${_RV_PROBE_OUTPUT:-}" ] || echo "  Reason: ${_RV_PROBE_OUTPUT}" >&2
         echo "  HOOKS_DAEMON_PYTHON: ${HOOKS_DAEMON_PYTHON:-<unset>} (unset or not executable)" >&2
         echo "  Stale venv-* entries were left in place; see: bin/hooks-daemon list-venvs" >&2
         return 0

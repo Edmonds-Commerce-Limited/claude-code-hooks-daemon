@@ -85,7 +85,6 @@ match. Never hardcode the directory — resolve it via `scripts/lib/resolve_venv
 | `ensure_venv`              | daemon_dir, target_version, python | Public entry — resolves path, stamps version            |
 | `create_venv_at_path`      | daemon_dir, venv_path, quiet       | Runs `uv sync` at an explicit path (called by ensure\_) |
 | `verify_venv`              | venv_python, daemon_dir            | Checks venv exists and daemon package imports           |
-| `get_venv_python_version`  | daemon_dir                         | Prints venv Python version                              |
 | `install_package_editable` | daemon_dir                         | Runs `pip install -e .` in venv                         |
 
 Uses `uv sync` for venv creation. Pre-v3.7.0 `create_venv` / `recreate_venv`
