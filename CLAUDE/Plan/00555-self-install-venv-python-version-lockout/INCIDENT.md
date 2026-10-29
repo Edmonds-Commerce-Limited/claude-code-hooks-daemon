@@ -39,7 +39,7 @@ tasks cite it.
   self heals and repair runs without one") does not cover this case: here the
   venv EXISTS but its interpreter no longer matches it.
 
-- **The background rebuild never produced a usable venv.** Over many hours the
+- **The background rebuild appeared to run, but never fixed anything.** Over many hours the
   stop hook alternated between:
 
   - "Hooks daemon not running"

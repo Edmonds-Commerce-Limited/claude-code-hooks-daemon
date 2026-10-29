@@ -19,7 +19,9 @@ The session then locked itself out for hours:
 
 - The fail-closed guard denied every diagnostic call.
 - `restart` and `repair` ran through the same broken interpreter.
-- The background venv build never produced a working venv.
+- No self-heal build ran during the drift, because the resolver still treated
+  the drifted venv as usable. The "build running" message reported a lock held
+  by some other process.
 - The hook-side resolver and the wrapper disagreed about which venv exists.
 - The stop hook blocked every stop indefinitely.
 
