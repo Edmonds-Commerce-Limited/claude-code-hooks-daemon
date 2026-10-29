@@ -78,6 +78,20 @@ VENV_PYTHON="untracked/venv/bin/python"
 
 if [ ! -f "$VENV_PYTHON" ]; then
     fail "Python venv" "Virtual environment not found at $VENV_PYTHON"
+else
+    # The interpreter must run the major.minor the venv's pyvenv.cfg records;
+    # inline because this historical script sources no library.
+    _venv_cfg="$(dirname "$(dirname "$VENV_PYTHON")")/pyvenv.cfg"
+    if [ -f "$_venv_cfg" ]; then
+        _cfg_version="$(awk -F= '/^(version_info|version)[ \t]*=/ { gsub(/[ \t]/, "", $2); split($2, v, "."); print v[1] "." v[2]; exit }' "$_venv_cfg")"
+        _run_version=""
+        if _out="$("$VENV_PYTHON" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"; then
+            _run_version="$_out"
+        fi
+        if [ -n "$_cfg_version" ] && [ "$_cfg_version" != "$_run_version" ]; then
+            fail "Python venv" "$VENV_PYTHON runs Python ${_run_version:-?} but $_venv_cfg records $_cfg_version"
+        fi
+    fi
 fi
 
 # Stop daemon if running

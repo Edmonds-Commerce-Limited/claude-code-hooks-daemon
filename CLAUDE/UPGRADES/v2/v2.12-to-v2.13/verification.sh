@@ -45,6 +45,24 @@ else
     exit 1
 fi
 
+# The venv interpreter must run the major.minor its pyvenv.cfg records: if the
+# interpreter behind bin/python changed minor version, the venv's site-packages
+# is invisible to it and every check below would misreport. Inline on purpose --
+# this historical script runs against old installs and sources no library.
+_venv_cfg="$(dirname "$(dirname "$PYTHON")")/pyvenv.cfg"
+if [ -f "$_venv_cfg" ]; then
+    _cfg_version="$(awk -F= '/^(version_info|version)[ \t]*=/ { gsub(/[ \t]/, "", $2); split($2, v, "."); print v[1] "." v[2]; exit }' "$_venv_cfg")"
+    _run_version=""
+    if _out="$("$PYTHON" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"; then
+        _run_version="$_out"
+    fi
+    if [ -n "$_cfg_version" ] && [ "$_cfg_version" != "$_run_version" ]; then
+        echo -e "${RED}✗ ERROR: $PYTHON runs Python ${_run_version:-?} but $_venv_cfg records ${_cfg_version}${NC}"
+        echo "  The venv's interpreter has drifted; recreate the venv before verifying."
+        exit 1
+    fi
+fi
+
 # Check 1: Version number
 echo -n "Checking version... "
 VERSION=$($PYTHON -c "import sys; sys.path.insert(0, '$DAEMON_DIR/src'); from claude_code_hooks_daemon.version import __version__; print(__version__)")
