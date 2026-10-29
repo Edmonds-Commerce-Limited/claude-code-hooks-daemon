@@ -126,12 +126,11 @@ class TestConfigTemplate:
             "role_floors": {},
         }
 
-    def test_both_templates_leave_relay_enabled_to_the_host_default(self) -> None:
-        """A new config names no relay_enabled, so the host-aware model default decides."""
+    def test_both_templates_enable_the_relay_with_auto_source(self) -> None:
+        """Plan 00529: a new config turns the relay on and provisions it with auto."""
         import yaml
 
         from claude_code_hooks_daemon.config.models import TransportConfig
-        from claude_code_hooks_daemon.utils.relay_host import relay_supported_by_host
 
         with patch(
             "claude_code_hooks_daemon.daemon.init_config.is_container_environment",
@@ -140,18 +139,16 @@ class TestConfigTemplate:
             templates = (ConfigTemplate.generate_minimal(), ConfigTemplate.generate_full())
         for template in templates:
             transport = yaml.safe_load(template)["daemon"]["transport"]
-            assert "relay_enabled" not in transport
             parsed = TransportConfig.model_validate(transport)
-            assert parsed.relay_enabled is relay_supported_by_host()
+            assert parsed.relay_enabled is True
             assert parsed.relay_source == "auto"
 
-    def test_the_model_default_follows_the_host(self) -> None:
-        """The model default is host-aware: relay where a binary can run, provisioned by auto."""
+    def test_the_model_default_keeps_the_relay_off(self) -> None:
+        """Only generated/example configs turn the relay on; the model default stays off."""
         from claude_code_hooks_daemon.config.models import TransportConfig
-        from claude_code_hooks_daemon.utils.relay_host import relay_supported_by_host
 
-        assert TransportConfig().relay_enabled is relay_supported_by_host()
-        assert TransportConfig().relay_source == "auto"
+        assert TransportConfig().relay_enabled is False
+        assert TransportConfig().relay_source is None
 
     def test_plugins_block_is_labelled_as_daemon_plugins(self) -> None:
         """Both templates say the `plugins:` block holds daemon plugins, so a

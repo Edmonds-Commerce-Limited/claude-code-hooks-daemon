@@ -40,14 +40,13 @@ _CONFIG_WITH_COMMENTS = """\
 version: '1.0'
 daemon:
   self_install_mode: false
-  # Transport (Plan 00290) - relay rung (opted out here).
+  # Transport (Plan 00290) - opt-in relay rung.
   transport:
     # DOGFOOD SUSPENDED (owner escalation): this comment block must survive
     # every toggle round-trip byte-for-byte.
     relay_enabled: false
     nc_enabled: false
     timeout_seconds: 30
-    relay_source: null
 handlers:
   pre_tool_use: {}
   post_tool_use: {}
@@ -518,11 +517,11 @@ class TestSeedRelayEnabled:
 
         assert seeded is True
         content = config_path.read_text()
-        assert read_relay_enabled(config_path) is True
+        assert read_relay_enabled(config_path) is False
         assert "# a comment that must survive" in content
         assert "nc_enabled: false" in content
         # The seeded line is indented as a child of transport:.
-        assert "\n    relay_enabled: true\n" in content
+        assert "\n    relay_enabled: false\n" in content
 
     def test_seed_creates_transport_block_under_daemon(self, tmp_path: Path) -> None:
         config_path = tmp_path / "hooks-daemon.yaml"
@@ -531,8 +530,8 @@ class TestSeedRelayEnabled:
         seeded = seed_relay_enabled_line(config_path)
 
         assert seeded is True
-        assert read_relay_enabled(config_path) is True
-        assert "  transport:\n    relay_enabled: true\n" in config_path.read_text()
+        assert read_relay_enabled(config_path) is False
+        assert "  transport:\n    relay_enabled: false\n" in config_path.read_text()
 
     def test_seed_is_a_no_op_when_the_line_exists(self, tmp_path: Path) -> None:
         config_path = tmp_path / "hooks-daemon.yaml"
@@ -551,56 +550,22 @@ class TestSeedRelayEnabled:
 
         assert "relay_enabled" in str(exc_info.value)
 
-    def test_run_toggle_on_a_fresh_config_is_a_seeded_no_op(
-        self, project: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """On a relay-capable host the default is on, so a config with no key is already enabled."""
-        monkeypatch.setattr("sys.platform", "linux")
-        monkeypatch.setattr("platform.machine", lambda: "x86_64")
+    def test_run_toggle_seeds_a_fresh_config_and_enables(self, project: Path) -> None:
         config_path = _config_path(project)
         config_path.write_text("daemon:\n  transport:\n    nc_enabled: false\nhandlers: {}\n")
 
         outcome = run_toggle(project, enable=True, restart_fn=lambda: 0, verify_fn=_passing_probes)
 
-        assert outcome.changed is False
+        assert outcome.verified is True
         assert read_relay_enabled(config_path) is True
 
-    @pytest.mark.parametrize(
-        ("platform_name", "machine", "expected"),
-        [
-            ("linux", "x86_64", "true"),
-            ("linux", "aarch64", "true"),
-            ("darwin", "arm64", "false"),
-        ],
-    )
-    def test_seed_value_follows_the_host(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        platform_name: str,
-        machine: str,
-        expected: str,
-    ) -> None:
-        monkeypatch.setattr("sys.platform", platform_name)
-        monkeypatch.setattr("platform.machine", lambda: machine)
-        for text, marker in (
-            ("daemon:\n  transport:\n    nc_enabled: false\n", "\n    relay_enabled: "),
-            ("daemon:\n  log_level: INFO\n", "  transport:\n    relay_enabled: "),
-        ):
-            config_path = tmp_path / "hooks-daemon.yaml"
-            config_path.write_text(text)
-
-            seed_relay_enabled_line(config_path)
-
-            assert f"{marker}{expected}\n" in config_path.read_text()
-
-    def test_run_toggle_off_on_a_fresh_config_seeds_then_opts_out(self, project: Path) -> None:
+    def test_run_toggle_off_on_a_fresh_config_is_a_seeded_no_op(self, project: Path) -> None:
         config_path = _config_path(project)
         config_path.write_text("daemon:\n  transport:\n    nc_enabled: false\nhandlers: {}\n")
 
         outcome = run_toggle(project, enable=False, restart_fn=lambda: 0, verify_fn=_passing_probes)
 
-        assert outcome.changed is True
+        assert outcome.changed is False
         assert read_relay_enabled(config_path) is False
 
 
@@ -675,7 +640,9 @@ class TestRelayProvisioning:
         binary = self._remove_fixture_binary(project)
         config_path = _config_path(project)
         config_path.write_text(
-            config_path.read_text().replace("relay_source: null", "relay_source: build")
+            config_path.read_text().replace(
+                "timeout_seconds: 30", "timeout_seconds: 30\n    relay_source: build"
+            )
         )
         calls: list[str] = []
 
@@ -705,7 +672,9 @@ class TestRelayProvisioning:
         binary.chmod(0o755)
         config_path = _config_path(project)
         config_path.write_text(
-            config_path.read_text().replace("relay_source: null", "relay_source: build")
+            config_path.read_text().replace(
+                "timeout_seconds: 30", "timeout_seconds: 30\n    relay_source: build"
+            )
         )
         calls: list[str] = []
 
@@ -737,7 +706,9 @@ class TestRelayProvisioning:
         self._remove_fixture_binary(project)
         config_path = _config_path(project)
         config_path.write_text(
-            config_path.read_text().replace("relay_source: null", "relay_source: build")
+            config_path.read_text().replace(
+                "timeout_seconds: 30", "timeout_seconds: 30\n    relay_source: build"
+            )
         )
         monkeypatch.setattr(
             "claude_code_hooks_daemon.install.transport_toggle.deploy_relay_if_configured",

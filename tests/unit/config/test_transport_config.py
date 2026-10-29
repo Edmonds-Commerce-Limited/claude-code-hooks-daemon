@@ -11,37 +11,13 @@ from claude_code_hooks_daemon.config.models import Config, DaemonConfig, Transpo
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.events import EventID
 from claude_code_hooks_daemon.utils.hook_registration import canonical_hook_entry
-from claude_code_hooks_daemon.utils.relay_host import relay_supported_by_host
 
 
 class TestDefaults:
-    def test_relay_defaults_to_host_support_and_nc_off(self) -> None:
+    def test_relay_and_nc_default_off(self) -> None:
         transport = TransportConfig()
-        assert transport.relay_enabled is relay_supported_by_host()
+        assert transport.relay_enabled is False
         assert transport.nc_enabled is False
-
-    @pytest.mark.parametrize(
-        ("platform_name", "machine", "expected"),
-        [
-            ("linux", "x86_64", True),
-            ("linux", "aarch64", True),
-            ("darwin", "arm64", False),
-            ("linux", "riscv64", False),
-        ],
-    )
-    def test_relay_default_follows_the_host(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        platform_name: str,
-        machine: str,
-        expected: bool,
-    ) -> None:
-        monkeypatch.setattr("sys.platform", platform_name)
-        monkeypatch.setattr("platform.machine", lambda: machine)
-        assert TransportConfig().relay_enabled is expected
-
-    def test_explicit_relay_false_is_respected(self) -> None:
-        assert TransportConfig.model_validate({"relay_enabled": False}).relay_enabled is False
 
     def test_timeout_defaults_to_thirty_seconds(self) -> None:
         assert TransportConfig().timeout_seconds == 30
@@ -49,14 +25,11 @@ class TestDefaults:
     def test_relay_binary_defaults_to_none(self) -> None:
         assert TransportConfig().relay_binary is None
 
-    def test_relay_source_defaults_to_auto(self) -> None:
-        assert TransportConfig().relay_source == "auto"
+    def test_relay_source_defaults_to_none(self) -> None:
+        assert TransportConfig().relay_source is None
 
-    def test_explicit_null_relay_source_is_respected(self) -> None:
-        assert TransportConfig.model_validate({"relay_source": None}).relay_source is None
-
-    def test_per_event_sockets_needed_true_by_default(self) -> None:
-        assert TransportConfig().per_event_sockets_needed is True
+    def test_per_event_sockets_needed_false_by_default(self) -> None:
+        assert TransportConfig().per_event_sockets_needed is False
 
 
 class TestPerEventSocketsNeeded:
@@ -75,7 +48,7 @@ class TestDaemonConfigCarriesATransportBlock:
     def test_absent_block_gets_defaults(self) -> None:
         daemon_config = DaemonConfig()
         assert isinstance(daemon_config.transport, TransportConfig)
-        assert daemon_config.transport.relay_enabled is True
+        assert daemon_config.transport.relay_enabled is False
 
     def test_parses_full_block(self) -> None:
         raw = {
@@ -92,10 +65,10 @@ class TestDaemonConfigCarriesATransportBlock:
         assert config.daemon.transport.timeout_seconds == 5
         assert config.daemon.transport.relay_binary == "/opt/hooks-relay"
 
-    def test_default_config_needs_per_event_sockets(self) -> None:
-        """The relay is on by default, so the per-event listeners are bound."""
+    def test_default_config_behaviour_is_byte_identical(self) -> None:
+        """Default config never needs per-event sockets (PLAN.md Success Criteria)."""
         config = Config()
-        assert config.daemon.transport.per_event_sockets_needed is True
+        assert config.daemon.transport.per_event_sockets_needed is False
 
 
 class TestStrictValidation:
@@ -114,16 +87,6 @@ class TestStrictValidation:
     def test_rejects_unknown_relay_source(self) -> None:
         with pytest.raises(ValidationError):
             TransportConfig.model_validate({"relay_source": "curl"})
-
-    def test_rejects_null_relay_enabled(self) -> None:
-        with pytest.raises(ValidationError):
-            TransportConfig.model_validate({"relay_enabled": None})
-
-    def test_load_or_default_rejects_null_relay_enabled(self, tmp_path: Path) -> None:
-        config_path = tmp_path / "hooks-daemon.yaml"
-        config_path.write_text("version: '2.0'\ndaemon:\n  transport:\n    relay_enabled: null\n")
-        with pytest.raises(ValidationError):
-            Config.load_or_default(config_path)
 
 
 _RELAY_SOURCE = Path(__file__).resolve().parents[3] / "relay" / "hooks_relay.rs"

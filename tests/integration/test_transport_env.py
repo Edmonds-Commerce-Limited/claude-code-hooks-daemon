@@ -84,19 +84,6 @@ def test_config_with_both_rungs_off_leaves_env_file_untouched(tmp_path: Path) ->
     assert env_file.read_text() == _BASE_ENV_CONTENT
 
 
-def test_relay_enabled_alone_leaves_env_file_untouched(tmp_path: Path) -> None:
-    project_root = tmp_path / "project"
-    project_root.mkdir()
-    _write_config(project_root, "relay_enabled: true\n")
-    env_file = tmp_path / "hooks-daemon.env"
-    env_file.write_text(_BASE_ENV_CONTENT)
-
-    result = _run(project_root, env_file, venv_python=sys.executable)
-
-    assert result.returncode == 0, result.stderr
-    assert env_file.read_text() == _BASE_ENV_CONTENT
-
-
 def test_nc_enabled_appends_capability_line(tmp_path: Path, monkeypatch) -> None:
     project_root = tmp_path / "project"
     project_root.mkdir()

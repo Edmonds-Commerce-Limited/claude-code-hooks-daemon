@@ -456,8 +456,10 @@ ENV_EOF
 
 # Plan 00290 Phase 5: thread transport-probe facts (e.g.
 # HOOKS_DAEMON_NC_UNIX_CAPABLE) into the same file, when a `daemon.transport`
-# config with nc enabled is resolvable at this point. A genuine fresh install
-# has no config yet here (nc defaults off) — a real no-op, appending nothing.
+# config with a rung already enabled is resolvable at this point. A genuine
+# fresh install has no config yet here (Step 7 deploys the default, both
+# rungs off) — a real no-op, appending nothing — so the base content above
+# stays byte-identical to today by default.
 append_transport_probe_env_lines "$PROJECT_ROOT" "$ENV_FILE" "$VENV_PYTHON"
 
 print_success "Deployed hooks-daemon.env"

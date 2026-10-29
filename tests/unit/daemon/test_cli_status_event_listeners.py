@@ -44,9 +44,7 @@ class TestCmdStatusPerEventListeners:
     def test_silent_when_transport_disabled(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        socket_path, _ = _make_project(
-            tmp_path, transport_yaml="  transport:\n    relay_enabled: false\n"
-        )
+        socket_path, _ = _make_project(tmp_path)
         args = argparse.Namespace(project_root=tmp_path)
 
         with (

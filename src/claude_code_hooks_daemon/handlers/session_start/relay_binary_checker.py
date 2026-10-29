@@ -1,7 +1,6 @@
 """RelayBinaryCheckerHandler - a configured relay whose binary is unusable (Plan 00474 N523).
 
-Unless ``daemon.transport.relay_enabled`` is false (the opt-out to the legacy
-transport; an absent key is the default, on), the forwarders hand relay-eligible
+With ``daemon.transport.relay_enabled: true`` the forwarders hand relay-eligible
 hooks to the Rust relay binary. When that binary is missing or cannot run
 (``relay_deploy.relay_binary_defect``), those hooks run on the fallback
 transport. This handler says it at session start, naming the path and the
@@ -10,8 +9,7 @@ provisioning detached (``install.relay_repair``), once per cause. The repair
 never runs in the hook: the answer reports that it started, is running, or
 what it recorded, and a repair that failed is reported at every session start.
 
-Silent when the relay is disabled, there is no config file (the daemon is not
-set up for this project), or the binary can run (Lean
+Silent when the relay is disabled or the binary can run (Lean
 SessionStart, Plan 00128). A config this handler cannot read is reported, not
 treated as "relay disabled": whether the relay works is then unknown, and the
 owner's rule for this repository is no silent fallbacks (Plan 00529).
@@ -43,7 +41,6 @@ from claude_code_hooks_daemon.install.relay_repair import (
     start_relay_repair,
 )
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
-from claude_code_hooks_daemon.utils.relay_host import relay_fix_subcommand
 from claude_code_hooks_daemon.version import __version__
 
 
@@ -120,8 +117,6 @@ class RelayBinaryCheckerHandler(SessionStartHandlerBase):
         if root is None:
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
         config_path = root / ".claude" / "hooks-daemon.yaml"
-        if not config_path.is_file():
-            return AdvisoryResult(decision=Decision.ALLOW, context=[])
         try:
             transport = Config.load_or_default(config_path).daemon.transport
         except (ValidationError, OSError, ValueError) as exc:
@@ -137,7 +132,7 @@ class RelayBinaryCheckerHandler(SessionStartHandlerBase):
         binary = missing_configured_relay_binary(root, transport)
         if binary is None:
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
-        fix = daemon_cli_command("transport", relay_fix_subcommand())
+        fix = daemon_cli_command("transport", "on")
         defect = relay_binary_defect(binary)
         if defect is None:
             # Repaired between the two checks: nothing to report.

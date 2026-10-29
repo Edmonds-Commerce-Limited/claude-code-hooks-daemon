@@ -38,27 +38,15 @@ def _make_project(tmp_path: Path, *, config_yaml: str | None) -> Path:
     return project_root
 
 
-def test_no_config_file_gets_the_default_relay_guard(tmp_path: Path) -> None:
-    """The relay is the shipped default, so an absent config still gets the guard."""
+def test_no_config_file_is_a_noop(tmp_path: Path) -> None:
     project_root = _make_project(tmp_path, config_yaml=None)
     hooks_dir = project_root / ".claude" / "hooks"
+    before = (hooks_dir / "pre-tool-use").read_text()
 
     rewritten = regenerate_deployed_hooks(project_root, hooks_dir)
 
-    assert sorted(rewritten) == ["post-tool-use", "pre-tool-use"]
-    assert "relay hot path" in (hooks_dir / "pre-tool-use").read_text()
-
-
-def test_config_without_relay_key_gets_the_default_relay_guard(tmp_path: Path) -> None:
-    """An upgraded client config with no relay_enabled key follows the new default."""
-    project_root = _make_project(
-        tmp_path, config_yaml="daemon:\n  transport:\n    nc_enabled: false\n"
-    )
-    hooks_dir = project_root / ".claude" / "hooks"
-
-    rewritten = regenerate_deployed_hooks(project_root, hooks_dir)
-
-    assert sorted(rewritten) == ["post-tool-use", "pre-tool-use"]
+    assert rewritten == []
+    assert (hooks_dir / "pre-tool-use").read_text() == before
 
 
 def test_relay_disabled_config_is_a_noop(tmp_path: Path) -> None:
@@ -103,7 +91,7 @@ def test_nc_only_enabled_config_rewrites_every_forwarder(tmp_path: Path) -> None
     """
     project_root = _make_project(
         tmp_path,
-        config_yaml="daemon:\n  transport:\n    relay_enabled: false\n    nc_enabled: true\n",
+        config_yaml="daemon:\n  transport:\n    nc_enabled: true\n",
     )
     hooks_dir = project_root / ".claude" / "hooks"
 

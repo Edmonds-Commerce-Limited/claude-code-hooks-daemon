@@ -195,6 +195,6 @@ def test_the_elf_check_spawns_nothing() -> None:
     block = build_relay_guard_block(
         "pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u"), Path("/p")
     )
-    assert 'IFS= read -r -n 4 _rl_magic < "$_rl_bin"' in block
+    assert 'read -r -N 4 _rl_magic < "$_rl_bin"' in block
     assert "$(" not in block
     assert "`" not in block

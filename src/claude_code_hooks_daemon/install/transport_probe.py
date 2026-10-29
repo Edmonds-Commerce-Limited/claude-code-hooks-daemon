@@ -191,8 +191,8 @@ def render_env_lines(
     Only ``HOOKS_DAEMON_NC_UNIX_CAPABLE`` is a fact ``init.sh``'s nc rung
     actually reads at runtime; it is emitted only when ``nc_enabled`` (no
     point recording a fact nothing consults). Empty when neither rung is
-    configured on; the relay rung alone never adds a line, so
-    ``hooks-daemon.env`` stays untouched for the default config.
+    configured on — keeps ``hooks-daemon.env`` untouched for the default
+    config, matching the byte-identical-by-default contract.
     """
     if not (relay_enabled or nc_enabled):
         return []

@@ -71,11 +71,7 @@ def _run_generated_forwarder(
     """Generate the forwarder for ``event_file_name`` and run it daemon-down."""
     source = (_HOOKS_DIR / event_file_name).read_text()
     generated = generate_forwarder_content(
-        source,
-        event_file_name,
-        TransportConfig(relay_enabled=False),
-        tmp_path / "untracked",
-        tmp_path,
+        source, event_file_name, TransportConfig(), tmp_path / "untracked", tmp_path
     )
     claude_dir = tmp_path / ".claude"
     hooks_dir = claude_dir / "hooks"

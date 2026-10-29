@@ -4,13 +4,13 @@
 #
 # hooks-daemon.env is written once at Step 6 of install_version.sh, before
 # Step 7 (config deploy) has run — so for a genuine fresh install the probe
-# below resolves the defaults (relay on where the host can run it, nc off)
-# and appends nothing: the only runtime fact init.sh reads from this file is
-# HOOKS_DAEMON_NC_UNIX_CAPABLE (DESIGN-socket-relay.md §6.3), and it matters
-# only for the nc rung, so the probe runs only when nc_enabled is true. The
-# function exists so the SAME write step can carry that line whenever a
-# `daemon.transport` config with nc enabled is already resolvable at this
-# point (e.g. a repair/idempotent re-run over an existing config).
+# below resolves the pure defaults (both rungs off) and appends nothing,
+# which is the byte-identical-by-default contract every other Plan 00290
+# installer step honours. The function exists so the SAME write step can
+# ALSO carry probe-derived lines whenever a `daemon.transport` config is
+# already resolvable at this point (e.g. a repair/idempotent re-run over an
+# existing config) — DESIGN-socket-relay.md §6.3 names
+# HOOKS_DAEMON_NC_UNIX_CAPABLE as the one runtime fact init.sh actually reads.
 #
 # Usage:
 #   source "$(dirname "$0")/install/transport_env.sh"
@@ -58,7 +58,7 @@ from claude_code_hooks_daemon.install.transport_probe import probe_transport, re
 
 project_root = Path(sys.argv[1])
 transport = load_transport_config(project_root)
-if not transport.nc_enabled:
+if not (transport.relay_enabled or transport.nc_enabled):
     sys.exit(0)
 
 relay_binary = resolve_relay_binary_path(project_root, transport)

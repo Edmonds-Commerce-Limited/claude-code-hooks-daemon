@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00554: rust relay transport default](00554-rust-relay-transport-default/PLAN.md) - In Progress (owner request: the Rust relay becomes the default hook transport when `relay_enabled` is absent, legacy bash and python3 stays as the explicit `relay_enabled: false` opt-in)
-
 - [00550: per command bash task budget](00550-per-command-bash-task-budget/PLAN.md) - Not Started, BLOCKED ON THE OWNER (from issue #137: a `CLAUDE_CODE_SHELL_PREFIX` wrapper giving each Bash tool call its own task budget so one runaway fork chain cannot kill the session; it wraps every Bash call and hook, so shipping it and its default are owner decisions)
 
 - [00548: python entry point shebang detector](00548-python-entry-point-shebang-detector/PLAN.md) - Not Started (follow-up to 00546 Q2: a detector for client-run Python entry points that do 3.11-only work before any floor guard; probe results recorded as a known gap)
@@ -324,7 +322,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Completed**: 471 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 60 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 59 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

@@ -51,7 +51,6 @@ from claude_code_hooks_daemon.install.transport_verify import (
     run_probes,
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
-from claude_code_hooks_daemon.utils.relay_host import relay_supported_by_host
 from claude_code_hooks_daemon.version import __version__
 
 logger = logging.getLogger(__name__)
@@ -178,15 +177,8 @@ def set_relay_enabled(config_path: Path, enabled: bool) -> bool:
 _TRANSPORT_BLOCK_LINE = re.compile(r"^(?P<indent>[ \t]*)transport:[ \t]*(?:#.*)?$", re.MULTILINE)
 _DAEMON_SECTION_LINE = re.compile(r"^daemon:[ \t]*(?:#.*)?$", re.MULTILINE)
 
-
-def _seed_value() -> str:
-    """The YAML boolean seeded for a missing key: the host's shipped default."""
-    return "true" if relay_supported_by_host() else "false"
-
-
-def _seed_yaml() -> str:
-    """The exact YAML an operator must add by hand when seeding cannot place it."""
-    return f"daemon:\n  transport:\n    relay_enabled: {_seed_value()}\n"
+#: The exact YAML an operator must add by hand when seeding cannot place it.
+_SEED_YAML = "daemon:\n  transport:\n    relay_enabled: false\n"
 
 
 def _insert_after_line(content: str, line_match_end: int, insertion: str) -> str:
@@ -198,13 +190,12 @@ def _insert_after_line(content: str, line_match_end: int, insertion: str) -> str
 
 
 def seed_relay_enabled_line(config_path: Path) -> bool:
-    """Seed a missing ``relay_enabled:`` line (defect D3, canary run 4).
+    """Seed a missing ``relay_enabled: false`` line (defect D3, canary run 4).
 
     A fresh client config carries no ``daemon.transport`` block at all, so
     the targeted flip used to refuse with "found 0" — safe but unhelpful for
     the documented client-side toggle. This inserts the key with the shipped
-    default for this host (``true`` where a relay binary can run, else
-    ``false``), comment-preservingly: under an existing
+    default (``false``), comment-preservingly: under an existing
     ``transport:`` line when there is exactly one, else as a new
     ``transport:`` block directly under a top-level ``daemon:`` section.
     Anything more ambiguous refuses with the exact YAML to add by hand.
@@ -221,28 +212,26 @@ def seed_relay_enabled_line(config_path: Path) -> bool:
     if len(transport_matches) == 1:
         match = transport_matches[0]
         child_indent = match.group("indent") + "  "
-        seeded = _insert_after_line(
-            content, match.end(), f"{child_indent}relay_enabled: {_seed_value()}\n"
-        )
+        seeded = _insert_after_line(content, match.end(), f"{child_indent}relay_enabled: false\n")
     elif not transport_matches:
         daemon_match = _DAEMON_SECTION_LINE.search(content)
         if daemon_match is None:
             raise TransportToggleError(
                 f"{config_path} has no daemon.transport.relay_enabled key and no "
                 f"daemon: section to seed it under — add this to the config "
-                f"first:\n{_seed_yaml()}"
+                f"first:\n{_SEED_YAML}"
             )
         seeded = _insert_after_line(
-            content, daemon_match.end(), f"  transport:\n    relay_enabled: {_seed_value()}\n"
+            content, daemon_match.end(), "  transport:\n    relay_enabled: false\n"
         )
     else:
         raise TransportToggleError(
             f"{config_path} contains {len(transport_matches)} 'transport:' lines — "
             f"cannot seed relay_enabled unambiguously; add this under "
-            f"daemon.transport yourself:\n{_seed_yaml()}"
+            f"daemon.transport yourself:\n{_SEED_YAML}"
         )
     config_path.write_text(seeded)
-    logger.info("seeded daemon.transport.relay_enabled: %s into %s", _seed_value(), config_path)
+    logger.info("seeded daemon.transport.relay_enabled: false into %s", config_path)
     return True
 
 
