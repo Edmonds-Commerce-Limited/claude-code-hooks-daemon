@@ -256,3 +256,50 @@ class TestWorktreeScriptsAskTheGate:
         ):
             text = (REPO_ROOT / "scripts" / name).read_text()
             assert fragment in text, name
+
+
+VENV_INCLUDE_BASH = REPO_ROOT / "scripts" / "venv-include.bash"
+
+
+class TestVenvIncludeAsksTheGate:
+    def _include(self, venv: Path, body: str) -> subprocess.CompletedProcess[str]:
+        script = f"""
+            PROJECT_ROOT="{REPO_ROOT}"
+            . "{VENV_INCLUDE_BASH}"
+            VENV_DIR="{venv}"
+            VENV_PYTHON="{venv}/bin/python3"
+            {body}
+            """
+        return _run([BASH, "-c", textwrap.dedent(script)], REPO_ROOT)
+
+    def _venv3(self, venv: Path, cfg: tuple[int, int]) -> None:
+        py = _venv(venv, cfg)
+        (venv / "bin" / "python3").symlink_to(py)
+
+    @pytest.mark.parametrize("drifted", [True, False])
+    def test_venv_exists(self, tmp_path: Path, drifted: bool) -> None:
+        self._venv3(tmp_path / "v", _OTHER if drifted else _RUNNING)
+
+        result = self._include(tmp_path / "v", "venv_exists")
+
+        assert (result.returncode != 0) is drifted, result.stdout + result.stderr
+
+    @pytest.mark.parametrize("drifted", [True, False])
+    def test_venv_tool_runs_only_under_a_usable_interpreter(
+        self, tmp_path: Path, drifted: bool
+    ) -> None:
+        venv = tmp_path / "v"
+        self._venv3(venv, _OTHER if drifted else _RUNNING)
+        tool = venv / "bin" / "mytool"
+        tool.write_text("#!/bin/bash\necho TOOL_RAN\n")
+        tool.chmod(0o755)
+
+        result = self._include(venv, "ensure_venv() { return 0; }\nvenv_tool mytool")
+
+        assert ("TOOL_RAN" in result.stdout) is not drifted, result.stdout + result.stderr
+        assert (result.returncode != 0) is drifted
+
+    def test_a_freshly_created_venv_is_judged_by_the_gate(self) -> None:
+        assert 'venv_python_usable "${VENV_PYTHON}"' in VENV_INCLUDE_BASH.read_text().split(
+            "Create venv\n"
+        )[1].split("Created venv")[0]
