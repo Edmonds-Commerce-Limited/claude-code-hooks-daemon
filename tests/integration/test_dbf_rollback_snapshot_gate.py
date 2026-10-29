@@ -40,8 +40,7 @@ def _snapshot(tmp_path: Path, cfg_version: tuple[int, int] | None) -> tuple[dict
     pip.chmod(0o755)
     if cfg_version is not None:
         (venv / "pyvenv.cfg").write_text(f"version_info = {cfg_version[0]}.{cfg_version[1]}.7\n")
-    script = textwrap.dedent(
-        f"""
+    script = textwrap.dedent(f"""
         set -euo pipefail
         resolve_existing_venv_python() {{ printf '%s\\n' '{python}'; }}
         source '{ROLLBACK_SH}'
@@ -50,8 +49,7 @@ def _snapshot(tmp_path: Path, cfg_version: tuple[int, int] | None) -> tuple[dict
         _hp_timestamp() {{ printf 'FIXED\\n'; }}
         mkdir -p '{daemon}/untracked/upgrade-snapshots/FIXED/files/venv'
         create_state_snapshot '{project}' '{daemon}' normal
-        """
-    )
+        """)
     result = subprocess.run(
         [BASH, "-c", script],
         capture_output=True,

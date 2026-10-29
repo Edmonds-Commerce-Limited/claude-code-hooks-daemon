@@ -390,8 +390,7 @@ def test_deduplicates_same_binary_on_multiple_path_entries(
 # ----- _probe_python_version: a venv interpreter on PATH is a base only if usable -----
 
 _FAKE_VENV_PYTHON = (
-    "#!/bin/sh\n"
-    'if [ "$1" = "-c" ]; then echo 3.13; else echo "Python 3.13.0"; fi\n'
+    "#!/bin/sh\n" 'if [ "$1" = "-c" ]; then echo 3.13; else echo "Python 3.13.0"; fi\n'
 )
 
 

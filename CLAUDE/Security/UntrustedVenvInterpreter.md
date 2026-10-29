@@ -51,6 +51,12 @@ What is NOT proof:
 
 There is no exemption marker: fix the site, or fix the Detector.
 
+Shell scoping: a name declared `local`, `declare` or `typeset` inside a function
+is a fresh variable there, so an outer interpreter binding of the same name does
+not reach it (`0298f52c5`). A local the function itself binds to an interpreter
+is still tracked, and a function that does not declare the name still sees the
+outer binding. Proof is still per function.
+
 Scope: every tracked first-party `*.py`, `*.sh`, `*.bash` and shell/python-shebang
 file except `tests/` (test code builds and asserts on fake venvs and selects no
 interpreter to run the product), any `fixtures` or `assets` directory,
@@ -72,51 +78,59 @@ visible by asking what the symlink does after the system changes.
 ## Instances
 
 The Defence landed first (`b0dbbe5e4`, widened in the commit after it). The
-core sites were then routed through the two public gates in `b51912cb8`; every
-other row is still `pending`. Rows group findings of one function or script.
+core sites were then routed through the two public gates in `b51912cb8`, and
+the remaining rows by the commits in the Fix column. Rows group findings of one
+function or script.
 Line numbers are those at the Defence commit.
 
-| Where                                                                                                                                         | What it allowed                                                                                                        | Defence   | Fix       |
-| --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | --------- | --------- |
-| `daemon/paths.py` `_venv_interpreter_runs` (960), now `venv_interpreter_usable`                                                               | The resolver's liveness gate is `-c "import sys"`: a symlink to another minor passes (the originating instance)        | b0dbbe5e4 | b51912cb8 |
-| `daemon/paths.py` `_best_ranked_scan_candidate` (998), `resolve_existing_venv_python` (1082), `_pick_interpreter` (1174)                      | Hot path and diagnostics path accept a venv on exec bit; the scan fallback takes any `venv-*` with no minor comparison | b0dbbe5e4 | b51912cb8 |
-| `daemon/paths.py` metadata branch (1234, 1235)                                                                                                | `python_path` from `.daemon-metadata.json` is used on is_file + X_OK, chosen by `lock_hash` alone                      | b0dbbe5e4 | b51912cb8 |
-| `daemon/paths.py` `live_venv_realpaths` (2977)                                                                                                | A venv whose interpreter exists is classed "live" for pruning (judged unsure by the independent search)                | b0dbbe5e4 | b51912cb8 |
-| `scripts/lib/resolve_venv.sh` `_rv_candidate_runs` (216, 221)                                                                                 | The bash resolver's gate is `-c 'import sys'` (now `venv_python_usable`)                                               | b0dbbe5e4 | b51912cb8 |
-| `scripts/lib/resolve_venv.sh` `_rv_pick_ranked_scan` (324), env override (355, 359), `resolve_venv_python_in_venv` (579, 583)                 | Scan, `HOOKS_DAEMON_VENV_PATH` and the in-venv resolver accept on `-x`                                                 | b0dbbe5e4 | b51912cb8 |
-| `bin/hooks-daemon` and `install/templates/hooks-daemon` (278)                                                                                 | `exec "$PYTHON" -m claude_code_hooks_daemon.daemon.cli` after only `[ -x "$PYTHON" ]`                                  | b0dbbe5e4 | b51912cb8 |
-| `init.sh` `_is_daemon_installed` (2197)                                                                                                       | "Installed" means `[[ -f "$PYTHON_CMD" ]]`                                                                             | b0dbbe5e4 | b51912cb8 |
-| Skill scripts `daemon-cli.sh`, `health-check.sh`, `init-handlers.sh` (`.claude/skills` and `src/.../skills` copies, six)                      | Run the resolver's result after `[ ! -f "$PYTHON" ]` only                                                              | b0dbbe5e4 | pending   |
-| `scripts/upgrade_version.sh` (804, 884, 1098, 1166, 1670)                                                                                     | Upgrade steps run the resolved venv Python after `-f`                                                                  | b0dbbe5e4 | pending   |
-| `scripts/upgrade.sh` (923, 932, 967, 998, 1052, 1106, 1158, 1253, 1289)                                                                       | A `venv-*py3*` glob picks the first executable; its path is written to metadata that the resolver later trusts         | b0dbbe5e4 | pending   |
-| `scripts/venv-include.bash` `venv_exists` (70), `venv_tool` (307)                                                                             | QA wrappers treat any `bin/python3` as a venv and run any `bin/<tool>` whose shebang points into it                    | b0dbbe5e4 | pending   |
-| `scripts/install/venv.sh` `verify_venv` (137, 143, 149)                                                                                       | Verification is exists, executable, `--version`; its import test puts `src` on `sys.path`                              | b0dbbe5e4 | pending   |
-| `scripts/install/venv.sh` `venv_lock_hash_matches` fallback (366, 368), `eager_cleanup_stale_venvs` (1693), `install_package_editable` (1593) | Interpreter picked or used on exec bit                                                                                 | b0dbbe5e4 | pending   |
-| `scripts/qa/run_canonical_callers_check.sh` (43), `run_strategy_pattern_check.sh` (44), `validate_worktrees.sh` (73), `debug_hooks.sh` (70)   | Tool scripts run the resolver's result after an existence or exec test                                                 | b0dbbe5e4 | pending   |
-| `scripts/install_version.sh` (805), `setup_worktree.sh` (307)                                                                                 | A just-built venv is run on `-x` (low exposure; `setup_worktree.sh` compares the directory tag later, see below)       | b0dbbe5e4 | pending   |
-| `CLAUDE/UPGRADES/v2/v2.0-to-v2.1/verification.sh` (79), `v2.12-to-v2.13/verification.sh` (26)                                                 | Frozen historical upgrade checks on the retired `untracked/venv` layout (scope for the owner to decide)                | b0dbbe5e4 | pending   |
+| Where                                                                                                                                         | What it allowed                                                                                                        | Defence   | Fix                  |
+| --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | --------- | -------------------- |
+| `daemon/paths.py` `_venv_interpreter_runs` (960), now `venv_interpreter_usable`                                                               | The resolver's liveness gate is `-c "import sys"`: a symlink to another minor passes (the originating instance)        | b0dbbe5e4 | b51912cb8            |
+| `daemon/paths.py` `_best_ranked_scan_candidate` (998), `resolve_existing_venv_python` (1082), `_pick_interpreter` (1174)                      | Hot path and diagnostics path accept a venv on exec bit; the scan fallback takes any `venv-*` with no minor comparison | b0dbbe5e4 | b51912cb8            |
+| `daemon/paths.py` metadata branch (1234, 1235)                                                                                                | `python_path` from `.daemon-metadata.json` is used on is_file + X_OK, chosen by `lock_hash` alone                      | b0dbbe5e4 | b51912cb8            |
+| `daemon/paths.py` `live_venv_realpaths` (2977)                                                                                                | A venv whose interpreter exists is classed "live" for pruning (judged unsure by the independent search)                | b0dbbe5e4 | b51912cb8            |
+| `scripts/lib/resolve_venv.sh` `_rv_candidate_runs` (216, 221)                                                                                 | The bash resolver's gate is `-c 'import sys'` (now `venv_python_usable`)                                               | b0dbbe5e4 | b51912cb8            |
+| `scripts/lib/resolve_venv.sh` `_rv_pick_ranked_scan` (324), env override (355, 359), `resolve_venv_python_in_venv` (579, 583)                 | Scan, `HOOKS_DAEMON_VENV_PATH` and the in-venv resolver accept on `-x`                                                 | b0dbbe5e4 | b51912cb8            |
+| `bin/hooks-daemon` and `install/templates/hooks-daemon` (278)                                                                                 | `exec "$PYTHON" -m claude_code_hooks_daemon.daemon.cli` after only `[ -x "$PYTHON" ]`                                  | b0dbbe5e4 | b51912cb8            |
+| `init.sh` `_is_daemon_installed` (2197)                                                                                                       | "Installed" means `[[ -f "$PYTHON_CMD" ]]`                                                                             | b0dbbe5e4 | b51912cb8            |
+| Skill scripts `daemon-cli.sh`, `health-check.sh`, `init-handlers.sh` (`.claude/skills` and `src/.../skills` copies, six)                      | Run the resolver's result after `[ ! -f "$PYTHON" ]` only                                                              | b0dbbe5e4 | 83fc85414            |
+| `scripts/upgrade_version.sh` (804, 884, 1098, 1166, 1670)                                                                                     | Upgrade steps run the resolved venv Python after `-f`                                                                  | b0dbbe5e4 | e1a368063            |
+| `scripts/upgrade.sh` (923, 932, 967, 998, 1052, 1106, 1158, 1253, 1289)                                                                       | A `venv-*py3*` glob picks the first executable; its path is written to metadata that the resolver later trusts         | b0dbbe5e4 | dc650805b            |
+| `scripts/venv-include.bash` `venv_exists` (70), `venv_tool` (307)                                                                             | QA wrappers treat any `bin/python3` as a venv and run any `bin/<tool>` whose shebang points into it                    | b0dbbe5e4 | 10b2732e0            |
+| `scripts/install/venv.sh` `verify_venv` (137, 143, 149)                                                                                       | Verification is exists, executable, `--version`; its import test puts `src` on `sys.path`                              | b0dbbe5e4 | 486b61a22            |
+| `scripts/install/venv.sh` `venv_lock_hash_matches` fallback (366, 368), `eager_cleanup_stale_venvs` (1693), `install_package_editable` (1593) | Interpreter picked or used on exec bit                                                                                 | b0dbbe5e4 | 486b61a22            |
+| `scripts/qa/run_canonical_callers_check.sh` (43), `run_strategy_pattern_check.sh` (44), `validate_worktrees.sh` (73), `debug_hooks.sh` (70)   | Tool scripts run the resolver's result after an existence or exec test                                                 | b0dbbe5e4 | ed51d5951, 9dc994c0f |
+| `scripts/install_version.sh` (805), `setup_worktree.sh` (307)                                                                                 | A just-built venv is run on `-x` (low exposure; `setup_worktree.sh` compares the directory tag later, see below)       | b0dbbe5e4 | 9dc994c0f            |
+| `CLAUDE/UPGRADES/v2/v2.0-to-v2.1/verification.sh` (79), `v2.12-to-v2.13/verification.sh` (26)                                                 | Frozen historical upgrade checks on the retired `untracked/venv` layout (inline pyvenv.cfg compare, no library)        | b0dbbe5e4 | d262dd275            |
 
-### Findings the Detector reports that carry no hazard
+### Findings first reported as carrying no hazard, now resolved
 
-The Detector has no exemption marker, so these keep it red until it is narrowed
-or the site changes. They are listed for the owner, not exempted. The
-reconciliation report (`CLAUDE/Plan/00555-self-install-venv-python-version-lockout/subagent-reports/261029-dbf-detector.md`)
-gives the reason for each.
+The Detector has no exemption marker, so each of these was either fixed at the
+site or the Detector was corrected. The Detector reports zero findings on the
+tree.
 
-- `daemon/paths.py` `_probe_python_version` (418): in practice a
-  PATH-discovered system interpreter probed with `--version`, parsed into a
-  major.minor to pick a base for a new venv. Left flagged: no lexical criterion
-  separates it from a venv interpreter, because the function takes any `Path` and
-  an activated venv puts its own `bin/` on `PATH`. Narrowing on the function's
-  name would be an exemption by another spelling.
-- `scripts/install/rollback.sh` (132, 133, 210): records `python_version` for a
-  manifest and runs a best-effort `pip freeze`.
-- `scripts/install/venv.sh` `get_venv_python_version` (202): a function whose
-  job is to report the interpreter's version.
-- `scripts/venv-include.bash` (157): checks that `python -m venv` just created
-  the file.
-- `scripts/upgrade.sh` (345): prints `--version` of a system interpreter
-  `find_latest_python` already version-checked.
+- `daemon/paths.py` `_probe_python_version` (418): fixed (`780babfad`). A venv
+  interpreter on `PATH` (a `pyvenv.cfg` two levels up) that
+  `venv_interpreter_usable` refuses is no base interpreter, so the probe returns
+  `None`. A plain system interpreter is probed as before. No lexical narrowing.
+- `scripts/install/rollback.sh` (132, 133, 210): fixed (`e0515c094`). A usable
+  venv records the interpreter's version and takes the `pip freeze`. A drifted
+  one is still recorded, from its `pyvenv.cfg`, as `3.11.2 (interpreter drifted)`
+  (the field has no reader beyond the manifest itself), and its pip is skipped.
+- `scripts/install/venv.sh` `get_venv_python_version`: deleted, it had no caller
+  (`486b61a22`).
+- `scripts/venv-include.bash` (157): routed through the gate (`10b2732e0`).
+- `scripts/upgrade.sh` (345): the message now takes the version from the
+  discovery library's own `_pd_probe_version`, so the interpreter is not run
+  inline; no Detector narrowing was needed (`dc650805b`).
+- `scripts/upgrade.sh` (967): a Detector bug, fixed by the local-shadow rule
+  above (`0298f52c5`); the variable was not renamed.
+
+A `--version` whose exit status is never consumed (only its text printed) was
+considered as a Detector narrowing and not built: the consumed-status shapes
+(`if`, `&&`/`||`, `$?`, `set -e`, a test on the output, an assignment tested
+later) cannot be told apart from it by the line-local reader, and the one site
+that needed it was fixed instead.
 
 ## What the Defence does not catch
 
