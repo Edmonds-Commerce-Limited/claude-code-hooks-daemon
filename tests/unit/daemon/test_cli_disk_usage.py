@@ -24,6 +24,7 @@ def _mark_self_install(project_root: Path) -> None:
 def _make_venv(path: Path, stamp_version: str) -> None:
     (path / "bin").mkdir(parents=True)
     (path / "bin" / "python").write_text("#!/bin/sh\n")
+    (path / "pyvenv.cfg").write_text("home = /usr/bin\n")  # what makes a directory a venv
     (path / ".daemon-version").write_text(stamp_version)
 
 

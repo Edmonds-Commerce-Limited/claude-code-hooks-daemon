@@ -45,6 +45,10 @@ def _scan_without_foreign_processes(venv_dirs: list[Path]) -> ProcessScan:
 def _venv(path: Path, lock_hash: str | None = None) -> Path:
     (path / "bin").mkdir(parents=True)
     (path / "bin" / "python").symlink_to(Path(sys.executable).resolve())
+    (path / "pyvenv.cfg").write_text(
+        f"home = {Path(sys.executable).resolve().parent}\n"
+        f"version_info = {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}\n"
+    )
     if lock_hash is not None:
         (path / ".daemon-metadata.json").write_text(
             json.dumps({"python_path": str(path / "bin" / "python"), "lock_hash": lock_hash})
