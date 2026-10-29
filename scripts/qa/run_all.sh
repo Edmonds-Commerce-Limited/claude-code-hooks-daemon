@@ -449,6 +449,19 @@ else
 fi
 echo ""
 
+# Plan 00555: a venv interpreter is judged usable only after its major.minor is
+# compared with pyvenv.cfg. Exec-bit and `import sys` checks pass for a venv
+# whose bin/python now runs another minor and cannot see its site-packages.
+echo "34. Running Venv-Interpreter-Trust Check..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_venv_interpreter_trust.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Venv-interpreter-trust check FAILED"
+else
+    echo "✅ Venv-interpreter-trust check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -498,6 +511,7 @@ results = {
     "Security Downgrade Flags": "untracked/qa/security_downgrade_flags.json",
     "Generated Doc Drift": "untracked/qa/generated_doc_drift.json",
     "Signal Targets": "untracked/qa/signal_targets.json",
+    "Venv Interpreter Trust": "untracked/qa/venv_interpreter_trust.json",
 }
 
 all_passed = True

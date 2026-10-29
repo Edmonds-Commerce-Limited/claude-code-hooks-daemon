@@ -521,6 +521,9 @@ project handlers' own tests), `declared_invariant_pairs`, `skill_refs`,
 `canonical_callers`, `authored_path_stat`, `install_mode_marker` (only
 `daemon/install_layout.py` and `scripts/install/mode_guard.sh` may test for
 `src/claude_code_hooks_daemon` to decide the install mode), `signal_targets`,
+`venv_interpreter_trust` (a venv interpreter is judged usable only after its
+major.minor is compared with `pyvenv.cfg`; see
+[Security/UntrustedVenvInterpreter.md](Security/UntrustedVenvInterpreter.md)),
 `unreachable_handle_branch`, `fail_open_inventory`, `security`,
 `capture_corruption`, `dangerous_invocation_corpus`, `python_var_guidance`,
 `skip_list_substring`, `sensitive_content`, `british_english`, `git_history`,

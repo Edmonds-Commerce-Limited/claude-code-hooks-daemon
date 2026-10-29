@@ -738,6 +738,11 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="signal_targets.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
+    "venv_interpreter_trust": ToolConfig(
+        command=_python("check_venv_interpreter_trust.py", "--json"),
+        json_file="venv_interpreter_trust.json",
+        jq_hint="jq '.violations[] | {file, line, rule, message}'",
+    ),
     "skip_list_substring": ToolConfig(
         command=_python("check_skip_list_substring.py", "--json"),
         json_file="skip_list_substring.json",
@@ -949,6 +954,7 @@ CHANGED_TOOL_NAMES: Final[list[str]] = [
     "install_mode_marker",
     "bare_python_invocation",
     "signal_targets",
+    "venv_interpreter_trust",
     "unreachable_handle_branch",
     "fail_open_inventory",
     "security",
@@ -1311,6 +1317,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "install_mode_marker": _summarize_violations,
     "bare_python_invocation": _summarize_violations,
     "signal_targets": _summarize_violations,
+    "venv_interpreter_trust": _summarize_violations,
     "skip_list_substring": _summarize_violations,
     "unreachable_handle_branch": _summarize_violations,
     "declared_invariant_pairs": _summarize_violations,

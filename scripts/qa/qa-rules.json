@@ -595,6 +595,16 @@
       "fix": "Validate the scheme (https only) before fetching.",
       "checks": ["check_security_downgrade_flags.py"]
     },
+    "venv-exec-bit-trust": {
+      "statement": "Code judges a venv interpreter (`bin/python`, `bin/python3`, a variable bound from one or from the venv resolver, or an interpreter path read from venv metadata) usable by existence or exec bit, with no comparison of its major.minor against pyvenv.cfg. After a system Python upgrade the symlink runs another minor and cannot see the venv's site-packages, yet still passes.",
+      "fix": "In the same function read pyvenv.cfg `version` and compare it with the interpreter that will run it, or call a gate that does (`_venv_interpreter_runs`, `_rv_candidate_runs`, `_rv_cached_venv_current`); importing the package under the interpreter without editing sys.path also counts. There is no exemption marker; see CLAUDE/Security/UntrustedVenvInterpreter.md.",
+      "checks": ["check_venv_interpreter_trust.py"]
+    },
+    "venv-weak-liveness-probe": {
+      "statement": "A venv interpreter is run as `-c \"import sys\"`, `--version` or `-V` and nothing else. Any Python passes that probe, including a symlink to a different minor than the venv was built for.",
+      "fix": "Compare the venv's pyvenv.cfg major.minor with the interpreter that will run it in the same function, or call a gate that does. There is no exemption marker; see CLAUDE/Security/UntrustedVenvInterpreter.md.",
+      "checks": ["check_venv_interpreter_trust.py"]
+    },
     "wrong-github-owner": {
       "statement": "A GitHub URL names this project under an owner that is not the canonical repository.",
       "fix": "Use the canonical `Edmonds-Commerce-Limited/claude-code-hooks-daemon` URL.",

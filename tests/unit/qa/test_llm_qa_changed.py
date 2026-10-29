@@ -69,6 +69,7 @@ class TestTheChangedSelection:
             "authored_path_stat",
             "install_mode_marker",
             "signal_targets",
+            "venv_interpreter_trust",
             "unreachable_handle_branch",
             "fail_open_inventory",
             "security",

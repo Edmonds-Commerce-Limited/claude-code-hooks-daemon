@@ -17,6 +17,7 @@ anyone about to change a guard.
 | [fail-open boundaries](FailOpenBoundaries.md)                   | `scripts/qa/check_fail_open_inventory.py`         | A place in the enforcement path where the guarded action proceeds because the guard could not reach a verdict — asserted as a declared inventory, because the discriminator is a property of the surface rather than of the code |
 | [unenumerated spelling](UnenumeratedSpelling.md)                | `scripts/qa/check_dangerous_invocation_corpus.py` | A dangerous outcome reachable by a command or flag no guard's pattern names — asserted as a corpus of invocations driven through the real chain, because a match is not a denial and only the decision settles it                |
 | [unproven signal target](UnprovenSignalTarget.md)               | `scripts/qa/check_signal_targets.py`              | A nonzero signal to a pid nothing proved is the intended process — a mocked pid that coerces to 1, a PID file that outlived a restart, a group the target does not lead                                                          |
+| [untrusted venv interpreter](UntrustedVenvInterpreter.md)       | `scripts/qa/check_venv_interpreter_trust.py`      | A venv interpreter judged usable, or selected, without comparing the major.minor in its `pyvenv.cfg` with the interpreter that will run it — an exec-bit test, an `import sys` or `--version` probe, a metadata `python_path`    |
 
 **A category whose Defence cell is empty is the most important row in this
 table.** It says a class of defect is known and nothing is watching for it,
@@ -97,10 +98,10 @@ Every category in the table must name a Defence, and every Defence must be a
 Detector in `scripts/qa/` wired into `run_all.sh` like any other check — not a
 regression test, not a note, not a convention.
 
-All five categories honour it. `authored-path-stat` is check 25 in
+All six categories honour it. `authored-path-stat` is check 25 in
 `run_all.sh`, `declared-invariant-pairs` is check 26, `fail-open-inventory` is
-check 27, `dangerous-invocation-corpus` is check 28 and `signal-targets` is
-check 33; each is a Detector, each is also a step in `llm_qa.py`, and each
+check 27, `dangerous-invocation-corpus` is check 28, `signal-targets` is
+check 33 and `venv-interpreter-trust` is check 34; each is a Detector, each is also a step in `llm_qa.py`, and each
 fails rather than warns.
 
 **Nothing yet enforces that the NEXT one will.** A sixth category could name a
