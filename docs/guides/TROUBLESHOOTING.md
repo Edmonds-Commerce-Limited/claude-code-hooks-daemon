@@ -720,6 +720,8 @@ Fix the reported issues and try again. See [Configuration Issues](#9-configurati
 .claude/hooks-daemon/bin/hooks-daemon repair
 ```
 
+If the error comes from the venv's own `bin/python` after a system Python upgrade, see [Interpreter changed under the venv](../../CLAUDE/SELF_INSTALL.md#interpreter-changed-under-the-venv).
+
 ---
 
 ### "Socket path too long"

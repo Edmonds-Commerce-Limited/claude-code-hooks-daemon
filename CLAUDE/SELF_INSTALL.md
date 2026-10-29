@@ -303,6 +303,39 @@ never spell out a venv path (they are fingerprint-keyed and change):
 ./bin/hooks-daemon status
 ```
 
+### Interpreter changed under the venv
+
+**Symptom**: `ModuleNotFoundError: No module named 'claude_code_hooks_daemon'`
+raised by the venv's own `bin/python` (not a PATH `python3`), after a host or
+image update changed the system Python (for example 3.11 to 3.13). The venv's
+`bin/python` is a symlink to the system interpreter, so it now runs a different
+`major.minor` than the one the venv was built with, and the venv's
+`site-packages` is no longer on its `sys.path`.
+
+**Diagnose** (substitute the venv directory; the wrapper's venv-path output
+names it):
+
+```bash
+<venv>/bin/python -c "import sys; print(sys.version); print(sys.flags.no_site); print(*sys.path, sep='\n')"
+```
+
+Drift shows as a `sys.path` holding only system paths, with no `<venv>/lib/pythonX.Y/site-packages`.
+Compare the printed version with `version_info` (or `version`) in
+`<venv>/pyvenv.cfg`; a differing `major.minor` confirms it.
+
+**Resolution**: the venv resolvers treat a venv whose interpreter `major.minor`
+differs from `pyvenv.cfg` as stale. The normal hook bootstrap then builds a
+fresh venv for the current Python, so no action is normally needed. Manual
+fallback: remove the drifted venv directory, then restart:
+
+```bash
+.claude/hooks-daemon/bin/hooks-daemon restart
+```
+
+In self-install mode the editable install of this repository is what links the
+venv to `src/`; rebuilding the venv re-creates that link and is not installing
+the daemon from elsewhere.
+
 ### "Config file not found"
 
 **Cause**: Daemon looking in wrong location (`.claude/hooks-daemon/` instead of `/workspace/`)
