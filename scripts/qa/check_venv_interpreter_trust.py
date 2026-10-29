@@ -486,8 +486,27 @@ def _is_interpreter_word(raw: str, interp_vars: set[str]) -> bool:
     return match is not None and (match.group(1) or match.group(2)) in interp_vars
 
 
-def _shell_interpreter_variables(commands: list[_sig._Command]) -> set[str]:
-    found: set[str] = set()
+_SHELL_LOCAL_DECLARATIONS: Final = frozenset({"local", "declare", "typeset"})
+
+
+def _shell_local_names(commands: list[_sig._Command]) -> set[str]:
+    """Names a ``local``/``declare``/``typeset`` in ``commands`` makes function-private."""
+    names: set[str] = set()
+    for command in commands:
+        words, _ = _sig._stripped(command.words)
+        if not words or _sig._unquote(words[0].raw) not in _SHELL_LOCAL_DECLARATIONS:
+            continue
+        for word in words[1:]:
+            text = _sig._unquote(word.raw)
+            if not text.startswith("-"):
+                names.add(text.split("=", 1)[0])
+    return names
+
+
+def _shell_interpreter_variables(
+    commands: list[_sig._Command], seed: frozenset[str] = frozenset()
+) -> set[str]:
+    found: set[str] = set(seed)
     for _ in range(3):
         for command in commands:
             for word in command.words:
@@ -577,7 +596,24 @@ def scan_shell_source(
     commands = _sig._shell_commands(text)
     lines = text.splitlines()
     spans = _sig._function_spans(lines)
-    interp_vars = _shell_interpreter_variables(commands)
+    file_vars = _shell_interpreter_variables(commands)
+    scope_vars: dict[tuple[int, int] | None, set[str]] = {}
+
+    def interpreter_variables(scope: tuple[int, int] | None) -> set[str]:
+        """File-wide interpreter variables, minus names the function declares local.
+
+        A name declared local is a fresh variable: the outer binding does not reach it.
+        A local that the function itself binds to an interpreter is found again here.
+        """
+        if scope is None:
+            return file_vars
+        if scope not in scope_vars:
+            own = [
+                c for c in commands if c.words and _sig._scope_of(c.words[0].line, spans) == scope
+            ]
+            visible = frozenset(file_vars - _shell_local_names(own))
+            scope_vars[scope] = _shell_interpreter_variables(own, visible)
+        return scope_vars[scope]
 
     proof: dict[tuple[int, int] | None, bool] = {}
     violations: list[Violation] = []
@@ -592,14 +628,15 @@ def scan_shell_source(
             in_double_bracket = "]]" not in texts[texts.index("[[") :]
         elif "]]" in texts:
             in_double_bracket = False
+        line = words[0].line
+        scope = _sig._scope_of(line, spans)
+        interp_vars = interpreter_variables(scope)
         if _shell_existence_test(words, interp_vars, continuation):
             rule = RULE_EXEC_BIT
         elif _shell_weak_probe(words, interp_vars):
             rule = RULE_WEAK_PROBE
         else:
             continue
-        line = words[0].line
-        scope = _sig._scope_of(line, spans)
         if scope not in proof:
             proof[scope] = _shell_scope_is_proven(commands, lines, spans, scope, gates)
         if not proof[scope]:

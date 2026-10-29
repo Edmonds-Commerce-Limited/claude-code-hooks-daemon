@@ -441,6 +441,71 @@ class TestShellWeakLivenessProbe:
         assert _sh(checker, source) == []
 
 
+class TestShellLocalShadowing:
+    _OUTER = """
+        for _candidate in untracked/venv-*/bin/python; do
+            :
+        done
+    """
+
+    @pytest.mark.parametrize("keyword", ["local", "declare", "typeset"])
+    def test_a_local_declaration_shadows_an_outer_interpreter_variable(
+        self, checker: ModuleType, keyword: str
+    ) -> None:
+        source = f"""{self._OUTER}
+        find_backup() {{
+            {keyword} _candidate
+            for _candidate in conf/*.bak; do
+                [ -f "$_candidate" ] && echo "$_candidate"
+            done
+        }}
+        """
+        assert _sh(checker, source) == []
+
+    def test_a_multi_name_local_with_a_value_shadows_every_name(self, checker: ModuleType) -> None:
+        source = f"""{self._OUTER}
+        find_backup() {{
+            local other=1 _candidate="conf/x.bak"
+            [ -f "$_candidate" ]
+        }}
+        """
+        assert _sh(checker, source) == []
+
+    def test_an_unshadowed_use_inside_a_function_is_still_reported(
+        self, checker: ModuleType
+    ) -> None:
+        source = f"""{self._OUTER}
+        usable() {{
+            [ -x "$_candidate" ]
+        }}
+        """
+        assert [rule for _, rule in _sh(checker, source)] == [EXEC]
+
+    def test_a_local_that_is_itself_bound_to_an_interpreter_is_still_reported(
+        self, checker: ModuleType
+    ) -> None:
+        source = """
+        usable() {
+            local _candidate
+            _candidate="$1/bin/python"
+            [ -x "$_candidate" ]
+        }
+        """
+        assert [rule for _, rule in _sh(checker, source)] == [EXEC]
+
+    def test_shadowing_in_one_function_does_not_hide_another(self, checker: ModuleType) -> None:
+        source = f"""{self._OUTER}
+        shadowed() {{
+            local _candidate
+            [ -f "$_candidate" ]
+        }}
+        exposed() {{
+            [ -f "$_candidate" ]
+        }}
+        """
+        assert [line for line, _ in _sh(checker, source)] == [11]
+
+
 class TestShellProof:
     def test_reading_pyvenv_cfg_and_comparing_a_version_exempts_the_function(
         self, checker: ModuleType
