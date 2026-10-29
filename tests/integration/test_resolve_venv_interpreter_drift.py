@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.paths import _venv_interpreter_runs
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -45,7 +46,11 @@ def _bash_runs(candidate: Path) -> bool:
         _rv_candidate_runs "{candidate}"
         """)
     result = subprocess.run(
-        [BASH, "-c", harness], capture_output=True, text=True, check=False, timeout=30
+        [BASH, "-c", harness],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=Timeout.REQUEST_DEFAULT,
     )
     return result.returncode == 0
 
@@ -76,7 +81,11 @@ def test_pick_python_skips_a_drifted_venv(tmp_path: Path) -> None:
         """)
 
     result = subprocess.run(
-        [BASH, "-c", harness], capture_output=True, text=True, check=False, timeout=30
+        [BASH, "-c", harness],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=Timeout.REQUEST_DEFAULT,
     )
 
     assert result.returncode != 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
@@ -107,7 +116,11 @@ def _resolve_with_cache(daemon_dir: Path, cached: Path) -> subprocess.CompletedP
         _rv_resolve_python_impl "{daemon_dir}"
         """)
     return subprocess.run(
-        [BASH, "-c", harness], capture_output=True, text=True, check=False, timeout=60
+        [BASH, "-c", harness],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=Timeout.REQUEST_LONG,
     )
 
 
@@ -141,7 +154,11 @@ def test_cached_venv_check_refuses_when_system_python_link_changes(tmp_path: Pat
     harness = f'. "{RESOLVE_VENV_SH}"; _rv_cached_venv_current "{py}"'
 
     result = subprocess.run(
-        [BASH, "-c", harness], capture_output=True, text=True, check=False, timeout=30
+        [BASH, "-c", harness],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=Timeout.REQUEST_DEFAULT,
     )
 
     assert result.returncode != 0

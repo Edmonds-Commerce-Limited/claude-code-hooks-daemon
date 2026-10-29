@@ -990,10 +990,16 @@ def venv_cfg_major_minor(venv_dir: Path) -> tuple[int, int] | None:
     uv writes ``version_info``, the stdlib ``venv`` writes ``version``; the
     first such line in the file wins (the bash twin reads it the same way).
     """
+    text = ""
     try:
         text = (venv_dir / "pyvenv.cfg").read_text()
-    except OSError:
-        return None
+    except OSError as e:
+        log_and_continue(
+            logger,
+            e,
+            reason=f"a missing or unreadable {venv_dir / 'pyvenv.cfg'} records no version, so the venv cannot be judged drifted; callers treat that as 'cannot tell'",
+            level=logging.DEBUG,
+        )
     match = _PYVENV_CFG_VERSION_RE.search(text)
     if match is None:
         return None
@@ -1041,7 +1047,13 @@ def venv_interpreter_drift(venv_dir: Path) -> str | None:
                 timeout=_VENV_RUN_PROBE_TIMEOUT_SECS,
                 check=False,
             )
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, subprocess.SubprocessError) as e:
+            log_and_continue(
+                logger,
+                e,
+                reason=f"{candidate} could not be probed, so the next interpreter name is tried; if none runs the venv cannot be judged drifted (that defect is reported by _venv_interpreter_runs)",
+                level=logging.DEBUG,
+            )
             continue
         if result.returncode == 0:
             return _drift_reason(venv_dir, result.stdout)
