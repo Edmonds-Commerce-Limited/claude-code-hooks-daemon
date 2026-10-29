@@ -18,14 +18,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # --- relay hot path (generated; Plan 00290) ---
 if [[ "${1:-}" != "--no-relay" && "${BASH_SOURCE[0]}" == "/workspace/.claude/hooks/"* ]]; then
     _rl_dir="/workspace/untracked"
-    _rl_sfx="-${HOSTNAME:-localhost}"; _rl_sfx="${_rl_sfx,,}"; _rl_sfx="${_rl_sfx// /-}"
+    _rl_sfx="-${HOSTNAME:-localhost}"; _rl_sfx="${_rl_sfx// /-}"
+    if [[ "$_rl_sfx" == *[[:upper:]]* ]]; then
+        for _rl_c in Aa Bb Cc Dd Ee Ff Gg Hh Ii Jj Kk Ll Mm Nn Oo Pp Qq Rr Ss Tt Uu Vv Ww Xx Yy Zz; do
+            _rl_sfx="${_rl_sfx//${_rl_c:0:1}/${_rl_c:1:1}}"
+        done
+    fi
     _rl_events_dir="${HOOKS_DAEMON_EVENTS_DIR:-$_rl_dir/events$_rl_sfx}"
     _rl_bin="${HOOKS_DAEMON_RELAY_BINARY:-/workspace/untracked/bin/hooks-relay}"
     _rl_sock="$_rl_events_dir/instructions-loaded.sock"
     if [[ -S "$_rl_sock" ]]; then
         _rl_magic=""
         if [[ -x "$_rl_bin" && -f "$_rl_bin" ]] \
-            && read -r -N 4 _rl_magic < "$_rl_bin" \
+            && IFS= read -r -n 4 _rl_magic < "$_rl_bin" \
             && [[ "$_rl_magic" == $'\x7fELF' || "$_rl_magic" == '#!'* ]]; then
             _rl_opts="$-"
             shopt -s execfail

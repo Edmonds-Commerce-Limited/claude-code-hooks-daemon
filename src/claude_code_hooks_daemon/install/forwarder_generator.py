@@ -3,8 +3,8 @@
 The deployed ``.claude/hooks/<event>`` forwarder scripts are, today, a plain
 1:1 copy of this repository's own ``.claude/hooks/*`` (see
 ``install/client_owned_assets.py`` and ``scripts/install/hooks_deploy.sh``).
-Plan 00290 adds an opt-in relay hot path: when ``daemon.transport.relay_enabled``
-is set, each deployed forwarder gains a pure-builtin guard block (no subshell
+Plan 00290 adds a relay hot path, on by default: unless
+``daemon.transport.relay_enabled`` is false, each deployed forwarder gains a pure-builtin guard block (no subshell
 spawns) that execs the static Rust relay binary directly against its per-event
 socket, falling back to the untouched legacy body (``--no-relay`` re-entry) on
 any failure to connect.
@@ -12,9 +12,9 @@ any failure to connect.
 See ``CLAUDE/Plan/00290-rust-socket-relay-forwarder/DESIGN-socket-relay.md``
 §6.1 for the binding guard-block contract this module implements verbatim.
 
-With the config default (``relay_enabled: False``) :func:`generate_forwarder_content`
-returns its input completely unchanged — the deployed file is byte-identical
-to today's, which is the whole point of shipping this rung opt-in.
+With an explicit ``relay_enabled: false`` (and ``nc_enabled`` off)
+:func:`generate_forwarder_content` returns its input completely unchanged —
+the deployed file is the plain legacy forwarder, the opt-out transport.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import logging
 import re
+import string
 import sys
 from collections.abc import Iterable
 from pathlib import Path
@@ -307,6 +308,10 @@ def _checkout_guard_open(project_root: Path, *, honour_no_relay: bool) -> str:
     return f'if [[ {no_relay}"${{BASH_SOURCE[0]}}" == "{hooks_dir}"* ]]; then\n'
 
 
+#: "Aa Bb ... Zz": the table the generated lowercase loop walks.
+_UPPER_LOWER_PAIRS = " ".join(f"{c.upper()}{c}" for c in string.ascii_lowercase)
+
+
 def _events_dir_lines(untracked_dir: Path) -> list[str]:
     """Bash lines that set ``_rl_dir`` and ``_rl_events_dir`` with no spawn.
 
@@ -322,10 +327,15 @@ def _events_dir_lines(untracked_dir: Path) -> list[str]:
         # expansion, zero spawns, so a test fixture can still redirect this.
         lines.append(f'    _rl_events_dir="${{HOOKS_DAEMON_EVENTS_DIR:-{resolved_events_dir}}}"\n')
     else:
-        lines.append(
-            '    _rl_sfx="-${HOSTNAME:-localhost}"; _rl_sfx="${_rl_sfx,,}"; '
-            '_rl_sfx="${_rl_sfx// /-}"\n'
-        )
+        # Lowercased with parameter expansion only, one upper/lower pair per
+        # pass: `${v,,}` is bash 4+ and macOS ships /bin/bash 3.2, where the
+        # bad substitution would exit the forwarder before it judges anything.
+        lines.append('    _rl_sfx="-${HOSTNAME:-localhost}"; _rl_sfx="${_rl_sfx// /-}"\n')
+        lines.append('    if [[ "$_rl_sfx" == *[[:upper:]]* ]]; then\n')
+        lines.append(f"        for _rl_c in {_UPPER_LOWER_PAIRS}; do\n")
+        lines.append('            _rl_sfx="${_rl_sfx//${_rl_c:0:1}/${_rl_c:1:1}}"\n')
+        lines.append("        done\n")
+        lines.append("    fi\n")
         lines.append('    _rl_events_dir="${HOOKS_DAEMON_EVENTS_DIR:-$_rl_dir/events$_rl_sfx}"\n')
     return lines
 
@@ -434,7 +444,9 @@ def build_relay_guard_block(
     lines.append('    if [[ -S "$_rl_sock" ]]; then\n')
     lines.append('        _rl_magic=""\n')
     lines.append('        if [[ -x "$_rl_bin" && -f "$_rl_bin" ]] \\\n')
-    lines.append('            && read -r -N 4 _rl_magic < "$_rl_bin" \\\n')
+    # `read -n` (bash 2.04+), not `-N` (bash 4): on 3.2 `-N` is an invalid option.
+    # IFS is emptied so a leading space is not stripped from the four bytes.
+    lines.append('            && IFS= read -r -n 4 _rl_magic < "$_rl_bin" \\\n')
     lines.append(
         "            && [[ \"$_rl_magic\" == $'\\x7fELF' || \"$_rl_magic\" == '#!'* ]]; then\n"
     )
@@ -1007,12 +1019,14 @@ def generate_forwarder_content(
 def load_transport_config(project_root: Path) -> TransportConfig:
     """Resolve the effective ``daemon.transport`` config for ``project_root``.
 
-    Missing/absent config file resolves to the pure defaults (relay
-    disabled) — the same fail-safe behaviour every other config-driven
-    installer step uses. A config file that EXISTS but fails to parse
-    (malformed YAML) or fails pydantic validation resolves the same way,
-    with the failure logged rather than aborting the caller — a client's
-    broken config must not take down forwarder regeneration entirely.
+    A missing config file resolves to the pure defaults (relay on where the
+    host can run it, since the relay is the shipped default). A key absent from an existing file also
+    takes the default; an explicit ``relay_enabled: false`` is respected.
+    A config file that EXISTS but fails to parse (malformed YAML) or fails
+    pydantic validation cannot show whether the client opted out, so it
+    resolves to the legacy transport (relay off), the permanent fallback
+    rung, with the failure logged rather than aborting the caller — a
+    client's broken config must not take down forwarder regeneration.
 
     Only ``project_root``'s own config is read: an upward search would hand a
     nested project the ENCLOSING repository's transport (Plan 00466 N24).
@@ -1028,13 +1042,14 @@ def load_transport_config(project_root: Path) -> TransportConfig:
         # ValueError (malformed YAML/JSON, from ConfigLoader.load) and
         # pydantic.ValidationError (from Config.model_validate) both land
         # here — neither is a case worth distinguishing from "no usable
-        # config", so both fall back to defaults with an explicit advisory.
+        # config", so both fall back to the legacy transport with an advisory.
         logger.warning(
-            "daemon.transport config at %s is unusable (%s); falling back to defaults",
+            "daemon.transport config at %s is unusable (%s); falling back to the "
+            "legacy transport (relay off)",
             project_root / ".claude" / "hooks-daemon.yaml",
             exc,
         )
-        return TransportConfig()
+        return TransportConfig(relay_enabled=False)
 
 
 def regenerate_deployed_hooks(project_root: Path, hooks_dir: Path) -> list[str]:

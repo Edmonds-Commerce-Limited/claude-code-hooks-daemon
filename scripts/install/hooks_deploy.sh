@@ -521,18 +521,18 @@ git_force_executable() {
 }
 
 #
-# regenerate_forwarders_for_transport() - Insert the opt-in relay guard (Plan 00290)
+# regenerate_forwarders_for_transport() - Insert the relay guard (Plan 00290)
 #
 # Runs the forwarder_generator module against an already-deployed hooks dir.
-# With the config default (daemon.transport.relay_enabled: false) this is a
-# genuine no-op: the generator reads config, sees the rung disabled, and
-# touches nothing — deploy_hook_scripts already stripped any relay guard
-# block on the way in (Plan 00295 Task 1.6, _strip_relay_guard_block), so the
-# deployed forwarder is ALREADY the guard-free canonical shape before this
-# function ever runs, whether or not a venv Python was available to reach
-# this step at all. Only when a client has opted in does this rewrite the
+# The relay is the default transport (Plan 00554), so this rewrites the
 # deployed forwarders in place to add the guard block (DESIGN-socket-relay.md
-# §6.1).
+# §6.1) unless the client set daemon.transport.relay_enabled: false. With that
+# explicit opt-out this is a genuine no-op: the generator reads config, sees
+# the rung disabled, and touches nothing — deploy_hook_scripts already
+# stripped any relay guard block on the way in (Plan 00295 Task 1.6,
+# _strip_relay_guard_block), so the deployed forwarder is ALREADY the
+# guard-free canonical shape before this function ever runs, whether or not a
+# venv Python was available to reach this step at all.
 #
 # Args:
 #   $1 - project_root: Path to project root
@@ -651,8 +651,8 @@ deploy_all_hooks() {
         print_warning "Failed to set hook permissions — hooks may not fire"
     fi
 
-    # Plan 00290 Task 4.1: insert the opt-in relay hot-path guard when config
-    # enables it. NEVER in self-install mode — target_hooks IS this
+    # Plan 00290 Task 4.1: insert the relay hot-path guard unless config
+    # opts out of it. NEVER in self-install mode — target_hooks IS this
     # repository's own tracked .claude/hooks/* (deploy_hook_scripts already
     # skipped copying for the same reason above); rewriting the source of
     # truth from a generator would defeat the whole byte-identical contract.

@@ -82,16 +82,16 @@ budget is raised only by a decision recorded here with the new measurement, neve
 Ordered by measured impact. Full detail + magnitudes:
 [Plan 00154 PYTHON-TUNING.md](../Plan/Completed/00154-daemon-performance-rust-vs-python-research/PYTHON-TUNING.md).
 
-| ID  | Change                                                         | Expected                        | Risk                    | Status                                                                                       | Plan  |
-| --- | -------------------------------------------------------------- | ------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------- | ----- |
-| T1  | Cache `is_hooks_daemon_repo` (stop per-Bash `git remote` fork) | −1.4 ms/Bash event              | near-zero               | Landed (1076→2.1 µs)                                                                         | 00155 |
-| T4  | Status-line git: short per-cwd TTL cache                       | render 10.4 ms → ~4 µs (cached) | low                     | Landed                                                                                       | 00155 |
-| —   | Delete broken legacy one-shot `hooks/*.py` package             | correctness                     | low                     | Landed (deleted)                                                                             | 00155 |
-| T2  | Drop `jq` from hook wrappers (transport does JSON wrap/unwrap) | −22 ms/event                    | medium (transport)      | Landed (jq-free transport)                                                                   | 00156 |
-| T3  | Slim `init.sh` hot path (subshells, mkdir, tr pipelines)       | est. −5-8 ms/event              | medium (edge cases)     | Landed (portable tier, ~1.4 ms/event)                                                        | 00156 |
-| T5  | Single-pass/combined-alternation content scanning              | est. 2-5× on ≥100 KB writes     | medium                  | Deferred (only if large writes common)                                                       | —     |
-| T6  | `orjson` socket encode/decode                                  | −1-3 ms at MB payloads only     | low (adds compiled dep) | Not recommended                                                                              | —     |
-| —   | Compiled transport forwarder (Rust, policy-free)               | 45 → ~3-5 ms                    | high (distribution)     | Landed, opt-in (`relay/hooks_relay.rs`; 4.3 ms p50 against 34.1 ms for the Python transport) | 00290 |
+| ID  | Change                                                         | Expected                        | Risk                    | Status                                                                                        | Plan  |
+| --- | -------------------------------------------------------------- | ------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------- | ----- |
+| T1  | Cache `is_hooks_daemon_repo` (stop per-Bash `git remote` fork) | −1.4 ms/Bash event              | near-zero               | Landed (1076→2.1 µs)                                                                          | 00155 |
+| T4  | Status-line git: short per-cwd TTL cache                       | render 10.4 ms → ~4 µs (cached) | low                     | Landed                                                                                        | 00155 |
+| —   | Delete broken legacy one-shot `hooks/*.py` package             | correctness                     | low                     | Landed (deleted)                                                                              | 00155 |
+| T2  | Drop `jq` from hook wrappers (transport does JSON wrap/unwrap) | −22 ms/event                    | medium (transport)      | Landed (jq-free transport)                                                                    | 00156 |
+| T3  | Slim `init.sh` hot path (subshells, mkdir, tr pipelines)       | est. −5-8 ms/event              | medium (edge cases)     | Landed (portable tier, ~1.4 ms/event)                                                         | 00156 |
+| T5  | Single-pass/combined-alternation content scanning              | est. 2-5× on ≥100 KB writes     | medium                  | Deferred (only if large writes common)                                                        | —     |
+| T6  | `orjson` socket encode/decode                                  | −1-3 ms at MB payloads only     | low (adds compiled dep) | Not recommended                                                                               | —     |
+| —   | Compiled transport forwarder (Rust, policy-free)               | 45 → ~3-5 ms                    | high (distribution)     | Landed, default (`relay/hooks_relay.rs`; 4.3 ms p50 against 34.1 ms for the Python transport) | 00290 |
 
 ## Waves
 
