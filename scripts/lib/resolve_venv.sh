@@ -252,6 +252,45 @@ _rv_check_cfg_drift() {
     return 1
 }
 
+# _rv_link_major_minor <path>
+#
+# Echoes the "<major>.<minor>" of the deepest `pythonX.Y`-named hop in the
+# symlink chain starting at <path> (one `readlink` per hop, no interpreter
+# spawned); returns 1 when no hop carries a version.
+_rv_link_major_minor() {
+    local current="$1" target found="" hops=0 base
+    local name_re='^python([0-9]+\.[0-9]+)$'
+    while [ -L "$current" ] && [ "$hops" -lt 20 ]; do
+        target="$(readlink "$current")" || break
+        case "$target" in
+            /*) current="$target" ;;
+            *) current="${current%/*}/$target" ;;
+        esac
+        base="${current##*/}"
+        if [[ "$base" =~ $name_re ]]; then
+            found="${BASH_REMATCH[1]}"
+        fi
+        hops=$((hops + 1))
+    done
+    [ -n "$found" ] || return 1
+    printf '%s\n' "$found"
+}
+
+# _rv_cached_venv_current <venv_python>
+#
+# Plan 00555: a hot-path cache hit is valid only while the venv's pyvenv.cfg
+# major.minor still equals the one its interpreter symlink chain names. The
+# cache is keyed on untracked/'s mtime, which does not move when the SYSTEM
+# Python is upgraded, so the hit must re-check. Costs one file read plus one
+# `readlink` per symlink hop; no interpreter is spawned. Passes when either
+# side is unknown (same "cannot tell" rule as _rv_check_cfg_drift).
+_rv_cached_venv_current() {
+    local venv_dir="${1%/bin/*}" recorded linked
+    recorded="$(_rv_cfg_major_minor "$venv_dir")" || return 0
+    linked="$(_rv_link_major_minor "$1")" || return 0
+    [ "$recorded" = "$linked" ]
+}
+
 _rv_candidate_runs() {
     local candidate="$1" pid watchdog rc logfile
     local probe_code='import sys; print("%d.%d" % sys.version_info[:2])'
@@ -527,7 +566,8 @@ _rv_resolve_python_impl() {
             && [ "$cached_mtime" = "$current_mtime" ] \
             && [ -n "$cached_path" ] \
             && _rv_is_own_venv_python "$daemon_dir" "$cached_path" \
-            && [ -x "$cached_path" ]; then
+            && [ -x "$cached_path" ] \
+            && _rv_cached_venv_current "$cached_path"; then
             printf '%s\n' "$cached_path"
             return 0
         fi
