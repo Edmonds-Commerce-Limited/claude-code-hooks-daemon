@@ -684,7 +684,7 @@ run_effective_handler_restore() {
 # bootstraps the new venv from $HOOKS_DAEMON_PYTHON / python3. Stderr is
 # NOT silenced — any genuine failure from the canonical resolver
 # (paths.py SSOT missing, daemon_dir invalid, paths.py crash) is surfaced
-# to the operator. The downstream `[ -f "$VENV_PYTHON" ]` guards already
+# to the operator. The downstream `venv_python_usable "$VENV_PYTHON"` guards already
 # gate the codepaths that require an existing interpreter.
 VENV_PYTHON="$(resolve_existing_venv_python "$DAEMON_DIR")" || VENV_PYTHON=""
 if [ -z "$VENV_PYTHON" ]; then
@@ -801,7 +801,7 @@ cleanup_on_failure() {
         fi
 
         # Try to restart daemon with old code
-        if [ -f "$VENV_PYTHON" ]; then
+        if venv_python_usable "$VENV_PYTHON"; then
             print_info "Attempting to restart daemon with previous version..."
             # Best-effort rollback — we're already inside cleanup_on_failure, so
             # we cannot abort the trap if restart also fails. `if` wrapper
@@ -881,7 +881,7 @@ CURRENT_VERSION="unknown"
 VERSION_FILE="$DAEMON_DIR/src/claude_code_hooks_daemon/version.py"
 if [ -n "${HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION:-}" ]; then
     CURRENT_VERSION="$HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION"
-elif [ -f "$VERSION_FILE" ] && [ -f "$VENV_PYTHON" ]; then
+elif [ -f "$VERSION_FILE" ] && venv_python_usable "$VENV_PYTHON"; then
     CURRENT_VERSION=$("$VENV_PYTHON" -c "
 from claude_code_hooks_daemon.version import __version__
 print(__version__)
@@ -1095,7 +1095,7 @@ FASTPATH_CCY_PY
 fi
 
 # Run pre-upgrade safety checks if venv exists
-if [ -f "$VENV_PYTHON" ]; then
+if venv_python_usable "$VENV_PYTHON"; then
     # fail_on_error=false: a non-zero return is the documented "problems were
     # found and printed" signal, and is non-fatal here by design.
     if ! run_pre_install_checks "$PROJECT_ROOT" "$VENV_PYTHON" "$DAEMON_DIR" "false"; then
@@ -1163,7 +1163,7 @@ if [ -f "$TARGET_CONFIG" ]; then
 fi
 
 # Breaking changes detection (compare old vs new default config)
-if [ -f "$TARGET_CONFIG" ] && [ -f "$OLD_DEFAULT_CONFIG" ] && [ -f "$VENV_PYTHON" ]; then
+if [ -f "$TARGET_CONFIG" ] && [ -f "$OLD_DEFAULT_CONFIG" ] && venv_python_usable "$VENV_PYTHON"; then
     print_info "Analyzing config for breaking changes..."
 
     # Run config diff analyzer.
@@ -1667,7 +1667,7 @@ cleanup_old_snapshots "$DAEMON_DIR" 3
 
 # Get new version
 NEW_VERSION="unknown"
-if [ -f "$VERSION_FILE" ] && [ -f "$VENV_PYTHON" ]; then
+if [ -f "$VERSION_FILE" ] && venv_python_usable "$VENV_PYTHON"; then
     NEW_VERSION=$("$VENV_PYTHON" -c "
 from claude_code_hooks_daemon.version import __version__
 print(__version__)

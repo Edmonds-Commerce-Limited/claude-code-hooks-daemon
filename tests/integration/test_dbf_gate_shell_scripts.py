@@ -146,3 +146,26 @@ class TestQaAndDebugScriptsRefuseADriftedInterpreter:
 
         assert result.returncode == 1, result.stdout + result.stderr
         assert "not usable" in result.stdout, result.stdout + result.stderr
+
+
+UPGRADE_VERSION_SH = REPO_ROOT / "scripts" / "upgrade_version.sh"
+
+
+class TestUpgradeVersionAsksTheGate:
+    """Static contract: ``upgrade_version.sh`` is too heavy to run end to end here.
+
+    Every decision to run ``$VENV_PYTHON`` goes through ``venv_python_usable``;
+    the file existing is not evidence the interpreter works.
+    """
+
+    def test_no_file_existence_test_on_venv_python(self) -> None:
+        hits = [
+            f"{n}: {line.strip()}"
+            for n, line in enumerate(UPGRADE_VERSION_SH.read_text().splitlines(), 1)
+            if '[ -f "$VENV_PYTHON" ]' in line
+        ]
+        assert hits == []
+
+    def test_the_five_guards_use_the_gate(self) -> None:
+        text = UPGRADE_VERSION_SH.read_text()
+        assert text.count('venv_python_usable "$VENV_PYTHON"') >= 5
