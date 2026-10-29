@@ -402,7 +402,7 @@ class TestShellWeakLivenessProbe:
         "command",
         [
             """"$candidate" -c 'import sys'""",
-            '''"$candidate" -c "import sys" > /dev/null 2>&1''',
+            """"$candidate" -c "import sys" > /dev/null 2>&1""",
             '"$PYTHON_CMD" --version',
             '"$venv/bin/python" -V',
             """timeout 5 "$candidate" -c 'import sys'""",
@@ -584,6 +584,162 @@ class TestGatesAreProvenFromTheirOwnBody:
         }
         for path in checker.GATES.values():
             assert (_REPO_ROOT / path).is_file()
+
+
+class TestWidenedToMatchTheIndependentSearch:
+    """Shapes the independent search (Plan 00555) found that the first rules missed."""
+
+    def test_existence_test_inside_a_compound_double_bracket(self, checker: ModuleType) -> None:
+        source = """
+            validate() {
+                PYTHON_CMD="$(resolve_venv_python "$dir")"
+                if [[ -z "$PYTHON_CMD" || ! -f "$PYTHON_CMD" ]]; then
+                    return 1
+                fi
+            }
+        """
+        assert _sh(checker, source) == [(4, EXEC)]
+
+    def test_a_compound_double_bracket_about_something_else_is_not_reported(
+        self, checker: ModuleType
+    ) -> None:
+        source = """
+            validate() {
+                if [[ -z "$name" || ! -f "$config" ]]; then
+                    return 1
+                fi
+            }
+        """
+        assert _sh(checker, source) == []
+
+    def test_a_scan_variable_named_bin_entry_under_a_venv_glob(self, checker: ModuleType) -> None:
+        source = """
+            pick() {
+                for candidate in "${daemon_dir}"/untracked/venv-*/bin/"$name"; do
+                    [ -x "$candidate" ] || continue
+                    echo "$candidate"
+                done
+            }
+        """
+        assert _sh(checker, source) == [(4, EXEC)]
+
+    def test_a_tool_path_built_from_the_venv_dir_and_a_variable(self, checker: ModuleType) -> None:
+        source = """
+            venv_tool() {
+                local tool_path="${VENV_DIR}/bin/${tool}"
+                if [[ ! -f "${tool_path}" ]]; then
+                    return 1
+                fi
+            }
+        """
+        assert _sh(checker, source) == [(4, EXEC)]
+
+    def test_a_bin_entry_variable_outside_a_venv_is_not_reported(self, checker: ModuleType) -> None:
+        source = """
+            find_tool() {
+                local tool_path="${PREFIX}/bin/${tool}"
+                [ -x "${tool_path}" ]
+            }
+        """
+        assert _sh(checker, source) == []
+
+    @pytest.mark.parametrize(
+        "binding",
+        [
+            'python_path = Path(metadata["python_path"])',
+            'python_path = Path(metadata.get("python_path", ""))',
+            'python_path = metadata["python_path"]',
+        ],
+    )
+    def test_interpreter_path_read_from_venv_metadata(
+        self, checker: ModuleType, binding: str
+    ) -> None:
+        source = f"""
+            import os
+            from pathlib import Path
+
+            def usable(metadata):
+                {binding}
+                return python_path.is_file() and os.access(python_path, os.X_OK)
+        """
+        assert _py(checker, source) == [(7, EXEC)]
+
+    def test_another_metadata_key_is_not_an_interpreter(self, checker: ModuleType) -> None:
+        source = """
+            from pathlib import Path
+
+            def usable(metadata):
+                config = Path(metadata["config_path"])
+                return config.is_file()
+        """
+        assert _py(checker, source) == []
+
+
+class TestImportingThePackageIsTheVersionCheck:
+    """Running ``import <package>`` under the interpreter fails on a minor mismatch.
+
+    A venv built for another minor cannot see its own site-packages, so the
+    import is a stronger test than any version comparison -- provided the source
+    tree is not put on ``sys.path`` first.
+    """
+
+    def test_shell_exec_test_followed_by_a_package_import_probe(self, checker: ModuleType) -> None:
+        source = """
+            healthy() {
+                local py="$1/bin/python"
+                [ -x "$py" ] && "$py" -c "import claude_code_hooks_daemon" 2>/dev/null
+            }
+        """
+        assert _sh(checker, source) == []
+
+    def test_shell_import_probe_that_prepends_the_source_tree_is_not_proof(
+        self, checker: ModuleType
+    ) -> None:
+        source = """
+            healthy() {
+                local py="$1/bin/python"
+                [ -x "$py" ] || return 1
+                "$py" -c "import sys; sys.path.insert(0, 'src'); import claude_code_hooks_daemon"
+            }
+        """
+        assert _sh(checker, source) == [(4, EXEC)]
+
+    def test_shell_import_of_another_module_is_not_proof(self, checker: ModuleType) -> None:
+        source = """
+            healthy() {
+                local py="$1/bin/python"
+                [ -x "$py" ] && "$py" -c "import json"
+            }
+        """
+        assert _sh(checker, source) == [(4, EXEC)]
+
+    def test_python_exists_followed_by_a_package_import_probe(self, checker: ModuleType) -> None:
+        source = """
+            import subprocess
+
+            def validate(venv_python):
+                python = venv_python / "bin" / "python"
+                if not python.exists():
+                    return False
+                result = subprocess.run([str(python), "-c", "import claude_code_hooks_daemon"])
+                return result.returncode == 0
+        """
+        assert _py(checker, source) == []
+
+    def test_python_import_probe_that_edits_sys_path_is_not_proof(
+        self, checker: ModuleType
+    ) -> None:
+        source = """
+            import subprocess
+
+            def validate(venv):
+                python = venv / "bin" / "python"
+                if not python.exists():
+                    return False
+                code = "import sys; sys.path.insert(0, 'src'); import claude_code_hooks_daemon"
+                return subprocess.run([str(python), "-c", code]).returncode == 0
+        """
+        assert _py(checker, source) == [(6, EXEC)]
 
 
 class TestScope:

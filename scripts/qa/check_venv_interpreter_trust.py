@@ -102,6 +102,13 @@ _WORKTREES_PREFIX: Final[str] = ".claude/worktrees/"
 
 _INTERP_NAME: Final = re.compile(r"python(?:3(?:\.\d+)?)?")
 _INTERP_TAIL: Final = re.compile(r"bin/(?:python(?:3(?:\.\d+)?)?|\{python[^}]*\})\*?$")
+_VENV_BIN_VARIABLE: Final = re.compile(r"venv.*/bin/\$\{?\w+\}?$", re.IGNORECASE)
+_METADATA_PYTHON_KEY: Final[str] = "python_path"
+_PACKAGE: Final[str] = "claude_code_hooks_daemon"
+_SYS_PATH_EDIT: Final[str] = "sys.path"
+_SH_PACKAGE_IMPORT: Final = re.compile(
+    r"-c\s+[\"']import " + _PACKAGE + r"\b(?![^\"']*" + re.escape(_SYS_PATH_EDIT) + ")"
+)
 _PROBE_HEAD_HINT: Final = re.compile(r"python|interp|candidate|venv", re.IGNORECASE)
 _VERSION_FLAGS: Final[frozenset[str]] = frozenset({"--version", "-V"})
 _IMPORT_SYS: Final[str] = "import sys"
@@ -274,8 +281,26 @@ def _unwrap(node: ast.expr) -> ast.expr:
     return node
 
 
+def _reads_metadata_python_path(node: ast.expr) -> bool:
+    """``meta["python_path"]`` or ``meta.get("python_path", ...)``."""
+    if isinstance(node, ast.Subscript):
+        key = node.slice
+    elif (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get"
+        and node.args
+    ):
+        key = node.args[0]
+    else:
+        return False
+    return isinstance(key, ast.Constant) and key.value == _METADATA_PYTHON_KEY
+
+
 def _is_interpreter(node: ast.expr, interp_vars: set[str], python_names: frozenset[str]) -> bool:
     node = _unwrap(node)
+    if _reads_metadata_python_path(node):
+        return True
     if isinstance(node, ast.Name | ast.Attribute) and ast.unparse(node) in interp_vars:
         return True
     return _is_interpreter_path(_parts(node), python_names)
@@ -350,6 +375,33 @@ def _is_version_proof_scope(scope: ast.AST, aliases: dict[str, str], gates: froz
     return has_cfg and has_version and has_compare
 
 
+def _runs_package_import(scope: ast.AST, aliases: dict[str, str]) -> bool:
+    """Whether ``scope`` runs ``[interp, "-c", "import <package>..."]`` without editing sys.path.
+
+    A venv built for another minor cannot see its own site-packages, so
+    importing the package under the interpreter fails on a mismatch.
+    """
+    for node in _sig._walk_scope(scope):
+        if not (
+            isinstance(node, ast.Call)
+            and (_sig._dotted(node.func, aliases) or "") in _sig._SUBPROCESS_RUNNERS
+            and node.args
+            and isinstance(node.args[0], ast.List | ast.Tuple)
+        ):
+            continue
+        for flag, code in pairwise(node.args[0].elts):
+            if (
+                isinstance(flag, ast.Constant)
+                and flag.value == "-c"
+                and isinstance(code, ast.Constant)
+                and isinstance(code.value, str)
+                and code.value.strip().startswith(f"import {_PACKAGE}")
+                and _SYS_PATH_EDIT not in code.value
+            ):
+                return True
+    return False
+
+
 def _weak_probe_argv(argv: ast.expr) -> bool:
     """Whether ``argv`` is ``[interp, "-c", "import sys"]`` or ``[interp, "--version"|"-V"]``."""
     if not isinstance(argv, ast.List | ast.Tuple) or len(argv.elts) < 2:
@@ -411,7 +463,9 @@ def scan_python_source(
             if rule is None:
                 continue
             if proven is None:
-                proven = _is_version_proof_scope(scope, aliases, gates)
+                proven = _is_version_proof_scope(scope, aliases, gates) or _runs_package_import(
+                    scope, aliases
+                )
             if not proven:
                 violations.append(
                     Violation(file=reported, line=node.lineno, rule=rule, call=ast.unparse(node))
@@ -426,10 +480,10 @@ _SIMPLE_VARIABLE: Final = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
 
 def _is_interpreter_word(raw: str, interp_vars: set[str]) -> bool:
     text = _sig._unquote(raw)
-    if _INTERP_TAIL.search(text):
+    if _INTERP_TAIL.search(text) or _VENV_BIN_VARIABLE.search(text):
         return True
     match = _SIMPLE_VARIABLE.fullmatch(text)
-    return bool(match) and (match.group(1) or match.group(2)) in interp_vars
+    return match is not None and (match.group(1) or match.group(2)) in interp_vars
 
 
 def _shell_interpreter_variables(commands: list[_sig._Command]) -> set[str]:
@@ -454,13 +508,16 @@ def _shell_interpreter_variables(commands: list[_sig._Command]) -> set[str]:
     return found
 
 
-def _shell_existence_test(words: tuple[_sig._Word, ...], interp_vars: set[str]) -> bool:
-    if _sig._unquote(words[0].raw) not in _SHELL_TEST_HEADS:
+def _shell_existence_test(
+    words: tuple[_sig._Word, ...], interp_vars: set[str], continuation: bool = False
+) -> bool:
+    """Whether ``words`` test an interpreter; ``continuation`` is the tail of a ``[[ a || b ]]``."""
+    if not continuation and _sig._unquote(words[0].raw) not in _SHELL_TEST_HEADS:
         return False
     return any(
         _sig._unquote(word.raw) in _SHELL_TEST_OPERATORS
         and _is_interpreter_word(operand.raw, interp_vars)
-        for word, operand in pairwise(words[1:])
+        for word, operand in pairwise(words if continuation else words[1:])
     )
 
 
@@ -500,6 +557,8 @@ def _shell_scope_is_proven(
     text = _shell_scope_text(lines, numbers)
     if _SH_PYVENV_CFG.search(text) and _SH_VERSION.search(text):
         return True
+    if _SH_PACKAGE_IMPORT.search(text):
+        return True
     for command in commands:
         words, _ = _sig._stripped(command.words)
         if (
@@ -522,11 +581,18 @@ def scan_shell_source(
 
     proof: dict[tuple[int, int] | None, bool] = {}
     violations: list[Violation] = []
+    in_double_bracket = False
     for command in commands:
         words, _ = _sig._stripped(command.words)
         if not words:
             continue
-        if _shell_existence_test(words, interp_vars):
+        continuation = in_double_bracket
+        texts = [_sig._unquote(word.raw) for word in words]
+        if "[[" in texts:
+            in_double_bracket = "]]" not in texts[texts.index("[[") :]
+        elif "]]" in texts:
+            in_double_bracket = False
+        if _shell_existence_test(words, interp_vars, continuation):
             rule = RULE_EXEC_BIT
         elif _shell_weak_probe(words, interp_vars):
             rule = RULE_WEAK_PROBE
