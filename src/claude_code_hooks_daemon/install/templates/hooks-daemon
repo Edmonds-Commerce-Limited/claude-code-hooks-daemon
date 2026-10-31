@@ -165,14 +165,20 @@ _package_importable() {
 }
 
 # _explain_unimportable_venv() - Say why venv $1 cannot start, using the
-# stdlib-only paths.py diagnosis (Task 2.4) under the system python3, so it
-# works exactly when the venv is what is broken. Output goes to stderr.
+# stdlib-only paths.py diagnosis (Task 2.4) under the venv's OWN interpreter
+# (never a bare PATH python3, which may be older than requires-python). That
+# interpreter still runs when the venv cannot import the package. Output goes
+# to stderr.
 _explain_unimportable_venv() {
-    local venv="$1" paths_py system_python diagnosis_rc=0
+    local venv="$1" paths_py diagnosis_rc=0
+    local -a bound=()
     paths_py="$DAEMON_DIR/src/claude_code_hooks_daemon/daemon/paths.py"
-    if [ -f "$paths_py" ] && system_python="$(command -v python3)"; then
+    if command -v timeout > /dev/null; then
+        bound=(timeout "$IMPORT_PROBE_TIMEOUT")
+    fi
+    if [ -f "$paths_py" ]; then
         # diagnose-venv exits 1 for an unhealthy venv, which is the case here.
-        "$system_python" "$paths_py" diagnose-venv --daemon-dir "$DAEMON_DIR" --venv-dir "$venv" >&2 || diagnosis_rc=$?
+        "${bound[@]+"${bound[@]}"}" "$venv/bin/python" "$paths_py" diagnose-venv --daemon-dir "$DAEMON_DIR" --venv-dir "$venv" >&2 || diagnosis_rc=$?
     fi
     if [ -n "$_IMPORT_PROBE_OUTPUT" ]; then
         echo "   $_IMPORT_PROBE_OUTPUT" >&2
