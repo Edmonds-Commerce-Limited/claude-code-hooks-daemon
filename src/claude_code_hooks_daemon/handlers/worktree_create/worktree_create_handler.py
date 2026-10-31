@@ -141,7 +141,11 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
 
     @staticmethod
     def _repo_root(cwd: str) -> str:
-        """Return the repository root ``cwd`` sits in, else ``cwd`` unchanged.
+        """Return the MAIN checkout of the repository ``cwd`` sits in, else ``cwd``.
+
+        A session standing inside a linked worktree still anchors to the main
+        checkout: that is where the git-ignored seed files live and where
+        ``.claude/worktrees/`` is collected (N563).
 
         The worktree belongs to the REPOSITORY, not to whatever directory the
         session happened to be standing in. Anchoring to a raw ``cwd`` scatters
@@ -163,7 +167,7 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
                 cwd,
             )
             return cwd
-        return str(repo.root)
+        return str(repo.main_worktree_root())
 
     @staticmethod
     def _git_worktree_add(cwd: str, path: Path, branch: str) -> None:
