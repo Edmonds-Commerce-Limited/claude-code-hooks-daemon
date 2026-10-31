@@ -104,7 +104,8 @@ never be the reason the session cannot repair the daemon.
 - [x] ✅ **Task 3.2**: Add an "interpreter changed under the venv" entry to
   SELF_INSTALL.md and TROUBLESHOOTING, with the `sys.path` probe as the first
   diagnostic.
-- [ ] ⬜ **Task 3.3**: Release note in the pending-release holding area.
+- [x] ✅ **Task 3.3**: Release note in the pending-release holding area
+  (`CLAUDE/UPGRADES/UNRELEASED/release-notes/010-venv-python-version-drift.md`).
 
 ## Success Criteria
 
@@ -114,7 +115,7 @@ never be the reason the session cannot repair the daemon.
 - [ ] With the daemon down, Read and `git log` succeed and
   `hooks-daemon diagnose` names the drift.
 - [ ] A daemon-down stop loop ends after a bounded number of blocks.
-- [ ] A release note is recorded in `CLAUDE/UPGRADES/UNRELEASED/` (the
+- [x] A release note is recorded in `CLAUDE/UPGRADES/UNRELEASED/` (the
   pending-release holding area).
 
 ## Delivery & Milestones
