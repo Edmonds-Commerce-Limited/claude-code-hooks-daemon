@@ -130,7 +130,8 @@ _venv_load_gate() {
     local lib="${BASH_SOURCE[0]%/*}"
     lib="${lib%/install}/lib/resolve_venv.sh"
     [ -f "$lib" ] || return 1
-    # The path is computed from this script's own location.
+    # The library path is computed at runtime, so shellcheck cannot follow this
+    # source (it is built from this script's own location).
     # shellcheck disable=SC1090
     source "$lib"
 }
