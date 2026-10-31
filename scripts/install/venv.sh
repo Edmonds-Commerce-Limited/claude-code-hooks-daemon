@@ -1438,6 +1438,16 @@ create_venv_at_path() {
         fi
     fi
 
+    # Plan 00555 Task 3.1: `dev` is an optional-dependencies extra, so a plain
+    # sync omits it. A self-install (the daemon's own checkout) is where the
+    # daemon is developed and gets it; a client install must not (the layout
+    # rule is bin/hooks-daemon's: only <project>/.claude/hooks-daemon is one).
+    local extra_args=()
+    if [ "$(basename "$daemon_dir")" != "hooks-daemon" ] \
+            || [ "$(basename "$(dirname "$daemon_dir")")" != ".claude" ]; then
+        extra_args=(--extra dev)
+    fi
+
     local uv_output="/tmp/uv_sync_output.$$.txt"
     local uv_rc=0
 
@@ -1459,7 +1469,7 @@ create_venv_at_path() {
     # branch applies it inline via a variable (not a hardcoded literal).
     if [ -n "$first_link_mode" ]; then
         if UV_LINK_MODE="$first_link_mode" UV_PROJECT_ENVIRONMENT="$venv_path" \
-                _venv_uv sync --frozen --project "$daemon_dir" "${python_args[@]}" \
+                _venv_uv sync --frozen --project "$daemon_dir" "${extra_args[@]}" "${python_args[@]}" \
                 > "$uv_output" 2>&1; then
             uv_rc=0
         else
@@ -1467,7 +1477,7 @@ create_venv_at_path() {
         fi
     else
         if UV_PROJECT_ENVIRONMENT="$venv_path" \
-                _venv_uv sync --frozen --project "$daemon_dir" "${python_args[@]}" \
+                _venv_uv sync --frozen --project "$daemon_dir" "${extra_args[@]}" "${python_args[@]}" \
                 > "$uv_output" 2>&1; then
             uv_rc=0
         else
@@ -1485,7 +1495,7 @@ create_venv_at_path() {
     if [ -f "$uv_output" ] && grep -q "Failed to hardlink" "$uv_output"; then
         print_warning "uv hardlink failed (likely overlay-fs) — retrying with UV_LINK_MODE=copy. Set UV_LINK_MODE=copy in your environment to skip the hardlink attempt and silence this notice."
         rm -rf "$venv_path"  # clean slate for the retry
-        if UV_LINK_MODE=copy UV_PROJECT_ENVIRONMENT="$venv_path" _venv_uv sync --frozen --project "$daemon_dir" "${python_args[@]}" \
+        if UV_LINK_MODE=copy UV_PROJECT_ENVIRONMENT="$venv_path" _venv_uv sync --frozen --project "$daemon_dir" "${extra_args[@]}" "${python_args[@]}" \
                 > "$uv_output" 2>&1; then
             uv_rc=0
         else

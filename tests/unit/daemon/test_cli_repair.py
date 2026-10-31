@@ -428,7 +428,7 @@ class TestCmdRepairTargetsTheDaemonDir:
             yield
 
         def fake_run(argv: list[str], **kwargs: object) -> MagicMock:
-            if argv == [_UV, "sync"]:
+            if argv[:2] == [_UV, "sync"]:
                 sync_calls.append({"argv": argv, **kwargs})
             done = MagicMock()
             done.returncode = 0
@@ -511,3 +511,24 @@ class TestCmdRepairTargetsTheDaemonDir:
         assert isinstance(env, dict)
         expected = project / "untracked" / f"venv-{python_venv_fingerprint(project)}"
         assert env["UV_PROJECT_ENVIRONMENT"] == str(expected)
+
+
+class TestRepairInstallsDevExtrasOnSelfInstallOnly:
+    """Plan 00555 Task 3.1: ``dev`` is an extra, so a bare ``uv sync`` omits it."""
+
+    def _sync_argv(self, daemon_dir: Path) -> list[str]:
+        from claude_code_hooks_daemon.daemon.cli import _repair_venv_locked
+
+        venv_path = daemon_dir / "untracked" / "venv-x-py311-00000000"
+        done = MagicMock(returncode=1, stderr="stop here", stdout="")
+        with patch("subprocess.run", return_value=done) as mock_run:
+            _repair_venv_locked(daemon_dir, venv_path, {})
+        argv: list[str] = mock_run.call_args_list[0].args[0]
+        return argv
+
+    def test_self_install_layout_syncs_with_the_dev_extra(self, tmp_path: Path) -> None:
+        assert self._sync_argv(tmp_path / "checkout") == [_UV, "sync", "--extra", "dev"]
+
+    def test_client_layout_syncs_without_extras(self, tmp_path: Path) -> None:
+        daemon_dir = tmp_path / "project" / ".claude" / "hooks-daemon"
+        assert self._sync_argv(daemon_dir) == [_UV, "sync"]
