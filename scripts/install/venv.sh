@@ -1069,6 +1069,13 @@ release_venv_lock() {
 _venv_is_fresh() {
     local daemon_dir="$1" venv_path="$2" target_version="$3"
     [ -d "$venv_path" ] || return 1
+    # Plan 00555 Task 2.3: a caller that has proved the venv unusable although
+    # its lock hash matches (it cannot import the package) forces a rebuild.
+    # Set by `venv_bootstrap.sh repair --rebuild`, in that process only.
+    if [ "${_VENV_FORCE_REBUILD:-0}" = "1" ]; then
+        print_info "ensure_venv: rebuild forced — not reusing $venv_path"
+        return 1
+    fi
     # Plan 00100 Task 3.7: lock_hash is authoritative. A daemon upgrade or
     # downgrade with unchanged deps (pyproject.toml + uv.lock) must reuse the
     # existing venv — the legacy `.daemon-version` SemVer stamp is advisory.

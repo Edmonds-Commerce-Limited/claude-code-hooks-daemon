@@ -69,6 +69,9 @@
 #    daemon/signal_standalone.py is standard-library-only, so its arm execs
 #    it directly under a system python3 and never touches venv_bootstrap.sh.
 #    Plan 00431 is the precedent for moving a check ahead of venv resolution.
+#    `repair` also takes that arm when a venv resolves but cannot import the
+#    package (Plan 00555 Task 2.3), with a forced rebuild: see the import probe
+#    after the interpreter is resolved.
 #    `_run_venv_free_verb` is the one place such verbs are listed; a new
 #    venv-free verb is a new arm there.
 
@@ -137,6 +140,45 @@ _subcommand_of() {
     return 1
 }
 
+# Set by the import probe further down when a venv resolves yet cannot import
+# the package: `repair` then takes the venv-free arm below with a forced
+# rebuild (a matching lock hash would otherwise make the build reuse the
+# broken venv). Empty on the ordinary no-venv-resolves path.
+_VENV_FREE_REASON=""
+_VENV_FREE_REBUILD=""
+
+# Upper bound, in seconds, on the package-import probe (Plan 00555 Task 2.3).
+IMPORT_PROBE_TIMEOUT="${HOOKS_DAEMON_IMPORT_PROBE_TIMEOUT_SECONDS:-20}"
+
+# _package_importable() - True (0) iff interpreter $1 can import the daemon CLI.
+# Bounded by `timeout` where it exists; a hang counts as "cannot import". The
+# interpreter's own error text is left in _IMPORT_PROBE_OUTPUT for the caller.
+_IMPORT_PROBE_OUTPUT=""
+_package_importable() {
+    local python="$1" rc=0
+    local -a bound=()
+    if command -v timeout > /dev/null; then
+        bound=(timeout "$IMPORT_PROBE_TIMEOUT")
+    fi
+    _IMPORT_PROBE_OUTPUT="$("${bound[@]+"${bound[@]}"}" "$python" -c 'import claude_code_hooks_daemon.daemon.cli' 2>&1)" || rc=$?
+    return "$rc"
+}
+
+# _explain_unimportable_venv() - Say why venv $1 cannot start, using the
+# stdlib-only paths.py diagnosis (Task 2.4) under the system python3, so it
+# works exactly when the venv is what is broken. Output goes to stderr.
+_explain_unimportable_venv() {
+    local venv="$1" paths_py system_python diagnosis_rc=0
+    paths_py="$DAEMON_DIR/src/claude_code_hooks_daemon/daemon/paths.py"
+    if [ -f "$paths_py" ] && system_python="$(command -v python3)"; then
+        # diagnose-venv exits 1 for an unhealthy venv, which is the case here.
+        "$system_python" "$paths_py" diagnose-venv --daemon-dir "$DAEMON_DIR" --venv-dir "$venv" >&2 || diagnosis_rc=$?
+    fi
+    if [ -n "$_IMPORT_PROBE_OUTPUT" ]; then
+        echo "   $_IMPORT_PROBE_OUTPUT" >&2
+    fi
+}
+
 # The verbs that run when NO venv resolves (design note 4), one case arm each,
 # keyed on the subcommand wherever it sits among the global options. An arm
 # either makes a venv resolve, sets PYTHON and returns 0 so the normal path
@@ -163,8 +205,9 @@ _run_venv_free_verb() {
                 echo "   upgrade (hooks-daemon skill: upgrade) restores its tracked files." >&2
                 exit 5
             fi
-            echo "hooks-daemon repair: no venv resolves for this project path, so one is built first." >&2
-            if ! bash "$BOOTSTRAP" repair "$DAEMON_DIR"; then
+            echo "hooks-daemon repair: ${_VENV_FREE_REASON:-no venv resolves for this project path, so one is built first.}" >&2
+            # ${var:+--rebuild} is empty unless the venv resolved but is broken.
+            if ! bash "$BOOTSTRAP" repair "$DAEMON_DIR" ${_VENV_FREE_REBUILD:+--rebuild}; then
                 echo "❌ hooks-daemon repair: the venv for this project path could not be built (see above)." >&2
                 exit 1
             fi
@@ -281,6 +324,20 @@ fi
 if ! venv_python_usable "$PYTHON"; then
     echo "❌ hooks-daemon: resolved interpreter is not usable (not executable, cannot run, or its Python version no longer matches its venv): $PYTHON" >&2
     exit 5
+fi
+
+# A venv can resolve (right version) and still lack the package: an uninstalled
+# dist, a partial sync, a stale editable .pth. Its lock hash then matches, so
+# only `repair` with a forced rebuild fixes it, and the Python CLI cannot run to
+# do that itself (Plan 00555 Task 2.3). Probed for `repair` ONLY: every other
+# verb would pay a CLI import for it, and the hook hot path never comes here.
+_verb="$(_subcommand_of "$@")" || _verb=""
+if [ "$_verb" = "repair" ] && ! _package_importable "$PYTHON"; then
+    _venv_dir="$(dirname "$(dirname "$PYTHON")")"
+    _VENV_FREE_REBUILD=1
+    _VENV_FREE_REASON="the venv at $_venv_dir resolves but cannot import claude_code_hooks_daemon, so it is rebuilt."
+    _explain_unimportable_venv "$_venv_dir"
+    _run_venv_free_verb "$@"
 fi
 
 # Derive THIS wrapper's own project root, so the daemon managed is this
