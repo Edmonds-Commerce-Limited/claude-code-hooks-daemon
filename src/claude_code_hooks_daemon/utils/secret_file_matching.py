@@ -235,6 +235,30 @@ def resolve_configured_patterns() -> tuple[str, ...]:
     return _CONFIGURED_PATTERNS
 
 
+PROTECTED_PATHS_SNAPSHOT_NAME: Final[str] = ".protected-paths.snapshot"
+
+
+def write_protected_paths_snapshot() -> Path:
+    """Write the effective protected globs, one per line, for ``init.sh``.
+
+    ``init.sh`` cannot load the daemon's config while the daemon is down, so it
+    reads this file from the daemon untracked directory instead. The write is
+    atomic (temp file then ``os.replace``). Raises ``OSError`` when the
+    directory cannot be written; the caller decides whether that is fatal.
+    """
+    from claude_code_hooks_daemon.core.project_context import ProjectContext
+
+    target = ProjectContext.daemon_untracked_dir() / PROTECTED_PATHS_SNAPSHOT_NAME
+    temp = target.with_name(target.name + f".{os.getpid()}.tmp")
+    try:
+        temp.write_text("".join(f"{glob}\n" for glob in resolve_configured_patterns()))
+        temp.replace(target)
+    except OSError:
+        temp.unlink(missing_ok=True)
+        raise
+    return target
+
+
 def reset_configured_patterns_cache() -> None:
     """Clear the process-lifetime resolved-patterns cache. Test-only escape hatch."""
     global _CONFIGURED_PATTERNS_RESOLVED, _CONFIGURED_PATTERNS
