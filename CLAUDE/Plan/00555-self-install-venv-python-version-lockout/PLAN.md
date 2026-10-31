@@ -101,7 +101,7 @@ never be the reason the session cannot repair the daemon.
   live daemon venv is `venv-workspace-py313-0d6d49c6`. Make the self-install
   bootstrap install the `dev` extras, which were installed by hand after the
   incident.
-- [ ] ⬜ **Task 3.2**: Add an "interpreter changed under the venv" entry to
+- [x] ✅ **Task 3.2**: Add an "interpreter changed under the venv" entry to
   SELF_INSTALL.md and TROUBLESHOOTING, with the `sys.path` probe as the first
   diagnostic.
 - [ ] ⬜ **Task 3.3**: Release note in the pending-release holding area.
