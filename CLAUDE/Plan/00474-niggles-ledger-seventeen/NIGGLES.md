@@ -124,6 +124,26 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N566 — the goal evaluator keeps re-entering a goal-blocked session, so the retraction never runs
+
+**Source**: dogfood, 2026-10-31, in the session working Plan 00555.
+
+**Evidence**: the goal-loop detector put the session in goal-blocked mode and told it to run
+`bin/hooks-daemon clear-goal`, journal the reason and stop. The session did all three: the queued
+retraction is reported, and the journal entry is `131551Z-decision-c83609.md`. The retraction waits
+for the ccy supervisor to type `/goal clear` "at its next idle". On every `[awaiting-human]` stop,
+though, the goal's stop-hook evaluator rejects the stop and feeds the condition back in. That
+happened six times in a row, each time with the same reasoning (Tasks 2.5 and 2.6 still unticked
+and owner decisions not obtained), so the session never goes idle. Each rejection costs a full
+model turn and buys nothing.
+
+**Fix direction**: while the goal-blocked mode or a queued retraction is live, the goal evaluator's
+re-entry should be stood down, or the retraction applied directly, rather than waiting for an idle
+that the evaluator itself prevents. The alternative is for the goal-loop block to accept an
+`[awaiting-human]` stop as final.
+
+**Status**: ⬜ open.
+
 ### N565 — a venv self-heal leaves the old-key venv behind, and `untracked/lsp-venv` is not repointed until the daemon starts
 
 **Source**: dogfood, 2026-10-31. Plan 00555's drift self-heal demonstration
