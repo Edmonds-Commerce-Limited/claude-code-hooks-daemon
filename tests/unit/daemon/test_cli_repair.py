@@ -22,8 +22,10 @@ from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.cli import (
     _UV_SYNC_TIMEOUT_SECONDS,
     _VERIFY_IMPORT_TIMEOUT_SECONDS,
+    _judge_repaired_venv_is_resolved,
     cmd_repair,
 )
+from claude_code_hooks_daemon.daemon.paths import python_venv_fingerprint
 from claude_code_hooks_daemon.daemon.venv_lock import VenvLockTimeout
 
 #: The uv every test here resolves, wherever this machine keeps its own.
@@ -33,6 +35,59 @@ _UV: str = "/opt/uv/bin/uv"
 @pytest.fixture(autouse=True)
 def _resolved_uv(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("claude_code_hooks_daemon.daemon.cli.find_uv", lambda: _UV)
+
+
+@pytest.fixture(autouse=True)
+def _resolver_names_the_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The mocked syncs build nothing on disk, so let the resolver name the repair's target.
+
+    The judge itself is tested for real in ``TestRepairIsJudgedByTheResolver``.
+    """
+
+    def _target(daemon_dir: Path | str) -> tuple[Path, list[str]]:
+        keyed = Path(daemon_dir) / "untracked" / f"venv-{python_venv_fingerprint(daemon_dir)}"
+        return keyed / "bin" / "python", []
+
+    monkeypatch.setattr(
+        "claude_code_hooks_daemon.daemon.cli.resolve_existing_venv_python_with_diagnostics",
+        _target,
+    )
+
+
+class TestRepairIsJudgedByTheResolver:
+    """Plan 00555 Task 2.1: a repair that the resolver does not pick is not a repair."""
+
+    def test_the_resolved_venv_being_the_repaired_one_succeeds(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        built = tmp_path / "untracked" / "venv-built"
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.daemon.cli.resolve_existing_venv_python_with_diagnostics",
+            lambda _d: (built / "bin" / "python", []),
+        )
+        assert _judge_repaired_venv_is_resolved(tmp_path, built) == 0
+
+    def test_another_venv_winning_resolution_fails_and_names_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        built = tmp_path / "untracked" / "venv-built"
+        older = tmp_path / "untracked" / "venv-older"
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.daemon.cli.resolve_existing_venv_python_with_diagnostics",
+            lambda _d: (older / "bin" / "python", []),
+        )
+        assert _judge_repaired_venv_is_resolved(tmp_path, built) == 1
+        assert str(older) in capsys.readouterr().out
+
+    def test_nothing_resolving_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.daemon.cli.resolve_existing_venv_python_with_diagnostics",
+            lambda _d: (None, []),
+        )
+        assert _judge_repaired_venv_is_resolved(tmp_path, tmp_path / "untracked" / "venv-x") == 1
+        assert "no venv" in capsys.readouterr().out
 
 
 class TestCmdRepairUsesTheBuildsUv:

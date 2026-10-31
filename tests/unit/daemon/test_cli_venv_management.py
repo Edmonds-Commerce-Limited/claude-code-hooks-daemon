@@ -16,7 +16,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from claude_code_hooks_daemon.daemon import cli
-from claude_code_hooks_daemon.daemon.paths import python_venv_fingerprint
+from claude_code_hooks_daemon.daemon.paths import (
+    _compute_project_lock_hash_stdlib,
+    python_venv_fingerprint,
+)
 
 STALE_HASH = "sha256:" + "0" * 64
 
@@ -27,6 +30,15 @@ def _make_venv(path: Path, stamp_version: str | None = None, lock_hash: str | No
     ``lock_hash`` writes readable metadata; one that differs from the project's
     makes the venv proven stale, none leaves it UNPROVEN.
     """
+    daemon_dir = path.parent.parent
+    if (
+        lock_hash is None
+        and path.name == f"venv-{python_venv_fingerprint(daemon_dir)}"
+        and (daemon_dir / "pyproject.toml").is_file()
+    ):
+        # The one resolver (Plan 00555 Task 2.1) refuses a stamp-only venv, so the
+        # fingerprint-keyed venv a test calls "current" carries current metadata.
+        lock_hash = _compute_project_lock_hash_stdlib(daemon_dir)
     (path / "bin").mkdir(parents=True)
     (path / "bin" / "python").write_text('#!/bin/sh\nexec /usr/bin/python3 "$@"\n')
     (path / "bin" / "python").chmod(0o755)
@@ -339,6 +351,7 @@ class TestEnumerateVenvsInstallModes:
         daemon_dir = tmp_path / ".claude" / "hooks-daemon"
         untracked = daemon_dir / "untracked"
         untracked.mkdir(parents=True)
+        (daemon_dir / "pyproject.toml").write_text("[project]\nname = 'x'\n")
         # A client install keys its venv on the DAEMON dir (Plan 00456), so the
         # resolver serves this one and the legacy venv/ is not live.
         fp = python_venv_fingerprint(daemon_dir)
@@ -429,6 +442,10 @@ class TestRepairUsesFingerprintKeyedPath:
             ),
             patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None),
             patch("subprocess.run", side_effect=fake_run),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.resolve_existing_venv_python_with_diagnostics",
+                return_value=(expected_venv / "bin" / "python", []),
+            ),
         ):
             rc = cli.cmd_repair(args)
 

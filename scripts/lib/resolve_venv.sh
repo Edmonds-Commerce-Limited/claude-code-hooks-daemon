@@ -395,7 +395,7 @@ _rv_current_lock_hash() {
 # Sets _RV_SCAN_RANK (no subshell, no fork): 0 when the venv's
 # .daemon-metadata.json lock_hash equals <current_lock_hash>, 2 for a legacy
 # un-slugged name (venv-py{MM}-{hex}), else 1. Mirrors paths.py's
-# `_best_ranked_scan_candidate`.
+# `_scan_rank`.
 _rv_rank_scan_candidate() {
     local venv_dir="$1" current_hash="$2" metadata
     local lock_re='"lock_hash"[[:space:]]*:[[:space:]]*"([^"]*)"'

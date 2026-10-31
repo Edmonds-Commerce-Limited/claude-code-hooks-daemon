@@ -265,12 +265,27 @@ _vb_print_running() {
 }
 
 #
+# _vb_resolved_is_built() - True when the resolved interpreter belongs to the built venv.
+#
+# Args: $1 resolved interpreter (bin/python), $2 the venv directory just built.
+# Compares real paths of the venv directories, so a still-usable older venv
+# that the resolver prefers is not certified as this build's success.
+#
+_vb_resolved_is_built() {
+    local resolved_dir built_dir
+    resolved_dir="$(cd "$(dirname "$1")/.." 2> /dev/null && pwd -P)" || return 1
+    built_dir="$(cd "$2" 2> /dev/null && pwd -P)" || return 1
+    [ "$resolved_dir" = "$built_dir" ]
+}
+
+#
 # _vb_build_under_lock() - Build with the lock held, then judge the result.
 #
 # Success is judged by the RESOLVER, not by ensure_venv's exit code: a venv
 # whose metadata write failed is stamp-only, the resolver refuses it, and no
-# hook could start the daemon from it. Records or clears the failed-build
-# marker accordingly.
+# hook could start the daemon from it. The venv that resolves must also BE the
+# one just built: another usable venv winning resolution is a failed build.
+# Records or clears the failed-build marker accordingly.
 #
 # Bootstrap switched off here is NOT a failed build: ensure_venv would skip
 # and report success, so the build is refused up front and no marker is left.
@@ -280,7 +295,7 @@ _vb_print_running() {
 #
 _vb_build_under_lock() {
     local daemon_dir="$1" python="$2" fingerprint="$3" inputs="$4"
-    local marker version build_rc=0 resolved switched_off
+    local marker version build_rc=0 resolved switched_off built=""
     marker="$(_vb_marker_path "$daemon_dir" "$fingerprint")"
 
     if switched_off="$(venv_bootstrap_switched_off_by)"; then
@@ -290,7 +305,8 @@ _vb_build_under_lock() {
 
     if version="$(_vb_clone_version "$daemon_dir")"; then
         print_info "venv bootstrap: building the venv for $daemon_dir with $python (fingerprint $fingerprint)"
-        if ! ensure_venv_locked "$daemon_dir" "v$version" "$python" > /dev/null; then
+        # ensure_venv_locked echoes the venv directory it built on stdout.
+        if ! built="$(ensure_venv_locked "$daemon_dir" "v$version" "$python")"; then
             build_rc=1
         fi
     else
@@ -298,6 +314,13 @@ _vb_build_under_lock() {
     fi
 
     if [ "$build_rc" -eq 0 ] && resolved="$(resolve_venv_python "$daemon_dir")"; then
+        if ! _vb_resolved_is_built "$resolved" "$built"; then
+            print_error "venv bootstrap: the build produced $built, but $resolved is what resolves for this path."
+            build_rc=1
+        fi
+    fi
+
+    if [ "$build_rc" -eq 0 ]; then
         rm -f "$marker"
         print_success "venv bootstrap SUCCEEDED: $resolved resolves for this path. The next hook starts the daemon."
         _vb_record_result "$daemon_dir" "$fingerprint" succeeded 0

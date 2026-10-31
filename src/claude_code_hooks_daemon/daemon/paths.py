@@ -1101,93 +1101,39 @@ _SCAN_RANK_SLUGGED = 1
 _SCAN_RANK_LEGACY = 2
 
 
-def _best_ranked_scan_candidate(daemon_path: Path, untracked: Path) -> Path | None:
-    """Return the best usable ``venv-*/bin/python`` under ``untracked``, or ``None``.
-
-    Candidates must be slug-eligible (:func:`_venv_slug_eligible`) with a
-    ``bin/python`` that passes :func:`venv_interpreter_usable`. They are ranked,
-    best first:
+def _scan_rank(candidate_dir: Path, current_hash: str | None) -> int:
+    """Rank one ``venv-*`` directory for the scan step, lower is better.
 
     1. metadata ``lock_hash`` equal to the current source's lock hash
-       (:func:`_compute_project_lock_hash_stdlib`) — the venv built for THIS source;
+       (:func:`_compute_project_lock_hash_stdlib`) -- the venv built for THIS source;
     2. other slugged candidates;
     3. legacy un-slugged candidates (``venv-py{MM}-{hex}``).
 
-    Ties keep the sorted-name order. Ranking costs stdlib hashing and one JSON
-    read per candidate; the usability gate (one probe subprocess) runs only on
-    candidates in rank order, until the first one passes.
+    Costs one JSON read; the caller sorts stably, so ties keep sorted-name order.
     """
-    current_slug = project_path_slug(daemon_path)
-    current_hash = _compute_project_lock_hash_stdlib(daemon_path)
-    ranked: list[tuple[int, Path]] = []
-    for candidate_dir in sorted(untracked.glob("venv-*")):
-        eligible, _skip_reason = _venv_slug_eligible(candidate_dir, current_slug)
-        if not eligible:
-            continue
-        candidate = candidate_dir / "bin" / "python"
-        metadata = _read_venv_metadata_stdlib(candidate_dir)
-        if (
-            current_hash is not None
-            and metadata is not None
-            and (metadata["lock_hash"] == current_hash)
-        ):
-            rank = _SCAN_RANK_LOCK_HASH_MATCH
-        elif _parse_venv_dir_slug(candidate_dir.name) is not None:
-            rank = _SCAN_RANK_SLUGGED
-        else:
-            rank = _SCAN_RANK_LEGACY
-        ranked.append((rank, candidate))
-    for _rank, candidate in sorted(ranked, key=lambda entry: entry[0]):
-        if venv_interpreter_usable(candidate):
-            return candidate
-    return None
+    metadata = _read_venv_metadata_stdlib(candidate_dir)
+    if current_hash is not None and metadata is not None and metadata["lock_hash"] == current_hash:
+        return _SCAN_RANK_LOCK_HASH_MATCH
+    if _parse_venv_dir_slug(candidate_dir.name) is not None:
+        return _SCAN_RANK_SLUGGED
+    return _SCAN_RANK_LEGACY
 
 
 def resolve_existing_venv_python(daemon_dir: Path | str) -> Path:
     """Resolve the bin/python of an already-installed venv under ``daemon_dir``.
 
-    Precedence (matches
-    ``src/claude_code_hooks_daemon/skills/hooks-daemon/scripts/_resolve-venv.sh``
-    so Python-side and bash-side resolvers agree):
+    A thin, never-raising wrapper over
+    :func:`resolve_existing_venv_python_with_diagnostics`, the single
+    precedence implementation (override, metadata, fingerprint, scan, legacy;
+    Plan 00555 Task 2.1). It exists for callers that want a best-effort path
+    even when nothing is provisioned, so they can print a useful "venv
+    missing" message:
 
-    1. ``$HOOKS_DAEMON_VENV_PATH/bin/python`` — explicit override
-    2. ``{daemon_dir}/untracked/venv-{current-fingerprint}/bin/python`` — fingerprint match
-    3. Best-ranked executable ``{daemon_dir}/untracked/venv-*/bin/python`` — scan
-       fallback (see :func:`_best_ranked_scan_candidate`): a venv whose metadata
-       ``lock_hash`` matches the current source first, other slugged venvs next,
-       legacy un-slugged ``venv-py{MM}-{hex}`` venvs last
-    4. ``{daemon_dir}/untracked/venv/bin/python`` — legacy (pre-v3.7.0)
-
-    The scan fallback (step 3) handles the case where the installer built
-    the venv under one interpreter (e.g. ``/usr/bin/python3.13`` →
-    fingerprint ``py313-956ed987``) but the resolver's current Python is
-    a different interpreter (e.g. ``python3`` → 3.9 → fingerprint
-    ``py39-3bb0ae3d``). The venv's own ``bin/python`` is a symlink to the
-    installer's chosen base interpreter, so the scanned venv is fully
-    usable regardless of the resolver's current PATH.
-
-    The scan first refuses any candidate whose embedded project-path slug
-    does not match :func:`project_path_slug` of the current root, via
-    :func:`_venv_slug_eligible` (Plan 00313) — so "fully usable" above means
-    usable for THIS view of the project, not any venv found under
-    ``untracked/``. A host view and a container view of one bind-mounted
-    project therefore never reuse each other's venv. Steps 1, 2 and 4 do not
-    check the slug: an explicit override, an exact fingerprint-keyed path,
-    and the legacy un-slugged directory respectively.
-
-    Step 4 is returned without an existence check so callers can produce
-    a useful "venv missing" error message that still mentions the legacy
-    path (relevant for brand-new installs where nothing has been
-    provisioned yet).
-
-    Steps 2 and 3 judge each candidate through :func:`venv_interpreter_usable`
-    (Plan 00555): the callers include shell scripts that EXECUTE the result
-    (``health_check.sh``, ``upgrade_version.sh``, ``qa/run_all.sh``), and a
-    venv whose interpreter now runs a different ``major.minor`` than its
-    ``pyvenv.cfg`` records cannot see its own site-packages. The cost is one
-    bounded probe per candidate tried, in rank order, stopping at the first
-    usable one. The explicit override (step 1) is returned as given, and so is
-    the step 4 fallback.
+    - ``$HOOKS_DAEMON_VENV_PATH`` set but unusable: that override's
+      ``bin/python`` as given, so the caller's message names the path the
+      operator chose (the diagnostics resolver falls through instead);
+    - nothing usable and no override: the legacy
+      ``{daemon_dir}/untracked/venv/bin/python`` (a brand-new install).
 
     Args:
         daemon_dir: Daemon installation directory (holds ``untracked/``).
@@ -1195,30 +1141,17 @@ def resolve_existing_venv_python(daemon_dir: Path | str) -> Path:
           In self-install mode: the project root itself.
 
     Returns:
-        Absolute path to the resolved ``bin/python``.
+        Path to the resolved ``bin/python`` (or ``bin/python3``), or the
+        best-effort fallback described above.
     """
-    daemon_path = Path(daemon_dir)
-
     override = os.environ.get("HOOKS_DAEMON_VENV_PATH")
-    if override:
+    resolved, _steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+    if override and (resolved is None or not resolved.is_relative_to(Path(override))):
+        # An explicit override always wins, usable or not (see docstring).
         return Path(override) / "bin" / "python"
-
-    untracked = daemon_path / "untracked"
-
-    keyed = untracked / f"venv-{python_venv_fingerprint(daemon_path)}" / "bin" / "python"
-    if venv_interpreter_usable(keyed):
-        return keyed
-
-    if untracked.is_dir():
-        scanned = _best_ranked_scan_candidate(daemon_path, untracked)
-        if scanned is not None:
-            return scanned
-
-    # TODO Plan 00100 Phase 2: once this Python entry point becomes the single
-    # SSOT (bash resolvers shell out here), remove the scan fallback above and
-    # return based solely on the persisted `.daemon-metadata.json` choice.
-    # Legacy fallback retained only for pre-v3.7.0 installs.
-    return untracked / "venv" / "bin" / "python"
+    if resolved is not None:
+        return resolved
+    return Path(daemon_dir) / "untracked" / "venv" / "bin" / "python"
 
 
 def resolve_existing_venv_python_with_diagnostics(
@@ -1226,7 +1159,8 @@ def resolve_existing_venv_python_with_diagnostics(
 ) -> tuple[Path | None, list[str]]:
     """Resolve the venv python path, returning diagnostics for every step tried.
 
-    Unlike :func:`resolve_existing_venv_python`, this function never returns a
+    Unlike :func:`resolve_existing_venv_python` (which wraps this and adds a
+    best-effort fallback), this function never returns a
     path that does not exist. It returns ``(resolved_path, steps)`` where
     ``resolved_path`` is ``None`` on failure and ``steps`` is the full
     per-precedence-step diagnostic log (always populated, for both success
@@ -1242,7 +1176,9 @@ def resolve_existing_venv_python_with_diagnostics(
        for lookup.
     3. ``{daemon_dir}/untracked/venv-{current-fingerprint}/bin/python(3)`` —
        fingerprint-keyed (legacy naming convenience)
-    4. First executable ``{daemon_dir}/untracked/venv-*/bin/python(3)`` —
+    4. Best-ranked executable ``{daemon_dir}/untracked/venv-*/bin/python(3)``
+       (lock-hash-matching metadata, then slugged, then legacy un-slugged;
+       see :func:`_scan_rank`) —
        scan fallback (legacy)
     5. ``{daemon_dir}/untracked/venv/bin/python(3)`` — legacy (pre-v3.7.0)
 
@@ -1457,7 +1393,10 @@ def resolve_existing_venv_python_with_diagnostics(
     unrunnable_scan: list[str] = []
     if untracked.is_dir():
         scan_current_slug = project_path_slug(daemon_path)
-        for candidate_dir in sorted(untracked.glob("venv-*")):
+        scan_hash = _compute_project_lock_hash_stdlib(daemon_path)
+        for candidate_dir in sorted(
+            sorted(untracked.glob("venv-*")), key=lambda d: _scan_rank(d, scan_hash)
+        ):
             scanned.append(str(candidate_dir / "bin" / "python"))
             eligible, slug_skip_reason = _venv_slug_eligible(candidate_dir, scan_current_slug)
             if not eligible:

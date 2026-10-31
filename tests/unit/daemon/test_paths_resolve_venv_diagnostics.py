@@ -22,6 +22,7 @@ from claude_code_hooks_daemon.daemon.paths import (
     main,
     project_path_slug,
     python_venv_fingerprint,
+    resolve_existing_venv_python,
     resolve_existing_venv_python_with_diagnostics,
 )
 
@@ -1106,3 +1107,42 @@ class TestRunnabilityProbe:
         resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
         assert resolved == py
         assert any("step 3" in s and "OK" in s for s in steps)
+
+
+class TestSingleResolutionPrecedence:
+    """Plan 00555 Task 2.1: both Python resolvers name the same venv."""
+
+    def test_both_resolvers_pick_metadata_venv_over_fingerprint_keyed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Two usable venvs: fingerprint-keyed (no metadata) and a lock-hash
+        matched one under another name. Both resolvers must name the latter."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+        lock_hash = _compute_test_lock_hash(daemon_dir)
+        fp = python_venv_fingerprint(daemon_dir)
+        _make_fake_venv(daemon_dir / "untracked" / f"venv-{fp}")
+        metadata_venv = daemon_dir / "untracked" / "venv-py999-freshmeta"
+        py_meta = _make_fake_venv(metadata_venv)
+        _write_metadata(metadata_venv, python_path=str(py_meta), lock_hash=lock_hash)
+
+        diagnosed, _steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert diagnosed == py_meta
+        assert resolve_existing_venv_python(daemon_dir) == diagnosed
+
+    def test_nothing_usable_falls_back_to_legacy_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With no usable venv the best-effort legacy path is still returned."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        assert resolve_existing_venv_python(daemon_dir) == daemon_dir / "untracked/venv/bin/python"
+
+    def test_unusable_override_falls_back_to_override_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An override naming nothing usable (and no alternative) is returned as given."""
+        override = tmp_path / "nope"
+        monkeypatch.setenv("HOOKS_DAEMON_VENV_PATH", str(override))
+        assert resolve_existing_venv_python(tmp_path / "daemon") == override / "bin" / "python"
