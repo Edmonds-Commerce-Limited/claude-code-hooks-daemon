@@ -491,7 +491,7 @@ def _is_protected(path, project_path, daemon_root):
 def _path_allowed(raw, cwd, project_path, daemon_root, allow_dir):
     """True when raw names a regular file (or, with allow_dir, a directory)
     inside the project or daemon root that is not protected. Judged on the
-    spelling and on the resolved path, so a symlink or .. cannot launder it."""
+    lexical spelling and on the resolved path, so a symlink or .. cannot launder it."""
     try:
         if not raw or "\0" in raw:
             return False
@@ -503,7 +503,12 @@ def _path_allowed(raw, cwd, project_path, daemon_root, allow_dir):
         real = os.path.realpath(os.path.join(cwd, raw))
         if _is_protected(real, project_path, daemon_root):
             return False
-        if not any(_relative_to(real, root) is not None for root in _roots(project_path, daemon_root)):
+        roots = _roots(project_path, daemon_root)
+        if not any(_relative_to(real, root) is not None for root in roots):
+            return False
+        # path.resolve in Node applies .. textually, so the lexical form must
+        # stay inside a root too: both the real and the lexical path pass.
+        if not any(_relative_to(absolute, root) is not None for root in roots):
             return False
         if os.path.isfile(real):
             return True

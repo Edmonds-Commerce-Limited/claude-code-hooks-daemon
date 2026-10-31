@@ -61,3 +61,47 @@ class TestWriteProtectedPathsSnapshot:
             pytest.raises(OSError),
         ):
             sfm.write_protected_paths_snapshot()
+
+
+class TestSnapshotCarriesTheOtherConfiguredProtections:
+    """Plan 00555 Task 2.8 N2: the project's extra quarantine globs and a relocated
+    payload capture directory are in the snapshot, so a daemon-down read denies them."""
+
+    @staticmethod
+    def _config(tmp_path: Path, body: str) -> Path:
+        path = tmp_path / "hooks-daemon.yaml"
+        path.write_text(body)
+        return path
+
+    def _lines(self, config: Path | None) -> list[str]:
+        with (
+            patch.object(sfm, "resolve_configured_patterns", return_value=("x*",)),
+            patch.object(ProjectContext, "is_initialized", return_value=config is not None),
+            patch.object(ProjectContext, "config_path", return_value=config),
+        ):
+            written = sfm.write_protected_paths_snapshot()
+        return written.read_text().splitlines()
+
+    def test_extra_quarantine_globs_are_written(self, untracked: Path, tmp_path: Path) -> None:
+        config = self._config(
+            tmp_path,
+            "version: '1.0'\nhandlers:\n  pre_tool_use:\n    quarantine_artefact_read_guard:\n"
+            "      enabled: true\n      options:\n        quarantine_artefact_globs:\n"
+            "          - 'reports/*-RAW*'\n",
+        )
+        assert "reports/*-RAW*" in self._lines(config)
+
+    def test_a_relocated_capture_dir_is_written_as_an_anchored_glob(
+        self, untracked: Path, tmp_path: Path
+    ) -> None:
+        config = self._config(
+            tmp_path, "version: '1.0'\ndaemon:\n  payload_capture:\n    dir: my-capture\n"
+        )
+        assert f"{untracked.resolve()}/my-capture/**" in self._lines(config)
+
+    def test_the_default_capture_dir_is_written_too(self, untracked: Path, tmp_path: Path) -> None:
+        config = self._config(tmp_path, "version: '1.0'\n")
+        assert f"{untracked.resolve()}/payload-capture/**" in self._lines(config)
+
+    def test_an_unreadable_config_still_writes_the_base_globs(self, untracked: Path) -> None:
+        assert self._lines(None) == ["x*"]
