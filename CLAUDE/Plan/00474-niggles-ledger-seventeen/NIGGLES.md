@@ -124,6 +124,49 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N564 — playbook probe #120 fails whenever the acceptance gate runs in a linked worktree
+
+**Source**: dogfood, 2026-10-31. Found in Plan 00555's final full gate, which ran in
+`.claude/worktrees/p555-dbf-fix`. It failed in the 3.11 and 3.12 legs, and on 3.13 when re-run against
+the live daemon.
+
+**Evidence**: `tests/acceptance/test_playbook_harness.py::TestTheDeclaredProbesBehaveAsDeclared` fails
+on 1 of 256 probes: "#120 WorktreeFileCopyHandler: denied, but for a reason that does not match \['from a
+worktree into the main repo', 'git history'\] -- observed: 'BLOCKED [R-WRITE-OUTSIDE-PROJECT-ROOT]…'".
+The same test passes on main. The branch changes no handler, core or acceptance file.
+
+**Cause (unverified)**: the probe's `extra_hook_input` sets `cwd` to `$MAIN_CHECKOUT_DIR`
+(`worktree_file_copy.py:197`). Inside a linked worktree that is the main checkout, which lies outside
+the worktree daemon's project root, so `project_containment` denies first and the expected reason never
+appears.
+
+**Fix direction**: confirm the cause. Then make the harness, or the probe, give the same verdict in a
+worktree as in the main checkout, because the full gate is meant to run in a worktree before merge.
+
+**Status**: ⬜ open.
+
+### N563 — WorktreeCreate refuses every sub-agent worktree when the session stands inside a linked worktree
+
+**Source**: dogfood, 2026-10-31. A `defence-before-fix:conformance-reviewer` dispatch from a session
+whose `cwd` was `.claude/worktrees/p555-dbf-fix` failed with "WorktreeCreate produced no worktree path …
+Handler worktree-create crashed".
+
+**Evidence**: the daemon log shows `WorktreeSeedError: Cannot seed worktree — 1 configured entry is unusable: '.claude/hooks-daemon.env': no such file or directory at the repository root`. The file
+exists at `/workspace` (`secret-meta`: exists, 0600). The same dispatch succeeded once the session's
+`cwd` was `/workspace`.
+
+**Cause**: `WorktreeCreateHandler._repo_root` (`worktree_create_handler.py:143-166`) returns
+`GitRepo.resolve_for(cwd).root`. For a linked worktree that is the worktree's own toplevel, not the
+main checkout. Seeding (`validate_seed_sources(Path(root), …)`) therefore looks for gitignored seed
+files in the linked worktree, which never holds them, and the new worktree would also nest under
+`<linked-worktree>/.claude/worktrees/`. The crash is reported as a WorktreeCreate deny, which that event
+cannot express (RESPONSE CONTRACT VIOLATION in the log).
+
+**Fix direction**: anchor to the main working tree (the parent of git's common dir) when `cwd` is in a
+linked worktree, with a test that creates a linked worktree and fires WorktreeCreate from inside it.
+
+**Status**: ⬜ open; a fix is being dispatched.
+
 ### N562 — the format gate's JSON names no file when black cannot parse one
 
 **Source**: dogfood, 2026-10-31. Seen while classifying Plan 00555's full-gate failures. It fails on main
