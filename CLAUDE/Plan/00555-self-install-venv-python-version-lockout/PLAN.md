@@ -74,8 +74,13 @@ never be the reason the session cannot repair the daemon.
 
 ### Phase 2: Fix
 
-- [ ] ⬜ **Task 2.1**: One venv-resolution SSoT, used by the wrapper, the
+- [x] ✅ **Task 2.1**: One venv-resolution SSoT, used by the wrapper, the
   hooks, the builder and `repair` (folds into 00100's scope where it overlaps).
+  Python has one precedence. The bootstrap build and `cmd_repair` succeed only
+  when the venv that resolves is the one they built, and a resolver failure
+  fails the build. The DBF guards caught that last case on the first attempt.
+  Turning the bash ranked scan into a pure interpreter-finder stays with
+  Plan 00100 ([report](subagent-reports/261031-task-2.1-venv-ssot.md)).
 - [x] ✅ **Task 2.2**: Interpreter-drift detection: a `pyvenv.cfg` version that
   differs from the runtime version means a stale venv. Rebuild it with the
   current interpreter, editable-install the repo plus the dev extras on a
