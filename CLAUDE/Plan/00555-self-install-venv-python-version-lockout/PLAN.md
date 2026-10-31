@@ -129,8 +129,10 @@ never be the reason the session cannot repair the daemon.
 ## Success Criteria
 
 - [x] A test reproduces the drift and passes after the fix.
-- [ ] Simulated drift on a scratch self-install self-heals with no human
-  command.
+- [x] Simulated drift on a scratch self-install self-heals with no human
+  command. The demo reproduced the incident shape, and the drift-at-current-key
+  lockout it found is fixed
+  ([demo](subagent-reports/261031-drift-self-heal-demo.md)).
 - [ ] With the daemon down, Read and `git log` succeed and
   `hooks-daemon diagnose` names the drift.
 - [ ] A daemon-down stop loop ends after a bounded number of blocks.

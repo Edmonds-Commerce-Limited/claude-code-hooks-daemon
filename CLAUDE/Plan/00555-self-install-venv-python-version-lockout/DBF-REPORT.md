@@ -405,6 +405,28 @@ about 52,800 tests. The failures it reported, and what became of each:
 **Plan state.** Task 1.1 and Task 2.2 are ticked in PLAN.md. The plan's other tasks (2.3 to 2.7,
 Phase 3) are outside this DBF remediation.
 
+## Found after merge
+
+The drift self-heal demonstration
+([report](subagent-reports/261031-drift-self-heal-demo.md)) found one more instance of the class,
+after the branch merged:
+
+- **Where:** `_venv_is_fresh` in `scripts/install/venv.sh`.
+- **What:** it judged a venv fresh from its lock hash or stamp alone, which is cause (d).
+- **How it locked out:** take a venv already named for the running minor whose `pyvenv.cfg` records
+  another. It was reused, its build was then judged a failure, and a `.failed` marker plus a failing
+  `repair` left it locked out.
+- **Why it was missed:**
+  - Its Python twin, `_cli_check_venv_fresh`, was fixed by hand in `b51912cb8`, but this one was not.
+  - It has no lexical signature, so the detector could not report it.
+  - No test covered it.
+- **Fix:** freshness now also requires `venv_python_usable`, and fails closed when the gate cannot
+  load. The fix was red first, with an end-to-end in-place rebuild test
+  ([report](subagent-reports/261031-fresh-check-drift-fix.md)).
+
+This is direct evidence for Decision 1: the non-lexical causes are defended only by tests, and an
+instance with no test escaped both the sweep and the review.
+
 ## Conformance review
 
 `defence-before-fix:conformance-reviewer` ran at `f5a225d4c`
