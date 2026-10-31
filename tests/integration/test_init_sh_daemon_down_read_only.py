@@ -13,6 +13,7 @@ import os
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -345,11 +346,19 @@ class TestReadBoundaries:
 
 class TestInitShProtectedDefaultsMatchTheDaemonConstant:
     def test_the_default_globs_are_pinned(self) -> None:
-        source = INIT_SH.read_text()
-        start = source.index("_PROTECTED_DEFAULTS = (")
-        block = source[start : source.index(")", start)]
-        found = tuple(part.split('"')[1] for part in block.split(",") if '"' in part)
-        assert found == DEFAULT_PROTECTED_PATTERNS
+        # init.sh assembles the globs from parts, so the source text cannot be
+        # parsed: evaluate the recovery python and read the tuple it builds.
+        extracted = subprocess.run(
+            [BASH, "-c", 'source "$1"; _hooks_daemon_recovery_py src; printf %s "$src"', "_", str(INIT_SH)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        program = extracted.stdout + "\nimport json\nprint(json.dumps(list(_PROTECTED_DEFAULTS)))\n"
+        evaluated = subprocess.run(
+            [sys.executable, "-c", program], check=True, capture_output=True, text=True
+        )
+        assert tuple(json.loads(evaluated.stdout)) == DEFAULT_PROTECTED_PATTERNS
 
 
 class TestEndToEndThroughTheTransport:

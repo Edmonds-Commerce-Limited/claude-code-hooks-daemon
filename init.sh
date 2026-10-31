@@ -695,6 +695,7 @@ def _recovery_advice(project_path, daemon_root):
     """The TO FIX lines every PreToolUse deny ends with."""
     restart = _recovery_command(project_path, daemon_root, "restart")
     repair = _recovery_command(project_path, daemon_root, "repair")
+    diagnose = _recovery_command(project_path, daemon_root, "diagnose")
     if restart is None:
         named_root = daemon_root or "unset"
         return [
@@ -712,6 +713,10 @@ def _recovery_advice(project_path, daemon_root):
         "restart cannot start it (a broken venv), run exactly",
         f"{repair}. A human can also",
         f"run it directly (! {restart}), since Edit is denied here too.",
+        f"To see why it will not start, run exactly {diagnose}.",
+        "Only read-only diagnostics (Read, ls, cat/head/tail of a project file,",
+        "git log, git status) are allowed while the daemon is down; everything",
+        "else is denied.",
     ]
 '
 }
@@ -724,18 +729,42 @@ def _recovery_advice(project_path, daemon_root):
 # failure returns false (deny-by-default) -- this function decides whether a
 # call gets a CARVE-OUT, never whether it gets blocked outright.
 _hooks_daemon_stdin_is_recovery_command() {
+    _hooks_daemon_stdin_judge recovery
+}
+
+#
+# _hooks_daemon_stdin_judge MODE [EVENT CLASS] - Judge the hook_input JSON on
+# stdin. MODE recovery: exit 0 for an exempt recovery command. MODE permitted:
+# exit 0 for a recovery command or the read-only set allowed while the daemon
+# was never reached. MODE stop-bound: print the systemMessage JSON and exit 0
+# when a daemon-down Stop is let through, exit 1 to keep blocking. Unparseable
+# input is deny-by-default (exit 1); an unknown MODE exits 2.
+_hooks_daemon_stdin_judge() {
     local recovery_py
     _hooks_daemon_recovery_py recovery_py
     python3 -c "$recovery_py"'
 import json
 import sys
 
+mode, project_path, daemon_root = sys.argv[1:4]
 try:
     hi = json.load(sys.stdin)
 except Exception:
-    sys.exit(1)
-sys.exit(0 if _is_daemon_recovery_command(hi, sys.argv[1], sys.argv[2]) else 1)
-' "${PROJECT_PATH:-}" "${HOOKS_DAEMON_ROOT_DIR:-}"
+    hi = None
+if mode == "recovery":
+    sys.exit(0 if _is_daemon_recovery_command(hi, project_path, daemon_root) else 1)
+if mode == "permitted":
+    allowed = _is_daemon_recovery_command(hi, project_path, daemon_root)
+    allowed = allowed or _is_daemon_down_permitted(hi, project_path, daemon_root)
+    sys.exit(0 if allowed else 1)
+if mode == "stop-bound":
+    message = _stop_bound(hi, sys.argv[4], sys.argv[5], project_path, daemon_root)
+    if message is None:
+        sys.exit(1)
+    print(json.dumps({"systemMessage": message}))
+    sys.exit(0)
+sys.exit(2)
+' "$1" "${PROJECT_PATH:-}" "${HOOKS_DAEMON_ROOT_DIR:-}" "${2:-}" "${3:-}"
 }
 
 #
@@ -1100,6 +1129,28 @@ emit_hook_error() {
         return 0
     fi
 
+    # Plan 00555 Task 2.6: a daemon-down Stop or SubagentStop is blocked, but
+    # only a bounded number of times in a row, or when the last message
+    # declares awaiting-human. The CI-enforced, unconfigured-repo and
+    # version-mismatch states keep their own unconditional answers.
+    if [[ ( "$event_name" == "Stop" || "$event_name" == "SubagentStop" ) \
+        && "$_HOOKS_DAEMON_CI_ENFORCED" != "true" \
+        && "$_HOOKS_DAEMON_REPO_UNCONFIGURED" != "true" \
+        && "$_HOOKS_DAEMON_VERSION_MISMATCH" != "true" ]]; then
+        local _hd_stop_class="standard"
+        if [[ "$_HOOKS_DAEMON_VENV_MISSING" == "true" ]]; then
+            _hd_stop_class="venv_missing"
+        elif [[ "$_HOOKS_DAEMON_NOT_INSTALLED" == "true" ]]; then
+            _hd_stop_class="not_installed"
+        fi
+        local _hd_stop_payload="" _hd_stop_answer="" _hd_stop_rc=0
+        IFS= read -r -d '' -t 2 _hd_stop_payload || _hd_stop_rc=$?
+        if _hd_stop_answer="$(_hooks_daemon_stdin_judge stop-bound "$event_name" "$_hd_stop_class" <<<"$_hd_stop_payload")"; then
+            printf '%s\n' "$_hd_stop_answer"
+            return 0
+        fi
+    fi
+
     # Plan 00466 N24 review 3 MA4: for PreToolUse, the STANDARD branch below
     # (an installed project whose daemon could not be reached at all --
     # ensure_daemon itself failed) now denies rather than fails open. The one
@@ -1120,7 +1171,13 @@ emit_hook_error() {
         && "$_HOOKS_DAEMON_VENV_MISSING" != "true" \
         && "$_HOOKS_DAEMON_NOT_INSTALLED" != "true" \
         && "$_HOOKS_DAEMON_VERSION_MISMATCH" != "true" ]]; then
-        if _hooks_daemon_stdin_is_recovery_command; then
+        # The read-only set is for a daemon that was never reached; a relay
+        # hand-off means it WAS reached, so only the recovery carve-out applies.
+        local _hd_judge_mode="permitted"
+        if [[ -n "${_HOOKS_DAEMON_RELAY_FAILED:-}" ]]; then
+            _hd_judge_mode="recovery"
+        fi
+        if _hooks_daemon_stdin_judge "$_hd_judge_mode"; then
             _pretooluse_deny="false"
         else
             _pretooluse_deny="true"
@@ -3252,6 +3309,22 @@ _hooks_daemon_is_down() {
 #   0 if daemon is running or CI passthrough mode active
 #   1 if daemon failed and must report error to agent
 #
+#
+# _hooks_daemon_reset_stop_bound() - A daemon that has just been started ends
+# the run of daemon-down Stops (Plan 00555 Task 2.6): drop every session's
+# counters. Called only after a successful start, never on the
+# already-running path, where a pid with a missing socket would reset the
+# count on every call and defeat the bound.
+_hooks_daemon_reset_stop_bound() {
+    local counter
+    for counter in "${HOOKS_DAEMON_ROOT_DIR:-}"/untracked/.daemon-down-stops.*.Stop \
+        "${HOOKS_DAEMON_ROOT_DIR:-}"/untracked/.daemon-down-stops.*.SubagentStop; do
+        if [[ -e "$counter" ]]; then
+            rm -f "$counter" || echo "HOOKS DAEMON: could not reset stop counter $counter" >&2
+        fi
+    done
+}
+
 ensure_daemon() {
     # Plan 00466 N126 round 2 (F1): a relay hand-off goes straight to
     # send_request_stdin, whose judged deny is the only answer it may get.
@@ -3288,6 +3361,7 @@ ensure_daemon() {
     # Try to start daemon
     if start_daemon; then
         rm -f "$passthrough_flag" 2>/dev/null
+        _hooks_daemon_reset_stop_bound
         return 0
     fi
 
@@ -3888,8 +3962,17 @@ def emit_error_json(event_name, error_type, error_details):
                 'decision': 'block',
                 'reason': reason,
             }
+            # Plan 00555 Task 2.6: only a daemon that was never reached counts
+            # toward the bound; a reached one stays blocked.
+            if not daemon_reached:
+                allowed = _stop_bound(hook_input, event_name, 'daemon_unreachable',
+                                      project_path, daemon_root)
+                if allowed is not None:
+                    response = {'systemMessage': allowed}
     elif event_name == 'PreToolUse' \
-            and not _is_daemon_recovery_command(hook_input, project_path, daemon_root):
+            and not (_is_daemon_recovery_command(hook_input, project_path, daemon_root)
+                     or (not daemon_reached
+                         and _is_daemon_down_permitted(hook_input, project_path, daemon_root))):
         # Plan 00466 N24 review 4 R4-MA1: deny for EVERY PreToolUse transport
         # failure except the exact daemon-recovery command (review 3 MA4's
         # carve-out, checked via _is_daemon_recovery_command so this can
@@ -4135,6 +4218,8 @@ try:
             'pool is saturated.')
     else:
         print(output)
+        if not response_mode:
+            _reset_stop_bound(hook_input, daemon_root)
     sys.exit(0)
 
 except socket.timeout:
@@ -4284,6 +4369,8 @@ sys.exit(0)
 export -f emit_hook_error
 export -f _hooks_daemon_recovery_py
 export -f _hooks_daemon_stdin_is_recovery_command
+export -f _hooks_daemon_stdin_judge
+export -f _hooks_daemon_reset_stop_bound
 export -f _hooks_daemon_recovery_command
 export -f _hooks_daemon_static_deny
 export -f _hooks_daemon_stdin_is_provision_command

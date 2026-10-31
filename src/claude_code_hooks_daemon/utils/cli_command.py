@@ -284,6 +284,7 @@ _RECOVERY_SUBCOMMANDS: Final[tuple[str, ...]] = (
     "stop",
     "start",
     "repair",
+    "diagnose",
 )
 
 #: The only characters that may pad an exempt command. ``str.strip()`` would

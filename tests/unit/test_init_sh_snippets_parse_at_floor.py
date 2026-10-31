@@ -34,7 +34,9 @@ ALLOWLIST = REPO_ROOT / "scripts" / "qa" / "bare-python-allowlist.json"
 INIT_SH = REPO_ROOT / "init.sh"
 
 #: The only modules a no-venv snippet may import; all exist on the 3.6 floor.
-ALLOWED_IMPORTS = frozenset({"json", "os", "shlex", "socket", "sys"})
+# fnmatch (protected-path globs) and time (daemon-down stop log stamp) are
+# stdlib and present at the floor.
+ALLOWED_IMPORTS = frozenset({"fnmatch", "json", "os", "shlex", "socket", "sys", "time"})
 
 _RECOVERY_PY_OPEN = "_hooks_daemon_recovery_py() {"
 _SHELL_VARIABLE = re.compile(r"\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*")

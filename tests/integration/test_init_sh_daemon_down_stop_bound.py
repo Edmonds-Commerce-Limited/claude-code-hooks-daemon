@@ -230,8 +230,9 @@ class TestTransportPath:
     def test_unwritable_untracked_still_blocks_and_names_the_path(
         self, project: Path, dead_socket: Path
     ) -> None:
-        shutil.rmtree(_untracked(project))
-        _untracked(project).write_text("a file where the directory should be")
+        # A directory where the counter file belongs cannot be read or written
+        # (a file in place of untracked/ would abort init.sh at source time).
+        _counter(project).mkdir()
         for _ in range(4):
             result = _forward(project, dead_socket, _payload())
             assert result.returncode == 2
@@ -314,8 +315,7 @@ class TestEmitHookErrorPath:
         assert "Stop" in fields
 
     def test_unwritable_untracked_still_blocks(self, project: Path) -> None:
-        shutil.rmtree(_untracked(project))
-        _untracked(project).write_text("file")
+        _counter(project).mkdir()
         for _ in range(4):
             result = _emit(project, _payload())
             assert _is_block(result)
