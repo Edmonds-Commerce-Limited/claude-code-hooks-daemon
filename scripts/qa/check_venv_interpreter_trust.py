@@ -164,7 +164,7 @@ _REMEDIATION: Final[str] = (
     "\n"
     "Fix: compare pyvenv.cfg's version (major.minor) with the interpreter that\n"
     "will run it in the same function, or call a gate that does\n"
-    "(_venv_interpreter_runs, _rv_candidate_runs, _rv_cached_venv_current).\n"
+    f"({', '.join(GATES)}).\n"
     "There is no exemption marker: fix the site, or fix this Detector.\n"
     f"Rules and proofs: {_DOC}"
 )

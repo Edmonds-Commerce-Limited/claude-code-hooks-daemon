@@ -980,10 +980,14 @@ def venv_interpreter_usable(python_path: Path) -> bool:
     venv's ``lib/pythonX.Y/site-packages`` is invisible to it.
 
     "Cannot tell" (no ``pyvenv.cfg``, no recorded version, a probe that printed
-    no version) passes. Never raises.
+    no version) passes. An interpreter that is not there (or a dangling
+    symlink) fails without a probe: ``cmd_start`` enumerates candidate venvs on
+    every start, and absence is proof enough of unusability. Never raises.
     """
     import subprocess  # nosec B404 — trusted: probing a resolved venv path, no user input
 
+    if not python_path.exists():
+        return False
     venv_dir = python_path.parent.parent
     pyvenv_cfg = venv_dir / _PYVENV_CFG_NAME
     try:

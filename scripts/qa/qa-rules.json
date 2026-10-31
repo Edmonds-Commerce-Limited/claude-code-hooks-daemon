@@ -597,7 +597,7 @@
     },
     "venv-exec-bit-trust": {
       "statement": "Code judges a venv interpreter (`bin/python`, `bin/python3`, a variable bound from one or from the venv resolver, or an interpreter path read from venv metadata) usable by existence or exec bit, with no comparison of its major.minor against pyvenv.cfg. After a system Python upgrade the symlink runs another minor and cannot see the venv's site-packages, yet still passes.",
-      "fix": "In the same function read pyvenv.cfg `version` and compare it with the interpreter that will run it, or call a gate that does (`_venv_interpreter_runs`, `_rv_candidate_runs`, `_rv_cached_venv_current`); importing the package under the interpreter without editing sys.path also counts. There is no exemption marker; see CLAUDE/Security/UntrustedVenvInterpreter.md.",
+      "fix": "In the same function read pyvenv.cfg `version` and compare it with the interpreter that will run it, or call a gate that does (`venv_interpreter_usable`, `venv_python_usable`, `_rv_cached_venv_current`); importing the package under the interpreter without editing sys.path also counts. There is no exemption marker; see CLAUDE/Security/UntrustedVenvInterpreter.md.",
       "checks": ["check_venv_interpreter_trust.py"]
     },
     "venv-weak-liveness-probe": {

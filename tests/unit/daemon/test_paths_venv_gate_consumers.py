@@ -180,3 +180,15 @@ def test_the_gate_itself_refuses_drift(tmp_path: Path) -> None:
     assert venv_interpreter_usable(_venv(tmp_path / "ok", _RUNNING)) is True
     assert venv_interpreter_usable(_venv(tmp_path / "bad", _OTHER)) is False
     assert venv_interpreter_usable(tmp_path / "missing" / "bin" / "python") is False
+
+
+def test_the_gate_refuses_a_missing_interpreter_without_launching_it(tmp_path: Path) -> None:
+    """``cmd_start`` enumerates candidate venvs on every start; one that is not
+    there is unusable, and probing it would spawn a process for nothing."""
+    with patch.object(subprocess, "run") as run:
+        assert venv_interpreter_usable(tmp_path / "missing" / "bin" / "python") is False
+        dangling = tmp_path / "dangling" / "bin" / "python"
+        dangling.parent.mkdir(parents=True)
+        dangling.symlink_to(tmp_path / "gone" / "python3.11")
+        assert venv_interpreter_usable(dangling) is False
+    run.assert_not_called()
