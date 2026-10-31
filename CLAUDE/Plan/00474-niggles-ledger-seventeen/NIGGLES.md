@@ -124,6 +124,22 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N561 — the rollback state snapshot never creates its `files/venv/` and `files/gitignore/` directories
+
+**Source**: dogfood, 2026-10-29, Plan 00555's Defence Before Fix sweep of `scripts/install/rollback.sh` (the
+rollback-snapshot gate test on branch `p555-dbf-fix`).
+
+**Evidence** (`scripts/install/rollback.sh` on main, lines 199-216): `create_state_snapshot` redirects `grep`
+output to `$snapshot_dir/files/gitignore/root.gitignore` and `pip freeze` output to
+`$snapshot_dir/files/venv/requirements.txt`. Only `backup_file` runs `mkdir -p`, and neither of these goes through
+it, so both redirects fail with "No such file or directory". Each sits in an `if …; then :; fi` written for
+grep's no-match exit, which also swallows the redirect failure. The snapshot reports success without either file.
+
+**Fix direction**: create both directories before copying, and fail the snapshot when a backup it promises cannot be
+written. Add a test that snapshots a tree with a venv and a `.gitignore` and asserts both are present.
+
+**Status**: ⬜ open. It is out of Plan 00555's class (venv interpreter trust), so it was left unfixed there.
+
 ### N560 — the stand-in re-rules an unchanged question every three hours
 
 **Source**: dogfood, 2026-10-28. Five stand-in ticks fired in one awaiting-human stretch (05:47, 08:47, 11:53,
