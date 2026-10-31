@@ -187,6 +187,9 @@ _PROTECTED_DEFAULTS = (
     "id_" + "rsa",
     "id_" + "ed25519",
 )
+# Protected whatever the snapshot says: the quarantined artefact that
+# quarantine_artefact_read_guard keeps out of the coordinator (its seed glob).
+_ALWAYS_PROTECTED = ("*-opus-security-DETAIL*",)
 # Written by the healthy daemon at start: the project-configured globs, one per line.
 _SNAPSHOT_NAME = ".protected-paths.snapshot"
 # Any of these anywhere in a Bash command voids the read-only judgement: pipes,
@@ -359,13 +362,102 @@ def _snapshot_globs(daemon_root):
         return None
 
 
+def _glob_tokens(pattern):
+    """The glob dialect of the daemon (utils/path_exclusion.py) as a token list."""
+    anchored = pattern.startswith("/")
+    body = pattern[1:] if anchored else pattern
+    tokens = [] if anchored else [("PREFIX", "")]
+    literal = []
+    index = 0
+    while index < len(body):
+        char = body[index]
+        if char in "*?":
+            if literal:
+                tokens.append(("LIT", "".join(literal)))
+                literal = []
+            if char == "?":
+                tokens.append(("QMARK", ""))
+            elif body.startswith("**", index):
+                index += 1
+                if body.startswith("/", index + 1):
+                    index += 1
+                    tokens.append(("SEGSTAR", ""))
+                else:
+                    tokens.append(("ANYALL", ""))
+            else:
+                tokens.append(("STAR", ""))
+        else:
+            literal.append(char)
+        index += 1
+    if literal:
+        tokens.append(("LIT", "".join(literal)))
+    return tokens
+
+
+def _glob_fullmatch(pattern, text):
+    """True when the whole of text matches pattern in the glob dialect of the daemon:
+    * and ? stay inside one segment, **/ spans whole segments, a trailing **
+    spans anything, a leading / anchors, otherwise any leading directories."""
+    size = len(text)
+    reach = {0}
+    for kind, literal in _glob_tokens(pattern):
+        found = set()
+        if kind == "PREFIX":
+            found = {0} | {at + 1 for at in range(size) if text[at] == "/"}
+        elif kind == "LIT":
+            found = {at + len(literal) for at in reach if text.startswith(literal, at)}
+        elif kind == "QMARK":
+            found = {at + 1 for at in reach if at < size and text[at] != "/"}
+        elif kind == "STAR":
+            for at in reach:
+                end = at
+                found.add(end)
+                while end < size and text[end] != "/":
+                    end += 1
+                    found.add(end)
+        elif kind == "SEGSTAR":
+            found = set(reach)
+            pending = list(reach)
+            while pending:
+                at = pending.pop()
+                slash = text.find("/", at)
+                if slash > at and slash + 1 not in found:
+                    found.add(slash + 1)
+                    pending.append(slash + 1)
+        else:
+            found = set(range(min(reach), size + 1)) if reach else set()
+        reach = found
+        if not reach:
+            return False
+    return size in reach
+
+
+def _glob_candidates(path, project_path):
+    """The forms of path the daemon matches a glob against: relative to the
+    project root when inside it, and the absolute path without its leading /."""
+    forms = [path.lstrip("/")]
+    if _is_absolute(project_path):
+        for root in {os.path.normpath(project_path), os.path.realpath(project_path)}:
+            rel = _relative_to(path, root)
+            if rel:
+                forms.append(rel)
+    return forms
+
+
+def _matches_glob(glob, path, project_path):
+    base = os.path.basename(path)
+    if fnmatch.fnmatchcase(base, glob) or fnmatch.fnmatchcase(path, glob):
+        return True
+    return any(_glob_fullmatch(glob, form) for form in _glob_candidates(path, project_path))
+
+
 def _is_protected(path, project_path, daemon_root):
     """True when path names something a daemon-down read must never show."""
     norm = os.path.normpath(path)
     base = os.path.basename(norm)
     snapshot = _snapshot_globs(daemon_root)
-    for glob in _PROTECTED_DEFAULTS + tuple(snapshot or ()):
-        if fnmatch.fnmatchcase(base, glob) or fnmatch.fnmatchcase(norm, glob):
+    for glob in _PROTECTED_DEFAULTS + _ALWAYS_PROTECTED + tuple(snapshot or ()):
+        if _matches_glob(glob, norm, project_path):
             return True
     if base.endswith(".sock"):
         return True
@@ -382,6 +474,13 @@ def _is_protected(path, project_path, daemon_root):
             return True
         if len(parts) > 1 and parts[0] == "untracked" and parts[1].startswith("events"):
             return True
+        # Known-sensitive daemon runtime output: raw hook payloads, the verdict
+        # log and the stop-event log (utils/private_io.py).
+        if len(parts) > 1 and parts[0] == "untracked":
+            if parts[1] == "payload-capture" or parts[1].startswith("stop-events"):
+                return True
+            if parts[1] == "logs" and len(parts) > 2 and parts[2] == "hooks":
+                return True
         if snapshot is None and parts[0] == ".claude" and len(parts) > 1:
             settings = len(parts) == 2 and fnmatch.fnmatchcase(parts[1], "settings*.json")
             if rel != ".claude/hooks-daemon.yaml" and not settings:
@@ -399,7 +498,9 @@ def _path_allowed(raw, cwd, project_path, daemon_root, allow_dir):
         absolute = os.path.normpath(os.path.join(cwd, raw))
         if _is_protected(absolute, project_path, daemon_root):
             return False
-        real = os.path.realpath(absolute)
+        # The shell resolves a symlink before it applies a following .., so
+        # resolve the joined spelling, not the lexically normalised one.
+        real = os.path.realpath(os.path.join(cwd, raw))
         if _is_protected(real, project_path, daemon_root):
             return False
         if not any(_relative_to(real, root) is not None for root in _roots(project_path, daemon_root)):
@@ -431,8 +532,11 @@ def _git_read_only(args, cwd, project_path, daemon_root):
         token = rest[index]
         index += 1
         if pathspecs:
-            absolute = os.path.normpath(os.path.join(cwd, token))
-            if token.startswith("-") or _is_protected(absolute, project_path, daemon_root):
+            joined = os.path.join(cwd, token)
+            if token.startswith("-") or any(
+                _is_protected(form, project_path, daemon_root)
+                for form in (os.path.normpath(joined), os.path.realpath(joined))
+            ):
                 return False
             continue
         if token == "--":
@@ -597,6 +701,19 @@ def _declares_awaiting_human(text):
 
 
 def _stop_bound(hi, event, reason_class, project_path, daemon_root):
+    """_stop_bound_counted, failing closed: any unexpected error keeps blocking."""
+    try:
+        return _stop_bound_counted(hi, event, reason_class, project_path, daemon_root)
+    except Exception as exc:
+        print(
+            "HOOKS DAEMON: stop bound failed, so this stop stays blocked: "
+            + type(exc).__name__ + ": " + str(exc)[:200],
+            file=sys.stderr,
+        )
+        return None
+
+
+def _stop_bound_counted(hi, event, reason_class, project_path, daemon_root):
     """Plan 00555 Task 2.6 (a): the systemMessage that lets a daemon-down Stop
     through, or None to keep blocking. Counts consecutive blocks per session and
     event under <daemon root>/untracked; honours an awaiting-human declaration in
@@ -3294,22 +3411,6 @@ _hooks_daemon_is_down() {
 }
 
 #
-# _hooks_daemon_reset_stop_bound() - A daemon that has just been started ends
-# the run of daemon-down Stops (Plan 00555 Task 2.6): drop every session's
-# counters. Called only after a successful start, never on the
-# already-running path, where a pid with a missing socket would reset the
-# count on every call and defeat the bound.
-_hooks_daemon_reset_stop_bound() {
-    local counter
-    for counter in "${HOOKS_DAEMON_ROOT_DIR:-}"/untracked/.daemon-down-stops.*.Stop \
-        "${HOOKS_DAEMON_ROOT_DIR:-}"/untracked/.daemon-down-stops.*.SubagentStop; do
-        if [[ -e "$counter" ]]; then
-            rm -f "$counter" || echo "HOOKS DAEMON: could not reset stop counter $counter" >&2
-        fi
-    done
-}
-
-#
 # ensure_daemon() - Start daemon if not running (lazy startup)
 #
 # Idempotent function safe to call on every hook invocation.
@@ -3361,7 +3462,8 @@ ensure_daemon() {
     # Try to start daemon
     if start_daemon; then
         rm -f "$passthrough_flag" 2>/dev/null
-        _hooks_daemon_reset_stop_bound
+        # No stop-count reset here: a start that returns 0 has not served a
+        # request, so only the transport's parsed-response reset may end the run.
         return 0
     fi
 
@@ -4370,7 +4472,6 @@ export -f emit_hook_error
 export -f _hooks_daemon_recovery_py
 export -f _hooks_daemon_stdin_is_recovery_command
 export -f _hooks_daemon_stdin_judge
-export -f _hooks_daemon_reset_stop_bound
 export -f _hooks_daemon_recovery_command
 export -f _hooks_daemon_static_deny
 export -f _hooks_daemon_stdin_is_provision_command
