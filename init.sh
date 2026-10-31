@@ -468,6 +468,30 @@ _hooks_daemon_event_takes_context() {
 }
 
 #
+# _hooks_daemon_last_build_note() - Name the last venv build and its log.
+#
+# Reads untracked/.venv-bootstrap.result (venv.sh venv_write_build_result) with
+# plain bash: no subprocess, so the stop hook's hot path stays cheap. Prints
+# nothing when no build has recorded a result.
+#
+# Args:
+#   $1 - the daemon directory
+_hooks_daemon_last_build_note() {
+    local record="$1/untracked/.venv-bootstrap.result" key value
+    local result="" finished="" log=""
+    [[ -f "$record" ]] || return 0
+    while IFS='=' read -r key value; do
+        case "$key" in
+            result) result="$value" ;;
+            finished_at) finished="$value" ;;
+            log) log="$value" ;;
+        esac
+    done < "$record"
+    [[ -n "$result" ]] || return 0
+    printf ' (last venv build: %s at %s; build log: %s)' "$result" "${finished:-unknown time}" "${log:-unknown}"
+}
+
+#
 # _hooks_daemon_fail_open_json() - Print the schema-valid fail-open document
 # carrying a message, for the event (jq encoder).
 #
@@ -654,6 +678,8 @@ emit_hook_error() {
     # time, below this function's definition, so the `:-` default covers the
     # one caller that runs before it (the init_path_error branch) under set -u.
     local _hooks_daemon_checkout="${PROJECT_PATH:-unknown checkout}"
+    local _hd_last_build_note
+    _hd_last_build_note="$(_hooks_daemon_last_build_note "${HOOKS_DAEMON_ROOT_DIR:-$_hooks_daemon_checkout/.claude/hooks-daemon}")"
 
     # Log to stderr for debugging (agent won't see this)
     echo "HOOKS DAEMON ERROR [$error_type]: $error_details" >&2
@@ -1116,7 +1142,7 @@ Nothing has been changed: hooks never move the daemon to another version themsel
             # 00466 N24 review 3 MA4) unless stdin was the exact recovery
             # command; every other event fails open with context.
             if [[ "$event_name" == "Stop" || "$event_name" == "SubagentStop" ]]; then
-                jq -n --arg reason "Hooks daemon not running - protection not active" \
+                jq -n --arg reason "Hooks daemon not running - protection not active$_hd_last_build_note" \
                     '{"decision": "block", "reason": $reason}'
             elif [[ "$event_name" == "PreToolUse" && "$_pretooluse_deny" == "true" ]]; then
                 jq -n --arg event "$event_name" --arg reason "$_pretooluse_deny_msg" \
@@ -1138,7 +1164,7 @@ Nothing has been changed: hooks never move the daemon to another version themsel
 import json
 import sys
 
-event_name, context_msg, ci_enforced, not_installed, checkout, venv_missing, venv_block_reason, pretooluse_deny, pretooluse_deny_msg, context_events = sys.argv[1:11]
+event_name, context_msg, ci_enforced, not_installed, checkout, venv_missing, venv_block_reason, pretooluse_deny, pretooluse_deny_msg, context_events, last_build_note = sys.argv[1:12]
 stop_events = ("Stop", "SubagentStop")
 
 
@@ -1192,7 +1218,10 @@ else:
     # review 3 MA4) unless stdin was the exact recovery command; every
     # other event fails open with context.
     if event_name in stop_events:
-        resp = {"decision": "block", "reason": "Hooks daemon not running - protection not active"}
+        resp = {
+            "decision": "block",
+            "reason": "Hooks daemon not running - protection not active" + last_build_note,
+        }
     elif event_name == "PreToolUse" and pretooluse_deny == "true":
         resp = {
             "hookSpecificOutput": {
@@ -1207,7 +1236,8 @@ else:
 print(json.dumps(resp))
 ' "$event_name" "$context_msg" "$_HOOKS_DAEMON_CI_ENFORCED" "$_HOOKS_DAEMON_NOT_INSTALLED" \
             "$_hooks_daemon_checkout" "$_HOOKS_DAEMON_VENV_MISSING" "$venv_block_reason" \
-            "$_pretooluse_deny" "$_pretooluse_deny_msg" "$_HOOKS_DAEMON_CONTEXT_EVENTS" || {
+            "$_pretooluse_deny" "$_pretooluse_deny_msg" "$_HOOKS_DAEMON_CONTEXT_EVENTS" \
+            "$_hd_last_build_note" || {
             # No jq and no working python3: nothing can encode the reason, but
             # a deny must still reach Claude Code (Plan 00466 round 3, R2-1).
             local _hd_encoder_rc=$?
@@ -3220,6 +3250,24 @@ $_recovery_py
 project_path = sys.argv[3] if len(sys.argv) > 3 else ''
 daemon_root = sys.argv[5] if len(sys.argv) > 5 else ''
 
+
+def _last_build_note(root):
+    '''Name the last venv build and its log: one small file read, no subprocess.'''
+    fields = {}
+    try:
+        with open(os.path.join(root, 'untracked', '.venv-bootstrap.result')) as handle:
+            for line in handle:
+                key, _, value = line.rstrip('\n').partition('=')
+                fields[key] = value
+    except OSError:
+        return ''
+    if not fields.get('result'):
+        return ''
+    return (' (last venv build: %s at %s; build log: %s)'
+            % (fields['result'], fields.get('finished_at', 'unknown time'),
+               fields.get('log', 'unknown')))
+
+
 # The recovery advice every daemon-side failure below ends with.
 _RESTART_ADVICE = _recovery_advice(project_path, daemon_root) + [
     'Then use the hooks-daemon skill to verify health (args=health).',
@@ -3439,7 +3487,8 @@ def emit_error_json(event_name, error_type, error_details):
                 'reason': reason,
             }
         else:
-            reason = 'Hooks daemon not running - protection not active'
+            reason = ('Hooks daemon not running - protection not active'
+                      + _last_build_note(daemon_root))
             response = {
                 'decision': 'block',
                 'reason': reason,

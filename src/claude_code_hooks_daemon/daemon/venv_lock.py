@@ -31,6 +31,8 @@ import shutil
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 VENV_LOCK_FILE_NAME = ".venv-bootstrap.lock"
@@ -166,6 +168,108 @@ def _mkdir_lock(
         shutil.rmtree(lock_dir, ignore_errors=True)
 
 
+#: The holder record and the last-result record, beside the lock. Same names
+#: and key=value format as scripts/install/venv.sh (VENV_BUILD_RECORD_NAME,
+#: VENV_BUILD_RESULT_NAME), which writes them for the bash build paths.
+VENV_BUILD_RECORD_NAME = ".venv-bootstrap.current"
+VENV_BUILD_RESULT_NAME = ".venv-bootstrap.result"
+_RESULT_KEYS = ("result", "finished_at", "exit", "log")
+
+
+@dataclass(frozen=True)
+class BuildResult:
+    """How the last venv build ended, whichever path ran it."""
+
+    result: str
+    finished_at: str
+    exit: int
+    log: str
+
+
+def build_log_path(project_root: Path, fingerprint: str) -> Path:
+    """The log a build of this fingerprint writes (bootstrap-driver naming)."""
+    return project_root / "untracked" / f".venv-bootstrap-{fingerprint}.log"
+
+
+def _write_kv_file(path: Path, lines: list[str]) -> None:
+    """Write key=value lines atomically: write a sibling, then rename."""
+    tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+    tmp.write_text("".join(f"{line}\n" for line in lines))
+    tmp.replace(path)
+
+
+def write_build_result(project_root: Path, result: str, exit_code: int, log: Path) -> None:
+    """Record how a build ended, and end the named log with the same verdict."""
+    finished_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _write_kv_file(
+        project_root / "untracked" / VENV_BUILD_RESULT_NAME,
+        [
+            f"result={result}",
+            f"finished_at={finished_at}",
+            f"exit={exit_code}",
+            f"log={log}",
+        ],
+    )
+    with log.open("a") as handle:
+        handle.write(f"venv build result: {result} (exit {exit_code}) at {finished_at}\n")
+
+
+def read_build_result(project_root: Path) -> BuildResult | None:
+    """The last build's result record, or ``None`` when no build recorded one.
+
+    Raises:
+        ValueError: the record exists but lacks a key or has a non-numeric exit.
+    """
+    path = project_root / "untracked" / VENV_BUILD_RESULT_NAME
+    if not path.is_file():
+        return None
+    fields = dict(line.partition("=")[::2] for line in path.read_text().splitlines())
+    missing = [key for key in _RESULT_KEYS if key not in fields]
+    if missing:
+        raise ValueError(f"{path} lacks {', '.join(missing)}")
+    if not fields["exit"].lstrip("-").isdigit():
+        raise ValueError(f"{path}: exit must be a number, got {fields['exit']!r}")
+    return BuildResult(
+        result=fields["result"],
+        finished_at=fields["finished_at"],
+        exit=int(fields["exit"]),
+        log=fields["log"],
+    )
+
+
+def last_build_lines(project_root: Path) -> list[str]:
+    """Human lines naming the last venv build and its log; empty when none recorded.
+
+    A malformed record is reported as a line rather than hidden, so the reader
+    sees that a record exists and is broken.
+    """
+    try:
+        result = read_build_result(project_root)
+    except ValueError as exc:
+        return [f"Last venv build: unreadable record ({exc})"]
+    if result is None:
+        return []
+    return [
+        f"Last venv build: {result.result} at {result.finished_at} (exit {result.exit})",
+        f"Build log: {result.log}",
+    ]
+
+
+@contextmanager
+def _holder_record(project_root: Path, holder: str, log: Path | None) -> Iterator[None]:
+    """Keep the holder record while the body runs; remove it only if still ours."""
+    path = project_root / "untracked" / VENV_BUILD_RECORD_NAME
+    lines = [f"holder={holder}", f"pid={os.getpid()}", f"started={int(time.time())}"]
+    if log is not None:
+        lines.append(f"log={log}")
+    _write_kv_file(path, lines)
+    try:
+        yield
+    finally:
+        if f"pid={os.getpid()}" in path.read_text().splitlines():
+            path.unlink(missing_ok=True)
+
+
 @contextmanager
 def venv_lock(
     project_root: Path,
@@ -173,6 +277,8 @@ def venv_lock(
     *,
     backend: str | None = None,
     on_wait: Callable[[str], None] | None = None,
+    holder: str | None = None,
+    log: Path | None = None,
 ) -> Iterator[None]:
     """Hold the venv build lock for ``project_root`` for the body's duration.
 
@@ -184,6 +290,9 @@ def venv_lock(
             ``HOOKS_DAEMON_VENV_LOCK_BACKEND`` and defaults to flock where installed.
         on_wait: receives each user-facing notice (waiting, stale reclaim) so the
             caller decides where it is printed.
+        holder: names this holder (``repair``, ``cleanup``) in the holder record
+            kept while the lock is held; ``None`` writes no record.
+        log: the build log to name in that record, when there is one.
 
     Raises:
         VenvLockTimeout: the lock stayed held past the bound.
@@ -197,9 +306,14 @@ def venv_lock(
     )
     lock_file = venv_lock_path(project_root)
     lock_file.parent.mkdir(parents=True, exist_ok=True)
-    if chosen == "flock":
-        with _flock(lock_file, bound, on_wait):
+    raw = (
+        _flock(lock_file, bound, on_wait)
+        if chosen == "flock"
+        else _mkdir_lock(lock_file.with_name(lock_file.name + ".d"), bound, on_wait)
+    )
+    with raw:
+        if holder is None:
             yield
-        return
-    with _mkdir_lock(lock_file.with_name(lock_file.name + ".d"), bound, on_wait):
-        yield
+        else:
+            with _holder_record(project_root, holder, log):
+                yield
