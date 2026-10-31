@@ -124,6 +124,23 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N562 — the format gate's JSON names no file when black cannot parse one
+
+**Source**: dogfood, 2026-10-31. Seen while classifying Plan 00555's full-gate failures. It fails on main
+with the workspace venv (py3.13), so the DBF branch did not cause it.
+
+**Evidence**: `tests/unit/qa/test_run_format_check.py::TestFormatGateAgreesWithExitCode::test_an_unparseable_file_fails_the_json_too`
+fails at its last assertion. The gate exits 123 and reports `passed: False`, as the test wants. The summary
+is `{'total_violations': 1, 'passed': False, 'error': 'black exited 123 (expected 0 or 1) -- it did not finish formatting, so this run cannot be reported as clean'}`, and neither that error nor
+`violations[0].file` names `broken.py`. So the reader learns that a file could not be formatted, but not
+which file.
+
+**Fix direction**: carry the file black names in its `error: cannot format <path>: ...` line into
+`violations[0].file`, or into the summary error. Check first whether the installed black's message shape
+moved, because the test passed when N21 of ledger 00466 landed (`7946008cb`).
+
+**Status**: ⬜ open.
+
 ### N561 — the rollback state snapshot never creates its `files/venv/` and `files/gitignore/` directories
 
 **Source**: dogfood, 2026-10-29, Plan 00555's Defence Before Fix sweep of `scripts/install/rollback.sh` (the
