@@ -116,6 +116,8 @@ _TOOLS: Final[tuple[str, ...]] = (
     "readlink",
     "kill",
     "find",
+    # The wrapper bounds its package-import probe with it.
+    "timeout",
 )
 
 #: The forwarders' own shape, with CI detection pinned off (CI runners export

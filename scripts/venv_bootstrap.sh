@@ -45,6 +45,11 @@
 #       automatic build off (and says so). Exit 0 once the venv resolves, 1
 #       otherwise.
 #
+#   venv_bootstrap.sh repair <daemon_dir> --rebuild
+#       The same, but a venv whose lock hash matches is rebuilt rather than
+#       reused. bin/hooks-daemon passes it when the venv that resolves cannot
+#       import the package (Plan 00555 Task 2.3).
+#
 #   venv_bootstrap.sh build  <daemon_dir> <python> <fingerprint> <inputs>
 #       The detached child `hook` starts. It inherits the lock through
 #       HOOKS_DAEMON_VENV_LOCK_INHERITED. Not for direct use.
@@ -104,7 +109,7 @@ _VB_EX_USAGE=2
 _VB_MIN_PYTHON="3.11"
 
 _vb_usage() {
-    echo "usage: venv_bootstrap.sh hook|probe|repair <daemon_dir>" >&2
+    echo "usage: venv_bootstrap.sh hook|probe|repair <daemon_dir> [--rebuild, repair only]" >&2
     echo "       venv_bootstrap.sh build <daemon_dir> <python> <fingerprint> <inputs>" >&2
     exit "$_VB_EX_USAGE"
 }
@@ -665,7 +670,12 @@ _vb_build() {
 }
 
 _vb_repair() {
-    local daemon_dir="$1" switched_off
+    local daemon_dir="$1" rebuild="${2:-}" switched_off
+    # --rebuild: the caller proved the venv that resolves cannot import the
+    # package, so a matching lock hash must not make the build reuse it.
+    if [ "$rebuild" = "--rebuild" ]; then
+        _VENV_FORCE_REBUILD=1
+    fi
 
     # The switch governs AUTOMATIC builds; asking for a repair is the
     # deliberate request it leaves open (review B1).
@@ -702,8 +712,11 @@ _vb_main() {
     local verb="${1:-}"
     local daemon_dir="${2:-}"
     case "$verb" in
-        hook | probe | repair)
+        hook | probe)
             [ "$#" -eq 2 ] || _vb_usage
+            ;;
+        repair)
+            [ "$#" -eq 2 ] || { [ "$#" -eq 3 ] && [ "$3" = "--rebuild" ]; } || _vb_usage
             ;;
         build)
             [ "$#" -eq 5 ] || _vb_usage
@@ -721,7 +734,7 @@ _vb_main() {
     case "$verb" in
         hook) _vb_hook "$daemon_dir" ;;
         probe) _vb_probe "$daemon_dir" ;;
-        repair) _vb_repair "$daemon_dir" ;;
+        repair) _vb_repair "$daemon_dir" "${3:-}" ;;
         build) _vb_build "$daemon_dir" "$3" "$4" "$5" ;;
     esac
 }
