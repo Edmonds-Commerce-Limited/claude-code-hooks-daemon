@@ -98,8 +98,13 @@ never be the reason the session cannot repair the daemon.
   `hooks-daemon diagnose` verb are permitted while the daemon is unreachable.
 - [ ] ⬜ **Task 2.6**: Bound the daemon-down stop block. After N identical
   blocks, or on an `[awaiting-human]` prefix, allow the stop and say why.
-- [ ] ⬜ **Task 2.7**: The background build writes its log to a known path,
+- [x] ✅ **Task 2.7**: The background build writes its log to a known path,
   and the stop/status message names that path and the build's last result.
+  Every build path writes `untracked/.venv-bootstrap.result` and a holder
+  record. `status`, `probe` and the daemon-down stop message name the last
+  result and log. The first merge broke main because the build log needed
+  `tee`; it was fixed forward at `00f9d734d`
+  ([report](subagent-reports/261031-task-2.7-build-log.md)).
 
 ### Phase 3: Clean up and document
 

@@ -688,6 +688,9 @@ SYNC_OWN_PATHS = (
     f"untracked/{STAGE_DIR_NAME}",
     f"untracked/{SYNC_STATE_DIR_NAME}",
     f"untracked/{SWITCH_MARKER_NAME}",
+    # Every venv build records its result and log here (.venv-bootstrap.result,
+    # .venv-bootstrap-<fp>.log).
+    "untracked/.venv-bootstrap",
 )
 #: A stand-in for the state the daemon keeps under its untracked/ directory.
 DAEMON_STATE = "untracked/handler-state.json"

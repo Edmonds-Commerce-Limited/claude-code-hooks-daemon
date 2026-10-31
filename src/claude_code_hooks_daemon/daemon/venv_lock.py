@@ -223,7 +223,10 @@ def read_build_result(project_root: Path) -> BuildResult | None:
     path = project_root / "untracked" / VENV_BUILD_RESULT_NAME
     if not path.is_file():
         return None
-    fields = dict(line.partition("=")[::2] for line in path.read_text().splitlines())
+    fields: dict[str, str] = {}
+    for line in path.read_text().splitlines():
+        key, _, value = line.partition("=")
+        fields[key] = value
     missing = [key for key in _RESULT_KEYS if key not in fields]
     if missing:
         raise ValueError(f"{path} lacks {', '.join(missing)}")

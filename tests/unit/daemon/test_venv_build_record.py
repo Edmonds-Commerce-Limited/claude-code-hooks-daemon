@@ -28,7 +28,11 @@ from claude_code_hooks_daemon.daemon.venv_lock import (
 
 
 def _kv(path: Path) -> dict[str, str]:
-    return dict(line.partition("=")[::2] for line in path.read_text().splitlines())
+    fields: dict[str, str] = {}
+    for line in path.read_text().splitlines():
+        key, _, value = line.partition("=")
+        fields[key] = value
+    return fields
 
 
 class TestHolderRecord:
