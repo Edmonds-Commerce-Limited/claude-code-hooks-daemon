@@ -15,6 +15,6 @@ A daemon that cannot start no longer locks the session out.
   - plain `ls`, `cat`, `head -n`, `tail -n`, and `git log` (`git status` is excluded: it can rewrite the index and run a configured fsmonitor program);
   - `hooks-daemon diagnose`.
 - Protected and quarantined files stay refused.
-- A Stop blocked because the daemon is down is allowed on the third identical block, or at once when the stop declares `[awaiting-human]`.
+- A Stop blocked because the daemon is down is allowed on the third consecutive block, or at once when the stop declares `[awaiting-human]`. The same applies to a daemon that accepts the connection but then fails, and each sub-agent keeps its own count.
 
 Nothing to do on upgrade. If a drifted venv from an earlier version is still in place, the first hook after upgrading replaces it. `bin/hooks-daemon repair` forces the rebuild if needed. The troubleshooting entry "Interpreter changed under the venv" in `CLAUDE/SELF_INSTALL.md` gives the manual diagnosis.

@@ -108,8 +108,9 @@ never be the reason the session cannot repair the daemon.
   The `diagnose` verb is on main (`27fd1725f`). The allow-list follows the
   **stand-in's ruling, not the owner's** (option b,
   [ruling](subagent-reports/261031-stand-in-ruling-fable.md)). It permits
-  exact-shape Read, `ls`, `cat`, `head -n`, `tail -n`, `git log`, `git status`
-  and `diagnose` only when the daemon was never reached. Protected paths,
+  exact-shape Read, `ls`, `cat`, `head -n`, `tail -n`, `git log` and
+  `diagnose` only when the daemon was never reached. `git status` was
+  removed in Task 2.8 S4. Protected paths,
   quarantine DETAIL artefacts and the self-install capture logs stay denied
   ([build report](subagent-reports/261031-task-2.5-2.6-build.md),
   [review](subagent-reports/261031-task-2.5-2.6-review.md),
@@ -119,8 +120,9 @@ never be the reason the session cannot repair the daemon.
 - [x] ✅ **Task 2.6**: Bound the daemon-down stop block. After N identical
   blocks, or on an `[awaiting-human]` prefix, allow the stop and say why.
   **Stand-in ruling**, option a, N = 3. The count is kept per session and per
-  event (`Stop` or `SubagentStop`). Every daemon-unreachable reason shares it,
-  so alternating reasons still count. It resets only when the daemon answers,
+  event (`Stop` or `SubagentStop`), and per agent id for a SubagentStop that
+  carries one (Task 2.8 S2). Every counted reason shares it, so alternating
+  reasons still count. It resets only when the daemon answers,
   and an error in the counter keeps the block. CI-enforced, invalid-input,
   needs-provision, unconfigured-repo and version-mismatch blocks stay
   unbounded.
@@ -133,7 +135,7 @@ never be the reason the session cannot repair the daemon.
   `tee`; it was fixed forward at `00f9d734d`
   ([report](subagent-reports/261031-task-2.7-build-log.md)).
 
-- [ ] ⬜ **Task 2.8**: Close the findings left open by the Task 2.5/2.6 security reviews
+- [x] ✅ **Task 2.8**: Close the findings left open by the Task 2.5/2.6 security reviews
   ([review](subagent-reports/261031-task-2.5-2.6-review.md); the re-review's verdict was SHIP):
 
   - **N1, fixed**: a Read could follow a planted symlink, then `..`, to a file outside the project.
@@ -141,11 +143,18 @@ never be the reason the session cannot repair the daemon.
     ([report](subagent-reports/261031-task-2.8-build.md)).
   - **N2, fixed**: while the daemon is down, configured extra quarantine globs and a relocated
     `payload_capture.dir` were not covered. The snapshot now carries both.
-  - **S1**: the snapshot goes stale when a config change breaks the restart.
-  - **S2**: concurrent sub-agents of one session share the single `SubagentStop` counter.
-  - **S4**: `git status` can rewrite the index and run fsmonitor.
-  - **S5**: a daemon that accepts a connection but then fails keeps blocking stops with no limit.
-  - **Owner follow-up**: whether a client install may read the daemon logs while the daemon is down.
+  - S1, S2, S4 and S5 are fixed under a **second stand-in ruling, not the owner's**
+    ([ruling](subagent-reports/261031-stand-in-ruling-2-fable.md);
+    [S4/S1 report](subagent-reports/261031-task-2.8-s4-s1-build.md),
+    [S2/S5 report](subagent-reports/261031-task-2.8-s2-s5-build.md)):
+    - **S1, fixed**: a config file newer than the snapshot keeps the old globs and adds the
+      `.claude/` lockdown.
+    - **S2, fixed**: a SubagentStop that carries an agent id gets its own counter.
+    - **S4, fixed**: `git status` is no longer on the daemon-down allow-list.
+    - **S5, fixed**: a daemon that accepts a connection but then fails is counted under the
+      same N = 3.
+  - **Owner question, not a task**: whether a client install may read the daemon logs while the
+    daemon is down. Today they stay denied, which is the safe default.
 
 ### Phase 3: Clean up and document
 
@@ -161,6 +170,21 @@ never be the reason the session cannot repair the daemon.
   diagnostic.
 - [x] ✅ **Task 3.3**: Release note in the pending-release holding area
   (`CLAUDE/UPGRADES/UNRELEASED/release-notes/010-venv-python-version-drift.md`).
+
+### Phase 4: Owner decisions
+
+- [ ] ⬜ **Task 4.1**: The owner makes [DBF-REPORT.md](DBF-REPORT.md)
+  decisions 1–3:
+
+  - accept that the class is only partly defended;
+  - decide whether to build the wider data-flow rule;
+  - confirm the calibrations.
+
+  These are reserved to the owner by DBF SPEC section 4.
+
+- [ ] ⬜ **Task 4.2**: The owner confirms or overturns the two stand-in rulings
+  (Tasks 2.5/2.6 and Task 2.8 S1/S2/S4/S5). The owner also answers the
+  client-install log question.
 
 ## Success Criteria
 
