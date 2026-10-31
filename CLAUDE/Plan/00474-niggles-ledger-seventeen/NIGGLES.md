@@ -165,7 +165,9 @@ cannot express (RESPONSE CONTRACT VIOLATION in the log).
 **Fix direction**: anchor to the main working tree (the parent of git's common dir) when `cwd` is in a
 linked worktree, with a test that creates a linked worktree and fires WorktreeCreate from inside it.
 
-**Status**: ⬜ open; a fix is being dispatched.
+**Status**: ✅ fixed in `dc45486fa` (branch `agent-a08ca9e3640ffd545-c7e930a7`, pending merge): `GitRepo.main_worktree_root()`
+anchors the handler to the main checkout. WorktreeRemove does not share the defect (report
+`subagent-reports/261031-n563-worktree-create-anchor.md`).
 
 ### N562 — the format gate's JSON names no file when black cannot parse one
 
