@@ -553,7 +553,7 @@ venv_write_build_result() {
         _vwbr_lib="${_vwbr_lib%/install}/lib/portable_time.sh"
         [ -f "$_vwbr_lib" ] || { print_error "venv build result: $_vwbr_lib is missing; no result recorded"; return 1; }
         # The path is built from this script's own location at runtime.
-        # shellcheck disable=SC1090
+        # shellcheck disable=SC1090  # path is computed at runtime from BASH_SOURCE
         source "$_vwbr_lib"
     fi
     if ! finished_at="$(_hp_timestamp '%Y-%m-%dT%H:%M:%SZ' --utc)"; then
