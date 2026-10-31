@@ -15,7 +15,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from claude_code_hooks_daemon.daemon.install_layout import get_untracked_dir, is_self_install_mode
+from claude_code_hooks_daemon.daemon.install_layout import (
+    get_untracked_dir,
+    is_client_daemon_dir,
+    is_self_install_mode,
+)
 
 
 class TestIsSelfInstallMode:
@@ -43,3 +47,14 @@ class TestGetUntrackedDir:
 
     def test_normal_mode_nests_under_dot_claude_hooks_daemon(self, tmp_path: Path) -> None:
         assert get_untracked_dir(tmp_path) == tmp_path / ".claude" / "hooks-daemon" / "untracked"
+
+
+class TestIsClientDaemonDir:
+    def test_dot_claude_hooks_daemon_is_a_client_install(self, tmp_path: Path) -> None:
+        assert is_client_daemon_dir(tmp_path / ".claude" / "hooks-daemon") is True
+
+    def test_a_checkout_root_is_not(self, tmp_path: Path) -> None:
+        assert is_client_daemon_dir(tmp_path / "checkout") is False
+
+    def test_a_hooks_daemon_dir_outside_dot_claude_is_not(self, tmp_path: Path) -> None:
+        assert is_client_daemon_dir(tmp_path / "x" / "hooks-daemon") is False

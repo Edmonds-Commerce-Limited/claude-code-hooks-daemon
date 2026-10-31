@@ -31,6 +31,16 @@ def is_self_install_mode(project_path: Path) -> bool:
     return project_path.joinpath(*_DAEMON_SOURCE_MARKER).is_dir()
 
 
+def is_client_daemon_dir(daemon_dir: Path) -> bool:
+    """Whether ``daemon_dir`` is a client install (``<project>/.claude/hooks-daemon``).
+
+    The same layout rule as ``bin/hooks-daemon``: every other daemon dir is a
+    self-install. Unlike ``is_self_install_mode`` this is keyed on the DAEMON
+    dir, which in a client install also holds ``src/claude_code_hooks_daemon``.
+    """
+    return daemon_dir.name == "hooks-daemon" and daemon_dir.parent.name == ".claude"
+
+
 def get_untracked_dir(project_path: Path) -> Path:
     """The daemon's untracked runtime dir for an already-resolved project root.
 

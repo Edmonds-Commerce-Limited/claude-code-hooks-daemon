@@ -67,6 +67,7 @@ from claude_code_hooks_daemon.daemon.enforcement import enforce_single_daemon
 from claude_code_hooks_daemon.daemon.install_layout import (
     get_untracked_dir as _daemon_untracked_dir,
 )
+from claude_code_hooks_daemon.daemon.install_layout import is_client_daemon_dir
 from claude_code_hooks_daemon.daemon.metadata import (
     DaemonVenvMetadata,
     compute_project_lock_hash,
@@ -2900,9 +2901,14 @@ def _repair_venv_locked(daemon_dir: Path, venv_path: Path, env: dict[str, str]) 
             "Install with: curl -LsSf https://astral.sh/uv/install.sh | sh"
         )
         return 1
+    # Plan 00555 Task 3.1: ``dev`` is an optional-dependencies extra, which a
+    # bare sync omits. A self-install is where the daemon is developed, so it
+    # gets the extra; a client install must not (run_semgrep_check.sh relies on
+    # that). Same layout rule as bash create_venv_at_path.
+    sync_argv = [uv, "sync"] if is_client_daemon_dir(daemon_dir) else [uv, "sync", "--extra", "dev"]
     try:
         result = subprocess.run(  # nosec B603 - uv resolved by find_uv, no user input
-            [uv, "sync"],
+            sync_argv,
             cwd=str(daemon_dir),
             env=env,
             capture_output=True,
