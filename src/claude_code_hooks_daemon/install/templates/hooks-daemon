@@ -72,6 +72,8 @@
 #    `repair` also takes that arm when a venv resolves but cannot import the
 #    package (Plan 00555 Task 2.3), with a forced rebuild: see the import probe
 #    after the interpreter is resolved.
+#    `diagnose` (Task 2.5) is read-only and venv-free too, and is answered
+#    BEFORE resolution even when a venv resolves: it reports on every venv.
 #    `_run_venv_free_verb` is the one place such verbs are listed; a new
 #    venv-free verb is a new arm there.
 
@@ -310,10 +312,86 @@ _run_venv_free_verb() {
             # "--project-root required" message ever runs.
             exec "$system_python" "$signal_script" ${rest[@]+"${rest[@]}"}
             ;;
+        diagnose)
+            _diagnose_venv_free
+            ;;
         *)
             return 1
             ;;
     esac
+}
+
+# _diagnose_venv_free() - The `diagnose` verb (Plan 00555 Task 2.5). Read-only,
+# needs no usable venv and no daemon, so the Python CLI cannot host it. Runs the
+# stdlib-only paths.py diagnose-venv under EACH venv's own interpreter (never a
+# bare PATH python3), then prints the last build record, the daemon's pid/socket
+# state and the one fix. Always exits: 0 when at least one venv is healthy,
+# 1 otherwise. Output goes to stdout.
+_diagnose_venv_free() {
+    local paths_py venv healthy=0 ran=0 found=0 rc
+    local -a bound=()
+    paths_py="$DAEMON_DIR/src/claude_code_hooks_daemon/daemon/paths.py"
+    if command -v timeout > /dev/null; then
+        bound=(timeout "$IMPORT_PROBE_TIMEOUT")
+    fi
+    for venv in "$DAEMON_DIR"/untracked/venv-*/; do
+        [ -d "$venv" ] || continue
+        venv="${venv%/}"
+        found=1
+        if [ ! -f "$paths_py" ]; then
+            echo "venv: $venv"
+            echo "diagnosis script missing at $paths_py; the clone is incomplete"
+            continue
+        fi
+        rc=0
+        "${bound[@]+"${bound[@]}"}" "$venv/bin/python" "$paths_py" diagnose-venv --daemon-dir "$DAEMON_DIR" --venv-dir "$venv" || rc=$?
+        # 0 healthy, 1 diagnosed unhealthy; anything else (124 timeout, 126/127
+        # cannot exec, a crash) means the diagnosis itself did not run.
+        case "$rc" in
+            0) healthy=1; ran=1 ;;
+            1) ran=1 ;;
+            *) echo "interpreter: $venv/bin/python could not run the diagnosis (exit $rc)" ;;
+        esac
+    done
+    if [ "$found" -eq 0 ]; then
+        echo "no venv found under $DAEMON_DIR/untracked"
+    elif [ "$ran" -eq 0 ]; then
+        echo "no venv interpreter could run the diagnosis"
+    fi
+    _print_last_build 2>&1
+    _print_daemon_state
+    if [ "$healthy" -eq 1 ]; then
+        echo "healthy: a venv can start the daemon"
+        exit 0
+    fi
+    echo "fix: $BIN_DIR/hooks-daemon repair"
+    exit 1
+}
+
+# _print_daemon_state() - Is the daemon running? Reads the pid file (the
+# CLAUDE_HOOKS_PID_PATH override, else untracked/daemon*.pid) and tests the pid
+# with `kill -0`. Read-only; the socket is only tested for existence.
+_print_daemon_state() {
+    local pid_file pid sock state="not running" candidate
+    pid_file="${CLAUDE_HOOKS_PID_PATH:-}"
+    if [ -z "$pid_file" ]; then
+        for candidate in "$DAEMON_DIR"/untracked/daemon*.pid; do
+            [ -f "$candidate" ] && pid_file="$candidate" && break
+        done
+    fi
+    if [ -n "$pid_file" ] && [ -f "$pid_file" ]; then
+        pid="$(cat "$pid_file" 2> /dev/null || true)"
+        if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2> /dev/null; then
+            state="running (pid $pid)"
+        else
+            state="not running (stale pid file $pid_file)"
+        fi
+    fi
+    echo "daemon: $state"
+    sock="${CLAUDE_HOOKS_SOCKET_PATH:-}"
+    if [ -n "$sock" ]; then
+        if [ -S "$sock" ]; then echo "socket: present ($sock)"; else echo "socket: absent ($sock)"; fi
+    fi
 }
 
 # _print_last_build() - Name the last venv build and its log on stderr.
@@ -336,6 +414,13 @@ _print_last_build() {
     echo "   Last venv build: $result at ${finished:-unknown time}" >&2
     echo "   Build log: ${log:-unknown}" >&2
 }
+
+# `diagnose` is answered before venv resolution: its job is to explain why a
+# venv does not resolve, so it must not depend on one (it exits itself).
+_verb="$(_subcommand_of "$@")" || _verb=""
+if [ "$_verb" = "diagnose" ]; then
+    _run_venv_free_verb "$@"
+fi
 
 if ! PYTHON="$(resolve_venv_python "$DAEMON_DIR")"; then
     if ! _run_venv_free_verb "$@"; then
