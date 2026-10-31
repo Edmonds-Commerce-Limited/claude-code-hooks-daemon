@@ -1674,6 +1674,7 @@ export PROJECT_PATH
 #
 validate_venv() {
     VENV_ERROR=""
+    local diagnosis=""
 
     # Plan 00099: lazy fingerprint-keyed venv resolution (paid only on daemon
     # startup, never on hot path). No-op on subsequent calls.
@@ -1687,30 +1688,71 @@ validate_venv() {
         local resolve_rv=0
         _resolve_python_cmd || resolve_rv=$?
         if [ "$resolve_rv" -ne 0 ]; then
-            VENV_ERROR="Venv Python could not be resolved (exit $resolve_rv). Run: cd $HOOKS_DAEMON_ROOT_DIR && uv sync"
+            diagnosis="$(_venv_start_diagnosis)"
+            VENV_ERROR="Venv Python could not be resolved (exit $resolve_rv).
+$diagnosis"
             return 1
         fi
     fi
 
+    # Plan 00555 Task 2.4: every failure below names the venv's actual state
+    # and the one fix (bin/hooks-daemon repair), never a bare `uv sync`.
+    local venv_dir=""
+    if [[ -n "$PYTHON_CMD" ]]; then
+        venv_dir="$(dirname "$(dirname "$PYTHON_CMD")")"
+    fi
+
     # Check venv Python binary exists
     if [[ -z "$PYTHON_CMD" || ! -f "$PYTHON_CMD" ]]; then
-        VENV_ERROR="Venv Python not found at ${PYTHON_CMD:-<unresolved>}. Run: cd $HOOKS_DAEMON_ROOT_DIR && uv sync"
+        diagnosis="$(_venv_start_diagnosis "$venv_dir")"
+        VENV_ERROR="Venv Python not found at ${PYTHON_CMD:-<unresolved>}.
+$diagnosis"
         return 1
     fi
 
     # Check venv Python is executable
     if [[ ! -x "$PYTHON_CMD" ]]; then
-        VENV_ERROR="Venv Python not executable at $PYTHON_CMD. Run: cd $HOOKS_DAEMON_ROOT_DIR && uv sync"
+        diagnosis="$(_venv_start_diagnosis "$venv_dir")"
+        VENV_ERROR="Venv Python not executable at $PYTHON_CMD.
+$diagnosis"
         return 1
     fi
 
     # Check key package is importable
     if ! "$PYTHON_CMD" -c "import claude_code_hooks_daemon" 2>/dev/null; then
-        VENV_ERROR="Cannot import claude_code_hooks_daemon. Venv may be broken (stale .pth files or Python version mismatch). Run: cd $HOOKS_DAEMON_ROOT_DIR && uv sync"
+        diagnosis="$(_venv_start_diagnosis "$venv_dir")"
+        VENV_ERROR="Cannot import claude_code_hooks_daemon.
+$diagnosis"
         return 1
     fi
 
     return 0
+}
+
+#
+# _venv_start_diagnosis() - Print why the daemon cannot start from a venv
+# (Plan 00555 Task 2.4): interpreter version, the venv's pyvenv.cfg version,
+# whether its site-packages is on sys.path, and the one fix command.
+#
+# $1 is the venv directory; without it every untracked/venv-* is diagnosed.
+# Runs paths.py by file path under the system python3, so it works when the
+# venv is exactly what is broken. Always prints at least the fix line.
+#
+_venv_start_diagnosis() {
+    local paths_py="${HOOKS_DAEMON_ROOT_DIR}/src/claude_code_hooks_daemon/daemon/paths.py"
+    local -a venv_args=()
+    if [[ -n "${1:-}" ]]; then
+        venv_args=(--venv-dir "$1")
+    fi
+    local out="" rv=0
+    if command -v python3 >/dev/null && [[ -f "$paths_py" ]]; then
+        out="$(python3 "$paths_py" diagnose-venv --daemon-dir "$HOOKS_DAEMON_ROOT_DIR" \
+            ${venv_args[@]+"${venv_args[@]}"} 2>&1)" || rv=$?
+    fi
+    if [[ -z "$out" ]]; then
+        out="fix: ${HOOKS_DAEMON_ROOT_DIR}/bin/hooks-daemon repair"
+    fi
+    printf '%s\n' "$out"
 }
 
 #
@@ -2118,6 +2160,9 @@ start_daemon() {
     if [[ -n "$launch_output" ]]; then
         echo "Launcher output (may explain the failure):" >&2
         echo "$launch_output" >&2
+    fi
+    if [[ -n "$PYTHON_CMD" ]]; then
+        _venv_start_diagnosis "$(dirname "$(dirname "$PYTHON_CMD")")" >&2
     fi
     return 1
 }

@@ -3523,6 +3523,120 @@ def _cli_list_stale_venvs(args: argparse.Namespace) -> int:
     return 0
 
 
+# Runs INSIDE the venv's own interpreter, so it sees exactly the ``sys.path`` the
+# daemon would start with. Stdlib only: the package may be the thing that is
+# missing. ``find_spec`` locates the package without executing it, and the empty
+# entry is dropped so the working directory cannot shadow the answer.
+_VENV_START_PROBE_CODE = (
+    "import importlib.util, json, sys\n"
+    "sys.path[:] = [p for p in sys.path if p]\n"
+    "spec = importlib.util.find_spec('claude_code_hooks_daemon')\n"
+    "print(json.dumps({'version': '%d.%d.%d' % sys.version_info[:3],"
+    " 'no_site': sys.flags.no_site, 'path': sys.path,"
+    " 'importable': spec is not None}))\n"
+)
+
+
+@dataclass(frozen=True)
+class VenvStartDiagnosis:
+    """What is wrong (or not) with one venv, for a daemon start failure (Plan 00555 Task 2.4)."""
+
+    healthy: bool
+    lines: list[str]
+
+
+def _yes_no(value: bool) -> str:
+    return "yes" if value else "no"
+
+
+def _run_start_probe(python: Path) -> tuple[dict[str, Any] | None, str]:
+    """Run the start probe in ``python``; return (its report, a failure reason)."""
+    import subprocess  # nosec B404 — trusted: probing a resolved venv path, no user input
+
+    try:
+        result = subprocess.run(  # nosec B603 — fixed argv, no shell, no user input
+            [str(python), "-c", _VENV_START_PROBE_CODE],
+            capture_output=True,
+            text=True,
+            timeout=_VENV_RUN_PROBE_TIMEOUT_SECS,
+            check=False,
+            cwd=python.parent,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, str(exc)
+    if result.returncode != 0:
+        return None, f"exit {result.returncode}: {result.stderr.strip()[-200:]}"
+    try:
+        report: dict[str, Any] = json.loads(result.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError) as exc:
+        return None, f"unreadable probe output ({exc})"
+    return report, ""
+
+
+def diagnose_venv_start(venv_dir: Path, daemon_dir: Path) -> VenvStartDiagnosis:
+    """Diagnose why the daemon cannot start from ``venv_dir``; stdlib only, never raises.
+
+    Runs the venv's own interpreter and reports its version, the ``pyvenv.cfg``
+    ``version_info``, whether the venv's ``lib/pythonX.Y/site-packages`` is on
+    that interpreter's ``sys.path``, and whether the package can be found. The
+    reference diagnostic is the ``sys.path`` probe in ``CLAUDE/SELF_INSTALL.md``
+    ("Interpreter changed under the venv"). An unhealthy venv ends with the one
+    fix, ``<daemon_dir>/bin/hooks-daemon repair``. Reusable by a later
+    ``hooks-daemon diagnose`` verb: it needs no importable daemon package.
+    """
+    python = venv_dir / "bin" / "python"
+    recorded = venv_cfg_major_minor(venv_dir)
+    recorded_text = f"{recorded[0]}.{recorded[1]}" if recorded else "not recorded"
+    lines = [f"venv: {venv_dir}"]
+    report, failure = _run_start_probe(python) if python.exists() else (None, "no such file")
+    healthy = False
+    if report is None:
+        lines.append(f"interpreter: cannot run {python} ({failure})")
+        lines.append(f"pyvenv.cfg version_info: {recorded_text}")
+    else:
+        running = str(report["version"])
+        running_minor = tuple(int(part) for part in running.split(".")[:2])
+        expected_minor = recorded or (running_minor[0], running_minor[1])
+        site_packages = (
+            venv_dir / "lib" / f"python{expected_minor[0]}.{expected_minor[1]}" / "site-packages"
+        )
+        on_path = os.path.realpath(site_packages) in {
+            os.path.realpath(entry) for entry in report["path"]
+        }
+        importable = bool(report["importable"])
+        lines.append(f"interpreter version: {running} ({python})")
+        lines.append(f"pyvenv.cfg version_info: {recorded_text}")
+        lines.append(f"site-packages on sys.path: {_yes_no(on_path)} ({site_packages})")
+        lines.append(f"claude_code_hooks_daemon importable: {_yes_no(importable)}")
+        if report["no_site"]:
+            lines.append("sys.flags.no_site is set: the interpreter never adds site-packages")
+        if recorded is not None and recorded != (running_minor[0], running_minor[1]):
+            lines.append(
+                f"cause: the interpreter changed under the venv ({recorded_text} -> "
+                f"{running_minor[0]}.{running_minor[1]}), so its site-packages is invisible"
+            )
+        healthy = on_path and importable
+    if not healthy:
+        lines.append(f"fix: {daemon_dir}/bin/hooks-daemon repair")
+    return VenvStartDiagnosis(healthy=healthy, lines=lines)
+
+
+def _cli_diagnose_venv(args: argparse.Namespace) -> int:
+    """CLI handler for ``diagnose-venv``: print the diagnosis; exit 0 only if all are healthy."""
+    daemon_dir = Path(args.daemon_dir)
+    venv_dirs = [Path(entry) for entry in args.venv_dir] or sorted(
+        entry for entry in (daemon_dir / "untracked").glob("venv-*") if entry.is_dir()
+    )
+    if not venv_dirs:
+        print(f"no venv found under {daemon_dir / 'untracked'}")
+        print(f"fix: {daemon_dir}/bin/hooks-daemon repair")
+        return 1
+    diagnoses = [diagnose_venv_start(venv, daemon_dir) for venv in venv_dirs]
+    for diagnosis in diagnoses:
+        print("\n".join(diagnosis.lines))
+    return 0 if all(diagnosis.healthy for diagnosis in diagnoses) else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     """Dispatcher for ``python -m claude_code_hooks_daemon.daemon.paths``.
 
@@ -3532,6 +3646,7 @@ def main(argv: list[str] | None = None) -> int:
     - ``check-venv-fresh`` (Plan 00100 Task 3.7) — lock_hash freshness gate
     - ``bootstrap-decision`` (Plan 00456) — the venv-less auto-build gate
     - ``list-stale-venvs`` — which non-current venvs are positively stale
+    - ``diagnose-venv`` (Plan 00555 Task 2.4) — why a venv cannot start the daemon
     """
     parser = argparse.ArgumentParser(
         description="Hooks-daemon path utilities (SSOT for bash wrappers).",
@@ -3607,6 +3722,22 @@ def main(argv: list[str] | None = None) -> int:
     list_stale_parser.add_argument("--daemon-dir", required=True, help="Daemon installation dir.")
     list_stale_parser.add_argument("--current-venv", required=True, help="The live venv path.")
     list_stale_parser.set_defaults(func=_cli_list_stale_venvs)
+
+    diagnose_parser = subparsers.add_parser(
+        "diagnose-venv",
+        help=(
+            "Diagnose a daemon start failure: interpreter version, pyvenv.cfg version, "
+            "site-packages on sys.path, importability, and the repair command. Exit 0 if healthy."
+        ),
+    )
+    diagnose_parser.add_argument("--daemon-dir", required=True, help="Daemon installation dir.")
+    diagnose_parser.add_argument(
+        "--venv-dir",
+        action="append",
+        default=[],
+        help="A venv to diagnose (repeatable); default: every untracked/venv-* of the daemon dir.",
+    )
+    diagnose_parser.set_defaults(func=_cli_diagnose_venv)
 
     args = parser.parse_args(argv)
     return int(args.func(args))
