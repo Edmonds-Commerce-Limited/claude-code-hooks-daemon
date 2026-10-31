@@ -6,3 +6,20 @@
 4. release_gate_layout: added `venv_interpreter_trust` to CHECKS_STATIC in `.github/workflows/release-gate.yml`.
 
 Verification: the five test files pass (183). The full-QA lock blocked `llm_qa.py venv_interpreter_trust`, so `scripts/qa/check_venv_interpreter_trust.py` was run directly: rc 0, no findings. Black and ruff are clean on the changed Python files.
+
+## Second round: symlinked-project wrapper stub and git-enumerated content
+
+- tests/integration/test_a_daemon_of_a_symlinked_project_is_stoppable.py: its stub
+  resolve_venv.sh defined only `resolve_venv_python`, so the wrapper's
+  `venv_python_usable` call (line ~281) failed. The stub now sources the real
+  scripts/lib/resolve_venv.sh (real gate) and then pins the interpreter.
+- scripts/qa/check_venv_interpreter_trust.py: `scanned_files` enumerated with
+  `git ls-files` and delegated protected-path filtering to a sibling module, so the
+  Plan 00412 class 9 tripwire saw no protected-set check in this module. Added a local
+  `_without_protected` (unguarded import of `path_is_protected` /
+  `resolve_configured_patterns`), mirroring check_sensitive_content.py.
+- Other `resolve_venv_python()` stubs in tests/ (test_dbf_gate_shell_scripts.py,
+  test_init_sh_resolve_python_cmd_status.py, test_venv_bootstrap_hostile_path_epoch.py,
+  test_worktree_socket_path_preflight.py) either source the real gate or return 1 and
+  never reach it; all pass unchanged. No further fixes needed.
+- Detector exits 0; black and ruff clean.

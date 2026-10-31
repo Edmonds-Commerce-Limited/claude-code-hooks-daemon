@@ -37,6 +37,7 @@ from tests.daemon_teardown import stop_daemons_of
 from tests.integration.test_init_sh_pretooluse_fail_closed import BASH, INIT_SH, _script_env
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+RESOLVE_VENV_SH = REPO_ROOT / "scripts" / "lib" / "resolve_venv.sh"
 DAEMON_CONTROL_SH = REPO_ROOT / "scripts" / "install" / "daemon_control.sh"
 _CLI_MODULE = "claude_code_hooks_daemon.daemon.cli"
 
@@ -87,7 +88,11 @@ def _make_project(path: Path) -> None:
     bin_wrapper.deploy_bin_wrapper(daemon_dir)
     resolver = daemon_dir / "scripts" / "lib" / "resolve_venv.sh"
     resolver.parent.mkdir(parents=True)
-    resolver.write_text(f"resolve_venv_python() {{ printf '%s\\n' '{sys.executable}'; }}\n")
+    # The real gate (venv_python_usable) judges the pinned interpreter, as in production.
+    resolver.write_text(
+        f'. "{RESOLVE_VENV_SH}"\n'
+        f"resolve_venv_python() {{ printf '%s\\n' '{sys.executable}'; }}\n"
+    )
 
 
 def _stop_every_daemon(*roots: Path) -> None:

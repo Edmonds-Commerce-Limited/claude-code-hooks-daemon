@@ -697,6 +697,24 @@ def in_scope(relative: str) -> bool:
     return not (_EXCLUDED_DIRS & set(parts[:-1]))
 
 
+def _without_protected(files: list[Path]) -> list[Path]:
+    """Drop files the project protects, so their bytes are never read (Plan 00412 class 9).
+
+    The import is deliberately unguarded: if the matcher cannot load, this
+    module cannot know what it must not read, and stopping is the only safe
+    outcome.
+    """
+    from claude_code_hooks_daemon.utils.secret_file_matching import (
+        path_is_protected,
+        resolve_configured_patterns,
+    )
+
+    patterns = resolve_configured_patterns()
+    if not patterns:
+        return files
+    return [f for f in files if not path_is_protected(str(f), patterns)]
+
+
 def scanned_files() -> tuple[list[Path], list[Path]]:
     """The tracked Python files and the tracked shell files the Detector judges."""
     # SECURITY: list-form subprocess, no shell=True, trusted system tool (git).
@@ -712,10 +730,7 @@ def scanned_files() -> tuple[list[Path], list[Path]]:
     python = [path for path in candidates if _sig._is_python(path)]
     python_set = set(python)
     shell = [path for path in candidates if path not in python_set and _sig._is_shell(path)]
-    return (
-        sorted(_sig._without_protected_paths(python)),
-        sorted(_sig._without_protected_paths(shell)),
-    )
+    return (sorted(_without_protected(python)), sorted(_without_protected(shell)))
 
 
 def main() -> int:
