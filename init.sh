@@ -201,21 +201,6 @@ _GIT_LOG_FLAGS = frozenset(
     ["--oneline", "--stat", "--no-pager", "--all", "--decorate", "--graph"]
 )
 _GIT_LOG_PREFIXES = ("--format=", "--pretty=", "--since=", "--until=", "--author=", "--grep=")
-_GIT_STATUS_FLAGS = frozenset(
-    [
-        "-s",
-        "--short",
-        "-b",
-        "--branch",
-        "-sb",
-        "--porcelain",
-        "--porcelain=v1",
-        "--porcelain=v2",
-        "--ignored",
-        "--no-pager",
-    ]
-)
-_GIT_STATUS_PREFIXES = ("--untracked-files=",)
 _REVISION_CHARS = frozenset(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_./^@-"
 )
@@ -362,6 +347,30 @@ def _snapshot_globs(daemon_root):
         return None
 
 
+_CONFIG_NAMES = ("hooks-daemon.yaml", "hooks-daemon.yml")
+
+
+def _stale_config(project_path, daemon_root):
+    """Plan 00555 Task 2.8 S1: the project config file edited after the snapshot
+    was written, or None. The daemon rewrites the snapshot only when it starts,
+    so a config edited since then may carry globs the snapshot does not. Stale
+    means a config file is strictly newer than the snapshot, or a stat fails;
+    no config file at all is not stale."""
+    if not (_is_absolute(project_path) and _is_absolute(daemon_root)):
+        return None
+    snapshot = os.path.join(daemon_root, "untracked", _SNAPSHOT_NAME)
+    for name in _CONFIG_NAMES:
+        config = os.path.join(project_path, ".claude", name)
+        if not os.path.lexists(config):
+            continue
+        try:
+            if os.stat(config).st_mtime > os.stat(snapshot).st_mtime:
+                return config
+        except OSError:
+            return config
+    return None
+
+
 def _glob_tokens(pattern):
     """The glob dialect of the daemon (utils/path_exclusion.py) as a token list."""
     anchored = pattern.startswith("/")
@@ -456,6 +465,8 @@ def _is_protected(path, project_path, daemon_root):
     norm = os.path.normpath(path)
     base = os.path.basename(norm)
     snapshot = _snapshot_globs(daemon_root)
+    # The union: a stale snapshot keeps its globs AND locks .claude/ down.
+    lockdown = snapshot is None or _stale_config(project_path, daemon_root) is not None
     for glob in _PROTECTED_DEFAULTS + _ALWAYS_PROTECTED + tuple(snapshot or ()):
         if _matches_glob(glob, norm, project_path):
             return True
@@ -481,7 +492,7 @@ def _is_protected(path, project_path, daemon_root):
                 return True
             if parts[1] == "logs" and len(parts) > 2 and parts[2] == "hooks":
                 return True
-        if snapshot is None and parts[0] == ".claude" and len(parts) > 1:
+        if lockdown and parts[0] == ".claude" and len(parts) > 1:
             settings = len(parts) == 2 and fnmatch.fnmatchcase(parts[1], "settings*.json")
             if rel != ".claude/hooks-daemon.yaml" and not settings:
                 return True
@@ -522,14 +533,14 @@ def _is_int(text):
 
 
 def _git_read_only(args, cwd, project_path, daemon_root):
-    """git log / git status with a fixed option set; nothing that prints content."""
-    if not args or args[0] not in ("log", "status"):
+    """git log with a fixed option set; nothing that prints content. status is not
+    here: it refreshes .git/index and may run a configured core.fsmonitor program."""
+    if not args or args[0] != "log":
         return False
     if not _path_allowed(".", cwd, project_path, daemon_root, True):
         return False
-    log = args[0] == "log"
-    flags = _GIT_LOG_FLAGS if log else _GIT_STATUS_FLAGS
-    prefixes = _GIT_LOG_PREFIXES if log else _GIT_STATUS_PREFIXES
+    flags = _GIT_LOG_FLAGS
+    prefixes = _GIT_LOG_PREFIXES
     rest = args[1:]
     index = 0
     pathspecs = False
@@ -548,13 +559,13 @@ def _git_read_only(args, cwd, project_path, daemon_root):
             pathspecs = True
         elif token in flags or token.startswith(prefixes):
             continue
-        elif log and token == "-n":
+        elif token == "-n":
             if index >= len(rest) or not _is_int(rest[index]):
                 return False
             index += 1
-        elif log and token.startswith("-") and _is_int(token[1:]):
+        elif token.startswith("-") and _is_int(token[1:]):
             continue
-        elif log and not token.startswith("-") and all(char in _REVISION_CHARS for char in token):
+        elif not token.startswith("-") and all(char in _REVISION_CHARS for char in token):
             continue
         else:
             return False
@@ -633,19 +644,28 @@ def _fix_line(project_path, daemon_root):
     return "Run exactly " + restart + " (then repair or diagnose if it cannot start)."
 
 
-def _safe_session(hi):
-    session = hi.get("session_id") if isinstance(hi, dict) else None
-    if not isinstance(session, str):
+def _safe_id(hi, key):
+    value = hi.get(key) if isinstance(hi, dict) else None
+    if not isinstance(value, str):
         return "unknown"
     cleaned = "".join(
         char if ord(char) < 128 and (char.isalnum() or char in "-_") else "_"
-        for char in session[:100]
+        for char in value[:100]
     )
     return cleaned or "unknown"
 
 
-def _stop_counter_path(daemon_root, session, event):
-    return os.path.join(daemon_root, "untracked", ".daemon-down-stops." + session + "." + event)
+def _safe_session(hi):
+    return _safe_id(hi, "session_id")
+
+
+def _stop_counter_path(daemon_root, session, event, agent=None):
+    """The counter of one session and event; a SubagentStop that names its agent
+    gets a count of its own, so each sub-agent is bounded separately."""
+    name = ".daemon-down-stops." + session + "." + event
+    if agent is not None:
+        name += "." + agent
+    return os.path.join(daemon_root, "untracked", name)
 
 
 def _text_of(content):
@@ -727,7 +747,15 @@ def _stop_bound_counted(hi, event, reason_class, project_path, daemon_root):
     if event not in _STOP_EVENTS or not _is_absolute(daemon_root):
         return None
     fix = _fix_line(project_path, daemon_root)
-    transcript = hi.get("transcript_path") if isinstance(hi, dict) else None
+    transcript = None
+    agent = None
+    if isinstance(hi, dict):
+        transcript = hi.get("transcript_path")
+        if event == "SubagentStop" and isinstance(hi.get("agent_id"), str):
+            agent = _safe_id(hi, "agent_id")
+        agent_transcript = hi.get("agent_transcript_path")
+        if event == "SubagentStop" and isinstance(agent_transcript, str) and agent_transcript:
+            transcript = agent_transcript
     if isinstance(transcript, str) and transcript:
         try:
             declared = _declares_awaiting_human(_last_assistant_text(transcript))
@@ -740,7 +768,7 @@ def _stop_bound_counted(hi, event, reason_class, project_path, daemon_root):
                 "stand-in cron was scheduled; protection is NOT active. " + fix
             )
     session = _safe_session(hi)
-    path = _stop_counter_path(daemon_root, session, event)
+    path = _stop_counter_path(daemon_root, session, event, agent)
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         count = 0
@@ -778,14 +806,20 @@ def _reset_stop_bound(hi, daemon_root):
     """The daemon answered: the daemon-down stop counts of this session start over."""
     if not _is_absolute(daemon_root):
         return
-    session = _safe_session(hi)
-    for event in _STOP_EVENTS:
-        path = _stop_counter_path(daemon_root, session, event)
-        if os.path.exists(path):
-            try:
-                os.remove(path)
-            except OSError as exc:
-                print("HOOKS DAEMON: could not reset " + path + ": " + str(exc), file=sys.stderr)
+    directory = os.path.join(daemon_root, "untracked")
+    prefix = ".daemon-down-stops." + _safe_session(hi) + "."
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return
+    for name in names:
+        if not name.startswith(prefix):
+            continue
+        path = os.path.join(directory, name)
+        try:
+            os.remove(path)
+        except OSError as exc:
+            print("HOOKS DAEMON: could not reset " + path + ": " + str(exc), file=sys.stderr)
 
 
 def _recovery_command(project_path, daemon_root, sub):
@@ -815,6 +849,22 @@ def _launcher_for_a_human(project_path):
 
 def _recovery_advice(project_path, daemon_root):
     """The TO FIX lines every PreToolUse deny ends with."""
+    return _stale_notice(project_path, daemon_root) + _recovery_lines(project_path, daemon_root)
+
+
+def _stale_notice(project_path, daemon_root):
+    """The deny-reason lines naming a stale protected-paths snapshot, if any."""
+    config = _stale_config(project_path, daemon_root)
+    if config is None:
+        return []
+    return [
+        "NOTE: the protected-paths snapshot is stale: " + config + " is newer than",
+        "it, so .claude/ is locked down as well as the snapshot globs (only the",
+        "config and settings files stay readable). A daemon restart rewrites it.",
+    ]
+
+
+def _recovery_lines(project_path, daemon_root):
     restart = _recovery_command(project_path, daemon_root, "restart")
     repair = _recovery_command(project_path, daemon_root, "repair")
     diagnose = _recovery_command(project_path, daemon_root, "diagnose")
@@ -837,8 +887,8 @@ def _recovery_advice(project_path, daemon_root):
         f"run it directly (! {restart}), since Edit is denied here too.",
         f"To see why it will not start, run exactly {diagnose}.",
         "Only read-only diagnostics (Read, ls, cat/head/tail of a project file,",
-        "git log, git status) are allowed while the daemon is down; everything",
-        "else is denied.",
+        "git log) are allowed while the daemon is down; everything else is",
+        "denied.",
     ]
 '
 }
@@ -4069,13 +4119,13 @@ def emit_error_json(event_name, error_type, error_details):
                 'decision': 'block',
                 'reason': reason,
             }
-            # Plan 00555 Task 2.6: only a daemon that was never reached counts
-            # toward the bound; a reached one stays blocked.
-            if not daemon_reached:
-                allowed = _stop_bound(hook_input, event_name, 'daemon_unreachable',
-                                      project_path, daemon_root)
-                if allowed is not None:
-                    response = {'systemMessage': allowed}
+            # Plan 00555 Task 2.6/2.8 S5: every class that blocks counts toward
+            # the bound (reached-but-broken included); invalid_hook_input and
+            # socket_timeout are handled above and never count.
+            allowed = _stop_bound(hook_input, event_name, error_type,
+                                  project_path, daemon_root)
+            if allowed is not None:
+                response = {'systemMessage': allowed}
     elif event_name == 'PreToolUse' \
             and not (_is_daemon_recovery_command(hook_input, project_path, daemon_root)
                      or (not daemon_reached
