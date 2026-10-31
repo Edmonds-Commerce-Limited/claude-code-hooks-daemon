@@ -131,7 +131,9 @@ remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedBy
 `subagent-reports/261031-task-2.5-2.6-build.md`).
 
 **Evidence**: the agent wiring the stop-bound counter tested with `untracked/` replaced by a regular
-file. `init.sh` then exits 1 when it is sourced, before the code under test runs. Two tests had to
+file. `init.sh` then exits 1 when it is sourced, before the code under test runs. The cause is the
+top-level `mkdir -p "${HOOKS_DAEMON_ROOT_DIR}/untracked"` (`init.sh:2066`, under `set -euo pipefail`
+from line 23). In a client install that path is `.claude/hooks-daemon/untracked`. Two tests had to
 use a directory at the counter path instead. A Stop or PreToolUse hook that exits 1 is not a deny:
 Claude Code reads only exit 2 or a JSON decision as a block. So a hook that cannot create
 `untracked/` may fail open, not closed. This has not been reproduced against the live hook entry
