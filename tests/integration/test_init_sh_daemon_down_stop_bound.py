@@ -408,3 +408,31 @@ class TestAwaitingHumanDeclaration:
 
 def test_the_bound_constant_is_three() -> None:
     assert re.search(r"^_STOP_BOUND = 3$", INIT_SH.read_text(), re.MULTILINE)
+
+
+class TestReviewFixes:
+    def test_a_start_that_never_serves_does_not_reset_the_count(
+        self, project: Path, dead_socket: Path
+    ) -> None:
+        """Review I2: start_daemon returning 0 proves no request was served."""
+        script = (
+            "is_daemon_running() { return 1; }; start_daemon() { return 0; }; "
+            "ensure_daemon; forward_stop_event Stop"
+        )
+        codes = [_run(project, script, _payload(), dead_socket).returncode for _ in range(3)]
+        assert codes == [2, 2, 0]
+
+    def test_an_unexpected_exception_in_the_bound_keeps_blocking(
+        self, project: Path, dead_socket: Path
+    ) -> None:
+        """Review S3: a counter int() cannot parse must not crash into an allow."""
+        _counter(project).write_text("9" * 5000 + "\n")
+        for _ in range(3):
+            result = _forward(project, dead_socket, _payload())
+            assert result.returncode == 2, result.stderr
+
+    def test_an_unexpected_exception_in_the_bound_keeps_blocking_on_emit(
+        self, project: Path
+    ) -> None:
+        _counter(project).write_text("9" * 5000 + "\n")
+        assert _is_block(_emit(project, _payload()))

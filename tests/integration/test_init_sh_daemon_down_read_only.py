@@ -443,3 +443,208 @@ class TestEndToEndThroughTheTransport:
         text = json.dumps(response)
         assert "diagnose" in text
         assert "read-only diagnostics" in text
+
+
+def _snapshot(project: Path, *globs: str) -> None:
+    path = project / ".claude" / "hooks-daemon" / "untracked" / SNAPSHOT_NAME
+    path.write_text("".join(f"{glob}\n" for glob in globs))
+
+
+class TestConfiguredGlobsWithASlash:
+    """Review C1: a configured glob is matched in the daemon's dialect, against the
+    project-relative path, not only against the basename."""
+
+    @pytest.fixture
+    def slashed(self, project: Path) -> Path:
+        for rel in (
+            "config/credentials.yml",
+            "secrets/db.txt",
+            "deploy/key.json",
+            "deploy/ok.json",
+        ):
+            target = project / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("s\n")
+        (project / "sub" / "config").mkdir(parents=True)
+        (project / "sub" / "config" / "credentials.yml").write_text("s\n")
+        (project / "private.txt").write_text("s\n")
+        _snapshot(
+            project,
+            "config/credentials.yml",
+            "secrets/**",
+            "/deploy/key.json",
+            f"{project}/private.txt",
+        )
+        return project
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cat config/credentials.yml",
+            "cat secrets/db.txt",
+            "cat deploy/key.json",
+            "cat private.txt",
+            "head -n 2 secrets/db.txt",
+            "tail -n 2 config/credentials.yml",
+            "cat sub/config/credentials.yml",
+            "cat ./secrets/../secrets/db.txt",
+            "git log -- secrets/db.txt",
+        ],
+    )
+    def test_bash_is_denied(self, slashed: Path, command: str) -> None:
+        assert _bash(slashed, command) is False
+
+    @pytest.mark.parametrize(
+        "rel", ["config/credentials.yml", "secrets/db.txt", "deploy/key.json", "private.txt"]
+    )
+    def test_read_is_denied(self, slashed: Path, rel: str) -> None:
+        assert _read(slashed, str(slashed / rel)) is False
+
+    def test_unrelated_files_stay_readable(self, slashed: Path) -> None:
+        assert _bash(slashed, "cat deploy/ok.json") is True
+        assert _bash(slashed, "cat README.md") is True
+        assert _read(slashed, str(slashed / "deploy" / "ok.json")) is True
+
+    def test_an_anchored_glob_does_not_match_deeper(self, slashed: Path) -> None:
+        (slashed / "sub" / "deploy").mkdir()
+        (slashed / "sub" / "deploy" / "key.json").write_text("s\n")
+        assert _bash(slashed, "cat sub/deploy/key.json") is True
+
+
+def _recovery_namespace() -> str:
+    extracted = subprocess.run(
+        [
+            BASH,
+            "-c",
+            'source "$1"; _hooks_daemon_recovery_py src; printf %s "$src"',
+            "_",
+            str(INIT_SH),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return extracted.stdout
+
+
+class TestGlobMatcherParityWithTheDaemon:
+    CASES = (
+        ("config/credentials.yml", "config/credentials.yml"),
+        ("config/credentials.yml", "a/b/config/credentials.yml"),
+        ("config/credentials.yml", "xconfig/credentials.yml"),
+        ("/deploy/key.json", "deploy/key.json"),
+        ("/deploy/key.json", "a/deploy/key.json"),
+        ("secrets/**", "secrets/a.txt"),
+        ("secrets/**", "secrets/a/b/c.txt"),
+        ("secrets/**", "x/secrets/a.txt"),
+        ("secrets/**", "secrets"),
+        ("**/keys/*.pem", "keys/a.pem"),
+        ("**/keys/*.pem", "a/b/keys/a.pem"),
+        ("**/keys/*.pem", "a/b/keys/c/a.pem"),
+        ("**/keys/*.pem", "xkeys/a.pem"),
+        ("*.pem", "a/b/k.pem"),
+        ("*.pem", "k.pem.bak"),
+        ("k?.pem", "k1.pem"),
+        ("k?.pem", "k/.pem"),
+        ("a/*/c", "a/b/c"),
+        ("a/*/c", "a/b/d/c"),
+        ("a/**/c", "a/c"),
+        ("a/**/c", "a/b/d/c"),
+        ("/a/**", "a/b"),
+        ("**", "anything/at/all"),
+    )
+
+    def test_matches_the_daemon_over_a_shared_table(self) -> None:
+        from claude_code_hooks_daemon.utils.path_exclusion import _glob_fullmatch
+
+        program = (
+            _recovery_namespace()
+            + "\nimport json\nprint(json.dumps([_glob_fullmatch(g, t) for g, t in "
+            + repr(self.CASES)
+            + "]))\n"
+        )
+        evaluated = subprocess.run(
+            [sys.executable, "-c", program], check=True, capture_output=True, text=True
+        )
+        init_sh = json.loads(evaluated.stdout)
+        daemon = [_glob_fullmatch(g, t) for g, t in self.CASES]
+        assert init_sh == daemon
+
+
+class TestSymlinkBeforeDotDot:
+    """Review I1: the shell resolves a symlink before it applies a following `..`."""
+
+    def test_dotdot_after_a_symlinked_directory_cannot_leave_the_project(
+        self, project: Path, tmp_path: Path
+    ) -> None:
+        outside = tmp_path / "elsewhere"
+        (outside / "inner").mkdir(parents=True)
+        (outside / "README.md").write_text("OUTSIDE\n")
+        (project / "lnk").symlink_to(outside / "inner")
+        assert _bash(project, "cat lnk/../README.md") is False
+        assert _bash(project, "head -n 1 lnk/../README.md") is False
+
+    def test_a_plain_dotdot_inside_the_project_still_works(self, project: Path) -> None:
+        assert _bash(project, "cat src/../README.md") is True
+
+    def test_dotdot_after_a_symlink_cannot_reach_a_configured_glob(
+        self, project: Path, tmp_path: Path
+    ) -> None:
+        (project / "secrets").mkdir()
+        (project / "secrets" / "db.txt").write_text("s\n")
+        _snapshot(project, "secrets/**")
+        (project / "sub").mkdir()
+        (project / "sub" / "secrets").symlink_to(project / "secrets")
+        assert _bash(project, "cat sub/secrets/db.txt") is False
+
+
+class TestQuarantineArtefactStaysDenied:
+    """Review I3: quarantine_artefact_read_guard's artefact is unreadable while down."""
+
+    @pytest.fixture
+    def detail(self, project: Path) -> Path:
+        target = project / "CLAUDE" / "reports" / "x-opus-security-DETAIL.md"
+        target.parent.mkdir(parents=True)
+        target.write_text("raw\n")
+        (target.parent / "x-opus-security-SUMMARY.md").write_text("ok\n")
+        return target
+
+    def test_bash_cat_is_denied(self, detail: Path, project: Path) -> None:
+        assert _bash(project, "cat CLAUDE/reports/x-opus-security-DETAIL.md") is False
+        assert _bash(project, "tail -n 3 CLAUDE/reports/x-opus-security-DETAIL.md") is False
+
+    def test_read_is_denied(self, detail: Path, project: Path) -> None:
+        assert _read(project, str(detail)) is False
+
+    def test_denied_with_the_snapshot_absent(self, detail: Path, project: Path) -> None:
+        (project / ".claude" / "hooks-daemon" / "untracked" / SNAPSHOT_NAME).unlink()
+        assert _read(project, str(detail)) is False
+
+    def test_the_summary_stays_readable(self, detail: Path, project: Path) -> None:
+        assert _bash(project, "cat CLAUDE/reports/x-opus-security-SUMMARY.md") is True
+
+
+class TestDaemonRuntimeArtefactsStayDenied:
+    """Review I4 (self-install half): payload capture and the verdict and stop-event
+    logs under untracked/ are known-sensitive, so they are denied in either layout."""
+
+    @pytest.mark.parametrize(
+        "rel",
+        [
+            "untracked/payload-capture/p.json",
+            "untracked/logs/hooks/verdicts.jsonl",
+            "untracked/stop-events.jsonl",
+        ],
+    )
+    def test_denied(self, project: Path, rel: str) -> None:
+        target = project / rel
+        target.parent.mkdir(parents=True)
+        target.write_text("{}\n")
+        assert _bash(project, "cat " + rel) is False
+        assert _read(project, str(target)) is False
+
+    def test_an_ordinary_daemon_log_stays_readable(self, project: Path) -> None:
+        target = project / "untracked" / "logs" / "daemon.log"
+        target.parent.mkdir(parents=True)
+        target.write_text("log\n")
+        assert _bash(project, "tail -n 5 untracked/logs/daemon.log") is True
