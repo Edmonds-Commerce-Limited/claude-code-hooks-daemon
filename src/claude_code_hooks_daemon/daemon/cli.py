@@ -140,7 +140,13 @@ from claude_code_hooks_daemon.daemon.validation import (
     is_hooks_daemon_repo,
     is_inside_daemon_directory,
 )
-from claude_code_hooks_daemon.daemon.venv_lock import VenvLockTimeout, venv_lock
+from claude_code_hooks_daemon.daemon.venv_lock import (
+    VenvLockTimeout,
+    build_log_path,
+    last_build_lines,
+    venv_lock,
+    write_build_result,
+)
 from claude_code_hooks_daemon.daemon.work_queue_cli import add_work_queue_parser
 from claude_code_hooks_daemon.docs_qa.comment_finder import DEFAULT_MIN_BLOCK_LINES
 from claude_code_hooks_daemon.install.forwarder_generator import REPAIR_INSTALL_VERB
@@ -1623,6 +1629,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"Socket: {socket_path}")
         print(f"PID file: {pid_path}")
         _print_install_stamp_line()
+        for line in last_build_lines(_daemon_untracked_dir(project_path).parent):
+            print(line)
         _print_transport_status_warnings(project_path, transport)
         return 1
 
@@ -2867,8 +2875,9 @@ def cmd_repair(args: argparse.Namespace) -> int:
     # Plan 00100 Task 4.3: the sync runs under the same build lock as bash
     # ensure_venv, so a daemon starting alongside this repair waits for it
     # and reuses the result instead of rebuilding into the same directory.
+    log = build_log_path(daemon_dir, _fingerprint_of(venv_path))
     try:
-        with venv_lock(daemon_dir, on_wait=print):
+        with venv_lock(daemon_dir, on_wait=print, holder="repair", log=log):
             return _repair_venv_locked(daemon_dir, venv_path, env)
     except VenvLockTimeout as exc:
         print(f"ERROR: {exc}")
@@ -2890,8 +2899,32 @@ def cmd_repair(args: argparse.Namespace) -> int:
         return 1
 
 
+def _fingerprint_of(venv_path: Path) -> str:
+    """The fingerprint a ``venv-<fingerprint>`` directory is named by."""
+    return venv_path.name.removeprefix(_VENV_DIR_PREFIX + "-")
+
+
 def _repair_venv_locked(daemon_dir: Path, venv_path: Path, env: dict[str, str]) -> int:
-    """The mutating half of ``cmd_repair``; the caller holds the venv build lock."""
+    """The mutating half of ``cmd_repair``; the caller holds the venv build lock.
+
+    Records how the repair ended (Plan 00555 Task 2.7) in the last-result
+    record every build path writes, and starts the fingerprint's build log the
+    bash drivers also write.
+    """
+    log = build_log_path(daemon_dir, _fingerprint_of(venv_path))
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text(f"venv repair started in {daemon_dir}\n")
+    try:
+        rc = _sync_and_verify_venv(daemon_dir, venv_path, env, log)
+    except Exception:
+        write_build_result(daemon_dir, "failed", 1, log)
+        raise
+    write_build_result(daemon_dir, "succeeded" if rc == 0 else "failed", rc, log)
+    return rc
+
+
+def _sync_and_verify_venv(daemon_dir: Path, venv_path: Path, env: dict[str, str], log: Path) -> int:
+    """``uv sync`` into ``venv_path`` and verify it imports; uv's failure text goes to ``log``."""
     # The uv the bash build and the gate use, ~/.local/bin included (Plan
     # 00456 review B2): a bare "uv" misses it wherever PATH does.
     uv = find_uv()
@@ -2927,6 +2960,8 @@ def _repair_venv_locked(daemon_dir: Path, venv_path: Path, env: dict[str, str]) 
         print(f"ERROR: uv sync failed (exit {result.returncode})")
         if result.stderr:
             print(result.stderr)
+            with log.open("a") as handle:
+                handle.write(result.stderr)
         return 1
 
     # Plan 00555: the venv is keyed on a fingerprint whose py{MM} tag names the
@@ -3438,7 +3473,7 @@ def _cleanup_proven_stale_venvs(project_root: Path) -> list[Path]:
         return []
     daemon_dir = _daemon_untracked_dir(project_root).parent
     removed: list[Path] = []
-    with venv_lock(daemon_dir, _VENV_CLEANUP_LOCK_SECONDS):
+    with venv_lock(daemon_dir, _VENV_CLEANUP_LOCK_SECONDS, holder="cleanup"):
         stale = _stale_venv_entries(_enumerate_venvs(project_root, include_size=False))
         scan = processes_using_venvs([Path(entry["path"]) for entry in stale])
         if scan.unreadable:

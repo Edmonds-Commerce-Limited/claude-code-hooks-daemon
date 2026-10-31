@@ -430,6 +430,11 @@ VENV_LOCK_HEARTBEAT_SECONDS_DEFAULT=60
 # the child runs, pid=. A waiter behind that build waits out the build's own
 # bound rather than the generic lock bound (Plan 00456 review I4).
 VENV_BUILD_RECORD_NAME=".venv-bootstrap.current"
+# How the LAST build ended, whichever path ran it: result=, finished_at=, exit=,
+# log= (venv_write_build_result).
+VENV_BUILD_RESULT_NAME=".venv-bootstrap.result"
+# Set by _venv_write_holder_record: the daemon dir whose record this process wrote.
+_VENV_HOLDER_RECORD_DIR=""
 VENV_BUILD_TIMEOUT_DEFAULT=900
 # After the bound, the build is sent TERM; this long later, KILL.
 VENV_BUILD_KILL_GRACE_SECONDS=30
@@ -487,7 +492,14 @@ venv_build_timeout() {
 # the key is absent.
 #
 venv_build_record_field() {
-    local record="$1/untracked/$VENV_BUILD_RECORD_NAME" wanted="$2" key value
+    _venv_kv_field "$1/untracked/$VENV_BUILD_RECORD_NAME" "$2"
+}
+
+#
+# _venv_kv_field() - One key of a key=value state file. Returns 1 if absent.
+#
+_venv_kv_field() {
+    local record="$1" wanted="$2" key value
     [ -f "$record" ] || return 1
     while IFS='=' read -r key value; do
         if [ "$key" = "$wanted" ]; then
@@ -496,6 +508,115 @@ venv_build_record_field() {
         fi
     done < "$record"
     return 1
+}
+
+#
+# venv_build_result_field() - One key of the last build's result record.
+#
+venv_build_result_field() {
+    _venv_kv_field "$1/untracked/$VENV_BUILD_RESULT_NAME" "$2"
+}
+
+#
+# venv_build_log_path() - The log a build for this fingerprint writes.
+#
+venv_build_log_path() {
+    echo "$1/untracked/.venv-bootstrap-$2.log"
+}
+
+#
+# _venv_write_kv_file() - Write key=value lines to a path atomically.
+#
+# Args: $1 path, then the lines. A failed write leaves the old file in place.
+#
+_venv_write_kv_file() {
+    local path="$1"
+    shift
+    local tmp="$path.tmp.$$"
+    printf '%s\n' "$@" > "$tmp" && mv -f "$tmp" "$path"
+}
+
+#
+# venv_write_build_result() - Record how the last build ended.
+#
+# Args: $1 daemon_dir, $2 result (succeeded|failed|timed-out), $3 exit code,
+# $4 log path. One file for every build path, so a reader that knows nothing
+# of the fingerprint (the stop hook, `status`) finds it. The timestamp is the
+# portable UTC one; with no time source the record is not written and the
+# reason is reported, never a record with an empty time.
+#
+venv_write_build_result() {
+    local daemon_dir="$1" result="$2" exit_code="$3" log="$4" finished_at
+    if ! command -v _hp_timestamp > /dev/null; then
+        local _vwbr_lib
+        _vwbr_lib="$(dirname "${BASH_SOURCE[0]}")"
+        _vwbr_lib="${_vwbr_lib%/install}/lib/portable_time.sh"
+        [ -f "$_vwbr_lib" ] || { print_error "venv build result: $_vwbr_lib is missing; no result recorded"; return 1; }
+        # The path is built from this script's own location at runtime.
+        # shellcheck disable=SC1090
+        source "$_vwbr_lib"
+    fi
+    if ! finished_at="$(_hp_timestamp '%Y-%m-%dT%H:%M:%SZ' --utc)"; then
+        print_error "venv build result: cannot determine the current time; no result recorded"
+        return 1
+    fi
+    _venv_write_kv_file "$daemon_dir/untracked/$VENV_BUILD_RESULT_NAME" \
+        "result=$result" "finished_at=$finished_at" "exit=$exit_code" "log=$log" || return 1
+    # The named log must exist and end with the verdict, even for a path whose
+    # output goes to the caller's terminal (an upgrade).
+    printf 'venv build result: %s (exit %s) at %s\n' "$result" "$exit_code" "$finished_at" >> "$log"
+}
+
+#
+# venv_record_build_outcome() - venv_write_build_result for a plain exit code.
+#
+# Args: $1 daemon_dir, $2 exit code (0 = succeeded), $3 log path. The record is
+# a diagnostic: when it cannot be written the writer has said why, and the
+# build's own verdict stands.
+#
+venv_record_build_outcome() {
+    local result="succeeded"
+    [ "$2" -eq 0 ] || result="failed"
+    if ! venv_write_build_result "$1" "$result" "$2" "$3"; then
+        print_warning "venv build: the last-result record was not written"
+    fi
+    return 0
+}
+
+#
+# _venv_write_holder_record() - Say who holds the lock now (acquire_venv_lock).
+#
+# The record a detached build keeps, in the same format, for every other
+# holder: holder= (VENV_HOLDER_KIND, default ensure_venv), pid=, started=
+# (epoch) and log= when VENV_HOLDER_LOG names one. No bound= is written, so a
+# waiter behind it keeps the generic wait bound. A failure to write is a
+# warning only: the lock itself is held and the build must not be refused for
+# want of a diagnostic.
+#
+_venv_write_holder_record() {
+    local daemon_dir="$1" started=""
+    if command -v _hp_epoch_seconds > /dev/null; then
+        started="$(_hp_epoch_seconds)" || started=""
+    fi
+    local -a lines=("holder=${VENV_HOLDER_KIND:-ensure_venv}" "pid=$$")
+    [[ "$started" =~ ^[0-9]+$ ]] && lines+=("started=$started")
+    [ -n "${VENV_HOLDER_LOG:-}" ] && lines+=("log=$VENV_HOLDER_LOG")
+    _venv_write_kv_file "$daemon_dir/untracked/$VENV_BUILD_RECORD_NAME" "${lines[@]}" \
+        || print_warning "venv lock: could not write the holder record under $daemon_dir/untracked"
+    _VENV_HOLDER_RECORD_DIR="$daemon_dir"
+    return 0
+}
+
+#
+# _venv_clear_holder_record() - Remove the record this process wrote, if still ours.
+#
+_venv_clear_holder_record() {
+    [ -n "$_VENV_HOLDER_RECORD_DIR" ] || return 0
+    local pid
+    if pid="$(venv_build_record_field "$_VENV_HOLDER_RECORD_DIR" pid)" && [ "$pid" = "$$" ]; then
+        rm -f "$_VENV_HOLDER_RECORD_DIR/untracked/$VENV_BUILD_RECORD_NAME"
+    fi
+    _VENV_HOLDER_RECORD_DIR=""
 }
 
 #
@@ -975,6 +1096,11 @@ adopt_venv_lock() {
 # passes or the lock cannot be created. Pair with release_venv_lock.
 #
 acquire_venv_lock() {
+    _venv_acquire_lock_raw "$@" || return $?
+    _venv_write_holder_record "$1"
+}
+
+_venv_acquire_lock_raw() {
     local daemon_dir="$1"
     local timeout="${HOOKS_DAEMON_VENV_LOCK_TIMEOUT:-$VENV_LOCK_TIMEOUT_DEFAULT}"
     local lock_file="$daemon_dir/untracked/$VENV_LOCK_FILE_NAME"
@@ -1040,6 +1166,7 @@ acquire_venv_lock() {
 # removing it would admit a third builder.
 #
 release_venv_lock() {
+    _venv_clear_holder_record
     if [ "$_VENV_LOCK_BACKEND" = "flock" ] && [ -n "$_VENV_LOCK_FD" ]; then
         exec {_VENV_LOCK_FD}>&-
         _VENV_LOCK_FD=""
@@ -1165,10 +1292,13 @@ ensure_venv() {
     fi
 
     # Slow path: (re)create under the build lock.
-    acquire_venv_lock "$daemon_dir" || return 1
+    local log
+    log="$(venv_build_log_path "$daemon_dir" "$fingerprint")"
+    VENV_HOLDER_LOG="$log" acquire_venv_lock "$daemon_dir" || return 1
     local build_rc=0
     _ensure_venv_build "$daemon_dir" "$venv_path" "$target_version" "$python_bin" "$fingerprint" || build_rc=$?
     release_venv_lock
+    venv_record_build_outcome "$daemon_dir" "$build_rc" "$log"
     return "$build_rc"
 }
 

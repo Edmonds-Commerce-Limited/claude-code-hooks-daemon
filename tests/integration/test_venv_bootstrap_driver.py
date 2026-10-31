@@ -85,6 +85,7 @@ _TOOLS: Final[tuple[str, ...]] = (
     "printf",
     "timeout",
     "cp",
+    "tee",
 )
 
 

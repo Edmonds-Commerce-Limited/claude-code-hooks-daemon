@@ -114,7 +114,20 @@ _vb_usage() {
     exit "$_VB_EX_USAGE"
 }
 
-_vb_log_path() { echo "$1/untracked/.venv-bootstrap-$2.log"; }
+_vb_log_path() { venv_build_log_path "$1" "$2"; }
+
+#
+# _vb_record_result() - Record how this build ended (venv.sh venv_write_build_result).
+#
+# Args: $1 daemon_dir, $2 fingerprint, $3 result, $4 exit code. The record is a
+# diagnostic; when it cannot be written the writer has said why.
+#
+_vb_record_result() {
+    if ! venv_write_build_result "$1" "$3" "$4" "$(_vb_log_path "$1" "$2")"; then
+        print_warning "venv bootstrap: the last-result record was not written"
+    fi
+    return 0
+}
 _vb_marker_path() { echo "$1/untracked/.venv-bootstrap-$2.failed"; }
 _vb_record_path() { echo "$1/untracked/$VENV_BUILD_RECORD_NAME"; }
 
@@ -231,6 +244,9 @@ _vb_clone_version() {
 _vb_print_running() {
     local daemon_dir="$1" value started now
     echo "state=running"
+    if value="$(venv_build_record_field "$daemon_dir" holder)"; then
+        echo "holder=$value"
+    fi
     if value="$(venv_build_record_field "$daemon_dir" log)"; then
         echo "log=$value"
     fi
@@ -284,10 +300,12 @@ _vb_build_under_lock() {
     if [ "$build_rc" -eq 0 ] && resolved="$(resolve_venv_python "$daemon_dir")"; then
         rm -f "$marker"
         print_success "venv bootstrap SUCCEEDED: $resolved resolves for this path. The next hook starts the daemon."
+        _vb_record_result "$daemon_dir" "$fingerprint" succeeded 0
         return 0
     fi
 
     _vb_write_marker "$marker" "$inputs" "$build_rc"
+    _vb_record_result "$daemon_dir" "$fingerprint" failed "$build_rc"
     print_error "venv bootstrap FAILED: no venv resolves for $daemon_dir after the build (ensure_venv exit $build_rc)."
     print_error "  Hooks will not retry until pyproject.toml, uv.lock, the Python interpreter or the uv binary changes."
     print_error "  After fixing the cause, retry in the foreground: $daemon_dir/bin/hooks-daemon repair"
@@ -300,7 +318,25 @@ _vb_probe() {
         _vb_print_running "$daemon_dir"
     else
         echo "state=idle"
+        _vb_print_last_result "$daemon_dir"
     fi
+}
+
+#
+# _vb_print_last_result() - last_result=, finished_at=, exit=, log= of the last build.
+#
+# Prints nothing when no build has recorded a result.
+#
+_vb_print_last_result() {
+    local daemon_dir="$1" value
+    value="$(venv_build_result_field "$daemon_dir" result)" || return 0
+    echo "last_result=$value"
+    local key
+    for key in finished_at exit log; do
+        if value="$(venv_build_result_field "$daemon_dir" "$key")"; then
+            echo "$key=$value"
+        fi
+    done
 }
 
 _vb_hook() {
@@ -382,7 +418,7 @@ _vb_hook() {
     started_iso="$(_hp_timestamp '%Y-%m-%dT%H:%M:%SZ' --utc)"
     printf 'venv bootstrap started %s (python %s, daemon dir %s, bound %ss)\n' \
         "$started_iso" "$VB_PYTHON" "$daemon_dir" "$bound" > "$log"
-    printf 'log=%s\nstarted=%s\nbound=%s\n' "$log" "$started_epoch" "$bound" \
+    printf 'holder=hook\nlog=%s\nstarted=%s\nbound=%s\n' "$log" "$started_epoch" "$bound" \
         > "$(_vb_record_path "$daemon_dir")"
 
     local spec
@@ -410,6 +446,7 @@ _VB_CHILD_DAEMON_DIR=""
 _VB_CHILD_LOG=""
 _VB_CHILD_MARKER=""
 _VB_CHILD_INPUTS=""
+_VB_CHILD_FINGERPRINT=""
 _VB_CHILD_STARTED=""
 _VB_CHILD_BOUND=""
 # Process groups: the build job, and the watchdog that bounds it.
@@ -566,6 +603,7 @@ _vb_judge_stop() {
     if resolved="$(resolve_venv_python "$_VB_CHILD_DAEMON_DIR")"; then
         rm -f "$_VB_CHILD_MARKER"
         print_success "venv bootstrap: the build was stopped (status $status), but $resolved resolves for this path; nothing is recorded as failed."
+        _vb_record_result "$_VB_CHILD_DAEMON_DIR" "$_VB_CHILD_FINGERPRINT" succeeded 0
         return 0
     fi
     # Plan 00466 N30: an unknown elapsed time must never be judged a
@@ -579,6 +617,7 @@ _vb_judge_stop() {
     elapsed=$((now - _VB_CHILD_STARTED))
     if [ "$elapsed" -ge "$_VB_CHILD_BOUND" ]; then
         _vb_write_marker "$_VB_CHILD_MARKER" "$_VB_CHILD_INPUTS" "timeout"
+        _vb_record_result "$_VB_CHILD_DAEMON_DIR" "$_VB_CHILD_FINGERPRINT" timed-out "$status"
         print_error "venv bootstrap FAILED: the build timed out after ${_VB_CHILD_BOUND}s (HOOKS_DAEMON_VENV_BUILD_TIMEOUT) and was stopped."
         print_error "  Hooks will not retry it until its inputs change. Find out what hung, then retry in the foreground: $_VB_CHILD_DAEMON_DIR/bin/hooks-daemon repair"
         return 124
@@ -628,6 +667,7 @@ _vb_build() {
     _VB_CHILD_LOG="$(_vb_log_path "$daemon_dir" "$fingerprint")"
     _VB_CHILD_MARKER="$(_vb_marker_path "$daemon_dir" "$fingerprint")"
     _VB_CHILD_INPUTS="$inputs"
+    _VB_CHILD_FINGERPRINT="$fingerprint"
 
     adopt_venv_lock "$daemon_dir" || exit 1
     trap _vb_build_exit EXIT
@@ -701,9 +741,16 @@ _vb_repair() {
     rm -f "$(_vb_marker_path "$daemon_dir" "$VB_FINGERPRINT")"
 
     print_info "No venv resolves for this project path. Building one in the foreground (waiting for any build already running)..."
-    acquire_venv_lock "$daemon_dir" || return 1
+    local log
+    log="$(_vb_log_path "$daemon_dir" "$VB_FINGERPRINT")"
+    VENV_HOLDER_KIND=repair VENV_HOLDER_LOG="$log" acquire_venv_lock "$daemon_dir" || return 1
+    # The same log a hook-started build writes, so `status` and the stop
+    # message name one place whichever path built last.
+    printf 'venv bootstrap repair started %s (python %s, daemon dir %s)\n' \
+        "$(_hp_timestamp '%Y-%m-%dT%H:%M:%SZ' --utc)" "$VB_PYTHON" "$daemon_dir" > "$log"
     local rc=0
-    _vb_build_under_lock "$daemon_dir" "$VB_PYTHON" "$VB_FINGERPRINT" "$VB_INPUTS" || rc=$?
+    _vb_build_under_lock "$daemon_dir" "$VB_PYTHON" "$VB_FINGERPRINT" "$VB_INPUTS" 2>&1 \
+        | tee -a "$log" >&2 || rc="${PIPESTATUS[0]}"
     release_venv_lock
     return "$rc"
 }
