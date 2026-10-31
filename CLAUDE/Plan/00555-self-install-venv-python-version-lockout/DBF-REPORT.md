@@ -419,13 +419,13 @@ after the branch merged:
 - **Why it was missed:**
   - Its Python twin, `_cli_check_venv_fresh`, was fixed by hand in `b51912cb8`, but this one was not.
   - It has no lexical signature, so the detector could not report it.
-  - No test covered it.
+  - Existing tests covered `_venv_is_fresh` on lock changes, but none covered drift.
 - **Fix:** freshness now also requires `venv_python_usable`, and fails closed when the gate cannot
   load. The fix was red first, with an end-to-end in-place rebuild test
   ([report](subagent-reports/261031-fresh-check-drift-fix.md)).
 
 This is direct evidence for Decision 1: the non-lexical causes are defended only by tests, and an
-instance with no test escaped both the sweep and the review.
+instance with no drift test escaped both the sweep and the review.
 
 ## Conformance review
 
