@@ -25,6 +25,7 @@ interpreter, so the metadata write and the resolver see a working venv.
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import os
 import shutil
@@ -1097,6 +1098,46 @@ class TestTheFailedMarkerIsJudgedUnderTheLock:
         assert out["state"] == ["failed"], out
         assert len(_uv_calls(tmp_path)) == 1, "the racing hook must not retry the build"
         assert marker.is_file()
+
+
+class TestTheJudgeCertifiesTheVenvItBuilt:
+    """Plan 00555 Task 2.1: success means the venv just built is the one that resolves."""
+
+    @staticmethod
+    def _older_usable_venv(daemon_dir: Path) -> Path:
+        """A working venv for the same lock under a name that sorts before any built one."""
+        hasher = hashlib.sha256()
+        hasher.update((daemon_dir / "pyproject.toml").read_bytes())
+        hasher.update((daemon_dir / "uv.lock").read_bytes())
+        venv = daemon_dir / "untracked" / "venv-0older-usable"
+        (venv / "bin").mkdir(parents=True)
+        python = venv / "bin" / "python"
+        python.write_text(f'#!/bin/bash\nexec "{sys.executable}" "$@"\n')
+        python.chmod(0o755)
+        (venv / ".daemon-metadata.json").write_text(
+            json.dumps(
+                {
+                    "python_path": str(python),
+                    "fingerprint": "py311-0lder000",
+                    "lock_hash": f"sha256:{hasher.hexdigest()}",
+                    "daemon_version": "v3.0.0",
+                    "written_at": "2026-01-01T00:00:00Z",
+                }
+            )
+        )
+        return venv
+
+    def test_a_build_resolving_to_an_older_venv_is_not_a_success(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        older = self._older_usable_venv(daemon_dir)
+        env = _env(tmp_path, with_uv=_stub_uv(tmp_path))
+        assert _resolves(daemon_dir, env), "precondition: the older venv resolves on its own"
+
+        result = _run("repair", daemon_dir, env)
+
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert str(older) in result.stdout + result.stderr, "the failure must name what resolved"
+        assert list((daemon_dir / "untracked").glob(".venv-bootstrap-*.failed"))
 
 
 class TestUsage:

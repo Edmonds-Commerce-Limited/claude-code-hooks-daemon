@@ -99,6 +99,7 @@ from claude_code_hooks_daemon.daemon.paths import (
     read_pid_file_text,
     read_pid_record,
     read_socket_discovery_file,
+    resolve_existing_venv_python_with_diagnostics,
     resolve_hostname,
     sweep_dead_runtime_sets,
     unproven_report_lines,
@@ -3000,9 +3001,28 @@ def _sync_and_verify_venv(daemon_dir: Path, venv_path: Path, env: dict[str, str]
     if verify.returncode == 0:
         print("Verification: import claude_code_hooks_daemon OK")
         _record_repaired_venv_lock(daemon_dir, venv_path)
-        return 0
+        return _judge_repaired_venv_is_resolved(daemon_dir, venv_path)
     print("WARNING: Venv repaired but import check failed:")
     print(verify.stderr)
+    return 1
+
+
+def _judge_repaired_venv_is_resolved(daemon_dir: Path, venv_path: Path) -> int:
+    """Return 0 only when the resolver now names the venv this repair just built.
+
+    Plan 00555 Task 2.1: the repair targets the running interpreter's
+    fingerprint, while the resolver is metadata-first and can prefer another
+    usable venv. A repair that leaves the resolver on that other venv has not
+    repaired what hooks will run, so it is reported as failed rather than done.
+    """
+    resolved, _steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+    if resolved is not None and resolved.parent.parent.resolve() == venv_path.resolve():
+        return 0
+    named = "no venv" if resolved is None else str(resolved.parent.parent)
+    print(
+        f"ERROR: venv repaired at {venv_path}, but the resolver selects {named} for this "
+        "path, so hooks will not run from the repaired venv"
+    )
     return 1
 
 
