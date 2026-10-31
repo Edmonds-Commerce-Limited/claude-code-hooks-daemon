@@ -313,8 +313,10 @@ _vb_build_under_lock() {
         build_rc=1
     fi
 
-    if [ "$build_rc" -eq 0 ] && resolved="$(resolve_venv_python "$daemon_dir")"; then
-        if ! _vb_resolved_is_built "$resolved" "$built"; then
+    if [ "$build_rc" -eq 0 ]; then
+        if ! resolved="$(resolve_venv_python "$daemon_dir")"; then
+            build_rc=1
+        elif ! _vb_resolved_is_built "$resolved" "$built"; then
             print_error "venv bootstrap: the build produced $built, but $resolved is what resolves for this path."
             build_rc=1
         fi
