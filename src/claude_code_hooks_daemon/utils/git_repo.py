@@ -552,6 +552,19 @@ class GitRepo:
         top = _git_output(start, "rev-parse", "--show-toplevel")
         return cls(Path(top)) if top else None
 
+    def main_worktree_root(self) -> Path:
+        """The MAIN checkout of this repository, whichever worktree ``root`` is.
+
+        ``root`` is the toplevel of the worktree git was asked from, so inside a
+        linked worktree it is that worktree. Git lists the main checkout first
+        in ``worktree list --porcelain``; when that cannot be read (git
+        unavailable, empty listing) ``root`` is returned unchanged, which is
+        exact for a main checkout and no worse than before for the rest.
+        """
+        listing = _git_output(self.root, "worktree", "list", "--porcelain")
+        records = parse_worktree_porcelain(listing) if listing else ()
+        return records[0].path if records else self.root
+
     def read_config(self, key: str) -> str | None:
         """Read a ``--local`` config value, or ``None`` when unset/unavailable.
 

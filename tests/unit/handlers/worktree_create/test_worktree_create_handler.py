@@ -201,6 +201,58 @@ class TestRepoRootResolution:
             handler.handle(self._input(outside))
 
 
+class TestLinkedWorktreeCwd:
+    """N563: a session standing inside a LINKED worktree anchors to the MAIN checkout.
+
+    ``git rev-parse --show-toplevel`` inside a linked worktree names that
+    worktree, so seeding looked for gitignored files where they never exist and
+    the new worktree nested under ``<linked>/.claude/worktrees/``.
+    """
+
+    @pytest.fixture
+    def linked(self, repo: Path, tmp_path: Path) -> Path:
+        path = tmp_path / "linked-session"
+        subprocess.run(
+            ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "session", str(path)],
+            check=True,
+        )
+        return path
+
+    def _input(self, cwd: Path) -> dict:
+        return {
+            "hook_event_name": EventType.WORKTREE_CREATE.value,
+            "cwd": str(cwd),
+            "name": "Child",
+            "prompt_id": "pid-123",
+            "session_id": "sid-456",
+        }
+
+    def test_worktree_is_created_under_the_main_checkout_and_seeded_from_it(
+        self, repo: Path, linked: Path
+    ) -> None:
+        (repo / ".env.local").write_text("SECRET=canonical\n", encoding="utf-8")
+        assert not (linked / ".env.local").exists()
+
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [{"path": ".env.local", "mode": SEED_MODE_COPY}]}
+        result = handler.handle(self._input(linked))
+
+        path = Path(result.worktree_path or "")
+        assert str(path).startswith(f"{repo}/.claude/worktrees/")
+        assert not (linked / ".claude").exists()
+        assert (path / ".env.local").read_text(encoding="utf-8") == "SECRET=canonical\n"
+
+    def test_subdirectory_of_a_linked_worktree_anchors_to_the_main_checkout(
+        self, repo: Path, linked: Path
+    ) -> None:
+        subdir = linked / "deep"
+        subdir.mkdir()
+
+        result = WorktreeCreateHandler().handle(self._input(subdir))
+
+        assert str(Path(result.worktree_path or "")).startswith(f"{repo}/.claude/worktrees/")
+
+
 class TestFailureNamesTheReason:
     """N53: exit 127 reached the user with git's reason (stderr) discarded."""
 

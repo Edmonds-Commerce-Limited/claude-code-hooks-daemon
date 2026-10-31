@@ -96,6 +96,32 @@ class TestResolveFor:
         assert GitRepo.resolve_for(tmp_git_repo / "x.py") is None
 
 
+class TestMainWorktreeRoot:
+    def test_main_checkout_answers_itself(self, tmp_git_repo: Path) -> None:
+        repo = GitRepo(tmp_git_repo)
+        assert repo.main_worktree_root().resolve() == tmp_git_repo.resolve()
+
+    def test_linked_worktree_answers_the_main_checkout(
+        self, tmp_git_repo: Path, tmp_path: Path
+    ) -> None:
+        linked = tmp_path / "linked"
+        subprocess.run(
+            ["git", "worktree", "add", "-q", "-b", "side", str(linked)],
+            cwd=tmp_git_repo,
+            capture_output=True,
+            check=True,
+        )
+        resolved = GitRepo.resolve_for(linked)
+        assert resolved is not None
+        assert resolved.root.resolve() == linked.resolve()
+        assert resolved.main_worktree_root().resolve() == tmp_git_repo.resolve()
+
+    def test_unreadable_listing_falls_back_to_root(self, tmp_path: Path) -> None:
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        assert GitRepo(plain).main_worktree_root() == plain
+
+
 class TestReadConfig:
     def test_absent_key_returns_none(self, tmp_git_repo: Path) -> None:
         repo = GitRepo(tmp_git_repo)
