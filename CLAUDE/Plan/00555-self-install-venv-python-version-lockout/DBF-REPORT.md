@@ -2,7 +2,10 @@
 
 Branch `p555-dbf-fix`, worktree `/workspace/.claude/worktrees/p555-dbf-fix`. The last code commit
 is `e59cfa07a`, and the commit that adds this report follows it. Line numbers below are at `879f6c66c` unless marked "at the Defence commit";
-`f43d472fb` moves `paths.py` below line 963 by three lines.
+`f43d472fb` moves `paths.py` below line 963 by three lines. Later commits change tests,
+configuration, one comment and the detector's file enumeration only. The conformance reviewer
+reproduced the green run at the final tree: "0 violations (1024 files scanned)", exit 0, and 124
+detector tests passing.
 
 ## Specification followed
 
@@ -399,5 +402,47 @@ about 52,800 tests. The failures it reported, and what became of each:
   they are a regression guard and not a reproduction. Fix-b says so, and so does the rule doc.
 - `ensure_daemon` was not run end to end for (e); the chain is shown step by step (fix-core report).
 
-**Plan state.** The PLAN.md tickboxes for Task 1.1 and Task 2.2 are still unticked, although the work
-above covers both. The plan's other tasks (2.3 to 2.7, Phase 3) are outside this DBF remediation.
+**Plan state.** Task 1.1 and Task 2.2 are ticked in PLAN.md. The plan's other tasks (2.3 to 2.7,
+Phase 3) are outside this DBF remediation.
+
+## Conformance review
+
+`defence-before-fix:conformance-reviewer` ran at `f5a225d4c`
+([report](subagent-reports/261031-dbf-conformance-review.md)).
+
+- **What it reproduced:** red at `b0dbbe5e4` (exit 1, 64 findings including `paths.py:960`) and green
+  at the final tree (exit 0, 0 findings in 1024 files).
+- **What it did not check:** the full gate. The reboot had cleared its spec cache, so it cited clauses
+  by topic. The cache was then re-fetched (1.1.0).
+
+Its findings, and what became of each:
+
+1. **"The original defect was fixed first" (High). Refuted.**
+   - Neither `e936d4538` nor `8bfcf9ab1` is an ancestor of `b0dbbe5e4`
+     (`git merge-base --is-ancestor`), so the red ran against unfixed code.
+   - The instance fix existed on a separate unmerged branch before DBF was engaged. It entered this
+     branch only at the merge `6edb526c7`, after the defence was committed red and wired.
+2. **The package-import exemption is not tied to the interpreter tested (High). Kept, as calibration.**
+   - Every proof is judged per function, not per binding: the `pyvenv.cfg`-plus-version read and
+     the gate call as well as the import. That is the recorded calibration ("Proof is per function").
+   - Fixtures show the exemption still reports an import that prepends the source tree or edits
+     `sys.path`, and an import of another module (`TestImportingThePackageIsTheVersionCheck`,
+     `test_check_venv_interpreter_trust.py:760-794`).
+   - The five sites it removed were judged "no" by the independent search.
+   - Tightening every proof to a binding is the data-flow work in Decision 2.
+3. **Fix tests were written after the code (Medium). Already disclosed.** The report says so above,
+   together with the red run of fix-core's tests at `6edb526c7`. No further sample of the by-pattern
+   sites was taken.
+4. **Late loosenings rest on asserted false positives (Medium). Answered.**
+   - `0298f52c5` is fenced by `TestShellLocalShadowing` (7 tests, 5 red first). These include the
+     cases that stay reported: an unshadowed use, a local bound to an interpreter, and shadowing
+     confined to one function.
+   - `5ad3529b8` changes no judgement. It drops protected paths from enumeration, which the
+     protected-set audit requires, and the scanned count is unchanged at 1024.
+5. **The owner referrals are unresolved (Medium). Correct, and not ours to resolve.** Decisions 1 to 3
+   above stand for the owner. The class is recorded as partly defended, and nothing is baselined or
+   suppressed.
+6. **The green run is stamped at older commits (Low). Resolved.** The header now records the
+   reviewer's green run at the final tree.
+7. **`shellcheck disable` reasons in `venv.sh` (Low). Resolved.** `check_inline_suppressions.py`
+   reports 0 violations at `e59cfa07a`.
