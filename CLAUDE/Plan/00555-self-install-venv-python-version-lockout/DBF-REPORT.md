@@ -304,9 +304,9 @@ instructed the work. None of the decisions below has been taken.
 3. **Assumed calibrations to confirm:** the `tests/` exclusion, the uncovered workflow YAML, and the
    "cannot tell passes" default in both gates.
 4. **Merge state.** The rule became blocking on this branch at `feab6a3c8` while 64 instances were
-   open. Clause 4 allows this only while the branch stays unmerged, and it has: the branch is not on
-   `main`. It now reports 0, so it can merge at full width. No instance is recorded as known and
-   unfixed.
+   open. Clause 4 allows this only while the branch stays unmerged, and it stayed unmerged until it
+   reported 0. It then merged to `main` at full width (`43c9effb4`). No instance is recorded as
+   known and unfixed.
 
 **Out of class, found and not fixed:**
 
