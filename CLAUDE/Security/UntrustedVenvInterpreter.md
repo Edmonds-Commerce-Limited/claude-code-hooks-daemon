@@ -91,9 +91,9 @@ Line numbers are those at the Defence commit.
 | `daemon/paths.py` `live_venv_realpaths` (2977)                                                                                                | A venv whose interpreter exists is classed "live" for pruning (judged unsure by the independent search)                | b0dbbe5e4 | b51912cb8            |
 | `scripts/lib/resolve_venv.sh` `_rv_candidate_runs` (216, 221)                                                                                 | The bash resolver's gate is `-c 'import sys'` (now `venv_python_usable`)                                               | b0dbbe5e4 | b51912cb8            |
 | `scripts/lib/resolve_venv.sh` `_rv_pick_ranked_scan` (324), env override (355, 359), `resolve_venv_python_in_venv` (579, 583)                 | Scan, `HOOKS_DAEMON_VENV_PATH` and the in-venv resolver accept on `-x`                                                 | b0dbbe5e4 | b51912cb8            |
-| `bin/hooks-daemon` and `install/templates/hooks-daemon` (278)                                                                                 | `exec "$PYTHON" -m claude_code_hooks_daemon.daemon.cli` after only `[ -x "$PYTHON" ]`                                  | b0dbbe5e4 | b51912cb8            |
+| `bin/hooks-daemon` and `install/templates/hooks-daemon` (278)                                                                                 | `exec` of the resolved interpreter running the daemon CLI module after only an `-x` test                               | b0dbbe5e4 | b51912cb8            |
 | `init.sh` `_is_daemon_installed` (2197)                                                                                                       | "Installed" means `[[ -f "$PYTHON_CMD" ]]`                                                                             | b0dbbe5e4 | b51912cb8            |
-| Skill scripts `daemon-cli.sh`, `health-check.sh`, `init-handlers.sh` (`.claude/skills` and `src/.../skills` copies, six)                      | Run the resolver's result after `[ ! -f "$PYTHON" ]` only                                                              | b0dbbe5e4 | 83fc85414            |
+| Skill scripts `daemon-cli.sh`, `health-check.sh`, `init-handlers.sh` (`.claude/skills` and `src/.../skills` copies, six)                      | Run the resolver's result after only a `-f` existence test                                                             | b0dbbe5e4 | 83fc85414            |
 | `scripts/upgrade_version.sh` (804, 884, 1098, 1166, 1670)                                                                                     | Upgrade steps run the resolved venv Python after `-f`                                                                  | b0dbbe5e4 | e1a368063            |
 | `scripts/upgrade.sh` (923, 932, 967, 998, 1052, 1106, 1158, 1253, 1289)                                                                       | A `venv-*py3*` glob picks the first executable; its path is written to metadata that the resolver later trusts         | b0dbbe5e4 | dc650805b            |
 | `scripts/venv-include.bash` `venv_exists` (70), `venv_tool` (307)                                                                             | QA wrappers treat any `bin/python3` as a venv and run any `bin/<tool>` whose shebang points into it                    | b0dbbe5e4 | 10b2732e0            |
@@ -180,7 +180,7 @@ before it; the Detector cannot confirm that, so a regression here stays silent.
 "Any execution of a venv interpreter not obtained from the single-source-of-truth
 resolver." It would catch hand-built `venv/bin/python` paths wherever they run,
 including those with no existence test. It needs cross-function data flow: to
-know that `$PYTHON` came from the resolver (or not) the Detector must follow the
+know that the interpreter variable came from the resolver (or not) the Detector must follow the
 value through assignments, arguments and sourced files. That is the same shape
 of analysis the signal-targets Detector declines for pid provenance, for the
 same reason: a name-based approximation reports correct callers, and a rule that

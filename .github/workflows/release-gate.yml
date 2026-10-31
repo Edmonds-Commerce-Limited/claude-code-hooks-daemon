@@ -38,6 +38,7 @@ env:
     signal_targets skip_list_substring
     unreachable_handle_branch declared_invariant_pairs fail_open_inventory
     dangerous_invocation_corpus security_downgrade_flags capture_corruption
+    venv_interpreter_trust
   # The slowest static check (118 s on the trial), alone so it extends no group.
   CHECKS_PYRIGHT: pyright
   # Shell, docs, plans and history: needs shellcheck.
