@@ -83,8 +83,12 @@ never be the reason the session cannot repair the daemon.
   venv no longer resolves, so self-heal rebuilds under a fingerprint keyed to
   the running version. The class is defended by `venv_interpreter_trust`
   ([DBF-REPORT.md](DBF-REPORT.md)). The dev extras are Task 3.1.
-- [ ] ⬜ **Task 2.3**: `repair` must not need a working venv to rebuild one
-  (extends 00456).
+- [x] ✅ **Task 2.3**: `repair` must not need a working venv to rebuild one
+  (extends 00456). A drifted venv does not resolve, so `repair` takes the
+  venv-free path. A venv that resolves but cannot import the package is
+  caught by a bounded import probe in the wrapper and rebuilt with
+  `venv_bootstrap.sh repair --rebuild`
+  ([report](subagent-reports/261031-task-2.3-repair-without-venv.md)).
 - [x] ✅ **Task 2.4**: On a start failure, print the diagnosis: interpreter
   version, venv `version_info`, whether site-packages is on `sys.path`, and
   the fix command. `paths.py diagnose-venv` (stdlib-only), wired into
