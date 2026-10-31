@@ -135,9 +135,12 @@ is `{'total_violations': 1, 'passed': False, 'error': 'black exited 123 (expecte
 `violations[0].file` names `broken.py`. So the reader learns that a file could not be formatted, but not
 which file.
 
-**Fix direction**: carry the file black names in its `error: cannot format <path>: ...` line into
-`violations[0].file`, or into the summary error. Check first whether the installed black's message shape
-moved, because the test passed when N21 of ledger 00466 landed (`7946008cb`).
+**Cause** (fact-check `subagent-reports/261031-fact-check-n562.md`): the installed black, 26.10.1,
+reports this input as `error: cannot parse for target version Python 3.13: <path>:1:6`. The parser at
+`run_format_check.sh:99` matches only `error: cannot format <path>: ...`, so `violations[0].file` stays
+empty.
+
+**Fix direction**: parse both message shapes, taking the path from `cannot parse for target version X.Y: <path>:L:C` as well as from `cannot format <path>:`. Add a test fixture for each shape.
 
 **Status**: ⬜ open.
 
