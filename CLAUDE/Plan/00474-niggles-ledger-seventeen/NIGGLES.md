@@ -124,6 +124,25 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N567 — `init.sh` aborts when it is sourced if `untracked/` cannot be created, before any fail-closed arm runs
+
+**Source**: dogfood, 2026-10-31. Found while building Plan 00555 Tasks 2.5/2.6 (branch
+`agent-ab5a501abf09caa6d-fada9658`; the build report there is
+`subagent-reports/261031-task-2.5-2.6-build.md`).
+
+**Evidence**: the agent wiring the stop-bound counter tested with `untracked/` replaced by a regular
+file. `init.sh` then exits 1 when it is sourced, before the code under test runs. Two tests had to
+use a directory at the counter path instead. A Stop or PreToolUse hook that exits 1 is not a deny:
+Claude Code reads only exit 2 or a JSON decision as a block. So a hook that cannot create
+`untracked/` may fail open, not closed. This has not been reproduced against the live hook entry
+scripts.
+
+**Fix direction**: reproduce it against `.claude/hooks/stop` and `.claude/hooks/pre-tool-use` with
+an uncreatable `untracked/`. If it fails open, make the source-time failure emit the fail-closed
+deny, and add a row to `fail-open-boundaries.yaml`.
+
+**Status**: ⬜ open.
+
 ### N566 — the goal evaluator keeps re-entering a goal-blocked session, so the retraction never runs
 
 **Source**: dogfood, 2026-10-31, in the session working Plan 00555.
