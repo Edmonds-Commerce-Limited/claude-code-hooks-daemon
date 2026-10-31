@@ -81,6 +81,7 @@ never be the reason the session cannot repair the daemon.
   fails the build. The DBF guards caught that last case on the first attempt.
   Turning the bash ranked scan into a pure interpreter-finder stays with
   Plan 00100 ([report](subagent-reports/261031-task-2.1-venv-ssot.md)).
+
 - [x] ✅ **Task 2.2**: Interpreter-drift detection: a `pyvenv.cfg` version that
   differs from the runtime version means a stale venv. Rebuild it with the
   current interpreter, editable-install the repo plus the dev extras on a
@@ -88,26 +89,40 @@ never be the reason the session cannot repair the daemon.
   venv no longer resolves, so self-heal rebuilds under a fingerprint keyed to
   the running version. The class is defended by `venv_interpreter_trust`
   ([DBF-REPORT.md](DBF-REPORT.md)). The dev extras are Task 3.1.
+
 - [x] ✅ **Task 2.3**: `repair` must not need a working venv to rebuild one
   (extends 00456). A drifted venv does not resolve, so `repair` takes the
   venv-free path. A venv that resolves but cannot import the package is
   caught by a bounded import probe in the wrapper and rebuilt with
   `venv_bootstrap.sh repair --rebuild`
   ([report](subagent-reports/261031-task-2.3-repair-without-venv.md)).
+
 - [x] ✅ **Task 2.4**: On a start failure, print the diagnosis: interpreter
   version, venv `version_info`, whether site-packages is on `sys.path`, and
   the fix command. `paths.py diagnose-venv` (stdlib-only), wired into
   `init.sh` `validate_venv` and the `start_daemon` timeout path
   ([report](subagent-reports/261031-task-2.4-start-diagnosis.md)).
-- [ ] ⬜ **Task 2.5**: Fail-closed allow-list: read-only diagnostics plus a new
+
+- [x] ✅ **Task 2.5**: Fail-closed allow-list: read-only diagnostics plus a new
   `hooks-daemon diagnose` verb are permitted while the daemon is unreachable.
-  The decision-neutral half is on main (`27fd1725f`): `hooks-daemon diagnose`
-  is read-only and runs with no venv and no daemon. It names drift, the last
-  build record, the daemon state and the fix. Still waiting on the owner:
-  whether the daemon-down guard lets it (and the other read-only diagnostics)
-  through.
-- [ ] ⬜ **Task 2.6**: Bound the daemon-down stop block. After N identical
+  The `diagnose` verb is on main (`27fd1725f`). The allow-list follows the
+  **stand-in's ruling, not the owner's** (option b,
+  [ruling](subagent-reports/261031-stand-in-ruling-fable.md)). It permits
+  exact-shape Read, `ls`, `cat`, `head -n`, `tail -n`, `git log`, `git status`
+  and `diagnose` only when the daemon was never reached. Protected paths,
+  quarantine DETAIL artefacts and the self-install capture logs stay denied
+  ([build report](subagent-reports/261031-task-2.5-2.6-build.md),
+  [review](subagent-reports/261031-task-2.5-2.6-review.md),
+  [re-review](subagent-reports/261031-task-2.5-2.6-re-review.md)). The owner
+  may overturn it.
+
+- [x] ✅ **Task 2.6**: Bound the daemon-down stop block. After N identical
   blocks, or on an `[awaiting-human]` prefix, allow the stop and say why.
+  **Stand-in ruling**, option a, N = 3. The count is kept per session, per
+  class, and resets only when the daemon answers. An error in the counter
+  keeps the block. CI-enforced, invalid-input and needs-provision blocks stay
+  unbounded.
+
 - [x] ✅ **Task 2.7**: The background build writes its log to a known path,
   and the stop/status message names that path and the build's last result.
   Every build path writes `untracked/.venv-bootstrap.result` and a holder
@@ -115,6 +130,19 @@ never be the reason the session cannot repair the daemon.
   result and log. The first merge broke main because the build log needed
   `tee`; it was fixed forward at `00f9d734d`
   ([report](subagent-reports/261031-task-2.7-build-log.md)).
+
+- [ ] ⬜ **Task 2.8**: Close the findings left open by the Task 2.5/2.6 security reviews
+  ([review](subagent-reports/261031-task-2.5-2.6-review.md); the re-review's verdict was SHIP):
+
+  - **N1**: a Read can follow a planted symlink, then `..`, to a file outside the project. Also
+    require the lexically normalised path to stay inside a root.
+  - **N2**: while the daemon is down, configured extra quarantine globs and a relocated
+    `payload_capture.dir` are not covered.
+  - **S1**: the snapshot goes stale when a config change breaks the restart.
+  - **S2**: SubagentStop shares one counter.
+  - **S4**: `git status` can rewrite the index and run fsmonitor.
+  - **S5**: a daemon that accepts a connection but then fails keeps blocking stops with no limit.
+  - **Owner follow-up**: whether a client install may read the daemon logs while the daemon is down.
 
 ### Phase 3: Clean up and document
 
@@ -138,9 +166,12 @@ never be the reason the session cannot repair the daemon.
   command. The demo reproduced the incident shape, and the drift-at-current-key
   lockout it found is fixed
   ([demo](subagent-reports/261031-drift-self-heal-demo.md)).
-- [ ] With the daemon down, Read and `git log` succeed and
-  `hooks-daemon diagnose` names the drift.
-- [ ] A daemon-down stop loop ends after a bounded number of blocks.
+- [x] With the daemon down, Read and `git log` succeed and
+  `hooks-daemon diagnose` names the drift. Proven by
+  `tests/integration/test_init_sh_daemon_down_read_only.py` and
+  `test_bin_hooks_daemon_diagnose_without_venv.py`.
+- [x] A daemon-down stop loop ends after a bounded number of blocks
+  (`tests/integration/test_init_sh_daemon_down_stop_bound.py`).
 - [x] A release note is recorded in `CLAUDE/UPGRADES/UNRELEASED/` (the
   pending-release holding area).
 
