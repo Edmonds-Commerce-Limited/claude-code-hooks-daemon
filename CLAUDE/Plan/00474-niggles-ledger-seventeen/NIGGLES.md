@@ -132,8 +132,10 @@ rollback-snapshot gate test on branch `p555-dbf-fix`).
 **Evidence** (`scripts/install/rollback.sh` on main, lines 199-216): `create_state_snapshot` redirects `grep`
 output to `$snapshot_dir/files/gitignore/root.gitignore` and `pip freeze` output to
 `$snapshot_dir/files/venv/requirements.txt`. Only `backup_file` runs `mkdir -p`, and neither of these goes through
-it, so both redirects fail with "No such file or directory". Each sits in an `if …; then :; fi` written for
-grep's no-match exit, which also swallows the redirect failure. The snapshot reports success without either file.
+it, so both redirects fail with "No such file or directory". Each sits in an `if …; then :; fi` (the gitignore one
+written for grep's no-match exit, the venv one for a failed `pip freeze`), which discards the failing exit status.
+The shell's message still reaches stderr on a direct call, but `upgrade_version.sh` hides the snapshot's stderr, and
+the snapshot reports success without either file.
 
 **Fix direction**: create both directories before copying, and fail the snapshot when a backup it promises cannot be
 written. Add a test that snapshots a tree with a venv and a `.gitignore` and asserts both are present.
