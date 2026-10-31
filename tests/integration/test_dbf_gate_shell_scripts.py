@@ -66,14 +66,10 @@ class TestSkillScriptsRefuseADriftedInterpreter:
         (project / ".claude" / "hooks-daemon.yaml").write_text("version: 1\n")
         # Real gate, but the resolver is pinned to the drifted interpreter so the
         # script's own guard is what is under test.
-        (lib / "resolve_venv.sh").write_text(
-            textwrap.dedent(
-                f"""\
+        (lib / "resolve_venv.sh").write_text(textwrap.dedent(f"""\
                 . "{RESOLVE_VENV_SH}"
                 resolve_venv_python() {{ echo "{drifted_python}"; }}
-                """
-            )
-        )
+                """))
         return project
 
     @pytest.mark.parametrize("script", SKILL_SCRIPTS)
@@ -97,15 +93,11 @@ def _stub_tree(tmp_path: Path, drifted_python: Path) -> Path:
     root = tmp_path / "repo"
     for sub in ("scripts/lib", "scripts/install", "scripts/qa", "untracked"):
         (root / sub).mkdir(parents=True)
-    (root / "scripts" / "lib" / "resolve_venv.sh").write_text(
-        textwrap.dedent(
-            f"""\
+    (root / "scripts" / "lib" / "resolve_venv.sh").write_text(textwrap.dedent(f"""\
             . "{RESOLVE_VENV_SH}"
             resolve_venv_python() {{ echo "{drifted_python}"; }}
             resolve_existing_venv_python() {{ echo "{drifted_python}"; }}
-            """
-        )
-    )
+            """))
     (root / "scripts" / "install" / "venv_resolver.sh").write_text(
         f'. "{root}/scripts/lib/resolve_venv.sh"\n'
     )
@@ -176,7 +168,9 @@ VENV_SH = REPO_ROOT / "scripts" / "install" / "venv.sh"
 _PATHS_REL = Path("src") / "claude_code_hooks_daemon" / "daemon" / "paths.py"
 
 
-def _venv_sh(script: str, env_extra: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def _venv_sh(
+    script: str, env_extra: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     body = f'. "{OUTPUT_SH}"\n. "{VENV_SH}"\n{textwrap.dedent(script)}'
     return _run([BASH, "-c", body], REPO_ROOT, env_extra)
 
@@ -300,6 +294,7 @@ class TestVenvIncludeAsksTheGate:
         assert (result.returncode != 0) is drifted
 
     def test_a_freshly_created_venv_is_judged_by_the_gate(self) -> None:
-        assert 'venv_python_usable "${VENV_PYTHON}"' in VENV_INCLUDE_BASH.read_text().split(
-            "Create venv\n"
-        )[1].split("Created venv")[0]
+        assert (
+            'venv_python_usable "${VENV_PYTHON}"'
+            in VENV_INCLUDE_BASH.read_text().split("Create venv\n")[1].split("Created venv")[0]
+        )
