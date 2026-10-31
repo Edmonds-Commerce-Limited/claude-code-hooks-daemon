@@ -136,10 +136,11 @@ never be the reason the session cannot repair the daemon.
 - [ ] ⬜ **Task 2.8**: Close the findings left open by the Task 2.5/2.6 security reviews
   ([review](subagent-reports/261031-task-2.5-2.6-review.md); the re-review's verdict was SHIP):
 
-  - **N1**: a Read can follow a planted symlink, then `..`, to a file outside the project. Also
-    require the lexically normalised path to stay inside a root.
-  - **N2**: while the daemon is down, configured extra quarantine globs and a relocated
-    `payload_capture.dir` are not covered.
+  - **N1, fixed**: a Read could follow a planted symlink, then `..`, to a file outside the project.
+    The lexically normalised path must now stay inside a root as well
+    ([report](subagent-reports/261031-task-2.8-build.md)).
+  - **N2, fixed**: while the daemon is down, configured extra quarantine globs and a relocated
+    `payload_capture.dir` were not covered. The snapshot now carries both.
   - **S1**: the snapshot goes stale when a config change breaks the restart.
   - **S2**: concurrent sub-agents of one session share the single `SubagentStop` counter.
   - **S4**: `git status` can rewrite the index and run fsmonitor.
