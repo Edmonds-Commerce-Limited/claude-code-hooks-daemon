@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from tests.integration.test_venv_bootstrap_driver import (
     BASH,
     REPO_ROOT,
@@ -177,7 +178,7 @@ class TestEveryLockHolderIsRecorded:
             assert out["holder"] == ["repair"]
             assert Path(out["log"][0]).parent == daemon_dir / "untracked"
         finally:
-            repair.wait(timeout=60)
+            repair.wait(timeout=Timeout.REQUEST_LONG)
 
 
 class TestTheDaemonDownStopMessageNamesTheLastBuild:

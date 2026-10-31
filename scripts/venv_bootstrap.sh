@@ -750,9 +750,19 @@ _vb_repair() {
         "$(_hp_timestamp '%Y-%m-%dT%H:%M:%SZ' --utc)" "$VB_PYTHON" "$daemon_dir" > "$log"
     local rc=0
     _vb_build_under_lock "$daemon_dir" "$VB_PYTHON" "$VB_FINGERPRINT" "$VB_INPUTS" 2>&1 \
-        | tee -a "$log" >&2 || rc="${PIPESTATUS[0]}"
+        | _vb_tee_to_log "$log" || rc="${PIPESTATUS[0]}"
     release_venv_lock
     return "$rc"
+}
+
+# Copy stdin to stderr and append it to the log, using only shell builtins:
+# the build path must not depend on `tee`, which restricted sandboxes omit.
+_vb_tee_to_log() {
+    local log="$1" line
+    while IFS= read -r line || [ -n "$line" ]; do
+        printf '%s\n' "$line" >> "$log"
+        printf '%s\n' "$line" >&2
+    done
 }
 
 _vb_main() {
