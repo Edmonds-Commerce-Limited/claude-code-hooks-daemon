@@ -1119,6 +1119,17 @@ def _scan_rank(candidate_dir: Path, current_hash: str | None) -> int:
     return _SCAN_RANK_LEGACY
 
 
+def _is_beneath(path: Path, root: Path) -> bool:
+    """Whether ``path`` is ``root`` or lies under it, compared lexically on ``parts``.
+
+    Stdlib-only on purpose: this module runs standalone under a bare
+    interpreter (``paths.py resolve-venv``), so it cannot import the package's
+    ``utils.path_containment``. ``Path.is_relative_to`` is O(depth^2) from 3.12.
+    """
+    root_parts = root.parts
+    return path.parts[: len(root_parts)] == root_parts
+
+
 def resolve_existing_venv_python(daemon_dir: Path | str) -> Path:
     """Resolve the bin/python of an already-installed venv under ``daemon_dir``.
 
@@ -1146,7 +1157,7 @@ def resolve_existing_venv_python(daemon_dir: Path | str) -> Path:
     """
     override = os.environ.get("HOOKS_DAEMON_VENV_PATH")
     resolved, _steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
-    if override and (resolved is None or not resolved.is_relative_to(Path(override))):
+    if override and (resolved is None or not _is_beneath(resolved, Path(override))):
         # An explicit override always wins, usable or not (see docstring).
         return Path(override) / "bin" / "python"
     if resolved is not None:

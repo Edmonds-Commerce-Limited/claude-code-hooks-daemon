@@ -98,7 +98,7 @@ class TestBuildSuccessIsJudgedByTheVersionAwareResolver:
             . "{VENV_BOOTSTRAP_SH}"
             venv_bootstrap_switched_off_by() {{ return 1; }}
             _vb_clone_version() {{ echo 1.2.3; }}
-            ensure_venv_locked() {{ return 0; }}
+            ensure_venv_locked() {{ echo "{venv}"; }}
             _vb_write_marker() {{ echo MARKER_WRITTEN; }}
             _vb_build_under_lock "{daemon_dir}" "{sys.executable}" py-fp inputs
             """
