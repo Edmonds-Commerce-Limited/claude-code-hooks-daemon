@@ -29,10 +29,15 @@ import pytest
 
 from claude_code_hooks_daemon.install import bin_wrapper
 
-#: Stub resolver: the wrapper sources this and calls resolve_venv_python.
+#: Stub resolver library: the wrapper sources this, calls resolve_venv_python,
+#: then asks venv_python_usable (Plan 00555) before exec. The stub interpreter
+#: is a shell script with no venv, so the stub gate accepts it.
 _RESOLVER_STUB: Final[str] = """#!/bin/bash
 resolve_venv_python() {
     printf '%s\\n' "$1/stub-python"
+}
+venv_python_usable() {
+    return 0
 }
 """
 
