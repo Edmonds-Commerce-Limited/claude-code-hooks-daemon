@@ -1203,6 +1203,15 @@ _venv_is_fresh() {
         print_info "ensure_venv: rebuild forced — not reusing $venv_path"
         return 1
     fi
+    # Plan 00555 DBF: a venv the version-aware gate rejects (its pyvenv.cfg
+    # records another major.minor than its interpreter now runs, or it does not
+    # run at all) is never fresh, whatever its lock hash or stamp say. Reusing
+    # it made the build's own success judge fail and wrote a `.failed` marker.
+    # A gate that cannot be loaded fails closed: the venv is rebuilt.
+    if ! _venv_load_gate || ! venv_python_usable "$venv_path/bin/python"; then
+        print_info "ensure_venv: $venv_path has an unusable interpreter — not reusing it${_RV_PROBE_OUTPUT:+: ${_RV_PROBE_OUTPUT}}"
+        return 1
+    fi
     # Plan 00100 Task 3.7: lock_hash is authoritative. A daemon upgrade or
     # downgrade with unchanged deps (pyproject.toml + uv.lock) must reuse the
     # existing venv — the legacy `.daemon-version` SemVer stamp is advisory.
