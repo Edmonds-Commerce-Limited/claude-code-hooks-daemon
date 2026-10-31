@@ -118,9 +118,11 @@ never be the reason the session cannot repair the daemon.
 
 - [x] ✅ **Task 2.6**: Bound the daemon-down stop block. After N identical
   blocks, or on an `[awaiting-human]` prefix, allow the stop and say why.
-  **Stand-in ruling**, option a, N = 3. The count is kept per session, per
-  class, and resets only when the daemon answers. An error in the counter
-  keeps the block. CI-enforced, invalid-input and needs-provision blocks stay
+  **Stand-in ruling**, option a, N = 3. The count is kept per session and per
+  event (`Stop` or `SubagentStop`). Every daemon-unreachable reason shares it,
+  so alternating reasons still count. It resets only when the daemon answers,
+  and an error in the counter keeps the block. CI-enforced, invalid-input,
+  needs-provision, unconfigured-repo and version-mismatch blocks stay
   unbounded.
 
 - [x] ✅ **Task 2.7**: The background build writes its log to a known path,
@@ -139,7 +141,7 @@ never be the reason the session cannot repair the daemon.
   - **N2**: while the daemon is down, configured extra quarantine globs and a relocated
     `payload_capture.dir` are not covered.
   - **S1**: the snapshot goes stale when a config change breaks the restart.
-  - **S2**: SubagentStop shares one counter.
+  - **S2**: concurrent sub-agents of one session share the single `SubagentStop` counter.
   - **S4**: `git status` can rewrite the index and run fsmonitor.
   - **S5**: a daemon that accepts a connection but then fails keeps blocking stops with no limit.
   - **Owner follow-up**: whether a client install may read the daemon logs while the daemon is down.
