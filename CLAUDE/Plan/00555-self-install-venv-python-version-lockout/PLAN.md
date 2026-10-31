@@ -85,9 +85,11 @@ never be the reason the session cannot repair the daemon.
   ([DBF-REPORT.md](DBF-REPORT.md)). The dev extras are Task 3.1.
 - [ ] ⬜ **Task 2.3**: `repair` must not need a working venv to rebuild one
   (extends 00456).
-- [ ] ⬜ **Task 2.4**: On a start failure, print the diagnosis: interpreter
+- [x] ✅ **Task 2.4**: On a start failure, print the diagnosis: interpreter
   version, venv `version_info`, whether site-packages is on `sys.path`, and
-  the fix command.
+  the fix command. `paths.py diagnose-venv` (stdlib-only), wired into
+  `init.sh` `validate_venv` and the `start_daemon` timeout path
+  ([report](subagent-reports/261031-task-2.4-start-diagnosis.md)).
 - [ ] ⬜ **Task 2.5**: Fail-closed allow-list: read-only diagnostics plus a new
   `hooks-daemon diagnose` verb are permitted while the daemon is unreachable.
 - [ ] ⬜ **Task 2.6**: Bound the daemon-down stop block. After N identical
@@ -97,10 +99,13 @@ never be the reason the session cannot repair the daemon.
 
 ### Phase 3: Clean up and document
 
-- [ ] ⬜ **Task 3.1**: Prune the orphaned `venv-workspace-py311-2a519198`; the
+- [x] ✅ **Task 3.1**: Prune the orphaned `venv-workspace-py311-2a519198`; the
   live daemon venv is `venv-workspace-py313-0d6d49c6`. Make the self-install
   bootstrap install the `dev` extras, which were installed by hand after the
-  incident.
+  incident. The orphan had already been reaped. `create_venv_at_path` and
+  `_repair_venv_locked` add `--extra dev` for a self-install only
+  ([report](subagent-reports/261031-task-3.1-dev-extras.md)). An existing
+  venv gains the extras at its next rebuild or `repair`.
 - [x] ✅ **Task 3.2**: Add an "interpreter changed under the venv" entry to
   SELF_INSTALL.md and TROUBLESHOOTING, with the `sys.path` probe as the first
   diagnostic.

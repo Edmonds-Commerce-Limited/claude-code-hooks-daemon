@@ -1735,19 +1735,34 @@ $diagnosis"
 # whether its site-packages is on sys.path, and the one fix command.
 #
 # $1 is the venv directory; without it every untracked/venv-* is diagnosed.
-# Runs paths.py by file path under the system python3, so it works when the
-# venv is exactly what is broken. Always prints at least the fix line.
+# paths.py is run by file path under the venv's own bin/python. That
+# interpreter still runs when the venv cannot import the daemon package, and
+# paths.py is stdlib-only, so the report works when the venv is exactly what
+# is broken. A bare PATH python3 could be older than requires-python. Exit 0
+# (healthy) and 1 (unhealthy) are both reports; any other status means the
+# interpreter did not run, so the next candidate is tried. Always prints at
+# least the fix line.
 #
 _venv_start_diagnosis() {
     local paths_py="${HOOKS_DAEMON_ROOT_DIR}/src/claude_code_hooks_daemon/daemon/paths.py"
-    local -a venv_args=()
+    local -a venv_args=() candidates=()
     if [[ -n "${1:-}" ]]; then
         venv_args=(--venv-dir "$1")
+        candidates=("$1/bin/python")
+    else
+        candidates=("$HOOKS_DAEMON_ROOT_DIR"/untracked/venv-*/bin/python)
     fi
-    local out="" rv=0
-    if command -v python3 >/dev/null && [[ -f "$paths_py" ]]; then
-        out="$(python3 "$paths_py" diagnose-venv --daemon-dir "$HOOKS_DAEMON_ROOT_DIR" \
-            ${venv_args[@]+"${venv_args[@]}"} 2>&1)" || rv=$?
+    local out="" rv interpreter
+    if [[ -f "$paths_py" ]]; then
+        for interpreter in "${candidates[@]}"; do
+            rv=0
+            out="$("$interpreter" "$paths_py" diagnose-venv --daemon-dir "$HOOKS_DAEMON_ROOT_DIR" \
+                ${venv_args[@]+"${venv_args[@]}"} 2>&1)" || rv=$?
+            if [[ "$rv" -le 1 ]]; then
+                break
+            fi
+            out=""
+        done
     fi
     if [[ -z "$out" ]]; then
         out="fix: ${HOOKS_DAEMON_ROOT_DIR}/bin/hooks-daemon repair"
