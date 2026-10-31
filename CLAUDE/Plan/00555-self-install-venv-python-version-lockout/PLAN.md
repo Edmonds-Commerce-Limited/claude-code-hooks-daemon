@@ -153,8 +153,11 @@ never be the reason the session cannot repair the daemon.
     - **S4, fixed**: `git status` is no longer on the daemon-down allow-list.
     - **S5, fixed**: a daemon that accepts a connection but then fails is counted under the
       same N = 3.
-  - **Owner question, not a task**: whether a client install may read the daemon logs while the
-    daemon is down. Today they stay denied, which is the safe default.
+  - **Owner question, not a task**: whether a client install may read the daemon's own logs
+    (the daemon log and the venv build log under `.claude/hooks-daemon/`) while the daemon is
+    down. Today the whole `.claude/hooks-daemon/` tree is denied in a client install (review I4),
+    which is the safe default. In self-install, only the hook-verdict, stop-event and
+    payload-capture logs are denied.
 
 ### Phase 3: Clean up and document
 
