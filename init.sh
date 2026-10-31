@@ -162,13 +162,68 @@ unset HOOKS_DAEMON_RELAY_UNUSED
 # block: it is a single-quoted shell string.
 _hooks_daemon_recovery_py() {
     printf -v "$1" '%s' '
+import fnmatch
+import json
 import os
 import shlex
+import sys
+import time
 
 _INSTALL_LAUNCHER = "bin/hooks-daemon"
 _RECOVERY_BINARIES = (".claude/hooks-daemon/bin/hooks-daemon", _INSTALL_LAUNCHER)
-_RECOVERY_SUBCOMMANDS = ("restart", "status", "logs", "stop", "start", "repair")
+_RECOVERY_SUBCOMMANDS = ("restart", "status", "logs", "stop", "start", "repair", "diagnose")
 _RECOVERY_PADDING = " \t"
+
+# Plan 00555 Task 2.5 (b): the read-only diagnostics permitted while the daemon
+# was never reached. _PROTECTED_DEFAULTS is the daemon constant
+# DEFAULT_PROTECTED_PATTERNS, which this stdlib-only code cannot import;
+# test_init_sh_daemon_down_read_only.py pins the two equal. The globs are
+# assembled from parts so this file does not itself name a protected path.
+_PROTECTED_DEFAULTS = (
+    "*." + "secret*",
+    ".vault-" + "pass*",
+    "*.vault-" + "password",
+    "*vault_" + "pass*",
+    "id_" + "rsa",
+    "id_" + "ed25519",
+)
+# Written by the healthy daemon at start: the project-configured globs, one per line.
+_SNAPSHOT_NAME = ".protected-paths.snapshot"
+# Any of these anywhere in a Bash command voids the read-only judgement: pipes,
+# chaining, substitution, redirection, globbing, tilde, quoting, comments,
+# backslash and newlines.
+_SHELL_META = frozenset("|;&$`><(){}*?[~#" + chr(39) + chr(34) + chr(92) + chr(10) + chr(13))
+_LS_LETTERS = frozenset("lAahtr1d")
+_GIT_LOG_FLAGS = frozenset(
+    ["--oneline", "--stat", "--no-pager", "--all", "--decorate", "--graph"]
+)
+_GIT_LOG_PREFIXES = ("--format=", "--pretty=", "--since=", "--until=", "--author=", "--grep=")
+_GIT_STATUS_FLAGS = frozenset(
+    [
+        "-s",
+        "--short",
+        "-b",
+        "--branch",
+        "-sb",
+        "--porcelain",
+        "--porcelain=v1",
+        "--porcelain=v2",
+        "--ignored",
+        "--no-pager",
+    ]
+)
+_GIT_STATUS_PREFIXES = ("--untracked-files=",)
+_REVISION_CHARS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_./^@-"
+)
+
+# Plan 00555 Task 2.6 (a): consecutive daemon-down stop blocks per session before
+# the stop is allowed. A constant, not a setting: a configurable bound invites 1.
+_STOP_BOUND = 3
+_TRANSCRIPT_TAIL_BYTES = 262144
+_STOP_EXPLANATION = "stopping because:"
+_AWAITING_SENTINEL = "[awaiting-human]"
+_STOP_EVENTS = ("Stop", "SubagentStop")
 
 
 def _is_absolute(path):
@@ -269,6 +324,346 @@ def _is_daemon_recovery_command(hi, project_path, daemon_root):
             if stripped == shlex.quote(launcher) + " " + sub:
                 return _runs_the_installs_launcher(launcher, project_path, daemon_root)
     return False
+
+
+def _roots(project_path, daemon_root):
+    """The project root and the daemon root, as written and resolved."""
+    roots = []
+    for base in (project_path, daemon_root):
+        if _is_absolute(base):
+            for candidate in (os.path.normpath(base), os.path.realpath(base)):
+                if candidate not in roots:
+                    roots.append(candidate)
+    return roots
+
+
+def _relative_to(path, root):
+    """path relative to root, or None when it is not inside it."""
+    if path == root:
+        return ""
+    prefix = root.rstrip("/") + "/"
+    if path.startswith(prefix):
+        return path[len(prefix):]
+    return None
+
+
+def _snapshot_globs(daemon_root):
+    """The project-configured protected globs the healthy daemon last wrote, or
+    None when there is no readable snapshot (which locks .claude/ down)."""
+    if not _is_absolute(daemon_root):
+        return None
+    try:
+        with open(os.path.join(daemon_root, "untracked", _SNAPSHOT_NAME)) as handle:
+            return [line.strip() for line in handle.read().splitlines() if line.strip()]
+    except (OSError, ValueError):
+        return None
+
+
+def _is_protected(path, project_path, daemon_root):
+    """True when path names something a daemon-down read must never show."""
+    norm = os.path.normpath(path)
+    base = os.path.basename(norm)
+    snapshot = _snapshot_globs(daemon_root)
+    for glob in _PROTECTED_DEFAULTS + tuple(snapshot or ()):
+        if fnmatch.fnmatchcase(base, glob) or fnmatch.fnmatchcase(norm, glob):
+            return True
+    if base.endswith(".sock"):
+        return True
+    for root in _roots(project_path, daemon_root):
+        rel = _relative_to(norm, root)
+        if rel is None:
+            continue
+        parts = rel.split("/")
+        if rel == ".claude/hooks-daemon.env":
+            return True
+        if rel.startswith(".claude/hooks-daemon/") and not rel.startswith(
+            ".claude/hooks-daemon/bin/"
+        ):
+            return True
+        if len(parts) > 1 and parts[0] == "untracked" and parts[1].startswith("events"):
+            return True
+        if snapshot is None and parts[0] == ".claude" and len(parts) > 1:
+            settings = len(parts) == 2 and fnmatch.fnmatchcase(parts[1], "settings*.json")
+            if rel != ".claude/hooks-daemon.yaml" and not settings:
+                return True
+    return False
+
+
+def _path_allowed(raw, cwd, project_path, daemon_root, allow_dir):
+    """True when raw names a regular file (or, with allow_dir, a directory)
+    inside the project or daemon root that is not protected. Judged on the
+    spelling and on the resolved path, so a symlink or .. cannot launder it."""
+    try:
+        if not raw or "\0" in raw:
+            return False
+        absolute = os.path.normpath(os.path.join(cwd, raw))
+        if _is_protected(absolute, project_path, daemon_root):
+            return False
+        real = os.path.realpath(absolute)
+        if _is_protected(real, project_path, daemon_root):
+            return False
+        if not any(_relative_to(real, root) is not None for root in _roots(project_path, daemon_root)):
+            return False
+        if os.path.isfile(real):
+            return True
+        return allow_dir and os.path.isdir(real)
+    except (OSError, ValueError):
+        return False
+
+
+def _is_int(text):
+    return text != "" and all(char in "0123456789" for char in text)
+
+
+def _git_read_only(args, cwd, project_path, daemon_root):
+    """git log / git status with a fixed option set; nothing that prints content."""
+    if not args or args[0] not in ("log", "status"):
+        return False
+    if not _path_allowed(".", cwd, project_path, daemon_root, True):
+        return False
+    log = args[0] == "log"
+    flags = _GIT_LOG_FLAGS if log else _GIT_STATUS_FLAGS
+    prefixes = _GIT_LOG_PREFIXES if log else _GIT_STATUS_PREFIXES
+    rest = args[1:]
+    index = 0
+    pathspecs = False
+    while index < len(rest):
+        token = rest[index]
+        index += 1
+        if pathspecs:
+            absolute = os.path.normpath(os.path.join(cwd, token))
+            if token.startswith("-") or _is_protected(absolute, project_path, daemon_root):
+                return False
+            continue
+        if token == "--":
+            pathspecs = True
+        elif token in flags or token.startswith(prefixes):
+            continue
+        elif log and token == "-n":
+            if index >= len(rest) or not _is_int(rest[index]):
+                return False
+            index += 1
+        elif log and token.startswith("-") and _is_int(token[1:]):
+            continue
+        elif log and not token.startswith("-") and all(char in _REVISION_CHARS for char in token):
+            continue
+        else:
+            return False
+    return True
+
+
+def _bash_read_only(command, cwd, project_path, daemon_root):
+    stripped = command.strip(_RECOVERY_PADDING)
+    if not stripped or not stripped.isprintable():
+        return False
+    if any(char in _SHELL_META for char in stripped):
+        return False
+    tokens = stripped.split()
+    head, args = tokens[0], tokens[1:]
+    if head == "ls":
+        paths = []
+        for arg in args:
+            if arg.startswith("-"):
+                if len(arg) < 2 or not set(arg[1:]) <= _LS_LETTERS:
+                    return False
+            else:
+                paths.append(arg)
+        return all(
+            _path_allowed(path, cwd, project_path, daemon_root, True) for path in (paths or ["."])
+        )
+    if head == "cat":
+        if not args or any(arg.startswith("-") for arg in args):
+            return False
+        return all(_path_allowed(arg, cwd, project_path, daemon_root, False) for arg in args)
+    if head in ("head", "tail"):
+        if len(args) != 3 or args[0] != "-n" or not _is_int(args[1]) or args[2].startswith("-"):
+            return False
+        return _path_allowed(args[2], cwd, project_path, daemon_root, False)
+    if head == "git":
+        return _git_read_only(args, cwd, project_path, daemon_root)
+    return False
+
+
+def _is_daemon_down_permitted(hi, project_path, daemon_root):
+    """Plan 00555 Task 2.5 (b): what a PreToolUse call may do while the daemon
+    was never reached -- a recovery command, a Read of a regular project file,
+    or one of the exact read-only Bash shapes. Anything else, and any error
+    while judging, is denied."""
+    if _is_daemon_recovery_command(hi, project_path, daemon_root):
+        return True
+    if not isinstance(hi, dict):
+        return False
+    tool_input = hi.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return False
+    cwd = hi.get("cwd")
+    if not _is_absolute(cwd):
+        cwd = project_path
+    if not _is_absolute(cwd):
+        return False
+    try:
+        if hi.get("tool_name") == "Read":
+            path = tool_input.get("file_path")
+            return _is_absolute(path) and _path_allowed(
+                path, cwd, project_path, daemon_root, False
+            )
+        if hi.get("tool_name") == "Bash":
+            command = tool_input.get("command")
+            return isinstance(command, str) and _bash_read_only(
+                command, cwd, project_path, daemon_root
+            )
+    except (OSError, ValueError):
+        return False
+    return False
+
+
+def _fix_line(project_path, daemon_root):
+    restart = _recovery_command(project_path, daemon_root, "restart")
+    if restart is None:
+        return "A human must run the daemon launcher with restart, repair or diagnose."
+    return "Run exactly " + restart + " (then repair or diagnose if it cannot start)."
+
+
+def _safe_session(hi):
+    session = hi.get("session_id") if isinstance(hi, dict) else None
+    if not isinstance(session, str):
+        return "unknown"
+    cleaned = "".join(
+        char if ord(char) < 128 and (char.isalnum() or char in "-_") else "_"
+        for char in session[:100]
+    )
+    return cleaned or "unknown"
+
+
+def _stop_counter_path(daemon_root, session, event):
+    return os.path.join(daemon_root, "untracked", ".daemon-down-stops." + session + "." + event)
+
+
+def _text_of(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            block["text"]
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+            and isinstance(block.get("text"), str)
+        )
+    return ""
+
+
+def _last_assistant_text(path):
+    """The text of the last assistant message in the last 256 KiB of the
+    transcript JSONL. A line that does not parse ends the walk: no declaration."""
+    with open(path, "rb") as handle:
+        handle.seek(0, 2)
+        start = max(0, handle.tell() - _TRANSCRIPT_TAIL_BYTES)
+        handle.seek(start)
+        data = handle.read()
+    lines = data.split(b"\n")
+    if start > 0:
+        lines = lines[1:]
+    for raw in reversed(lines):
+        if not raw.strip():
+            continue
+        try:
+            entry = json.loads(raw.decode("utf-8"))
+        except ValueError:
+            return ""
+        if not isinstance(entry, dict):
+            return ""
+        message = entry.get("message")
+        holder = message if isinstance(message, dict) else entry
+        if holder.get("role") == "assistant" or entry.get("type") == "assistant":
+            return _text_of(holder.get("content"))
+    return ""
+
+
+def _declares_awaiting_human(text):
+    """The same declaration auto_continue_stop._AWAITING_HUMAN_DECLARATION finds:
+    the stop prefix, optional whitespace, the sentinel; case-insensitive."""
+    low = text.lower()
+    start = 0
+    while True:
+        at = low.find(_STOP_EXPLANATION, start)
+        if at < 0:
+            return False
+        cursor = at + len(_STOP_EXPLANATION)
+        while cursor < len(low) and low[cursor].isspace():
+            cursor += 1
+        if low.startswith(_AWAITING_SENTINEL, cursor):
+            return True
+        start = at + 1
+
+
+def _stop_bound(hi, event, reason_class, project_path, daemon_root):
+    """Plan 00555 Task 2.6 (a): the systemMessage that lets a daemon-down Stop
+    through, or None to keep blocking. Counts consecutive blocks per session and
+    event under <daemon root>/untracked; honours an awaiting-human declaration in
+    the last assistant message at any count. A count that cannot be written keeps
+    the block and says why on stderr."""
+    if event not in _STOP_EVENTS or not _is_absolute(daemon_root):
+        return None
+    fix = _fix_line(project_path, daemon_root)
+    transcript = hi.get("transcript_path") if isinstance(hi, dict) else None
+    if isinstance(transcript, str) and transcript:
+        try:
+            declared = _declares_awaiting_human(_last_assistant_text(transcript))
+        except (OSError, ValueError):
+            declared = False
+        if declared:
+            return (
+                "HOOKS DAEMON: your STOPPING BECAUSE [awaiting-human] declaration was honoured, "
+                "but the daemon is down, so no awaiting-human marker was armed and no "
+                "stand-in cron was scheduled; protection is NOT active. " + fix
+            )
+    session = _safe_session(hi)
+    path = _stop_counter_path(daemon_root, session, event)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        count = 0
+        if os.path.exists(path):
+            with open(path) as handle:
+                text = handle.read().strip()
+            count = int(text) if _is_int(text) else 0
+        count += 1
+        with open(path, "w") as handle:
+            handle.write(str(count) + "\n")
+    except OSError as exc:
+        print(
+            "HOOKS DAEMON: cannot count daemon-down stops, so this stop stays blocked: "
+            + path + ": " + str(exc),
+            file=sys.stderr,
+        )
+        return None
+    if count < _STOP_BOUND:
+        return None
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    line = "\t".join([session, stamp, str(count), reason_class, event]) + "\n"
+    try:
+        with open(os.path.join(daemon_root, "untracked", ".daemon-down-stops.log"), "a") as log:
+            log.write(line)
+    except OSError as exc:
+        print("HOOKS DAEMON: could not log the unguarded stop: " + str(exc), file=sys.stderr)
+    return (
+        "HOOKS DAEMON: the daemon has been down for " + str(count) + " consecutive stops, so "
+        "this stop is allowed rather than wedging the session; protection was NOT active "
+        "for this stop. " + fix
+    )
+
+
+def _reset_stop_bound(hi, daemon_root):
+    """The daemon answered: the daemon-down stop counts of this session start over."""
+    if not _is_absolute(daemon_root):
+        return
+    session = _safe_session(hi)
+    for event in _STOP_EVENTS:
+        path = _stop_counter_path(daemon_root, session, event)
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError as exc:
+                print("HOOKS DAEMON: could not reset " + path + ": " + str(exc), file=sys.stderr)
 
 
 def _recovery_command(project_path, daemon_root, sub):

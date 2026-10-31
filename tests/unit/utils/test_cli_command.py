@@ -381,7 +381,9 @@ class TestIsInstallRecoveryCommand:
     one command that recovers it. Parity with init.sh over the same inputs
     is pinned by test_init_sh_pretooluse_fail_closed.py."""
 
-    @pytest.mark.parametrize("sub", ["restart", "status", "logs", "stop", "start", "repair"])
+    @pytest.mark.parametrize(
+        "sub", ["restart", "status", "logs", "stop", "start", "repair", "diagnose"]
+    )
     def test_every_recovery_subcommand_by_the_clone_spelling_is_exempt(
         self, tmp_path: Path, sub: str
     ) -> None:
