@@ -131,9 +131,6 @@ class TestPermittedReadOnlyShapes:
             "git log -5 --stat --no-pager",
             "git log --format=%H main..HEAD",
             "git log --since=2.days -- README.md",
-            "git status",
-            "git status -sb",
-            "git status --porcelain=v2 --untracked-files=no",
             "bin/hooks-daemon diagnose",
             ".claude/hooks-daemon/bin/hooks-daemon diagnose",
             "cat .claude/hooks-daemon.yaml",
@@ -188,6 +185,11 @@ class TestDeniedShapes:
             "git -c core.pager=x log",
             "git -C /tmp log",
             "GIT_DIR=/x git log",
+            # Plan 00555 Task 2.8 S4: status refreshes .git/index and may run a
+            # configured core.fsmonitor program, so it is not a read-only shape.
+            "git status",
+            "git status -sb",
+            "git status --porcelain=v2 --untracked-files=no",
             "git status --bogus",
             "git diff",
             "git show",
@@ -443,11 +445,102 @@ class TestEndToEndThroughTheTransport:
         text = json.dumps(response)
         assert "diagnose" in text
         assert "read-only diagnostics" in text
+        assert "git log" in text
+        assert "git status" not in text
+
+    def test_a_stale_snapshot_is_named_in_the_deny_reason(
+        self, project: Path, dead_socket: Path
+    ) -> None:
+        _make_snapshot_stale(project)
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "cat .claude/notes.txt"},
+            "cwd": str(project),
+        }
+        response = self._send(project, dead_socket, hook_input)
+        assert response["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert "stale" in json.dumps(response).lower()
 
 
 def _snapshot(project: Path, *globs: str) -> None:
     path = project / ".claude" / "hooks-daemon" / "untracked" / SNAPSHOT_NAME
     path.write_text("".join(f"{glob}\n" for glob in globs))
+
+
+def _set_mtimes(project: Path, config_delta: int) -> None:
+    """Snapshot mtime fixed; the config's is the snapshot's plus config_delta seconds."""
+    snapshot = project / ".claude" / "hooks-daemon" / "untracked" / SNAPSHOT_NAME
+    config = project / ".claude" / "hooks-daemon.yaml"
+    base = 1_700_000_000
+    os.utime(snapshot, (base, base))
+    os.utime(config, (base + config_delta, base + config_delta))
+
+
+def _make_snapshot_stale(project: Path) -> None:
+    _snapshot(project, "config/credentials.yml")
+    _set_mtimes(project, 100)
+
+
+class TestStaleSnapshotUnionLockdown:
+    """Plan 00555 Task 2.8 S1: a config edited after the snapshot was written keeps
+    the snapshot's globs AND locks .claude/ down (the union, never a swap)."""
+
+    def test_stale_snapshot_locks_dot_claude_but_keeps_the_config_readable(
+        self, project: Path
+    ) -> None:
+        _make_snapshot_stale(project)
+        (project / ".claude" / "settings.json").write_text("{}")
+        assert _bash(project, "cat .claude/notes.txt") is False
+        assert _read(project, str(project / ".claude" / "notes.txt")) is False
+        assert _bash(project, "cat .claude/hooks-daemon.yaml") is True
+        assert _bash(project, "cat .claude/settings.json") is True
+
+    def test_stale_snapshot_still_enforces_its_old_globs(self, project: Path) -> None:
+        _make_snapshot_stale(project)
+        (project / "config").mkdir()
+        (project / "config" / "credentials.yml").write_text("s\n")
+        assert _bash(project, "cat config/credentials.yml") is False
+        assert _bash(project, "cat README.md") is True
+
+    def test_snapshot_newer_than_the_config_is_not_stale(self, project: Path) -> None:
+        _snapshot(project)
+        _set_mtimes(project, -100)
+        (project / ".claude" / "README.md").write_text("r\n")
+        assert _bash(project, "cat .claude/README.md") is True
+
+    def test_equal_mtimes_are_not_stale(self, project: Path) -> None:
+        _snapshot(project)
+        _set_mtimes(project, 0)
+        assert _bash(project, "cat .claude/notes.txt") is True
+
+    def test_a_missing_config_is_not_stale(self, project: Path) -> None:
+        _snapshot(project)
+        _set_mtimes(project, 100)
+        (project / ".claude" / "hooks-daemon.yaml").unlink()
+        assert _bash(project, "cat .claude/notes.txt") is True
+
+    def test_a_newer_yml_spelling_also_makes_it_stale(self, project: Path) -> None:
+        _snapshot(project)
+        _set_mtimes(project, -100)
+        yml = project / ".claude" / "hooks-daemon.yml"
+        yml.write_text("version: '1.0'\n")
+        os.utime(yml, (1_700_000_500, 1_700_000_500))
+        assert _bash(project, "cat .claude/notes.txt") is False
+
+    def test_a_daemon_start_rewrites_the_snapshot_so_its_mtime_advances(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.core.project_context import ProjectContext
+        from claude_code_hooks_daemon.utils.secret_file_matching import (
+            write_protected_paths_snapshot,
+        )
+
+        target = tmp_path / SNAPSHOT_NAME
+        target.write_text("old\n")
+        os.utime(target, (1_700_000_000, 1_700_000_000))
+        monkeypatch.setattr(ProjectContext, "daemon_untracked_dir", lambda: tmp_path)
+        write_protected_paths_snapshot()
+        assert target.stat().st_mtime > 1_700_000_000
 
 
 class TestConfiguredGlobsWithASlash:

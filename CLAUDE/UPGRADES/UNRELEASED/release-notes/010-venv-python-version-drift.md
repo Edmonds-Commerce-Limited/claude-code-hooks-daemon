@@ -12,7 +12,7 @@ A daemon that cannot start no longer locks the session out.
 - `hooks-daemon diagnose` runs with no venv and no daemon. It names any interpreter drift, the last build result and the fix.
 - While the daemon cannot be reached, the fail-closed guard now allows a small read-only set:
   - Read of a project file;
-  - plain `ls`, `cat`, `head -n`, `tail -n`, `git log` and `git status`;
+  - plain `ls`, `cat`, `head -n`, `tail -n`, and `git log` (`git status` is excluded: it can rewrite the index and run a configured fsmonitor program);
   - `hooks-daemon diagnose`.
 - Protected and quarantined files stay refused.
 - A Stop blocked because the daemon is down is allowed on the third identical block, or at once when the stop declares `[awaiting-human]`.
