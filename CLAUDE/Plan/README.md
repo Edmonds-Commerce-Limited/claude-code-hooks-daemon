@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00556: secret guard bare dotted token mentions](00556-secret-guard-bare-dotted-token-mentions/PLAN.md) - Not Started, BLOCKED ON THE OWNER (#145: a bare dotted word such as an nmcli secrets setting key matches `*.secret*` and is denied although no file is read; the glob's breadth is a recorded owner decision, so narrowing what counts as a mention is the owner's call)
+
 - [00555: self install venv python version lockout](00555-self-install-venv-python-version-lockout/PLAN.md) - In Progress, High (dogfooding incident: system Python moved 3.11→3.13 under the self-install venv, every start failed `ModuleNotFoundError`, and the fail-closed guard, `repair`, the background build and the stop hook together locked the session out for hours; evidence in INCIDENT.md)
 
 - [00554: rust relay transport default](00554-rust-relay-transport-default/PLAN.md) - In Progress (owner request: the Rust relay becomes the default hook transport when `relay_enabled` is absent, legacy bash and python3 stays as the explicit `relay_enabled: false` opt-in)
@@ -322,11 +324,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 555 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 556 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 471 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 61 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 62 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
