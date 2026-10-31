@@ -349,7 +349,13 @@ class TestInitShProtectedDefaultsMatchTheDaemonConstant:
         # init.sh assembles the globs from parts, so the source text cannot be
         # parsed: evaluate the recovery python and read the tuple it builds.
         extracted = subprocess.run(
-            [BASH, "-c", 'source "$1"; _hooks_daemon_recovery_py src; printf %s "$src"', "_", str(INIT_SH)],
+            [
+                BASH,
+                "-c",
+                'source "$1"; _hooks_daemon_recovery_py src; printf %s "$src"',
+                "_",
+                str(INIT_SH),
+            ],
             check=True,
             capture_output=True,
             text=True,

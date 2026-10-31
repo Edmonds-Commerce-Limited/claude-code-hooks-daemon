@@ -83,9 +83,7 @@ def _run(
     project: Path, script: str, payload: str, sock: Path | None = None
 ) -> subprocess.CompletedProcess[str]:
     env = {
-        k: v
-        for k, v in os.environ.items()
-        if not k.startswith(("CLAUDE_HOOKS_", "HOOKS_DAEMON_"))
+        k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE_HOOKS_", "HOOKS_DAEMON_"))
     }
     env["CLAUDE_HOOKS_SOCKET_TIMEOUT"] = "0.4"
     if sock is not None:
@@ -134,7 +132,9 @@ def _user(text: str) -> dict[str, Any]:
 
 
 class TestTransportPath:
-    def test_blocks_one_and_two_then_allows_the_third(self, project: Path, dead_socket: Path) -> None:
+    def test_blocks_one_and_two_then_allows_the_third(
+        self, project: Path, dead_socket: Path
+    ) -> None:
         for expected_count in (1, 2):
             result = _forward(project, dead_socket, _payload())
             assert result.returncode == 2, result.stderr
@@ -199,9 +199,7 @@ class TestTransportPath:
             assert "malformed hook payload" in result.stderr
         assert not _counter(project, session="unknown").exists()
 
-    def test_a_reached_but_slow_daemon_keeps_allowing_without_counting(
-        self, project: Path
-    ) -> None:
+    def test_a_reached_but_slow_daemon_keeps_allowing_without_counting(self, project: Path) -> None:
         import socket
         import threading
 
@@ -233,10 +231,9 @@ class TestTransportPath:
         # A directory where the counter file belongs cannot be read or written
         # (a file in place of untracked/ would abort init.sh at source time).
         _counter(project).mkdir()
-        for _ in range(4):
-            result = _forward(project, dead_socket, _payload())
-            assert result.returncode == 2
-        assert str(_untracked(project)) in result.stderr
+        results = [_forward(project, dead_socket, _payload()) for _ in range(4)]
+        assert all(result.returncode == 2 for result in results)
+        assert str(_untracked(project)) in results[-1].stderr
 
     def test_a_response_from_the_daemon_resets_the_count(self, project: Path) -> None:
         import socket
@@ -316,14 +313,15 @@ class TestEmitHookErrorPath:
 
     def test_unwritable_untracked_still_blocks(self, project: Path) -> None:
         _counter(project).mkdir()
-        for _ in range(4):
-            result = _emit(project, _payload())
-            assert _is_block(result)
-        assert str(_untracked(project)) in result.stderr
+        results = [_emit(project, _payload()) for _ in range(4)]
+        assert all(_is_block(result) for result in results)
+        assert str(_untracked(project)) in results[-1].stderr
 
 
 class TestAwaitingHumanDeclaration:
-    def test_honoured_at_count_one_without_incrementing(self, project: Path, tmp_path: Path) -> None:
+    def test_honoured_at_count_one_without_incrementing(
+        self, project: Path, tmp_path: Path
+    ) -> None:
         transcript = _transcript(tmp_path / "t.jsonl", [_user("hi"), _assistant(AWAITING)])
         result = _emit(project, _payload(transcript=transcript))
         assert result.returncode == 0

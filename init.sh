@@ -3294,22 +3294,6 @@ _hooks_daemon_is_down() {
 }
 
 #
-# ensure_daemon() - Start daemon if not running (lazy startup)
-#
-# Idempotent function safe to call on every hook invocation.
-# Only starts daemon if not already running.
-#
-# When daemon cannot start:
-#   - If ci_enabled: true in config: hard fail (return 1), forwarder blocks
-#   - If CI environment detected: passthrough mode (daemon not installed in pipeline)
-#   - Otherwise (non-CI dev environment): fail with error (return 1), forwarder
-#     calls emit_hook_error so agent sees "Not currently running" and can restart
-#
-# Returns:
-#   0 if daemon is running or CI passthrough mode active
-#   1 if daemon failed and must report error to agent
-#
-#
 # _hooks_daemon_reset_stop_bound() - A daemon that has just been started ends
 # the run of daemon-down Stops (Plan 00555 Task 2.6): drop every session's
 # counters. Called only after a successful start, never on the
@@ -3325,6 +3309,22 @@ _hooks_daemon_reset_stop_bound() {
     done
 }
 
+#
+# ensure_daemon() - Start daemon if not running (lazy startup)
+#
+# Idempotent function safe to call on every hook invocation.
+# Only starts daemon if not already running.
+#
+# When daemon cannot start:
+#   - If ci_enabled: true in config: hard fail (return 1), forwarder blocks
+#   - If CI environment detected: passthrough mode (daemon not installed in pipeline)
+#   - Otherwise (non-CI dev environment): fail with error (return 1), forwarder
+#     calls emit_hook_error so agent sees "Not currently running" and can restart
+#
+# Returns:
+#   0 if daemon is running or CI passthrough mode active
+#   1 if daemon failed and must report error to agent
+#
 ensure_daemon() {
     # Plan 00466 N126 round 2 (F1): a relay hand-off goes straight to
     # send_request_stdin, whose judged deny is the only answer it may get.
