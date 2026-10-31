@@ -1480,6 +1480,7 @@ class HooksDaemon:
         logger.info("Starting hooks daemon on %s", socket_path)
 
         self._ensure_scratch_dir_best_effort()
+        self._write_protected_paths_snapshot_best_effort()
 
         # Acquire the socket atomically across the probe->unlink->bind critical
         # section (Plan 00127, Finding 3). Without serialisation two fresh
@@ -1591,6 +1592,24 @@ class HooksDaemon:
                 logger,
                 exc,
                 reason="a scratch directory that cannot be ensured only costs the agents a ready-made scratch location; the daemon must still serve hooks",
+            )
+
+    @staticmethod
+    def _write_protected_paths_snapshot_best_effort() -> None:
+        """Write the protected-path globs init.sh reads while the daemon is down.
+
+        Plan 00555 Task 2.5. Written at start only: config is read at restart,
+        so the snapshot cannot go stale between restarts. Fail-open on an
+        unwritable directory: init.sh then falls back to its built-in default
+        globs, which still protect, and the daemon must still serve hooks.
+        """
+        try:
+            sfm.write_protected_paths_snapshot()
+        except (OSError, RuntimeError) as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="a snapshot that cannot be written leaves init.sh on its built-in default globs, which still protect; the daemon must still serve hooks",
             )
 
     @staticmethod
