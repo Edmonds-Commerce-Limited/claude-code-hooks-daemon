@@ -70,6 +70,38 @@ class TestDriftedVenv:
         assert "uv sync" not in text
 
 
+class TestCfgDriftAtTheCurrentSitePackages:
+    """The drift demo's Variant A: site-packages sits at the RUNNING minor, the cfg names another.
+
+    The interpreter adds ``lib/python<its own minor>/site-packages`` whatever the
+    cfg says, so the site-packages line must follow the interpreter, not the cfg;
+    otherwise it says "not on sys.path" next to "importable: yes".
+    """
+
+    def _text(self, tmp_path: Path) -> tuple[bool, str]:
+        venv = _venv(tmp_path / "v", _OTHER, with_package=False)
+        running_site = venv / "lib" / f"python{_RUNNING[0]}.{_RUNNING[1]}" / "site-packages"
+        (running_site / "claude_code_hooks_daemon").mkdir(parents=True)
+        (running_site / "claude_code_hooks_daemon" / "__init__.py").write_text("")
+        result = diagnose_venv_start(venv, tmp_path / "daemon")
+        return result.healthy, "\n".join(result.lines)
+
+    def test_site_packages_line_agrees_with_importability(self, tmp_path: Path) -> None:
+        _, text = self._text(tmp_path)
+        assert "claude_code_hooks_daemon importable: yes" in text
+        assert "site-packages on sys.path: yes" in text
+        assert f"python{_RUNNING[0]}.{_RUNNING[1]}/site-packages" in text
+
+    def test_the_cfg_vs_interpreter_mismatch_is_named_as_drift(self, tmp_path: Path) -> None:
+        healthy, text = self._text(tmp_path)
+        assert healthy is False
+        assert (
+            f"drift: pyvenv.cfg records {_OTHER[0]}.{_OTHER[1]} but the interpreter runs "
+            f"{_RUNNING[0]}.{_RUNNING[1]}"
+        ) in text
+        assert "hooks-daemon repair" in text
+
+
 class TestPackageMissing:
     def test_matching_version_but_no_package_reports_site_packages_present(
         self, tmp_path: Path

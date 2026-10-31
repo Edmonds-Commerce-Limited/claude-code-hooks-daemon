@@ -316,9 +316,31 @@ _run_venv_free_verb() {
     esac
 }
 
+# _print_last_build() - Name the last venv build and its log on stderr.
+# The Python `status` that prints these lines cannot run without a venv, which
+# is exactly when they matter (Plan 00555 Task 2.7). Plain bash: the record is a
+# key=value file (scripts/install/venv.sh venv_write_build_result). Silent when
+# no build has recorded a result.
+_print_last_build() {
+    local record="$DAEMON_DIR/untracked/.venv-bootstrap.result" key value
+    local result="" finished="" log=""
+    [ -f "$record" ] || return 0
+    while IFS='=' read -r key value || [ -n "$key" ]; do
+        case "$key" in
+            result) result="$value" ;;
+            finished_at) finished="$value" ;;
+            log) log="$value" ;;
+        esac
+    done < "$record"
+    [ -n "$result" ] || return 0
+    echo "   Last venv build: $result at ${finished:-unknown time}" >&2
+    echo "   Build log: ${log:-unknown}" >&2
+}
+
 if ! PYTHON="$(resolve_venv_python "$DAEMON_DIR")"; then
     if ! _run_venv_free_verb "$@"; then
         echo "❌ hooks-daemon: could not resolve a usable venv under $DAEMON_DIR" >&2
+        _print_last_build
         echo "   Build the venv for this project path: $BIN_DIR/hooks-daemon repair" >&2
         exit 5
     fi

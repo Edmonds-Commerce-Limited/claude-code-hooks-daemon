@@ -82,6 +82,30 @@ def _minimal_daemon_dir(tmp: Path) -> Path:
     return tmp
 
 
+def _stamped_venv(daemon_dir: Path, lock_hash: str | None) -> Path:
+    """Fake venv at the current fingerprint key, stamped v99.0.0 (metadata if a hash is given)."""
+    fp_result = _run_bash(f'python_venv_fingerprint "{sys.executable}" "{daemon_dir}"')
+    venv_dir = daemon_dir / "untracked" / f"venv-{fp_result.stdout.strip()}"
+    (venv_dir / "bin").mkdir(parents=True)
+    (venv_dir / "bin" / "python").symlink_to(sys.executable)
+    (venv_dir / ".daemon-version").write_text("v99.0.0\n")
+    if lock_hash is not None:
+        (venv_dir / ".daemon-metadata.json").write_text(
+            "{" f'"python_path": "{venv_dir / "bin" / "python"}",' f'"lock_hash": "{lock_hash}"' "}"
+        )
+    return venv_dir
+
+
+def _freshness_verdict(daemon_dir: Path, venv_dir: Path) -> str:
+    """Return ``FRESH`` or ``STALE`` as ``_venv_is_fresh`` judges the venv."""
+    result = _run_bash(
+        f'if _venv_is_fresh "{daemon_dir}" "{venv_dir}" "v99.0.0"; '
+        "then echo FRESH; else echo STALE; fi"
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
 class TestEnsureVenvFunctionExists:
     """Preflight: ensure_venv must be exported by venv.sh."""
 
@@ -247,27 +271,10 @@ class TestEnsureVenvLockChangeBeatsTheStamp:
     """
 
     def _venv(self, daemon_dir: Path, lock_hash: str | None) -> Path:
-        fp_result = _run_bash(f'python_venv_fingerprint "{sys.executable}" "{daemon_dir}"')
-        venv_dir = daemon_dir / "untracked" / f"venv-{fp_result.stdout.strip()}"
-        (venv_dir / "bin").mkdir(parents=True)
-        (venv_dir / "bin" / "python").symlink_to(sys.executable)
-        (venv_dir / ".daemon-version").write_text("v99.0.0\n")
-        if lock_hash is not None:
-            (venv_dir / ".daemon-metadata.json").write_text(
-                "{"
-                f'"python_path": "{venv_dir / "bin" / "python"}",'
-                f'"lock_hash": "{lock_hash}"'
-                "}"
-            )
-        return venv_dir
+        return _stamped_venv(daemon_dir, lock_hash)
 
     def _verdict(self, daemon_dir: Path, venv_dir: Path) -> str:
-        result = _run_bash(
-            f'if _venv_is_fresh "{daemon_dir}" "{venv_dir}" "v99.0.0"; '
-            "then echo FRESH; else echo STALE; fi"
-        )
-        assert result.returncode == 0, result.stderr
-        return result.stdout.strip()
+        return _freshness_verdict(daemon_dir, venv_dir)
 
     def test_stale_lock_hash_is_rebuilt_even_when_the_stamp_matches(self, tmp_path: Path) -> None:
         daemon_dir = tmp_path / "project"
@@ -284,6 +291,74 @@ class TestEnsureVenvLockChangeBeatsTheStamp:
         venv_dir = self._venv(daemon_dir, None)
 
         assert self._verdict(daemon_dir, venv_dir) == "FRESH"
+
+
+class TestEnsureVenvInterpreterDriftIsNeverFresh:
+    """Plan 00555 DBF: a venv whose interpreter drifted is rebuilt, not reused.
+
+    The drift demo's Variant A: the venv already sits at the CURRENT fingerprint
+    key but its ``pyvenv.cfg`` records another major.minor than the interpreter
+    now runs. Reusing it made the build's own success judge fail, which wrote a
+    ``.failed`` marker and locked hooks and ``repair`` out. Freshness therefore
+    also requires ``venv_python_usable``.
+    """
+
+    @staticmethod
+    def _drift(venv_dir: Path) -> None:
+        (venv_dir / "pyvenv.cfg").write_text(
+            f"home = {Path(sys.executable).parent}\nversion_info = 3.11.2\n"
+        )
+
+    def _lock_matched_venv(self, daemon_dir: Path) -> Path:
+        from claude_code_hooks_daemon.daemon.metadata import compute_project_lock_hash
+
+        return _stamped_venv(daemon_dir, compute_project_lock_hash(daemon_dir))
+
+    def test_lock_hash_match_with_drifted_interpreter_is_stale(self, tmp_path: Path) -> None:
+        daemon_dir = tmp_path / "project"
+        daemon_dir.mkdir()
+        _minimal_daemon_dir(daemon_dir)
+        venv_dir = self._lock_matched_venv(daemon_dir)
+        self._drift(venv_dir)
+
+        assert _freshness_verdict(daemon_dir, venv_dir) == "STALE"
+
+    def test_stamp_match_with_drifted_interpreter_is_stale(self, tmp_path: Path) -> None:
+        daemon_dir = tmp_path / "project"
+        daemon_dir.mkdir()
+        _minimal_daemon_dir(daemon_dir)
+        venv_dir = _stamped_venv(daemon_dir, None)
+        self._drift(venv_dir)
+
+        assert _freshness_verdict(daemon_dir, venv_dir) == "STALE"
+
+    def test_lock_hash_match_with_consistent_interpreter_stays_fresh(self, tmp_path: Path) -> None:
+        daemon_dir = tmp_path / "project"
+        daemon_dir.mkdir()
+        _minimal_daemon_dir(daemon_dir)
+        venv_dir = self._lock_matched_venv(daemon_dir)
+        version = f"{sys.version_info.major}.{sys.version_info.minor}.0"
+        (venv_dir / "pyvenv.cfg").write_text(f"version_info = {version}\n")
+
+        assert _freshness_verdict(daemon_dir, venv_dir) == "FRESH"
+
+    @pytest.mark.slow
+    def test_ensure_venv_rebuilds_the_drifted_venv_in_place(self, tmp_path: Path) -> None:
+        """The self-heal build's shape: same key, wrong recorded minor -> rebuilt."""
+        daemon_dir = tmp_path / "project"
+        daemon_dir.mkdir()
+        _minimal_daemon_dir(daemon_dir)
+        venv_dir = self._lock_matched_venv(daemon_dir)
+        self._drift(venv_dir)
+        sentinel = venv_dir / "SENTINEL"
+        sentinel.write_text("must-be-wiped")
+
+        result = _run_bash(f'ensure_venv "{daemon_dir}" "v99.0.0" "{sys.executable}"')
+
+        assert result.returncode == 0, result.stderr
+        assert not sentinel.exists(), "drifted venv was reused instead of rebuilt"
+        cfg = (venv_dir / "pyvenv.cfg").read_text()
+        assert "3.11.2" not in cfg
 
 
 class TestEnsureVenvCIGate:

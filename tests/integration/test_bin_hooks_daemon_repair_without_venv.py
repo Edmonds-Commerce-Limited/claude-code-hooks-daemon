@@ -181,6 +181,36 @@ class TestOtherVerbsStillRefuse:
         assert f"{sandbox.clone}/bin/hooks-daemon repair" in result.stderr
         assert_never_suggests_install_or_force(result.stderr)
 
+    def test_status_with_no_venv_prints_the_last_build_result_and_log(
+        self, sandbox: Sandbox
+    ) -> None:
+        """The daemon-down case Task 2.7 meant to cover: no venv, so no Python status."""
+        sandbox.stub_uv(fail=True)
+        sandbox.hook()
+        sandbox.wait_for_build()
+        record = dict(
+            line.split("=", 1)
+            for line in (sandbox.clone / "untracked" / ".venv-bootstrap.result")
+            .read_text()
+            .splitlines()
+            if "=" in line
+        )
+
+        result = sandbox.wrapper("status")
+
+        assert result.returncode == _NO_VENV_EXIT
+        assert f"Last venv build: failed at {record['finished_at']}" in result.stderr
+        assert f"Build log: {record['log']}" in result.stderr
+
+    def test_status_with_no_venv_and_no_recorded_build_prints_no_build_lines(
+        self, sandbox: Sandbox
+    ) -> None:
+        result = sandbox.wrapper("status")
+
+        assert result.returncode == _NO_VENV_EXIT
+        assert "Last venv build" not in result.stderr
+        assert "Build log" not in result.stderr
+
     def test_status_with_no_venv_builds_nothing(self, sandbox: Sandbox) -> None:
         sandbox.stub_uv()
         sandbox.wrapper("status")

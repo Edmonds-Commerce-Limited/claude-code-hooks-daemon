@@ -3546,10 +3546,12 @@ def diagnose_venv_start(venv_dir: Path, daemon_dir: Path) -> VenvStartDiagnosis:
     else:
         running = str(report["version"])
         running_minor = tuple(int(part) for part in running.split(".")[:2])
-        expected_minor = recorded or (running_minor[0], running_minor[1])
+        # site.py adds lib/python<the interpreter's OWN minor>/site-packages, whatever
+        # pyvenv.cfg records, so that is the directory to look for.
         site_packages = (
-            venv_dir / "lib" / f"python{expected_minor[0]}.{expected_minor[1]}" / "site-packages"
+            venv_dir / "lib" / f"python{running_minor[0]}.{running_minor[1]}" / "site-packages"
         )
+        drifted = recorded is not None and recorded != (running_minor[0], running_minor[1])
         on_path = os.path.realpath(site_packages) in {
             os.path.realpath(entry) for entry in report["path"]
         }
@@ -3560,12 +3562,13 @@ def diagnose_venv_start(venv_dir: Path, daemon_dir: Path) -> VenvStartDiagnosis:
         lines.append(f"claude_code_hooks_daemon importable: {_yes_no(importable)}")
         if report["no_site"]:
             lines.append("sys.flags.no_site is set: the interpreter never adds site-packages")
-        if recorded is not None and recorded != (running_minor[0], running_minor[1]):
+        if drifted:
             lines.append(
-                f"cause: the interpreter changed under the venv ({recorded_text} -> "
-                f"{running_minor[0]}.{running_minor[1]}), so its site-packages is invisible"
+                f"drift: pyvenv.cfg records {recorded_text} but the interpreter runs "
+                f"{running_minor[0]}.{running_minor[1]}: the venv was built for another "
+                "interpreter and is refused even when its packages import"
             )
-        healthy = on_path and importable
+        healthy = on_path and importable and not drifted
     if not healthy:
         lines.append(f"fix: {daemon_dir}/bin/hooks-daemon repair")
     return VenvStartDiagnosis(healthy=healthy, lines=lines)
