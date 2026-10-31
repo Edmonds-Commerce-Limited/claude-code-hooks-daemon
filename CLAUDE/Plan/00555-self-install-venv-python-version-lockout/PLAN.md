@@ -101,6 +101,11 @@ never be the reason the session cannot repair the daemon.
   ([report](subagent-reports/261031-task-2.4-start-diagnosis.md)).
 - [ ] ⬜ **Task 2.5**: Fail-closed allow-list: read-only diagnostics plus a new
   `hooks-daemon diagnose` verb are permitted while the daemon is unreachable.
+  The decision-neutral half is on main (`27fd1725f`): `hooks-daemon diagnose`
+  is read-only and runs with no venv and no daemon. It names drift, the last
+  build record, the daemon state and the fix. Still waiting on the owner:
+  whether the daemon-down guard lets it (and the other read-only diagnostics)
+  through.
 - [ ] ⬜ **Task 2.6**: Bound the daemon-down stop block. After N identical
   blocks, or on an `[awaiting-human]` prefix, allow the stop and say why.
 - [x] ✅ **Task 2.7**: The background build writes its log to a known path,
