@@ -644,19 +644,28 @@ def _fix_line(project_path, daemon_root):
     return "Run exactly " + restart + " (then repair or diagnose if it cannot start)."
 
 
-def _safe_session(hi):
-    session = hi.get("session_id") if isinstance(hi, dict) else None
-    if not isinstance(session, str):
+def _safe_id(hi, key):
+    value = hi.get(key) if isinstance(hi, dict) else None
+    if not isinstance(value, str):
         return "unknown"
     cleaned = "".join(
         char if ord(char) < 128 and (char.isalnum() or char in "-_") else "_"
-        for char in session[:100]
+        for char in value[:100]
     )
     return cleaned or "unknown"
 
 
-def _stop_counter_path(daemon_root, session, event):
-    return os.path.join(daemon_root, "untracked", ".daemon-down-stops." + session + "." + event)
+def _safe_session(hi):
+    return _safe_id(hi, "session_id")
+
+
+def _stop_counter_path(daemon_root, session, event, agent=None):
+    """The counter of one session and event; a SubagentStop that names its agent
+    gets a count of its own, so each sub-agent is bounded separately."""
+    name = ".daemon-down-stops." + session + "." + event
+    if agent is not None:
+        name += "." + agent
+    return os.path.join(daemon_root, "untracked", name)
 
 
 def _text_of(content):
@@ -738,7 +747,15 @@ def _stop_bound_counted(hi, event, reason_class, project_path, daemon_root):
     if event not in _STOP_EVENTS or not _is_absolute(daemon_root):
         return None
     fix = _fix_line(project_path, daemon_root)
-    transcript = hi.get("transcript_path") if isinstance(hi, dict) else None
+    transcript = None
+    agent = None
+    if isinstance(hi, dict):
+        transcript = hi.get("transcript_path")
+        if event == "SubagentStop" and isinstance(hi.get("agent_id"), str):
+            agent = _safe_id(hi, "agent_id")
+        agent_transcript = hi.get("agent_transcript_path")
+        if event == "SubagentStop" and isinstance(agent_transcript, str) and agent_transcript:
+            transcript = agent_transcript
     if isinstance(transcript, str) and transcript:
         try:
             declared = _declares_awaiting_human(_last_assistant_text(transcript))
@@ -751,7 +768,7 @@ def _stop_bound_counted(hi, event, reason_class, project_path, daemon_root):
                 "stand-in cron was scheduled; protection is NOT active. " + fix
             )
     session = _safe_session(hi)
-    path = _stop_counter_path(daemon_root, session, event)
+    path = _stop_counter_path(daemon_root, session, event, agent)
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         count = 0
@@ -789,14 +806,20 @@ def _reset_stop_bound(hi, daemon_root):
     """The daemon answered: the daemon-down stop counts of this session start over."""
     if not _is_absolute(daemon_root):
         return
-    session = _safe_session(hi)
-    for event in _STOP_EVENTS:
-        path = _stop_counter_path(daemon_root, session, event)
-        if os.path.exists(path):
-            try:
-                os.remove(path)
-            except OSError as exc:
-                print("HOOKS DAEMON: could not reset " + path + ": " + str(exc), file=sys.stderr)
+    directory = os.path.join(daemon_root, "untracked")
+    prefix = ".daemon-down-stops." + _safe_session(hi) + "."
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return
+    for name in names:
+        if not name.startswith(prefix):
+            continue
+        path = os.path.join(directory, name)
+        try:
+            os.remove(path)
+        except OSError as exc:
+            print("HOOKS DAEMON: could not reset " + path + ": " + str(exc), file=sys.stderr)
 
 
 def _recovery_command(project_path, daemon_root, sub):
@@ -4096,13 +4119,13 @@ def emit_error_json(event_name, error_type, error_details):
                 'decision': 'block',
                 'reason': reason,
             }
-            # Plan 00555 Task 2.6: only a daemon that was never reached counts
-            # toward the bound; a reached one stays blocked.
-            if not daemon_reached:
-                allowed = _stop_bound(hook_input, event_name, 'daemon_unreachable',
-                                      project_path, daemon_root)
-                if allowed is not None:
-                    response = {'systemMessage': allowed}
+            # Plan 00555 Task 2.6/2.8 S5: every class that blocks counts toward
+            # the bound (reached-but-broken included); invalid_hook_input and
+            # socket_timeout are handled above and never count.
+            allowed = _stop_bound(hook_input, event_name, error_type,
+                                  project_path, daemon_root)
+            if allowed is not None:
+                response = {'systemMessage': allowed}
     elif event_name == 'PreToolUse' \
             and not (_is_daemon_recovery_command(hook_input, project_path, daemon_root)
                      or (not daemon_reached

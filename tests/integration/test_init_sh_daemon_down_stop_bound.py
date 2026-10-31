@@ -436,3 +436,205 @@ class TestReviewFixes:
     ) -> None:
         _counter(project).write_text("9" * 5000 + "\n")
         assert _is_block(_emit(project, _payload()))
+
+
+def _agent_counter(project: Path, agent: str, session: str = SESSION) -> Path:
+    return _untracked(project) / f".daemon-down-stops.{session}.SubagentStop.{agent}"
+
+
+def _sub(project: Path, sock: Path, **extra: Any) -> subprocess.CompletedProcess[str]:
+    return _forward(project, sock, _payload(**extra), "SubagentStop")
+
+
+class TestSubagentStopKeyedByAgent:
+    """Stand-in ruling 2, S2: each sub-agent gets its own N=3."""
+
+    def test_agents_are_counted_separately(self, project: Path, dead_socket: Path) -> None:
+        codes = {"A": [], "B": []}  # type: dict[str, list[int]]
+        for agent in ("A", "B", "A", "B", "A"):
+            codes[agent].append(_sub(project, dead_socket, agent_id=agent).returncode)
+        assert codes["A"] == [2, 2, 0]
+        assert codes["B"] == [2, 2]
+        assert _sub(project, dead_socket, agent_id="B").returncode == 0
+
+    def test_an_agent_with_no_count_starts_at_one_despite_a_shared_count(
+        self, project: Path, dead_socket: Path
+    ) -> None:
+        for _ in range(2):
+            _sub(project, dead_socket)
+        assert _counter(project, "SubagentStop").read_text().strip() == "2"
+        assert _sub(project, dead_socket, agent_id="fresh").returncode == 2
+        assert _agent_counter(project, "fresh").read_text().strip() == "1"
+
+    def test_no_agent_id_uses_the_shared_key(self, project: Path, dead_socket: Path) -> None:
+        codes = [_sub(project, dead_socket).returncode for _ in range(3)]
+        assert codes == [2, 2, 0]
+        assert _counter(project, "SubagentStop").exists()
+
+    @pytest.mark.parametrize("agent", ["../x", "a" * 300, "é中"])
+    def test_a_hostile_agent_id_cannot_escape_the_untracked_dir(
+        self, project: Path, dead_socket: Path, agent: str
+    ) -> None:
+        _sub(project, dead_socket, agent_id=agent)
+        names = [p.name for p in _untracked(project).iterdir()]
+        assert any(n.startswith(".daemon-down-stops.") and "SubagentStop." in n for n in names)
+        assert not any("/" in n for n in names)
+        assert max(len(n) for n in names) < 255
+        assert not (project / "x").exists()
+        assert not (project / ".claude" / "x").exists()
+
+    def test_the_parent_declaration_does_not_free_a_subagent(
+        self, project: Path, dead_socket: Path, tmp_path: Path
+    ) -> None:
+        parent = _transcript(tmp_path / "p.jsonl", [_assistant(AWAITING)])
+        agent = _transcript(tmp_path / "a.jsonl", [_assistant("working")])
+        result = _sub(
+            project,
+            dead_socket,
+            agent_id="A",
+            transcript_path=str(parent),
+            agent_transcript_path=str(agent),
+        )
+        assert result.returncode == 2
+
+    def test_the_agent_declaration_frees_it_without_counting(
+        self, project: Path, dead_socket: Path, tmp_path: Path
+    ) -> None:
+        parent = _transcript(tmp_path / "p.jsonl", [_assistant("working")])
+        agent = _transcript(tmp_path / "a.jsonl", [_assistant(AWAITING)])
+        result = _sub(
+            project,
+            dead_socket,
+            agent_id="A",
+            transcript_path=str(parent),
+            agent_transcript_path=str(agent),
+        )
+        assert result.returncode == 0
+        assert not _agent_counter(project, "A").exists()
+
+    def test_a_daemon_response_removes_every_counter_of_the_session(self, project: Path) -> None:
+        import socket
+        import threading
+
+        dead = project / "nowhere.sock"
+        _sub(project, dead, agent_id="A")
+        _sub(project, dead)
+        _forward(project, dead, _payload())
+        _sub(project, dead, session="keep", agent_id="A")
+        short = Path(tempfile.mkdtemp(prefix="hd-"))
+        server = socket.socket(socket.AF_UNIX)
+        server.bind(str(short / "s.sock"))
+        server.listen(5)
+
+        def answer() -> None:
+            conn, _ = server.accept()
+            conn.recv(65536)
+            conn.sendall(b"{}\n")
+            conn.close()
+
+        threading.Thread(target=answer, daemon=True).start()
+        try:
+            _forward(project, short / "s.sock", _payload())
+        finally:
+            server.close()
+            shutil.rmtree(short, ignore_errors=True)
+        left = [p.name for p in _untracked(project).iterdir()]
+        assert not [n for n in left if n.startswith(f".daemon-down-stops.{SESSION}.")]
+        assert any(".keep." in n for n in left)
+
+
+@pytest.fixture
+def resetting_listener() -> Iterator[Path]:
+    """Accepts every connection and resets it (SO_LINGER 0), so the client sees
+    a connection reset (connection_lost). A CLEAN close gives an empty response,
+    which forward_stop_event already allows; that path is not changed here.
+    malformed_response is raised for PreToolUse only, so it cannot occur on Stop."""
+    import socket
+    import threading
+    import time
+
+    short = Path(tempfile.mkdtemp(prefix="hd-"))
+    server = socket.socket(socket.AF_UNIX)
+    server.bind(str(short / "r.sock"))
+    server.listen(16)
+    stop = threading.Event()
+
+    def serve() -> None:
+        server.settimeout(0.1)
+        while not stop.is_set():
+            try:
+                conn, _ = server.accept()
+            except OSError:
+                continue
+            time.sleep(0.15)  # let the request arrive, then close with it unread
+            conn.close()
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    try:
+        yield short / "r.sock"
+    finally:
+        stop.set()
+        thread.join(timeout=Timeout.REQUEST_LONG)
+        server.close()
+        shutil.rmtree(short, ignore_errors=True)
+
+
+class TestReachedButBrokenClassesCount:
+    """Stand-in ruling 2, S5: a daemon that binds then breaks is bounded too."""
+
+    def test_a_resetting_listener_blocks_twice_then_allows(
+        self, project: Path, resetting_listener: Path
+    ) -> None:
+        for _ in range(2):
+            result = _forward(project, resetting_listener, _payload())
+            assert result.returncode == 2, result.stderr
+            assert "Hooks daemon not running" in result.stderr
+        third = _forward(project, resetting_listener, _payload())
+        assert third.returncode == 0, third.stderr
+        assert "3 consecutive" in json.loads(third.stdout.strip().splitlines()[-1])["systemMessage"]
+        assert "\tconnection_lost\t" in _log(project).read_text()
+
+    def test_alternating_refused_and_reset_counts_as_three(
+        self, project: Path, resetting_listener: Path, dead_socket: Path
+    ) -> None:
+        codes = [
+            _forward(project, dead_socket, _payload()).returncode,
+            _forward(project, resetting_listener, _payload()).returncode,
+            _forward(project, dead_socket, _payload()).returncode,
+        ]
+        assert codes == [2, 2, 0]
+
+    def test_the_unreachable_class_is_named_in_the_log(
+        self, project: Path, dead_socket: Path
+    ) -> None:
+        for _ in range(3):
+            _forward(project, dead_socket, _payload())
+        fields = _log(project).read_text().strip().split("\t")
+        assert fields[3] not in ("daemon_unreachable", "")
+        assert fields[3] in ("socket_not_found", "connection_refused")
+
+    def test_invalid_hook_input_does_not_become_the_third(
+        self, project: Path, dead_socket: Path
+    ) -> None:
+        _counter(project, session="unknown").write_text("2\n")
+        result = _forward(project, dead_socket, "not json")
+        assert result.returncode == 2
+        assert _counter(project, session="unknown").read_text().strip() == "2"
+
+    def test_a_reset_on_pre_tool_use_is_still_a_deny(
+        self, project: Path, resetting_listener: Path
+    ) -> None:
+        payload = json.dumps(
+            {"session_id": SESSION, "tool_name": "Write", "tool_input": {"file_path": "/x"}}
+        )
+        for _ in range(4):
+            result = _run(
+                project,
+                "send_request_stdin PreToolUse",
+                payload,
+                resetting_listener,
+            )
+            assert '"deny"' in result.stdout or result.returncode == 2
+            assert "systemMessage" not in result.stdout
+        assert not _counter(project, "PreToolUse").exists()
